@@ -88,6 +88,11 @@ export type OutputCatalogPageDTO = { results: OutputCatalogItemDTO[]; nextCursor
 export type PlanViewDTO = { current: PlanDTO; revisions: PlanDTO[]; steps: RunStepDTO[] };
 export type RunEventType = "context.compiled" | "progress.created" | "run.started" | "run.preparing" | "run.strategy_selected" | "run.waiting_input" | "run.resumed" | "run.status_changed" | "run.completed" | "run.failed" | "run.cancelled" | "run.suspended" | "plan.created" | "plan.proposed" | "plan.approved" | "plan.rejected" | "plan.revised" | "step.created" | "step.started" | "step.approved" | "step.resumed" | "step.waiting_input" | "step.updated" | "step.completed" | "step.failed" | "step.cancelled" | "step.suspended" | "step.skipped" | "interaction.created" | "interaction.resolved" | "interaction.expired" | "checkpoint.created" | "output.created" | "output.updated" | "message.delta" | "message.completed" | "message.failed" | "message.cancelled" | "tool.started" | "tool.completed" | "tool.failed" | "usage.updated" | "billing.updated" | string;
 export type RunEventDTO = { schemaVersion: 1; eventID: string; runID: string; actor: ActorRefDTO; thread: ThreadRefDTO; projection?: ProjectionRefDTO; seq: number; type: RunEventType; stepID?: string; parentEventID?: string; timestamp: string; payload: Record<string, unknown> };
+export type RunEventDetailDTO = RunEventDTO & {
+  inputJSON?: string;
+  outputJSON?: string;
+  errorJSON?: string;
+};
 export type RunEventHistoryPage = { results: RunEventDTO[]; hasMore: boolean; nextBeforeSeq?: number };
 export type PhaseKind = "context" | "planning" | "execution" | "interaction" | "synthesis";
 export type PhaseProjectionDTO = { phaseID: string; kind: PhaseKind; title?: string; summary?: string; status: string; startSeq: number; endSeq?: number; stepIDs: string[]; toolCallIDs: string[]; outputIDs: string[]; startedAt?: string; endedAt?: string };

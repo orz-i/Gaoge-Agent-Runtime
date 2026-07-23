@@ -1,6 +1,6 @@
 import type {
   EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
-  OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDTO, RunEventHistoryPage,
+  OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
   RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RuntimeEvidenceSelectionDTO,
   RuntimeEvidenceSourceDTO, StartTextRunRequest, StartTextRunResult, TextRunDetailDTO,
   TextRunDTO, WorkbenchDTO,
@@ -64,7 +64,7 @@ export class RuntimeClient {
       checkpoints: async (runID:string,request?:RequestOptions)=>(await this.request<{results:RunCheckpointDTO[]}>(`/runs/${pathPart(runID)}/checkpoints`,{},request)).results ?? [],
     };
     this.events = {
-      get:(runID:string,eventID:string,request?:RequestOptions)=>this.request<RunEventDTO>(`/runs/${pathPart(runID)}/events/${pathPart(eventID)}`,{},request),
+      get:(runID:string,eventID:string,request?:RequestOptions)=>this.request<RunEventDetailDTO>(`/runs/${pathPart(runID)}/events/${pathPart(eventID)}`,{},request),
       history:(runID:string,options:{beforeSeq?:number;limit?:number}&RequestOptions={})=>{const q=new URLSearchParams();if(options.beforeSeq)q.set("beforeSeq",String(options.beforeSeq));if(options.limit)q.set("limit",String(options.limit));return this.request<RunEventHistoryPage>(`/runs/${pathPart(runID)}/events/history${q.size?`?${q}`:""}`,{},options)},
       stream:(runID:string,afterSeq:number,onEvent:(event:RunEventDTO)=>void,request?:RequestOptions)=>this.stream(runID,afterSeq,onEvent,request?.signal),
     };
