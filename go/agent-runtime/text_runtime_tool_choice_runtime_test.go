@@ -2,6 +2,8 @@ package agentruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -18,6 +20,7 @@ const (
 	testOperationsJSON  = `{"operations":[]}`
 	testStepAID         = "step_a"
 	testSideEffectWrite = "write"
+	testAskToolCallID   = "call_ask"
 )
 
 type scriptedLLMGateway struct {
@@ -49,9 +52,12 @@ func (g *scriptedLLMGateway) GenerateTextStream(context.Context, *LLMRoute, Gene
 
 type multiTurnRunRepo struct {
 	Store
-	events  []model.Event
-	nextSeq int64
-	outputs []model.OutputRef
+	events       []model.Event
+	nextSeq      int64
+	outputs      []model.OutputRef
+	interactions []model.Interaction
+	checkpoints  []model.Checkpoint
+	snapshot     *model.ContextSnapshot
 }
 
 func (r *multiTurnRunRepo) AppendRunEvent(_ context.Context, item *model.Event) (*model.Event, bool, error) {
@@ -101,6 +107,12 @@ func (r *multiTurnRunRepo) CountRunEventsByType(_ context.Context, _ model.Actor
 	return counts, nil
 }
 
+func (r *multiTurnRunRepo) CreateRunInteractionBundle(_ context.Context, _ string, _ string, interaction *model.Interaction, checkpoint *model.Checkpoint, events []model.Event) ([]model.Event, error) {
+	r.interactions = append(r.interactions, *interaction)
+	r.checkpoints = append(r.checkpoints, *checkpoint)
+	return r.AppendRunEvents(context.Background(), events)
+}
+
 func (r *multiTurnRunRepo) CommitRunToolResultBundle(_ context.Context, _ *model.Checkpoint, output *model.OutputRef, events []model.Event) (*model.OutputRef, []model.Event, bool, error) {
 	saved, err := r.AppendRunEvents(context.Background(), events)
 	if err != nil {
@@ -114,6 +126,10 @@ func (r *multiTurnRunRepo) CommitRunToolResultBundle(_ context.Context, _ *model
 
 func (r *multiTurnRunRepo) ListOutputs(_ context.Context, _ model.ActorRef, _ string) ([]model.OutputRef, error) {
 	return append([]model.OutputRef(nil), r.outputs...), nil
+}
+
+func (r *multiTurnRunRepo) GetRunContextSnapshot(_ context.Context, _ model.ActorRef, _ string) (*model.ContextSnapshot, error) {
+	return r.snapshot, nil
 }
 
 type scriptedWorkspace struct {
@@ -207,6 +223,70 @@ func TestExecuteRunStepChangeSetMultiTurnDSMLThenNativeTools(t *testing.T) {
 		t.Fatal("expected protocol rejection event after DSML turn")
 	}
 	assertWorkspaceCallOrder(t, workspace.calls, testReadToolName, testPublishToolName)
+}
+
+func TestExecuteDirectStrategyStopsAtWaitingInteraction(t *testing.T) {
+	policy := storyToolPolicy(testReadToolKey, testReadToolName)
+	gateway := &scriptedLLMGateway{
+		outputs: []*GenerateOutput{{
+			ToolCalls: []ToolCall{{
+				ToolCallID:    testAskToolCallID,
+				ToolName:      runControlAskUser,
+				ArgumentsJSON: `{"question":"Which track kind should be used?"}`,
+			}},
+		}},
+	}
+	run := model.Run{
+		RunID:         "run_direct_waiting",
+		Actor:         model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey},
+		Thread:        model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey},
+		RequestID:     "req_direct_waiting",
+		CurrentStepID: "step_direct_waiting",
+	}
+	contextJSON, err := json.Marshal(textRunContextSnapshotPayload{
+		SemanticVersion: RuntimeSnapshotVersion,
+		RunID:           run.RunID,
+		MessagePathHash: hashTextRunContextStrings(nil),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextHash := sha256.Sum256(contextJSON)
+	repo := &multiTurnRunRepo{
+		snapshot: &model.ContextSnapshot{
+			RunID:          run.RunID,
+			SchemaVersion:  RuntimeSnapshotVersion,
+			ThreadPathHash: hashTextRunContextStrings(nil),
+			ContentJSON:    string(contextJSON),
+			ContentHash:    hex.EncodeToString(contextHash[:]),
+		},
+	}
+	service := &Engine{
+		repo:              repo,
+		llmGateway:        gateway,
+		generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{}),
+	}
+	root := model.Step{StepID: "step_direct_waiting", Title: "Clarify", Description: "Ask for required input"}
+	effective := effectiveTextRunConfig{
+		SemanticVersion: RuntimeSnapshotVersion,
+		Strategy:        TextRunStrategyDirect,
+		MaxLLMCalls:     3,
+		MaxToolCalls:    3,
+		ToolKeys:        []string{policy.ToolKey},
+		ToolPolicies:    []effectiveRunToolPolicy{policy},
+	}
+
+	service.executeDirectStrategy(context.Background(), run, root, effective, nil, nil, runUsage{})
+
+	if len(repo.interactions) != 1 || len(repo.checkpoints) != 1 {
+		t.Fatalf("interactions=%d checkpoints=%d, want one durable waiting bundle", len(repo.interactions), len(repo.checkpoints))
+	}
+	if !hasRunEventType(repo.events, "run.waiting_input") {
+		t.Fatal("expected run.waiting_input event")
+	}
+	if hasRunEventType(repo.events, "message.delta") || hasRunEventType(repo.events, "step.completed") || hasRunEventType(repo.events, "run.completed") {
+		t.Fatalf("waiting direct run emitted terminal events: %#v", repo.events)
+	}
 }
 
 func TestPrepareRunStepExecutionRehydratesForcedToolChoice(t *testing.T) {

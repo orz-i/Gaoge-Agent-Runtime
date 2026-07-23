@@ -1198,13 +1198,17 @@ func (s *Engine) executeDirectStrategy(ctx context.Context, run model.Run, root 
 		lifecycle.fail(run, effective, root.StepID, err)
 		return
 	}
-	finalText, route, usage, err := s.generateDirectRunAnswer(ctx, run, root, effective, contextMessages, initialUsage)
+	finalText, route, usage, waiting, err := s.generateDirectRunAnswer(ctx, run, root, effective, contextMessages, initialUsage)
 	if err != nil {
 		lifecycle.fail(run, effective, root.StepID, err)
 		return
 	}
 	if err = s.settleRunSegment(context.WithoutCancel(ctx), run, effective, reservation, route, usage); err != nil {
 		s.failTextRun(context.WithoutCancel(ctx), run, root.StepID, err)
+		lifecycle.close()
+		return
+	}
+	if waiting {
 		lifecycle.close()
 		return
 	}
@@ -1218,21 +1222,21 @@ func (s *Engine) executeDirectStrategy(ctx context.Context, run model.Run, root 
 	lifecycle.close()
 }
 
-func (s *Engine) generateDirectRunAnswer(ctx context.Context, run model.Run, root model.Step, effective effectiveTextRunConfig, contextMessages []Message, usage runUsage) (string, *LLMRoute, runUsage, error) {
+func (s *Engine) generateDirectRunAnswer(ctx context.Context, run model.Run, root model.Step, effective effectiveTextRunConfig, contextMessages []Message, usage runUsage) (string, *LLMRoute, runUsage, bool, error) {
 	if !hasLocalRunTools(effective) {
 		finalUsage, route, finalText, err := s.streamRunAnswer(ctx, run, root.StepID, effective, "direct", "direct", contextMessages, strings.TrimSpace(effective.Instructions)+"\n直接、准确地回答用户目标。不要生成计划。", true)
-		return finalText, route, addRunUsage(usage, runUsageFromUsage(finalUsage)), err
+		return finalText, route, addRunUsage(usage, runUsageFromUsage(finalUsage)), false, err
 	}
 	tools, err := s.resolveRunTools(ctx, run.Actor, effective)
 	if err != nil {
-		return "", nil, usage, err
+		return "", nil, usage, false, err
 	}
-	finalText, stepUsage, _, err := s.executeRunStep(ctx, run, root, effective, tools, contextMessages, nil)
+	finalText, stepUsage, waiting, err := s.executeRunStep(ctx, run, root, effective, tools, contextMessages, nil)
 	usage = addRunUsage(usage, stepUsage)
-	if err == nil && strings.TrimSpace(finalText) != "" {
+	if err == nil && !waiting && strings.TrimSpace(finalText) != "" {
 		err = s.appendRunEvent(context.WithoutCancel(ctx), &run, "message.delta", root.StepID, "", map[string]interface{}{valueDelta1F5E22EC: finalText}, nil)
 	}
-	return finalText, nil, usage, err
+	return finalText, nil, usage, waiting, err
 }
 
 func (s *Engine) executePlan(ctx context.Context, run model.Run, root model.Step, effective effectiveTextRunConfig, reservation *UsageBalanceReservation, initialRoute *LLMRoute, initialUsage runUsage) {
