@@ -1,0 +1,141 @@
+export type StartTextRunRequest = {
+  thread: {
+    kind: string;
+    id: string;
+    parentProjection?: ProjectionRefDTO;
+    sourceProjection?: ProjectionRefDTO;
+    branchReason?: "default" | "retry" | "edit";
+  };
+  input: {
+    contentType: "text" | "markdown";
+    content: string;
+    fileIDs?: string[];
+    outputIDs?: string[];
+    evidenceIDs?: string[];
+    htmlVisualPrompt?: boolean;
+    htmlVisualColorMode?: "light" | "dark";
+  };
+  model?: string;
+  executionMode?: "auto" | "direct" | "plan";
+  options?: Record<string, unknown>;
+  clientRunID?: string;
+  toolKeys?: string[];
+  skillKeys?: string[];
+	workspace?: RuntimeWorkspaceExtensionDTO;
+};
+
+export type RuntimeExtensionDTO = Readonly<Record<string, unknown>>;
+export type RuntimeWorkspaceExtensionDTO = RuntimeExtensionDTO & {
+  schemaVersion: number;
+  type: string;
+};
+
+export type TextRunStatus = "queued" | "preparing" | "waiting_input" | "running" | "completed" | "failed" | "cancelled" | "suspended";
+export type RunStepDTO = { stepID: string; runID: string; parentStepID: string; planID?: string; stepIndex: number; attempt?: number; kind: string; title: string; description: string; status: string; dependsOn?: string[]; approvalRequired?: boolean; expectedTools?: string[]; resourceRefs?: string[]; resultSummary?: string; startedAt?: string | null; endedAt?: string };
+export type TextRunDTO = {
+  schemaVersion: 1;
+  runtimeKind: "text";
+  actor: { id: string };
+  thread: { kind: string; id: string };
+  runID: string;
+  requestID: string;
+  goal?: string;
+  status: TextRunStatus;
+  statusReason?: string;
+  currentStepID?: string;
+  currentPlanID?: string;
+  pendingInteractionID?: string;
+  lastEventSeq?: number;
+  requestedModelName: string;
+  platformModelName: string;
+  modelVendor: string;
+  modelIcon: string;
+  upstreamModelName: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  llmCallsCount: number;
+  toolCallsCount: number;
+  billedCurrency: string;
+  billedNanousd: number;
+  errorCode: string;
+  errorMessage: string;
+  startedAt: string;
+  endedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export type ActorRefDTO = { tenantID?: string; id: string };
+export type ThreadRefDTO = { kind: string; id: string };
+export type ProjectionRefDTO = { kind: string; id: string };
+export type ResourceRefDTO = { kind: string; id: string; revision?: string };
+export type StartTextRunResult = { run: TextRunDTO; rootStep: RunStepDTO; inputProjectionRef: ProjectionRefDTO; outputProjectionRef: ProjectionRefDTO };
+export type TextRunExecutionStrategyDTO = "" | "direct" | "planned";
+export type TextRunConfigSummaryDTO = { strategy: TextRunExecutionStrategyDTO; strategyReason: string; requestedMode: "auto" | "direct" | "plan"; defaultMode: "auto" | "direct" | "plan"; allowedModes: Array<"direct" | "plan">; environmentRef: ResourceRefDTO; environmentProfileName: string; platformModelName: string; memoryEnabled: boolean; skillRefs: ResourceRefDTO[]; toolKeys: string[]; localToolKeys: string[]; unavailableSkillRefs: ResourceRefDTO[]; unavailableToolKeys: string[]; providerToolNames?: string[]; toolSchemaBytes?: number; providerToolPayloadBytes?: number; providerPayloadObserved?: boolean; fileCount: number; maxLLMCalls: number; maxToolCalls: number; toolRetryCount: number; toolConcurrency: number; planApprovalMode?: "required" | "auto"; planMaxSteps?: number; planMaxRevisions?: number; interactionTTLHours?: number; outputMaxPerRun?: number };
+export type TextRunContextSummaryDTO = { snapshotID: string; semanticVersion: number; contentHash: string; fileCount: number; ragCount: number; skillCount: number; memoryCount: number; outputCount: number; evidenceCount: number; retrievalFallbackCount: number; skippedCount: number; compiledAt: string };
+export type TextRunDetailDTO = { run: TextRunDTO; steps: RunStepDTO[]; inputProjectionRef: ProjectionRefDTO; outputProjectionRef: ProjectionRefDTO; effectiveConfig?: TextRunConfigSummaryDTO; context?: TextRunContextSummaryDTO };
+export type TextRunCompletionDTO = { run: TextRunDTO; inputProjectionRef: ProjectionRefDTO; outputProjectionRef: ProjectionRefDTO };
+export type PlanDTO = { planID: string; runID: string; revision: number; status: string; goal: string; summary: string; plan?: { summary?: string; steps?: Array<{ key: string; title: string; description: string; dependsOn: string[]; approvalRequired: boolean; expectedTools: string[]; resourceRefs: string[] }> }; approvedAt?: string; createdAt: string };
+export type ToolApprovalPreviewDTO = { action?: unknown; resource?: unknown; target?: unknown; sideEffectLevel: "read" | "staged_write" | "write" | "destructive" | "unknown"; redactedArguments: unknown };
+export type RunInteractionDTO = { interactionID: string; runID: string; stepID: string; toolCallID?: string; type: "submit_plan" | "ask_user" | "approve_tool" | "approve_tool_set" | "approve_step"; status: string; request: Record<string, unknown> & { preview?: ToolApprovalPreviewDTO }; responseSchemaJSON: string; requestedAt: string; expiresAt?: string; resolvedAt?: string };
+export type RunCheckpointDTO = { checkpointID: string; runID: string; eventSeq: number; stepID: string; toolCallID?: string; kind: string; status: string; createdAt: string };
+export type OutputStatus = "draft" | "published" | "aborted";
+export type OutputDTO = { outputID: string; runID: string; stepID: string; toolCallID?: string; sourceToolCallID?: string; sourceEventID: string; sourceSnapshotID?: string; parentOutputID?: string; status: OutputStatus; kind: string; title: string; summary: string; extension?: RuntimeExtensionDTO; fileID?: string; fileSHA256?: string; fileMIMEType?: string; projectionRef?: ProjectionRefDTO; version: number; createdAt: string };
+export type OutputCatalogItemDTO = OutputDTO & { sourceRun: { goal: string; status: string; model: string }; sourceThread: ThreadRefDTO & { title?: string } };
+export type OutputCatalogPageDTO = { results: OutputCatalogItemDTO[]; nextCursor?: string };
+export type PlanViewDTO = { current: PlanDTO; revisions: PlanDTO[]; steps: RunStepDTO[] };
+export type RunEventType = "context.compiled" | "progress.created" | "run.started" | "run.preparing" | "run.strategy_selected" | "run.waiting_input" | "run.resumed" | "run.status_changed" | "run.completed" | "run.failed" | "run.cancelled" | "run.suspended" | "plan.created" | "plan.proposed" | "plan.approved" | "plan.rejected" | "plan.revised" | "step.created" | "step.started" | "step.approved" | "step.resumed" | "step.waiting_input" | "step.updated" | "step.completed" | "step.failed" | "step.cancelled" | "step.suspended" | "step.skipped" | "interaction.created" | "interaction.resolved" | "interaction.expired" | "checkpoint.created" | "output.created" | "output.updated" | "message.delta" | "message.completed" | "message.failed" | "message.cancelled" | "tool.started" | "tool.completed" | "tool.failed" | "usage.updated" | "billing.updated" | string;
+export type RunEventDTO = { schemaVersion: 1; eventID: string; runID: string; actor: ActorRefDTO; thread: ThreadRefDTO; projection?: ProjectionRefDTO; seq: number; type: RunEventType; stepID?: string; parentEventID?: string; timestamp: string; payload: Record<string, unknown> };
+export type RunEventHistoryPage = { results: RunEventDTO[]; hasMore: boolean; nextBeforeSeq?: number };
+export type PhaseKind = "context" | "planning" | "execution" | "interaction" | "synthesis";
+export type PhaseProjectionDTO = { phaseID: string; kind: PhaseKind; title?: string; summary?: string; status: string; startSeq: number; endSeq?: number; stepIDs: string[]; toolCallIDs: string[]; outputIDs: string[]; startedAt?: string; endedAt?: string };
+export type RunActivityKind = "context" | "commentary" | "plan" | "operation" | "step_result" | "interaction" | "error";
+export type RunActivityItemDTO = {
+  id: string;
+  kind: RunActivityKind;
+  seq: number;
+  endSeq: number;
+  stepID?: string;
+  status: string;
+  title?: string;
+  summary?: string;
+  contentMarkdown?: string;
+  operationKind?: "command" | "edit" | "image" | "search" | "inspect" | "output" | "tool" | string;
+  count?: number;
+  interactionType?: string;
+  details?: Array<{ id: string; title: string; status: string; summary?: string }>;
+  sources?: Array<{ type: string; id: string; title: string }>;
+  context?: {
+    fileCount: number;
+    ragCount: number;
+    skillCount: number;
+    memoryCount: number;
+    outputCount: number;
+    evidenceCount: number;
+    retrievalFallbackCount: number;
+    includedCount: number;
+    skippedCount: number;
+    extension?: RuntimeExtensionDTO;
+  };
+};
+export type ToolGroupDTO = { groupID: string; phaseID: string; stepID?: string; title: string; status: string; startSeq: number; endSeq?: number; toolCallIDs: string[]; toolNames?: Record<string, string>; toolEventIDs?: Record<string, string>; toolStatuses?: Record<string, string> };
+export type WorkbenchGraphDTO = { nodes: Array<{ id: string; kind: string; label: string; subtitle?: string; status: string; entityID: string; phaseID?: string }>; edges: Array<{ id: string; source: string; target: string; kind: string }> };
+export type WorkbenchSelectionTarget = { tab: "overview" | "trace" | "outputs" | "details"; kind: "phase" | "step" | "tool" | "output" | "checkpoint" | "event"; id: string; phaseID?: string; seq?: number };
+export type WorkbenchDTO = { projectionVersion: 1; projectionSeq: number; projectionPersisted: boolean; run: TextRunDTO; overview: { goal: string; status: string; currentPhaseID?: string; statusReason?: string; errorCode?: string; errorMessage?: string; strategy?: TextRunExecutionStrategyDTO; plannerRepairs: number; startedAt: string; endedAt?: string; llmCalls: number; toolCalls: number; inputTokens: number; outputTokens: number; reasoningTokens: number; billedCurrency?: string; billedNanousd: number }; phases: PhaseProjectionDTO[]; toolGroups: ToolGroupDTO[]; plan?: PlanViewDTO; steps: RunStepDTO[]; pendingInteraction?: RunInteractionDTO; interactions: RunInteractionDTO[]; checkpoints: RunCheckpointDTO[]; outputs: OutputDTO[]; context?: TextRunContextSummaryDTO; effectiveConfig?: TextRunConfigSummaryDTO; graph: WorkbenchGraphDTO; selectionIndex: Record<string, WorkbenchSelectionTarget> };
+export type OutputPreviewDTO = { type: "markdown" | "text" | "code" | "table" | "image" | "html" | "file" | "summary"; content?: string; language?: string; fileID?: string; mimeType?: string; rows?: string[][]; truncated?: boolean };
+export type OutputDetailDTO = OutputCatalogItemDTO;
+export type OutputVersionPageDTO = { results: OutputDetailDTO[]; hasMore: boolean; nextCursor?: string };
+export type RuntimeEvidenceSourceDTO =
+  | { kind: "output"; id: string; version: number }
+  | { kind: "projection"; thread: ThreadRefDTO; projection: ProjectionRefDTO };
+export type RuntimeEvidenceSelectionDTO =
+  | { kind: "full"; title?: string }
+  | { kind: "text_range"; start: number; end: number; title?: string }
+  | { kind: "table_range"; rowStart: number; rowEnd: number; columnStart: number; columnEnd: number; title?: string };
+export type EvidenceDTO = { evidenceID: string; source: RuntimeEvidenceSourceDTO; projectionRef?: ProjectionRefDTO; kind: RuntimeEvidenceSelectionDTO["kind"]; title: string; excerpt?: string; contentHash: string; sourceContentHash?: string; createdAt: string };
+export type RunQueueStatus = "queued" | "dispatching" | "started" | "failed" | "cancelled";
+export type RunQueueRequestDTO = Omit<StartTextRunRequest, "clientRunID">;
+export type RunQueueItemDTO = { queueID: string; clientQueueID: string; thread: { kind: string; id: string }; status: RunQueueStatus; position: number; revision: number; attemptCount: number; request: RunQueueRequestDTO; anchorRunID?: string; startedRunID?: string; errorCode?: string; errorMessage?: string; nextAttemptAt?: string; createdAt: string; updatedAt: string };
+
