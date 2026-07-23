@@ -427,7 +427,7 @@ func newRunPromptBuildResult(
 	statefulPrefixFingerprint := buildPromptStateFingerprint(promptStateFingerprintInput{
 		Protocol:          input.Route.Protocol,
 		Endpoint:          routeConfig.Endpoint,
-		UpstreamID:        input.Route.UpstreamID,
+		UpstreamRef:       input.Route.UpstreamRef,
 		UpstreamModel:     input.Route.UpstreamModel,
 		PlatformModelName: input.RunInput.PlatformModelName,
 		ContextConfig:     statefulContextConfig,

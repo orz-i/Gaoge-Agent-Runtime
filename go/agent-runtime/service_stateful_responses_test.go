@@ -20,6 +20,7 @@ const (
 	valueFirst6074A28C   = "first"
 	valueGpt55004D6907   = "gpt-5.5"
 	valueHello636D88EC   = "hello"
+	valueModelUpstream   = "model_upstream"
 	valuePolicy44182DB1  = "policy"
 	valueRun16BAF6D69    = "run_1"
 	value第一轮29386C12     = "第一轮"
@@ -46,7 +47,7 @@ func TestTextRunPromptSnapshotNeverDependsOnPreviousResponseID(t *testing.T) {
 		},
 		Route: &LLMRoute{
 			Protocol:                    AdapterOpenAIResponses,
-			UpstreamID:                  1,
+			UpstreamRef:                 model.ResourceRef{Kind: valueModelUpstream, ID: "1"},
 			UpstreamModel:               valueGpt55004D6907,
 			PreviousResponseIDSupported: true,
 		},
@@ -128,7 +129,7 @@ func TestPromptStateFingerprintMatchesPrefixAfterAssistantAppend(t *testing.T) {
 	stored := buildPromptStateFingerprint(promptStateFingerprintInput{
 		Protocol:          AdapterOpenAIResponses,
 		Endpoint:          EndpointResponses,
-		UpstreamID:        1,
+		UpstreamRef:       model.ResourceRef{Kind: valueModelUpstream, ID: "1"},
 		UpstreamModel:     valueGpt55004D6907,
 		PlatformModelName: valueGpt55004D6907,
 		Messages:          appendAssistantStateMessage(firstPrompt, value第一轮回答F760B219),
@@ -146,7 +147,7 @@ func TestPromptStateFingerprintMatchesPrefixAfterAssistantAppend(t *testing.T) {
 	prefix := buildPromptStateFingerprint(promptStateFingerprintInput{
 		Protocol:          AdapterOpenAIResponses,
 		Endpoint:          EndpointResponses,
-		UpstreamID:        1,
+		UpstreamRef:       model.ResourceRef{Kind: valueModelUpstream, ID: "1"},
 		UpstreamModel:     valueGpt55004D6907,
 		PlatformModelName: valueGpt55004D6907,
 		Messages:          promptStatePrefixMessages(secondPrompt),
@@ -170,7 +171,7 @@ func TestPromptStateFingerprintUsesRebuildableHistoryWhenCurrentUserHasDynamicCo
 	stored := buildPromptStateFingerprint(promptStateFingerprintInput{
 		Protocol:          AdapterOpenAIResponses,
 		Endpoint:          EndpointResponses,
-		UpstreamID:        1,
+		UpstreamRef:       model.ResourceRef{Kind: valueModelUpstream, ID: "1"},
 		UpstreamModel:     valueGpt55004D6907,
 		PlatformModelName: valueGpt55004D6907,
 		Messages:          buildNextStatefulPrefixMessages(firstPrompt, value第一轮29386C12, value第一轮回答F760B219),
@@ -185,7 +186,7 @@ func TestPromptStateFingerprintUsesRebuildableHistoryWhenCurrentUserHasDynamicCo
 	prefix := buildPromptStateFingerprint(promptStateFingerprintInput{
 		Protocol:          AdapterOpenAIResponses,
 		Endpoint:          EndpointResponses,
-		UpstreamID:        1,
+		UpstreamRef:       model.ResourceRef{Kind: valueModelUpstream, ID: "1"},
 		UpstreamModel:     valueGpt55004D6907,
 		PlatformModelName: valueGpt55004D6907,
 		Messages:          promptStatePrefixMessages(secondPrompt),
@@ -213,7 +214,7 @@ func TestPromptStateFingerprintChangesWhenContextConfigChanges(t *testing.T) {
 	first := buildPromptStateFingerprint(promptStateFingerprintInput{
 		Protocol:          AdapterOpenAIResponses,
 		Endpoint:          EndpointResponses,
-		UpstreamID:        1,
+		UpstreamRef:       model.ResourceRef{Kind: valueModelUpstream, ID: "1"},
 		UpstreamModel:     valueGpt55004D6907,
 		PlatformModelName: valueGpt55004D6907,
 		ContextConfig:     buildPromptContextConfigSignature(baseCfg),
@@ -222,7 +223,7 @@ func TestPromptStateFingerprintChangesWhenContextConfigChanges(t *testing.T) {
 	second := buildPromptStateFingerprint(promptStateFingerprintInput{
 		Protocol:          AdapterOpenAIResponses,
 		Endpoint:          EndpointResponses,
-		UpstreamID:        1,
+		UpstreamRef:       model.ResourceRef{Kind: valueModelUpstream, ID: "1"},
 		UpstreamModel:     valueGpt55004D6907,
 		PlatformModelName: valueGpt55004D6907,
 		ContextConfig:     buildPromptContextConfigSignature(changedCfg),

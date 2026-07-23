@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
 const (
@@ -23,7 +25,7 @@ const (
 type promptStateFingerprintInput struct {
 	Protocol          string
 	Endpoint          string
-	UpstreamID        uint
+	UpstreamRef       domain.ResourceRef
 	UpstreamModel     string
 	PlatformModelName string
 	ContextConfig     string
@@ -38,7 +40,9 @@ func buildPromptStateFingerprint(input promptStateFingerprintInput) string {
 	hasher := sha256.New()
 	writeFingerprintField(hasher, "protocol", input.Protocol)
 	writeFingerprintField(hasher, "endpoint", input.Endpoint)
-	writeFingerprintField(hasher, "upstream_id", fmt.Sprintf("%d", input.UpstreamID))
+	writeFingerprintField(hasher, "upstream_ref_kind", input.UpstreamRef.Kind)
+	writeFingerprintField(hasher, "upstream_ref_id", input.UpstreamRef.ID)
+	writeFingerprintField(hasher, "upstream_ref_revision", input.UpstreamRef.Revision)
 	writeFingerprintField(hasher, "upstream_model", input.UpstreamModel)
 	writeFingerprintField(hasher, "platform_model_name", input.PlatformModelName)
 	writeFingerprintField(hasher, "context_config", input.ContextConfig)

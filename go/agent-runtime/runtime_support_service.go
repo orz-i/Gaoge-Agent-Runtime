@@ -40,11 +40,11 @@ type LLMRouteInput struct {
 
 // LLMRoute 是 Gateway 返回给 conversation 的只读路由描述，不携带 API key。
 type LLMRoute struct {
-	RouteID                     uint
-	PlatformModelID             uint
+	Ref                         domain.ResourceRef
+	PlatformModelRef            domain.ResourceRef
 	PlatformModelName           string
-	UpstreamModelID             uint
-	UpstreamID                  uint
+	UpstreamModelRef            domain.ResourceRef
+	UpstreamRef                 domain.ResourceRef
 	UpstreamName                string
 	BindingCode                 string
 	Protocol                    string
@@ -192,7 +192,7 @@ type RunMessageResult struct {
 	Projection          TurnProjection
 	MetadataRefreshHint string
 	Billable            bool
-	UpstreamID          uint
+	UpstreamRef         domain.ResourceRef
 	UpstreamName        string
 	PlatformModelName   string
 	RoutedBindingCode   string

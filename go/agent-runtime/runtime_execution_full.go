@@ -3406,7 +3406,7 @@ func (s *Engine) resolveRunSegmentUsage(ctx context.Context, run model.Run, usag
 func (s *Engine) runSegmentBillingResult(effective effectiveTextRunConfig, route *LLMRoute, usage runUsage) *RunMessageResult {
 	result := &RunMessageResult{Billable: true, PlatformModelName: effective.PlatformModelName, EffectiveOptions: effective.Options, CacheWrite5mTokens: usage.CacheWrite5mTokens, CacheWrite1hTokens: usage.CacheWrite1hTokens, UsageSpeed: usage.UsageSpeed, UsageServiceTier: usage.UsageServiceTier, BillingRateClass: usage.BillingRateClass, RawUsageJSON: usage.RawUsageJSON, ServerSideToolUsage: usage.ServerSideToolUsage, ServiceItems: usage.ServiceItems}
 	if route != nil {
-		result.UpstreamID, result.UpstreamName, result.RoutedBindingCode, result.UpstreamModelName, result.UpstreamProtocol = route.UpstreamID, route.UpstreamName, route.BindingCode, route.UpstreamModel, route.Protocol
+		result.UpstreamRef, result.UpstreamName, result.RoutedBindingCode, result.UpstreamModelName, result.UpstreamProtocol = route.UpstreamRef, route.UpstreamName, route.BindingCode, route.UpstreamModel, route.Protocol
 	}
 	return result
 }
@@ -3480,11 +3480,11 @@ type runSegmentUsagePayload struct {
 	CacheWrite5mTokens, CacheWrite1hTokens                                        int64
 	ServerSideToolUsage                                                           map[string]int64 `json:"serverSideToolUsage"`
 	RawUsageJSON, UsageSpeed, UsageServiceTier, BillingRateClass                  string
-	UpstreamID                                                                    uint   `json:"upstreamID"`
-	UpstreamName                                                                  string `json:"upstreamName"`
-	BindingCode                                                                   string `json:"bindingCode"`
-	UpstreamModel                                                                 string `json:"upstreamModel"`
-	Protocol                                                                      string `json:"protocol"`
+	UpstreamRef                                                                   model.ResourceRef `json:"upstreamRef"`
+	UpstreamName                                                                  string            `json:"upstreamName"`
+	BindingCode                                                                   string            `json:"bindingCode"`
+	UpstreamModel                                                                 string            `json:"upstreamModel"`
+	Protocol                                                                      string            `json:"protocol"`
 }
 
 func (accumulator *runSegmentUsageAccumulator) apply(event model.Event) {
@@ -3516,8 +3516,8 @@ func (accumulator *runSegmentUsageAccumulator) applyUsage(event model.Event) {
 		return
 	}
 	accumulator.total = addRunUsage(accumulator.total, runUsage{InputTokens: payload.InputTokens, OutputTokens: payload.OutputTokens, CacheReadTokens: payload.CacheReadTokens, CacheWriteTokens: payload.CacheWriteTokens, CacheWrite5mTokens: payload.CacheWrite5mTokens, CacheWrite1hTokens: payload.CacheWrite1hTokens, ReasoningTokens: payload.ReasoningTokens, ServerSideToolUsage: payload.ServerSideToolUsage, RawUsageJSON: payload.RawUsageJSON, UsageSpeed: payload.UsageSpeed, UsageServiceTier: payload.UsageServiceTier, BillingRateClass: payload.BillingRateClass})
-	if payload.UpstreamID != 0 || payload.UpstreamModel != "" {
-		accumulator.route = &LLMRoute{UpstreamID: payload.UpstreamID, UpstreamName: payload.UpstreamName, BindingCode: payload.BindingCode, UpstreamModel: payload.UpstreamModel, Protocol: payload.Protocol}
+	if payload.UpstreamRef.ID != "" || payload.UpstreamModel != "" {
+		accumulator.route = &LLMRoute{UpstreamRef: payload.UpstreamRef, UpstreamName: payload.UpstreamName, BindingCode: payload.BindingCode, UpstreamModel: payload.UpstreamModel, Protocol: payload.Protocol}
 	}
 }
 
@@ -4430,7 +4430,7 @@ func (s *Engine) recordRunLLMUsageForStep(ctx context.Context, run model.Run, st
 	}
 	payload := map[string]interface{}{valueSegmentKeyB3442EFB: runSegmentKey(ctx, run), valuePhaseA62799FA: phase, "inputTokens": usage.InputTokens, "outputTokens": usage.OutputTokens, "cacheReadTokens": usage.CacheReadTokens, "cacheWriteTokens": usage.CacheWriteTokens, "cacheWrite5mTokens": usage.CacheWrite5mTokens, "cacheWrite1hTokens": usage.CacheWrite1hTokens, "reasoningTokens": usage.ReasoningTokens, "usageSpeed": usage.Speed, "usageServiceTier": usage.ServiceTier, "billingRateClass": usage.BillingRateClass, "rawUsageJSON": usage.RawUsageJSON, "serverSideToolUsage": serverSideToolUsage, "serverToolCalls": serverToolCalls}
 	if route != nil {
-		payload["upstreamID"], payload["upstreamName"], payload["bindingCode"], payload["upstreamModel"], payload["protocol"] = route.UpstreamID, route.UpstreamName, route.BindingCode, route.UpstreamModel, route.Protocol
+		payload["upstreamRef"], payload["upstreamName"], payload["bindingCode"], payload["upstreamModel"], payload["protocol"] = route.UpstreamRef, route.UpstreamName, route.BindingCode, route.UpstreamModel, route.Protocol
 	}
 	event := newRunEvent(run, valueUsageUpdatedABC8B0B2, stepID, phase, payload, nil)
 	return s.appendRunEvents(ctx, run.RunID, []model.Event{event})
