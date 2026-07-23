@@ -12,16 +12,6 @@ type CancelRunResponse struct {
 	Canceled bool `json:"canceled"`
 }
 
-type StartTextRunResponseDoc struct {
-	ErrorMsg string      `json:"errorMsg"`
-	Data     interface{} `json:"data"`
-}
-
-type EvidenceResponseDoc struct {
-	ErrorMsg string      `json:"errorMsg"`
-	Data     interface{} `json:"data"`
-}
-
 type CreateEvidenceRequest struct {
 	Source    EvidenceSourceRequest    `json:"source" binding:"required"`
 	Selection EvidenceSelectionRequest `json:"selection" binding:"required"`
@@ -39,14 +29,6 @@ type EvidenceSelectionRequest struct {
 	Kind                                                 string `json:"kind" binding:"required,oneof=full text_range table_range"`
 	Title                                                string `json:"title,omitempty" binding:"omitempty,max=255"`
 	Start, End, RowStart, RowEnd, ColumnStart, ColumnEnd int
-}
-
-type ErrorDoc struct {
-	ErrorMsg  string      `json:"errorMsg"`
-	ErrorCode string      `json:"errorCode,omitempty"`
-	Details   interface{} `json:"details,omitempty"`
-	RequestID string      `json:"requestId,omitempty"`
-	Data      interface{} `json:"data"`
 }
 
 type threadRefDTO struct {

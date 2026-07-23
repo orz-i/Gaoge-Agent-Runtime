@@ -9,129 +9,1040 @@ paths:
     get:
       operationId: listRuns
       parameters:
-        - {name: threadKind, in: query, required: true, schema: {type: string}}
-        - {name: threadID, in: query, required: true, schema: {type: string}}
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+        - $ref: '#/components/parameters/ThreadKind'
+        - $ref: '#/components/parameters/ThreadID'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Runtime runs for one host thread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunPage'
+        default:
+          $ref: '#/components/responses/Error'
     post:
       operationId: createRun
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateRunRequest'}}}}
-      responses: {'202': {description: Text Run and durable host projections, content: {application/json: {schema: {$ref: '#/components/schemas/RunProjectionResult'}}}}, default: {$ref: '#/components/responses/Error'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunRequest'
+      responses:
+        '202':
+          description: Accepted run and durable host projections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartRunResult'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}:
     get:
       operationId: getRun
-      parameters: [{$ref: '#/components/parameters/RunID'}]
-      responses: {'200': {description: Text Run detail and durable host projections, content: {application/json: {schema: {$ref: '#/components/schemas/RunProjectionResult'}}}}, default: {$ref: '#/components/responses/Error'}}
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Run detail and durable host projections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunDetail'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/cancel:
-    post: {$ref: '#/components/pathItems/runAction'}
+    post:
+      operationId: cancelRun
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Cancellation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CancelRunResponse'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/resume:
-    post: {$ref: '#/components/pathItems/runAction'}
+    post:
+      operationId: resumeRun
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResumeRunRequest'
+      responses:
+        '202':
+          description: Accepted resume request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResumeRunResponse'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/retire:
-    post: {$ref: '#/components/pathItems/runAction'}
+    post:
+      operationId: retireRun
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Retired run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetireRunResponse'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/events:
     get:
       operationId: streamRunEvents
-      parameters: [{$ref: '#/components/parameters/RunID'}, {name: afterSeq, in: query, schema: {type: integer, format: int64, minimum: 0}}]
-      responses: {'200': {description: Ordered NDJSON runtime events, content: {application/x-ndjson: {schema: {$ref: '#/components/schemas/Event'}}}}, default: {$ref: '#/components/responses/Error'}}
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/AfterSeq'
+      responses:
+        '200':
+          description: Ordered NDJSON Runtime events
+          content:
+            application/x-ndjson:
+              schema:
+                $ref: '#/components/schemas/Event'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/events/history:
-    get: {$ref: '#/components/pathItems/runRead'}
+    get:
+      operationId: listRunEventHistory
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/BeforeSeq'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Historical Runtime events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventHistoryPage'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/events/{eventID}:
     get:
       operationId: getRunEvent
-      parameters: [{$ref: '#/components/parameters/RunID'}, {name: eventID, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/EventID'
+      responses:
+        '200':
+          description: Runtime event with redacted diagnostic payloads
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventDetail'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/plan:
-    get: {$ref: '#/components/pathItems/runRead'}
+    get:
+      operationId: getRunPlan
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Current plan and revisions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanView'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/interactions:
-    get: {$ref: '#/components/pathItems/runRead'}
+    get:
+      operationId: listRunInteractions
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Runtime interactions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionList'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/interactions/{interactionID}/resolve:
     post:
-      operationId: resolveInteraction
-      parameters: [{$ref: '#/components/parameters/RunID'}, {name: interactionID, in: path, required: true, schema: {type: string}}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [clientResolveID, response], properties: {clientResolveID: {type: string}, response: {type: object}}}}}}
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+      operationId: resolveRunInteraction
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/InteractionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolveInteractionRequest'
+      responses:
+        '200':
+          description: Resolved Runtime interaction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Interaction'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/checkpoints:
-    get: {$ref: '#/components/pathItems/runRead'}
+    get:
+      operationId: listRunCheckpoints
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Durable Runtime checkpoints
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointList'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/outputs:
-    get: {$ref: '#/components/pathItems/runRead'}
+    get:
+      operationId: listRunOutputs
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Outputs created by the run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutputList'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/workbench:
-    get: {$ref: '#/components/pathItems/runRead'}
+    get:
+      operationId: getRunWorkbench
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Durable Runtime workbench projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workbench'
+        default:
+          $ref: '#/components/responses/Error'
   /run-queue:
     get:
       operationId: listQueue
       parameters:
-        - {name: threadKind, in: query, required: true, schema: {type: string}}
-        - {name: threadID, in: query, required: true, schema: {type: string}}
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+        - $ref: '#/components/parameters/ThreadKind'
+        - $ref: '#/components/parameters/ThreadID'
+      responses:
+        '200':
+          description: Durable queue for one host thread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueList'
+        default:
+          $ref: '#/components/responses/Error'
     post:
       operationId: enqueueRun
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QueueRequest'}}}}
-      responses: {'202': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueueCreateRequest'
+      responses:
+        '202':
+          description: Accepted queue item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueCreateResponse'
+        default:
+          $ref: '#/components/responses/Error'
   /run-queue/{queueID}:
-    patch: {$ref: '#/components/pathItems/queueAction'}
-    delete: {$ref: '#/components/pathItems/queueAction'}
+    patch:
+      operationId: updateQueueItem
+      parameters:
+        - $ref: '#/components/parameters/QueueID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueueUpdateRequest'
+      responses:
+        '200':
+          description: Updated queue item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueItem'
+        default:
+          $ref: '#/components/responses/Error'
+    delete:
+      operationId: cancelQueueItem
+      parameters:
+        - $ref: '#/components/parameters/QueueID'
+        - $ref: '#/components/parameters/ThreadKind'
+        - $ref: '#/components/parameters/ThreadID'
+      responses:
+        '200':
+          description: Cancelled queue item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueItem'
+        default:
+          $ref: '#/components/responses/Error'
   /run-queue/{queueID}/prioritize:
-    post: {$ref: '#/components/pathItems/queueAction'}
+    post:
+      operationId: prioritizeQueueItem
+      parameters:
+        - $ref: '#/components/parameters/QueueID'
+        - $ref: '#/components/parameters/ThreadKind'
+        - $ref: '#/components/parameters/ThreadID'
+      responses:
+        '200':
+          description: Prioritized queue item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueItem'
+        default:
+          $ref: '#/components/responses/Error'
   /run-queue/{queueID}/interrupt-and-send:
-    post: {$ref: '#/components/pathItems/queueAction'}
+    post:
+      operationId: interruptAndSendQueueItem
+      parameters:
+        - $ref: '#/components/parameters/QueueID'
+        - $ref: '#/components/parameters/ThreadKind'
+        - $ref: '#/components/parameters/ThreadID'
+      responses:
+        '200':
+          description: Queue item selected after interrupting the active run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueItem'
+        default:
+          $ref: '#/components/responses/Error'
   /outputs:
     get:
       operationId: listOutputs
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+      parameters:
+        - $ref: '#/components/parameters/SearchQuery'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Actor output catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutputCatalogPage'
+        default:
+          $ref: '#/components/responses/Error'
   /outputs/{outputID}:
-    get: {$ref: '#/components/pathItems/outputRead'}
+    get:
+      operationId: getOutput
+      parameters:
+        - $ref: '#/components/parameters/OutputID'
+        - $ref: '#/components/parameters/OptionalVersion'
+      responses:
+        '200':
+          description: One output version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutputCatalogItem'
+        default:
+          $ref: '#/components/responses/Error'
   /outputs/{outputID}/versions:
-    get: {$ref: '#/components/pathItems/outputRead'}
+    get:
+      operationId: listOutputVersions
+      parameters:
+        - $ref: '#/components/parameters/OutputID'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Version history for one output
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutputVersionPage'
+        default:
+          $ref: '#/components/responses/Error'
   /outputs/{outputID}/versions/{version}/preview:
-    get: {$ref: '#/components/pathItems/outputVersionRead'}
+    get:
+      operationId: previewOutputVersion
+      parameters:
+        - $ref: '#/components/parameters/OutputID'
+        - $ref: '#/components/parameters/Version'
+      responses:
+        '200':
+          description: Renderable output preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutputPreviewResult'
+        default:
+          $ref: '#/components/responses/Error'
   /outputs/{outputID}/versions/{version}/download:
-    get: {$ref: '#/components/pathItems/outputVersionRead'}
+    get:
+      operationId: downloadOutputVersion
+      parameters:
+        - $ref: '#/components/parameters/OutputID'
+        - $ref: '#/components/parameters/Version'
+      responses:
+        '200':
+          description: Output file content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        default:
+          $ref: '#/components/responses/Error'
   /evidence:
     post:
       operationId: createEvidence
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateEvidenceRequest'}}}}
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEvidenceRequest'
+      responses:
+        '200':
+          description: Frozen Runtime evidence
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Evidence'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   parameters:
-    RunID: {name: runID, in: path, required: true, schema: {type: string}}
-  pathItems:
-    runRead:
-      operationId: readRunResource
-      parameters: [{$ref: '#/components/parameters/RunID'}]
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
-    runAction:
-      operationId: mutateRun
-      parameters: [{$ref: '#/components/parameters/RunID'}]
-      responses: {'200': {$ref: '#/components/responses/Success'}, '202': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
-    queueAction:
-      operationId: mutateQueueItem
-      parameters: [{name: queueID, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
-    outputRead:
-      operationId: readOutput
-      parameters: [{name: outputID, in: path, required: true, schema: {type: string}}]
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
-    outputVersionRead:
-      operationId: readOutputVersion
-      parameters: [{name: outputID, in: path, required: true, schema: {type: string}}, {name: version, in: path, required: true, schema: {type: integer, minimum: 1}}]
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+    RunID:
+      name: runID
+      in: path
+      required: true
+      schema: {type: string}
+    EventID:
+      name: eventID
+      in: path
+      required: true
+      schema: {type: string}
+    InteractionID:
+      name: interactionID
+      in: path
+      required: true
+      schema: {type: string}
+    QueueID:
+      name: queueID
+      in: path
+      required: true
+      schema: {type: string}
+    OutputID:
+      name: outputID
+      in: path
+      required: true
+      schema: {type: string}
+    Version:
+      name: version
+      in: path
+      required: true
+      schema: {type: integer, minimum: 1}
+    OptionalVersion:
+      name: version
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1}
+    ThreadKind:
+      name: threadKind
+      in: query
+      required: true
+      schema: {type: string}
+    ThreadID:
+      name: threadID
+      in: query
+      required: true
+      schema: {type: string}
+    Page:
+      name: page
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, default: 1}
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, default: 20}
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1}
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: {type: string}
+    SearchQuery:
+      name: q
+      in: query
+      required: false
+      schema: {type: string}
+    AfterSeq:
+      name: afterSeq
+      in: query
+      required: false
+      schema: {type: integer, format: int64, minimum: 0}
+    BeforeSeq:
+      name: beforeSeq
+      in: query
+      required: false
+      schema: {type: integer, format: int64, minimum: 1}
   responses:
-    Success: {description: Runtime resource response, content: {application/json: {schema: {type: object}}}}
-    Error: {description: Stable runtime error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
+    Error:
+      description: Stable Runtime error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
   schemas:
-    ActorRef: {type: object, additionalProperties: false, required: [id], properties: {tenantID: {type: string}, id: {type: string}}}
-    ThreadRef: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string}, id: {type: string}}}
-    ProjectionRef: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string}, id: {type: string}}}
-    ResourceRef: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string}, id: {type: string}, revision: {type: string}}}
-    RunProjectionResult: {type: object, required: [run, inputProjectionRef, outputProjectionRef], properties: {run: {type: object}, rootStep: {type: object}, steps: {type: array, items: {type: object}}, inputProjectionRef: {$ref: '#/components/schemas/ProjectionRef'}, outputProjectionRef: {$ref: '#/components/schemas/ProjectionRef'}, effectiveConfig: {type: object, properties: {environmentRef: {$ref: '#/components/schemas/ResourceRef'}, skillRefs: {type: array, items: {$ref: '#/components/schemas/ResourceRef'}}, unavailableSkillRefs: {type: array, items: {$ref: '#/components/schemas/ResourceRef'}}}}, context: {type: object}}}
+    ActorRef:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        tenantID: {type: string}
+        id: {type: string}
+    ThreadRef:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string}
+        id: {type: string}
+    ProjectionRef:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string}
+        id: {type: string}
+    ResourceRef:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string}
+        id: {type: string}
+        revision: {type: string}
     RunThread:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string}
+        id: {type: string}
+        parentProjection:
+          $ref: '#/components/schemas/ProjectionRef'
+        sourceProjection:
+          $ref: '#/components/schemas/ProjectionRef'
+        branchReason:
+          type: string
+          enum: [default, retry, edit]
+    RunInput:
+      type: object
+      additionalProperties: false
+      required: [content, contentType]
+      properties:
+        content: {type: string, maxLength: 20000}
+        contentType: {type: string, enum: [text, markdown]}
+        fileIDs: {type: array, maxItems: 20, items: {type: string}}
+        outputIDs: {type: array, maxItems: 50, items: {type: string}}
+        evidenceIDs: {type: array, maxItems: 50, items: {type: string}}
+        htmlVisualPrompt: {type: boolean}
+        htmlVisualColorMode: {type: string, enum: [light, dark]}
+    WorkspaceExtension:
+      type: object
+      required: [schemaVersion, type]
+      additionalProperties: true
+      properties:
+        schemaVersion: {type: integer, minimum: 1}
+        type: {type: string}
+    CreateRunRequest:
+      type: object
+      additionalProperties: false
+      required: [thread, input]
+      properties:
+        thread:
+          $ref: '#/components/schemas/RunThread'
+        input:
+          $ref: '#/components/schemas/RunInput'
+        clientRunID: {type: string, maxLength: 64}
+        model: {type: string, maxLength: 128}
+        executionMode: {type: string, enum: [auto, direct, plan]}
+        options: {type: object, additionalProperties: true}
+        toolKeys: {type: array, maxItems: 128, items: {type: string}}
+        skillKeys: {type: array, maxItems: 128, items: {type: string}}
+        workspace:
+          $ref: '#/components/schemas/WorkspaceExtension'
+    QueueCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [thread, input, clientQueueID]
+      properties:
+        thread:
+          $ref: '#/components/schemas/RunThread'
+        input:
+          $ref: '#/components/schemas/RunInput'
+        clientQueueID: {type: string, maxLength: 64}
+        model: {type: string, maxLength: 128}
+        executionMode: {type: string, enum: [auto, direct, plan]}
+        options: {type: object, additionalProperties: true}
+        toolKeys: {type: array, maxItems: 128, items: {type: string}}
+        skillKeys: {type: array, maxItems: 128, items: {type: string}}
+        workspace:
+          $ref: '#/components/schemas/WorkspaceExtension'
+    QueueUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [thread, input, expectedRevision]
+      properties:
+        thread:
+          $ref: '#/components/schemas/RunThread'
+        input:
+          $ref: '#/components/schemas/RunInput'
+        expectedRevision: {type: integer, minimum: 0}
+        model: {type: string, maxLength: 128}
+        executionMode: {type: string, enum: [auto, direct, plan]}
+        options: {type: object, additionalProperties: true}
+        toolKeys: {type: array, maxItems: 128, items: {type: string}}
+        skillKeys: {type: array, maxItems: 128, items: {type: string}}
+        workspace:
+          $ref: '#/components/schemas/WorkspaceExtension'
+    ResumeRunRequest:
+      type: object
+      additionalProperties: false
+      required: [clientResumeID]
+      properties:
+        checkpointID: {type: string, maxLength: 96}
+        clientResumeID: {type: string, minLength: 1, maxLength: 64}
+    ResolveInteractionRequest:
+      type: object
+      additionalProperties: false
+      required: [clientResolveID, response]
+      properties:
+        clientResolveID: {type: string, minLength: 1, maxLength: 64}
+        response: {type: object, additionalProperties: true}
+    Run:
+      type: object
+      additionalProperties: true
+      required: [schemaVersion, runtimeKind, actor, thread, runID, requestID, status]
+      properties:
+        schemaVersion: {type: integer, enum: [1]}
+        runtimeKind: {type: string, enum: [text]}
+        actor:
+          $ref: '#/components/schemas/ActorRef'
+        thread:
+          $ref: '#/components/schemas/ThreadRef'
+        runID: {type: string}
+        requestID: {type: string}
+        status: {type: string}
+    RunStep:
+      type: object
+      additionalProperties: true
+      required: [stepID, runID, status]
+      properties:
+        stepID: {type: string}
+        runID: {type: string}
+        status: {type: string}
+    StartRunResult:
+      type: object
+      additionalProperties: false
+      required: [run, rootStep, inputProjectionRef, outputProjectionRef]
+      properties:
+        run:
+          $ref: '#/components/schemas/Run'
+        rootStep:
+          $ref: '#/components/schemas/RunStep'
+        inputProjectionRef:
+          $ref: '#/components/schemas/ProjectionRef'
+        outputProjectionRef:
+          $ref: '#/components/schemas/ProjectionRef'
+    RunDetail:
+      type: object
+      additionalProperties: false
+      required: [run, steps, inputProjectionRef, outputProjectionRef]
+      properties:
+        run:
+          $ref: '#/components/schemas/Run'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunStep'
+        inputProjectionRef:
+          $ref: '#/components/schemas/ProjectionRef'
+        outputProjectionRef:
+          $ref: '#/components/schemas/ProjectionRef'
+        effectiveConfig: {type: object, additionalProperties: true}
+        context: {type: object, additionalProperties: true}
+    RunPage:
+      type: object
+      additionalProperties: false
+      required: [total, results]
+      properties:
+        total: {type: integer, format: int64, minimum: 0}
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Run'
+    CancelRunResponse:
+      type: object
+      additionalProperties: false
+      required: [canceled]
+      properties:
+        canceled: {type: boolean}
+    ResumeRunResponse:
+      type: object
+      additionalProperties: false
+      required: [checkpointID, runID, status, reused]
+      properties:
+        checkpointID: {type: string}
+        runID: {type: string}
+        status: {type: string}
+        reused: {type: boolean}
+    RetireRunResponse:
+      type: object
+      additionalProperties: false
+      required: [runID, status, reused]
+      properties:
+        runID: {type: string}
+        status: {type: string, enum: [cancelled]}
+        reused: {type: boolean}
+    Event:
+      type: object
+      additionalProperties: true
+      required: [schemaVersion, eventID, runID, actor, thread, seq, type, timestamp, payload]
+      properties:
+        schemaVersion: {type: integer, enum: [1]}
+        eventID: {type: string}
+        runID: {type: string}
+        actor:
+          $ref: '#/components/schemas/ActorRef'
+        thread:
+          $ref: '#/components/schemas/ThreadRef'
+        projection:
+          $ref: '#/components/schemas/ProjectionRef'
+        seq: {type: integer, format: int64, minimum: 1}
+        type: {type: string}
+        timestamp: {type: string, format: date-time}
+        payload: {type: object, additionalProperties: true}
+    EventDetail:
       allOf:
-        - {$ref: '#/components/schemas/ThreadRef'}
-        - {type: object, additionalProperties: false, properties: {parentProjection: {$ref: '#/components/schemas/ProjectionRef'}, sourceProjection: {$ref: '#/components/schemas/ProjectionRef'}, branchReason: {type: string, enum: [default, retry, edit]}}}
-    RunInput: {type: object, additionalProperties: false, required: [content, contentType], properties: {content: {type: string}, contentType: {type: string, enum: [text, markdown]}, fileIDs: {type: array, items: {type: string}}, outputIDs: {type: array, items: {type: string}}, evidenceIDs: {type: array, items: {type: string}}}}
-    CreateRunRequest: {type: object, additionalProperties: false, required: [thread, input], properties: {thread: {$ref: '#/components/schemas/RunThread'}, input: {$ref: '#/components/schemas/RunInput'}, clientRunID: {type: string}, model: {type: string}, executionMode: {type: string, enum: [auto, direct, plan]}, options: {type: object}, toolKeys: {type: array, items: {type: string}}, skillKeys: {type: array, items: {type: string}}, workspace: {type: object}}}
-    QueueRequest: {allOf: [{$ref: '#/components/schemas/CreateRunRequest'}, {type: object, properties: {clientQueueID: {type: string}, expectedRevision: {type: integer}}}]}
-    EvidenceSource: {oneOf: [{type: object, additionalProperties: false, required: [kind, id, version], properties: {kind: {type: string, enum: [output]}, id: {type: string}, version: {type: integer, minimum: 1}}}, {type: object, additionalProperties: false, required: [kind, thread, projection], properties: {kind: {type: string, enum: [projection]}, thread: {$ref: '#/components/schemas/ThreadRef'}, projection: {$ref: '#/components/schemas/ProjectionRef'}}}]}
-    EvidenceSelection: {type: object, additionalProperties: false, required: [kind], properties: {kind: {type: string, enum: [full, text_range, table_range]}, title: {type: string}, start: {type: integer}, end: {type: integer}, rowStart: {type: integer}, rowEnd: {type: integer}, columnStart: {type: integer}, columnEnd: {type: integer}}}
-    CreateEvidenceRequest: {type: object, additionalProperties: false, required: [source, selection], properties: {source: {$ref: '#/components/schemas/EvidenceSource'}, selection: {$ref: '#/components/schemas/EvidenceSelection'}}}
-    Event: {type: object, required: [seq, type], properties: {projection: {$ref: '#/components/schemas/ProjectionRef'}, seq: {type: integer, format: int64}, type: {type: string}, payload: {type: object}}}
-    ErrorResponse: {type: object, additionalProperties: false, required: [error], properties: {error: {type: object, additionalProperties: false, required: [code, message, requestID], properties: {code: {type: string}, message: {type: string}, requestID: {type: string}}}}}
+        - $ref: '#/components/schemas/Event'
+        - type: object
+          properties:
+            inputJSON: {type: string}
+            outputJSON: {type: string}
+            errorJSON: {type: string}
+    EventHistoryPage:
+      type: object
+      additionalProperties: false
+      required: [results, hasMore]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Event'
+        hasMore: {type: boolean}
+        nextBeforeSeq: {type: integer, format: int64, minimum: 1}
+    Plan:
+      type: object
+      additionalProperties: true
+      required: [planID, runID, revision, status]
+      properties:
+        planID: {type: string}
+        runID: {type: string}
+        revision: {type: integer, minimum: 1}
+        status: {type: string}
+    PlanView:
+      type: object
+      additionalProperties: false
+      required: [current, revisions, steps]
+      properties:
+        current:
+          $ref: '#/components/schemas/Plan'
+        revisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plan'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunStep'
+    Interaction:
+      type: object
+      additionalProperties: true
+      required: [interactionID, runID, type, status, request, requestedAt]
+      properties:
+        interactionID: {type: string}
+        runID: {type: string}
+        type: {type: string}
+        status: {type: string}
+        request: {type: object, additionalProperties: true}
+        requestedAt: {type: string, format: date-time}
+    InteractionList:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Interaction'
+    Checkpoint:
+      type: object
+      additionalProperties: false
+      required: [checkpointID, runID, eventSeq, stepID, kind, status, createdAt]
+      properties:
+        checkpointID: {type: string}
+        runID: {type: string}
+        eventSeq: {type: integer, format: int64, minimum: 1}
+        stepID: {type: string}
+        toolCallID: {type: string}
+        kind: {type: string}
+        status: {type: string}
+        createdAt: {type: string, format: date-time}
+    CheckpointList:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Checkpoint'
+    Output:
+      type: object
+      additionalProperties: true
+      required: [outputID, runID, status, kind, title, version, createdAt]
+      properties:
+        outputID: {type: string}
+        runID: {type: string}
+        status: {type: string}
+        kind: {type: string}
+        title: {type: string}
+        version: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+    OutputCatalogItem:
+      allOf:
+        - $ref: '#/components/schemas/Output'
+        - type: object
+          required: [sourceRun, thread]
+          properties:
+            sourceRun: {type: object, additionalProperties: true}
+            thread:
+              allOf:
+                - $ref: '#/components/schemas/ThreadRef'
+                - type: object
+                  properties:
+                    title: {type: string}
+    OutputList:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Output'
+    OutputCatalogPage:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutputCatalogItem'
+        nextCursor: {type: string}
+    OutputVersionPage:
+      type: object
+      additionalProperties: false
+      required: [results, hasMore]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutputCatalogItem'
+        hasMore: {type: boolean}
+        nextCursor: {type: string}
+    OutputPreview:
+      type: object
+      additionalProperties: true
+      required: [type]
+      properties:
+        type: {type: string}
+    OutputPreviewResult:
+      type: object
+      additionalProperties: false
+      required: [output, preview]
+      properties:
+        output:
+          $ref: '#/components/schemas/OutputCatalogItem'
+        preview:
+          $ref: '#/components/schemas/OutputPreview'
+    QueueItem:
+      type: object
+      additionalProperties: true
+      required: [queueID, clientQueueID, thread, status, position, revision, attemptCount, request, createdAt, updatedAt]
+      properties:
+        queueID: {type: string}
+        clientQueueID: {type: string}
+        thread:
+          $ref: '#/components/schemas/ThreadRef'
+        status: {type: string}
+        position: {type: integer, minimum: 0}
+        revision: {type: integer, minimum: 0}
+        attemptCount: {type: integer, minimum: 0}
+        request:
+          $ref: '#/components/schemas/CreateRunRequest'
+        anchorRunID: {type: string}
+        startedRunID: {type: string}
+        errorCode: {type: string}
+        errorMessage: {type: string}
+        nextAttemptAt: {type: string, format: date-time}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    QueueCreateResponse:
+      allOf:
+        - $ref: '#/components/schemas/QueueItem'
+        - type: object
+          required: [reused]
+          properties:
+            reused: {type: boolean}
+    QueueList:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueueItem'
+    Workbench:
+      type: object
+      additionalProperties: true
+      required: [projectionVersion, projectionSeq, projectionPersisted, run, overview, phases, toolGroups, steps, interactions, checkpoints, outputs, graph, selectionIndex]
+      properties:
+        projectionVersion: {type: integer, enum: [1]}
+        projectionSeq: {type: integer, format: int64, minimum: 0}
+        projectionPersisted: {type: boolean}
+        run:
+          $ref: '#/components/schemas/Run'
+        overview: {type: object, additionalProperties: true}
+        phases: {type: array, items: {type: object, additionalProperties: true}}
+        toolGroups: {type: array, items: {type: object, additionalProperties: true}}
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunStep'
+        interactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Interaction'
+        checkpoints:
+          type: array
+          items:
+            $ref: '#/components/schemas/Checkpoint'
+        outputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Output'
+        graph: {type: object, additionalProperties: true}
+        selectionIndex: {type: object, additionalProperties: true}
+    EvidenceSource:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, id, version]
+          properties:
+            kind: {type: string, enum: [output]}
+            id: {type: string}
+            version: {type: integer, minimum: 1}
+        - type: object
+          additionalProperties: false
+          required: [kind, thread, projection]
+          properties:
+            kind: {type: string, enum: [projection]}
+            thread:
+              $ref: '#/components/schemas/ThreadRef'
+            projection:
+              $ref: '#/components/schemas/ProjectionRef'
+    EvidenceSelection:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [full, text_range, table_range]}
+        title: {type: string}
+        start: {type: integer, minimum: 0}
+        end: {type: integer, minimum: 0}
+        rowStart: {type: integer, minimum: 0}
+        rowEnd: {type: integer, minimum: 0}
+        columnStart: {type: integer, minimum: 0}
+        columnEnd: {type: integer, minimum: 0}
+    CreateEvidenceRequest:
+      type: object
+      additionalProperties: false
+      required: [source, selection]
+      properties:
+        source:
+          $ref: '#/components/schemas/EvidenceSource'
+        selection:
+          $ref: '#/components/schemas/EvidenceSelection'
+    Evidence:
+      type: object
+      additionalProperties: false
+      required: [evidenceID, source, kind, title, contentHash, createdAt]
+      properties:
+        evidenceID: {type: string}
+        source:
+          $ref: '#/components/schemas/EvidenceSource'
+        projectionRef:
+          $ref: '#/components/schemas/ProjectionRef'
+        kind: {type: string, enum: [full, text_range, table_range]}
+        title: {type: string}
+        excerpt: {type: string}
+        contentHash: {type: string}
+        sourceContentHash: {type: string}
+        createdAt: {type: string, format: date-time}
+    ErrorResponse:
+      type: object
+      additionalProperties: false
+      required: [error]
+      properties:
+        error:
+          type: object
+          additionalProperties: false
+          required: [code, message, requestID]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            requestID: {type: string}

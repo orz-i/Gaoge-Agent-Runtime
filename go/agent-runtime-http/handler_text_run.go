@@ -102,17 +102,6 @@ func (h *Handler) GetTextRunPolicy(c *gin.Context) {
 }
 
 // StartTextRun creates the sole text-runtime run contract and both message projections.
-// @Summary 创建文本 Run
-// @Tags runs
-// @Accept json
-// @Produce json
-// @Param body body StartTextRunRequest true "文本 Run 输入"
-// @Success 202 {object} StartTextRunResponseDoc
-// @Failure 400 {object} ErrorDoc
-// @Failure 402 {object} ErrorDoc
-// @Failure 404 {object} ErrorDoc
-// @Failure 409 {object} ErrorDoc
-// @Router /runs [post]
 func (h *Handler) StartTextRun(c *gin.Context) {
 	var req StartTextRunRequest
 	if err := bindStrictJSON(c, &req); err != nil {
@@ -204,10 +193,6 @@ func runQueueResponse(item model.QueueItem) map[string]interface{} {
 }
 
 // ListRunQueue lists the durable queue for a host thread.
-// @Summary 查询文本 Run Queue
-// @Tags runs
-// @Success 200 {object} response.SuccessDoc
-// @Router /run-queue [get]
 func (h *Handler) ListRunQueue(c *gin.Context) {
 	threadID := c.Query("threadID")
 	actor, thread, _, err := h.runQueueContext(c, threadRef(c.Query("threadKind"), threadID))
@@ -228,12 +213,6 @@ func (h *Handler) ListRunQueue(c *gin.Context) {
 }
 
 // EnqueueRun appends a durable text run request.
-// @Summary 加入文本 Run Queue
-// @Tags runs
-// @Accept json
-// @Param body body RunQueueRequest true "队列请求"
-// @Success 202 {object} response.SuccessDoc
-// @Router /run-queue [post]
 func (h *Handler) EnqueueRun(c *gin.Context) {
 	var req RunQueueRequest
 	if err := bindStrictJSON(c, &req); err != nil {
@@ -256,13 +235,6 @@ func (h *Handler) EnqueueRun(c *gin.Context) {
 }
 
 // UpdateRunQueue updates a queued text run using an expected revision CAS.
-// @Summary 编辑文本 Run Queue
-// @Tags runs
-// @Accept json
-// @Param queue_id path string true "Queue ID"
-// @Param body body RunQueueRequest true "队列请求"
-// @Success 200 {object} response.SuccessDoc
-// @Router /run-queue/{queue_id} [patch]
 func (h *Handler) UpdateRunQueue(c *gin.Context) {
 	var req RunQueueRequest
 	if err := bindStrictJSON(c, &req); err != nil {
@@ -283,12 +255,6 @@ func (h *Handler) UpdateRunQueue(c *gin.Context) {
 }
 
 // CancelRunQueue cancels one queued text run request.
-// @Summary 取消文本 Run Queue 项
-// @Tags runs
-// @Param id path string true "会话 public_id"
-// @Param queue_id path string true "Queue ID"
-// @Success 200 {object} response.SuccessDoc
-// @Router /run-queue/{queue_id} [delete]
 func (h *Handler) CancelRunQueue(c *gin.Context) {
 	actor, thread, _, err := h.runQueueContext(c, threadRef(c.Query("threadKind"), c.Query("threadID")))
 	if err != nil {
@@ -304,12 +270,6 @@ func (h *Handler) CancelRunQueue(c *gin.Context) {
 }
 
 // PrioritizeRunQueue moves one queue item to the front.
-// @Summary 置顶文本 Run Queue 项
-// @Tags runs
-// @Param id path string true "会话 public_id"
-// @Param queue_id path string true "Queue ID"
-// @Success 200 {object} response.SuccessDoc
-// @Router /run-queue/{queue_id}/prioritize [post]
 func (h *Handler) PrioritizeRunQueue(c *gin.Context) {
 	actor, thread, _, err := h.runQueueContext(c, threadRef(c.Query("threadKind"), c.Query("threadID")))
 	if err != nil {
@@ -325,12 +285,6 @@ func (h *Handler) PrioritizeRunQueue(c *gin.Context) {
 }
 
 // InterruptAndSendRun interrupts the active run and prioritizes one queued request.
-// @Summary 中断并发送队列项
-// @Tags runs
-// @Param id path string true "会话 public_id"
-// @Param queue_id path string true "Queue ID"
-// @Success 200 {object} response.SuccessDoc
-// @Router /run-queue/{queue_id}/interrupt-and-send [post]
 func (h *Handler) InterruptAndSendRun(c *gin.Context) {
 	actor, thread, _, err := h.runQueueContext(c, threadRef(c.Query("threadKind"), c.Query("threadID")))
 	if err != nil {
@@ -346,12 +300,6 @@ func (h *Handler) InterruptAndSendRun(c *gin.Context) {
 }
 
 // GetTextRun returns one text run and its durable projections.
-// @Summary 查询文本 Run
-// @Tags runs
-// @Param run_id path string true "Run ID"
-// @Success 200 {object} response.SuccessDoc
-// @Failure 404 {object} ErrorDoc
-// @Router /runs/{run_id} [get]
 func (h *Handler) GetTextRun(c *gin.Context) {
 	runID := strings.TrimSpace(c.Param("run_id"))
 	detail, err := h.service.GetTextRunDetail(c.Request.Context(), h.actorRef(c), runID)
@@ -441,14 +389,6 @@ func nullableRunSeq(value int64) interface{} {
 }
 
 // StreamRunEvents replays and tails schemaVersion 1 NDJSON events after a sequence cursor.
-// @Summary 订阅文本 Run 事件
-// @Tags runs
-// @Produce application/x-ndjson
-// @Param run_id path string true "Run ID"
-// @Param afterSeq query integer false "最后已处理事件序号"
-// @Success 200 {string} string "NDJSON Run events"
-// @Failure 404 {object} ErrorDoc
-// @Router /runs/{run_id}/events [get]
 func (h *Handler) StreamRunEvents(c *gin.Context) {
 	runID := strings.TrimSpace(c.Param("run_id"))
 	after, _ := strconv.ParseInt(c.Query("afterSeq"), 10, 64)
@@ -646,13 +586,6 @@ func (h *Handler) ListRunCheckpoints(c *gin.Context) {
 }
 
 // ResumeTextRun resumes one suspended text run from a durable checkpoint.
-// @Summary 恢复文本 Run
-// @Tags runs
-// @Accept json
-// @Param run_id path string true "Run ID"
-// @Param body body ResumeTextRunRequest true "恢复请求"
-// @Success 202 {object} response.SuccessDoc
-// @Router /runs/{run_id}/resume [post]
 func (h *Handler) ResumeTextRun(c *gin.Context) {
 	var req ResumeTextRunRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -668,11 +601,6 @@ func (h *Handler) ResumeTextRun(c *gin.Context) {
 }
 
 // RetireTextRun abandons recovery and retires one suspended text run.
-// @Summary 退役文本 Run
-// @Tags runs
-// @Param run_id path string true "Run ID"
-// @Success 200 {object} response.SuccessDoc
-// @Router /runs/{run_id}/retire [post]
 func (h *Handler) RetireTextRun(c *gin.Context) {
 	run, reused, err := h.service.RetireTextRun(c.Request.Context(), h.actorRef(c), strings.TrimSpace(c.Param("run_id")))
 	if err != nil {
@@ -783,17 +711,6 @@ func (h *Handler) DownloadOutput(c *gin.Context) {
 }
 
 // CreateEvidence freezes a selected output range or host projection.
-// @Summary 创建 Runtime Evidence
-// @Tags evidence
-// @Accept json
-// @Produce json
-// @Param body body CreateEvidenceRequest true "中性 Evidence 来源与选择范围"
-// @Success 200 {object} EvidenceResponseDoc
-// @Failure 400 {object} ErrorDoc
-// @Failure 404 {object} ErrorDoc
-// @Failure 409 {object} ErrorDoc
-// @Failure 422 {object} ErrorDoc
-// @Router /evidence [post]
 func (h *Handler) CreateEvidence(c *gin.Context) {
 	var req CreateEvidenceRequest
 	if err := bindStrictJSON(c, &req); err != nil {

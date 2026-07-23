@@ -78,12 +78,6 @@ func usageBillingStreamErrorPayload(err error) map[string]interface{} {
 }
 
 // CancelRun cancels one text or media run owned by the current user.
-// @Summary 取消运行
-// @Tags runs
-// @Param run_id path string true "运行 ID"
-// @Success 200 {object} response.SuccessDoc
-// @Failure 400 {object} ErrorDoc
-// @Router /runs/{run_id}/cancel [post]
 func (h *Handler) CancelRun(c *gin.Context) {
 	runID, err := stringParam(c, "run_id")
 	if err != nil {
