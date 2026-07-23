@@ -1644,18 +1644,34 @@ func (s *Engine) ReconcileTextRunsOnce(ctx context.Context, olderThan time.Time)
 // ExpireRunInteractionsOnce runs one deterministic interaction-expiry pass.
 // It is exported for operational probes and crash-recovery contract tests.
 func (s *Engine) ExpireRunInteractionsOnce(ctx context.Context, before time.Time) error {
-	items, err := s.repo.ListExpiredRunInteractions(ctx, before, 100)
+	return expireRunInteractionsOnce(ctx, before, interactionExpiryDependencies{
+		list:    s.repo.ListExpiredRunInteractions,
+		expire:  s.repo.ExpireRunInteraction,
+		publish: s.publishRunEvents,
+		finish:  s.FinishRunNotifications,
+	})
+}
+
+type interactionExpiryDependencies struct {
+	list    func(context.Context, time.Time, int) ([]model.ExpiredInteraction, error)
+	expire  func(context.Context, string) ([]model.Event, bool, error)
+	publish func(string, []model.Event)
+	finish  func(string)
+}
+
+func expireRunInteractionsOnce(ctx context.Context, before time.Time, deps interactionExpiryDependencies) error {
+	items, err := deps.list(ctx, before, 100)
 	if err != nil {
 		return err
 	}
 	for _, item := range items {
-		saved, applied, expireErr := s.repo.ExpireRunInteraction(ctx, item.InteractionID)
+		saved, applied, expireErr := deps.expire(ctx, item.InteractionID)
 		if expireErr != nil {
 			return expireErr
 		}
 		if applied {
-			s.publishRunEvents(item.RunID, saved)
-			s.FinishRunNotifications(item.RunID)
+			deps.publish(item.RunID, saved)
+			deps.finish(item.RunID)
 		}
 	}
 	return nil

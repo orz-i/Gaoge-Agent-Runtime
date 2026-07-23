@@ -143,7 +143,7 @@ func (r *Repository) ListExpiredRunInteractions(ctx context.Context, before time
 	}
 	type row struct{ InteractionID, RunID, TenantID, ActorID, ThreadKind, ThreadID string }
 	var rows []row
-	err := r.dbFor(ctx).Table("agent_interactions").Select("agent_interactions.interaction_id, agent_interactions.run_id, agent_runs.tenant_id, agent_runs.actor_id, agent_runs.thread_kind, agent_runs.thread_id").Joins("JOIN agent_runs ON agent_runs.run_id = agent_interactions.run_id").Where("agent_interactions.status = ? AND agent_interactions.expires_at IS NOT NULL AND agent_interactions.expires_at <= ?", domain.InteractionPending, before).Order("agent_interactions.expires_at,id").Limit(limit).Scan(&rows).Error
+	err := r.dbFor(ctx).Table("agent_interactions").Select("agent_interactions.interaction_id, agent_interactions.run_id, agent_runs.tenant_id, agent_runs.actor_id, agent_runs.thread_kind, agent_runs.thread_id").Joins("JOIN agent_runs ON agent_runs.run_id = agent_interactions.run_id").Where("agent_interactions.status = ? AND agent_interactions.expires_at IS NOT NULL AND agent_interactions.expires_at <= ?", domain.InteractionPending, before).Order("agent_interactions.expires_at,agent_interactions.id").Limit(limit).Scan(&rows).Error
 	items := make([]domain.ExpiredInteraction, 0, len(rows))
 	for _, item := range rows {
 		items = append(items, domain.ExpiredInteraction{InteractionID: item.InteractionID, RunID: item.RunID, Actor: domain.ActorRef{TenantID: item.TenantID, ActorID: item.ActorID}, Thread: domain.ThreadRef{Kind: item.ThreadKind, ID: item.ThreadID}})
