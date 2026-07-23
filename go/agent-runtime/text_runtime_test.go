@@ -25,7 +25,11 @@ const (
 	testErrorCodeWorkspaceArgumentsInvalid = "workspace_arguments_invalid"
 )
 
-var errStaleWorkspaceSnapshot = errors.New("stale snapshot")
+var (
+	errStaleWorkspaceSnapshot   = errors.New("stale snapshot")
+	errProviderInvalidInput     = errors.New("provider-specific invalid input")
+	errProviderRevisionConflict = errors.New("story revision conflict")
+)
 
 func testWorkspacePolicy(expected string) WorkspacePolicy {
 	policy := WorkspacePolicy{ArtifactResourceField: "storyID", SerializeToolProtocols: []string{protocolGoogleGenerateContent}}
@@ -381,15 +385,34 @@ func TestPlanFailureCodesAreStable(t *testing.T) {
 }
 
 func TestWorkspaceErrorPreservesDiagnosticAndIsDeterministic(t *testing.T) {
-	err := NewWorkspaceError(WorkspaceErrorClassification{Message: "workspace arguments invalid", Diagnostic: "operation 1: evidence is required", Deterministic: true}, ErrInvalidInput)
+	err := NewWorkspaceError(
+		WorkspaceErrorClassification{Kind: WorkspaceErrorInvalidInput, Message: "workspace arguments invalid", Diagnostic: "operation 1: evidence is required", Deterministic: true},
+		errProviderInvalidInput,
+	)
 	if err.Error() != "operation 1: evidence is required" {
 		t.Fatalf("Error() = %q", err.Error())
+	}
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatal("invalid workspace error must preserve ErrInvalidInput semantics")
 	}
 	if !deterministicWorkspaceToolFailure(err) {
 		t.Fatal("wrapped publisher validation must stay deterministic")
 	}
 	if !err.DeterministicToolFailure() {
 		t.Fatal("DeterministicToolFailure() = false")
+	}
+}
+
+func TestWorkspaceConflictPreservesSourceStaleSemantics(t *testing.T) {
+	err := NewWorkspaceError(
+		WorkspaceErrorClassification{Kind: WorkspaceErrorConflict, Code: "workspace_revision_conflict"},
+		errProviderRevisionConflict,
+	)
+	if !errors.Is(err, ErrWorkspaceSourceStale) {
+		t.Fatal("workspace conflict must preserve ErrWorkspaceSourceStale semantics")
+	}
+	if errors.Is(err, ErrInvalidInput) {
+		t.Fatal("workspace conflict must not be classified as invalid input")
 	}
 }
 

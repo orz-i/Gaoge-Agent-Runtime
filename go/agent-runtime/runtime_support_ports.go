@@ -264,6 +264,22 @@ func (e *WorkspaceError) Unwrap() error {
 	return e.cause
 }
 
+// Is preserves Runtime's transport-neutral error semantics while retaining the
+// provider-owned diagnostic and receipt carried by WorkspaceError.
+func (e *WorkspaceError) Is(target error) bool {
+	if e == nil {
+		return false
+	}
+	switch e.classification.Kind {
+	case WorkspaceErrorInvalidInput:
+		return target == ErrInvalidInput
+	case WorkspaceErrorConflict:
+		return target == ErrWorkspaceSourceStale
+	default:
+		return false
+	}
+}
+
 func (e *WorkspaceError) DeterministicToolFailure() bool {
 	return e != nil && e.classification.Deterministic
 }
