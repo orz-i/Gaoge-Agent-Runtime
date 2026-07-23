@@ -4052,7 +4052,9 @@ func (s *Engine) stopForHostedToolApproval(ctx context.Context, run model.Run, e
 func (s *Engine) dispatchInitialRunContinuation(ctx context.Context, run model.Run, root model.Step, effective effectiveTextRunConfig, reservation *UsageBalanceReservation, continuation runContinuation) bool {
 	switch continuation.Type {
 	case runContinuationStartDirect:
-		s.executeDirectStrategy(ctx, run, root, effective, reservation, nil, runUsage{})
+		s.withRunGenerationLease(ctx, run, func(runCtx context.Context) {
+			s.executeDirectStrategy(runCtx, run, root, effective, reservation, nil, runUsage{})
+		})
 		return true
 	case runContinuationStartPlanning, runContinuationReplan:
 		s.executePlanning(ctx, run, root, effective, reservation, continuation.NextRevision, continuation.Feedback)
@@ -4065,6 +4067,13 @@ func (s *Engine) dispatchInitialRunContinuation(ctx context.Context, run model.R
 	default:
 		return false
 	}
+}
+
+func (s *Engine) withRunGenerationLease(ctx context.Context, run model.Run, execute func(context.Context)) {
+	runCtx, cancel := context.WithTimeout(ctx, 2*time.Hour)
+	s.generationStreams.register(runCtx, run.RunID, run.Actor, cancel)
+	defer cancel()
+	execute(runCtx)
 }
 
 func (s *Engine) validateDurableRunToolResult(ctx context.Context, run model.Run, continuation runContinuation) error {

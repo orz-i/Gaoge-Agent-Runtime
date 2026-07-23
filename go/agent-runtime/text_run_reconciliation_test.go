@@ -75,6 +75,23 @@ func TestReconcileTextRunsOncePreservesQuiescentRuns(t *testing.T) {
 	}
 }
 
+func TestWithRunGenerationLeaseMarksInitialDirectExecutionActive(t *testing.T) {
+	service := &Engine{
+		generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{}),
+	}
+	run := model.Run{
+		RunID: "run_initial_direct",
+		Actor: model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey},
+	}
+	service.withRunGenerationLease(t.Context(), run, func(ctx context.Context) {
+		state, err := service.TextRunLeaseState(ctx, run.RunID)
+		if state != GenerationLeaseActive {
+			t.Fatalf("lease state = %q, want active (err=%v)", state, err)
+		}
+		service.FinishRunNotifications(run.RunID)
+	})
+}
+
 func TestReconcileTextRunsOnceReturnsListAndAppendFailures(t *testing.T) {
 	wantListErr := errCategory6EF1809EF6
 	if err := reconcileTextRunsOnce(t.Context(), time.Now(), textRunReconciliationDependencies{
