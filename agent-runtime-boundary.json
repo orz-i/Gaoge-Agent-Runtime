@@ -1,0 +1,11 @@
+{
+  "version": "0.1.0",
+  "goModules": [
+    "github.com/orz-i/Gaoge/sdk/go/agent-runtime",
+    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres",
+    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-redis",
+    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http"
+  ],
+  "typescriptPackage": "@gaoge/agent-runtime-client",
+  "openAPI": "sdk/contracts/agent-runtime/v1/openapi.yaml"
+}
