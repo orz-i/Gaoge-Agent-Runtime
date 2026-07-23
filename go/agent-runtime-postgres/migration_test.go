@@ -99,7 +99,19 @@ func TestMigrateRepairsContextArtifactUniqueIndexPostgres(t *testing.T) {
 }
 
 func TestMigrateReplaysHistoricalRunAndStepProjection(t *testing.T) {
-	db := openRuntimeMigrationDB(t, "run_projection")
+	testMigrateReplaysHistoricalRunAndStepProjection(t, openRuntimeMigrationDB(t, "run_projection"))
+}
+
+func TestMigrateReplaysHistoricalRunAndStepProjectionPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not set")
+	}
+	testMigrateReplaysHistoricalRunAndStepProjection(t, openConversationPostgresContractDB(t, dsn))
+}
+
+func testMigrateReplaysHistoricalRunAndStepProjection(t *testing.T, db *gorm.DB) {
+	t.Helper()
 	requirePostgresTestNoError(t, Migrate(db))
 	started := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
 	ended := started.Add(3 * time.Second)
