@@ -48,6 +48,33 @@ func TestReconcileTextRunsOnceSuspendsOnlyRunsWithoutActiveLease(t *testing.T) {
 	}
 }
 
+func TestReconcileTextRunsOncePreservesQuiescentRuns(t *testing.T) {
+	leaseChecks := 0
+	suspended := false
+	err := reconcileTextRunsOnce(t.Context(), time.Now(), textRunReconciliationDependencies{
+		list: func(context.Context, time.Time) ([]model.Run, error) {
+			return []model.Run{
+				{RunID: "run_waiting", Status: model.RunStatusWaitingInput},
+				{RunID: "run_suspended", Status: model.RunStatusSuspended},
+			}, nil
+		},
+		leaseState: func(context.Context, string) (GenerationLeaseState, error) {
+			leaseChecks++
+			return GenerationLeaseExpired, nil
+		},
+		suspend: func(model.Run, []model.Event) (bool, error) {
+			suspended = true
+			return true, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaseChecks != 0 || suspended {
+		t.Fatalf("quiescent runs must not require a generation lease: leaseChecks=%d suspended=%v", leaseChecks, suspended)
+	}
+}
+
 func TestReconcileTextRunsOnceReturnsListAndAppendFailures(t *testing.T) {
 	wantListErr := errCategory6EF1809EF6
 	if err := reconcileTextRunsOnce(t.Context(), time.Now(), textRunReconciliationDependencies{
@@ -61,7 +88,7 @@ func TestReconcileTextRunsOnceReturnsListAndAppendFailures(t *testing.T) {
 	wantAppendErr := errCategory0675656AB0
 	err := reconcileTextRunsOnce(t.Context(), time.Now(), textRunReconciliationDependencies{
 		list: func(context.Context, time.Time) ([]model.Run, error) {
-			return []model.Run{{RunID: "run_stale", CurrentStepID: "step_stale"}}, nil
+			return []model.Run{{RunID: "run_stale", CurrentStepID: "step_stale", Status: model.RunStatusRunning}}, nil
 		},
 		leaseState: func(context.Context, string) (GenerationLeaseState, error) { return GenerationLeaseExpired, nil },
 		suspend:    func(model.Run, []model.Event) (bool, error) { return false, wantAppendErr },

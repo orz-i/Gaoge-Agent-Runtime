@@ -1701,6 +1701,9 @@ func reconcileTextRunsOnce(ctx context.Context, olderThan time.Time, deps textRu
 	}
 	var reconcileErr error
 	for i := range runs {
+		if !runRequiresGenerationLease(runs[i].Status) {
+			continue
+		}
 		state, leaseErr := deps.leaseState(ctx, runs[i].RunID)
 		if leaseErr != nil && deps.warn != nil {
 			deps.warn(runs[i].RunID, state, leaseErr)
@@ -1718,4 +1721,13 @@ func reconcileTextRunsOnce(ctx context.Context, olderThan time.Time, deps textRu
 		}
 	}
 	return reconcileErr
+}
+
+func runRequiresGenerationLease(status string) bool {
+	switch status {
+	case model.RunStatusQueued, model.RunStatusPreparing, model.RunStatusRunning:
+		return true
+	default:
+		return false
+	}
 }
