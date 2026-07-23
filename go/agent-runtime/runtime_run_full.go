@@ -482,7 +482,7 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 	if err != nil {
 		_ = s.ReleaseRunUsageReservation(ctx, reservation, "文本运行创建失败退回预扣")
 		if errors.Is(err, ErrDuplicate) {
-			return s.recoverDuplicateTextRunStart(ctx, input.Actor, runID, fingerprint)
+			return s.recoverDuplicateTextRunStart(ctx, input.Actor, input.Thread, runID, fingerprint, err)
 		}
 		return nil, err
 	}
@@ -760,15 +760,25 @@ func textRunInitialEvents(run model.Run, step model.Step, environmentRef model.R
 	return append(events, newRunEvent(run, "context.compiled", step.StepID, "Text context compiled", map[string]interface{}{"contextHash": snapshot.ContentHash, "fileCount": snapshot.FileCount, "ragCount": snapshot.RAGCount, "skillCount": snapshot.SkillCount, "memoryCount": snapshot.MemoryCount, "outputCount": snapshot.OutputCount, "evidenceCount": snapshot.EvidenceCount, "retrievalFallbackCount": snapshot.RetrievalFallbackCount, "skippedCount": snapshot.SkippedCount}, nil))
 }
 
-func (s *Engine) recoverDuplicateTextRunStart(ctx context.Context, actor model.ActorRef, runID, fingerprint string) (*TextRunStartResult, error) {
+func (s *Engine) recoverDuplicateTextRunStart(ctx context.Context, actor model.ActorRef, thread model.ThreadRef, runID, fingerprint string, duplicateErr error) (*TextRunStartResult, error) {
 	existing, err := s.repo.GetRun(ctx, actor, runID)
-	if err != nil {
+	if err == nil {
+		if !textRunFingerprintMatches(existing, fingerprint) {
+			return nil, ErrTextRunIdempotencyConflict
+		}
+		return s.textRunStartResult(ctx, actor, existing)
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	_, err = s.repo.GetActiveRun(ctx, actor, thread)
+	if err == nil {
 		return nil, ErrTextRunAlreadyActive
 	}
-	if !textRunFingerprintMatches(existing, fingerprint) {
-		return nil, ErrTextRunIdempotencyConflict
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
 	}
-	return s.textRunStartResult(ctx, actor, existing)
+	return nil, duplicateErr
 }
 
 func (s *Engine) resolveTextRunProfile(ctx context.Context, actor model.ActorRef, environment model.ResourceRef) (*EnvironmentProfile, error) {

@@ -1,6 +1,8 @@
 package agentruntime
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"time"
@@ -8,13 +10,35 @@ import (
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
+type duplicateRunRecoveryStore struct {
+	Store
+	run, active       *model.Run
+	runErr, activeErr error
+	steps             []model.Step
+}
+
+func (s *duplicateRunRecoveryStore) GetRun(context.Context, model.ActorRef, string) (*model.Run, error) {
+	return s.run, s.runErr
+}
+
+func (s *duplicateRunRecoveryStore) GetActiveRun(context.Context, model.ActorRef, model.ThreadRef) (*model.Run, error) {
+	return s.active, s.activeErr
+}
+
+func (s *duplicateRunRecoveryStore) ListRunSteps(context.Context, string) ([]model.Step, error) {
+	return s.steps, nil
+}
+
 const (
 	valueFileA156CC0BC        = "file_a"
 	valueGoal86AC966D         = "goal"
 	valueMcp3A1498F66         = "mcp.3"
+	valueRunActive8FC2E9A1    = "run_active"
 	valueStory6000957F        = "story"
 	valueUsageUpdatedEF9AA839 = "usage.updated"
 )
+
+var errContextArtifactDuplicate = errors.New("context artifact duplicate")
 
 func TestTextRunRequestFingerprintIsStableForSetInputs(t *testing.T) {
 	toolsA, toolsB := []string{valueMcp3A1498F66, "mcp.1", valueMcp3A1498F66}, []string{"mcp.1", valueMcp3A1498F66}
@@ -92,5 +116,41 @@ func TestTextRunFingerprintRejectsMissingImmutableFingerprint(t *testing.T) {
 	run.RequestFingerprint = "new-fingerprint"
 	if !textRunFingerprintMatches(run, "new-fingerprint") {
 		t.Fatal("identical v3 request fingerprint should be idempotent")
+	}
+}
+
+func TestRecoverDuplicateTextRunStartPreservesCauseWithoutRunEvidence(t *testing.T) {
+	actor := model.ActorRef{TenantID: valueTenantTest, ActorID: "actor_duplicate"}
+	thread := model.ThreadRef{Kind: threadKindConversation, ID: "thread_duplicate"}
+	cause := errContextArtifactDuplicate
+	service := &Engine{repo: &duplicateRunRecoveryStore{runErr: ErrNotFound, activeErr: ErrNotFound}}
+	if _, err := service.recoverDuplicateTextRunStart(t.Context(), actor, thread, "run_missing", "fingerprint", cause); !errors.Is(err, cause) {
+		t.Fatalf("duplicate recovery error = %v, want original cause", err)
+	}
+}
+
+func TestRecoverDuplicateTextRunStartReportsOnlyRealActiveRun(t *testing.T) {
+	actor := model.ActorRef{TenantID: valueTenantTest, ActorID: "actor_active"}
+	thread := model.ThreadRef{Kind: threadKindConversation, ID: "thread_active"}
+	active := &model.Run{RunID: valueRunActive8FC2E9A1, Actor: actor, Thread: thread}
+	service := &Engine{repo: &duplicateRunRecoveryStore{runErr: ErrNotFound, active: active}}
+	if _, err := service.recoverDuplicateTextRunStart(t.Context(), actor, thread, "run_new", "fingerprint", ErrDuplicate); !errors.Is(err, ErrTextRunAlreadyActive) {
+		t.Fatalf("active recovery error = %v", err)
+	}
+}
+
+func TestRecoverDuplicateTextRunStartKeepsIdempotentRunSemantics(t *testing.T) {
+	actor := model.ActorRef{TenantID: valueTenantTest, ActorID: "actor_idempotent"}
+	thread := model.ThreadRef{Kind: threadKindConversation, ID: "thread_idempotent"}
+	existing := &model.Run{RunID: "run_existing", Actor: actor, Thread: thread, RequestFingerprint: "same"}
+	step := model.Step{StepID: "step_existing", RunID: existing.RunID}
+	store := &duplicateRunRecoveryStore{run: existing, steps: []model.Step{step}}
+	service := &Engine{repo: store}
+	result, err := service.recoverDuplicateTextRunStart(t.Context(), actor, thread, existing.RunID, "same", ErrDuplicate)
+	if err != nil || result == nil || result.Run.RunID != existing.RunID || result.Step.StepID != step.StepID {
+		t.Fatalf("idempotent recovery result = %#v, err=%v", result, err)
+	}
+	if _, err = service.recoverDuplicateTextRunStart(t.Context(), actor, thread, existing.RunID, "different", ErrDuplicate); !errors.Is(err, ErrTextRunIdempotencyConflict) {
+		t.Fatalf("fingerprint conflict error = %v", err)
 	}
 }
