@@ -79,6 +79,24 @@ func TestCreateRunStartBundleRollsBackEveryRowOnArtifactConflict(t *testing.T) {
 	}
 }
 
+func TestCreateRunStartBundleAllowsMultipleSnapshotsWithoutArtifacts(t *testing.T) {
+	db := openConversationRepositoryTestDB(t)
+	repo := New(db, StaticSessions(db))
+	for _, runID := range []string{"run_snapshot_one", "run_snapshot_two"} {
+		run, step, snapshot, _, checkpoint, events := runtimeStartBundleFixture(runID)
+		if _, err := repo.CreateRunStartBundle(context.Background(), &run, &step, &snapshot, nil, &checkpoint, events); err != nil {
+			t.Fatalf("create %s: %v", runID, err)
+		}
+	}
+	var count int64
+	if err := db.Model(&models.ContextRecord{}).Where("record_type = ?", "snapshot").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("snapshot count = %d, want 2", count)
+	}
+}
+
 func TestCreatePlanningBundleAtomicallyMovesRunToWaitingInput(t *testing.T) {
 	repo := newTestRepository(t)
 	run, step, snapshot, artifacts, checkpoint, events := runtimeStartBundleFixture("run_planning")

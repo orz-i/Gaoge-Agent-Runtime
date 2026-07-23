@@ -130,7 +130,7 @@ type ContextRecord struct {
 	BaseModel
 	RecordType             string `gorm:"size:32;not null;index:idx_agent_context_records_type"`
 	SnapshotID             string `gorm:"size:64;not null;default:'';index:idx_agent_context_records_snapshot"`
-	ArtifactID             string `gorm:"size:64;not null;default:'';uniqueIndex:uk_agent_context_records_artifact"`
+	ArtifactID             string `gorm:"size:64;not null;default:'';uniqueIndex:uk_agent_context_records_artifact,where:record_type = 'artifact'"`
 	RunID                  string `gorm:"size:64;not null;default:'';index:idx_agent_context_records_run"`
 	TenantID               string `gorm:"size:64;not null;default:'';index:idx_agent_context_records_actor,priority:1"`
 	ActorID                string `gorm:"size:64;not null;default:'';index:idx_agent_context_records_actor,priority:2"`

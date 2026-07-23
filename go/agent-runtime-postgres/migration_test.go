@@ -2,11 +2,18 @@ package postgres
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+)
+
+const (
+	migrationContextSnapshot = "snapshot"
+	migrationContextArtifact = "artifact"
 )
 
 func TestMigrateCreatesOnlyAgentRuntimeV1Tables(t *testing.T) {
@@ -68,6 +75,42 @@ func TestMigrateRejectsLegacyRuntimeContextRows(t *testing.T) {
 	}
 	if err := Migrate(db); !errors.Is(err, ErrLegacyRuntimeSchema) || !strings.Contains(err.Error(), "chat_context_records") {
 		t.Fatalf("legacy context error = %v", err)
+	}
+}
+
+func TestMigrateRepairsContextArtifactUniqueIndex(t *testing.T) {
+	testMigrateRepairsContextArtifactUniqueIndex(t, openRuntimeMigrationDB(t, "context_artifact_index"))
+}
+
+func TestMigrateRepairsContextArtifactUniqueIndexPostgres(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not set")
+	}
+	testMigrateRepairsContextArtifactUniqueIndex(t, openConversationPostgresContractDB(t, dsn))
+}
+
+func testMigrateRepairsContextArtifactUniqueIndex(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	requirePostgresTestNoError(t, Migrate(db))
+	requirePostgresTestNoError(t, db.Exec("DROP INDEX IF EXISTS "+contextArtifactUniqueIndex).Error)
+	requirePostgresTestNoError(t, db.Exec("CREATE UNIQUE INDEX "+contextArtifactUniqueIndex+" ON agent_context_records (artifact_id)").Error)
+	first := models.ContextRecord{RecordType: migrationContextSnapshot, SnapshotID: "snapshot_existing", RunID: "run_existing"}
+	requirePostgresTestNoError(t, db.Create(&first).Error)
+	requirePostgresTestNoError(t, Migrate(db))
+	requirePostgresTestNoError(t, Migrate(db))
+	second := models.ContextRecord{RecordType: migrationContextSnapshot, SnapshotID: "snapshot_next", RunID: "run_next"}
+	requirePostgresTestNoError(t, db.Create(&second).Error)
+	artifact := models.ContextRecord{RecordType: migrationContextArtifact, SnapshotID: first.SnapshotID, ArtifactID: "artifact_unique", RunID: first.RunID}
+	requirePostgresTestNoError(t, db.Create(&artifact).Error)
+	duplicate := models.ContextRecord{RecordType: migrationContextArtifact, SnapshotID: second.SnapshotID, ArtifactID: artifact.ArtifactID, RunID: second.RunID}
+	if err := db.Create(&duplicate).Error; err == nil {
+		t.Fatal("duplicate artifact ID must remain rejected")
+	}
+	var snapshots int64
+	requirePostgresTestNoError(t, db.Model(&models.ContextRecord{}).Where("record_type = ?", migrationContextSnapshot).Count(&snapshots).Error)
+	if snapshots != 2 {
+		t.Fatalf("snapshot count = %d, want 2", snapshots)
 	}
 }
 

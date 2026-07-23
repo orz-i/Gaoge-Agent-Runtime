@@ -12,6 +12,8 @@ import (
 var ErrLegacyRuntimeSchema = errors.New("legacy Conversation Text Runtime schema detected; delete the local database or Docker volume before starting")
 var ErrNilDatabase = errors.New("agent runtime postgres migrate: nil database")
 
+const contextArtifactUniqueIndex = "uk_agent_context_records_artifact"
+
 var legacyRuntimeTables = []string{
 	"chat_runs", "chat_run_events", "text_run_steps", "text_run_plans",
 	"text_run_interactions", "text_run_checkpoints", "output_identities", "output_refs",
@@ -45,7 +47,19 @@ func Migrate(db *gorm.DB, _ ...bool) error {
 	if err := rejectLegacyContextRows(db); err != nil {
 		return err
 	}
-	return db.AutoMigrate(Models()...)
+	if err := db.AutoMigrate(Models()...); err != nil {
+		return err
+	}
+	return ensureContextArtifactUniqueIndex(db)
+}
+
+func ensureContextArtifactUniqueIndex(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("DROP INDEX IF EXISTS " + contextArtifactUniqueIndex).Error; err != nil {
+			return err
+		}
+		return tx.Exec("CREATE UNIQUE INDEX " + contextArtifactUniqueIndex + " ON agent_context_records (artifact_id) WHERE record_type = 'artifact'").Error
+	})
 }
 
 func rejectLegacyContextRows(db *gorm.DB) error {
