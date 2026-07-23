@@ -3229,15 +3229,19 @@ func (s *Engine) finalizeRunWithProjection(ctx context.Context, run model.Run, i
 		if err != nil || !applied {
 			return err
 		}
-		projection := TurnProjection{Input: run.InputProjection, Output: run.OutputProjection}
-		usage := TurnUsage{InputTokens: run.InputTokens, OutputTokens: run.OutputTokens, CacheReadTokens: run.CacheReadTokens, CacheWriteTokens: run.CacheWriteTokens, ReasoningTokens: run.ReasoningTokens, LatencyMS: run.TotalLatencyMS, BilledCurrency: run.BilledCurrency, BilledNanousd: run.BilledNanousd, PricingSnapshot: run.LastBillingSnapshotJSON}
+		persisted, err := s.repo.GetRun(txCtx, run.Actor, run.RunID)
+		if err != nil {
+			return err
+		}
+		projection := TurnProjection{Input: persisted.InputProjection, Output: persisted.OutputProjection}
+		usage := TurnUsage{InputTokens: persisted.InputTokens, OutputTokens: persisted.OutputTokens, CacheReadTokens: persisted.CacheReadTokens, CacheWriteTokens: persisted.CacheWriteTokens, ReasoningTokens: persisted.ReasoningTokens, LatencyMS: persisted.TotalLatencyMS, BilledCurrency: persisted.BilledCurrency, BilledNanousd: persisted.BilledNanousd, PricingSnapshot: persisted.LastBillingSnapshotJSON}
 		switch intent.Outcome {
 		case model.TerminalCompleted:
-			_, err = s.turnProjections.CompleteTurn(txCtx, CompleteTurnRequest{Actor: run.Actor, Thread: run.Thread, RunID: run.RunID, Projection: projection, ContentType: "text", Content: content, Usage: usage})
+			_, err = s.turnProjections.CompleteTurn(txCtx, CompleteTurnRequest{Actor: persisted.Actor, Thread: persisted.Thread, RunID: persisted.RunID, Projection: projection, ContentType: "text", Content: content, Usage: usage})
 		case model.TerminalFailed:
-			_, err = s.turnProjections.FailTurn(txCtx, FailTurnRequest{Actor: run.Actor, Thread: run.Thread, RunID: run.RunID, Projection: projection, ContentType: "text", Content: content, Usage: usage, ErrorCode: intent.ErrorCode, ErrorMessage: intent.ErrorMessage})
+			_, err = s.turnProjections.FailTurn(txCtx, FailTurnRequest{Actor: persisted.Actor, Thread: persisted.Thread, RunID: persisted.RunID, Projection: projection, ContentType: "text", Content: content, Usage: usage, ErrorCode: intent.ErrorCode, ErrorMessage: intent.ErrorMessage})
 		case model.TerminalCancelled:
-			_, err = s.turnProjections.CancelTurn(txCtx, CancelTurnRequest{Actor: run.Actor, Thread: run.Thread, RunID: run.RunID, Projection: projection, ErrorCode: intent.ErrorCode, ErrorMessage: intent.ErrorMessage})
+			_, err = s.turnProjections.CancelTurn(txCtx, CancelTurnRequest{Actor: persisted.Actor, Thread: persisted.Thread, RunID: persisted.RunID, Projection: projection, ErrorCode: intent.ErrorCode, ErrorMessage: intent.ErrorMessage})
 		default:
 			err = ErrInvalidInput
 		}

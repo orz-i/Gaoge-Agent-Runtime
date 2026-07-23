@@ -10,6 +10,7 @@ import (
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
+	stateprojection "github.com/orz-i/Gaoge/sdk/go/agent-runtime/projection"
 )
 
 type state struct {
@@ -75,25 +76,6 @@ func owned(run domain.Run, actor domain.ActorRef) bool {
 	return run.Actor == actor
 }
 
-func eventStatus(eventType, current string) string {
-	switch eventType {
-	case "run.preparing":
-		return domain.RunStatusPreparing
-	case "run.started", "run.resumed":
-		return domain.RunStatusRunning
-	case "run.suspended":
-		return domain.RunStatusSuspended
-	case "run.completed":
-		return domain.RunStatusCompleted
-	case "run.failed":
-		return domain.RunStatusFailed
-	case "run.cancelled":
-		return domain.RunStatusCancelled
-	default:
-		return current
-	}
-}
-
 func terminal(status string) bool {
 	return status == domain.RunStatusCompleted || status == domain.RunStatusFailed || status == domain.RunStatusCancelled
 }
@@ -116,18 +98,26 @@ func appendEvent(st *state, item domain.Event) (domain.Event, bool, error) {
 		item.CreatedAt = time.Now()
 	}
 	st.Events[item.RunID] = append(st.Events[item.RunID], clone(item))
+	var stepProjection *domain.Step
+	var stepIndex int
+	for index := range st.Steps[item.RunID] {
+		if st.Steps[item.RunID][index].StepID == item.StepID {
+			value := clone(st.Steps[item.RunID][index])
+			stepProjection, stepIndex = &value, index
+			break
+		}
+	}
+	if err := stateprojection.ApplyEvent(&run, stepProjection, item); err != nil {
+		return domain.Event{}, false, err
+	}
 	run.LastEventSeq = item.Seq
 	if item.EventType != "message.delta" {
 		run.LastPresentationEventSeq = item.Seq
 	}
-	run.Status = eventStatus(item.EventType, run.Status)
 	run.UpdatedAt = time.Now()
-	if terminal(run.Status) {
-		endedAt := run.UpdatedAt
-		if item.EndedAt != nil {
-			endedAt = *item.EndedAt
-		}
-		run.EndedAt = &endedAt
+	if stepProjection != nil {
+		stepProjection.UpdatedAt = run.UpdatedAt
+		st.Steps[item.RunID][stepIndex] = *stepProjection
 	}
 	st.Runs[item.RunID] = run
 	return clone(item), true, nil

@@ -9,6 +9,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
+	stateprojection "github.com/orz-i/Gaoge/sdk/go/agent-runtime/projection"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -192,19 +193,86 @@ func appendRunEventTx(tx *gorm.DB, item domain.Event) (domain.Event, bool, error
 	if err := tx.Create(&row).Error; err != nil {
 		return domain.Event{}, false, err
 	}
-	status := eventRunStatus(item, run.Status)
-	updates := map[string]interface{}{"last_event_seq": item.Seq, columnStatus: status, "updated_at": time.Now()}
-	if isPresentationEvent(item) {
-		updates["last_presentation_event_seq"] = item.Seq
+	item = toEventDomain(row)
+	runProjection := toRunDomain(run)
+	var stepRow *models.RunStep
+	if strings.TrimSpace(item.StepID) != "" {
+		var candidate models.RunStep
+		stepErr := tx.Where("run_id = ? AND step_id = ?", item.RunID, item.StepID).Take(&candidate).Error
+		switch {
+		case stepErr == nil:
+			stepRow = &candidate
+		case errors.Is(stepErr, gorm.ErrRecordNotFound):
+		default:
+			return domain.Event{}, false, stepErr
+		}
 	}
-	if isTerminalRunStatus(status) {
-		endedAt := eventEndTime(item)
-		updates["ended_at"] = endedAt
+	var stepProjection *domain.Step
+	if stepRow != nil {
+		value := toStepDomain(*stepRow)
+		stepProjection = &value
 	}
-	if err := tx.Model(&models.RunRecord{}).Where("id = ?", run.ID).Updates(updates).Error; err != nil {
+	if err := stateprojection.ApplyEvent(&runProjection, stepProjection, item); err != nil {
 		return domain.Event{}, false, err
 	}
+	runProjection.LastEventSeq = item.Seq
+	runProjection.UpdatedAt = time.Now()
+	if isPresentationEvent(item) {
+		runProjection.LastPresentationEventSeq = item.Seq
+	}
+	if err := tx.Model(&models.RunRecord{}).Where("id = ?", run.ID).Updates(runProjectionUpdates(runProjection)).Error; err != nil {
+		return domain.Event{}, false, err
+	}
+	if stepRow != nil && stepProjection != nil {
+		if err := tx.Model(&models.RunStep{}).Where("id = ?", stepRow.ID).Updates(stepProjectionUpdates(*stepProjection)).Error; err != nil {
+			return domain.Event{}, false, err
+		}
+	}
 	return toEventDomain(row), true, nil
+}
+
+func runProjectionUpdates(run domain.Run) map[string]interface{} {
+	return map[string]interface{}{
+		columnStatus:                  run.Status,
+		"status_reason":               run.StatusReason,
+		"current_step_id":             run.CurrentStepID,
+		"pending_interaction_id":      run.PendingInteractionID,
+		"last_event_seq":              run.LastEventSeq,
+		"last_presentation_event_seq": run.LastPresentationEventSeq,
+		"provider_protocol":           run.ProviderProtocol,
+		"routed_binding_code":         run.RoutedBindingCode,
+		"upstream_model_name":         run.UpstreamModelName,
+		"input_tokens":                run.InputTokens,
+		"output_tokens":               run.OutputTokens,
+		"cache_read_tokens":           run.CacheReadTokens,
+		"cache_write_tokens":          run.CacheWriteTokens,
+		"reasoning_tokens":            run.ReasoningTokens,
+		"llm_calls_count":             run.LLMCallsCount,
+		"tool_calls_count":            run.ToolCallsCount,
+		"first_token_latency_ms":      run.FirstTokenLatencyMS,
+		"total_latency_ms":            run.TotalLatencyMS,
+		"error_code":                  run.ErrorCode,
+		"error_message":               run.ErrorMessage,
+		"ended_at":                    run.EndedAt,
+		"updated_at":                  run.UpdatedAt,
+	}
+}
+
+func stepProjectionUpdates(step domain.Step) map[string]interface{} {
+	var startedAt *time.Time
+	if !step.StartedAt.IsZero() {
+		startedAt = &step.StartedAt
+	}
+	return map[string]interface{}{
+		columnStatus:     step.Status,
+		"result_summary": step.ResultSummary,
+		"input_json":     step.InputJSON,
+		"output_json":    step.OutputJSON,
+		"error_json":     step.ErrorJSON,
+		"started_at":     startedAt,
+		"ended_at":       step.EndedAt,
+		"updated_at":     time.Now(),
+	}
 }
 
 func (r *Repository) ListRunEventsAfter(ctx context.Context, actor domain.ActorRef, runID string, afterSeq int64, limit int) ([]domain.Event, error) {
@@ -280,33 +348,7 @@ func runForUpdate(tx *gorm.DB, runID string, destination *models.RunRecord) erro
 	return query.Take(destination).Error
 }
 
-func eventRunStatus(event domain.Event, current string) string {
-	switch event.EventType {
-	case "run.preparing":
-		return domain.RunStatusPreparing
-	case "run.started", "run.resumed":
-		return domain.RunStatusRunning
-	case "run.suspended":
-		return domain.RunStatusSuspended
-	case "run.completed":
-		return domain.RunStatusCompleted
-	case "run.failed":
-		return domain.RunStatusFailed
-	case "run.cancelled":
-		return domain.RunStatusCancelled
-	default:
-		return current
-	}
-}
-
 func isPresentationEvent(event domain.Event) bool { return event.EventType != "message.delta" }
-
-func eventEndTime(event domain.Event) time.Time {
-	if event.EndedAt != nil {
-		return *event.EndedAt
-	}
-	return time.Now()
-}
 
 func isTerminalRunStatus(status string) bool {
 	return status == domain.RunStatusCompleted || status == domain.RunStatusFailed || status == domain.RunStatusCancelled

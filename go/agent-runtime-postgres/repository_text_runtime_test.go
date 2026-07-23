@@ -28,6 +28,70 @@ func TestCreateRunStartBundlePersistsRefsOnlyAtomicRoot(t *testing.T) {
 	assertRunStartCheckpoints(t, checkpoints, snapshot, err)
 }
 
+func TestAppendRunEventProjectsRunAndStepExactlyOnce(t *testing.T) {
+	repo := newTestRepository(t)
+	run, step, snapshot, artifacts, checkpoint, events := runtimeStartBundleFixture("run_event_projection")
+	if _, err := repo.CreateRunStartBundle(context.Background(), &run, &step, &snapshot, artifacts, &checkpoint, events); err != nil {
+		t.Fatalf("create start bundle: %v", err)
+	}
+
+	usage := domain.Event{
+		EventID:     "usage_event",
+		RunID:       run.RunID,
+		Actor:       run.Actor,
+		Thread:      run.Thread,
+		EventType:   "usage.updated",
+		StepID:      step.StepID,
+		PayloadJSON: `{"inputTokens":17,"outputTokens":256,"bindingCode":"route_a","upstreamModel":"gemini","protocol":"google_generate_content"}`,
+	}
+	appendProjectedEvent(t, repo, &usage)
+	duplicate := usage
+	duplicate.Seq = 0
+	if _, created, err := repo.AppendRunEvent(context.Background(), &duplicate); err != nil || created {
+		t.Fatalf("append duplicate usage: created=%v err=%v", created, err)
+	}
+
+	completedAt := run.StartedAt.Add(2 * time.Second)
+	for _, event := range []domain.Event{
+		{EventID: "step_completed", RunID: run.RunID, Actor: run.Actor, Thread: run.Thread, EventType: "step.completed", StepID: step.StepID, Summary: "done", EndedAt: &completedAt},
+		{EventID: "run_completed", RunID: run.RunID, Actor: run.Actor, Thread: run.Thread, EventType: "run.completed", StepID: step.StepID, Summary: "complete", EndedAt: &completedAt},
+	} {
+		appendProjectedEvent(t, repo, &event)
+	}
+
+	loaded, err := repo.GetRun(context.Background(), run.Actor, run.RunID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	assertRepositoryRunProjection(t, loaded)
+	steps, err := repo.ListRunSteps(context.Background(), run.RunID)
+	assertRepositoryStepProjection(t, steps, err)
+}
+
+func appendProjectedEvent(t *testing.T, repo *Repository, event *domain.Event) {
+	t.Helper()
+	if _, created, err := repo.AppendRunEvent(context.Background(), event); err != nil || !created {
+		t.Fatalf("append %s: created=%v err=%v", event.EventType, created, err)
+	}
+}
+
+func assertRepositoryRunProjection(t *testing.T, loaded *domain.Run) {
+	t.Helper()
+	if loaded.Status != domain.RunStatusCompleted || loaded.InputTokens != 17 || loaded.OutputTokens != 256 || loaded.LLMCallsCount != 1 || loaded.TotalLatencyMS != 2000 {
+		t.Fatalf("run projection mismatch: %#v", loaded)
+	}
+	if loaded.RoutedBindingCode != "route_a" || loaded.UpstreamModelName != "gemini" || loaded.ProviderProtocol != "google_generate_content" {
+		t.Fatalf("run route projection mismatch: %#v", loaded)
+	}
+}
+
+func assertRepositoryStepProjection(t *testing.T, steps []domain.Step, err error) {
+	t.Helper()
+	if err != nil || len(steps) != 1 || steps[0].Status != domain.RunStatusCompleted || steps[0].ResultSummary != "done" || steps[0].EndedAt == nil {
+		t.Fatalf("step projection mismatch: steps=%#v err=%v", steps, err)
+	}
+}
+
 func assertRunStartEvents(t *testing.T, saved []domain.Event, run domain.Run, err error) {
 	t.Helper()
 	if err != nil || len(saved) != 1 || saved[0].Seq != 1 || saved[0].Actor != run.Actor || saved[0].Thread != run.Thread {
