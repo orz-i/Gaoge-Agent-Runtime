@@ -998,11 +998,15 @@ func validatePlanResourceScope(payload planPayload, effective effectiveTextRunCo
 }
 
 func newRunCheckpoint(run model.Run, stepID, kind string, state interface{}) *model.Checkpoint {
-	encoded, err := json.Marshal(state)
+	encoded, err := json.Marshal(map[string]interface{}{
+		"semanticVersion": RuntimeSnapshotVersion,
+		"runID":           run.RunID,
+		"state":           state,
+	})
 	if err != nil {
-		encoded = []byte(`{"error":"checkpoint_state_encoding_failed"}`)
+		encoded = []byte(fmt.Sprintf(`{"semanticVersion":%d,"runID":"","state":{"error":"checkpoint_state_encoding_failed"}}`, RuntimeSnapshotVersion))
 	}
-	return &model.Checkpoint{CheckpointID: "checkpoint_" + strings.ReplaceAll(uuid.NewString(), "-", ""), RunID: run.RunID, StepID: stepID, ContextHash: fmt.Sprintf("%x", sha256.Sum256([]byte(run.RunID+":"+stepID+":"+kind))), Kind: kind, Status: model.CheckpointReady, ResumeStateJSON: string(encoded)}
+	return &model.Checkpoint{CheckpointID: "checkpoint_" + strings.ReplaceAll(uuid.NewString(), "-", ""), RunID: run.RunID, StepID: stepID, ContextHash: fmt.Sprintf("%x", sha256.Sum256([]byte(run.RunID+":"+stepID+":"+kind))), ManifestHash: fmt.Sprintf("%x", sha256.Sum256(encoded)), Kind: kind, Status: model.CheckpointReady, ResumeStateJSON: string(encoded)}
 }
 
 func newRunContinuationCheckpoint(run model.Run, stepID, kind string, continuation runContinuation) *model.Checkpoint {

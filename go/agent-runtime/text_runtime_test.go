@@ -652,20 +652,40 @@ func TestRunContinuationCheckpointIsFailClosedAndTamperEvident(t *testing.T) {
 		{SemanticVersion: RuntimeSnapshotVersion, SegmentKey: "run_continuation:interaction:interaction_renew", Type: runContinuationRenewInteraction, TargetStatus: model.RunStatusWaitingInput, InteractionID: "interaction_renew", StepID: valueStep83D64102, FrozenInteraction: frozenInteraction},
 	}
 	for _, continuation := range cases {
-		checkpoint := sealRunContinuationCheckpointForTest(t, newRunContinuationCheckpoint(run, continuation.StepID, "runtime", continuation))
+		checkpoint := *newRunContinuationCheckpoint(run, continuation.StepID, "runtime", continuation)
 		decoded, err := decodeRunContinuation(checkpoint)
 		if err != nil || decoded.Type != continuation.Type {
 			t.Fatalf("continuation %s decode=%#v err=%v", continuation.Type, decoded, err)
 		}
 	}
-	missing := sealRunContinuationCheckpointForTest(t, newRunCheckpoint(run, valueRoot809EA865, "runtime", map[string]interface{}{"legacy": true}))
+	missing := *newRunCheckpoint(run, valueRoot809EA865, "runtime", map[string]interface{}{"legacy": true})
 	if _, err := decodeRunContinuation(missing); !errors.Is(err, ErrRunSnapshotIncompatible) {
 		t.Fatalf("missing continuation error=%v", err)
 	}
-	tampered := sealRunContinuationCheckpointForTest(t, newRunContinuationCheckpoint(run, valueRoot809EA865, "runtime", cases[0]))
+	tampered := *newRunContinuationCheckpoint(run, valueRoot809EA865, "runtime", cases[0])
 	tampered.ResumeStateJSON = strings.Replace(tampered.ResumeStateJSON, `"nextRevision":1`, `"nextRevision":2`, 1)
 	if _, err := decodeRunContinuation(tampered); !errors.Is(err, ErrRunSnapshotIncompatible) {
 		t.Fatalf("tampered continuation error=%v", err)
+	}
+	unsealed := *newRunContinuationCheckpoint(run, valueRoot809EA865, "runtime", cases[0])
+	unsealed.ManifestHash = ""
+	if _, err := decodeRunContinuation(unsealed); !errors.Is(err, ErrRunSnapshotIncompatible) {
+		t.Fatalf("unsealed continuation error=%v", err)
+	}
+	wrongRun := *newRunContinuationCheckpoint(run, valueRoot809EA865, "runtime", cases[0])
+	wrongRun.RunID = "run_other"
+	if _, err := decodeRunContinuation(wrongRun); !errors.Is(err, ErrRunSnapshotIncompatible) {
+		t.Fatalf("wrong run continuation error=%v", err)
+	}
+	legacyState, err := json.Marshal(map[string]interface{}{"continuation": cases[0]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := *newRunContinuationCheckpoint(run, valueRoot809EA865, "runtime", cases[0])
+	legacy.ResumeStateJSON = string(legacyState)
+	legacy.ManifestHash = fmt.Sprintf("%x", sha256.Sum256(legacyState))
+	if _, err = decodeRunContinuation(legacy); !errors.Is(err, ErrRunSnapshotIncompatible) {
+		t.Fatalf("legacy continuation error=%v", err)
 	}
 }
 
@@ -688,7 +708,7 @@ func assertWaitingInteractionFrozen(t *testing.T, run model.Run, kind string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := decodeRunContinuation(sealRunContinuationCheckpointForTest(t, checkpoint))
+	decoded, err := decodeRunContinuation(*checkpoint)
 	assertRenewalContinuation(t, decoded, err)
 	assertFrozenInteractionSnapshot(t, interaction, kind, decoded)
 }
@@ -785,21 +805,6 @@ func TestTextRunContinuationLauncherCanHoldCommittedWork(t *testing.T) {
 	if !launched || executed {
 		t.Fatalf("launcher crash injection mismatch: launched=%v executed=%v", launched, executed)
 	}
-}
-
-func sealRunContinuationCheckpointForTest(t *testing.T, checkpoint *model.Checkpoint) model.Checkpoint {
-	t.Helper()
-	var state interface{}
-	if err := json.Unmarshal([]byte(checkpoint.ResumeStateJSON), &state); err != nil {
-		t.Fatal(err)
-	}
-	manifest, err := json.Marshal(map[string]interface{}{"semanticVersion": RuntimeSnapshotVersion, "runID": checkpoint.RunID, "state": state})
-	if err != nil {
-		t.Fatal(err)
-	}
-	checkpoint.ResumeStateJSON = string(manifest)
-	checkpoint.ManifestHash = fmt.Sprintf("%x", sha256.Sum256(manifest))
-	return *checkpoint
 }
 
 func TestRunStepExecutionModeContinuesCurrentRunningStep(t *testing.T) {
