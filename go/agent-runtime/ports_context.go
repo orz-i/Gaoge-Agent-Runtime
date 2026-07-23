@@ -26,6 +26,17 @@ type TurnProjectionWriter interface {
 	CancelTurn(context.Context, CancelTurnRequest) (ProjectionWriteResult, error)
 }
 
+// TurnProjectionRepairer updates only terminal host metadata from a durable
+// Runtime projection. It must not rewrite host-owned content or branch links.
+type TurnProjectionRepairer interface {
+	RepairTurn(context.Context, RepairTurnRequest) (ProjectionWriteResult, error)
+}
+
+// HostProjectionTracker marks a successful host metadata projection.
+type HostProjectionTracker interface {
+	MarkHostProjectionRepaired(context.Context, string) error
+}
+
 // AttachmentResolver resolves provider-neutral resource references for a turn.
 type AttachmentResolver interface {
 	ResolveAttachments(context.Context, ResolveAttachmentsRequest) (ResolveAttachmentsResult, error)
@@ -185,6 +196,17 @@ type TurnUsage struct {
 	BilledCurrency   string
 	BilledNanousd    int64
 	PricingSnapshot  string
+}
+
+type RepairTurnRequest struct {
+	Actor        domain.ActorRef
+	Thread       domain.ThreadRef
+	RunID        string
+	Projection   TurnProjection
+	Outcome      string
+	Usage        TurnUsage
+	ErrorCode    string
+	ErrorMessage string
 }
 
 type CompleteTurnRequest struct {

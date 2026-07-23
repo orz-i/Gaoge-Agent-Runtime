@@ -40,6 +40,8 @@ type RunRecord struct {
 	StatusReason             string    `gorm:"size:255;not null;default:''"`
 	LastEventSeq             int64     `gorm:"not null;default:0"`
 	LastPresentationEventSeq int64     `gorm:"not null;default:0"`
+	StateProjectionVersion   int       `gorm:"not null;default:0"`
+	HostProjectionVersion    int       `gorm:"not null;default:0"`
 	StartedBy                string    `gorm:"size:32;not null;default:''"`
 	Endpoint                 string    `gorm:"size:32;not null;default:'';index:idx_agent_runs_endpoint"`
 	Provider                 string    `gorm:"size:32;not null;default:'';index:idx_agent_runs_provider"`

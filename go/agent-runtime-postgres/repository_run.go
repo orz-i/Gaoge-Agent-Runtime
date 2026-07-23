@@ -254,6 +254,7 @@ func runProjectionUpdates(run domain.Run) map[string]interface{} {
 		"error_code":                  run.ErrorCode,
 		"error_message":               run.ErrorMessage,
 		"ended_at":                    run.EndedAt,
+		"state_projection_version":    currentStateProjectionVersion,
 		"updated_at":                  run.UpdatedAt,
 	}
 }

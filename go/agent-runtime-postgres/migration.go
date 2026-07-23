@@ -50,7 +50,10 @@ func Migrate(db *gorm.DB, _ ...bool) error {
 	if err := db.AutoMigrate(Models()...); err != nil {
 		return err
 	}
-	return ensureContextArtifactUniqueIndex(db)
+	if err := ensureContextArtifactUniqueIndex(db); err != nil {
+		return err
+	}
+	return reconcileHistoricalRunState(db)
 }
 
 func ensureContextArtifactUniqueIndex(db *gorm.DB) error {

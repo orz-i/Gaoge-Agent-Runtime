@@ -3245,6 +3245,11 @@ func (s *Engine) finalizeRunWithProjection(ctx context.Context, run model.Run, i
 		default:
 			err = ErrInvalidInput
 		}
+		if err == nil {
+			if tracker, ok := s.repo.(HostProjectionTracker); ok {
+				err = tracker.MarkHostProjectionRepaired(txCtx, persisted.RunID)
+			}
+		}
 		return err
 	})
 	if err != nil {
