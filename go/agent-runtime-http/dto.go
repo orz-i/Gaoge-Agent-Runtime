@@ -1,8 +1,10 @@
 package http
 
 import (
+	"encoding/json"
 	"strings"
 
+	runtime "github.com/orz-i/Gaoge/sdk/go/agent-runtime"
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
@@ -45,6 +47,95 @@ type ErrorDoc struct {
 	Details   interface{} `json:"details,omitempty"`
 	RequestID string      `json:"requestId,omitempty"`
 	Data      interface{} `json:"data"`
+}
+
+type threadRefDTO struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+type projectionRefDTO struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+type resourceRefDTO struct {
+	Kind     string `json:"kind"`
+	ID       string `json:"id"`
+	Revision string `json:"revision,omitempty"`
+}
+
+func threadRefResponse(ref model.ThreadRef) threadRefDTO {
+	return threadRefDTO{Kind: ref.Kind, ID: ref.ID}
+}
+
+func projectionRefResponse(ref model.ProjectionRef) projectionRefDTO {
+	return projectionRefDTO{Kind: ref.Kind, ID: ref.ID}
+}
+
+func resourceRefResponse(ref model.ResourceRef) resourceRefDTO {
+	return resourceRefDTO{Kind: ref.Kind, ID: ref.ID, Revision: ref.Revision}
+}
+
+func resourceRefsResponse(refs []model.ResourceRef) []resourceRefDTO {
+	result := make([]resourceRefDTO, 0, len(refs))
+	for _, ref := range refs {
+		result = append(result, resourceRefResponse(ref))
+	}
+	return result
+}
+
+func textRunConfigResponse(item *runtime.TextRunConfigSummary) interface{} {
+	if item == nil {
+		return nil
+	}
+	raw, err := json.Marshal(item)
+	if err != nil {
+		return map[string]interface{}{}
+	}
+	var result map[string]interface{}
+	if json.Unmarshal(raw, &result) != nil {
+		return map[string]interface{}{}
+	}
+	result["environmentRef"] = resourceRefResponse(item.EnvironmentRef)
+	result["skillRefs"] = resourceRefsResponse(item.SkillRefs)
+	result["unavailableSkillRefs"] = resourceRefsResponse(item.UnavailableSkillRefs)
+	return result
+}
+
+func canonicalizeKnownRuntimeRefs(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case []interface{}:
+		result := make([]interface{}, 0, len(typed))
+		for _, item := range typed {
+			result = append(result, canonicalizeKnownRuntimeRefs(item))
+		}
+		return result
+	case map[string]interface{}:
+		if ref, ok := canonicalRuntimeRefMap(typed); ok {
+			return ref
+		}
+		result := make(map[string]interface{}, len(typed))
+		for key, item := range typed {
+			result[key] = canonicalizeKnownRuntimeRefs(item)
+		}
+		return result
+	default:
+		return value
+	}
+}
+
+func canonicalRuntimeRefMap(value map[string]interface{}) (map[string]interface{}, bool) {
+	kind, kindOK := value["Kind"].(string)
+	id, idOK := value["ID"].(string)
+	if !kindOK || !idOK {
+		return nil, false
+	}
+	result := map[string]interface{}{"kind": kind, "id": id}
+	if revision, ok := value["Revision"].(string); ok && strings.TrimSpace(revision) != "" {
+		result["revision"] = revision
+	}
+	return result, true
 }
 
 func toRunResponse(run model.Run, threadIDs ...string) map[string]interface{} {

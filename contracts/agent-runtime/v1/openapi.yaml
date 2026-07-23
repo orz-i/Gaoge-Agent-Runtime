@@ -15,12 +15,12 @@ paths:
     post:
       operationId: createRun
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CreateRunRequest'}}}}
-      responses: {'202': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+      responses: {'202': {description: Text Run and durable host projections, content: {application/json: {schema: {$ref: '#/components/schemas/RunProjectionResult'}}}}, default: {$ref: '#/components/responses/Error'}}
   /runs/{runID}:
     get:
       operationId: getRun
       parameters: [{$ref: '#/components/parameters/RunID'}]
-      responses: {'200': {$ref: '#/components/responses/Success'}, default: {$ref: '#/components/responses/Error'}}
+      responses: {'200': {description: Text Run detail and durable host projections, content: {application/json: {schema: {$ref: '#/components/schemas/RunProjectionResult'}}}}, default: {$ref: '#/components/responses/Error'}}
   /runs/{runID}/cancel:
     post: {$ref: '#/components/pathItems/runAction'}
   /runs/{runID}/resume:
@@ -118,9 +118,11 @@ components:
     Success: {description: Runtime resource response, content: {application/json: {schema: {type: object}}}}
     Error: {description: Stable runtime error, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}}}}
   schemas:
-    ActorRef: {type: object, additionalProperties: false, required: [tenantID, actorID], properties: {tenantID: {type: string}, actorID: {type: string}}}
+    ActorRef: {type: object, additionalProperties: false, required: [id], properties: {tenantID: {type: string}, id: {type: string}}}
     ThreadRef: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string}, id: {type: string}}}
     ProjectionRef: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string}, id: {type: string}}}
+    ResourceRef: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string}, id: {type: string}, revision: {type: string}}}
+    RunProjectionResult: {type: object, required: [run, inputProjectionRef, outputProjectionRef], properties: {run: {type: object}, rootStep: {type: object}, steps: {type: array, items: {type: object}}, inputProjectionRef: {$ref: '#/components/schemas/ProjectionRef'}, outputProjectionRef: {$ref: '#/components/schemas/ProjectionRef'}, effectiveConfig: {type: object, properties: {environmentRef: {$ref: '#/components/schemas/ResourceRef'}, skillRefs: {type: array, items: {$ref: '#/components/schemas/ResourceRef'}}, unavailableSkillRefs: {type: array, items: {$ref: '#/components/schemas/ResourceRef'}}}}, context: {type: object}}}
     RunThread:
       allOf:
         - {$ref: '#/components/schemas/ThreadRef'}
@@ -131,5 +133,5 @@ components:
     EvidenceSource: {oneOf: [{type: object, additionalProperties: false, required: [kind, id, version], properties: {kind: {type: string, enum: [output]}, id: {type: string}, version: {type: integer, minimum: 1}}}, {type: object, additionalProperties: false, required: [kind, thread, projection], properties: {kind: {type: string, enum: [projection]}, thread: {$ref: '#/components/schemas/ThreadRef'}, projection: {$ref: '#/components/schemas/ProjectionRef'}}}]}
     EvidenceSelection: {type: object, additionalProperties: false, required: [kind], properties: {kind: {type: string, enum: [full, text_range, table_range]}, title: {type: string}, start: {type: integer}, end: {type: integer}, rowStart: {type: integer}, rowEnd: {type: integer}, columnStart: {type: integer}, columnEnd: {type: integer}}}
     CreateEvidenceRequest: {type: object, additionalProperties: false, required: [source, selection], properties: {source: {$ref: '#/components/schemas/EvidenceSource'}, selection: {$ref: '#/components/schemas/EvidenceSelection'}}}
-    Event: {type: object, required: [seq, type], properties: {seq: {type: integer, format: int64}, type: {type: string}, payload: {type: object}}}
+    Event: {type: object, required: [seq, type], properties: {projection: {$ref: '#/components/schemas/ProjectionRef'}, seq: {type: integer, format: int64}, type: {type: string}, payload: {type: object}}}
     ErrorResponse: {type: object, additionalProperties: false, required: [error], properties: {error: {type: object, additionalProperties: false, required: [code, message, requestID], properties: {code: {type: string}, message: {type: string}, requestID: {type: string}}}}}

@@ -29,6 +29,15 @@ function outputFromWire<T extends OutputWireDTO>(item: T): Omit<T, "artifact"> &
 function catalogOutputFromWire(item: OutputCatalogWireDTO): OutputDetailDTO {
   const { thread, ...output } = outputFromWire(item); return { ...output, sourceThread: thread };
 }
+function validProjectionRef(value: unknown): value is {kind:string;id:string} {
+  if (!value || typeof value !== "object") return false;
+  const ref=value as Record<string,unknown>;
+  return typeof ref.kind==="string"&&ref.kind.length>0&&typeof ref.id==="string"&&ref.id.length>0;
+}
+function requireRunProjectionRefs<T extends StartTextRunResult|TextRunDetailDTO>(value:T):T {
+  if (validProjectionRef(value.inputProjectionRef)&&validProjectionRef(value.outputProjectionRef)) return value;
+  throw new RuntimeAPIError("runtime returned invalid projection references",502,"runtime.invalid_response",value.run?.requestID??"");
+}
 
 export class RuntimeClient {
   readonly runs;
@@ -46,8 +55,8 @@ export class RuntimeClient {
     this.maxStreamRetries = options.maxStreamRetries ?? 5;
     this.runs = {
       list: (thread: {kind:string;id:string}, page=1, pageSize=20, request?:RequestOptions) => this.request<{total:number;results:TextRunDTO[]}>(`/runs?threadKind=${pathPart(thread.kind)}&threadID=${pathPart(thread.id)}&page=${page}&pageSize=${pageSize}`, {}, request),
-      create: (payload:StartTextRunRequest, request?:RequestOptions) => this.request<StartTextRunResult>("/runs", {method:"POST", body:JSON.stringify(payload)}, request),
-      get: (runID:string, request?:RequestOptions) => this.request<TextRunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request),
+      create: async(payload:StartTextRunRequest, request?:RequestOptions) => requireRunProjectionRefs(await this.request<StartTextRunResult>("/runs", {method:"POST", body:JSON.stringify(payload)}, request)),
+      get: async(runID:string, request?:RequestOptions) => requireRunProjectionRefs(await this.request<TextRunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request)),
       cancel: (runID:string, request?:RequestOptions) => this.request<{canceled:boolean}>(`/runs/${pathPart(runID)}/cancel`, {method:"POST"}, request),
       resume: (runID:string,payload:{checkpointID?:string;clientResumeID:string},request?:RequestOptions)=>this.request<{checkpointID:string;runID:string;status:string;reused:boolean}>(`/runs/${pathPart(runID)}/resume`,{method:"POST",body:JSON.stringify(payload)},request),
       retire: (runID:string,request?:RequestOptions)=>this.request<{runID:string;status:"cancelled";reused:boolean}>(`/runs/${pathPart(runID)}/retire`,{method:"POST"},request),

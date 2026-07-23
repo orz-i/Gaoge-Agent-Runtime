@@ -131,7 +131,7 @@ func (h *Handler) StartTextRun(c *gin.Context) {
 		writeTextRunError(c, err)
 		return
 	}
-	data := map[string]interface{}{valueRunA037153B: toRunResponse(result.Run, req.Thread.ID), "rootStep": toRunStepResponse(result.Step), "inputProjectionRef": result.Projection.Input, "outputProjectionRef": result.Projection.Output}
+	data := map[string]interface{}{valueRunA037153B: toRunResponse(result.Run, req.Thread.ID), "rootStep": toRunStepResponse(result.Step), "inputProjectionRef": projectionRefResponse(result.Projection.Input), "outputProjectionRef": projectionRefResponse(result.Projection.Output)}
 	c.JSON(http.StatusAccepted, data)
 }
 
@@ -200,7 +200,7 @@ func skillRefs(keys *[]string) *[]model.ResourceRef {
 func runQueueResponse(item model.QueueItem) map[string]interface{} {
 	var request map[string]interface{}
 	_ = json.Unmarshal([]byte(item.RequestJSON), &request)
-	return map[string]interface{}{"queueID": item.QueueID, "clientQueueID": item.ClientQueueID, valueThread: item.Thread, valueStatus00E8FE8E: item.Status, "position": item.Position, "revision": item.Revision, "attemptCount": item.AttemptCount, "request": request, "anchorRunID": item.AnchorRunID, "startedRunID": item.StartedRunID, valueErrorCode8B63C5B4: item.ErrorCode, valueErrorMessage: item.ErrorMessage, "nextAttemptAt": item.NextAttemptAt, valueCreatedAtE3B65D13: item.CreatedAt, valueUpdatedAt: item.UpdatedAt}
+	return map[string]interface{}{"queueID": item.QueueID, "clientQueueID": item.ClientQueueID, valueThread: threadRefResponse(item.Thread), valueStatus00E8FE8E: item.Status, "position": item.Position, "revision": item.Revision, "attemptCount": item.AttemptCount, "request": canonicalizeKnownRuntimeRefs(request), "anchorRunID": item.AnchorRunID, "startedRunID": item.StartedRunID, valueErrorCode8B63C5B4: item.ErrorCode, valueErrorMessage: item.ErrorMessage, "nextAttemptAt": item.NextAttemptAt, valueCreatedAtE3B65D13: item.CreatedAt, valueUpdatedAt: item.UpdatedAt}
 }
 
 // ListRunQueue lists the durable queue for a host thread.
@@ -364,10 +364,10 @@ func (h *Handler) GetTextRun(c *gin.Context) {
 		steps = append(steps, toRunStepResponse(s))
 	}
 	result := map[string]interface{}{valueRunA037153B: toRunResponse(detail.Run, h.runThreadID(c, detail.Run)), valueStepsF083D597: steps}
-	result["inputProjectionRef"] = detail.Projection.Input
-	result["outputProjectionRef"] = detail.Projection.Output
+	result["inputProjectionRef"] = projectionRefResponse(detail.Projection.Input)
+	result["outputProjectionRef"] = projectionRefResponse(detail.Projection.Output)
 	if detail.Config != nil {
-		result["effectiveConfig"] = detail.Config
+		result["effectiveConfig"] = textRunConfigResponse(detail.Config)
 	}
 	if detail.Context != nil {
 		result["context"] = detail.Context
@@ -383,7 +383,7 @@ func (h *Handler) GetWorkbench(c *gin.Context) {
 	}
 	steps, phases, groups := workbenchTraceResponses(view)
 	interactions, checkpoints, outputs := workbenchDetailResponses(view)
-	result := map[string]interface{}{"projectionVersion": runtime.WorkbenchContractVersion, "projectionSeq": view.ProjectionSeq, "projectionPersisted": view.ProjectionPersisted, valueRunA037153B: toRunResponse(view.Run, h.runThreadID(c, view.Run)), "overview": view.Overview, "phases": phases, "toolGroups": groups, valueStepsF083D597: steps, "interactions": interactions, "checkpoints": checkpoints, "outputs": outputs, "context": view.Context, "effectiveConfig": view.Config, "graph": map[string]interface{}{"nodes": view.GraphNodes, "edges": view.GraphEdges}, "selectionIndex": view.SelectionIndex}
+	result := map[string]interface{}{"projectionVersion": runtime.WorkbenchContractVersion, "projectionSeq": view.ProjectionSeq, "projectionPersisted": view.ProjectionPersisted, valueRunA037153B: toRunResponse(view.Run, h.runThreadID(c, view.Run)), "overview": view.Overview, "phases": phases, "toolGroups": groups, valueStepsF083D597: steps, "interactions": interactions, "checkpoints": checkpoints, "outputs": outputs, "context": view.Context, "effectiveConfig": textRunConfigResponse(view.Config), "graph": map[string]interface{}{"nodes": view.GraphNodes, "edges": view.GraphEdges}, "selectionIndex": view.SelectionIndex}
 	if view.Plan != nil {
 		revisions := make([]map[string]interface{}, 0, len(view.Plan.Revisions))
 		for _, item := range view.Plan.Revisions {
@@ -830,11 +830,11 @@ func (h *Handler) CreateEvidence(c *gin.Context) {
 	if req.Source.Kind == "output" {
 		source["id"], source["version"] = item.SourceID, req.Source.Version
 	} else {
-		source["thread"], source["projection"] = input.Thread, item.Projection
+		source["thread"], source["projection"] = threadRefResponse(input.Thread), projectionRefResponse(item.Projection)
 	}
 	data := map[string]interface{}{valueEvidenceID: item.EvidenceID, "source": source, valueKind72883EFB: item.Kind, valueTitle48EAAEED: item.Title, valueExcerpt: item.Excerpt, valueContentHash: item.ContentHash, valueSourceContentHash: item.SourceContentHash, valueCreatedAtE3B65D13: item.CreatedAt}
 	if strings.TrimSpace(item.Projection.Kind) != "" && strings.TrimSpace(item.Projection.ID) != "" {
-		data["projectionRef"] = item.Projection
+		data["projectionRef"] = projectionRefResponse(item.Projection)
 	}
 	writeSuccess(c, data)
 }
@@ -853,8 +853,11 @@ func outputResponse(item model.OutputRef) map[string]interface{} {
 		"sourceToolCallID": item.SourceToolCallID, "sourceEventID": item.SourceEventID,
 		"sourceSnapshotID": item.SourceSnapshotID, "parentOutputID": item.ParentOutputID,
 		valueKind72883EFB: item.Kind, valueTitle48EAAEED: item.Title, valueSummary15D65CC8: item.Summary, "fileID": item.FileID,
-		"fileSHA256": item.FileSHA256, "fileMIMEType": item.FileMIMEType, "projectionRef": item.Projection,
+		"fileSHA256": item.FileSHA256, "fileMIMEType": item.FileMIMEType,
 		"version": item.Version, valueStatus00E8FE8E: item.Status, valueCreatedAtE3B65D13: item.CreatedAt,
+	}
+	if strings.TrimSpace(item.Projection.Kind) != "" && strings.TrimSpace(item.Projection.ID) != "" {
+		result["projectionRef"] = projectionRefResponse(item.Projection)
 	}
 	var artifact map[string]interface{}
 	if json.Unmarshal([]byte(item.PreviewJSON), &artifact) == nil && len(artifact) > 0 {
@@ -1058,7 +1061,11 @@ func runEventResponse(e model.Event) map[string]interface{} {
 		}
 		payload[key] = strings.TrimSpace(value)
 	}
-	return map[string]interface{}{"schemaVersion": 1, "eventID": e.EventID, valueRunID1DA2F0B6: e.RunID, "actor": map[string]string{"tenantID": e.Actor.TenantID, "id": e.Actor.ActorID}, "thread": map[string]string{valueKind72883EFB: e.Thread.Kind, "id": e.Thread.ID}, "projection": e.Projection, "seq": e.Seq, valueType9065E5F9: e.EventType, valueStepIDF52B51EE: e.StepID, "parentEventID": e.ParentEventID, "timestamp": e.StartedAt.UTC().Format(time.RFC3339Nano), "payload": payload}
+	result := map[string]interface{}{"schemaVersion": 1, "eventID": e.EventID, valueRunID1DA2F0B6: e.RunID, "actor": map[string]string{"tenantID": e.Actor.TenantID, "id": e.Actor.ActorID}, "thread": threadRefResponse(e.Thread), "seq": e.Seq, valueType9065E5F9: e.EventType, valueStepIDF52B51EE: e.StepID, "parentEventID": e.ParentEventID, "timestamp": e.StartedAt.UTC().Format(time.RFC3339Nano), "payload": canonicalizeKnownRuntimeRefs(payload)}
+	if strings.TrimSpace(e.Projection.Kind) != "" && strings.TrimSpace(e.Projection.ID) != "" {
+		result["projection"] = projectionRefResponse(e.Projection)
+	}
+	return result
 }
 func isRunStreamClosableStatus(status string) bool {
 	switch status {
