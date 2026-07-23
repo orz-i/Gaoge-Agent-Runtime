@@ -7,3 +7,5 @@ require (
 	golang.org/x/image v0.42.0
 	golang.org/x/sync v0.21.0
 )
+
+require github.com/santhosh-tekuri/jsonschema/v5 v5.3.1

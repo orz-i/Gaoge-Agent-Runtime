@@ -50,6 +50,30 @@ func testWorkspacePolicy(expected string) WorkspacePolicy {
 	return policy
 }
 
+func (r *durableFailureTestRepository) AppendRunEvents(_ context.Context, events []model.Event) ([]model.Event, error) {
+	saved := append([]model.Event(nil), events...)
+	for index := range saved {
+		r.nextSeq++
+		saved[index].Seq = r.nextSeq
+	}
+	r.events = append(r.events, saved...)
+	return saved, nil
+}
+
+func (r *durableFailureTestRepository) CountRunEventsByType(_ context.Context, _ model.ActorRef, _ string, eventTypes []string) (map[string]int, error) {
+	wanted := make(map[string]struct{}, len(eventTypes))
+	for _, eventType := range eventTypes {
+		wanted[eventType] = struct{}{}
+	}
+	counts := make(map[string]int, len(wanted))
+	for _, event := range r.events {
+		if _, ok := wanted[event.EventType]; ok {
+			counts[event.EventType]++
+		}
+	}
+	return counts, nil
+}
+
 const (
 	valueKey50D45996    = "key"
 	valueLookupE85B2FAE = "lookup"
@@ -545,12 +569,10 @@ func (r *durableFailureTestRepository) ListRunEventsAfter(_ context.Context, _ m
 }
 
 func (r *durableFailureTestRepository) CommitRunToolResultBundle(_ context.Context, _ *model.Checkpoint, output *model.OutputRef, events []model.Event) (*model.OutputRef, []model.Event, bool, error) {
-	saved := append([]model.Event(nil), events...)
-	for index := range saved {
-		r.nextSeq++
-		saved[index].Seq = r.nextSeq
+	saved, err := r.AppendRunEvents(context.Background(), events)
+	if err != nil {
+		return nil, nil, false, err
 	}
-	r.events = append(r.events, saved...)
 	return output, saved, true, nil
 }
 

@@ -133,7 +133,7 @@ type ResolvedWorkspaceContext struct {
 
 type WorkspaceToolDefinition struct {
 	ToolKey, Name, Description string
-	InputSchema                json.RawMessage
+	InputSchema, OutputSchema  json.RawMessage
 	SideEffectLevel            string
 }
 
@@ -456,6 +456,7 @@ type ResolvedTool struct {
 	Description        string
 	DefinitionVersion  string
 	InputSchema        json.RawMessage
+	OutputSchema       json.RawMessage
 	ExecutionMode      string
 	ApprovalCapability string
 	ApprovalMode       string

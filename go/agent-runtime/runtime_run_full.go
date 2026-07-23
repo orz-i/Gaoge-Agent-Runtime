@@ -311,6 +311,7 @@ type effectiveRunToolPolicy struct {
 	Description        string              `json:"description"`
 	DefinitionVersion  string              `json:"definitionVersion"`
 	InputSchema        json.RawMessage     `json:"inputSchema,omitempty"`
+	OutputSchema       json.RawMessage     `json:"outputSchema,omitempty"`
 	ExecutionMode      string              `json:"executionMode"`
 	ApprovalCapability string              `json:"approvalCapability"`
 	ApprovalMode       string              `json:"approvalMode"`
@@ -381,14 +382,14 @@ type effectiveRunEvidenceRef struct {
 
 func fingerprintRunToolSnapshot(item effectiveRunToolPolicy) string {
 	payload := struct {
-		ToolKey, ProviderKind, ProviderKey, ModelName, OriginalName, Description, DefinitionVersion string
-		InputSchema, ExecutionMode, ApprovalCapability, ApprovalMode, RiskLevel, SideEffectLevel    string
-		HostedVariants                                                                              []HostedToolVariant
-		RetryCount, Concurrency                                                                     int
+		ToolKey, ProviderKind, ProviderKey, ModelName, OriginalName, Description, DefinitionVersion            string
+		InputSchema, OutputSchema, ExecutionMode, ApprovalCapability, ApprovalMode, RiskLevel, SideEffectLevel string
+		HostedVariants                                                                                         []HostedToolVariant
+		RetryCount, Concurrency                                                                                int
 	}{
 		ToolKey: item.ToolKey, ProviderKind: item.ProviderKind, ProviderKey: item.ProviderKey,
 		ModelName: item.ModelName, OriginalName: item.OriginalName, Description: item.Description,
-		DefinitionVersion: item.DefinitionVersion, InputSchema: canonicalRunJSON(item.InputSchema),
+		DefinitionVersion: item.DefinitionVersion, InputSchema: canonicalRunJSON(item.InputSchema), OutputSchema: canonicalRunJSON(item.OutputSchema),
 		ExecutionMode: item.ExecutionMode, ApprovalCapability: item.ApprovalCapability,
 		ApprovalMode: item.ApprovalMode, RiskLevel: item.RiskLevel, SideEffectLevel: item.SideEffectLevel,
 		HostedVariants: item.HostedVariants, RetryCount: item.RetryCount, Concurrency: item.Concurrency,
@@ -615,9 +616,8 @@ func workspaceSnapshotToolKeys(workspace *WorkspaceSnapshot) []string {
 	return uniqueRuntimeStrings(keys)
 }
 
-// applyWorkspaceToolDefinitions replaces catalog InputSchema/Description with
-// the workspace-compiled definitions for matching provider tools and recomputes
-// fingerprints so frozen run snapshots stay consistent.
+// applyWorkspaceToolDefinitions replaces catalog tool contracts and description
+// with workspace-compiled definitions, then recomputes the frozen fingerprint.
 func applyWorkspaceToolDefinitions(policies []effectiveRunToolPolicy, tools []WorkspaceToolDefinition) ([]effectiveRunToolPolicy, error) {
 	if len(tools) == 0 {
 		return policies, nil
@@ -655,6 +655,9 @@ func indexWorkspaceToolDefinitions(tools []WorkspaceToolDefinition) (byKey, byNa
 		if name == "" || len(tool.InputSchema) == 0 {
 			return nil, nil, ErrInvalidInput
 		}
+		if schemaErr := validateToolContractSchemas(tool.InputSchema, tool.OutputSchema); schemaErr != nil {
+			return nil, nil, errors.Join(ErrInvalidInput, schemaErr)
+		}
 		byName[name] = tool
 		if key := strings.TrimSpace(tool.ToolKey); key != "" {
 			byKey[key] = tool
@@ -677,6 +680,7 @@ func lookupWorkspaceToolDefinition(policy effectiveRunToolPolicy, byKey, byName 
 func overlayWorkspaceToolPolicy(policy *effectiveRunToolPolicy, tool WorkspaceToolDefinition) error {
 	policy.Description = tool.Description
 	policy.InputSchema = append(json.RawMessage(nil), tool.InputSchema...)
+	policy.OutputSchema = append(json.RawMessage(nil), tool.OutputSchema...)
 	policy.Fingerprint = fingerprintRunToolSnapshot(*policy)
 	if policy.Fingerprint == "" {
 		return ErrInvalidInput
@@ -1031,6 +1035,11 @@ func snapshotResolvedRunTool(tool ResolvedTool, retryCount, concurrency int) (ef
 	if !validResolvedRunTool(tool) {
 		return effectiveRunToolPolicy{}, ErrRunEnvironmentUnavailable
 	}
+	if tool.ExecutionMode == valueLocalDispatch71FF6D47 {
+		if schemaErr := validateToolContractSchemas(tool.InputSchema, tool.OutputSchema); schemaErr != nil {
+			return effectiveRunToolPolicy{}, errors.Join(ErrRunEnvironmentUnavailable, schemaErr)
+		}
+	}
 	mode := strings.TrimSpace(tool.ApprovalMode)
 	if tool.ApprovalCapability == valuePerCall2570116D {
 		if mode != valueNever4C6E2E88 {
@@ -1044,7 +1053,7 @@ func snapshotResolvedRunTool(tool ResolvedTool, retryCount, concurrency int) (ef
 	if !validLevels[level] {
 		level = valueUnknown26BF6906
 	}
-	snapshot := effectiveRunToolPolicy{ToolKey: tool.ToolKey, ProviderKind: tool.ProviderKind, ProviderKey: tool.ProviderKey, ModelName: tool.ModelName, OriginalName: tool.OriginalName, Description: tool.Description, DefinitionVersion: tool.DefinitionVersion, InputSchema: append(json.RawMessage(nil), tool.InputSchema...), ExecutionMode: tool.ExecutionMode, ApprovalCapability: tool.ApprovalCapability, ApprovalMode: mode, RiskLevel: tool.RiskLevel, SideEffectLevel: level, HostedVariants: cloneHostedToolVariants(tool.HostedVariants), RetryCount: retryCount, Concurrency: concurrency}
+	snapshot := effectiveRunToolPolicy{ToolKey: tool.ToolKey, ProviderKind: tool.ProviderKind, ProviderKey: tool.ProviderKey, ModelName: tool.ModelName, OriginalName: tool.OriginalName, Description: tool.Description, DefinitionVersion: tool.DefinitionVersion, InputSchema: append(json.RawMessage(nil), tool.InputSchema...), OutputSchema: append(json.RawMessage(nil), tool.OutputSchema...), ExecutionMode: tool.ExecutionMode, ApprovalCapability: tool.ApprovalCapability, ApprovalMode: mode, RiskLevel: tool.RiskLevel, SideEffectLevel: level, HostedVariants: cloneHostedToolVariants(tool.HostedVariants), RetryCount: retryCount, Concurrency: concurrency}
 	snapshot.Fingerprint = fingerprintRunToolSnapshot(snapshot)
 	return snapshot, nil
 }

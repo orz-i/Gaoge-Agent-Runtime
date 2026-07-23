@@ -1567,7 +1567,7 @@ func addResolvedRunTool(result map[string]ResolvedTool, policy effectiveRunToolP
 		approvalMode = valueAlwaysE613B9F9
 	}
 	if policy.ExecutionMode == valueLocalDispatchC00F9A8D {
-		result[policy.ModelName] = ResolvedTool{ToolKey: policy.ToolKey, ProviderKind: policy.ProviderKind, ProviderKey: policy.ProviderKey, ModelName: policy.ModelName, OriginalName: policy.OriginalName, Description: policy.Description, DefinitionVersion: policy.DefinitionVersion, InputSchema: append(json.RawMessage(nil), policy.InputSchema...), ExecutionMode: policy.ExecutionMode, ApprovalCapability: policy.ApprovalCapability, ApprovalMode: approvalMode, RiskLevel: policy.RiskLevel, SideEffectLevel: policy.SideEffectLevel}
+		result[policy.ModelName] = ResolvedTool{ToolKey: policy.ToolKey, ProviderKind: policy.ProviderKind, ProviderKey: policy.ProviderKey, ModelName: policy.ModelName, OriginalName: policy.OriginalName, Description: policy.Description, DefinitionVersion: policy.DefinitionVersion, InputSchema: append(json.RawMessage(nil), policy.InputSchema...), OutputSchema: append(json.RawMessage(nil), policy.OutputSchema...), ExecutionMode: policy.ExecutionMode, ApprovalCapability: policy.ApprovalCapability, ApprovalMode: approvalMode, RiskLevel: policy.RiskLevel, SideEffectLevel: policy.SideEffectLevel}
 	}
 	return nil
 }
@@ -2295,6 +2295,17 @@ func (s *Engine) handleResolvedRunToolCall(ctx context.Context, run model.Run, s
 	if !ok {
 		return ToolResult{}, false, withErrorMessage(errCategory00919D2AA2, fmt.Sprintf("tool %s is not available in the run snapshot", call.ToolName))
 	}
+	normalizedArguments, validationErr := normalizeToolArgumentsAgainstSchema(call.ArgumentsJSON, tool.InputSchema)
+	if validationErr != nil {
+		if err := s.ensureRunCallBudgetWithReserve(ctx, run, effective, false, 0); err != nil {
+			return ToolResult{}, false, err
+		}
+		if err := s.appendFrozenToolStarted(ctx, run, step.StepID, tool, call); err != nil {
+			return ToolResult{}, false, err
+		}
+		return s.commitFrozenToolResult(ctx, run, step.StepID, effective, tool, call, "", 0, validationErr)
+	}
+	call.ArgumentsJSON = normalizedArguments
 	if tool.ApprovalMode != valueNeverF5C79F24 {
 		return s.requestRunToolApproval(ctx, run, step, effective, tool, call)
 	}
@@ -2330,6 +2341,11 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 	if err := s.appendFrozenToolStarted(ctx, run, stepID, tool, call); err != nil {
 		return ToolResult{}, false, err
 	}
+	normalizedArguments, validationErr := normalizeToolArgumentsAgainstSchema(call.ArgumentsJSON, tool.InputSchema)
+	if validationErr != nil {
+		return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, "", 0, validationErr)
+	}
+	call.ArgumentsJSON = normalizedArguments
 	policy, ok := frozenRunToolPolicy(effective, tool.ToolKey)
 	if !ok {
 		return ToolResult{}, false, ErrRunSnapshotIncompatible
@@ -2340,6 +2356,9 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 	}
 	limits := &TextRunExecutionLimits{MaxLLMCalls: effective.MaxLLMCalls, MaxToolCalls: effective.MaxToolCalls, ToolRetryCount: policy.RetryCount, ToolConcurrency: policy.Concurrency}
 	output, err := s.executeFrozenToolProvider(ctx, run, stepID, effective, tool, call, limits)
+	if err == nil {
+		output, err = normalizeToolOutputAgainstSchema(output, tool.OutputSchema, tool.ProviderKind)
+	}
 	workspaceResultTokens, output, err := s.enforceFrozenWorkspaceBudget(ctx, run, effective, tool, output, err)
 	return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, output, workspaceResultTokens, err)
 }
