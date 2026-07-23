@@ -194,6 +194,7 @@ func (s *Engine) freezeRunQueueRequest(ctx context.Context, actor model.ActorRef
 }
 
 func (s *Engine) freezeRunQueueCapabilities(ctx context.Context, actor model.ActorRef, thread *ThreadSnapshot, request RunQueueRequest, environment *EnvironmentProfile, modelName string) (RunQueueRequest, error) {
+	request.Environment = environment.Ref
 	effectiveToolSelection := request.ToolKeys
 	workspace, found, err := s.compileTextRunWorkspace(ctx, StartTextRunInput{Actor: actor, Thread: thread.Thread, ThreadScope: thread.BindingScope, Workspace: request.Workspace}, modelName)
 	if err != nil {
@@ -227,8 +228,8 @@ func (s *Engine) freezeRunQueueCapabilities(ctx context.Context, actor model.Act
 		return RunQueueRequest{}, err
 	}
 	effectiveTools := mergeTextRunToolResolutions(strictTools, defaultTools)
-	toolKeys := append([]string(nil), effectiveTools.ResolvedKeys...)
-	skillRefs := append([]model.ResourceRef(nil), effectiveSkills...)
+	toolKeys := append([]string{}, effectiveTools.ResolvedKeys...)
+	skillRefs := append([]model.ResourceRef{}, effectiveSkills...)
 	request.ToolKeys, request.SkillRefs = &toolKeys, &skillRefs
 	request.ToolFingerprints = toolResolutionFingerprints(effectiveTools)
 	request.SkillFingerprints, err = s.skillFingerprints(ctx, actor, effectiveSkills)
@@ -434,10 +435,17 @@ func (s *Engine) dispatchRunQueueItem(ctx context.Context, item model.QueueItem)
 }
 
 func queuedThreadSnapshotUnchanged(thread *ThreadSnapshot, request RunQueueRequest) bool {
-	return thread != nil && thread.Environment == request.Environment &&
+	return thread != nil && sameQueuedEnvironmentBinding(thread.Environment, request.Environment) &&
 		thread.DefaultModel == request.ThreadModel &&
 		thread.ModelProvider == request.ThreadProvider &&
 		thread.BindingScope == request.ThreadScope
+}
+
+func sameQueuedEnvironmentBinding(current, frozen model.ResourceRef) bool {
+	if current.Kind != frozen.Kind || current.ID != frozen.ID {
+		return false
+	}
+	return current.Revision == "" || current.Revision == frozen.Revision
 }
 
 func (s *Engine) queuedCapabilitiesUnchanged(ctx context.Context, actor model.ActorRef, request RunQueueRequest) bool {

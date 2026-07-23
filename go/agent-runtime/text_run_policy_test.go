@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,6 +223,90 @@ func TestRunQueueRejectsChangedCapabilityDefinitions(t *testing.T) {
 	skillResolver.updatedAt = time.Unix(2, 0)
 	if service.queuedCapabilitiesUnchanged(t.Context(), actor, frozen) {
 		t.Fatal("changed skill definition was accepted")
+	}
+}
+
+func freezeEmptyQueueCapabilities(t *testing.T) (*Engine, model.ActorRef, *ThreadSnapshot, RunQueueRequest, model.ResourceRef) {
+	t.Helper()
+	environment := &EnvironmentProfile{
+		Ref:           model.ResourceRef{Kind: resourceKindEnvironment, ID: "7", Revision: "3"},
+		Revision:      3,
+		BindingScopes: []string{conversationGeneralEnvironment},
+		DefaultMode:   TextRunExecutionModeAuto,
+		AllowedModes:  []string{TextRunExecutionModeDirect, TextRunExecutionModePlan},
+		Models:        []EnvironmentModelPolicy{{PlatformModelName: defaultModelName, IsDefault: true, Available: true}},
+	}
+	service := &Engine{cfg: StaticConfigProvider(Config{}), environmentProfiles: environmentResolverTestStub{profile: environment}}
+	actor := model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey}
+	thread := &ThreadSnapshot{
+		Thread:       model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey},
+		Environment:  model.ResourceRef{Kind: resourceKindEnvironment, ID: "7"},
+		DefaultModel: defaultModelName,
+		BindingScope: conversationGeneralEnvironment,
+	}
+	frozen, err := service.freezeRunQueueRequest(t.Context(), actor, thread, RunQueueRequest{Input: RunQueueInput{Content: "queued goal"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return service, actor, thread, frozen, environment.Ref
+}
+
+func TestRunQueueFreezesEmptyCapabilitiesAsArrays(t *testing.T) {
+	_, _, _, frozen, environmentRef := freezeEmptyQueueCapabilities(t)
+	if frozen.Environment != environmentRef {
+		t.Fatalf("environment = %#v, want canonical ref %#v", frozen.Environment, environmentRef)
+	}
+	if frozen.ToolKeys == nil || *frozen.ToolKeys == nil {
+		t.Fatalf("empty frozen tools must be a non-nil array: %#v", frozen.ToolKeys)
+	}
+	if frozen.SkillRefs == nil || *frozen.SkillRefs == nil {
+		t.Fatalf("empty frozen skills must be a non-nil array: %#v", frozen.SkillRefs)
+	}
+}
+
+func TestRunQueueEmptyCapabilitiesSurvivePersistence(t *testing.T) {
+	service, actor, thread, frozen, _ := freezeEmptyQueueCapabilities(t)
+	encoded, err := json.Marshal(frozen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"toolKeys":null`) {
+		t.Fatalf("frozen request contains null tool selection: %s", encoded)
+	}
+	if strings.Contains(string(encoded), `"skillRefs":null`) {
+		t.Fatalf("frozen request contains null skill selection: %s", encoded)
+	}
+	var decoded RunQueueRequest
+	if err = json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !queuedThreadSnapshotUnchanged(thread, decoded) {
+		t.Fatal("canonical revision must not look like a changed host binding when the host only exposes identity")
+	}
+	if !service.queuedCapabilitiesUnchanged(t.Context(), actor, decoded) {
+		t.Fatal("empty frozen capabilities must survive persistence and dispatch")
+	}
+}
+
+func TestQueuedThreadSnapshotUsesEnvironmentIdentityAndOptionalRevision(t *testing.T) {
+	request := RunQueueRequest{
+		Environment:    model.ResourceRef{Kind: resourceKindEnvironment, ID: "7", Revision: "3"},
+		ThreadModel:    defaultModelName,
+		ThreadProvider: "internal",
+		ThreadScope:    conversationGeneralEnvironment,
+	}
+	thread := &ThreadSnapshot{
+		Environment:   model.ResourceRef{Kind: resourceKindEnvironment, ID: "7"},
+		DefaultModel:  defaultModelName,
+		ModelProvider: "internal",
+		BindingScope:  conversationGeneralEnvironment,
+	}
+	if !queuedThreadSnapshotUnchanged(thread, request) {
+		t.Fatal("environment identity without a host revision must accept the frozen canonical revision")
+	}
+	thread.Environment.Revision = "4"
+	if queuedThreadSnapshotUnchanged(thread, request) {
+		t.Fatal("an explicit changed host environment revision must be rejected")
 	}
 }
 
