@@ -1,7 +1,8 @@
 import type {
-  ContinuationJobDTO, ContinuationJobFilterDTO, ContinuationJobPageDTO, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
+  AgentManifestDTO, AgentManifestPageDTO, AgentManifestRevisionRequest, AgentManifestStatus, ContinuationJobDTO, ContinuationJobFilterDTO,
+  ContinuationJobPageDTO, DelegateRunRequest, DelegatedRunResult, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
   OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
-  RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RuntimeEvidenceSelectionDTO,
+  RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RunTaskTreeDTO, RuntimeEvidenceSelectionDTO,
   RuntimeEvidenceSourceDTO, StartTextRunRequest, StartTextRunResult, TextRunDetailDTO,
   TextRunDTO, WorkbenchDTO,
 } from "./types.js";
@@ -47,6 +48,7 @@ export class RuntimeClient {
   readonly evidence;
   readonly queue;
   readonly workbench;
+  readonly agents;
   readonly admin;
   private readonly fetcher: typeof globalThis.fetch;
   private readonly maxStreamRetries: number;
@@ -61,6 +63,8 @@ export class RuntimeClient {
       cancel: (runID:string, request?:RequestOptions) => this.request<{canceled:boolean}>(`/runs/${pathPart(runID)}/cancel`, {method:"POST"}, request),
       resume: (runID:string,payload:{checkpointID?:string;clientResumeID:string},request?:RequestOptions)=>this.request<{checkpointID:string;runID:string;status:string;reused:boolean}>(`/runs/${pathPart(runID)}/resume`,{method:"POST",body:JSON.stringify(payload)},request),
       retire: (runID:string,request?:RequestOptions)=>this.request<{runID:string;status:"cancelled";reused:boolean}>(`/runs/${pathPart(runID)}/retire`,{method:"POST"},request),
+      delegate: (runID:string,payload:DelegateRunRequest,request?:RequestOptions)=>this.request<DelegatedRunResult>(`/runs/${pathPart(runID)}/handoffs`,{method:"POST",body:JSON.stringify(payload)},request),
+      taskTree: (runID:string,request?:RequestOptions)=>this.request<RunTaskTreeDTO>(`/runs/${pathPart(runID)}/task-tree`,{},request),
       plan: (runID:string,request?:RequestOptions)=>this.request<PlanViewDTO>(`/runs/${pathPart(runID)}/plan`,{},request),
       checkpoints: async (runID:string,request?:RequestOptions)=>(await this.request<{results:RunCheckpointDTO[]}>(`/runs/${pathPart(runID)}/checkpoints`,{},request)).results ?? [],
     };
@@ -91,10 +95,19 @@ export class RuntimeClient {
       interruptAndSend:(thread:{kind:string;id:string},id:string,request?:RequestOptions)=>this.request<RunQueueItemDTO>(`/run-queue/${pathPart(id)}/interrupt-and-send?threadKind=${pathPart(thread.kind)}&threadID=${pathPart(thread.id)}`,{method:"POST"},request),
     };
     this.workbench = { get:async(runID:string,request?:RequestOptions)=>{const view=await this.request<Omit<WorkbenchDTO,"outputs">&{outputs:OutputWireDTO[]}>(`/runs/${pathPart(runID)}/workbench`,{},request);return{...view,outputs:(view.outputs??[]).map(outputFromWire)}} };
+    this.agents = {
+      list:(options:{limit?:number;offset?:number}&RequestOptions={})=>{const q=new URLSearchParams();if(options.limit)q.set("limit",String(options.limit));if(options.offset)q.set("offset",String(options.offset));return this.request<AgentManifestPageDTO>(`/agent-manifests${q.size?`?${q}`:""}`,{},options)},
+      get:(manifestID:string,revision?:number,request?:RequestOptions)=>this.request<AgentManifestDTO>(`/agent-manifests/${pathPart(manifestID)}${revision?`?revision=${revision}`:""}`,{},request),
+    };
     this.admin = {
       continuations: {
         list:(options:ContinuationJobFilterDTO&RequestOptions={})=>{const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined&&value!=="")q.set(key,String(value))}return this.request<ContinuationJobPageDTO>(`/admin/agentruntime/continuations${q.size?`?${q}`:""}`,{},options)},
         requeue:(jobID:string,payload:{reason:string},request?:RequestOptions)=>this.request<ContinuationJobDTO>(`/admin/agentruntime/continuations/${pathPart(jobID)}/requeue`,{method:"POST",body:JSON.stringify(payload)},request),
+      },
+      agentManifests: {
+        list:(options:{status?:AgentManifestStatus;limit?:number;offset?:number}&RequestOptions={})=>{const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined)q.set(key,String(value))}return this.request<AgentManifestPageDTO>(`/admin/agentruntime/agent-manifests${q.size?`?${q}`:""}`,{},options)},
+        create:(payload:AgentManifestRevisionRequest,request?:RequestOptions)=>this.request<AgentManifestDTO>("/admin/agentruntime/agent-manifests",{method:"POST",body:JSON.stringify(payload)},request),
+        revise:(manifestID:string,payload:AgentManifestRevisionRequest&{expectedRevision:number},request?:RequestOptions)=>this.request<AgentManifestDTO>(`/admin/agentruntime/agent-manifests/${pathPart(manifestID)}/revisions`,{method:"POST",body:JSON.stringify(payload)},request),
       },
     };
   }

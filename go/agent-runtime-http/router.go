@@ -14,6 +14,8 @@ func (m *Module) RegisterRoutes(auth *gin.RouterGroup) {
 	routes.POST("/runs/:run_id/cancel", m.Handler.CancelRun)
 	routes.POST("/runs/:run_id/resume", m.Handler.ResumeTextRun)
 	routes.POST("/runs/:run_id/retire", m.Handler.RetireTextRun)
+	routes.POST("/runs/:run_id/handoffs", m.Handler.DelegateTextRun)
+	routes.GET("/runs/:run_id/task-tree", m.Handler.GetRunTaskTree)
 	routes.GET("/runs/:run_id/events", m.Handler.StreamRunEvents)
 	routes.GET("/runs/:run_id/events/history", m.Handler.GetRunEventHistory)
 	routes.GET("/runs/:run_id/events/:event_id", m.Handler.GetRunEvent)
@@ -35,6 +37,8 @@ func (m *Module) RegisterRoutes(auth *gin.RouterGroup) {
 	routes.GET("/outputs/:output_id/versions/:version/preview", m.Handler.GetOutputPreview)
 	routes.GET("/outputs/:output_id/versions/:version/download", m.Handler.DownloadOutput)
 	routes.POST("/evidence", m.Handler.CreateEvidence)
+	routes.GET("/agent-manifests", m.Handler.ListAgentManifests)
+	routes.GET("/agent-manifests/:manifest_id", m.Handler.GetAgentManifest)
 }
 
 func (m *Module) RegisterAdminRoutes(admin *gin.RouterGroup) {
@@ -45,4 +49,7 @@ func (m *Module) RegisterAdminRoutes(admin *gin.RouterGroup) {
 	})
 	routes.GET("/continuations", m.Handler.ListContinuationJobs)
 	routes.POST("/continuations/:job_id/requeue", m.Handler.RequeueDeadLetterContinuationJob)
+	routes.GET("/agent-manifests", m.Handler.ListAdminAgentManifests)
+	routes.POST("/agent-manifests", m.Handler.CreateAgentManifest)
+	routes.POST("/agent-manifests/:manifest_id/revisions", m.Handler.ReviseAgentManifest)
 }

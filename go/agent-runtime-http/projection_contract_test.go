@@ -9,6 +9,8 @@ import (
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
+const testDelegationRootRunID = "run-root"
+
 const (
 	projectionContractEnvironmentID = "env-1"
 	projectionContractEnvironment   = "environment"
@@ -30,6 +32,25 @@ func TestRunResponseUsesNeutralThreadProjection(t *testing.T) {
 	}
 	if response["schemaVersion"] != 1 {
 		t.Fatalf("schemaVersion = %#v", response["schemaVersion"])
+	}
+}
+
+func TestRunResponseIncludesDelegationLineageOnlyForChildRuns(t *testing.T) {
+	root := toRunResponse(model.Run{RunID: testDelegationRootRunID, Actor: model.ActorRef{TenantID: "tenant", ActorID: "42"}, Thread: model.ThreadRef{Kind: "host.thread", ID: "thread-public"}})
+	if _, ok := root["agentManifestRef"]; ok {
+		t.Fatalf("root run leaked empty agent manifest: %#v", root)
+	}
+	child := toRunResponse(model.Run{
+		RunID: "run-child", Actor: model.ActorRef{TenantID: "tenant", ActorID: "42"}, Thread: model.ThreadRef{Kind: "host.thread", ID: "thread-public"},
+		AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: "agent-research", Revision: "2"}, AgentName: "Research",
+		RootRunID: testDelegationRootRunID, ParentRunID: testDelegationRootRunID, HandoffID: "handoff-1", Depth: 1,
+	})
+	if child["agentName"] != "Research" || child["rootRunID"] != testDelegationRootRunID || child["parentRunID"] != testDelegationRootRunID || child["handoffID"] != "handoff-1" || child["depth"] != 1 {
+		t.Fatalf("child lineage = %#v", child)
+	}
+	ref, ok := child["agentManifestRef"].(resourceRefDTO)
+	if !ok || ref.ID != "agent-research" || ref.Revision != "2" {
+		t.Fatalf("child manifest ref = %#v", child["agentManifestRef"])
 	}
 }
 

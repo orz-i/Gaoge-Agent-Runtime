@@ -21,7 +21,7 @@ export type StartTextRunRequest = {
   clientRunID?: string;
   toolKeys?: string[];
   skillKeys?: string[];
-	workspace?: RuntimeWorkspaceExtensionDTO;
+  workspace?: RuntimeWorkspaceExtensionDTO;
 };
 
 export type RuntimeExtensionDTO = Readonly<Record<string, unknown>>;
@@ -46,6 +46,12 @@ export type TextRunDTO = {
   currentPlanID?: string;
   pendingInteractionID?: string;
   lastEventSeq?: number;
+  agentManifestRef?: ResourceRefDTO;
+  agentName?: string;
+  rootRunID?: string;
+  parentRunID?: string;
+  handoffID?: string;
+  depth?: number;
   requestedModelName: string;
   platformModelName: string;
   modelVendor: string;
@@ -181,4 +187,75 @@ export type ContinuationJobFilterDTO = {
   limit?: number;
   offset?: number;
 };
+
+export type AgentManifestStatus = "active" | "disabled";
+export type AgentManifestDTO = {
+  manifestID: string;
+  revision: number;
+  ref: ResourceRefDTO;
+  name: string;
+  description: string;
+  instructions: string;
+  status: AgentManifestStatus;
+  modelName: string;
+  executionMode: "" | "auto" | "direct" | "plan";
+  toolKeys: string[];
+  skillKeys: string[];
+  maxChildRuns: number;
+  maxDepth: number;
+  revisionNote: string;
+  createdAt: string;
+  updatedAt: string;
+};
+export type AgentManifestPageDTO = { total: number; results: AgentManifestDTO[] };
+export type AgentManifestRevisionRequest = {
+  manifestID?: string;
+  expectedRevision?: number;
+  name: string;
+  description?: string;
+  instructions?: string;
+  status?: AgentManifestStatus;
+  modelName?: string;
+  executionMode?: "auto" | "direct" | "plan";
+  toolKeys?: string[];
+  skillKeys?: string[];
+  maxChildRuns?: number;
+  maxDepth?: number;
+  revisionNote?: string;
+};
+export type RunHandoffStatus = "queued" | "completed" | "failed" | "cancelled";
+export type RunHandoffDTO = {
+  handoffID: string;
+  clientHandoffID: string;
+  rootRunID: string;
+  parentRunID: string;
+  childRunID: string;
+  agentManifest: ResourceRefDTO;
+  agentName: string;
+  goal: string;
+  status: RunHandoffStatus;
+  depth: number;
+  inputProjectionRef: ProjectionRefDTO;
+  resultSummary: string;
+  resultOutputIDs: string[];
+  errorCode: string;
+  errorMessage: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+};
+export type DelegateRunRequest = {
+  clientHandoffID: string;
+  agentManifest: ResourceRefDTO;
+  goal: string;
+  contentType?: "text" | "markdown";
+  outputIDs?: string[];
+  evidenceIDs?: string[];
+  options?: Record<string, unknown>;
+  htmlVisualPrompt?: boolean;
+  htmlVisualColorMode?: "light" | "dark";
+};
+export type DelegatedRunResult = { handoff: RunHandoffDTO; run: TextRunDTO; rootStep: RunStepDTO };
+export type RunTaskDTO = { handoff: RunHandoffDTO; run: TextRunDTO };
+export type RunTaskTreeDTO = { rootRunID: string; currentRunID: string; rootRun: TextRunDTO; tasks: RunTaskDTO[] };
 

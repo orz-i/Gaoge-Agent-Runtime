@@ -125,7 +125,7 @@ func toRunResponse(run model.Run, threadIDs ...string) map[string]interface{} {
 	if len(threadIDs) > 0 && strings.TrimSpace(threadIDs[0]) != "" {
 		threadID = strings.TrimSpace(threadIDs[0])
 	}
-	return map[string]interface{}{
+	result := map[string]interface{}{
 		"schemaVersion": 1,
 		"runtimeKind":   "text",
 		"actor":         map[string]string{"tenantID": run.Actor.TenantID, "id": run.Actor.ActorID},
@@ -141,4 +141,21 @@ func toRunResponse(run model.Run, threadIDs ...string) map[string]interface{} {
 		"billedCurrency": run.BilledCurrency, "billedNanousd": run.BilledNanousd,
 		valueStartedAt: run.StartedAt, valueEndedAt: run.EndedAt, "createdAt": run.CreatedAt, valueUpdatedAt: run.UpdatedAt,
 	}
+	if strings.TrimSpace(run.AgentManifest.ID) != "" {
+		result["agentManifestRef"] = resourceRefResponse(run.AgentManifest)
+		result["agentName"] = run.AgentName
+	}
+	if strings.TrimSpace(run.RootRunID) != "" {
+		result["rootRunID"] = run.RootRunID
+	}
+	if strings.TrimSpace(run.ParentRunID) != "" {
+		result["parentRunID"] = run.ParentRunID
+	}
+	if strings.TrimSpace(run.HandoffID) != "" {
+		result["handoffID"] = run.HandoffID
+	}
+	if run.Depth > 0 {
+		result["depth"] = run.Depth
+	}
+	return result
 }

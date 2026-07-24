@@ -39,6 +39,70 @@ paths:
                 $ref: '#/components/schemas/StartRunResult'
         default:
           $ref: '#/components/responses/Error'
+  /agent-manifests:
+    get:
+      operationId: listAgentManifests
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Active Agent Manifest catalog
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentManifestPage'
+        default:
+          $ref: '#/components/responses/Error'
+  /agent-manifests/{manifestID}:
+    get:
+      operationId: getAgentManifest
+      parameters:
+        - $ref: '#/components/parameters/AgentManifestID'
+        - $ref: '#/components/parameters/OptionalRevision'
+      responses:
+        '200':
+          description: One immutable Agent Manifest revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentManifest'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{runID}/handoffs:
+    post:
+      operationId: delegateRun
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DelegateRunRequest'
+      responses:
+        '202':
+          description: Accepted delegated child run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DelegatedRunResult'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{runID}/task-tree:
+    get:
+      operationId: getRunTaskTree
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Durable parent and child run task tree
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunTaskTree'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}:
     get:
       operationId: getRun
@@ -474,10 +538,68 @@ paths:
                 $ref: '#/components/schemas/ContinuationJob'
         default:
           $ref: '#/components/responses/Error'
+  /admin/agentruntime/agent-manifests:
+    get:
+      operationId: listAdminAgentManifests
+      parameters:
+        - $ref: '#/components/parameters/AgentManifestStatus'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Latest Agent Manifest revisions for administrators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentManifestPage'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createAgentManifest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentManifestRevisionRequest'
+      responses:
+        '201':
+          description: Created Agent Manifest revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentManifest'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/agentruntime/agent-manifests/{manifestID}/revisions:
+    post:
+      operationId: reviseAgentManifest
+      parameters:
+        - $ref: '#/components/parameters/AgentManifestID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentManifestRevisionRequest'
+      responses:
+        '201':
+          description: Appended Agent Manifest revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentManifest'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     RunID:
       name: runID
+      in: path
+      required: true
+      schema: {type: string}
+    AgentManifestID:
+      name: manifestID
       in: path
       required: true
       schema: {type: string}
@@ -511,6 +633,21 @@ components:
       in: path
       required: true
       schema: {type: integer, minimum: 1}
+    Offset:
+      name: offset
+      in: query
+      required: false
+      schema: {type: integer, minimum: 0, default: 0}
+    AgentManifestStatus:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [active, disabled]}
+    OptionalRevision:
+      name: revision
+      in: query
+      required: false
+      schema: {type: string}
     OptionalVersion:
       name: version
       in: query
@@ -598,6 +735,56 @@ components:
         kind: {type: string}
         id: {type: string}
         revision: {type: string}
+    AgentManifestRevisionRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        manifestID: {type: string, maxLength: 64}
+        expectedRevision: {type: integer, minimum: 0}
+        name: {type: string, minLength: 1, maxLength: 128}
+        description: {type: string, maxLength: 4000}
+        instructions: {type: string, maxLength: 20000}
+        status: {type: string, enum: [active, disabled]}
+        modelName: {type: string, maxLength: 128}
+        executionMode: {type: string, enum: [auto, direct, plan]}
+        toolKeys: {type: array, maxItems: 128, items: {type: string}}
+        skillKeys: {type: array, maxItems: 128, items: {type: string}}
+        maxChildRuns: {type: integer, minimum: 1, maximum: 16}
+        maxDepth: {type: integer, minimum: 1, maximum: 6}
+        revisionNote: {type: string, maxLength: 255}
+    AgentManifest:
+      type: object
+      additionalProperties: false
+      required: [manifestID, revision, ref, name, status, toolKeys, skillKeys, maxChildRuns, maxDepth, createdAt, updatedAt]
+      properties:
+        manifestID: {type: string}
+        revision: {type: integer, minimum: 1}
+        ref:
+          $ref: '#/components/schemas/ResourceRef'
+        name: {type: string}
+        description: {type: string}
+        instructions: {type: string}
+        status: {type: string, enum: [active, disabled]}
+        modelName: {type: string}
+        executionMode: {type: string, enum: [auto, direct, plan]}
+        toolKeys: {type: array, items: {type: string}}
+        skillKeys: {type: array, items: {type: string}}
+        maxChildRuns: {type: integer, minimum: 1}
+        maxDepth: {type: integer, minimum: 1}
+        revisionNote: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    AgentManifestPage:
+      type: object
+      additionalProperties: false
+      required: [total, results]
+      properties:
+        total: {type: integer, format: int64, minimum: 0}
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentManifest'
     RunThread:
       type: object
       additionalProperties: false
@@ -648,6 +835,21 @@ components:
         skillKeys: {type: array, maxItems: 128, items: {type: string}}
         workspace:
           $ref: '#/components/schemas/WorkspaceExtension'
+    DelegateRunRequest:
+      type: object
+      additionalProperties: false
+      required: [clientHandoffID, agentManifest, goal]
+      properties:
+        clientHandoffID: {type: string, minLength: 1, maxLength: 64}
+        agentManifest:
+          $ref: '#/components/schemas/ResourceRef'
+        goal: {type: string, minLength: 1, maxLength: 20000}
+        contentType: {type: string, enum: [text, markdown]}
+        outputIDs: {type: array, maxItems: 128, items: {type: string}}
+        evidenceIDs: {type: array, maxItems: 128, items: {type: string}}
+        options: {type: object, additionalProperties: true}
+        htmlVisualPrompt: {type: boolean}
+        htmlVisualColorMode: {type: string, enum: [light, dark]}
     QueueCreateRequest:
       type: object
       additionalProperties: false
@@ -710,6 +912,13 @@ components:
         runID: {type: string}
         requestID: {type: string}
         status: {type: string}
+        agentManifestRef:
+          $ref: '#/components/schemas/ResourceRef'
+        agentName: {type: string}
+        rootRunID: {type: string}
+        parentRunID: {type: string}
+        handoffID: {type: string}
+        depth: {type: integer, minimum: 1}
     RunStep:
       type: object
       additionalProperties: true
@@ -731,6 +940,64 @@ components:
           $ref: '#/components/schemas/ProjectionRef'
         outputProjectionRef:
           $ref: '#/components/schemas/ProjectionRef'
+    RunHandoff:
+      type: object
+      additionalProperties: false
+      required: [handoffID, clientHandoffID, rootRunID, parentRunID, childRunID, agentManifest, agentName, goal, status, depth, inputProjectionRef, resultOutputIDs, createdAt, updatedAt]
+      properties:
+        handoffID: {type: string}
+        clientHandoffID: {type: string}
+        rootRunID: {type: string}
+        parentRunID: {type: string}
+        childRunID: {type: string}
+        agentManifest:
+          $ref: '#/components/schemas/ResourceRef'
+        agentName: {type: string}
+        goal: {type: string}
+        status: {type: string, enum: [queued, completed, failed, cancelled]}
+        depth: {type: integer, minimum: 1}
+        inputProjectionRef:
+          $ref: '#/components/schemas/ProjectionRef'
+        resultSummary: {type: string}
+        resultOutputIDs: {type: array, items: {type: string}}
+        errorCode: {type: string}
+        errorMessage: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        completedAt: {type: string, format: date-time, nullable: true}
+    DelegatedRunResult:
+      type: object
+      additionalProperties: false
+      required: [handoff, run, rootStep]
+      properties:
+        handoff:
+          $ref: '#/components/schemas/RunHandoff'
+        run:
+          $ref: '#/components/schemas/Run'
+        rootStep:
+          $ref: '#/components/schemas/RunStep'
+    RunTask:
+      type: object
+      additionalProperties: false
+      required: [handoff, run]
+      properties:
+        handoff:
+          $ref: '#/components/schemas/RunHandoff'
+        run:
+          $ref: '#/components/schemas/Run'
+    RunTaskTree:
+      type: object
+      additionalProperties: false
+      required: [rootRunID, currentRunID, rootRun, tasks]
+      properties:
+        rootRunID: {type: string}
+        currentRunID: {type: string}
+        rootRun:
+          $ref: '#/components/schemas/Run'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunTask'
     RunDetail:
       type: object
       additionalProperties: false

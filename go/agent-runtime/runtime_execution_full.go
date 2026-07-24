@@ -3340,9 +3340,12 @@ func (s *Engine) finalizeRunWithProjection(ctx context.Context, run model.Run, i
 	intent.Actor, intent.Thread, intent.RunID = run.Actor, run.Thread, run.RunID
 	var events []model.Event
 	var applied bool
+	var output *model.OutputRef
+	var handoffParentRunID string
+	var handoffEvents []model.Event
 	err := s.unitOfWork.Within(ctx, func(txCtx context.Context) error {
 		var err error
-		_, events, applied, err = s.repo.FinalizeRun(txCtx, intent)
+		output, events, applied, err = s.repo.FinalizeRun(txCtx, intent)
 		if err != nil || !applied {
 			return err
 		}
@@ -3367,10 +3370,16 @@ func (s *Engine) finalizeRunWithProjection(ctx context.Context, run model.Run, i
 				err = tracker.MarkHostProjectionRepaired(txCtx, persisted.RunID)
 			}
 		}
+		if err == nil {
+			handoffParentRunID, handoffEvents, err = s.finalizeRunHandoff(txCtx, *persisted, intent, output)
+		}
 		return err
 	})
 	if err != nil {
 		return nil, false, err
+	}
+	if handoffParentRunID != "" {
+		s.publishRunEvents(handoffParentRunID, handoffEvents)
 	}
 	return events, applied, nil
 }
