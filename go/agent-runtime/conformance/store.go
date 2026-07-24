@@ -400,6 +400,50 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		store, actor, _, run := seeded(t, factory)
 		runHandoffJoinWaitBundleConformance(t, store, actor, run)
 	})
+
+	t.Run("parent cancellation makes pending joins terminal", func(t *testing.T) {
+		store, actor, _, run := seeded(t, factory)
+		ctx := context.Background()
+		manifest := domain.ResourceRef{Kind: domain.AgentManifestKind, ID: "agent-cancel", Revision: "1"}
+		first := domain.RunHandoff{
+			HandoffID: "handoff-cancel-1", ClientHandoffID: "client-cancel-1", RequestFingerprint: "cancel-fp-1", Actor: actor,
+			RootRunID: run.RunID, ParentRunID: run.RunID, ChildRunID: "run-cancel-child-1", AgentManifest: manifest,
+			AgentName: "Cancel child one", Goal: "Wait for cancellation", Status: domain.RunHandoffStatusQueued, Depth: 1,
+		}
+		second := first
+		second.HandoffID, second.ClientHandoffID, second.RequestFingerprint, second.ChildRunID = "handoff-cancel-2", "client-cancel-2", "cancel-fp-2", "run-cancel-child-2"
+		if _, _, err := store.CreateRunHandoff(ctx, &first); err != nil {
+			t.Fatalf("create first cancellation handoff: %v", err)
+		}
+		if _, _, err := store.CreateRunHandoff(ctx, &second); err != nil {
+			t.Fatalf("create second cancellation handoff: %v", err)
+		}
+		join := domain.RunHandoffJoin{
+			JoinID: "join-cancel", ClientJoinID: "client-join-cancel", RequestFingerprint: "join-cancel-fp", Actor: actor,
+			RootRunID: run.RunID, ParentRunID: run.RunID, HandoffIDs: []string{first.HandoffID, second.HandoffID},
+			Mode: domain.RunHandoffJoinModeAll, Quorum: 1, FailurePolicy: domain.RunHandoffJoinFailureCollect, Status: domain.RunHandoffJoinStatusPending,
+		}
+		if _, _, err := store.CreateRunHandoffJoin(ctx, &join); err != nil {
+			t.Fatalf("create cancellation join: %v", err)
+		}
+		cancelledAt := time.Now().UTC()
+		cancelled, err := store.CancelPendingRunHandoffJoins(ctx, actor, run.RunID, cancelledAt, "parent_run_cancelled", "parent cancelled")
+		if err != nil || len(cancelled) != 1 || cancelled[0].Status != domain.RunHandoffJoinStatusCancelled || cancelled[0].ResolvedAt == nil || cancelled[0].ErrorCode != "parent_run_cancelled" {
+			t.Fatalf("cancel pending joins = %+v,%v", cancelled, err)
+		}
+		replayed, err := store.CancelPendingRunHandoffJoins(ctx, actor, run.RunID, cancelledAt.Add(time.Second), "parent_run_cancelled", "parent cancelled")
+		if err != nil || len(replayed) != 0 {
+			t.Fatalf("replay cancellation = %+v,%v", replayed, err)
+		}
+		completion, err := store.CompleteRunHandoffWithJoins(ctx, actor, first.ChildRunID, domain.RunHandoffCompletion{Status: domain.RunHandoffStatusCancelled})
+		if err != nil || len(completion.ResolvedJoins) != 0 {
+			t.Fatalf("late child cancellation resolved terminal join = %+v,%v", completion, err)
+		}
+		stable, err := store.GetRunHandoffJoin(ctx, actor, join.JoinID)
+		if err != nil || stable.Status != domain.RunHandoffJoinStatusCancelled || stable.ErrorCode != "parent_run_cancelled" {
+			t.Fatalf("cancelled join changed after late child = %+v,%v", stable, err)
+		}
+	})
 }
 
 func handoffJoinByID(items []domain.RunHandoffJoin, joinID string) (domain.RunHandoffJoin, bool) {

@@ -271,6 +271,24 @@ func RunHandoffJoinTerminal(status string) bool {
 	return status == RunHandoffJoinStatusReady || status == RunHandoffJoinStatusFailed || status == RunHandoffJoinStatusCancelled
 }
 
+// CancelRunHandoffJoin transitions one pending fan-in contract to a stable
+// cancelled terminal state. Terminal joins are immutable and returned as-is.
+func CancelRunHandoffJoin(join RunHandoffJoin, now time.Time, code, message string) RunHandoffJoin {
+	if RunHandoffJoinTerminal(join.Status) {
+		return join
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	join.Status = RunHandoffJoinStatusCancelled
+	join.ErrorCode = strings.TrimSpace(code)
+	join.ErrorMessage = strings.TrimSpace(message)
+	join.UpdatedAt = now
+	resolvedAt := now
+	join.ResolvedAt = &resolvedAt
+	return join
+}
+
 type RunHandoffCompletion struct {
 	Status          string
 	ResultSummary   string

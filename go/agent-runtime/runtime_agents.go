@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
@@ -639,6 +640,9 @@ func (s *Engine) finalizeRunHandoff(ctx context.Context, run model.Run, intent m
 			events = append(events, *persisted)
 		}
 	}
+	if continuationRunDoesNotExecute(*parent) {
+		return handoff.ParentRunID, events, nil
+	}
 	for _, join := range completion.ResolvedJoins {
 		resolved, _, resolveErr := s.resolveRunHandoffJoinAtCommit(ctx, *parent, join)
 		if resolveErr != nil {
@@ -647,6 +651,56 @@ func (s *Engine) finalizeRunHandoff(ctx context.Context, run model.Run, intent m
 		events = append(events, resolved...)
 	}
 	return handoff.ParentRunID, events, nil
+}
+
+func (s *Engine) cancelPendingRunHandoffJoinsAtCommit(ctx context.Context, parent model.Run, code, message string) ([]model.Event, error) {
+	joins, err := s.repo.CancelPendingRunHandoffJoins(ctx, parent.Actor, parent.RunID, time.Now(), firstNonEmptyString(strings.TrimSpace(code), "parent_run_cancelled"), firstNonEmptyString(strings.TrimSpace(message), "parent run was cancelled"))
+	if err != nil {
+		return nil, err
+	}
+	events := make([]model.Event, 0, len(joins))
+	for _, join := range joins {
+		event := newRunEvent(parent, "handoff.join.cancelled", parent.CurrentStepID, "Delegated task wait cancelled", runHandoffJoinPayload(join, nil), &parent.OutputProjection)
+		event.EventID = "handoff_join:" + join.JoinID + ":cancelled"
+		persisted, created, appendErr := s.repo.AppendRunEvent(ctx, &event)
+		if appendErr != nil {
+			return nil, appendErr
+		}
+		if created {
+			events = append(events, *persisted)
+		}
+	}
+	return events, nil
+}
+
+func (s *Engine) cancelDelegatedChildren(ctx context.Context, parent model.Run, reason string) {
+	if s == nil || s.repo == nil {
+		return
+	}
+	page, err := s.repo.ListRunHandoffs(ctx, parent.Actor, model.RunHandoffFilter{ParentRunID: parent.RunID, Status: model.RunHandoffStatusQueued, Limit: hardAgentMaxChildRuns})
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Error("cancel_delegated_children_list_failed", String("run_id", parent.RunID), Error(err))
+		}
+		return
+	}
+	for _, handoff := range page.Results {
+		s.cancelDelegatedChild(ctx, parent, handoff, reason)
+	}
+}
+
+func (s *Engine) cancelDelegatedChild(ctx context.Context, parent model.Run, handoff model.RunHandoff, reason string) {
+	child, err := s.repo.GetRun(ctx, parent.Actor, handoff.ChildRunID)
+	if err != nil || child == nil || continuationRunDoesNotExecute(*child) {
+		return
+	}
+	cancelled, err := s.CancelRun(ctx, parent.Actor, child.RunID)
+	if err == nil && !cancelled {
+		err = s.cancelTextRun(ctx, *child, child.CurrentStepID, firstNonEmptyString(strings.TrimSpace(reason), "Parent run was cancelled"))
+	}
+	if err != nil && s.logger != nil {
+		s.logger.Error("cancel_delegated_child_failed", String("parent_run_id", parent.RunID), String("child_run_id", child.RunID), Error(err))
+	}
 }
 
 var (

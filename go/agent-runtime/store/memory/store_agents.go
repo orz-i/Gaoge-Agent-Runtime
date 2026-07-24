@@ -309,6 +309,30 @@ func (s *Store) ListRunHandoffJoins(_ context.Context, actor domain.ActorRef, fi
 	return domain.RunHandoffJoinPage{Total: total, Results: items[offset:min(offset+limit, len(items))]}, nil
 }
 
+func (s *Store) CancelPendingRunHandoffJoins(_ context.Context, actor domain.ActorRef, parentRunID string, now time.Time, code, message string) ([]domain.RunHandoffJoin, error) {
+	parentRunID = strings.TrimSpace(parentRunID)
+	if strings.TrimSpace(actor.TenantID) == "" || strings.TrimSpace(actor.ActorID) == "" || parentRunID == "" {
+		return nil, agentruntime.ErrInvalidInput
+	}
+	result := make([]domain.RunHandoffJoin, 0)
+	err := s.write(func(st *state) error {
+		for joinID, join := range st.HandoffJoins {
+			if join.Actor != actor || join.ParentRunID != parentRunID || domain.RunHandoffJoinTerminal(join.Status) {
+				continue
+			}
+			updated := domain.CancelRunHandoffJoin(join, now, code, message)
+			st.HandoffJoins[joinID] = clone(updated)
+			result = append(result, clone(updated))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.Before(result[j].CreatedAt) })
+	return result, nil
+}
+
 func findMemoryRunHandoff(items map[string]domain.RunHandoff, input domain.RunHandoff) (domain.RunHandoff, bool, error) {
 	for _, existing := range items {
 		if !sameHandoffClient(existing, input.Actor, input.ClientHandoffID) && existing.HandoffID != input.HandoffID {

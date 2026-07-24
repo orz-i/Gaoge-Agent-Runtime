@@ -3411,6 +3411,7 @@ func (s *Engine) cancelTextRun(ctx context.Context, run model.Run, stepID, reaso
 		return err
 	}
 	s.publishRunEvents(run.RunID, events)
+	s.cancelDelegatedChildren(context.WithoutCancel(ctx), run, reason)
 	return nil
 }
 
@@ -3433,6 +3434,7 @@ func (s *Engine) RetireTextRun(ctx context.Context, actor model.ActorRef, runID 
 		return nil, false, err
 	}
 	s.publishRunEvents(run.RunID, events)
+	s.cancelDelegatedChildren(context.WithoutCancel(ctx), *run, "Parent run retired")
 	s.FinishRunNotifications(run.RunID)
 	updated, err := s.repo.GetRun(ctx, actor, run.RunID)
 	if err != nil {
@@ -3466,6 +3468,7 @@ func (s *Engine) finalizeRunWithProjection(ctx context.Context, run model.Run, i
 	var output *model.OutputRef
 	var handoffParentRunID string
 	var handoffEvents []model.Event
+	var cancelledJoinEvents []model.Event
 	err := s.unitOfWork.Within(ctx, func(txCtx context.Context) error {
 		var err error
 		output, events, applied, err = s.repo.FinalizeRun(txCtx, intent)
@@ -3491,6 +3494,12 @@ func (s *Engine) finalizeRunWithProjection(ctx context.Context, run model.Run, i
 		if err == nil {
 			if tracker, ok := s.repo.(HostProjectionTracker); ok {
 				err = tracker.MarkHostProjectionRepaired(txCtx, persisted.RunID)
+			}
+		}
+		if err == nil {
+			if intent.Outcome == model.TerminalCancelled {
+				cancelledJoinEvents, err = s.cancelPendingRunHandoffJoinsAtCommit(txCtx, *persisted, intent.ErrorCode, intent.ErrorMessage)
+				events = append(events, cancelledJoinEvents...)
 			}
 		}
 		if err == nil {

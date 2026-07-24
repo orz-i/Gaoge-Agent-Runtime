@@ -21,13 +21,67 @@ const (
 	testJoinOne            = "one"
 	testJoinTwo            = "two"
 	testJoinThree          = "three"
+	testJoinReadyID        = "join-ready"
 )
 
 type agentRuntimeTestStore struct {
 	Store
-	runs      map[string]model.Run
-	manifests map[string]model.AgentManifest
-	handoffs  []model.RunHandoff
+	runs              map[string]model.Run
+	manifests         map[string]model.AgentManifest
+	handoffs          []model.RunHandoff
+	handoffCompletion model.RunHandoffCompletionResult
+	appendedRunEvents []model.Event
+}
+
+func TestFinalizeRunHandoffDoesNotResumeTerminalParent(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	parent := model.Run{RunID: testAgentParentRunID, Actor: actor, Status: model.RunStatusCancelled, CurrentStepID: "step-parent"}
+	child := model.Run{RunID: "run-child", Actor: actor, HandoffID: "handoff-1"}
+	handoff := model.RunHandoff{
+		HandoffID: "handoff-1", ParentRunID: parent.RunID, ChildRunID: child.RunID, Actor: actor,
+		AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: testAgentReviewID, Revision: "1"}, AgentName: "Reviewer",
+	}
+	store := &agentRuntimeTestStore{
+		runs: map[string]model.Run{parent.RunID: parent},
+		handoffCompletion: model.RunHandoffCompletionResult{
+			Handoff:       handoff,
+			ResolvedJoins: []model.RunHandoffJoin{{JoinID: testJoinReadyID, ParentRunID: parent.RunID, Status: model.RunHandoffJoinStatusReady}},
+		},
+	}
+	engine := &Engine{repo: store}
+	parentRunID, events, err := engine.finalizeRunHandoff(t.Context(), child, model.TerminalIntent{Outcome: model.TerminalCancelled}, nil)
+	if err != nil || parentRunID != parent.RunID || len(events) != 1 || len(store.appendedRunEvents) != 1 {
+		t.Fatalf("terminal parent handoff result = parent=%q events=%+v appended=%+v err=%v", parentRunID, events, store.appendedRunEvents, err)
+	}
+	if events[0].EventType != "handoff.cancelled" {
+		t.Fatalf("terminal parent event = %+v", events[0])
+	}
+}
+
+func (s *agentRuntimeTestStore) CompleteRunHandoffWithJoins(_ context.Context, _ model.ActorRef, _ string, _ model.RunHandoffCompletion) (model.RunHandoffCompletionResult, error) {
+	return s.handoffCompletion, nil
+}
+
+func (s *agentRuntimeTestStore) AppendRunEvent(_ context.Context, event *model.Event) (*model.Event, bool, error) {
+	if event == nil {
+		return nil, false, ErrInvalidInput
+	}
+	item := *event
+	s.appendedRunEvents = append(s.appendedRunEvents, item)
+	return &item, true, nil
+}
+
+func TestCancelRunHandoffJoinIsMonotonic(t *testing.T) {
+	now := time.Now().UTC()
+	pending := model.RunHandoffJoin{JoinID: "join-1", Status: model.RunHandoffJoinStatusPending}
+	cancelled := model.CancelRunHandoffJoin(pending, now, "parent_run_cancelled", "parent cancelled")
+	if cancelled.Status != model.RunHandoffJoinStatusCancelled || cancelled.ResolvedAt == nil || !cancelled.ResolvedAt.Equal(now) || cancelled.ErrorCode != "parent_run_cancelled" {
+		t.Fatalf("cancelled join = %+v", cancelled)
+	}
+	ready := model.RunHandoffJoin{JoinID: testJoinReadyID, Status: model.RunHandoffJoinStatusReady}
+	if result := model.CancelRunHandoffJoin(ready, now, "ignored", "ignored"); result.Status != model.RunHandoffJoinStatusReady || result.ErrorCode != "" {
+		t.Fatalf("terminal join changed = %+v", result)
+	}
 }
 
 func TestCreateRunHandoffJoinCanonicalizesPolicy(t *testing.T) {

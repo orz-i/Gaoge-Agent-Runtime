@@ -388,6 +388,37 @@ func (r *Repository) ListRunHandoffJoins(ctx context.Context, actor domain.Actor
 	return domain.RunHandoffJoinPage{Total: total, Results: items}, nil
 }
 
+func (r *Repository) CancelPendingRunHandoffJoins(ctx context.Context, actor domain.ActorRef, parentRunID string, now time.Time, code, message string) ([]domain.RunHandoffJoin, error) {
+	parentRunID = strings.TrimSpace(parentRunID)
+	if strings.TrimSpace(actor.TenantID) == "" || strings.TrimSpace(actor.ActorID) == "" || parentRunID == "" {
+		return nil, agentruntime.ErrInvalidInput
+	}
+	result := make([]domain.RunHandoffJoin, 0)
+	err := r.within(ctx, func(txCtx context.Context) error {
+		db := r.dbFor(txCtx)
+		query := db.Where("tenant_id = ? AND actor_id = ? AND parent_run_id = ? AND status = ?", actor.TenantID, actor.ActorID, parentRunID, domain.RunHandoffJoinStatusPending)
+		if db.Name() == valuePostgres7F253790 {
+			query = query.Clauses(clause.Locking{Strength: valueLockUpdate})
+		}
+		var rows []models.RunHandoffJoinRecord
+		if err := query.Order("created_at ASC, id ASC").Find(&rows).Error; err != nil {
+			return translateError(err)
+		}
+		for _, row := range rows {
+			updated := domain.CancelRunHandoffJoin(runHandoffJoinDomain(row), now, code, message)
+			if err := updateRunHandoffJoinRow(db, row, updated); err != nil {
+				return err
+			}
+			result = append(result, updated)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (r *Repository) completeRunHandoffTx(ctx context.Context, actor domain.ActorRef, childRunID string, input domain.RunHandoffCompletion) (domain.RunHandoffCompletionResult, error) {
 	db := r.dbFor(ctx)
 	row, err := lockChildHandoff(db, actor, childRunID)

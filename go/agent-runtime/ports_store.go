@@ -43,6 +43,7 @@ type RunHandoffStore interface {
 	CreateRunHandoffJoinWaitBundle(context.Context, *domain.RunHandoffJoin, string, int64, *domain.Checkpoint, []domain.Event) (*domain.RunHandoffJoin, []domain.Event, bool, error)
 	GetRunHandoffJoin(context.Context, domain.ActorRef, string) (*domain.RunHandoffJoin, error)
 	ListRunHandoffJoins(context.Context, domain.ActorRef, domain.RunHandoffJoinFilter) (domain.RunHandoffJoinPage, error)
+	CancelPendingRunHandoffJoins(context.Context, domain.ActorRef, string, time.Time, string, string) ([]domain.RunHandoffJoin, error)
 }
 
 // ContinuationJobStore persists executable checkpoint handoffs. Enqueue calls
