@@ -172,6 +172,10 @@ type WorkspaceProvider interface {
 	ExecuteWorkspaceTool(context.Context, WorkspaceToolExecution) (string, error)
 }
 
+type WorkspaceReceiptProvider interface {
+	ExecuteWorkspaceToolWithReceipt(context.Context, WorkspaceToolExecution) (ToolExecutionResult, error)
+}
+
 // WorkspaceRouteValidation contains provider-neutral facts measured from the
 // exact model route and tool payload selected for a run step.
 type WorkspaceRouteValidation struct {
@@ -450,6 +454,7 @@ type ResolvedTool struct {
 	ApprovalMode       string
 	RiskLevel          string
 	SideEffectLevel    string
+	IdempotencyMode    string
 	HostedVariants     []HostedToolVariant
 }
 
@@ -471,6 +476,34 @@ type ToolExecutionInput struct {
 
 type ToolExecutor interface {
 	Execute(context.Context, ToolExecutionInput) (string, error)
+}
+
+const (
+	ToolSideEffectStagedWrite = "staged_write"
+	ToolSideEffectWrite       = "write"
+	ToolSideEffectDestructive = "destructive"
+
+	ToolIdempotencyNone            = "none"
+	ToolIdempotencyRequestKey      = "request_key"
+	ToolIdempotencyProviderReceipt = "provider_receipt"
+
+	ToolReceiptCommitted = "committed"
+	ToolReceiptReplayed  = "replayed"
+)
+
+type ToolExecutionReceipt struct {
+	RequestID           string `json:"requestID"`
+	ProviderExecutionID string `json:"providerExecutionID"`
+	Disposition         string `json:"disposition"`
+}
+
+type ToolExecutionResult struct {
+	OutputJSON string               `json:"outputJSON"`
+	Receipt    ToolExecutionReceipt `json:"receipt"`
+}
+
+type ReceiptToolExecutor interface {
+	ExecuteWithReceipt(context.Context, ToolExecutionInput) (ToolExecutionResult, error)
 }
 
 type AuditWriter interface {

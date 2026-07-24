@@ -1566,7 +1566,7 @@ func addResolvedRunTool(result map[string]ResolvedTool, policy effectiveRunToolP
 		approvalMode = valueAlwaysE613B9F9
 	}
 	if policy.ExecutionMode == valueLocalDispatchC00F9A8D {
-		result[policy.ModelName] = ResolvedTool{ToolKey: policy.ToolKey, ProviderKind: policy.ProviderKind, ProviderKey: policy.ProviderKey, ModelName: policy.ModelName, OriginalName: policy.OriginalName, Description: policy.Description, DefinitionVersion: policy.DefinitionVersion, InputSchema: append(json.RawMessage(nil), policy.InputSchema...), OutputSchema: append(json.RawMessage(nil), policy.OutputSchema...), ExecutionMode: policy.ExecutionMode, ApprovalCapability: policy.ApprovalCapability, ApprovalMode: approvalMode, RiskLevel: policy.RiskLevel, SideEffectLevel: policy.SideEffectLevel}
+		result[policy.ModelName] = ResolvedTool{ToolKey: policy.ToolKey, ProviderKind: policy.ProviderKind, ProviderKey: policy.ProviderKey, ModelName: policy.ModelName, OriginalName: policy.OriginalName, Description: policy.Description, DefinitionVersion: policy.DefinitionVersion, InputSchema: append(json.RawMessage(nil), policy.InputSchema...), OutputSchema: append(json.RawMessage(nil), policy.OutputSchema...), ExecutionMode: policy.ExecutionMode, ApprovalCapability: policy.ApprovalCapability, ApprovalMode: approvalMode, RiskLevel: policy.RiskLevel, SideEffectLevel: policy.SideEffectLevel, IdempotencyMode: policy.IdempotencyMode}
 	}
 	return nil
 }
@@ -2317,7 +2317,7 @@ func (s *Engine) handleResolvedRunToolCall(ctx context.Context, run model.Run, s
 		if err := s.appendFrozenToolStarted(ctx, run, step.StepID, tool, call); err != nil {
 			return ToolResult{}, false, err
 		}
-		return s.commitFrozenToolResult(ctx, run, step.StepID, effective, tool, call, "", 0, validationErr)
+		return s.commitFrozenToolResult(ctx, run, step.StepID, effective, tool, call, "", 0, ToolExecutionReceipt{}, validationErr)
 	}
 	call.ArgumentsJSON = normalizedArguments
 	if tool.ApprovalMode != valueNeverF5C79F24 {
@@ -2328,7 +2328,7 @@ func (s *Engine) handleResolvedRunToolCall(ctx context.Context, run model.Run, s
 			if err := s.appendFrozenToolStarted(ctx, run, step.StepID, tool, call); err != nil {
 				return ToolResult{}, false, err
 			}
-			return s.commitFrozenToolResult(ctx, run, step.StepID, effective, tool, call, "", 0, evaluationErr)
+			return s.commitFrozenToolResult(ctx, run, step.StepID, effective, tool, call, "", 0, ToolExecutionReceipt{}, evaluationErr)
 		}
 		return s.requestRunToolApproval(ctx, run, step, effective, tool, call)
 	}
@@ -2375,11 +2375,11 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 	}
 	normalizedArguments, validationErr := normalizeToolArgumentsAgainstSchema(call.ArgumentsJSON, tool.InputSchema)
 	if validationErr != nil {
-		return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, "", 0, validationErr)
+		return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, "", 0, ToolExecutionReceipt{}, validationErr)
 	}
 	call.ArgumentsJSON = normalizedArguments
 	if evaluationErr := s.evaluateAndPersistRuntimeBoundary(ctx, run, toolInputEvaluationRequest(run, stepID, tool, call)); evaluationErr != nil {
-		return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, "", 0, evaluationErr)
+		return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, "", 0, ToolExecutionReceipt{}, evaluationErr)
 	}
 	policy, ok := frozenRunToolPolicy(effective, tool.ToolKey)
 	if !ok {
@@ -2398,11 +2398,12 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 		String("tool.name", tool.ModelName),
 		String("tool.provider_kind", tool.ProviderKind),
 	)
-	output, err := s.executeFrozenToolProvider(executeCtx, run, stepID, effective, tool, call, limits)
+	execution, err := s.executeFrozenToolProvider(executeCtx, run, stepID, effective, tool, call, limits)
 	if err != nil {
 		toolSpan.RecordError(err)
 	}
 	toolSpan.End()
+	output := execution.OutputJSON
 	if err == nil {
 		output, err = normalizeToolOutputAgainstSchema(output, tool.OutputSchema, tool.ProviderKind)
 	}
@@ -2412,7 +2413,7 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 		}
 	}
 	workspaceResultTokens, output, err := s.enforceFrozenWorkspaceBudget(ctx, run, effective, tool, output, err)
-	return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, output, workspaceResultTokens, err)
+	return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, output, workspaceResultTokens, execution.Receipt, err)
 }
 
 func (s *Engine) appendFrozenToolStarted(ctx context.Context, run model.Run, stepID string, tool ResolvedTool, call ToolCall) error {
@@ -2464,25 +2465,53 @@ func (s *Engine) loadStartedToolCalls(ctx context.Context, run model.Run, stepID
 	return started, nil
 }
 
-func (s *Engine) executeFrozenToolProvider(ctx context.Context, run model.Run, stepID string, effective effectiveTextRunConfig, tool ResolvedTool, call ToolCall, limits *TextRunExecutionLimits) (string, error) {
+func (s *Engine) executeFrozenToolProvider(ctx context.Context, run model.Run, stepID string, effective effectiveTextRunConfig, tool ResolvedTool, call ToolCall, limits *TextRunExecutionLimits) (ToolExecutionResult, error) {
+	requestID := run.RunID + ":tool:" + call.ToolCallID
 	switch tool.ProviderKind {
 	case workspaceProviderKind(effective):
 		if s.workspaces == nil || effective.Workspace == nil {
-			return "", ErrRunSnapshotIncompatible
+			return ToolExecutionResult{}, ErrRunSnapshotIncompatible
 		}
 		provider, ok := s.workspaces.ResolveWorkspace(effective.Workspace.Request.Type)
 		if !ok {
-			return "", ErrRunSnapshotIncompatible
+			return ToolExecutionResult{}, ErrRunSnapshotIncompatible
 		}
-		output, err := provider.ExecuteWorkspaceTool(ctx, WorkspaceToolExecution{Actor: run.Actor, Thread: run.Thread, RunID: run.RunID, RequestID: run.RunID + ":tool:" + call.ToolCallID, ToolName: tool.OriginalName, ArgumentsJSON: call.ArgumentsJSON, Snapshot: *effective.Workspace})
-		return output, classifyWorkspaceProviderError(provider, err)
+		input := WorkspaceToolExecution{Actor: run.Actor, Thread: run.Thread, RunID: run.RunID, RequestID: requestID, ToolName: tool.OriginalName, ArgumentsJSON: call.ArgumentsJSON, Snapshot: *effective.Workspace}
+		if tool.IdempotencyMode == ToolIdempotencyProviderReceipt {
+			receiptProvider, receiptOK := provider.(WorkspaceReceiptProvider)
+			if !receiptOK {
+				return ToolExecutionResult{}, ErrRunToolProviderReceiptRequired
+			}
+			result, err := receiptProvider.ExecuteWorkspaceToolWithReceipt(ctx, input)
+			return validateToolExecutionResult(result, requestID, classifyWorkspaceProviderError(provider, err))
+		}
+		output, err := provider.ExecuteWorkspaceTool(ctx, input)
+		return ToolExecutionResult{OutputJSON: output}, classifyWorkspaceProviderError(provider, err)
 	case valueMcpCE1A7808:
-		return s.executeToolCall(ctx, ExecuteToolInput{Actor: run.Actor, Thread: run.Thread, RequestID: run.RunID + ":tool:" + call.ToolCallID, ToolKey: tool.ToolKey, ProviderKind: tool.ProviderKind, ProviderKey: tool.ProviderKey, ToolName: tool.OriginalName, ArgumentsJSON: call.ArgumentsJSON, ExecutionLimits: limits, OnAttemptFailed: func(attempt, maxAttempts int, attemptErr error) error {
+		input := ExecuteToolInput{Actor: run.Actor, Thread: run.Thread, RequestID: requestID, ToolKey: tool.ToolKey, ProviderKind: tool.ProviderKind, ProviderKey: tool.ProviderKey, ToolName: tool.OriginalName, ArgumentsJSON: call.ArgumentsJSON, ExecutionLimits: limits, OnAttemptFailed: func(attempt, maxAttempts int, attemptErr error) error {
 			return s.appendFrozenToolAttemptFailure(ctx, run, stepID, tool, call, attempt, maxAttempts, attemptErr)
-		}})
+		}}
+		if tool.IdempotencyMode == ToolIdempotencyProviderReceipt {
+			result, err := s.executeToolCallWithReceipt(ctx, input)
+			return validateToolExecutionResult(result, requestID, err)
+		}
+		output, err := s.executeToolCall(ctx, input)
+		return ToolExecutionResult{OutputJSON: output}, err
 	default:
-		return "", ErrRunSnapshotIncompatible
+		return ToolExecutionResult{}, ErrRunSnapshotIncompatible
 	}
+}
+
+func validateToolExecutionResult(result ToolExecutionResult, requestID string, executionErr error) (ToolExecutionResult, error) {
+	if executionErr != nil {
+		return ToolExecutionResult{}, executionErr
+	}
+	receipt := result.Receipt
+	validDisposition := receipt.Disposition == ToolReceiptCommitted || receipt.Disposition == ToolReceiptReplayed
+	if strings.TrimSpace(receipt.RequestID) != strings.TrimSpace(requestID) || strings.TrimSpace(receipt.ProviderExecutionID) == "" || !validDisposition {
+		return ToolExecutionResult{}, ErrRunToolProviderReceiptRequired
+	}
+	return result, nil
 }
 
 func workspaceProviderKind(effective effectiveTextRunConfig) string {
@@ -2515,7 +2544,7 @@ func (s *Engine) enforceFrozenWorkspaceBudget(ctx context.Context, run model.Run
 	return tokens, output, nil
 }
 
-func (s *Engine) commitFrozenToolResult(ctx context.Context, run model.Run, stepID string, effective effectiveTextRunConfig, tool ResolvedTool, call ToolCall, output string, workspaceResultTokens int64, executionErr error) (ToolResult, bool, error) {
+func (s *Engine) commitFrozenToolResult(ctx context.Context, run model.Run, stepID string, effective effectiveTextRunConfig, tool ResolvedTool, call ToolCall, output string, workspaceResultTokens int64, receipt ToolExecutionReceipt, executionErr error) (ToolResult, bool, error) {
 	eventType, status := valueToolCompleted8D0A12FD, valueSuccess4D886D19
 	if executionErr != nil {
 		eventType, status = valueToolFailedFB145984, valueErrorA8DE48C2
@@ -2527,6 +2556,9 @@ func (s *Engine) commitFrozenToolResult(ctx context.Context, run model.Run, step
 	}
 	if isWorkspaceProviderTool(effective, tool) {
 		completedPayload["workspaceToolResultTokenEstimate"] = workspaceResultTokens
+	}
+	if strings.TrimSpace(receipt.ProviderExecutionID) != "" {
+		completedPayload["executionReceipt"] = receipt
 	}
 	completed := newRunEvent(run, eventType, stepID, tool.ModelName, completedPayload, nil)
 	completed.ToolCallID, completed.ToolName, completed.InputJSON = call.ToolCallID, tool.ModelName, call.ArgumentsJSON

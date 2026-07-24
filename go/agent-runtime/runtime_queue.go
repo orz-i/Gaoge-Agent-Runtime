@@ -540,6 +540,8 @@ func runQueueErrorCode(err error) string {
 		return "environment.model_not_authorized"
 	case errors.Is(err, ErrRunEnvironmentUnavailable):
 		return "environment_unavailable"
+	case errors.Is(err, ErrRunToolProviderReceiptRequired):
+		return "run.tool_provider_receipt_required"
 	case errors.Is(err, ErrUsageBalanceInsufficient):
 		return "payment_required"
 	case errors.Is(err, ErrModelPricingRequired):

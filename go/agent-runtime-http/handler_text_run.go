@@ -935,6 +935,7 @@ func mapRunControlError(err error) runControlErrorMapping {
 		{runtime.ErrEnvironmentModelNotAccessible, http.StatusUnprocessableEntity, "environment.model_not_accessible", "model is not accessible to the current user"},
 		{runtime.ErrEnvironmentModelNotAuthorized, http.StatusUnprocessableEntity, "environment.model_not_authorized", "model is not authorized by the environment"},
 		{runtime.ErrExecutionModeNotAllowed, http.StatusUnprocessableEntity, "run.execution_mode_not_allowed", "execution mode is not allowed by the environment"},
+		{runtime.ErrRunToolProviderReceiptRequired, http.StatusUnprocessableEntity, "run.tool_provider_receipt_required", "write or destructive tool does not provide a verifiable execution receipt"},
 		{runtime.ErrRunToolUnavailable, http.StatusUnprocessableEntity, "run.tool_unavailable", "one or more selected tools are unavailable"},
 		{runtime.ErrRunSkillUnavailable, http.StatusUnprocessableEntity, "run.skill_unavailable", "one or more selected skills are unavailable"},
 		{runtime.ErrInvalidInput, http.StatusBadRequest, "", "invalid text run control request"},
@@ -998,6 +999,8 @@ func writeTextRunError(c *gin.Context, err error) {
 		writeError(c, http.StatusUnprocessableEntity, code, message)
 	case errors.Is(err, runtime.ErrEnvironmentBindingNotAllowed):
 		writeError(c, http.StatusUnprocessableEntity, "environment.binding_not_allowed", "environment is incompatible with this workspace")
+	case errors.Is(err, runtime.ErrRunToolProviderReceiptRequired):
+		writeError(c, http.StatusUnprocessableEntity, "run.tool_provider_receipt_required", "write or destructive tool does not provide a verifiable execution receipt")
 	case errors.Is(err, runtime.ErrRunToolUnavailable), errors.Is(err, runtime.ErrRunToolIncompatible):
 		writeError(c, http.StatusUnprocessableEntity, "run.tool_unavailable", "one or more selected tools are unavailable")
 	case errors.Is(err, runtime.ErrRunSkillUnavailable):

@@ -19,9 +19,11 @@ const (
 )
 
 type recordingToolExecutor struct {
-	calls  []ToolExecutionInput
-	output string
-	err    error
+	calls         []ToolExecutionInput
+	receiptCalls  []ToolExecutionInput
+	output        string
+	receiptResult ToolExecutionResult
+	err           error
 }
 
 func TestResolvedToolCallRejectsInvalidArgumentsBeforeApprovalOrExecution(t *testing.T) {
@@ -230,6 +232,68 @@ func assertFirewallToolEvents(t *testing.T, events []model.Event, toolCallID str
 func (e *recordingToolExecutor) Execute(_ context.Context, input ToolExecutionInput) (string, error) {
 	e.calls = append(e.calls, input)
 	return e.output, e.err
+}
+
+func (e *recordingToolExecutor) ExecuteWithReceipt(_ context.Context, input ToolExecutionInput) (ToolExecutionResult, error) {
+	e.receiptCalls = append(e.receiptCalls, input)
+	return e.receiptResult, e.err
+}
+
+func TestSnapshotResolvedRunToolRequiresProviderReceiptForWrites(t *testing.T) {
+	tool, _ := frozenFirewallTestTool(t, json.RawMessage(`{"type":"object","additionalProperties":false}`), nil, valueAlways6FAD1299)
+	tool.SideEffectLevel = ToolSideEffectWrite
+	tool.IdempotencyMode = ToolIdempotencyRequestKey
+	if _, err := snapshotResolvedRunTool(tool, 0, 1); !errors.Is(err, ErrRunToolProviderReceiptRequired) {
+		t.Fatalf("write tool without provider receipt error = %v", err)
+	}
+
+	tool.IdempotencyMode = ToolIdempotencyProviderReceipt
+	if _, err := snapshotResolvedRunTool(tool, 0, 1); err != nil {
+		t.Fatalf("write tool with provider receipt error = %v", err)
+	}
+}
+
+func TestFrozenWriteToolPersistsProviderExecutionReceipt(t *testing.T) {
+	repo := &durableFailureTestRepository{}
+	run := firewallTestRun("run_receipt")
+	call := ToolCall{ToolCallID: "call_receipt", ToolName: testFirewallToolName, ArgumentsJSON: `{}`}
+	requestID := run.RunID + ":tool:" + call.ToolCallID
+	executor := &recordingToolExecutor{receiptResult: ToolExecutionResult{
+		OutputJSON: `{"content":[],"structuredContent":{"ok":true}}`,
+		Receipt:    ToolExecutionReceipt{RequestID: requestID, ProviderExecutionID: "provider_execution_1", Disposition: ToolReceiptCommitted},
+	}}
+	engine := &Engine{cfg: StaticConfigProvider(Config{}), repo: repo, toolExecutor: executor, generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{})}
+	tool, _ := frozenFirewallTestTool(t, json.RawMessage(`{"type":"object","additionalProperties":false}`), nil, valueNever4C6E2E88)
+	tool.SideEffectLevel = ToolSideEffectWrite
+	tool.IdempotencyMode = ToolIdempotencyProviderReceipt
+	policy, err := snapshotResolvedRunTool(tool, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective := effectiveTextRunConfig{MaxToolCalls: 4, ToolPolicies: []effectiveRunToolPolicy{policy}}
+
+	result, waiting, err := engine.executeFrozenRunTool(t.Context(), run, "step_1", effective, tool, call)
+	if err != nil || waiting || result.Status != valueSuccess4D886D19 {
+		t.Fatalf("receipt tool result=%#v waiting=%v err=%v", result, waiting, err)
+	}
+	if len(executor.calls) != 0 || len(executor.receiptCalls) != 1 || executor.receiptCalls[0].RequestID != requestID {
+		t.Fatalf("executor calls=%d receiptCalls=%#v", len(executor.calls), executor.receiptCalls)
+	}
+	assertProviderReceiptEvent(t, repo.events, call.ToolCallID, "provider_execution_1", ToolReceiptCommitted)
+}
+
+func assertProviderReceiptEvent(t *testing.T, events []model.Event, toolCallID, providerExecutionID, disposition string) {
+	t.Helper()
+	for _, event := range events {
+		if event.EventType != valueToolCompleted8D0A12FD || event.ToolCallID != toolCallID {
+			continue
+		}
+		if !strings.Contains(event.PayloadJSON, `"providerExecutionID":"`+providerExecutionID+`"`) || !strings.Contains(event.PayloadJSON, `"disposition":"`+disposition+`"`) {
+			t.Fatalf("receipt missing from completed event: %s", event.PayloadJSON)
+		}
+		return
+	}
+	t.Fatal("tool.completed event missing")
 }
 
 func TestNormalizeToolArgumentsAgainstSchemaCanonicalizesAndValidates(t *testing.T) {

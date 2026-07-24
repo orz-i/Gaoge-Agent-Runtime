@@ -25,6 +25,89 @@ type ExecuteToolInput struct {
 	OnAttemptFailed func(attempt, maxAttempts int, err error) error
 }
 
+func callReceiptToolWithRetry(ctx context.Context, executor ReceiptToolExecutor, input ToolExecutionInput, retryCount int, onAttemptFailed func(int, int, error) error) (ToolExecutionResult, error) {
+	if retryCount < 0 {
+		retryCount = 0
+	}
+	var lastErr error
+	for attempt := 0; attempt <= retryCount; attempt++ {
+		result, err := executor.ExecuteWithReceipt(ctx, input)
+		if err == nil {
+			return result, nil
+		}
+		lastErr = err
+		if onAttemptFailed != nil {
+			if observeErr := onAttemptFailed(attempt+1, retryCount+1, err); observeErr != nil {
+				return ToolExecutionResult{}, observeErr
+			}
+		}
+		if attempt >= retryCount {
+			break
+		}
+		timer := time.NewTimer(time.Duration(100*(attempt+1)) * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ToolExecutionResult{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return ToolExecutionResult{}, lastErr
+}
+
+func (s *Engine) executeReceiptWithToolLimiter(ctx context.Context, limit int, fn func() (ToolExecutionResult, error)) (ToolExecutionResult, error) {
+	if fn == nil {
+		return ToolExecutionResult{}, errCategoryD364A2A615
+	}
+	if limit <= 0 {
+		return fn()
+	}
+	limiter := s.getToolLimiter(limit)
+	select {
+	case limiter <- struct{}{}:
+		defer func() { <-limiter }()
+		return fn()
+	case <-ctx.Done():
+		return ToolExecutionResult{}, ctx.Err()
+	}
+}
+
+func (s *Engine) executeToolCallWithReceipt(ctx context.Context, input ExecuteToolInput) (ToolExecutionResult, error) {
+	toolName := strings.TrimSpace(input.ToolName)
+	if toolName == "" {
+		return ToolExecutionResult{}, errCategory3A5F699D5F
+	}
+	if strings.TrimSpace(input.ToolKey) == "" || strings.TrimSpace(input.ProviderKey) == "" {
+		return ToolExecutionResult{}, withErrorMessage(errCategory0B02F88F59, fmt.Sprintf("tool %s is not enabled for this run", toolName))
+	}
+	executor, ok := s.toolExecutor.(ReceiptToolExecutor)
+	if !ok {
+		return ToolExecutionResult{}, ErrRunToolProviderReceiptRequired
+	}
+	cfg := s.cfg.Snapshot()
+	retryCount := cfg.Tools.RetryCount
+	limit := cfg.Tools.MaxConcurrentCalls
+	if input.ExecutionLimits != nil {
+		retryCount = input.ExecutionLimits.ToolRetryCount
+		limit = input.ExecutionLimits.ToolConcurrency
+	}
+	if limit <= 0 {
+		limit = 8
+	}
+	return s.executeReceiptWithToolLimiter(ctx, limit, func() (ToolExecutionResult, error) {
+		return callReceiptToolWithRetry(ctx, executor, ToolExecutionInput{
+			ToolKey:       strings.TrimSpace(input.ToolKey),
+			ProviderKind:  strings.TrimSpace(input.ProviderKind),
+			ProviderKey:   strings.TrimSpace(input.ProviderKey),
+			ToolName:      toolName,
+			ArgumentsJSON: strings.TrimSpace(input.ArgumentsJSON),
+			Actor:         input.Actor,
+			Thread:        input.Thread,
+			RequestID:     strings.TrimSpace(input.RequestID),
+		}, retryCount, input.OnAttemptFailed)
+	})
+}
+
 func (s *Engine) executeToolCall(ctx context.Context, input ExecuteToolInput) (string, error) {
 	toolName := strings.TrimSpace(input.ToolName)
 	if toolName == "" {

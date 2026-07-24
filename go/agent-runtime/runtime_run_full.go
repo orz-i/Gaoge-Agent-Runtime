@@ -95,6 +95,7 @@ var (
 	ErrContinuationWorkerPanic          = errors.New("continuation worker panic")
 	ErrContinuationAttemptsExhausted    = errors.New("continuation attempts exhausted")
 	ErrRunToolUnavailable               = errors.New("selected tool is unavailable")
+	ErrRunToolProviderReceiptRequired   = errors.New("write or destructive tool requires provider execution receipts")
 	ErrRunSkillUnavailable              = errors.New("selected skill is unavailable")
 	ErrRunToolIncompatible              = errors.New("selected hosted tool is incompatible with the routed model protocol")
 	ErrWorkspaceSourceStale             = errors.New("workspace directive source is stale")
@@ -126,6 +127,22 @@ type StartTextRunInput struct {
 	ThreadScope                                   string
 	Workspace                                     *WorkspaceRequest
 	Delegation                                    *RunDelegationStart
+}
+
+func normalizeToolIdempotencyMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case ToolIdempotencyRequestKey:
+		return ToolIdempotencyRequestKey
+	case ToolIdempotencyProviderReceipt:
+		return ToolIdempotencyProviderReceipt
+	default:
+		return ToolIdempotencyNone
+	}
+}
+
+func toolRequiresProviderReceipt(sideEffectLevel string) bool {
+	level := strings.ToLower(strings.TrimSpace(sideEffectLevel))
+	return level == ToolSideEffectWrite || level == ToolSideEffectDestructive
 }
 
 type TextRunStartResult struct {
@@ -324,6 +341,7 @@ type effectiveRunToolPolicy struct {
 	ApprovalMode       string              `json:"approvalMode"`
 	RiskLevel          string              `json:"riskLevel"`
 	SideEffectLevel    string              `json:"sideEffectLevel"`
+	IdempotencyMode    string              `json:"idempotencyMode"`
 	HostedVariants     []HostedToolVariant `json:"hostedVariants,omitempty"`
 	RetryCount         int                 `json:"retryCount"`
 	Concurrency        int                 `json:"concurrency"`
@@ -403,16 +421,16 @@ type effectiveRunEvidenceRef struct {
 
 func fingerprintRunToolSnapshot(item effectiveRunToolPolicy) string {
 	payload := struct {
-		ToolKey, ProviderKind, ProviderKey, ModelName, OriginalName, Description, DefinitionVersion            string
-		InputSchema, OutputSchema, ExecutionMode, ApprovalCapability, ApprovalMode, RiskLevel, SideEffectLevel string
-		HostedVariants                                                                                         []HostedToolVariant
-		RetryCount, Concurrency                                                                                int
+		ToolKey, ProviderKind, ProviderKey, ModelName, OriginalName, Description, DefinitionVersion                             string
+		InputSchema, OutputSchema, ExecutionMode, ApprovalCapability, ApprovalMode, RiskLevel, SideEffectLevel, IdempotencyMode string
+		HostedVariants                                                                                                          []HostedToolVariant
+		RetryCount, Concurrency                                                                                                 int
 	}{
 		ToolKey: item.ToolKey, ProviderKind: item.ProviderKind, ProviderKey: item.ProviderKey,
 		ModelName: item.ModelName, OriginalName: item.OriginalName, Description: item.Description,
 		DefinitionVersion: item.DefinitionVersion, InputSchema: canonicalRunJSON(item.InputSchema), OutputSchema: canonicalRunJSON(item.OutputSchema),
 		ExecutionMode: item.ExecutionMode, ApprovalCapability: item.ApprovalCapability,
-		ApprovalMode: item.ApprovalMode, RiskLevel: item.RiskLevel, SideEffectLevel: item.SideEffectLevel,
+		ApprovalMode: item.ApprovalMode, RiskLevel: item.RiskLevel, SideEffectLevel: item.SideEffectLevel, IdempotencyMode: item.IdempotencyMode,
 		HostedVariants: item.HostedVariants, RetryCount: item.RetryCount, Concurrency: item.Concurrency,
 	}
 	encoded, err := json.Marshal(payload)
@@ -1099,12 +1117,16 @@ func snapshotResolvedRunTool(tool ResolvedTool, retryCount, concurrency int) (ef
 	} else {
 		mode = "activation_only"
 	}
-	validLevels := map[string]bool{valueRead3A612695: true, "staged_write": true, "write": true, "destructive": true}
+	validLevels := map[string]bool{valueRead3A612695: true, ToolSideEffectStagedWrite: true, ToolSideEffectWrite: true, ToolSideEffectDestructive: true}
 	level := strings.TrimSpace(tool.SideEffectLevel)
 	if !validLevels[level] {
 		level = valueUnknown26BF6906
 	}
-	snapshot := effectiveRunToolPolicy{ToolKey: tool.ToolKey, ProviderKind: tool.ProviderKind, ProviderKey: tool.ProviderKey, ModelName: tool.ModelName, OriginalName: tool.OriginalName, Description: tool.Description, DefinitionVersion: tool.DefinitionVersion, InputSchema: append(json.RawMessage(nil), tool.InputSchema...), OutputSchema: append(json.RawMessage(nil), tool.OutputSchema...), ExecutionMode: tool.ExecutionMode, ApprovalCapability: tool.ApprovalCapability, ApprovalMode: mode, RiskLevel: tool.RiskLevel, SideEffectLevel: level, HostedVariants: cloneHostedToolVariants(tool.HostedVariants), RetryCount: retryCount, Concurrency: concurrency}
+	idempotencyMode := normalizeToolIdempotencyMode(tool.IdempotencyMode)
+	if tool.ExecutionMode == valueLocalDispatch71FF6D47 && toolRequiresProviderReceipt(level) && idempotencyMode != ToolIdempotencyProviderReceipt {
+		return effectiveRunToolPolicy{}, ErrRunToolProviderReceiptRequired
+	}
+	snapshot := effectiveRunToolPolicy{ToolKey: tool.ToolKey, ProviderKind: tool.ProviderKind, ProviderKey: tool.ProviderKey, ModelName: tool.ModelName, OriginalName: tool.OriginalName, Description: tool.Description, DefinitionVersion: tool.DefinitionVersion, InputSchema: append(json.RawMessage(nil), tool.InputSchema...), OutputSchema: append(json.RawMessage(nil), tool.OutputSchema...), ExecutionMode: tool.ExecutionMode, ApprovalCapability: tool.ApprovalCapability, ApprovalMode: mode, RiskLevel: tool.RiskLevel, SideEffectLevel: level, IdempotencyMode: idempotencyMode, HostedVariants: cloneHostedToolVariants(tool.HostedVariants), RetryCount: retryCount, Concurrency: concurrency}
 	snapshot.Fingerprint = fingerprintRunToolSnapshot(snapshot)
 	return snapshot, nil
 }

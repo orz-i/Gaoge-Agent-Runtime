@@ -587,11 +587,11 @@ func TestCommitFrozenToolResultBreaksOnSecondDurableFailure(t *testing.T) {
 	effective := effectiveTextRunConfig{Workspace: &WorkspaceSnapshot{ExpectedArtifact: "change_set"}}
 	executionErr := markedDeterministicFailure{message: "invalid Foundation field"}
 
-	_, _, err := service.commitFrozenToolResult(t.Context(), run, "step_1", effective, tool, ToolCall{ToolCallID: durableFailureCall1, ArgumentsJSON: `{"operations":[]}`}, "", 0, executionErr)
+	_, _, err := service.commitFrozenToolResult(t.Context(), run, "step_1", effective, tool, ToolCall{ToolCallID: durableFailureCall1, ArgumentsJSON: `{"operations":[]}`}, "", 0, ToolExecutionReceipt{}, executionErr)
 	if err != nil {
 		t.Fatalf("first failure returned terminal error: %v", err)
 	}
-	_, _, err = service.commitFrozenToolResult(t.Context(), run, "step_1", effective, tool, ToolCall{ToolCallID: durableFailureCall2, ArgumentsJSON: `{"operations":[]}`}, "", 0, executionErr)
+	_, _, err = service.commitFrozenToolResult(t.Context(), run, "step_1", effective, tool, ToolCall{ToolCallID: durableFailureCall2, ArgumentsJSON: `{"operations":[]}`}, "", 0, ToolExecutionReceipt{}, executionErr)
 	if !errors.Is(err, errRepeatedDeterministicWorkspaceToolFailure) {
 		t.Fatalf("second failure error = %v", err)
 	}
