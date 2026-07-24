@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"time"
 
@@ -37,6 +38,18 @@ func (s *Store) CreateContinuationJob(_ context.Context, item *domain.Continuati
 	return &saved, reused, nil
 }
 
+func continuationRunTerminal(run domain.Run) bool {
+	if run.EndedAt != nil {
+		return true
+	}
+	switch run.Status {
+	case domain.RunStatusWaitingInput, domain.RunStatusSuspended, domain.RunStatusCompleted, domain.RunStatusFailed, domain.RunStatusCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Store) DeadLetterExpiredContinuationJob(_ context.Context, now time.Time) (*domain.ContinuationJob, error) {
 	var deadLettered *domain.ContinuationJob
 	err := s.write(func(st *state) error {
@@ -69,6 +82,95 @@ func (s *Store) GetContinuationJob(_ context.Context, jobID string) (*domain.Con
 		return nil, agentruntime.ErrNotFound
 	}
 	result := clone(item)
+	return &result, nil
+}
+
+func (s *Store) ListContinuationJobs(_ context.Context, filter domain.ContinuationJobFilter) (domain.ContinuationJobPage, error) {
+	filter = normalizedMemoryContinuationFilter(filter)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.ContinuationJob, 0, len(s.state.Continuations))
+	for _, item := range s.state.Continuations {
+		if memoryContinuationMatches(item, filter) {
+			items = append(items, clone(item))
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].JobID > items[j].JobID
+		}
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+	total := int64(len(items))
+	start := min(filter.Offset, len(items))
+	end := min(start+filter.Limit, len(items))
+	return domain.ContinuationJobPage{Items: items[start:end], Total: total}, nil
+}
+
+func normalizedMemoryContinuationFilter(filter domain.ContinuationJobFilter) domain.ContinuationJobFilter {
+	filter.TenantID = strings.TrimSpace(filter.TenantID)
+	filter.ActorID = strings.TrimSpace(filter.ActorID)
+	filter.Status = strings.TrimSpace(filter.Status)
+	filter.RunID = strings.TrimSpace(filter.RunID)
+	filter.JobID = strings.TrimSpace(filter.JobID)
+	filter.Source = strings.TrimSpace(filter.Source)
+	if filter.Limit <= 0 {
+		filter.Limit = 50
+	}
+	if filter.Limit > 200 {
+		filter.Limit = 200
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+	return filter
+}
+
+func memoryContinuationMatches(item domain.ContinuationJob, filter domain.ContinuationJobFilter) bool {
+	return matchesContinuationValue(filter.TenantID, item.Actor.TenantID) &&
+		matchesContinuationValue(filter.ActorID, item.Actor.ActorID) &&
+		matchesContinuationValue(filter.Status, item.Status) &&
+		matchesContinuationValue(filter.RunID, item.RunID) &&
+		matchesContinuationValue(filter.JobID, item.JobID) &&
+		matchesContinuationValue(filter.Source, item.Source)
+}
+
+func matchesContinuationValue(filter, value string) bool {
+	return filter == "" || filter == value
+}
+
+func (s *Store) RequeueDeadLetterContinuationJob(_ context.Context, jobID string, availableAt time.Time) (*domain.ContinuationJob, error) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" || availableAt.IsZero() {
+		return nil, agentruntime.ErrInvalidInput
+	}
+	var saved domain.ContinuationJob
+	err := s.write(func(st *state) error {
+		item, ok := st.Continuations[jobID]
+		if !ok || item.Status != domain.ContinuationJobDeadLetter {
+			return agentruntime.ErrContinuationJobConflict
+		}
+		run, ok := st.Runs[item.RunID]
+		if !ok || run.Actor != item.Actor {
+			return agentruntime.ErrNotFound
+		}
+		if continuationRunTerminal(run) {
+			return agentruntime.ErrContinuationRunTerminal
+		}
+		item.Status = domain.ContinuationJobQueued
+		item.AttemptCount = 0
+		item.AvailableAt = availableAt
+		item.LeaseOwner, item.LeaseExpiresAt, item.HeartbeatAt = "", nil, nil
+		item.LastError = ""
+		item.UpdatedAt = availableAt
+		st.Continuations[jobID] = clone(item)
+		saved = item
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := clone(saved)
 	return &result, nil
 }
 

@@ -28,6 +28,8 @@ type Store interface {
 type ContinuationJobStore interface {
 	CreateContinuationJob(context.Context, *domain.ContinuationJob) (*domain.ContinuationJob, bool, error)
 	GetContinuationJob(context.Context, string) (*domain.ContinuationJob, error)
+	ListContinuationJobs(context.Context, domain.ContinuationJobFilter) (domain.ContinuationJobPage, error)
+	RequeueDeadLetterContinuationJob(context.Context, string, time.Time) (*domain.ContinuationJob, error)
 	DeadLetterExpiredContinuationJob(context.Context, time.Time) (*domain.ContinuationJob, error)
 	ClaimNextContinuationJob(context.Context, string, time.Time, time.Time) (*domain.ContinuationJob, error)
 	HeartbeatContinuationJob(context.Context, string, string, time.Time, time.Time) error

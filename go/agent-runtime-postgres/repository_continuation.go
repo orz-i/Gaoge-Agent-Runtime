@@ -13,6 +13,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const continuationColumnAttemptCount = "attempt_count"
+
 func (r *Repository) CreateContinuationJob(ctx context.Context, item *domain.ContinuationJob) (*domain.ContinuationJob, bool, error) {
 	if !validContinuationJob(item) {
 		return nil, false, agentruntime.ErrInvalidInput
@@ -102,9 +104,127 @@ func (r *Repository) DeadLetterExpiredContinuationJob(ctx context.Context, now t
 	return &item, nil
 }
 
+func requeueDeadLetterContinuationJobTx(tx *gorm.DB, jobID string, availableAt time.Time, row *models.ContinuationJobRecord) error {
+	if err := loadRecoverableDeadLetterContinuation(tx, jobID, row); err != nil {
+		return err
+	}
+	result := tx.Model(&models.ContinuationJobRecord{}).
+		Where("id = ? AND status = ?", row.ID, domain.ContinuationJobDeadLetter).
+		Updates(map[string]interface{}{
+			columnStatus:                   domain.ContinuationJobQueued,
+			continuationColumnAttemptCount: 0,
+			"available_at":                 availableAt,
+			columnLeaseOwner:               "",
+			columnLeaseExpiresAt:           nil,
+			columnHeartbeatAt:              nil,
+			columnLastError:                "",
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return agentruntime.ErrContinuationJobConflict
+	}
+	return tx.Where("id = ?", row.ID).Take(row).Error
+}
+
+func loadRecoverableDeadLetterContinuation(tx *gorm.DB, jobID string, row *models.ContinuationJobRecord) error {
+	if err := tx.Where("job_id = ?", jobID).Take(row).Error; err != nil {
+		return err
+	}
+	if row.Status != domain.ContinuationJobDeadLetter {
+		return agentruntime.ErrContinuationJobConflict
+	}
+	var run models.RunRecord
+	if err := tx.Where("run_id = ? AND tenant_id = ? AND actor_id = ?", row.RunID, row.TenantID, row.ActorID).Take(&run).Error; err != nil {
+		return err
+	}
+	if continuationRunRecordIsTerminal(run) {
+		return agentruntime.ErrContinuationRunTerminal
+	}
+	return nil
+}
+
+func continuationRunRecordIsTerminal(run models.RunRecord) bool {
+	return run.EndedAt != nil || isTerminalRunStatus(run.Status) || run.Status == domain.RunStatusWaitingInput || run.Status == domain.RunStatusSuspended
+}
+
 func (r *Repository) GetContinuationJob(ctx context.Context, jobID string) (*domain.ContinuationJob, error) {
 	var row models.ContinuationJobRecord
 	if err := r.dbFor(ctx).Where("job_id = ?", strings.TrimSpace(jobID)).Take(&row).Error; err != nil {
+		return nil, translateError(err)
+	}
+	item := toContinuationJobDomain(row)
+	return &item, nil
+}
+
+func (r *Repository) ListContinuationJobs(ctx context.Context, filter domain.ContinuationJobFilter) (domain.ContinuationJobPage, error) {
+	filter = normalizedContinuationJobFilter(filter)
+	query := continuationJobFilterQuery(r.dbFor(ctx).Model(&models.ContinuationJobRecord{}), filter)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return domain.ContinuationJobPage{}, translateError(err)
+	}
+	var rows []models.ContinuationJobRecord
+	if err := query.Order("updated_at DESC,id DESC").Limit(filter.Limit).Offset(filter.Offset).Find(&rows).Error; err != nil {
+		return domain.ContinuationJobPage{}, translateError(err)
+	}
+	items := make([]domain.ContinuationJob, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toContinuationJobDomain(row))
+	}
+	return domain.ContinuationJobPage{Items: items, Total: total}, nil
+}
+
+func normalizedContinuationJobFilter(filter domain.ContinuationJobFilter) domain.ContinuationJobFilter {
+	filter.TenantID = strings.TrimSpace(filter.TenantID)
+	filter.ActorID = strings.TrimSpace(filter.ActorID)
+	filter.Status = strings.TrimSpace(filter.Status)
+	filter.RunID = strings.TrimSpace(filter.RunID)
+	filter.JobID = strings.TrimSpace(filter.JobID)
+	filter.Source = strings.TrimSpace(filter.Source)
+	if filter.Limit <= 0 {
+		filter.Limit = 50
+	}
+	if filter.Limit > 200 {
+		filter.Limit = 200
+	}
+	if filter.Offset < 0 {
+		filter.Offset = 0
+	}
+	return filter
+}
+
+func continuationJobFilterQuery(query *gorm.DB, filter domain.ContinuationJobFilter) *gorm.DB {
+	filters := []struct {
+		value  string
+		column string
+	}{
+		{value: filter.TenantID, column: "tenant_id"},
+		{value: filter.ActorID, column: "actor_id"},
+		{value: filter.Status, column: columnStatus},
+		{value: filter.RunID, column: "run_id"},
+		{value: filter.JobID, column: "job_id"},
+		{value: filter.Source, column: "source"},
+	}
+	for _, item := range filters {
+		if item.value != "" {
+			query = query.Where(item.column+" = ?", item.value)
+		}
+	}
+	return query
+}
+
+func (r *Repository) RequeueDeadLetterContinuationJob(ctx context.Context, jobID string, availableAt time.Time) (*domain.ContinuationJob, error) {
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" || availableAt.IsZero() {
+		return nil, agentruntime.ErrInvalidInput
+	}
+	var row models.ContinuationJobRecord
+	err := r.within(ctx, func(txCtx context.Context) error {
+		return requeueDeadLetterContinuationJobTx(r.dbFor(txCtx), jobID, availableAt, &row)
+	})
+	if err != nil {
 		return nil, translateError(err)
 	}
 	item := toContinuationJobDomain(row)
@@ -134,12 +254,12 @@ func (r *Repository) ClaimNextContinuationJob(ctx context.Context, owner string,
 		}
 		result := tx.Model(&models.ContinuationJobRecord{}).Where("id = ? AND attempt_count < max_attempts", claimed.ID).
 			Updates(map[string]interface{}{
-				columnStatus:         domain.ContinuationJobRunning,
-				columnLeaseOwner:     owner,
-				columnLeaseExpiresAt: leaseUntil,
-				columnHeartbeatAt:    now,
-				"attempt_count":      gorm.Expr("attempt_count + 1"),
-				columnLastError:      "",
+				columnStatus:                   domain.ContinuationJobRunning,
+				columnLeaseOwner:               owner,
+				columnLeaseExpiresAt:           leaseUntil,
+				columnHeartbeatAt:              now,
+				continuationColumnAttemptCount: gorm.Expr(continuationColumnAttemptCount + " + 1"),
+				columnLastError:                "",
 			})
 		if result.Error != nil {
 			return result.Error

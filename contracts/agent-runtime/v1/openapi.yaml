@@ -433,10 +433,56 @@ paths:
                 $ref: '#/components/schemas/Evidence'
         default:
           $ref: '#/components/responses/Error'
+  /admin/agentruntime/continuations:
+    get:
+      operationId: listContinuationJobs
+      parameters:
+        - {name: tenantID, in: query, required: false, schema: {type: string}}
+        - {name: actorID, in: query, required: false, schema: {type: string}}
+        - {name: status, in: query, required: false, schema: {type: string, enum: [queued, running, retry_wait, completed, dead_letter]}}
+        - {name: runID, in: query, required: false, schema: {type: string}}
+        - {name: jobID, in: query, required: false, schema: {type: string}}
+        - {name: source, in: query, required: false, schema: {type: string}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 0, maximum: 200, default: 50}}
+        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        '200':
+          description: Operator view of durable continuation jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContinuationJobPage'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/agentruntime/continuations/{jobID}/requeue:
+    post:
+      operationId: requeueContinuationJob
+      parameters:
+        - $ref: '#/components/parameters/ContinuationJobID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequeueContinuationRequest'
+      responses:
+        '200':
+          description: Requeued recoverable continuation job
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContinuationJob'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     RunID:
       name: runID
+      in: path
+      required: true
+      schema: {type: string}
+    ContinuationJobID:
+      name: jobID
       in: path
       required: true
       schema: {type: string}
@@ -712,6 +758,64 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Run'
+    ContinuationJobPage:
+      type: object
+      additionalProperties: false
+      required: [total, results]
+      properties:
+        total: {type: integer, format: int64, minimum: 0}
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContinuationJob'
+    ContinuationJob:
+      type: object
+      additionalProperties: false
+      required:
+        - jobID
+        - segmentFingerprint
+        - runID
+        - checkpointID
+        - tenantID
+        - actorID
+        - source
+        - status
+        - recoverable
+        - reservationAmountNanousd
+        - attemptCount
+        - maxAttempts
+        - availableAt
+        - createdAt
+        - updatedAt
+      properties:
+        jobID: {type: string}
+        segmentFingerprint: {type: string}
+        runID: {type: string}
+        checkpointID: {type: string}
+        tenantID: {type: string}
+        actorID: {type: string}
+        source: {type: string}
+        status: {type: string, enum: [queued, running, retry_wait, completed, dead_letter]}
+        runStatus: {type: string}
+        recoverable: {type: boolean}
+        recoveryBlockReason: {type: string}
+        reservationAmountNanousd: {type: integer, format: int64}
+        reservationRefNo: {type: string}
+        attemptCount: {type: integer, minimum: 0}
+        maxAttempts: {type: integer, minimum: 1}
+        availableAt: {type: string, format: date-time}
+        leaseOwner: {type: string}
+        leaseExpiresAt: {type: string, format: date-time}
+        heartbeatAt: {type: string, format: date-time}
+        lastErrorSummary: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    RequeueContinuationRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 3, maxLength: 500}
     CancelRunResponse:
       type: object
       additionalProperties: false

@@ -92,7 +92,7 @@ func RunStore(t *testing.T, factory StoreFactory) {
 
 	t.Run("continuation jobs are idempotent leased and reclaimable", func(t *testing.T) {
 		const checkpointID = "checkpoint-1"
-		store, actor, _, run := seeded(t, factory)
+		store, actor, thread, run := seeded(t, factory)
 		ctx := context.Background()
 		now := time.Now().UTC()
 		job := domain.ContinuationJob{JobID: "continuation-1", SegmentKey: "segment-1", RunID: run.RunID, CheckpointID: checkpointID, Actor: actor, Source: "conformance", Status: domain.ContinuationJobQueued, ReservationAmountNanousd: 42, ReservationRefNo: "reservation-1", MaxAttempts: 3, AvailableAt: now}
@@ -157,6 +157,28 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		exhaustedView, err := store.GetContinuationJob(ctx, exhausted.JobID)
 		if err != nil || exhaustedView.Status != domain.ContinuationJobDeadLetter {
 			t.Fatalf("exhausted continuation = %+v,%v", exhaustedView, err)
+		}
+		page, err := store.ListContinuationJobs(ctx, domain.ContinuationJobFilter{RunID: run.RunID, Status: domain.ContinuationJobDeadLetter, Limit: 1})
+		if err != nil || page.Total != 2 || len(page.Items) != 1 {
+			t.Fatalf("list dead-letter continuations = %+v,%v", page, err)
+		}
+		requeuedAt := now.Add(3 * time.Second)
+		requeued, err := store.RequeueDeadLetterContinuationJob(ctx, exhausted.JobID, requeuedAt)
+		if err != nil || requeued.Status != domain.ContinuationJobQueued || requeued.AttemptCount != 0 || !requeued.AvailableAt.Equal(requeuedAt) || requeued.LastError != "" {
+			t.Fatalf("requeue continuation = %+v,%v", requeued, err)
+		}
+		recoveryClaim, err := store.ClaimNextContinuationJob(ctx, "recovery-worker", requeuedAt, requeuedAt.Add(time.Minute))
+		if err != nil || recoveryClaim.JobID != exhausted.JobID || recoveryClaim.AttemptCount != 1 {
+			t.Fatalf("claim requeued continuation = %+v,%v", recoveryClaim, err)
+		}
+		if err = store.RetryContinuationJob(ctx, recoveryClaim.JobID, "recovery-worker", "still failing", requeuedAt.Add(time.Second), true); err != nil {
+			t.Fatalf("dead-letter requeued continuation: %v", err)
+		}
+		if _, _, _, err = store.FinalizeRun(ctx, domain.TerminalIntent{Actor: actor, Thread: thread, RunID: run.RunID, Outcome: domain.TerminalFailed, CurrentStepID: "step-1", Summary: "terminal"}); err != nil {
+			t.Fatalf("finalize continuation run: %v", err)
+		}
+		if _, err = store.RequeueDeadLetterContinuationJob(ctx, exhausted.JobID, requeuedAt.Add(2*time.Second)); !errors.Is(err, agentruntime.ErrContinuationRunTerminal) {
+			t.Fatalf("terminal continuation requeue error = %v", err)
 		}
 	})
 }

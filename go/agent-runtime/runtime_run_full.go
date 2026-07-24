@@ -90,6 +90,7 @@ var (
 	ErrPlanRevisionLimit                = errors.New("plan revision limit reached")
 	ErrRunQueueConflict                 = errors.New("run queue conflict")
 	ErrContinuationJobConflict          = errors.New("continuation job conflict")
+	ErrContinuationRunTerminal          = errors.New("continuation run is terminal")
 	ErrContinuationDeadLetter           = errors.New("continuation job exhausted")
 	ErrContinuationWorkerPanic          = errors.New("continuation worker panic")
 	ErrContinuationAttemptsExhausted    = errors.New("continuation attempts exhausted")

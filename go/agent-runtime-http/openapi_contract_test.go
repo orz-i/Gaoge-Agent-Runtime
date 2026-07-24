@@ -25,6 +25,8 @@ const (
 	openAPIQueueID    = "queueID"
 	openAPIOutputID   = "outputID"
 	openAPIVersion    = "version"
+	openAPIJobID      = "jobID"
+	openAPITenantID   = "tenantID"
 )
 
 func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
@@ -62,6 +64,8 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 		"GET /outputs/{outputID}/versions/{version}/preview":      {status: "200", parameters: []string{openAPIOutputID, openAPIVersion}},
 		"GET /outputs/{outputID}/versions/{version}/download":     {status: "200", parameters: []string{openAPIOutputID, openAPIVersion}},
 		"POST /evidence":                                          {status: "200", requestBody: "CreateEvidenceRequest"},
+		"GET /admin/agentruntime/continuations":                   {status: "200", parameters: []string{openAPITenantID, "actorID", "status", valueRunID1DA2F0B6, openAPIJobID, "source", openAPILimit, "offset"}},
+		"POST /admin/agentruntime/continuations/{jobID}/requeue":  {status: "200", requestBody: "RequeueContinuationRequest", parameters: []string{openAPIJobID}},
 	}
 
 	assertOpenAPIRouterCoverage(t, paths, expected)
@@ -83,6 +87,7 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	assertOpenAPISchemaOptional(t, schemas, "ResumeRunRequest", "checkpointID")
 	assertOpenAPISchemaRequired(t, schemas, "QueueCreateRequest", "clientQueueID")
 	assertOpenAPISchemaRequired(t, schemas, "QueueUpdateRequest", "expectedRevision")
+	assertOpenAPISchemaRequired(t, schemas, "RequeueContinuationRequest", "reason")
 	assertOpenAPISchemaReferencesExist(t, document, schemas)
 }
 
@@ -103,11 +108,13 @@ func assertOpenAPIRouterCoverage(t *testing.T, paths map[string]any, expected ma
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	NewModule(&Handler{}).RegisterRoutes(router.Group("/api/v1"))
+	module := NewModule(&Handler{})
+	module.RegisterRoutes(router.Group("/api/v1"))
+	module.RegisterAdminRoutes(router.Group("/api/v1/admin"))
 	actual := make([]string, 0, len(router.Routes()))
 	for _, route := range router.Routes() {
 		path := strings.TrimPrefix(route.Path, "/api/v1")
-		path = strings.NewReplacer(":run_id", "{runID}", ":event_id", "{eventID}", ":interaction_id", "{interactionID}", ":queue_id", "{queueID}", ":output_id", "{outputID}", ":version", "{version}").Replace(path)
+		path = strings.NewReplacer(":run_id", "{runID}", ":event_id", "{eventID}", ":interaction_id", "{interactionID}", ":queue_id", "{queueID}", ":output_id", "{outputID}", ":version", "{version}", ":job_id", "{jobID}").Replace(path)
 		key := route.Method + " " + path
 		actual = append(actual, key)
 		if _, ok := expected[key]; !ok {

@@ -51,3 +51,27 @@ func TestRunFirstRouteInventoryContract(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminContinuationRouteInventoryContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	NewModule(&Handler{}).RegisterAdminRoutes(engine.Group("/api/v1/admin"))
+	want := []string{
+		"GET /api/v1/admin/agentruntime/continuations",
+		"POST /api/v1/admin/agentruntime/continuations/:job_id/requeue",
+	}
+	got := make([]string, 0, len(engine.Routes()))
+	for _, route := range engine.Routes() {
+		got = append(got, route.Method+" "+route.Path)
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if len(got) != len(want) {
+		t.Fatalf("route count = %d, want %d: %v", len(got), len(want), got)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("route[%d] = %q, want %q", index, got[index], want[index])
+		}
+	}
+}

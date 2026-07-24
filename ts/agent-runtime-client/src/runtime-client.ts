@@ -1,5 +1,5 @@
 import type {
-  EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
+  ContinuationJobDTO, ContinuationJobFilterDTO, ContinuationJobPageDTO, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
   OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
   RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RuntimeEvidenceSelectionDTO,
   RuntimeEvidenceSourceDTO, StartTextRunRequest, StartTextRunResult, TextRunDetailDTO,
@@ -47,6 +47,7 @@ export class RuntimeClient {
   readonly evidence;
   readonly queue;
   readonly workbench;
+  readonly admin;
   private readonly fetcher: typeof globalThis.fetch;
   private readonly maxStreamRetries: number;
 
@@ -90,6 +91,12 @@ export class RuntimeClient {
       interruptAndSend:(thread:{kind:string;id:string},id:string,request?:RequestOptions)=>this.request<RunQueueItemDTO>(`/run-queue/${pathPart(id)}/interrupt-and-send?threadKind=${pathPart(thread.kind)}&threadID=${pathPart(thread.id)}`,{method:"POST"},request),
     };
     this.workbench = { get:async(runID:string,request?:RequestOptions)=>{const view=await this.request<Omit<WorkbenchDTO,"outputs">&{outputs:OutputWireDTO[]}>(`/runs/${pathPart(runID)}/workbench`,{},request);return{...view,outputs:(view.outputs??[]).map(outputFromWire)}} };
+    this.admin = {
+      continuations: {
+        list:(options:ContinuationJobFilterDTO&RequestOptions={})=>{const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined&&value!=="")q.set(key,String(value))}return this.request<ContinuationJobPageDTO>(`/admin/agentruntime/continuations${q.size?`?${q}`:""}`,{},options)},
+        requeue:(jobID:string,payload:{reason:string},request?:RequestOptions)=>this.request<ContinuationJobDTO>(`/admin/agentruntime/continuations/${pathPart(jobID)}/requeue`,{method:"POST",body:JSON.stringify(payload)},request),
+      },
+    };
   }
 
   private async headers(): Promise<Headers> { const source=typeof this.options.headers==="function"?await this.options.headers():this.options.headers;const headers=new Headers(source);headers.set("Accept","application/json");return headers }

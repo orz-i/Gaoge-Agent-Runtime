@@ -20,6 +20,89 @@ const (
 	continuationHeartbeatTimeout = 5 * time.Second
 )
 
+const (
+	continuationRecoveryReady       = "ready"
+	continuationRecoveryNotDead     = "not_dead_letter"
+	continuationRecoveryRunTerminal = "run_terminal"
+	continuationRecoveryRunMissing  = "run_missing"
+)
+
+type ContinuationJobInspection struct {
+	Job                 model.ContinuationJob
+	RunStatus           string
+	Recoverable         bool
+	RecoveryBlockReason string
+}
+
+type ContinuationJobInspectionPage struct {
+	Items []ContinuationJobInspection
+	Total int64
+}
+
+type RequeueDeadLetterContinuationInput struct {
+	Actor     model.ActorRef
+	JobID     string
+	Reason    string
+	RequestID string
+}
+
+func (s *Engine) ListContinuationJobs(ctx context.Context, filter model.ContinuationJobFilter) (ContinuationJobInspectionPage, error) {
+	if s == nil || s.repo == nil {
+		return ContinuationJobInspectionPage{}, ErrInvalidInput
+	}
+	page, err := s.repo.ListContinuationJobs(ctx, filter)
+	if err != nil {
+		return ContinuationJobInspectionPage{}, err
+	}
+	result := ContinuationJobInspectionPage{Items: make([]ContinuationJobInspection, 0, len(page.Items)), Total: page.Total}
+	for _, job := range page.Items {
+		result.Items = append(result.Items, s.inspectContinuationJob(ctx, job))
+	}
+	return result, nil
+}
+
+func (s *Engine) inspectContinuationJob(ctx context.Context, job model.ContinuationJob) ContinuationJobInspection {
+	result := ContinuationJobInspection{Job: job, RecoveryBlockReason: continuationRecoveryNotDead}
+	run, err := s.repo.GetRun(ctx, job.Actor, job.RunID)
+	if err != nil || run == nil {
+		result.RecoveryBlockReason = continuationRecoveryRunMissing
+		return result
+	}
+	result.RunStatus = run.Status
+	if job.Status != model.ContinuationJobDeadLetter {
+		return result
+	}
+	if continuationRunDoesNotExecute(*run) {
+		result.RecoveryBlockReason = continuationRecoveryRunTerminal
+		return result
+	}
+	result.Recoverable = true
+	result.RecoveryBlockReason = continuationRecoveryReady
+	return result
+}
+
+func (s *Engine) RequeueDeadLetterContinuationJob(ctx context.Context, input RequeueDeadLetterContinuationInput) (*ContinuationJobInspection, error) {
+	input.JobID = strings.TrimSpace(input.JobID)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if s == nil || s.repo == nil || !validActorRef(input.Actor) || input.JobID == "" || len([]rune(input.Reason)) < 3 || len([]rune(input.Reason)) > 500 {
+		return nil, ErrInvalidInput
+	}
+	job, err := s.repo.RequeueDeadLetterContinuationJob(ctx, input.JobID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if s.auditWriter != nil {
+		s.auditWriter.Write(ctx, strings.TrimSpace(input.RequestID), input.Actor, "agent_runtime.continuation_requeued", model.ThreadRef{Kind: "run", ID: job.RunID}, "", "", map[string]interface{}{
+			"job_id":        job.JobID,
+			"checkpoint_id": job.CheckpointID,
+			"reason":        input.Reason,
+		})
+	}
+	s.wakeContinuationJobs()
+	inspection := s.inspectContinuationJob(ctx, *job)
+	return &inspection, nil
+}
+
 func (s *Engine) createContinuationJob(ctx context.Context, run model.Run, checkpoint model.Checkpoint, source string, reservation *UsageBalanceReservation) error {
 	continuation, err := decodeRunContinuation(checkpoint)
 	if err != nil {

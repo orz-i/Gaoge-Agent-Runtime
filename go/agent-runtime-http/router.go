@@ -36,3 +36,13 @@ func (m *Module) RegisterRoutes(auth *gin.RouterGroup) {
 	routes.GET("/outputs/:output_id/versions/:version/download", m.Handler.DownloadOutput)
 	routes.POST("/evidence", m.Handler.CreateEvidence)
 }
+
+func (m *Module) RegisterAdminRoutes(admin *gin.RouterGroup) {
+	routes := admin.Group("/agentruntime")
+	routes.Use(func(c *gin.Context) {
+		c.Set(requestIDContextKey, m.Handler.requestID(c))
+		c.Next()
+	})
+	routes.GET("/continuations", m.Handler.ListContinuationJobs)
+	routes.POST("/continuations/:job_id/requeue", m.Handler.RequeueDeadLetterContinuationJob)
+}

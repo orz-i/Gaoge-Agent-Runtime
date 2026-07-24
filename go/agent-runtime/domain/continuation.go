@@ -25,3 +25,19 @@ type ContinuationJob struct {
 	LastError                              string
 	CreatedAt, UpdatedAt                   time.Time
 }
+
+type ContinuationJobFilter struct {
+	TenantID string
+	ActorID  string
+	Status   string
+	RunID    string
+	JobID    string
+	Source   string
+	Limit    int
+	Offset   int
+}
+
+type ContinuationJobPage struct {
+	Items []ContinuationJob
+	Total int64
+}

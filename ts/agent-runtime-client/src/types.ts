@@ -144,3 +144,41 @@ export type RunQueueStatus = "queued" | "dispatching" | "started" | "failed" | "
 export type RunQueueRequestDTO = Omit<StartTextRunRequest, "clientRunID">;
 export type RunQueueItemDTO = { queueID: string; clientQueueID: string; thread: { kind: string; id: string }; status: RunQueueStatus; position: number; revision: number; attemptCount: number; request: RunQueueRequestDTO; anchorRunID?: string; startedRunID?: string; errorCode?: string; errorMessage?: string; nextAttemptAt?: string; createdAt: string; updatedAt: string };
 
+export type ContinuationJobStatus = "queued" | "running" | "retry_wait" | "completed" | "dead_letter";
+export type ContinuationRecoveryBlockReason = "ready" | "not_dead_letter" | "run_terminal" | "run_missing" | string;
+export type ContinuationJobDTO = {
+  jobID: string;
+  segmentFingerprint: string;
+  runID: string;
+  checkpointID: string;
+  tenantID: string;
+  actorID: string;
+  source: string;
+  status: ContinuationJobStatus;
+  runStatus?: TextRunStatus | string;
+  recoverable: boolean;
+  recoveryBlockReason?: ContinuationRecoveryBlockReason;
+  reservationAmountNanousd: number;
+  reservationRefNo?: string;
+  attemptCount: number;
+  maxAttempts: number;
+  availableAt: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  heartbeatAt?: string;
+  lastErrorSummary?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+export type ContinuationJobPageDTO = { total: number; results: ContinuationJobDTO[] };
+export type ContinuationJobFilterDTO = {
+  tenantID?: string;
+  actorID?: string;
+  status?: ContinuationJobStatus;
+  runID?: string;
+  jobID?: string;
+  source?: string;
+  limit?: number;
+  offset?: number;
+};
+
