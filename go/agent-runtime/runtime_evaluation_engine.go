@@ -155,11 +155,13 @@ func toolInputEvaluationRequest(run domain.Run, stepID string, tool ResolvedTool
 		ToolCallID:  call.ToolCallID,
 		ToolKey:     tool.ToolKey,
 		ToolName:    tool.ModelName,
-		ContentType: "application/json",
+		ContentType: evaluationContentTypeJSON,
 		PayloadJSON: call.ArgumentsJSON,
 		Metadata: map[string]string{
-			"providerKind":    tool.ProviderKind,
-			"sideEffectLevel": tool.SideEffectLevel,
+			evaluationMetadataProviderKind:    tool.ProviderKind,
+			evaluationMetadataSideEffectLevel: tool.SideEffectLevel,
+			evaluationMetadataApprovalMode:    tool.ApprovalMode,
+			evaluationMetadataIdempotencyMode: tool.IdempotencyMode,
 		},
 	}
 }
@@ -174,10 +176,10 @@ func toolOutputEvaluationRequest(run domain.Run, stepID string, tool ResolvedToo
 		ToolCallID:  call.ToolCallID,
 		ToolKey:     tool.ToolKey,
 		ToolName:    tool.ModelName,
-		ContentType: "application/json",
+		ContentType: evaluationContentTypeJSON,
 		PayloadJSON: output,
 		Metadata: map[string]string{
-			"providerKind": tool.ProviderKind,
+			evaluationMetadataProviderKind: tool.ProviderKind,
 		},
 	}
 }

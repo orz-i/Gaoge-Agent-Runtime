@@ -7,11 +7,16 @@ import (
 )
 
 const (
-	defaultEvaluationTextBytes = 2 << 20
-	defaultEvaluationJSONBytes = 8 << 20
-	evaluationContentTypeText  = "text/plain"
-	evaluationPhasePlanner     = "planner"
-	evaluationPhasePlanRepair  = "planner_repair"
+	defaultEvaluationTextBytes        = 2 << 20
+	defaultEvaluationJSONBytes        = 8 << 20
+	evaluationContentTypeText         = "text/plain"
+	evaluationContentTypeJSON         = "application/json"
+	evaluationPhasePlanner            = "planner"
+	evaluationPhasePlanRepair         = "planner_repair"
+	evaluationMetadataProviderKind    = "providerKind"
+	evaluationMetadataSideEffectLevel = "sideEffectLevel"
+	evaluationMetadataApprovalMode    = "approvalMode"
+	evaluationMetadataIdempotencyMode = "idempotencyMode"
 )
 
 // BoundaryIntegrityEvaluator enforces transport-safe boundary payloads and
