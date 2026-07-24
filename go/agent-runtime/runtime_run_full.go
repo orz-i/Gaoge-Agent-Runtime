@@ -88,6 +88,10 @@ var (
 	ErrRunRetireConflict                = errors.New("text run cannot be retired")
 	ErrPlanRevisionLimit                = errors.New("plan revision limit reached")
 	ErrRunQueueConflict                 = errors.New("run queue conflict")
+	ErrContinuationJobConflict          = errors.New("continuation job conflict")
+	ErrContinuationDeadLetter           = errors.New("continuation job exhausted")
+	ErrContinuationWorkerPanic          = errors.New("continuation worker panic")
+	ErrContinuationAttemptsExhausted    = errors.New("continuation attempts exhausted")
 	ErrRunToolUnavailable               = errors.New("selected tool is unavailable")
 	ErrRunSkillUnavailable              = errors.New("selected skill is unavailable")
 	ErrRunToolIncompatible              = errors.New("selected hosted tool is incompatible with the routed model protocol")
@@ -478,6 +482,10 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 		initialEvents := textRunInitialEvents(run, step, profile.Ref, strategy, effective.StrategyReason, initial.ContextSnapshot)
 		initialEvents = append(initialEvents, newRunEvent(run, "checkpoint.created", stepID, "Initial context checkpoint", map[string]interface{}{valueCheckpointID7923DD64: checkpoint.CheckpointID, valueKindDAA7F13C: checkpoint.Kind}, nil))
 		savedEvents, prepareErr = s.repo.CreateRunStartBundle(txCtx, &run, &step, initial.ContextSnapshot, initial.Artifacts, checkpoint, initialEvents)
+		if prepareErr != nil {
+			return prepareErr
+		}
+		prepareErr = s.createContinuationJob(txCtx, run, *checkpoint, "text_run_start", reservation)
 		return prepareErr
 	})
 	if err != nil {
@@ -488,10 +496,7 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 		return nil, err
 	}
 	s.publishRunEvents(run.RunID, savedEvents)
-	segmentCtx := context.WithValue(context.Background(), runSegmentKeyContextKey{}, startSegmentKey)
-	s.launchRunContinuation(func() {
-		s.executeRunContinuation(segmentCtx, run, step, effective, reservation, *checkpoint, "text_run_start")
-	})
+	s.wakeContinuationJobs()
 	return &TextRunStartResult{Run: run, Step: step, Projection: initial.Projection}, nil
 }
 

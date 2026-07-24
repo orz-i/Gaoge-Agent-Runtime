@@ -121,3 +121,26 @@ type RunQueueItemRecord struct {
 }
 
 func (RunQueueItemRecord) TableName() string { return "agent_queue_items" }
+
+type ContinuationJobRecord struct {
+	BaseModel
+	JobID                    string     `gorm:"size:64;not null;uniqueIndex:uk_agent_continuation_jobs_job_id"`
+	SegmentKey               string     `gorm:"size:255;not null;uniqueIndex:uk_agent_continuation_jobs_segment_key"`
+	RunID                    string     `gorm:"size:64;not null;index:idx_agent_continuation_jobs_run_id"`
+	CheckpointID             string     `gorm:"size:64;not null;index:idx_agent_continuation_jobs_checkpoint_id"`
+	TenantID                 string     `gorm:"size:64;not null;default:'default';index:idx_agent_continuation_jobs_actor,priority:1"`
+	ActorID                  string     `gorm:"size:64;not null;default:'';index:idx_agent_continuation_jobs_actor,priority:2"`
+	Source                   string     `gorm:"size:64;not null;default:''"`
+	Status                   string     `gorm:"size:32;not null;index:idx_agent_continuation_jobs_dispatch,priority:1"`
+	ReservationAmountNanousd int64      `gorm:"not null;default:0"`
+	ReservationRefNo         string     `gorm:"size:255;not null;default:''"`
+	AttemptCount             int        `gorm:"not null;default:0"`
+	MaxAttempts              int        `gorm:"not null;default:5"`
+	AvailableAt              time.Time  `gorm:"not null;index:idx_agent_continuation_jobs_dispatch,priority:2"`
+	LeaseOwner               string     `gorm:"size:128;not null;default:'';index:idx_agent_continuation_jobs_lease_owner"`
+	LeaseExpiresAt           *time.Time `gorm:"index:idx_agent_continuation_jobs_lease_expiry"`
+	HeartbeatAt              *time.Time
+	LastError                string `gorm:"type:text;not null;default:''"`
+}
+
+func (ContinuationJobRecord) TableName() string { return "agent_continuation_jobs" }

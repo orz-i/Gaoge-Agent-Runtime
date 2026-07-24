@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -133,7 +134,8 @@ func (r *multiTurnRunRepo) GetRunContextSnapshot(_ context.Context, _ model.Acto
 }
 
 type scriptedWorkspace struct {
-	calls []string
+	calls      []string
+	requestIDs []string
 }
 
 func (w *scriptedWorkspace) CompileWorkspace(context.Context, model.ActorRef, model.ThreadRef, *WorkspaceRequest, int) (*WorkspaceSnapshot, error) {
@@ -142,6 +144,7 @@ func (w *scriptedWorkspace) CompileWorkspace(context.Context, model.ActorRef, mo
 
 func (w *scriptedWorkspace) ExecuteWorkspaceTool(_ context.Context, input WorkspaceToolExecution) (string, error) {
 	w.calls = append(w.calls, input.ToolName)
+	w.requestIDs = append(w.requestIDs, input.RequestID)
 	if input.ToolName == testPublishToolName {
 		return `{
 			"projection": {
@@ -223,6 +226,10 @@ func TestExecuteRunStepChangeSetMultiTurnDSMLThenNativeTools(t *testing.T) {
 		t.Fatal("expected protocol rejection event after DSML turn")
 	}
 	assertWorkspaceCallOrder(t, workspace.calls, testReadToolName, testPublishToolName)
+	wantRequestIDs := []string{"run_cs_dsml:tool:call_read", "run_cs_dsml:tool:call_publish"}
+	if !slices.Equal(workspace.requestIDs, wantRequestIDs) {
+		t.Fatalf("workspace request IDs = %v, want %v", workspace.requestIDs, wantRequestIDs)
+	}
 }
 
 func TestExecuteDirectStrategyStopsAtWaitingInteraction(t *testing.T) {

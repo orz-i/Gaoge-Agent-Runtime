@@ -27,7 +27,7 @@ func Models() []interface{} {
 		&models.RuntimePlanRecord{}, &models.RunInteraction{}, &models.RunCheckpoint{},
 		&models.RuntimeOutputIdentityRecord{}, &models.RuntimeOutputRefRecord{},
 		&models.RuntimeWorkbenchProjectionRecord{}, &models.RuntimePhaseProjectionRecord{},
-		&models.EvidenceSelection{}, &models.RunQueueItemRecord{}, &models.ContextRecord{},
+		&models.EvidenceSelection{}, &models.RunQueueItemRecord{}, &models.ContinuationJobRecord{}, &models.ContextRecord{},
 	}
 }
 

@@ -48,6 +48,7 @@ func (s *Engine) Start(ctx context.Context) error {
 	s.started = true
 	s.startWorker(workerCtx, s.startInMemoryCacheCleanupWorker)
 	s.startWorker(workerCtx, s.startContextArtifactCleanupWorker)
+	s.startContinuationWorkers(workerCtx)
 	s.startWorker(workerCtx, s.startTextRunReconciliation)
 	s.startWorker(workerCtx, s.startRunQueueDispatcher)
 	return nil

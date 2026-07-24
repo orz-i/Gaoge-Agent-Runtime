@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime"
@@ -25,6 +26,17 @@ func (r *Repository) CreatePlanningBundle(ctx context.Context, runID, expectedSt
 		return err
 	})
 	return saved, translateError(err)
+}
+
+func (r *Repository) GetRunCheckpoint(ctx context.Context, actor domain.ActorRef, runID, checkpointID string) (*domain.Checkpoint, error) {
+	var row models.RunCheckpoint
+	err := ownedRunTable(r.dbFor(ctx), actor, "agent_checkpoints", runID).
+		Where("agent_checkpoints.checkpoint_id = ?", strings.TrimSpace(checkpointID)).Take(&row).Error
+	if err != nil {
+		return nil, translateError(err)
+	}
+	item := toCheckpointDomain(row)
+	return &item, nil
 }
 
 func createPlanningBundleTx(tx *gorm.DB, runID, expectedStatus string, plan *domain.Plan, steps []domain.Step, interaction *domain.Interaction, checkpoint *domain.Checkpoint, events []domain.Event) ([]domain.Event, error) {

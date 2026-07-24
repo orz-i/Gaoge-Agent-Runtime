@@ -3,6 +3,7 @@ package agentruntime
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -16,6 +17,15 @@ func TestNewRejectsMissingDependenciesWithoutStartingWork(t *testing.T) {
 	if !errors.Is(err, ErrMissingDependency) {
 		t.Fatalf("New() store error = %v, want %v", err, ErrMissingDependency)
 	}
+	_, err = New(StaticConfigProvider(Config{}), Dependencies{Store: lifecycleStore{}, Cache: lifecycleCache{}})
+	if !errors.Is(err, ErrMissingDependency) || !strings.Contains(err.Error(), "unit of work") {
+		t.Fatalf("New() unit of work error = %v, want missing unit of work", err)
+	}
+}
+
+type lifecycleStore struct{ Store }
+type lifecycleCache struct {
+	GenerationStreamCacheRepository
 }
 
 func TestEngineLifecycleStartsOnceAndClosesIdempotently(t *testing.T) {

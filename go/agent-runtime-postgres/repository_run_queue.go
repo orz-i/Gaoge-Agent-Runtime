@@ -126,8 +126,8 @@ func (r *Repository) ClaimNextRunQueueItem(ctx context.Context, now time.Time) (
 			Where("NOT EXISTS (SELECT 1 FROM agent_runs WHERE agent_runs.tenant_id = agent_queue_items.tenant_id AND agent_runs.actor_id = agent_queue_items.actor_id AND agent_runs.thread_kind = agent_queue_items.thread_kind AND agent_runs.thread_id = agent_queue_items.thread_id AND agent_runs.ended_at IS NULL)").
 			Where("NOT EXISTS (SELECT 1 FROM agent_queue_items AS dispatching WHERE dispatching.tenant_id = agent_queue_items.tenant_id AND dispatching.actor_id = agent_queue_items.actor_id AND dispatching.thread_kind = agent_queue_items.thread_kind AND dispatching.thread_id = agent_queue_items.thread_id AND dispatching.status = ?)", domain.QueueDispatching).
 			Order("position,id")
-		if tx.Name() == "postgres" {
-			query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+		if tx.Name() == valuePostgres7F253790 {
+			query = query.Clauses(clause.Locking{Strength: valueLockUpdate, Options: valueSkipLocked})
 		}
 		if err := query.Take(&claimed).Error; err != nil {
 			return err

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime"
@@ -42,6 +43,21 @@ func (s *Store) CreatePlanningBundle(_ context.Context, runID, expectedStatus st
 		return err
 	})
 	return clone(saved), err
+}
+
+func (s *Store) GetRunCheckpoint(_ context.Context, actor domain.ActorRef, runID, checkpointID string) (*domain.Checkpoint, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	run, ok := s.state.Runs[strings.TrimSpace(runID)]
+	if !ok || !owned(run, actor) {
+		return nil, agentruntime.ErrNotFound
+	}
+	item, ok := s.state.Checkpoints[run.RunID][strings.TrimSpace(checkpointID)]
+	if !ok {
+		return nil, agentruntime.ErrNotFound
+	}
+	result := clone(item)
+	return &result, nil
 }
 
 func (s *Store) GetCurrentPlan(_ context.Context, actor domain.ActorRef, runID string) (*domain.Plan, error) {

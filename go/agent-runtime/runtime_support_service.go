@@ -86,39 +86,39 @@ type basicServiceBillingContext struct {
 
 // Engine owns Agent Runtime orchestration and durable runtime facts.
 type Engine struct {
-	cfg                   ConfigProvider
-	repo                  Store
-	threadContext         ThreadContextSource
-	projectionContent     ProjectionContentSource
-	turnProjections       TurnProjectionWriter
-	attachments           AttachmentResolver
-	settingsRepo          ActorSettingsSource
-	cache                 GenerationStreamCacheRepository
-	llmGateway            TextModelGateway
-	memoryRecorder        Memory
-	toolCatalog           ToolCatalog
-	toolExecutor          ToolExecutor
-	workspaces            WorkspaceRegistry
-	embeddingSvc          EmbeddingPort
-	ragSvc                RetrievalPort
-	skillResolver         SkillResolver
-	environmentProfiles   EnvironmentProfileResolver
-	unitOfWork            UnitOfWork
-	billingSvc            Billing
-	auditWriter           AuditWriter
-	logger                Logger
-	tracer                Tracer
-	toolLimiters          sync.Map
-	generationStreams     *generationStreamRegistry
-	continuationScheduler ContinuationScheduler
-	runQueueWake          chan struct{}
-	userMemCache          sync.Map // actor ref key → cached memories
-	userSettingCache      sync.Map // actor ref + key → cached setting
-	lifecycleMu           sync.Mutex
-	workerCancel          context.CancelFunc
-	workerWG              sync.WaitGroup
-	started               bool
-	closed                bool
+	cfg                 ConfigProvider
+	repo                Store
+	threadContext       ThreadContextSource
+	projectionContent   ProjectionContentSource
+	turnProjections     TurnProjectionWriter
+	attachments         AttachmentResolver
+	settingsRepo        ActorSettingsSource
+	cache               GenerationStreamCacheRepository
+	llmGateway          TextModelGateway
+	memoryRecorder      Memory
+	toolCatalog         ToolCatalog
+	toolExecutor        ToolExecutor
+	workspaces          WorkspaceRegistry
+	embeddingSvc        EmbeddingPort
+	ragSvc              RetrievalPort
+	skillResolver       SkillResolver
+	environmentProfiles EnvironmentProfileResolver
+	unitOfWork          UnitOfWork
+	billingSvc          Billing
+	auditWriter         AuditWriter
+	logger              Logger
+	tracer              Tracer
+	toolLimiters        sync.Map
+	generationStreams   *generationStreamRegistry
+	continuationWake    chan struct{}
+	runQueueWake        chan struct{}
+	userMemCache        sync.Map // actor ref key → cached memories
+	userSettingCache    sync.Map // actor ref + key → cached setting
+	lifecycleMu         sync.Mutex
+	workerCancel        context.CancelFunc
+	workerWG            sync.WaitGroup
+	started             bool
+	closed              bool
 }
 
 func (s *Engine) llmAttribution() (string, string) {
@@ -223,35 +223,35 @@ func New(cfg ConfigProvider, deps Dependencies) (*Engine, error) {
 	if deps.Cache == nil {
 		return nil, fmt.Errorf("%w: generation stream cache", ErrMissingDependency)
 	}
-	if deps.ContinuationScheduler == nil {
-		return nil, fmt.Errorf("%w: continuation scheduler", ErrMissingDependency)
+	if deps.UnitOfWork == nil {
+		return nil, fmt.Errorf("%w: unit of work", ErrMissingDependency)
 	}
 	svc := &Engine{
-		cfg:                   cfg,
-		repo:                  deps.Store,
-		threadContext:         deps.ThreadContext,
-		projectionContent:     deps.ProjectionContent,
-		turnProjections:       deps.TurnProjections,
-		attachments:           deps.Attachments,
-		settingsRepo:          deps.Settings,
-		cache:                 deps.Cache,
-		llmGateway:            deps.TextModelGateway,
-		memoryRecorder:        deps.Memory,
-		toolCatalog:           deps.ToolCatalog,
-		toolExecutor:          deps.ToolExecutor,
-		workspaces:            deps.Workspaces,
-		embeddingSvc:          deps.Knowledge.Embedding,
-		ragSvc:                deps.Knowledge.Retrieval,
-		skillResolver:         deps.Skills,
-		environmentProfiles:   deps.EnvironmentProfiles,
-		unitOfWork:            deps.UnitOfWork,
-		billingSvc:            deps.Billing,
-		auditWriter:           deps.Audit,
-		logger:                deps.Logger,
-		tracer:                deps.Tracer,
-		continuationScheduler: deps.ContinuationScheduler,
-		generationStreams:     newGenerationStreamRegistry(deps.Cache, defaultGenerationStreamOptions()),
-		runQueueWake:          make(chan struct{}, 1),
+		cfg:                 cfg,
+		repo:                deps.Store,
+		threadContext:       deps.ThreadContext,
+		projectionContent:   deps.ProjectionContent,
+		turnProjections:     deps.TurnProjections,
+		attachments:         deps.Attachments,
+		settingsRepo:        deps.Settings,
+		cache:               deps.Cache,
+		llmGateway:          deps.TextModelGateway,
+		memoryRecorder:      deps.Memory,
+		toolCatalog:         deps.ToolCatalog,
+		toolExecutor:        deps.ToolExecutor,
+		workspaces:          deps.Workspaces,
+		embeddingSvc:        deps.Knowledge.Embedding,
+		ragSvc:              deps.Knowledge.Retrieval,
+		skillResolver:       deps.Skills,
+		environmentProfiles: deps.EnvironmentProfiles,
+		unitOfWork:          deps.UnitOfWork,
+		billingSvc:          deps.Billing,
+		auditWriter:         deps.Audit,
+		logger:              deps.Logger,
+		tracer:              deps.Tracer,
+		generationStreams:   newGenerationStreamRegistry(deps.Cache, defaultGenerationStreamOptions()),
+		continuationWake:    make(chan struct{}, 1),
+		runQueueWake:        make(chan struct{}, 1),
 	}
 	return svc, nil
 }

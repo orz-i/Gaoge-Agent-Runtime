@@ -19,7 +19,20 @@ type Store interface {
 	OutputStore
 	EvidenceStore
 	QueueStore
+	ContinuationJobStore
 	WorkbenchStore
+}
+
+// ContinuationJobStore persists executable checkpoint handoffs. Enqueue calls
+// participate in the caller's UnitOfWork so checkpoint and job commit atomically.
+type ContinuationJobStore interface {
+	CreateContinuationJob(context.Context, *domain.ContinuationJob) (*domain.ContinuationJob, bool, error)
+	GetContinuationJob(context.Context, string) (*domain.ContinuationJob, error)
+	DeadLetterExpiredContinuationJob(context.Context, time.Time) (*domain.ContinuationJob, error)
+	ClaimNextContinuationJob(context.Context, string, time.Time, time.Time) (*domain.ContinuationJob, error)
+	HeartbeatContinuationJob(context.Context, string, string, time.Time, time.Time) error
+	CompleteContinuationJob(context.Context, string, string, time.Time) error
+	RetryContinuationJob(context.Context, string, string, string, time.Time, bool) error
 }
 
 type RunStore interface {
@@ -61,6 +74,7 @@ type InteractionStore interface {
 
 type CheckpointStore interface {
 	CreateRunCheckpointBundle(context.Context, *domain.Checkpoint, []domain.Event) ([]domain.Event, error)
+	GetRunCheckpoint(context.Context, domain.ActorRef, string, string) (*domain.Checkpoint, error)
 	ListRunCheckpoints(context.Context, domain.ActorRef, string) ([]domain.Checkpoint, error)
 	ResumeRun(context.Context, domain.ActorRef, string, string, string, string, string, *domain.Checkpoint, []domain.Event) (*domain.Checkpoint, *domain.Checkpoint, []domain.Event, bool, error)
 	RenewExpiredRunInteraction(context.Context, domain.ActorRef, string, string, string, string, string, *domain.Interaction, *domain.Checkpoint, []domain.Event) (*domain.Checkpoint, *domain.Checkpoint, *domain.Interaction, []domain.Event, bool, error)

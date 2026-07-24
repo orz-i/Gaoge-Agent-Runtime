@@ -14,19 +14,20 @@ import (
 )
 
 type state struct {
-	Runs         map[string]domain.Run                    `json:"runs"`
-	Steps        map[string][]domain.Step                 `json:"steps"`
-	Events       map[string][]domain.Event                `json:"events"`
-	Plans        map[string][]domain.Plan                 `json:"plans"`
-	Interactions map[string]map[string]domain.Interaction `json:"interactions"`
-	Checkpoints  map[string]map[string]domain.Checkpoint  `json:"checkpoints"`
-	Contexts     map[string]domain.ContextSnapshot        `json:"contexts"`
-	Artifacts    map[string]domain.ContextArtifact        `json:"artifacts"`
-	Outputs      map[string][]domain.OutputRef            `json:"outputs"`
-	Evidence     map[string]domain.Evidence               `json:"evidence"`
-	Queue        map[string]domain.QueueItem              `json:"queue"`
-	Workbench    map[string]domain.WorkbenchProjection    `json:"workbench"`
-	Phases       map[string][]domain.PhaseProjection      `json:"phases"`
+	Runs          map[string]domain.Run                    `json:"runs"`
+	Steps         map[string][]domain.Step                 `json:"steps"`
+	Events        map[string][]domain.Event                `json:"events"`
+	Plans         map[string][]domain.Plan                 `json:"plans"`
+	Interactions  map[string]map[string]domain.Interaction `json:"interactions"`
+	Checkpoints   map[string]map[string]domain.Checkpoint  `json:"checkpoints"`
+	Contexts      map[string]domain.ContextSnapshot        `json:"contexts"`
+	Artifacts     map[string]domain.ContextArtifact        `json:"artifacts"`
+	Outputs       map[string][]domain.OutputRef            `json:"outputs"`
+	Evidence      map[string]domain.Evidence               `json:"evidence"`
+	Queue         map[string]domain.QueueItem              `json:"queue"`
+	Continuations map[string]domain.ContinuationJob        `json:"continuations"`
+	Workbench     map[string]domain.WorkbenchProjection    `json:"workbench"`
+	Phases        map[string][]domain.PhaseProjection      `json:"phases"`
 }
 
 type Store struct {
@@ -44,7 +45,7 @@ func newState() state {
 		Plans: make(map[string][]domain.Plan), Interactions: make(map[string]map[string]domain.Interaction),
 		Checkpoints: make(map[string]map[string]domain.Checkpoint), Contexts: make(map[string]domain.ContextSnapshot),
 		Artifacts: make(map[string]domain.ContextArtifact), Outputs: make(map[string][]domain.OutputRef),
-		Evidence: make(map[string]domain.Evidence), Queue: make(map[string]domain.QueueItem),
+		Evidence: make(map[string]domain.Evidence), Queue: make(map[string]domain.QueueItem), Continuations: make(map[string]domain.ContinuationJob),
 		Workbench: make(map[string]domain.WorkbenchProjection), Phases: make(map[string][]domain.PhaseProjection),
 	}
 }

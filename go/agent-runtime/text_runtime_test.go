@@ -839,19 +839,6 @@ func assertRevisionContinuation(t *testing.T, continuation runContinuation, sour
 	}
 }
 
-func TestTextRunContinuationLauncherCanHoldCommittedWork(t *testing.T) {
-	launched, executed := false, false
-	service := &Engine{continuationScheduler: ContinuationSchedulerFunc(func(_ context.Context, task func(context.Context)) error {
-		launched = true
-		_ = task
-		return nil
-	})}
-	service.launchRunContinuation(func() { executed = true })
-	if !launched || executed {
-		t.Fatalf("launcher crash injection mismatch: launched=%v executed=%v", launched, executed)
-	}
-}
-
 func TestRunStepExecutionModeContinuesCurrentRunningStep(t *testing.T) {
 	current := model.Step{StepID: "step_current", Status: model.RunStatusRunning}
 	if execute, appendStarted := runStepExecutionMode(current, current.StepID); !execute || appendStarted {

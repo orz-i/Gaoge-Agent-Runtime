@@ -37,39 +37,26 @@ func (p staticConfigProvider) Snapshot() Config        { return p.value }
 
 // Dependencies is the complete immutable dependency set for Agent Runtime.
 type Dependencies struct {
-	Store                 Store
-	ThreadContext         ThreadContextSource
-	ProjectionContent     ProjectionContentSource
-	TurnProjections       TurnProjectionWriter
-	Attachments           AttachmentResolver
-	Settings              ActorSettingsSource
-	Cache                 GenerationStreamCacheRepository
-	TextModelGateway      TextModelGateway
-	Billing               Billing
-	Knowledge             KnowledgeDependencies
-	Memory                Memory
-	Skills                SkillResolver
-	EnvironmentProfiles   EnvironmentProfileResolver
-	UnitOfWork            UnitOfWork
-	ToolCatalog           ToolCatalog
-	ToolExecutor          ToolExecutor
-	Workspaces            WorkspaceRegistry
-	Audit                 AuditWriter
-	Logger                Logger
-	Tracer                Tracer
-	ContinuationScheduler ContinuationScheduler
-}
-
-// ContinuationScheduler hands durable continuation work to a host-controlled
-// executor. Engine never creates an implicit goroutine when scheduling work.
-type ContinuationScheduler interface {
-	Schedule(context.Context, func(context.Context)) error
-}
-
-type ContinuationSchedulerFunc func(context.Context, func(context.Context)) error
-
-func (f ContinuationSchedulerFunc) Schedule(ctx context.Context, task func(context.Context)) error {
-	return f(ctx, task)
+	Store               Store
+	ThreadContext       ThreadContextSource
+	ProjectionContent   ProjectionContentSource
+	TurnProjections     TurnProjectionWriter
+	Attachments         AttachmentResolver
+	Settings            ActorSettingsSource
+	Cache               GenerationStreamCacheRepository
+	TextModelGateway    TextModelGateway
+	Billing             Billing
+	Knowledge           KnowledgeDependencies
+	Memory              Memory
+	Skills              SkillResolver
+	EnvironmentProfiles EnvironmentProfileResolver
+	UnitOfWork          UnitOfWork
+	ToolCatalog         ToolCatalog
+	ToolExecutor        ToolExecutor
+	Workspaces          WorkspaceRegistry
+	Audit               AuditWriter
+	Logger              Logger
+	Tracer              Tracer
 }
 
 type WorkspaceSelection struct {
@@ -173,10 +160,10 @@ type WorkspaceFailurePolicy struct {
 }
 
 type WorkspaceToolExecution struct {
-	Actor                          domain.ActorRef
-	Thread                         domain.ThreadRef
-	RunID, ToolName, ArgumentsJSON string
-	Snapshot                       WorkspaceSnapshot
+	Actor                                     domain.ActorRef
+	Thread                                    domain.ThreadRef
+	RunID, RequestID, ToolName, ArgumentsJSON string
+	Snapshot                                  WorkspaceSnapshot
 }
 
 type WorkspaceProvider interface {

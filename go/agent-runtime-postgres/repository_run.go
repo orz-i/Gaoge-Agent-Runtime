@@ -343,8 +343,8 @@ func actorEventQuery(db *gorm.DB, actor domain.ActorRef, runID string) *gorm.DB 
 
 func runForUpdate(tx *gorm.DB, runID string, destination *models.RunRecord) error {
 	query := tx.Where("run_id = ?", runID)
-	if tx.Name() == "postgres" {
-		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	if tx.Name() == valuePostgres7F253790 {
+		query = query.Clauses(clause.Locking{Strength: valueLockUpdate})
 	}
 	return query.Take(destination).Error
 }

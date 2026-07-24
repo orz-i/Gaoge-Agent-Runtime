@@ -1127,21 +1127,6 @@ func validateRenewInteractionContinuation(value runContinuation) error {
 	return continuationValidationResult(valid && runInteractionSnapshotFingerprint(*interaction) == interaction.Fingerprint)
 }
 
-func (s *Engine) launchRunContinuation(task func()) {
-	if s == nil || s.continuationScheduler == nil {
-		return
-	}
-	s.lifecycleMu.Lock()
-	closed := s.closed
-	s.lifecycleMu.Unlock()
-	if closed {
-		return
-	}
-	if err := s.continuationScheduler.Schedule(context.Background(), func(context.Context) { task() }); err != nil && s.logger != nil {
-		s.logger.Error("schedule_run_continuation_failed", Error(err))
-	}
-}
-
 func newRunInteraction(run model.Run, stepID, kind string, request interface{}, ttlHours int) *model.Interaction {
 	now := time.Now()
 	expiresAt := now.Add(time.Duration(ttlHours) * time.Hour)
@@ -2422,7 +2407,7 @@ func (s *Engine) executeFrozenToolProvider(ctx context.Context, run model.Run, s
 		if !ok {
 			return "", ErrRunSnapshotIncompatible
 		}
-		output, err := provider.ExecuteWorkspaceTool(ctx, WorkspaceToolExecution{Actor: run.Actor, Thread: run.Thread, RunID: run.RunID, ToolName: tool.OriginalName, ArgumentsJSON: call.ArgumentsJSON, Snapshot: *effective.Workspace})
+		output, err := provider.ExecuteWorkspaceTool(ctx, WorkspaceToolExecution{Actor: run.Actor, Thread: run.Thread, RunID: run.RunID, RequestID: run.RunID + ":tool:" + call.ToolCallID, ToolName: tool.OriginalName, ArgumentsJSON: call.ArgumentsJSON, Snapshot: *effective.Workspace})
 		return output, classifyWorkspaceProviderError(provider, err)
 	case valueMcpCE1A7808:
 		return s.executeToolCall(ctx, ExecuteToolInput{Actor: run.Actor, Thread: run.Thread, RequestID: run.RunID + ":tool:" + call.ToolCallID, ToolKey: tool.ToolKey, ProviderKind: tool.ProviderKind, ProviderKey: tool.ProviderKey, ToolName: tool.OriginalName, ArgumentsJSON: call.ArgumentsJSON, ExecutionLimits: limits, OnAttemptFailed: func(attempt, maxAttempts int, attemptErr error) error {
@@ -3615,7 +3600,7 @@ func (s *Engine) ResolveRunInteraction(ctx context.Context, input ResolveRunInte
 			return nil, err
 		}
 	}
-	return s.commitInteractionResolution(ctx, input, prepared.run, prepared.interaction, effective, prepared.responseJSON, prepared.fingerprint, prepared.resolution, bundle, reservation)
+	return s.commitInteractionResolution(ctx, input, prepared.run, prepared.interaction, prepared.responseJSON, prepared.fingerprint, prepared.resolution, bundle, reservation)
 }
 
 type preparedInteractionResolution struct {
@@ -3701,8 +3686,30 @@ func (s *Engine) validateInteractionResolutionRuntime(ctx context.Context, run m
 	return effective, nil
 }
 
-func (s *Engine) commitInteractionResolution(ctx context.Context, input ResolveRunInteractionInput, run model.Run, interaction model.Interaction, effective effectiveTextRunConfig, responseJSON, fingerprint string, resolution interactionResolution, bundle interactionResolutionBundle, reservation *UsageBalanceReservation) (*model.Interaction, error) {
-	resolved, continuationCheckpoint, saved, applied, err := s.repo.ResolveRunInteractionWithCheckpoint(ctx, input.Actor, input.RunID, input.InteractionID, input.ClientResolveID, responseJSON, fingerprint, resolution.nextStatus, bundle.checkpoint, bundle.events)
+func (s *Engine) commitInteractionResolution(ctx context.Context, input ResolveRunInteractionInput, run model.Run, interaction model.Interaction, responseJSON, fingerprint string, resolution interactionResolution, bundle interactionResolutionBundle, reservation *UsageBalanceReservation) (*model.Interaction, error) {
+	var resolved *model.Interaction
+	var continuationCheckpoint *model.Checkpoint
+	var saved []model.Event
+	var applied bool
+	work := func(txCtx context.Context) error {
+		var resolveErr error
+		resolved, continuationCheckpoint, saved, applied, resolveErr = s.repo.ResolveRunInteractionWithCheckpoint(txCtx, input.Actor, input.RunID, input.InteractionID, input.ClientResolveID, responseJSON, fingerprint, resolution.nextStatus, bundle.checkpoint, bundle.events)
+		if resolveErr != nil || !applied || !resolution.shouldContinue {
+			return resolveErr
+		}
+		if continuationCheckpoint == nil {
+			return ErrRunSnapshotIncompatible
+		}
+		run.Status, run.PendingInteractionID = resolution.nextStatus, ""
+		resolveErr = s.createContinuationJob(txCtx, run, *continuationCheckpoint, "interaction_resolve", reservation)
+		return resolveErr
+	}
+	var err error
+	if s.unitOfWork == nil {
+		err = ErrHostProjectionUnavailable
+	} else {
+		err = s.unitOfWork.Within(ctx, work)
+	}
 	if err != nil {
 		_ = s.ReleaseRunUsageReservation(ctx, reservation, "运行交互解决失败退回预扣")
 		return nil, err
@@ -3717,27 +3724,7 @@ func (s *Engine) commitInteractionResolution(ctx context.Context, input ResolveR
 		s.FinishRunNotifications(run.RunID)
 		return resolved, nil
 	}
-	if continuationCheckpoint == nil {
-		_ = s.ReleaseRunUsageReservation(ctx, reservation, "运行恢复缺少后继检查点退回预扣")
-		return nil, ErrRunSnapshotIncompatible
-	}
-	root, rootErr := s.runRootStep(ctx, run.RunID)
-	if rootErr != nil {
-		s.failTextRun(context.WithoutCancel(ctx), run, run.CurrentStepID, rootErr)
-		_ = s.ReleaseRunUsageReservation(ctx, reservation, "运行恢复缺少根步骤退回预扣")
-		s.FinishRunNotifications(run.RunID)
-		return nil, rootErr
-	}
-	continuation, continuationErr := decodeRunContinuation(*continuationCheckpoint)
-	if continuationErr != nil {
-		_ = s.ReleaseRunUsageReservation(ctx, reservation, "运行恢复后继检查点不兼容退回预扣")
-		return nil, ErrRunSnapshotIncompatible
-	}
-	segmentCtx := context.WithValue(context.Background(), runSegmentKeyContextKey{}, continuation.SegmentKey)
-	run.Status, run.PendingInteractionID = resolution.nextStatus, ""
-	s.launchRunContinuation(func() {
-		s.executeRunContinuation(segmentCtx, run, root, effective, reservation, *continuationCheckpoint, "interaction_resolve")
-	})
+	s.wakeContinuationJobs()
 	return resolved, nil
 }
 
@@ -4155,7 +4142,7 @@ func (s *Engine) ResumeTextRun(ctx context.Context, input ResumeTextRunInput) (*
 	if prepared.continuation.Type == runContinuationRenewInteraction {
 		return s.renewExpiredRunInteraction(ctx, input, prepared.run, prepared.effective, prepared.checkpoint, prepared.continuation, prepared.fingerprint)
 	}
-	root, resumeStepIDs, err := s.prepareExplicitResumeSteps(ctx, prepared.run, prepared.reused)
+	_, resumeStepIDs, err := s.prepareExplicitResumeSteps(ctx, prepared.run, prepared.reused)
 	if err != nil {
 		return nil, false, err
 	}
@@ -4166,7 +4153,7 @@ func (s *Engine) ResumeTextRun(ctx context.Context, input ResumeTextRunInput) (*
 			return nil, false, err
 		}
 	}
-	return s.applyExplicitTextRunResume(ctx, input, prepared, root, resumeStepIDs, reservation)
+	return s.applyExplicitTextRunResume(ctx, input, prepared, resumeStepIDs, reservation)
 }
 
 type preparedTextRunResume struct {
@@ -4279,14 +4266,35 @@ func suspendedResumeStepIDs(steps []model.Step, currentStepID, rootStepID string
 	return result
 }
 
-func (s *Engine) applyExplicitTextRunResume(ctx context.Context, input ResumeTextRunInput, prepared preparedTextRunResume, root model.Step, resumeStepIDs []string, reservation *UsageBalanceReservation) (*model.Checkpoint, bool, error) {
+func (s *Engine) applyExplicitTextRunResume(ctx context.Context, input ResumeTextRunInput, prepared preparedTextRunResume, resumeStepIDs []string, reservation *UsageBalanceReservation) (*model.Checkpoint, bool, error) {
 	run, continuation, selectedCheckpoint := prepared.run, prepared.continuation, prepared.checkpoint
 	nextStatus := continuation.TargetStatus
 	successor := newRunContinuationCheckpoint(run, selectedCheckpoint.StepID, "resume_execution", continuation)
 	successor.CheckpointID = deterministicRunCheckpointID(run.RunID, selectedCheckpoint.CheckpointID, input.ClientResumeID, "resume_execution")
 	successor.ParentCheckpointID = selectedCheckpoint.CheckpointID
 	events := runExplicitResumeEvents(run, selectedCheckpoint, *successor, nextStatus, resumeStepIDs, continuation.Type)
-	checkpoint, continuationCheckpoint, saved, applied, err := s.repo.ResumeRun(ctx, input.Actor, input.RunID, selectedCheckpoint.CheckpointID, input.ClientResumeID, prepared.fingerprint, nextStatus, successor, events)
+	var checkpoint, continuationCheckpoint *model.Checkpoint
+	var saved []model.Event
+	var applied bool
+	work := func(txCtx context.Context) error {
+		var resumeErr error
+		checkpoint, continuationCheckpoint, saved, applied, resumeErr = s.repo.ResumeRun(txCtx, input.Actor, input.RunID, selectedCheckpoint.CheckpointID, input.ClientResumeID, prepared.fingerprint, nextStatus, successor, events)
+		if resumeErr != nil || !applied {
+			return resumeErr
+		}
+		if continuationCheckpoint == nil {
+			return ErrRunSnapshotIncompatible
+		}
+		run.Status, run.PendingInteractionID = nextStatus, ""
+		resumeErr = s.createContinuationJob(txCtx, run, *continuationCheckpoint, "explicit_resume", reservation)
+		return resumeErr
+	}
+	var err error
+	if s.unitOfWork == nil {
+		err = ErrHostProjectionUnavailable
+	} else {
+		err = s.unitOfWork.Within(ctx, work)
+	}
 	if err != nil {
 		_ = s.ReleaseRunUsageReservation(ctx, reservation, "运行显式恢复失败退回预扣")
 		return nil, false, err
@@ -4295,21 +4303,8 @@ func (s *Engine) applyExplicitTextRunResume(ctx context.Context, input ResumeTex
 		_ = s.ReleaseRunUsageReservation(ctx, reservation, "运行显式恢复幂等复用退回预扣")
 		return checkpoint, true, nil
 	}
-	if continuationCheckpoint == nil {
-		_ = s.ReleaseRunUsageReservation(ctx, reservation, "运行显式恢复缺少后继检查点退回预扣")
-		return nil, false, ErrRunSnapshotIncompatible
-	}
 	s.publishRunEvents(run.RunID, saved)
-	resumedContinuation, continuationErr := decodeRunContinuation(*continuationCheckpoint)
-	if continuationErr != nil {
-		_ = s.ReleaseRunUsageReservation(ctx, reservation, "运行显式恢复后继检查点不兼容退回预扣")
-		return nil, false, ErrRunSnapshotIncompatible
-	}
-	segmentCtx := context.WithValue(context.Background(), runSegmentKeyContextKey{}, resumedContinuation.SegmentKey)
-	run.Status, run.PendingInteractionID = nextStatus, ""
-	s.launchRunContinuation(func() {
-		s.executeRunContinuation(segmentCtx, run, root, prepared.effective, reservation, *continuationCheckpoint, "explicit_resume")
-	})
+	s.wakeContinuationJobs()
 	return checkpoint, false, nil
 }
 

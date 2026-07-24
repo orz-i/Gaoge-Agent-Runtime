@@ -89,6 +89,76 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			t.Fatalf("store leaked mutable state: %+v, %v", again, err)
 		}
 	})
+
+	t.Run("continuation jobs are idempotent leased and reclaimable", func(t *testing.T) {
+		const checkpointID = "checkpoint-1"
+		store, actor, _, run := seeded(t, factory)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		job := domain.ContinuationJob{JobID: "continuation-1", SegmentKey: "segment-1", RunID: run.RunID, CheckpointID: checkpointID, Actor: actor, Source: "conformance", Status: domain.ContinuationJobQueued, ReservationAmountNanousd: 42, ReservationRefNo: "reservation-1", MaxAttempts: 3, AvailableAt: now}
+		created, reused, err := store.CreateContinuationJob(ctx, &job)
+		if err != nil || reused || created.Status != domain.ContinuationJobQueued || created.ReservationAmountNanousd != 42 || created.ReservationRefNo != "reservation-1" {
+			t.Fatalf("create continuation = %+v,%t,%v", created, reused, err)
+		}
+		again, reused, err := store.CreateContinuationJob(ctx, &job)
+		if err != nil || !reused || again.JobID != created.JobID {
+			t.Fatalf("reuse continuation = %+v,%t,%v", again, reused, err)
+		}
+		leaseUntil := now.Add(time.Minute)
+		claimed, err := store.ClaimNextContinuationJob(ctx, "worker-1", now, leaseUntil)
+		if err != nil || claimed.Status != domain.ContinuationJobRunning || claimed.AttemptCount != 1 || claimed.LeaseOwner != "worker-1" {
+			t.Fatalf("claim continuation = %+v,%v", claimed, err)
+		}
+		if _, err = store.ClaimNextContinuationJob(ctx, "worker-2", now.Add(30*time.Second), now.Add(90*time.Second)); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("unexpired continuation was reclaimed: %v", err)
+		}
+		heartbeatAt := now.Add(45 * time.Second)
+		if err = store.HeartbeatContinuationJob(ctx, claimed.JobID, "worker-1", heartbeatAt, heartbeatAt.Add(time.Minute)); err != nil {
+			t.Fatalf("heartbeat continuation: %v", err)
+		}
+		if _, err = store.ClaimNextContinuationJob(ctx, "worker-2", now.Add(75*time.Second), now.Add(135*time.Second)); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("heartbeat lease was ignored: %v", err)
+		}
+		reclaimedAt := heartbeatAt.Add(time.Minute)
+		reclaimed, err := store.ClaimNextContinuationJob(ctx, "worker-2", reclaimedAt, reclaimedAt.Add(time.Minute))
+		if err != nil || reclaimed.AttemptCount != 2 || reclaimed.LeaseOwner != "worker-2" {
+			t.Fatalf("reclaim continuation = %+v,%v", reclaimed, err)
+		}
+		retryAt := reclaimedAt.Add(time.Second)
+		if err = store.RetryContinuationJob(ctx, reclaimed.JobID, "worker-2", "transient", retryAt, false); err != nil {
+			t.Fatalf("retry continuation: %v", err)
+		}
+		final, err := store.ClaimNextContinuationJob(ctx, "worker-3", retryAt, retryAt.Add(time.Minute))
+		if err != nil || final.AttemptCount != 3 {
+			t.Fatalf("final claim = %+v,%v", final, err)
+		}
+		if err = store.RetryContinuationJob(ctx, final.JobID, "worker-3", "exhausted", retryAt, true); err != nil {
+			t.Fatalf("dead letter continuation: %v", err)
+		}
+		if _, err = store.ClaimNextContinuationJob(ctx, "worker-4", retryAt.Add(time.Hour), retryAt.Add(2*time.Hour)); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("dead letter continuation was claimable: %v", err)
+		}
+
+		exhausted := domain.ContinuationJob{JobID: "continuation-exhausted", SegmentKey: "segment-exhausted", RunID: run.RunID, CheckpointID: checkpointID, Actor: actor, Status: domain.ContinuationJobQueued, MaxAttempts: 1, AvailableAt: now}
+		if _, _, err = store.CreateContinuationJob(ctx, &exhausted); err != nil {
+			t.Fatalf("create exhausted continuation: %v", err)
+		}
+		crashed, err := store.ClaimNextContinuationJob(ctx, "crashed-worker", now, now.Add(time.Second))
+		if err != nil || crashed.JobID != exhausted.JobID || crashed.AttemptCount != 1 {
+			t.Fatalf("claim exhausted continuation = %+v,%v", crashed, err)
+		}
+		deadLettered, err := store.DeadLetterExpiredContinuationJob(ctx, now.Add(2*time.Second))
+		if err != nil || deadLettered.JobID != exhausted.JobID || deadLettered.Status != domain.ContinuationJobDeadLetter {
+			t.Fatalf("dead letter exhausted continuation = %+v,%v", deadLettered, err)
+		}
+		if _, err = store.ClaimNextContinuationJob(ctx, "recovery-worker", now.Add(2*time.Second), now.Add(time.Minute)); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("dead-lettered continuation was reclaimed: %v", err)
+		}
+		exhaustedView, err := store.GetContinuationJob(ctx, exhausted.JobID)
+		if err != nil || exhaustedView.Status != domain.ContinuationJobDeadLetter {
+			t.Fatalf("exhausted continuation = %+v,%v", exhaustedView, err)
+		}
+	})
 }
 
 func seeded(t testing.TB, factory StoreFactory) (agentruntime.Store, domain.ActorRef, domain.ThreadRef, domain.Run) {
