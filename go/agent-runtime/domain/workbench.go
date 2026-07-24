@@ -26,6 +26,7 @@ type WorkbenchSnapshot struct {
 	Interactions []Interaction
 	Checkpoints  []Checkpoint
 	Outputs      []OutputRef
+	Handoffs     []RunHandoff
 	Projection   *WorkbenchProjection
 	Phases       []PhaseProjection
 	Events       []Event

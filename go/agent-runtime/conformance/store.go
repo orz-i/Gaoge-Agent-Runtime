@@ -181,6 +181,87 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			t.Fatalf("terminal continuation requeue error = %v", err)
 		}
 	})
+
+	t.Run("agent manifests are revisioned and handoffs are replay safe", func(t *testing.T) {
+		store, actor, _, run := seeded(t, factory)
+		ctx := context.Background()
+		manifest := domain.AgentManifest{
+			ManifestID: "agent-research", TenantID: actor.TenantID, Name: "Research agent", Description: "Collect bounded evidence",
+			Instructions: "Return a concise evidence summary.", Status: domain.AgentManifestStatusActive, ExecutionMode: "direct",
+			ToolKeys: []string{"search"}, SkillRefs: []domain.ResourceRef{{Kind: "skill", ID: "research"}}, MaxChildRuns: 2, MaxDepth: 2,
+			CreatedBy: actor, RequestID: "manifest-request-1", RequestFingerprint: "manifest-fp-1",
+		}
+		first, reused, err := store.CreateAgentManifestRevision(ctx, &manifest, 0)
+		if err != nil || reused || first.Revision != 1 {
+			t.Fatalf("create manifest = %+v,%t,%v", first, reused, err)
+		}
+		again, reused, err := store.CreateAgentManifestRevision(ctx, &manifest, 0)
+		if err != nil || !reused || again.Revision != first.Revision {
+			t.Fatalf("reuse manifest = %+v,%t,%v", again, reused, err)
+		}
+		conflict := manifest
+		conflict.RequestFingerprint = "different"
+		if _, _, err = store.CreateAgentManifestRevision(ctx, &conflict, 0); !errors.Is(err, agentruntime.ErrAgentManifestConflict) {
+			t.Fatalf("manifest request conflict = %v", err)
+		}
+		secondInput := manifest
+		secondInput.Name = "Research specialist"
+		secondInput.RequestID = "manifest-request-2"
+		secondInput.RequestFingerprint = "manifest-fp-2"
+		second, reused, err := store.CreateAgentManifestRevision(ctx, &secondInput, 1)
+		if err != nil || reused || second.Revision != 2 {
+			t.Fatalf("revise manifest = %+v,%t,%v", second, reused, err)
+		}
+		if _, _, err = store.CreateAgentManifestRevision(ctx, &secondInput, 1); err != nil {
+			t.Fatalf("replay revised manifest: %v", err)
+		}
+		latest, err := store.GetAgentManifest(ctx, actor, domain.ResourceRef{Kind: domain.AgentManifestKind, ID: manifest.ManifestID})
+		if err != nil || latest.Revision != 2 || latest.Name != secondInput.Name {
+			t.Fatalf("latest manifest = %+v,%v", latest, err)
+		}
+		stable, err := store.GetAgentManifest(ctx, actor, domain.ResourceRef{Kind: domain.AgentManifestKind, ID: manifest.ManifestID, Revision: "1"})
+		if err != nil || stable.Revision != 1 || stable.Name != manifest.Name {
+			t.Fatalf("stable manifest revision = %+v,%v", stable, err)
+		}
+		page, err := store.ListAgentManifests(ctx, actor, domain.AgentManifestFilter{Status: domain.AgentManifestStatusActive})
+		if err != nil || page.Total != 1 || len(page.Results) != 1 || page.Results[0].Revision != 2 {
+			t.Fatalf("manifest page = %+v,%v", page, err)
+		}
+
+		handoff := domain.RunHandoff{
+			HandoffID: "handoff-1", ClientHandoffID: "client-handoff-1", RequestFingerprint: "handoff-fp-1", Actor: actor,
+			RootRunID: run.RunID, ParentRunID: run.RunID, ChildRunID: "run-child-1", AgentManifest: second.Ref(), AgentName: second.Name,
+			Goal: "Research one bounded question", Status: domain.RunHandoffStatusQueued, Depth: 1,
+		}
+		created, reused, err := store.CreateRunHandoff(ctx, &handoff)
+		if err != nil || reused || created.ChildRunID != handoff.ChildRunID {
+			t.Fatalf("create handoff = %+v,%t,%v", created, reused, err)
+		}
+		replayed, reused, err := store.CreateRunHandoff(ctx, &handoff)
+		if err != nil || !reused || replayed.HandoffID != created.HandoffID {
+			t.Fatalf("replay handoff = %+v,%t,%v", replayed, reused, err)
+		}
+		handoffConflict := handoff
+		handoffConflict.RequestFingerprint = "different"
+		if _, _, err = store.CreateRunHandoff(ctx, &handoffConflict); !errors.Is(err, agentruntime.ErrRunHandoffConflict) {
+			t.Fatalf("handoff conflict = %v", err)
+		}
+		completedAt := time.Now().UTC()
+		completed, reused, err := store.CompleteRunHandoff(ctx, actor, handoff.ChildRunID, domain.RunHandoffCompletion{
+			Status: domain.RunHandoffStatusCompleted, ResultSummary: "Evidence collected", ResultOutputIDs: []string{"output-1"}, CompletedAt: completedAt,
+		})
+		if err != nil || reused || completed.Status != domain.RunHandoffStatusCompleted || len(completed.ResultOutputIDs) != 1 {
+			t.Fatalf("complete handoff = %+v,%t,%v", completed, reused, err)
+		}
+		completed, reused, err = store.CompleteRunHandoff(ctx, actor, handoff.ChildRunID, domain.RunHandoffCompletion{Status: domain.RunHandoffStatusCompleted})
+		if err != nil || !reused || completed.Status != domain.RunHandoffStatusCompleted {
+			t.Fatalf("reuse handoff completion = %+v,%t,%v", completed, reused, err)
+		}
+		handoffs, err := store.ListRunHandoffs(ctx, actor, domain.RunHandoffFilter{RootRunID: run.RunID})
+		if err != nil || handoffs.Total != 1 || len(handoffs.Results) != 1 || handoffs.Results[0].ResultSummary != "Evidence collected" {
+			t.Fatalf("handoff page = %+v,%v", handoffs, err)
+		}
+	})
 }
 
 func seeded(t testing.TB, factory StoreFactory) (agentruntime.Store, domain.ActorRef, domain.ThreadRef, domain.Run) {

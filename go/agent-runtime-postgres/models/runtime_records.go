@@ -31,6 +31,13 @@ type RunRecord struct {
 	EnvironmentKind          string    `gorm:"size:64;not null;default:''"`
 	EnvironmentID            string    `gorm:"size:128;not null;default:''"`
 	EnvironmentRevision      string    `gorm:"size:64;not null;default:''"`
+	AgentManifestID          string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_manifest"`
+	AgentManifestRevision    string    `gorm:"size:64;not null;default:''"`
+	AgentName                string    `gorm:"size:128;not null;default:''"`
+	RootRunID                string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_root"`
+	ParentRunID              string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_parent"`
+	HandoffID                string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_handoff"`
+	Depth                    int       `gorm:"not null;default:0"`
 	Goal                     string    `gorm:"type:text;not null;default:''"`
 	RunConfigSnapshotJSON    string    `gorm:"type:text;not null;default:''"`
 	RequestFingerprint       string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_request_fingerprint"`

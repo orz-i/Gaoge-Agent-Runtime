@@ -22,6 +22,12 @@ type Run struct {
 	InputProjection          ProjectionRef
 	OutputProjection         ProjectionRef
 	Environment              ResourceRef
+	AgentManifest            ResourceRef
+	AgentName                string
+	RootRunID                string
+	ParentRunID              string
+	HandoffID                string
+	Depth                    int
 	Goal                     string
 	RunConfigSnapshotJSON    string
 	RequestFingerprint       string

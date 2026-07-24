@@ -26,6 +26,8 @@ type state struct {
 	Evidence      map[string]domain.Evidence               `json:"evidence"`
 	Queue         map[string]domain.QueueItem              `json:"queue"`
 	Continuations map[string]domain.ContinuationJob        `json:"continuations"`
+	Manifests     map[string][]domain.AgentManifest        `json:"manifests"`
+	Handoffs      map[string]domain.RunHandoff             `json:"handoffs"`
 	Workbench     map[string]domain.WorkbenchProjection    `json:"workbench"`
 	Phases        map[string][]domain.PhaseProjection      `json:"phases"`
 }
@@ -46,6 +48,7 @@ func newState() state {
 		Checkpoints: make(map[string]map[string]domain.Checkpoint), Contexts: make(map[string]domain.ContextSnapshot),
 		Artifacts: make(map[string]domain.ContextArtifact), Outputs: make(map[string][]domain.OutputRef),
 		Evidence: make(map[string]domain.Evidence), Queue: make(map[string]domain.QueueItem), Continuations: make(map[string]domain.ContinuationJob),
+		Manifests: make(map[string][]domain.AgentManifest), Handoffs: make(map[string]domain.RunHandoff),
 		Workbench: make(map[string]domain.WorkbenchProjection), Phases: make(map[string][]domain.PhaseProjection),
 	}
 }

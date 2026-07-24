@@ -20,7 +20,23 @@ type Store interface {
 	EvidenceStore
 	QueueStore
 	ContinuationJobStore
+	AgentManifestStore
+	RunHandoffStore
 	WorkbenchStore
+}
+
+type AgentManifestStore interface {
+	CreateAgentManifestRevision(context.Context, *domain.AgentManifest, int) (*domain.AgentManifest, bool, error)
+	GetAgentManifest(context.Context, domain.ActorRef, domain.ResourceRef) (*domain.AgentManifest, error)
+	ListAgentManifests(context.Context, domain.ActorRef, domain.AgentManifestFilter) (domain.AgentManifestPage, error)
+}
+
+type RunHandoffStore interface {
+	CreateRunHandoff(context.Context, *domain.RunHandoff) (*domain.RunHandoff, bool, error)
+	GetRunHandoff(context.Context, domain.ActorRef, string) (*domain.RunHandoff, error)
+	GetRunHandoffByChildRun(context.Context, domain.ActorRef, string) (*domain.RunHandoff, error)
+	ListRunHandoffs(context.Context, domain.ActorRef, domain.RunHandoffFilter) (domain.RunHandoffPage, error)
+	CompleteRunHandoff(context.Context, domain.ActorRef, string, domain.RunHandoffCompletion) (*domain.RunHandoff, bool, error)
 }
 
 // ContinuationJobStore persists executable checkpoint handoffs. Enqueue calls
