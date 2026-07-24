@@ -11,8 +11,11 @@ import (
 )
 
 const (
-	testFirewallToolKey  = "mcp.search"
-	testFirewallToolName = "search"
+	testFirewallToolKey       = "mcp.search"
+	testFirewallToolName      = "search"
+	testToolOutputDeniedCode  = "tool_output_denied"
+	testRejectedProviderValue = "provider leak"
+	testOutputDeniedCallID    = "call_output_denied"
 )
 
 type recordingToolExecutor struct {
@@ -92,6 +95,89 @@ func TestFrozenToolExecutionRejectsInvalidOutputAfterProviderSuccess(t *testing.
 		t.Fatalf("invalid provider output escaped firewall: %s", result.OutputJSON)
 	}
 	assertFirewallToolEvents(t, repo.events, "call_invalid_output")
+}
+
+func TestToolInputEvaluationBlocksBeforeProviderExecution(t *testing.T) {
+	repo := &durableFailureTestRepository{}
+	executor := &recordingToolExecutor{output: `{"structuredContent":{"ok":true}}`}
+	registry, err := NewEvaluationRegistry([]EvaluationRegistration{{
+		Name: "tool_input_policy", Stages: []EvaluationStage{EvaluationStageToolInput}, Mode: EvaluationModeEnforce,
+		Evaluator: evaluatorFunc(func(context.Context, EvaluationRequest) (EvaluationResult, error) {
+			return EvaluationResult{Decision: EvaluationDecisionDeny, Code: "tool_input_denied", Message: "raw input must not persist"}, nil
+		}),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &Engine{cfg: StaticConfigProvider(Config{}), repo: repo, toolExecutor: executor, evaluations: registry, generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{})}
+	tool, effective := frozenFirewallTestTool(t, json.RawMessage(`{"type":"object","additionalProperties":false}`), nil, valueNever4C6E2E88)
+	run := firewallTestRun("run_input_evaluation")
+
+	result, waiting, err := engine.executeFrozenRunTool(t.Context(), run, "step_1", effective, tool, ToolCall{ToolCallID: "call_input_denied", ToolName: tool.ModelName, ArgumentsJSON: `{}`})
+	if err != nil || waiting {
+		t.Fatalf("executeFrozenRunTool() waiting=%v error=%v", waiting, err)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0", len(executor.calls))
+	}
+	if result.Status != valueErrorA8DE48C2 || !strings.Contains(result.Error, "tool_input_denied") || strings.Contains(result.Error, "raw input") {
+		t.Fatalf("blocked input result = %#v", result)
+	}
+	assertFirewallToolEvents(t, repo.events, "call_input_denied")
+	assertEvaluationEvent(t, repo.events, EvaluationStageToolInput, "tool_input_denied")
+}
+
+func TestToolOutputEvaluationBlocksRawProviderOutputPersistence(t *testing.T) {
+	repo := &durableFailureTestRepository{}
+	executor := &recordingToolExecutor{output: `{"structuredContent":{"secret":"` + testRejectedProviderValue + `"}}`}
+	registry, err := NewEvaluationRegistry([]EvaluationRegistration{{
+		Name: "tool_output_policy", Stages: []EvaluationStage{EvaluationStageToolOutput}, Mode: EvaluationModeEnforce,
+		Evaluator: evaluatorFunc(func(context.Context, EvaluationRequest) (EvaluationResult, error) {
+			return EvaluationResult{Decision: EvaluationDecisionDeny, Code: testToolOutputDeniedCode, Message: testRejectedProviderValue}, nil
+		}),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &Engine{cfg: StaticConfigProvider(Config{}), repo: repo, toolExecutor: executor, evaluations: registry, generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{})}
+	inputSchema := json.RawMessage(`{"type":"object","additionalProperties":false}`)
+	outputSchema := json.RawMessage(`{"type":"object","required":["secret"],"additionalProperties":false,"properties":{"secret":{"type":"string"}}}`)
+	tool, effective := frozenFirewallTestTool(t, inputSchema, outputSchema, valueNever4C6E2E88)
+	run := firewallTestRun("run_output_evaluation")
+
+	result, waiting, err := engine.executeFrozenRunTool(t.Context(), run, "step_1", effective, tool, ToolCall{ToolCallID: testOutputDeniedCallID, ToolName: tool.ModelName, ArgumentsJSON: `{}`})
+	if err != nil || waiting {
+		t.Fatalf("executeFrozenRunTool() waiting=%v error=%v", waiting, err)
+	}
+	if len(executor.calls) != 1 {
+		t.Fatalf("executor calls = %d, want 1", len(executor.calls))
+	}
+	if result.Status != valueErrorA8DE48C2 || !strings.Contains(result.Error, testToolOutputDeniedCode) {
+		t.Fatalf("blocked output result = %#v", result)
+	}
+	assertNoEventPayloadContains(t, repo.events, testRejectedProviderValue)
+	assertFirewallToolEvents(t, repo.events, testOutputDeniedCallID)
+	assertEvaluationEvent(t, repo.events, EvaluationStageToolOutput, testToolOutputDeniedCode)
+}
+
+func assertNoEventPayloadContains(t *testing.T, events []model.Event, forbidden string) {
+	t.Helper()
+	for _, event := range events {
+		combined := event.PayloadJSON + event.OutputJSON + event.ErrorJSON
+		if strings.Contains(combined, forbidden) {
+			t.Fatalf("rejected payload leaked into event: %#v", event)
+		}
+	}
+}
+
+func assertEvaluationEvent(t *testing.T, events []model.Event, stage EvaluationStage, code string) {
+	t.Helper()
+	for _, event := range events {
+		if event.EventType == eventGuardrailEvaluated && strings.Contains(event.PayloadJSON, `"stage":"`+string(stage)+`"`) && strings.Contains(event.PayloadJSON, `"code":"`+code+`"`) {
+			return
+		}
+	}
+	t.Fatalf("evaluation event stage=%s code=%s missing: %#v", stage, code, events)
 }
 
 func frozenFirewallTestTool(t *testing.T, inputSchema, outputSchema json.RawMessage, approvalMode string) (ResolvedTool, effectiveTextRunConfig) {

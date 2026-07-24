@@ -57,6 +57,7 @@ type Dependencies struct {
 	Audit               AuditWriter
 	Logger              Logger
 	Tracer              Tracer
+	Evaluations         EvaluationRegistry
 }
 
 type WorkspaceSelection struct {

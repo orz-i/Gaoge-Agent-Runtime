@@ -587,16 +587,30 @@ func (s *Engine) generatePlanAttempt(ctx context.Context, run model.Run, effecti
 	if err = s.ensureRunCallBudgetWithReserve(ctx, run, effective, true, 1); err != nil {
 		return planAttemptResult{}, err
 	}
-	output, err := s.llmGateway.GenerateText(ctx, route, request)
-	if err != nil {
-		return planAttemptResult{}, err
-	}
 	phase := "planner"
 	if repair {
 		phase = "planner_repair"
 	}
+	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate",
+		String("run.id", run.RunID),
+		String("step.id", run.CurrentStepID),
+		String("generation.phase", phase),
+		String("model.name", effective.PlatformModelName),
+		String("provider.protocol", route.Protocol),
+	)
+	output, err := s.llmGateway.GenerateText(generateCtx, route, request)
+	if err != nil {
+		generationSpan.RecordError(err)
+	}
+	generationSpan.End()
+	if err != nil {
+		return planAttemptResult{}, err
+	}
 	if err = s.recordRunLLMUsage(context.WithoutCancel(ctx), run, phase, route, output); err != nil {
 		return planAttemptResult{Usage: output.Usage}, err
+	}
+	if err = s.evaluateAndPersistRuntimeBoundary(ctx, run, modelOutputEvaluationRequest(run, run.CurrentStepID, phase, output)); err != nil {
+		return planAttemptResult{Usage: output.Usage, RawText: output.Text}, err
 	}
 	payload, validationErr := parseAndValidatePlan(output.Text, planMax)
 	if validationErr == nil {
@@ -1913,7 +1927,15 @@ func (s *Engine) generateRunStepTurn(ctx context.Context, run model.Run, step mo
 	if err := s.ensureRunCallBudgetWithReserve(ctx, run, effective, true, 1); err != nil {
 		return nil, err
 	}
-	output, err := s.llmGateway.GenerateText(ctx, prepared.route, GenerateInput{
+	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate",
+		String("run.id", run.RunID),
+		String("step.id", step.StepID),
+		String("generation.phase", valueStepB959B536),
+		String("model.name", effective.PlatformModelName),
+		String("provider.protocol", prepared.route.Protocol),
+		Int("generation.call_number", callNumber),
+	)
+	output, err := s.llmGateway.GenerateText(generateCtx, prepared.route, GenerateInput{
 		RequestID:    fmt.Sprintf("%s:step:%s:%d", run.RunID, step.StepID, callNumber),
 		Thread:       run.Thread,
 		Messages:     prepared.messages,
@@ -1925,9 +1947,16 @@ func (s *Engine) generateRunStepTurn(ctx context.Context, run model.Run, step mo
 		Options:      effective.Options,
 	})
 	if err != nil {
+		generationSpan.RecordError(err)
+	}
+	generationSpan.End()
+	if err != nil {
 		return nil, err
 	}
 	if err = s.recordRunLLMUsageForStep(context.WithoutCancel(ctx), run, step.StepID, valueStepB959B536, prepared.route, output); err != nil {
+		return nil, err
+	}
+	if err = s.evaluateAndPersistRuntimeBoundary(ctx, run, modelOutputEvaluationRequest(run, step.StepID, valueStepB959B536, output)); err != nil {
 		return nil, err
 	}
 	return output, nil
@@ -2292,6 +2321,15 @@ func (s *Engine) handleResolvedRunToolCall(ctx context.Context, run model.Run, s
 	}
 	call.ArgumentsJSON = normalizedArguments
 	if tool.ApprovalMode != valueNeverF5C79F24 {
+		if evaluationErr := s.evaluateAndPersistRuntimeBoundary(ctx, run, toolInputEvaluationRequest(run, step.StepID, tool, call)); evaluationErr != nil {
+			if err := s.ensureRunCallBudgetWithReserve(ctx, run, effective, false, 0); err != nil {
+				return ToolResult{}, false, err
+			}
+			if err := s.appendFrozenToolStarted(ctx, run, step.StepID, tool, call); err != nil {
+				return ToolResult{}, false, err
+			}
+			return s.commitFrozenToolResult(ctx, run, step.StepID, effective, tool, call, "", 0, evaluationErr)
+		}
 		return s.requestRunToolApproval(ctx, run, step, effective, tool, call)
 	}
 	if err := s.ensureRunCallBudgetWithReserve(ctx, run, effective, false, 0); err != nil {
@@ -2301,6 +2339,15 @@ func (s *Engine) handleResolvedRunToolCall(ctx context.Context, run model.Run, s
 }
 
 func (s *Engine) requestRunToolApproval(ctx context.Context, run model.Run, step model.Step, effective effectiveTextRunConfig, tool ResolvedTool, call ToolCall) (ToolResult, bool, error) {
+	ctx, span := s.startSpan(ctx, "agentruntime.approval.request",
+		String("run.id", run.RunID),
+		String("step.id", step.StepID),
+		String("tool.call_id", call.ToolCallID),
+		String("tool.key", tool.ToolKey),
+		String("tool.name", tool.ModelName),
+		String("approval.kind", model.InteractionApproveTool),
+	)
+	defer span.End()
 	fingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(tool.ToolKey+"\x00"+tool.ModelName+"\x00"+canonicalRunJSON(json.RawMessage(call.ArgumentsJSON)))))
 	request := map[string]interface{}{valueToolKey560014C9: tool.ToolKey, valueToolName4234B607: tool.ModelName, "originalName": tool.OriginalName, valueToolCallID64CA70DB: call.ToolCallID, "arguments": json.RawMessage(call.ArgumentsJSON), "fingerprint": fingerprint, "sideEffectLevel": tool.SideEffectLevel}
 	interaction := newRunInteraction(run, step.StepID, model.InteractionApproveTool, request, effective.InteractionTTLHours)
@@ -2331,6 +2378,9 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 		return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, "", 0, validationErr)
 	}
 	call.ArgumentsJSON = normalizedArguments
+	if evaluationErr := s.evaluateAndPersistRuntimeBoundary(ctx, run, toolInputEvaluationRequest(run, stepID, tool, call)); evaluationErr != nil {
+		return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, "", 0, evaluationErr)
+	}
 	policy, ok := frozenRunToolPolicy(effective, tool.ToolKey)
 	if !ok {
 		return ToolResult{}, false, ErrRunSnapshotIncompatible
@@ -2340,9 +2390,26 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 		return ToolResult{}, false, ErrRunSnapshotIncompatible
 	}
 	limits := &TextRunExecutionLimits{MaxLLMCalls: effective.MaxLLMCalls, MaxToolCalls: effective.MaxToolCalls, ToolRetryCount: policy.RetryCount, ToolConcurrency: policy.Concurrency}
-	output, err := s.executeFrozenToolProvider(ctx, run, stepID, effective, tool, call, limits)
+	executeCtx, toolSpan := s.startSpan(ctx, "agentruntime.tool.execute",
+		String("run.id", run.RunID),
+		String("step.id", stepID),
+		String("tool.call_id", call.ToolCallID),
+		String("tool.key", tool.ToolKey),
+		String("tool.name", tool.ModelName),
+		String("tool.provider_kind", tool.ProviderKind),
+	)
+	output, err := s.executeFrozenToolProvider(executeCtx, run, stepID, effective, tool, call, limits)
+	if err != nil {
+		toolSpan.RecordError(err)
+	}
+	toolSpan.End()
 	if err == nil {
 		output, err = normalizeToolOutputAgainstSchema(output, tool.OutputSchema, tool.ProviderKind)
+	}
+	if err == nil {
+		if evaluationErr := s.evaluateAndPersistRuntimeBoundary(ctx, run, toolOutputEvaluationRequest(run, stepID, tool, call, output)); evaluationErr != nil {
+			output, err = "", evaluationErr
+		}
 	}
 	workspaceResultTokens, output, err := s.enforceFrozenWorkspaceBudget(ctx, run, effective, tool, output, err)
 	return s.commitFrozenToolResult(ctx, run, stepID, effective, tool, call, output, workspaceResultTokens, err)
@@ -2727,8 +2794,22 @@ func (s *Engine) streamRunAnswer(ctx context.Context, run model.Run, orchestrati
 	if err != nil {
 		return Usage{}, route, "", err
 	}
-	collector := runDeltaCollector{service: s, ctx: ctx, run: run, stepID: orchestrationStepID, projection: run.OutputProjection, lastFlush: time.Now()}
-	output, err := s.llmGateway.GenerateTextStream(ctx, route, GenerateInput{RequestID: run.RunID + ":" + requestKind, Messages: promptMessages, Instructions: instructions, HostedTools: hostedTools, DisableTools: len(hostedTools) == 0, Options: effective.Options}, collector.accept)
+	holdForEvaluation := s.evaluations != nil && s.evaluations.Enforces(EvaluationStageModelOutput)
+	collector := runDeltaCollector{service: s, ctx: ctx, run: run, stepID: orchestrationStepID, projection: run.OutputProjection, lastFlush: time.Now(), holdForEvaluation: holdForEvaluation}
+	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate",
+		String("run.id", run.RunID),
+		String("step.id", orchestrationStepID),
+		String("generation.phase", phase),
+		String("model.name", effective.PlatformModelName),
+		String("provider.protocol", route.Protocol),
+		Bool("generation.stream", true),
+		Bool("generation.held_for_evaluation", holdForEvaluation),
+	)
+	output, err := s.llmGateway.GenerateTextStream(generateCtx, route, GenerateInput{RequestID: run.RunID + ":" + requestKind, Messages: promptMessages, Instructions: instructions, HostedTools: hostedTools, DisableTools: len(hostedTools) == 0, Options: effective.Options}, collector.accept)
+	if err != nil {
+		generationSpan.RecordError(err)
+	}
+	generationSpan.End()
 	if err != nil {
 		return Usage{}, route, "", err
 	}
@@ -2754,8 +2835,13 @@ func (s *Engine) prepareStreamRun(ctx context.Context, run model.Run, effective 
 func (s *Engine) finishStreamRun(ctx context.Context, run model.Run, stepID, phase string, route *LLMRoute, output *GenerateOutput, collector *runDeltaCollector) (Usage, string, error) {
 	// Final flush must not leave incomplete-prefix holds unpublished when the
 	// stream ended as public text; it must still refuse protocol buffers.
-	if err := collector.flushFinal(); err != nil {
-		return Usage{}, "", err
+	if collector != nil && !collector.holdForEvaluation {
+		if err := collector.flushFinal(); err != nil {
+			return Usage{}, "", err
+		}
+	}
+	if collector == nil {
+		return Usage{}, "", ErrInvalidInput
 	}
 	if err := s.recordStreamRunUsage(ctx, run, stepID, phase, route, output); err != nil {
 		return usageFromGenerateOutput(output), "", err
@@ -2763,6 +2849,23 @@ func (s *Engine) finishStreamRun(ctx context.Context, run model.Run, stepID, pha
 	finalText, err := finalizeStreamCollectorText(collector, output, phase)
 	if err != nil {
 		return usageFromGenerateOutput(output), "", err
+	}
+	evaluationOutput := output
+	if evaluationOutput == nil {
+		evaluationOutput = &GenerateOutput{}
+	}
+	evaluationCopy := *evaluationOutput
+	evaluationCopy.Text = finalText
+	if err = s.evaluateAndPersistRuntimeBoundary(ctx, run, modelOutputEvaluationRequest(run, stepID, phase, &evaluationCopy)); err != nil {
+		if collector != nil {
+			collector.buffer.Reset()
+		}
+		return usageFromGenerateOutput(output), "", err
+	}
+	if collector.holdForEvaluation {
+		if err = collector.flushFinal(); err != nil {
+			return usageFromGenerateOutput(output), "", err
+		}
 	}
 	return usageFromGenerateOutput(output), finalText, nil
 }
@@ -2802,6 +2905,9 @@ type runDeltaCollector struct {
 	content    strings.Builder
 	buffer     strings.Builder
 	lastFlush  time.Time
+	// holdForEvaluation prevents public message.delta persistence until all
+	// enforcing model-output evaluators have allowed the final response.
+	holdForEvaluation bool
 	// suppressed becomes true once tool-protocol markup is observed. Further
 	// deltas stay in content for diagnostics but never become message.delta.
 	suppressed bool
@@ -2825,6 +2931,9 @@ func (collector *runDeltaCollector) accept(event GenerateStreamEvent) error {
 		return nil
 	}
 	collector.buffer.WriteString(event.Delta)
+	if collector.holdForEvaluation {
+		return nil
+	}
 	if collector.buffer.Len() >= 2048 || time.Since(collector.lastFlush) >= 250*time.Millisecond {
 		return collector.flush()
 	}

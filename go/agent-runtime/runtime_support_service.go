@@ -108,6 +108,7 @@ type Engine struct {
 	auditWriter         AuditWriter
 	logger              Logger
 	tracer              Tracer
+	evaluations         EvaluationRegistry
 	toolLimiters        sync.Map
 	generationStreams   *generationStreamRegistry
 	continuationWake    chan struct{}
@@ -249,6 +250,7 @@ func New(cfg ConfigProvider, deps Dependencies) (*Engine, error) {
 		auditWriter:         deps.Audit,
 		logger:              deps.Logger,
 		tracer:              deps.Tracer,
+		evaluations:         deps.Evaluations,
 		generationStreams:   newGenerationStreamRegistry(deps.Cache, defaultGenerationStreamOptions()),
 		continuationWake:    make(chan struct{}, 1),
 		runQueueWake:        make(chan struct{}, 1),

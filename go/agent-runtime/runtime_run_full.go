@@ -450,6 +450,21 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 	if err != nil {
 		return nil, err
 	}
+	prepared.InputEvaluation, err = s.evaluateRuntimeBoundary(ctx, EvaluationRequest{
+		Stage:       EvaluationStageRunInput,
+		Actor:       input.Actor,
+		Thread:      input.Thread,
+		RunID:       runID,
+		ContentType: evaluationContentTypeText,
+		Content:     goal,
+		Metadata: map[string]string{
+			"environmentID": strings.TrimSpace(input.Environment.ID),
+			"requestID":     strings.TrimSpace(input.RequestID),
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
 	profile, modelName, strategy, effective, snapshot := prepared.Profile, prepared.ModelName, prepared.Effective.Strategy, prepared.Effective, prepared.Snapshot
 	if err = s.EnsureRunBillingAccess(ctx, RunBillingInput{Actor: input.Actor, Thread: input.Thread, PlatformModelName: modelName, ThreadModel: input.ThreadModel, ClientRunID: runID}); err != nil {
 		return nil, err
@@ -479,7 +494,7 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 		}
 		run.InputProjection, run.OutputProjection = initial.Projection.Input, initial.Projection.Output
 		checkpoint = newRunContinuationCheckpoint(run, stepID, "initial_context", runContinuation{SemanticVersion: RuntimeSnapshotVersion, SegmentKey: startSegmentKey, Type: continuationType, TargetStatus: targetStatus, StepID: stepID, NextRevision: 1})
-		initialEvents := textRunInitialEvents(run, step, profile.Ref, strategy, effective.StrategyReason, initial.ContextSnapshot)
+		initialEvents := textRunInitialEvents(run, step, profile.Ref, strategy, effective.StrategyReason, initial.ContextSnapshot, prepared.InputEvaluation)
 		initialEvents = append(initialEvents, newRunEvent(run, "checkpoint.created", stepID, "Initial context checkpoint", map[string]interface{}{valueCheckpointID7923DD64: checkpoint.CheckpointID, valueKindDAA7F13C: checkpoint.Kind}, nil))
 		savedEvents, prepareErr = s.repo.CreateRunStartBundle(txCtx, &run, &step, initial.ContextSnapshot, initial.Artifacts, checkpoint, initialEvents)
 		if prepareErr != nil {
@@ -509,10 +524,11 @@ func validTextRunStartRequest(input StartTextRunInput, goal string) bool {
 }
 
 type textRunPreparedConfiguration struct {
-	Profile   *EnvironmentProfile
-	ModelName string
-	Effective effectiveTextRunConfig
-	Snapshot  []byte
+	Profile         *EnvironmentProfile
+	ModelName       string
+	Effective       effectiveTextRunConfig
+	Snapshot        []byte
+	InputEvaluation EvaluationReport
 }
 
 func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTextRunInput, goal string) (textRunPreparedConfiguration, error) {
@@ -757,7 +773,7 @@ func textRunInitialContinuation(strategy string) (string, string) {
 	return runContinuationStartDirect, model.RunStatusRunning
 }
 
-func textRunInitialEvents(run model.Run, step model.Step, environmentRef model.ResourceRef, strategy, reason string, snapshot *model.ContextSnapshot) []model.Event {
+func textRunInitialEvents(run model.Run, step model.Step, environmentRef model.ResourceRef, strategy, reason string, snapshot *model.ContextSnapshot, inputEvaluation EvaluationReport) []model.Event {
 	events := []model.Event{
 		newRunEvent(run, "run.started", step.StepID, "Text run started", map[string]interface{}{valueGoal855E06D1: run.Goal, "environmentRef": environmentRef, "strategy": strategy}, nil),
 		newRunEvent(run, "run.strategy_selected", step.StepID, "Text run strategy selected", map[string]interface{}{"strategy": strategy, "reasonCode": reason}, nil),
@@ -765,6 +781,9 @@ func textRunInitialEvents(run model.Run, step model.Step, environmentRef model.R
 	}
 	if strategy == TextRunStrategyPlanned {
 		events = append(events, newRunEvent(run, valueRunPreparingA8E38F48, step.StepID, "Preparing plan", map[string]interface{}{valueRevision0742568C: 1}, nil))
+	}
+	if len(inputEvaluation.Findings) > 0 {
+		events = append(events, runtimeEvaluationEvent(run, step.StepID, inputEvaluation))
 	}
 	return append(events, newRunEvent(run, "context.compiled", step.StepID, "Text context compiled", map[string]interface{}{"contextHash": snapshot.ContentHash, "fileCount": snapshot.FileCount, "ragCount": snapshot.RAGCount, "skillCount": snapshot.SkillCount, "memoryCount": snapshot.MemoryCount, "outputCount": snapshot.OutputCount, "evidenceCount": snapshot.EvidenceCount, "retrievalFallbackCount": snapshot.RetrievalFallbackCount, "skippedCount": snapshot.SkippedCount}, nil))
 }
