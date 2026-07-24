@@ -78,11 +78,12 @@ func (r *Repository) DeadLetterExpiredContinuationJob(ctx context.Context, now t
 		if tx.Name() == valuePostgres7F253790 {
 			query = query.Clauses(clause.Locking{Strength: valueLockUpdate, Options: valueSkipLocked})
 		}
-		if err := query.Take(&row).Error; err != nil {
-			if recordNotFound(err) {
-				return nil
-			}
-			return err
+		find := query.Limit(1).Find(&row)
+		if find.Error != nil {
+			return find.Error
+		}
+		if find.RowsAffected == 0 {
+			return nil
 		}
 		result := tx.Model(&models.ContinuationJobRecord{}).Where("id = ?", row.ID).
 			Updates(map[string]interface{}{columnStatus: domain.ContinuationJobDeadLetter, columnLeaseOwner: "", columnLeaseExpiresAt: nil, columnLastError: "continuation attempts exhausted"})
@@ -124,11 +125,12 @@ func (r *Repository) ClaimNextContinuationJob(ctx context.Context, owner string,
 		if tx.Name() == valuePostgres7F253790 {
 			query = query.Clauses(clause.Locking{Strength: valueLockUpdate, Options: valueSkipLocked})
 		}
-		if err := query.Take(&claimed).Error; err != nil {
-			if recordNotFound(err) {
-				return nil
-			}
-			return err
+		find := query.Limit(1).Find(&claimed)
+		if find.Error != nil {
+			return find.Error
+		}
+		if find.RowsAffected == 0 {
+			return nil
 		}
 		result := tx.Model(&models.ContinuationJobRecord{}).Where("id = ? AND attempt_count < max_attempts", claimed.ID).
 			Updates(map[string]interface{}{

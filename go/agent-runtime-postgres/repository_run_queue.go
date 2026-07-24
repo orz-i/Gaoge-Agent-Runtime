@@ -129,8 +129,12 @@ func (r *Repository) ClaimNextRunQueueItem(ctx context.Context, now time.Time) (
 		if tx.Name() == valuePostgres7F253790 {
 			query = query.Clauses(clause.Locking{Strength: valueLockUpdate, Options: valueSkipLocked})
 		}
-		if err := query.Take(&claimed).Error; err != nil {
-			return err
+		find := query.Limit(1).Find(&claimed)
+		if find.Error != nil {
+			return find.Error
+		}
+		if find.RowsAffected == 0 {
+			return nil
 		}
 		result := tx.Model(&models.RunQueueItemRecord{}).Where("id = ? AND status = ?", claimed.ID, domain.QueueQueued).
 			Updates(map[string]interface{}{columnStatus: domain.QueueDispatching, "attempt_count": gorm.Expr("attempt_count + 1"), columnRevision: gorm.Expr("revision + 1")})
@@ -145,8 +149,14 @@ func (r *Repository) ClaimNextRunQueueItem(ctx context.Context, now time.Time) (
 	if recordNotFound(err) {
 		return nil, agentruntime.ErrNotFound
 	}
+	if err != nil {
+		return nil, translateError(err)
+	}
+	if claimed.ID == 0 {
+		return nil, agentruntime.ErrNotFound
+	}
 	item := toQueueDomain(claimed)
-	return &item, translateError(err)
+	return &item, nil
 }
 
 func (r *Repository) MarkRunQueueStarted(ctx context.Context, queueID, runID string) error {
