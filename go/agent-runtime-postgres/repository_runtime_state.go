@@ -179,7 +179,7 @@ func (r *Repository) ExpireRunInteraction(ctx context.Context, interactionID str
 			return agentruntime.ErrRunResumeConflict
 		}
 		now := time.Now()
-		if err := tx.Model(&interaction).Updates(map[string]interface{}{columnStatus: domain.InteractionExpired, "resolved_at": now}).Error; err != nil {
+		if err := tx.Model(&interaction).Updates(map[string]interface{}{columnStatus: domain.InteractionExpired, columnResolvedAt: now}).Error; err != nil {
 			return err
 		}
 		event := domain.Event{RunID: interaction.RunID, EventID: "interaction.expired:" + interaction.InteractionID, EventType: "interaction.expired", StepID: interaction.StepID, Visibility: visibilityUser, StartedAt: now, PayloadJSON: fmt.Sprintf(`{"interactionID":%q}`, interaction.InteractionID)}
@@ -231,7 +231,7 @@ func resolveRunInteractionTx(tx *gorm.DB, actor domain.ActorRef, runID, interact
 	if row.Status != domain.InteractionPending {
 		return result, agentruntime.ErrRunResumeConflict
 	}
-	updates := map[string]interface{}{columnStatus: domain.InteractionResolved, "response_json": responseJSON, "resolve_request_id": resolveRequestID, "resume_fingerprint": fingerprint, "resolved_at": time.Now(), "resolved_by_tenant_id": actor.TenantID, "resolved_by_actor_id": actor.ActorID}
+	updates := map[string]interface{}{columnStatus: domain.InteractionResolved, "response_json": responseJSON, "resolve_request_id": resolveRequestID, "resume_fingerprint": fingerprint, columnResolvedAt: time.Now(), "resolved_by_tenant_id": actor.TenantID, "resolved_by_actor_id": actor.ActorID}
 	if err := tx.Model(&row).Updates(updates).Error; err != nil {
 		return result, err
 	}

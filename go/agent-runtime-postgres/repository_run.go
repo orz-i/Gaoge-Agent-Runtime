@@ -255,7 +255,7 @@ func runProjectionUpdates(run domain.Run) map[string]interface{} {
 		"error_message":               run.ErrorMessage,
 		"ended_at":                    run.EndedAt,
 		"state_projection_version":    currentStateProjectionVersion,
-		"updated_at":                  run.UpdatedAt,
+		columnUpdatedAt:               run.UpdatedAt,
 	}
 }
 
@@ -272,7 +272,7 @@ func stepProjectionUpdates(step domain.Step) map[string]interface{} {
 		"error_json":     step.ErrorJSON,
 		"started_at":     startedAt,
 		"ended_at":       step.EndedAt,
-		"updated_at":     time.Now(),
+		columnUpdatedAt:  time.Now(),
 	}
 }
 

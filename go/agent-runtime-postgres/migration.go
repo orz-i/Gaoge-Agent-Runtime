@@ -28,7 +28,7 @@ func Models() []interface{} {
 		&models.RuntimeOutputIdentityRecord{}, &models.RuntimeOutputRefRecord{},
 		&models.RuntimeWorkbenchProjectionRecord{}, &models.RuntimePhaseProjectionRecord{},
 		&models.EvidenceSelection{}, &models.RunQueueItemRecord{}, &models.ContinuationJobRecord{}, &models.ContextRecord{},
-		&models.AgentManifestRevisionRecord{}, &models.RunHandoffRecord{},
+		&models.AgentManifestRevisionRecord{}, &models.RunHandoffRecord{}, &models.RunHandoffJoinRecord{},
 	}
 }
 

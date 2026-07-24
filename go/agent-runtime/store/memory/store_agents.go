@@ -93,6 +93,141 @@ func (s *Store) CreateAgentManifestRevision(_ context.Context, input *domain.Age
 	return &result, reused, nil
 }
 
+func findMemoryRunHandoffJoin(items map[string]domain.RunHandoffJoin, input domain.RunHandoffJoin) (domain.RunHandoffJoin, bool, error) {
+	for _, existing := range items {
+		if existing.JoinID != input.JoinID && (existing.Actor != input.Actor || existing.ClientJoinID != input.ClientJoinID) {
+			continue
+		}
+		if existing.RequestFingerprint != input.RequestFingerprint {
+			return domain.RunHandoffJoin{}, false, agentruntime.ErrRunHandoffJoinConflict
+		}
+		return clone(existing), true, nil
+	}
+	return domain.RunHandoffJoin{}, false, nil
+}
+
+func joinHandoffsFromMemory(items map[string]domain.RunHandoff, input domain.RunHandoffJoin) ([]domain.RunHandoff, error) {
+	seen := make(map[string]struct{}, len(input.HandoffIDs))
+	handoffs := make([]domain.RunHandoff, 0, len(input.HandoffIDs))
+	for _, rawID := range input.HandoffIDs {
+		handoffID := strings.TrimSpace(rawID)
+		if handoffID == "" {
+			return nil, agentruntime.ErrInvalidInput
+		}
+		if _, duplicate := seen[handoffID]; duplicate {
+			return nil, agentruntime.ErrInvalidInput
+		}
+		seen[handoffID] = struct{}{}
+		handoff, ok := items[handoffID]
+		if !ok || handoff.Actor != input.Actor || handoff.RootRunID != input.RootRunID || handoff.ParentRunID != input.ParentRunID {
+			return nil, agentruntime.ErrRunHandoffJoinMember
+		}
+		handoffs = append(handoffs, handoff)
+	}
+	return handoffs, nil
+}
+
+func (s *Store) CreateRunHandoffJoin(_ context.Context, input *domain.RunHandoffJoin) (*domain.RunHandoffJoin, bool, error) {
+	if !domain.ValidRunHandoffJoin(input) {
+		return nil, false, agentruntime.ErrInvalidInput
+	}
+	var result domain.RunHandoffJoin
+	var reused bool
+	err := s.write(func(st *state) error {
+		existing, found, err := findMemoryRunHandoffJoin(st.HandoffJoins, *input)
+		if err != nil {
+			return err
+		}
+		if found {
+			result, reused = existing, true
+			return nil
+		}
+		handoffs, err := joinHandoffsFromMemory(st.Handoffs, *input)
+		if err != nil {
+			return err
+		}
+		item := clone(*input)
+		item.HandoffIDs = normalizeMemoryJoinIDs(item.HandoffIDs)
+		now := time.Now()
+		if item.CreatedAt.IsZero() {
+			item.CreatedAt = now
+		}
+		item.UpdatedAt = item.CreatedAt
+		item = domain.ResolveRunHandoffJoin(item, handoffs, item.CreatedAt)
+		st.HandoffJoins[item.JoinID] = clone(item)
+		result = item
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return &result, reused, nil
+}
+
+func normalizeMemoryJoinIDs(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, strings.TrimSpace(value))
+	}
+	return result
+}
+
+func reconcileMemoryRunHandoffJoins(st *state, handoff domain.RunHandoff) {
+	for joinID, join := range st.HandoffJoins {
+		if domain.RunHandoffJoinTerminal(join.Status) || join.Actor != handoff.Actor || join.ParentRunID != handoff.ParentRunID || !memoryJoinContains(join, handoff.HandoffID) {
+			continue
+		}
+		handoffs, err := joinHandoffsFromMemory(st.Handoffs, join)
+		if err != nil {
+			continue
+		}
+		st.HandoffJoins[joinID] = domain.ResolveRunHandoffJoin(join, handoffs, time.Now())
+	}
+}
+
+func memoryJoinContains(join domain.RunHandoffJoin, handoffID string) bool {
+	for _, value := range join.HandoffIDs {
+		if value == handoffID {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) GetRunHandoffJoin(_ context.Context, actor domain.ActorRef, joinID string) (*domain.RunHandoffJoin, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, ok := s.state.HandoffJoins[strings.TrimSpace(joinID)]
+	if !ok || item.Actor != actor {
+		return nil, agentruntime.ErrNotFound
+	}
+	result := clone(item)
+	return &result, nil
+}
+
+func joinMatches(item domain.RunHandoffJoin, actor domain.ActorRef, filter domain.RunHandoffJoinFilter) bool {
+	return item.Actor == actor && (filter.RootRunID == "" || item.RootRunID == filter.RootRunID) &&
+		(filter.ParentRunID == "" || item.ParentRunID == filter.ParentRunID) && (filter.Status == "" || item.Status == filter.Status)
+}
+
+func (s *Store) ListRunHandoffJoins(_ context.Context, actor domain.ActorRef, filter domain.RunHandoffJoinFilter) (domain.RunHandoffJoinPage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.RunHandoffJoin, 0)
+	for _, item := range s.state.HandoffJoins {
+		if joinMatches(item, actor, filter) {
+			items = append(items, clone(item))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.Before(items[j].CreatedAt) })
+	total := int64(len(items))
+	offset, limit := boundedPage(filter.Offset, filter.Limit, 100, 500)
+	if offset >= len(items) {
+		return domain.RunHandoffJoinPage{Total: total, Results: []domain.RunHandoffJoin{}}, nil
+	}
+	return domain.RunHandoffJoinPage{Total: total, Results: items[offset:min(offset+limit, len(items))]}, nil
+}
+
 func findMemoryRunHandoff(items map[string]domain.RunHandoff, input domain.RunHandoff) (domain.RunHandoff, bool, error) {
 	for _, existing := range items {
 		if !sameHandoffClient(existing, input.Actor, input.ClientHandoffID) && existing.HandoffID != input.HandoffID {
@@ -367,6 +502,7 @@ func (s *Store) CompleteRunHandoff(_ context.Context, actor domain.ActorRef, chi
 		if !wasReused {
 			st.Handoffs[id] = updated
 		}
+		reconcileMemoryRunHandoffJoins(st, updated)
 		result, reused = clone(updated), wasReused
 		return nil
 	})

@@ -233,11 +233,11 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			RootRunID: run.RunID, ParentRunID: run.RunID, ChildRunID: "run-child-1", AgentManifest: second.Ref(), AgentName: second.Name,
 			Goal: "Research one bounded question", Status: domain.RunHandoffStatusQueued, Depth: 1,
 		}
-		created, reused, err := store.CreateRunHandoffWithinLimit(ctx, &handoff, 1)
+		created, reused, err := store.CreateRunHandoffWithinLimit(ctx, &handoff, 2)
 		if err != nil || reused || created.ChildRunID != handoff.ChildRunID {
 			t.Fatalf("create handoff = %+v,%t,%v", created, reused, err)
 		}
-		replayed, reused, err := store.CreateRunHandoffWithinLimit(ctx, &handoff, 1)
+		replayed, reused, err := store.CreateRunHandoffWithinLimit(ctx, &handoff, 2)
 		if err != nil || !reused || replayed.HandoffID != created.HandoffID {
 			t.Fatalf("replay handoff = %+v,%t,%v", replayed, reused, err)
 		}
@@ -246,7 +246,16 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		secondHandoff.ClientHandoffID = "client-handoff-2"
 		secondHandoff.RequestFingerprint = "handoff-fp-2"
 		secondHandoff.ChildRunID = "run-child-2"
-		if _, _, err = store.CreateRunHandoffWithinLimit(ctx, &secondHandoff, 1); !errors.Is(err, agentruntime.ErrRunHandoffLimit) {
+		secondCreated, reused, err := store.CreateRunHandoffWithinLimit(ctx, &secondHandoff, 2)
+		if err != nil || reused || secondCreated.HandoffID != secondHandoff.HandoffID {
+			t.Fatalf("create second handoff = %+v,%t,%v", secondCreated, reused, err)
+		}
+		thirdHandoff := secondHandoff
+		thirdHandoff.HandoffID = "handoff-3"
+		thirdHandoff.ClientHandoffID = "client-handoff-3"
+		thirdHandoff.RequestFingerprint = "handoff-fp-3"
+		thirdHandoff.ChildRunID = "run-child-3"
+		if _, _, err = store.CreateRunHandoffWithinLimit(ctx, &thirdHandoff, 2); !errors.Is(err, agentruntime.ErrRunHandoffLimit) {
 			t.Fatalf("handoff child limit = %v", err)
 		}
 		handoffConflict := handoff
@@ -254,6 +263,43 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		if _, _, err = store.CreateRunHandoff(ctx, &handoffConflict); !errors.Is(err, agentruntime.ErrRunHandoffConflict) {
 			t.Fatalf("handoff conflict = %v", err)
 		}
+		joinBase := domain.RunHandoffJoin{
+			Actor: actor, RootRunID: run.RunID, ParentRunID: run.RunID, HandoffIDs: []string{handoff.HandoffID, secondHandoff.HandoffID},
+			Quorum: 1, FailurePolicy: domain.RunHandoffJoinFailureCollect, Status: domain.RunHandoffJoinStatusPending,
+		}
+		invalidJoin := joinBase
+		invalidJoin.JoinID, invalidJoin.ClientJoinID, invalidJoin.RequestFingerprint, invalidJoin.Mode = "join-invalid", "client-join-invalid", "join-fp-invalid", domain.RunHandoffJoinModeAll
+		invalidJoin.RootRunID = "other-root"
+		if _, _, err = store.CreateRunHandoffJoin(ctx, &invalidJoin); !errors.Is(err, agentruntime.ErrRunHandoffJoinMember) {
+			t.Fatalf("invalid join member error = %v", err)
+		}
+		allCollect := joinBase
+		allCollect.JoinID, allCollect.ClientJoinID, allCollect.RequestFingerprint, allCollect.Mode = "join-all-collect", "client-join-all-collect", "join-fp-all-collect", domain.RunHandoffJoinModeAll
+		createdJoin, reused, err := store.CreateRunHandoffJoin(ctx, &allCollect)
+		if err != nil || reused || createdJoin.Status != domain.RunHandoffJoinStatusPending || createdJoin.PendingCount != 2 {
+			t.Fatalf("create all collect join = %+v,%t,%v", createdJoin, reused, err)
+		}
+		replayedJoin, reused, err := store.CreateRunHandoffJoin(ctx, &allCollect)
+		if err != nil || !reused || replayedJoin.JoinID != allCollect.JoinID {
+			t.Fatalf("replay join = %+v,%t,%v", replayedJoin, reused, err)
+		}
+		joinConflict := allCollect
+		joinConflict.RequestFingerprint = "different"
+		if _, _, err = store.CreateRunHandoffJoin(ctx, &joinConflict); !errors.Is(err, agentruntime.ErrRunHandoffJoinConflict) {
+			t.Fatalf("join conflict = %v", err)
+		}
+		anyCollect := joinBase
+		anyCollect.JoinID, anyCollect.ClientJoinID, anyCollect.RequestFingerprint, anyCollect.Mode = "join-any-collect", "client-join-any-collect", "join-fp-any-collect", domain.RunHandoffJoinModeAny
+		if _, _, err = store.CreateRunHandoffJoin(ctx, &anyCollect); err != nil {
+			t.Fatalf("create any collect join: %v", err)
+		}
+		allFailFast := joinBase
+		allFailFast.JoinID, allFailFast.ClientJoinID, allFailFast.RequestFingerprint, allFailFast.Mode = "join-all-fast", "client-join-all-fast", "join-fp-all-fast", domain.RunHandoffJoinModeAll
+		allFailFast.FailurePolicy = domain.RunHandoffJoinFailureFailFast
+		if _, _, err = store.CreateRunHandoffJoin(ctx, &allFailFast); err != nil {
+			t.Fatalf("create fail-fast join: %v", err)
+		}
+
 		completedAt := time.Now().UTC()
 		completed, reused, err := store.CompleteRunHandoff(ctx, actor, handoff.ChildRunID, domain.RunHandoffCompletion{
 			Status: domain.RunHandoffStatusCompleted, ResultSummary: "Evidence collected", ResultOutputIDs: []string{"output-1"}, CompletedAt: completedAt,
@@ -261,15 +307,49 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		if err != nil || reused || completed.Status != domain.RunHandoffStatusCompleted || len(completed.ResultOutputIDs) != 1 {
 			t.Fatalf("complete handoff = %+v,%t,%v", completed, reused, err)
 		}
+		anyReady, err := store.GetRunHandoffJoin(ctx, actor, anyCollect.JoinID)
+		if err != nil || anyReady.Status != domain.RunHandoffJoinStatusReady || anyReady.CompletedCount != 1 || anyReady.PendingCount != 1 {
+			t.Fatalf("any join after first success = %+v,%v", anyReady, err)
+		}
+		allPending, err := store.GetRunHandoffJoin(ctx, actor, allCollect.JoinID)
+		if err != nil || allPending.Status != domain.RunHandoffJoinStatusPending || allPending.CompletedCount != 1 || allPending.PendingCount != 1 {
+			t.Fatalf("all join after first success = %+v,%v", allPending, err)
+		}
 		completed, reused, err = store.CompleteRunHandoff(ctx, actor, handoff.ChildRunID, domain.RunHandoffCompletion{Status: domain.RunHandoffStatusCompleted})
 		if err != nil || !reused || completed.Status != domain.RunHandoffStatusCompleted {
 			t.Fatalf("reuse handoff completion = %+v,%t,%v", completed, reused, err)
 		}
+		failed, reused, err := store.CompleteRunHandoff(ctx, actor, secondHandoff.ChildRunID, domain.RunHandoffCompletion{Status: domain.RunHandoffStatusFailed, ErrorCode: "child_failed"})
+		if err != nil || reused || failed.Status != domain.RunHandoffStatusFailed {
+			t.Fatalf("fail second handoff = %+v,%t,%v", failed, reused, err)
+		}
+		allReady, err := store.GetRunHandoffJoin(ctx, actor, allCollect.JoinID)
+		if err != nil || allReady.Status != domain.RunHandoffJoinStatusReady || allReady.CompletedCount != 1 || allReady.FailedCount != 1 || allReady.PendingCount != 0 {
+			t.Fatalf("all collect join terminal = %+v,%v", allReady, err)
+		}
+		fastFailed, err := store.GetRunHandoffJoin(ctx, actor, allFailFast.JoinID)
+		if err != nil || fastFailed.Status != domain.RunHandoffJoinStatusFailed || fastFailed.ErrorCode != "handoff_join_child_failed" {
+			t.Fatalf("fail-fast join terminal = %+v,%v", fastFailed, err)
+		}
 		handoffs, err := store.ListRunHandoffs(ctx, actor, domain.RunHandoffFilter{RootRunID: run.RunID})
-		if err != nil || handoffs.Total != 1 || len(handoffs.Results) != 1 || handoffs.Results[0].ResultSummary != "Evidence collected" {
+		completedHandoff, found := handoffByID(handoffs.Results, handoff.HandoffID)
+		if err != nil || handoffs.Total != 2 || len(handoffs.Results) != 2 || !found || completedHandoff.ResultSummary != "Evidence collected" {
 			t.Fatalf("handoff page = %+v,%v", handoffs, err)
 		}
+		joins, err := store.ListRunHandoffJoins(ctx, actor, domain.RunHandoffJoinFilter{ParentRunID: run.RunID})
+		if err != nil || joins.Total != 3 || len(joins.Results) != 3 {
+			t.Fatalf("join page = %+v,%v", joins, err)
+		}
 	})
+}
+
+func handoffByID(items []domain.RunHandoff, handoffID string) (domain.RunHandoff, bool) {
+	for _, item := range items {
+		if item.HandoffID == handoffID {
+			return item, true
+		}
+	}
+	return domain.RunHandoff{}, false
 }
 
 func seeded(t testing.TB, factory StoreFactory) (agentruntime.Store, domain.ActorRef, domain.ThreadRef, domain.Run) {

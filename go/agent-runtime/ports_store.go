@@ -38,6 +38,9 @@ type RunHandoffStore interface {
 	GetRunHandoffByChildRun(context.Context, domain.ActorRef, string) (*domain.RunHandoff, error)
 	ListRunHandoffs(context.Context, domain.ActorRef, domain.RunHandoffFilter) (domain.RunHandoffPage, error)
 	CompleteRunHandoff(context.Context, domain.ActorRef, string, domain.RunHandoffCompletion) (*domain.RunHandoff, bool, error)
+	CreateRunHandoffJoin(context.Context, *domain.RunHandoffJoin) (*domain.RunHandoffJoin, bool, error)
+	GetRunHandoffJoin(context.Context, domain.ActorRef, string) (*domain.RunHandoffJoin, error)
+	ListRunHandoffJoins(context.Context, domain.ActorRef, domain.RunHandoffJoinFilter) (domain.RunHandoffJoinPage, error)
 }
 
 // ContinuationJobStore persists executable checkpoint handoffs. Enqueue calls

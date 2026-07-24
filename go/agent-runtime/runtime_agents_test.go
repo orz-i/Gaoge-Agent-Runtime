@@ -3,8 +3,10 @@ package agentruntime
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
@@ -15,6 +17,10 @@ const (
 	testAgentParentRunID   = "run-parent"
 	testAgentReviewID      = "agent-review"
 	testAgentSearchToolKey = "search"
+	testJoinHandoffA       = "handoff-a"
+	testJoinOne            = "one"
+	testJoinTwo            = "two"
+	testJoinThree          = "three"
 )
 
 type agentRuntimeTestStore struct {
@@ -22,6 +28,100 @@ type agentRuntimeTestStore struct {
 	runs      map[string]model.Run
 	manifests map[string]model.AgentManifest
 	handoffs  []model.RunHandoff
+	join      *model.RunHandoffJoin
+}
+
+func TestCreateRunHandoffJoinCanonicalizesPolicy(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	parent := model.Run{RunID: testAgentParentRunID, Actor: actor, Status: model.RunStatusRunning}
+	store := &agentRuntimeTestStore{runs: map[string]model.Run{parent.RunID: parent}}
+	engine := &Engine{repo: store}
+	join, reused, err := engine.CreateRunHandoffJoin(t.Context(), CreateRunHandoffJoinInput{
+		Actor: actor, ParentRunID: parent.RunID, ClientJoinID: "client-join", HandoffIDs: []string{"handoff-b", testJoinHandoffA},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reused {
+		t.Fatal("new join was reused")
+	}
+	policy := struct {
+		mode, failure string
+		quorum        int
+	}{join.Mode, join.FailurePolicy, join.Quorum}
+	wantPolicy := struct {
+		mode, failure string
+		quorum        int
+	}{model.RunHandoffJoinModeAll, model.RunHandoffJoinFailureCollect, 1}
+	if policy != wantPolicy {
+		t.Fatalf("join policy=%#v", policy)
+	}
+	if !slices.Equal(join.HandoffIDs, []string{testJoinHandoffA, "handoff-b"}) {
+		t.Fatalf("canonical join IDs=%#v", join.HandoffIDs)
+	}
+	if join.RequestFingerprint == "" {
+		t.Fatal("join fingerprint is empty")
+	}
+	if !strings.HasPrefix(join.JoinID, "join_") {
+		t.Fatalf("join ID=%q", join.JoinID)
+	}
+}
+
+func TestCreateRunHandoffJoinRejectsDuplicateMembers(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	parent := model.Run{RunID: testAgentParentRunID, Actor: actor, Status: model.RunStatusRunning}
+	engine := &Engine{repo: &agentRuntimeTestStore{runs: map[string]model.Run{parent.RunID: parent}}}
+	if _, _, err := engine.CreateRunHandoffJoin(t.Context(), CreateRunHandoffJoinInput{
+		Actor: actor, ParentRunID: parent.RunID, ClientJoinID: "duplicate", HandoffIDs: []string{testJoinHandoffA, testJoinHandoffA},
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("duplicate handoff IDs error=%v", err)
+	}
+}
+
+func TestResolveRunHandoffJoinQuorumIsMonotonic(t *testing.T) {
+	now := time.Now().UTC()
+	join := model.RunHandoffJoin{
+		HandoffIDs: []string{testJoinOne, testJoinTwo, testJoinThree}, Mode: model.RunHandoffJoinModeQuorum, Quorum: 2,
+		FailurePolicy: model.RunHandoffJoinFailureCollect, Status: model.RunHandoffJoinStatusPending,
+	}
+	pending := model.ResolveRunHandoffJoin(join, []model.RunHandoff{
+		{HandoffID: testJoinOne, Status: model.RunHandoffStatusCompleted},
+		{HandoffID: testJoinTwo, Status: model.RunHandoffStatusFailed},
+		{HandoffID: testJoinThree, Status: model.RunHandoffStatusQueued},
+	}, now)
+	if pending.Status != model.RunHandoffJoinStatusPending || pending.CompletedCount != 1 || pending.PendingCount != 1 {
+		t.Fatalf("pending quorum=%#v", pending)
+	}
+	failed := model.ResolveRunHandoffJoin(pending, []model.RunHandoff{
+		{HandoffID: testJoinOne, Status: model.RunHandoffStatusCompleted},
+		{HandoffID: testJoinTwo, Status: model.RunHandoffStatusFailed},
+		{HandoffID: testJoinThree, Status: model.RunHandoffStatusCancelled},
+	}, now.Add(time.Second))
+	if failed.Status != model.RunHandoffJoinStatusFailed || failed.ErrorCode != "handoff_join_quorum_unreachable" {
+		t.Fatalf("failed quorum=%#v", failed)
+	}
+	ready := model.ResolveRunHandoffJoin(join, []model.RunHandoff{
+		{HandoffID: testJoinOne, Status: model.RunHandoffStatusCompleted},
+		{HandoffID: testJoinTwo, Status: model.RunHandoffStatusCompleted},
+		{HandoffID: testJoinThree, Status: model.RunHandoffStatusQueued},
+	}, now)
+	if ready.Status != model.RunHandoffJoinStatusReady || ready.ResolvedAt == nil {
+		t.Fatalf("ready quorum=%#v", ready)
+	}
+	unchanged := model.ResolveRunHandoffJoin(ready, []model.RunHandoff{
+		{HandoffID: testJoinOne, Status: model.RunHandoffStatusFailed},
+		{HandoffID: testJoinTwo, Status: model.RunHandoffStatusFailed},
+		{HandoffID: testJoinThree, Status: model.RunHandoffStatusFailed},
+	}, now.Add(2*time.Second))
+	if unchanged.Status != model.RunHandoffJoinStatusReady || unchanged.CompletedCount != ready.CompletedCount {
+		t.Fatalf("terminal join regressed: before=%#v after=%#v", ready, unchanged)
+	}
+}
+
+func (s *agentRuntimeTestStore) CreateRunHandoffJoin(_ context.Context, input *model.RunHandoffJoin) (*model.RunHandoffJoin, bool, error) {
+	cloned := *input
+	s.join = &cloned
+	return &cloned, false, nil
 }
 
 func (s *agentRuntimeTestStore) GetRun(_ context.Context, actor model.ActorRef, runID string) (*model.Run, error) {

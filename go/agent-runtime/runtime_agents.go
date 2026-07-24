@@ -41,6 +41,132 @@ type AgentManifestRevisionInput struct {
 	RevisionNote     string
 }
 
+func normalizeRunHandoffJoinIDs(values []string) ([]string, error) {
+	if len(values) == 0 || len(values) > hardAgentMaxChildRuns {
+		return nil, ErrInvalidInput
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return nil, ErrInvalidInput
+		}
+		if _, duplicate := seen[value]; duplicate {
+			return nil, ErrInvalidInput
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result, nil
+}
+
+func runHandoffJoinPublicID(actor model.ActorRef, clientJoinID string) string {
+	sum := sha256.Sum256([]byte(actor.TenantID + "\x00" + actor.ActorID + "\x00" + strings.TrimSpace(clientJoinID)))
+	return "join_" + hex.EncodeToString(sum[:16])
+}
+
+func runHandoffJoinFingerprint(join model.RunHandoffJoin) string {
+	payload := struct {
+		Actor         model.ActorRef
+		ParentRunID   string
+		HandoffIDs    []string
+		Mode          string
+		Quorum        int
+		FailurePolicy string
+	}{join.Actor, join.ParentRunID, join.HandoffIDs, join.Mode, join.Quorum, join.FailurePolicy}
+	return hashAgentPayload(payload)
+}
+
+func (s *Engine) CreateRunHandoffJoin(ctx context.Context, input CreateRunHandoffJoinInput) (*model.RunHandoffJoin, bool, error) {
+	if !validActorRef(input.Actor) || strings.TrimSpace(input.ParentRunID) == "" || strings.TrimSpace(input.ClientJoinID) == "" {
+		return nil, false, ErrInvalidInput
+	}
+	parent, err := s.repo.GetRun(ctx, input.Actor, strings.TrimSpace(input.ParentRunID))
+	if err != nil {
+		return nil, false, err
+	}
+	if !runCanDelegate(*parent) {
+		return nil, false, ErrRunHandoffParentBlocked
+	}
+	handoffIDs, err := normalizeRunHandoffJoinIDs(input.HandoffIDs)
+	if err != nil {
+		return nil, false, err
+	}
+	sort.Strings(handoffIDs)
+	mode, quorum, failurePolicy, err := normalizeRunHandoffJoinPolicy(input.Mode, input.Quorum, input.FailurePolicy, len(handoffIDs))
+	if err != nil {
+		return nil, false, err
+	}
+	rootRunID := firstNonEmptyString(parent.RootRunID, parent.RunID)
+	joinID := runHandoffJoinPublicID(input.Actor, input.ClientJoinID)
+	join := &model.RunHandoffJoin{
+		JoinID: joinID, ClientJoinID: strings.TrimSpace(input.ClientJoinID), Actor: input.Actor,
+		RootRunID: rootRunID, ParentRunID: parent.RunID, HandoffIDs: handoffIDs,
+		Mode: mode, Quorum: quorum, FailurePolicy: failurePolicy, Status: model.RunHandoffJoinStatusPending,
+	}
+	join.RequestFingerprint = runHandoffJoinFingerprint(*join)
+	return s.repo.CreateRunHandoffJoin(ctx, join)
+}
+
+func (s *Engine) GetRunHandoffJoin(ctx context.Context, actor model.ActorRef, joinID string) (*model.RunHandoffJoin, error) {
+	if !validActorRef(actor) || strings.TrimSpace(joinID) == "" {
+		return nil, ErrInvalidInput
+	}
+	return s.repo.GetRunHandoffJoin(ctx, actor, strings.TrimSpace(joinID))
+}
+
+func (s *Engine) ListRunHandoffJoins(ctx context.Context, actor model.ActorRef, filter model.RunHandoffJoinFilter) (model.RunHandoffJoinPage, error) {
+	if !validActorRef(actor) {
+		return model.RunHandoffJoinPage{}, ErrInvalidInput
+	}
+	return s.repo.ListRunHandoffJoins(ctx, actor, filter)
+}
+
+func normalizeRunHandoffJoinPolicy(mode string, quorum int, failurePolicy string, members int) (string, int, string, error) {
+	if members <= 0 || members > hardAgentMaxChildRuns {
+		return "", 0, "", ErrInvalidInput
+	}
+	failurePolicy, err := normalizeRunHandoffJoinFailurePolicy(failurePolicy)
+	if err != nil {
+		return "", 0, "", ErrInvalidInput
+	}
+	mode, quorum, err = normalizeRunHandoffJoinMode(mode, quorum, members)
+	if err != nil {
+		return "", 0, "", err
+	}
+	return mode, quorum, failurePolicy, nil
+}
+
+func normalizeRunHandoffJoinFailurePolicy(value string) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return model.RunHandoffJoinFailureCollect, nil
+	}
+	if value != model.RunHandoffJoinFailureCollect && value != model.RunHandoffJoinFailureFailFast {
+		return "", ErrInvalidInput
+	}
+	return value, nil
+}
+
+func normalizeRunHandoffJoinMode(mode string, quorum, members int) (string, int, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		mode = model.RunHandoffJoinModeAll
+	}
+	switch mode {
+	case model.RunHandoffJoinModeAll, model.RunHandoffJoinModeAny:
+		return mode, 1, nil
+	case model.RunHandoffJoinModeQuorum:
+		if quorum <= 0 || quorum > members {
+			return "", 0, ErrInvalidInput
+		}
+		return mode, quorum, nil
+	default:
+		return "", 0, ErrInvalidInput
+	}
+}
+
 type DelegateTextRunInput struct {
 	Actor            model.ActorRef
 	ParentRunID      string
@@ -60,6 +186,16 @@ type DelegateTextRunResult struct {
 	Handoff model.RunHandoff
 	Run     model.Run
 	Step    model.Step
+}
+
+type CreateRunHandoffJoinInput struct {
+	Actor         model.ActorRef
+	ParentRunID   string
+	ClientJoinID  string
+	HandoffIDs    []string
+	Mode          string
+	Quorum        int
+	FailurePolicy string
 }
 
 type RunTask struct {
@@ -528,4 +664,6 @@ var (
 	ErrRunHandoffLimit         = errors.New("run handoff child limit reached")
 	ErrRunHandoffDepth         = errors.New("run handoff depth limit reached")
 	ErrRunHandoffParentBlocked = errors.New("parent run cannot delegate")
+	ErrRunHandoffJoinConflict  = errors.New("run handoff join idempotency conflict")
+	ErrRunHandoffJoinMember    = errors.New("run handoff join contains an invalid member")
 )

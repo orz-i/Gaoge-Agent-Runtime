@@ -18,8 +18,10 @@ const (
 	columnErrorCode          = "error_code"
 	columnErrorMessage       = "error_message"
 	columnPendingInteraction = "pending_interaction_id"
+	columnResolvedAt         = "resolved_at"
 	columnRevision           = "revision"
 	columnStatus             = "status"
+	columnUpdatedAt          = "updated_at"
 	projectionKindMessage    = "conversation.message"
 	visibilityUser           = "user"
 )

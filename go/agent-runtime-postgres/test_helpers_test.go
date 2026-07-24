@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -90,7 +89,7 @@ func openConversationRepositoryTestDB(t *testing.T) *gorm.DB {
 			_ = sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.RunRecord{}, &model.EventRecord{}, &model.RunStep{}, &model.RuntimePlanRecord{}, &model.RunInteraction{}, &model.RunCheckpoint{}, &model.RuntimeOutputIdentityRecord{}, &model.RuntimeOutputRefRecord{}, &model.RuntimeWorkbenchProjectionRecord{}, &model.RuntimePhaseProjectionRecord{}, &model.EvidenceSelection{}, &model.RunQueueItemRecord{}, &model.ContinuationJobRecord{}, &model.ContextRecord{}, &model.AgentManifestRevisionRecord{}, &model.RunHandoffRecord{}); err != nil {
+	if err := db.AutoMigrate(Models()...); err != nil {
 		t.Fatalf("migrate models: %v", err)
 	}
 	return db
