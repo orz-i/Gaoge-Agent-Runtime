@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/modelcap"
 )
 
 const (
@@ -184,7 +186,7 @@ func shouldUseRAGForAttachment(item AttachmentInput, fileMode string, cfg Config
 			return true
 		}
 		if cfg.Context.TokenBudgetEnabled {
-			budget := EffectiveContextBudgetFromCapabilities(capabilityModelName, capabilitiesJSON)
+			budget := modelcap.Default.Resolve(capabilityModelName, capabilitiesJSON).EffectiveContextBudget()
 			fileTokens := int(estimateTokens(item.ExtractedText))
 			return budget > 0 && fileTokens > budget*2/5
 		}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/modelcap"
 )
 
 const (
@@ -1110,7 +1111,7 @@ func (s *Engine) compileTextRunWorkspace(ctx context.Context, input StartTextRun
 	if !ok {
 		return WorkspaceSnapshot{}, false, ErrInvalidInput
 	}
-	workspace, err := provider.CompileWorkspace(ctx, input.Actor, input.Thread, input.Workspace, EffectiveContextBudget(modelName))
+	workspace, err := provider.CompileWorkspace(ctx, input.Actor, input.Thread, input.Workspace, modelcap.Default.Resolve(modelName, "").EffectiveContextBudget())
 	if err != nil {
 		return WorkspaceSnapshot{}, false, classifyWorkspaceProviderError(provider, err)
 	}

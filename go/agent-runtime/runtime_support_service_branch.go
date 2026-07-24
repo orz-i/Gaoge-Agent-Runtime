@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/modelcap"
 )
 
 const (
@@ -78,7 +79,7 @@ func (s *Engine) applyContextTokenBudget(messages []ContextMessage, capabilityMo
 	if s == nil || s.cfg == nil || !s.cfg.Snapshot().Context.TokenBudgetEnabled || len(messages) <= 1 {
 		return messages
 	}
-	return truncateContextByTokenBudget(messages, EffectiveContextBudgetFromCapabilities(capabilityModelName, capabilitiesJSON))
+	return truncateContextByTokenBudget(messages, modelcap.Default.Resolve(capabilityModelName, capabilitiesJSON).EffectiveContextBudget())
 }
 
 func truncateContextByTokenBudget(messages []ContextMessage, budgetTokens int) []ContextMessage {
