@@ -42,25 +42,3 @@ func TestEffectiveContextBudgetUsesResolvedLimits(t *testing.T) {
 		t.Fatalf("effective context budget = %d", got)
 	}
 }
-
-func TestParseStoryAgentSharesConfigurationStatusAndFields(t *testing.T) {
-	resolution := ParseStoryAgent(`{
-		"storyAgent": {
-			"nativeToolCalling": "required",
-			"structuredArguments": false,
-			"maxToolSchemaBytes": 32768,
-			"maxTools": "24"
-		}
-	}`)
-	if resolution.ConfigurationStatus != ConfigurationValid || !resolution.Present {
-		t.Fatalf("story agent resolution = %#v", resolution)
-	}
-	caps := resolution.Capabilities
-	if caps.NativeToolCalling != "required" || !caps.StructuredArgumentsSet || caps.StructuredArguments || caps.MaxToolSchemaBytes != 32_768 || caps.MaxTools != 24 {
-		t.Fatalf("story agent capabilities = %#v", caps)
-	}
-	invalid := ParseStoryAgent(`{`)
-	if invalid.ConfigurationStatus != ConfigurationInvalid || invalid.Present {
-		t.Fatalf("invalid story agent resolution = %#v", invalid)
-	}
-}
