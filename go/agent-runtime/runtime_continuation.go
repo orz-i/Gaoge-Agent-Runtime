@@ -145,7 +145,7 @@ func continuationRunDoesNotExecute(run model.Run) bool {
 		return true
 	}
 	switch run.Status {
-	case model.RunStatusWaitingInput, model.RunStatusSuspended, model.RunStatusCompleted, model.RunStatusFailed, model.RunStatusCancelled:
+	case model.RunStatusWaitingInput, model.RunStatusWaitingHandoff, model.RunStatusSuspended, model.RunStatusCompleted, model.RunStatusFailed, model.RunStatusCancelled:
 		return true
 	default:
 		return false
@@ -276,7 +276,7 @@ func (s *Engine) processContinuationJob(ctx context.Context, owner string, job m
 	defer recoverContinuationWorkerPanic(&resultErr)
 	jobCtx, heartbeat := s.startContinuationHeartbeat(ctx, owner, job.JobID)
 	defer heartbeat.stop(&resultErr)
-	return s.executeContinuationJob(jobCtx, job)
+	return s.executeContinuationJob(jobCtx, owner, job)
 }
 
 type continuationHeartbeat struct {
@@ -311,7 +311,7 @@ func recoverContinuationWorkerPanic(resultErr *error) {
 	}
 }
 
-func (s *Engine) executeContinuationJob(ctx context.Context, job model.ContinuationJob) error {
+func (s *Engine) executeContinuationJob(ctx context.Context, owner string, job model.ContinuationJob) error {
 	run, err := s.repo.GetRun(ctx, job.Actor, job.RunID)
 	if err != nil {
 		return err
@@ -327,6 +327,7 @@ func (s *Engine) executeContinuationJob(ctx context.Context, job model.Continuat
 	if err != nil || continuation.SegmentKey != job.SegmentKey {
 		return ErrRunSnapshotIncompatible
 	}
+	ctx = context.WithValue(ctx, runHandoffJoinContextKey{}, continuation.HandoffJoin)
 	effective, err := s.loadResumeTextRunRuntime(ctx, *run)
 	if err != nil {
 		return err
@@ -335,17 +336,39 @@ func (s *Engine) executeContinuationJob(ctx context.Context, job model.Continuat
 	if err != nil {
 		return err
 	}
-	reservationValue, hasReservation, err := continuationReservation(job, run.Actor)
+	reservation, err := s.ensureContinuationJobReservation(ctx, owner, job, *run, effective)
 	if err != nil {
 		return err
-	}
-	var reservation *UsageBalanceReservation
-	if hasReservation {
-		reservation = &reservationValue
 	}
 	segmentCtx := context.WithValue(ctx, runSegmentKeyContextKey{}, job.SegmentKey)
 	s.executeRunContinuation(segmentCtx, *run, root, effective, reservation, *checkpoint, job.Source)
 	return ctx.Err()
+}
+
+func (s *Engine) ensureContinuationJobReservation(ctx context.Context, owner string, job model.ContinuationJob, run model.Run, effective effectiveTextRunConfig) (*UsageBalanceReservation, error) {
+	reservationValue, hasReservation, err := continuationReservation(job, run.Actor)
+	if err != nil {
+		return nil, err
+	}
+	if hasReservation {
+		return &reservationValue, nil
+	}
+	reservation, _, err := s.ReserveRunUsageBalance(ctx, RunBillingInput{
+		Actor: run.Actor, Thread: run.Thread, PlatformModelName: effective.PlatformModelName, ClientRunID: job.SegmentKey,
+	})
+	if err != nil || reservation == nil {
+		return reservation, err
+	}
+	saved, _, persistErr := s.repo.SetContinuationJobReservation(ctx, job.JobID, owner, reservation.AmountNanousd, reservation.RefNo, time.Now())
+	if persistErr != nil {
+		_ = s.ReleaseRunUsageReservation(context.WithoutCancel(ctx), reservation, "Continuation Job 预扣回执持久化失败退回预扣")
+		return nil, persistErr
+	}
+	if saved == nil || saved.ReservationRefNo != reservation.RefNo || saved.ReservationAmountNanousd != reservation.AmountNanousd {
+		_ = s.ReleaseRunUsageReservation(context.WithoutCancel(ctx), reservation, "Continuation Job 预扣回执不一致退回预扣")
+		return nil, ErrRunSnapshotIncompatible
+	}
+	return reservation, nil
 }
 
 func continuationReservation(job model.ContinuationJob, actor model.ActorRef) (UsageBalanceReservation, bool, error) {

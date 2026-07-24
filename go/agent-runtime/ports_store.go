@@ -38,7 +38,9 @@ type RunHandoffStore interface {
 	GetRunHandoffByChildRun(context.Context, domain.ActorRef, string) (*domain.RunHandoff, error)
 	ListRunHandoffs(context.Context, domain.ActorRef, domain.RunHandoffFilter) (domain.RunHandoffPage, error)
 	CompleteRunHandoff(context.Context, domain.ActorRef, string, domain.RunHandoffCompletion) (*domain.RunHandoff, bool, error)
+	CompleteRunHandoffWithJoins(context.Context, domain.ActorRef, string, domain.RunHandoffCompletion) (domain.RunHandoffCompletionResult, error)
 	CreateRunHandoffJoin(context.Context, *domain.RunHandoffJoin) (*domain.RunHandoffJoin, bool, error)
+	CreateRunHandoffJoinWaitBundle(context.Context, *domain.RunHandoffJoin, string, int64, *domain.Checkpoint, []domain.Event) (*domain.RunHandoffJoin, []domain.Event, bool, error)
 	GetRunHandoffJoin(context.Context, domain.ActorRef, string) (*domain.RunHandoffJoin, error)
 	ListRunHandoffJoins(context.Context, domain.ActorRef, domain.RunHandoffJoinFilter) (domain.RunHandoffJoinPage, error)
 }
@@ -52,6 +54,7 @@ type ContinuationJobStore interface {
 	RequeueDeadLetterContinuationJob(context.Context, string, time.Time) (*domain.ContinuationJob, error)
 	DeadLetterExpiredContinuationJob(context.Context, time.Time) (*domain.ContinuationJob, error)
 	ClaimNextContinuationJob(context.Context, string, time.Time, time.Time) (*domain.ContinuationJob, error)
+	SetContinuationJobReservation(context.Context, string, string, int64, string, time.Time) (*domain.ContinuationJob, bool, error)
 	HeartbeatContinuationJob(context.Context, string, string, time.Time, time.Time) error
 	CompleteContinuationJob(context.Context, string, string, time.Time) error
 	RetryContinuationJob(context.Context, string, string, string, time.Time, bool) error

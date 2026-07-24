@@ -3,14 +3,15 @@ package domain
 import "time"
 
 const (
-	RunStatusQueued       = "queued"
-	RunStatusPreparing    = "preparing"
-	RunStatusWaitingInput = "waiting_input"
-	RunStatusRunning      = "running"
-	RunStatusCompleted    = "completed"
-	RunStatusFailed       = "failed"
-	RunStatusCancelled    = "cancelled"
-	RunStatusSuspended    = "suspended"
+	RunStatusQueued         = "queued"
+	RunStatusPreparing      = "preparing"
+	RunStatusWaitingInput   = "waiting_input"
+	RunStatusWaitingHandoff = "waiting_handoff"
+	RunStatusRunning        = "running"
+	RunStatusCompleted      = "completed"
+	RunStatusFailed         = "failed"
+	RunStatusCancelled      = "cancelled"
+	RunStatusSuspended      = "suspended"
 )
 
 // Run is the durable root of an Agent Runtime execution.

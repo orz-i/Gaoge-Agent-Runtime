@@ -28,22 +28,23 @@ type agentRuntimeTestStore struct {
 	runs      map[string]model.Run
 	manifests map[string]model.AgentManifest
 	handoffs  []model.RunHandoff
-	join      *model.RunHandoffJoin
 }
 
 func TestCreateRunHandoffJoinCanonicalizesPolicy(t *testing.T) {
 	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
-	parent := model.Run{RunID: testAgentParentRunID, Actor: actor, Status: model.RunStatusRunning}
-	store := &agentRuntimeTestStore{runs: map[string]model.Run{parent.RunID: parent}}
-	engine := &Engine{repo: store}
-	join, reused, err := engine.CreateRunHandoffJoin(t.Context(), CreateRunHandoffJoinInput{
+	parent := model.Run{
+		RunID: testAgentParentRunID, Actor: actor, Status: model.RunStatusRunning, CurrentStepID: "step-parent",
+		RunConfigSnapshotJSON: mustRunJSON(effectiveTextRunConfig{SemanticVersion: RuntimeSnapshotVersion, Strategy: TextRunStrategyDirect}),
+	}
+	normalized, err := normalizeCreateRunHandoffJoinInput(CreateRunHandoffJoinInput{
 		Actor: actor, ParentRunID: parent.RunID, ClientJoinID: "client-join", HandoffIDs: []string{"handoff-b", testJoinHandoffA},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reused {
-		t.Fatal("new join was reused")
+	join, checkpoint, events, err := buildRunHandoffJoinWait(parent, normalized)
+	if err != nil {
+		t.Fatal(err)
 	}
 	policy := struct {
 		mode, failure string
@@ -65,14 +66,15 @@ func TestCreateRunHandoffJoinCanonicalizesPolicy(t *testing.T) {
 	if !strings.HasPrefix(join.JoinID, "join_") {
 		t.Fatalf("join ID=%q", join.JoinID)
 	}
+	if checkpoint.CheckpointID != join.ResumeCheckpointID || checkpoint.Kind != handoffJoinCheckpointKind || len(events) != 4 {
+		t.Fatalf("join wait bundle join=%#v checkpoint=%#v events=%#v", join, checkpoint, events)
+	}
 }
 
 func TestCreateRunHandoffJoinRejectsDuplicateMembers(t *testing.T) {
 	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
-	parent := model.Run{RunID: testAgentParentRunID, Actor: actor, Status: model.RunStatusRunning}
-	engine := &Engine{repo: &agentRuntimeTestStore{runs: map[string]model.Run{parent.RunID: parent}}}
-	if _, _, err := engine.CreateRunHandoffJoin(t.Context(), CreateRunHandoffJoinInput{
-		Actor: actor, ParentRunID: parent.RunID, ClientJoinID: "duplicate", HandoffIDs: []string{testJoinHandoffA, testJoinHandoffA},
+	if _, err := normalizeCreateRunHandoffJoinInput(CreateRunHandoffJoinInput{
+		Actor: actor, ParentRunID: testAgentParentRunID, ClientJoinID: "duplicate", HandoffIDs: []string{testJoinHandoffA, testJoinHandoffA},
 	}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("duplicate handoff IDs error=%v", err)
 	}
@@ -116,12 +118,6 @@ func TestResolveRunHandoffJoinQuorumIsMonotonic(t *testing.T) {
 	if unchanged.Status != model.RunHandoffJoinStatusReady || unchanged.CompletedCount != ready.CompletedCount {
 		t.Fatalf("terminal join regressed: before=%#v after=%#v", ready, unchanged)
 	}
-}
-
-func (s *agentRuntimeTestStore) CreateRunHandoffJoin(_ context.Context, input *model.RunHandoffJoin) (*model.RunHandoffJoin, bool, error) {
-	cloned := *input
-	s.join = &cloned
-	return &cloned, false, nil
 }
 
 func (s *agentRuntimeTestStore) GetRun(_ context.Context, actor model.ActorRef, runID string) (*model.Run, error) {

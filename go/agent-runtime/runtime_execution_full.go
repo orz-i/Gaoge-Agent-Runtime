@@ -130,6 +130,7 @@ const (
 	runContinuationReplan              = "replan"
 	runContinuationExecuteApprovedTool = "execute_approved_tool"
 	runContinuationRenewInteraction    = "renew_interaction"
+	runContinuationAwaitHandoffJoin    = "await_handoff_join"
 )
 
 const runPublicProgressInstruction = `When you call tools, you may include a brief user-facing progress update in the assistant text only when the goal, phase, or material result changes. Use at most two short sentences and 320 characters. State what you are doing or what changed; never reveal hidden reasoning, system instructions, credentials, or raw tool payloads. Do not add an update merely to announce every tool call.`
@@ -142,6 +143,61 @@ var (
 type planPayload struct {
 	Summary string         `json:"summary"`
 	Steps   []planStepSpec `json:"steps"`
+}
+
+func validateExplicitResumeContinuation(continuation runContinuation) error {
+	if continuation.Type == runContinuationAwaitHandoffJoin {
+		return ErrRunResumeConflict
+	}
+	return nil
+}
+
+func validateAwaitHandoffJoinContinuation(value runContinuation) error {
+	next := value.NextContinuation
+	valid := allRunContinuationConditions(
+		value.TargetStatus == model.RunStatusWaitingHandoff,
+		strings.TrimSpace(value.HandoffJoinID) != "",
+		next != nil,
+		value.FrozenToolCall == nil,
+		value.FrozenInteraction == nil,
+		value.DurableToolResult == nil,
+		value.HandoffJoin == nil,
+	)
+	if !valid || next.Type == runContinuationAwaitHandoffJoin || next.StepID != value.StepID {
+		return ErrRunSnapshotIncompatible
+	}
+	return validateRunContinuation(*next)
+}
+
+func validateContinuationHandoffJoinContext(value runContinuation) error {
+	if value.HandoffJoin == nil {
+		return nil
+	}
+	if !continuationSupportsHandoffJoinContext(value.Type) {
+		return ErrRunSnapshotIncompatible
+	}
+	join := *value.HandoffJoin
+	if !validRunHandoffJoinContextEnvelope(join) || runHandoffJoinContextFingerprint(join) != join.Fingerprint || !validRunHandoffJoinResults(join.Results) {
+		return ErrRunSnapshotIncompatible
+	}
+	return nil
+}
+
+func continuationSupportsHandoffJoinContext(continuationType string) bool {
+	return continuationType == runContinuationStartDirect || continuationType == runContinuationContinuePlan
+}
+
+func validRunHandoffJoinContextEnvelope(join runHandoffJoinContext) bool {
+	return strings.TrimSpace(join.JoinID) != "" && len(join.Results) > 0 && len(join.Results) <= hardAgentMaxChildRuns && strings.TrimSpace(join.Fingerprint) != ""
+}
+
+func validRunHandoffJoinResults(results []runHandoffJoinResult) bool {
+	for _, result := range results {
+		if strings.TrimSpace(result.HandoffID) == "" || strings.TrimSpace(result.ChildRunID) == "" || strings.TrimSpace(result.Status) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 type planStepSpec struct {
@@ -186,20 +242,41 @@ type runFrozenInteraction struct {
 	Fingerprint    string          `json:"fingerprint"`
 }
 
+type runHandoffJoinResult struct {
+	HandoffID  string   `json:"handoffID"`
+	ChildRunID string   `json:"childRunID"`
+	AgentName  string   `json:"agentName"`
+	Status     string   `json:"status"`
+	Summary    string   `json:"summary,omitempty"`
+	OutputIDs  []string `json:"outputIDs,omitempty"`
+	ErrorCode  string   `json:"errorCode,omitempty"`
+}
+
+type runHandoffJoinContext struct {
+	JoinID        string                 `json:"joinID"`
+	Mode          string                 `json:"mode"`
+	FailurePolicy string                 `json:"failurePolicy"`
+	Results       []runHandoffJoinResult `json:"results"`
+	Fingerprint   string                 `json:"fingerprint"`
+}
+
 type runContinuation struct {
-	SemanticVersion   int                   `json:"semanticVersion"`
-	SegmentKey        string                `json:"segmentKey"`
-	Type              string                `json:"type"`
-	TargetStatus      string                `json:"targetStatus"`
-	InteractionID     string                `json:"interactionID,omitempty"`
-	PlanID            string                `json:"planID,omitempty"`
-	StepID            string                `json:"stepID,omitempty"`
-	SourceStepID      string                `json:"sourceStepID,omitempty"`
-	NextRevision      int                   `json:"nextRevision,omitempty"`
-	Feedback          string                `json:"feedback,omitempty"`
-	DurableToolResult *runDurableToolResult `json:"durableToolResult,omitempty"`
-	FrozenToolCall    *runFrozenToolCall    `json:"frozenToolCall,omitempty"`
-	FrozenInteraction *runFrozenInteraction `json:"frozenInteraction,omitempty"`
+	SemanticVersion   int                    `json:"semanticVersion"`
+	SegmentKey        string                 `json:"segmentKey"`
+	Type              string                 `json:"type"`
+	TargetStatus      string                 `json:"targetStatus"`
+	InteractionID     string                 `json:"interactionID,omitempty"`
+	PlanID            string                 `json:"planID,omitempty"`
+	StepID            string                 `json:"stepID,omitempty"`
+	SourceStepID      string                 `json:"sourceStepID,omitempty"`
+	NextRevision      int                    `json:"nextRevision,omitempty"`
+	Feedback          string                 `json:"feedback,omitempty"`
+	DurableToolResult *runDurableToolResult  `json:"durableToolResult,omitempty"`
+	FrozenToolCall    *runFrozenToolCall     `json:"frozenToolCall,omitempty"`
+	FrozenInteraction *runFrozenInteraction  `json:"frozenInteraction,omitempty"`
+	HandoffJoinID     string                 `json:"handoffJoinID,omitempty"`
+	NextContinuation  *runContinuation       `json:"nextContinuation,omitempty"`
+	HandoffJoin       *runHandoffJoinContext `json:"handoffJoin,omitempty"`
 }
 
 type runCheckpointManifest struct {
@@ -1059,6 +1136,12 @@ func validateRunContinuation(continuation runContinuation) error {
 	if invalidContinuationFrozenInteraction(continuation) {
 		return ErrRunSnapshotIncompatible
 	}
+	if continuation.Type != runContinuationAwaitHandoffJoin && (strings.TrimSpace(continuation.HandoffJoinID) != "" || continuation.NextContinuation != nil) {
+		return ErrRunSnapshotIncompatible
+	}
+	if err := validateContinuationHandoffJoinContext(continuation); err != nil {
+		return err
+	}
 	switch continuation.Type {
 	case runContinuationStartDirect:
 		return validateStartDirectContinuation(continuation)
@@ -1072,6 +1155,8 @@ func validateRunContinuation(continuation runContinuation) error {
 		return validateApprovedToolContinuation(continuation)
 	case runContinuationRenewInteraction:
 		return validateRenewInteractionContinuation(continuation)
+	case runContinuationAwaitHandoffJoin:
+		return validateAwaitHandoffJoinContinuation(continuation)
 	default:
 		return ErrRunSnapshotIncompatible
 	}
@@ -3200,6 +3285,9 @@ func (s *Engine) failTextRun(ctx context.Context, run model.Run, stepID string, 
 	if err == nil {
 		return
 	}
+	if s.currentRunWaitingHandoff(context.WithoutCancel(ctx), run) {
+		return
+	}
 	if s.isRunCanceled(ctx, run.RunID) || errors.Is(err, context.Canceled) {
 		_ = s.cancelTextRun(ctx, run, stepID, ErrRunCanceled.Error())
 		return
@@ -3354,6 +3442,9 @@ func (s *Engine) RetireTextRun(ctx context.Context, actor model.ActorRef, runID 
 }
 
 func (s *Engine) completeTextRun(ctx context.Context, run model.Run, rootStepID string, effective effectiveTextRunConfig, finalText string) error {
+	if s.currentRunWaitingHandoff(context.WithoutCancel(ctx), run) {
+		return nil
+	}
 	if err := s.validateRequiredWorkspaceArtifact(ctx, run, effective); err != nil {
 		return err
 	}
@@ -3412,6 +3503,7 @@ func (s *Engine) finalizeRunWithProjection(ctx context.Context, run model.Run, i
 	}
 	if handoffParentRunID != "" {
 		s.publishRunEvents(handoffParentRunID, handoffEvents)
+		s.wakeContinuationJobs()
 	}
 	return events, applied, nil
 }
@@ -4220,6 +4312,11 @@ func (s *Engine) dispatchInitialRunContinuation(ctx context.Context, run model.R
 		s.failTextRun(context.WithoutCancel(ctx), run, continuation.StepID, ErrRunSnapshotIncompatible)
 		s.FinishRunNotifications(run.RunID)
 		return true
+	case runContinuationAwaitHandoffJoin:
+		_ = s.ReleaseRunUsageReservation(context.WithoutCancel(ctx), reservation, "Handoff Join 等待 checkpoint 被错误调度退回预扣")
+		s.failTextRun(context.WithoutCancel(ctx), run, continuation.StepID, ErrRunSnapshotIncompatible)
+		s.FinishRunNotifications(run.RunID)
+		return true
 	default:
 		return false
 	}
@@ -4334,6 +4431,9 @@ func (s *Engine) prepareTextRunResume(ctx context.Context, input ResumeTextRunIn
 	continuation, err := decodeRunContinuation(checkpoint)
 	if err != nil {
 		return preparedTextRunResume{}, ErrRunSnapshotIncompatible
+	}
+	if err = validateExplicitResumeContinuation(continuation); err != nil {
+		return preparedTextRunResume{}, err
 	}
 	requestedID := strings.TrimSpace(input.CheckpointID)
 	if requestedID != "" && checkpoint.CheckpointID != requestedID {

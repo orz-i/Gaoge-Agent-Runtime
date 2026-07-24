@@ -987,7 +987,7 @@ func runEventResponse(e model.Event) map[string]interface{} {
 }
 func isRunStreamClosableStatus(status string) bool {
 	switch status {
-	case model.RunStatusCompleted, model.RunStatusFailed, model.RunStatusCancelled, model.RunStatusSuspended, model.RunStatusWaitingInput:
+	case model.RunStatusCompleted, model.RunStatusFailed, model.RunStatusCancelled, model.RunStatusSuspended, model.RunStatusWaitingInput, model.RunStatusWaitingHandoff:
 		return true
 	}
 	return false

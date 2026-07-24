@@ -119,6 +119,7 @@ type RunHandoffJoin struct {
 	RootRunID          string
 	ParentRunID        string
 	HandoffIDs         []string
+	ResumeCheckpointID string
 	Mode               string
 	Quorum             int
 	FailurePolicy      string
@@ -146,6 +147,12 @@ type RunHandoffJoinFilter struct {
 type RunHandoffJoinPage struct {
 	Total   int64
 	Results []RunHandoffJoin
+}
+
+type RunHandoffCompletionResult struct {
+	Handoff       RunHandoff
+	ResolvedJoins []RunHandoffJoin
+	Reused        bool
 }
 
 func ValidRunHandoffJoin(input *RunHandoffJoin) bool {

@@ -14,6 +14,8 @@ const (
 	testContinuationRunRunning = "run-running"
 	testContinuationRunFailed  = "run-failed"
 	testContinuationRunRequeue = "run-requeue"
+	testReservationTenantID    = "tenant-reservation"
+	testReservationActorID     = "actor-reservation"
 )
 
 type continuationAdminStore struct {
@@ -22,6 +24,76 @@ type continuationAdminStore struct {
 	runs     map[string]model.Run
 	requeued *model.ContinuationJob
 	err      error
+}
+
+type continuationReservationStore struct {
+	Store
+	savedJob *model.ContinuationJob
+	reused   bool
+	err      error
+}
+
+func (s *continuationReservationStore) SetContinuationJobReservation(_ context.Context, jobID, owner string, amount int64, refNo string, at time.Time) (*model.ContinuationJob, bool, error) {
+	if s.err != nil {
+		return nil, false, s.err
+	}
+	job := &model.ContinuationJob{JobID: jobID, Status: model.ContinuationJobRunning, LeaseOwner: owner, ReservationAmountNanousd: amount, ReservationRefNo: refNo, UpdatedAt: at}
+	s.savedJob = job
+	return job, s.reused, nil
+}
+
+type continuationBillingStub struct {
+	Billing
+	reservation  *UsageBalanceReservation
+	reserveCalls int
+	releaseCalls int
+	err          error
+}
+
+func (s *continuationBillingStub) ReserveUsageBalance(_ context.Context, _ model.ActorRef, _, _ string) (*UsageBalanceReservation, bool, error) {
+	s.reserveCalls++
+	return s.reservation, false, s.err
+}
+
+func (s *continuationBillingStub) ReleaseUsageBalanceReservation(_ context.Context, _ *UsageBalanceReservation, _ string) error {
+	s.releaseCalls++
+	return nil
+}
+
+func TestEnsureContinuationJobReservationPersistsBeforeExecution(t *testing.T) {
+	actor := model.ActorRef{TenantID: testReservationTenantID, ActorID: testReservationActorID}
+	reservation := &UsageBalanceReservation{Actor: actor, AmountNanousd: 77, RefNo: "reservation-77"}
+	billing := &continuationBillingStub{reservation: reservation}
+	store := &continuationReservationStore{}
+	engine := &Engine{repo: store, billingSvc: billing}
+	job := model.ContinuationJob{JobID: "job-reservation", SegmentKey: "segment-reservation", Actor: actor}
+	run := model.Run{RunID: "run-reservation", Actor: actor, Thread: model.ThreadRef{Kind: threadKindConversation, ID: "thread-reservation"}}
+	saved, err := engine.ensureContinuationJobReservation(t.Context(), "worker-reservation", job, run, effectiveTextRunConfig{PlatformModelName: "model-reservation"})
+	if err != nil || saved == nil || saved.RefNo != reservation.RefNo || billing.reserveCalls != 1 || store.savedJob == nil {
+		t.Fatalf("saved=%#v store=%#v reserveCalls=%d err=%v", saved, store.savedJob, billing.reserveCalls, err)
+	}
+}
+
+func TestEnsureContinuationJobReservationReusesDurableReceipt(t *testing.T) {
+	actor := model.ActorRef{TenantID: testReservationTenantID, ActorID: testReservationActorID}
+	billing := &continuationBillingStub{reservation: &UsageBalanceReservation{Actor: actor, AmountNanousd: 99, RefNo: "new-reservation"}}
+	engine := &Engine{repo: &continuationReservationStore{}, billingSvc: billing}
+	job := model.ContinuationJob{JobID: "job-receipted", SegmentKey: "segment-receipted", Actor: actor, ReservationAmountNanousd: 44, ReservationRefNo: "existing-reservation"}
+	saved, err := engine.ensureContinuationJobReservation(t.Context(), "worker-reservation", job, model.Run{Actor: actor}, effectiveTextRunConfig{})
+	if err != nil || saved == nil || saved.RefNo != job.ReservationRefNo || billing.reserveCalls != 0 {
+		t.Fatalf("saved=%#v reserveCalls=%d err=%v", saved, billing.reserveCalls, err)
+	}
+}
+
+func TestEnsureContinuationJobReservationReleasesOnPersistFailure(t *testing.T) {
+	actor := model.ActorRef{TenantID: testReservationTenantID, ActorID: testReservationActorID}
+	billing := &continuationBillingStub{reservation: &UsageBalanceReservation{Actor: actor, AmountNanousd: 77, RefNo: "reservation-failed"}}
+	store := &continuationReservationStore{err: ErrContinuationJobConflict}
+	engine := &Engine{repo: store, billingSvc: billing}
+	_, err := engine.ensureContinuationJobReservation(t.Context(), "worker-reservation", model.ContinuationJob{JobID: "job-failed", SegmentKey: "segment-failed", Actor: actor}, model.Run{Actor: actor}, effectiveTextRunConfig{})
+	if !errors.Is(err, ErrContinuationJobConflict) || billing.releaseCalls != 1 {
+		t.Fatalf("err=%v releaseCalls=%d", err, billing.releaseCalls)
+	}
 }
 
 func (s *continuationAdminStore) ListContinuationJobs(context.Context, model.ContinuationJobFilter) (model.ContinuationJobPage, error) {

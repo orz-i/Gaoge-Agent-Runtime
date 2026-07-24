@@ -93,6 +93,81 @@ func (s *Store) CreateAgentManifestRevision(_ context.Context, input *domain.Age
 	return &result, reused, nil
 }
 
+func (s *Store) CreateRunHandoffJoinWaitBundle(_ context.Context, input *domain.RunHandoffJoin, expectedStatus string, expectedLastEventSeq int64, checkpoint *domain.Checkpoint, events []domain.Event) (*domain.RunHandoffJoin, []domain.Event, bool, error) {
+	if !validMemoryRunHandoffJoinWaitBundle(input, checkpoint, events) {
+		return nil, nil, false, agentruntime.ErrInvalidInput
+	}
+	var result memoryRunHandoffJoinWaitBundle
+	err := s.write(func(st *state) error {
+		applied, applyErr := applyMemoryRunHandoffJoinWaitBundle(st, *input, expectedStatus, expectedLastEventSeq, *checkpoint, events)
+		result = applied
+		return applyErr
+	})
+	if err != nil {
+		return nil, nil, false, err
+	}
+	join := result.join
+	return &join, clone(result.events), result.reused, nil
+}
+
+type memoryRunHandoffJoinWaitBundle struct {
+	join   domain.RunHandoffJoin
+	events []domain.Event
+	reused bool
+}
+
+func validMemoryRunHandoffJoinWaitBundle(input *domain.RunHandoffJoin, checkpoint *domain.Checkpoint, events []domain.Event) bool {
+	return domain.ValidRunHandoffJoin(input) && checkpoint != nil && checkpoint.RunID == input.ParentRunID &&
+		checkpoint.CheckpointID == input.ResumeCheckpointID && checkpoint.Status == domain.CheckpointReady && len(events) > 0
+}
+
+func applyMemoryRunHandoffJoinWaitBundle(st *state, input domain.RunHandoffJoin, expectedStatus string, expectedLastEventSeq int64, checkpoint domain.Checkpoint, events []domain.Event) (memoryRunHandoffJoinWaitBundle, error) {
+	existing, found, err := findMemoryRunHandoffJoin(st.HandoffJoins, input)
+	if err != nil || found {
+		return memoryRunHandoffJoinWaitBundle{join: existing, reused: found}, err
+	}
+	run, err := memoryRunHandoffJoinWaitParent(st, input, expectedStatus, expectedLastEventSeq, checkpoint.CheckpointID)
+	if err != nil {
+		return memoryRunHandoffJoinWaitBundle{}, err
+	}
+	handoffs, err := joinHandoffsFromMemory(st.Handoffs, input)
+	if err != nil {
+		return memoryRunHandoffJoinWaitBundle{}, err
+	}
+	join := resolveMemoryRunHandoffJoin(input, handoffs)
+	st.HandoffJoins[join.JoinID] = clone(join)
+	st.Checkpoints[run.RunID][checkpoint.CheckpointID] = clone(checkpoint)
+	saved, err := appendEvents(st, events)
+	return memoryRunHandoffJoinWaitBundle{join: join, events: saved}, err
+}
+
+func memoryRunHandoffJoinWaitParent(st *state, input domain.RunHandoffJoin, expectedStatus string, expectedLastEventSeq int64, checkpointID string) (domain.Run, error) {
+	run, ok := st.Runs[input.ParentRunID]
+	if !ok || !owned(run, input.Actor) {
+		return domain.Run{}, agentruntime.ErrNotFound
+	}
+	if run.Status != expectedStatus || run.LastEventSeq != expectedLastEventSeq {
+		return domain.Run{}, agentruntime.ErrDuplicate
+	}
+	if st.Checkpoints[run.RunID] == nil {
+		st.Checkpoints[run.RunID] = make(map[string]domain.Checkpoint)
+	}
+	if _, exists := st.Checkpoints[run.RunID][checkpointID]; exists {
+		return domain.Run{}, agentruntime.ErrDuplicate
+	}
+	return run, nil
+}
+
+func resolveMemoryRunHandoffJoin(input domain.RunHandoffJoin, handoffs []domain.RunHandoff) domain.RunHandoffJoin {
+	join := clone(input)
+	join.HandoffIDs = normalizeMemoryJoinIDs(join.HandoffIDs)
+	if join.CreatedAt.IsZero() {
+		join.CreatedAt = time.Now()
+	}
+	join.UpdatedAt = join.CreatedAt
+	return domain.ResolveRunHandoffJoin(join, handoffs, join.CreatedAt)
+}
+
 func findMemoryRunHandoffJoin(items map[string]domain.RunHandoffJoin, input domain.RunHandoffJoin) (domain.RunHandoffJoin, bool, error) {
 	for _, existing := range items {
 		if existing.JoinID != input.JoinID && (existing.Actor != input.Actor || existing.ClientJoinID != input.ClientJoinID) {
@@ -172,7 +247,8 @@ func normalizeMemoryJoinIDs(values []string) []string {
 	return result
 }
 
-func reconcileMemoryRunHandoffJoins(st *state, handoff domain.RunHandoff) {
+func reconcileMemoryRunHandoffJoins(st *state, handoff domain.RunHandoff) []domain.RunHandoffJoin {
+	resolved := make([]domain.RunHandoffJoin, 0)
 	for joinID, join := range st.HandoffJoins {
 		if domain.RunHandoffJoinTerminal(join.Status) || join.Actor != handoff.Actor || join.ParentRunID != handoff.ParentRunID || !memoryJoinContains(join, handoff.HandoffID) {
 			continue
@@ -181,8 +257,13 @@ func reconcileMemoryRunHandoffJoins(st *state, handoff domain.RunHandoff) {
 		if err != nil {
 			continue
 		}
-		st.HandoffJoins[joinID] = domain.ResolveRunHandoffJoin(join, handoffs, time.Now())
+		updated := domain.ResolveRunHandoffJoin(join, handoffs, time.Now())
+		st.HandoffJoins[joinID] = updated
+		if !domain.RunHandoffJoinTerminal(join.Status) && domain.RunHandoffJoinTerminal(updated.Status) {
+			resolved = append(resolved, clone(updated))
+		}
 	}
+	return resolved
 }
 
 func memoryJoinContains(join domain.RunHandoffJoin, handoffID string) bool {
@@ -484,12 +565,20 @@ func validHandoffCompletion(input domain.RunHandoffCompletion) bool {
 	return input.Status == domain.RunHandoffStatusCompleted || input.Status == domain.RunHandoffStatusFailed || input.Status == domain.RunHandoffStatusCancelled
 }
 
-func (s *Store) CompleteRunHandoff(_ context.Context, actor domain.ActorRef, childRunID string, input domain.RunHandoffCompletion) (*domain.RunHandoff, bool, error) {
-	if !validHandoffCompletion(input) || strings.TrimSpace(childRunID) == "" {
-		return nil, false, agentruntime.ErrInvalidInput
+func (s *Store) CompleteRunHandoff(ctx context.Context, actor domain.ActorRef, childRunID string, input domain.RunHandoffCompletion) (*domain.RunHandoff, bool, error) {
+	result, err := s.CompleteRunHandoffWithJoins(ctx, actor, childRunID, input)
+	if err != nil {
+		return nil, false, err
 	}
-	var result domain.RunHandoff
-	var reused bool
+	handoff := result.Handoff
+	return &handoff, result.Reused, nil
+}
+
+func (s *Store) CompleteRunHandoffWithJoins(_ context.Context, actor domain.ActorRef, childRunID string, input domain.RunHandoffCompletion) (domain.RunHandoffCompletionResult, error) {
+	if !validHandoffCompletion(input) || strings.TrimSpace(childRunID) == "" {
+		return domain.RunHandoffCompletionResult{}, agentruntime.ErrInvalidInput
+	}
+	var result domain.RunHandoffCompletionResult
 	err := s.write(func(st *state) error {
 		item, id, found := findChildHandoff(st.Handoffs, actor, childRunID)
 		if !found {
@@ -502,12 +591,13 @@ func (s *Store) CompleteRunHandoff(_ context.Context, actor domain.ActorRef, chi
 		if !wasReused {
 			st.Handoffs[id] = updated
 		}
-		reconcileMemoryRunHandoffJoins(st, updated)
-		result, reused = clone(updated), wasReused
+		result.Handoff = clone(updated)
+		result.Reused = wasReused
+		result.ResolvedJoins = reconcileMemoryRunHandoffJoins(st, updated)
 		return nil
 	})
 	if err != nil {
-		return nil, false, err
+		return domain.RunHandoffCompletionResult{}, err
 	}
-	return &result, reused, nil
+	return result, nil
 }

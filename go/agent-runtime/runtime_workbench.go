@@ -35,6 +35,7 @@ const (
 	valueRunResumedB398BE30      = "run.resumed"
 	valueRunSuspendedA2ED2B05    = "run.suspended"
 	valueRunWaitingInput4621EBDE = "run.waiting_input"
+	valueRunWaitingHandoff       = "run.waiting_handoff"
 	valueStep1396E1CE            = "step"
 	valueStepResumed395D0C55     = "step.resumed"
 	valueSynthesis58DF5D37       = "synthesis"
@@ -335,7 +336,7 @@ func classifyInteractionEvent(event model.Event, interactionID string) (phaseDes
 	if strings.HasPrefix(event.EventType, "interaction.") {
 		return interactionPhaseDescriptor(firstNonEmptyString(interactionID, event.StepID)), true
 	}
-	waiting := event.EventType == valueRunWaitingInput4621EBDE || event.EventType == "step.waiting_input" || event.EventType == "step.approved"
+	waiting := event.EventType == valueRunWaitingInput4621EBDE || event.EventType == "step.waiting_input" || event.EventType == valueRunWaitingHandoff || event.EventType == "step.waiting_handoff" || event.EventType == "step.approved"
 	if waiting && interactionID != "" {
 		return interactionPhaseDescriptor(interactionID), true
 	}
@@ -461,6 +462,7 @@ func phaseStatusForEvent(event model.Event) (string, bool) {
 		valueRunFailedD21BA399:       model.RunStatusFailed,
 		valueRunCancelledD74AD332:    model.RunStatusCancelled,
 		valueRunSuspendedA2ED2B05:    model.RunStatusSuspended,
+		valueRunWaitingHandoff:       model.RunStatusWaitingHandoff,
 		"interaction.expired":        model.RunStatusSuspended,
 		"interaction.created":        model.RunStatusWaitingInput,
 		valueRunPreparing142D9E38:    model.RunStatusRunning,
@@ -471,7 +473,7 @@ func phaseStatusForEvent(event model.Event) (string, bool) {
 	rules := []struct{ suffix, status string }{
 		{".failed", model.RunStatusFailed}, {".cancelled", model.RunStatusCancelled}, {".suspended", model.RunStatusSuspended},
 		{".completed", model.RunStatusCompleted}, {".resolved", model.RunStatusCompleted}, {".approved", model.RunStatusCompleted},
-		{".waiting_input", model.RunStatusWaitingInput}, {".started", model.RunStatusRunning}, {".resumed", model.RunStatusRunning},
+		{".waiting_input", model.RunStatusWaitingInput}, {".waiting_handoff", model.RunStatusWaitingHandoff}, {".started", model.RunStatusRunning}, {".resumed", model.RunStatusRunning},
 	}
 	for _, rule := range rules {
 		if strings.HasSuffix(event.EventType, rule.suffix) {
@@ -540,7 +542,7 @@ func phaseViewsFromDomain(phases []model.PhaseProjection) []PhaseView {
 func buildWorkbenchOverview(run model.Run, phases []PhaseView, events []model.Event, config *TextRunConfigSummary) WorkbenchOverview {
 	current := ""
 	for index := range phases {
-		if phases[index].Status == model.RunStatusRunning || phases[index].Status == model.RunStatusWaitingInput || phases[index].Status == model.RunStatusSuspended {
+		if phases[index].Status == model.RunStatusRunning || phases[index].Status == model.RunStatusWaitingInput || phases[index].Status == model.RunStatusWaitingHandoff || phases[index].Status == model.RunStatusSuspended {
 			current = phases[index].PhaseID
 		}
 	}

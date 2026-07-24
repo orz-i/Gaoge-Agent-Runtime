@@ -182,6 +182,49 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		}
 	})
 
+	t.Run("continuation reservation receipts are lease bound and idempotent", func(t *testing.T) {
+		store, actor, _, run := seeded(t, factory)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		job := domain.ContinuationJob{
+			JobID: "continuation-reservation", SegmentKey: "segment-reservation", RunID: run.RunID, CheckpointID: "checkpoint-1",
+			Actor: actor, Source: "reservation-conformance", Status: domain.ContinuationJobQueued, MaxAttempts: 3, AvailableAt: now,
+		}
+		if _, _, err := store.CreateContinuationJob(ctx, &job); err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := store.ClaimNextContinuationJob(ctx, "reservation-worker", now, now.Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipted, reused, err := store.SetContinuationJobReservation(ctx, claimed.JobID, "reservation-worker", 55, "reservation-late", now.Add(time.Second))
+		if err != nil || reused || receipted.ReservationAmountNanousd != 55 || receipted.ReservationRefNo != "reservation-late" {
+			t.Fatalf("set reservation = %+v,%t,%v", receipted, reused, err)
+		}
+		replayed, reused, err := store.SetContinuationJobReservation(ctx, claimed.JobID, "reservation-worker", 55, "reservation-late", now.Add(2*time.Second))
+		if err != nil || !reused || replayed.ReservationRefNo != receipted.ReservationRefNo {
+			t.Fatalf("replay reservation = %+v,%t,%v", replayed, reused, err)
+		}
+		if _, _, err = store.SetContinuationJobReservation(ctx, claimed.JobID, "reservation-worker", 56, "reservation-other", now.Add(3*time.Second)); !errors.Is(err, agentruntime.ErrContinuationJobConflict) {
+			t.Fatalf("reservation conflict = %v", err)
+		}
+		if _, _, err = store.SetContinuationJobReservation(ctx, claimed.JobID, "other-worker", 55, "reservation-late", now.Add(3*time.Second)); !errors.Is(err, agentruntime.ErrContinuationJobConflict) {
+			t.Fatalf("reservation owner conflict = %v", err)
+		}
+		deadLetterAt := now.Add(4 * time.Second)
+		if err = store.RetryContinuationJob(ctx, claimed.JobID, "reservation-worker", "reservation attempt failed", deadLetterAt, true); err != nil {
+			t.Fatalf("dead-letter receipted continuation: %v", err)
+		}
+		deadLettered, err := store.GetContinuationJob(ctx, claimed.JobID)
+		if err != nil || deadLettered.ReservationAmountNanousd != 0 || deadLettered.ReservationRefNo != "" {
+			t.Fatalf("retry retained stale reservation = %+v,%v", deadLettered, err)
+		}
+		requeued, err := store.RequeueDeadLetterContinuationJob(ctx, claimed.JobID, deadLetterAt.Add(time.Second))
+		if err != nil || requeued.ReservationAmountNanousd != 0 || requeued.ReservationRefNo != "" {
+			t.Fatalf("requeue retained stale reservation = %+v,%v", requeued, err)
+		}
+	})
+
 	t.Run("agent manifests are revisioned and handoffs are replay safe", func(t *testing.T) {
 		store, actor, _, run := seeded(t, factory)
 		ctx := context.Background()
@@ -301,11 +344,16 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		}
 
 		completedAt := time.Now().UTC()
-		completed, reused, err := store.CompleteRunHandoff(ctx, actor, handoff.ChildRunID, domain.RunHandoffCompletion{
+		firstCompletion, err := store.CompleteRunHandoffWithJoins(ctx, actor, handoff.ChildRunID, domain.RunHandoffCompletion{
 			Status: domain.RunHandoffStatusCompleted, ResultSummary: "Evidence collected", ResultOutputIDs: []string{"output-1"}, CompletedAt: completedAt,
 		})
-		if err != nil || reused || completed.Status != domain.RunHandoffStatusCompleted || len(completed.ResultOutputIDs) != 1 {
-			t.Fatalf("complete handoff = %+v,%t,%v", completed, reused, err)
+		completed := firstCompletion.Handoff
+		if err != nil || firstCompletion.Reused || completed.Status != domain.RunHandoffStatusCompleted || len(completed.ResultOutputIDs) != 1 {
+			t.Fatalf("complete handoff = %+v,%v", firstCompletion, err)
+		}
+		resolvedAny, found := handoffJoinByID(firstCompletion.ResolvedJoins, anyCollect.JoinID)
+		if !found || resolvedAny.Status != domain.RunHandoffJoinStatusReady {
+			t.Fatalf("first completion resolved joins = %+v", firstCompletion.ResolvedJoins)
 		}
 		anyReady, err := store.GetRunHandoffJoin(ctx, actor, anyCollect.JoinID)
 		if err != nil || anyReady.Status != domain.RunHandoffJoinStatusReady || anyReady.CompletedCount != 1 || anyReady.PendingCount != 1 {
@@ -315,13 +363,19 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		if err != nil || allPending.Status != domain.RunHandoffJoinStatusPending || allPending.CompletedCount != 1 || allPending.PendingCount != 1 {
 			t.Fatalf("all join after first success = %+v,%v", allPending, err)
 		}
-		completed, reused, err = store.CompleteRunHandoff(ctx, actor, handoff.ChildRunID, domain.RunHandoffCompletion{Status: domain.RunHandoffStatusCompleted})
-		if err != nil || !reused || completed.Status != domain.RunHandoffStatusCompleted {
-			t.Fatalf("reuse handoff completion = %+v,%t,%v", completed, reused, err)
+		replayedCompletion, reused, err := store.CompleteRunHandoff(ctx, actor, handoff.ChildRunID, domain.RunHandoffCompletion{Status: domain.RunHandoffStatusCompleted})
+		if err != nil || !reused || replayedCompletion.Status != domain.RunHandoffStatusCompleted {
+			t.Fatalf("reuse handoff completion = %+v,%t,%v", replayedCompletion, reused, err)
 		}
-		failed, reused, err := store.CompleteRunHandoff(ctx, actor, secondHandoff.ChildRunID, domain.RunHandoffCompletion{Status: domain.RunHandoffStatusFailed, ErrorCode: "child_failed"})
-		if err != nil || reused || failed.Status != domain.RunHandoffStatusFailed {
-			t.Fatalf("fail second handoff = %+v,%t,%v", failed, reused, err)
+		secondCompletion, err := store.CompleteRunHandoffWithJoins(ctx, actor, secondHandoff.ChildRunID, domain.RunHandoffCompletion{Status: domain.RunHandoffStatusFailed, ErrorCode: "child_failed"})
+		failed := secondCompletion.Handoff
+		if err != nil || secondCompletion.Reused || failed.Status != domain.RunHandoffStatusFailed {
+			t.Fatalf("fail second handoff = %+v,%v", secondCompletion, err)
+		}
+		resolvedAll, found := handoffJoinByID(secondCompletion.ResolvedJoins, allCollect.JoinID)
+		resolvedFast, fastFound := handoffJoinByID(secondCompletion.ResolvedJoins, allFailFast.JoinID)
+		if !found || resolvedAll.Status != domain.RunHandoffJoinStatusReady || !fastFound || resolvedFast.Status != domain.RunHandoffJoinStatusFailed {
+			t.Fatalf("second completion resolved joins = %+v", secondCompletion.ResolvedJoins)
 		}
 		allReady, err := store.GetRunHandoffJoin(ctx, actor, allCollect.JoinID)
 		if err != nil || allReady.Status != domain.RunHandoffJoinStatusReady || allReady.CompletedCount != 1 || allReady.FailedCount != 1 || allReady.PendingCount != 0 {
@@ -341,6 +395,111 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			t.Fatalf("join page = %+v,%v", joins, err)
 		}
 	})
+
+	t.Run("handoff join wait bundle is atomic and replay safe", func(t *testing.T) {
+		store, actor, _, run := seeded(t, factory)
+		runHandoffJoinWaitBundleConformance(t, store, actor, run)
+	})
+}
+
+func handoffJoinByID(items []domain.RunHandoffJoin, joinID string) (domain.RunHandoffJoin, bool) {
+	for _, item := range items {
+		if item.JoinID == joinID {
+			return item, true
+		}
+	}
+	return domain.RunHandoffJoin{}, false
+}
+
+func runHandoffJoinWaitBundleConformance(t *testing.T, store agentruntime.Store, actor domain.ActorRef, run domain.Run) {
+	t.Helper()
+	fixture := prepareRunHandoffJoinWaitFixture(t, store, actor, run)
+	assertRunHandoffJoinWaitCreated(t, store, fixture)
+	assertRunHandoffJoinWaitReplayed(t, store, fixture)
+	assertStaleRunHandoffJoinWaitRejected(t, store, fixture)
+}
+
+type runHandoffJoinWaitFixture struct {
+	ctx        context.Context
+	actor      domain.ActorRef
+	run        domain.Run
+	current    domain.Run
+	join       domain.RunHandoffJoin
+	checkpoint domain.Checkpoint
+	events     []domain.Event
+}
+
+func prepareRunHandoffJoinWaitFixture(t *testing.T, store agentruntime.Store, actor domain.ActorRef, run domain.Run) runHandoffJoinWaitFixture {
+	t.Helper()
+	ctx := context.Background()
+	current, err := store.GetRun(ctx, actor, run.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoff := domain.RunHandoff{
+		HandoffID: "handoff-wait", ClientHandoffID: "client-handoff-wait", RequestFingerprint: "handoff-wait-fp", Actor: actor,
+		RootRunID: run.RunID, ParentRunID: run.RunID, ChildRunID: "run-child-wait",
+		AgentManifest: domain.ResourceRef{Kind: domain.AgentManifestKind, ID: "agent-wait", Revision: "1"},
+		AgentName:     "Wait agent", Goal: "Complete bounded work", Status: domain.RunHandoffStatusQueued, Depth: 1,
+	}
+	if _, _, err = store.CreateRunHandoff(ctx, &handoff); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := domain.Checkpoint{
+		CheckpointID: "checkpoint-join-wait", RunID: run.RunID, StepID: "step-1", Kind: "handoff_join_wait",
+		Status: domain.CheckpointReady, ManifestHash: "manifest", ResumeStateJSON: `{}`,
+	}
+	join := domain.RunHandoffJoin{
+		JoinID: "join-wait", ClientJoinID: "client-join-wait", RequestFingerprint: "join-wait-fp", Actor: actor,
+		RootRunID: run.RunID, ParentRunID: run.RunID, HandoffIDs: []string{handoff.HandoffID}, ResumeCheckpointID: checkpoint.CheckpointID,
+		Mode: domain.RunHandoffJoinModeAll, Quorum: 1, FailurePolicy: domain.RunHandoffJoinFailureCollect, Status: domain.RunHandoffJoinStatusPending,
+	}
+	events := []domain.Event{
+		{EventID: "event-join-wait-step", RunID: run.RunID, StepID: "step-1", EventType: "step.waiting_handoff", Actor: actor},
+		{EventID: "event-join-wait-run", RunID: run.RunID, StepID: "step-1", EventType: "run.waiting_handoff", Actor: actor},
+	}
+	return runHandoffJoinWaitFixture{ctx: ctx, actor: actor, run: run, current: *current, join: join, checkpoint: checkpoint, events: events}
+}
+
+func assertRunHandoffJoinWaitCreated(t *testing.T, store agentruntime.Store, fixture runHandoffJoinWaitFixture) {
+	t.Helper()
+	created, saved, reused, err := store.CreateRunHandoffJoinWaitBundle(fixture.ctx, &fixture.join, fixture.current.Status, fixture.current.LastEventSeq, &fixture.checkpoint, fixture.events)
+	if err != nil || reused || created.JoinID != fixture.join.JoinID || len(saved) != 2 {
+		t.Fatalf("create wait bundle = %+v,%+v,%t,%v", created, saved, reused, err)
+	}
+	waiting, err := store.GetRun(fixture.ctx, fixture.actor, fixture.run.RunID)
+	if err != nil || waiting.Status != domain.RunStatusWaitingHandoff {
+		t.Fatalf("waiting run = %+v,%v", waiting, err)
+	}
+	if _, err = store.GetRunCheckpoint(fixture.ctx, fixture.actor, fixture.run.RunID, fixture.checkpoint.CheckpointID); err != nil {
+		t.Fatalf("wait checkpoint: %v", err)
+	}
+}
+
+func assertRunHandoffJoinWaitReplayed(t *testing.T, store agentruntime.Store, fixture runHandoffJoinWaitFixture) {
+	t.Helper()
+	replayed, replayEvents, reused, err := store.CreateRunHandoffJoinWaitBundle(fixture.ctx, &fixture.join, fixture.current.Status, fixture.current.LastEventSeq, &fixture.checkpoint, fixture.events)
+	if err != nil || !reused || replayed.JoinID != fixture.join.JoinID || len(replayEvents) != 0 {
+		t.Fatalf("replay wait bundle = %+v,%+v,%t,%v", replayed, replayEvents, reused, err)
+	}
+}
+
+func assertStaleRunHandoffJoinWaitRejected(t *testing.T, store agentruntime.Store, fixture runHandoffJoinWaitFixture) {
+	t.Helper()
+	staleJoin := fixture.join
+	staleJoin.JoinID, staleJoin.ClientJoinID, staleJoin.RequestFingerprint = "join-stale", "client-join-stale", "join-stale-fp"
+	staleCheckpoint := fixture.checkpoint
+	staleCheckpoint.CheckpointID = "checkpoint-join-stale"
+	staleJoin.ResumeCheckpointID = staleCheckpoint.CheckpointID
+	if _, _, _, err := store.CreateRunHandoffJoinWaitBundle(fixture.ctx, &staleJoin, fixture.current.Status, fixture.current.LastEventSeq, &staleCheckpoint, fixture.events); !errors.Is(err, agentruntime.ErrDuplicate) {
+		t.Fatalf("stale wait bundle error = %v", err)
+	}
+	if _, err := store.GetRunHandoffJoin(fixture.ctx, fixture.actor, staleJoin.JoinID); !errors.Is(err, agentruntime.ErrNotFound) {
+		t.Fatalf("stale join leaked: %v", err)
+	}
+	if _, err := store.GetRunCheckpoint(fixture.ctx, fixture.actor, fixture.run.RunID, staleCheckpoint.CheckpointID); !errors.Is(err, agentruntime.ErrNotFound) {
+		t.Fatalf("stale checkpoint leaked: %v", err)
+	}
 }
 
 func handoffByID(items []domain.RunHandoff, handoffID string) (domain.RunHandoff, bool) {

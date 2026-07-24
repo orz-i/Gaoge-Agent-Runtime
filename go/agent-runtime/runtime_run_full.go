@@ -1590,6 +1590,8 @@ func runEventStatus(kind string) string {
 		return model.RunStatusPreparing
 	case valueRunWaitingInputF2C37C0A, "step.waiting_input":
 		return model.RunStatusWaitingInput
+	case "run.waiting_handoff", "step.waiting_handoff":
+		return model.RunStatusWaitingHandoff
 	case "step.created":
 		return model.RunStatusQueued
 	case "step.skipped":

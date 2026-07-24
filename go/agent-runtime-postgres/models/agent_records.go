@@ -68,6 +68,7 @@ type RunHandoffJoinRecord struct {
 	RootRunID            string `gorm:"size:64;not null;index:idx_agent_run_handoff_join_root"`
 	ParentRunID          string `gorm:"size:64;not null;index:idx_agent_run_handoff_join_parent_status,priority:1"`
 	HandoffIDsJSON       string `gorm:"type:text;not null;default:'[]'"`
+	ResumeCheckpointID   string `gorm:"size:64;not null;default:'';index:idx_agent_run_handoff_join_checkpoint"`
 	Mode                 string `gorm:"size:32;not null"`
 	Quorum               int    `gorm:"not null;default:1"`
 	FailurePolicy        string `gorm:"size:32;not null"`

@@ -43,7 +43,7 @@ func continuationRunTerminal(run domain.Run) bool {
 		return true
 	}
 	switch run.Status {
-	case domain.RunStatusWaitingInput, domain.RunStatusSuspended, domain.RunStatusCompleted, domain.RunStatusFailed, domain.RunStatusCancelled:
+	case domain.RunStatusWaitingInput, domain.RunStatusWaitingHandoff, domain.RunStatusSuspended, domain.RunStatusCompleted, domain.RunStatusFailed, domain.RunStatusCancelled:
 		return true
 	default:
 		return false
@@ -161,6 +161,7 @@ func (s *Store) RequeueDeadLetterContinuationJob(_ context.Context, jobID string
 		item.AttemptCount = 0
 		item.AvailableAt = availableAt
 		item.LeaseOwner, item.LeaseExpiresAt, item.HeartbeatAt = "", nil, nil
+		item.ReservationAmountNanousd, item.ReservationRefNo = 0, ""
 		item.LastError = ""
 		item.UpdatedAt = availableAt
 		st.Continuations[jobID] = clone(item)
@@ -199,6 +200,49 @@ func (s *Store) ClaimNextContinuationJob(_ context.Context, owner string, now, l
 	return &result, nil
 }
 
+func (s *Store) SetContinuationJobReservation(_ context.Context, jobID, owner string, amountNanousd int64, refNo string, updatedAt time.Time) (*domain.ContinuationJob, bool, error) {
+	jobID, owner, refNo = strings.TrimSpace(jobID), strings.TrimSpace(owner), strings.TrimSpace(refNo)
+	if !validContinuationReservationUpdate(jobID, owner, amountNanousd, refNo, updatedAt) {
+		return nil, false, agentruntime.ErrInvalidInput
+	}
+	var saved domain.ContinuationJob
+	var reused bool
+	err := s.write(func(st *state) error {
+		updated, wasReused, updateErr := setMemoryContinuationReservation(st, jobID, owner, amountNanousd, refNo, updatedAt)
+		saved, reused = updated, wasReused
+		return updateErr
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	result := clone(saved)
+	return &result, reused, nil
+}
+
+func validContinuationReservationUpdate(jobID, owner string, amountNanousd int64, refNo string, updatedAt time.Time) bool {
+	return jobID != "" && owner != "" && amountNanousd >= 0 && refNo != "" && !updatedAt.IsZero()
+}
+
+func setMemoryContinuationReservation(st *state, jobID, owner string, amountNanousd int64, refNo string, updatedAt time.Time) (domain.ContinuationJob, bool, error) {
+	item, ok := st.Continuations[jobID]
+	if !ok || item.Status != domain.ContinuationJobRunning || item.LeaseOwner != owner {
+		return domain.ContinuationJob{}, false, agentruntime.ErrContinuationJobConflict
+	}
+	if continuationHasReservation(item) {
+		if item.ReservationRefNo != refNo || item.ReservationAmountNanousd != amountNanousd {
+			return domain.ContinuationJob{}, false, agentruntime.ErrContinuationJobConflict
+		}
+		return clone(item), true, nil
+	}
+	item.ReservationAmountNanousd, item.ReservationRefNo, item.UpdatedAt = amountNanousd, refNo, updatedAt
+	st.Continuations[jobID] = clone(item)
+	return item, false, nil
+}
+
+func continuationHasReservation(item domain.ContinuationJob) bool {
+	return item.ReservationRefNo != "" || item.ReservationAmountNanousd != 0
+}
+
 func (s *Store) HeartbeatContinuationJob(_ context.Context, jobID, owner string, heartbeatAt, leaseUntil time.Time) error {
 	return s.updateContinuationJob(jobID, owner, func(item *domain.ContinuationJob) {
 		item.HeartbeatAt = timePointer(heartbeatAt)
@@ -225,6 +269,7 @@ func (s *Store) RetryContinuationJob(_ context.Context, jobID, owner, message st
 		}
 		item.AvailableAt = availableAt
 		item.LeaseOwner, item.LeaseExpiresAt = "", nil
+		item.ReservationAmountNanousd, item.ReservationRefNo = 0, ""
 		item.LastError = strings.TrimSpace(message)
 		item.UpdatedAt = time.Now()
 	})

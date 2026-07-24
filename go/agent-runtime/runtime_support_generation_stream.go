@@ -108,7 +108,7 @@ func (s *Engine) cancelDurableRunIfTerminalOrWaiting(ctx context.Context, actor 
 	switch textRun.Status {
 	case model.RunStatusCompleted, model.RunStatusFailed, model.RunStatusCancelled, model.RunStatusSuspended:
 		return *textRun, true, true, nil
-	case model.RunStatusWaitingInput:
+	case model.RunStatusWaitingInput, model.RunStatusWaitingHandoff:
 		if err := s.cancelTextRun(ctx, *textRun, textRun.CurrentStepID, ErrRunCanceled.Error()); err != nil {
 			return *textRun, true, false, err
 		}

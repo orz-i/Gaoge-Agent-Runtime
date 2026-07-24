@@ -83,6 +83,65 @@ func (r *Repository) CreateAgentManifestRevision(ctx context.Context, input *dom
 	return &result, reused, nil
 }
 
+func (r *Repository) CreateRunHandoffJoinWaitBundle(ctx context.Context, input *domain.RunHandoffJoin, expectedStatus string, expectedLastEventSeq int64, checkpoint *domain.Checkpoint, events []domain.Event) (*domain.RunHandoffJoin, []domain.Event, bool, error) {
+	if !validRunHandoffJoinWaitBundle(input, checkpoint, events) {
+		return nil, nil, false, agentruntime.ErrInvalidInput
+	}
+	var result postgresRunHandoffJoinWaitBundle
+	err := r.within(ctx, func(txCtx context.Context) error {
+		applied, applyErr := r.createRunHandoffJoinWaitBundleTx(txCtx, *input, expectedStatus, expectedLastEventSeq, checkpoint, events)
+		result = applied
+		return applyErr
+	})
+	if err != nil {
+		return nil, nil, false, translateError(err)
+	}
+	join := result.join
+	return &join, result.events, result.reused, nil
+}
+
+type postgresRunHandoffJoinWaitBundle struct {
+	join   domain.RunHandoffJoin
+	events []domain.Event
+	reused bool
+}
+
+func (r *Repository) createRunHandoffJoinWaitBundleTx(ctx context.Context, input domain.RunHandoffJoin, expectedStatus string, expectedLastEventSeq int64, checkpoint *domain.Checkpoint, events []domain.Event) (postgresRunHandoffJoinWaitBundle, error) {
+	db := r.dbFor(ctx)
+	existing, found, err := findRunHandoffJoinRequest(db, input)
+	if err != nil || found {
+		return postgresRunHandoffJoinWaitBundle{join: existing, reused: found}, err
+	}
+	if err = lockRunHandoffJoinWaitParent(db, input, expectedStatus, expectedLastEventSeq); err != nil {
+		return postgresRunHandoffJoinWaitBundle{}, err
+	}
+	created, reused, err := createRunHandoffJoinTx(db, input)
+	if err != nil || reused {
+		return postgresRunHandoffJoinWaitBundle{join: created, reused: reused}, err
+	}
+	saved, err := r.CreateRunCheckpointBundle(ctx, checkpoint, events)
+	return postgresRunHandoffJoinWaitBundle{join: created, events: saved}, err
+}
+
+func lockRunHandoffJoinWaitParent(db *gorm.DB, input domain.RunHandoffJoin, expectedStatus string, expectedLastEventSeq int64) error {
+	var parent models.RunRecord
+	if err := runForUpdate(db, input.ParentRunID, &parent); err != nil {
+		return translateError(err)
+	}
+	if parent.TenantID != input.Actor.TenantID || parent.ActorID != input.Actor.ActorID {
+		return agentruntime.ErrNotFound
+	}
+	if parent.Status != expectedStatus || parent.LastEventSeq != expectedLastEventSeq {
+		return agentruntime.ErrDuplicate
+	}
+	return nil
+}
+
+func validRunHandoffJoinWaitBundle(input *domain.RunHandoffJoin, checkpoint *domain.Checkpoint, events []domain.Event) bool {
+	return domain.ValidRunHandoffJoin(input) && checkpoint != nil && checkpoint.RunID == input.ParentRunID &&
+		checkpoint.CheckpointID == input.ResumeCheckpointID && checkpoint.Status == domain.CheckpointReady && len(events) > 0
+}
+
 func runHandoffJoinRecord(input domain.RunHandoffJoin) (models.RunHandoffJoinRecord, error) {
 	handoffIDs, err := json.Marshal(input.HandoffIDs)
 	if err != nil {
@@ -96,7 +155,7 @@ func runHandoffJoinRecord(input domain.RunHandoffJoin) (models.RunHandoffJoinRec
 		BaseModel: models.BaseModel{CreatedAt: input.CreatedAt, UpdatedAt: input.UpdatedAt},
 		JoinID:    input.JoinID, ClientJoinID: input.ClientJoinID, RequestFingerprint: input.RequestFingerprint,
 		TenantID: input.Actor.TenantID, ActorID: input.Actor.ActorID, RootRunID: input.RootRunID, ParentRunID: input.ParentRunID,
-		HandoffIDsJSON: string(handoffIDs), Mode: input.Mode, Quorum: input.Quorum, FailurePolicy: input.FailurePolicy, Status: input.Status,
+		HandoffIDsJSON: string(handoffIDs), ResumeCheckpointID: input.ResumeCheckpointID, Mode: input.Mode, Quorum: input.Quorum, FailurePolicy: input.FailurePolicy, Status: input.Status,
 		CompletedCount: input.CompletedCount, FailedCount: input.FailedCount, CancelledCount: input.CancelledCount, PendingCount: input.PendingCount,
 		ResultHandoffIDsJSON: string(resultIDs), ErrorCode: input.ErrorCode, ErrorMessage: input.ErrorMessage, ResolvedAt: input.ResolvedAt,
 	}, nil
@@ -109,7 +168,7 @@ func runHandoffJoinDomain(row models.RunHandoffJoinRecord) domain.RunHandoffJoin
 	return domain.RunHandoffJoin{
 		JoinID: row.JoinID, ClientJoinID: row.ClientJoinID, RequestFingerprint: row.RequestFingerprint,
 		Actor: domain.ActorRef{TenantID: row.TenantID, ActorID: row.ActorID}, RootRunID: row.RootRunID, ParentRunID: row.ParentRunID,
-		HandoffIDs: handoffIDs, Mode: row.Mode, Quorum: row.Quorum, FailurePolicy: row.FailurePolicy, Status: row.Status,
+		HandoffIDs: handoffIDs, ResumeCheckpointID: row.ResumeCheckpointID, Mode: row.Mode, Quorum: row.Quorum, FailurePolicy: row.FailurePolicy, Status: row.Status,
 		CompletedCount: row.CompletedCount, FailedCount: row.FailedCount, CancelledCount: row.CancelledCount, PendingCount: row.PendingCount,
 		ResultHandoffIDs: resultIDs, ErrorCode: row.ErrorCode, ErrorMessage: row.ErrorMessage,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, ResolvedAt: row.ResolvedAt,
@@ -235,15 +294,16 @@ func normalizedPostgresJoinIDs(values []string) ([]string, error) {
 	return result, nil
 }
 
-func reconcileRunHandoffJoins(db *gorm.DB, handoff domain.RunHandoff) error {
+func reconcileRunHandoffJoins(db *gorm.DB, handoff domain.RunHandoff) ([]domain.RunHandoffJoin, error) {
 	query := db.Where("tenant_id = ? AND actor_id = ? AND parent_run_id = ? AND status = ?", handoff.Actor.TenantID, handoff.Actor.ActorID, handoff.ParentRunID, domain.RunHandoffJoinStatusPending)
 	if db.Name() == valuePostgres7F253790 {
 		query = query.Clauses(clause.Locking{Strength: valueLockUpdate})
 	}
 	var rows []models.RunHandoffJoinRecord
 	if err := query.Find(&rows).Error; err != nil {
-		return translateError(err)
+		return nil, translateError(err)
 	}
+	resolved := make([]domain.RunHandoffJoin, 0)
 	for _, row := range rows {
 		join := runHandoffJoinDomain(row)
 		if !runHandoffJoinContains(join, handoff.HandoffID) {
@@ -251,14 +311,17 @@ func reconcileRunHandoffJoins(db *gorm.DB, handoff domain.RunHandoff) error {
 		}
 		handoffs, err := loadRunHandoffJoinMembers(db, join, false)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		updated := domain.ResolveRunHandoffJoin(join, handoffs, time.Now())
 		if err = updateRunHandoffJoinRow(db, row, updated); err != nil {
-			return err
+			return nil, err
+		}
+		if domain.RunHandoffJoinTerminal(updated.Status) {
+			resolved = append(resolved, updated)
 		}
 	}
-	return nil
+	return resolved, nil
 }
 
 func runHandoffJoinContains(join domain.RunHandoffJoin, handoffID string) bool {
@@ -325,43 +388,45 @@ func (r *Repository) ListRunHandoffJoins(ctx context.Context, actor domain.Actor
 	return domain.RunHandoffJoinPage{Total: total, Results: items}, nil
 }
 
-func (r *Repository) completeRunHandoffTx(ctx context.Context, actor domain.ActorRef, childRunID string, input domain.RunHandoffCompletion) (domain.RunHandoff, bool, error) {
+func (r *Repository) completeRunHandoffTx(ctx context.Context, actor domain.ActorRef, childRunID string, input domain.RunHandoffCompletion) (domain.RunHandoffCompletionResult, error) {
 	db := r.dbFor(ctx)
 	row, err := lockChildHandoff(db, actor, childRunID)
 	if err != nil {
-		return domain.RunHandoff{}, false, err
+		return domain.RunHandoffCompletionResult{}, err
 	}
 	if row.Status != domain.RunHandoffStatusQueued {
 		if row.Status == input.Status {
 			item := handoffDomain(row)
-			if err = reconcileRunHandoffJoins(db, item); err != nil {
-				return domain.RunHandoff{}, false, err
+			resolved, reconcileErr := reconcileRunHandoffJoins(db, item)
+			if reconcileErr != nil {
+				return domain.RunHandoffCompletionResult{}, reconcileErr
 			}
-			return item, true, nil
+			return domain.RunHandoffCompletionResult{Handoff: item, ResolvedJoins: resolved, Reused: true}, nil
 		}
-		return domain.RunHandoff{}, false, agentruntime.ErrRunHandoffConflict
+		return domain.RunHandoffCompletionResult{}, agentruntime.ErrRunHandoffConflict
 	}
 	updates, err := handoffCompletionUpdates(input)
 	if err != nil {
-		return domain.RunHandoff{}, false, err
+		return domain.RunHandoffCompletionResult{}, err
 	}
 	if err = db.Model(&row).Updates(updates).Error; err != nil {
-		return domain.RunHandoff{}, false, translateError(err)
+		return domain.RunHandoffCompletionResult{}, translateError(err)
 	}
 	if err = db.Where("id = ?", row.ID).Take(&row).Error; err != nil {
-		return domain.RunHandoff{}, false, translateError(err)
+		return domain.RunHandoffCompletionResult{}, translateError(err)
 	}
 	item := handoffDomain(row)
-	if err = reconcileRunHandoffJoins(db, item); err != nil {
-		return domain.RunHandoff{}, false, err
+	resolved, err := reconcileRunHandoffJoins(db, item)
+	if err != nil {
+		return domain.RunHandoffCompletionResult{}, err
 	}
-	return item, false, nil
+	return domain.RunHandoffCompletionResult{Handoff: item, ResolvedJoins: resolved}, nil
 }
 
 func lockChildHandoff(db *gorm.DB, actor domain.ActorRef, childRunID string) (models.RunHandoffRecord, error) {
 	query := db.Where("tenant_id = ? AND actor_id = ? AND child_run_id = ?", actor.TenantID, actor.ActorID, strings.TrimSpace(childRunID))
-	if db.Name() == "postgres" {
-		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	if db.Name() == valuePostgres7F253790 {
+		query = query.Clauses(clause.Locking{Strength: valueLockUpdate})
 	}
 	var row models.RunHandoffRecord
 	if err := query.Take(&row).Error; err != nil {
@@ -380,8 +445,8 @@ func handoffCompletionUpdates(input domain.RunHandoffCompletion) (map[string]int
 		return nil, agentruntime.ErrInvalidInput
 	}
 	return map[string]interface{}{
-		"status": input.Status, "result_summary": strings.TrimSpace(input.ResultSummary), "result_output_ids_json": string(outputIDs),
-		"error_code": strings.TrimSpace(input.ErrorCode), "error_message": strings.TrimSpace(input.ErrorMessage), "completed_at": completedAt,
+		columnStatus: input.Status, "result_summary": strings.TrimSpace(input.ResultSummary), "result_output_ids_json": string(outputIDs),
+		columnErrorCode: strings.TrimSpace(input.ErrorCode), columnErrorMessage: strings.TrimSpace(input.ErrorMessage), "completed_at": completedAt,
 	}, nil
 }
 
@@ -722,21 +787,29 @@ func validHandoffCompletion(input domain.RunHandoffCompletion) bool {
 }
 
 func (r *Repository) CompleteRunHandoff(ctx context.Context, actor domain.ActorRef, childRunID string, input domain.RunHandoffCompletion) (*domain.RunHandoff, bool, error) {
-	if !validHandoffCompletion(input) || strings.TrimSpace(childRunID) == "" {
-		return nil, false, agentruntime.ErrInvalidInput
-	}
-	var result domain.RunHandoff
-	var reused bool
-	err := r.within(ctx, func(txCtx context.Context) error {
-		updated, wasReused, completeErr := r.completeRunHandoffTx(txCtx, actor, childRunID, input)
-		if completeErr != nil {
-			return completeErr
-		}
-		result, reused = updated, wasReused
-		return nil
-	})
+	result, err := r.CompleteRunHandoffWithJoins(ctx, actor, childRunID, input)
 	if err != nil {
 		return nil, false, err
 	}
-	return &result, reused, nil
+	handoff := result.Handoff
+	return &handoff, result.Reused, nil
+}
+
+func (r *Repository) CompleteRunHandoffWithJoins(ctx context.Context, actor domain.ActorRef, childRunID string, input domain.RunHandoffCompletion) (domain.RunHandoffCompletionResult, error) {
+	if !validHandoffCompletion(input) || strings.TrimSpace(childRunID) == "" {
+		return domain.RunHandoffCompletionResult{}, agentruntime.ErrInvalidInput
+	}
+	var result domain.RunHandoffCompletionResult
+	err := r.within(ctx, func(txCtx context.Context) error {
+		updated, completeErr := r.completeRunHandoffTx(txCtx, actor, childRunID, input)
+		if completeErr != nil {
+			return completeErr
+		}
+		result = updated
+		return nil
+	})
+	if err != nil {
+		return domain.RunHandoffCompletionResult{}, err
+	}
+	return result, nil
 }

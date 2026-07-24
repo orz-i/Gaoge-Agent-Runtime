@@ -13,7 +13,11 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const continuationColumnAttemptCount = "attempt_count"
+const (
+	continuationColumnAttemptCount      = "attempt_count"
+	continuationColumnReservationAmount = "reservation_amount_nanousd"
+	continuationColumnReservationRef    = "reservation_ref_no"
+)
 
 func (r *Repository) CreateContinuationJob(ctx context.Context, item *domain.ContinuationJob) (*domain.ContinuationJob, bool, error) {
 	if !validContinuationJob(item) {
@@ -111,13 +115,15 @@ func requeueDeadLetterContinuationJobTx(tx *gorm.DB, jobID string, availableAt t
 	result := tx.Model(&models.ContinuationJobRecord{}).
 		Where("id = ? AND status = ?", row.ID, domain.ContinuationJobDeadLetter).
 		Updates(map[string]interface{}{
-			columnStatus:                   domain.ContinuationJobQueued,
-			continuationColumnAttemptCount: 0,
-			"available_at":                 availableAt,
-			columnLeaseOwner:               "",
-			columnLeaseExpiresAt:           nil,
-			columnHeartbeatAt:              nil,
-			columnLastError:                "",
+			columnStatus:                        domain.ContinuationJobQueued,
+			continuationColumnAttemptCount:      0,
+			"available_at":                      availableAt,
+			columnLeaseOwner:                    "",
+			columnLeaseExpiresAt:                nil,
+			columnHeartbeatAt:                   nil,
+			continuationColumnReservationAmount: 0,
+			continuationColumnReservationRef:    "",
+			columnLastError:                     "",
 		})
 	if result.Error != nil {
 		return result.Error
@@ -146,7 +152,7 @@ func loadRecoverableDeadLetterContinuation(tx *gorm.DB, jobID string, row *model
 }
 
 func continuationRunRecordIsTerminal(run models.RunRecord) bool {
-	return run.EndedAt != nil || isTerminalRunStatus(run.Status) || run.Status == domain.RunStatusWaitingInput || run.Status == domain.RunStatusSuspended
+	return run.EndedAt != nil || isTerminalRunStatus(run.Status) || run.Status == domain.RunStatusWaitingInput || run.Status == domain.RunStatusWaitingHandoff || run.Status == domain.RunStatusSuspended
 }
 
 func (r *Repository) GetContinuationJob(ctx context.Context, jobID string) (*domain.ContinuationJob, error) {
@@ -279,6 +285,69 @@ func (r *Repository) ClaimNextContinuationJob(ctx context.Context, owner string,
 	return &result, nil
 }
 
+func (r *Repository) SetContinuationJobReservation(ctx context.Context, jobID, owner string, amountNanousd int64, refNo string, updatedAt time.Time) (*domain.ContinuationJob, bool, error) {
+	jobID, owner, refNo = strings.TrimSpace(jobID), strings.TrimSpace(owner), strings.TrimSpace(refNo)
+	if !validPostgresContinuationReservationUpdate(jobID, owner, amountNanousd, refNo, updatedAt) {
+		return nil, false, agentruntime.ErrInvalidInput
+	}
+	var row models.ContinuationJobRecord
+	var reused bool
+	err := r.within(ctx, func(txCtx context.Context) error {
+		updated, wasReused, updateErr := setContinuationJobReservationTx(r.dbFor(txCtx), jobID, owner, amountNanousd, refNo, updatedAt)
+		row, reused = updated, wasReused
+		return updateErr
+	})
+	if err != nil {
+		return nil, false, translateError(err)
+	}
+	item := toContinuationJobDomain(row)
+	return &item, reused, nil
+}
+
+func validPostgresContinuationReservationUpdate(jobID, owner string, amountNanousd int64, refNo string, updatedAt time.Time) bool {
+	return jobID != "" && owner != "" && amountNanousd >= 0 && refNo != "" && !updatedAt.IsZero()
+}
+
+func setContinuationJobReservationTx(tx *gorm.DB, jobID, owner string, amountNanousd int64, refNo string, updatedAt time.Time) (models.ContinuationJobRecord, bool, error) {
+	row, err := lockContinuationJobReservation(tx, jobID, owner)
+	if err != nil {
+		return models.ContinuationJobRecord{}, false, err
+	}
+	if row.ReservationRefNo != "" || row.ReservationAmountNanousd != 0 {
+		if row.ReservationRefNo != refNo || row.ReservationAmountNanousd != amountNanousd {
+			return models.ContinuationJobRecord{}, false, agentruntime.ErrContinuationJobConflict
+		}
+		return row, true, nil
+	}
+	updates := map[string]interface{}{
+		continuationColumnReservationAmount: amountNanousd,
+		continuationColumnReservationRef:    refNo,
+		columnUpdatedAt:                     updatedAt,
+	}
+	if err = tx.Model(&row).Updates(updates).Error; err != nil {
+		return models.ContinuationJobRecord{}, false, translateError(err)
+	}
+	if err = tx.Where("id = ?", row.ID).Take(&row).Error; err != nil {
+		return models.ContinuationJobRecord{}, false, translateError(err)
+	}
+	return row, false, nil
+}
+
+func lockContinuationJobReservation(tx *gorm.DB, jobID, owner string) (models.ContinuationJobRecord, error) {
+	query := tx.Where("job_id = ? AND status = ? AND lease_owner = ?", jobID, domain.ContinuationJobRunning, owner)
+	if tx.Name() == valuePostgres7F253790 {
+		query = query.Clauses(clause.Locking{Strength: valueLockUpdate})
+	}
+	var row models.ContinuationJobRecord
+	if err := query.Take(&row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return models.ContinuationJobRecord{}, agentruntime.ErrContinuationJobConflict
+		}
+		return models.ContinuationJobRecord{}, translateError(err)
+	}
+	return row, nil
+}
+
 func (r *Repository) HeartbeatContinuationJob(ctx context.Context, jobID, owner string, heartbeatAt, leaseUntil time.Time) error {
 	result := r.dbFor(ctx).Model(&models.ContinuationJobRecord{}).
 		Where("job_id = ? AND status = ? AND lease_owner = ?", strings.TrimSpace(jobID), domain.ContinuationJobRunning, strings.TrimSpace(owner)).
@@ -300,7 +369,10 @@ func (r *Repository) RetryContinuationJob(ctx context.Context, jobID, owner, mes
 	}
 	result := r.dbFor(ctx).Model(&models.ContinuationJobRecord{}).
 		Where("job_id = ? AND status = ? AND lease_owner = ?", strings.TrimSpace(jobID), domain.ContinuationJobRunning, strings.TrimSpace(owner)).
-		Updates(map[string]interface{}{columnStatus: status, "available_at": availableAt, columnLeaseOwner: "", columnLeaseExpiresAt: nil, columnLastError: strings.TrimSpace(message)})
+		Updates(map[string]interface{}{
+			columnStatus: status, "available_at": availableAt, columnLeaseOwner: "", columnLeaseExpiresAt: nil,
+			continuationColumnReservationAmount: 0, continuationColumnReservationRef: "", columnLastError: strings.TrimSpace(message),
+		})
 	return continuationTransitionError(result)
 }
 

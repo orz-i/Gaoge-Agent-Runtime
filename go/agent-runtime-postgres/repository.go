@@ -150,6 +150,9 @@ func (r *Repository) EraseAccountData(ctx context.Context, userID uint) error {
 			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.ContinuationJobRecord{}).Error
 		},
 		func() error {
+			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunHandoffJoinRecord{}).Error
+		},
+		func() error {
 			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunHandoffRecord{}).Error
 		},
 		func() error {

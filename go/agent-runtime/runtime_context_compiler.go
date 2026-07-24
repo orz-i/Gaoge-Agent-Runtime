@@ -210,7 +210,7 @@ func (s *Engine) loadTextRunContextMessages(ctx context.Context, run model.Run) 
 	if err != nil {
 		return nil, ErrRunSnapshotIncompatible
 	}
-	return messages, nil
+	return appendRunHandoffJoinContextMessages(ctx, messages)
 }
 
 func (s *Engine) restoreTextRunContextMessages(ctx context.Context, actor model.ActorRef, payload textRunContextSnapshotPayload) ([]Message, error) {

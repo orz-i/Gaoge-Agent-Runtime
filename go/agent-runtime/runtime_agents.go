@@ -79,34 +79,7 @@ func runHandoffJoinFingerprint(join model.RunHandoffJoin) string {
 }
 
 func (s *Engine) CreateRunHandoffJoin(ctx context.Context, input CreateRunHandoffJoinInput) (*model.RunHandoffJoin, bool, error) {
-	if !validActorRef(input.Actor) || strings.TrimSpace(input.ParentRunID) == "" || strings.TrimSpace(input.ClientJoinID) == "" {
-		return nil, false, ErrInvalidInput
-	}
-	parent, err := s.repo.GetRun(ctx, input.Actor, strings.TrimSpace(input.ParentRunID))
-	if err != nil {
-		return nil, false, err
-	}
-	if !runCanDelegate(*parent) {
-		return nil, false, ErrRunHandoffParentBlocked
-	}
-	handoffIDs, err := normalizeRunHandoffJoinIDs(input.HandoffIDs)
-	if err != nil {
-		return nil, false, err
-	}
-	sort.Strings(handoffIDs)
-	mode, quorum, failurePolicy, err := normalizeRunHandoffJoinPolicy(input.Mode, input.Quorum, input.FailurePolicy, len(handoffIDs))
-	if err != nil {
-		return nil, false, err
-	}
-	rootRunID := firstNonEmptyString(parent.RootRunID, parent.RunID)
-	joinID := runHandoffJoinPublicID(input.Actor, input.ClientJoinID)
-	join := &model.RunHandoffJoin{
-		JoinID: joinID, ClientJoinID: strings.TrimSpace(input.ClientJoinID), Actor: input.Actor,
-		RootRunID: rootRunID, ParentRunID: parent.RunID, HandoffIDs: handoffIDs,
-		Mode: mode, Quorum: quorum, FailurePolicy: failurePolicy, Status: model.RunHandoffJoinStatusPending,
-	}
-	join.RequestFingerprint = runHandoffJoinFingerprint(*join)
-	return s.repo.CreateRunHandoffJoin(ctx, join)
+	return s.createRunHandoffJoinWait(ctx, input)
 }
 
 func (s *Engine) GetRunHandoffJoin(ctx context.Context, actor model.ActorRef, joinID string) (*model.RunHandoffJoin, error) {
@@ -635,26 +608,40 @@ func (s *Engine) finalizeRunHandoff(ctx context.Context, run model.Run, intent m
 	if output != nil && strings.TrimSpace(output.Summary) != "" {
 		resultSummary = strings.TrimSpace(output.Summary)
 	}
-	handoff, reused, err := s.repo.CompleteRunHandoff(ctx, run.Actor, run.RunID, model.RunHandoffCompletion{
+	completion, err := s.repo.CompleteRunHandoffWithJoins(ctx, run.Actor, run.RunID, model.RunHandoffCompletion{
 		Status: status, ResultSummary: resultSummary, ResultOutputIDs: handoffOutputIDs(output), ErrorCode: intent.ErrorCode, ErrorMessage: intent.ErrorMessage,
 	})
-	if err != nil || reused {
+	if err != nil {
 		return "", nil, err
 	}
+	handoff := completion.Handoff
 	parent, err := s.repo.GetRun(ctx, run.Actor, handoff.ParentRunID)
 	if err != nil {
 		return "", nil, err
 	}
-	payload := map[string]interface{}{
-		"handoffID": handoff.HandoffID, "childRunID": run.RunID, "agentManifest": handoff.AgentManifest,
-		"agentName": handoff.AgentName, handoffPayloadStatusKey: status, handoffPayloadSummaryKey: resultSummary, "outputIDs": handoff.ResultOutputIDs,
+	events := make([]model.Event, 0, 1+len(completion.ResolvedJoins)*4)
+	if !completion.Reused {
+		payload := map[string]interface{}{
+			"handoffID": handoff.HandoffID, "childRunID": run.RunID, "agentManifest": handoff.AgentManifest,
+			"agentName": handoff.AgentName, handoffPayloadStatusKey: status, handoffPayloadSummaryKey: resultSummary, "outputIDs": handoff.ResultOutputIDs,
+		}
+		event := newRunEvent(*parent, handoffTerminalEventType(status), parent.CurrentStepID, "Delegated task "+status, payload, &parent.OutputProjection)
+		persisted, created, appendErr := s.repo.AppendRunEvent(ctx, &event)
+		if appendErr != nil {
+			return "", nil, appendErr
+		}
+		if created {
+			events = append(events, *persisted)
+		}
 	}
-	event := newRunEvent(*parent, handoffTerminalEventType(status), parent.CurrentStepID, "Delegated task "+status, payload, &parent.OutputProjection)
-	persisted, created, err := s.repo.AppendRunEvent(ctx, &event)
-	if err != nil || !created {
-		return handoff.ParentRunID, nil, err
+	for _, join := range completion.ResolvedJoins {
+		resolved, _, resolveErr := s.resolveRunHandoffJoinAtCommit(ctx, *parent, join)
+		if resolveErr != nil {
+			return "", nil, resolveErr
+		}
+		events = append(events, resolved...)
 	}
-	return handoff.ParentRunID, []model.Event{*persisted}, nil
+	return handoff.ParentRunID, events, nil
 }
 
 var (
