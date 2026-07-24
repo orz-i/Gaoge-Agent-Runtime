@@ -181,6 +181,7 @@ type RunTaskTree struct {
 	CurrentRunID string
 	RootRun      model.Run
 	Tasks        []RunTask
+	Joins        []model.RunHandoffJoin
 }
 
 type RunDelegationStart struct {
@@ -332,6 +333,10 @@ func (s *Engine) GetRunTaskTree(ctx context.Context, actor model.ActorRef, runID
 	if err != nil {
 		return nil, err
 	}
+	joins, err := s.repo.ListRunHandoffJoins(ctx, actor, model.RunHandoffJoinFilter{RootRunID: rootRunID, Limit: 500})
+	if err != nil {
+		return nil, err
+	}
 	tasks := make([]RunTask, 0, len(page.Results))
 	for _, handoff := range page.Results {
 		child, childErr := s.repo.GetRun(ctx, actor, handoff.ChildRunID)
@@ -343,7 +348,7 @@ func (s *Engine) GetRunTaskTree(ctx context.Context, actor model.ActorRef, runID
 		}
 		tasks = append(tasks, RunTask{Handoff: handoff, Run: *child})
 	}
-	return &RunTaskTree{RootRunID: rootRunID, CurrentRunID: current.RunID, RootRun: *rootRun, Tasks: tasks}, nil
+	return &RunTaskTree{RootRunID: rootRunID, CurrentRunID: current.RunID, RootRun: *rootRun, Tasks: tasks, Joins: joins.Results}, nil
 }
 
 func (s *Engine) resolveDelegationSource(ctx context.Context, input DelegateTextRunInput) (*model.Run, *model.AgentManifest, error) {

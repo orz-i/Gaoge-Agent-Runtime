@@ -30,7 +30,7 @@ export type RuntimeWorkspaceExtensionDTO = RuntimeExtensionDTO & {
   type: string;
 };
 
-export type TextRunStatus = "queued" | "preparing" | "waiting_input" | "running" | "completed" | "failed" | "cancelled" | "suspended";
+export type TextRunStatus = "queued" | "preparing" | "waiting_input" | "waiting_handoff" | "running" | "completed" | "failed" | "cancelled" | "suspended";
 export type RunStepDTO = { stepID: string; runID: string; parentStepID: string; planID?: string; stepIndex: number; attempt?: number; kind: string; title: string; description: string; status: string; dependsOn?: string[]; approvalRequired?: boolean; expectedTools?: string[]; resourceRefs?: string[]; resultSummary?: string; startedAt?: string | null; endedAt?: string };
 export type TextRunDTO = {
   schemaVersion: 1;
@@ -92,7 +92,7 @@ export type OutputDTO = { outputID: string; runID: string; stepID: string; toolC
 export type OutputCatalogItemDTO = OutputDTO & { sourceRun: { goal: string; status: string; model: string }; sourceThread: ThreadRefDTO & { title?: string } };
 export type OutputCatalogPageDTO = { results: OutputCatalogItemDTO[]; nextCursor?: string };
 export type PlanViewDTO = { current: PlanDTO; revisions: PlanDTO[]; steps: RunStepDTO[] };
-export type RunEventType = "context.compiled" | "progress.created" | "run.started" | "run.preparing" | "run.strategy_selected" | "run.waiting_input" | "run.resumed" | "run.status_changed" | "run.completed" | "run.failed" | "run.cancelled" | "run.suspended" | "plan.created" | "plan.proposed" | "plan.approved" | "plan.rejected" | "plan.revised" | "step.created" | "step.started" | "step.approved" | "step.resumed" | "step.waiting_input" | "step.updated" | "step.completed" | "step.failed" | "step.cancelled" | "step.suspended" | "step.skipped" | "interaction.created" | "interaction.resolved" | "interaction.expired" | "checkpoint.created" | "output.created" | "output.updated" | "message.delta" | "message.completed" | "message.failed" | "message.cancelled" | "tool.started" | "tool.completed" | "tool.failed" | "usage.updated" | "billing.updated" | string;
+export type RunEventType = "context.compiled" | "progress.created" | "run.started" | "run.preparing" | "run.strategy_selected" | "run.waiting_input" | "run.waiting_handoff" | "run.resumed" | "run.status_changed" | "run.completed" | "run.failed" | "run.cancelled" | "run.suspended" | "handoff.join.created" | "handoff.join.ready" | "handoff.join.failed" | "handoff.join.cancelled" | "plan.created" | "plan.proposed" | "plan.approved" | "plan.rejected" | "plan.revised" | "step.created" | "step.started" | "step.approved" | "step.resumed" | "step.waiting_input" | "step.waiting_handoff" | "step.updated" | "step.completed" | "step.failed" | "step.cancelled" | "step.suspended" | "step.skipped" | "interaction.created" | "interaction.resolved" | "interaction.expired" | "checkpoint.created" | "output.created" | "output.updated" | "message.delta" | "message.completed" | "message.failed" | "message.cancelled" | "tool.started" | "tool.completed" | "tool.failed" | "usage.updated" | "billing.updated" | string;
 export type RunEventDTO = { schemaVersion: 1; eventID: string; runID: string; actor: ActorRefDTO; thread: ThreadRefDTO; projection?: ProjectionRefDTO; seq: number; type: RunEventType; stepID?: string; parentEventID?: string; timestamp: string; payload: Record<string, unknown> };
 export type RunEventDetailDTO = RunEventDTO & {
   inputJSON?: string;
@@ -255,7 +255,40 @@ export type DelegateRunRequest = {
   htmlVisualPrompt?: boolean;
   htmlVisualColorMode?: "light" | "dark";
 };
+export type RunHandoffJoinMode = "all" | "any" | "quorum";
+export type RunHandoffJoinFailurePolicy = "collect" | "fail_fast";
+export type RunHandoffJoinStatus = "pending" | "ready" | "failed" | "cancelled";
+export type CreateRunHandoffJoinRequest = {
+  clientJoinID: string;
+  handoffIDs: string[];
+  mode?: RunHandoffJoinMode;
+  quorum?: number;
+  failurePolicy?: RunHandoffJoinFailurePolicy;
+};
+export type RunHandoffJoinDTO = {
+  joinID: string;
+  clientJoinID: string;
+  rootRunID: string;
+  parentRunID: string;
+  handoffIDs: string[];
+  mode: RunHandoffJoinMode;
+  quorum: number;
+  failurePolicy: RunHandoffJoinFailurePolicy;
+  status: RunHandoffJoinStatus;
+  completedCount: number;
+  failedCount: number;
+  cancelledCount: number;
+  pendingCount: number;
+  resultHandoffIDs: string[];
+  errorCode: string;
+  errorMessage: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string | null;
+};
+export type RunHandoffJoinPageDTO = { total: number; results: RunHandoffJoinDTO[] };
+export type RunHandoffJoinFilterDTO = { status?: RunHandoffJoinStatus; limit?: number; offset?: number };
 export type DelegatedRunResult = { handoff: RunHandoffDTO; run: TextRunDTO; rootStep: RunStepDTO };
 export type RunTaskDTO = { handoff: RunHandoffDTO; run: TextRunDTO };
-export type RunTaskTreeDTO = { rootRunID: string; currentRunID: string; rootRun: TextRunDTO; tasks: RunTaskDTO[] };
+export type RunTaskTreeDTO = { rootRunID: string; currentRunID: string; rootRun: TextRunDTO; tasks: RunTaskDTO[]; joins: RunHandoffJoinDTO[] };
 

@@ -14,6 +14,7 @@ import (
 const (
 	agentFieldRevision           = "revision"
 	agentFieldStatus             = "status"
+	agentFieldRootRunID          = "rootRunID"
 	agentFieldInputProjectionRef = "inputProjectionRef"
 )
 
@@ -31,6 +32,95 @@ type AgentManifestRevisionRequest struct {
 	MaxChildRuns     int      `json:"maxChildRuns" binding:"omitempty,min=1,max=16"`
 	MaxDepth         int      `json:"maxDepth" binding:"omitempty,min=1,max=6"`
 	RevisionNote     string   `json:"revisionNote" binding:"omitempty,max=255"`
+}
+
+func runHandoffJoinResponse(item model.RunHandoffJoin) map[string]interface{} {
+	return map[string]interface{}{
+		"joinID": item.JoinID, "clientJoinID": item.ClientJoinID, agentFieldRootRunID: item.RootRunID, "parentRunID": item.ParentRunID,
+		"handoffIDs": item.HandoffIDs, "mode": item.Mode, "quorum": item.Quorum, "failurePolicy": item.FailurePolicy,
+		agentFieldStatus: item.Status, "completedCount": item.CompletedCount, "failedCount": item.FailedCount,
+		"cancelledCount": item.CancelledCount, "pendingCount": item.PendingCount, "resultHandoffIDs": item.ResultHandoffIDs,
+		valueErrorCode8B63C5B4: item.ErrorCode, valueErrorMessage: item.ErrorMessage,
+		valueCreatedAtE3B65D13: item.CreatedAt, valueUpdatedAt: item.UpdatedAt, "resolvedAt": item.ResolvedAt,
+	}
+}
+
+func (h *Handler) CreateRunHandoffJoin(c *gin.Context) {
+	parentRunID, err := stringParam(c, "run_id")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "", err.Error())
+		return
+	}
+	var request CreateRunHandoffJoinRequest
+	if err = bindStrictJSON(c, &request); err != nil {
+		writeError(c, http.StatusBadRequest, "", "invalid run handoff join request")
+		return
+	}
+	join, reused, err := h.service.CreateRunHandoffJoin(c.Request.Context(), runtime.CreateRunHandoffJoinInput{
+		Actor: h.actorRef(c), ParentRunID: parentRunID, ClientJoinID: request.ClientJoinID,
+		HandoffIDs: request.HandoffIDs, Mode: request.Mode, Quorum: request.Quorum, FailurePolicy: request.FailurePolicy,
+	})
+	if err != nil {
+		writeAgentError(c, err)
+		return
+	}
+	status := http.StatusCreated
+	if reused {
+		status = http.StatusOK
+	}
+	c.JSON(status, runHandoffJoinResponse(*join))
+}
+
+func (h *Handler) ListRunHandoffJoins(c *gin.Context) {
+	parentRunID, err := stringParam(c, "run_id")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "", err.Error())
+		return
+	}
+	limit, offset := pageParams(c, 100)
+	page, err := h.service.ListRunHandoffJoins(c.Request.Context(), h.actorRef(c), model.RunHandoffJoinFilter{
+		ParentRunID: parentRunID, Status: strings.TrimSpace(c.Query(agentFieldStatus)), Limit: limit, Offset: offset,
+	})
+	if err != nil {
+		writeAgentError(c, err)
+		return
+	}
+	results := make([]map[string]interface{}, 0, len(page.Results))
+	for _, join := range page.Results {
+		results = append(results, runHandoffJoinResponse(join))
+	}
+	writePage(c, page.Total, results)
+}
+
+func (h *Handler) GetRunHandoffJoin(c *gin.Context) {
+	parentRunID, err := stringParam(c, "run_id")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "", err.Error())
+		return
+	}
+	joinID, err := stringParam(c, "join_id")
+	if err != nil {
+		writeError(c, http.StatusBadRequest, "", err.Error())
+		return
+	}
+	join, err := h.service.GetRunHandoffJoin(c.Request.Context(), h.actorRef(c), joinID)
+	if err != nil {
+		writeAgentError(c, err)
+		return
+	}
+	if join.ParentRunID != parentRunID {
+		writeAgentError(c, runtime.ErrNotFound)
+		return
+	}
+	writeSuccess(c, runHandoffJoinResponse(*join))
+}
+
+type CreateRunHandoffJoinRequest struct {
+	ClientJoinID  string   `json:"clientJoinID" binding:"required,max=64"`
+	HandoffIDs    []string `json:"handoffIDs" binding:"required,min=1,max=16,dive,required,max=64"`
+	Mode          string   `json:"mode" binding:"omitempty,oneof=all any quorum"`
+	Quorum        int      `json:"quorum" binding:"omitempty,min=1,max=16"`
+	FailurePolicy string   `json:"failurePolicy" binding:"omitempty,oneof=collect fail_fast"`
 }
 
 type DelegateTextRunRequest struct {
@@ -169,7 +259,11 @@ func (h *Handler) GetRunTaskTree(c *gin.Context) {
 	for _, item := range tree.Tasks {
 		tasks = append(tasks, map[string]interface{}{"handoff": runHandoffResponse(item.Handoff), valueRunA037153B: toRunResponse(item.Run)})
 	}
-	writeSuccess(c, map[string]interface{}{"rootRunID": tree.RootRunID, "currentRunID": tree.CurrentRunID, "rootRun": toRunResponse(tree.RootRun), "tasks": tasks})
+	joins := make([]map[string]interface{}, 0, len(tree.Joins))
+	for _, join := range tree.Joins {
+		joins = append(joins, runHandoffJoinResponse(join))
+	}
+	writeSuccess(c, map[string]interface{}{agentFieldRootRunID: tree.RootRunID, "currentRunID": tree.CurrentRunID, "rootRun": toRunResponse(tree.RootRun), "tasks": tasks, "joins": joins})
 }
 
 func skillRefsFromKeys(keys []string) []model.ResourceRef {
@@ -197,7 +291,7 @@ func agentManifestResponse(item model.AgentManifest) map[string]interface{} {
 
 func runHandoffResponse(item model.RunHandoff) map[string]interface{} {
 	return map[string]interface{}{
-		"handoffID": item.HandoffID, "clientHandoffID": item.ClientHandoffID, "rootRunID": item.RootRunID,
+		"handoffID": item.HandoffID, "clientHandoffID": item.ClientHandoffID, agentFieldRootRunID: item.RootRunID,
 		"parentRunID": item.ParentRunID, "childRunID": item.ChildRunID, "agentManifest": resourceRefResponse(item.AgentManifest),
 		"agentName": item.AgentName, "goal": item.Goal, "status": item.Status, "depth": item.Depth,
 		agentFieldInputProjectionRef: projectionRefResponse(item.InputProjection), "resultSummary": item.ResultSummary,
@@ -221,8 +315,12 @@ func writeAgentError(c *gin.Context, err error) {
 		writeError(c, http.StatusBadRequest, "agent.invalid_request", "invalid agent request")
 	case errors.Is(err, runtime.ErrNotFound):
 		writeError(c, http.StatusNotFound, "agent.not_found", "agent resource not found")
-	case errors.Is(err, runtime.ErrAgentManifestConflict), errors.Is(err, runtime.ErrRunHandoffConflict):
+	case errors.Is(err, runtime.ErrAgentManifestConflict), errors.Is(err, runtime.ErrRunHandoffConflict), errors.Is(err, runtime.ErrRunHandoffJoinConflict):
 		writeError(c, http.StatusConflict, "agent.request_conflict", err.Error())
+	case errors.Is(err, runtime.ErrDuplicate):
+		writeError(c, http.StatusConflict, "agent.join_state_conflict", "parent run changed while creating the handoff join")
+	case errors.Is(err, runtime.ErrRunHandoffJoinMember):
+		writeError(c, http.StatusUnprocessableEntity, "agent.join_member_invalid", "handoff join members must belong to the same parent run")
 	case errors.Is(err, runtime.ErrRunHandoffParentBlocked):
 		writeError(c, http.StatusConflict, "agent.parent_run_blocked", "parent run cannot delegate in its current state")
 	case errors.Is(err, runtime.ErrRunHandoffLimit):

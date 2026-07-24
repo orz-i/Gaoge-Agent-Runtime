@@ -31,6 +31,7 @@ const (
 	openAPIOffset     = "offset"
 	openAPIRevision   = "revision"
 	openAPIStatus     = "status"
+	openAPIJoinID     = "joinID"
 )
 
 func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
@@ -48,6 +49,9 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 		"POST /runs/{runID}/resume":                                       {status: "202", requestBody: "ResumeRunRequest", parameters: []string{valueRunID1DA2F0B6}},
 		"POST /runs/{runID}/retire":                                       {status: "200", parameters: []string{valueRunID1DA2F0B6}},
 		"POST /runs/{runID}/handoffs":                                     {status: "202", requestBody: "DelegateRunRequest", parameters: []string{valueRunID1DA2F0B6}},
+		"POST /runs/{runID}/handoff-joins":                                {status: "201", requestBody: "CreateRunHandoffJoinRequest", parameters: []string{valueRunID1DA2F0B6}},
+		"GET /runs/{runID}/handoff-joins":                                 {status: "200", parameters: []string{valueRunID1DA2F0B6, openAPIStatus, openAPILimit, openAPIOffset}},
+		"GET /runs/{runID}/handoff-joins/{joinID}":                        {status: "200", parameters: []string{valueRunID1DA2F0B6, openAPIJoinID}},
 		"GET /runs/{runID}/task-tree":                                     {status: "200", parameters: []string{valueRunID1DA2F0B6}},
 		"GET /runs/{runID}/events":                                        {status: "200", parameters: []string{valueRunID1DA2F0B6, "afterSeq"}},
 		"GET /runs/{runID}/events/history":                                {status: "200", parameters: []string{valueRunID1DA2F0B6, "beforeSeq", openAPILimit}},
@@ -101,6 +105,9 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	assertOpenAPISchemaRequired(t, schemas, "RequeueContinuationRequest", "reason")
 	assertOpenAPISchemaRequired(t, schemas, "DelegateRunRequest", "clientHandoffID")
 	assertOpenAPISchemaRequired(t, schemas, "DelegateRunRequest", "agentManifest")
+	assertOpenAPISchemaRequired(t, schemas, "CreateRunHandoffJoinRequest", "clientJoinID")
+	assertOpenAPISchemaRequired(t, schemas, "CreateRunHandoffJoinRequest", "handoffIDs")
+	assertOpenAPISchemaRequired(t, schemas, "RunTaskTree", "joins")
 	assertOpenAPISchemaRequired(t, schemas, "AgentManifestRevisionRequest", "name")
 	assertOpenAPISchemaReferencesExist(t, document, schemas)
 }
@@ -128,7 +135,7 @@ func assertOpenAPIRouterCoverage(t *testing.T, paths map[string]any, expected ma
 	actual := make([]string, 0, len(router.Routes()))
 	for _, route := range router.Routes() {
 		path := strings.TrimPrefix(route.Path, "/api/v1")
-		path = strings.NewReplacer(":run_id", "{runID}", ":event_id", "{eventID}", ":interaction_id", "{interactionID}", ":queue_id", "{queueID}", ":output_id", "{outputID}", ":version", "{version}", ":job_id", "{jobID}", ":manifest_id", "{manifestID}").Replace(path)
+		path = strings.NewReplacer(":run_id", "{runID}", ":event_id", "{eventID}", ":interaction_id", "{interactionID}", ":queue_id", "{queueID}", ":output_id", "{outputID}", ":version", "{version}", ":job_id", "{jobID}", ":manifest_id", "{manifestID}", ":join_id", "{joinID}").Replace(path)
 		key := route.Method + " " + path
 		actual = append(actual, key)
 		if _, ok := expected[key]; !ok {

@@ -23,10 +23,11 @@ func TestRunFirstRouteInventoryContract(t *testing.T) {
 		"GET /api/v1/run-queue", "GET /api/v1/runs", "GET /api/v1/runs/:run_id",
 		"GET /api/v1/runs/:run_id/checkpoints", "GET /api/v1/runs/:run_id/events", "GET /api/v1/runs/:run_id/events/:event_id",
 		"GET /api/v1/runs/:run_id/events/history", "GET /api/v1/runs/:run_id/interactions", "GET /api/v1/runs/:run_id/outputs",
+		"GET /api/v1/runs/:run_id/handoff-joins", "GET /api/v1/runs/:run_id/handoff-joins/:join_id",
 		"GET /api/v1/runs/:run_id/plan", "GET /api/v1/runs/:run_id/task-tree", "GET /api/v1/runs/:run_id/workbench",
 		"PATCH /api/v1/run-queue/:queue_id", "POST /api/v1/evidence", "POST /api/v1/run-queue",
 		"POST /api/v1/run-queue/:queue_id/interrupt-and-send", "POST /api/v1/run-queue/:queue_id/prioritize", "POST /api/v1/runs",
-		"POST /api/v1/runs/:run_id/cancel", "POST /api/v1/runs/:run_id/handoffs", "POST /api/v1/runs/:run_id/interactions/:interaction_id/resolve",
+		"POST /api/v1/runs/:run_id/cancel", "POST /api/v1/runs/:run_id/handoff-joins", "POST /api/v1/runs/:run_id/handoffs", "POST /api/v1/runs/:run_id/interactions/:interaction_id/resolve",
 		"POST /api/v1/runs/:run_id/resume", "POST /api/v1/runs/:run_id/retire",
 	}
 	got := make([]string, 0, len(engine.Routes()))

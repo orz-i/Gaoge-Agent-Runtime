@@ -1,8 +1,8 @@
 import type {
   AgentManifestDTO, AgentManifestPageDTO, AgentManifestRevisionRequest, AgentManifestStatus, ContinuationJobDTO, ContinuationJobFilterDTO,
-  ContinuationJobPageDTO, DelegateRunRequest, DelegatedRunResult, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
+  ContinuationJobPageDTO, CreateRunHandoffJoinRequest, DelegateRunRequest, DelegatedRunResult, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
   OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
-  RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RunTaskTreeDTO, RuntimeEvidenceSelectionDTO,
+  RunHandoffJoinDTO, RunHandoffJoinFilterDTO, RunHandoffJoinPageDTO, RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RunTaskTreeDTO, RuntimeEvidenceSelectionDTO,
   RuntimeEvidenceSourceDTO, StartTextRunRequest, StartTextRunResult, TextRunDetailDTO,
   TextRunDTO, WorkbenchDTO,
 } from "./types.js";
@@ -22,7 +22,7 @@ type OutputWireDTO = Omit<OutputDTO, "extension"> & { artifact?: OutputDTO["exte
 type OutputCatalogWireDTO = OutputWireDTO & { sourceRun: OutputDetailDTO["sourceRun"]; thread: OutputDetailDTO["sourceThread"] };
 
 const pathPart = (value: string): string => encodeURIComponent(value);
-const streamClosingEvents = new Set(["run.completed", "run.failed", "run.cancelled", "run.waiting_input", "run.suspended"]);
+const streamClosingEvents = new Set(["run.completed", "run.failed", "run.cancelled", "run.waiting_input", "run.waiting_handoff", "run.suspended"]);
 
 function outputFromWire<T extends OutputWireDTO>(item: T): Omit<T, "artifact"> & Pick<OutputDTO, "extension"> {
   const { artifact, ...output } = item; return { ...output, extension: artifact };
@@ -64,6 +64,9 @@ export class RuntimeClient {
       resume: (runID:string,payload:{checkpointID?:string;clientResumeID:string},request?:RequestOptions)=>this.request<{checkpointID:string;runID:string;status:string;reused:boolean}>(`/runs/${pathPart(runID)}/resume`,{method:"POST",body:JSON.stringify(payload)},request),
       retire: (runID:string,request?:RequestOptions)=>this.request<{runID:string;status:"cancelled";reused:boolean}>(`/runs/${pathPart(runID)}/retire`,{method:"POST"},request),
       delegate: (runID:string,payload:DelegateRunRequest,request?:RequestOptions)=>this.request<DelegatedRunResult>(`/runs/${pathPart(runID)}/handoffs`,{method:"POST",body:JSON.stringify(payload)},request),
+      createHandoffJoin: (runID:string,payload:CreateRunHandoffJoinRequest,request?:RequestOptions)=>this.request<RunHandoffJoinDTO>(`/runs/${pathPart(runID)}/handoff-joins`,{method:"POST",body:JSON.stringify(payload)},request),
+      handoffJoins: (runID:string,options:RunHandoffJoinFilterDTO&RequestOptions={})=>{const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined)q.set(key,String(value))}return this.request<RunHandoffJoinPageDTO>(`/runs/${pathPart(runID)}/handoff-joins${q.size?`?${q}`:""}`,{},options)},
+      handoffJoin: (runID:string,joinID:string,request?:RequestOptions)=>this.request<RunHandoffJoinDTO>(`/runs/${pathPart(runID)}/handoff-joins/${pathPart(joinID)}`,{},request),
       taskTree: (runID:string,request?:RequestOptions)=>this.request<RunTaskTreeDTO>(`/runs/${pathPart(runID)}/task-tree`,{},request),
       plan: (runID:string,request?:RequestOptions)=>this.request<PlanViewDTO>(`/runs/${pathPart(runID)}/plan`,{},request),
       checkpoints: async (runID:string,request?:RequestOptions)=>(await this.request<{results:RunCheckpointDTO[]}>(`/runs/${pathPart(runID)}/checkpoints`,{},request)).results ?? [],

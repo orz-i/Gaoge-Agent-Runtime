@@ -89,6 +89,57 @@ paths:
                 $ref: '#/components/schemas/DelegatedRunResult'
         default:
           $ref: '#/components/responses/Error'
+  /runs/{runID}/handoff-joins:
+    post:
+      operationId: createRunHandoffJoin
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRunHandoffJoinRequest'
+      responses:
+        '201':
+          description: Created durable handoff fan-in contract and paused the parent run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunHandoffJoin'
+        default:
+          $ref: '#/components/responses/Error'
+    get:
+      operationId: listRunHandoffJoins
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/RunHandoffJoinStatus'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Durable handoff fan-in contracts for the parent run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunHandoffJoinPage'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{runID}/handoff-joins/{joinID}:
+    get:
+      operationId: getRunHandoffJoin
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/RunHandoffJoinID'
+      responses:
+        '200':
+          description: One durable handoff fan-in contract
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunHandoffJoin'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/task-tree:
     get:
       operationId: getRunTaskTree
@@ -598,6 +649,11 @@ components:
       in: path
       required: true
       schema: {type: string}
+    RunHandoffJoinID:
+      name: joinID
+      in: path
+      required: true
+      schema: {type: string}
     AgentManifestID:
       name: manifestID
       in: path
@@ -643,6 +699,11 @@ components:
       in: query
       required: false
       schema: {type: string, enum: [active, disabled]}
+    RunHandoffJoinStatus:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [pending, ready, failed, cancelled]}
     OptionalRevision:
       name: revision
       in: query
@@ -811,6 +872,21 @@ components:
         evidenceIDs: {type: array, maxItems: 50, items: {type: string}}
         htmlVisualPrompt: {type: boolean}
         htmlVisualColorMode: {type: string, enum: [light, dark]}
+    CreateRunHandoffJoinRequest:
+      type: object
+      additionalProperties: false
+      required: [clientJoinID, handoffIDs]
+      properties:
+        clientJoinID: {type: string, minLength: 1, maxLength: 64}
+        handoffIDs:
+          type: array
+          minItems: 1
+          maxItems: 16
+          uniqueItems: true
+          items: {type: string, minLength: 1, maxLength: 64}
+        mode: {type: string, enum: [all, any, quorum], default: all}
+        quorum: {type: integer, minimum: 1, maximum: 16}
+        failurePolicy: {type: string, enum: [collect, fail_fast], default: collect}
     WorkspaceExtension:
       type: object
       required: [schemaVersion, type]
@@ -965,6 +1041,44 @@ components:
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
         completedAt: {type: string, format: date-time, nullable: true}
+    RunHandoffJoin:
+      type: object
+      additionalProperties: false
+      required: [joinID, clientJoinID, rootRunID, parentRunID, handoffIDs, mode, quorum, failurePolicy, status, completedCount, failedCount, cancelledCount, pendingCount, resultHandoffIDs, createdAt, updatedAt]
+      properties:
+        joinID: {type: string}
+        clientJoinID: {type: string}
+        rootRunID: {type: string}
+        parentRunID: {type: string}
+        handoffIDs:
+          type: array
+          items: {type: string}
+        mode: {type: string, enum: [all, any, quorum]}
+        quorum: {type: integer, minimum: 1}
+        failurePolicy: {type: string, enum: [collect, fail_fast]}
+        status: {type: string, enum: [pending, ready, failed, cancelled]}
+        completedCount: {type: integer, minimum: 0}
+        failedCount: {type: integer, minimum: 0}
+        cancelledCount: {type: integer, minimum: 0}
+        pendingCount: {type: integer, minimum: 0}
+        resultHandoffIDs:
+          type: array
+          items: {type: string}
+        errorCode: {type: string}
+        errorMessage: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        resolvedAt: {type: string, format: date-time, nullable: true}
+    RunHandoffJoinPage:
+      type: object
+      additionalProperties: false
+      required: [total, results]
+      properties:
+        total: {type: integer, format: int64, minimum: 0}
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunHandoffJoin'
     DelegatedRunResult:
       type: object
       additionalProperties: false
@@ -988,7 +1102,7 @@ components:
     RunTaskTree:
       type: object
       additionalProperties: false
-      required: [rootRunID, currentRunID, rootRun, tasks]
+      required: [rootRunID, currentRunID, rootRun, tasks, joins]
       properties:
         rootRunID: {type: string}
         currentRunID: {type: string}
@@ -998,6 +1112,10 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RunTask'
+        joins:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunHandoffJoin'
     RunDetail:
       type: object
       additionalProperties: false
