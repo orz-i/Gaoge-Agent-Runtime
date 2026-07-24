@@ -297,23 +297,90 @@ func handoffDomain(row models.RunHandoffRecord) domain.RunHandoff {
 }
 
 func (r *Repository) CreateRunHandoff(ctx context.Context, input *domain.RunHandoff) (*domain.RunHandoff, bool, error) {
+	return r.createRunHandoff(ctx, input, 0)
+}
+
+func (r *Repository) CreateRunHandoffWithinLimit(ctx context.Context, input *domain.RunHandoff, maxChildren int) (*domain.RunHandoff, bool, error) {
+	if maxChildren <= 0 {
+		return nil, false, agentruntime.ErrInvalidInput
+	}
+	return r.createRunHandoff(ctx, input, maxChildren)
+}
+
+func (r *Repository) createRunHandoff(ctx context.Context, input *domain.RunHandoff, maxChildren int) (*domain.RunHandoff, bool, error) {
 	if !validRunHandoff(input) {
 		return nil, false, agentruntime.ErrInvalidInput
 	}
-	db := r.dbFor(ctx)
-	var existing models.RunHandoffRecord
-	err := db.Where("(tenant_id = ? AND actor_id = ? AND client_handoff_id = ?) OR handoff_id = ?", input.Actor.TenantID, input.Actor.ActorID, input.ClientHandoffID, input.HandoffID).Take(&existing).Error
-	if err == nil {
-		if existing.RequestFingerprint != input.RequestFingerprint {
-			return nil, false, agentruntime.ErrRunHandoffConflict
+	var result domain.RunHandoff
+	var reused bool
+	err := r.within(ctx, func(txCtx context.Context) error {
+		created, wasReused, createErr := r.createRunHandoffTx(txCtx, input, maxChildren)
+		if createErr != nil {
+			return createErr
 		}
-		item := handoffDomain(existing)
-		return &item, true, nil
+		result, reused = *created, wasReused
+		return nil
+	})
+	if err != nil {
+		return nil, false, err
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	return &result, reused, nil
+}
+
+func (r *Repository) createRunHandoffTx(ctx context.Context, input *domain.RunHandoff, maxChildren int) (*domain.RunHandoff, bool, error) {
+	db := r.dbFor(ctx)
+	existing, found, err := findRunHandoffRequest(db, *input)
+	if err != nil || found {
+		return existing, found, err
+	}
+	if err = enforceRunHandoffChildLimit(db, *input, maxChildren); err != nil {
+		return nil, false, err
+	}
+	return insertRunHandoff(db, *input)
+}
+
+func findRunHandoffRequest(db *gorm.DB, input domain.RunHandoff) (*domain.RunHandoff, bool, error) {
+	var existing models.RunHandoffRecord
+	err := runHandoffIdentityQuery(db, input).Take(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, nil
+	}
+	if err != nil {
 		return nil, false, translateError(err)
 	}
-	row, err := handoffRecord(*input)
+	if existing.RequestFingerprint != input.RequestFingerprint {
+		return nil, false, agentruntime.ErrRunHandoffConflict
+	}
+	item := handoffDomain(existing)
+	return &item, true, nil
+}
+
+func enforceRunHandoffChildLimit(db *gorm.DB, input domain.RunHandoff, maxChildren int) error {
+	if maxChildren <= 0 {
+		return nil
+	}
+	var parent models.RunRecord
+	query := db.Where("tenant_id = ? AND actor_id = ? AND run_id = ?", input.Actor.TenantID, input.Actor.ActorID, input.ParentRunID)
+	if db.Name() == "postgres" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Take(&parent).Error; err != nil {
+		return translateError(err)
+	}
+	var children int64
+	if err := db.Model(&models.RunHandoffRecord{}).
+		Where("tenant_id = ? AND actor_id = ? AND parent_run_id = ?", input.Actor.TenantID, input.Actor.ActorID, input.ParentRunID).
+		Count(&children).Error; err != nil {
+		return translateError(err)
+	}
+	if children >= int64(maxChildren) {
+		return agentruntime.ErrRunHandoffLimit
+	}
+	return nil
+}
+
+func insertRunHandoff(db *gorm.DB, input domain.RunHandoff) (*domain.RunHandoff, bool, error) {
+	row, err := handoffRecord(input)
 	if err != nil {
 		return nil, false, agentruntime.ErrInvalidInput
 	}
@@ -321,7 +388,8 @@ func (r *Repository) CreateRunHandoff(ctx context.Context, input *domain.RunHand
 		if !isUniqueConstraint(err) {
 			return nil, false, translateError(err)
 		}
-		if findErr := db.Where("(tenant_id = ? AND actor_id = ? AND client_handoff_id = ?) OR handoff_id = ?", input.Actor.TenantID, input.Actor.ActorID, input.ClientHandoffID, input.HandoffID).Take(&existing).Error; findErr != nil {
+		var existing models.RunHandoffRecord
+		if findErr := runHandoffIdentityQuery(db, input).Take(&existing).Error; findErr != nil {
 			return nil, false, agentruntime.ErrRunHandoffConflict
 		}
 		if existing.RequestFingerprint != input.RequestFingerprint {
@@ -332,6 +400,10 @@ func (r *Repository) CreateRunHandoff(ctx context.Context, input *domain.RunHand
 	}
 	item := handoffDomain(row)
 	return &item, false, nil
+}
+
+func runHandoffIdentityQuery(db *gorm.DB, input domain.RunHandoff) *gorm.DB {
+	return db.Where("(tenant_id = ? AND actor_id = ? AND client_handoff_id = ?) OR handoff_id = ?", input.Actor.TenantID, input.Actor.ActorID, input.ClientHandoffID, input.HandoffID)
 }
 
 func (r *Repository) GetRunHandoff(ctx context.Context, actor domain.ActorRef, handoffID string) (*domain.RunHandoff, error) {

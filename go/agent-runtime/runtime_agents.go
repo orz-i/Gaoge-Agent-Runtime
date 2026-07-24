@@ -411,7 +411,7 @@ func (s *Engine) persistRunDelegationStart(ctx context.Context, child model.Run,
 	if err != nil {
 		return nil, err
 	}
-	saved, reused, err := s.createDelegationHandoffAtCommit(ctx, child, delegation.Handoff)
+	saved, reused, err := s.createDelegationHandoffAtCommit(ctx, child, delegation.Handoff, delegation.Manifest.MaxChildRuns)
 	if err != nil {
 		return nil, err
 	}
@@ -432,11 +432,12 @@ func (s *Engine) validateDelegationParentAtCommit(ctx context.Context, child mod
 	return parent, nil
 }
 
-func (s *Engine) createDelegationHandoffAtCommit(ctx context.Context, child model.Run, input model.RunHandoff) (*model.RunHandoff, bool, error) {
+func (s *Engine) createDelegationHandoffAtCommit(ctx context.Context, child model.Run, input model.RunHandoff, maxChildren int) (*model.RunHandoff, bool, error) {
 	handoff := input
 	handoff.ChildRunID = child.RunID
 	handoff.InputProjection = child.InputProjection
-	return s.repo.CreateRunHandoff(ctx, &handoff)
+	limit := min(maxChildren, hardAgentMaxChildRuns)
+	return s.repo.CreateRunHandoffWithinLimit(ctx, &handoff, limit)
 }
 
 func validateReusedDelegationHandoff(saved *model.RunHandoff, child model.Run, expected model.RunHandoff) error {

@@ -33,6 +33,7 @@ type AgentManifestStore interface {
 
 type RunHandoffStore interface {
 	CreateRunHandoff(context.Context, *domain.RunHandoff) (*domain.RunHandoff, bool, error)
+	CreateRunHandoffWithinLimit(context.Context, *domain.RunHandoff, int) (*domain.RunHandoff, bool, error)
 	GetRunHandoff(context.Context, domain.ActorRef, string) (*domain.RunHandoff, error)
 	GetRunHandoffByChildRun(context.Context, domain.ActorRef, string) (*domain.RunHandoff, error)
 	ListRunHandoffs(context.Context, domain.ActorRef, domain.RunHandoffFilter) (domain.RunHandoffPage, error)

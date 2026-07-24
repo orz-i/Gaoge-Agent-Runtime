@@ -233,13 +233,21 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			RootRunID: run.RunID, ParentRunID: run.RunID, ChildRunID: "run-child-1", AgentManifest: second.Ref(), AgentName: second.Name,
 			Goal: "Research one bounded question", Status: domain.RunHandoffStatusQueued, Depth: 1,
 		}
-		created, reused, err := store.CreateRunHandoff(ctx, &handoff)
+		created, reused, err := store.CreateRunHandoffWithinLimit(ctx, &handoff, 1)
 		if err != nil || reused || created.ChildRunID != handoff.ChildRunID {
 			t.Fatalf("create handoff = %+v,%t,%v", created, reused, err)
 		}
-		replayed, reused, err := store.CreateRunHandoff(ctx, &handoff)
+		replayed, reused, err := store.CreateRunHandoffWithinLimit(ctx, &handoff, 1)
 		if err != nil || !reused || replayed.HandoffID != created.HandoffID {
 			t.Fatalf("replay handoff = %+v,%t,%v", replayed, reused, err)
+		}
+		secondHandoff := handoff
+		secondHandoff.HandoffID = "handoff-2"
+		secondHandoff.ClientHandoffID = "client-handoff-2"
+		secondHandoff.RequestFingerprint = "handoff-fp-2"
+		secondHandoff.ChildRunID = "run-child-2"
+		if _, _, err = store.CreateRunHandoffWithinLimit(ctx, &secondHandoff, 1); !errors.Is(err, agentruntime.ErrRunHandoffLimit) {
+			t.Fatalf("handoff child limit = %v", err)
 		}
 		handoffConflict := handoff
 		handoffConflict.RequestFingerprint = "different"

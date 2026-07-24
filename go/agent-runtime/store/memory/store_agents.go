@@ -93,6 +93,29 @@ func (s *Store) CreateAgentManifestRevision(_ context.Context, input *domain.Age
 	return &result, reused, nil
 }
 
+func findMemoryRunHandoff(items map[string]domain.RunHandoff, input domain.RunHandoff) (domain.RunHandoff, bool, error) {
+	for _, existing := range items {
+		if !sameHandoffClient(existing, input.Actor, input.ClientHandoffID) && existing.HandoffID != input.HandoffID {
+			continue
+		}
+		if existing.RequestFingerprint != input.RequestFingerprint {
+			return domain.RunHandoff{}, false, agentruntime.ErrRunHandoffConflict
+		}
+		return clone(existing), true, nil
+	}
+	return domain.RunHandoff{}, false, nil
+}
+
+func countMemoryRunHandoffChildren(items map[string]domain.RunHandoff, actor domain.ActorRef, parentRunID string) int {
+	children := 0
+	for _, existing := range items {
+		if existing.Actor == actor && existing.ParentRunID == parentRunID {
+			children++
+		}
+	}
+	return children
+}
+
 func findChildHandoff(items map[string]domain.RunHandoff, actor domain.ActorRef, childRunID string) (domain.RunHandoff, string, bool) {
 	for id, item := range items {
 		if item.Actor == actor && item.ChildRunID == childRunID {
@@ -230,21 +253,33 @@ func sameHandoffClient(left domain.RunHandoff, actor domain.ActorRef, clientID s
 }
 
 func (s *Store) CreateRunHandoff(_ context.Context, input *domain.RunHandoff) (*domain.RunHandoff, bool, error) {
+	return s.createRunHandoff(input, 0)
+}
+
+func (s *Store) CreateRunHandoffWithinLimit(_ context.Context, input *domain.RunHandoff, maxChildren int) (*domain.RunHandoff, bool, error) {
+	if maxChildren <= 0 {
+		return nil, false, agentruntime.ErrInvalidInput
+	}
+	return s.createRunHandoff(input, maxChildren)
+}
+
+func (s *Store) createRunHandoff(input *domain.RunHandoff, maxChildren int) (*domain.RunHandoff, bool, error) {
 	if !validHandoff(input) {
 		return nil, false, agentruntime.ErrInvalidInput
 	}
 	var result domain.RunHandoff
 	var reused bool
 	err := s.write(func(st *state) error {
-		for _, existing := range st.Handoffs {
-			if !sameHandoffClient(existing, input.Actor, input.ClientHandoffID) && existing.HandoffID != input.HandoffID {
-				continue
-			}
-			if existing.RequestFingerprint != input.RequestFingerprint {
-				return agentruntime.ErrRunHandoffConflict
-			}
-			result, reused = clone(existing), true
+		existing, found, findErr := findMemoryRunHandoff(st.Handoffs, *input)
+		if findErr != nil {
+			return findErr
+		}
+		if found {
+			result, reused = existing, true
 			return nil
+		}
+		if maxChildren > 0 && countMemoryRunHandoffChildren(st.Handoffs, input.Actor, input.ParentRunID) >= maxChildren {
+			return agentruntime.ErrRunHandoffLimit
 		}
 		item := clone(*input)
 		now := time.Now()
