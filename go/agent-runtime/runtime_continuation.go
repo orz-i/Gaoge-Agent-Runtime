@@ -120,6 +120,8 @@ func (s *Engine) createContinuationJob(ctx context.Context, run model.Run, check
 		MaxAttempts:  5,
 		AvailableAt:  time.Now(),
 	}
+	traceContext := s.captureTraceContext(ctx)
+	job.TraceParent, job.TraceState = traceContext.TraceParent, traceContext.TraceState
 	if reservation != nil {
 		job.ReservationAmountNanousd = reservation.AmountNanousd
 		job.ReservationRefNo = strings.TrimSpace(reservation.RefNo)
@@ -312,8 +314,19 @@ func recoverContinuationWorkerPanic(resultErr *error) {
 }
 
 func (s *Engine) executeContinuationJob(ctx context.Context, owner string, job model.ContinuationJob) error {
+	ctx = s.restoreTraceContext(ctx, TraceContext{TraceParent: job.TraceParent, TraceState: job.TraceState})
+	ctx, span := s.startSpan(ctx, "agentruntime.continuation.execute",
+		String("gen_ai.operation.name", "execute_continuation"),
+		String("gen_ai.agent.id", job.RunID),
+		String("run.id", job.RunID),
+		String("continuation.job_id", job.JobID),
+		String("continuation.checkpoint_id", job.CheckpointID),
+		Int("continuation.attempt", job.AttemptCount),
+	)
+	defer span.End()
 	run, err := s.repo.GetRun(ctx, job.Actor, job.RunID)
 	if err != nil {
+		span.RecordError(err)
 		return err
 	}
 	if continuationRunDoesNotExecute(*run) {
@@ -321,23 +334,28 @@ func (s *Engine) executeContinuationJob(ctx context.Context, owner string, job m
 	}
 	checkpoint, err := s.repo.GetRunCheckpoint(ctx, job.Actor, job.RunID, job.CheckpointID)
 	if err != nil {
+		span.RecordError(err)
 		return err
 	}
 	continuation, err := decodeRunContinuation(*checkpoint)
 	if err != nil || continuation.SegmentKey != job.SegmentKey {
+		span.RecordError(ErrRunSnapshotIncompatible)
 		return ErrRunSnapshotIncompatible
 	}
 	ctx = context.WithValue(ctx, runHandoffJoinContextKey{}, continuation.HandoffJoin)
 	effective, err := s.loadResumeTextRunRuntime(ctx, *run)
 	if err != nil {
+		span.RecordError(err)
 		return err
 	}
 	root, err := s.runRootStep(ctx, run.RunID)
 	if err != nil {
+		span.RecordError(err)
 		return err
 	}
 	reservation, err := s.ensureContinuationJobReservation(ctx, owner, job, *run, effective)
 	if err != nil {
+		span.RecordError(err)
 		return err
 	}
 	segmentCtx := context.WithValue(ctx, runSegmentKeyContextKey{}, job.SegmentKey)

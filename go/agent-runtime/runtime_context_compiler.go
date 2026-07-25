@@ -70,7 +70,7 @@ func (s *Engine) compileTextRunContext(ctx context.Context, run model.Run, effec
 	if err != nil {
 		return nil, nil, err
 	}
-	ctx, span := s.startSpan(ctx, "agentruntime.context.compile", String("run_id", run.RunID), String("thread_id", run.Thread.ID))
+	ctx, span := s.startSpan(ctx, "agentruntime.context.compile", String("gen_ai.operation.name", "compile_context"), String("gen_ai.agent.id", run.RunID), String("run_id", run.RunID), String("thread_id", run.Thread.ID))
 	defer span.End()
 	input := RuntimeInput{Actor: run.Actor, Thread: run.Thread, RequestID: run.RequestID + ":context", ContentType: userMessage.ContentType, Content: run.Goal, PlatformModelName: effective.PlatformModelName, Options: effective.Options, ClientRunID: run.RunID, FileIDs: effective.FileIDs, SelectedToolKeys: effective.ToolKeys, SkillRefs: effective.SkillRefs, HTMLVisualPromptEnabled: effective.HTMLVisualPromptEnabled, HTMLVisualColorMode: effective.HTMLVisualColorMode, ParentProjection: userMessage.Parent, SourceProjection: userMessage.Source, BranchReason: valueDefaultD11B78AC, Instructions: effective.Instructions, MemoryEnabled: effective.MemoryEnabled}
 	prompt, err := s.compileRuntimePrompt(ctx, PromptBuildInput{RunInput: input, Thread: &thread, Route: route, BranchState: branch, UserMessage: &userMessage, RunID: run.RunID, BranchReason: input.BranchReason, RunSpan: span, DeferContextArtifactPersistence: true})

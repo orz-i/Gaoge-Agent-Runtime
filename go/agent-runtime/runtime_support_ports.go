@@ -534,6 +534,15 @@ type Logger interface {
 type Tracer interface {
 	TraceID(context.Context) string
 	Start(context.Context, string, ...LogField) (context.Context, Span)
+	Inject(context.Context) TraceContext
+	Extract(context.Context, TraceContext) context.Context
+}
+
+// TraceContext is the W3C trace carrier persisted across durable Runtime jobs.
+// Baggage is intentionally excluded from scheduler storage.
+type TraceContext struct {
+	TraceParent string
+	TraceState  string
 }
 
 type Span interface {

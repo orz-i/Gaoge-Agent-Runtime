@@ -132,6 +132,8 @@ type ContinuationJobRecord struct {
 	ActorID                  string     `gorm:"size:64;not null;default:'';index:idx_agent_continuation_jobs_actor,priority:2"`
 	Source                   string     `gorm:"size:64;not null;default:''"`
 	Status                   string     `gorm:"size:32;not null;index:idx_agent_continuation_jobs_dispatch,priority:1"`
+	TraceParent              string     `gorm:"size:128;not null;default:''"`
+	TraceState               string     `gorm:"size:512;not null;default:''"`
 	ReservationAmountNanousd int64      `gorm:"not null;default:0"`
 	ReservationRefNo         string     `gorm:"size:255;not null;default:''"`
 	AttemptCount             int        `gorm:"not null;default:0"`

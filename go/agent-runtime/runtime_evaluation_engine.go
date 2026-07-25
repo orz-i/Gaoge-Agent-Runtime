@@ -20,6 +20,8 @@ func (s *Engine) evaluateRuntimeBoundary(ctx context.Context, request Evaluation
 		return report, nil
 	}
 	ctx, span := s.startSpan(ctx, "agentruntime.guardrail.evaluate",
+		String("gen_ai.operation.name", "evaluate"),
+		String("gen_ai.agent.id", strings.TrimSpace(request.RunID)),
 		String("evaluation.stage", string(request.Stage)),
 		String("run.id", strings.TrimSpace(request.RunID)),
 		String("step.id", strings.TrimSpace(request.StepID)),

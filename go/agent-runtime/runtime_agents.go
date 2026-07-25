@@ -246,12 +246,21 @@ func (s *Engine) GetAgentManifest(ctx context.Context, actor model.ActorRef, ref
 }
 
 func (s *Engine) DelegateTextRun(ctx context.Context, input DelegateTextRunInput) (*DelegateTextRunResult, error) {
+	ctx, span := s.startSpan(ctx, "agentruntime.handoff.create",
+		String("gen_ai.operation.name", "handoff"),
+		String("gen_ai.agent.id", strings.TrimSpace(input.ParentRunID)),
+		String("handoff.client_id", strings.TrimSpace(input.ClientHandoffID)),
+		String("agent.manifest_id", strings.TrimSpace(input.AgentManifest.ID)),
+	)
+	defer span.End()
 	goal, err := validateDelegateTextRunInput(input)
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 	prepared, reused, err := s.prepareDelegation(ctx, input, goal)
 	if err != nil {
+		span.RecordError(err)
 		return nil, err
 	}
 	if reused != nil {

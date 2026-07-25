@@ -669,6 +669,9 @@ func (s *Engine) generatePlanAttempt(ctx context.Context, run model.Run, effecti
 		phase = "planner_repair"
 	}
 	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate",
+		String("gen_ai.operation.name", "chat"),
+		String("gen_ai.agent.id", run.RunID),
+		String("gen_ai.request.model", effective.PlatformModelName),
 		String("run.id", run.RunID),
 		String("step.id", run.CurrentStepID),
 		String("generation.phase", phase),
@@ -2013,6 +2016,9 @@ func (s *Engine) generateRunStepTurn(ctx context.Context, run model.Run, step mo
 		return nil, err
 	}
 	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate",
+		String("gen_ai.operation.name", "chat"),
+		String("gen_ai.agent.id", run.RunID),
+		String("gen_ai.request.model", effective.PlatformModelName),
 		String("run.id", run.RunID),
 		String("step.id", step.StepID),
 		String("generation.phase", valueStepB959B536),
@@ -2425,6 +2431,8 @@ func (s *Engine) handleResolvedRunToolCall(ctx context.Context, run model.Run, s
 
 func (s *Engine) requestRunToolApproval(ctx context.Context, run model.Run, step model.Step, effective effectiveTextRunConfig, tool ResolvedTool, call ToolCall) (ToolResult, bool, error) {
 	ctx, span := s.startSpan(ctx, "agentruntime.approval.request",
+		String("gen_ai.operation.name", "request_approval"),
+		String("gen_ai.agent.id", run.RunID),
 		String("run.id", run.RunID),
 		String("step.id", step.StepID),
 		String("tool.call_id", call.ToolCallID),
@@ -2476,6 +2484,10 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 	}
 	limits := &TextRunExecutionLimits{MaxLLMCalls: effective.MaxLLMCalls, MaxToolCalls: effective.MaxToolCalls, ToolRetryCount: policy.RetryCount, ToolConcurrency: policy.Concurrency}
 	executeCtx, toolSpan := s.startSpan(ctx, "agentruntime.tool.execute",
+		String("gen_ai.operation.name", "execute_tool"),
+		String("gen_ai.agent.id", run.RunID),
+		String("gen_ai.tool.name", tool.ModelName),
+		String("gen_ai.tool.call.id", call.ToolCallID),
 		String("run.id", run.RunID),
 		String("step.id", stepID),
 		String("tool.call_id", call.ToolCallID),
@@ -2914,6 +2926,9 @@ func (s *Engine) streamRunAnswer(ctx context.Context, run model.Run, orchestrati
 	holdForEvaluation := s.evaluations != nil && s.evaluations.Enforces(EvaluationStageModelOutput)
 	collector := runDeltaCollector{service: s, ctx: ctx, run: run, stepID: orchestrationStepID, projection: run.OutputProjection, lastFlush: time.Now(), holdForEvaluation: holdForEvaluation}
 	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate",
+		String("gen_ai.operation.name", "chat"),
+		String("gen_ai.agent.id", run.RunID),
+		String("gen_ai.request.model", effective.PlatformModelName),
 		String("run.id", run.RunID),
 		String("step.id", orchestrationStepID),
 		String("generation.phase", phase),

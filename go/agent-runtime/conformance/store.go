@@ -95,9 +95,9 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		store, actor, thread, run := seeded(t, factory)
 		ctx := context.Background()
 		now := time.Now().UTC()
-		job := domain.ContinuationJob{JobID: "continuation-1", SegmentKey: "segment-1", RunID: run.RunID, CheckpointID: checkpointID, Actor: actor, Source: "conformance", Status: domain.ContinuationJobQueued, ReservationAmountNanousd: 42, ReservationRefNo: "reservation-1", MaxAttempts: 3, AvailableAt: now}
+		job := domain.ContinuationJob{JobID: "continuation-1", SegmentKey: "segment-1", RunID: run.RunID, CheckpointID: checkpointID, Actor: actor, Source: "conformance", Status: domain.ContinuationJobQueued, TraceParent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", TraceState: "vendor=value", ReservationAmountNanousd: 42, ReservationRefNo: "reservation-1", MaxAttempts: 3, AvailableAt: now}
 		created, reused, err := store.CreateContinuationJob(ctx, &job)
-		if err != nil || reused || created.Status != domain.ContinuationJobQueued || created.ReservationAmountNanousd != 42 || created.ReservationRefNo != "reservation-1" {
+		if err != nil || reused || created.Status != domain.ContinuationJobQueued || created.TraceParent != job.TraceParent || created.TraceState != job.TraceState || created.ReservationAmountNanousd != 42 || created.ReservationRefNo != "reservation-1" {
 			t.Fatalf("create continuation = %+v,%t,%v", created, reused, err)
 		}
 		again, reused, err := store.CreateContinuationJob(ctx, &job)

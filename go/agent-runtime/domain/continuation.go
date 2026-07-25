@@ -16,6 +16,7 @@ type ContinuationJob struct {
 	JobID, SegmentKey, RunID, CheckpointID string
 	Actor                                  ActorRef
 	Source, Status                         string
+	TraceParent, TraceState                string
 	ReservationAmountNanousd               int64
 	ReservationRefNo                       string
 	AttemptCount, MaxAttempts              int

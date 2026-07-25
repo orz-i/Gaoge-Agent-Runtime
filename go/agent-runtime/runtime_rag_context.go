@@ -69,6 +69,7 @@ func (s *Engine) retrieveRunRAG(
 	readyObjs []FileAsset,
 ) (RetrievalResult, error) {
 	ragCtx, ragSpan := s.startSpan(ctx, "agentruntime.rag.retrieve",
+		String("gen_ai.operation.name", "retrieve"),
 		String("thread.id", input.Thread.ID),
 		String("actor.id", input.Actor.ActorID),
 		Int("conversation.rag.file_count", len(readyObjs)),

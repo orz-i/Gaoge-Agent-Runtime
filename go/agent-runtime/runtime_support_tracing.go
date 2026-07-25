@@ -15,6 +15,20 @@ func (s *Engine) startSpan(ctx context.Context, name string, fields ...LogField)
 	return ctx, noopSpan{}
 }
 
+func (s *Engine) captureTraceContext(ctx context.Context) TraceContext {
+	if s == nil || s.tracer == nil {
+		return TraceContext{}
+	}
+	return s.tracer.Inject(ctx)
+}
+
+func (s *Engine) restoreTraceContext(ctx context.Context, carrier TraceContext) context.Context {
+	if s == nil || s.tracer == nil {
+		return ctx
+	}
+	return s.tracer.Extract(ctx, carrier)
+}
+
 func (s *Engine) traceID(ctx context.Context) string {
 	if s != nil && s.tracer != nil {
 		return s.tracer.TraceID(ctx)
