@@ -483,7 +483,8 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 	}
 	runID := EnsureRunID(input.ClientRunID)
 	fingerprint := textRunRequestFingerprint(input, goal)
-	existingResult, exists, err := s.existingTextRunStart(ctx, input.Actor, input.Thread, runID, fingerprint)
+	delegated := input.Delegation != nil
+	existingResult, exists, err := s.existingTextRunStart(ctx, input.Actor, input.Thread, runID, fingerprint, delegated)
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +557,7 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 	if err != nil {
 		_ = s.ReleaseRunUsageReservation(ctx, reservation, "文本运行创建失败退回预扣")
 		if errors.Is(err, ErrDuplicate) {
-			return s.recoverDuplicateTextRunStart(ctx, input.Actor, input.Thread, runID, fingerprint, err)
+			return s.recoverDuplicateTextRunStart(ctx, input.Actor, input.Thread, runID, fingerprint, err, delegated)
 		}
 		return nil, err
 	}
@@ -847,7 +848,7 @@ func textRunInitialEvents(run model.Run, step model.Step, environmentRef model.R
 	return append(events, newRunEvent(run, "context.compiled", step.StepID, "Text context compiled", map[string]interface{}{"contextHash": snapshot.ContentHash, "fileCount": snapshot.FileCount, "ragCount": snapshot.RAGCount, "skillCount": snapshot.SkillCount, "memoryCount": snapshot.MemoryCount, "outputCount": snapshot.OutputCount, "evidenceCount": snapshot.EvidenceCount, "retrievalFallbackCount": snapshot.RetrievalFallbackCount, "skippedCount": snapshot.SkippedCount}, nil))
 }
 
-func (s *Engine) recoverDuplicateTextRunStart(ctx context.Context, actor model.ActorRef, thread model.ThreadRef, runID, fingerprint string, duplicateErr error) (*TextRunStartResult, error) {
+func (s *Engine) recoverDuplicateTextRunStart(ctx context.Context, actor model.ActorRef, thread model.ThreadRef, runID, fingerprint string, duplicateErr error, allowThreadConcurrency bool) (*TextRunStartResult, error) {
 	existing, err := s.repo.GetRun(ctx, actor, runID)
 	if err == nil {
 		if !textRunFingerprintMatches(existing, fingerprint) {
@@ -857,6 +858,9 @@ func (s *Engine) recoverDuplicateTextRunStart(ctx context.Context, actor model.A
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return nil, err
+	}
+	if allowThreadConcurrency {
+		return nil, duplicateErr
 	}
 	_, err = s.repo.GetActiveRun(ctx, actor, thread)
 	if err == nil {
@@ -890,7 +894,7 @@ func (s *Engine) resolveTextRunProfileAtRevision(ctx context.Context, actor mode
 	return profile, nil
 }
 
-func (s *Engine) existingTextRunStart(ctx context.Context, actor model.ActorRef, thread model.ThreadRef, runID, fingerprint string) (TextRunStartResult, bool, error) {
+func (s *Engine) existingTextRunStart(ctx context.Context, actor model.ActorRef, thread model.ThreadRef, runID, fingerprint string, allowThreadConcurrency bool) (TextRunStartResult, bool, error) {
 	existing, err := s.repo.GetRun(ctx, actor, runID)
 	if err == nil {
 		if !textRunFingerprintMatches(existing, fingerprint) {
@@ -904,6 +908,9 @@ func (s *Engine) existingTextRunStart(ctx context.Context, actor model.ActorRef,
 	}
 	if !errors.Is(err, ErrNotFound) {
 		return TextRunStartResult{}, false, err
+	}
+	if allowThreadConcurrency {
+		return TextRunStartResult{}, false, nil
 	}
 	_, err = s.repo.GetActiveRun(ctx, actor, thread)
 	if err == nil {

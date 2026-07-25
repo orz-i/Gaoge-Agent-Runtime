@@ -15,6 +15,7 @@ type duplicateRunRecoveryStore struct {
 	run, active       *model.Run
 	runErr, activeErr error
 	steps             []model.Step
+	activeChecks      int
 }
 
 func (s *duplicateRunRecoveryStore) GetRun(context.Context, model.ActorRef, string) (*model.Run, error) {
@@ -22,6 +23,7 @@ func (s *duplicateRunRecoveryStore) GetRun(context.Context, model.ActorRef, stri
 }
 
 func (s *duplicateRunRecoveryStore) GetActiveRun(context.Context, model.ActorRef, model.ThreadRef) (*model.Run, error) {
+	s.activeChecks++
 	return s.active, s.activeErr
 }
 
@@ -124,7 +126,7 @@ func TestRecoverDuplicateTextRunStartPreservesCauseWithoutRunEvidence(t *testing
 	thread := model.ThreadRef{Kind: threadKindConversation, ID: "thread_duplicate"}
 	cause := errContextArtifactDuplicate
 	service := &Engine{repo: &duplicateRunRecoveryStore{runErr: ErrNotFound, activeErr: ErrNotFound}}
-	if _, err := service.recoverDuplicateTextRunStart(t.Context(), actor, thread, "run_missing", "fingerprint", cause); !errors.Is(err, cause) {
+	if _, err := service.recoverDuplicateTextRunStart(t.Context(), actor, thread, "run_missing", "fingerprint", cause, false); !errors.Is(err, cause) {
 		t.Fatalf("duplicate recovery error = %v, want original cause", err)
 	}
 }
@@ -134,7 +136,7 @@ func TestRecoverDuplicateTextRunStartReportsOnlyRealActiveRun(t *testing.T) {
 	thread := model.ThreadRef{Kind: threadKindConversation, ID: "thread_active"}
 	active := &model.Run{RunID: valueRunActive8FC2E9A1, Actor: actor, Thread: thread}
 	service := &Engine{repo: &duplicateRunRecoveryStore{runErr: ErrNotFound, active: active}}
-	if _, err := service.recoverDuplicateTextRunStart(t.Context(), actor, thread, "run_new", "fingerprint", ErrDuplicate); !errors.Is(err, ErrTextRunAlreadyActive) {
+	if _, err := service.recoverDuplicateTextRunStart(t.Context(), actor, thread, "run_new", "fingerprint", ErrDuplicate, false); !errors.Is(err, ErrTextRunAlreadyActive) {
 		t.Fatalf("active recovery error = %v", err)
 	}
 }
@@ -146,11 +148,35 @@ func TestRecoverDuplicateTextRunStartKeepsIdempotentRunSemantics(t *testing.T) {
 	step := model.Step{StepID: "step_existing", RunID: existing.RunID}
 	store := &duplicateRunRecoveryStore{run: existing, steps: []model.Step{step}}
 	service := &Engine{repo: store}
-	result, err := service.recoverDuplicateTextRunStart(t.Context(), actor, thread, existing.RunID, "same", ErrDuplicate)
+	result, err := service.recoverDuplicateTextRunStart(t.Context(), actor, thread, existing.RunID, "same", ErrDuplicate, false)
 	if err != nil || result == nil || result.Run.RunID != existing.RunID || result.Step.StepID != step.StepID {
 		t.Fatalf("idempotent recovery result = %#v, err=%v", result, err)
 	}
-	if _, err = service.recoverDuplicateTextRunStart(t.Context(), actor, thread, existing.RunID, "different", ErrDuplicate); !errors.Is(err, ErrTextRunIdempotencyConflict) {
+	if _, err = service.recoverDuplicateTextRunStart(t.Context(), actor, thread, existing.RunID, "different", ErrDuplicate, false); !errors.Is(err, ErrTextRunIdempotencyConflict) {
 		t.Fatalf("fingerprint conflict error = %v", err)
+	}
+}
+
+func TestDelegatedTextRunSkipsRootThreadActiveGate(t *testing.T) {
+	actor := model.ActorRef{TenantID: valueTenantTest, ActorID: "actor_delegate"}
+	thread := model.ThreadRef{Kind: threadKindConversation, ID: "thread_delegate"}
+	active := &model.Run{RunID: valueRunActive8FC2E9A1, Actor: actor, Thread: thread}
+	store := &duplicateRunRecoveryStore{runErr: ErrNotFound, active: active}
+	service := &Engine{repo: store}
+
+	result, exists, err := service.existingTextRunStart(t.Context(), actor, thread, "run_delegate", "fingerprint", true)
+	if err != nil || exists || result.Run.RunID != "" {
+		t.Fatalf("delegated preflight = %#v, exists=%v, err=%v", result, exists, err)
+	}
+	if store.activeChecks != 0 {
+		t.Fatalf("delegated preflight consulted root active gate %d times", store.activeChecks)
+	}
+
+	cause := errContextArtifactDuplicate
+	if _, err = service.recoverDuplicateTextRunStart(t.Context(), actor, thread, "run_delegate", "fingerprint", cause, true); !errors.Is(err, cause) {
+		t.Fatalf("delegated duplicate recovery error = %v, want original cause", err)
+	}
+	if store.activeChecks != 0 {
+		t.Fatalf("delegated duplicate recovery consulted root active gate %d times", store.activeChecks)
 	}
 }
