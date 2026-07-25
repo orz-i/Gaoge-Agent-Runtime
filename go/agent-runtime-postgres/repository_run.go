@@ -70,6 +70,46 @@ func (r *Repository) GetRun(ctx context.Context, actor domain.ActorRef, runID st
 	return &item, nil
 }
 
+func (r *Repository) GetRunsByIDs(ctx context.Context, actor domain.ActorRef, runIDs []string) ([]domain.Run, error) {
+	ids, err := normalizedPostgresRunIDs(runIDs)
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	var rows []models.RunRecord
+	if err = actorRunQuery(r.dbFor(ctx), actor).Where("run_id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, translateError(err)
+	}
+	byID := make(map[string]domain.Run, len(rows))
+	for _, row := range rows {
+		item := toRunDomain(row)
+		byID[item.RunID] = item
+	}
+	result := make([]domain.Run, 0, len(rows))
+	for _, runID := range ids {
+		if item, ok := byID[runID]; ok {
+			result = append(result, item)
+		}
+	}
+	return result, nil
+}
+
+func normalizedPostgresRunIDs(values []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return nil, agentruntime.ErrInvalidInput
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result, nil
+}
+
 func (r *Repository) GetActiveRun(ctx context.Context, actor domain.ActorRef, thread domain.ThreadRef) (*domain.Run, error) {
 	var row models.RunRecord
 	err := actorRunQuery(r.dbFor(ctx), actor).Where("thread_kind = ? AND thread_id = ? AND ended_at IS NULL", thread.Kind, thread.ID).Order("id DESC").Take(&row).Error

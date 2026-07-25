@@ -65,6 +65,7 @@ type ContinuationJobStore interface {
 type RunStore interface {
 	CreateRunStartBundle(context.Context, *domain.Run, *domain.Step, *domain.ContextSnapshot, []domain.ContextArtifact, *domain.Checkpoint, []domain.Event) ([]domain.Event, error)
 	GetRun(context.Context, domain.ActorRef, string) (*domain.Run, error)
+	GetRunsByIDs(context.Context, domain.ActorRef, []string) ([]domain.Run, error)
 	GetActiveRun(context.Context, domain.ActorRef, domain.ThreadRef) (*domain.Run, error)
 	ListRuns(context.Context, domain.ActorRef, *domain.ThreadRef, int, int) ([]domain.Run, int64, error)
 	ListNonterminalRuns(context.Context, time.Time) ([]domain.Run, error)

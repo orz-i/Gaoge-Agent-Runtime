@@ -11,6 +11,8 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
+const testMutatedGoal = "mutated"
+
 // StoreFactory creates a fresh Store for one isolated contract test.
 type StoreFactory func(testing.TB) agentruntime.Store
 
@@ -33,6 +35,26 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		items, err := store.ListRunEventsAfter(ctx, actor, run.RunID, 0, 10)
 		if err != nil || len(items) != 2 || items[0].Seq != 1 || items[1].Seq != 2 {
 			t.Fatalf("events = %+v, %v", items, err)
+		}
+	})
+
+	t.Run("runs are batch loaded in requested actor scoped order", func(t *testing.T) {
+		store, actor, thread, run := seeded(t, factory)
+		ctx := context.Background()
+		second := seedAdditionalRun(t, store, actor, thread, "run-2")
+		foreignActor := domain.ActorRef{TenantID: actor.TenantID, ActorID: "actor-foreign"}
+		foreign := seedAdditionalRun(t, store, foreignActor, domain.ThreadRef{Kind: thread.Kind, ID: "thread-foreign"}, "run-foreign")
+		items, err := store.GetRunsByIDs(ctx, actor, []string{second.RunID, run.RunID, second.RunID, foreign.RunID, "run-missing"})
+		if err != nil || len(items) != 2 || items[0].RunID != second.RunID || items[1].RunID != run.RunID {
+			t.Fatalf("batch runs = %+v, %v", items, err)
+		}
+		items[0].Goal = testMutatedGoal
+		again, err := store.GetRunsByIDs(ctx, actor, []string{second.RunID})
+		if err != nil || len(again) != 1 || again[0].Goal == testMutatedGoal {
+			t.Fatalf("batch run leaked mutable state: %+v, %v", again, err)
+		}
+		if _, err = store.GetRunsByIDs(ctx, actor, []string{""}); !errors.Is(err, agentruntime.ErrInvalidInput) {
+			t.Fatalf("blank batch run ID error = %v", err)
 		}
 	})
 
@@ -83,9 +105,9 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		loaded.Goal = "mutated"
+		loaded.Goal = testMutatedGoal
 		again, err := store.GetRun(ctx, actor, run.RunID)
-		if err != nil || again.Goal == "mutated" {
+		if err != nil || again.Goal == testMutatedGoal {
 			t.Fatalf("store leaked mutable state: %+v, %v", again, err)
 		}
 	})
@@ -478,6 +500,21 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			t.Fatalf("expired join was claimed twice: %v", err)
 		}
 	})
+}
+
+func seedAdditionalRun(tb testing.TB, store agentruntime.Store, actor domain.ActorRef, thread domain.ThreadRef, runID string) domain.Run {
+	tb.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	run := domain.Run{RunID: runID, Actor: actor, Thread: thread, Goal: "goal " + runID, Status: domain.RunStatusRunning, CreatedAt: now, UpdatedAt: now}
+	step := domain.Step{StepID: "step-" + runID, RunID: runID, CreatedAt: now, UpdatedAt: now}
+	snapshot := domain.ContextSnapshot{SnapshotID: "snapshot-" + runID, RunID: runID, Actor: actor, Thread: thread, CreatedAt: now, UpdatedAt: now}
+	checkpoint := domain.Checkpoint{CheckpointID: "checkpoint-" + runID, RunID: runID, Status: domain.CheckpointReady, CreatedAt: now, UpdatedAt: now}
+	event := domain.Event{EventID: "event-" + runID, RunID: runID, EventType: "run.started", Actor: actor, Thread: thread, CreatedAt: now}
+	if _, err := store.CreateRunStartBundle(ctx, &run, &step, &snapshot, nil, &checkpoint, []domain.Event{event}); err != nil {
+		tb.Fatalf("seed additional run: %v", err)
+	}
+	return run
 }
 
 func handoffJoinByID(items []domain.RunHandoffJoin, joinID string) (domain.RunHandoffJoin, bool) {

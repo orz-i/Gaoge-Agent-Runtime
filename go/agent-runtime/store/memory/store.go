@@ -182,6 +182,40 @@ func (s *Store) GetRun(_ context.Context, actor domain.ActorRef, runID string) (
 	return &result, nil
 }
 
+func (s *Store) GetRunsByIDs(_ context.Context, actor domain.ActorRef, runIDs []string) ([]domain.Run, error) {
+	ids, err := normalizeMemoryRunIDs(runIDs)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]domain.Run, 0, len(ids))
+	for _, runID := range ids {
+		run, ok := s.state.Runs[runID]
+		if ok && owned(run, actor) {
+			result = append(result, clone(run))
+		}
+	}
+	return result, nil
+}
+
+func normalizeMemoryRunIDs(values []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			return nil, agentruntime.ErrInvalidInput
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result, nil
+}
+
 func (s *Store) GetActiveRun(_ context.Context, actor domain.ActorRef, thread domain.ThreadRef) (*domain.Run, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

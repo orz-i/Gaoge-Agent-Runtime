@@ -22,6 +22,7 @@ const (
 	testJoinTwo            = "two"
 	testJoinThree          = "three"
 	testJoinReadyID        = "join-ready"
+	testMissingRunID       = "run-missing"
 )
 
 type agentRuntimeTestStore struct {
@@ -31,6 +32,39 @@ type agentRuntimeTestStore struct {
 	handoffs          []model.RunHandoff
 	handoffCompletion model.RunHandoffCompletionResult
 	appendedRunEvents []model.Event
+	getRunCalls       []string
+	batchRunCalls     [][]string
+}
+
+func (s *agentRuntimeTestStore) ListRunHandoffJoins(_ context.Context, _ model.ActorRef, _ model.RunHandoffJoinFilter) (model.RunHandoffJoinPage, error) {
+	return model.RunHandoffJoinPage{Results: []model.RunHandoffJoin{}}, nil
+}
+
+func TestGetRunTaskTreeBatchLoadsChildRuns(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	root := model.Run{RunID: "run-root", RootRunID: "run-root", Actor: actor, Status: model.RunStatusRunning}
+	childOne := model.Run{RunID: "run-child-one", RootRunID: root.RunID, Actor: actor, Status: model.RunStatusCompleted}
+	childTwo := model.Run{RunID: "run-child-two", RootRunID: root.RunID, Actor: actor, Status: model.RunStatusRunning}
+	store := &agentRuntimeTestStore{
+		runs: map[string]model.Run{root.RunID: root, childOne.RunID: childOne, childTwo.RunID: childTwo},
+		handoffs: []model.RunHandoff{
+			{HandoffID: "handoff-one", Actor: actor, RootRunID: root.RunID, ParentRunID: root.RunID, ChildRunID: childOne.RunID},
+			{HandoffID: "handoff-missing", Actor: actor, RootRunID: root.RunID, ParentRunID: root.RunID, ChildRunID: testMissingRunID},
+			{HandoffID: "handoff-two", Actor: actor, RootRunID: root.RunID, ParentRunID: root.RunID, ChildRunID: childTwo.RunID},
+			{HandoffID: "handoff-one-reused", Actor: actor, RootRunID: root.RunID, ParentRunID: root.RunID, ChildRunID: childOne.RunID},
+		},
+	}
+	engine := &Engine{repo: store}
+	tree, err := engine.GetRunTaskTree(t.Context(), actor, root.RunID)
+	if err != nil || tree.RootRun.RunID != root.RunID || len(tree.Tasks) != 3 {
+		t.Fatalf("task tree = %+v, %v", tree, err)
+	}
+	if !slices.Equal(store.getRunCalls, []string{root.RunID}) {
+		t.Fatalf("point run calls = %#v", store.getRunCalls)
+	}
+	if len(store.batchRunCalls) != 1 || !slices.Equal(store.batchRunCalls[0], []string{childOne.RunID, testMissingRunID, childTwo.RunID}) {
+		t.Fatalf("batch run calls = %#v", store.batchRunCalls)
+	}
 }
 
 func TestAgentExecutionBudgetOnlyNarrowsEnvironmentLimits(t *testing.T) {
@@ -195,11 +229,23 @@ func TestResolveRunHandoffJoinQuorumIsMonotonic(t *testing.T) {
 }
 
 func (s *agentRuntimeTestStore) GetRun(_ context.Context, actor model.ActorRef, runID string) (*model.Run, error) {
+	s.getRunCalls = append(s.getRunCalls, runID)
 	run, ok := s.runs[runID]
 	if !ok || run.Actor != actor {
 		return nil, ErrNotFound
 	}
 	return &run, nil
+}
+
+func (s *agentRuntimeTestStore) GetRunsByIDs(_ context.Context, actor model.ActorRef, runIDs []string) ([]model.Run, error) {
+	s.batchRunCalls = append(s.batchRunCalls, append([]string(nil), runIDs...))
+	result := make([]model.Run, 0, len(runIDs))
+	for _, runID := range runIDs {
+		if run, ok := s.runs[runID]; ok && run.Actor == actor {
+			result = append(result, run)
+		}
+	}
+	return result, nil
 }
 
 func (s *agentRuntimeTestStore) GetAgentManifest(_ context.Context, actor model.ActorRef, ref model.ResourceRef) (*model.AgentManifest, error) {

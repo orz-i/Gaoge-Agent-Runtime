@@ -346,10 +346,6 @@ func (s *Engine) GetRunTaskTree(ctx context.Context, actor model.ActorRef, runID
 	if rootRunID == "" {
 		rootRunID = current.RunID
 	}
-	rootRun, err := s.repo.GetRun(ctx, actor, rootRunID)
-	if err != nil {
-		return nil, err
-	}
 	page, err := s.repo.ListRunHandoffs(ctx, actor, model.RunHandoffFilter{RootRunID: rootRunID, Limit: 500})
 	if err != nil {
 		return nil, err
@@ -358,18 +354,42 @@ func (s *Engine) GetRunTaskTree(ctx context.Context, actor model.ActorRef, runID
 	if err != nil {
 		return nil, err
 	}
+	runsByID := map[string]model.Run{current.RunID: *current}
+	requestedRunIDs := make([]string, 0, len(page.Results)+1)
+	requested := map[string]struct{}{current.RunID: {}}
+	if rootRunID != current.RunID {
+		requestedRunIDs = append(requestedRunIDs, rootRunID)
+		requested[rootRunID] = struct{}{}
+	}
+	for _, handoff := range page.Results {
+		if _, exists := requested[handoff.ChildRunID]; exists {
+			continue
+		}
+		requested[handoff.ChildRunID] = struct{}{}
+		requestedRunIDs = append(requestedRunIDs, handoff.ChildRunID)
+	}
+	if len(requestedRunIDs) > 0 {
+		runs, loadErr := s.repo.GetRunsByIDs(ctx, actor, requestedRunIDs)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		for _, run := range runs {
+			runsByID[run.RunID] = run
+		}
+	}
+	rootRun, found := runsByID[rootRunID]
+	if !found {
+		return nil, ErrNotFound
+	}
 	tasks := make([]RunTask, 0, len(page.Results))
 	for _, handoff := range page.Results {
-		child, childErr := s.repo.GetRun(ctx, actor, handoff.ChildRunID)
-		if childErr != nil {
-			if errors.Is(childErr, ErrNotFound) {
-				continue
-			}
-			return nil, childErr
+		child, found := runsByID[handoff.ChildRunID]
+		if !found {
+			continue
 		}
-		tasks = append(tasks, RunTask{Handoff: handoff, Run: *child})
+		tasks = append(tasks, RunTask{Handoff: handoff, Run: child})
 	}
-	return &RunTaskTree{RootRunID: rootRunID, CurrentRunID: current.RunID, RootRun: *rootRun, Tasks: tasks, Joins: joins.Results}, nil
+	return &RunTaskTree{RootRunID: rootRunID, CurrentRunID: current.RunID, RootRun: rootRun, Tasks: tasks, Joins: joins.Results}, nil
 }
 
 func (s *Engine) resolveDelegationSource(ctx context.Context, input DelegateTextRunInput) (*model.Run, *model.AgentManifest, error) {
