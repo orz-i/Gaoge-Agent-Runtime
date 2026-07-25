@@ -887,6 +887,8 @@ components:
         mode: {type: string, enum: [all, any, quorum], default: all}
         quorum: {type: integer, minimum: 1, maximum: 16}
         failurePolicy: {type: string, enum: [collect, fail_fast], default: collect}
+        timeoutSeconds: {type: integer, minimum: 60, maximum: 604800, default: 3600}
+        timeoutPolicy: {type: string, enum: [cancel_pending, leave_running], default: cancel_pending}
     WorkspaceExtension:
       type: object
       required: [schemaVersion, type]
@@ -1044,7 +1046,7 @@ components:
     RunHandoffJoin:
       type: object
       additionalProperties: false
-      required: [joinID, clientJoinID, rootRunID, parentRunID, handoffIDs, mode, quorum, failurePolicy, status, completedCount, failedCount, cancelledCount, pendingCount, resultHandoffIDs, createdAt, updatedAt]
+      required: [joinID, clientJoinID, rootRunID, parentRunID, handoffIDs, mode, quorum, failurePolicy, timeoutSeconds, timeoutPolicy, deadlineAt, status, completedCount, failedCount, cancelledCount, pendingCount, resultHandoffIDs, createdAt, updatedAt]
       properties:
         joinID: {type: string}
         clientJoinID: {type: string}
@@ -1056,6 +1058,9 @@ components:
         mode: {type: string, enum: [all, any, quorum]}
         quorum: {type: integer, minimum: 1}
         failurePolicy: {type: string, enum: [collect, fail_fast]}
+        timeoutSeconds: {type: integer, minimum: 60, maximum: 604800}
+        timeoutPolicy: {type: string, enum: [cancel_pending, leave_running]}
+        deadlineAt: {type: string, format: date-time}
         status: {type: string, enum: [pending, ready, failed, cancelled]}
         completedCount: {type: integer, minimum: 0}
         failedCount: {type: integer, minimum: 0}

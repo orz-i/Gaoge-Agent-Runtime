@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
@@ -21,6 +22,58 @@ type handoffJoinTestUnitOfWork struct{}
 
 func (handoffJoinTestUnitOfWork) Within(ctx context.Context, work func(context.Context) error) error {
 	return work(ctx)
+}
+
+func TestExpiredRunHandoffJoinSuspendsParent(t *testing.T) {
+	parent, join, checkpoint := handoffJoinReadyFixture(t)
+	deadline := time.Now().UTC().Add(-time.Second)
+	join.Status = model.RunHandoffJoinStatusPending
+	join.CompletedCount, join.PendingCount = 0, 1
+	join.ResultHandoffIDs = nil
+	join.TimeoutSeconds = 60
+	join.TimeoutPolicy = model.RunHandoffJoinTimeoutLeaveRunning
+	join.DeadlineAt = &deadline
+	store := &handoffJoinRuntimeStore{
+		run: parent, checkpoint: checkpoint, expiredJoin: &join,
+		handoffs: map[string]model.RunHandoff{
+			testJoinHandoffA: {HandoffID: testJoinHandoffA, Actor: parent.Actor, ChildRunID: testHandoffChildRunID, AgentName: testHandoffAgentName, Status: model.RunHandoffStatusQueued},
+		},
+	}
+	engine := &Engine{repo: store, unitOfWork: handoffJoinTestUnitOfWork{}, generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{})}
+	if err := engine.ExpireRunHandoffJoinsOnce(t.Context(), time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if store.resumeStatus != model.RunStatusSuspended || store.expiredJoin == nil || store.expiredJoin.Status != model.RunHandoffJoinStatusFailed || store.expiredJoin.ErrorCode != "handoff_join_timeout" {
+		t.Fatalf("expired join state = join=%#v resume=%q", store.expiredJoin, store.resumeStatus)
+	}
+	if !containsRuntimeEventType(store.resumeEvents, "handoff.join.failed") || !containsRuntimeEventType(store.resumeEvents, "run.suspended") {
+		t.Fatalf("timeout events = %#v", store.resumeEvents)
+	}
+}
+
+func TestNormalizeRunHandoffJoinTimeoutRejectsUnboundedValues(t *testing.T) {
+	if _, _, err := normalizeRunHandoffJoinTimeout(minimumHandoffJoinTimeoutSeconds-1, ""); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("short timeout error = %v", err)
+	}
+	if _, _, err := normalizeRunHandoffJoinTimeout(maximumHandoffJoinTimeoutSeconds+1, ""); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("long timeout error = %v", err)
+	}
+	if _, _, err := normalizeRunHandoffJoinTimeout(defaultHandoffJoinTimeoutSeconds, "unknown"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("unknown timeout policy error = %v", err)
+	}
+}
+
+func (s *handoffJoinRuntimeStore) ExpireNextRunHandoffJoin(_ context.Context, now time.Time) (*model.RunHandoffJoin, error) {
+	if s.expiredJoin == nil || s.expiredJoinTaken {
+		return nil, ErrNotFound
+	}
+	expired, applied := model.ExpireRunHandoffJoin(*s.expiredJoin, now)
+	if !applied {
+		return nil, ErrNotFound
+	}
+	s.expiredJoinTaken = true
+	s.expiredJoin = &expired
+	return &expired, nil
 }
 
 func TestPendingHandoffJoinCheckpointCannotBeExplicitlyResumed(t *testing.T) {
@@ -79,6 +132,8 @@ type handoffJoinRuntimeStore struct {
 	resumeApplied     bool
 	resumeError       error
 	continuationError error
+	expiredJoin       *model.RunHandoffJoin
+	expiredJoinTaken  bool
 }
 
 func (s *handoffJoinRuntimeStore) GetRun(_ context.Context, actor model.ActorRef, runID string) (*model.Run, error) {
@@ -162,6 +217,9 @@ func TestCreateRunHandoffJoinTransitionsParentToWaiting(t *testing.T) {
 		Actor: parent.Actor, ParentRunID: parent.RunID, ClientJoinID: "join-wait", HandoffIDs: []string{testJoinHandoffA},
 	})
 	requireNewRunHandoffJoin(t, join, reused, err)
+	if join.TimeoutSeconds != defaultHandoffJoinTimeoutSeconds || join.TimeoutPolicy != model.RunHandoffJoinTimeoutCancelPending || join.DeadlineAt == nil {
+		t.Fatalf("default timeout contract = %#v", join)
+	}
 	assertParentWaitingForHandoffJoin(t, store, *join)
 	assertRunHandoffWaitContinuation(t, store.checkpoint)
 	replayed, reused, err := engine.CreateRunHandoffJoin(t.Context(), CreateRunHandoffJoinInput{

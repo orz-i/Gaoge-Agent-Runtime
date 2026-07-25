@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
@@ -27,6 +28,83 @@ type runHandoffJoinWaitResult struct {
 	reused              bool
 	stopGeneration      bool
 	continuationCreated bool
+}
+
+type expiredRunHandoffJoinResult struct {
+	join   *model.RunHandoffJoin
+	parent *model.Run
+	events []model.Event
+}
+
+// ExpireRunHandoffJoinsOnce applies durable fan-in deadlines. PostgreSQL hosts
+// execute the join transition and parent suspension in one UnitOfWork.
+func (s *Engine) ExpireRunHandoffJoinsOnce(ctx context.Context, now time.Time) error {
+	if s == nil || s.repo == nil || s.unitOfWork == nil {
+		return ErrHostProjectionUnavailable
+	}
+	for processed := 0; processed < 100; processed++ {
+		handled, err := s.expireNextRunHandoffJoin(ctx, now)
+		if err != nil {
+			return err
+		}
+		if !handled {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (s *Engine) expireNextRunHandoffJoin(ctx context.Context, now time.Time) (bool, error) {
+	result, err := s.expireNextRunHandoffJoinAtCommit(ctx, now)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	s.applyExpiredRunHandoffJoin(ctx, result)
+	return true, nil
+}
+
+func (s *Engine) expireNextRunHandoffJoinAtCommit(ctx context.Context, now time.Time) (expiredRunHandoffJoinResult, error) {
+	var result expiredRunHandoffJoinResult
+	err := s.unitOfWork.Within(ctx, func(txCtx context.Context) error {
+		join, err := s.repo.ExpireNextRunHandoffJoin(txCtx, now)
+		if err != nil {
+			return err
+		}
+		parent, err := s.repo.GetRun(txCtx, join.Actor, join.ParentRunID)
+		if err != nil {
+			return err
+		}
+		result.join, result.parent = join, parent
+		if parent.Status != model.RunStatusWaitingHandoff {
+			return nil
+		}
+		result.events, _, err = s.resolveRunHandoffJoinAtCommit(txCtx, *parent, *join)
+		return err
+	})
+	return result, err
+}
+
+func (s *Engine) applyExpiredRunHandoffJoin(ctx context.Context, result expiredRunHandoffJoinResult) {
+	if result.parent != nil && len(result.events) > 0 {
+		s.publishRunEvents(result.parent.RunID, result.events)
+	}
+	if result.join == nil || result.parent == nil || result.join.TimeoutPolicy != model.RunHandoffJoinTimeoutCancelPending {
+		return
+	}
+	s.cancelHandoffJoinChildren(context.WithoutCancel(ctx), *result.parent, *result.join)
+}
+
+func (s *Engine) cancelHandoffJoinChildren(ctx context.Context, parent model.Run, join model.RunHandoffJoin) {
+	for _, handoffID := range join.HandoffIDs {
+		handoff, err := s.repo.GetRunHandoff(ctx, join.Actor, handoffID)
+		if err != nil || handoff == nil || handoff.Status != model.RunHandoffStatusQueued {
+			continue
+		}
+		s.cancelDelegatedChild(ctx, parent, *handoff, "Delegated task wait timed out")
+	}
 }
 
 func runHandoffJoinContextFingerprint(value runHandoffJoinContext) string {
@@ -105,8 +183,30 @@ func normalizeCreateRunHandoffJoinInput(input CreateRunHandoffJoinInput) (Create
 	if err != nil {
 		return CreateRunHandoffJoinInput{}, err
 	}
+	timeoutSeconds, timeoutPolicy, err := normalizeRunHandoffJoinTimeout(input.TimeoutSeconds, input.TimeoutPolicy)
+	if err != nil {
+		return CreateRunHandoffJoinInput{}, err
+	}
 	input.HandoffIDs, input.Mode, input.Quorum, input.FailurePolicy = handoffIDs, mode, quorum, failurePolicy
+	input.TimeoutSeconds, input.TimeoutPolicy = timeoutSeconds, timeoutPolicy
 	return input, nil
+}
+
+func normalizeRunHandoffJoinTimeout(seconds int, policy string) (int, string, error) {
+	if seconds == 0 {
+		seconds = defaultHandoffJoinTimeoutSeconds
+	}
+	if seconds < minimumHandoffJoinTimeoutSeconds || seconds > maximumHandoffJoinTimeoutSeconds {
+		return 0, "", ErrInvalidInput
+	}
+	policy = strings.ToLower(strings.TrimSpace(policy))
+	if policy == "" {
+		policy = model.RunHandoffJoinTimeoutCancelPending
+	}
+	if policy != model.RunHandoffJoinTimeoutCancelPending && policy != model.RunHandoffJoinTimeoutLeaveRunning {
+		return 0, "", ErrInvalidInput
+	}
+	return seconds, policy, nil
 }
 
 func (s *Engine) createRunHandoffJoinWaitAtCommit(ctx context.Context, input CreateRunHandoffJoinInput) (runHandoffJoinWaitResult, error) {
@@ -188,11 +288,14 @@ func buildRunHandoffJoinWait(parent model.Run, input CreateRunHandoffJoinInput) 
 }
 
 func newRunHandoffJoinContract(parent model.Run, input CreateRunHandoffJoinInput, resumeCheckpointID string) model.RunHandoffJoin {
+	deadline := time.Now().Add(time.Duration(input.TimeoutSeconds) * time.Second)
 	join := model.RunHandoffJoin{
 		JoinID: runHandoffJoinPublicID(input.Actor, input.ClientJoinID), ClientJoinID: input.ClientJoinID, Actor: input.Actor,
 		RootRunID: firstNonEmptyString(parent.RootRunID, parent.RunID), ParentRunID: parent.RunID,
 		HandoffIDs: input.HandoffIDs, ResumeCheckpointID: resumeCheckpointID,
-		Mode: input.Mode, Quorum: input.Quorum, FailurePolicy: input.FailurePolicy, Status: model.RunHandoffJoinStatusPending,
+		Mode: input.Mode, Quorum: input.Quorum, FailurePolicy: input.FailurePolicy,
+		TimeoutSeconds: input.TimeoutSeconds, TimeoutPolicy: input.TimeoutPolicy, DeadlineAt: &deadline,
+		Status: model.RunHandoffJoinStatusPending,
 	}
 	join.RequestFingerprint = runHandoffJoinFingerprint(join)
 	return join
@@ -357,7 +460,8 @@ func (s *Engine) freezeRunHandoffJoinContext(ctx context.Context, join model.Run
 func runHandoffJoinPayload(join model.RunHandoffJoin, results []runHandoffJoinResult) map[string]interface{} {
 	payload := map[string]interface{}{
 		handoffJoinIDKey: join.JoinID, "handoffIDs": join.HandoffIDs, "mode": join.Mode, "quorum": join.Quorum,
-		"failurePolicy": join.FailurePolicy, valueStatus327C4193: join.Status, "completedCount": join.CompletedCount,
+		"failurePolicy": join.FailurePolicy, "timeoutSeconds": join.TimeoutSeconds, "timeoutPolicy": join.TimeoutPolicy,
+		"deadlineAt": join.DeadlineAt, valueStatus327C4193: join.Status, "completedCount": join.CompletedCount,
 		"failedCount": join.FailedCount, "cancelledCount": join.CancelledCount, "pendingCount": join.PendingCount,
 		"resultHandoffIDs": join.ResultHandoffIDs,
 	}

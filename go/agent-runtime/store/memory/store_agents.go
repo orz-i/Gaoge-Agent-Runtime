@@ -15,6 +15,45 @@ func manifestKey(tenantID, manifestID string) string {
 	return strings.TrimSpace(tenantID) + ":" + strings.TrimSpace(manifestID)
 }
 
+func (s *Store) ExpireNextRunHandoffJoin(_ context.Context, now time.Time) (*domain.RunHandoffJoin, error) {
+	var result domain.RunHandoffJoin
+	err := s.write(func(st *state) error {
+		selectedID, selected, found := earliestExpiredMemoryRunHandoffJoin(st.HandoffJoins, now)
+		if !found {
+			return agentruntime.ErrNotFound
+		}
+		updated, applied := domain.ExpireRunHandoffJoin(selected, now)
+		if !applied {
+			return agentruntime.ErrNotFound
+		}
+		st.HandoffJoins[selectedID] = clone(updated)
+		result = clone(updated)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func earliestExpiredMemoryRunHandoffJoin(items map[string]domain.RunHandoffJoin, now time.Time) (string, domain.RunHandoffJoin, bool) {
+	var selectedID string
+	var selected domain.RunHandoffJoin
+	for joinID, join := range items {
+		if !memoryRunHandoffJoinDue(join, now) {
+			continue
+		}
+		if selectedID == "" || join.DeadlineAt.Before(*selected.DeadlineAt) {
+			selectedID, selected = joinID, join
+		}
+	}
+	return selectedID, selected, selectedID != ""
+}
+
+func memoryRunHandoffJoinDue(join domain.RunHandoffJoin, now time.Time) bool {
+	return join.Status == domain.RunHandoffJoinStatusPending && join.DeadlineAt != nil && !join.DeadlineAt.After(now)
+}
+
 func validManifest(item *domain.AgentManifest) bool {
 	return item != nil && validManifestIdentity(*item) && validManifestPolicy(*item)
 }

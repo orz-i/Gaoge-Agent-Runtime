@@ -19,6 +19,35 @@ func validManifestRevision(input *domain.AgentManifest, expectedRevision int) bo
 	return input != nil && expectedRevision >= 0 && validManifestRevisionIdentity(*input) && validManifestRevisionPolicy(*input)
 }
 
+func (r *Repository) ExpireNextRunHandoffJoin(ctx context.Context, now time.Time) (*domain.RunHandoffJoin, error) {
+	var result domain.RunHandoffJoin
+	err := r.within(ctx, func(txCtx context.Context) error {
+		db := r.dbFor(txCtx)
+		query := db.Where("status = ? AND deadline_at IS NOT NULL AND deadline_at <= ?", domain.RunHandoffJoinStatusPending, now).
+			Order("deadline_at ASC, id ASC")
+		if db.Name() == valuePostgres7F253790 {
+			query = query.Clauses(clause.Locking{Strength: valueLockUpdate, Options: "SKIP LOCKED"})
+		}
+		var row models.RunHandoffJoinRecord
+		if err := query.Take(&row).Error; err != nil {
+			return translateError(err)
+		}
+		updated, applied := domain.ExpireRunHandoffJoin(runHandoffJoinDomain(row), now)
+		if !applied {
+			return agentruntime.ErrNotFound
+		}
+		if err := updateRunHandoffJoinRow(db, row, updated); err != nil {
+			return err
+		}
+		result = updated
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func validManifestRevisionIdentity(input domain.AgentManifest) bool {
 	return strings.TrimSpace(input.ManifestID) != "" && strings.TrimSpace(input.TenantID) != "" && strings.TrimSpace(input.Name) != "" &&
 		input.CreatedBy.TenantID == input.TenantID && strings.TrimSpace(input.CreatedBy.ActorID) != ""
@@ -156,6 +185,7 @@ func runHandoffJoinRecord(input domain.RunHandoffJoin) (models.RunHandoffJoinRec
 		JoinID:    input.JoinID, ClientJoinID: input.ClientJoinID, RequestFingerprint: input.RequestFingerprint,
 		TenantID: input.Actor.TenantID, ActorID: input.Actor.ActorID, RootRunID: input.RootRunID, ParentRunID: input.ParentRunID,
 		HandoffIDsJSON: string(handoffIDs), ResumeCheckpointID: input.ResumeCheckpointID, Mode: input.Mode, Quorum: input.Quorum, FailurePolicy: input.FailurePolicy, Status: input.Status,
+		TimeoutSeconds: input.TimeoutSeconds, TimeoutPolicy: input.TimeoutPolicy, DeadlineAt: input.DeadlineAt,
 		CompletedCount: input.CompletedCount, FailedCount: input.FailedCount, CancelledCount: input.CancelledCount, PendingCount: input.PendingCount,
 		ResultHandoffIDsJSON: string(resultIDs), ErrorCode: input.ErrorCode, ErrorMessage: input.ErrorMessage, ResolvedAt: input.ResolvedAt,
 	}, nil
@@ -168,7 +198,8 @@ func runHandoffJoinDomain(row models.RunHandoffJoinRecord) domain.RunHandoffJoin
 	return domain.RunHandoffJoin{
 		JoinID: row.JoinID, ClientJoinID: row.ClientJoinID, RequestFingerprint: row.RequestFingerprint,
 		Actor: domain.ActorRef{TenantID: row.TenantID, ActorID: row.ActorID}, RootRunID: row.RootRunID, ParentRunID: row.ParentRunID,
-		HandoffIDs: handoffIDs, ResumeCheckpointID: row.ResumeCheckpointID, Mode: row.Mode, Quorum: row.Quorum, FailurePolicy: row.FailurePolicy, Status: row.Status,
+		HandoffIDs: handoffIDs, ResumeCheckpointID: row.ResumeCheckpointID, Mode: row.Mode, Quorum: row.Quorum, FailurePolicy: row.FailurePolicy,
+		TimeoutSeconds: row.TimeoutSeconds, TimeoutPolicy: row.TimeoutPolicy, DeadlineAt: row.DeadlineAt, Status: row.Status,
 		CompletedCount: row.CompletedCount, FailedCount: row.FailedCount, CancelledCount: row.CancelledCount, PendingCount: row.PendingCount,
 		ResultHandoffIDs: resultIDs, ErrorCode: row.ErrorCode, ErrorMessage: row.ErrorMessage,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, ResolvedAt: row.ResolvedAt,

@@ -60,26 +60,29 @@ func (RunHandoffRecord) TableName() string { return "agent_run_handoffs" }
 // and its monotonic fan-in decision state.
 type RunHandoffJoinRecord struct {
 	BaseModel
-	JoinID               string `gorm:"size:64;not null;uniqueIndex:uk_agent_run_handoff_join"`
-	ClientJoinID         string `gorm:"size:64;not null;uniqueIndex:uk_agent_run_handoff_join_client,priority:3"`
-	RequestFingerprint   string `gorm:"size:64;not null"`
-	TenantID             string `gorm:"size:64;not null;uniqueIndex:uk_agent_run_handoff_join_client,priority:1;index:idx_agent_run_handoff_join_actor,priority:1"`
-	ActorID              string `gorm:"size:64;not null;uniqueIndex:uk_agent_run_handoff_join_client,priority:2;index:idx_agent_run_handoff_join_actor,priority:2"`
-	RootRunID            string `gorm:"size:64;not null;index:idx_agent_run_handoff_join_root"`
-	ParentRunID          string `gorm:"size:64;not null;index:idx_agent_run_handoff_join_parent_status,priority:1"`
-	HandoffIDsJSON       string `gorm:"type:text;not null;default:'[]'"`
-	ResumeCheckpointID   string `gorm:"size:64;not null;default:'';index:idx_agent_run_handoff_join_checkpoint"`
-	Mode                 string `gorm:"size:32;not null"`
-	Quorum               int    `gorm:"not null;default:1"`
-	FailurePolicy        string `gorm:"size:32;not null"`
-	Status               string `gorm:"size:32;not null;default:'pending';index:idx_agent_run_handoff_join_parent_status,priority:2"`
-	CompletedCount       int    `gorm:"not null;default:0"`
-	FailedCount          int    `gorm:"not null;default:0"`
-	CancelledCount       int    `gorm:"not null;default:0"`
-	PendingCount         int    `gorm:"not null;default:0"`
-	ResultHandoffIDsJSON string `gorm:"type:text;not null;default:'[]'"`
-	ErrorCode            string `gorm:"size:64;not null;default:''"`
-	ErrorMessage         string `gorm:"size:255;not null;default:''"`
+	JoinID               string     `gorm:"size:64;not null;uniqueIndex:uk_agent_run_handoff_join"`
+	ClientJoinID         string     `gorm:"size:64;not null;uniqueIndex:uk_agent_run_handoff_join_client,priority:3"`
+	RequestFingerprint   string     `gorm:"size:64;not null"`
+	TenantID             string     `gorm:"size:64;not null;uniqueIndex:uk_agent_run_handoff_join_client,priority:1;index:idx_agent_run_handoff_join_actor,priority:1"`
+	ActorID              string     `gorm:"size:64;not null;uniqueIndex:uk_agent_run_handoff_join_client,priority:2;index:idx_agent_run_handoff_join_actor,priority:2"`
+	RootRunID            string     `gorm:"size:64;not null;index:idx_agent_run_handoff_join_root"`
+	ParentRunID          string     `gorm:"size:64;not null;index:idx_agent_run_handoff_join_parent_status,priority:1"`
+	HandoffIDsJSON       string     `gorm:"type:text;not null;default:'[]'"`
+	ResumeCheckpointID   string     `gorm:"size:64;not null;default:'';index:idx_agent_run_handoff_join_checkpoint"`
+	Mode                 string     `gorm:"size:32;not null"`
+	Quorum               int        `gorm:"not null;default:1"`
+	FailurePolicy        string     `gorm:"size:32;not null"`
+	TimeoutSeconds       int        `gorm:"not null;default:0"`
+	TimeoutPolicy        string     `gorm:"size:32;not null;default:''"`
+	DeadlineAt           *time.Time `gorm:"index:idx_agent_run_handoff_join_deadline,priority:2"`
+	Status               string     `gorm:"size:32;not null;default:'pending';index:idx_agent_run_handoff_join_parent_status,priority:2;index:idx_agent_run_handoff_join_deadline,priority:1"`
+	CompletedCount       int        `gorm:"not null;default:0"`
+	FailedCount          int        `gorm:"not null;default:0"`
+	CancelledCount       int        `gorm:"not null;default:0"`
+	PendingCount         int        `gorm:"not null;default:0"`
+	ResultHandoffIDsJSON string     `gorm:"type:text;not null;default:'[]'"`
+	ErrorCode            string     `gorm:"size:64;not null;default:''"`
+	ErrorMessage         string     `gorm:"size:255;not null;default:''"`
 	ResolvedAt           *time.Time
 }
 

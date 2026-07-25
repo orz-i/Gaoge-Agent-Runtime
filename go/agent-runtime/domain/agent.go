@@ -23,6 +23,9 @@ const (
 	RunHandoffJoinFailureCollect  = "collect"
 	RunHandoffJoinFailureFailFast = "fail_fast"
 
+	RunHandoffJoinTimeoutCancelPending = "cancel_pending"
+	RunHandoffJoinTimeoutLeaveRunning  = "leave_running"
+
 	RunHandoffJoinStatusPending   = "pending"
 	RunHandoffJoinStatusReady     = "ready"
 	RunHandoffJoinStatusFailed    = "failed"
@@ -52,6 +55,29 @@ type AgentManifest struct {
 	RevisionNote       string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+}
+
+// ExpireRunHandoffJoin applies the frozen deadline to one pending fan-in
+// contract. It returns applied=false when the join is terminal or not due.
+func ExpireRunHandoffJoin(join RunHandoffJoin, now time.Time) (RunHandoffJoin, bool) {
+	if RunHandoffJoinTerminal(join.Status) || join.DeadlineAt == nil || join.DeadlineAt.After(now) {
+		return join, false
+	}
+	join.Status = RunHandoffJoinStatusFailed
+	join.ErrorCode = "handoff_join_timeout"
+	join.ErrorMessage = "delegated task wait exceeded its deadline"
+	join.UpdatedAt = now
+	resolvedAt := now
+	join.ResolvedAt = &resolvedAt
+	return join, true
+}
+
+func validRunHandoffJoinTimeout(input RunHandoffJoin) bool {
+	if input.TimeoutSeconds == 0 {
+		return input.TimeoutPolicy == "" && input.DeadlineAt == nil
+	}
+	validPolicy := input.TimeoutPolicy == RunHandoffJoinTimeoutCancelPending || input.TimeoutPolicy == RunHandoffJoinTimeoutLeaveRunning
+	return validPolicy && input.DeadlineAt != nil
 }
 
 func (m AgentManifest) Ref() ResourceRef {
@@ -123,6 +149,9 @@ type RunHandoffJoin struct {
 	Mode               string
 	Quorum             int
 	FailurePolicy      string
+	TimeoutSeconds     int
+	TimeoutPolicy      string
+	DeadlineAt         *time.Time
 	Status             string
 	CompletedCount     int
 	FailedCount        int
@@ -177,6 +206,9 @@ func validRunHandoffJoinSelection(input RunHandoffJoin) bool {
 
 func validRunHandoffJoinPolicy(input RunHandoffJoin) bool {
 	if input.FailurePolicy != RunHandoffJoinFailureCollect && input.FailurePolicy != RunHandoffJoinFailureFailFast {
+		return false
+	}
+	if !validRunHandoffJoinTimeout(input) {
 		return false
 	}
 	switch input.Mode {

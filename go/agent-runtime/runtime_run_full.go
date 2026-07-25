@@ -1715,6 +1715,9 @@ func (s *Engine) startTextRunReconciliation(ctx context.Context) {
 		if err := s.ExpireRunInteractionsOnce(ctx, time.Now()); err != nil && s.logger != nil {
 			s.logger.Error("expire_run_interactions_failed", Error(err))
 		}
+		if err := s.ExpireRunHandoffJoinsOnce(ctx, time.Now()); err != nil && s.logger != nil {
+			s.logger.Error("expire_run_handoff_joins_failed", Error(err))
+		}
 	}
 }
 

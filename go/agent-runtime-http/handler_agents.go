@@ -38,6 +38,7 @@ func runHandoffJoinResponse(item model.RunHandoffJoin) map[string]interface{} {
 	return map[string]interface{}{
 		"joinID": item.JoinID, "clientJoinID": item.ClientJoinID, agentFieldRootRunID: item.RootRunID, "parentRunID": item.ParentRunID,
 		"handoffIDs": item.HandoffIDs, "mode": item.Mode, "quorum": item.Quorum, "failurePolicy": item.FailurePolicy,
+		"timeoutSeconds": item.TimeoutSeconds, "timeoutPolicy": item.TimeoutPolicy, "deadlineAt": item.DeadlineAt,
 		agentFieldStatus: item.Status, "completedCount": item.CompletedCount, "failedCount": item.FailedCount,
 		"cancelledCount": item.CancelledCount, "pendingCount": item.PendingCount, "resultHandoffIDs": item.ResultHandoffIDs,
 		valueErrorCode8B63C5B4: item.ErrorCode, valueErrorMessage: item.ErrorMessage,
@@ -59,6 +60,7 @@ func (h *Handler) CreateRunHandoffJoin(c *gin.Context) {
 	join, reused, err := h.service.CreateRunHandoffJoin(c.Request.Context(), runtime.CreateRunHandoffJoinInput{
 		Actor: h.actorRef(c), ParentRunID: parentRunID, ClientJoinID: request.ClientJoinID,
 		HandoffIDs: request.HandoffIDs, Mode: request.Mode, Quorum: request.Quorum, FailurePolicy: request.FailurePolicy,
+		TimeoutSeconds: request.TimeoutSeconds, TimeoutPolicy: request.TimeoutPolicy,
 	})
 	if err != nil {
 		writeAgentError(c, err)
@@ -116,11 +118,13 @@ func (h *Handler) GetRunHandoffJoin(c *gin.Context) {
 }
 
 type CreateRunHandoffJoinRequest struct {
-	ClientJoinID  string   `json:"clientJoinID" binding:"required,max=64"`
-	HandoffIDs    []string `json:"handoffIDs" binding:"required,min=1,max=16,dive,required,max=64"`
-	Mode          string   `json:"mode" binding:"omitempty,oneof=all any quorum"`
-	Quorum        int      `json:"quorum" binding:"omitempty,min=1,max=16"`
-	FailurePolicy string   `json:"failurePolicy" binding:"omitempty,oneof=collect fail_fast"`
+	ClientJoinID   string   `json:"clientJoinID" binding:"required,max=64"`
+	HandoffIDs     []string `json:"handoffIDs" binding:"required,min=1,max=16,dive,required,max=64"`
+	Mode           string   `json:"mode" binding:"omitempty,oneof=all any quorum"`
+	Quorum         int      `json:"quorum" binding:"omitempty,min=1,max=16"`
+	FailurePolicy  string   `json:"failurePolicy" binding:"omitempty,oneof=collect fail_fast"`
+	TimeoutSeconds int      `json:"timeoutSeconds" binding:"omitempty,min=60,max=604800"`
+	TimeoutPolicy  string   `json:"timeoutPolicy" binding:"omitempty,oneof=cancel_pending leave_running"`
 }
 
 type DelegateTextRunRequest struct {

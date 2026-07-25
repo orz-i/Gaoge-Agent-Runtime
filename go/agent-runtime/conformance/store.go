@@ -444,6 +444,39 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			t.Fatalf("cancelled join changed after late child = %+v,%v", stable, err)
 		}
 	})
+
+	t.Run("handoff join deadlines expire once", func(t *testing.T) {
+		store, actor, _, run := seeded(t, factory)
+		ctx := context.Background()
+		handoff := domain.RunHandoff{
+			HandoffID: "handoff-timeout", ClientHandoffID: "client-timeout", RequestFingerprint: "timeout-fp", Actor: actor,
+			RootRunID: run.RunID, ParentRunID: run.RunID, ChildRunID: "run-timeout-child",
+			AgentManifest: domain.ResourceRef{Kind: domain.AgentManifestKind, ID: "agent-timeout", Revision: "1"},
+			AgentName:     "Timeout child", Goal: "Exercise deadline", Status: domain.RunHandoffStatusQueued, Depth: 1,
+		}
+		if _, _, err := store.CreateRunHandoff(ctx, &handoff); err != nil {
+			t.Fatalf("create timeout handoff: %v", err)
+		}
+		deadline := time.Now().UTC().Add(-time.Minute)
+		join := domain.RunHandoffJoin{
+			JoinID: "join-timeout", ClientJoinID: "client-join-timeout", RequestFingerprint: "join-timeout-fp", Actor: actor,
+			RootRunID: run.RunID, ParentRunID: run.RunID, HandoffIDs: []string{handoff.HandoffID},
+			Mode: domain.RunHandoffJoinModeAll, Quorum: 1, FailurePolicy: domain.RunHandoffJoinFailureCollect,
+			TimeoutSeconds: 60, TimeoutPolicy: domain.RunHandoffJoinTimeoutLeaveRunning, DeadlineAt: &deadline,
+			Status: domain.RunHandoffJoinStatusPending,
+		}
+		if _, _, err := store.CreateRunHandoffJoin(ctx, &join); err != nil {
+			t.Fatalf("create timeout join: %v", err)
+		}
+		expiredAt := deadline.Add(time.Minute)
+		expired, err := store.ExpireNextRunHandoffJoin(ctx, expiredAt)
+		if err != nil || expired.Status != domain.RunHandoffJoinStatusFailed || expired.ErrorCode != "handoff_join_timeout" || expired.ResolvedAt == nil {
+			t.Fatalf("expire timeout join = %+v,%v", expired, err)
+		}
+		if _, err = store.ExpireNextRunHandoffJoin(ctx, expiredAt.Add(time.Second)); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("expired join was claimed twice: %v", err)
+		}
+	})
 }
 
 func handoffJoinByID(items []domain.RunHandoffJoin, joinID string) (domain.RunHandoffJoin, bool) {

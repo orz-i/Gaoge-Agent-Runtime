@@ -257,6 +257,7 @@ export type DelegateRunRequest = {
 };
 export type RunHandoffJoinMode = "all" | "any" | "quorum";
 export type RunHandoffJoinFailurePolicy = "collect" | "fail_fast";
+export type RunHandoffJoinTimeoutPolicy = "cancel_pending" | "leave_running";
 export type RunHandoffJoinStatus = "pending" | "ready" | "failed" | "cancelled";
 export type CreateRunHandoffJoinRequest = {
   clientJoinID: string;
@@ -264,6 +265,8 @@ export type CreateRunHandoffJoinRequest = {
   mode?: RunHandoffJoinMode;
   quorum?: number;
   failurePolicy?: RunHandoffJoinFailurePolicy;
+  timeoutSeconds?: number;
+  timeoutPolicy?: RunHandoffJoinTimeoutPolicy;
 };
 export type RunHandoffJoinDTO = {
   joinID: string;
@@ -274,6 +277,9 @@ export type RunHandoffJoinDTO = {
   mode: RunHandoffJoinMode;
   quorum: number;
   failurePolicy: RunHandoffJoinFailurePolicy;
+  timeoutSeconds: number;
+  timeoutPolicy: RunHandoffJoinTimeoutPolicy;
+  deadlineAt: string;
   status: RunHandoffJoinStatus;
   completedCount: number;
   failedCount: number;

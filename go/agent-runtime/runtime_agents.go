@@ -15,13 +15,16 @@ import (
 )
 
 const (
-	defaultAgentMaxChildRuns = 4
-	defaultAgentMaxDepth     = 3
-	hardAgentMaxChildRuns    = 16
-	hardAgentMaxDepth        = 6
-	agentBranchReasonDefault = "default"
-	handoffPayloadStatusKey  = "status"
-	handoffPayloadSummaryKey = "summary"
+	defaultAgentMaxChildRuns         = 4
+	defaultAgentMaxDepth             = 3
+	hardAgentMaxChildRuns            = 16
+	hardAgentMaxDepth                = 6
+	agentBranchReasonDefault         = "default"
+	handoffPayloadStatusKey          = "status"
+	handoffPayloadSummaryKey         = "summary"
+	defaultHandoffJoinTimeoutSeconds = 60 * 60
+	minimumHandoffJoinTimeoutSeconds = 60
+	maximumHandoffJoinTimeoutSeconds = 7 * 24 * 60 * 60
 )
 
 type AgentManifestRevisionInput struct {
@@ -69,13 +72,15 @@ func runHandoffJoinPublicID(actor model.ActorRef, clientJoinID string) string {
 
 func runHandoffJoinFingerprint(join model.RunHandoffJoin) string {
 	payload := struct {
-		Actor         model.ActorRef
-		ParentRunID   string
-		HandoffIDs    []string
-		Mode          string
-		Quorum        int
-		FailurePolicy string
-	}{join.Actor, join.ParentRunID, join.HandoffIDs, join.Mode, join.Quorum, join.FailurePolicy}
+		Actor          model.ActorRef
+		ParentRunID    string
+		HandoffIDs     []string
+		Mode           string
+		Quorum         int
+		FailurePolicy  string
+		TimeoutSeconds int
+		TimeoutPolicy  string
+	}{join.Actor, join.ParentRunID, join.HandoffIDs, join.Mode, join.Quorum, join.FailurePolicy, join.TimeoutSeconds, join.TimeoutPolicy}
 	return hashAgentPayload(payload)
 }
 
@@ -163,13 +168,15 @@ type DelegateTextRunResult struct {
 }
 
 type CreateRunHandoffJoinInput struct {
-	Actor         model.ActorRef
-	ParentRunID   string
-	ClientJoinID  string
-	HandoffIDs    []string
-	Mode          string
-	Quorum        int
-	FailurePolicy string
+	Actor          model.ActorRef
+	ParentRunID    string
+	ClientJoinID   string
+	HandoffIDs     []string
+	Mode           string
+	Quorum         int
+	FailurePolicy  string
+	TimeoutSeconds int
+	TimeoutPolicy  string
 }
 
 type RunTask struct {
