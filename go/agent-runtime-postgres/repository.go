@@ -130,46 +130,64 @@ func isUniqueConstraint(err error) bool {
 // numeric identity is converted at the bootstrap edge; storage remains refs-only.
 func (r *Repository) EraseAccountData(ctx context.Context, userID uint) error {
 	actorID := strconv.FormatUint(uint64(userID), 10)
-	db := r.dbFor(ctx).Unscoped()
-	runIDs := db.Model(&models.RunRecord{}).Select("run_id").Where("tenant_id = ? AND actor_id = ?", "default", actorID)
-	steps := []func() error{
-		func() error { return db.Where("run_id IN (?)", runIDs).Delete(&models.RuntimeOutputRefRecord{}).Error },
+	freshDB := func() *gorm.DB {
+		return r.dbFor(ctx).Session(&gorm.Session{NewDB: true}).Unscoped()
+	}
+	var runIDs []string
+	if err := freshDB().Model(&models.RunRecord{}).
+		Where("tenant_id = ? AND actor_id = ?", "default", actorID).
+		Pluck("run_id", &runIDs).Error; err != nil {
+		return translateError(err)
+	}
+	steps := make([]func() error, 0, 16)
+	if len(runIDs) > 0 {
+		steps = append(steps,
+			func() error {
+				return freshDB().Where("run_id IN ?", runIDs).Delete(&models.RuntimeOutputRefRecord{}).Error
+			},
+			func() error {
+				return freshDB().Where("run_id IN ?", runIDs).Delete(&models.RuntimePhaseProjectionRecord{}).Error
+			},
+			func() error {
+				return freshDB().Where("run_id IN ?", runIDs).Delete(&models.RuntimeWorkbenchProjectionRecord{}).Error
+			},
+		)
+	}
+	steps = append(steps,
 		func() error {
-			return db.Where("run_id IN (?)", runIDs).Delete(&models.RuntimePhaseProjectionRecord{}).Error
+			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.EvidenceSelection{}).Error
 		},
 		func() error {
-			return db.Where("run_id IN (?)", runIDs).Delete(&models.RuntimeWorkbenchProjectionRecord{}).Error
+			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunQueueItemRecord{}).Error
 		},
 		func() error {
-			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.EvidenceSelection{}).Error
+			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.ContinuationJobRecord{}).Error
 		},
 		func() error {
-			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunQueueItemRecord{}).Error
+			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunHandoffJoinRecord{}).Error
 		},
 		func() error {
-			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.ContinuationJobRecord{}).Error
+			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunHandoffRecord{}).Error
 		},
 		func() error {
-			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunHandoffJoinRecord{}).Error
+			return freshDB().Where("created_by_tenant_id = ? AND created_by_actor_id = ?", "default", actorID).Delete(&models.AgentManifestRevisionRecord{}).Error
 		},
 		func() error {
-			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunHandoffRecord{}).Error
+			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RuntimeOutputIdentityRecord{}).Error
 		},
-		func() error {
-			return db.Where("created_by_tenant_id = ? AND created_by_actor_id = ?", "default", actorID).Delete(&models.AgentManifestRevisionRecord{}).Error
-		},
-		func() error {
-			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RuntimeOutputIdentityRecord{}).Error
-		},
-		func() error { return db.Where("run_id IN (?)", runIDs).Delete(&models.RunCheckpoint{}).Error },
-		func() error { return db.Where("run_id IN (?)", runIDs).Delete(&models.RunInteraction{}).Error },
-		func() error { return db.Where("run_id IN (?)", runIDs).Delete(&models.RuntimePlanRecord{}).Error },
-		func() error { return db.Where("run_id IN (?)", runIDs).Delete(&models.RunStep{}).Error },
-		func() error { return db.Where("run_id IN (?)", runIDs).Delete(&models.ContextRecord{}).Error },
-		func() error { return db.Where("run_id IN (?)", runIDs).Delete(&models.EventRecord{}).Error },
-		func() error {
-			return db.Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunRecord{}).Error
-		},
+	)
+	if len(runIDs) > 0 {
+		steps = append(steps,
+			func() error { return freshDB().Where("run_id IN ?", runIDs).Delete(&models.RunCheckpoint{}).Error },
+			func() error { return freshDB().Where("run_id IN ?", runIDs).Delete(&models.RunInteraction{}).Error },
+			func() error { return freshDB().Where("run_id IN ?", runIDs).Delete(&models.RuntimePlanRecord{}).Error },
+			func() error { return freshDB().Where("run_id IN ?", runIDs).Delete(&models.RunStep{}).Error },
+			func() error { return freshDB().Where("run_id IN ?", runIDs).Delete(&models.ContextRecord{}).Error },
+			func() error { return freshDB().Where("run_id IN ?", runIDs).Delete(&models.EventRecord{}).Error },
+			func() error {
+				return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunRecord{}).Error
+			},
+		)
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
