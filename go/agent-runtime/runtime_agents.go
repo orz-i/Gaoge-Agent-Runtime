@@ -41,6 +41,8 @@ type AgentManifestRevisionInput struct {
 	SkillRefs        []model.ResourceRef
 	MaxChildRuns     int
 	MaxDepth         int
+	MaxLLMCalls      int
+	MaxToolCalls     int
 	RequestID        string
 	RevisionNote     string
 }
@@ -204,7 +206,8 @@ type preparedDelegation struct {
 }
 
 func (s *Engine) CreateAgentManifestRevision(ctx context.Context, input AgentManifestRevisionInput) (*model.AgentManifest, bool, error) {
-	if !validActorRef(input.Actor) || strings.TrimSpace(input.Name) == "" || input.ExpectedRevision < 0 {
+	if !validActorRef(input.Actor) || strings.TrimSpace(input.Name) == "" || input.ExpectedRevision < 0 ||
+		!validAgentBudget(input.MaxLLMCalls, 2, 32) || !validAgentBudget(input.MaxToolCalls, 1, 64) {
 		return nil, false, ErrInvalidInput
 	}
 	manifestID := normalizeAgentManifestID(input.ManifestID)
@@ -220,7 +223,8 @@ func (s *Engine) CreateAgentManifestRevision(ctx context.Context, input AgentMan
 		Instructions: strings.TrimSpace(input.Instructions), Status: status, ModelName: strings.TrimSpace(input.ModelName), ExecutionMode: strings.TrimSpace(input.ExecutionMode),
 		ToolKeys: uniqueRuntimeStrings(input.ToolKeys), SkillRefs: normalizeSelectedSkillRefs(input.SkillRefs),
 		MaxChildRuns: boundedTextRunConfig(input.MaxChildRuns, defaultAgentMaxChildRuns, hardAgentMaxChildRuns),
-		MaxDepth:     boundedTextRunConfig(input.MaxDepth, defaultAgentMaxDepth, hardAgentMaxDepth), CreatedBy: input.Actor,
+		MaxDepth:     boundedTextRunConfig(input.MaxDepth, defaultAgentMaxDepth, hardAgentMaxDepth),
+		MaxLLMCalls:  input.MaxLLMCalls, MaxToolCalls: input.MaxToolCalls, CreatedBy: input.Actor,
 		RequestID: strings.TrimSpace(input.RequestID), RevisionNote: strings.TrimSpace(input.RevisionNote),
 	}
 	item.RequestFingerprint = agentManifestRequestFingerprint(*item, input.ExpectedRevision)
@@ -433,10 +437,10 @@ func agentManifestRequestFingerprint(item model.AgentManifest, expectedRevision 
 	})
 	payload := struct {
 		ManifestID, TenantID, Name, Description, Instructions, Status, ModelName, ExecutionMode, RevisionNote string
-		ExpectedRevision, MaxChildRuns, MaxDepth                                                              int
+		ExpectedRevision, MaxChildRuns, MaxDepth, MaxLLMCalls, MaxToolCalls                                   int
 		ToolKeys                                                                                              []string
 		SkillRefs                                                                                             []model.ResourceRef
-	}{item.ManifestID, item.TenantID, item.Name, item.Description, item.Instructions, item.Status, item.ModelName, item.ExecutionMode, item.RevisionNote, expectedRevision, item.MaxChildRuns, item.MaxDepth, toolKeys, skillRefs}
+	}{item.ManifestID, item.TenantID, item.Name, item.Description, item.Instructions, item.Status, item.ModelName, item.ExecutionMode, item.RevisionNote, expectedRevision, item.MaxChildRuns, item.MaxDepth, item.MaxLLMCalls, item.MaxToolCalls, toolKeys, skillRefs}
 	return hashAgentPayload(payload)
 }
 
@@ -502,7 +506,12 @@ func textRunAgentManifest(input StartTextRunInput, environmentInstructions strin
 		Ref: manifest.Ref(), Name: manifest.Name, Description: manifest.Description, Instructions: manifest.Instructions,
 		ModelName: manifest.ModelName, ExecutionMode: manifest.ExecutionMode, ToolKeys: append([]string(nil), manifest.ToolKeys...),
 		SkillRefs: append([]model.ResourceRef(nil), manifest.SkillRefs...), MaxChildRuns: manifest.MaxChildRuns, MaxDepth: manifest.MaxDepth,
+		MaxLLMCalls: manifest.MaxLLMCalls, MaxToolCalls: manifest.MaxToolCalls,
 	}
+}
+
+func validAgentBudget(value, minimum, maximum int) bool {
+	return value == 0 || value >= minimum && value <= maximum
 }
 
 func nonEmptyAgentStrings(items []string) []string {

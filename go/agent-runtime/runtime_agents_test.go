@@ -33,6 +33,26 @@ type agentRuntimeTestStore struct {
 	appendedRunEvents []model.Event
 }
 
+func TestAgentExecutionBudgetOnlyNarrowsEnvironmentLimits(t *testing.T) {
+	if got := narrowAgentBudget(12, 4); got != 4 {
+		t.Fatalf("narrowed LLM budget = %d", got)
+	}
+	if got := narrowAgentBudget(8, 0); got != 8 {
+		t.Fatalf("inherited tool budget = %d", got)
+	}
+	if got := narrowAgentBudget(8, 16); got != 8 {
+		t.Fatalf("expanded tool budget = %d", got)
+	}
+	for _, test := range []struct {
+		value, minimum, maximum int
+		valid                   bool
+	}{{0, 2, 32, true}, {2, 2, 32, true}, {32, 2, 32, true}, {1, 2, 32, false}, {33, 2, 32, false}} {
+		if got := validAgentBudget(test.value, test.minimum, test.maximum); got != test.valid {
+			t.Fatalf("validAgentBudget(%d) = %t", test.value, got)
+		}
+	}
+}
+
 func TestFinalizeRunHandoffDoesNotResumeTerminalParent(t *testing.T) {
 	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
 	parent := model.Run{RunID: testAgentParentRunID, Actor: actor, Status: model.RunStatusCancelled, CurrentStepID: "step-parent"}
@@ -204,10 +224,10 @@ func TestTextRunAgentManifestFreezesDelegatedInstructions(t *testing.T) {
 	manifest := model.AgentManifest{
 		ManifestID: "agent-research", Revision: 3, Name: "Research specialist", Description: "Collect bounded evidence.",
 		Instructions: "Return a concise source-backed summary.", ToolKeys: []string{testAgentSearchToolKey},
-		SkillRefs: []model.ResourceRef{{Kind: ResourceKindSkill, ID: "research"}}, MaxChildRuns: 2, MaxDepth: 3,
+		SkillRefs: []model.ResourceRef{{Kind: ResourceKindSkill, ID: "research"}}, MaxChildRuns: 2, MaxDepth: 3, MaxLLMCalls: 4, MaxToolCalls: 6,
 	}
 	instructions, snapshot := textRunAgentManifest(StartTextRunInput{Delegation: &RunDelegationStart{Manifest: manifest}}, "Environment rules")
-	if snapshot == nil || snapshot.Ref.Revision != "3" || snapshot.Name != manifest.Name || len(snapshot.ToolKeys) != 1 {
+	if snapshot == nil || snapshot.Ref.Revision != "3" || snapshot.Name != manifest.Name || len(snapshot.ToolKeys) != 1 || snapshot.MaxLLMCalls != 4 || snapshot.MaxToolCalls != 6 {
 		t.Fatalf("manifest snapshot = %#v", snapshot)
 	}
 	for _, expected := range []string{"Environment rules", "Research specialist", "Collect bounded evidence.", "Return a concise source-backed summary."} {

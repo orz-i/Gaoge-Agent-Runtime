@@ -66,7 +66,9 @@ func validManifestIdentity(item domain.AgentManifest) bool {
 func validManifestPolicy(item domain.AgentManifest) bool {
 	validStatus := item.Status == domain.AgentManifestStatusActive || item.Status == domain.AgentManifestStatusDisabled
 	validMode := item.ExecutionMode == "" || item.ExecutionMode == "auto" || item.ExecutionMode == "direct" || item.ExecutionMode == "plan"
-	return validStatus && validMode && item.MaxChildRuns > 0 && item.MaxDepth > 0
+	validLLMBudget := item.MaxLLMCalls == 0 || item.MaxLLMCalls >= 2 && item.MaxLLMCalls <= 32
+	validToolBudget := item.MaxToolCalls == 0 || item.MaxToolCalls >= 1 && item.MaxToolCalls <= 64
+	return validStatus && validMode && validLLMBudget && validToolBudget && item.MaxChildRuns > 0 && item.MaxDepth > 0
 }
 
 func findManifestRequest(revisions []domain.AgentManifest, requestID, fingerprint string) (domain.AgentManifest, bool, error) {

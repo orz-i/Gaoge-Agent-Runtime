@@ -19,6 +19,8 @@ type AgentManifestRevisionRecord struct {
 	SkillRefsJSON      string `gorm:"type:text;not null;default:'[]'"`
 	MaxChildRuns       int    `gorm:"not null;default:1"`
 	MaxDepth           int    `gorm:"not null;default:1"`
+	MaxLLMCalls        int    `gorm:"not null;default:0"`
+	MaxToolCalls       int    `gorm:"not null;default:0"`
 	CreatedByTenantID  string `gorm:"size:64;not null;default:''"`
 	CreatedByActorID   string `gorm:"size:64;not null;default:''"`
 	RequestID          string `gorm:"size:64;not null;default:'';index:idx_agent_manifest_request,priority:2"`

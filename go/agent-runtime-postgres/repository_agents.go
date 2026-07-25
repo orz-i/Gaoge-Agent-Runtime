@@ -56,7 +56,9 @@ func validManifestRevisionIdentity(input domain.AgentManifest) bool {
 func validManifestRevisionPolicy(input domain.AgentManifest) bool {
 	validStatus := input.Status == domain.AgentManifestStatusActive || input.Status == domain.AgentManifestStatusDisabled
 	validMode := input.ExecutionMode == "" || input.ExecutionMode == "auto" || input.ExecutionMode == "direct" || input.ExecutionMode == "plan"
-	return validStatus && validMode && input.MaxChildRuns > 0 && input.MaxDepth > 0
+	validLLMBudget := input.MaxLLMCalls == 0 || input.MaxLLMCalls >= 2 && input.MaxLLMCalls <= 32
+	validToolBudget := input.MaxToolCalls == 0 || input.MaxToolCalls >= 1 && input.MaxToolCalls <= 64
+	return validStatus && validMode && validLLMBudget && validToolBudget && input.MaxChildRuns > 0 && input.MaxDepth > 0
 }
 
 func manifestRecord(input domain.AgentManifest) (models.AgentManifestRevisionRecord, error) {
@@ -73,6 +75,7 @@ func manifestRecord(input domain.AgentManifest) (models.AgentManifestRevisionRec
 		Name: strings.TrimSpace(input.Name), Description: strings.TrimSpace(input.Description), Instructions: strings.TrimSpace(input.Instructions),
 		Status: input.Status, ModelName: strings.TrimSpace(input.ModelName), ExecutionMode: strings.TrimSpace(input.ExecutionMode),
 		ToolKeysJSON: string(toolKeys), SkillRefsJSON: string(skillRefs), MaxChildRuns: input.MaxChildRuns, MaxDepth: input.MaxDepth,
+		MaxLLMCalls: input.MaxLLMCalls, MaxToolCalls: input.MaxToolCalls,
 		CreatedByTenantID: input.CreatedBy.TenantID, CreatedByActorID: input.CreatedBy.ActorID,
 		RequestID: strings.TrimSpace(input.RequestID), RequestFingerprint: strings.TrimSpace(input.RequestFingerprint), RevisionNote: strings.TrimSpace(input.RevisionNote),
 	}, nil
@@ -87,6 +90,7 @@ func manifestDomain(row models.AgentManifestRevisionRecord) domain.AgentManifest
 		ManifestID: row.ManifestID, Revision: row.Revision, TenantID: row.TenantID, Name: row.Name, Description: row.Description,
 		Instructions: row.Instructions, Status: row.Status, ModelName: row.ModelName, ExecutionMode: row.ExecutionMode,
 		ToolKeys: toolKeys, SkillRefs: skillRefs, MaxChildRuns: row.MaxChildRuns, MaxDepth: row.MaxDepth,
+		MaxLLMCalls: row.MaxLLMCalls, MaxToolCalls: row.MaxToolCalls,
 		CreatedBy: domain.ActorRef{TenantID: row.CreatedByTenantID, ActorID: row.CreatedByActorID}, RequestID: row.RequestID,
 		RequestFingerprint: row.RequestFingerprint, RevisionNote: row.RevisionNote, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}

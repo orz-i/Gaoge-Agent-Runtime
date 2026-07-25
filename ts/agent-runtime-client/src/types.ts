@@ -203,6 +203,8 @@ export type AgentManifestDTO = {
   skillKeys: string[];
   maxChildRuns: number;
   maxDepth: number;
+  maxLLMCalls: number;
+  maxToolCalls: number;
   revisionNote: string;
   createdAt: string;
   updatedAt: string;
@@ -221,6 +223,8 @@ export type AgentManifestRevisionRequest = {
   skillKeys?: string[];
   maxChildRuns?: number;
   maxDepth?: number;
+  maxLLMCalls?: number;
+  maxToolCalls?: number;
   revisionNote?: string;
 };
 export type RunHandoffStatus = "queued" | "completed" | "failed" | "cancelled";

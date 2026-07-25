@@ -129,6 +129,13 @@ type StartTextRunInput struct {
 	Delegation                                    *RunDelegationStart
 }
 
+func narrowAgentBudget(environmentLimit, manifestLimit int) int {
+	if manifestLimit <= 0 || manifestLimit >= environmentLimit {
+		return environmentLimit
+	}
+	return manifestLimit
+}
+
 func normalizeToolIdempotencyMode(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case ToolIdempotencyRequestKey:
@@ -399,6 +406,8 @@ type effectiveAgentManifest struct {
 	SkillRefs     []model.ResourceRef `json:"skillRefs"`
 	MaxChildRuns  int                 `json:"maxChildRuns"`
 	MaxDepth      int                 `json:"maxDepth"`
+	MaxLLMCalls   int                 `json:"maxLLMCalls,omitempty"`
+	MaxToolCalls  int                 `json:"maxToolCalls,omitempty"`
 }
 
 type effectiveRunOutputRef struct {
@@ -641,12 +650,17 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 		strategy, strategyReason, requestedMode = input.FrozenStrategy, input.FrozenStrategyReason, input.FrozenRequestedMode
 	}
 	instructions, agentSnapshot := textRunAgentManifest(input, profile.Instructions)
+	maxLLMCalls, maxToolCalls := s.resolveMaxLLMCallsPerRun(), s.resolveMaxToolCallsPerRun()
+	if agentSnapshot != nil {
+		maxLLMCalls = narrowAgentBudget(maxLLMCalls, agentSnapshot.MaxLLMCalls)
+		maxToolCalls = narrowAgentBudget(maxToolCalls, agentSnapshot.MaxToolCalls)
+	}
 	effective := effectiveTextRunConfig{
 		SemanticVersion: RuntimeSnapshotVersion, Strategy: strategy, StrategyReason: strategyReason, RequestedMode: requestedMode, DefaultMode: profile.DefaultMode, AllowedModes: append([]string(nil), profile.AllowedModes...), Environment: input.Environment, EnvironmentProfileName: profile.Name,
 		Instructions: instructions, PlatformModelName: modelName, AllowedModelSnapshot: append([]EnvironmentModelPolicy(nil), profile.Models...), MemoryPolicy: profile.MemoryPolicy, MemoryEnabled: profile.MemoryPolicy != "disabled", SkillRefs: selectedSkillRefs, UnavailableSkillRefs: unavailableSkillRefs,
 		ToolKeys: toolResolution.ResolvedKeys, UnavailableToolKeys: uniqueRuntimeStrings(toolResolution.Unavailable),
 		FileIDs: append([]string(nil), input.FileIDs...), Options: input.Options, HTMLVisualPromptEnabled: input.HTMLVisualPromptEnabled, HTMLVisualColorMode: input.HTMLVisualColorMode,
-		MaxLLMCalls: s.resolveMaxLLMCallsPerRun(), MaxToolCalls: s.resolveMaxToolCallsPerRun(), ToolRetryCount: toolRetryCount, ToolConcurrency: toolConcurrency,
+		MaxLLMCalls: maxLLMCalls, MaxToolCalls: maxToolCalls, ToolRetryCount: toolRetryCount, ToolConcurrency: toolConcurrency,
 		PlanApprovalMode: normalizedPlanApprovalMode(profile.PlanApprovalMode), ToolPolicies: toolResolution.Policies,
 		PlanMaxSteps: boundedTextRunConfig(cfg.Planner.MaxSteps, 12, 50), PlanMaxRevisions: boundedTextRunConfig(cfg.Planner.MaxRevisions, 5, 20),
 		InteractionTTLHours: boundedTextRunConfig(cfg.Execution.InteractionTTLHours, 168, 24*365), OutputMaxPerRun: boundedTextRunConfig(cfg.Outputs.MaxPerRun, 50, 500),

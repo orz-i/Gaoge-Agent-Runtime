@@ -49,6 +49,8 @@ type AgentManifest struct {
 	SkillRefs          []ResourceRef
 	MaxChildRuns       int
 	MaxDepth           int
+	MaxLLMCalls        int
+	MaxToolCalls       int
 	CreatedBy          ActorRef
 	RequestID          string
 	RequestFingerprint string

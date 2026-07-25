@@ -31,6 +31,8 @@ type AgentManifestRevisionRequest struct {
 	SkillKeys        []string `json:"skillKeys" binding:"max=128,dive,max=64"`
 	MaxChildRuns     int      `json:"maxChildRuns" binding:"omitempty,min=1,max=16"`
 	MaxDepth         int      `json:"maxDepth" binding:"omitempty,min=1,max=6"`
+	MaxLLMCalls      int      `json:"maxLLMCalls" binding:"omitempty,min=2,max=32"`
+	MaxToolCalls     int      `json:"maxToolCalls" binding:"omitempty,min=1,max=64"`
 	RevisionNote     string   `json:"revisionNote" binding:"omitempty,max=255"`
 }
 
@@ -211,7 +213,8 @@ func (h *Handler) createAgentManifestRevision(c *gin.Context, request AgentManif
 		Actor: h.actorRef(c), ManifestID: request.ManifestID, ExpectedRevision: request.ExpectedRevision, Name: request.Name,
 		Description: request.Description, Instructions: request.Instructions, Status: request.Status, ModelName: request.ModelName,
 		ExecutionMode: request.ExecutionMode, ToolKeys: request.ToolKeys, SkillRefs: skillRefsFromKeys(request.SkillKeys),
-		MaxChildRuns: request.MaxChildRuns, MaxDepth: request.MaxDepth, RequestID: h.requestID(c), RevisionNote: request.RevisionNote,
+		MaxChildRuns: request.MaxChildRuns, MaxDepth: request.MaxDepth, MaxLLMCalls: request.MaxLLMCalls, MaxToolCalls: request.MaxToolCalls,
+		RequestID: h.requestID(c), RevisionNote: request.RevisionNote,
 	})
 	if err != nil {
 		writeAgentError(c, err)
@@ -289,7 +292,8 @@ func agentManifestResponse(item model.AgentManifest) map[string]interface{} {
 		"manifestID": item.ManifestID, agentFieldRevision: item.Revision, "ref": resourceRefResponse(item.Ref()), "name": item.Name,
 		"description": item.Description, "instructions": item.Instructions, agentFieldStatus: item.Status, "modelName": item.ModelName,
 		"executionMode": item.ExecutionMode, "toolKeys": item.ToolKeys, "skillKeys": skillKeys, "maxChildRuns": item.MaxChildRuns,
-		"maxDepth": item.MaxDepth, "revisionNote": item.RevisionNote, valueCreatedAtE3B65D13: item.CreatedAt, valueUpdatedAt: item.UpdatedAt,
+		"maxDepth": item.MaxDepth, "maxLLMCalls": item.MaxLLMCalls, "maxToolCalls": item.MaxToolCalls,
+		"revisionNote": item.RevisionNote, valueCreatedAtE3B65D13: item.CreatedAt, valueUpdatedAt: item.UpdatedAt,
 	}
 }
 

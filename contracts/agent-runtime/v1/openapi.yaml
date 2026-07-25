@@ -813,11 +813,13 @@ components:
         skillKeys: {type: array, maxItems: 128, items: {type: string}}
         maxChildRuns: {type: integer, minimum: 1, maximum: 16}
         maxDepth: {type: integer, minimum: 1, maximum: 6}
+        maxLLMCalls: {type: integer, minimum: 2, maximum: 32, description: Zero or omitted inherits the environment limit.}
+        maxToolCalls: {type: integer, minimum: 1, maximum: 64, description: Zero or omitted inherits the environment limit.}
         revisionNote: {type: string, maxLength: 255}
     AgentManifest:
       type: object
       additionalProperties: false
-      required: [manifestID, revision, ref, name, status, toolKeys, skillKeys, maxChildRuns, maxDepth, createdAt, updatedAt]
+      required: [manifestID, revision, ref, name, status, toolKeys, skillKeys, maxChildRuns, maxDepth, maxLLMCalls, maxToolCalls, createdAt, updatedAt]
       properties:
         manifestID: {type: string}
         revision: {type: integer, minimum: 1}
@@ -833,6 +835,8 @@ components:
         skillKeys: {type: array, items: {type: string}}
         maxChildRuns: {type: integer, minimum: 1}
         maxDepth: {type: integer, minimum: 1}
+        maxLLMCalls: {type: integer, minimum: 0, maximum: 32}
+        maxToolCalls: {type: integer, minimum: 0, maximum: 64}
         revisionNote: {type: string}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}

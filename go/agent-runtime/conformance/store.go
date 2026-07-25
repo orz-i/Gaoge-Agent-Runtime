@@ -232,6 +232,7 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			ManifestID: "agent-research", TenantID: actor.TenantID, Name: "Research agent", Description: "Collect bounded evidence",
 			Instructions: "Return a concise evidence summary.", Status: domain.AgentManifestStatusActive, ExecutionMode: "direct",
 			ToolKeys: []string{"search"}, SkillRefs: []domain.ResourceRef{{Kind: "skill", ID: "research"}}, MaxChildRuns: 2, MaxDepth: 2,
+			MaxLLMCalls: 4, MaxToolCalls: 8,
 			CreatedBy: actor, RequestID: "manifest-request-1", RequestFingerprint: "manifest-fp-1",
 		}
 		first, reused, err := store.CreateAgentManifestRevision(ctx, &manifest, 0)
@@ -259,7 +260,7 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			t.Fatalf("replay revised manifest: %v", err)
 		}
 		latest, err := store.GetAgentManifest(ctx, actor, domain.ResourceRef{Kind: domain.AgentManifestKind, ID: manifest.ManifestID})
-		if err != nil || latest.Revision != 2 || latest.Name != secondInput.Name {
+		if err != nil || latest.Revision != 2 || latest.Name != secondInput.Name || latest.MaxLLMCalls != 4 || latest.MaxToolCalls != 8 {
 			t.Fatalf("latest manifest = %+v,%v", latest, err)
 		}
 		stable, err := store.GetAgentManifest(ctx, actor, domain.ResourceRef{Kind: domain.AgentManifestKind, ID: manifest.ManifestID, Revision: "1"})
