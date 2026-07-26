@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/modelcap"
 )
 
 const (
@@ -23,6 +24,7 @@ const (
 	testStoryID                            = "story_1"
 	testReplyContract                      = "reply"
 	testErrorCodeWorkspaceArgumentsInvalid = "workspace_arguments_invalid"
+	testLegacyPlannerOption                = "legacy"
 )
 
 var (
@@ -48,6 +50,83 @@ func testWorkspacePolicy(expected string) WorkspacePolicy {
 		policy.AllowPublishOutput = true
 	}
 	return policy
+}
+
+func TestPlannerUnsupportedCapabilityNeverCallsGateway(t *testing.T) {
+	gateway := &scriptedLLMGateway{}
+	engine := &Engine{llmGateway: gateway}
+	_, err := engine.generatePlanAttempt(
+		t.Context(),
+		model.Run{RunID: "run_unsupported_plan"},
+		effectiveTextRunConfig{},
+		&LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: `{}`},
+		1,
+		"",
+		false,
+		nil,
+	)
+	if !errors.Is(err, errPlannerStructuredOutputUnsupported) {
+		t.Fatalf("planner unsupported error = %v", err)
+	}
+	if len(gateway.inputs) != 0 {
+		t.Fatalf("unsupported Planner reached the provider: %#v", gateway.inputs)
+	}
+}
+
+func TestPlannerRequestNegotiatesStructuredOutputModes(t *testing.T) {
+	effective := effectiveTextRunConfig{
+		PlanMaxSteps: 3,
+		Options: map[string]interface{}{
+			plannerResponseFormatKey:     map[string]interface{}{"type": testLegacyPlannerOption},
+			plannerResponseJSONSchemaKey: map[string]interface{}{testLegacyPlannerOption: true},
+		},
+	}
+	tests := []struct {
+		name string
+		mode modelcap.StructuredOutputMode
+		want string
+	}{
+		{name: "strict schema", mode: modelcap.StructuredOutputStrictJSONSchema, want: plannerJSONSchemaType},
+		{name: "json object", mode: modelcap.StructuredOutputJSONObject, want: plannerJSONObjectType},
+		{name: "json text", mode: modelcap.StructuredOutputJSONText},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := buildPlannerRequest("run_mode", "goal", effective, 1, "", false, 3, test.mode)
+			if _, exists := request.Options[plannerResponseJSONSchemaKey]; exists {
+				t.Fatal("response_json_schema must be removed")
+			}
+			format, exists := request.Options[plannerResponseFormatKey].(map[string]interface{})
+			if test.want == "" {
+				if exists {
+					t.Fatalf("json_text leaked response_format: %#v", format)
+				}
+				return
+			}
+			if !exists || format[valueType5EE8C955] != test.want {
+				t.Fatalf("response_format = %#v", request.Options[plannerResponseFormatKey])
+			}
+		})
+	}
+}
+
+func TestPlannerStructuredOutputRejectsUnconfiguredRoutes(t *testing.T) {
+	tests := []struct {
+		name  string
+		route *LLMRoute
+	}{
+		{name: "nil route"},
+		{name: "absent capability", route: &LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: `{}`}},
+		{name: "explicit unsupported", route: &LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: `{"structuredOutput":{"mode":"unsupported"}}`}},
+		{name: "invalid capability", route: &LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: `{"structuredOutput":{"mode":"yaml"}}`}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := plannerStructuredOutput(test.route); !errors.Is(err, errPlannerStructuredOutputUnsupported) {
+				t.Fatalf("planner capability error = %v", err)
+			}
+		})
+	}
 }
 
 func (r *durableFailureTestRepository) AppendRunEvents(_ context.Context, events []model.Event) ([]model.Event, error) {
@@ -173,15 +252,15 @@ func TestTopologicallySortRunStepsHonorsDependencies(t *testing.T) {
 
 func TestPlannerRequestUsesRunScopedIdempotencyKey(t *testing.T) {
 	effective := effectiveTextRunConfig{PlanMaxSteps: 12}
-	planner := buildPlannerRequest("run_123", "goal", effective, 2, "", false, 3)
-	repair := buildPlannerRequest("run_123", "goal", effective, 2, "fix", true, 2)
+	planner := buildPlannerRequest("run_123", "goal", effective, 2, "", false, 3, modelcap.StructuredOutputStrictJSONSchema)
+	repair := buildPlannerRequest("run_123", "goal", effective, 2, "fix", true, 2, modelcap.StructuredOutputStrictJSONSchema)
 	if planner.RequestID != "run_123:planner:2" || repair.RequestID != "run_123:planner-repair:2" {
 		t.Fatalf("unexpected planner request IDs: %q %q", planner.RequestID, repair.RequestID)
 	}
-	if _, duplicated := planner.Options["response_json_schema"]; duplicated {
+	if _, duplicated := planner.Options[plannerResponseJSONSchemaKey]; duplicated {
 		t.Fatal("planner must not send both response_format and response_json_schema to Gemini")
 	}
-	if _, ok := planner.Options["response_format"]; !ok {
+	if _, ok := planner.Options[plannerResponseFormatKey]; !ok {
 		t.Fatal("planner response_format is missing")
 	}
 	if len(planner.Messages) != 1 || strings.Contains(planner.Messages[0].Content, `"mode"`) || !strings.Contains(planner.Messages[0].Content, "最终呈现由系统 synthesis 完成") {
@@ -255,9 +334,9 @@ func TestAutoStrategyIntentPolicy(t *testing.T) {
 }
 
 func TestPlannerSchemaMatchesRequiredStepFields(t *testing.T) {
-	request := buildPlannerRequest("run_schema", "比较两种数据库", effectiveTextRunConfig{PlanMaxSteps: 3}, 1, "", false, 3)
-	responseFormat := requireStringMap(t, request.Options, "response_format")
-	jsonSchema := requireStringMap(t, responseFormat, "json_schema")
+	request := buildPlannerRequest("run_schema", "比较两种数据库", effectiveTextRunConfig{PlanMaxSteps: 3}, 1, "", false, 3, modelcap.StructuredOutputStrictJSONSchema)
+	responseFormat := requireStringMap(t, request.Options, plannerResponseFormatKey)
+	jsonSchema := requireStringMap(t, responseFormat, plannerJSONSchemaType)
 	schema := requireStringMap(t, jsonSchema, "schema")
 	properties := requireStringMap(t, schema, "properties")
 	steps := requireStringMap(t, properties, "steps")
@@ -382,6 +461,9 @@ func TestPlanFailureCodesAreStable(t *testing.T) {
 	}
 	if got := runFailureCode(fmt.Errorf("%w: malformed", errPlanInvalid)); got != "plan_invalid" {
 		t.Fatalf("invalid code = %q", got)
+	}
+	if got := runFailureCode(fmt.Errorf("%w: unavailable", errPlannerStructuredOutputUnsupported)); got != "planner_structured_output_unsupported" {
+		t.Fatalf("structured output code = %q", got)
 	}
 	if got := runFailureCode(fmt.Errorf("%w: invalid document", errRepeatedDeterministicWorkspaceToolFailure)); got != "repeated_deterministic_tool_failure" {
 		t.Fatalf("repeated tool failure code = %q", got)

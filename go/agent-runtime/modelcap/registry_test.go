@@ -9,6 +9,32 @@ func TestDefaultRegistryReportsInferredProvenance(t *testing.T) {
 	}
 }
 
+func TestResolveStructuredOutputRequiresExplicitCapability(t *testing.T) {
+	tests := []struct {
+		name   string
+		raw    string
+		mode   StructuredOutputMode
+		status ConfigurationStatus
+	}{
+		{name: "absent", raw: `{}`, mode: StructuredOutputUnsupported, status: ConfigurationAbsent},
+		{name: "strict", raw: `{"structuredOutput":{"mode":"strict_json_schema"}}`, mode: StructuredOutputStrictJSONSchema, status: ConfigurationValid},
+		{name: "json object", raw: `{"structuredOutputMode":"json_object"}`, mode: StructuredOutputJSONObject, status: ConfigurationValid},
+		{name: "json text", raw: `{"structuredOutput":"json_text"}`, mode: StructuredOutputJSONText, status: ConfigurationValid},
+		{name: "canonical wins over alias", raw: `{"structuredOutput":{"mode":"json_text"},"structuredOutputMode":"json_object"}`, mode: StructuredOutputJSONText, status: ConfigurationValid},
+		{name: "explicit unsupported", raw: `{"structuredOutput":{"mode":"unsupported"}}`, mode: StructuredOutputUnsupported, status: ConfigurationValid},
+		{name: "invalid mode", raw: `{"structuredOutput":{"mode":"yaml"}}`, mode: StructuredOutputUnsupported, status: ConfigurationInvalid},
+		{name: "invalid json", raw: `{`, mode: StructuredOutputUnsupported, status: ConfigurationInvalid},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := ResolveStructuredOutput(test.raw)
+			if got.Mode != test.mode || got.ConfigurationStatus != test.status {
+				t.Fatalf("resolution = %+v", got)
+			}
+		})
+	}
+}
+
 func TestDefaultRegistryReportsConfiguredProvenance(t *testing.T) {
 	configured := Default.Resolve("gpt-4.1-mini", `{"context_window_tokens":"64000","maxOutputTokens":12000}`)
 	if configured.ContextWindow != 64_000 || configured.MaxOutputTokens != 12_000 {

@@ -24,6 +24,57 @@ const (
 	ConfigurationInvalid ConfigurationStatus = "invalid"
 )
 
+type StructuredOutputMode string
+
+const (
+	StructuredOutputStrictJSONSchema StructuredOutputMode = "strict_json_schema"
+	StructuredOutputJSONObject       StructuredOutputMode = "json_object"
+	StructuredOutputJSONText         StructuredOutputMode = "json_text"
+	StructuredOutputUnsupported      StructuredOutputMode = "unsupported"
+)
+
+type StructuredOutputResolution struct {
+	Mode                StructuredOutputMode `json:"mode"`
+	ConfigurationStatus ConfigurationStatus  `json:"configurationStatus"`
+}
+
+func ResolveStructuredOutput(raw string) StructuredOutputResolution {
+	payload, status := parseCapabilities(raw)
+	if status != ConfigurationValid {
+		return StructuredOutputResolution{Mode: StructuredOutputUnsupported, ConfigurationStatus: status}
+	}
+	value, found := structuredOutputModeValue(payload)
+	if !found {
+		return StructuredOutputResolution{Mode: StructuredOutputUnsupported, ConfigurationStatus: ConfigurationAbsent}
+	}
+	mode := StructuredOutputMode(strings.ToLower(strings.TrimSpace(value)))
+	switch mode {
+	case StructuredOutputStrictJSONSchema, StructuredOutputJSONObject, StructuredOutputJSONText, StructuredOutputUnsupported:
+		return StructuredOutputResolution{Mode: mode, ConfigurationStatus: ConfigurationValid}
+	default:
+		return StructuredOutputResolution{Mode: StructuredOutputUnsupported, ConfigurationStatus: ConfigurationInvalid}
+	}
+}
+
+func structuredOutputModeValue(payload map[string]interface{}) (string, bool) {
+	value, exists := payload["structuredOutput"]
+	if exists {
+		if mode, ok := value.(string); ok {
+			return mode, true
+		}
+		object, ok := value.(map[string]interface{})
+		if !ok {
+			return "", true
+		}
+		mode, _ := object["mode"].(string)
+		return mode, true
+	}
+	if value, ok := payload["structuredOutputMode"].(string); ok {
+		return value, true
+	}
+	return "", false
+}
+
 type Limits struct {
 	ContextWindow   int `json:"contextWindow"`
 	MaxOutputTokens int `json:"maxOutputTokens"`
