@@ -5,10 +5,35 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strings"
 
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
+
+type AgentTeamStartStage string
+
+const (
+	AgentTeamStartStageCoordinatorValidation AgentTeamStartStage = "coordinator_validation"
+	AgentTeamStartStageCoordinatorRun        AgentTeamStartStage = "coordinator_run"
+	AgentTeamStartStageMemberRun             AgentTeamStartStage = "member_run"
+	AgentTeamStartStageJoin                  AgentTeamStartStage = "join"
+)
+
+type AgentTeamStartError struct {
+	Stage    AgentTeamStartStage
+	MemberID string
+	Cause    error
+}
+
+func (e *AgentTeamStartError) Error() string {
+	if strings.TrimSpace(e.MemberID) != "" {
+		return fmt.Sprintf("agent team start failed at %s for member %s: %v", e.Stage, e.MemberID, e.Cause)
+	}
+	return fmt.Sprintf("agent team start failed at %s: %v", e.Stage, e.Cause)
+}
+
+func (e *AgentTeamStartError) Unwrap() error { return e.Cause }
 
 // AgentTeamMemberInput defines one specialist task in a coordinator-led team.
 // The member Manifest is frozen before the child Run starts.
@@ -63,7 +88,7 @@ func (s *Engine) StartAgentTeam(ctx context.Context, input StartAgentTeamInput) 
 		return nil, err
 	}
 	if err = s.validateAgentTeamCoordinator(ctx, normalized); err != nil {
-		return nil, err
+		return nil, s.agentTeamStartFailure(normalized, AgentTeamStartStageCoordinatorValidation, "", err)
 	}
 
 	rootInput := normalized.Coordinator
@@ -71,10 +96,10 @@ func (s *Engine) StartAgentTeam(ctx context.Context, input StartAgentTeamInput) 
 	rootInput.DeferInitialContinuation = true
 	root, err := s.startTextRun(ctx, rootInput)
 	if err != nil {
-		return nil, err
+		return nil, s.agentTeamStartFailure(normalized, AgentTeamStartStageCoordinatorRun, "", err)
 	}
 	if err = validateDeferredAgentTeamRoot(root.Run); err != nil {
-		return nil, err
+		return nil, s.agentTeamStartFailure(normalized, AgentTeamStartStageCoordinatorRun, "", err)
 	}
 
 	tasks := make([]AgentTeamTaskStart, 0, len(normalized.Members))
@@ -82,7 +107,7 @@ func (s *Engine) StartAgentTeam(ctx context.Context, input StartAgentTeamInput) 
 	for _, member := range normalized.Members {
 		delegated, delegateErr := s.ensureAgentTeamMember(ctx, normalized, root.Run, member)
 		if delegateErr != nil {
-			return nil, delegateErr
+			return nil, s.agentTeamStartFailure(normalized, AgentTeamStartStageMemberRun, member.MemberID, delegateErr)
 		}
 		tasks = append(tasks, AgentTeamTaskStart{MemberID: member.MemberID, Handoff: delegated.Handoff, Run: delegated.Run, Step: delegated.Step})
 		handoffIDs = append(handoffIDs, delegated.Handoff.HandoffID)
@@ -100,9 +125,23 @@ func (s *Engine) StartAgentTeam(ctx context.Context, input StartAgentTeamInput) 
 		TimeoutPolicy:  normalized.Join.TimeoutPolicy,
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.agentTeamStartFailure(normalized, AgentTeamStartStageJoin, "", err)
 	}
 	return &AgentTeamStartResult{Root: *root, Tasks: tasks, Join: *join}, nil
+}
+
+func (s *Engine) agentTeamStartFailure(input StartAgentTeamInput, stage AgentTeamStartStage, memberID string, cause error) error {
+	failure := &AgentTeamStartError{Stage: stage, MemberID: strings.TrimSpace(memberID), Cause: cause}
+	if s.logger != nil {
+		s.logger.Error(
+			"agent_team_start_failed",
+			String("client_team_id", input.ClientTeamID),
+			String("stage", string(stage)),
+			String("member_id", failure.MemberID),
+			Error(cause),
+		)
+	}
+	return failure
 }
 
 func normalizeStartAgentTeamInput(input StartAgentTeamInput) (StartAgentTeamInput, error) {

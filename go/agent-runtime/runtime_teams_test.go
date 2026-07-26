@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
@@ -31,6 +32,24 @@ func TestNormalizeStartAgentTeamInputFreezesJoinDefaults(t *testing.T) {
 	}
 	if input.Members[0].ContentType != valueText6CED98CE || input.Members[1].ContentType != valueText6CED98CE {
 		t.Fatalf("member content types = %#v", input.Members)
+	}
+}
+
+func TestAgentTeamStartFailurePreservesStageAndCause(t *testing.T) {
+	engine := &Engine{}
+	cause := ErrRunToolUnavailable
+	err := engine.agentTeamStartFailure(
+		StartAgentTeamInput{ClientTeamID: "team-stage"},
+		AgentTeamStartStageMemberRun,
+		"architect",
+		cause,
+	)
+	var failure *AgentTeamStartError
+	if !errors.As(err, &failure) || !errors.Is(err, cause) {
+		t.Fatalf("failure=%#v err=%v", failure, err)
+	}
+	if failure.Stage != AgentTeamStartStageMemberRun || failure.MemberID != "architect" || !strings.Contains(err.Error(), "architect") {
+		t.Fatalf("failure=%#v err=%v", failure, err)
 	}
 }
 
