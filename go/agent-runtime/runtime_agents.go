@@ -50,6 +50,17 @@ type AgentManifestRevisionInput struct {
 	RevisionNote     string
 }
 
+func delegationCommitMaxChildren(parent model.Run, childDepth int) (int, error) {
+	maxChildren, maxDepth, err := parentDelegationLimits(parent)
+	if err != nil {
+		return 0, err
+	}
+	if childDepth > maxDepth || childDepth > hardAgentMaxDepth {
+		return 0, ErrRunHandoffDepth
+	}
+	return maxChildren, nil
+}
+
 func normalizeAgentManifestOwnership(input AgentManifestRevisionInput) (string, string, string, bool) {
 	scope := strings.TrimSpace(input.Scope)
 	if scope == "" {
@@ -715,7 +726,11 @@ func (s *Engine) persistRunDelegationStart(ctx context.Context, child model.Run,
 	if err != nil {
 		return nil, err
 	}
-	saved, reused, err := s.createDelegationHandoffAtCommit(ctx, child, delegation.Handoff, delegation.Manifest.MaxChildRuns)
+	maxChildren, err := delegationCommitMaxChildren(*parent, child.Depth)
+	if err != nil {
+		return nil, err
+	}
+	saved, reused, err := s.createDelegationHandoffAtCommit(ctx, child, delegation.Handoff, maxChildren)
 	if err != nil {
 		return nil, err
 	}

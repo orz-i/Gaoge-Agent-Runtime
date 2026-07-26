@@ -39,6 +39,22 @@ type agentRuntimeTestStore struct {
 	batchRunCalls     [][]string
 }
 
+func TestDelegationCommitLimitUsesFrozenCoordinatorBudget(t *testing.T) {
+	parent := model.Run{
+		RunConfigSnapshotJSON: mustRunJSON(effectiveTextRunConfig{
+			SemanticVersion: RuntimeSnapshotVersion,
+			AgentManifest:   &effectiveAgentManifest{MaxChildRuns: 6, MaxDepth: 1},
+		}),
+	}
+	maxChildren, err := delegationCommitMaxChildren(parent, 1)
+	if err != nil || maxChildren != 6 {
+		t.Fatalf("commit limit = %d, %v", maxChildren, err)
+	}
+	if _, err = delegationCommitMaxChildren(parent, 2); !errors.Is(err, ErrRunHandoffDepth) {
+		t.Fatalf("depth error = %v", err)
+	}
+}
+
 func TestNormalizeAgentManifestOwnership(t *testing.T) {
 	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
 	tests := []struct {
