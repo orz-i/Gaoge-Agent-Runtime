@@ -3,6 +3,7 @@ package agentruntime
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ const (
 	testStoryGetManifestName      = "story_get_manifest"
 	testStoryStagedWrite          = "staged_write"
 	testStoryContinuityToolKey    = "story.continuity"
+	testStorySearchToolKey        = "story.search"
 )
 
 func TestApplyWorkspaceToolDefinitionsOverlaysSchemaAndFingerprint(t *testing.T) {
@@ -64,6 +66,80 @@ func TestApplyWorkspaceToolDefinitionsOverlaysSchemaAndFingerprint(t *testing.T)
 	}
 	if !strings.Contains(string(got[0].InputSchema), "patch_foundation_fields") {
 		t.Fatalf("foundation op missing: %s", got[0].InputSchema)
+	}
+}
+
+func TestFreezeWorkspaceForAgentRoleNarrowsToolsAndClearsDelegatedArtifactDuty(t *testing.T) {
+	workspace := &WorkspaceSnapshot{
+		ExpectedArtifact: testArtifactChangeSet,
+		Request: ResolvedWorkspaceContext{
+			ArtifactContract: testArtifactChangeSet,
+			Directive:        &WorkspaceDirective{ActionID: "develop_full_outline", ArtifactContract: testArtifactChangeSet},
+		},
+		Policy: WorkspacePolicy{
+			RequiredArtifact:      true,
+			TerminalArtifactTypes: []string{testArtifactChangeSet},
+			ArtifactResourceField: "storyID",
+			AllowPublishOutput:    true,
+			Failure: WorkspaceFailurePolicy{
+				RequiredArtifactErrorCode: "story.workspace_artifact_missing",
+			},
+		},
+		Tools: []WorkspaceToolDefinition{
+			{ToolKey: testStoryGetManifestKey, Name: testStoryGetManifestName},
+			{ToolKey: testStoryPublishChangeSetKey, Name: testStoryPublishChangeSetName},
+			{ToolKey: testStorySearchToolKey, Name: "story_search"},
+		},
+	}
+	freezeWorkspaceForAgentRole(workspace, []string{testStoryGetManifestKey, testStorySearchToolKey}, true)
+	if got := workspaceSnapshotToolKeys(workspace); !slices.Equal(got, []string{testStoryGetManifestKey, testStorySearchToolKey}) {
+		t.Fatalf("tools = %#v", got)
+	}
+	assertDelegatedWorkspaceArtifactDutyCleared(t, workspace)
+}
+
+func assertDelegatedWorkspaceArtifactDutyCleared(t *testing.T, workspace *WorkspaceSnapshot) {
+	t.Helper()
+	directiveActionID, directiveArtifact := "", ""
+	if workspace.Request.Directive != nil {
+		directiveActionID = workspace.Request.Directive.ActionID
+		directiveArtifact = workspace.Request.Directive.ArtifactContract
+	}
+	type artifactDutySnapshot struct {
+		expectedArtifact, requestArtifact, directiveActionID, directiveArtifact string
+		requiredArtifact, allowPublishOutput                                    bool
+		terminalArtifactTypes                                                   []string
+		artifactResourceField, requiredArtifactErrorCode                        string
+	}
+	got := artifactDutySnapshot{
+		expectedArtifact: workspace.ExpectedArtifact, requestArtifact: workspace.Request.ArtifactContract,
+		directiveActionID: directiveActionID, directiveArtifact: directiveArtifact,
+		requiredArtifact: workspace.Policy.RequiredArtifact, allowPublishOutput: workspace.Policy.AllowPublishOutput,
+		terminalArtifactTypes: workspace.Policy.TerminalArtifactTypes, artifactResourceField: workspace.Policy.ArtifactResourceField,
+		requiredArtifactErrorCode: workspace.Policy.Failure.RequiredArtifactErrorCode,
+	}
+	want := artifactDutySnapshot{directiveActionID: "develop_full_outline"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("artifact duty = %#v, want %#v", got, want)
+	}
+}
+
+func TestFreezeWorkspaceForCoordinatorKeepsArtifactDuty(t *testing.T) {
+	workspace := &WorkspaceSnapshot{
+		ExpectedArtifact: testArtifactReview,
+		Request:          ResolvedWorkspaceContext{ArtifactContract: testArtifactReview},
+		Policy:           WorkspacePolicy{RequiredArtifact: true, TerminalArtifactTypes: []string{testArtifactReview}},
+		Tools: []WorkspaceToolDefinition{
+			{ToolKey: testStoryGetManifestKey, Name: testStoryGetManifestName},
+			{ToolKey: testStoryPublishChangeSetKey, Name: testStoryPublishChangeSetName},
+		},
+	}
+	freezeWorkspaceForAgentRole(workspace, []string{testStoryGetManifestKey}, false)
+	if got := workspaceSnapshotToolKeys(workspace); !slices.Equal(got, []string{testStoryGetManifestKey}) {
+		t.Fatalf("tools = %#v", got)
+	}
+	if workspace.ExpectedArtifact != testArtifactReview || workspace.Request.ArtifactContract != testArtifactReview || !workspace.Policy.RequiredArtifact || !slices.Equal(workspace.Policy.TerminalArtifactTypes, []string{testArtifactReview}) {
+		t.Fatalf("coordinator artifact policy changed: %#v", workspace)
 	}
 }
 

@@ -132,6 +132,38 @@ type StartTextRunInput struct {
 	DeferInitialContinuation                      bool
 }
 
+func freezeWorkspaceForAgentRole(workspace *WorkspaceSnapshot, allowedToolKeys []string, delegated bool) {
+	if workspace == nil {
+		return
+	}
+	allowed := make(map[string]struct{}, len(allowedToolKeys))
+	for _, key := range uniqueRuntimeStrings(allowedToolKeys) {
+		allowed[key] = struct{}{}
+	}
+	tools := make([]WorkspaceToolDefinition, 0, min(len(workspace.Tools), len(allowed)))
+	for _, tool := range workspace.Tools {
+		if _, ok := allowed[strings.TrimSpace(tool.ToolKey)]; ok {
+			tools = append(tools, tool)
+		}
+	}
+	workspace.Tools = tools
+	if !delegated {
+		return
+	}
+	workspace.ExpectedArtifact = ""
+	workspace.Request.ArtifactContract = ""
+	if workspace.Request.Directive != nil {
+		directive := *workspace.Request.Directive
+		directive.ArtifactContract = ""
+		workspace.Request.Directive = &directive
+	}
+	workspace.Policy.RequiredArtifact = false
+	workspace.Policy.TerminalArtifactTypes = nil
+	workspace.Policy.ArtifactResourceField = ""
+	workspace.Policy.AllowPublishOutput = false
+	workspace.Policy.Failure.RequiredArtifactErrorCode = ""
+}
+
 type textRunStartReservation struct {
 	value *UsageBalanceReservation
 }
@@ -705,6 +737,9 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 	}
 	if !textRunEnvironmentWorkspaceCompatible(profile, resources.Workspace) {
 		return textRunPreparedConfiguration{}, ErrEnvironmentBindingNotAllowed
+	}
+	if resources.Workspace != nil && agentManifest != nil {
+		freezeWorkspaceForAgentRole(resources.Workspace, agentManifest.ToolKeys, input.Delegation != nil)
 	}
 	workspaceType, workspaceMode := textRunWorkspaceScope(resources.Workspace)
 	effectiveToolSelection := input.ToolKeys
