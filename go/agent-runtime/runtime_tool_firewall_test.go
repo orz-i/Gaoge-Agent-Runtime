@@ -26,6 +26,26 @@ type recordingToolExecutor struct {
 	err           error
 }
 
+func TestNullOutputSchemaIsAbsentAfterSnapshotRoundTrip(t *testing.T) {
+	inputSchema := json.RawMessage(`{"type":"object","additionalProperties":false}`)
+	outputSchema := json.RawMessage(`null`)
+	if err := validateToolContractSchemas(inputSchema, outputSchema); err != nil {
+		t.Fatalf("validateToolContractSchemas() error = %v", err)
+	}
+	const providerOutput = "plain provider output"
+	got, err := normalizeToolOutputAgainstSchema(providerOutput, outputSchema, "")
+	if err != nil || got != providerOutput {
+		t.Fatalf("normalizeToolOutputAgainstSchema() = %q, %v", got, err)
+	}
+}
+
+func TestNullInputSchemaRemainsInvalid(t *testing.T) {
+	err := validateToolContractSchemas(json.RawMessage(`null`), nil)
+	if !errors.Is(err, ErrToolSchemaInvalid) {
+		t.Fatalf("validateToolContractSchemas() error = %v", err)
+	}
+}
+
 func TestResolvedToolCallRejectsInvalidArgumentsBeforeApprovalOrExecution(t *testing.T) {
 	repo := &durableFailureTestRepository{}
 	executor := &recordingToolExecutor{output: `{"structuredContent":{"ok":true}}`}

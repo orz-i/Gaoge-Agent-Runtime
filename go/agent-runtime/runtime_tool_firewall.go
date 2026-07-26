@@ -33,11 +33,16 @@ func validateToolContractSchemas(inputSchema, outputSchema json.RawMessage) erro
 	if _, err := compileToolContractSchema(inputSchema); err != nil {
 		return err
 	}
-	if len(bytes.TrimSpace(outputSchema)) == 0 {
+	if optionalToolContractSchemaAbsent(outputSchema) {
 		return nil
 	}
 	_, err := compileToolContractSchema(outputSchema)
 	return err
+}
+
+func optionalToolContractSchemaAbsent(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null"))
 }
 
 func (e *ToolContractError) Error() string {
@@ -83,7 +88,7 @@ func normalizeToolArgumentsAgainstSchema(raw string, schema json.RawMessage) (st
 }
 
 func normalizeToolOutputAgainstSchema(raw string, schema json.RawMessage, providerKind string) (string, error) {
-	if len(bytes.TrimSpace(schema)) == 0 {
+	if optionalToolContractSchemaAbsent(schema) {
 		if !utf8.ValidString(raw) {
 			return "", newToolContractError("output", "$", "value is not valid UTF-8")
 		}
