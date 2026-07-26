@@ -24,6 +24,42 @@ func (handoffJoinTestUnitOfWork) Within(ctx context.Context, work func(context.C
 	return work(ctx)
 }
 
+func TestFinalizeChildResolvesWaitingParentJoin(t *testing.T) {
+	parent, join, checkpoint := handoffJoinReadyFixture(t)
+	child := model.Run{RunID: testHandoffChildRunID, Actor: parent.Actor, HandoffID: testJoinHandoffA}
+	handoff := model.RunHandoff{
+		HandoffID: testJoinHandoffA, ParentRunID: parent.RunID, ChildRunID: child.RunID, Actor: parent.Actor,
+		AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: testAgentReviewID, Revision: "1"},
+		AgentName:     testHandoffAgentName, Status: model.RunHandoffStatusCompleted, ResultSummary: testHandoffEvidenceReady,
+	}
+	store := &handoffJoinRuntimeStore{
+		run: parent, checkpoint: checkpoint,
+		handoffs:          map[string]model.RunHandoff{testJoinHandoffA: handoff},
+		handoffCompletion: model.RunHandoffCompletionResult{Handoff: handoff, ResolvedJoins: []model.RunHandoffJoin{join}},
+	}
+	engine := &Engine{repo: store}
+	parentRunID, events, err := engine.finalizeRunHandoff(t.Context(), child, model.TerminalIntent{Outcome: model.TerminalCompleted, Summary: testHandoffEvidenceReady}, nil)
+	if err != nil || parentRunID != parent.RunID || store.resumeStatus != model.RunStatusRunning || store.continuationJob == nil {
+		t.Fatalf("finalize child parent=%q status=%q job=%#v events=%#v err=%v", parentRunID, store.resumeStatus, store.continuationJob, events, err)
+	}
+	if !containsRuntimeEventType(events, "handoff.completed") || !containsRuntimeEventType(events, "handoff.join.ready") || !containsRuntimeEventType(events, "run.resumed") {
+		t.Fatalf("finalize child events=%#v", events)
+	}
+}
+
+func (s *handoffJoinRuntimeStore) CompleteRunHandoffWithJoins(_ context.Context, _ model.ActorRef, _ string, _ model.RunHandoffCompletion) (model.RunHandoffCompletionResult, error) {
+	return s.handoffCompletion, nil
+}
+
+func (s *handoffJoinRuntimeStore) AppendRunEvent(_ context.Context, event *model.Event) (*model.Event, bool, error) {
+	if event == nil {
+		return nil, false, ErrInvalidInput
+	}
+	item := *event
+	s.appendedRunEvents = append(s.appendedRunEvents, item)
+	return &item, true, nil
+}
+
 func TestExpiredRunHandoffJoinSuspendsParent(t *testing.T) {
 	parent, join, checkpoint := handoffJoinReadyFixture(t)
 	deadline := time.Now().UTC().Add(-time.Second)
@@ -132,6 +168,8 @@ type handoffJoinRuntimeStore struct {
 	resumeApplied     bool
 	resumeError       error
 	continuationError error
+	handoffCompletion model.RunHandoffCompletionResult
+	appendedRunEvents []model.Event
 	expiredJoin       *model.RunHandoffJoin
 	expiredJoinTaken  bool
 }

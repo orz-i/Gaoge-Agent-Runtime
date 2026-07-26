@@ -844,7 +844,7 @@ func (s *Engine) finalizeRunHandoff(ctx context.Context, run model.Run, intent m
 			events = append(events, *persisted)
 		}
 	}
-	if continuationRunDoesNotExecute(*parent) {
+	if parent.EndedAt != nil || parent.Status != model.RunStatusWaitingHandoff {
 		return handoff.ParentRunID, events, nil
 	}
 	for _, join := range completion.ResolvedJoins {
