@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -14,6 +15,8 @@ import (
 const (
 	testAgentActorID       = "actor"
 	testAgentTenantID      = "tenant"
+	testAgentStoryScope    = "story"
+	testAgentStoryReadTool = "story.read"
 	testAgentParentRunID   = "run-parent"
 	testAgentReviewID      = "agent-review"
 	testAgentSearchToolKey = "search"
@@ -34,6 +37,55 @@ type agentRuntimeTestStore struct {
 	appendedRunEvents []model.Event
 	getRunCalls       []string
 	batchRunCalls     [][]string
+}
+
+func TestResolveTextRunAgentManifestFreezesRootRevision(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	manifest := model.AgentManifest{
+		ManifestID: "agent-root", Revision: 4, TenantID: actor.TenantID, Name: "Lead writer", Status: model.AgentManifestStatusActive,
+		ModelName: "model-lead", ExecutionMode: TextRunExecutionModeDirect, ToolKeys: []string{testAgentStoryReadTool, testPublishToolKey},
+		SkillRefs: []model.ResourceRef{{Kind: ResourceKindSkill, ID: "writing"}}, MaxChildRuns: 3, MaxDepth: 2,
+	}
+	engine := &Engine{repo: &agentRuntimeTestStore{manifests: map[string]model.AgentManifest{manifest.ManifestID: manifest}}}
+	resolved, frozen, err := engine.resolveTextRunAgentManifest(t.Context(), StartTextRunInput{
+		Actor: actor, AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: manifest.ManifestID},
+	})
+	if err != nil || frozen == nil {
+		t.Fatalf("resolve root manifest = %#v, %v", frozen, err)
+	}
+	if resolved.AgentManifest.Revision != "4" || resolved.PlatformModelName != manifest.ModelName || resolved.ExecutionMode != TextRunExecutionModeDirect {
+		t.Fatalf("resolved input = %#v", resolved)
+	}
+	if resolved.ToolKeys == nil || !slices.Equal(*resolved.ToolKeys, manifest.ToolKeys) || resolved.SkillRefs == nil || !slices.Equal(*resolved.SkillRefs, manifest.SkillRefs) {
+		t.Fatalf("resolved capabilities = tools=%#v skills=%#v", resolved.ToolKeys, resolved.SkillRefs)
+	}
+}
+
+func TestDelegatedTextRunStartInputInheritsFrozenWorkspace(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	workspace := &WorkspaceSnapshot{
+		SchemaVersion: RuntimeSnapshotVersion,
+		Request:       ResolvedWorkspaceContext{SchemaVersion: RuntimeSnapshotVersion, Type: testAgentStoryScope, ResourceID: "story_1", Revision: 41, ArtifactContract: "review"},
+		Revision:      41, SnapshotID: "snapshot_story_41", StateHash: "hash_story_41", ContentJSON: `{"storyID":"story_1"}`,
+		Tools: []WorkspaceToolDefinition{{ToolKey: testAgentStoryReadTool, Name: "story_read", InputSchema: json.RawMessage(`{"type":"object"}`)}},
+	}
+	parent := model.Run{
+		RunID: testAgentParentRunID, Actor: actor, Thread: model.ThreadRef{Kind: threadKindConversation, ID: "conversation_1"},
+		Environment: model.ResourceRef{Kind: resourceKindEnvironment, ID: "2", Revision: "3"}, PlatformModelName: "model-parent", Provider: "provider",
+		RunConfigSnapshotJSON: mustRunJSON(effectiveTextRunConfig{SemanticVersion: RuntimeSnapshotVersion, Workspace: workspace}),
+	}
+	manifest := model.AgentManifest{ManifestID: "agent-specialist", Revision: 2, TenantID: actor.TenantID, Name: "Specialist", Status: model.AgentManifestStatusActive, ToolKeys: []string{testAgentStoryReadTool}}
+	prepared := preparedDelegation{parent: parent, manifest: manifest, handoff: model.RunHandoff{HandoffID: "handoff_1", ChildRunID: "run_child", Goal: "Audit Story"}}
+	start, err := delegatedTextRunStartInput(DelegateTextRunInput{Actor: actor}, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start.FrozenWorkspace == nil || start.FrozenWorkspace.SnapshotID != workspace.SnapshotID || start.ThreadScope != testAgentStoryScope {
+		t.Fatalf("delegated start = %#v", start)
+	}
+	if start.Workspace != nil || start.Delegation == nil || start.Delegation.Manifest.Ref() != manifest.Ref() {
+		t.Fatalf("delegation contract = %#v", start)
+	}
 }
 
 func (s *agentRuntimeTestStore) ListRunHandoffJoins(_ context.Context, _ model.ActorRef, _ model.RunHandoffJoinFilter) (model.RunHandoffJoinPage, error) {
@@ -272,7 +324,7 @@ func TestTextRunAgentManifestFreezesDelegatedInstructions(t *testing.T) {
 		Instructions: "Return a concise source-backed summary.", ToolKeys: []string{testAgentSearchToolKey},
 		SkillRefs: []model.ResourceRef{{Kind: ResourceKindSkill, ID: "research"}}, MaxChildRuns: 2, MaxDepth: 3, MaxLLMCalls: 4, MaxToolCalls: 6,
 	}
-	instructions, snapshot := textRunAgentManifest(StartTextRunInput{Delegation: &RunDelegationStart{Manifest: manifest}}, "Environment rules")
+	instructions, snapshot := textRunAgentManifest(&manifest, "Environment rules")
 	if snapshot == nil || snapshot.Ref.Revision != "3" || snapshot.Name != manifest.Name || len(snapshot.ToolKeys) != 1 || snapshot.MaxLLMCalls != 4 || snapshot.MaxToolCalls != 6 {
 		t.Fatalf("manifest snapshot = %#v", snapshot)
 	}

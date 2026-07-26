@@ -73,6 +73,7 @@ type StartTextRunRequest struct {
 	Options       map[string]interface{}    `json:"options"`
 	ToolKeys      *[]string                 `json:"toolKeys" binding:"omitempty,max=128,dive,max=255"`
 	SkillKeys     *[]string                 `json:"skillKeys" binding:"omitempty,max=128,dive,max=64"`
+	AgentManifest *model.ResourceRef        `json:"agentManifest"`
 	Workspace     *runtime.WorkspaceRequest `json:"workspace"`
 }
 
@@ -93,6 +94,7 @@ type RunQueueRequest struct {
 	Options          map[string]interface{}    `json:"options"`
 	ToolKeys         *[]string                 `json:"toolKeys" binding:"omitempty,max=128,dive,max=255"`
 	SkillKeys        *[]string                 `json:"skillKeys" binding:"omitempty,max=128,dive,max=64"`
+	AgentManifest    *model.ResourceRef        `json:"agentManifest"`
 	ExpectedRevision int                       `json:"expectedRevision"`
 	Workspace        *runtime.WorkspaceRequest `json:"workspace"`
 }
@@ -115,7 +117,11 @@ func (h *Handler) StartTextRun(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "", "thread not found")
 		return
 	}
-	result, err := h.service.StartTextRun(c.Request.Context(), runtime.StartTextRunInput{Actor: actor, Thread: thread, RequestID: h.requestID(c), Goal: req.Input.Content, ContentType: req.Input.ContentType, Environment: snapshot.Environment, ClientRunID: req.ClientRunID, PlatformModelName: req.Model, ExecutionMode: req.ExecutionMode, Options: sanitizeRunOptions(req.Options), FileIDs: req.Input.FileIDs, OutputIDs: req.Input.OutputIDs, EvidenceIDs: req.Input.EvidenceIDs, ToolKeys: req.ToolKeys, SkillRefs: skillRefs(req.SkillKeys), ParentProjection: req.Thread.ParentProjection, SourceProjection: req.Thread.SourceProjection, BranchReason: req.Thread.BranchReason, HTMLVisualPromptEnabled: req.Input.HTMLVisualPrompt, HTMLVisualColorMode: req.Input.HTMLVisualColorMode, ThreadModel: snapshot.DefaultModel, ThreadProvider: snapshot.ModelProvider, ThreadScope: snapshot.BindingScope, Workspace: req.Workspace})
+	agentManifest := model.ResourceRef{}
+	if req.AgentManifest != nil {
+		agentManifest = *req.AgentManifest
+	}
+	result, err := h.service.StartTextRun(c.Request.Context(), runtime.StartTextRunInput{Actor: actor, Thread: thread, RequestID: h.requestID(c), Goal: req.Input.Content, ContentType: req.Input.ContentType, Environment: snapshot.Environment, ClientRunID: req.ClientRunID, PlatformModelName: req.Model, ExecutionMode: req.ExecutionMode, Options: sanitizeRunOptions(req.Options), FileIDs: req.Input.FileIDs, OutputIDs: req.Input.OutputIDs, EvidenceIDs: req.Input.EvidenceIDs, ToolKeys: req.ToolKeys, SkillRefs: skillRefs(req.SkillKeys), ParentProjection: req.Thread.ParentProjection, SourceProjection: req.Thread.SourceProjection, BranchReason: req.Thread.BranchReason, HTMLVisualPromptEnabled: req.Input.HTMLVisualPrompt, HTMLVisualColorMode: req.Input.HTMLVisualColorMode, ThreadModel: snapshot.DefaultModel, ThreadProvider: snapshot.ModelProvider, ThreadScope: snapshot.BindingScope, Workspace: req.Workspace, AgentManifest: agentManifest})
 	if err != nil {
 		writeTextRunError(c, err)
 		return
@@ -167,7 +173,11 @@ func (h *Handler) runQueueContext(c *gin.Context, ref model.ThreadRef) (model.Ac
 	return actor, thread, snapshot, nil
 }
 func toRunQueueRequest(req RunQueueRequest, snapshot *runtime.ThreadSnapshot) runtime.RunQueueRequest {
-	request := runtime.RunQueueRequest{Input: runtime.RunQueueInput{Content: req.Input.Content, ContentType: req.Input.ContentType, FileIDs: req.Input.FileIDs, OutputIDs: req.Input.OutputIDs, EvidenceIDs: req.Input.EvidenceIDs, HTMLVisualPrompt: req.Input.HTMLVisualPrompt, HTMLVisualColorMode: req.Input.HTMLVisualColorMode}, Model: req.Model, ExecutionMode: req.ExecutionMode, Options: sanitizeRunOptions(req.Options), ToolKeys: req.ToolKeys, SkillRefs: skillRefs(req.SkillKeys), ParentProjection: req.Thread.ParentProjection, SourceProjection: req.Thread.SourceProjection, BranchReason: req.Thread.BranchReason, Workspace: req.Workspace}
+	agentManifest := model.ResourceRef{}
+	if req.AgentManifest != nil {
+		agentManifest = *req.AgentManifest
+	}
+	request := runtime.RunQueueRequest{Input: runtime.RunQueueInput{Content: req.Input.Content, ContentType: req.Input.ContentType, FileIDs: req.Input.FileIDs, OutputIDs: req.Input.OutputIDs, EvidenceIDs: req.Input.EvidenceIDs, HTMLVisualPrompt: req.Input.HTMLVisualPrompt, HTMLVisualColorMode: req.Input.HTMLVisualColorMode}, Model: req.Model, ExecutionMode: req.ExecutionMode, Options: sanitizeRunOptions(req.Options), ToolKeys: req.ToolKeys, SkillRefs: skillRefs(req.SkillKeys), AgentManifest: agentManifest, ParentProjection: req.Thread.ParentProjection, SourceProjection: req.Thread.SourceProjection, BranchReason: req.Thread.BranchReason, Workspace: req.Workspace}
 	if snapshot != nil {
 		request.Environment = snapshot.Environment
 	}

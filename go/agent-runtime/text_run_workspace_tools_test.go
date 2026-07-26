@@ -3,6 +3,7 @@ package agentruntime
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,7 @@ const (
 	testStoryGetManifestKey       = "story.get_manifest"
 	testStoryGetManifestName      = "story_get_manifest"
 	testStoryStagedWrite          = "staged_write"
+	testStoryContinuityToolKey    = "story.continuity"
 )
 
 func TestApplyWorkspaceToolDefinitionsOverlaysSchemaAndFingerprint(t *testing.T) {
@@ -62,6 +64,34 @@ func TestApplyWorkspaceToolDefinitionsOverlaysSchemaAndFingerprint(t *testing.T)
 	}
 	if !strings.Contains(string(got[0].InputSchema), "patch_foundation_fields") {
 		t.Fatalf("foundation op missing: %s", got[0].InputSchema)
+	}
+}
+
+func TestFrozenWorkspaceIsClonedAndValidated(t *testing.T) {
+	input := &WorkspaceSnapshot{
+		SchemaVersion: RuntimeSnapshotVersion,
+		Request:       ResolvedWorkspaceContext{SchemaVersion: RuntimeSnapshotVersion, Type: testWorkspaceProviderKind, ResourceID: "story_1", Revision: 9},
+		Revision:      9, SnapshotID: "snapshot_9", StateHash: "state_9", ContentJSON: `{"storyID":"story_1"}`,
+		Tools: []WorkspaceToolDefinition{{ToolKey: testStoryGetManifestKey, Name: testStoryGetManifestName, InputSchema: json.RawMessage(`{"type":"object"}`)}},
+	}
+	engine := &Engine{}
+	got, found, err := engine.compileTextRunWorkspace(t.Context(), StartTextRunInput{ThreadScope: testWorkspaceProviderKind, FrozenWorkspace: input}, "model")
+	if err != nil || !found || got.SnapshotID != input.SnapshotID {
+		t.Fatalf("frozen workspace = %#v, %t, %v", got, found, err)
+	}
+	got.Tools[0].InputSchema[0] = '['
+	if input.Tools[0].InputSchema[0] != '{' {
+		t.Fatal("frozen workspace was not deep cloned")
+	}
+}
+
+func TestAgentManifestToolsNarrowWorkspaceTools(t *testing.T) {
+	got := intersectRuntimeStrings(
+		[]string{testAgentStoryReadTool, testPublishToolKey, testStoryContinuityToolKey},
+		[]string{testAgentStoryReadTool, testStoryContinuityToolKey, "outside.tool"},
+	)
+	if !slices.Equal(got, []string{testAgentStoryReadTool, testStoryContinuityToolKey}) {
+		t.Fatalf("intersection = %#v", got)
 	}
 }
 

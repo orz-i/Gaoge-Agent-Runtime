@@ -21,6 +21,11 @@ export type StartTextRunRequest = {
   clientRunID?: string;
   toolKeys?: string[];
   skillKeys?: string[];
+  agentManifest?: {
+    kind: "agent_manifest";
+    id: string;
+    revision?: string;
+  };
   workspace?: RuntimeWorkspaceExtensionDTO;
 };
 

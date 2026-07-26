@@ -15,6 +15,28 @@ type environmentResolverTestStub struct {
 	profile *EnvironmentProfile
 }
 
+func TestRunQueueFreezesExactAgentManifestRevision(t *testing.T) {
+	service, actor, thread, _, environmentRef := freezeEmptyQueueCapabilities(t)
+	manifest := model.AgentManifest{
+		ManifestID: "agent-queue", Revision: 3, TenantID: actor.TenantID, Name: "Queued Agent", Status: model.AgentManifestStatusActive,
+		ExecutionMode: TextRunExecutionModeDirect, ToolKeys: []string{}, SkillRefs: []model.ResourceRef{},
+	}
+	service.repo = &agentRuntimeTestStore{manifests: map[string]model.AgentManifest{manifest.ManifestID: manifest}}
+	frozen, err := service.freezeRunQueueRequest(t.Context(), actor, thread, RunQueueRequest{
+		Input: RunQueueInput{Content: "queued agent goal"}, Environment: environmentRef,
+		AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: manifest.ManifestID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frozen.AgentManifest.Revision != "3" || frozen.ExecutionMode != TextRunExecutionModeDirect {
+		t.Fatalf("frozen Agent request = %#v", frozen)
+	}
+	if frozen.ToolKeys == nil || frozen.SkillRefs == nil || !service.queuedCapabilitiesUnchanged(t.Context(), actor, frozen) {
+		t.Fatalf("frozen Agent capabilities are not dispatchable: %#v", frozen)
+	}
+}
+
 type queueToolCatalogStub struct {
 	definitionVersion string
 }

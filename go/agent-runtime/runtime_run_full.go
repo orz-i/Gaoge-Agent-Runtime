@@ -126,7 +126,52 @@ type StartTextRunInput struct {
 	ThreadModel, ThreadProvider                   string
 	ThreadScope                                   string
 	Workspace                                     *WorkspaceRequest
+	AgentManifest                                 model.ResourceRef
+	FrozenWorkspace                               *WorkspaceSnapshot
 	Delegation                                    *RunDelegationStart
+}
+
+func validFrozenWorkspace(workspace WorkspaceSnapshot) bool {
+	if workspace.SchemaVersion != RuntimeSnapshotVersion || workspace.Revision == 0 {
+		return false
+	}
+	required := []string{
+		workspace.Request.Type,
+		workspace.Request.ResourceID,
+		workspace.SnapshotID,
+		workspace.StateHash,
+		workspace.ContentJSON,
+	}
+	for _, value := range required {
+		if strings.TrimSpace(value) == "" {
+			return false
+		}
+	}
+	return validFrozenWorkspaceTools(workspace.Tools)
+}
+
+func validFrozenWorkspaceTools(tools []WorkspaceToolDefinition) bool {
+	for _, definition := range tools {
+		if strings.TrimSpace(definition.ToolKey) == "" || strings.TrimSpace(definition.Name) == "" || len(definition.InputSchema) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneFrozenWorkspace(input *WorkspaceSnapshot) (WorkspaceSnapshot, error) {
+	if input == nil {
+		return WorkspaceSnapshot{}, ErrInvalidInput
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return WorkspaceSnapshot{}, err
+	}
+	var result WorkspaceSnapshot
+	if err = json.Unmarshal(raw, &result); err != nil {
+		return WorkspaceSnapshot{}, err
+	}
+	return result, nil
 }
 
 func narrowAgentBudget(environmentLimit, manifestLimit int) int {
@@ -481,6 +526,11 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 	if !validTextRunStartRequest(input, goal) {
 		return nil, ErrInvalidInput
 	}
+	var err error
+	input, _, err = s.resolveTextRunAgentManifest(ctx, input)
+	if err != nil {
+		return nil, err
+	}
 	runID := EnsureRunID(input.ClientRunID)
 	fingerprint := textRunRequestFingerprint(input, goal)
 	delegated := input.Delegation != nil
@@ -522,6 +572,7 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 	now := time.Now()
 	stepID := "step_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	run := model.Run{RunID: runID, RequestID: strings.TrimSpace(input.RequestID), Actor: input.Actor, Thread: input.Thread, Environment: input.Environment, RootRunID: runID, Goal: goal, RunConfigSnapshotJSON: string(snapshot), RequestFingerprint: fingerprint, CurrentStepID: stepID, StartedBy: valueUserDD885A59, RequestedModelName: modelName, PlatformModelName: modelName, Provider: input.ThreadProvider, Status: model.RunStatusQueued, StartedAt: now}
+	applyRunAgentManifest(&run, effective.AgentManifest)
 	applyRunDelegation(&run, input.Delegation)
 	step := model.Step{StepID: stepID, RunID: runID, StepIndex: 0, Kind: valueOrchestration1BD4660D, Title: truncateRunTitle(goal), Description: goal, Status: model.RunStatusQueued, StartedAt: now}
 	continuationType, targetStatus := textRunInitialContinuation(strategy)
@@ -586,6 +637,10 @@ type textRunPreparedConfiguration struct {
 }
 
 func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTextRunInput, goal string) (textRunPreparedConfiguration, error) {
+	input, agentManifest, err := s.resolveTextRunAgentManifest(ctx, input)
+	if err != nil {
+		return textRunPreparedConfiguration{}, err
+	}
 	profile, err := s.resolveTextRunProfileAtRevision(ctx, input.Actor, input.Environment)
 	if err != nil {
 		return textRunPreparedConfiguration{}, err
@@ -606,6 +661,9 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 	effectiveToolSelection := input.ToolKeys
 	if resources.Workspace != nil {
 		keys := workspaceSnapshotToolKeys(resources.Workspace)
+		if agentManifest != nil {
+			keys = intersectRuntimeStrings(keys, agentManifest.ToolKeys)
+		}
 		effectiveToolSelection = &keys
 	}
 	toolSelection, err := compileEnvironmentToolSelection(effectiveToolSelection, profile)
@@ -650,7 +708,7 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 		}
 		strategy, strategyReason, requestedMode = input.FrozenStrategy, input.FrozenStrategyReason, input.FrozenRequestedMode
 	}
-	instructions, agentSnapshot := textRunAgentManifest(input, profile.Instructions)
+	instructions, agentSnapshot := textRunAgentManifest(agentManifest, profile.Instructions)
 	maxLLMCalls, maxToolCalls := s.resolveMaxLLMCallsPerRun(), s.resolveMaxToolCallsPerRun()
 	if agentSnapshot != nil {
 		maxLLMCalls = narrowAgentBudget(maxLLMCalls, agentSnapshot.MaxLLMCalls)
@@ -1167,6 +1225,19 @@ func validResolvedRunTool(tool ResolvedTool) bool {
 
 func (s *Engine) compileTextRunWorkspace(ctx context.Context, input StartTextRunInput, modelName string) (WorkspaceSnapshot, bool, error) {
 	scope := strings.TrimSpace(input.ThreadScope)
+	if input.FrozenWorkspace != nil {
+		if input.Workspace != nil {
+			return WorkspaceSnapshot{}, false, ErrInvalidInput
+		}
+		workspace, err := cloneFrozenWorkspace(input.FrozenWorkspace)
+		if err != nil || !validFrozenWorkspace(workspace) {
+			return WorkspaceSnapshot{}, false, ErrRunSnapshotIncompatible
+		}
+		if scope == "" || scope != strings.TrimSpace(workspace.Request.Type) {
+			return WorkspaceSnapshot{}, false, ErrEnvironmentBindingNotAllowed
+		}
+		return workspace, true, nil
+	}
 	if input.Workspace == nil {
 		return WorkspaceSnapshot{}, false, nil
 	}
@@ -1387,6 +1458,9 @@ type textRunFingerprintInput struct {
 	HTMLVisualPrompt    bool
 	HTMLVisualColorMode string
 	Workspace           *WorkspaceRequest
+	AgentManifest       model.ResourceRef
+	FrozenWorkspaceID   string
+	FrozenWorkspaceHash string
 	Delegation          *runDelegationFingerprint
 }
 
@@ -1421,7 +1495,11 @@ func textRunRequestFingerprint(input StartTextRunInput, goal string) string {
 	sort.Strings(outputs)
 	evidence := uniqueRuntimeStrings(input.EvidenceIDs)
 	sort.Strings(evidence)
-	payload := textRunFingerprintInput{Actor: input.Actor, Thread: input.Thread, Goal: goal, Environment: input.Environment, Model: strings.TrimSpace(input.PlatformModelName), ExecutionMode: strings.TrimSpace(input.ExecutionMode), Options: input.Options, FileIDs: files, OutputIDs: outputs, EvidenceIDs: evidence, ToolKeys: copyKeys(input.ToolKeys), SkillRefs: copyRefs(input.SkillRefs), ParentProjection: input.ParentProjection, SourceProjection: input.SourceProjection, BranchReason: strings.TrimSpace(input.BranchReason), HTMLVisualPrompt: input.HTMLVisualPromptEnabled, HTMLVisualColorMode: strings.TrimSpace(input.HTMLVisualColorMode), Workspace: input.Workspace, Delegation: delegationFingerprint(input.Delegation)}
+	payload := textRunFingerprintInput{Actor: input.Actor, Thread: input.Thread, Goal: goal, Environment: input.Environment, Model: strings.TrimSpace(input.PlatformModelName), ExecutionMode: strings.TrimSpace(input.ExecutionMode), Options: input.Options, FileIDs: files, OutputIDs: outputs, EvidenceIDs: evidence, ToolKeys: copyKeys(input.ToolKeys), SkillRefs: copyRefs(input.SkillRefs), ParentProjection: input.ParentProjection, SourceProjection: input.SourceProjection, BranchReason: strings.TrimSpace(input.BranchReason), HTMLVisualPrompt: input.HTMLVisualPromptEnabled, HTMLVisualColorMode: strings.TrimSpace(input.HTMLVisualColorMode), Workspace: input.Workspace, AgentManifest: input.AgentManifest, Delegation: delegationFingerprint(input.Delegation)}
+	if input.FrozenWorkspace != nil {
+		payload.FrozenWorkspaceID = strings.TrimSpace(input.FrozenWorkspace.SnapshotID)
+		payload.FrozenWorkspaceHash = strings.TrimSpace(input.FrozenWorkspace.StateHash)
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return ""

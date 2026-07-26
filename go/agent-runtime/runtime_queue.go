@@ -41,6 +41,7 @@ type RunQueueRequest struct {
 	Options           map[string]interface{} `json:"options,omitempty"`
 	ToolKeys          *[]string              `json:"toolKeys,omitempty"`
 	SkillRefs         *[]model.ResourceRef   `json:"skillRefs,omitempty"`
+	AgentManifest     model.ResourceRef      `json:"agentManifest,omitempty"`
 	ParentProjection  *model.ProjectionRef   `json:"parentProjection,omitempty"`
 	SourceProjection  *model.ProjectionRef   `json:"sourceProjection,omitempty"`
 	BranchReason      string                 `json:"branchReason,omitempty"`
@@ -186,25 +187,30 @@ func (s *Engine) freezeRunQueueRequest(ctx context.Context, actor model.ActorRef
 	if err != nil {
 		return RunQueueRequest{}, err
 	}
+	resolvedInput, manifest, err := s.resolveTextRunAgentManifest(ctx, StartTextRunInput{
+		Actor: actor, PlatformModelName: request.Model, ExecutionMode: request.ExecutionMode,
+		ToolKeys: request.ToolKeys, SkillRefs: request.SkillRefs, AgentManifest: request.AgentManifest,
+	})
+	if err != nil {
+		return RunQueueRequest{}, err
+	}
+	request.AgentManifest = resolvedInput.AgentManifest
+	request.Model = resolvedInput.PlatformModelName
+	request.ExecutionMode = resolvedInput.ExecutionMode
+	request.ToolKeys = resolvedInput.ToolKeys
+	request.SkillRefs = resolvedInput.SkillRefs
 	modelName, err := selectEnvironmentModel(environment, firstNonEmptyString(request.Model, thread.DefaultModel))
 	if err != nil {
 		return RunQueueRequest{}, err
 	}
-	return s.freezeRunQueueCapabilities(ctx, actor, thread, request, environment, modelName)
+	return s.freezeRunQueueCapabilities(ctx, actor, thread, request, environment, modelName, manifest)
 }
 
-func (s *Engine) freezeRunQueueCapabilities(ctx context.Context, actor model.ActorRef, thread *ThreadSnapshot, request RunQueueRequest, environment *EnvironmentProfile, modelName string) (RunQueueRequest, error) {
+func (s *Engine) freezeRunQueueCapabilities(ctx context.Context, actor model.ActorRef, thread *ThreadSnapshot, request RunQueueRequest, environment *EnvironmentProfile, modelName string, manifest *model.AgentManifest) (RunQueueRequest, error) {
 	request.Environment = environment.Ref
-	effectiveToolSelection := request.ToolKeys
-	workspace, found, err := s.compileTextRunWorkspace(ctx, StartTextRunInput{Actor: actor, Thread: thread.Thread, ThreadScope: thread.BindingScope, Workspace: request.Workspace}, modelName)
+	effectiveToolSelection, compiledWorkspace, err := s.freezeRunQueueWorkspaceCapabilities(ctx, actor, thread, request, modelName, manifest)
 	if err != nil {
 		return RunQueueRequest{}, err
-	}
-	var compiledWorkspace *WorkspaceSnapshot
-	if found {
-		compiledWorkspace = &workspace
-		keys := workspaceSnapshotToolKeys(&workspace)
-		effectiveToolSelection = &keys
 	}
 	if !textRunEnvironmentWorkspaceCompatible(environment, compiledWorkspace) {
 		return RunQueueRequest{}, ErrEnvironmentBindingNotAllowed
@@ -236,12 +242,36 @@ func (s *Engine) freezeRunQueueCapabilities(ctx context.Context, actor model.Act
 	if err != nil {
 		return RunQueueRequest{}, err
 	}
-	request.Model = modelName
+	request.Model = firstNonEmptyString(request.Model, modelName)
 	request.ResolvedStrategy, request.StrategyReason, request.RequestedMode, err = resolveTextRunStrategy(request.ExecutionMode, environment.DefaultMode, environment.AllowedModes, request.Input.Content, effectiveTools.Policies)
 	if err != nil {
 		return RunQueueRequest{}, err
 	}
 	return request, nil
+}
+
+func (s *Engine) freezeRunQueueWorkspaceCapabilities(
+	ctx context.Context,
+	actor model.ActorRef,
+	thread *ThreadSnapshot,
+	request RunQueueRequest,
+	modelName string,
+	manifest *model.AgentManifest,
+) (*[]string, *WorkspaceSnapshot, error) {
+	workspace, found, err := s.compileTextRunWorkspace(ctx, StartTextRunInput{
+		Actor: actor, Thread: thread.Thread, ThreadScope: thread.BindingScope, Workspace: request.Workspace,
+	}, modelName)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !found {
+		return request.ToolKeys, nil, nil
+	}
+	keys := workspaceSnapshotToolKeys(&workspace)
+	if manifest != nil {
+		keys = intersectRuntimeStrings(keys, manifest.ToolKeys)
+	}
+	return &keys, &workspace, nil
 }
 
 func (s *Engine) CancelRunQueue(ctx context.Context, actor model.ActorRef, thread model.ThreadRef, queueID string) (*model.QueueItem, error) {
@@ -282,6 +312,9 @@ func normalizeRunQueueRequest(input RunQueueRequest) RunQueueRequest {
 	input.Environment.Kind = strings.TrimSpace(input.Environment.Kind)
 	input.Environment.ID = strings.TrimSpace(input.Environment.ID)
 	input.Environment.Revision = strings.TrimSpace(input.Environment.Revision)
+	input.AgentManifest.Kind = strings.TrimSpace(input.AgentManifest.Kind)
+	input.AgentManifest.ID = strings.TrimSpace(input.AgentManifest.ID)
+	input.AgentManifest.Revision = strings.TrimSpace(input.AgentManifest.Revision)
 	input.ParentProjection = normalizeProjectionRef(input.ParentProjection)
 	input.SourceProjection = normalizeProjectionRef(input.SourceProjection)
 	input.BranchReason = strings.TrimSpace(input.BranchReason)
@@ -413,6 +446,7 @@ func (s *Engine) dispatchRunQueueItem(ctx context.Context, item model.QueueItem)
 		EvidenceIDs:             request.Input.EvidenceIDs,
 		ToolKeys:                request.ToolKeys,
 		SkillRefs:               request.SkillRefs,
+		AgentManifest:           request.AgentManifest,
 		ParentProjection:        request.ParentProjection,
 		SourceProjection:        request.SourceProjection,
 		BranchReason:            request.BranchReason,
@@ -452,6 +486,12 @@ func (s *Engine) queuedCapabilitiesUnchanged(ctx context.Context, actor model.Ac
 	environment, err := s.resolveTextRunProfileAtRevision(ctx, actor, request.Environment)
 	if err != nil || request.ToolKeys == nil || request.SkillRefs == nil {
 		return false
+	}
+	if request.AgentManifest.ID != "" {
+		manifest, manifestErr := s.repo.GetAgentManifest(ctx, actor, request.AgentManifest)
+		if manifestErr != nil || manifest.Status != model.AgentManifestStatusActive {
+			return false
+		}
 	}
 	selection, err := compileEnvironmentToolSelection(request.ToolKeys, environment)
 	if err != nil || len(selection.DefaultKeys) > 0 {

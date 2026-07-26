@@ -47,6 +47,39 @@ type AgentManifestRevisionInput struct {
 	RevisionNote     string
 }
 
+func applyRunAgentManifest(run *model.Run, manifest *effectiveAgentManifest) {
+	if run == nil || manifest == nil {
+		return
+	}
+	run.AgentManifest = manifest.Ref
+	run.AgentName = manifest.Name
+}
+
+func intersectRuntimeStrings(left, right []string) []string {
+	allowed := make(map[string]struct{}, len(right))
+	for _, item := range right {
+		if value := strings.TrimSpace(item); value != "" {
+			allowed[value] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(left))
+	for _, item := range left {
+		value := strings.TrimSpace(item)
+		if _, ok := allowed[value]; ok {
+			result = append(result, value)
+		}
+	}
+	return uniqueRuntimeStrings(result)
+}
+
+func effectiveTextRunConfigFromRun(run model.Run) (effectiveTextRunConfig, error) {
+	var effective effectiveTextRunConfig
+	if json.Unmarshal([]byte(run.RunConfigSnapshotJSON), &effective) != nil || effective.SemanticVersion != RuntimeSnapshotVersion {
+		return effectiveTextRunConfig{}, ErrRunSnapshotIncompatible
+	}
+	return effective, nil
+}
+
 func normalizeRunHandoffJoinIDs(values []string) ([]string, error) {
 	if len(values) == 0 || len(values) > hardAgentMaxChildRuns {
 		return nil, ErrInvalidInput
@@ -315,18 +348,11 @@ func (s *Engine) findReusedDelegation(ctx context.Context, actor model.ActorRef,
 }
 
 func (s *Engine) startDelegatedTextRun(ctx context.Context, input DelegateTextRunInput, prepared preparedDelegation) (*DelegateTextRunResult, error) {
-	toolKeys := append([]string(nil), prepared.manifest.ToolKeys...)
-	skillRefs := append([]model.ResourceRef(nil), prepared.manifest.SkillRefs...)
-	modelName := firstNonEmptyString(prepared.manifest.ModelName, prepared.parent.PlatformModelName)
-	executionMode := firstNonEmptyString(prepared.manifest.ExecutionMode, TextRunExecutionModeAuto)
-	start, err := s.StartTextRun(ctx, StartTextRunInput{
-		Actor: input.Actor, Thread: prepared.parent.Thread, RequestID: input.RequestID, Goal: prepared.handoff.Goal, ContentType: firstNonEmptyString(input.ContentType, "text"),
-		Environment: prepared.parent.Environment, ClientRunID: prepared.handoff.ChildRunID, PlatformModelName: modelName, ExecutionMode: executionMode, Options: input.Options,
-		OutputIDs: input.OutputIDs, EvidenceIDs: input.EvidenceIDs, ToolKeys: &toolKeys, SkillRefs: &skillRefs,
-		ParentProjection: &prepared.parent.OutputProjection, BranchReason: agentBranchReasonDefault, HTMLVisualPromptEnabled: input.HTMLVisualPrompt,
-		HTMLVisualColorMode: input.HTMLColorMode, ThreadModel: prepared.parent.PlatformModelName, ThreadProvider: prepared.parent.Provider,
-		Delegation: &RunDelegationStart{Manifest: prepared.manifest, Handoff: prepared.handoff},
-	})
+	startInput, err := delegatedTextRunStartInput(input, prepared)
+	if err != nil {
+		return nil, err
+	}
+	start, err := s.StartTextRun(ctx, startInput)
 	if err != nil {
 		return nil, err
 	}
@@ -335,6 +361,30 @@ func (s *Engine) startDelegatedTextRun(ctx context.Context, input DelegateTextRu
 		return nil, err
 	}
 	return &DelegateTextRunResult{Handoff: *savedHandoff, Run: start.Run, Step: start.Step}, nil
+}
+
+func delegatedTextRunStartInput(input DelegateTextRunInput, prepared preparedDelegation) (StartTextRunInput, error) {
+	parentConfig, err := effectiveTextRunConfigFromRun(prepared.parent)
+	if err != nil {
+		return StartTextRunInput{}, err
+	}
+	toolKeys := append([]string(nil), prepared.manifest.ToolKeys...)
+	skillRefs := append([]model.ResourceRef(nil), prepared.manifest.SkillRefs...)
+	modelName := firstNonEmptyString(prepared.manifest.ModelName, prepared.parent.PlatformModelName)
+	executionMode := firstNonEmptyString(prepared.manifest.ExecutionMode, TextRunExecutionModeAuto)
+	threadScope := "general"
+	if parentConfig.Workspace != nil {
+		threadScope = strings.TrimSpace(parentConfig.Workspace.Request.Type)
+	}
+	return StartTextRunInput{
+		Actor: input.Actor, Thread: prepared.parent.Thread, RequestID: input.RequestID, Goal: prepared.handoff.Goal, ContentType: firstNonEmptyString(input.ContentType, "text"),
+		Environment: prepared.parent.Environment, ClientRunID: prepared.handoff.ChildRunID, PlatformModelName: modelName, ExecutionMode: executionMode, Options: input.Options,
+		OutputIDs: input.OutputIDs, EvidenceIDs: input.EvidenceIDs, ToolKeys: &toolKeys, SkillRefs: &skillRefs,
+		ParentProjection: &prepared.parent.OutputProjection, BranchReason: agentBranchReasonDefault, HTMLVisualPromptEnabled: input.HTMLVisualPrompt,
+		HTMLVisualColorMode: input.HTMLColorMode, ThreadModel: prepared.parent.PlatformModelName, ThreadProvider: prepared.parent.Provider, ThreadScope: threadScope,
+		FrozenWorkspace: parentConfig.Workspace,
+		Delegation:      &RunDelegationStart{Manifest: prepared.manifest, Handoff: prepared.handoff},
+	}, nil
 }
 
 func (s *Engine) GetRunTaskTree(ctx context.Context, actor model.ActorRef, runID string) (*RunTaskTree, error) {
@@ -519,12 +569,54 @@ func applyRunDelegation(run *model.Run, delegation *RunDelegationStart) {
 	run.Depth = delegation.Handoff.Depth
 }
 
-func textRunAgentManifest(input StartTextRunInput, environmentInstructions string) (string, *effectiveAgentManifest) {
-	if input.Delegation == nil {
+func (s *Engine) resolveTextRunAgentManifest(ctx context.Context, input StartTextRunInput) (StartTextRunInput, *model.AgentManifest, error) {
+	manifest, found, err := s.lookupTextRunAgentManifest(ctx, input)
+	if err != nil {
+		return StartTextRunInput{}, nil, err
+	}
+	if !found {
+		return input, nil, nil
+	}
+	if manifest.Status != model.AgentManifestStatusActive {
+		return StartTextRunInput{}, nil, ErrAgentManifestDisabled
+	}
+	return applyTextRunAgentManifest(input, manifest), manifest, nil
+}
+
+func (s *Engine) lookupTextRunAgentManifest(ctx context.Context, input StartTextRunInput) (*model.AgentManifest, bool, error) {
+	if input.Delegation != nil {
+		item := input.Delegation.Manifest
+		return &item, true, nil
+	}
+	if input.AgentManifest.Kind == "" && input.AgentManifest.ID == "" && input.AgentManifest.Revision == "" {
+		return nil, false, nil
+	}
+	if input.AgentManifest.Kind != model.AgentManifestKind || strings.TrimSpace(input.AgentManifest.ID) == "" {
+		return nil, false, ErrInvalidInput
+	}
+	manifest, err := s.repo.GetAgentManifest(ctx, input.Actor, input.AgentManifest)
+	return manifest, err == nil, err
+}
+
+func applyTextRunAgentManifest(input StartTextRunInput, manifest *model.AgentManifest) StartTextRunInput {
+	input.AgentManifest = manifest.Ref()
+	if strings.TrimSpace(manifest.ModelName) != "" {
+		input.PlatformModelName = manifest.ModelName
+	}
+	if strings.TrimSpace(manifest.ExecutionMode) != "" {
+		input.ExecutionMode = manifest.ExecutionMode
+	}
+	toolKeys := append([]string(nil), manifest.ToolKeys...)
+	skillRefs := append([]model.ResourceRef(nil), manifest.SkillRefs...)
+	input.ToolKeys, input.SkillRefs = &toolKeys, &skillRefs
+	return input
+}
+
+func textRunAgentManifest(manifest *model.AgentManifest, environmentInstructions string) (string, *effectiveAgentManifest) {
+	if manifest == nil {
 		return environmentInstructions, nil
 	}
-	manifest := input.Delegation.Manifest
-	sections := []string{strings.TrimSpace(environmentInstructions), "## Delegated agent\nName: " + manifest.Name}
+	sections := []string{strings.TrimSpace(environmentInstructions), "## Runtime agent\nName: " + manifest.Name}
 	if manifest.Description != "" {
 		sections = append(sections, manifest.Description)
 	}

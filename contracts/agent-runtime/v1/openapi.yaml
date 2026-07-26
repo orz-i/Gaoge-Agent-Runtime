@@ -915,6 +915,8 @@ components:
         options: {type: object, additionalProperties: true}
         toolKeys: {type: array, maxItems: 128, items: {type: string}}
         skillKeys: {type: array, maxItems: 128, items: {type: string}}
+        agentManifest:
+          $ref: '#/components/schemas/ResourceRef'
         workspace:
           $ref: '#/components/schemas/WorkspaceExtension'
     DelegateRunRequest:
@@ -947,6 +949,8 @@ components:
         options: {type: object, additionalProperties: true}
         toolKeys: {type: array, maxItems: 128, items: {type: string}}
         skillKeys: {type: array, maxItems: 128, items: {type: string}}
+        agentManifest:
+          $ref: '#/components/schemas/ResourceRef'
         workspace:
           $ref: '#/components/schemas/WorkspaceExtension'
     QueueUpdateRequest:
@@ -964,6 +968,8 @@ components:
         options: {type: object, additionalProperties: true}
         toolKeys: {type: array, maxItems: 128, items: {type: string}}
         skillKeys: {type: array, maxItems: 128, items: {type: string}}
+        agentManifest:
+          $ref: '#/components/schemas/ResourceRef'
         workspace:
           $ref: '#/components/schemas/WorkspaceExtension'
     ResumeRunRequest:
