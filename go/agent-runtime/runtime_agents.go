@@ -31,6 +31,9 @@ type AgentManifestRevisionInput struct {
 	Actor            model.ActorRef
 	ManifestID       string
 	ExpectedRevision int
+	Scope            string
+	TenantID         string
+	OwnerActorID     string
 	Name             string
 	Description      string
 	Instructions     string
@@ -45,6 +48,34 @@ type AgentManifestRevisionInput struct {
 	MaxToolCalls     int
 	RequestID        string
 	RevisionNote     string
+}
+
+func normalizeAgentManifestOwnership(input AgentManifestRevisionInput) (string, string, string, bool) {
+	scope := strings.TrimSpace(input.Scope)
+	if scope == "" {
+		scope = model.AgentManifestScopeActor
+	}
+	tenantID := strings.TrimSpace(input.TenantID)
+	ownerActorID := strings.TrimSpace(input.OwnerActorID)
+	switch scope {
+	case model.AgentManifestScopeActor:
+		if tenantID == "" {
+			tenantID = input.Actor.TenantID
+		}
+		if ownerActorID == "" {
+			ownerActorID = input.Actor.ActorID
+		}
+		return scope, tenantID, ownerActorID, tenantID != "" && ownerActorID != ""
+	case model.AgentManifestScopeTenant:
+		if tenantID == "" {
+			tenantID = input.Actor.TenantID
+		}
+		return scope, tenantID, "", tenantID != ""
+	case model.AgentManifestScopeSystem:
+		return scope, "", "", true
+	default:
+		return "", "", "", false
+	}
 }
 
 func applyRunAgentManifest(run *model.Run, manifest *effectiveAgentManifest) {
@@ -251,8 +282,13 @@ func (s *Engine) CreateAgentManifestRevision(ctx context.Context, input AgentMan
 	if status == "" {
 		status = model.AgentManifestStatusActive
 	}
+	scope, tenantID, ownerActorID, ok := normalizeAgentManifestOwnership(input)
+	if !ok {
+		return nil, false, ErrInvalidInput
+	}
 	item := &model.AgentManifest{
-		ManifestID: manifestID, TenantID: input.Actor.TenantID, Name: strings.TrimSpace(input.Name), Description: strings.TrimSpace(input.Description),
+		ManifestID: manifestID, Scope: scope, TenantID: tenantID, OwnerActorID: ownerActorID,
+		Name: strings.TrimSpace(input.Name), Description: strings.TrimSpace(input.Description),
 		Instructions: strings.TrimSpace(input.Instructions), Status: status, ModelName: strings.TrimSpace(input.ModelName), ExecutionMode: strings.TrimSpace(input.ExecutionMode),
 		ToolKeys: uniqueRuntimeStrings(input.ToolKeys), SkillRefs: normalizeSelectedSkillRefs(input.SkillRefs),
 		MaxChildRuns: boundedTextRunConfig(input.MaxChildRuns, defaultAgentMaxChildRuns, hardAgentMaxChildRuns),

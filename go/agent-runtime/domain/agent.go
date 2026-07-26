@@ -10,6 +10,9 @@ const (
 	AgentManifestKind           = "agent_manifest"
 	AgentManifestStatusActive   = "active"
 	AgentManifestStatusDisabled = "disabled"
+	AgentManifestScopeActor     = "actor"
+	AgentManifestScopeTenant    = "tenant"
+	AgentManifestScopeSystem    = "system"
 
 	RunHandoffStatusQueued    = "queued"
 	RunHandoffStatusCompleted = "completed"
@@ -38,7 +41,9 @@ const (
 type AgentManifest struct {
 	ManifestID         string
 	Revision           int
+	Scope              string
 	TenantID           string
+	OwnerActorID       string
 	Name               string
 	Description        string
 	Instructions       string
@@ -87,9 +92,26 @@ func (m AgentManifest) Ref() ResourceRef {
 }
 
 type AgentManifestFilter struct {
-	Status string
-	Limit  int
-	Offset int
+	Status       string
+	Scope        string
+	TenantID     string
+	OwnerActorID string
+	Admin        bool
+	Limit        int
+	Offset       int
+}
+
+func AgentManifestVisibleTo(item AgentManifest, actor ActorRef) bool {
+	switch item.Scope {
+	case AgentManifestScopeActor:
+		return item.TenantID == actor.TenantID && item.OwnerActorID == actor.ActorID
+	case AgentManifestScopeTenant:
+		return item.TenantID == actor.TenantID
+	case AgentManifestScopeSystem:
+		return true
+	default:
+		return false
+	}
 }
 
 type AgentManifestPage struct {

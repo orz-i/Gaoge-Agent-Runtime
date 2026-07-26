@@ -38,6 +38,63 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		}
 	})
 
+	t.Run("agent manifest scopes enforce visibility and admin filters", func(t *testing.T) {
+		store, actor, _, _ := seeded(t, factory)
+		ctx := context.Background()
+		otherActor := domain.ActorRef{TenantID: actor.TenantID, ActorID: "actor-other"}
+		foreignActor := domain.ActorRef{TenantID: "tenant-other", ActorID: "actor-foreign"}
+		items := []domain.AgentManifest{
+			{
+				ManifestID: "agent-private", Scope: domain.AgentManifestScopeActor, TenantID: actor.TenantID, OwnerActorID: actor.ActorID,
+				Name: "Private", Status: domain.AgentManifestStatusActive, MaxChildRuns: 1, MaxDepth: 1,
+				CreatedBy: actor, RequestID: "scope-private", RequestFingerprint: "scope-private-fp",
+			},
+			{
+				ManifestID: "agent-tenant", Scope: domain.AgentManifestScopeTenant, TenantID: actor.TenantID,
+				Name: "Tenant", Status: domain.AgentManifestStatusActive, MaxChildRuns: 1, MaxDepth: 1,
+				CreatedBy: actor, RequestID: "scope-tenant", RequestFingerprint: "scope-tenant-fp",
+			},
+			{
+				ManifestID: "agent-system", Scope: domain.AgentManifestScopeSystem,
+				Name: "System", Status: domain.AgentManifestStatusActive, MaxChildRuns: 1, MaxDepth: 1,
+				CreatedBy: actor, RequestID: "scope-system", RequestFingerprint: "scope-system-fp",
+			},
+		}
+		for index := range items {
+			if _, _, err := store.CreateAgentManifestRevision(ctx, &items[index], 0); err != nil {
+				t.Fatalf("create scoped manifest %q: %v", items[index].ManifestID, err)
+			}
+		}
+		if _, err := store.GetAgentManifest(ctx, otherActor, items[0].Ref()); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("other actor read private manifest = %v", err)
+		}
+		if _, err := store.GetAgentManifest(ctx, otherActor, items[1].Ref()); err != nil {
+			t.Fatalf("same tenant read tenant manifest: %v", err)
+		}
+		if _, err := store.GetAgentManifest(ctx, foreignActor, items[1].Ref()); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("foreign tenant read tenant manifest = %v", err)
+		}
+		if _, err := store.GetAgentManifest(ctx, foreignActor, items[2].Ref()); err != nil {
+			t.Fatalf("foreign tenant read system manifest: %v", err)
+		}
+		visible, err := store.ListAgentManifests(ctx, otherActor, domain.AgentManifestFilter{Status: domain.AgentManifestStatusActive})
+		if err != nil || visible.Total != 2 {
+			t.Fatalf("visible scoped manifests = %+v,%v", visible, err)
+		}
+		admin, err := store.ListAgentManifests(ctx, otherActor, domain.AgentManifestFilter{Admin: true, Scope: domain.AgentManifestScopeActor, OwnerActorID: actor.ActorID})
+		if err != nil || admin.Total != 1 || len(admin.Results) != 1 || admin.Results[0].ManifestID != items[0].ManifestID {
+			t.Fatalf("admin scoped manifests = %+v,%v", admin, err)
+		}
+		conflict := items[0]
+		conflict.Scope = domain.AgentManifestScopeTenant
+		conflict.OwnerActorID = ""
+		conflict.RequestID = "scope-conflict"
+		conflict.RequestFingerprint = "scope-conflict-fp"
+		if _, _, err := store.CreateAgentManifestRevision(ctx, &conflict, 1); !errors.Is(err, agentruntime.ErrAgentManifestConflict) {
+			t.Fatalf("scope change conflict = %v", err)
+		}
+	})
+
 	t.Run("runs are batch loaded in requested actor scoped order", func(t *testing.T) {
 		store, actor, thread, run := seeded(t, factory)
 		ctx := context.Background()
@@ -251,7 +308,8 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		store, actor, _, run := seeded(t, factory)
 		ctx := context.Background()
 		manifest := domain.AgentManifest{
-			ManifestID: "agent-research", TenantID: actor.TenantID, Name: "Research agent", Description: "Collect bounded evidence",
+			ManifestID: "agent-research", Scope: domain.AgentManifestScopeActor, TenantID: actor.TenantID, OwnerActorID: actor.ActorID,
+			Name: "Research agent", Description: "Collect bounded evidence",
 			Instructions: "Return a concise evidence summary.", Status: domain.AgentManifestStatusActive, ExecutionMode: "direct",
 			ToolKeys: []string{"search"}, SkillRefs: []domain.ResourceRef{{Kind: "skill", ID: "research"}}, MaxChildRuns: 2, MaxDepth: 2,
 			MaxLLMCalls: 4, MaxToolCalls: 8,

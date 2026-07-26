@@ -10,6 +10,7 @@ import (
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 	"gorm.io/gorm"
 )
 
@@ -170,7 +171,12 @@ func (r *Repository) EraseAccountData(ctx context.Context, userID uint) error {
 			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RunHandoffRecord{}).Error
 		},
 		func() error {
-			return freshDB().Where("created_by_tenant_id = ? AND created_by_actor_id = ?", "default", actorID).Delete(&models.AgentManifestRevisionRecord{}).Error
+			return freshDB().Model(&models.AgentManifestRevisionRecord{}).
+				Where("created_by_tenant_id = ? AND created_by_actor_id = ? AND scope IN ?", "default", actorID, []string{domain.AgentManifestScopeTenant, domain.AgentManifestScopeSystem}).
+				Update("created_by_actor_id", "").Error
+		},
+		func() error {
+			return freshDB().Where("scope = ? AND tenant_id = ? AND owner_actor_id = ?", domain.AgentManifestScopeActor, "default", actorID).Delete(&models.AgentManifestRevisionRecord{}).Error
 		},
 		func() error {
 			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RuntimeOutputIdentityRecord{}).Error

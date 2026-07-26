@@ -1,5 +1,5 @@
 import type {
-  AgentManifestDTO, AgentManifestPageDTO, AgentManifestRevisionRequest, AgentManifestStatus, ContinuationJobDTO, ContinuationJobFilterDTO,
+  AgentManifestDTO, AgentManifestFilterDTO, AgentManifestPageDTO, AgentManifestRevisionRequest, ContinuationJobDTO, ContinuationJobFilterDTO,
   ContinuationJobPageDTO, CreateRunHandoffJoinRequest, DelegateRunRequest, DelegatedRunResult, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
   OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
   RunHandoffJoinDTO, RunHandoffJoinFilterDTO, RunHandoffJoinPageDTO, RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RunTaskTreeDTO, RuntimeEvidenceSelectionDTO,
@@ -108,7 +108,7 @@ export class RuntimeClient {
         requeue:(jobID:string,payload:{reason:string},request?:RequestOptions)=>this.request<ContinuationJobDTO>(`/admin/agentruntime/continuations/${pathPart(jobID)}/requeue`,{method:"POST",body:JSON.stringify(payload)},request),
       },
       agentManifests: {
-        list:(options:{status?:AgentManifestStatus;limit?:number;offset?:number}&RequestOptions={})=>{const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined)q.set(key,String(value))}return this.request<AgentManifestPageDTO>(`/admin/agentruntime/agent-manifests${q.size?`?${q}`:""}`,{},options)},
+        list:(options:AgentManifestFilterDTO&RequestOptions={})=>{const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined&&value!=="")q.set(key,String(value))}return this.request<AgentManifestPageDTO>(`/admin/agentruntime/agent-manifests${q.size?`?${q}`:""}`,{},options)},
         create:(payload:AgentManifestRevisionRequest,request?:RequestOptions)=>this.request<AgentManifestDTO>("/admin/agentruntime/agent-manifests",{method:"POST",body:JSON.stringify(payload)},request),
         revise:(manifestID:string,payload:AgentManifestRevisionRequest&{expectedRevision:number},request?:RequestOptions)=>this.request<AgentManifestDTO>(`/admin/agentruntime/agent-manifests/${pathPart(manifestID)}/revisions`,{method:"POST",body:JSON.stringify(payload)},request),
       },

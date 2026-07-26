@@ -49,8 +49,20 @@ func (r *Repository) ExpireNextRunHandoffJoin(ctx context.Context, now time.Time
 }
 
 func validManifestRevisionIdentity(input domain.AgentManifest) bool {
-	return strings.TrimSpace(input.ManifestID) != "" && strings.TrimSpace(input.TenantID) != "" && strings.TrimSpace(input.Name) != "" &&
-		input.CreatedBy.TenantID == input.TenantID && strings.TrimSpace(input.CreatedBy.ActorID) != ""
+	if strings.TrimSpace(input.ManifestID) == "" || strings.TrimSpace(input.Name) == "" ||
+		strings.TrimSpace(input.CreatedBy.TenantID) == "" || strings.TrimSpace(input.CreatedBy.ActorID) == "" {
+		return false
+	}
+	switch input.Scope {
+	case domain.AgentManifestScopeActor:
+		return input.TenantID != "" && input.OwnerActorID != ""
+	case domain.AgentManifestScopeTenant:
+		return input.TenantID != "" && input.OwnerActorID == ""
+	case domain.AgentManifestScopeSystem:
+		return input.TenantID == "" && input.OwnerActorID == ""
+	default:
+		return false
+	}
 }
 
 func validManifestRevisionPolicy(input domain.AgentManifest) bool {
@@ -71,7 +83,8 @@ func manifestRecord(input domain.AgentManifest) (models.AgentManifestRevisionRec
 		return models.AgentManifestRevisionRecord{}, err
 	}
 	return models.AgentManifestRevisionRecord{
-		ManifestID: strings.TrimSpace(input.ManifestID), Revision: input.Revision, TenantID: strings.TrimSpace(input.TenantID),
+		ManifestID: strings.TrimSpace(input.ManifestID), Revision: input.Revision, Scope: input.Scope,
+		TenantID: strings.TrimSpace(input.TenantID), OwnerActorID: strings.TrimSpace(input.OwnerActorID),
 		Name: strings.TrimSpace(input.Name), Description: strings.TrimSpace(input.Description), Instructions: strings.TrimSpace(input.Instructions),
 		Status: input.Status, ModelName: strings.TrimSpace(input.ModelName), ExecutionMode: strings.TrimSpace(input.ExecutionMode),
 		ToolKeysJSON: string(toolKeys), SkillRefsJSON: string(skillRefs), MaxChildRuns: input.MaxChildRuns, MaxDepth: input.MaxDepth,
@@ -87,7 +100,8 @@ func manifestDomain(row models.AgentManifestRevisionRecord) domain.AgentManifest
 	_ = json.Unmarshal([]byte(row.ToolKeysJSON), &toolKeys)
 	_ = json.Unmarshal([]byte(row.SkillRefsJSON), &skillRefs)
 	return domain.AgentManifest{
-		ManifestID: row.ManifestID, Revision: row.Revision, TenantID: row.TenantID, Name: row.Name, Description: row.Description,
+		ManifestID: row.ManifestID, Revision: row.Revision, Scope: row.Scope, TenantID: row.TenantID, OwnerActorID: row.OwnerActorID,
+		Name: row.Name, Description: row.Description,
 		Instructions: row.Instructions, Status: row.Status, ModelName: row.ModelName, ExecutionMode: row.ExecutionMode,
 		ToolKeys: toolKeys, SkillRefs: skillRefs, MaxChildRuns: row.MaxChildRuns, MaxDepth: row.MaxDepth,
 		MaxLLMCalls: row.MaxLLMCalls, MaxToolCalls: row.MaxToolCalls,
@@ -522,9 +536,16 @@ func (r *Repository) createManifestRevisionTx(ctx context.Context, input domain.
 	if err != nil || found {
 		return existing, found, err
 	}
-	latestRevision, err := latestManifestRevision(db, input.TenantID, input.ManifestID)
+	latest, found, err := latestManifestRevision(db, input.ManifestID)
 	if err != nil {
 		return domain.AgentManifest{}, false, err
+	}
+	latestRevision := 0
+	if found {
+		latestRevision = latest.Revision
+		if latest.Scope != input.Scope || latest.TenantID != input.TenantID || latest.OwnerActorID != input.OwnerActorID {
+			return domain.AgentManifest{}, false, agentruntime.ErrAgentManifestConflict
+		}
 	}
 	if expectedRevision != latestRevision {
 		return domain.AgentManifest{}, false, agentruntime.ErrAgentManifestConflict
@@ -549,7 +570,7 @@ func findManifestRevisionRequest(db *gorm.DB, input domain.AgentManifest) (domai
 		return domain.AgentManifest{}, false, nil
 	}
 	var row models.AgentManifestRevisionRecord
-	err := db.Where("tenant_id = ? AND request_id = ?", input.TenantID, requestID).Order("revision DESC").Take(&row).Error
+	err := db.Where("created_by_tenant_id = ? AND created_by_actor_id = ? AND request_id = ?", input.CreatedBy.TenantID, input.CreatedBy.ActorID, requestID).Order("revision DESC").Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return domain.AgentManifest{}, false, nil
 	}
@@ -562,27 +583,27 @@ func findManifestRevisionRequest(db *gorm.DB, input domain.AgentManifest) (domai
 	return manifestDomain(row), true, nil
 }
 
-func latestManifestRevision(db *gorm.DB, tenantID, manifestID string) (int, error) {
+func latestManifestRevision(db *gorm.DB, manifestID string) (models.AgentManifestRevisionRecord, bool, error) {
 	var row models.AgentManifestRevisionRecord
-	query := db.Where("tenant_id = ? AND manifest_id = ?", tenantID, manifestID).Order("revision DESC")
+	query := db.Where("manifest_id = ?", manifestID).Order("revision DESC")
 	if db.Name() == "postgres" {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
 	err := query.Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return 0, nil
+		return models.AgentManifestRevisionRecord{}, false, nil
 	}
 	if err != nil {
-		return 0, translateError(err)
+		return models.AgentManifestRevisionRecord{}, false, translateError(err)
 	}
-	return row.Revision, nil
+	return row, true, nil
 }
 
 func (r *Repository) GetAgentManifest(ctx context.Context, actor domain.ActorRef, ref domain.ResourceRef) (*domain.AgentManifest, error) {
 	if strings.TrimSpace(actor.TenantID) == "" || strings.TrimSpace(actor.ActorID) == "" || ref.Kind != domain.AgentManifestKind || strings.TrimSpace(ref.ID) == "" {
 		return nil, agentruntime.ErrInvalidInput
 	}
-	query := r.dbFor(ctx).Where("tenant_id = ? AND manifest_id = ?", actor.TenantID, strings.TrimSpace(ref.ID))
+	query := r.dbFor(ctx).Where("manifest_id = ?", strings.TrimSpace(ref.ID))
 	if strings.TrimSpace(ref.Revision) == "" {
 		query = query.Order("revision DESC")
 	} else {
@@ -597,6 +618,9 @@ func (r *Repository) GetAgentManifest(ctx context.Context, actor domain.ActorRef
 		return nil, translateError(err)
 	}
 	item := manifestDomain(row)
+	if !domain.AgentManifestVisibleTo(item, actor) {
+		return nil, agentruntime.ErrNotFound
+	}
 	return &item, nil
 }
 
@@ -606,12 +630,25 @@ func (r *Repository) ListAgentManifests(ctx context.Context, actor domain.ActorR
 	}
 	db := r.dbFor(ctx)
 	subquery := db.Model(&models.AgentManifestRevisionRecord{}).
-		Select("manifest_id, MAX(revision) AS revision").Where("tenant_id = ?", actor.TenantID).Group("manifest_id")
+		Select("manifest_id, MAX(revision) AS revision").Group("manifest_id")
 	query := db.Model(&models.AgentManifestRevisionRecord{}).
-		Joins("JOIN (?) AS latest ON latest.manifest_id = agent_manifest_revisions.manifest_id AND latest.revision = agent_manifest_revisions.revision", subquery).
-		Where("agent_manifest_revisions.tenant_id = ?", actor.TenantID)
+		Joins("JOIN (?) AS latest ON latest.manifest_id = agent_manifest_scope_revisions.manifest_id AND latest.revision = agent_manifest_scope_revisions.revision", subquery)
+	if !filter.Admin {
+		query = query.Where("agent_manifest_scope_revisions.scope = ? OR (agent_manifest_scope_revisions.scope = ? AND agent_manifest_scope_revisions.tenant_id = ?) OR (agent_manifest_scope_revisions.scope = ? AND agent_manifest_scope_revisions.tenant_id = ? AND agent_manifest_scope_revisions.owner_actor_id = ?)",
+			domain.AgentManifestScopeSystem, domain.AgentManifestScopeTenant, actor.TenantID,
+			domain.AgentManifestScopeActor, actor.TenantID, actor.ActorID)
+	}
 	if strings.TrimSpace(filter.Status) != "" {
-		query = query.Where("agent_manifest_revisions.status = ?", strings.TrimSpace(filter.Status))
+		query = query.Where("agent_manifest_scope_revisions.status = ?", strings.TrimSpace(filter.Status))
+	}
+	if strings.TrimSpace(filter.Scope) != "" {
+		query = query.Where("agent_manifest_scope_revisions.scope = ?", strings.TrimSpace(filter.Scope))
+	}
+	if strings.TrimSpace(filter.TenantID) != "" {
+		query = query.Where("agent_manifest_scope_revisions.tenant_id = ?", strings.TrimSpace(filter.TenantID))
+	}
+	if strings.TrimSpace(filter.OwnerActorID) != "" {
+		query = query.Where("agent_manifest_scope_revisions.owner_actor_id = ?", strings.TrimSpace(filter.OwnerActorID))
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -625,7 +662,7 @@ func (r *Repository) ListAgentManifests(ctx context.Context, actor domain.ActorR
 		offset = 0
 	}
 	var rows []models.AgentManifestRevisionRecord
-	if err := query.Order("agent_manifest_revisions.name ASC, agent_manifest_revisions.manifest_id ASC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
+	if err := query.Order("agent_manifest_scope_revisions.name ASC, agent_manifest_scope_revisions.manifest_id ASC").Limit(limit).Offset(offset).Find(&rows).Error; err != nil {
 		return domain.AgentManifestPage{}, translateError(err)
 	}
 	items := make([]domain.AgentManifest, 0, len(rows))

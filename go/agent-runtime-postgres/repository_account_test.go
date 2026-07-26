@@ -16,12 +16,16 @@ func TestEraseAccountDataWithoutRuns(t *testing.T) {
 	db := repo.db
 	ctx := context.Background()
 	target := models.AgentManifestRevisionRecord{
-		ManifestID: "agent-target", Revision: 1, TenantID: accountEraseTenant, Name: "Target", Status: valueActiveC374515E,
+		ManifestID: "agent-target", Revision: 1, Scope: "actor", TenantID: accountEraseTenant, OwnerActorID: "7", Name: "Target", Status: valueActiveC374515E,
 		CreatedByTenantID: accountEraseTenant, CreatedByActorID: "7", RequestID: "request-target", RequestFingerprint: "fingerprint-target",
 	}
 	other := models.AgentManifestRevisionRecord{
-		ManifestID: "agent-other", Revision: 1, TenantID: accountEraseTenant, Name: "Other", Status: valueActiveC374515E,
+		ManifestID: "agent-other", Revision: 1, Scope: "actor", TenantID: accountEraseTenant, OwnerActorID: "8", Name: "Other", Status: valueActiveC374515E,
 		CreatedByTenantID: accountEraseTenant, CreatedByActorID: "8", RequestID: "request-other", RequestFingerprint: "fingerprint-other",
+	}
+	shared := models.AgentManifestRevisionRecord{
+		ManifestID: "agent-shared", Revision: 1, Scope: "tenant", TenantID: accountEraseTenant, Name: "Shared", Status: valueActiveC374515E,
+		CreatedByTenantID: accountEraseTenant, CreatedByActorID: "7", RequestID: "request-shared", RequestFingerprint: "fingerprint-shared",
 	}
 	if err := db.Create(&target).Error; err != nil {
 		t.Fatal(err)
@@ -29,11 +33,16 @@ func TestEraseAccountDataWithoutRuns(t *testing.T) {
 	if err := db.Create(&other).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Create(&shared).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	if err := repo.EraseAccountData(ctx, 7); err != nil {
 		t.Fatalf("erase account without runs: %v", err)
 	}
-	assertAccountEraseCount(t, db, &models.AgentManifestRevisionRecord{}, "created_by_actor_id = ?", "7", 0)
+	assertAccountEraseCount(t, db, &models.AgentManifestRevisionRecord{}, "manifest_id = ?", target.ManifestID, 0)
+	assertAccountEraseCount(t, db, &models.AgentManifestRevisionRecord{}, "manifest_id = ?", shared.ManifestID, 1)
+	assertAccountEraseCount(t, db, &models.AgentManifestRevisionRecord{}, "created_by_actor_id = ?", "", 1)
 	assertAccountEraseCount(t, db, &models.AgentManifestRevisionRecord{}, "created_by_actor_id = ?", "8", 1)
 }
 

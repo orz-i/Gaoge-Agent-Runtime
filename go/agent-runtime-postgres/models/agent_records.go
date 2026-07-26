@@ -6,13 +6,15 @@ import "time"
 // Manifest revision. Updates append a new row rather than mutating history.
 type AgentManifestRevisionRecord struct {
 	BaseModel
-	ManifestID         string `gorm:"size:64;not null;uniqueIndex:uk_agent_manifest_revision,priority:2"`
-	Revision           int    `gorm:"not null;uniqueIndex:uk_agent_manifest_revision,priority:3"`
-	TenantID           string `gorm:"size:64;not null;uniqueIndex:uk_agent_manifest_revision,priority:1;index:idx_agent_manifest_tenant_status,priority:1"`
+	ManifestID         string `gorm:"size:64;not null;uniqueIndex:uk_agent_manifest_scope_revision,priority:1"`
+	Revision           int    `gorm:"not null;uniqueIndex:uk_agent_manifest_scope_revision,priority:2"`
+	Scope              string `gorm:"size:16;not null;index:idx_agent_manifest_scope_owner,priority:1"`
+	TenantID           string `gorm:"size:64;not null;default:'';index:idx_agent_manifest_scope_owner,priority:2"`
+	OwnerActorID       string `gorm:"size:64;not null;default:'';index:idx_agent_manifest_scope_owner,priority:3"`
 	Name               string `gorm:"size:128;not null;default:'';index:idx_agent_manifest_name"`
 	Description        string `gorm:"type:text;not null;default:''"`
 	Instructions       string `gorm:"type:text;not null;default:''"`
-	Status             string `gorm:"size:32;not null;default:'active';index:idx_agent_manifest_tenant_status,priority:2"`
+	Status             string `gorm:"size:32;not null;default:'active';index:idx_agent_manifest_scope_owner,priority:4"`
 	ModelName          string `gorm:"size:128;not null;default:''"`
 	ExecutionMode      string `gorm:"size:32;not null;default:''"`
 	ToolKeysJSON       string `gorm:"type:text;not null;default:'[]'"`
@@ -28,7 +30,7 @@ type AgentManifestRevisionRecord struct {
 	RevisionNote       string `gorm:"size:255;not null;default:''"`
 }
 
-func (AgentManifestRevisionRecord) TableName() string { return "agent_manifest_revisions" }
+func (AgentManifestRevisionRecord) TableName() string { return "agent_manifest_scope_revisions" }
 
 // RunHandoffRecord persists one replay-safe parent-to-child delegation.
 type RunHandoffRecord struct {

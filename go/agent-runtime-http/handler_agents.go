@@ -14,6 +14,7 @@ import (
 const (
 	agentFieldRevision           = "revision"
 	agentFieldStatus             = "status"
+	agentFieldTenantID           = "tenantID"
 	agentFieldRootRunID          = "rootRunID"
 	agentFieldInputProjectionRef = "inputProjectionRef"
 )
@@ -21,6 +22,9 @@ const (
 type AgentManifestRevisionRequest struct {
 	ManifestID       string   `json:"manifestID" binding:"omitempty,max=64"`
 	ExpectedRevision int      `json:"expectedRevision" binding:"min=0"`
+	Scope            string   `json:"scope" binding:"omitempty,oneof=actor tenant system"`
+	TenantID         string   `json:"tenantID" binding:"omitempty,max=64"`
+	OwnerActorID     string   `json:"ownerActorID" binding:"omitempty,max=64"`
 	Name             string   `json:"name" binding:"required,max=128"`
 	Description      string   `json:"description" binding:"omitempty,max=4000"`
 	Instructions     string   `json:"instructions" binding:"omitempty,max=20000"`
@@ -152,12 +156,19 @@ func (h *Handler) ListAgentManifests(c *gin.Context) {
 }
 
 func (h *Handler) ListAdminAgentManifests(c *gin.Context) {
-	h.listAgentManifests(c, strings.TrimSpace(c.Query("status")))
+	h.listAgentManifests(c, strings.TrimSpace(c.Query("status")), true)
 }
 
-func (h *Handler) listAgentManifests(c *gin.Context, status string) {
+func (h *Handler) listAgentManifests(c *gin.Context, status string, admin ...bool) {
 	limit, offset := pageParams(c, 50)
-	page, err := h.service.ListAgentManifests(c.Request.Context(), h.actorRef(c), model.AgentManifestFilter{Status: status, Limit: limit, Offset: offset})
+	filter := model.AgentManifestFilter{Status: status, Limit: limit, Offset: offset}
+	if len(admin) > 0 && admin[0] {
+		filter.Admin = true
+		filter.Scope = strings.TrimSpace(c.Query("scope"))
+		filter.TenantID = strings.TrimSpace(c.Query(agentFieldTenantID))
+		filter.OwnerActorID = strings.TrimSpace(c.Query("ownerActorID"))
+	}
+	page, err := h.service.ListAgentManifests(c.Request.Context(), h.actorRef(c), filter)
 	if err != nil {
 		writeAgentError(c, err)
 		return
@@ -211,6 +222,7 @@ func (h *Handler) ReviseAgentManifest(c *gin.Context) {
 func (h *Handler) createAgentManifestRevision(c *gin.Context, request AgentManifestRevisionRequest) {
 	item, reused, err := h.service.CreateAgentManifestRevision(c.Request.Context(), runtime.AgentManifestRevisionInput{
 		Actor: h.actorRef(c), ManifestID: request.ManifestID, ExpectedRevision: request.ExpectedRevision, Name: request.Name,
+		Scope: request.Scope, TenantID: request.TenantID, OwnerActorID: request.OwnerActorID,
 		Description: request.Description, Instructions: request.Instructions, Status: request.Status, ModelName: request.ModelName,
 		ExecutionMode: request.ExecutionMode, ToolKeys: request.ToolKeys, SkillRefs: skillRefsFromKeys(request.SkillKeys),
 		MaxChildRuns: request.MaxChildRuns, MaxDepth: request.MaxDepth, MaxLLMCalls: request.MaxLLMCalls, MaxToolCalls: request.MaxToolCalls,
@@ -290,6 +302,7 @@ func agentManifestResponse(item model.AgentManifest) map[string]interface{} {
 	}
 	return map[string]interface{}{
 		"manifestID": item.ManifestID, agentFieldRevision: item.Revision, "ref": resourceRefResponse(item.Ref()), "name": item.Name,
+		"scope": item.Scope, agentFieldTenantID: item.TenantID, "ownerActorID": item.OwnerActorID,
 		"description": item.Description, "instructions": item.Instructions, agentFieldStatus: item.Status, "modelName": item.ModelName,
 		"executionMode": item.ExecutionMode, "toolKeys": item.ToolKeys, "skillKeys": skillKeys, "maxChildRuns": item.MaxChildRuns,
 		"maxDepth": item.MaxDepth, "maxLLMCalls": item.MaxLLMCalls, "maxToolCalls": item.MaxToolCalls,

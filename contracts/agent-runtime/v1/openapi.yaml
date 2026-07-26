@@ -594,6 +594,9 @@ paths:
       operationId: listAdminAgentManifests
       parameters:
         - $ref: '#/components/parameters/AgentManifestStatus'
+        - $ref: '#/components/parameters/AgentManifestScope'
+        - $ref: '#/components/parameters/AgentManifestTenantID'
+        - $ref: '#/components/parameters/AgentManifestOwnerActorID'
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Offset'
       responses:
@@ -699,6 +702,21 @@ components:
       in: query
       required: false
       schema: {type: string, enum: [active, disabled]}
+    AgentManifestScope:
+      name: scope
+      in: query
+      required: false
+      schema: {type: string, enum: [actor, tenant, system]}
+    AgentManifestTenantID:
+      name: tenantID
+      in: query
+      required: false
+      schema: {type: string, maxLength: 64}
+    AgentManifestOwnerActorID:
+      name: ownerActorID
+      in: query
+      required: false
+      schema: {type: string, maxLength: 64}
     RunHandoffJoinStatus:
       name: status
       in: query
@@ -803,6 +821,9 @@ components:
       properties:
         manifestID: {type: string, maxLength: 64}
         expectedRevision: {type: integer, minimum: 0}
+        scope: {type: string, enum: [actor, tenant, system]}
+        tenantID: {type: string, maxLength: 64}
+        ownerActorID: {type: string, maxLength: 64}
         name: {type: string, minLength: 1, maxLength: 128}
         description: {type: string, maxLength: 4000}
         instructions: {type: string, maxLength: 20000}
@@ -819,12 +840,15 @@ components:
     AgentManifest:
       type: object
       additionalProperties: false
-      required: [manifestID, revision, ref, name, status, toolKeys, skillKeys, maxChildRuns, maxDepth, maxLLMCalls, maxToolCalls, createdAt, updatedAt]
+      required: [manifestID, revision, ref, scope, tenantID, ownerActorID, name, status, toolKeys, skillKeys, maxChildRuns, maxDepth, maxLLMCalls, maxToolCalls, createdAt, updatedAt]
       properties:
         manifestID: {type: string}
         revision: {type: integer, minimum: 1}
         ref:
           $ref: '#/components/schemas/ResourceRef'
+        scope: {type: string, enum: [actor, tenant, system]}
+        tenantID: {type: string}
+        ownerActorID: {type: string}
         name: {type: string}
         description: {type: string}
         instructions: {type: string}

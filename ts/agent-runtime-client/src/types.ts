@@ -194,10 +194,14 @@ export type ContinuationJobFilterDTO = {
 };
 
 export type AgentManifestStatus = "active" | "disabled";
+export type AgentManifestScope = "actor" | "tenant" | "system";
 export type AgentManifestDTO = {
   manifestID: string;
   revision: number;
   ref: ResourceRefDTO;
+  scope: AgentManifestScope;
+  tenantID: string;
+  ownerActorID: string;
   name: string;
   description: string;
   instructions: string;
@@ -218,6 +222,9 @@ export type AgentManifestPageDTO = { total: number; results: AgentManifestDTO[] 
 export type AgentManifestRevisionRequest = {
   manifestID?: string;
   expectedRevision?: number;
+  scope?: AgentManifestScope;
+  tenantID?: string;
+  ownerActorID?: string;
   name: string;
   description?: string;
   instructions?: string;
@@ -231,6 +238,14 @@ export type AgentManifestRevisionRequest = {
   maxLLMCalls?: number;
   maxToolCalls?: number;
   revisionNote?: string;
+};
+export type AgentManifestFilterDTO = {
+  status?: AgentManifestStatus;
+  scope?: AgentManifestScope;
+  tenantID?: string;
+  ownerActorID?: string;
+  limit?: number;
+  offset?: number;
 };
 export type RunHandoffStatus = "queued" | "completed" | "failed" | "cancelled";
 export type RunHandoffDTO = {

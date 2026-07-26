@@ -19,19 +19,21 @@ type openAPIOperationExpectation struct {
 }
 
 const (
-	openAPIThreadKind = "threadKind"
-	openAPIThreadID   = "threadID"
-	openAPILimit      = "limit"
-	openAPIQueueID    = "queueID"
-	openAPIOutputID   = "outputID"
-	openAPIVersion    = "version"
-	openAPIJobID      = "jobID"
-	openAPITenantID   = "tenantID"
-	openAPIManifestID = "manifestID"
-	openAPIOffset     = "offset"
-	openAPIRevision   = "revision"
-	openAPIStatus     = "status"
-	openAPIJoinID     = "joinID"
+	openAPIThreadKind    = "threadKind"
+	openAPIThreadID      = "threadID"
+	openAPILimit         = "limit"
+	openAPIQueueID       = "queueID"
+	openAPIOutputID      = "outputID"
+	openAPIVersion       = "version"
+	openAPIJobID         = "jobID"
+	openAPITenantID      = "tenantID"
+	openAPIManifestID    = "manifestID"
+	openAPIManifestScope = "scope"
+	openAPIOwnerActorID  = "ownerActorID"
+	openAPIOffset        = "offset"
+	openAPIRevision      = "revision"
+	openAPIStatus        = "status"
+	openAPIJoinID        = "joinID"
 )
 
 func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
@@ -78,7 +80,7 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 		"GET /agent-manifests/{manifestID}":                               {status: "200", parameters: []string{openAPIManifestID, openAPIRevision}},
 		"GET /admin/agentruntime/continuations":                           {status: "200", parameters: []string{openAPITenantID, "actorID", openAPIStatus, valueRunID1DA2F0B6, openAPIJobID, "source", openAPILimit, openAPIOffset}},
 		"POST /admin/agentruntime/continuations/{jobID}/requeue":          {status: "200", requestBody: "RequeueContinuationRequest", parameters: []string{openAPIJobID}},
-		"GET /admin/agentruntime/agent-manifests":                         {status: "200", parameters: []string{openAPIStatus, openAPILimit, openAPIOffset}},
+		"GET /admin/agentruntime/agent-manifests":                         {status: "200", parameters: []string{openAPIStatus, openAPIManifestScope, openAPITenantID, openAPIOwnerActorID, openAPILimit, openAPIOffset}},
 		"POST /admin/agentruntime/agent-manifests":                        {status: "201", requestBody: "AgentManifestRevisionRequest"},
 		"POST /admin/agentruntime/agent-manifests/{manifestID}/revisions": {status: "201", requestBody: "AgentManifestRevisionRequest", parameters: []string{openAPIManifestID}},
 	}
@@ -112,6 +114,10 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	assertOpenAPISchemaRequired(t, schemas, "CreateRunHandoffJoinRequest", "handoffIDs")
 	assertOpenAPISchemaRequired(t, schemas, "RunTaskTree", "joins")
 	assertOpenAPISchemaRequired(t, schemas, "AgentManifestRevisionRequest", "name")
+	assertOpenAPISchemaOptional(t, schemas, "AgentManifestRevisionRequest", openAPIManifestScope)
+	assertOpenAPISchemaRequired(t, schemas, "AgentManifest", openAPIManifestScope)
+	assertOpenAPISchemaRequired(t, schemas, "AgentManifest", openAPITenantID)
+	assertOpenAPISchemaRequired(t, schemas, "AgentManifest", openAPIOwnerActorID)
 	assertOpenAPISchemaReferencesExist(t, document, schemas)
 }
 

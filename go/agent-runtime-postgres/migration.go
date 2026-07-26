@@ -19,6 +19,7 @@ var legacyRuntimeTables = []string{
 	"text_run_interactions", "text_run_checkpoints", "output_identities", "output_refs",
 	"text_run_workbench_projections", "text_run_phase_projections", "evidence_selections",
 	"text_run_queue_items",
+	"agent_manifest_revisions",
 }
 
 func Models() []interface{} {

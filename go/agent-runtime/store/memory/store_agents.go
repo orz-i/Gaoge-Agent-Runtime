@@ -11,8 +11,24 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
-func manifestKey(tenantID, manifestID string) string {
-	return strings.TrimSpace(tenantID) + ":" + strings.TrimSpace(manifestID)
+func manifestKey(manifestID string) string {
+	return strings.TrimSpace(manifestID)
+}
+
+func manifestMatchesFilter(item domain.AgentManifest, actor domain.ActorRef, filter domain.AgentManifestFilter) bool {
+	if !filter.Admin && !domain.AgentManifestVisibleTo(item, actor) {
+		return false
+	}
+	if filter.Status != "" && item.Status != filter.Status {
+		return false
+	}
+	if filter.Scope != "" && item.Scope != filter.Scope {
+		return false
+	}
+	if filter.TenantID != "" && item.TenantID != filter.TenantID {
+		return false
+	}
+	return filter.OwnerActorID == "" || item.OwnerActorID == filter.OwnerActorID
 }
 
 func (s *Store) ExpireNextRunHandoffJoin(_ context.Context, now time.Time) (*domain.RunHandoffJoin, error) {
@@ -59,8 +75,20 @@ func validManifest(item *domain.AgentManifest) bool {
 }
 
 func validManifestIdentity(item domain.AgentManifest) bool {
-	return strings.TrimSpace(item.ManifestID) != "" && strings.TrimSpace(item.TenantID) != "" && strings.TrimSpace(item.Name) != "" &&
-		item.CreatedBy.TenantID == item.TenantID && strings.TrimSpace(item.CreatedBy.ActorID) != ""
+	if strings.TrimSpace(item.ManifestID) == "" || strings.TrimSpace(item.Name) == "" ||
+		strings.TrimSpace(item.CreatedBy.TenantID) == "" || strings.TrimSpace(item.CreatedBy.ActorID) == "" {
+		return false
+	}
+	switch item.Scope {
+	case domain.AgentManifestScopeActor:
+		return item.TenantID != "" && item.OwnerActorID != ""
+	case domain.AgentManifestScopeTenant:
+		return item.TenantID != "" && item.OwnerActorID == ""
+	case domain.AgentManifestScopeSystem:
+		return item.TenantID == "" && item.OwnerActorID == ""
+	default:
+		return false
+	}
 }
 
 func validManifestPolicy(item domain.AgentManifest) bool {
@@ -94,7 +122,7 @@ func (s *Store) CreateAgentManifestRevision(_ context.Context, input *domain.Age
 	var result domain.AgentManifest
 	var reused bool
 	err := s.write(func(st *state) error {
-		key := manifestKey(input.TenantID, input.ManifestID)
+		key := manifestKey(input.ManifestID)
 		revisions := st.Manifests[key]
 		requestID := strings.TrimSpace(input.RequestID)
 		existing, found, findErr := findManifestRequest(revisions, requestID, strings.TrimSpace(input.RequestFingerprint))
@@ -107,14 +135,20 @@ func (s *Store) CreateAgentManifestRevision(_ context.Context, input *domain.Age
 		}
 		latestRevision := 0
 		if len(revisions) > 0 {
-			latestRevision = revisions[len(revisions)-1].Revision
+			latest := revisions[len(revisions)-1]
+			latestRevision = latest.Revision
+			if latest.Scope != input.Scope || latest.TenantID != input.TenantID || latest.OwnerActorID != input.OwnerActorID {
+				return agentruntime.ErrAgentManifestConflict
+			}
 		}
 		if expectedRevision != latestRevision {
 			return agentruntime.ErrAgentManifestConflict
 		}
 		item := clone(*input)
 		item.ManifestID = strings.TrimSpace(item.ManifestID)
+		item.Scope = strings.TrimSpace(item.Scope)
 		item.TenantID = strings.TrimSpace(item.TenantID)
+		item.OwnerActorID = strings.TrimSpace(item.OwnerActorID)
 		item.Name = strings.TrimSpace(item.Name)
 		item.Description = strings.TrimSpace(item.Description)
 		item.Instructions = strings.TrimSpace(item.Instructions)
@@ -443,13 +477,16 @@ func (s *Store) GetAgentManifest(_ context.Context, actor domain.ActorRef, ref d
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	revisions := s.state.Manifests[manifestKey(actor.TenantID, ref.ID)]
+	revisions := s.state.Manifests[manifestKey(ref.ID)]
 	if len(revisions) == 0 {
 		return nil, agentruntime.ErrNotFound
 	}
 	item, err := selectManifestRevision(revisions, ref.Revision)
 	if err != nil {
 		return nil, err
+	}
+	if !domain.AgentManifestVisibleTo(item, actor) {
+		return nil, agentruntime.ErrNotFound
 	}
 	result := clone(item)
 	return &result, nil
@@ -481,7 +518,7 @@ func (s *Store) ListAgentManifests(_ context.Context, actor domain.ActorRef, fil
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	items := collectLatestManifests(s.state.Manifests, actor.TenantID, filter.Status)
+	items := collectLatestManifests(s.state.Manifests, actor, filter)
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].Name == items[j].Name {
 			return items[i].ManifestID < items[j].ManifestID
@@ -491,14 +528,14 @@ func (s *Store) ListAgentManifests(_ context.Context, actor domain.ActorRef, fil
 	return paginateManifests(items, filter), nil
 }
 
-func collectLatestManifests(all map[string][]domain.AgentManifest, tenantID, status string) []domain.AgentManifest {
+func collectLatestManifests(all map[string][]domain.AgentManifest, actor domain.ActorRef, filter domain.AgentManifestFilter) []domain.AgentManifest {
 	items := make([]domain.AgentManifest, 0)
 	for _, revisions := range all {
 		if len(revisions) == 0 {
 			continue
 		}
 		item := revisions[len(revisions)-1]
-		if item.TenantID == tenantID && (status == "" || item.Status == status) {
+		if manifestMatchesFilter(item, actor, filter) {
 			items = append(items, clone(item))
 		}
 	}

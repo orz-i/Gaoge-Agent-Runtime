@@ -39,6 +39,31 @@ type agentRuntimeTestStore struct {
 	batchRunCalls     [][]string
 }
 
+func TestNormalizeAgentManifestOwnership(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	tests := []struct {
+		name     string
+		input    AgentManifestRevisionInput
+		scope    string
+		tenantID string
+		ownerID  string
+		valid    bool
+	}{
+		{name: "actor defaults", input: AgentManifestRevisionInput{Actor: actor}, scope: model.AgentManifestScopeActor, tenantID: actor.TenantID, ownerID: actor.ActorID, valid: true},
+		{name: "tenant target", input: AgentManifestRevisionInput{Actor: actor, Scope: model.AgentManifestScopeTenant, TenantID: "tenant-shared"}, scope: model.AgentManifestScopeTenant, tenantID: "tenant-shared", valid: true},
+		{name: "system clears owner", input: AgentManifestRevisionInput{Actor: actor, Scope: model.AgentManifestScopeSystem, TenantID: "ignored", OwnerActorID: "ignored"}, scope: model.AgentManifestScopeSystem, valid: true},
+		{name: "invalid scope", input: AgentManifestRevisionInput{Actor: actor, Scope: "workspace"}, valid: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			scope, tenantID, ownerID, valid := normalizeAgentManifestOwnership(test.input)
+			if scope != test.scope || tenantID != test.tenantID || ownerID != test.ownerID || valid != test.valid {
+				t.Fatalf("ownership = %q,%q,%q,%t", scope, tenantID, ownerID, valid)
+			}
+		})
+	}
+}
+
 func TestResolveTextRunAgentManifestFreezesRootRevision(t *testing.T) {
 	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
 	manifest := model.AgentManifest{
