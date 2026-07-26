@@ -496,18 +496,34 @@ func (s *Engine) resolveDelegationSource(ctx context.Context, input DelegateText
 	return parent, manifest, nil
 }
 
-func (s *Engine) validateDelegationLimits(ctx context.Context, actor model.ActorRef, parent model.Run, manifest model.AgentManifest, depth int) error {
-	if depth > manifest.MaxDepth || depth > hardAgentMaxDepth {
+func (s *Engine) validateDelegationLimits(ctx context.Context, actor model.ActorRef, parent model.Run, _ model.AgentManifest, depth int) error {
+	maxChildRuns, maxDepth, err := parentDelegationLimits(parent)
+	if err != nil {
+		return err
+	}
+	if depth > maxDepth || depth > hardAgentMaxDepth {
 		return ErrRunHandoffDepth
 	}
 	page, err := s.repo.ListRunHandoffs(ctx, actor, model.RunHandoffFilter{ParentRunID: parent.RunID, Limit: hardAgentMaxChildRuns + 1})
 	if err != nil {
 		return err
 	}
-	if page.Total >= int64(manifest.MaxChildRuns) || page.Total >= hardAgentMaxChildRuns {
+	if page.Total >= int64(maxChildRuns) || page.Total >= hardAgentMaxChildRuns {
 		return ErrRunHandoffLimit
 	}
 	return nil
+}
+
+func parentDelegationLimits(parent model.Run) (int, int, error) {
+	effective, err := effectiveTextRunConfigFromRun(parent)
+	if err != nil {
+		return 0, 0, err
+	}
+	if effective.AgentManifest == nil {
+		return defaultAgentMaxChildRuns, defaultAgentMaxDepth, nil
+	}
+	return boundedTextRunConfig(effective.AgentManifest.MaxChildRuns, defaultAgentMaxChildRuns, hardAgentMaxChildRuns),
+		boundedTextRunConfig(effective.AgentManifest.MaxDepth, defaultAgentMaxDepth, hardAgentMaxDepth), nil
 }
 
 func (s *Engine) reusedDelegationResult(ctx context.Context, handoff *model.RunHandoff, fingerprint string) (*DelegateTextRunResult, error) {

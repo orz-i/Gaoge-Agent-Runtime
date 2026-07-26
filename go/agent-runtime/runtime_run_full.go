@@ -129,6 +129,11 @@ type StartTextRunInput struct {
 	AgentManifest                                 model.ResourceRef
 	FrozenWorkspace                               *WorkspaceSnapshot
 	Delegation                                    *RunDelegationStart
+	DeferInitialContinuation                      bool
+}
+
+type textRunStartReservation struct {
+	value *UsageBalanceReservation
 }
 
 func validFrozenWorkspace(workspace WorkspaceSnapshot) bool {
@@ -401,43 +406,44 @@ type effectiveRunToolPolicy struct {
 }
 
 type effectiveTextRunConfig struct {
-	SemanticVersion         int                       `json:"semanticVersion"`
-	Strategy                string                    `json:"strategy"`
-	StrategyReason          string                    `json:"strategyReason"`
-	RequestedMode           string                    `json:"requestedMode"`
-	DefaultMode             string                    `json:"defaultMode"`
-	AllowedModes            []string                  `json:"allowedModes"`
-	Environment             model.ResourceRef         `json:"environment"`
-	EnvironmentProfileName  string                    `json:"environmentProfileName"`
-	Instructions            string                    `json:"instructions"`
-	PlatformModelName       string                    `json:"platformModelName"`
-	MemoryEnabled           bool                      `json:"memoryEnabled"`
-	SkillRefs               []model.ResourceRef       `json:"skillRefs"`
-	ToolKeys                []string                  `json:"toolKeys"`
-	UnavailableSkillRefs    []model.ResourceRef       `json:"unavailableSkillRefs"`
-	UnavailableToolKeys     []string                  `json:"unavailableToolKeys"`
-	AllowedModelSnapshot    []EnvironmentModelPolicy  `json:"allowedModelSnapshot"`
-	MemoryPolicy            string                    `json:"memoryPolicy"`
-	FileIDs                 []string                  `json:"fileIDs"`
-	Options                 map[string]interface{}    `json:"options,omitempty"`
-	HTMLVisualPromptEnabled bool                      `json:"htmlVisualPrompt,omitempty"`
-	HTMLVisualColorMode     string                    `json:"htmlVisualColorMode,omitempty"`
-	MaxLLMCalls             int                       `json:"maxLLMCalls"`
-	MaxToolCalls            int                       `json:"maxToolCalls"`
-	ToolRetryCount          int                       `json:"toolRetryCount"`
-	ToolConcurrency         int                       `json:"toolConcurrency"`
-	PlanApprovalMode        string                    `json:"planApprovalMode,omitempty"`
-	ToolPolicies            []effectiveRunToolPolicy  `json:"toolPolicies,omitempty"`
-	PlanMaxSteps            int                       `json:"planMaxSteps,omitempty"`
-	PlanMaxRevisions        int                       `json:"planMaxRevisions,omitempty"`
-	InteractionTTLHours     int                       `json:"interactionTTLHours,omitempty"`
-	OutputMaxPerRun         int                       `json:"outputMaxPerRun,omitempty"`
-	OutputIDs               []string                  `json:"outputIDs,omitempty"`
-	OutputRefs              []effectiveRunOutputRef   `json:"outputRefs,omitempty"`
-	EvidenceIDs             []string                  `json:"evidenceIDs,omitempty"`
-	EvidenceRefs            []effectiveRunEvidenceRef `json:"evidenceRefs,omitempty"`
-	Workspace               *WorkspaceSnapshot        `json:"workspace,omitempty"`
-	AgentManifest           *effectiveAgentManifest   `json:"agentManifest,omitempty"`
+	SemanticVersion             int                       `json:"semanticVersion"`
+	Strategy                    string                    `json:"strategy"`
+	StrategyReason              string                    `json:"strategyReason"`
+	RequestedMode               string                    `json:"requestedMode"`
+	DefaultMode                 string                    `json:"defaultMode"`
+	AllowedModes                []string                  `json:"allowedModes"`
+	Environment                 model.ResourceRef         `json:"environment"`
+	EnvironmentProfileName      string                    `json:"environmentProfileName"`
+	Instructions                string                    `json:"instructions"`
+	PlatformModelName           string                    `json:"platformModelName"`
+	MemoryEnabled               bool                      `json:"memoryEnabled"`
+	SkillRefs                   []model.ResourceRef       `json:"skillRefs"`
+	ToolKeys                    []string                  `json:"toolKeys"`
+	UnavailableSkillRefs        []model.ResourceRef       `json:"unavailableSkillRefs"`
+	UnavailableToolKeys         []string                  `json:"unavailableToolKeys"`
+	AllowedModelSnapshot        []EnvironmentModelPolicy  `json:"allowedModelSnapshot"`
+	MemoryPolicy                string                    `json:"memoryPolicy"`
+	FileIDs                     []string                  `json:"fileIDs"`
+	Options                     map[string]interface{}    `json:"options,omitempty"`
+	HTMLVisualPromptEnabled     bool                      `json:"htmlVisualPrompt,omitempty"`
+	HTMLVisualColorMode         string                    `json:"htmlVisualColorMode,omitempty"`
+	MaxLLMCalls                 int                       `json:"maxLLMCalls"`
+	MaxToolCalls                int                       `json:"maxToolCalls"`
+	ToolRetryCount              int                       `json:"toolRetryCount"`
+	ToolConcurrency             int                       `json:"toolConcurrency"`
+	PlanApprovalMode            string                    `json:"planApprovalMode,omitempty"`
+	ToolPolicies                []effectiveRunToolPolicy  `json:"toolPolicies,omitempty"`
+	PlanMaxSteps                int                       `json:"planMaxSteps,omitempty"`
+	PlanMaxRevisions            int                       `json:"planMaxRevisions,omitempty"`
+	InteractionTTLHours         int                       `json:"interactionTTLHours,omitempty"`
+	OutputMaxPerRun             int                       `json:"outputMaxPerRun,omitempty"`
+	OutputIDs                   []string                  `json:"outputIDs,omitempty"`
+	OutputRefs                  []effectiveRunOutputRef   `json:"outputRefs,omitempty"`
+	EvidenceIDs                 []string                  `json:"evidenceIDs,omitempty"`
+	EvidenceRefs                []effectiveRunEvidenceRef `json:"evidenceRefs,omitempty"`
+	Workspace                   *WorkspaceSnapshot        `json:"workspace,omitempty"`
+	AgentManifest               *effectiveAgentManifest   `json:"agentManifest,omitempty"`
+	InitialContinuationDeferred bool                      `json:"initialContinuationDeferred,omitempty"`
 }
 
 type effectiveAgentManifest struct {
@@ -522,15 +528,20 @@ func (s *Engine) TextRunPolicy() TextRunPolicy {
 }
 
 func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*TextRunStartResult, error) {
+	input.DeferInitialContinuation = false
+	return s.startTextRun(ctx, input)
+}
+
+func (s *Engine) startTextRun(ctx context.Context, input StartTextRunInput) (*TextRunStartResult, error) {
 	goal := strings.TrimSpace(input.Goal)
 	if !validTextRunStartRequest(input, goal) {
 		return nil, ErrInvalidInput
 	}
-	var err error
-	input, _, err = s.resolveTextRunAgentManifest(ctx, input)
+	resolved, _, err := s.resolveTextRunAgentManifest(ctx, input)
 	if err != nil {
 		return nil, err
 	}
+	input = resolved
 	runID := EnsureRunID(input.ClientRunID)
 	fingerprint := textRunRequestFingerprint(input, goal)
 	delegated := input.Delegation != nil
@@ -541,11 +552,15 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 	if exists {
 		return &existingResult, nil
 	}
+	return s.createTextRunStart(ctx, input, goal, runID, fingerprint, delegated)
+}
+
+func (s *Engine) createTextRunStart(ctx context.Context, input StartTextRunInput, goal, runID, fingerprint string, delegated bool) (*TextRunStartResult, error) {
 	prepared, err := s.prepareTextRunConfiguration(ctx, input, goal)
 	if err != nil {
 		return nil, err
 	}
-	prepared.InputEvaluation, err = s.evaluateRuntimeBoundary(ctx, EvaluationRequest{
+	evaluation, err := s.evaluateRuntimeBoundary(ctx, EvaluationRequest{
 		Stage:       EvaluationStageRunInput,
 		Actor:       input.Actor,
 		Thread:      input.Thread,
@@ -560,15 +575,21 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 	if err != nil {
 		return nil, err
 	}
+	prepared.InputEvaluation = evaluation
+	return s.persistTextRunStart(ctx, input, goal, runID, fingerprint, delegated, prepared)
+}
+
+func (s *Engine) persistTextRunStart(ctx context.Context, input StartTextRunInput, goal, runID, fingerprint string, delegated bool, prepared textRunPreparedConfiguration) (*TextRunStartResult, error) {
 	profile, modelName, strategy, effective, snapshot := prepared.Profile, prepared.ModelName, prepared.Effective.Strategy, prepared.Effective, prepared.Snapshot
-	if err = s.EnsureRunBillingAccess(ctx, RunBillingInput{Actor: input.Actor, Thread: input.Thread, PlatformModelName: modelName, ThreadModel: input.ThreadModel, ClientRunID: runID}); err != nil {
+	if err := s.EnsureRunBillingAccess(ctx, RunBillingInput{Actor: input.Actor, Thread: input.Thread, PlatformModelName: modelName, ThreadModel: input.ThreadModel, ClientRunID: runID}); err != nil {
 		return nil, err
 	}
 	startSegmentKey := runID + ":start"
-	reservation, _, err := s.ReserveRunUsageBalance(ctx, RunBillingInput{Actor: input.Actor, Thread: input.Thread, PlatformModelName: modelName, ThreadModel: input.ThreadModel, ClientRunID: startSegmentKey})
+	reserved, err := s.reserveTextRunStart(ctx, input, modelName, startSegmentKey)
 	if err != nil {
 		return nil, err
 	}
+	reservation := reserved.value
 	now := time.Now()
 	stepID := "step_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	run := model.Run{RunID: runID, RequestID: strings.TrimSpace(input.RequestID), Actor: input.Actor, Thread: input.Thread, Environment: input.Environment, RootRunID: runID, Goal: goal, RunConfigSnapshotJSON: string(snapshot), RequestFingerprint: fingerprint, CurrentStepID: stepID, StartedBy: valueUserDD885A59, RequestedModelName: modelName, PlatformModelName: modelName, Provider: input.ThreadProvider, Status: model.RunStatusQueued, StartedAt: now}
@@ -602,22 +623,50 @@ func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*Te
 		if prepareErr != nil {
 			return prepareErr
 		}
-		prepareErr = s.createContinuationJob(txCtx, run, *checkpoint, "text_run_start", reservation)
-		return prepareErr
+		return s.createTextRunStartContinuation(txCtx, input, run, *checkpoint, reservation)
 	})
 	if err != nil {
-		_ = s.ReleaseRunUsageReservation(ctx, reservation, "文本运行创建失败退回预扣")
-		if errors.Is(err, ErrDuplicate) {
-			return s.recoverDuplicateTextRunStart(ctx, input.Actor, input.Thread, runID, fingerprint, err, delegated)
-		}
-		return nil, err
+		return s.resolveTextRunStartPersistenceError(ctx, input, runID, fingerprint, delegated, reservation, err)
 	}
-	s.publishRunEvents(run.RunID, savedEvents)
+	s.publishTextRunStartEvents(input, run, savedEvents, parentEvents)
+	s.wakeTextRunStartContinuation(input)
+	return &TextRunStartResult{Run: run, Step: step, Projection: initial.Projection}, nil
+}
+
+func (s *Engine) reserveTextRunStart(ctx context.Context, input StartTextRunInput, modelName, segmentKey string) (textRunStartReservation, error) {
+	if input.DeferInitialContinuation {
+		return textRunStartReservation{}, nil
+	}
+	reservation, _, err := s.ReserveRunUsageBalance(ctx, RunBillingInput{Actor: input.Actor, Thread: input.Thread, PlatformModelName: modelName, ThreadModel: input.ThreadModel, ClientRunID: segmentKey})
+	return textRunStartReservation{value: reservation}, err
+}
+
+func (s *Engine) resolveTextRunStartPersistenceError(ctx context.Context, input StartTextRunInput, runID, fingerprint string, delegated bool, reservation *UsageBalanceReservation, cause error) (*TextRunStartResult, error) {
+	_ = s.ReleaseRunUsageReservation(ctx, reservation, "文本运行创建失败退回预扣")
+	if errors.Is(cause, ErrDuplicate) {
+		return s.recoverDuplicateTextRunStart(ctx, input.Actor, input.Thread, runID, fingerprint, cause, delegated)
+	}
+	return nil, cause
+}
+
+func (s *Engine) publishTextRunStartEvents(input StartTextRunInput, run model.Run, events, parentEvents []model.Event) {
+	s.publishRunEvents(run.RunID, events)
 	if input.Delegation != nil {
 		s.publishRunEvents(input.Delegation.Handoff.ParentRunID, parentEvents)
 	}
-	s.wakeContinuationJobs()
-	return &TextRunStartResult{Run: run, Step: step, Projection: initial.Projection}, nil
+}
+
+func (s *Engine) createTextRunStartContinuation(ctx context.Context, input StartTextRunInput, run model.Run, checkpoint model.Checkpoint, reservation *UsageBalanceReservation) error {
+	if input.DeferInitialContinuation {
+		return nil
+	}
+	return s.createContinuationJob(ctx, run, checkpoint, "text_run_start", reservation)
+}
+
+func (s *Engine) wakeTextRunStartContinuation(input StartTextRunInput) {
+	if !input.DeferInitialContinuation {
+		s.wakeContinuationJobs()
+	}
 }
 
 func validTextRunStartInput(goal string) bool {
@@ -724,6 +773,7 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 		PlanMaxSteps: boundedTextRunConfig(cfg.Planner.MaxSteps, 12, 50), PlanMaxRevisions: boundedTextRunConfig(cfg.Planner.MaxRevisions, 5, 20),
 		InteractionTTLHours: boundedTextRunConfig(cfg.Execution.InteractionTTLHours, 168, 24*365), OutputMaxPerRun: boundedTextRunConfig(cfg.Outputs.MaxPerRun, 50, 500),
 		OutputIDs: uniqueRuntimeStrings(input.OutputIDs), OutputRefs: resources.OutputRefs, EvidenceIDs: resources.EvidenceIDs, EvidenceRefs: resources.EvidenceRefs, Workspace: resources.Workspace, AgentManifest: agentSnapshot,
+		InitialContinuationDeferred: input.DeferInitialContinuation,
 	}
 	snapshot, err := json.Marshal(effective)
 	if err != nil {
@@ -1440,28 +1490,29 @@ func validTextRunEvidenceRef(item model.Evidence) bool {
 }
 
 type textRunFingerprintInput struct {
-	Actor               model.ActorRef
-	Thread              model.ThreadRef
-	Goal                string
-	Environment         model.ResourceRef
-	Model               string
-	ExecutionMode       string
-	Options             map[string]interface{}
-	FileIDs             []string
-	OutputIDs           []string
-	EvidenceIDs         []string
-	ToolKeys            *[]string
-	SkillRefs           *[]model.ResourceRef
-	ParentProjection    *model.ProjectionRef
-	SourceProjection    *model.ProjectionRef
-	BranchReason        string
-	HTMLVisualPrompt    bool
-	HTMLVisualColorMode string
-	Workspace           *WorkspaceRequest
-	AgentManifest       model.ResourceRef
-	FrozenWorkspaceID   string
-	FrozenWorkspaceHash string
-	Delegation          *runDelegationFingerprint
+	Actor                       model.ActorRef
+	Thread                      model.ThreadRef
+	Goal                        string
+	Environment                 model.ResourceRef
+	Model                       string
+	ExecutionMode               string
+	Options                     map[string]interface{}
+	FileIDs                     []string
+	OutputIDs                   []string
+	EvidenceIDs                 []string
+	ToolKeys                    *[]string
+	SkillRefs                   *[]model.ResourceRef
+	ParentProjection            *model.ProjectionRef
+	SourceProjection            *model.ProjectionRef
+	BranchReason                string
+	HTMLVisualPrompt            bool
+	HTMLVisualColorMode         string
+	Workspace                   *WorkspaceRequest
+	AgentManifest               model.ResourceRef
+	FrozenWorkspaceID           string
+	FrozenWorkspaceHash         string
+	Delegation                  *runDelegationFingerprint
+	InitialContinuationDeferred bool
 }
 
 type runDelegationFingerprint struct {
@@ -1495,7 +1546,7 @@ func textRunRequestFingerprint(input StartTextRunInput, goal string) string {
 	sort.Strings(outputs)
 	evidence := uniqueRuntimeStrings(input.EvidenceIDs)
 	sort.Strings(evidence)
-	payload := textRunFingerprintInput{Actor: input.Actor, Thread: input.Thread, Goal: goal, Environment: input.Environment, Model: strings.TrimSpace(input.PlatformModelName), ExecutionMode: strings.TrimSpace(input.ExecutionMode), Options: input.Options, FileIDs: files, OutputIDs: outputs, EvidenceIDs: evidence, ToolKeys: copyKeys(input.ToolKeys), SkillRefs: copyRefs(input.SkillRefs), ParentProjection: input.ParentProjection, SourceProjection: input.SourceProjection, BranchReason: strings.TrimSpace(input.BranchReason), HTMLVisualPrompt: input.HTMLVisualPromptEnabled, HTMLVisualColorMode: strings.TrimSpace(input.HTMLVisualColorMode), Workspace: input.Workspace, AgentManifest: input.AgentManifest, Delegation: delegationFingerprint(input.Delegation)}
+	payload := textRunFingerprintInput{Actor: input.Actor, Thread: input.Thread, Goal: goal, Environment: input.Environment, Model: strings.TrimSpace(input.PlatformModelName), ExecutionMode: strings.TrimSpace(input.ExecutionMode), Options: input.Options, FileIDs: files, OutputIDs: outputs, EvidenceIDs: evidence, ToolKeys: copyKeys(input.ToolKeys), SkillRefs: copyRefs(input.SkillRefs), ParentProjection: input.ParentProjection, SourceProjection: input.SourceProjection, BranchReason: strings.TrimSpace(input.BranchReason), HTMLVisualPrompt: input.HTMLVisualPromptEnabled, HTMLVisualColorMode: strings.TrimSpace(input.HTMLVisualColorMode), Workspace: input.Workspace, AgentManifest: input.AgentManifest, Delegation: delegationFingerprint(input.Delegation), InitialContinuationDeferred: input.DeferInitialContinuation}
 	if input.FrozenWorkspace != nil {
 		payload.FrozenWorkspaceID = strings.TrimSpace(input.FrozenWorkspace.SnapshotID)
 		payload.FrozenWorkspaceHash = strings.TrimSpace(input.FrozenWorkspace.StateHash)

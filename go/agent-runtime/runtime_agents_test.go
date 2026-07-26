@@ -362,7 +362,13 @@ func TestTextRunAgentManifestFreezesDelegatedInstructions(t *testing.T) {
 
 func TestValidateDelegationLimitsFailsBeforeChildExecution(t *testing.T) {
 	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
-	parent := model.Run{RunID: testAgentParentRunID, Actor: actor, Status: model.RunStatusRunning}
+	parent := model.Run{
+		RunID: testAgentParentRunID, Actor: actor, Status: model.RunStatusRunning,
+		RunConfigSnapshotJSON: mustRunJSON(effectiveTextRunConfig{
+			SemanticVersion: RuntimeSnapshotVersion,
+			AgentManifest:   &effectiveAgentManifest{MaxChildRuns: 1, MaxDepth: 1},
+		}),
+	}
 	manifest := model.AgentManifest{MaxChildRuns: 1, MaxDepth: 1}
 	store := &agentRuntimeTestStore{runs: map[string]model.Run{parent.RunID: parent}, handoffs: []model.RunHandoff{{Actor: actor, ParentRunID: parent.RunID}}}
 	engine := &Engine{repo: store}

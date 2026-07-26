@@ -30,6 +30,17 @@ type runHandoffJoinWaitResult struct {
 	continuationCreated bool
 }
 
+func runCanEnterHandoffJoinWait(parent model.Run) bool {
+	if parent.Status == model.RunStatusRunning {
+		return true
+	}
+	if parent.Status != model.RunStatusQueued {
+		return false
+	}
+	effective, err := effectiveTextRunConfigFromRun(parent)
+	return err == nil && effective.InitialContinuationDeferred
+}
+
 type expiredRunHandoffJoinResult struct {
 	join   *model.RunHandoffJoin
 	parent *model.Run
@@ -238,7 +249,7 @@ func (s *Engine) reusedRunHandoffJoinWait(ctx context.Context, parent model.Run,
 }
 
 func (s *Engine) createNewRunHandoffJoinWaitAtCommit(ctx context.Context, parent model.Run, input CreateRunHandoffJoinInput) (runHandoffJoinWaitResult, error) {
-	if parent.Status != model.RunStatusRunning || strings.TrimSpace(parent.CurrentStepID) == "" {
+	if !runCanEnterHandoffJoinWait(parent) || strings.TrimSpace(parent.CurrentStepID) == "" {
 		return runHandoffJoinWaitResult{}, ErrRunHandoffParentBlocked
 	}
 	join, checkpoint, events, err := buildRunHandoffJoinWait(parent, input)
