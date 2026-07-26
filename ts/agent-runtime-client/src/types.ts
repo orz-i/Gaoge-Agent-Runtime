@@ -321,4 +321,35 @@ export type RunHandoffJoinFilterDTO = { status?: RunHandoffJoinStatus; limit?: n
 export type DelegatedRunResult = { handoff: RunHandoffDTO; run: TextRunDTO; rootStep: RunStepDTO };
 export type RunTaskDTO = { handoff: RunHandoffDTO; run: TextRunDTO };
 export type RunTaskTreeDTO = { rootRunID: string; currentRunID: string; rootRun: TextRunDTO; tasks: RunTaskDTO[]; joins: RunHandoffJoinDTO[] };
+export type AgentTeamMemberRequest = {
+  memberID: string;
+  agentManifest: ResourceRefDTO;
+  goal: string;
+  contentType?: "text" | "markdown";
+  outputIDs?: string[];
+  evidenceIDs?: string[];
+  options?: Record<string, unknown>;
+};
+export type AgentTeamJoinRequest = Omit<CreateRunHandoffJoinRequest, "clientJoinID" | "handoffIDs">;
+export type StartAgentTeamRequest = {
+  thread: StartTextRunRequest["thread"];
+  input: StartTextRunRequest["input"];
+  clientTeamID: string;
+  coordinatorManifest: ResourceRefDTO;
+  model?: string;
+  executionMode?: "auto" | "direct" | "plan";
+  options?: Record<string, unknown>;
+  workspace?: StartTextRunRequest["workspace"];
+  members: AgentTeamMemberRequest[];
+  join: AgentTeamJoinRequest;
+};
+export type AgentTeamTaskStartDTO = { memberID: string; handoff: RunHandoffDTO; run: TextRunDTO; rootStep: RunStepDTO };
+export type AgentTeamStartResultDTO = {
+  rootRun: TextRunDTO;
+  rootStep: RunStepDTO;
+  inputProjectionRef: ProjectionRefDTO;
+  outputProjectionRef: ProjectionRefDTO;
+  tasks: AgentTeamTaskStartDTO[];
+  join: RunHandoffJoinDTO;
+};
 

@@ -3,7 +3,7 @@ import type {
   ContinuationJobPageDTO, CreateRunHandoffJoinRequest, DelegateRunRequest, DelegatedRunResult, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
   OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
   RunHandoffJoinDTO, RunHandoffJoinFilterDTO, RunHandoffJoinPageDTO, RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RunTaskTreeDTO, RuntimeEvidenceSelectionDTO,
-  RuntimeEvidenceSourceDTO, StartTextRunRequest, StartTextRunResult, TextRunDetailDTO,
+  RuntimeEvidenceSourceDTO, StartAgentTeamRequest, AgentTeamStartResultDTO, StartTextRunRequest, StartTextRunResult, TextRunDetailDTO,
   TextRunDTO, WorkbenchDTO,
 } from "./types.js";
 
@@ -15,6 +15,10 @@ export class RuntimeAPIError extends Error {
   constructor(message: string, public readonly status: number, public readonly code: string, public readonly requestID: string) {
     super(message); this.name = "RuntimeAPIError";
   }
+}
+function requireAgentTeamProjectionRefs(value:AgentTeamStartResultDTO):AgentTeamStartResultDTO {
+  if (validProjectionRef(value.inputProjectionRef)&&validProjectionRef(value.outputProjectionRef)) return value;
+  throw new RuntimeAPIError("runtime returned invalid team projection references",502,"runtime.invalid_response",value.rootRun?.requestID??"");
 }
 
 type ErrorResponse = { error?: { code?: string; message?: string; requestID?: string } };
@@ -42,6 +46,7 @@ function requireRunProjectionRefs<T extends StartTextRunResult|TextRunDetailDTO>
 
 export class RuntimeClient {
   readonly runs;
+  readonly teams;
   readonly events;
   readonly interactions;
   readonly outputs;
@@ -70,6 +75,9 @@ export class RuntimeClient {
       taskTree: (runID:string,request?:RequestOptions)=>this.request<RunTaskTreeDTO>(`/runs/${pathPart(runID)}/task-tree`,{},request),
       plan: (runID:string,request?:RequestOptions)=>this.request<PlanViewDTO>(`/runs/${pathPart(runID)}/plan`,{},request),
       checkpoints: async (runID:string,request?:RequestOptions)=>(await this.request<{results:RunCheckpointDTO[]}>(`/runs/${pathPart(runID)}/checkpoints`,{},request)).results ?? [],
+    };
+    this.teams = {
+      start: async(payload:StartAgentTeamRequest, request?:RequestOptions) => requireAgentTeamProjectionRefs(await this.request<AgentTeamStartResultDTO>("/agent-teams", {method:"POST", body:JSON.stringify(payload)}, request)),
     };
     this.events = {
       get:(runID:string,eventID:string,request?:RequestOptions)=>this.request<RunEventDetailDTO>(`/runs/${pathPart(runID)}/events/${pathPart(eventID)}`,{},request),

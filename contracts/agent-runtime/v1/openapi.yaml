@@ -39,6 +39,24 @@ paths:
                 $ref: '#/components/schemas/StartRunResult'
         default:
           $ref: '#/components/responses/Error'
+  /agent-teams:
+    post:
+      operationId: startAgentTeam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartAgentTeamRequest'
+      responses:
+        '202':
+          description: Accepted coordinator-led Agent Team with durable member handoffs and fan-in join
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTeamStartResult'
+        default:
+          $ref: '#/components/responses/Error'
   /agent-manifests:
     get:
       operationId: listAgentManifests
@@ -943,6 +961,53 @@ components:
           $ref: '#/components/schemas/ResourceRef'
         workspace:
           $ref: '#/components/schemas/WorkspaceExtension'
+    AgentTeamMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [memberID, agentManifest, goal]
+      properties:
+        memberID: {type: string, minLength: 1, maxLength: 64}
+        agentManifest:
+          $ref: '#/components/schemas/ResourceRef'
+        goal: {type: string, minLength: 1, maxLength: 20000}
+        contentType: {type: string, enum: [text, markdown]}
+        outputIDs: {type: array, maxItems: 128, items: {type: string}}
+        evidenceIDs: {type: array, maxItems: 128, items: {type: string}}
+        options: {type: object, additionalProperties: true}
+    AgentTeamJoinRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        mode: {type: string, enum: [all, any, quorum], default: all}
+        quorum: {type: integer, minimum: 1, maximum: 16}
+        failurePolicy: {type: string, enum: [collect, fail_fast], default: collect}
+        timeoutSeconds: {type: integer, minimum: 60, maximum: 604800, default: 3600}
+        timeoutPolicy: {type: string, enum: [cancel_pending, leave_running], default: cancel_pending}
+    StartAgentTeamRequest:
+      type: object
+      additionalProperties: false
+      required: [thread, input, clientTeamID, coordinatorManifest, members, join]
+      properties:
+        thread:
+          $ref: '#/components/schemas/RunThread'
+        input:
+          $ref: '#/components/schemas/RunInput'
+        clientTeamID: {type: string, minLength: 1, maxLength: 128}
+        coordinatorManifest:
+          $ref: '#/components/schemas/ResourceRef'
+        model: {type: string, maxLength: 128}
+        executionMode: {type: string, enum: [auto, direct, plan]}
+        options: {type: object, additionalProperties: true}
+        workspace:
+          $ref: '#/components/schemas/WorkspaceExtension'
+        members:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/AgentTeamMemberRequest'
+        join:
+          $ref: '#/components/schemas/AgentTeamJoinRequest'
     DelegateRunRequest:
       type: object
       additionalProperties: false
@@ -1052,6 +1117,37 @@ components:
           $ref: '#/components/schemas/ProjectionRef'
         outputProjectionRef:
           $ref: '#/components/schemas/ProjectionRef'
+    AgentTeamTaskStart:
+      type: object
+      additionalProperties: false
+      required: [memberID, handoff, run, rootStep]
+      properties:
+        memberID: {type: string}
+        handoff:
+          $ref: '#/components/schemas/RunHandoff'
+        run:
+          $ref: '#/components/schemas/Run'
+        rootStep:
+          $ref: '#/components/schemas/RunStep'
+    AgentTeamStartResult:
+      type: object
+      additionalProperties: false
+      required: [rootRun, rootStep, inputProjectionRef, outputProjectionRef, tasks, join]
+      properties:
+        rootRun:
+          $ref: '#/components/schemas/Run'
+        rootStep:
+          $ref: '#/components/schemas/RunStep'
+        inputProjectionRef:
+          $ref: '#/components/schemas/ProjectionRef'
+        outputProjectionRef:
+          $ref: '#/components/schemas/ProjectionRef'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentTeamTaskStart'
+        join:
+          $ref: '#/components/schemas/RunHandoffJoin'
     RunHandoff:
       type: object
       additionalProperties: false

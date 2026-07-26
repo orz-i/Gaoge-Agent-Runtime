@@ -46,6 +46,7 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	expected := map[string]openAPIOperationExpectation{
 		"GET /runs":                                                       {status: "200", parameters: []string{openAPIThreadKind, openAPIThreadID, "page", "pageSize"}},
 		"POST /runs":                                                      {status: "202", requestBody: "CreateRunRequest"},
+		"POST /agent-teams":                                               {status: "202", requestBody: "StartAgentTeamRequest"},
 		"GET /runs/{runID}":                                               {status: "200", parameters: []string{valueRunID1DA2F0B6}},
 		"POST /runs/{runID}/cancel":                                       {status: "200", parameters: []string{valueRunID1DA2F0B6}},
 		"POST /runs/{runID}/resume":                                       {status: "202", requestBody: "ResumeRunRequest", parameters: []string{valueRunID1DA2F0B6}},
@@ -104,6 +105,15 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	assertOpenAPISchemaOptional(t, schemas, "ResumeRunRequest", "checkpointID")
 	assertOpenAPISchemaRequired(t, schemas, "QueueCreateRequest", "clientQueueID")
 	assertOpenAPISchemaOptional(t, schemas, "CreateRunRequest", "agentManifest")
+	assertOpenAPISchemaRequired(t, schemas, "StartAgentTeamRequest", "clientTeamID")
+	assertOpenAPISchemaRequired(t, schemas, "StartAgentTeamRequest", "coordinatorManifest")
+	assertOpenAPISchemaRequired(t, schemas, "StartAgentTeamRequest", "members")
+	assertOpenAPISchemaRequired(t, schemas, "StartAgentTeamRequest", "join")
+	assertOpenAPISchemaRequired(t, schemas, "AgentTeamMemberRequest", "memberID")
+	assertOpenAPISchemaRequired(t, schemas, "AgentTeamMemberRequest", "agentManifest")
+	assertOpenAPISchemaRequired(t, schemas, "AgentTeamStartResult", "rootRun")
+	assertOpenAPISchemaRequired(t, schemas, "AgentTeamStartResult", "tasks")
+	assertOpenAPISchemaRequired(t, schemas, "AgentTeamStartResult", "join")
 	assertOpenAPISchemaOptional(t, schemas, "QueueCreateRequest", "agentManifest")
 	assertOpenAPISchemaOptional(t, schemas, "QueueUpdateRequest", "agentManifest")
 	assertOpenAPISchemaRequired(t, schemas, "QueueUpdateRequest", "expectedRevision")

@@ -9,6 +9,7 @@ func (m *Module) RegisterRoutes(auth *gin.RouterGroup) {
 		c.Next()
 	})
 	routes.POST("/runs", m.Handler.StartTextRun)
+	routes.POST("/agent-teams", m.Handler.StartAgentTeam)
 	routes.GET("/runs", m.Handler.ListRuns)
 	routes.GET("/runs/:run_id", m.Handler.GetTextRun)
 	routes.POST("/runs/:run_id/cancel", m.Handler.CancelRun)
