@@ -21,9 +21,6 @@ type AttributionConfig struct {
 type ContextConfig struct {
 	MaxMessages             int
 	MaxInputTokens          int
-	CompactEnabled          bool
-	CompactTrigger          int
-	CompactPreserve         int
 	TokenBudgetEnabled      bool
 	MessageEmbeddingEnabled bool
 	SemanticEnabled         bool

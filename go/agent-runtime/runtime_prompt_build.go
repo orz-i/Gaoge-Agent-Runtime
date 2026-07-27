@@ -63,7 +63,7 @@ func (s *Engine) compileRuntimePrompt(ctx context.Context, input PromptBuildInpu
 
 	prefetch := <-prefetchCh
 	contextMessages := buildBranchMessagePath(input.BranchState, input.UserMessage)
-	promptScope := buildPromptScope(contextMessages, input.BranchState.Path.Compaction)
+	promptScope := buildPromptScope(contextMessages)
 	promptMessages := s.applyContextTokenBudget(promptScope.activeMessages(), input.Route.UpstreamModel, input.Route.ModelCapabilitiesJSON)
 	ragQuery := buildRAGQuery(promptMessages, input.RunInput.Content, cfg.Retrieval.QueryHistoryTurns)
 
@@ -166,7 +166,7 @@ func (s *Engine) buildRunBaseContext(
 	historyMsgs := runtimeHistoryMessages(promptMessages, input.RunInput.Content)
 	assembler := NewContextAssembler(int64(cfg.Context.MaxInputTokens))
 	applyRunSystemPrompt(assembler, &historyMsgs, cfg, input)
-	userCtx := runtimeSnapshotUserContext(promptScope)
+	userCtx := userContextInput{}
 	prefixMemories := s.applyRunMemoryContext(ctx, input, prefetch.userMemories, assembler, &userCtx)
 	llmMessages, _ := assembler.Assemble(historyMsgs)
 	if input.Trace != nil {
@@ -232,24 +232,6 @@ func threadSystemPrompt(thread *ThreadSnapshot) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func runtimeSnapshotUserContext(promptScope promptScope) userContextInput {
-	if promptScope.Compaction == nil {
-		return userContextInput{}
-	}
-	summary := strings.TrimSpace(promptScope.Compaction.Summary)
-	if summary == "" {
-		return userContextInput{}
-	}
-	return userContextInput{
-		Snapshot: &snapshotContext{
-			Summary:  summary,
-			FromTurn: promptScope.Compaction.FromTurn,
-			ToTurn:   promptScope.Compaction.ToTurn,
-			Strategy: promptScope.Compaction.Strategy,
-		},
-	}
-}
-
 func (s *Engine) applyRunMemoryContext(
 	ctx context.Context,
 	input PromptBuildInput,
@@ -293,17 +275,13 @@ func (s *Engine) completeRunDynamicContext(
 	if recallCh != nil {
 		userCtx.RecallChunks = <-recallCh
 	}
-	coveredThrough := ""
-	if promptScope.Compaction != nil {
-		coveredThrough = promptScope.Compaction.CoveredThrough.ID
-	}
 	userCtx.HistoricalArtifacts = s.recallHistoricalContextArtifacts(
 		ctx,
 		input.RunInput.Actor,
 		input.RunInput.Thread,
 		input.UserMessage.Projection.ID,
-		promptScope.Compaction != nil,
-		coveredThrough,
+		false,
+		"",
 		promptScope.retainedProjectionIDSet(),
 		input.RunInput.Content,
 		ragContext.chunks,

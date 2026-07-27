@@ -62,7 +62,6 @@ const (
 	processTracePayloadStages       = "trace_stages"
 	processTraceKindFileContext     = "file_context"
 	processTraceKindRetrieval       = "content_retrieval"
-	processTraceKindCompaction      = "context_compaction"
 	processTraceStatusReady         = "ready"
 	processTraceStatusCompleted     = valueCompletedEC0C83B1
 	processTraceStatusIncomplete    = "incomplete"

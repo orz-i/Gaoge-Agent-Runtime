@@ -209,7 +209,7 @@ func TestPromptStateFingerprintChangesWhenContextConfigChanges(t *testing.T) {
 		},
 	}
 	changedCfg := baseCfg
-	changedCfg.Context.CompactEnabled = !baseCfg.Context.CompactEnabled
+	changedCfg.Context.MessageEmbeddingEnabled = !baseCfg.Context.MessageEmbeddingEnabled
 
 	first := buildPromptStateFingerprint(promptStateFingerprintInput{
 		Protocol:          AdapterOpenAIResponses,

@@ -9,29 +9,14 @@ const (
 
 type promptScope struct {
 	FullBranchMessages []ContextMessage
-	CoveredMessages    []ContextMessage
 	RetainedMessages   []ContextMessage
-	Compaction         *ThreadCompaction
 }
 
-func buildPromptScope(messages []ContextMessage, compaction *ThreadCompaction) promptScope {
-	scope := promptScope{FullBranchMessages: append([]ContextMessage(nil), messages...), RetainedMessages: append([]ContextMessage(nil), messages...), Compaction: compaction}
-	if compaction == nil {
-		return scope
+func buildPromptScope(messages []ContextMessage) promptScope {
+	return promptScope{
+		FullBranchMessages: append([]ContextMessage(nil), messages...),
+		RetainedMessages:   append([]ContextMessage(nil), messages...),
 	}
-	for index := range messages {
-		if messages[index].Projection != compaction.CoveredThrough {
-			continue
-		}
-		scope.CoveredMessages = append([]ContextMessage(nil), messages[:index+1]...)
-		if index+1 < len(messages) {
-			scope.RetainedMessages = append([]ContextMessage(nil), messages[index+1:]...)
-		} else {
-			scope.RetainedMessages = nil
-		}
-		break
-	}
-	return scope
 }
 
 func (s promptScope) activeMessages() []ContextMessage {

@@ -65,14 +65,6 @@ type toolContextArtifactInput struct {
 	Rows       []domainconversation.ToolRecord
 }
 
-type snapshotContextArtifactInput struct {
-	Actor      domainconversation.ActorRef
-	Thread     domainconversation.ThreadRef
-	Projection domainconversation.ProjectionRef
-	RunID      string
-	Snapshot   *ThreadCompaction
-}
-
 type historicalContextArtifactInput struct {
 	CurrentProjection  string
 	HasCurrentSnapshot bool
@@ -112,19 +104,6 @@ func (s *Engine) GetContextArtifact(ctx context.Context, actor domainconversatio
 		return nil, err
 	}
 	return item, nil
-}
-
-// persistSnapshotContextArtifact 保存压缩摘要证据，供未来 PromptPlan 解释和召回。
-func (s *Engine) persistSnapshotContextArtifact(ctx context.Context, input snapshotContextArtifactInput) {
-	item := buildSnapshotContextArtifact(input)
-	if item == nil {
-		return
-	}
-	items := []domainconversation.ContextArtifact{*item}
-	s.applyContextArtifactRetention(items)
-	if err := s.repo.CreateContextArtifacts(ctx, items); err != nil && s.logger != nil {
-		s.logger.Warn("snapshot_context_artifact_persist_failed", String("trace_id", s.traceID(ctx)), String("thread_id", input.Thread.ID), String("projection_id", input.Projection.ID), Error(err))
-	}
 }
 
 // applyContextArtifactRetention 给新证据写入过期时间；过期策略只影响证据表，不影响原始消息。
@@ -339,45 +318,6 @@ func buildToolContextArtifacts(input toolContextArtifactInput) []domainconversat
 		})
 	}
 	return items
-}
-
-// buildSnapshotContextArtifact 将压缩快照转换为历史 evidence。
-func buildSnapshotContextArtifact(input snapshotContextArtifactInput) *domainconversation.ContextArtifact {
-	if input.Snapshot == nil || strings.TrimSpace(input.Snapshot.Summary) == "" {
-		return nil
-	}
-	sourceID := input.Snapshot.CoveredThrough.ID
-	if input.Snapshot.CoveredThrough.ID == "" {
-		sourceID = strings.TrimSpace(input.RunID)
-	}
-	if sourceID == "" {
-		sourceID = strings.TrimSpace(input.RunID)
-	}
-	title := fmt.Sprintf("上下文摘要 %d-%d", input.Snapshot.FromTurn, input.Snapshot.ToTurn)
-	content := strings.TrimSpace(input.Snapshot.Summary)
-	tokenEstimate := input.Snapshot.SummaryTokens
-	if tokenEstimate <= 0 {
-		tokenEstimate = estimateTokens(content)
-	}
-	return &domainconversation.ContextArtifact{
-		Projection:    input.Projection,
-		RunID:         firstNonEmptyString(input.RunID, input.RunID),
-		Kind:          domainconversation.ContextArtifactSummary,
-		SourceType:    "context_snapshot",
-		SourceID:      sourceID,
-		SourceTitle:   title,
-		Content:       contextArtifactExcerpt(content),
-		ContentHash:   contextArtifactHash(domainconversation.ContextArtifactSummary, sourceID, content),
-		TokenEstimate: tokenEstimate,
-		Score:         1,
-		MetadataJSON: contextArtifactMetadata(map[string]interface{}{
-			valueFromTurn04D064E1:      input.Snapshot.FromTurn,
-			valueToTurn80048439:        input.Snapshot.ToTurn,
-			valueSourceTokens70418271:  input.Snapshot.SourceTokens,
-			valueSummaryTokens137CDE82: input.Snapshot.SummaryTokens,
-			valueStrategy66C6BD9B:      strings.TrimSpace(input.Snapshot.Strategy),
-		}),
-	}
 }
 
 // selectHistoricalContextArtifacts 从近期证据中选择与当前问题相关的少量历史证据。

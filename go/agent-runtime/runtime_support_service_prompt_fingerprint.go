@@ -190,9 +190,6 @@ func buildPromptContextConfigSignature(cfg Config) string {
 		"rag_min_similarity":          cfg.Retrieval.MinSimilarity,
 		"rag_token_budget":            cfg.Retrieval.TokenBudget,
 		"rag_query_history_turns":     cfg.Retrieval.QueryHistoryTurns,
-		"context_compact_enabled":     cfg.Context.CompactEnabled,
-		"context_compact_trigger":     cfg.Context.CompactTrigger,
-		"context_compact_preserve":    cfg.Context.CompactPreserve,
 		"message_embedding_enabled":   cfg.Context.MessageEmbeddingEnabled,
 		"semantic_context_enabled":    cfg.Context.SemanticEnabled,
 	}

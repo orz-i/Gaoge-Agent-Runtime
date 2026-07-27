@@ -73,7 +73,6 @@ type ThreadSnapshot struct {
 	ModelProvider      string
 	Environment        domain.ResourceRef
 	BindingScope       string
-	Compacted          bool
 	Instructions       []ThreadInstruction
 	ResourceRefs       []domain.ResourceRef
 	ProviderResponseID string
@@ -99,7 +98,6 @@ type ThreadPath struct {
 	Parent     *domain.ProjectionRef
 	Source     *domain.ProjectionRef
 	ReuseInput *domain.ProjectionRef
-	Compaction *ThreadCompaction
 }
 
 type ContextMessage struct {
@@ -113,17 +111,6 @@ type ContextMessage struct {
 	Status      string
 	Attachments []domain.ResourceRef
 	CreatedAt   time.Time
-}
-
-type ThreadCompaction struct {
-	CoveredThrough domain.ProjectionRef
-	PathHash       string
-	FromTurn       int
-	ToTurn         int
-	SourceTokens   int64
-	SummaryTokens  int64
-	Summary        string
-	Strategy       string
 }
 
 type ResolveAttachmentsRequest struct {

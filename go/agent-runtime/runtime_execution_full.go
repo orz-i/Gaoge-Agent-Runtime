@@ -2521,7 +2521,7 @@ func (s *Engine) commitReplayedReadToolResult(ctx context.Context, run model.Run
 		valueProviderKind7144A4D9: tool.ProviderKind,
 		valueStatus327C4193:       valueSuccess4D886D19,
 		"replayed":                true,
-		"replayedFromToolCallID": source.ToolCallID,
+		"replayedFromToolCallID":  source.ToolCallID,
 	}
 	completed := newRunEvent(run, valueToolCompleted8D0A12FD, stepID, tool.ModelName, payload, nil)
 	completed.ToolCallID, completed.ToolName, completed.InputJSON, completed.OutputJSON = call.ToolCallID, tool.ModelName, call.ArgumentsJSON, source.OutputJSON
@@ -2540,7 +2540,7 @@ func (s *Engine) commitReplayedReadToolResult(ctx context.Context, run model.Run
 	checkpointEvent := newRunEvent(run, "checkpoint.created", stepID, "Replayed read tool result checkpoint", map[string]interface{}{
 		valueCheckpointID9CD08C70: checkpoint.CheckpointID,
 		valueToolCallID64CA70DB:   call.ToolCallID,
-		"replayedFromToolCallID": source.ToolCallID,
+		"replayedFromToolCallID":  source.ToolCallID,
 	}, nil)
 	_, saved, _, err := s.repo.CommitRunToolResultBundle(context.WithoutCancel(ctx), checkpoint, nil, []model.Event{completed, checkpointEvent})
 	if err != nil {

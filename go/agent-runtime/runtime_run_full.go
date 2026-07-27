@@ -100,7 +100,6 @@ var (
 	ErrRunToolIncompatible              = errors.New("selected hosted tool is incompatible with the routed model protocol")
 	ErrWorkspaceSourceStale             = errors.New("workspace directive source is stale")
 	ErrWorkspaceSourceTooLarge          = errors.New("workspace conversation source exceeds directive limits; select a message or text range")
-	ErrWorkspaceSourceCompacted         = errors.New("workspace conversation source contains a compaction gap; select a message or text range")
 	ErrWorkspaceArtifactMissing         = errors.New("workspace run did not publish its required artifact")
 	ErrExecutionModeNotAllowed          = errors.New("execution mode is not allowed by environment")
 )
@@ -1414,9 +1413,6 @@ func (s *Engine) validateConversationDirectiveSource(ctx context.Context, actor 
 	path, err := s.threadContext.LoadThreadPath(ctx, LoadThreadPathRequest{Actor: actor, Thread: thread, Head: &head, MaxDepth: 51})
 	if err != nil {
 		return err
-	}
-	if path.Compaction != nil {
-		return ErrWorkspaceSourceCompacted
 	}
 	if len(path.Messages) > 50 {
 		return ErrWorkspaceSourceTooLarge

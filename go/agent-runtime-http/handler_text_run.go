@@ -1019,8 +1019,6 @@ func writeTextRunError(c *gin.Context, err error) {
 		writeError(c, http.StatusConflict, "workspace.source_stale", "the frozen thread head or evidence changed; refresh the intent and try again")
 	case errors.Is(err, runtime.ErrWorkspaceSourceTooLarge):
 		writeError(c, http.StatusUnprocessableEntity, "workspace.source_too_large", "the thread source exceeds the configured context limit; select a smaller range")
-	case errors.Is(err, runtime.ErrWorkspaceSourceCompacted):
-		writeError(c, http.StatusUnprocessableEntity, "workspace.source_compacted", "the thread source contains a compacted gap; select a smaller range")
 	case errors.Is(err, runtime.ErrUsageBalanceInsufficient), errors.Is(err, runtime.ErrModelPricingRequired):
 		writeError(c, http.StatusPaymentRequired, "", err.Error())
 	case errors.Is(err, runtime.ErrInvalidInput):

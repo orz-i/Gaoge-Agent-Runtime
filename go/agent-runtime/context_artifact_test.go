@@ -227,33 +227,6 @@ func TestBuildToolContextArtifactsKeepsHeadAndTailForLargeResults(t *testing.T) 
 	}
 }
 
-func TestBuildSnapshotContextArtifactRecordsSummary(t *testing.T) {
-	item := buildSnapshotContextArtifact(snapshotContextArtifactInput{
-		Actor:      model.ActorRef{TenantID: valueTenantTest, ActorID: valueActor11},
-		Thread:     model.ThreadRef{Kind: threadKindConversation, ID: valueThread7},
-		Projection: model.ProjectionRef{Kind: valueMessage5959AD4D, ID: "message_14"},
-		RunID:      valueRun14AAE66FD,
-		Snapshot: &ThreadCompaction{
-			CoveredThrough: model.ProjectionRef{Kind: valueMessage5959AD4D, ID: "3"},
-			FromTurn:       1,
-			ToTurn:         6,
-			SourceTokens:   1000,
-			SummaryTokens:  120,
-			Summary:        "压缩摘要内容",
-			Strategy:       valueTokenCap85C62630,
-		},
-	})
-	if item == nil {
-		t.Fatal("expected snapshot artifact")
-	}
-	if item.Kind != model.ContextArtifactSummary || item.SourceID != "3" || item.Projection.ID != "message_14" {
-		t.Fatalf("unexpected snapshot artifact: %#v", item)
-	}
-	if item.TokenEstimate != 120 || item.ContentHash == "" || item.MetadataJSON == "" {
-		t.Fatalf("snapshot artifact missing fields: %#v", item)
-	}
-}
-
 func TestSelectHistoricalContextArtifactsUsesFollowUpAndDeduplicatesCurrentEvidence(t *testing.T) {
 	items := selectHistoricalContextArtifacts(historicalContextArtifactInput{
 		CurrentProjection: valueMessage9,

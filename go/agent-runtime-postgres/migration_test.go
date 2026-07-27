@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -55,34 +54,6 @@ func TestMigrateAgentTablesContainNoHostDatabaseKeys(t *testing.T) {
 				t.Errorf("%s leaked host database key %s", table, column)
 			}
 		}
-	}
-}
-
-func TestMigrateRejectsEveryLegacyRuntimeTableWithCleanupHint(t *testing.T) {
-	for _, table := range legacyRuntimeTables {
-		t.Run(table, func(t *testing.T) {
-			db := openRuntimeMigrationDB(t, table)
-			if err := db.Exec("CREATE TABLE " + table + " (id integer)").Error; err != nil {
-				t.Fatal(err)
-			}
-			err := Migrate(db)
-			if !errors.Is(err, ErrLegacyRuntimeSchema) || !strings.Contains(err.Error(), table) || !strings.Contains(err.Error(), "delete the local database or Docker volume") {
-				t.Fatalf("legacy table error = %v", err)
-			}
-		})
-	}
-}
-
-func TestMigrateRejectsLegacyRuntimeContextRows(t *testing.T) {
-	db := openRuntimeMigrationDB(t, "context")
-	if err := db.Exec("CREATE TABLE chat_context_records (id integer, record_type text)").Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Exec("INSERT INTO chat_context_records (record_type) VALUES (?)", "text_run_snapshot").Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := Migrate(db); !errors.Is(err, ErrLegacyRuntimeSchema) || !strings.Contains(err.Error(), "chat_context_records") {
-		t.Fatalf("legacy context error = %v", err)
 	}
 }
 

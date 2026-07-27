@@ -61,7 +61,6 @@ func TestContextPortContractsDoNotExposeNumericHostIDs(t *testing.T) {
 		reflect.TypeFor[LoadThreadPathRequest](),
 		reflect.TypeFor[ThreadPath](),
 		reflect.TypeFor[ContextMessage](),
-		reflect.TypeFor[ThreadCompaction](),
 		reflect.TypeFor[ResolveAttachmentsRequest](),
 		reflect.TypeFor[ResolveAttachmentsResult](),
 		reflect.TypeFor[ResolvedAttachment](),
