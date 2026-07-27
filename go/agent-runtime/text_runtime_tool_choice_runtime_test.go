@@ -29,6 +29,76 @@ type scriptedLLMGateway struct {
 	inputs  []GenerateInput
 }
 
+func countRunEvents(events []model.Event, eventType string) int {
+	count := 0
+	for _, event := range events {
+		if event.EventType == eventType {
+			count++
+		}
+	}
+	return count
+}
+
+func countReplayedToolResults(events []model.Event) int {
+	count := 0
+	for _, event := range events {
+		if event.EventType != valueToolCompleted8D0A12FD {
+			continue
+		}
+		var payload struct {
+			Replayed bool `json:"replayed"`
+		}
+		if json.Unmarshal([]byte(event.PayloadJSON), &payload) == nil && payload.Replayed {
+			count++
+		}
+	}
+	return count
+}
+
+func TestExecuteRunStepReplaysIdenticalReadWithoutToolBudgetOrProviderCall(t *testing.T) {
+	gateway := &scriptedLLMGateway{outputs: []*GenerateOutput{
+		{ToolCalls: []ToolCall{{ToolCallID: "call_read_1", ToolName: testReadToolName, ArgumentsJSON: `{}`}}},
+		{ToolCalls: []ToolCall{{ToolCallID: "call_read_2", ToolName: testReadToolName, ArgumentsJSON: `{}`}}},
+		{ToolCalls: []ToolCall{{ToolCallID: "call_read_3", ToolName: testReadToolName, ArgumentsJSON: `{}`}}},
+		{ToolCalls: []ToolCall{{ToolCallID: "call_publish", ToolName: testPublishToolName, ArgumentsJSON: testOperationsJSON}}},
+	}}
+	repo := &multiTurnRunRepo{}
+	workspace := &scriptedWorkspace{}
+	service := &Engine{
+		repo:              repo,
+		llmGateway:        gateway,
+		workspaces:        NewWorkspaceRegistry(map[string]WorkspaceProvider{testWorkspaceProviderKind: workspace}),
+		generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{}),
+	}
+	run := model.Run{RunID: "run_read_replay", Actor: model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey}, Thread: model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey}, RequestID: "req_read_replay"}
+	step := model.Step{StepID: "step_read_replay", Title: "Review", Description: "Reuse frozen read evidence"}
+	readPolicy := storyToolPolicy(testReadToolKey, testReadToolName)
+	readPolicy.SideEffectLevel = ToolSideEffectRead
+	readPolicy.Fingerprint = fingerprintRunToolSnapshot(readPolicy)
+	publishPolicy := storyToolPolicy(testPublishToolKey, testPublishToolName)
+	effective := changeSetRunConfig(readPolicy, publishPolicy)
+	effective.MaxToolCalls = 2
+	tools := map[string]ResolvedTool{
+		testReadToolName:    policyToResolvedTool(readPolicy),
+		testPublishToolName: policyToResolvedTool(publishPolicy),
+	}
+
+	text, _, waiting, err := service.executeRunStep(context.Background(), run, step, effective, tools, nil, nil)
+	if err != nil || waiting {
+		t.Fatalf("executeRunStep err=%v waiting=%v", err, waiting)
+	}
+	if !strings.Contains(text, "Change Set ready") {
+		t.Fatalf("terminal text = %q", text)
+	}
+	assertWorkspaceCallOrder(t, workspace.calls, testReadToolName, testPublishToolName)
+	if got := countRunEvents(repo.events, valueToolStartedB113F313); got != 2 {
+		t.Fatalf("tool.started=%d, want one read and one publish", got)
+	}
+	if got := countReplayedToolResults(repo.events); got != 2 {
+		t.Fatalf("replayed tool results=%d, want 2", got)
+	}
+}
+
 func (g *scriptedLLMGateway) PrepareTextRoute(context.Context, LLMRouteInput) (*LLMRoute, error) {
 	return &LLMRoute{PlatformModelName: "test-model", Protocol: AdapterOpenAIResponses, UpstreamModel: "test-model"}, nil
 }

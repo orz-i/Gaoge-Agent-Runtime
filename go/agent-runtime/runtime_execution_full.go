@@ -165,6 +165,17 @@ func applyPlannerStructuredOutput(options map[string]interface{}, mode modelcap.
 	}
 }
 
+func committedReadToolResultMatches(event model.Event, stepID string, tool ResolvedTool, wantArguments string) bool {
+	if event.StepID != stepID || event.EventType != valueToolCompleted8D0A12FD || event.ToolName != tool.ModelName ||
+		canonicalRunJSON(json.RawMessage(event.InputJSON)) != wantArguments {
+		return false
+	}
+	var payload struct {
+		ToolKey string `json:"toolKey"`
+	}
+	return json.Unmarshal([]byte(event.PayloadJSON), &payload) == nil && strings.TrimSpace(payload.ToolKey) == tool.ToolKey
+}
+
 func plannerStructuredOutput(route *LLMRoute) (modelcap.StructuredOutputMode, error) {
 	if route == nil {
 		return modelcap.StructuredOutputUnsupported, fmt.Errorf("%w: route unavailable", errPlannerStructuredOutputUnsupported)
@@ -2453,6 +2464,15 @@ func (s *Engine) handleResolvedRunToolCall(ctx context.Context, run model.Run, s
 		return s.commitFrozenToolResult(ctx, run, step.StepID, effective, tool, call, "", 0, ToolExecutionReceipt{}, validationErr)
 	}
 	call.ArgumentsJSON = normalizedArguments
+	if strings.TrimSpace(tool.SideEffectLevel) == ToolSideEffectRead {
+		committed, found, err := s.findCommittedReadToolResult(ctx, run, step.StepID, tool, call)
+		if err != nil {
+			return ToolResult{}, false, err
+		}
+		if found {
+			return s.commitReplayedReadToolResult(ctx, run, step.StepID, tool, call, committed)
+		}
+	}
 	if tool.ApprovalMode != valueNeverF5C79F24 {
 		if evaluationErr := s.evaluateAndPersistRuntimeBoundary(ctx, run, toolInputEvaluationRequest(run, step.StepID, tool, call)); evaluationErr != nil {
 			if err := s.ensureRunCallBudgetWithReserve(ctx, run, effective, false, 0); err != nil {
@@ -2469,6 +2489,65 @@ func (s *Engine) handleResolvedRunToolCall(ctx context.Context, run model.Run, s
 		return ToolResult{}, false, err
 	}
 	return s.executeFrozenRunTool(ctx, run, step.StepID, effective, tool, call)
+}
+
+func (s *Engine) findCommittedReadToolResult(ctx context.Context, run model.Run, stepID string, tool ResolvedTool, call ToolCall) (model.Event, bool, error) {
+	wantArguments := canonicalRunJSON(json.RawMessage(call.ArgumentsJSON))
+	var cursor int64
+	for {
+		events, err := s.repo.ListRunEventsAfter(ctx, run.Actor, run.RunID, cursor, 1000)
+		if err != nil {
+			return model.Event{}, false, err
+		}
+		for _, event := range events {
+			cursor = event.Seq
+			if !committedReadToolResultMatches(event, stepID, tool, wantArguments) {
+				continue
+			}
+			return event, true, nil
+		}
+		if len(events) < 1000 {
+			return model.Event{}, false, nil
+		}
+	}
+}
+
+func (s *Engine) commitReplayedReadToolResult(ctx context.Context, run model.Run, stepID string, tool ResolvedTool, call ToolCall, source model.Event) (ToolResult, bool, error) {
+	payload := map[string]interface{}{
+		valueSegmentKeyB3442EFB:   runSegmentKey(ctx, run),
+		valueToolCallID64CA70DB:   call.ToolCallID,
+		valueToolKey560014C9:      tool.ToolKey,
+		valueToolName4234B607:     tool.ModelName,
+		valueProviderKind7144A4D9: tool.ProviderKind,
+		valueStatus327C4193:       valueSuccess4D886D19,
+		"replayed":                true,
+		"replayedFromToolCallID": source.ToolCallID,
+	}
+	completed := newRunEvent(run, valueToolCompleted8D0A12FD, stepID, tool.ModelName, payload, nil)
+	completed.ToolCallID, completed.ToolName, completed.InputJSON, completed.OutputJSON = call.ToolCallID, tool.ModelName, call.ArgumentsJSON, source.OutputJSON
+	checkpoint := newRunContinuationCheckpoint(run, stepID, "tool_result_replayed", runContinuation{
+		SemanticVersion: RuntimeSnapshotVersion,
+		SegmentKey:      runSegmentKey(ctx, run),
+		Type:            runContinuationContinuePlan,
+		TargetStatus:    model.RunStatusRunning,
+		StepID:          stepID,
+		DurableToolResult: &runDurableToolResult{
+			ToolCallID: call.ToolCallID,
+			EventType:  valueToolCompleted8D0A12FD,
+		},
+	})
+	checkpoint.ToolCallID = call.ToolCallID
+	checkpointEvent := newRunEvent(run, "checkpoint.created", stepID, "Replayed read tool result checkpoint", map[string]interface{}{
+		valueCheckpointID9CD08C70: checkpoint.CheckpointID,
+		valueToolCallID64CA70DB:   call.ToolCallID,
+		"replayedFromToolCallID": source.ToolCallID,
+	}, nil)
+	_, saved, _, err := s.repo.CommitRunToolResultBundle(context.WithoutCancel(ctx), checkpoint, nil, []model.Event{completed, checkpointEvent})
+	if err != nil {
+		return ToolResult{}, false, err
+	}
+	s.publishRunEvents(run.RunID, saved)
+	return ToolResult{ToolCallID: call.ToolCallID, ToolName: tool.ModelName, Status: valueSuccess4D886D19, OutputJSON: source.OutputJSON}, false, nil
 }
 
 func (s *Engine) requestRunToolApproval(ctx context.Context, run model.Run, step model.Step, effective effectiveTextRunConfig, tool ResolvedTool, call ToolCall) (ToolResult, bool, error) {
@@ -3786,6 +3865,7 @@ type runSegmentToolPayload struct {
 	SegmentKey   string `json:"segmentKey"`
 	ToolKey      string `json:"toolKey"`
 	ProviderKind string `json:"providerKind"`
+	Replayed     bool   `json:"replayed"`
 }
 
 type runSegmentUsagePayload struct {
@@ -3813,7 +3893,7 @@ func (accumulator *runSegmentUsageAccumulator) apply(event model.Event) {
 
 func (accumulator *runSegmentUsageAccumulator) applyTool(event model.Event) {
 	var payload runSegmentToolPayload
-	if json.Unmarshal([]byte(event.PayloadJSON), &payload) != nil || payload.SegmentKey != accumulator.segmentKey || strings.TrimSpace(payload.ToolKey) == "" {
+	if json.Unmarshal([]byte(event.PayloadJSON), &payload) != nil || payload.SegmentKey != accumulator.segmentKey || strings.TrimSpace(payload.ToolKey) == "" || payload.Replayed {
 		return
 	}
 	callID := strings.TrimSpace(event.ToolCallID)

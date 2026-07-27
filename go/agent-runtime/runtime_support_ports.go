@@ -479,6 +479,7 @@ type ToolExecutor interface {
 }
 
 const (
+	ToolSideEffectRead        = "read"
 	ToolSideEffectStagedWrite = "staged_write"
 	ToolSideEffectWrite       = "write"
 	ToolSideEffectDestructive = "destructive"
