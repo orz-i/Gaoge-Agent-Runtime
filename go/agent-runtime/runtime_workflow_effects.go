@@ -32,6 +32,8 @@ type workflowEffectState struct {
 	ArgumentsJSON    string `json:"argumentsJSON,omitempty"`
 	SideEffectLevel  string `json:"sideEffectLevel,omitempty"`
 	IdempotencyMode  string `json:"idempotencyMode,omitempty"`
+	ChildRunID       string `json:"childRunID,omitempty"`
+	PayloadJSON      string `json:"payloadJSON,omitempty"`
 	ReservedAttempts int    `json:"reservedAttempts,omitempty"`
 	DispatchAttempt  int    `json:"dispatchAttempt,omitempty"`
 }
@@ -59,8 +61,28 @@ func (r *workflowRunner) dispatchClaimedWorkflowEffect(ctx context.Context) erro
 	switch effect.Kind {
 	case workflowEffectKindTool:
 		return r.dispatchWorkflowToolEffect(ctx, effect)
+	case workflowEffectKindAgent, workflowEffectKindWorkflow:
+		return r.dispatchWorkflowChildEffect(ctx, effect)
 	default:
 		return ErrRunSnapshotIncompatible
+	}
+}
+
+func (r *workflowRunner) advanceWorkflowEffect(
+	node *model.WorkflowNode,
+	activation workflowActivationState,
+) (interface{}, bool, error) {
+	effect, ok := r.state.Effects[activation.EffectID]
+	if !ok {
+		return nil, false, r.failActivation(*node, activation, "workflow_effect_invalid", ErrRunSnapshotIncompatible.Error())
+	}
+	switch effect.Kind {
+	case workflowEffectKindTool:
+		return r.advanceWorkflowToolEffect(node, activation)
+	case workflowEffectKindAgent, workflowEffectKindWorkflow:
+		return r.advanceWorkflowChildEffect(node, activation)
+	default:
+		return nil, false, r.failActivation(*node, activation, "workflow_effect_invalid", ErrRunSnapshotIncompatible.Error())
 	}
 }
 
@@ -142,7 +164,7 @@ func workflowToolTerminalEvent(
 		workflowPayloadToolCallID: effect.ToolCallID,
 		workflowPayloadToolCalls:  execution.Attempts,
 		valueToolKey560014C9:      effect.ToolKey,
-		"effectID":                effect.EffectID,
+		workflowPayloadEffectID:   effect.EffectID,
 		"executionReceipt":        execution.Receipt,
 	}, nil)
 	event.EventID = workflowEffectTerminalEventID(effect.EffectID)
@@ -355,7 +377,7 @@ func (r *workflowRunner) advanceNextWorkflowEffectForDrain() error {
 	if !ok || node == nil || activation.EffectID != effect.EffectID {
 		return ErrRunSnapshotIncompatible
 	}
-	_, _, err = r.advanceWorkflowToolEffect(node, activation)
+	_, _, err = r.advanceWorkflowEffect(node, activation)
 	return ignoreWorkflowNodeFailure(err)
 }
 

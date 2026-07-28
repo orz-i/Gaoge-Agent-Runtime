@@ -60,7 +60,7 @@ func (r *workflowRunner) resumeWaitingNode(node *model.WorkflowNode, activation 
 	case model.WorkflowNodeTool:
 		return r.resumeWorkflowInteraction(node, activation, true)
 	case model.WorkflowNodeAgent, model.WorkflowNodeWorkflow:
-		return r.resumeChildRun(node, activation)
+		return r.resumeWorkflowChild(node, activation)
 	default:
 		return nil, false, workflowNodeFailure{Code: "workflow_wait_invalid", Message: "node cannot be resumed from a wait"}
 	}
@@ -160,6 +160,9 @@ func (r *workflowRunner) advanceTimer(node *model.WorkflowNode, activation workf
 }
 
 func (r *workflowRunner) advanceAgent(node *model.WorkflowNode, activation workflowActivationState) (interface{}, bool, error) {
+	if activation.EffectID != "" {
+		return r.advanceWorkflowEffect(node, activation)
+	}
 	goal, err := r.workflowAgentGoal(node, activation)
 	if err != nil {
 		return nil, false, r.failActivation(*node, activation, workflowFailureCode(err), err.Error())
@@ -173,22 +176,21 @@ func (r *workflowRunner) advanceAgent(node *model.WorkflowNode, activation workf
 		return nil, false, r.failActivation(*node, activation, "workflow_budget_exceeded", err.Error())
 	}
 	clientID := deterministicWorkflowID("workflow_agent", r.run.RunID, activation.Path, strconv.Itoa(activation.Attempt))
-	result, err := r.service.DelegateTextRun(r.ctx, DelegateTextRunInput{
-		Actor: r.run.Actor, ParentRunID: r.run.RunID, ClientHandoffID: clientID, AgentManifest: node.ManifestRef,
-		Goal: goal, ContentType: workflowContentTypeText, RequestID: r.run.RequestID + ":" + node.ID,
-		MaxLLMCalls: maxLLM, MaxToolCalls: maxTools, StructuredOutputSchema: node.OutputSchema, ResultAttempts: node.ResultAttempts,
+	_, childRunID := delegatedPublicIDs(r.run.Actor, clientID)
+	err = r.registerWorkflowChildEffect(*node, activation, workflowEffectKindAgent, childRunID, workflowAgentEffectPayload{
+		ClientHandoffID:        clientID,
+		ManifestRef:            node.ManifestRef,
+		Goal:                   goal,
+		RequestID:              r.run.RequestID + ":" + node.ID,
+		MaxLLMCalls:            maxLLM,
+		MaxToolCalls:           maxTools,
+		StructuredOutputSchema: append(json.RawMessage(nil), node.OutputSchema...),
+		ResultAttempts:         node.ResultAttempts,
 	})
 	if err != nil {
 		r.releaseFailedChildReservation(&activation)
-		return nil, false, r.failActivation(*node, activation, "workflow_agent_start_failed", err.Error())
+		return nil, false, r.failActivation(*node, activation, workflowChildFailureInvalid, err.Error())
 	}
-	activation.ChildRunID = result.Run.RunID
-	r.addWait(&activation, model.WorkflowWaitAgent, nil, "", result.Run.RunID, map[string]interface{}{"manifestRef": node.ManifestRef})
-	r.events = append(r.events,
-		newRunEvent(r.run, "workflow.child.started", activation.StepID, node.ID, map[string]interface{}{workflowPayloadChildRunID: result.Run.RunID, valueKindE5B2EFB3: model.WorkflowWaitAgent}, nil),
-		newRunEvent(r.run, "workflow.node.waiting", activation.StepID, node.ID, map[string]interface{}{workflowPayloadWaitKind: model.WorkflowWaitAgent, workflowPayloadChildRunID: result.Run.RunID}, nil),
-		newRunEvent(r.run, "step.waiting_handoff", activation.StepID, node.ID, map[string]interface{}{workflowPayloadChildRunID: result.Run.RunID}, nil),
-	)
 	return nil, false, nil
 }
 
@@ -226,6 +228,9 @@ func (r *workflowRunner) workflowAgentLimits(manifest model.AgentManifest, nodeL
 }
 
 func (r *workflowRunner) advanceNestedWorkflow(node *model.WorkflowNode, activation workflowActivationState) (interface{}, bool, error) {
+	if activation.EffectID != "" {
+		return r.advanceWorkflowEffect(node, activation)
+	}
 	inputValue, err := r.evaluate(node.Input, activation.ScopeKey)
 	if err != nil {
 		return nil, false, r.failActivation(*node, activation, "workflow_expression_failed", err.Error())
@@ -249,24 +254,17 @@ func (r *workflowRunner) advanceNestedWorkflow(node *model.WorkflowNode, activat
 		return nil, false, r.failActivation(*node, activation, "workflow_budget_exceeded", err.Error())
 	}
 	childRunID := deterministicWorkflowID("run", r.run.RunID, activation.Path, strconv.Itoa(activation.Attempt))
-	start, err := r.service.StartWorkflow(r.ctx, StartWorkflowInput{
-		Actor: r.run.Actor, Thread: r.run.Thread, RequestID: r.run.RequestID + ":" + node.ID, ClientRunID: childRunID,
-		Definition: node.DefinitionRef, Input: canonicalInput, Environment: r.run.Environment, Limits: &definition.Limits,
-		CacheMode: r.effective.CacheMode, ParentProjection: &r.run.OutputProjection, ThreadModel: r.effective.ThreadModel,
-		ThreadScope: workflowEffectiveThreadScope(r.effective), FrozenWorkspace: r.effective.Workspace,
-		ParentRunID: r.run.RunID, RootRunID: r.execution.RootRunID, BudgetOwnerRunID: r.execution.BudgetOwnerRunID, Depth: r.run.Depth + 1,
+	err = r.registerWorkflowChildEffect(*node, activation, workflowEffectKindWorkflow, childRunID, workflowNestedEffectPayload{
+		ClientRunID: childRunID,
+		Definition:  node.DefinitionRef,
+		Input:       append(json.RawMessage(nil), canonicalInput...),
+		Limits:      definition.Limits,
+		RequestID:   r.run.RequestID + ":" + node.ID,
 	})
 	if err != nil {
 		r.releaseFailedChildReservation(&activation)
-		return nil, false, r.failActivation(*node, activation, "nested_workflow_start_failed", err.Error())
+		return nil, false, r.failActivation(*node, activation, workflowChildFailureInvalid, err.Error())
 	}
-	activation.ChildRunID = start.Run.RunID
-	r.addWait(&activation, model.WorkflowWaitWorkflow, nil, "", start.Run.RunID, map[string]interface{}{"definitionRef": node.DefinitionRef})
-	r.events = append(r.events,
-		newRunEvent(r.run, "workflow.child.started", activation.StepID, node.ID, map[string]interface{}{workflowPayloadChildRunID: start.Run.RunID, valueKindE5B2EFB3: model.WorkflowWaitWorkflow}, nil),
-		newRunEvent(r.run, "workflow.node.waiting", activation.StepID, node.ID, map[string]interface{}{workflowPayloadWaitKind: model.WorkflowWaitWorkflow, workflowPayloadChildRunID: start.Run.RunID}, nil),
-		newRunEvent(r.run, "step.waiting_handoff", activation.StepID, node.ID, map[string]interface{}{workflowPayloadChildRunID: start.Run.RunID}, nil),
-	)
 	return nil, false, nil
 }
 
@@ -392,7 +390,7 @@ func normalizeAgentWorkflowResult(value interface{}, schema json.RawMessage) (in
 
 func (r *workflowRunner) advanceTool(node *model.WorkflowNode, activation workflowActivationState) (interface{}, bool, error) {
 	if activation.EffectID != "" {
-		return r.advanceWorkflowToolEffect(node, activation)
+		return r.advanceWorkflowEffect(node, activation)
 	}
 	invocation, err := r.prepareWorkflowToolInvocation(node, activation)
 	if err != nil {

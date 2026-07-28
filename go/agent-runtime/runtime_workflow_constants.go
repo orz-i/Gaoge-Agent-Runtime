@@ -16,6 +16,7 @@ const (
 	workflowPayloadCompletionSeq = "completionSeq"
 	workflowPayloadContentHash   = "contentHash"
 	workflowPayloadError         = "error"
+	workflowPayloadEffectID      = "effectID"
 	workflowPayloadInteractionID = "interactionID"
 	workflowPayloadItems         = "items"
 	workflowPayloadLane          = "lane"
