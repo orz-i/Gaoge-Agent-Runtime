@@ -208,7 +208,7 @@ func TestWorkflowRunnerCompensatesInReverseOrderAndResumesOnlyFailedUndo(t *test
 	assertWorkflowCompensationSuspended(t, runner)
 	assertWorkflowLogSummaries(t, runner.events, []string{"undo-second"})
 
-	if _, err := resetFailedWorkflowCompensation(&runner.state, runner.run.RunID); err != nil {
+	if _, err := resetFailedWorkflowCompensation(&runner.state, runner.run.RunID, runner.now); err != nil {
 		t.Fatalf("resetFailedWorkflowCompensation() error = %v", err)
 	}
 	runner.state.Compensations[0].Undo.Message = workflowExprPointer(workflowTestLiteral("undo-first"))

@@ -3,9 +3,10 @@ package agentruntime
 const (
 	workflowRootScope = "root"
 
-	workflowContentTypeText = "text"
-	workflowEnvironment     = "general"
-	workflowApprovalPerCall = "per_call"
+	workflowContentTypeText         = "text"
+	workflowEnvironment             = "general"
+	workflowApprovalPerCall         = "per_call"
+	workflowFailureDurationExceeded = "workflow_duration_exceeded"
 
 	workflowPayloadActivationKey = "activationKey"
 	workflowPayloadAttempt       = "attempt"

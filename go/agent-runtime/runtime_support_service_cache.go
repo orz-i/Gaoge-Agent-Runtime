@@ -39,7 +39,7 @@ func (s *Engine) getUserSettingCached(ctx context.Context, actor domain.ActorRef
 			s.userSettingCache.Delete(cacheKey)
 			return s.settingsRepo.GetActorSettingValue(ctx, actor, key)
 		}
-		if time.Now().Before(entry.expiresAt) {
+		if s.now().Before(entry.expiresAt) {
 			if !entry.valid {
 				return "", errCategory5CEE377763
 			}
@@ -49,10 +49,10 @@ func (s *Engine) getUserSettingCached(ctx context.Context, actor domain.ActorRef
 	}
 	val, err := s.settingsRepo.GetActorSettingValue(ctx, actor, key)
 	if err != nil {
-		s.userSettingCache.Store(cacheKey, &cachedUserSetting{valid: false, expiresAt: time.Now().Add(userSettingCacheTTL)})
+		s.userSettingCache.Store(cacheKey, &cachedUserSetting{valid: false, expiresAt: s.now().Add(userSettingCacheTTL)})
 		return "", err
 	}
-	s.userSettingCache.Store(cacheKey, &cachedUserSetting{value: val, valid: true, expiresAt: time.Now().Add(userSettingCacheTTL)})
+	s.userSettingCache.Store(cacheKey, &cachedUserSetting{value: val, valid: true, expiresAt: s.now().Add(userSettingCacheTTL)})
 	return val, nil
 }
 
@@ -65,7 +65,7 @@ func (s *Engine) getCachedUserMemories(ctx context.Context, actor domain.ActorRe
 			s.userMemCache.Delete(cacheKey)
 			return s.memoryRecorder.ListUserMemories(ctx, actor)
 		}
-		if time.Now().Before(entry.expiresAt) {
+		if s.now().Before(entry.expiresAt) {
 			return entry.memories, nil
 		}
 		s.userMemCache.Delete(cacheKey)
@@ -76,7 +76,7 @@ func (s *Engine) getCachedUserMemories(ctx context.Context, actor domain.ActorRe
 	}
 	s.userMemCache.Store(cacheKey, &cachedUserMemories{
 		memories:  mems,
-		expiresAt: time.Now().Add(userMemCacheTTL),
+		expiresAt: s.now().Add(userMemCacheTTL),
 	})
 	return mems, nil
 }

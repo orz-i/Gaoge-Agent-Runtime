@@ -115,7 +115,7 @@ func (s *Engine) applyContextArtifactRetention(items []domainconversation.Contex
 	if days <= 0 {
 		return
 	}
-	expiresAt := time.Now().Add(time.Duration(days) * 24 * time.Hour)
+	expiresAt := s.now().Add(time.Duration(days) * 24 * time.Hour)
 	for index := range items {
 		items[index].ExpiresAt = &expiresAt
 	}

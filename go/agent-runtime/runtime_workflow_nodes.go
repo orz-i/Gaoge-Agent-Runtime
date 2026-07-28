@@ -24,6 +24,7 @@ func (r *workflowRunner) addWait(activation *workflowActivationState, kind strin
 		WaitID: waitID, Kind: kind, ActivationKey: activation.Path, StepID: activation.StepID,
 		InteractionID: interactionID, ChildRunID: childRunID, WakeAt: wakeAt, Payload: raw, CreatedAt: r.now,
 	}
+	r.recordWorkflowWaitSpan(wait)
 	r.state.Waits[waitID] = wait
 	activation.Status, activation.WaitID = model.WorkflowStepStatusWaiting, waitID
 	activation.InteractionID, activation.ChildRunID, activation.WakeAt = interactionID, childRunID, wakeAt

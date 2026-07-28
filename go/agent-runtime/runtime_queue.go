@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
@@ -84,7 +83,7 @@ func (s *Engine) EnqueueRun(ctx context.Context, input EnqueueRunInput) (*model.
 		return nil, false, err
 	}
 	item := &model.QueueItem{
-		QueueID:            "queue_" + strings.ReplaceAll(uuid.NewString(), "-", ""),
+		QueueID:            s.newRuntimeID("queue"),
 		ClientQueueID:      strings.TrimSpace(input.ClientQueueID),
 		RequestFingerprint: hashRunQueueRequest(input.Actor, input.Thread, requestJSON),
 		Actor:              input.Actor,
@@ -393,7 +392,7 @@ func (s *Engine) runQueueDispatchLoop(ctx context.Context) {
 
 func (s *Engine) dispatchRunQueueBatch(ctx context.Context) {
 	for index := 0; index < 10; index++ {
-		item, err := s.repo.ClaimNextRunQueueItem(ctx, time.Now())
+		item, err := s.repo.ClaimNextRunQueueItem(ctx, s.now())
 		if errors.Is(err, ErrNotFound) {
 			return
 		}
@@ -462,7 +461,7 @@ func (s *Engine) dispatchRunQueueItem(ctx context.Context, item model.QueueItem)
 	}
 	if runQueueTransient(startErr) && item.AttemptCount < 5 {
 		delay := time.Second * time.Duration(1<<max(0, item.AttemptCount-1))
-		next := time.Now().Add(delay)
+		next := s.now().Add(delay)
 		return s.repo.RequeueRunQueueItem(ctx, item.QueueID, "dispatch_retry", startErr.Error(), &next)
 	}
 	return s.repo.RequeueRunQueueItem(ctx, item.QueueID, runQueueErrorCode(startErr), startErr.Error(), nil)
@@ -550,7 +549,7 @@ func (s *Engine) requeueWhenAnchorSuspended(ctx context.Context, item model.Queu
 	if anchor == nil || anchor.Status != model.RunStatusSuspended {
 		return false, nil
 	}
-	next := time.Now().Add(15 * time.Second)
+	next := s.now().Add(15 * time.Second)
 	return true, s.repo.RequeueRunQueueItem(ctx, item.QueueID, "blocked_by_suspended_run", "resume or cancel the suspended run", &next)
 }
 

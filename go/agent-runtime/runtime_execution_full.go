@@ -722,9 +722,8 @@ func (s *Engine) generatePlanAttempt(ctx context.Context, run model.Run, effecti
 	if repair {
 		phase = "planner_repair"
 	}
-	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate",
+	fields := runTelemetryFields(run,
 		String("gen_ai.operation.name", "chat"),
-		String("gen_ai.agent.id", run.RunID),
 		String("gen_ai.request.model", effective.PlatformModelName),
 		String("run.id", run.RunID),
 		String("step.id", run.CurrentStepID),
@@ -732,6 +731,7 @@ func (s *Engine) generatePlanAttempt(ctx context.Context, run model.Run, effecti
 		String("model.name", effective.PlatformModelName),
 		String("provider.protocol", route.Protocol),
 	)
+	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate", fields...)
 	output, err := s.llmGateway.GenerateText(generateCtx, route, request)
 	if err != nil {
 		generationSpan.RecordError(err)
@@ -2094,9 +2094,8 @@ func (s *Engine) generateRunStepTurn(ctx context.Context, run model.Run, step mo
 	if err := s.ensureRunCallBudgetWithReserve(ctx, run, effective, true, 1); err != nil {
 		return nil, err
 	}
-	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate",
+	fields := runTelemetryFields(run,
 		String("gen_ai.operation.name", "chat"),
-		String("gen_ai.agent.id", run.RunID),
 		String("gen_ai.request.model", effective.PlatformModelName),
 		String("run.id", run.RunID),
 		String("step.id", step.StepID),
@@ -2105,6 +2104,7 @@ func (s *Engine) generateRunStepTurn(ctx context.Context, run model.Run, step mo
 		String("provider.protocol", prepared.route.Protocol),
 		Int("generation.call_number", callNumber),
 	)
+	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate", fields...)
 	output, err := s.llmGateway.GenerateText(generateCtx, prepared.route, GenerateInput{
 		RequestID:    fmt.Sprintf("%s:step:%s:%d", run.RunID, step.StepID, callNumber),
 		Thread:       run.Thread,
@@ -2592,9 +2592,8 @@ func (s *Engine) commitReplayedReadToolResult(ctx context.Context, run model.Run
 }
 
 func (s *Engine) requestRunToolApproval(ctx context.Context, run model.Run, step model.Step, effective effectiveTextRunConfig, tool ResolvedTool, call ToolCall) (ToolResult, bool, error) {
-	ctx, span := s.startSpan(ctx, "agentruntime.approval.request",
+	fields := runTelemetryFields(run,
 		String("gen_ai.operation.name", "request_approval"),
-		String("gen_ai.agent.id", run.RunID),
 		String("run.id", run.RunID),
 		String("step.id", step.StepID),
 		String("tool.call_id", call.ToolCallID),
@@ -2602,6 +2601,7 @@ func (s *Engine) requestRunToolApproval(ctx context.Context, run model.Run, step
 		String("tool.name", tool.ModelName),
 		String("approval.kind", model.InteractionApproveTool),
 	)
+	ctx, span := s.startSpan(ctx, "agentruntime.approval.request", fields...)
 	defer span.End()
 	fingerprint := fmt.Sprintf("%x", sha256.Sum256([]byte(tool.ToolKey+"\x00"+tool.ModelName+"\x00"+canonicalRunJSON(json.RawMessage(call.ArgumentsJSON)))))
 	request := map[string]interface{}{valueToolKey560014C9: tool.ToolKey, valueToolName4234B607: tool.ModelName, "originalName": tool.OriginalName, valueToolCallID64CA70DB: call.ToolCallID, "arguments": json.RawMessage(call.ArgumentsJSON), "fingerprint": fingerprint, "sideEffectLevel": tool.SideEffectLevel}
@@ -2645,9 +2645,8 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 		return ToolResult{}, false, ErrRunSnapshotIncompatible
 	}
 	limits := &TextRunExecutionLimits{MaxLLMCalls: effective.MaxLLMCalls, MaxToolCalls: effective.MaxToolCalls, ToolRetryCount: policy.RetryCount, ToolConcurrency: policy.Concurrency}
-	executeCtx, toolSpan := s.startSpan(ctx, "agentruntime.tool.execute",
+	fields := runTelemetryFields(run,
 		String("gen_ai.operation.name", "execute_tool"),
-		String("gen_ai.agent.id", run.RunID),
 		String("gen_ai.tool.name", tool.ModelName),
 		String("gen_ai.tool.call.id", call.ToolCallID),
 		String("run.id", run.RunID),
@@ -2657,6 +2656,7 @@ func (s *Engine) executeFrozenRunTool(ctx context.Context, run model.Run, stepID
 		String("tool.name", tool.ModelName),
 		String("tool.provider_kind", tool.ProviderKind),
 	)
+	executeCtx, toolSpan := s.startSpan(ctx, "agentruntime.tool.execute", fields...)
 	execution, err := s.executeFrozenToolProvider(executeCtx, run, stepID, effective, tool, call, limits)
 	if err != nil {
 		toolSpan.RecordError(err)
@@ -3129,9 +3129,8 @@ func (s *Engine) streamRunAnswerAttempt(ctx context.Context, run model.Run, orch
 	}
 	holdForEvaluation := len(effective.StructuredOutputSchema) > 0 || s.evaluations != nil && s.evaluations.Enforces(EvaluationStageModelOutput)
 	collector := runDeltaCollector{service: s, ctx: ctx, run: run, stepID: orchestrationStepID, projection: run.OutputProjection, lastFlush: time.Now(), holdForEvaluation: holdForEvaluation}
-	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate",
+	fields := runTelemetryFields(run,
 		String("gen_ai.operation.name", "chat"),
-		String("gen_ai.agent.id", run.RunID),
 		String("gen_ai.request.model", effective.PlatformModelName),
 		String("run.id", run.RunID),
 		String("step.id", orchestrationStepID),
@@ -3141,6 +3140,7 @@ func (s *Engine) streamRunAnswerAttempt(ctx context.Context, run model.Run, orch
 		Bool("generation.stream", true),
 		Bool("generation.held_for_evaluation", holdForEvaluation),
 	)
+	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate", fields...)
 	output, err := s.llmGateway.GenerateTextStream(generateCtx, route, GenerateInput{RequestID: run.RunID + ":" + requestKind, Messages: promptMessages, Instructions: instructions, HostedTools: hostedTools, DisableTools: len(hostedTools) == 0, Options: options}, collector.accept)
 	if err != nil {
 		generationSpan.RecordError(err)

@@ -103,7 +103,7 @@ func (s *Engine) prepareWorkflowResume(
 	if err != nil {
 		return workflowResumePreparation{}, err
 	}
-	step, err := resetFailedWorkflowCompensation(&state, input.RunID)
+	step, err := resetFailedWorkflowCompensation(&state, input.RunID, s.now())
 	if err != nil {
 		return workflowResumePreparation{}, err
 	}
@@ -132,7 +132,7 @@ func (s *Engine) prepareWorkflowResume(
 		budgetJSON,
 	)
 	nextRun := workflowResumeRun(run)
-	current.Status, current.ResumeRequestID, current.ResumeFingerprint, current.UpdatedAt = model.CheckpointConsumed, input.ClientResumeID, fingerprint, time.Now()
+	current.Status, current.ResumeRequestID, current.ResumeFingerprint, current.UpdatedAt = model.CheckpointConsumed, input.ClientResumeID, fingerprint, s.now()
 	successor, job := s.workflowResumeContinuation(ctx, input, run, nextRun, nextExecution, current, step)
 	transition := workflowResumeTransition(input, run, *execution, nextExecution, nextRun, current, successor, *job, step)
 	return workflowResumePreparation{transition: transition, successor: successor}, nil
@@ -187,7 +187,7 @@ func (s *Engine) workflowResumeContinuation(
 	successor := newRunContinuationCheckpoint(run, step.StepID, "workflow_compensation_resume", continuation)
 	successor.CheckpointID = deterministicRunCheckpointID(run.RunID, "workflow_compensation_resume", input.ClientResumeID)
 	successor.ParentCheckpointID = current.CheckpointID
-	job := s.newWorkflowContinuationJob(ctx, nextRun, *successor, "workflow_compensation_resume", time.Now())
+	job := s.newWorkflowContinuationJob(ctx, nextRun, *successor, "workflow_compensation_resume", s.now())
 	return *successor, job
 }
 
@@ -274,7 +274,7 @@ func selectWorkflowResumeCheckpoint(checkpoints []model.Checkpoint, checkpointID
 	return model.Checkpoint{}, ErrRunResumeConflict
 }
 
-func resetFailedWorkflowCompensation(state *workflowRuntimeState, runID string) (model.Step, error) {
+func resetFailedWorkflowCompensation(state *workflowRuntimeState, runID string, now time.Time) (model.Step, error) {
 	for index := len(state.Compensations) - 1; index >= 0; index-- {
 		compensation := state.Compensations[index]
 		if compensation.Status != model.WorkflowCompensationFailed {
@@ -295,7 +295,7 @@ func resetFailedWorkflowCompensation(state *workflowRuntimeState, runID string) 
 		return model.Step{
 			StepID: activation.StepID, RunID: runID, NodeID: activation.NodeID, ActivationPath: activation.Path,
 			LaneID: activation.ScopeKey, Attempt: activation.Attempt, Kind: compensation.Undo.Type,
-			Title: compensation.Undo.ID, Status: model.WorkflowStepStatusRunning, StartedAt: time.Now(),
+			Title: compensation.Undo.ID, Status: model.WorkflowStepStatusRunning, StartedAt: now,
 		}, nil
 	}
 	return model.Step{}, ErrRunResumeConflict

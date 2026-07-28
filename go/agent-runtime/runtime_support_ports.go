@@ -58,6 +58,8 @@ type Dependencies struct {
 	Logger              Logger
 	Tracer              Tracer
 	Evaluations         EvaluationRegistry
+	Clock               RuntimeClock
+	IDSource            RuntimeIDSource
 }
 
 type WorkspaceSelection struct {

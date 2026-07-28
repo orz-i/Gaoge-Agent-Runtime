@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
@@ -62,7 +61,7 @@ func (s *Engine) EnsureRunBillingAccess(ctx context.Context, input RunBillingInp
 	if s.billingSvc == nil {
 		return nil
 	}
-	return s.billingSvc.EnsureModelUsable(ctx, input.Actor, runBillingPlatformModelName(input), time.Now())
+	return s.billingSvc.EnsureModelUsable(ctx, input.Actor, runBillingPlatformModelName(input), s.now())
 }
 
 // ReserveRunUsageBalance 在模型调用前执行按量预扣。

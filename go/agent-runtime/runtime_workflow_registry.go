@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/google/uuid"
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
@@ -141,7 +140,7 @@ func (s *Engine) prepareWorkflowDefinition(input WorkflowDefinitionRevisionInput
 	}
 	workflowID := normalizeWorkflowID(input.WorkflowID)
 	if workflowID == "" {
-		workflowID = "workflow_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		workflowID = s.newRuntimeID("workflow")
 	}
 	scope, tenantID, ownerActorID, ok := normalizeWorkflowOwnership(input)
 	if !ok {

@@ -38,6 +38,14 @@ type workflowEffectState struct {
 	DispatchAttempt  int    `json:"dispatchAttempt,omitempty"`
 }
 
+func workflowNodeFailureCode(err error) string {
+	var failure workflowNodeFailure
+	if errors.As(err, &failure) {
+		return failure.Code
+	}
+	return ""
+}
+
 type workflowToolEffectPayload struct {
 	EffectID string               `json:"effectID"`
 	ToolKey  string               `json:"toolKey"`
@@ -87,7 +95,14 @@ func (r *workflowRunner) advanceWorkflowEffect(
 }
 
 func (r *workflowRunner) dispatchWorkflowToolEffect(ctx context.Context, effect workflowEffectState) error {
+	var deadlineFailure workflowNodeFailure
+	if r.workflowDeadlineExceededAt(r.service.now()) {
+		deadlineFailure = workflowNodeFailure{Code: workflowFailureDurationExceeded, Message: ErrWorkflowBudgetExceeded.Error()}
+	}
 	tool, policy, err := r.resolveWorkflowTool(effect.ToolKey)
+	if deadlineFailure.Code != "" {
+		err = deadlineFailure
+	}
 	call := ToolCall{ToolCallID: effect.ToolCallID, ToolName: effect.ToolName, ArgumentsJSON: effect.ArgumentsJSON}
 	execution := ToolExecutionResult{}
 	if err == nil {
@@ -127,6 +142,10 @@ func (r *workflowRunner) dispatchWorkflowToolEffect(ctx context.Context, effect 
 			output, err = "", evaluationErr
 		}
 	}
+	if err == nil && r.workflowDeadlineExceededAt(r.service.now()) {
+		output = ""
+		err = workflowNodeFailure{Code: workflowFailureDurationExceeded, Message: ErrWorkflowBudgetExceeded.Error()}
+	}
 	return r.appendWorkflowToolTerminalEvent(ctx, effect, output, execution, err)
 }
 
@@ -137,7 +156,7 @@ func (r *workflowRunner) appendWorkflowToolTerminalEvent(
 	execution ToolExecutionResult,
 	executionErr error,
 ) error {
-	event := workflowToolTerminalEvent(r.run, effect, output, execution, executionErr, "")
+	event := workflowToolTerminalEvent(r.run, effect, output, execution, executionErr, workflowNodeFailureCode(executionErr))
 	saved, created, err := r.service.repo.AppendRunEvent(ctx, &event)
 	if err != nil {
 		return err
@@ -234,11 +253,9 @@ func (r *workflowRunner) claimOrRecoverWorkflowToolEffect(
 	default:
 		return nil, false, r.failActivation(*node, activation, "workflow_effect_invalid", ErrRunSnapshotIncompatible.Error())
 	}
-	effect.Status = workflowEffectStatusDispatching
-	effect.DispatchAttempt++
-	r.state.Effects[effect.EffectID] = effect
-	r.dispatchEffectID = effect.EffectID
-	r.progress = true
+	if !r.claimWorkflowEffectForDispatch(effect) {
+		return nil, false, nil
+	}
 	return nil, false, nil
 }
 

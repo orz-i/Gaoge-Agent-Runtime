@@ -226,6 +226,7 @@ func TestRecoveredWorkflowChildEffectReusesChildRunID(t *testing.T) {
 	effect := runner.state.Effects[activation.EffectID]
 	firstAttempt := effect.DispatchAttempt
 	runner.dispatchEffectID = ""
+	runner.segment = workflowSegmentState{}
 
 	if _, _, err := runner.advanceWorkflowChildEffect(&node, activation); err != nil {
 		t.Fatal(err)

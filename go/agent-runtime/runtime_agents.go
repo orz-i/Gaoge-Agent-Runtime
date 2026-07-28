@@ -8,9 +8,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
@@ -291,7 +289,7 @@ func (s *Engine) CreateAgentManifestRevision(ctx context.Context, input AgentMan
 	}
 	manifestID := normalizeAgentManifestID(input.ManifestID)
 	if manifestID == "" {
-		manifestID = "agent_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+		manifestID = s.newRuntimeID("agent")
 	}
 	status := strings.TrimSpace(input.Status)
 	if status == "" {
@@ -330,12 +328,13 @@ func (s *Engine) GetAgentManifest(ctx context.Context, actor model.ActorRef, ref
 }
 
 func (s *Engine) DelegateTextRun(ctx context.Context, input DelegateTextRunInput) (*DelegateTextRunResult, error) {
-	ctx, span := s.startSpan(ctx, "agentruntime.handoff.create",
+	fields := telemetryAgentFields(input.AgentManifest.ID,
 		String("gen_ai.operation.name", "handoff"),
-		String("gen_ai.agent.id", strings.TrimSpace(input.ParentRunID)),
+		String("run.parent_id", strings.TrimSpace(input.ParentRunID)),
 		String("handoff.client_id", strings.TrimSpace(input.ClientHandoffID)),
 		String("agent.manifest_id", strings.TrimSpace(input.AgentManifest.ID)),
 	)
+	ctx, span := s.startSpan(ctx, "agentruntime.handoff.create", fields...)
 	defer span.End()
 	goal, err := validateDelegateTextRunInput(input)
 	if err != nil {
@@ -901,7 +900,7 @@ func (s *Engine) finalizeRunHandoff(ctx context.Context, run model.Run, intent m
 }
 
 func (s *Engine) cancelPendingRunHandoffJoinsAtCommit(ctx context.Context, parent model.Run, code, message string) ([]model.Event, error) {
-	joins, err := s.repo.CancelPendingRunHandoffJoins(ctx, parent.Actor, parent.RunID, time.Now(), firstNonEmptyString(strings.TrimSpace(code), "parent_run_cancelled"), firstNonEmptyString(strings.TrimSpace(message), "parent run was cancelled"))
+	joins, err := s.repo.CancelPendingRunHandoffJoins(ctx, parent.Actor, parent.RunID, s.now(), firstNonEmptyString(strings.TrimSpace(code), "parent_run_cancelled"), firstNonEmptyString(strings.TrimSpace(message), "parent run was cancelled"))
 	if err != nil {
 		return nil, err
 	}

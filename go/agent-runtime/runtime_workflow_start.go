@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
@@ -365,7 +364,7 @@ func (s *Engine) persistWorkflowStart(ctx context.Context, input StartWorkflowIn
 	if s.unitOfWork == nil || s.turnProjections == nil {
 		return nil, ErrHostProjectionUnavailable
 	}
-	now := time.Now()
+	now := s.now()
 	rootRunID := firstNonEmptyString(strings.TrimSpace(input.RootRunID), runID)
 	budgetOwnerRunID := firstNonEmptyString(strings.TrimSpace(input.BudgetOwnerRunID), rootRunID)
 	stepID := deterministicWorkflowID("step", runID, definition.Root.ID)
@@ -424,7 +423,7 @@ func (s *Engine) persistWorkflowStart(ctx context.Context, input StartWorkflowIn
 			return branchErr
 		}
 		run.InputProjection, run.OutputProjection = projection.Input, projection.Output
-		snapshot = newWorkflowContextSnapshot(run, prepared.InputJSON, prepared.ThreadSnapshotHash, now)
+		snapshot = s.newWorkflowContextSnapshot(run, prepared.InputJSON, prepared.ThreadSnapshotHash, now)
 		checkpoint.ContextSnapshotID = snapshot.SnapshotID
 		events := []model.Event{
 			newRunEvent(run, "run.started", stepID, "Workflow run started", map[string]interface{}{"workflowRef": definition.Ref(), workflowPayloadRuntimeKind: model.RuntimeKindWorkflow}, nil),
@@ -449,10 +448,10 @@ func (s *Engine) persistWorkflowStart(ctx context.Context, input StartWorkflowIn
 	return &WorkflowStartResult{Run: run, Step: step, Projection: projection}, nil
 }
 
-func newWorkflowContextSnapshot(run model.Run, inputJSON []byte, threadHash string, now time.Time) *model.ContextSnapshot {
+func (s *Engine) newWorkflowContextSnapshot(run model.Run, inputJSON []byte, threadHash string, now time.Time) *model.ContextSnapshot {
 	contentHash := sha256.Sum256(inputJSON)
 	return &model.ContextSnapshot{
-		SnapshotID: "context_" + strings.ReplaceAll(uuid.NewString(), "-", ""), RunID: run.RunID,
+		SnapshotID: s.newRuntimeID("context"), RunID: run.RunID,
 		ThreadPathHash: threadHash, ContentJSON: string(inputJSON), ContentHash: hex.EncodeToString(contentHash[:]),
 		SchemaVersion: RuntimeSnapshotVersion, Actor: run.Actor, Thread: run.Thread, InputProjection: run.InputProjection,
 		TokenEstimate: estimateTokens(string(inputJSON)), CreatedAt: now, UpdatedAt: now,

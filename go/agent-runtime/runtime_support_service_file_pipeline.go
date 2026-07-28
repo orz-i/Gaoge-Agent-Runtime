@@ -115,7 +115,7 @@ func (s *Engine) deleteExpiredContextArtifacts(ctx context.Context) {
 	}
 	for {
 		cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		deleted, err := s.repo.DeleteExpiredContextArtifacts(cleanupCtx, time.Now(), contextArtifactCleanupBatch)
+		deleted, err := s.repo.DeleteExpiredContextArtifacts(cleanupCtx, s.now(), contextArtifactCleanupBatch)
 		cancel()
 		if err != nil {
 			if s.logger != nil {

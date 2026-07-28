@@ -134,11 +134,9 @@ func (r *workflowRunner) claimOrRecoverWorkflowChildEffect(
 	default:
 		return nil, false, r.failActivation(*node, activation, "workflow_effect_invalid", ErrRunSnapshotIncompatible.Error())
 	}
-	effect.Status = workflowEffectStatusDispatching
-	effect.DispatchAttempt++
-	r.state.Effects[effect.EffectID] = effect
-	r.dispatchEffectID = effect.EffectID
-	r.progress = true
+	if !r.claimWorkflowEffectForDispatch(effect) {
+		return nil, false, nil
+	}
 	return nil, false, nil
 }
 
@@ -161,9 +159,17 @@ func workflowChildWaitPayload(effect workflowEffectState) map[string]interface{}
 }
 
 func (r *workflowRunner) dispatchWorkflowChildEffect(ctx context.Context, effect workflowEffectState) error {
+	if r.workflowDeadlineExceededAt(r.service.now()) {
+		failure := workflowNodeFailure{Code: workflowFailureDurationExceeded, Message: ErrWorkflowBudgetExceeded.Error()}
+		return r.appendWorkflowChildTerminalEvent(ctx, effect, "", failure)
+	}
 	childRunID, err := r.startWorkflowChildEffect(ctx, effect)
 	if err == nil && childRunID != effect.ChildRunID {
 		err = ErrRunSnapshotIncompatible
+	}
+	if err == nil && r.workflowDeadlineExceededAt(r.service.now()) {
+		_, _ = r.service.CancelRun(context.WithoutCancel(ctx), r.run.Actor, childRunID)
+		err = workflowNodeFailure{Code: workflowFailureDurationExceeded, Message: ErrWorkflowBudgetExceeded.Error()}
 	}
 	return r.appendWorkflowChildTerminalEvent(ctx, effect, childRunID, err)
 }
@@ -235,7 +241,7 @@ func (r *workflowRunner) startNestedWorkflowEffect(ctx context.Context, effect w
 }
 
 func (r *workflowRunner) appendWorkflowChildTerminalEvent(ctx context.Context, effect workflowEffectState, childRunID string, startErr error) error {
-	event := workflowChildTerminalEvent(r.run, effect, childRunID, startErr, "")
+	event := workflowChildTerminalEvent(r.run, effect, childRunID, startErr, workflowNodeFailureCode(startErr))
 	saved, created, err := r.service.repo.AppendRunEvent(ctx, &event)
 	if err != nil {
 		return err

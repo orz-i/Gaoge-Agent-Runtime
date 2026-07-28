@@ -31,6 +31,14 @@ type WorkflowConfig struct {
 	MaxExpressionBytes int
 	MaxDefinitionNodes int
 	MaxCacheTTLSeconds int
+
+	// Segment limits are cooperative execution bounds. They do not change the
+	// workflow's aggregate budget; they force a durable checkpoint before one
+	// continuation monopolizes a worker or builds an oversized transition.
+	MaxSegmentNodeActivations int
+	MaxSegmentDurationMS      int
+	MaxSegmentEffects         int
+	MaxSegmentTransitionBytes int
 }
 
 type AttributionConfig struct {

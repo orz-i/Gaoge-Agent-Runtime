@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
@@ -14,14 +13,13 @@ const (
 )
 
 func (s *Engine) evaluateRuntimeBoundary(ctx context.Context, request EvaluationRequest) (EvaluationReport, error) {
-	startedAt := time.Now()
+	startedAt := s.now()
 	report := EvaluationReport{Stage: request.Stage, Decision: EvaluationDecisionAllow}
 	if s == nil || s.evaluations == nil || s.evaluations.Count(request.Stage) == 0 {
 		return report, nil
 	}
 	ctx, span := s.startSpan(ctx, "agentruntime.guardrail.evaluate",
 		String("gen_ai.operation.name", "evaluate"),
-		String("gen_ai.agent.id", strings.TrimSpace(request.RunID)),
 		String("evaluation.stage", string(request.Stage)),
 		String("run.id", strings.TrimSpace(request.RunID)),
 		String("step.id", strings.TrimSpace(request.StepID)),
@@ -34,7 +32,7 @@ func (s *Engine) evaluateRuntimeBoundary(ctx context.Context, request Evaluation
 	span.SetAttributes(
 		String("evaluation.decision", string(report.Decision)),
 		Int("evaluation.findings", len(report.Findings)),
-		Int64("evaluation.latency_ms", time.Since(startedAt).Milliseconds()),
+		Int64("evaluation.latency_ms", s.now().Sub(startedAt).Milliseconds()),
 	)
 	if err != nil {
 		blockedEvaluator, blockedCode := blockedEvaluationIdentity(report)

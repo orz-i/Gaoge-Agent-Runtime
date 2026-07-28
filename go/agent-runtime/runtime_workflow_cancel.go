@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
@@ -86,7 +85,7 @@ func (s *Engine) prepareWorkflowCancellation(
 		StepID:          run.CurrentStepID,
 	}
 	checkpoint := newRunContinuationCheckpoint(run, run.CurrentStepID, "workflow_cancel", continuation)
-	job := s.newWorkflowContinuationJob(ctx, run, *checkpoint, "workflow_cancel", time.Now())
+	job := s.newWorkflowContinuationJob(ctx, run, *checkpoint, "workflow_cancel", s.now())
 	return workflowCancellationPreparation{
 		transition: model.WorkflowTransition{
 			ExpectedVersion: execution.Version,

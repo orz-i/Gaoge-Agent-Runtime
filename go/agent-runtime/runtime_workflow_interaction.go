@@ -53,7 +53,7 @@ func (s *Engine) resolveWorkflowInteractionAttempt(
 	if err != nil {
 		return nil, false, err
 	}
-	if resolved, terminal, gateErr := workflowInteractionResolutionGate(run, interaction, input, fingerprint); terminal {
+	if resolved, terminal, gateErr := workflowInteractionResolutionGate(run, interaction, input, fingerprint, s.now()); terminal {
 		return resolved, false, gateErr
 	}
 	if err = validateWorkflowJSON(json.RawMessage(interaction.ResponseSchemaJSON), responseValue); err != nil {
@@ -101,6 +101,7 @@ func workflowInteractionResolutionGate(
 	interaction *model.Interaction,
 	input ResolveRunInteractionInput,
 	fingerprint string,
+	now time.Time,
 ) (*model.Interaction, bool, error) {
 	if run.EndedAt != nil || run.Status == model.RunStatusSuspended {
 		return nil, true, ErrRunInteractionConflict
@@ -109,7 +110,7 @@ func workflowInteractionResolutionGate(
 		resolved, _, err := replayWorkflowInteractionResolution(interaction, input, fingerprint)
 		return resolved, true, err
 	}
-	if !workflowInteractionCanResolve(*interaction, time.Now()) {
+	if !workflowInteractionCanResolve(*interaction, now) {
 		return nil, true, ErrRunInteractionConflict
 	}
 	return nil, false, nil
@@ -140,7 +141,7 @@ func (s *Engine) buildWorkflowInteractionResolutionTransition(
 	responseJSON string,
 	fingerprint string,
 ) (model.WorkflowTransition, model.Interaction) {
-	now := time.Now()
+	now := s.now()
 	resolved := interaction
 	resolved.Status, resolved.ResponseJSON = model.InteractionResolved, responseJSON
 	resolved.ResolveRequestID, resolved.ResumeFingerprint = input.ClientResolveID, fingerprint
@@ -250,7 +251,7 @@ func (s *Engine) buildWorkflowInteractionExpiryTransition(
 	execution model.WorkflowExecution,
 	interaction model.Interaction,
 ) model.WorkflowTransition {
-	now := time.Now()
+	now := s.now()
 	expired := interaction
 	expired.Status, expired.ResolvedAt, expired.UpdatedAt = model.InteractionExpired, &now, now
 	nextRun := run

@@ -109,6 +109,8 @@ type Engine struct {
 	logger              Logger
 	tracer              Tracer
 	evaluations         EvaluationRegistry
+	clock               RuntimeClock
+	idSource            RuntimeIDSource
 	toolLimiters        sync.Map
 	generationStreams   *generationStreamRegistry
 	continuationWake    chan struct{}
@@ -251,9 +253,17 @@ func New(cfg ConfigProvider, deps Dependencies) (*Engine, error) {
 		logger:              deps.Logger,
 		tracer:              deps.Tracer,
 		evaluations:         deps.Evaluations,
+		clock:               deps.Clock,
+		idSource:            deps.IDSource,
 		generationStreams:   newGenerationStreamRegistry(deps.Cache, defaultGenerationStreamOptions()),
 		continuationWake:    make(chan struct{}, 1),
 		runQueueWake:        make(chan struct{}, 1),
+	}
+	if svc.clock == nil {
+		svc.clock = systemRuntimeClock{}
+	}
+	if svc.idSource == nil {
+		svc.idSource = uuidRuntimeIDSource{}
 	}
 	return svc, nil
 }

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
@@ -87,7 +86,7 @@ func (s *Engine) RequeueDeadLetterContinuationJob(ctx context.Context, input Req
 	if s == nil || s.repo == nil || !validActorRef(input.Actor) || input.JobID == "" || len([]rune(input.Reason)) < 3 || len([]rune(input.Reason)) > 500 {
 		return nil, ErrInvalidInput
 	}
-	job, err := s.repo.RequeueDeadLetterContinuationJob(ctx, input.JobID, time.Now())
+	job, err := s.repo.RequeueDeadLetterContinuationJob(ctx, input.JobID, s.now())
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +117,7 @@ func (s *Engine) createContinuationJob(ctx context.Context, run model.Run, check
 		Source:       strings.TrimSpace(source),
 		Status:       model.ContinuationJobQueued,
 		MaxAttempts:  5,
-		AvailableAt:  time.Now(),
+		AvailableAt:  s.now(),
 	}
 	traceContext := s.captureTraceContext(ctx)
 	job.TraceParent, job.TraceState = traceContext.TraceParent, traceContext.TraceState
@@ -180,7 +179,7 @@ func (s *Engine) startContinuationWorkers(ctx context.Context) {
 	if s == nil || s.repo == nil || s.continuationWake == nil {
 		return
 	}
-	workerGroup := "continuation-" + uuid.NewString()
+	workerGroup := s.newRuntimeID("continuation")
 	for index := 0; index < continuationWorkerCount; index++ {
 		owner := fmt.Sprintf("%s-%d", workerGroup, index+1)
 		s.startWorker(ctx, func(workerCtx context.Context) {
@@ -209,7 +208,7 @@ func (s *Engine) continuationWorkerLoop(ctx context.Context, owner string) {
 }
 
 func (s *Engine) runNextContinuationJob(ctx context.Context, owner string) bool {
-	now := time.Now()
+	now := s.now()
 	if handled, stop := s.reconcileExpiredContinuation(ctx, now); handled || stop {
 		return handled
 	}
@@ -263,14 +262,14 @@ func (s *Engine) executeClaimedContinuationJob(ctx context.Context, owner string
 }
 
 func (s *Engine) completeContinuationJob(ctx context.Context, owner, jobID string) {
-	if err := s.repo.CompleteContinuationJob(ctx, jobID, owner, time.Now()); err != nil && s.logger != nil {
+	if err := s.repo.CompleteContinuationJob(ctx, jobID, owner, s.now()); err != nil && s.logger != nil {
 		s.logger.Error("continuation_job_complete_failed", String("job_id", jobID), Error(err))
 	}
 }
 
 func (s *Engine) retryContinuationJob(ctx context.Context, owner string, job model.ContinuationJob, cause error) bool {
 	deadLetter := job.AttemptCount >= job.MaxAttempts
-	nextAttempt := time.Now().Add(continuationRetryDelay(job.AttemptCount))
+	nextAttempt := s.now().Add(continuationRetryDelay(job.AttemptCount))
 	if err := s.repo.RetryContinuationJob(ctx, job.JobID, owner, cause.Error(), nextAttempt, deadLetter); err != nil {
 		if s.logger != nil {
 			s.logger.Error("continuation_job_retry_failed", String("job_id", job.JobID), Error(err))
@@ -329,7 +328,6 @@ func (s *Engine) executeContinuationJob(ctx context.Context, owner string, job m
 	ctx = s.restoreTraceContext(ctx, TraceContext{TraceParent: job.TraceParent, TraceState: job.TraceState})
 	ctx, span := s.startSpan(ctx, "agentruntime.continuation.execute",
 		String("gen_ai.operation.name", "execute_continuation"),
-		String("gen_ai.agent.id", job.RunID),
 		String("run.id", job.RunID),
 		String("continuation.job_id", job.JobID),
 		String("continuation.checkpoint_id", job.CheckpointID),
@@ -341,6 +339,7 @@ func (s *Engine) executeContinuationJob(ctx context.Context, owner string, job m
 		span.RecordError(err)
 		return err
 	}
+	span.SetAttributes(telemetryAgentFields(runTelemetryAgentID(*run))...)
 	if continuationRunDoesNotExecute(*run) {
 		return nil
 	}
@@ -395,7 +394,7 @@ func (s *Engine) ensureContinuationJobReservation(ctx context.Context, owner str
 	if err != nil || reservation == nil {
 		return reservation, err
 	}
-	saved, _, persistErr := s.repo.SetContinuationJobReservation(ctx, job.JobID, owner, reservation.AmountNanousd, reservation.RefNo, time.Now())
+	saved, _, persistErr := s.repo.SetContinuationJobReservation(ctx, job.JobID, owner, reservation.AmountNanousd, reservation.RefNo, s.now())
 	if persistErr != nil {
 		_ = s.ReleaseRunUsageReservation(context.WithoutCancel(ctx), reservation, "Continuation Job 预扣回执持久化失败退回预扣")
 		return nil, persistErr
@@ -419,14 +418,26 @@ func continuationReservation(job model.ContinuationJob, actor model.ActorRef) (U
 }
 
 func (s *Engine) heartbeatContinuationJob(ctx context.Context, cancel context.CancelFunc, owner, jobID string, errOut chan<- error, done chan<- struct{}) {
-	defer close(done)
 	ticker := time.NewTicker(continuationHeartbeatPeriod)
 	defer ticker.Stop()
+	s.heartbeatContinuationJobTicks(ctx, cancel, owner, jobID, errOut, done, ticker.C)
+}
+
+func (s *Engine) heartbeatContinuationJobTicks(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	owner string,
+	jobID string,
+	errOut chan<- error,
+	done chan<- struct{},
+	ticks <-chan time.Time,
+) {
+	defer close(done)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case heartbeatAt := <-ticker.C:
+		case heartbeatAt := <-ticks:
 			heartbeatCtx, heartbeatCancel := context.WithTimeout(context.WithoutCancel(ctx), continuationHeartbeatTimeout)
 			err := s.repo.HeartbeatContinuationJob(heartbeatCtx, jobID, owner, heartbeatAt, heartbeatAt.Add(continuationLeaseDuration))
 			heartbeatCancel()

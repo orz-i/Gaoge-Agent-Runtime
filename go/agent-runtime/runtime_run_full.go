@@ -627,8 +627,8 @@ func (s *Engine) persistTextRunStart(ctx context.Context, input StartTextRunInpu
 		return nil, err
 	}
 	reservation := reserved.value
-	now := time.Now()
-	stepID := "step_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	now := s.now()
+	stepID := s.newRuntimeID("step")
 	run := model.Run{RunID: runID, RequestID: strings.TrimSpace(input.RequestID), Actor: input.Actor, Thread: input.Thread, Environment: input.Environment, RootRunID: runID, Goal: goal, RunConfigSnapshotJSON: string(snapshot), RequestFingerprint: fingerprint, CurrentStepID: stepID, StartedBy: valueUserDD885A59, RequestedModelName: modelName, PlatformModelName: modelName, Provider: input.ThreadProvider, Status: model.RunStatusQueued, StartedAt: now}
 	applyRunAgentManifest(&run, effective.AgentManifest)
 	applyRunDelegation(&run, input.Delegation)
@@ -1910,13 +1910,14 @@ func (s *Engine) startTextRunReconciliation(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		if err := s.ReconcileTextRunsOnce(ctx, time.Now().Add(-60*time.Second)); err != nil && s.logger != nil {
+		now := s.now()
+		if err := s.ReconcileTextRunsOnce(ctx, now.Add(-60*time.Second)); err != nil && s.logger != nil {
 			s.logger.Error("reconcile_text_runs_failed", Error(err))
 		}
-		if err := s.ExpireRunInteractionsOnce(ctx, time.Now()); err != nil && s.logger != nil {
+		if err := s.ExpireRunInteractionsOnce(ctx, now); err != nil && s.logger != nil {
 			s.logger.Error("expire_run_interactions_failed", Error(err))
 		}
-		if err := s.ExpireRunHandoffJoinsOnce(ctx, time.Now()); err != nil && s.logger != nil {
+		if err := s.ExpireRunHandoffJoinsOnce(ctx, now); err != nil && s.logger != nil {
 			s.logger.Error("expire_run_handoff_joins_failed", Error(err))
 		}
 	}

@@ -14,6 +14,15 @@ type workflowEffectTestStore struct {
 	events map[string]model.Event
 }
 
+func (s *workflowEffectTestStore) AppendRunEvent(_ context.Context, event *model.Event) (*model.Event, bool, error) {
+	if s.events == nil {
+		s.events = make(map[string]model.Event)
+	}
+	eventCopy := *event
+	s.events[event.EventID] = eventCopy
+	return &eventCopy, true, nil
+}
+
 func (s *workflowEffectTestStore) GetRunEvent(_ context.Context, _ model.ActorRef, _, eventID string) (*model.Event, error) {
 	event, ok := s.events[eventID]
 	if !ok {

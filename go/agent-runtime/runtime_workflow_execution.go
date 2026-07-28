@@ -33,6 +33,7 @@ type workflowRunner struct {
 	progress         bool
 	dispatchEffectID string
 	drainingEffects  bool
+	segment          workflowSegmentState
 
 	terminalOutcome string
 	terminalCode    string
@@ -100,10 +101,12 @@ func (r *workflowRunner) advanceContinuation(runStatus string) error {
 }
 
 func (r *workflowRunner) applyDurationLimit() {
-	if time.Since(r.run.StartedAt) <= time.Duration(r.budget.Limits.MaxDurationSeconds)*time.Second {
+	now := r.service.now()
+	if !r.workflowDeadlineExceededAt(now) {
 		return
 	}
-	r.state.ErrorCode = "workflow_duration_exceeded"
+	r.now = now
+	r.state.ErrorCode = workflowFailureDurationExceeded
 	r.state.ErrorMessage = ErrWorkflowBudgetExceeded.Error()
 }
 
@@ -140,10 +143,16 @@ func workflowExecutionMatchesDefinition(execution model.WorkflowExecution, defin
 }
 
 func newLoadedWorkflowRunner(service *Engine, ctx context.Context, run model.Run, definition model.WorkflowDefinition, execution model.WorkflowExecution, effective effectiveWorkflowConfig, state workflowRuntimeState, budget model.WorkflowBudget, stepRows []model.Step, interactionRows []model.Interaction) *workflowRunner {
+	now := service.now()
 	runner := &workflowRunner{
 		service: service, ctx: ctx, run: run, definition: definition, execution: execution, effective: effective,
-		state: state, budget: budget, now: time.Now(), steps: make(map[string]model.Step, len(stepRows)),
+		state: state, budget: budget, now: now, steps: make(map[string]model.Step, len(stepRows)),
 		interactions: make(map[string]model.Interaction, len(interactionRows)), changedSteps: make(map[string]struct{}),
+		segment: workflowSegmentState{
+			startedAt:        now,
+			startActivations: budget.NodeActivations,
+			policy:           service.workflowSegmentPolicy(),
+		},
 	}
 	sort.Slice(stepRows, func(i, j int) bool { return stepRows[i].StepIndex < stepRows[j].StepIndex })
 	for _, step := range stepRows {
@@ -221,33 +230,54 @@ func (r *workflowRunner) cachedActivationResult(node *model.WorkflowNode, activa
 	return value, complete, true, err
 }
 
-func (r *workflowRunner) advanceNode(node *model.WorkflowNode, path, scopeKey, parentPath string) (interface{}, bool, error) {
+func (r *workflowRunner) advanceNode(node *model.WorkflowNode, path, scopeKey, parentPath string) (value interface{}, complete bool, resultErr error) {
 	if node == nil {
 		return nil, false, workflowNodeFailure{Code: "workflow_node_missing", Message: "workflow node is missing"}
 	}
-	if r.dispatchEffectID != "" {
-		return nil, false, nil
-	}
-	if r.drainingEffects {
-		if _, exists := r.state.Activations[path]; !exists {
-			return nil, false, nil
+	previousCtx := r.ctx
+	nodeCtx, span := r.startWorkflowNodeSpan(*node, path, scopeKey)
+	r.ctx = nodeCtx
+	defer func() {
+		r.ctx = previousCtx
+		span.SetAttributes(Bool("workflow.node.complete", complete))
+		if resultErr != nil {
+			span.RecordError(resultErr)
 		}
+		span.End()
+	}()
+	blocked, err := r.workflowNodeAdvanceBlocked(path)
+	if err != nil || blocked {
+		return nil, false, err
 	}
 	activation, err := r.ensureActivation(*node, path, scopeKey, parentPath)
 	if err != nil {
 		return nil, false, err
 	}
-	if value, complete, handled, resultErr := r.existingActivationResult(node, activation); handled {
-		return value, complete, resultErr
+	if existingValue, existingComplete, handled, existingErr := r.existingActivationResult(node, activation); handled {
+		return existingValue, existingComplete, existingErr
 	}
-	if value, complete, handled, cacheErr := r.cachedActivationResult(node, activation); handled {
-		return value, complete, cacheErr
+	if cachedValue, cachedComplete, handled, cacheErr := r.cachedActivationResult(node, activation); handled {
+		return cachedValue, cachedComplete, cacheErr
 	}
 	advance, ok := workflowNodeAdvancerFor(node.Type)
 	if !ok {
 		return nil, false, r.failActivation(*node, activation, "workflow_node_unknown", "unknown workflow node")
 	}
 	return advance(r, node, activation)
+}
+
+func (r *workflowRunner) workflowNodeAdvanceBlocked(path string) (bool, error) {
+	if !r.drainingEffects {
+		if r.workflowDeadlineExceededAt(r.service.now()) {
+			return true, workflowNodeFailure{Code: workflowFailureDurationExceeded, Message: ErrWorkflowBudgetExceeded.Error()}
+		}
+		return r.shouldYieldWorkflowSegment() || r.dispatchEffectID != "", nil
+	}
+	if r.dispatchEffectID != "" {
+		return true, nil
+	}
+	_, exists := r.state.Activations[path]
+	return !exists, nil
 }
 
 func workflowNodeAdvancerFor(nodeType string) (workflowNodeAdvancer, bool) {
@@ -989,6 +1019,7 @@ func (r *workflowRunner) commit() (bool, error) {
 func (r *workflowRunner) buildTransition() (model.WorkflowTransition, bool, error) {
 	status, nextAt := r.nextRunStatus()
 	nextRun, nextExecution := r.transitionBase(status)
+	r.appendWorkflowSegmentYieldEvent()
 	r.appendRunTransitionEvent(nextRun)
 	checkpointRows, jobRows, nextJob := []model.Checkpoint(nil), []model.ContinuationJob(nil), false
 	if r.terminalOutcome != "" {
@@ -1457,7 +1488,7 @@ func (s *Engine) failWorkflowRun(ctx context.Context, run model.Run, cause error
 		Type: runContinuationWorkflowExecute, TargetStatus: model.RunStatusRunning, StepID: run.CurrentStepID,
 	}
 	checkpoint := newRunContinuationCheckpoint(run, run.CurrentStepID, "workflow_failure", continuation)
-	job := s.newWorkflowContinuationJob(ctx, run, *checkpoint, "workflow_failure", time.Now())
+	job := s.newWorkflowContinuationJob(ctx, run, *checkpoint, "workflow_failure", s.now())
 	transition := model.WorkflowTransition{
 		ExpectedVersion: execution.Version, Execution: nextExecution, Run: nextRun,
 		Checkpoints: []model.Checkpoint{*checkpoint}, ContinuationJobs: []model.ContinuationJob{*job},
