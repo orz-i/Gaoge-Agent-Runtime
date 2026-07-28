@@ -99,6 +99,36 @@ func TestExecuteRunStepReplaysIdenticalReadWithoutToolBudgetOrProviderCall(t *te
 	}
 }
 
+func TestExecuteRunStepRecoversFromUnavailableModelToolCall(t *testing.T) {
+	gateway := &scriptedLLMGateway{outputs: []*GenerateOutput{
+		{ToolCalls: []ToolCall{{ToolCallID: "call_unavailable", ToolName: testPublishToolName, ArgumentsJSON: `{}`}}},
+		{Text: "Read-only specialist summary"},
+	}}
+	repo := &multiTurnRunRepo{}
+	service := &Engine{
+		repo:              repo,
+		llmGateway:        gateway,
+		generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{}),
+	}
+	run := model.Run{RunID: "run_unavailable_tool_recovery", Actor: model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey}, Thread: model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey}}
+	step := model.Step{StepID: "step_unavailable_tool_recovery", Title: "Specialist", Description: "Return a read-only summary"}
+	effective := effectiveTextRunConfig{MaxLLMCalls: 3, MaxToolCalls: 2}
+
+	text, _, waiting, err := service.executeRunStep(context.Background(), run, step, effective, map[string]ResolvedTool{}, nil, nil)
+	if err != nil || waiting {
+		t.Fatalf("executeRunStep err=%v waiting=%v", err, waiting)
+	}
+	if text != "Read-only specialist summary" {
+		t.Fatalf("text = %q", text)
+	}
+	if len(gateway.inputs) != 2 {
+		t.Fatalf("LLM calls = %d, want 2", len(gateway.inputs))
+	}
+	if !hasRunEventType(repo.events, valueModelToolProtocolRejected) {
+		t.Fatal("expected model.tool_protocol_rejected event")
+	}
+}
+
 func (g *scriptedLLMGateway) PrepareTextRoute(context.Context, LLMRouteInput) (*LLMRoute, error) {
 	return &LLMRoute{PlatformModelName: "test-model", Protocol: AdapterOpenAIResponses, UpstreamModel: "test-model"}, nil
 }
@@ -299,6 +329,38 @@ func TestExecuteRunStepChangeSetMultiTurnDSMLThenNativeTools(t *testing.T) {
 	wantRequestIDs := []string{"run_cs_dsml:tool:call_read", "run_cs_dsml:tool:call_publish"}
 	if !slices.Equal(workspace.requestIDs, wantRequestIDs) {
 		t.Fatalf("workspace request IDs = %v, want %v", workspace.requestIDs, wantRequestIDs)
+	}
+}
+
+func TestExecuteRunStepStopsProtocolRetryWhenArtifactToolBudgetIsExhausted(t *testing.T) {
+	gateway := &scriptedLLMGateway{
+		outputs: []*GenerateOutput{
+			{ToolCalls: []ToolCall{{ToolCallID: "call_read", ToolName: testReadToolName, ArgumentsJSON: `{}`}}},
+			{Text: "I need another tool call before I can publish."},
+		},
+	}
+	repo := &multiTurnRunRepo{}
+	workspace := &scriptedWorkspace{}
+	service := &Engine{
+		repo:              repo,
+		llmGateway:        gateway,
+		workspaces:        NewWorkspaceRegistry(map[string]WorkspaceProvider{testWorkspaceProviderKind: workspace}),
+		generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{}),
+	}
+	run := model.Run{RunID: "run_tool_budget_exhausted", Actor: model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey}, Thread: model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey}, RequestID: "req_tool_budget"}
+	step := model.Step{StepID: "step_tool_budget", Title: "Publish", Description: "Create change set"}
+	readPolicy := storyToolPolicy(testReadToolKey, testReadToolName)
+	effective := changeSetRunConfig(readPolicy)
+	effective.MaxLLMCalls = 32
+	effective.MaxToolCalls = 1
+	tools := map[string]ResolvedTool{testReadToolName: policyToResolvedTool(readPolicy)}
+
+	_, _, waiting, err := service.executeRunStep(context.Background(), run, step, effective, tools, nil, nil)
+	if err == nil || waiting || !strings.Contains(err.Error(), "text run tool call limit reached") {
+		t.Fatalf("executeRunStep err=%v waiting=%v, want exhausted tool budget", err, waiting)
+	}
+	if len(gateway.inputs) != 2 {
+		t.Fatalf("LLM calls = %d, want 2 without retry storm", len(gateway.inputs))
 	}
 }
 

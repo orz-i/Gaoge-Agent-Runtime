@@ -387,6 +387,12 @@ func TestNormalizeToolArgumentsAgainstSchemaRejectsContractViolations(t *testing
 			if !errors.Is(err, ErrToolArgumentsInvalid) {
 				t.Fatalf("error = %v, want ErrToolArgumentsInvalid", err)
 			}
+			if test.name == "missing required" && !strings.Contains(err.Error(), "required parameters are missing: target") {
+				t.Fatalf("missing-required error = %v, want actionable field name", err)
+			}
+			if test.name == "unknown field" && !strings.Contains(err.Error(), "$/force: unexpected parameters are not allowed: force") {
+				t.Fatalf("unknown-field error = %v, want actionable field name", err)
+			}
 		})
 	}
 }
@@ -407,6 +413,32 @@ func TestNormalizeToolArgumentsAgainstSchemaSupportsLocalRefsAndOneOf(t *testing
 	}
 	if _, err := normalizeToolArgumentsAgainstSchema(`{"target":"story_1","operation":"delete"}`, schema); !errors.Is(err, ErrToolArgumentsInvalid) {
 		t.Fatalf("oneOf violation error = %v", err)
+	}
+}
+
+func TestNormalizeToolArgumentsAgainstSchemaReportsNestedLeafViolation(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type":"object",
+		"required":["operations"],
+		"properties":{
+			"operations":{
+				"type":"array",
+				"items":{
+					"type":"object",
+					"required":["after"],
+					"properties":{"after":{"type":"object","minProperties":1}}
+				}
+			}
+		}
+	}`)
+	_, err := normalizeToolArgumentsAgainstSchema(
+		`{"operations":[{"after":{}}]}`,
+		schema,
+	)
+	if err == nil ||
+		!strings.Contains(err.Error(), "$/operations/0/after") ||
+		!strings.Contains(err.Error(), "object must include at least one property") {
+		t.Fatalf("nested validation error = %v", err)
 	}
 }
 

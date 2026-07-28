@@ -1792,6 +1792,15 @@ func (s *Engine) finishRunStepWithoutTools(ctx context.Context, run model.Run, s
 	if callNumber >= effective.MaxLLMCalls {
 		return "", false, errRequiredToolCallNotProduced
 	}
+	if requiresWorkspaceArtifact(effective) {
+		// A text-only turn cannot satisfy an artifact contract. Once every
+		// frozen tool-call slot has already been consumed, forcing another
+		// tool turn can only burn LLM calls until the much larger LLM budget
+		// expires.
+		if err := s.ensureRunCallBudgetWithReserve(ctx, run, effective, false, 0); err != nil {
+			return "", false, err
+		}
+	}
 	reason := "required_tool_missing"
 	if class == ModelTextToolProtocol {
 		reason = string(ModelTextToolProtocol)
@@ -1818,7 +1827,7 @@ func (s *Engine) advanceRunStepWithTools(ctx context.Context, run model.Run, ste
 		assistantText = ""
 	}
 	prepared.messages = append(prepared.messages, Message{Role: valueAssistantCE8D479A, Content: assistantText, ToolCalls: output.ToolCalls})
-	results, waiting, err := s.executeRunStepToolCalls(ctx, run, step, effective, tools, prepared.committed, output.ToolCalls)
+	results, waiting, err := s.executeRunStepToolCalls(ctx, run, step, effective, tools, prepared.committed, callNumber, output.ToolCalls)
 	if err != nil || waiting {
 		return "", false, waiting, err
 	}
@@ -2259,12 +2268,27 @@ func malformedToolAttemptCorrectionPrompt(effective effectiveTextRunConfig) stri
 	return base + " If a tool is needed, call it natively; otherwise answer in plain natural language without protocol markup."
 }
 
-func (s *Engine) executeRunStepToolCalls(ctx context.Context, run model.Run, step model.Step, effective effectiveTextRunConfig, tools map[string]ResolvedTool, committed map[string]ToolResult, calls []ToolCall) ([]ToolResult, bool, error) {
+func (s *Engine) executeRunStepToolCalls(ctx context.Context, run model.Run, step model.Step, effective effectiveTextRunConfig, tools map[string]ResolvedTool, committed map[string]ToolResult, callNumber int, calls []ToolCall) ([]ToolResult, bool, error) {
 	results := make([]ToolResult, 0, len(calls))
 	for _, call := range calls {
 		if result, exists := committed[call.ToolCallID]; exists {
 			results = append(results, result)
 			continue
+		}
+		if call.ToolName != runControlAskUser && call.ToolName != runControlPublishOutput {
+			if _, available := tools[call.ToolName]; !available {
+				if err := s.appendToolProtocolRejectedEvent(context.WithoutCancel(ctx), run, step.StepID, callNumber, "unavailable_tool"); err != nil {
+					return nil, false, err
+				}
+				results = append(results, ToolResult{
+					ToolCallID: call.ToolCallID,
+					ToolName:   call.ToolName,
+					Status:     valueFailedF9AB515B,
+					OutputJSON: mustRunJSON(map[string]interface{}{"error": "tool_unavailable"}),
+					Error:      fmt.Sprintf("tool %s is not available in the run snapshot", call.ToolName),
+				})
+				continue
+			}
 		}
 		result, waiting, err := s.handleRunToolCall(ctx, run, step, effective, tools, call)
 		if waiting || err != nil {

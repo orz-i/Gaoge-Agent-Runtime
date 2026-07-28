@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -124,6 +125,12 @@ func validateAndCanonicalizeToolContract(schema json.RawMessage, value interface
 	if err != nil {
 		return "", err
 	}
+	if missing := missingRootToolContractFields(schema, value); len(missing) > 0 {
+		return "", newToolContractError(kind, "$", "required parameters are missing: "+strings.Join(missing, ", "))
+	}
+	if unexpected := unexpectedRootToolContractFields(schema, value); len(unexpected) > 0 {
+		return "", newToolContractError(kind, "$/"+unexpected[0], "unexpected parameters are not allowed: "+strings.Join(unexpected, ", "))
+	}
 	if err = compiled.Validate(value); err != nil {
 		return "", toolContractValidationError(kind, err)
 	}
@@ -132,6 +139,48 @@ func validateAndCanonicalizeToolContract(schema json.RawMessage, value interface
 		return "", newToolContractError(kind, "$", "value cannot be canonicalized")
 	}
 	return string(encoded), nil
+}
+
+func unexpectedRootToolContractFields(schema json.RawMessage, value interface{}) []string {
+	object, ok := value.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	var contract struct {
+		AdditionalProperties json.RawMessage            `json:"additionalProperties"`
+		Properties           map[string]json.RawMessage `json:"properties"`
+	}
+	if json.Unmarshal(schema, &contract) != nil || !bytes.Equal(bytes.TrimSpace(contract.AdditionalProperties), []byte("false")) {
+		return nil
+	}
+	unexpected := make([]string, 0)
+	for name := range object {
+		if _, exists := contract.Properties[name]; !exists {
+			unexpected = append(unexpected, name)
+		}
+	}
+	sort.Strings(unexpected)
+	return unexpected
+}
+
+func missingRootToolContractFields(schema json.RawMessage, value interface{}) []string {
+	object, ok := value.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	var contract struct {
+		Required []string `json:"required"`
+	}
+	if json.Unmarshal(schema, &contract) != nil || len(contract.Required) == 0 {
+		return nil
+	}
+	missing := make([]string, 0, len(contract.Required))
+	for _, name := range contract.Required {
+		if _, exists := object[name]; !exists {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 func compileToolContractSchema(raw json.RawMessage) (*jsonschema.Schema, error) {
@@ -183,10 +232,53 @@ func decodeToolContractJSON(raw string, emptyObject bool, kind string) (interfac
 func toolContractValidationError(kind string, err error) error {
 	path := "$"
 	var validation *jsonschema.ValidationError
-	if errors.As(err, &validation) && strings.TrimSpace(validation.InstanceLocation) != "" {
-		path = validation.InstanceLocation
+	reason := "value does not satisfy the frozen schema"
+	if errors.As(err, &validation) {
+		specific := mostSpecificToolContractValidation(validation)
+		if location := strings.TrimSpace(specific.InstanceLocation); location != "" {
+			path = "$" + location
+		}
+		reason = toolContractValidationReason(specific.KeywordLocation)
 	}
-	return newToolContractError(kind, path, "value does not satisfy the frozen schema")
+	return newToolContractError(kind, path, reason)
+}
+
+func mostSpecificToolContractValidation(root *jsonschema.ValidationError) *jsonschema.ValidationError {
+	best := root
+	for _, cause := range root.Causes {
+		candidate := mostSpecificToolContractValidation(cause)
+		candidateDepth := strings.Count(candidate.InstanceLocation, "/")
+		bestDepth := strings.Count(best.InstanceLocation, "/")
+		if candidateDepth > bestDepth ||
+			(candidateDepth == bestDepth && len(candidate.Causes) == 0) {
+			best = candidate
+		}
+	}
+	return best
+}
+
+func toolContractValidationReason(keywordLocation string) string {
+	switch {
+	case strings.HasSuffix(keywordLocation, "/required"):
+		return "required parameters are missing"
+	case strings.HasSuffix(keywordLocation, "/additionalProperties"):
+		return "unexpected parameters are not allowed"
+	case strings.HasSuffix(keywordLocation, "/minProperties"):
+		return "object must include at least one property"
+	case strings.HasSuffix(keywordLocation, "/minItems"):
+		return "array does not contain enough items"
+	case strings.HasSuffix(keywordLocation, "/minLength"):
+		return "string is shorter than allowed"
+	case strings.HasSuffix(keywordLocation, "/type"):
+		return "value has the wrong type"
+	case strings.HasSuffix(keywordLocation, "/enum"):
+		return "value is not one of the allowed values"
+	case strings.HasSuffix(keywordLocation, "/oneOf"),
+		strings.HasSuffix(keywordLocation, "/anyOf"):
+		return "value does not match an allowed schema"
+	default:
+		return "value does not satisfy the frozen schema"
+	}
 }
 
 func newToolContractError(kind, path, reason string) error {
