@@ -68,6 +68,7 @@ type workflowRuntimeState struct {
 	Input           interface{}                        `json:"input"`
 	Scopes          map[string]workflowScopeState      `json:"scopes"`
 	Activations     map[string]workflowActivationState `json:"activations"`
+	Effects         map[string]workflowEffectState     `json:"effects,omitempty"`
 	Waits           map[string]model.WorkflowWait      `json:"waits"`
 	Compensations   []model.WorkflowCompensation       `json:"compensations"`
 	Result          interface{}                        `json:"result,omitempty"`
@@ -102,6 +103,7 @@ type workflowActivationState struct {
 	WaitID           string        `json:"waitID,omitempty"`
 	InteractionID    string        `json:"interactionID,omitempty"`
 	ChildRunID       string        `json:"childRunID,omitempty"`
+	EffectID         string        `json:"effectID,omitempty"`
 	WakeAt           *time.Time    `json:"wakeAt,omitempty"`
 	ReservedLLM      int           `json:"reservedLLM,omitempty"`
 	ReservedTools    int           `json:"reservedTools,omitempty"`
@@ -384,7 +386,7 @@ func (s *Engine) persistWorkflowStart(ctx context.Context, input StartWorkflowIn
 	state := workflowRuntimeState{
 		SemanticVersion: RuntimeSnapshotVersion, Input: inputValue,
 		Scopes:      map[string]workflowScopeState{workflowRootScope: {Vars: map[string]interface{}{}, Outputs: map[string]interface{}{}}},
-		Activations: map[string]workflowActivationState{}, Waits: map[string]model.WorkflowWait{}, Compensations: []model.WorkflowCompensation{},
+		Activations: map[string]workflowActivationState{}, Effects: map[string]workflowEffectState{}, Waits: map[string]model.WorkflowWait{}, Compensations: []model.WorkflowCompensation{},
 	}
 	stateJSON, varsJSON, waitsJSON, compensationJSON, budgetJSON, err := encodeWorkflowExecutionState(state, model.WorkflowBudget{Limits: prepared.Limits})
 	if err != nil {
@@ -543,6 +545,9 @@ func decodeWorkflowExecutionState(execution model.WorkflowExecution) (workflowRu
 	}
 	if state.Scopes == nil || state.Activations == nil || state.Waits == nil {
 		return workflowRuntimeState{}, model.WorkflowBudget{}, ErrRunSnapshotIncompatible
+	}
+	if state.Effects == nil {
+		state.Effects = make(map[string]workflowEffectState)
 	}
 	return state, budget, nil
 }
