@@ -1,7 +1,6 @@
 package agentruntime
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -392,6 +391,9 @@ func normalizeAgentWorkflowResult(value interface{}, schema json.RawMessage) (in
 }
 
 func (r *workflowRunner) advanceTool(node *model.WorkflowNode, activation workflowActivationState) (interface{}, bool, error) {
+	if activation.EffectID != "" {
+		return r.advanceWorkflowToolEffect(node, activation)
+	}
 	invocation, err := r.prepareWorkflowToolInvocation(node, activation)
 	if err != nil {
 		return nil, false, r.failActivation(*node, activation, workflowFailureCode(err), err.Error())
@@ -404,32 +406,35 @@ func (r *workflowRunner) advanceTool(node *model.WorkflowNode, activation workfl
 		return nil, false, r.failActivation(*node, activation, "workflow_budget_exceeded", ErrWorkflowBudgetExceeded.Error())
 	}
 	call := ToolCall{ToolCallID: deterministicWorkflowID("tool_call", r.run.RunID, activation.Path), ToolName: invocation.tool.ModelName, ArgumentsJSON: invocation.arguments}
+	reservedAttempts := min(toolRetryCount+1, remainingToolCalls)
+	effectID := workflowEffectID(r.run.RunID, activation.Path)
+	r.state.Effects[effectID] = workflowEffectState{
+		EffectID:         effectID,
+		Kind:             workflowEffectKindTool,
+		Status:           workflowEffectStatusIntent,
+		ActivationPath:   activation.Path,
+		NodeID:           node.ID,
+		StepID:           activation.StepID,
+		ToolCallID:       call.ToolCallID,
+		ToolKey:          invocation.tool.ToolKey,
+		ToolName:         invocation.tool.ModelName,
+		ArgumentsJSON:    invocation.arguments,
+		SideEffectLevel:  invocation.tool.SideEffectLevel,
+		IdempotencyMode:  normalizeToolIdempotencyMode(invocation.tool.IdempotencyMode),
+		ReservedAttempts: reservedAttempts,
+	}
+	r.budget.ReservedToolCalls += reservedAttempts
+	activation.EffectID = effectID
+	activation.ReservedTools = reservedAttempts
+	r.saveActivation(activation)
 	started := newRunEvent(r.run, "tool.started", activation.StepID, invocation.tool.ModelName, map[string]interface{}{workflowPayloadToolCallID: call.ToolCallID, valueToolKey560014C9: invocation.tool.ToolKey, workflowPayloadNodeID: node.ID}, nil)
 	started.ToolCallID, started.ToolName, started.InputJSON = call.ToolCallID, invocation.tool.ModelName, invocation.arguments
 	r.events = append(r.events, started)
-	if evaluationErr := r.service.evaluateAndPersistRuntimeBoundary(r.ctx, r.run, toolInputEvaluationRequest(r.run, activation.StepID, invocation.tool, call)); evaluationErr != nil {
-		return nil, false, r.failActivation(*node, activation, "workflow_tool_blocked", evaluationErr.Error())
-	}
-	effective := effectiveTextRunConfig{
-		SemanticVersion: RuntimeSnapshotVersion, Workspace: r.effective.Workspace,
-		MaxLLMCalls: r.budget.Limits.MaxTotalLLMCalls, MaxToolCalls: r.budget.Limits.MaxTotalToolCalls,
-		ToolRetryCount: toolRetryCount, ToolConcurrency: invocation.policy.Concurrency, ToolPolicies: []effectiveRunToolPolicy{invocation.policy},
-	}
-	execution, executionErr := r.service.executeFrozenToolProvider(
-		context.WithValue(r.ctx, runSegmentKeyContextKey{}, r.run.RunID+":workflow:"+activation.Path),
-		r.run, activation.StepID, effective, invocation.tool, call,
-		&TextRunExecutionLimits{MaxLLMCalls: effective.MaxLLMCalls, MaxToolCalls: effective.MaxToolCalls, ToolRetryCount: effective.ToolRetryCount, ToolConcurrency: invocation.policy.Concurrency},
-	)
-	if execution.Attempts > remainingToolCalls {
-		return nil, false, r.failActivation(*node, activation, "workflow_budget_exceeded", ErrWorkflowBudgetExceeded.Error())
-	}
-	r.budget.UsedToolCalls += execution.Attempts
-	r.run.ToolCallsCount += execution.Attempts
-	return r.finishWorkflowToolInvocation(node, activation, invocation, call, execution, executionErr)
+	return nil, false, nil
 }
 
 func workflowToolRetryBudget(policy effectiveRunToolPolicy, budget model.WorkflowBudget) (int, int, error) {
-	remaining := budget.Limits.MaxTotalToolCalls - budget.UsedToolCalls
+	remaining := budget.Limits.MaxTotalToolCalls - budget.UsedToolCalls - budget.ReservedToolCalls
 	if remaining <= 0 {
 		return 0, 0, ErrWorkflowBudgetExceeded
 	}

@@ -26,11 +26,13 @@ type workflowRunner struct {
 	stepOrder    []string
 	interactions map[string]model.Interaction
 
-	changedSteps    map[string]struct{}
-	interactionRows []model.Interaction
-	events          []model.Event
-	cacheEntries    []model.WorkflowCacheEntry
-	progress        bool
+	changedSteps     map[string]struct{}
+	interactionRows  []model.Interaction
+	events           []model.Event
+	cacheEntries     []model.WorkflowCacheEntry
+	progress         bool
+	dispatchEffectID string
+	drainingEffects  bool
 
 	terminalOutcome string
 	terminalCode    string
@@ -51,14 +53,28 @@ func (s *Engine) executeWorkflowContinuation(ctx context.Context, run model.Run,
 	if continuation.Type != runContinuationWorkflowExecute {
 		return ErrRunSnapshotIncompatible
 	}
-	runner, err := s.loadWorkflowRunner(ctx, run)
-	if err != nil {
-		return err
+	current := run
+	for {
+		runner, err := s.loadWorkflowRunner(ctx, current)
+		if err != nil {
+			return err
+		}
+		if err = runner.advanceContinuation(current.Status); err != nil {
+			return err
+		}
+		applied, err := runner.commit()
+		if err != nil || !applied || runner.dispatchEffectID == "" {
+			return err
+		}
+		if err = runner.dispatchClaimedWorkflowEffect(context.WithoutCancel(ctx)); err != nil {
+			return err
+		}
+		latest, err := s.repo.GetRun(ctx, current.Actor, current.RunID)
+		if err != nil {
+			return err
+		}
+		current = *latest
 	}
-	if err = runner.advanceContinuation(run.Status); err != nil {
-		return err
-	}
-	return runner.commit()
 }
 
 func (r *workflowRunner) advanceContinuation(runStatus string) error {
@@ -67,9 +83,17 @@ func (r *workflowRunner) advanceContinuation(runStatus string) error {
 	}
 	r.applyDurationLimit()
 	if r.state.CancelRequested {
+		settled, err := r.drainWorkflowEffects()
+		if err != nil || !settled {
+			return err
+		}
 		return r.advanceCancellation()
 	}
 	if r.state.ErrorMessage != "" {
+		settled, err := r.drainWorkflowEffects()
+		if err != nil || !settled {
+			return err
+		}
 		return r.advanceFailure(workflowNodeFailure{Code: r.state.ErrorCode, Message: r.state.ErrorMessage})
 	}
 	return r.advanceRoot()
@@ -200,6 +224,14 @@ func (r *workflowRunner) cachedActivationResult(node *model.WorkflowNode, activa
 func (r *workflowRunner) advanceNode(node *model.WorkflowNode, path, scopeKey, parentPath string) (interface{}, bool, error) {
 	if node == nil {
 		return nil, false, workflowNodeFailure{Code: "workflow_node_missing", Message: "workflow node is missing"}
+	}
+	if r.dispatchEffectID != "" {
+		return nil, false, nil
+	}
+	if r.drainingEffects {
+		if _, exists := r.state.Activations[path]; !exists {
+			return nil, false, nil
+		}
 	}
 	activation, err := r.ensureActivation(*node, path, scopeKey, parentPath)
 	if err != nil {
@@ -918,10 +950,10 @@ func (r *workflowRunner) advanceCompensate(node *model.WorkflowNode, activation 
 	return r.completeActivation(*node, activation, value)
 }
 
-func (r *workflowRunner) commit() error {
+func (r *workflowRunner) commit() (bool, error) {
 	transition, nextJob, err := r.buildTransition()
 	if err != nil {
-		return err
+		return false, err
 	}
 	var saved []model.Event
 	var applied bool
@@ -942,16 +974,16 @@ func (r *workflowRunner) commit() error {
 		err = commit(r.ctx)
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !applied {
-		return nil
+		return false, nil
 	}
 	r.service.publishRunEvents(r.run.RunID, saved)
 	if nextJob {
 		r.service.wakeContinuationJobs()
 	}
-	return nil
+	return true, nil
 }
 
 func (r *workflowRunner) buildTransition() (model.WorkflowTransition, bool, error) {
@@ -961,7 +993,7 @@ func (r *workflowRunner) buildTransition() (model.WorkflowTransition, bool, erro
 	checkpointRows, jobRows, nextJob := []model.Checkpoint(nil), []model.ContinuationJob(nil), false
 	if r.terminalOutcome != "" {
 		r.applyTerminalTransition(&nextRun, &nextExecution)
-	} else if r.shouldScheduleContinuation(status, nextAt) {
+	} else if r.dispatchEffectID == "" && r.shouldScheduleContinuation(status, nextAt) {
 		checkpointRows, jobRows = r.transitionContinuation(nextRun, nextExecution, status, nextAt)
 		nextJob = true
 	}
