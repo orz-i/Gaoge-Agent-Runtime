@@ -39,6 +39,24 @@ paths:
                 $ref: '#/components/schemas/StartRunResult'
         default:
           $ref: '#/components/responses/Error'
+  /workflows:
+    post:
+      operationId: startWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartWorkflowRequest'
+      responses:
+        '202':
+          description: Accepted durable Workflow run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowStartResult'
+        default:
+          $ref: '#/components/responses/Error'
   /agent-teams:
     post:
       operationId: startAgentTeam
@@ -85,6 +103,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentManifest'
+        default:
+          $ref: '#/components/responses/Error'
+  /workflow-definitions:
+    get:
+      operationId: listWorkflowDefinitions
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Active visible Workflow Definition revisions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinitionPage'
+        default:
+          $ref: '#/components/responses/Error'
+  /workflow-definitions/{workflowID}:
+    get:
+      operationId: getWorkflowDefinition
+      parameters:
+        - $ref: '#/components/parameters/WorkflowDefinitionID'
+        - $ref: '#/components/parameters/OptionalRevision'
+      responses:
+        '200':
+          description: One immutable Workflow Definition revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinition'
         default:
           $ref: '#/components/responses/Error'
   /runs/{runID}/handoffs:
@@ -184,6 +232,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunDetail'
+        default:
+          $ref: '#/components/responses/Error'
+  /runs/{runID}/result:
+    get:
+      operationId: getRunResult
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Canonical terminal result for a Text or Workflow run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResult'
         default:
           $ref: '#/components/responses/Error'
   /runs/{runID}/cancel:
@@ -663,6 +725,80 @@ paths:
                 $ref: '#/components/schemas/AgentManifest'
         default:
           $ref: '#/components/responses/Error'
+  /admin/agentruntime/workflow-definitions:
+    get:
+      operationId: listAdminWorkflowDefinitions
+      parameters:
+        - $ref: '#/components/parameters/WorkflowDefinitionStatus'
+        - $ref: '#/components/parameters/WorkflowDefinitionScope'
+        - $ref: '#/components/parameters/AgentManifestTenantID'
+        - $ref: '#/components/parameters/AgentManifestOwnerActorID'
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Latest Workflow Definition revisions for administrators
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinitionPage'
+        default:
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: createWorkflowDefinition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowDefinitionRevisionRequest'
+      responses:
+        '201':
+          description: Created and compiled Workflow Definition revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinition'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/agentruntime/workflow-definitions/validate:
+    post:
+      operationId: validateWorkflowDefinition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowDefinitionRevisionRequest'
+      responses:
+        '200':
+          description: Strictly compiled Workflow Definition without publishing it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinitionValidation'
+        default:
+          $ref: '#/components/responses/Error'
+  /admin/agentruntime/workflow-definitions/{workflowID}/revisions:
+    post:
+      operationId: reviseWorkflowDefinition
+      parameters:
+        - $ref: '#/components/parameters/WorkflowDefinitionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WorkflowDefinitionRevisionRequest'
+      responses:
+        '201':
+          description: Appended immutable Workflow Definition revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowDefinition'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     RunID:
@@ -677,6 +813,11 @@ components:
       schema: {type: string}
     AgentManifestID:
       name: manifestID
+      in: path
+      required: true
+      schema: {type: string}
+    WorkflowDefinitionID:
+      name: workflowID
       in: path
       required: true
       schema: {type: string}
@@ -735,6 +876,16 @@ components:
       in: query
       required: false
       schema: {type: string, maxLength: 64}
+    WorkflowDefinitionStatus:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [active, disabled]}
+    WorkflowDefinitionScope:
+      name: scope
+      in: query
+      required: false
+      schema: {type: string, enum: [actor, tenant, system]}
     RunHandoffJoinStatus:
       name: status
       in: query
@@ -892,6 +1043,243 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AgentManifest'
+    WorkflowLimits:
+      type: object
+      additionalProperties: false
+      required: [maxNodeActivations, maxChildRuns, maxConcurrentRuns, maxTotalLLMCalls, maxTotalToolCalls, maxDurationSeconds, maxLoopIterations, maxNestedDepth, maxStateBytes]
+      properties:
+        maxNodeActivations: {type: integer, minimum: 1}
+        maxChildRuns: {type: integer, minimum: 1}
+        maxConcurrentRuns: {type: integer, minimum: 1}
+        maxTotalLLMCalls: {type: integer, minimum: 1}
+        maxTotalToolCalls: {type: integer, minimum: 1}
+        maxDurationSeconds: {type: integer, minimum: 1}
+        maxLoopIterations: {type: integer, minimum: 1}
+        maxNestedDepth: {type: integer, minimum: 1}
+        maxStateBytes: {type: integer, minimum: 1}
+    WorkflowNodeLimits:
+      type: object
+      additionalProperties: false
+      properties:
+        maxLLMCalls: {type: integer, minimum: 1}
+        maxToolCalls: {type: integer, minimum: 1}
+    WorkflowCachePolicy:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        ttlSeconds: {type: integer, minimum: 1}
+        mode: {type: string, enum: [use, refresh, bypass]}
+    WorkflowExpr:
+      type: object
+      additionalProperties: false
+      required: [op]
+      properties:
+        op:
+          type: string
+          enum: [literal, ref, object, array, eq, ne, lt, lte, gt, gte, and, or, not, coalesce, merge, append, concat, length, contains, add, sub, mul, div, mod]
+        value: {}
+        ref: {type: string}
+        fields:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/WorkflowExpr'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowExpr'
+        args:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowExpr'
+    JSONSchema:
+      description: Self-contained JSON Schema Draft 2020-12 document; remote references are rejected at validation time.
+      oneOf:
+        - type: object
+          additionalProperties: true
+        - type: boolean
+    WorkflowNode:
+      type: object
+      additionalProperties: false
+      required: [id, type]
+      properties:
+        id: {type: string, minLength: 1}
+        type:
+          type: string
+          enum: [sequence, agent, parallel, forEach, pipeline, if, loop, set, log, tool, workflow, interaction, timer, compensate, return]
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowNode'
+        branches:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowNode'
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowNode'
+        body:
+          $ref: '#/components/schemas/WorkflowNode'
+        then:
+          $ref: '#/components/schemas/WorkflowNode'
+        else:
+          $ref: '#/components/schemas/WorkflowNode'
+        do:
+          $ref: '#/components/schemas/WorkflowNode'
+        undo:
+          $ref: '#/components/schemas/WorkflowNode'
+        manifestRef:
+          $ref: '#/components/schemas/ResourceRef'
+        definitionRef:
+          $ref: '#/components/schemas/ResourceRef'
+        toolKey: {type: string}
+        goal:
+          $ref: '#/components/schemas/WorkflowExpr'
+        items:
+          $ref: '#/components/schemas/WorkflowExpr'
+        condition:
+          $ref: '#/components/schemas/WorkflowExpr'
+        arguments:
+          $ref: '#/components/schemas/WorkflowExpr'
+        input:
+          $ref: '#/components/schemas/WorkflowExpr'
+        message:
+          $ref: '#/components/schemas/WorkflowExpr'
+        data:
+          $ref: '#/components/schemas/WorkflowExpr'
+        delaySeconds:
+          $ref: '#/components/schemas/WorkflowExpr'
+        wakeAt:
+          $ref: '#/components/schemas/WorkflowExpr'
+        value:
+          $ref: '#/components/schemas/WorkflowExpr'
+        presentation:
+          $ref: '#/components/schemas/WorkflowExpr'
+        assignments:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/WorkflowExpr'
+        outputSchema:
+          $ref: '#/components/schemas/JSONSchema'
+        schema:
+          $ref: '#/components/schemas/JSONSchema'
+        perNodeLimits:
+          $ref: '#/components/schemas/WorkflowNodeLimits'
+        maxConcurrency: {type: integer, minimum: 1}
+        maxIterations: {type: integer, minimum: 1}
+        resultAttempts: {type: integer, minimum: 0, maximum: 2}
+        failurePolicy: {type: string, enum: [collect, fail_fast]}
+        level: {type: string, enum: [debug, info, warn, error]}
+        title: {type: string}
+        prompt: {type: string}
+        expiresAfterSeconds: {type: integer, minimum: 1}
+        cache:
+          $ref: '#/components/schemas/WorkflowCachePolicy'
+    WorkflowDependency:
+      type: object
+      additionalProperties: false
+      required: [kind, ref, fingerprint]
+      properties:
+        kind: {type: string, enum: [agent_manifest, workflow_definition, tool]}
+        ref:
+          $ref: '#/components/schemas/ResourceRef'
+        toolKey: {type: string}
+        definitionVersion: {type: string}
+        fingerprint: {type: string}
+        sideEffectLevel: {type: string}
+    WorkflowDefinitionRevisionRequest:
+      type: object
+      additionalProperties: false
+      required: [name, inputSchema, outputSchema, root, limits]
+      properties:
+        workflowID: {type: string, maxLength: 64}
+        expectedRevision: {type: integer, minimum: 0}
+        schemaVersion: {type: integer, enum: [1], default: 1}
+        scope: {type: string, enum: [actor, tenant, system]}
+        tenantID: {type: string, maxLength: 64}
+        ownerActorID: {type: string, maxLength: 64}
+        name: {type: string, minLength: 1, maxLength: 128}
+        description: {type: string, maxLength: 4000}
+        status: {type: string, enum: [active, disabled]}
+        inputSchema:
+          $ref: '#/components/schemas/JSONSchema'
+        outputSchema:
+          $ref: '#/components/schemas/JSONSchema'
+        root:
+          $ref: '#/components/schemas/WorkflowNode'
+        limits:
+          $ref: '#/components/schemas/WorkflowLimits'
+        revisionNote: {type: string, maxLength: 255}
+    WorkflowDefinition:
+      type: object
+      additionalProperties: false
+      required: [workflowID, revision, ref, schemaVersion, scope, tenantID, ownerActorID, name, status, inputSchema, outputSchema, root, limits, dependencies, dependencyHash, definitionHash, createdAt, updatedAt]
+      properties:
+        workflowID: {type: string}
+        revision: {type: integer, minimum: 1}
+        ref:
+          $ref: '#/components/schemas/ResourceRef'
+        schemaVersion: {type: integer, enum: [1]}
+        scope: {type: string, enum: [actor, tenant, system]}
+        tenantID: {type: string}
+        ownerActorID: {type: string}
+        name: {type: string}
+        description: {type: string}
+        status: {type: string, enum: [active, disabled]}
+        inputSchema:
+          $ref: '#/components/schemas/JSONSchema'
+        outputSchema:
+          $ref: '#/components/schemas/JSONSchema'
+        root:
+          $ref: '#/components/schemas/WorkflowNode'
+        limits:
+          $ref: '#/components/schemas/WorkflowLimits'
+        dependencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowDependency'
+        dependencyHash: {type: string}
+        definitionHash: {type: string}
+        revisionNote: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    WorkflowDefinitionPage:
+      type: object
+      additionalProperties: false
+      required: [total, results]
+      properties:
+        total: {type: integer, format: int64, minimum: 0}
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowDefinition'
+    WorkflowDefinitionValidation:
+      type: object
+      additionalProperties: false
+      required: [valid, nodeCount, definition]
+      properties:
+        valid: {type: boolean, enum: [true]}
+        nodeCount: {type: integer, minimum: 1}
+        definition:
+          $ref: '#/components/schemas/WorkflowDefinition'
+    StartWorkflowRequest:
+      type: object
+      additionalProperties: false
+      required: [thread, definition, input]
+      properties:
+        thread:
+          $ref: '#/components/schemas/RunThread'
+        definition:
+          $ref: '#/components/schemas/ResourceRef'
+        input: {}
+        clientRunID: {type: string, maxLength: 64}
+        limits:
+          $ref: '#/components/schemas/WorkflowLimits'
+        cacheMode: {type: string, enum: [use, refresh, bypass]}
+        workspace:
+          $ref: '#/components/schemas/WorkspaceExtension'
     RunThread:
       type: object
       additionalProperties: false
@@ -1081,7 +1469,7 @@ components:
       required: [schemaVersion, runtimeKind, actor, thread, runID, requestID, status]
       properties:
         schemaVersion: {type: integer, enum: [1]}
-        runtimeKind: {type: string, enum: [text]}
+        runtimeKind: {type: string, enum: [text, workflow]}
         actor:
           $ref: '#/components/schemas/ActorRef'
         thread:
@@ -1090,6 +1478,8 @@ components:
         requestID: {type: string}
         status: {type: string}
         agentManifestRef:
+          $ref: '#/components/schemas/ResourceRef'
+        workflowDefinitionRef:
           $ref: '#/components/schemas/ResourceRef'
         agentName: {type: string}
         rootRunID: {type: string}
@@ -1104,6 +1494,27 @@ components:
         stepID: {type: string}
         runID: {type: string}
         status: {type: string}
+        nodeID: {type: string}
+        activationPath: {type: string}
+        laneID: {type: string}
+        activationIndex: {type: integer, minimum: 0}
+        completionOrder: {type: integer, minimum: 0}
+        waitKind: {type: string}
+        waitID: {type: string}
+        childRunID: {type: string}
+    RunResult:
+      type: object
+      additionalProperties: false
+      required: [runID, runtimeKind, value, presentation, schemaHash, contentHash, createdAt, updatedAt]
+      properties:
+        runID: {type: string}
+        runtimeKind: {type: string, enum: [text, workflow]}
+        value: {}
+        presentation: {type: string}
+        schemaHash: {type: string}
+        contentHash: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
     StartRunResult:
       type: object
       additionalProperties: false
@@ -1117,6 +1528,9 @@ components:
           $ref: '#/components/schemas/ProjectionRef'
         outputProjectionRef:
           $ref: '#/components/schemas/ProjectionRef'
+    WorkflowStartResult:
+      allOf:
+        - $ref: '#/components/schemas/StartRunResult'
     AgentTeamTaskStart:
       type: object
       additionalProperties: false
@@ -1570,6 +1984,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/QueueItem'
+    WorkflowExecution:
+      type: object
+      additionalProperties: false
+      required: [runID, definitionRef, definitionHash, dependencyHash, budgetOwnerRunID, rootRunID, depth, version, status, state, vars, waits, compensations, budget, threadSnapshotHash, completionSeq, startedAt, createdAt, updatedAt]
+      properties:
+        runID: {type: string}
+        definitionRef:
+          $ref: '#/components/schemas/ResourceRef'
+        definitionHash: {type: string}
+        dependencyHash: {type: string}
+        budgetOwnerRunID: {type: string}
+        rootRunID: {type: string}
+        parentRunID: {type: string}
+        depth: {type: integer, minimum: 0}
+        version: {type: integer, format: int64, minimum: 1}
+        status: {type: string, enum: [running, waiting, cancelling, compensating, completed, failed, cancelled, suspended]}
+        state: {type: object, additionalProperties: true}
+        vars: {type: object, additionalProperties: true}
+        waits: {type: array, items: {type: object, additionalProperties: true}}
+        compensations: {type: array, items: {type: object, additionalProperties: true}}
+        budget: {type: object, additionalProperties: true}
+        threadSnapshotHash: {type: string}
+        completionSeq: {type: integer, format: int64, minimum: 0}
+        errorCode: {type: string}
+        errorMessage: {type: string}
+        startedAt: {type: string, format: date-time}
+        endedAt: {type: string, format: date-time, nullable: true}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
     Workbench:
       type: object
       additionalProperties: true
@@ -1580,6 +2023,10 @@ components:
         projectionPersisted: {type: boolean}
         run:
           $ref: '#/components/schemas/Run'
+        workflow:
+          $ref: '#/components/schemas/WorkflowExecution'
+        result:
+          $ref: '#/components/schemas/RunResult'
         overview: {type: object, additionalProperties: true}
         phases: {type: array, items: {type: object, additionalProperties: true}}
         toolGroups: {type: array, items: {type: object, additionalProperties: true}}

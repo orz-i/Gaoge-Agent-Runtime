@@ -152,6 +152,12 @@ func (r *Repository) EraseAccountData(ctx context.Context, userID uint) error {
 			func() error {
 				return freshDB().Where("run_id IN ?", runIDs).Delete(&models.RuntimeWorkbenchProjectionRecord{}).Error
 			},
+			func() error {
+				return freshDB().Where("run_id IN ?", runIDs).Delete(&models.RunResultRecord{}).Error
+			},
+			func() error {
+				return freshDB().Where("run_id IN ?", runIDs).Delete(&models.WorkflowExecutionRecord{}).Error
+			},
 		)
 	}
 	steps = append(steps,
@@ -177,6 +183,17 @@ func (r *Repository) EraseAccountData(ctx context.Context, userID uint) error {
 		},
 		func() error {
 			return freshDB().Where("scope = ? AND tenant_id = ? AND owner_actor_id = ?", domain.AgentManifestScopeActor, "default", actorID).Delete(&models.AgentManifestRevisionRecord{}).Error
+		},
+		func() error {
+			return freshDB().Model(&models.WorkflowDefinitionRevisionRecord{}).
+				Where("created_by_tenant_id = ? AND created_by_actor_id = ? AND scope IN ?", "default", actorID, []string{domain.WorkflowDefinitionScopeTenant, domain.WorkflowDefinitionScopeSystem}).
+				Update("created_by_actor_id", "").Error
+		},
+		func() error {
+			return freshDB().Where("scope = ? AND tenant_id = ? AND owner_actor_id = ?", domain.WorkflowDefinitionScopeActor, "default", actorID).Delete(&models.WorkflowDefinitionRevisionRecord{}).Error
+		},
+		func() error {
+			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.WorkflowCacheEntryRecord{}).Error
 		},
 		func() error {
 			return freshDB().Where("tenant_id = ? AND actor_id = ?", "default", actorID).Delete(&models.RuntimeOutputIdentityRecord{}).Error

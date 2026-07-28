@@ -75,6 +75,11 @@ func EnsureRunID(raw string) string {
 // CancelRun 取消用户显式停止的流式生成；浏览器刷新不会走这个路径。
 func (s *Engine) CancelRun(ctx context.Context, actor model.ActorRef, runID string) (bool, error) {
 	normalizedRunID := normalizeRunID(runID)
+	if s != nil && s.repo != nil {
+		if run, err := s.repo.GetRun(ctx, actor, normalizedRunID); err == nil && run.RuntimeKind == model.RuntimeKindWorkflow {
+			return s.cancelWorkflowRun(ctx, *run)
+		}
+	}
 	_, found, handled, err := s.cancelDurableRunIfTerminalOrWaiting(ctx, actor, normalizedRunID)
 	if err != nil || handled {
 		return handled, err

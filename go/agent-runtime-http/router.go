@@ -9,9 +9,11 @@ func (m *Module) RegisterRoutes(auth *gin.RouterGroup) {
 		c.Next()
 	})
 	routes.POST("/runs", m.Handler.StartTextRun)
+	routes.POST("/workflows", m.Handler.StartWorkflow)
 	routes.POST("/agent-teams", m.Handler.StartAgentTeam)
 	routes.GET("/runs", m.Handler.ListRuns)
 	routes.GET("/runs/:run_id", m.Handler.GetTextRun)
+	routes.GET("/runs/:run_id/result", m.Handler.GetRunResult)
 	routes.POST("/runs/:run_id/cancel", m.Handler.CancelRun)
 	routes.POST("/runs/:run_id/resume", m.Handler.ResumeTextRun)
 	routes.POST("/runs/:run_id/retire", m.Handler.RetireTextRun)
@@ -43,6 +45,8 @@ func (m *Module) RegisterRoutes(auth *gin.RouterGroup) {
 	routes.POST("/evidence", m.Handler.CreateEvidence)
 	routes.GET("/agent-manifests", m.Handler.ListAgentManifests)
 	routes.GET("/agent-manifests/:manifest_id", m.Handler.GetAgentManifest)
+	routes.GET("/workflow-definitions", m.Handler.ListWorkflowDefinitions)
+	routes.GET("/workflow-definitions/:workflow_id", m.Handler.GetWorkflowDefinition)
 }
 
 func (m *Module) RegisterAdminRoutes(admin *gin.RouterGroup) {
@@ -56,4 +60,8 @@ func (m *Module) RegisterAdminRoutes(admin *gin.RouterGroup) {
 	routes.GET("/agent-manifests", m.Handler.ListAdminAgentManifests)
 	routes.POST("/agent-manifests", m.Handler.CreateAgentManifest)
 	routes.POST("/agent-manifests/:manifest_id/revisions", m.Handler.ReviseAgentManifest)
+	routes.GET("/workflow-definitions", m.Handler.ListAdminWorkflowDefinitions)
+	routes.POST("/workflow-definitions/validate", m.Handler.ValidateWorkflowDefinition)
+	routes.POST("/workflow-definitions", m.Handler.CreateWorkflowDefinition)
+	routes.POST("/workflow-definitions/:workflow_id/revisions", m.Handler.ReviseWorkflowDefinition)
 }

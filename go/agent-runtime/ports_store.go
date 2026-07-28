@@ -21,8 +21,34 @@ type Store interface {
 	QueueStore
 	ContinuationJobStore
 	AgentManifestStore
+	WorkflowDefinitionStore
+	WorkflowExecutionStore
+	RunResultStore
+	WorkflowCacheStore
 	RunHandoffStore
 	WorkbenchStore
+}
+
+type WorkflowDefinitionStore interface {
+	CreateWorkflowDefinitionRevision(context.Context, *domain.WorkflowDefinition, int) (*domain.WorkflowDefinition, bool, error)
+	GetWorkflowDefinition(context.Context, domain.ActorRef, domain.ResourceRef) (*domain.WorkflowDefinition, error)
+	ListWorkflowDefinitions(context.Context, domain.ActorRef, domain.WorkflowDefinitionFilter) (domain.WorkflowDefinitionPage, error)
+}
+
+type WorkflowExecutionStore interface {
+	CreateWorkflowRunStartBundle(context.Context, *domain.Run, *domain.Step, *domain.ContextSnapshot, []domain.ContextArtifact, *domain.WorkflowExecution, *domain.Checkpoint, *domain.ContinuationJob, []domain.Event) ([]domain.Event, error)
+	GetWorkflowExecution(context.Context, domain.ActorRef, string) (*domain.WorkflowExecution, error)
+	ApplyWorkflowTransition(context.Context, domain.ActorRef, string, domain.WorkflowTransition) (*domain.WorkflowExecution, []domain.Event, bool, error)
+}
+
+type RunResultStore interface {
+	GetRunResult(context.Context, domain.ActorRef, string) (*domain.RunResult, error)
+}
+
+type WorkflowCacheStore interface {
+	GetWorkflowCacheEntry(context.Context, domain.ActorRef, string, time.Time) (*domain.WorkflowCacheEntry, error)
+	PutWorkflowCacheEntry(context.Context, *domain.WorkflowCacheEntry) error
+	DeleteExpiredWorkflowCacheEntries(context.Context, time.Time, int) (int64, error)
 }
 
 type AgentManifestStore interface {

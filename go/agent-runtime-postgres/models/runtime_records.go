@@ -18,65 +18,68 @@ type BaseModel struct {
 // exclusively by opaque SDK refs; no Conversation database key is persisted.
 type RunRecord struct {
 	BaseModel
-	RunID                    string    `gorm:"size:64;not null;default:'';uniqueIndex:idx_agent_runs_run_id"`
-	RequestID                string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_request_id"`
-	TenantID                 string    `gorm:"size:64;not null;default:'default';index:idx_agent_runs_actor,priority:1"`
-	ActorID                  string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_actor,priority:2"`
-	ThreadKind               string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_thread,priority:1"`
-	ThreadID                 string    `gorm:"size:128;not null;default:'';index:idx_agent_runs_thread,priority:2"`
-	InputProjectionKind      string    `gorm:"size:64;not null;default:''"`
-	InputProjectionID        string    `gorm:"size:128;not null;default:''"`
-	OutputProjectionKind     string    `gorm:"size:64;not null;default:''"`
-	OutputProjectionID       string    `gorm:"size:128;not null;default:''"`
-	EnvironmentKind          string    `gorm:"size:64;not null;default:''"`
-	EnvironmentID            string    `gorm:"size:128;not null;default:''"`
-	EnvironmentRevision      string    `gorm:"size:64;not null;default:''"`
-	AgentManifestID          string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_manifest"`
-	AgentManifestRevision    string    `gorm:"size:64;not null;default:''"`
-	AgentName                string    `gorm:"size:128;not null;default:''"`
-	RootRunID                string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_root"`
-	ParentRunID              string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_parent"`
-	HandoffID                string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_handoff"`
-	Depth                    int       `gorm:"not null;default:0"`
-	Goal                     string    `gorm:"type:text;not null;default:''"`
-	RunConfigSnapshotJSON    string    `gorm:"type:text;not null;default:''"`
-	RequestFingerprint       string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_request_fingerprint"`
-	CurrentStepID            string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_current_step_id"`
-	CurrentPlanID            string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_current_plan_id"`
-	PendingInteractionID     string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_pending_interaction_id"`
-	StatusReason             string    `gorm:"size:255;not null;default:''"`
-	LastEventSeq             int64     `gorm:"not null;default:0"`
-	LastPresentationEventSeq int64     `gorm:"not null;default:0"`
-	StateProjectionVersion   int       `gorm:"not null;default:0"`
-	HostProjectionVersion    int       `gorm:"not null;default:0"`
-	StartedBy                string    `gorm:"size:32;not null;default:''"`
-	Endpoint                 string    `gorm:"size:32;not null;default:'';index:idx_agent_runs_endpoint"`
-	Provider                 string    `gorm:"size:32;not null;default:'';index:idx_agent_runs_provider"`
-	ProviderProtocol         string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_provider_protocol"`
-	UpstreamName             string    `gorm:"size:128;not null;default:''"`
-	RequestedModelName       string    `gorm:"size:128;not null;default:'';index:idx_agent_runs_requested_model_name"`
-	PlatformModelName        string    `gorm:"size:128;not null;default:'';index:idx_agent_runs_platform_model_name"`
-	RoutedBindingCode        string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_routed_binding_code"`
-	ModelVendor              string    `gorm:"size:64;not null;default:''"`
-	ModelIcon                string    `gorm:"size:64;not null;default:''"`
-	UpstreamModelName        string    `gorm:"size:256;not null;default:''"`
-	InputTokens              int64     `gorm:"not null;default:0"`
-	OutputTokens             int64     `gorm:"not null;default:0"`
-	CacheReadTokens          int64     `gorm:"not null;default:0"`
-	CacheWriteTokens         int64     `gorm:"not null;default:0"`
-	ReasoningTokens          int64     `gorm:"not null;default:0"`
-	LLMCallsCount            int       `gorm:"not null;default:0"`
-	ToolCallsCount           int       `gorm:"not null;default:0"`
-	BilledCurrency           string    `gorm:"size:16;not null;default:''"`
-	BilledNanousd            int64     `gorm:"not null;default:0"`
-	LastBillingSnapshotJSON  string    `gorm:"type:text;not null;default:''"`
-	FirstTokenLatencyMS      int64     `gorm:"not null;default:0"`
-	TotalLatencyMS           int64     `gorm:"not null;default:0"`
-	Status                   string    `gorm:"size:32;not null;default:'';index:idx_agent_runs_status"`
-	ErrorCode                string    `gorm:"size:64;not null;default:''"`
-	ErrorMessage             string    `gorm:"size:255;not null;default:''"`
-	StartedAt                time.Time `gorm:"not null"`
-	EndedAt                  *time.Time
+	RunID                      string    `gorm:"size:64;not null;default:'';uniqueIndex:idx_agent_runs_run_id"`
+	RequestID                  string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_request_id"`
+	RuntimeKind                string    `gorm:"size:16;not null;default:'text';index:idx_agent_runs_runtime_kind"`
+	TenantID                   string    `gorm:"size:64;not null;default:'default';index:idx_agent_runs_actor,priority:1"`
+	ActorID                    string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_actor,priority:2"`
+	ThreadKind                 string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_thread,priority:1"`
+	ThreadID                   string    `gorm:"size:128;not null;default:'';index:idx_agent_runs_thread,priority:2"`
+	InputProjectionKind        string    `gorm:"size:64;not null;default:''"`
+	InputProjectionID          string    `gorm:"size:128;not null;default:''"`
+	OutputProjectionKind       string    `gorm:"size:64;not null;default:''"`
+	OutputProjectionID         string    `gorm:"size:128;not null;default:''"`
+	EnvironmentKind            string    `gorm:"size:64;not null;default:''"`
+	EnvironmentID              string    `gorm:"size:128;not null;default:''"`
+	EnvironmentRevision        string    `gorm:"size:64;not null;default:''"`
+	AgentManifestID            string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_manifest"`
+	AgentManifestRevision      string    `gorm:"size:64;not null;default:''"`
+	AgentName                  string    `gorm:"size:128;not null;default:''"`
+	WorkflowDefinitionID       string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_workflow_definition"`
+	WorkflowDefinitionRevision string    `gorm:"size:64;not null;default:''"`
+	RootRunID                  string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_root"`
+	ParentRunID                string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_parent"`
+	HandoffID                  string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_handoff"`
+	Depth                      int       `gorm:"not null;default:0"`
+	Goal                       string    `gorm:"type:text;not null;default:''"`
+	RunConfigSnapshotJSON      string    `gorm:"type:text;not null;default:''"`
+	RequestFingerprint         string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_request_fingerprint"`
+	CurrentStepID              string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_current_step_id"`
+	CurrentPlanID              string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_current_plan_id"`
+	PendingInteractionID       string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_pending_interaction_id"`
+	StatusReason               string    `gorm:"size:255;not null;default:''"`
+	LastEventSeq               int64     `gorm:"not null;default:0"`
+	LastPresentationEventSeq   int64     `gorm:"not null;default:0"`
+	StateProjectionVersion     int       `gorm:"not null;default:0"`
+	HostProjectionVersion      int       `gorm:"not null;default:0"`
+	StartedBy                  string    `gorm:"size:32;not null;default:''"`
+	Endpoint                   string    `gorm:"size:32;not null;default:'';index:idx_agent_runs_endpoint"`
+	Provider                   string    `gorm:"size:32;not null;default:'';index:idx_agent_runs_provider"`
+	ProviderProtocol           string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_provider_protocol"`
+	UpstreamName               string    `gorm:"size:128;not null;default:''"`
+	RequestedModelName         string    `gorm:"size:128;not null;default:'';index:idx_agent_runs_requested_model_name"`
+	PlatformModelName          string    `gorm:"size:128;not null;default:'';index:idx_agent_runs_platform_model_name"`
+	RoutedBindingCode          string    `gorm:"size:64;not null;default:'';index:idx_agent_runs_routed_binding_code"`
+	ModelVendor                string    `gorm:"size:64;not null;default:''"`
+	ModelIcon                  string    `gorm:"size:64;not null;default:''"`
+	UpstreamModelName          string    `gorm:"size:256;not null;default:''"`
+	InputTokens                int64     `gorm:"not null;default:0"`
+	OutputTokens               int64     `gorm:"not null;default:0"`
+	CacheReadTokens            int64     `gorm:"not null;default:0"`
+	CacheWriteTokens           int64     `gorm:"not null;default:0"`
+	ReasoningTokens            int64     `gorm:"not null;default:0"`
+	LLMCallsCount              int       `gorm:"not null;default:0"`
+	ToolCallsCount             int       `gorm:"not null;default:0"`
+	BilledCurrency             string    `gorm:"size:16;not null;default:''"`
+	BilledNanousd              int64     `gorm:"not null;default:0"`
+	LastBillingSnapshotJSON    string    `gorm:"type:text;not null;default:''"`
+	FirstTokenLatencyMS        int64     `gorm:"not null;default:0"`
+	TotalLatencyMS             int64     `gorm:"not null;default:0"`
+	Status                     string    `gorm:"size:32;not null;default:'';index:idx_agent_runs_status"`
+	ErrorCode                  string    `gorm:"size:64;not null;default:''"`
+	ErrorMessage               string    `gorm:"size:255;not null;default:''"`
+	StartedAt                  time.Time `gorm:"not null"`
+	EndedAt                    *time.Time
 }
 
 func (RunRecord) TableName() string { return "agent_runs" }
@@ -120,15 +123,34 @@ func (EventRecord) TableName() string { return "agent_run_events" }
 
 type RunStep struct {
 	BaseModel
-	StepID, RunID, ParentStepID, PlanID  string
-	StepIndex, Attempt                   int
-	Kind, Title, Description, Status     string
-	DependsOnJSON, ExpectedToolsJSON     string
-	ResourceRefsJSON                     string
-	ApprovalRequired                     bool
-	ResultSummary, InputJSON, OutputJSON string
-	ErrorJSON                            string
-	StartedAt, EndedAt                   *time.Time
+	StepID            string `gorm:"size:64;not null;uniqueIndex:uk_agent_run_step_id"`
+	RunID             string `gorm:"size:64;not null;index:idx_agent_run_steps_run"`
+	ParentStepID      string `gorm:"size:64;not null;default:''"`
+	PlanID            string `gorm:"size:64;not null;default:''"`
+	StepIndex         int
+	Attempt           int
+	NodeID            string `gorm:"size:128;not null;default:'';index:idx_agent_run_steps_node"`
+	ActivationPath    string `gorm:"size:512;not null;default:''"`
+	LaneID            string `gorm:"size:128;not null;default:''"`
+	ActivationIndex   int
+	CompletionOrder   int
+	Kind              string
+	Title             string
+	Description       string
+	Status            string
+	DependsOnJSON     string
+	ExpectedToolsJSON string
+	ResourceRefsJSON  string
+	ApprovalRequired  bool
+	WaitingKind       string `gorm:"size:32;not null;default:''"`
+	WaitingID         string `gorm:"size:128;not null;default:''"`
+	ChildRunID        string `gorm:"size:64;not null;default:''"`
+	ResultSummary     string
+	InputJSON         string
+	OutputJSON        string
+	ErrorJSON         string
+	StartedAt         *time.Time
+	EndedAt           *time.Time
 }
 
 func (RunStep) TableName() string { return "agent_run_steps" }

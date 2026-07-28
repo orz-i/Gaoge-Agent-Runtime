@@ -11,6 +11,26 @@ type Config struct {
 	Outputs     OutputConfig
 	Retention   RetentionConfig
 	Trace       TraceConfig
+	Workflow    WorkflowConfig
+}
+
+// WorkflowConfig contains absolute engine ceilings. A Definition and a start
+// request may narrow these values but can never raise them.
+type WorkflowConfig struct {
+	MaxNodeActivations int
+	MaxChildRuns       int
+	MaxConcurrentRuns  int
+	MaxTotalLLMCalls   int
+	MaxTotalToolCalls  int
+	MaxDurationSeconds int
+	MaxLoopIterations  int
+	MaxNestedDepth     int
+	MaxStateBytes      int
+	MaxExpressionDepth int
+	MaxExpressionOps   int
+	MaxExpressionBytes int
+	MaxDefinitionNodes int
+	MaxCacheTTLSeconds int
 }
 
 type AttributionConfig struct {

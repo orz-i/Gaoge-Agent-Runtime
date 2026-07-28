@@ -67,6 +67,12 @@ func projectedRunStatus(eventType string) string {
 		return domain.RunStatusWaitingInput
 	case "run.waiting_handoff":
 		return domain.RunStatusWaitingHandoff
+	case "run.waiting_timer":
+		return domain.RunStatusWaitingTimer
+	case "run.cancelling":
+		return domain.RunStatusCancelling
+	case "run.compensating":
+		return domain.RunStatusCompensating
 	case "run.suspended":
 		return domain.RunStatusSuspended
 	case "run.completed":
@@ -126,6 +132,10 @@ func applyStepStatus(step *domain.Step, event domain.Event) {
 		step.Status = domain.RunStatusWaitingInput
 	case "step.waiting_handoff":
 		step.Status = domain.RunStatusWaitingHandoff
+	case "step.waiting_timer":
+		step.Status = domain.RunStatusWaitingTimer
+	case "step.compensating":
+		step.Status = domain.RunStatusCompensating
 	case "step.suspended":
 		step.Status = domain.RunStatusSuspended
 		setStepEnd(step, event)

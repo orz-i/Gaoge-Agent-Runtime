@@ -165,6 +165,20 @@ func (s *Store) FinalizeRun(_ context.Context, input domain.TerminalIntent) (*do
 			}
 			output = &item
 		}
+		if input.Result != nil {
+			if input.Outcome != domain.TerminalCompleted || input.Result.RunID != input.RunID {
+				return agentruntime.ErrInvalidInput
+			}
+			if existing, ok := st.Results[input.RunID]; ok && existing.ContentHash != input.Result.ContentHash {
+				return agentruntime.ErrWorkflowResultConflict
+			}
+			result := clone(*input.Result)
+			if result.CreatedAt.IsZero() {
+				result.CreatedAt = time.Now()
+			}
+			result.UpdatedAt = result.CreatedAt
+			st.Results[input.RunID] = result
+		}
 		eventType := "run." + input.Outcome
 		event := domain.Event{EventID: "terminal:" + input.RunID + ":" + input.Outcome, RunID: input.RunID, EventType: eventType, StepID: input.CurrentStepID, Actor: run.Actor, Thread: run.Thread, Summary: input.Summary, ErrorJSON: input.DiagnosticJSON, CreatedAt: time.Now()}
 		var err error
@@ -578,8 +592,16 @@ func (s *Store) LoadWorkbenchSnapshot(_ context.Context, actor domain.ActorRef, 
 		}
 	}
 	if item, ok := s.state.Workbench[runID]; ok {
-		copy := clone(item)
-		result.Projection = &copy
+		copied := clone(item)
+		result.Projection = &copied
+	}
+	if item, ok := s.state.Executions[runID]; ok {
+		copied := clone(item)
+		result.Workflow = &copied
+	}
+	if item, ok := s.state.Results[runID]; ok {
+		copied := clone(item)
+		result.Result = &copied
 	}
 	return &result, nil
 }

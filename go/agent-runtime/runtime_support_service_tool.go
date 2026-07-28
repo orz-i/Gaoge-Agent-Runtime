@@ -30,15 +30,18 @@ func callReceiptToolWithRetry(ctx context.Context, executor ReceiptToolExecutor,
 		retryCount = 0
 	}
 	var lastErr error
+	var lastResult ToolExecutionResult
 	for attempt := 0; attempt <= retryCount; attempt++ {
 		result, err := executor.ExecuteWithReceipt(ctx, input)
+		result.Attempts = attempt + 1
+		lastResult = result
 		if err == nil {
 			return result, nil
 		}
 		lastErr = err
 		if onAttemptFailed != nil {
 			if observeErr := onAttemptFailed(attempt+1, retryCount+1, err); observeErr != nil {
-				return ToolExecutionResult{}, observeErr
+				return lastResult, observeErr
 			}
 		}
 		if attempt >= retryCount {
@@ -48,11 +51,11 @@ func callReceiptToolWithRetry(ctx context.Context, executor ReceiptToolExecutor,
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return ToolExecutionResult{}, ctx.Err()
+			return lastResult, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return ToolExecutionResult{}, lastErr
+	return lastResult, lastErr
 }
 
 func (s *Engine) executeReceiptWithToolLimiter(ctx context.Context, limit int, fn func() (ToolExecutionResult, error)) (ToolExecutionResult, error) {
@@ -108,16 +111,16 @@ func (s *Engine) executeToolCallWithReceipt(ctx context.Context, input ExecuteTo
 	})
 }
 
-func (s *Engine) executeToolCall(ctx context.Context, input ExecuteToolInput) (string, error) {
+func (s *Engine) executeToolCall(ctx context.Context, input ExecuteToolInput) (ToolExecutionResult, error) {
 	toolName := strings.TrimSpace(input.ToolName)
 	if toolName == "" {
-		return "", errCategory3A5F699D5F
+		return ToolExecutionResult{}, errCategory3A5F699D5F
 	}
 	if strings.TrimSpace(input.ToolKey) == "" || strings.TrimSpace(input.ProviderKey) == "" {
-		return "", withErrorMessage(errCategory0B02F88F59, fmt.Sprintf("tool %s is not enabled for this run", toolName))
+		return ToolExecutionResult{}, withErrorMessage(errCategory0B02F88F59, fmt.Sprintf("tool %s is not enabled for this run", toolName))
 	}
 	if s.toolExecutor == nil {
-		return "", errCategoryF1B7A5D95D
+		return ToolExecutionResult{}, errCategoryF1B7A5D95D
 	}
 	cfg := s.cfg.Snapshot()
 	retryCount := cfg.Tools.RetryCount
@@ -130,7 +133,7 @@ func (s *Engine) executeToolCall(ctx context.Context, input ExecuteToolInput) (s
 		limit = 8
 	}
 
-	return s.executeWithToolLimiter(ctx, limit, func() (string, error) {
+	return s.executeReceiptWithToolLimiter(ctx, limit, func() (ToolExecutionResult, error) {
 		return s.callMCPWithRetry(ctx, ToolExecutionInput{
 			ToolKey:       strings.TrimSpace(input.ToolKey),
 			ProviderKind:  strings.TrimSpace(input.ProviderKind),
@@ -188,28 +191,6 @@ func (s *Engine) resolveMaxLLMCallsPerRun() int {
 	return maxCalls
 }
 
-func (s *Engine) executeWithToolLimiter(
-	ctx context.Context,
-	limit int,
-	fn func() (string, error),
-) (string, error) {
-	if fn == nil {
-		return "", errCategoryD364A2A615
-	}
-	if limit <= 0 {
-		return fn()
-	}
-
-	limiter := s.getToolLimiter(limit)
-	select {
-	case limiter <- struct{}{}:
-		defer func() { <-limiter }()
-		return fn()
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
-}
-
 func (s *Engine) getToolLimiter(limit int) chan struct{} {
 	if limit <= 0 {
 		limit = 1
@@ -233,21 +214,23 @@ func (s *Engine) callMCPWithRetry(
 	input ToolExecutionInput,
 	retryCount int,
 	onAttemptFailed func(attempt, maxAttempts int, err error) error,
-) (string, error) {
+) (ToolExecutionResult, error) {
 	if retryCount < 0 {
 		retryCount = 0
 	}
 
 	var lastErr error
+	var lastResult ToolExecutionResult
 	for attempt := 0; attempt <= retryCount; attempt++ {
 		output, err := s.toolExecutor.Execute(ctx, input)
+		lastResult = ToolExecutionResult{OutputJSON: output, Attempts: attempt + 1}
 		if err == nil {
-			return output, nil
+			return lastResult, nil
 		}
 		lastErr = err
 		if onAttemptFailed != nil {
 			if observeErr := onAttemptFailed(attempt+1, retryCount+1, err); observeErr != nil {
-				return "", observeErr
+				return lastResult, observeErr
 			}
 		}
 		if attempt >= retryCount {
@@ -259,11 +242,11 @@ func (s *Engine) callMCPWithRetry(
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return "", ctx.Err()
+			return lastResult, ctx.Err()
 		case <-timer.C:
 		}
 	}
-	return "", lastErr
+	return lastResult, lastErr
 }
 
 var (

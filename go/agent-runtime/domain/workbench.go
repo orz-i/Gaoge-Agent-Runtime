@@ -20,6 +20,8 @@ type PhaseProjection struct {
 
 type WorkbenchSnapshot struct {
 	Run          Run
+	Workflow     *WorkflowExecution
+	Result       *RunResult
 	Steps        []Step
 	Context      *ContextSnapshot
 	Plans        []Plan

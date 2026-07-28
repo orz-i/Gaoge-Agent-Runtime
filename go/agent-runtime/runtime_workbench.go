@@ -129,6 +129,8 @@ type Workbench struct {
 	ProjectionSeq       int64
 	ProjectionPersisted bool
 	Run                 model.Run
+	Workflow            *model.WorkflowExecution
+	Result              *model.RunResult
 	Overview            WorkbenchOverview
 	Phases              []PhaseView
 	ToolGroups          []ToolGroupView
@@ -179,7 +181,7 @@ func (s *Engine) GetWorkbench(ctx context.Context, actor model.ActorRef, runID s
 			break
 		}
 	}
-	result := &Workbench{ProjectionVersion: workbenchProjectionVersion, ProjectionSeq: detail.Run.LastPresentationEventSeq, ProjectionPersisted: persisted, Run: detail.Run, Phases: phases, Plan: plan, Steps: detail.Steps, PendingInteraction: pending, Interactions: snapshot.Interactions, Checkpoints: snapshot.Checkpoints, Outputs: snapshot.Outputs, Context: detail.Context, Config: detail.Config}
+	result := &Workbench{ProjectionVersion: workbenchProjectionVersion, ProjectionSeq: detail.Run.LastPresentationEventSeq, ProjectionPersisted: persisted, Run: detail.Run, Workflow: snapshot.Workflow, Result: snapshot.Result, Phases: phases, Plan: plan, Steps: detail.Steps, PendingInteraction: pending, Interactions: snapshot.Interactions, Checkpoints: snapshot.Checkpoints, Outputs: snapshot.Outputs, Context: detail.Context, Config: detail.Config}
 	result.Overview = buildWorkbenchOverview(detail.Run, phases, snapshot.Events, detail.Config)
 	result.ToolGroups = buildToolGroups(phases, snapshot.Events)
 	result.GraphNodes, result.GraphEdges, result.SelectionIndex = buildWorkbenchGraph(result)
@@ -463,6 +465,9 @@ func phaseStatusForEvent(event model.Event) (string, bool) {
 		valueRunCancelledD74AD332:    model.RunStatusCancelled,
 		valueRunSuspendedA2ED2B05:    model.RunStatusSuspended,
 		valueRunWaitingHandoff:       model.RunStatusWaitingHandoff,
+		"run.waiting_timer":          model.RunStatusWaitingTimer,
+		"run.cancelling":             model.RunStatusCancelling,
+		"run.compensating":           model.RunStatusCompensating,
 		"interaction.expired":        model.RunStatusSuspended,
 		"interaction.created":        model.RunStatusWaitingInput,
 		valueRunPreparing142D9E38:    model.RunStatusRunning,
@@ -473,7 +478,8 @@ func phaseStatusForEvent(event model.Event) (string, bool) {
 	rules := []struct{ suffix, status string }{
 		{".failed", model.RunStatusFailed}, {".cancelled", model.RunStatusCancelled}, {".suspended", model.RunStatusSuspended},
 		{".completed", model.RunStatusCompleted}, {".resolved", model.RunStatusCompleted}, {".approved", model.RunStatusCompleted},
-		{".waiting_input", model.RunStatusWaitingInput}, {".waiting_handoff", model.RunStatusWaitingHandoff}, {".started", model.RunStatusRunning}, {".resumed", model.RunStatusRunning},
+		{".waiting_input", model.RunStatusWaitingInput}, {".waiting_handoff", model.RunStatusWaitingHandoff}, {".waiting_timer", model.RunStatusWaitingTimer},
+		{".cancelling", model.RunStatusCancelling}, {".compensating", model.RunStatusCompensating}, {".started", model.RunStatusRunning}, {".resumed", model.RunStatusRunning},
 	}
 	for _, rule := range rules {
 		if strings.HasSuffix(event.EventType, rule.suffix) {

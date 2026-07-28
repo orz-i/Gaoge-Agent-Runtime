@@ -501,6 +501,7 @@ type ToolExecutionReceipt struct {
 type ToolExecutionResult struct {
 	OutputJSON string               `json:"outputJSON"`
 	Receipt    ToolExecutionReceipt `json:"receipt"`
+	Attempts   int                  `json:"attempts,omitempty"`
 }
 
 type ReceiptToolExecutor interface {

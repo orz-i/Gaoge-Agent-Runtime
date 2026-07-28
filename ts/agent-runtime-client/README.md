@@ -44,7 +44,73 @@ survive a page reload.
 
 Clean stream boundaries include `run.completed`, `run.failed`,
 `run.cancelled`, `run.waiting_input`, `run.waiting_handoff`, and
-`run.suspended`.
+`run.waiting_timer`, and `run.suspended`.
+
+## Publish and start a Dynamic Workflow
+
+Dynamic Workflow complements Agent Team: code owns explicit control flow,
+state, budgets, waits, and recovery, while Agent nodes own only bounded
+probabilistic work.
+
+```ts
+const limits = {
+  maxNodeActivations: 100,
+  maxChildRuns: 8,
+  maxConcurrentRuns: 4,
+  maxTotalLLMCalls: 12,
+  maxTotalToolCalls: 20,
+  maxDurationSeconds: 3600,
+  maxLoopIterations: 10,
+  maxNestedDepth: 3,
+  maxStateBytes: 1_048_576,
+};
+
+const definition = await runtime.admin.workflowDefinitions.create({
+  name: "Release decision",
+  scope: "actor",
+  inputSchema: {
+    type: "object",
+    required: ["changeID"],
+    properties: { changeID: { type: "string" } },
+  },
+  outputSchema: {
+    type: "object",
+    required: ["approved"],
+    properties: { approved: { type: "boolean" } },
+  },
+  root: {
+    id: "root",
+    type: "sequence",
+    children: [
+      {
+        id: "result",
+        type: "return",
+        value: {
+          op: "object",
+          fields: { approved: { op: "literal", value: true } },
+        },
+      },
+    ],
+  },
+  limits,
+});
+
+const startedWorkflow = await runtime.workflows.start({
+  clientRunID: crypto.randomUUID(),
+  thread: { kind: "conversation", id: "conversation-42" },
+  definition: definition.ref,
+  input: { changeID: "change-17" },
+});
+
+const result = await runtime.runs.result<{ approved: boolean }>(
+  startedWorkflow.run.runID,
+);
+```
+
+Workflow Definition revisions are immutable and freeze exact Agent Manifest,
+nested Workflow, and Tool definition dependencies. Retry a publication with
+the same request identity; use `expectedRevision` when revising an existing
+definition.
 
 ## Publish immutable Agent Manifests
 

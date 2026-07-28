@@ -139,12 +139,24 @@ func (s *Engine) failDeadLetterContinuation(ctx context.Context, job model.Conti
 		cause = ErrContinuationAttemptsExhausted
 	}
 	message := fmt.Errorf("%w: job=%s checkpoint=%s attempts=%d: %w", ErrContinuationDeadLetter, job.JobID, job.CheckpointID, job.AttemptCount, cause)
+	if run.RuntimeKind == model.RuntimeKindWorkflow {
+		s.failWorkflowRun(ctx, *run, message)
+		return
+	}
 	s.failTextRun(ctx, *run, run.CurrentStepID, message)
 }
 
 func continuationRunDoesNotExecute(run model.Run) bool {
 	if run.EndedAt != nil {
 		return true
+	}
+	if run.RuntimeKind == model.RuntimeKindWorkflow {
+		switch run.Status {
+		case model.RunStatusCompleted, model.RunStatusFailed, model.RunStatusCancelled, model.RunStatusSuspended:
+			return true
+		default:
+			return false
+		}
 	}
 	switch run.Status {
 	case model.RunStatusWaitingInput, model.RunStatusWaitingHandoff, model.RunStatusSuspended, model.RunStatusCompleted, model.RunStatusFailed, model.RunStatusCancelled:
@@ -341,6 +353,12 @@ func (s *Engine) executeContinuationJob(ctx context.Context, owner string, job m
 	if err != nil || continuation.SegmentKey != job.SegmentKey {
 		span.RecordError(ErrRunSnapshotIncompatible)
 		return ErrRunSnapshotIncompatible
+	}
+	if run.RuntimeKind == model.RuntimeKindWorkflow {
+		if continuation.Type != runContinuationWorkflowExecute {
+			return ErrRunSnapshotIncompatible
+		}
+		return s.executeWorkflowContinuation(ctx, *run, *checkpoint, continuation, job.Source)
 	}
 	ctx = context.WithValue(ctx, runHandoffJoinContextKey{}, continuation.HandoffJoin)
 	effective, err := s.loadResumeTextRunRuntime(ctx, *run)

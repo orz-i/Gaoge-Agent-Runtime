@@ -129,6 +129,10 @@ type StartTextRunInput struct {
 	FrozenWorkspace                               *WorkspaceSnapshot
 	Delegation                                    *RunDelegationStart
 	DeferInitialContinuation                      bool
+	MaxLLMCalls                                   int
+	MaxToolCalls                                  int
+	StructuredOutputSchema                        json.RawMessage
+	ResultAttempts                                int
 }
 
 func freezeWorkspaceForAgentRole(workspace *WorkspaceSnapshot, allowedToolKeys []string, delegated bool) {
@@ -475,6 +479,8 @@ type effectiveTextRunConfig struct {
 	Workspace                   *WorkspaceSnapshot        `json:"workspace,omitempty"`
 	AgentManifest               *effectiveAgentManifest   `json:"agentManifest,omitempty"`
 	InitialContinuationDeferred bool                      `json:"initialContinuationDeferred,omitempty"`
+	StructuredOutputSchema      json.RawMessage           `json:"structuredOutputSchema,omitempty"`
+	ResultAttempts              int                       `json:"resultAttempts,omitempty"`
 }
 
 type effectiveAgentManifest struct {
@@ -797,6 +803,19 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 		maxLLMCalls = narrowAgentBudget(maxLLMCalls, agentSnapshot.MaxLLMCalls)
 		maxToolCalls = narrowAgentBudget(maxToolCalls, agentSnapshot.MaxToolCalls)
 	}
+	maxLLMCalls = narrowAgentBudget(maxLLMCalls, input.MaxLLMCalls)
+	maxToolCalls = narrowAgentBudget(maxToolCalls, input.MaxToolCalls)
+	resultAttempts := input.ResultAttempts
+	if len(input.StructuredOutputSchema) > 0 {
+		if _, schemaErr := validateWorkflowSchema(input.StructuredOutputSchema); schemaErr != nil || resultAttempts < 0 || resultAttempts > 2 {
+			return textRunPreparedConfiguration{}, ErrInvalidInput
+		}
+		if resultAttempts == 0 {
+			resultAttempts = 1
+		}
+	} else if resultAttempts != 0 {
+		return textRunPreparedConfiguration{}, ErrInvalidInput
+	}
 	effective := effectiveTextRunConfig{
 		SemanticVersion: RuntimeSnapshotVersion, Strategy: strategy, StrategyReason: strategyReason, RequestedMode: requestedMode, DefaultMode: profile.DefaultMode, AllowedModes: append([]string(nil), profile.AllowedModes...), Environment: input.Environment, EnvironmentProfileName: profile.Name,
 		Instructions: instructions, PlatformModelName: modelName, AllowedModelSnapshot: append([]EnvironmentModelPolicy(nil), profile.Models...), MemoryPolicy: profile.MemoryPolicy, MemoryEnabled: profile.MemoryPolicy != "disabled", SkillRefs: selectedSkillRefs, UnavailableSkillRefs: unavailableSkillRefs,
@@ -808,6 +827,7 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 		InteractionTTLHours: boundedTextRunConfig(cfg.Execution.InteractionTTLHours, 168, 24*365), OutputMaxPerRun: boundedTextRunConfig(cfg.Outputs.MaxPerRun, 50, 500),
 		OutputIDs: uniqueRuntimeStrings(input.OutputIDs), OutputRefs: resources.OutputRefs, EvidenceIDs: resources.EvidenceIDs, EvidenceRefs: resources.EvidenceRefs, Workspace: resources.Workspace, AgentManifest: agentSnapshot,
 		InitialContinuationDeferred: input.DeferInitialContinuation,
+		StructuredOutputSchema:      append(json.RawMessage(nil), input.StructuredOutputSchema...), ResultAttempts: resultAttempts,
 	}
 	snapshot, err := json.Marshal(effective)
 	if err != nil {
@@ -1932,18 +1952,20 @@ func (s *Engine) ReconcileTextRunsOnce(ctx context.Context, olderThan time.Time)
 // It is exported for operational probes and crash-recovery contract tests.
 func (s *Engine) ExpireRunInteractionsOnce(ctx context.Context, before time.Time) error {
 	return expireRunInteractionsOnce(ctx, before, interactionExpiryDependencies{
-		list:    s.repo.ListExpiredRunInteractions,
-		expire:  s.repo.ExpireRunInteraction,
-		publish: s.publishRunEvents,
-		finish:  s.FinishRunNotifications,
+		list:           s.repo.ListExpiredRunInteractions,
+		expire:         s.repo.ExpireRunInteraction,
+		expireWorkflow: s.expireWorkflowInteractionIfNeeded,
+		publish:        s.publishRunEvents,
+		finish:         s.FinishRunNotifications,
 	})
 }
 
 type interactionExpiryDependencies struct {
-	list    func(context.Context, time.Time, int) ([]model.ExpiredInteraction, error)
-	expire  func(context.Context, string) ([]model.Event, bool, error)
-	publish func(string, []model.Event)
-	finish  func(string)
+	list           func(context.Context, time.Time, int) ([]model.ExpiredInteraction, error)
+	expire         func(context.Context, string) ([]model.Event, bool, error)
+	expireWorkflow func(context.Context, model.ExpiredInteraction) ([]model.Event, bool, bool, error)
+	publish        func(string, []model.Event)
+	finish         func(string)
 }
 
 func expireRunInteractionsOnce(ctx context.Context, before time.Time, deps interactionExpiryDependencies) error {
@@ -1952,13 +1974,23 @@ func expireRunInteractionsOnce(ctx context.Context, before time.Time, deps inter
 		return err
 	}
 	for _, item := range items {
-		saved, applied, expireErr := deps.expire(ctx, item.InteractionID)
+		var saved []model.Event
+		var applied, handled bool
+		var expireErr error
+		if deps.expireWorkflow != nil {
+			saved, applied, handled, expireErr = deps.expireWorkflow(ctx, item)
+		}
+		if expireErr == nil && !handled {
+			saved, applied, expireErr = deps.expire(ctx, item.InteractionID)
+		}
 		if expireErr != nil {
 			return expireErr
 		}
 		if applied {
 			deps.publish(item.RunID, saved)
-			deps.finish(item.RunID)
+			if !handled {
+				deps.finish(item.RunID)
+			}
 		}
 	}
 	return nil

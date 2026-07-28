@@ -27,6 +27,10 @@ type state struct {
 	Queue         map[string]domain.QueueItem              `json:"queue"`
 	Continuations map[string]domain.ContinuationJob        `json:"continuations"`
 	Manifests     map[string][]domain.AgentManifest        `json:"manifests"`
+	Workflows     map[string][]domain.WorkflowDefinition   `json:"workflows"`
+	Executions    map[string]domain.WorkflowExecution      `json:"executions"`
+	Results       map[string]domain.RunResult              `json:"results"`
+	WorkflowCache map[string]domain.WorkflowCacheEntry     `json:"workflowCache"`
 	Handoffs      map[string]domain.RunHandoff             `json:"handoffs"`
 	HandoffJoins  map[string]domain.RunHandoffJoin         `json:"handoffJoins"`
 	Workbench     map[string]domain.WorkbenchProjection    `json:"workbench"`
@@ -49,7 +53,9 @@ func newState() state {
 		Checkpoints: make(map[string]map[string]domain.Checkpoint), Contexts: make(map[string]domain.ContextSnapshot),
 		Artifacts: make(map[string]domain.ContextArtifact), Outputs: make(map[string][]domain.OutputRef),
 		Evidence: make(map[string]domain.Evidence), Queue: make(map[string]domain.QueueItem), Continuations: make(map[string]domain.ContinuationJob),
-		Manifests: make(map[string][]domain.AgentManifest), Handoffs: make(map[string]domain.RunHandoff), HandoffJoins: make(map[string]domain.RunHandoffJoin),
+		Manifests: make(map[string][]domain.AgentManifest), Workflows: make(map[string][]domain.WorkflowDefinition),
+		Executions: make(map[string]domain.WorkflowExecution), Results: make(map[string]domain.RunResult), WorkflowCache: make(map[string]domain.WorkflowCacheEntry),
+		Handoffs: make(map[string]domain.RunHandoff), HandoffJoins: make(map[string]domain.RunHandoffJoin),
 		Workbench: make(map[string]domain.WorkbenchProjection), Phases: make(map[string][]domain.PhaseProjection),
 	}
 }
@@ -156,6 +162,7 @@ func (s *Store) CreateRunStartBundle(_ context.Context, run *domain.Run, step *d
 		if run.UpdatedAt.IsZero() {
 			run.UpdatedAt = now
 		}
+		run.RuntimeKind = domain.NormalizeRuntimeKind(run.RuntimeKind)
 		st.Runs[run.RunID] = clone(*run)
 		st.Steps[run.RunID] = []domain.Step{clone(*step)}
 		st.Contexts[run.RunID] = clone(*snapshot)
@@ -179,6 +186,7 @@ func (s *Store) GetRun(_ context.Context, actor domain.ActorRef, runID string) (
 		return nil, agentruntime.ErrNotFound
 	}
 	result := clone(run)
+	result.RuntimeKind = domain.NormalizeRuntimeKind(result.RuntimeKind)
 	return &result, nil
 }
 
@@ -277,7 +285,7 @@ func (s *Store) GetRunCursor(ctx context.Context, actor domain.ActorRef, runID s
 	if err != nil {
 		return nil, err
 	}
-	return &domain.RunCursor{Status: run.Status, LastEventSeq: run.LastEventSeq, LastPresentationEventSeq: run.LastPresentationEventSeq, CurrentStepID: run.CurrentStepID, PendingInteractionID: run.PendingInteractionID}, nil
+	return &domain.RunCursor{RuntimeKind: run.RuntimeKind, Status: run.Status, LastEventSeq: run.LastEventSeq, LastPresentationEventSeq: run.LastPresentationEventSeq, CurrentStepID: run.CurrentStepID, PendingInteractionID: run.PendingInteractionID}, nil
 }
 
 func (s *Store) ListRunSteps(_ context.Context, runID string) ([]domain.Step, error) {

@@ -3,8 +3,9 @@ import type {
   ContinuationJobPageDTO, CreateRunHandoffJoinRequest, DelegateRunRequest, DelegatedRunResult, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
   OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
   RunHandoffJoinDTO, RunHandoffJoinFilterDTO, RunHandoffJoinPageDTO, RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RunTaskTreeDTO, RuntimeEvidenceSelectionDTO,
-  RuntimeEvidenceSourceDTO, StartAgentTeamRequest, AgentTeamStartResultDTO, StartTextRunRequest, StartTextRunResult, TextRunDetailDTO,
-  TextRunDTO, WorkbenchDTO,
+  RuntimeEvidenceSourceDTO, StartAgentTeamRequest, AgentTeamStartResultDTO, StartTextRunRequest, StartTextRunResult,
+  RunDetailDTO, RunDTO, RunResultDTO, StartWorkflowRequest, WorkflowDefinitionDTO, WorkflowDefinitionFilterDTO,
+  WorkflowDefinitionPageDTO, WorkflowDefinitionRevisionRequest, WorkflowDefinitionValidationDTO, WorkflowStartResult, WorkbenchDTO,
 } from "./types.js";
 
 export type RuntimeHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
@@ -26,7 +27,7 @@ type OutputWireDTO = Omit<OutputDTO, "extension"> & { artifact?: OutputDTO["exte
 type OutputCatalogWireDTO = OutputWireDTO & { sourceRun: OutputDetailDTO["sourceRun"]; thread: OutputDetailDTO["sourceThread"] };
 
 const pathPart = (value: string): string => encodeURIComponent(value);
-const streamClosingEvents = new Set(["run.completed", "run.failed", "run.cancelled", "run.waiting_input", "run.waiting_handoff", "run.suspended"]);
+const streamClosingEvents = new Set(["run.completed", "run.failed", "run.cancelled", "run.waiting_input", "run.waiting_handoff", "run.waiting_timer", "run.suspended"]);
 
 function outputFromWire<T extends OutputWireDTO>(item: T): Omit<T, "artifact"> & Pick<OutputDTO, "extension"> {
   const { artifact, ...output } = item; return { ...output, extension: artifact };
@@ -39,13 +40,14 @@ function validProjectionRef(value: unknown): value is {kind:string;id:string} {
   const ref=value as Record<string,unknown>;
   return typeof ref.kind==="string"&&ref.kind.length>0&&typeof ref.id==="string"&&ref.id.length>0;
 }
-function requireRunProjectionRefs<T extends StartTextRunResult|TextRunDetailDTO>(value:T):T {
+function requireRunProjectionRefs<T extends {inputProjectionRef:unknown;outputProjectionRef:unknown;run?:{requestID?:string}}>(value:T):T {
   if (validProjectionRef(value.inputProjectionRef)&&validProjectionRef(value.outputProjectionRef)) return value;
   throw new RuntimeAPIError("runtime returned invalid projection references",502,"runtime.invalid_response",value.run?.requestID??"");
 }
 
 export class RuntimeClient {
   readonly runs;
+  readonly workflows;
   readonly teams;
   readonly events;
   readonly interactions;
@@ -62,9 +64,10 @@ export class RuntimeClient {
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.maxStreamRetries = options.maxStreamRetries ?? 5;
     this.runs = {
-      list: (thread: {kind:string;id:string}, page=1, pageSize=20, request?:RequestOptions) => this.request<{total:number;results:TextRunDTO[]}>(`/runs?threadKind=${pathPart(thread.kind)}&threadID=${pathPart(thread.id)}&page=${page}&pageSize=${pageSize}`, {}, request),
+      list: (thread: {kind:string;id:string}, page=1, pageSize=20, request?:RequestOptions) => this.request<{total:number;results:RunDTO[]}>(`/runs?threadKind=${pathPart(thread.kind)}&threadID=${pathPart(thread.id)}&page=${page}&pageSize=${pageSize}`, {}, request),
       create: async(payload:StartTextRunRequest, request?:RequestOptions) => requireRunProjectionRefs(await this.request<StartTextRunResult>("/runs", {method:"POST", body:JSON.stringify(payload)}, request)),
-      get: async(runID:string, request?:RequestOptions) => requireRunProjectionRefs(await this.request<TextRunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request)),
+      get: async(runID:string, request?:RequestOptions) => requireRunProjectionRefs(await this.request<RunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request)),
+      result: <T=unknown>(runID:string, request?:RequestOptions) => this.request<RunResultDTO<T>>(`/runs/${pathPart(runID)}/result`, {}, request),
       cancel: (runID:string, request?:RequestOptions) => this.request<{canceled:boolean}>(`/runs/${pathPart(runID)}/cancel`, {method:"POST"}, request),
       resume: (runID:string,payload:{checkpointID?:string;clientResumeID:string},request?:RequestOptions)=>this.request<{checkpointID:string;runID:string;status:string;reused:boolean}>(`/runs/${pathPart(runID)}/resume`,{method:"POST",body:JSON.stringify(payload)},request),
       retire: (runID:string,request?:RequestOptions)=>this.request<{runID:string;status:"cancelled";reused:boolean}>(`/runs/${pathPart(runID)}/retire`,{method:"POST"},request),
@@ -75,6 +78,11 @@ export class RuntimeClient {
       taskTree: (runID:string,request?:RequestOptions)=>this.request<RunTaskTreeDTO>(`/runs/${pathPart(runID)}/task-tree`,{},request),
       plan: (runID:string,request?:RequestOptions)=>this.request<PlanViewDTO>(`/runs/${pathPart(runID)}/plan`,{},request),
       checkpoints: async (runID:string,request?:RequestOptions)=>(await this.request<{results:RunCheckpointDTO[]}>(`/runs/${pathPart(runID)}/checkpoints`,{},request)).results ?? [],
+    };
+    this.workflows = {
+      start: async(payload:StartWorkflowRequest, request?:RequestOptions) => requireRunProjectionRefs(await this.request<WorkflowStartResult>("/workflows", {method:"POST", body:JSON.stringify(payload)}, request)),
+      list: (options:WorkflowDefinitionFilterDTO&RequestOptions={}) => {const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined&&value!=="")q.set(key,String(value))}return this.request<WorkflowDefinitionPageDTO>(`/workflow-definitions${q.size?`?${q}`:""}`,{},options)},
+      get: (workflowID:string,revision?:number,request?:RequestOptions) => this.request<WorkflowDefinitionDTO>(`/workflow-definitions/${pathPart(workflowID)}${revision?`?revision=${revision}`:""}`,{},request),
     };
     this.teams = {
       start: async(payload:StartAgentTeamRequest, request?:RequestOptions) => requireAgentTeamProjectionRefs(await this.request<AgentTeamStartResultDTO>("/agent-teams", {method:"POST", body:JSON.stringify(payload)}, request)),
@@ -119,6 +127,12 @@ export class RuntimeClient {
         list:(options:AgentManifestFilterDTO&RequestOptions={})=>{const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined&&value!=="")q.set(key,String(value))}return this.request<AgentManifestPageDTO>(`/admin/agentruntime/agent-manifests${q.size?`?${q}`:""}`,{},options)},
         create:(payload:AgentManifestRevisionRequest,request?:RequestOptions)=>this.request<AgentManifestDTO>("/admin/agentruntime/agent-manifests",{method:"POST",body:JSON.stringify(payload)},request),
         revise:(manifestID:string,payload:AgentManifestRevisionRequest&{expectedRevision:number},request?:RequestOptions)=>this.request<AgentManifestDTO>(`/admin/agentruntime/agent-manifests/${pathPart(manifestID)}/revisions`,{method:"POST",body:JSON.stringify(payload)},request),
+      },
+      workflowDefinitions: {
+        list:(options:WorkflowDefinitionFilterDTO&RequestOptions={})=>{const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined&&value!=="")q.set(key,String(value))}return this.request<WorkflowDefinitionPageDTO>(`/admin/agentruntime/workflow-definitions${q.size?`?${q}`:""}`,{},options)},
+        validate:(payload:WorkflowDefinitionRevisionRequest,request?:RequestOptions)=>this.request<WorkflowDefinitionValidationDTO>("/admin/agentruntime/workflow-definitions/validate",{method:"POST",body:JSON.stringify(payload)},request),
+        create:(payload:WorkflowDefinitionRevisionRequest,request?:RequestOptions)=>this.request<WorkflowDefinitionDTO>("/admin/agentruntime/workflow-definitions",{method:"POST",body:JSON.stringify(payload)},request),
+        revise:(workflowID:string,payload:WorkflowDefinitionRevisionRequest&{expectedRevision:number},request?:RequestOptions)=>this.request<WorkflowDefinitionDTO>(`/admin/agentruntime/workflow-definitions/${pathPart(workflowID)}/revisions`,{method:"POST",body:JSON.stringify(payload)},request),
       },
     };
   }

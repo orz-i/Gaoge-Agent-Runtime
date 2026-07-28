@@ -224,18 +224,22 @@ func normalizeRunHandoffJoinMode(mode string, quorum, members int) (string, int,
 }
 
 type DelegateTextRunInput struct {
-	Actor            model.ActorRef
-	ParentRunID      string
-	ClientHandoffID  string
-	AgentManifest    model.ResourceRef
-	Goal             string
-	ContentType      string
-	OutputIDs        []string
-	EvidenceIDs      []string
-	Options          map[string]interface{}
-	RequestID        string
-	HTMLVisualPrompt bool
-	HTMLColorMode    string
+	Actor                  model.ActorRef
+	ParentRunID            string
+	ClientHandoffID        string
+	AgentManifest          model.ResourceRef
+	Goal                   string
+	ContentType            string
+	OutputIDs              []string
+	EvidenceIDs            []string
+	Options                map[string]interface{}
+	RequestID              string
+	HTMLVisualPrompt       bool
+	HTMLColorMode          string
+	MaxLLMCalls            int
+	MaxToolCalls           int
+	StructuredOutputSchema json.RawMessage
+	ResultAttempts         int
 }
 
 type DelegateTextRunResult struct {
@@ -411,17 +415,31 @@ func (s *Engine) startDelegatedTextRun(ctx context.Context, input DelegateTextRu
 }
 
 func delegatedTextRunStartInput(input DelegateTextRunInput, prepared preparedDelegation) (StartTextRunInput, error) {
-	parentConfig, err := effectiveTextRunConfigFromRun(prepared.parent)
-	if err != nil {
-		return StartTextRunInput{}, err
-	}
 	toolKeys := append([]string(nil), prepared.manifest.ToolKeys...)
 	skillRefs := append([]model.ResourceRef(nil), prepared.manifest.SkillRefs...)
 	modelName := firstNonEmptyString(prepared.manifest.ModelName, prepared.parent.PlatformModelName)
 	executionMode := firstNonEmptyString(prepared.manifest.ExecutionMode, TextRunExecutionModeAuto)
 	threadScope := "general"
-	if parentConfig.Workspace != nil {
-		threadScope = strings.TrimSpace(parentConfig.Workspace.Request.Type)
+	var workspace *WorkspaceSnapshot
+	if prepared.parent.RuntimeKind == model.RuntimeKindWorkflow {
+		var parentConfig effectiveWorkflowConfig
+		if json.Unmarshal([]byte(prepared.parent.RunConfigSnapshotJSON), &parentConfig) != nil || parentConfig.SemanticVersion != RuntimeSnapshotVersion {
+			return StartTextRunInput{}, ErrRunSnapshotIncompatible
+		}
+		workspace = parentConfig.Workspace
+		modelName = firstNonEmptyString(prepared.manifest.ModelName, parentConfig.ThreadModel, prepared.parent.PlatformModelName)
+		if workspace != nil {
+			threadScope = strings.TrimSpace(workspace.Request.Type)
+		}
+	} else {
+		parentConfig, err := effectiveTextRunConfigFromRun(prepared.parent)
+		if err != nil {
+			return StartTextRunInput{}, err
+		}
+		workspace = parentConfig.Workspace
+		if workspace != nil {
+			threadScope = strings.TrimSpace(workspace.Request.Type)
+		}
 	}
 	return StartTextRunInput{
 		Actor: input.Actor, Thread: prepared.parent.Thread, RequestID: input.RequestID, Goal: prepared.handoff.Goal, ContentType: firstNonEmptyString(input.ContentType, "text"),
@@ -429,8 +447,10 @@ func delegatedTextRunStartInput(input DelegateTextRunInput, prepared preparedDel
 		OutputIDs: input.OutputIDs, EvidenceIDs: input.EvidenceIDs, ToolKeys: &toolKeys, SkillRefs: &skillRefs,
 		ParentProjection: &prepared.parent.OutputProjection, BranchReason: agentBranchReasonDefault, HTMLVisualPromptEnabled: input.HTMLVisualPrompt,
 		HTMLVisualColorMode: input.HTMLColorMode, ThreadModel: prepared.parent.PlatformModelName, ThreadProvider: prepared.parent.Provider, ThreadScope: threadScope,
-		FrozenWorkspace: parentConfig.Workspace,
+		FrozenWorkspace: workspace,
 		Delegation:      &RunDelegationStart{Manifest: prepared.manifest, Handoff: prepared.handoff},
+		MaxLLMCalls:     input.MaxLLMCalls, MaxToolCalls: input.MaxToolCalls,
+		StructuredOutputSchema: append(json.RawMessage(nil), input.StructuredOutputSchema...), ResultAttempts: input.ResultAttempts,
 	}, nil
 }
 
@@ -526,6 +546,13 @@ func (s *Engine) validateDelegationLimits(ctx context.Context, actor model.Actor
 }
 
 func parentDelegationLimits(parent model.Run) (int, int, error) {
+	if parent.RuntimeKind == model.RuntimeKindWorkflow {
+		var effective effectiveWorkflowConfig
+		if json.Unmarshal([]byte(parent.RunConfigSnapshotJSON), &effective) != nil || effective.SemanticVersion != RuntimeSnapshotVersion {
+			return 0, 0, ErrRunSnapshotIncompatible
+		}
+		return effective.Limits.MaxChildRuns, effective.Limits.MaxNestedDepth, nil
+	}
 	effective, err := effectiveTextRunConfigFromRun(parent)
 	if err != nil {
 		return 0, 0, err
@@ -556,6 +583,14 @@ func (s *Engine) reusedDelegationResult(ctx context.Context, handoff *model.RunH
 }
 
 func runCanDelegate(run model.Run) bool {
+	if run.RuntimeKind == model.RuntimeKindWorkflow {
+		switch run.Status {
+		case model.RunStatusQueued, model.RunStatusPreparing, model.RunStatusRunning, model.RunStatusWaitingInput, model.RunStatusWaitingTimer, model.RunStatusWaitingHandoff, model.RunStatusCompensating:
+			return true
+		default:
+			return false
+		}
+	}
 	return run.Status == model.RunStatusQueued || run.Status == model.RunStatusPreparing || run.Status == model.RunStatusRunning
 }
 
@@ -592,16 +627,24 @@ func handoffRequestFingerprint(input DelegateTextRunInput, manifest model.Resour
 	sort.Strings(outputs)
 	sort.Strings(evidence)
 	payload := struct {
-		Actor           model.ActorRef
-		ParentRunID     string
-		ClientHandoffID string
-		Manifest        model.ResourceRef
-		Goal            string
-		ContentType     string
-		OutputIDs       []string
-		EvidenceIDs     []string
-		Options         map[string]interface{}
-	}{input.Actor, strings.TrimSpace(input.ParentRunID), strings.TrimSpace(input.ClientHandoffID), manifest, strings.TrimSpace(input.Goal), strings.TrimSpace(input.ContentType), outputs, evidence, input.Options}
+		Actor                  model.ActorRef
+		ParentRunID            string
+		ClientHandoffID        string
+		Manifest               model.ResourceRef
+		Goal                   string
+		ContentType            string
+		OutputIDs              []string
+		EvidenceIDs            []string
+		Options                map[string]interface{}
+		MaxLLMCalls            int
+		MaxToolCalls           int
+		StructuredOutputSchema json.RawMessage
+		ResultAttempts         int
+	}{
+		input.Actor, strings.TrimSpace(input.ParentRunID), strings.TrimSpace(input.ClientHandoffID), manifest,
+		strings.TrimSpace(input.Goal), strings.TrimSpace(input.ContentType), outputs, evidence, input.Options,
+		input.MaxLLMCalls, input.MaxToolCalls, input.StructuredOutputSchema, input.ResultAttempts,
+	}
 	return hashAgentPayload(payload)
 }
 

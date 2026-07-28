@@ -533,6 +533,14 @@ func finalizeRunTx(tx *gorm.DB, input domain.TerminalIntent) (*domain.OutputRef,
 	if hasOutput {
 		output = &outputItem
 	}
+	if input.Result != nil {
+		if input.Outcome != domain.TerminalCompleted || input.Result.RunID != input.RunID {
+			return nil, nil, false, agentruntime.ErrInvalidInput
+		}
+		if err := applyRunResultRow(tx, *input.Result); err != nil {
+			return nil, nil, false, err
+		}
+	}
 	now := time.Now()
 	updates := map[string]interface{}{columnStatus: input.Outcome, "status_reason": input.Summary, columnErrorCode: input.ErrorCode, columnErrorMessage: input.ErrorMessage, columnEndedAt: now, columnPendingInteraction: ""}
 	if err := tx.Model(&models.RunRecord{}).Where("id = ?", run.ID).Updates(updates).Error; err != nil {
@@ -776,6 +784,20 @@ func loadWorkbenchCore(tx *gorm.DB, actor domain.ActorRef, runID string, snapsho
 }
 
 func loadWorkbenchState(tx *gorm.DB, runID string, snapshot *domain.WorkbenchSnapshot) error {
+	var execution models.WorkflowExecutionRecord
+	if err := tx.Where("run_id = ?", runID).Take(&execution).Error; err == nil {
+		item := workflowExecutionDomain(execution)
+		snapshot.Workflow = &item
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	var result models.RunResultRecord
+	if err := tx.Where("run_id = ?", runID).Take(&result).Error; err == nil {
+		item := runResultDomain(result)
+		snapshot.Result = &item
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
 	var plans []models.RuntimePlanRecord
 	if err := tx.Where("run_id = ?", runID).Order("revision,id").Find(&plans).Error; err != nil {
 		return err

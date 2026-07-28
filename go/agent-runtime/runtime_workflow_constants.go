@@ -1,0 +1,37 @@
+package agentruntime
+
+const (
+	workflowRootScope = "root"
+
+	workflowContentTypeText = "text"
+	workflowEnvironment     = "general"
+	workflowApprovalPerCall = "per_call"
+
+	workflowPayloadActivationKey = "activationKey"
+	workflowPayloadAttempt       = "attempt"
+	workflowPayloadCacheKey      = "cacheKey"
+	workflowPayloadCheckpointID  = "checkpointID"
+	workflowPayloadChildRunID    = "childRunID"
+	workflowPayloadCode          = "code"
+	workflowPayloadCompletionSeq = "completionSeq"
+	workflowPayloadContentHash   = "contentHash"
+	workflowPayloadError         = "error"
+	workflowPayloadInteractionID = "interactionID"
+	workflowPayloadItems         = "items"
+	workflowPayloadLane          = "lane"
+	workflowPayloadLLMCalls      = "llmCalls"
+	workflowPayloadMessage       = "message"
+	workflowPayloadNodeID        = "nodeID"
+	workflowPayloadPath          = "path"
+	workflowPayloadRuntimeKind   = "runtimeKind"
+	workflowPayloadSchema        = "schema"
+	workflowPayloadStatus        = "status"
+	workflowPayloadStrict        = "strict"
+	workflowPayloadToolCalls     = "toolCalls"
+	workflowPayloadToolCallID    = "toolCallID"
+	workflowPayloadType          = "type"
+	workflowPayloadValue         = "value"
+	workflowPayloadVars          = "vars"
+	workflowPayloadWaitKind      = "waitKind"
+	workflowPayloadWakeAt        = "wakeAt"
+)

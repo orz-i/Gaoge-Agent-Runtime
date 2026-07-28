@@ -127,7 +127,7 @@ func toRunResponse(run model.Run, threadIDs ...string) map[string]interface{} {
 	}
 	result := map[string]interface{}{
 		"schemaVersion": 1,
-		"runtimeKind":   "text",
+		"runtimeKind":   model.NormalizeRuntimeKind(run.RuntimeKind),
 		"actor":         map[string]string{"tenantID": run.Actor.TenantID, "id": run.Actor.ActorID},
 		valueThread:     map[string]string{valueKind72883EFB: run.Thread.Kind, "id": threadID},
 		"runID":         run.RunID, "requestID": run.RequestID, "goal": run.Goal, valueStatus00E8FE8E: run.Status,
@@ -144,6 +144,9 @@ func toRunResponse(run model.Run, threadIDs ...string) map[string]interface{} {
 	if strings.TrimSpace(run.AgentManifest.ID) != "" {
 		result["agentManifestRef"] = resourceRefResponse(run.AgentManifest)
 		result["agentName"] = run.AgentName
+	}
+	if strings.TrimSpace(run.WorkflowDefinition.ID) != "" {
+		result["workflowDefinitionRef"] = resourceRefResponse(run.WorkflowDefinition)
 	}
 	if strings.TrimSpace(run.RootRunID) != "" {
 		result["rootRunID"] = run.RootRunID

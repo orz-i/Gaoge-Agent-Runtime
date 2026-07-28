@@ -152,6 +152,9 @@ func loadRecoverableDeadLetterContinuation(tx *gorm.DB, jobID string, row *model
 }
 
 func continuationRunRecordIsTerminal(run models.RunRecord) bool {
+	if run.RuntimeKind == domain.RuntimeKindWorkflow {
+		return run.EndedAt != nil || isTerminalRunStatus(run.Status) || run.Status == domain.RunStatusSuspended
+	}
 	return run.EndedAt != nil || isTerminalRunStatus(run.Status) || run.Status == domain.RunStatusWaitingInput || run.Status == domain.RunStatusWaitingHandoff || run.Status == domain.RunStatusSuspended
 }
 

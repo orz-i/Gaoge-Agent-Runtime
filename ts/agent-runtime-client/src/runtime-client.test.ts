@@ -16,4 +16,52 @@ describe("RuntimeClient",()=>{
   it("owns agent manifests delegation and task trees",async()=>{const manifest={manifestID:"agent-research",revision:2,ref:{kind:"agent_manifest",id:"agent-research",revision:"2"},name:"Research",status:"active",maxLLMCalls:4,maxToolCalls:8};const handoff={handoffID:"handoff-1",childRunID:"run-child"};const run={runID:"run-child",requestID:"request-1",status:"queued"};const fetcher=vi.fn().mockResolvedValueOnce(json({total:1,results:[manifest]})).mockResolvedValueOnce(json(manifest)).mockResolvedValueOnce(json({handoff,run,rootStep:{stepID:"step-1"}})).mockResolvedValueOnce(json({rootRunID:"run-root",currentRunID:"run-root",rootRun:{runID:"run-root"},tasks:[{handoff,run}]})).mockResolvedValueOnce(json(manifest)).mockResolvedValueOnce(json({...manifest,revision:3}));const client=new RuntimeClient({baseURL:"https://runtime.test/v1",fetch:fetcher});await client.agents.list({limit:25,offset:50});await client.agents.get("agent/research",2);await client.runs.delegate("run/root",{clientHandoffID:"handoff 1",agentManifest:{kind:"agent_manifest",id:"agent-research",revision:"2"},goal:"Research one fact"});await client.runs.taskTree("run/root");await client.admin.agentManifests.create({name:"Research",toolKeys:["search"],maxLLMCalls:4,maxToolCalls:8});await client.admin.agentManifests.revise("agent/research",{expectedRevision:2,name:"Research v2",maxLLMCalls:3,maxToolCalls:6});expect(fetcher.mock.calls.map((call)=>call[0])).toEqual(["https://runtime.test/v1/agent-manifests?limit=25&offset=50","https://runtime.test/v1/agent-manifests/agent%2Fresearch?revision=2","https://runtime.test/v1/runs/run%2Froot/handoffs","https://runtime.test/v1/runs/run%2Froot/task-tree","https://runtime.test/v1/admin/agentruntime/agent-manifests","https://runtime.test/v1/admin/agentruntime/agent-manifests/agent%2Fresearch/revisions"]);expect(JSON.parse(String(fetcher.mock.calls[2]?.[1]?.body))).toMatchObject({clientHandoffID:"handoff 1",goal:"Research one fact"});expect(JSON.parse(String(fetcher.mock.calls[4]?.[1]?.body))).toMatchObject({maxLLMCalls:4,maxToolCalls:8});expect(JSON.parse(String(fetcher.mock.calls[5]?.[1]?.body))).toMatchObject({expectedRevision:2,name:"Research v2",maxLLMCalls:3,maxToolCalls:6})});
   it("owns handoff join creation queries and task tree joins",async()=>{const join={joinID:"join-1",clientJoinID:"client-join",rootRunID:"run-root",parentRunID:"run-root",handoffIDs:["handoff-1","handoff-2"],mode:"quorum",quorum:1,failurePolicy:"fail_fast",timeoutSeconds:1800,timeoutPolicy:"cancel_pending",deadlineAt:"2026-07-24T00:30:00Z",status:"pending",completedCount:0,failedCount:0,cancelledCount:0,pendingCount:2,resultHandoffIDs:[],errorCode:"",errorMessage:"",createdAt:"2026-07-24T00:00:00Z",updatedAt:"2026-07-24T00:00:00Z"};const tree={rootRunID:"run-root",currentRunID:"run-root",rootRun:{runID:"run-root"},tasks:[],joins:[join]};const fetcher=vi.fn().mockResolvedValueOnce(json(join)).mockResolvedValueOnce(json({total:1,results:[join]})).mockResolvedValueOnce(json(join)).mockResolvedValueOnce(json(tree));const client=new RuntimeClient({baseURL:"https://runtime.test/v1",fetch:fetcher});await client.runs.createHandoffJoin("run/root",{clientJoinID:"join 1",handoffIDs:["handoff-1","handoff-2"],mode:"quorum",quorum:1,failurePolicy:"fail_fast",timeoutSeconds:1800,timeoutPolicy:"cancel_pending"});await client.runs.handoffJoins("run/root",{status:"pending",limit:25,offset:50});await client.runs.handoffJoin("run/root","join/1");await expect(client.runs.taskTree("run/root")).resolves.toMatchObject({joins:[{joinID:"join-1",timeoutSeconds:1800}]});expect(fetcher.mock.calls.map((call)=>call[0])).toEqual(["https://runtime.test/v1/runs/run%2Froot/handoff-joins","https://runtime.test/v1/runs/run%2Froot/handoff-joins?status=pending&limit=25&offset=50","https://runtime.test/v1/runs/run%2Froot/handoff-joins/join%2F1","https://runtime.test/v1/runs/run%2Froot/task-tree"]);expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({clientJoinID:"join 1",handoffIDs:["handoff-1","handoff-2"],mode:"quorum",quorum:1,failurePolicy:"fail_fast",timeoutSeconds:1800,timeoutPolicy:"cancel_pending"})});
   it("starts a coordinator-led agent team",async()=>{const rootRun={runID:"run-root",requestID:"request-team",status:"queued"};const taskRun={runID:"run-child",requestID:"request-child",status:"queued"};const handoff={handoffID:"handoff-1",childRunID:"run-child"};const join={joinID:"join-1",status:"pending"};const fetcher=vi.fn().mockResolvedValue(json({rootRun,rootStep:{stepID:"step-root"},inputProjectionRef:{kind:"conversation.message",id:"user-1"},outputProjectionRef:{kind:"conversation.message",id:"assistant-1"},tasks:[{memberID:"architect",handoff,run:taskRun,rootStep:{stepID:"step-child"}}],join}));const client=new RuntimeClient({baseURL:"https://runtime.test/v1",fetch:fetcher});const payload={thread:{kind:"conversation",id:"conversation-1"},input:{content:"Integrate the specialists",contentType:"text" as const},clientTeamID:"team-1",coordinatorManifest:{kind:"agent_manifest",id:"agent-lead"},members:[{memberID:"architect",agentManifest:{kind:"agent_manifest",id:"agent-architect"},goal:"Audit structure"}],join:{mode:"all" as const,failurePolicy:"collect" as const}};await expect(client.teams.start(payload)).resolves.toMatchObject({rootRun:{runID:"run-root"},tasks:[{memberID:"architect"}],join:{joinID:"join-1"}});expect(fetcher.mock.calls[0]?.[0]).toBe("https://runtime.test/v1/agent-teams");expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(payload)});
+  it("owns workflow execution results and definition administration",async()=>{
+    const limits={maxNodeActivations:100,maxChildRuns:8,maxConcurrentRuns:4,maxTotalLLMCalls:12,maxTotalToolCalls:20,maxDurationSeconds:3600,maxLoopIterations:10,maxNestedDepth:3,maxStateBytes:1048576};
+    const definitionRequest={
+      workflowID:"workflow-research",
+      schemaVersion:1 as const,
+      scope:"actor" as const,
+      name:"Research workflow",
+      inputSchema:true,
+      outputSchema:{type:"object",required:["answer"],properties:{answer:{type:"number"}}},
+      root:{id:"root",type:"sequence" as const,children:[{id:"return",type:"return" as const,value:{op:"literal" as const,value:{answer:42}}}]},
+      limits,
+    };
+    const definition={...definitionRequest,revision:2,ref:{kind:"workflow_definition",id:"workflow-research",revision:"2"},tenantID:"tenant-1",ownerActorID:"actor-1",description:"",status:"active",dependencies:[],dependencyHash:"dependency-hash",definitionHash:"definition-hash",revisionNote:"",createdAt:"2026-07-28T00:00:00Z",updatedAt:"2026-07-28T00:00:00Z"};
+    const startPayload={thread:{kind:"conversation",id:"conversation-1"},definition:{kind:"workflow_definition" as const,id:"workflow/research",revision:"2"},input:{question:"why"},clientRunID:"workflow run 1",limits,cacheMode:"use" as const};
+    const workflowRun={runID:"run-workflow",requestID:"request-workflow",runtimeKind:"workflow",status:"queued"};
+    const fetcher=vi.fn()
+      .mockResolvedValueOnce(json({run:workflowRun,rootStep:{stepID:"step-root"},inputProjectionRef:{kind:"conversation.message",id:"user-1"},outputProjectionRef:{kind:"conversation.message",id:"assistant-1"}}))
+      .mockResolvedValueOnce(json({total:1,results:[definition]}))
+      .mockResolvedValueOnce(json(definition))
+      .mockResolvedValueOnce(json({runID:"run/workflow",runtimeKind:"workflow",value:{answer:42},presentation:"Answer: 42",schemaHash:"schema-hash",contentHash:"content-hash",createdAt:"2026-07-28T00:00:00Z",updatedAt:"2026-07-28T00:00:00Z"}))
+      .mockResolvedValueOnce(json({total:1,results:[definition]}))
+      .mockResolvedValueOnce(json({valid:true,nodeCount:2,definition}))
+      .mockResolvedValueOnce(json(definition))
+      .mockResolvedValueOnce(json({...definition,revision:3}));
+    const client=new RuntimeClient({baseURL:"https://runtime.test/v1",fetch:fetcher});
+
+    await expect(client.workflows.start(startPayload)).resolves.toMatchObject({run:{runtimeKind:"workflow"}});
+    await client.workflows.list({scope:"tenant",limit:25,offset:5});
+    await client.workflows.get("workflow/research",2);
+    await expect(client.runs.result<{answer:number}>("run/workflow")).resolves.toMatchObject({value:{answer:42},runtimeKind:"workflow"});
+    await client.admin.workflowDefinitions.list({status:"disabled",tenantID:"tenant 1",limit:10});
+    await client.admin.workflowDefinitions.validate(definitionRequest);
+    await client.admin.workflowDefinitions.create(definitionRequest);
+    await client.admin.workflowDefinitions.revise("workflow/research",{...definitionRequest,expectedRevision:2});
+
+    expect(fetcher.mock.calls.map((call)=>call[0])).toEqual([
+      "https://runtime.test/v1/workflows",
+      "https://runtime.test/v1/workflow-definitions?scope=tenant&limit=25&offset=5",
+      "https://runtime.test/v1/workflow-definitions/workflow%2Fresearch?revision=2",
+      "https://runtime.test/v1/runs/run%2Fworkflow/result",
+      "https://runtime.test/v1/admin/agentruntime/workflow-definitions?status=disabled&tenantID=tenant+1&limit=10",
+      "https://runtime.test/v1/admin/agentruntime/workflow-definitions/validate",
+      "https://runtime.test/v1/admin/agentruntime/workflow-definitions",
+      "https://runtime.test/v1/admin/agentruntime/workflow-definitions/workflow%2Fresearch/revisions",
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual(startPayload);
+    expect(JSON.parse(String(fetcher.mock.calls[7]?.[1]?.body))).toMatchObject({workflowID:"workflow-research",expectedRevision:2,inputSchema:true});
+  });
 });

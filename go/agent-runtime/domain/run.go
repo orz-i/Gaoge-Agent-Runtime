@@ -7,7 +7,10 @@ const (
 	RunStatusPreparing      = "preparing"
 	RunStatusWaitingInput   = "waiting_input"
 	RunStatusWaitingHandoff = "waiting_handoff"
+	RunStatusWaitingTimer   = "waiting_timer"
 	RunStatusRunning        = "running"
+	RunStatusCancelling     = "cancelling"
+	RunStatusCompensating   = "compensating"
 	RunStatusCompleted      = "completed"
 	RunStatusFailed         = "failed"
 	RunStatusCancelled      = "cancelled"
@@ -18,6 +21,7 @@ const (
 type Run struct {
 	RunID                    string
 	RequestID                string
+	RuntimeKind              string
 	Actor                    ActorRef
 	Thread                   ThreadRef
 	InputProjection          ProjectionRef
@@ -25,6 +29,7 @@ type Run struct {
 	Environment              ResourceRef
 	AgentManifest            ResourceRef
 	AgentName                string
+	WorkflowDefinition       ResourceRef
 	RootRunID                string
 	ParentRunID              string
 	HandoffID                string
@@ -71,6 +76,7 @@ type Run struct {
 }
 
 type RunCursor struct {
+	RuntimeKind              string
 	Status                   string
 	LastEventSeq             int64
 	LastPresentationEventSeq int64
@@ -87,6 +93,7 @@ type TerminalIntent struct {
 	Summary, ErrorCode, ErrorMessage string
 	DiagnosticJSON                   string
 	Output                           *OutputRef
+	Result                           *RunResult
 	Retire                           bool
 }
 

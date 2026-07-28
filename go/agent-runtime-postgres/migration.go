@@ -19,6 +19,8 @@ func Models() []interface{} {
 		&models.RuntimeWorkbenchProjectionRecord{}, &models.RuntimePhaseProjectionRecord{},
 		&models.EvidenceSelection{}, &models.RunQueueItemRecord{}, &models.ContinuationJobRecord{}, &models.ContextRecord{},
 		&models.AgentManifestRevisionRecord{}, &models.RunHandoffRecord{}, &models.RunHandoffJoinRecord{},
+		&models.WorkflowDefinitionRevisionRecord{}, &models.WorkflowExecutionRecord{},
+		&models.RunResultRecord{}, &models.WorkflowCacheEntryRecord{},
 	}
 }
 
@@ -27,6 +29,9 @@ func Migrate(db *gorm.DB, _ ...bool) error {
 		return ErrNilDatabase
 	}
 	if err := db.AutoMigrate(Models()...); err != nil {
+		return err
+	}
+	if err := db.Model(&models.RunRecord{}).Where("runtime_kind IS NULL OR runtime_kind = ''").Update("runtime_kind", "text").Error; err != nil {
 		return err
 	}
 	if err := ensureContextArtifactUniqueIndex(db); err != nil {

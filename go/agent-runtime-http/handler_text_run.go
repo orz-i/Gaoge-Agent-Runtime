@@ -342,6 +342,12 @@ func (h *Handler) GetWorkbench(c *gin.Context) {
 	steps, phases, groups := workbenchTraceResponses(view)
 	interactions, checkpoints, outputs := workbenchDetailResponses(view)
 	result := map[string]interface{}{"projectionVersion": runtime.WorkbenchContractVersion, "projectionSeq": view.ProjectionSeq, "projectionPersisted": view.ProjectionPersisted, valueRunA037153B: toRunResponse(view.Run, h.runThreadID(c, view.Run)), "overview": view.Overview, "phases": phases, "toolGroups": groups, valueStepsF083D597: steps, "interactions": interactions, "checkpoints": checkpoints, "outputs": outputs, "context": view.Context, "effectiveConfig": textRunConfigResponse(view.Config), "graph": map[string]interface{}{"nodes": view.GraphNodes, "edges": view.GraphEdges}, "selectionIndex": view.SelectionIndex}
+	if view.Workflow != nil {
+		result["workflow"] = workflowExecutionResponse(*view.Workflow)
+	}
+	if view.Result != nil {
+		result["result"] = runResultResponse(*view.Result)
+	}
 	if view.Plan != nil {
 		revisions := make([]map[string]interface{}, 0, len(view.Plan.Revisions))
 		for _, item := range view.Plan.Revisions {
@@ -968,7 +974,7 @@ func toRunStepResponse(s model.Step) map[string]interface{} {
 	_ = json.Unmarshal([]byte(s.DependsOnJSON), &dependsOn)
 	_ = json.Unmarshal([]byte(s.ExpectedToolsJSON), &expectedTools)
 	_ = json.Unmarshal([]byte(s.ResourceRefsJSON), &resourceRefs)
-	return map[string]interface{}{valueStepIDF52B51EE: s.StepID, valueRunID1DA2F0B6: s.RunID, "parentStepID": s.ParentStepID, "planID": s.PlanID, "stepIndex": s.StepIndex, "attempt": s.Attempt, valueKind72883EFB: s.Kind, valueTitle48EAAEED: s.Title, "description": s.Description, valueStatus00E8FE8E: s.Status, "dependsOn": dependsOn, "approvalRequired": s.ApprovalRequired, "expectedTools": expectedTools, "resourceRefs": resourceRefs, "resultSummary": s.ResultSummary, valueStartedAt: nullableRunStepTime(s.StartedAt), valueEndedAt: s.EndedAt}
+	return map[string]interface{}{valueStepIDF52B51EE: s.StepID, valueRunID1DA2F0B6: s.RunID, "parentStepID": s.ParentStepID, "planID": s.PlanID, "stepIndex": s.StepIndex, "attempt": s.Attempt, "nodeID": s.NodeID, "activationPath": s.ActivationPath, "laneID": s.LaneID, "activationIndex": s.ActivationIndex, "completionOrder": s.CompletionOrder, "waitKind": s.WaitingKind, "waitID": s.WaitingID, "childRunID": s.ChildRunID, valueKind72883EFB: s.Kind, valueTitle48EAAEED: s.Title, "description": s.Description, valueStatus00E8FE8E: s.Status, "dependsOn": dependsOn, "approvalRequired": s.ApprovalRequired, "expectedTools": expectedTools, "resourceRefs": resourceRefs, "resultSummary": s.ResultSummary, valueStartedAt: nullableRunStepTime(s.StartedAt), valueEndedAt: s.EndedAt}
 }
 
 func nullableRunStepTime(value time.Time) interface{} {

@@ -11,7 +11,11 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
-const testMutatedGoal = "mutated"
+const (
+	testMutatedGoal      = "mutated"
+	testWorkflowRootNode = "root"
+	testRunStartedEvent  = "run.started"
+)
 
 // StoreFactory creates a fresh Store for one isolated contract test.
 type StoreFactory func(testing.TB) agentruntime.Store
@@ -558,6 +562,321 @@ func RunStore(t *testing.T, factory StoreFactory) {
 			t.Fatalf("expired join was claimed twice: %v", err)
 		}
 	})
+
+	t.Run("workflow definitions are immutable scoped and replay safe", func(t *testing.T) {
+		store := factory(t)
+		ctx := context.Background()
+		actor := domain.ActorRef{TenantID: "tenant-workflow", ActorID: "actor-workflow"}
+		sameTenant := domain.ActorRef{TenantID: actor.TenantID, ActorID: "actor-workflow-other"}
+		foreign := domain.ActorRef{TenantID: "tenant-workflow-foreign", ActorID: "actor-workflow-foreign"}
+
+		private := workflowDefinitionFixture(actor, "workflow-private", domain.WorkflowDefinitionScopeActor)
+		first, reused, err := store.CreateWorkflowDefinitionRevision(ctx, &private, 0)
+		if err != nil || reused || first.Revision != 1 {
+			t.Fatalf("create workflow definition = %+v,%t,%v", first, reused, err)
+		}
+		replayInput := workflowDefinitionFixture(actor, "workflow-private", domain.WorkflowDefinitionScopeActor)
+		replayed, reused, err := store.CreateWorkflowDefinitionRevision(ctx, &replayInput, 0)
+		if err != nil || !reused || replayed.Revision != 1 {
+			t.Fatalf("replay workflow definition = %+v,%t,%v", replayed, reused, err)
+		}
+		conflictingReplay := workflowDefinitionFixture(actor, "workflow-private", domain.WorkflowDefinitionScopeActor)
+		conflictingReplay.RequestFingerprint = "workflow-private-conflicting-fingerprint"
+		if _, _, err = store.CreateWorkflowDefinitionRevision(ctx, &conflictingReplay, 0); !errors.Is(err, agentruntime.ErrWorkflowDefinitionConflict) {
+			t.Fatalf("workflow request conflict = %v", err)
+		}
+
+		revision := workflowDefinitionFixture(actor, "workflow-private", domain.WorkflowDefinitionScopeActor)
+		revision.Name = "Workflow private revision two"
+		revision.DefinitionHash = "definition-private-v2"
+		revision.RequestID = "request-workflow-private-v2"
+		revision.RequestFingerprint = "fingerprint-workflow-private-v2"
+		second, reused, err := store.CreateWorkflowDefinitionRevision(ctx, &revision, 1)
+		if err != nil || reused || second.Revision != 2 {
+			t.Fatalf("revise workflow definition = %+v,%t,%v", second, reused, err)
+		}
+		stale := workflowDefinitionFixture(actor, "workflow-private", domain.WorkflowDefinitionScopeActor)
+		stale.RequestID = "request-workflow-private-stale"
+		stale.RequestFingerprint = "fingerprint-workflow-private-stale"
+		if _, _, err = store.CreateWorkflowDefinitionRevision(ctx, &stale, 1); !errors.Is(err, agentruntime.ErrWorkflowDefinitionConflict) {
+			t.Fatalf("stale workflow revision = %v", err)
+		}
+
+		latest, err := store.GetWorkflowDefinition(ctx, actor, domain.ResourceRef{Kind: domain.WorkflowDefinitionKind, ID: private.WorkflowID})
+		if err != nil || latest.Revision != 2 || latest.Name != revision.Name {
+			t.Fatalf("latest workflow definition = %+v,%v", latest, err)
+		}
+		stable, err := store.GetWorkflowDefinition(ctx, actor, domain.ResourceRef{Kind: domain.WorkflowDefinitionKind, ID: private.WorkflowID, Revision: "1"})
+		if err != nil || stable.Revision != 1 || stable.Name != private.Name {
+			t.Fatalf("stable workflow revision = %+v,%v", stable, err)
+		}
+		if _, err = store.GetWorkflowDefinition(ctx, sameTenant, latest.Ref()); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("other actor read actor-scoped workflow = %v", err)
+		}
+
+		tenantDefinition := workflowDefinitionFixture(actor, "workflow-tenant", domain.WorkflowDefinitionScopeTenant)
+		systemDefinition := workflowDefinitionFixture(actor, "workflow-system", domain.WorkflowDefinitionScopeSystem)
+		for _, definition := range []*domain.WorkflowDefinition{&tenantDefinition, &systemDefinition} {
+			if _, _, err = store.CreateWorkflowDefinitionRevision(ctx, definition, 0); err != nil {
+				t.Fatalf("create scoped workflow %q: %v", definition.WorkflowID, err)
+			}
+		}
+		if _, err = store.GetWorkflowDefinition(ctx, sameTenant, tenantDefinition.Ref()); err != nil {
+			t.Fatalf("same tenant read tenant workflow: %v", err)
+		}
+		if _, err = store.GetWorkflowDefinition(ctx, foreign, tenantDefinition.Ref()); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("foreign tenant read tenant workflow = %v", err)
+		}
+		if _, err = store.GetWorkflowDefinition(ctx, foreign, systemDefinition.Ref()); err != nil {
+			t.Fatalf("foreign tenant read system workflow: %v", err)
+		}
+		visible, err := store.ListWorkflowDefinitions(ctx, sameTenant, domain.WorkflowDefinitionFilter{Status: domain.WorkflowDefinitionStatusActive})
+		if err != nil || visible.Total != 2 {
+			t.Fatalf("visible workflow definitions = %+v,%v", visible, err)
+		}
+		admin, err := store.ListWorkflowDefinitions(ctx, sameTenant, domain.WorkflowDefinitionFilter{
+			Admin: true, Scope: domain.WorkflowDefinitionScopeActor, OwnerActorID: actor.ActorID,
+		})
+		if err != nil || admin.Total != 1 || len(admin.Results) != 1 || admin.Results[0].WorkflowID != private.WorkflowID {
+			t.Fatalf("admin workflow definitions = %+v,%v", admin, err)
+		}
+	})
+
+	t.Run("workflow transition CAS preserves multiple waits and commits result atomically", func(t *testing.T) {
+		store := factory(t)
+		ctx := context.Background()
+		actor, run, execution := seedWorkflowRun(t, store, "workflow-cas")
+		now := time.Now().UTC()
+		firstExpiry, secondExpiry := now.Add(time.Hour), now.Add(2*time.Hour)
+		interactions := []domain.Interaction{
+			{
+				InteractionID: "interaction-workflow-a", RunID: run.RunID, StepID: "step-workflow-a",
+				Type: domain.InteractionAskUser, Status: domain.InteractionPending, RequestPayloadJSON: `{"title":"A"}`,
+				ResponseSchemaJSON: `{"type":"string"}`, RequestedAt: now, ExpiresAt: &firstExpiry,
+			},
+			{
+				InteractionID: "interaction-workflow-b", RunID: run.RunID, StepID: "step-workflow-b",
+				Type: domain.InteractionAskUser, Status: domain.InteractionPending, RequestPayloadJSON: `{"title":"B"}`,
+				ResponseSchemaJSON: `{"type":"string"}`, RequestedAt: now, ExpiresAt: &secondExpiry,
+			},
+		}
+		waitingExecution := execution
+		waitingExecution.Version = 2
+		waitingExecution.Status = domain.WorkflowExecutionWaiting
+		waitingExecution.WaitsJSON = `[{"waitID":"wait-a"},{"waitID":"wait-b"}]`
+		waitingRun := run
+		waitingRun.Status = domain.RunStatusWaitingInput
+		waitingRun.PendingInteractionID = interactions[0].InteractionID
+		waitingEvent := domain.Event{
+			EventID: "event-workflow-waiting", RunID: run.RunID, EventType: "run.waiting_input",
+			Actor: actor, Thread: run.Thread, CreatedAt: now,
+		}
+		current, saved, applied, err := store.ApplyWorkflowTransition(ctx, actor, run.RunID, domain.WorkflowTransition{
+			ExpectedVersion: 1, Execution: waitingExecution, Run: waitingRun,
+			Interactions: interactions, Events: []domain.Event{waitingEvent},
+		})
+		if err != nil || !applied || current.Version != 2 || len(saved) != 1 {
+			t.Fatalf("apply waiting workflow transition = %+v,%+v,%t,%v", current, saved, applied, err)
+		}
+		pending, err := store.ListRunInteractions(ctx, actor, run.RunID)
+		if err != nil || len(pending) != 2 || pending[0].InteractionID != interactions[0].InteractionID || pending[1].InteractionID != interactions[1].InteractionID {
+			t.Fatalf("workflow interactions = %+v,%v", pending, err)
+		}
+
+		staleExecution := waitingExecution
+		staleExecution.Version = 3
+		staleRun := waitingRun
+		staleRun.StatusReason = "must not persist"
+		current, saved, applied, err = store.ApplyWorkflowTransition(ctx, actor, run.RunID, domain.WorkflowTransition{
+			ExpectedVersion: 1, Execution: staleExecution, Run: staleRun,
+			Events: []domain.Event{{EventID: "event-workflow-stale", RunID: run.RunID, EventType: "workflow.stale", Actor: actor}},
+		})
+		if err != nil || applied || current.Version != 2 || len(saved) != 0 {
+			t.Fatalf("stale workflow transition = %+v,%+v,%t,%v", current, saved, applied, err)
+		}
+
+		endedAt := now.Add(time.Second)
+		completedExecution := waitingExecution
+		completedExecution.Version = 3
+		completedExecution.Status = domain.WorkflowExecutionCompleted
+		completedExecution.WaitsJSON = `[]`
+		completedExecution.EndedAt = &endedAt
+		completedRun := waitingRun
+		completedRun.Status = domain.RunStatusCompleted
+		completedRun.PendingInteractionID = ""
+		completedRun.EndedAt = &endedAt
+		result := domain.RunResult{
+			RunID: run.RunID, RuntimeKind: domain.RuntimeKindWorkflow, CanonicalJSON: `{"answer":42}`,
+			Presentation: "Answer: 42", SchemaHash: "schema-workflow-cas", ContentHash: "content-workflow-cas",
+		}
+		current, saved, applied, err = store.ApplyWorkflowTransition(ctx, actor, run.RunID, domain.WorkflowTransition{
+			ExpectedVersion: 2, Execution: completedExecution, Run: completedRun,
+			Events: []domain.Event{{
+				EventID: "event-workflow-completed", RunID: run.RunID, EventType: "run.completed",
+				Actor: actor, Thread: run.Thread, CreatedAt: endedAt,
+			}},
+			Result: &result,
+		})
+		if err != nil || !applied || current.Version != 3 || len(saved) != 1 {
+			t.Fatalf("complete workflow transition = %+v,%+v,%t,%v", current, saved, applied, err)
+		}
+		storedResult, err := store.GetRunResult(ctx, actor, run.RunID)
+		if err != nil || storedResult.CanonicalJSON != result.CanonicalJSON || storedResult.ContentHash != result.ContentHash {
+			t.Fatalf("workflow result = %+v,%v", storedResult, err)
+		}
+		storedRun, err := store.GetRun(ctx, actor, run.RunID)
+		if err != nil || storedRun.Status != domain.RunStatusCompleted || storedRun.RuntimeKind != domain.RuntimeKindWorkflow {
+			t.Fatalf("terminal workflow run = %+v,%v", storedRun, err)
+		}
+	})
+
+	t.Run("workflow transition failure rolls back every effect", func(t *testing.T) {
+		store := factory(t)
+		ctx := context.Background()
+		actor, run, execution := seedWorkflowRun(t, store, "workflow-rollback")
+		nextExecution := execution
+		nextExecution.Version = 2
+		nextRun := run
+		result := domain.RunResult{
+			RunID: run.RunID, RuntimeKind: domain.RuntimeKindWorkflow, CanonicalJSON: `"invalid-terminal-state"`,
+			SchemaHash: "schema-workflow-rollback", ContentHash: "content-workflow-rollback",
+		}
+		_, _, applied, err := store.ApplyWorkflowTransition(ctx, actor, run.RunID, domain.WorkflowTransition{
+			ExpectedVersion: 1, Execution: nextExecution, Run: nextRun,
+			Steps: []domain.Step{{
+				StepID: "step-workflow-rollback-leak", RunID: run.RunID, NodeID: "node-leak",
+				Status: domain.WorkflowStepStatusCompleted,
+			}},
+			Events: []domain.Event{{
+				EventID: "event-workflow-rollback-leak", RunID: run.RunID, EventType: "workflow.rollback.leak", Actor: actor,
+			}},
+			Result: &result,
+		})
+		if !errors.Is(err, agentruntime.ErrInvalidInput) || applied {
+			t.Fatalf("invalid workflow transition = %t,%v", applied, err)
+		}
+		current, err := store.GetWorkflowExecution(ctx, actor, run.RunID)
+		if err != nil || current.Version != 1 {
+			t.Fatalf("workflow execution leaked failed transition = %+v,%v", current, err)
+		}
+		if _, err = store.GetRunResult(ctx, actor, run.RunID); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("workflow result leaked failed transition = %v", err)
+		}
+		steps, err := store.ListRunSteps(ctx, run.RunID)
+		if err != nil || len(steps) != 1 {
+			t.Fatalf("workflow steps leaked failed transition = %+v,%v", steps, err)
+		}
+		events, err := store.ListRunEventsAfter(ctx, actor, run.RunID, 0, 10)
+		if err != nil || len(events) != 1 {
+			t.Fatalf("workflow events leaked failed transition = %+v,%v", events, err)
+		}
+	})
+
+	t.Run("workflow cache is actor isolated and expires", func(t *testing.T) {
+		store := factory(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+		actor := domain.ActorRef{TenantID: "tenant-cache", ActorID: "actor-cache"}
+		other := domain.ActorRef{TenantID: actor.TenantID, ActorID: "actor-cache-other"}
+		active := domain.WorkflowCacheEntry{
+			CacheKey: "workflow-cache-active", Actor: actor,
+			WorkflowRef: domain.ResourceRef{Kind: domain.WorkflowDefinitionKind, ID: "workflow-cache", Revision: "1"},
+			NodeID:      "node-cache", DependencyHash: "dependency-cache", SchemaHash: "schema-cache",
+			ContextHash: "context-cache", InputHash: "input-cache", ValueJSON: `{"cached":true}`,
+			ContentHash: "content-cache", ExpiresAt: now.Add(time.Hour),
+		}
+		expired := active
+		expired.CacheKey = "workflow-cache-expired"
+		expired.ExpiresAt = now.Add(-time.Second)
+		if err := store.PutWorkflowCacheEntry(ctx, &active); err != nil {
+			t.Fatalf("put active workflow cache: %v", err)
+		}
+		if err := store.PutWorkflowCacheEntry(ctx, &expired); err != nil {
+			t.Fatalf("put expired workflow cache: %v", err)
+		}
+		cached, err := store.GetWorkflowCacheEntry(ctx, actor, active.CacheKey, now)
+		if err != nil || cached.ValueJSON != active.ValueJSON {
+			t.Fatalf("get active workflow cache = %+v,%v", cached, err)
+		}
+		if _, err = store.GetWorkflowCacheEntry(ctx, other, active.CacheKey, now); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("other actor read workflow cache = %v", err)
+		}
+		if _, err = store.GetWorkflowCacheEntry(ctx, actor, expired.CacheKey, now); !errors.Is(err, agentruntime.ErrNotFound) {
+			t.Fatalf("expired workflow cache read = %v", err)
+		}
+		deleted, err := store.DeleteExpiredWorkflowCacheEntries(ctx, now, 10)
+		if err != nil || deleted != 1 {
+			t.Fatalf("delete expired workflow cache = %d,%v", deleted, err)
+		}
+		if _, err = store.GetWorkflowCacheEntry(ctx, actor, active.CacheKey, now); err != nil {
+			t.Fatalf("active workflow cache deleted: %v", err)
+		}
+	})
+}
+
+func workflowDefinitionFixture(actor domain.ActorRef, workflowID, scope string) domain.WorkflowDefinition {
+	definition := domain.WorkflowDefinition{
+		WorkflowID: workflowID, SchemaVersion: 1, Scope: scope, Name: "Workflow " + workflowID,
+		Status: domain.WorkflowDefinitionStatusActive, InputSchema: []byte(`{"type":"object"}`),
+		OutputSchema: []byte(`{"type":"object"}`), Root: domain.WorkflowNode{ID: testWorkflowRootNode, Type: domain.WorkflowNodeSequence},
+		DependencyHash: "dependency-" + workflowID, DefinitionHash: "definition-" + workflowID,
+		CreatedBy: actor, RequestID: "request-" + workflowID, RequestFingerprint: "fingerprint-" + workflowID,
+	}
+	switch scope {
+	case domain.WorkflowDefinitionScopeActor:
+		definition.TenantID, definition.OwnerActorID = actor.TenantID, actor.ActorID
+	case domain.WorkflowDefinitionScopeTenant:
+		definition.TenantID = actor.TenantID
+	}
+	return definition
+}
+
+func seedWorkflowRun(tb testing.TB, store agentruntime.Store, suffix string) (domain.ActorRef, domain.Run, domain.WorkflowExecution) {
+	tb.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	actor := domain.ActorRef{TenantID: "tenant-" + suffix, ActorID: "actor-" + suffix}
+	thread := domain.ThreadRef{Kind: "thread", ID: "thread-" + suffix}
+	runID := "run-" + suffix
+	run := domain.Run{
+		RunID: runID, RuntimeKind: domain.RuntimeKindWorkflow, Actor: actor, Thread: thread,
+		WorkflowDefinition: domain.ResourceRef{Kind: domain.WorkflowDefinitionKind, ID: suffix, Revision: "1"},
+		RootRunID:          runID, Goal: "execute workflow", Status: domain.RunStatusRunning,
+		StartedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	step := domain.Step{
+		StepID: "step-" + suffix, RunID: runID, NodeID: testWorkflowRootNode, ActivationPath: testWorkflowRootNode,
+		Kind: domain.WorkflowNodeSequence, Status: domain.WorkflowStepStatusRunning,
+		StartedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	snapshot := domain.ContextSnapshot{
+		SnapshotID: "snapshot-" + suffix, RunID: runID, Actor: actor, Thread: thread,
+		ContentJSON: `{}`, ContentHash: "context-" + suffix, CreatedAt: now, UpdatedAt: now,
+	}
+	execution := domain.WorkflowExecution{
+		RunID: runID, WorkflowID: suffix, WorkflowRevision: 1, DefinitionHash: "definition-" + suffix,
+		DependencyHash: "dependency-" + suffix, RootRunID: runID, BudgetOwnerRunID: runID,
+		Version: 1, Status: domain.WorkflowExecutionRunning, StateJSON: `{}`, VarsJSON: `{}`,
+		WaitsJSON: `[]`, CompensationJSON: `[]`, BudgetJSON: `{}`, StartedAt: now, CreatedAt: now, UpdatedAt: now,
+	}
+	checkpoint := domain.Checkpoint{
+		CheckpointID: "checkpoint-" + suffix, RunID: runID, StepID: step.StepID,
+		Kind: "workflow_start", Status: domain.CheckpointReady, ResumeStateJSON: `{}`,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	job := domain.ContinuationJob{
+		JobID: "continuation-" + suffix, SegmentKey: "segment-" + suffix, RunID: runID,
+		CheckpointID: checkpoint.CheckpointID, Actor: actor, Source: "workflow_conformance",
+		Status: domain.ContinuationJobQueued, MaxAttempts: 3, AvailableAt: now,
+	}
+	event := domain.Event{
+		EventID: "event-" + suffix, RunID: runID, EventType: testRunStartedEvent,
+		Actor: actor, Thread: thread, CreatedAt: now,
+	}
+	if _, err := store.CreateWorkflowRunStartBundle(ctx, &run, &step, &snapshot, nil, &execution, &checkpoint, &job, []domain.Event{event}); err != nil {
+		tb.Fatalf("seed workflow run: %v", err)
+	}
+	return actor, run, execution
 }
 
 func seedAdditionalRun(tb testing.TB, store agentruntime.Store, actor domain.ActorRef, thread domain.ThreadRef, runID string) domain.Run {
@@ -568,7 +887,7 @@ func seedAdditionalRun(tb testing.TB, store agentruntime.Store, actor domain.Act
 	step := domain.Step{StepID: "step-" + runID, RunID: runID, CreatedAt: now, UpdatedAt: now}
 	snapshot := domain.ContextSnapshot{SnapshotID: "snapshot-" + runID, RunID: runID, Actor: actor, Thread: thread, CreatedAt: now, UpdatedAt: now}
 	checkpoint := domain.Checkpoint{CheckpointID: "checkpoint-" + runID, RunID: runID, Status: domain.CheckpointReady, CreatedAt: now, UpdatedAt: now}
-	event := domain.Event{EventID: "event-" + runID, RunID: runID, EventType: "run.started", Actor: actor, Thread: thread, CreatedAt: now}
+	event := domain.Event{EventID: "event-" + runID, RunID: runID, EventType: testRunStartedEvent, Actor: actor, Thread: thread, CreatedAt: now}
 	if _, err := store.CreateRunStartBundle(ctx, &run, &step, &snapshot, nil, &checkpoint, []domain.Event{event}); err != nil {
 		tb.Fatalf("seed additional run: %v", err)
 	}
@@ -695,7 +1014,7 @@ func seeded(t testing.TB, factory StoreFactory) (agentruntime.Store, domain.Acto
 	step := domain.Step{StepID: "step-1", RunID: run.RunID, CreatedAt: now, UpdatedAt: now}
 	snapshot := domain.ContextSnapshot{SnapshotID: "snapshot-1", RunID: run.RunID, Actor: actor, Thread: thread, CreatedAt: now, UpdatedAt: now}
 	checkpoint := domain.Checkpoint{CheckpointID: "checkpoint-1", RunID: run.RunID, Status: domain.CheckpointReady, CreatedAt: now, UpdatedAt: now}
-	event := domain.Event{EventID: "event-1", RunID: run.RunID, EventType: "run.started", Actor: actor, Thread: thread, CreatedAt: now}
+	event := domain.Event{EventID: "event-1", RunID: run.RunID, EventType: testRunStartedEvent, Actor: actor, Thread: thread, CreatedAt: now}
 	if _, err := store.CreateRunStartBundle(ctx, &run, &step, &snapshot, nil, &checkpoint, []domain.Event{event}); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

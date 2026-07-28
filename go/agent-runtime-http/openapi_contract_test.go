@@ -34,6 +34,7 @@ const (
 	openAPIRevision      = "revision"
 	openAPIStatus        = "status"
 	openAPIJoinID        = "joinID"
+	openAPIWorkflowID    = "workflowID"
 )
 
 func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
@@ -44,46 +45,54 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	parameters := openAPIObject(t, components, "parameters")
 
 	expected := map[string]openAPIOperationExpectation{
-		"GET /runs":                                                       {status: "200", parameters: []string{openAPIThreadKind, openAPIThreadID, "page", "pageSize"}},
-		"POST /runs":                                                      {status: "202", requestBody: "CreateRunRequest"},
-		"POST /agent-teams":                                               {status: "202", requestBody: "StartAgentTeamRequest"},
-		"GET /runs/{runID}":                                               {status: "200", parameters: []string{valueRunID1DA2F0B6}},
-		"POST /runs/{runID}/cancel":                                       {status: "200", parameters: []string{valueRunID1DA2F0B6}},
-		"POST /runs/{runID}/resume":                                       {status: "202", requestBody: "ResumeRunRequest", parameters: []string{valueRunID1DA2F0B6}},
-		"POST /runs/{runID}/retire":                                       {status: "200", parameters: []string{valueRunID1DA2F0B6}},
-		"POST /runs/{runID}/handoffs":                                     {status: "202", requestBody: "DelegateRunRequest", parameters: []string{valueRunID1DA2F0B6}},
-		"POST /runs/{runID}/handoff-joins":                                {status: "201", requestBody: "CreateRunHandoffJoinRequest", parameters: []string{valueRunID1DA2F0B6}},
-		"GET /runs/{runID}/handoff-joins":                                 {status: "200", parameters: []string{valueRunID1DA2F0B6, openAPIStatus, openAPILimit, openAPIOffset}},
-		"GET /runs/{runID}/handoff-joins/{joinID}":                        {status: "200", parameters: []string{valueRunID1DA2F0B6, openAPIJoinID}},
-		"GET /runs/{runID}/task-tree":                                     {status: "200", parameters: []string{valueRunID1DA2F0B6}},
-		"GET /runs/{runID}/events":                                        {status: "200", parameters: []string{valueRunID1DA2F0B6, "afterSeq"}},
-		"GET /runs/{runID}/events/history":                                {status: "200", parameters: []string{valueRunID1DA2F0B6, "beforeSeq", openAPILimit}},
-		"GET /runs/{runID}/events/{eventID}":                              {status: "200", parameters: []string{valueRunID1DA2F0B6, "eventID"}},
-		"GET /runs/{runID}/plan":                                          {status: "200", parameters: []string{valueRunID1DA2F0B6}},
-		"GET /runs/{runID}/interactions":                                  {status: "200", parameters: []string{valueRunID1DA2F0B6}},
-		"POST /runs/{runID}/interactions/{interactionID}/resolve":         {status: "200", requestBody: "ResolveInteractionRequest", parameters: []string{valueRunID1DA2F0B6, "interactionID"}},
-		"GET /runs/{runID}/checkpoints":                                   {status: "200", parameters: []string{valueRunID1DA2F0B6}},
-		"GET /runs/{runID}/outputs":                                       {status: "200", parameters: []string{valueRunID1DA2F0B6}},
-		"GET /runs/{runID}/workbench":                                     {status: "200", parameters: []string{valueRunID1DA2F0B6}},
-		"GET /run-queue":                                                  {status: "200", parameters: []string{openAPIThreadKind, openAPIThreadID}},
-		"POST /run-queue":                                                 {status: "202", requestBody: "QueueCreateRequest"},
-		"PATCH /run-queue/{queueID}":                                      {status: "200", requestBody: "QueueUpdateRequest", parameters: []string{openAPIQueueID}},
-		"DELETE /run-queue/{queueID}":                                     {status: "200", parameters: []string{openAPIQueueID, openAPIThreadKind, openAPIThreadID}},
-		"POST /run-queue/{queueID}/prioritize":                            {status: "200", parameters: []string{openAPIQueueID, openAPIThreadKind, openAPIThreadID}},
-		"POST /run-queue/{queueID}/interrupt-and-send":                    {status: "200", parameters: []string{openAPIQueueID, openAPIThreadKind, openAPIThreadID}},
-		"GET /outputs":                                                    {status: "200", parameters: []string{"q", "cursor", openAPILimit}},
-		"GET /outputs/{outputID}":                                         {status: "200", parameters: []string{openAPIOutputID, openAPIVersion}},
-		"GET /outputs/{outputID}/versions":                                {status: "200", parameters: []string{openAPIOutputID, "cursor", openAPILimit}},
-		"GET /outputs/{outputID}/versions/{version}/preview":              {status: "200", parameters: []string{openAPIOutputID, openAPIVersion}},
-		"GET /outputs/{outputID}/versions/{version}/download":             {status: "200", parameters: []string{openAPIOutputID, openAPIVersion}},
-		"POST /evidence":                                                  {status: "200", requestBody: "CreateEvidenceRequest"},
-		"GET /agent-manifests":                                            {status: "200", parameters: []string{openAPILimit, openAPIOffset}},
-		"GET /agent-manifests/{manifestID}":                               {status: "200", parameters: []string{openAPIManifestID, openAPIRevision}},
-		"GET /admin/agentruntime/continuations":                           {status: "200", parameters: []string{openAPITenantID, "actorID", openAPIStatus, valueRunID1DA2F0B6, openAPIJobID, "source", openAPILimit, openAPIOffset}},
-		"POST /admin/agentruntime/continuations/{jobID}/requeue":          {status: "200", requestBody: "RequeueContinuationRequest", parameters: []string{openAPIJobID}},
-		"GET /admin/agentruntime/agent-manifests":                         {status: "200", parameters: []string{openAPIStatus, openAPIManifestScope, openAPITenantID, openAPIOwnerActorID, openAPILimit, openAPIOffset}},
-		"POST /admin/agentruntime/agent-manifests":                        {status: "201", requestBody: "AgentManifestRevisionRequest"},
-		"POST /admin/agentruntime/agent-manifests/{manifestID}/revisions": {status: "201", requestBody: "AgentManifestRevisionRequest", parameters: []string{openAPIManifestID}},
+		"GET /runs":                                                            {status: "200", parameters: []string{openAPIThreadKind, openAPIThreadID, "page", "pageSize"}},
+		"POST /runs":                                                           {status: "202", requestBody: "CreateRunRequest"},
+		"POST /workflows":                                                      {status: "202", requestBody: "StartWorkflowRequest"},
+		"POST /agent-teams":                                                    {status: "202", requestBody: "StartAgentTeamRequest"},
+		"GET /runs/{runID}":                                                    {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"GET /runs/{runID}/result":                                             {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"POST /runs/{runID}/cancel":                                            {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"POST /runs/{runID}/resume":                                            {status: "202", requestBody: "ResumeRunRequest", parameters: []string{valueRunID1DA2F0B6}},
+		"POST /runs/{runID}/retire":                                            {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"POST /runs/{runID}/handoffs":                                          {status: "202", requestBody: "DelegateRunRequest", parameters: []string{valueRunID1DA2F0B6}},
+		"POST /runs/{runID}/handoff-joins":                                     {status: "201", requestBody: "CreateRunHandoffJoinRequest", parameters: []string{valueRunID1DA2F0B6}},
+		"GET /runs/{runID}/handoff-joins":                                      {status: "200", parameters: []string{valueRunID1DA2F0B6, openAPIStatus, openAPILimit, openAPIOffset}},
+		"GET /runs/{runID}/handoff-joins/{joinID}":                             {status: "200", parameters: []string{valueRunID1DA2F0B6, openAPIJoinID}},
+		"GET /runs/{runID}/task-tree":                                          {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"GET /runs/{runID}/events":                                             {status: "200", parameters: []string{valueRunID1DA2F0B6, "afterSeq"}},
+		"GET /runs/{runID}/events/history":                                     {status: "200", parameters: []string{valueRunID1DA2F0B6, "beforeSeq", openAPILimit}},
+		"GET /runs/{runID}/events/{eventID}":                                   {status: "200", parameters: []string{valueRunID1DA2F0B6, "eventID"}},
+		"GET /runs/{runID}/plan":                                               {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"GET /runs/{runID}/interactions":                                       {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"POST /runs/{runID}/interactions/{interactionID}/resolve":              {status: "200", requestBody: "ResolveInteractionRequest", parameters: []string{valueRunID1DA2F0B6, "interactionID"}},
+		"GET /runs/{runID}/checkpoints":                                        {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"GET /runs/{runID}/outputs":                                            {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"GET /runs/{runID}/workbench":                                          {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"GET /run-queue":                                                       {status: "200", parameters: []string{openAPIThreadKind, openAPIThreadID}},
+		"POST /run-queue":                                                      {status: "202", requestBody: "QueueCreateRequest"},
+		"PATCH /run-queue/{queueID}":                                           {status: "200", requestBody: "QueueUpdateRequest", parameters: []string{openAPIQueueID}},
+		"DELETE /run-queue/{queueID}":                                          {status: "200", parameters: []string{openAPIQueueID, openAPIThreadKind, openAPIThreadID}},
+		"POST /run-queue/{queueID}/prioritize":                                 {status: "200", parameters: []string{openAPIQueueID, openAPIThreadKind, openAPIThreadID}},
+		"POST /run-queue/{queueID}/interrupt-and-send":                         {status: "200", parameters: []string{openAPIQueueID, openAPIThreadKind, openAPIThreadID}},
+		"GET /outputs":                                                         {status: "200", parameters: []string{"q", "cursor", openAPILimit}},
+		"GET /outputs/{outputID}":                                              {status: "200", parameters: []string{openAPIOutputID, openAPIVersion}},
+		"GET /outputs/{outputID}/versions":                                     {status: "200", parameters: []string{openAPIOutputID, "cursor", openAPILimit}},
+		"GET /outputs/{outputID}/versions/{version}/preview":                   {status: "200", parameters: []string{openAPIOutputID, openAPIVersion}},
+		"GET /outputs/{outputID}/versions/{version}/download":                  {status: "200", parameters: []string{openAPIOutputID, openAPIVersion}},
+		"POST /evidence":                                                       {status: "200", requestBody: "CreateEvidenceRequest"},
+		"GET /agent-manifests":                                                 {status: "200", parameters: []string{openAPILimit, openAPIOffset}},
+		"GET /agent-manifests/{manifestID}":                                    {status: "200", parameters: []string{openAPIManifestID, openAPIRevision}},
+		"GET /workflow-definitions":                                            {status: "200", parameters: []string{openAPILimit, openAPIOffset}},
+		"GET /workflow-definitions/{workflowID}":                               {status: "200", parameters: []string{openAPIWorkflowID, openAPIRevision}},
+		"GET /admin/agentruntime/continuations":                                {status: "200", parameters: []string{openAPITenantID, "actorID", openAPIStatus, valueRunID1DA2F0B6, openAPIJobID, "source", openAPILimit, openAPIOffset}},
+		"POST /admin/agentruntime/continuations/{jobID}/requeue":               {status: "200", requestBody: "RequeueContinuationRequest", parameters: []string{openAPIJobID}},
+		"GET /admin/agentruntime/agent-manifests":                              {status: "200", parameters: []string{openAPIStatus, openAPIManifestScope, openAPITenantID, openAPIOwnerActorID, openAPILimit, openAPIOffset}},
+		"POST /admin/agentruntime/agent-manifests":                             {status: "201", requestBody: "AgentManifestRevisionRequest"},
+		"POST /admin/agentruntime/agent-manifests/{manifestID}/revisions":      {status: "201", requestBody: "AgentManifestRevisionRequest", parameters: []string{openAPIManifestID}},
+		"GET /admin/agentruntime/workflow-definitions":                         {status: "200", parameters: []string{openAPIStatus, openAPIManifestScope, openAPITenantID, openAPIOwnerActorID, openAPILimit, openAPIOffset}},
+		"POST /admin/agentruntime/workflow-definitions":                        {status: "201", requestBody: "WorkflowDefinitionRevisionRequest"},
+		"POST /admin/agentruntime/workflow-definitions/validate":               {status: "200", requestBody: "WorkflowDefinitionRevisionRequest"},
+		"POST /admin/agentruntime/workflow-definitions/{workflowID}/revisions": {status: "201", requestBody: "WorkflowDefinitionRevisionRequest", parameters: []string{openAPIWorkflowID}},
 	}
 
 	assertOpenAPIRouterCoverage(t, paths, expected)
@@ -128,6 +137,11 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	assertOpenAPISchemaRequired(t, schemas, "AgentManifest", openAPIManifestScope)
 	assertOpenAPISchemaRequired(t, schemas, "AgentManifest", openAPITenantID)
 	assertOpenAPISchemaRequired(t, schemas, "AgentManifest", openAPIOwnerActorID)
+	assertOpenAPISchemaRequired(t, schemas, "StartWorkflowRequest", "definition")
+	assertOpenAPISchemaRequired(t, schemas, "StartWorkflowRequest", "input")
+	assertOpenAPISchemaRequired(t, schemas, "WorkflowDefinitionRevisionRequest", "root")
+	assertOpenAPISchemaRequired(t, schemas, "WorkflowDefinitionRevisionRequest", "limits")
+	assertOpenAPISchemaRequired(t, schemas, "WorkflowDefinition", "dependencies")
 	assertOpenAPISchemaReferencesExist(t, document, schemas)
 }
 
@@ -154,7 +168,7 @@ func assertOpenAPIRouterCoverage(t *testing.T, paths map[string]any, expected ma
 	actual := make([]string, 0, len(router.Routes()))
 	for _, route := range router.Routes() {
 		path := strings.TrimPrefix(route.Path, "/api/v1")
-		path = strings.NewReplacer(":run_id", "{runID}", ":event_id", "{eventID}", ":interaction_id", "{interactionID}", ":queue_id", "{queueID}", ":output_id", "{outputID}", ":version", "{version}", ":job_id", "{jobID}", ":manifest_id", "{manifestID}", ":join_id", "{joinID}").Replace(path)
+		path = strings.NewReplacer(":run_id", "{runID}", ":event_id", "{eventID}", ":interaction_id", "{interactionID}", ":queue_id", "{queueID}", ":output_id", "{outputID}", ":version", "{version}", ":job_id", "{jobID}", ":manifest_id", "{manifestID}", ":join_id", "{joinID}", ":workflow_id", "{workflowID}").Replace(path)
 		key := route.Method + " " + path
 		actual = append(actual, key)
 		if _, ok := expected[key]; !ok {

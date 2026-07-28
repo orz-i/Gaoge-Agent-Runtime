@@ -144,7 +144,12 @@ func (s *Store) ListRunInteractions(_ context.Context, actor domain.ActorRef, ru
 	for _, item := range s.state.Interactions[runID] {
 		items = append(items, clone(item))
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].RequestedAt.Before(items[j].RequestedAt) })
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].RequestedAt.Equal(items[j].RequestedAt) {
+			return items[i].InteractionID < items[j].InteractionID
+		}
+		return items[i].RequestedAt.Before(items[j].RequestedAt)
+	})
 	return items, nil
 }
 

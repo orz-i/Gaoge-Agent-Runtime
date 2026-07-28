@@ -25,10 +25,12 @@ func TestRunFirstRouteInventoryContract(t *testing.T) {
 		"GET /api/v1/runs/:run_id/events/history", "GET /api/v1/runs/:run_id/interactions", "GET /api/v1/runs/:run_id/outputs",
 		"GET /api/v1/runs/:run_id/handoff-joins", "GET /api/v1/runs/:run_id/handoff-joins/:join_id",
 		"GET /api/v1/runs/:run_id/plan", "GET /api/v1/runs/:run_id/task-tree", "GET /api/v1/runs/:run_id/workbench",
+		"GET /api/v1/runs/:run_id/result", "GET /api/v1/workflow-definitions", "GET /api/v1/workflow-definitions/:workflow_id",
 		"PATCH /api/v1/run-queue/:queue_id", "POST /api/v1/agent-teams", "POST /api/v1/evidence", "POST /api/v1/run-queue",
 		"POST /api/v1/run-queue/:queue_id/interrupt-and-send", "POST /api/v1/run-queue/:queue_id/prioritize", "POST /api/v1/runs",
 		"POST /api/v1/runs/:run_id/cancel", "POST /api/v1/runs/:run_id/handoff-joins", "POST /api/v1/runs/:run_id/handoffs", "POST /api/v1/runs/:run_id/interactions/:interaction_id/resolve",
 		"POST /api/v1/runs/:run_id/resume", "POST /api/v1/runs/:run_id/retire",
+		"POST /api/v1/workflows",
 	}
 	got := make([]string, 0, len(engine.Routes()))
 	for _, route := range engine.Routes() {
@@ -61,9 +63,13 @@ func TestAdminContinuationRouteInventoryContract(t *testing.T) {
 	want := []string{
 		"GET /api/v1/admin/agentruntime/agent-manifests",
 		"GET /api/v1/admin/agentruntime/continuations",
+		"GET /api/v1/admin/agentruntime/workflow-definitions",
 		"POST /api/v1/admin/agentruntime/agent-manifests",
 		"POST /api/v1/admin/agentruntime/agent-manifests/:manifest_id/revisions",
 		"POST /api/v1/admin/agentruntime/continuations/:job_id/requeue",
+		"POST /api/v1/admin/agentruntime/workflow-definitions",
+		"POST /api/v1/admin/agentruntime/workflow-definitions/:workflow_id/revisions",
+		"POST /api/v1/admin/agentruntime/workflow-definitions/validate",
 	}
 	got := make([]string, 0, len(engine.Routes()))
 	for _, route := range engine.Routes() {

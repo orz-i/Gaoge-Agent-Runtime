@@ -42,6 +42,14 @@ func continuationRunTerminal(run domain.Run) bool {
 	if run.EndedAt != nil {
 		return true
 	}
+	if run.RuntimeKind == domain.RuntimeKindWorkflow {
+		switch run.Status {
+		case domain.RunStatusSuspended, domain.RunStatusCompleted, domain.RunStatusFailed, domain.RunStatusCancelled:
+			return true
+		default:
+			return false
+		}
+	}
 	switch run.Status {
 	case domain.RunStatusWaitingInput, domain.RunStatusWaitingHandoff, domain.RunStatusSuspended, domain.RunStatusCompleted, domain.RunStatusFailed, domain.RunStatusCancelled:
 		return true
