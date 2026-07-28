@@ -127,7 +127,7 @@ func TestRequiredToolCallFailureAssistantContentIsSafe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content := (&Engine{}).failedAssistantContent(t.Context(), model.Run{RunConfigSnapshotJSON: string(raw)}, errRequiredToolCallNotProduced)
+	content := (&Engine{}).failedAssistantContent(model.Run{RunConfigSnapshotJSON: string(raw)}, errRequiredToolCallNotProduced)
 	if content == "" || looksLikeToolProtocolText(content) {
 		t.Fatalf("unsafe failure content: %q", content)
 	}
