@@ -129,6 +129,9 @@ func TestWorkflowAgentRegistersIntentBeforeChildStart(t *testing.T) {
 	if payload.ToolKeys == nil || len(*payload.ToolKeys) != 0 {
 		t.Fatalf("agent child tool override = %#v", payload.ToolKeys)
 	}
+	if activation.ReservedTools != 0 || runner.budget.ReservedToolCalls != 0 {
+		t.Fatalf("empty tool set reserved tools: activation=%d budget=%d", activation.ReservedTools, runner.budget.ReservedToolCalls)
+	}
 }
 
 func TestNestedWorkflowRegistersIntentBeforeChildStart(t *testing.T) {

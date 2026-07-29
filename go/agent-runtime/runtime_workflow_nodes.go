@@ -172,7 +172,7 @@ func (r *workflowRunner) advanceAgent(node *model.WorkflowNode, activation workf
 	if err != nil {
 		return nil, false, r.failActivation(*node, activation, "workflow_agent_unavailable", err.Error())
 	}
-	maxLLM, maxTools := r.workflowAgentLimits(*manifest, node.PerNodeLimits)
+	maxLLM, maxTools := r.workflowAgentLimits(*manifest, *node)
 	if err = r.reserveChildBudget(&activation, maxLLM, maxTools, 1); err != nil {
 		return nil, false, r.failActivation(*node, activation, "workflow_budget_exceeded", err.Error())
 	}
@@ -208,7 +208,7 @@ func (r *workflowRunner) workflowAgentGoal(node *model.WorkflowNode, activation 
 	return goal, nil
 }
 
-func (r *workflowRunner) workflowAgentLimits(manifest model.AgentManifest, nodeLimits *model.WorkflowNodeLimits) (int, int) {
+func (r *workflowRunner) workflowAgentLimits(manifest model.AgentManifest, node model.WorkflowNode) (int, int) {
 	maxLLM := manifest.MaxLLMCalls
 	if maxLLM <= 0 {
 		maxLLM = r.service.resolveMaxLLMCallsPerRun()
@@ -217,6 +217,10 @@ func (r *workflowRunner) workflowAgentLimits(manifest model.AgentManifest, nodeL
 	if maxTools <= 0 {
 		maxTools = r.service.resolveMaxToolCallsPerRun()
 	}
+	if node.ToolKeys != nil && len(*node.ToolKeys) == 0 {
+		maxTools = 0
+	}
+	nodeLimits := node.PerNodeLimits
 	if nodeLimits == nil {
 		return maxLLM, maxTools
 	}
