@@ -29,6 +29,7 @@ type workflowAgentEffectPayload struct {
 	RequestID              string            `json:"requestID"`
 	MaxLLMCalls            int               `json:"maxLLMCalls"`
 	MaxToolCalls           int               `json:"maxToolCalls"`
+	ToolKeys               *[]string         `json:"toolKeys,omitempty"`
 	StructuredOutputSchema json.RawMessage   `json:"structuredOutputSchema,omitempty"`
 	ResultAttempts         int               `json:"resultAttempts,omitempty"`
 }
@@ -198,6 +199,7 @@ func (r *workflowRunner) startWorkflowAgentEffect(ctx context.Context, effect wo
 		Goal:                   payload.Goal,
 		ContentType:            workflowContentTypeText,
 		RequestID:              payload.RequestID,
+		ToolKeys:               cloneOptionalStrings(payload.ToolKeys),
 		MaxLLMCalls:            payload.MaxLLMCalls,
 		MaxToolCalls:           payload.MaxToolCalls,
 		StructuredOutputSchema: append(json.RawMessage(nil), payload.StructuredOutputSchema...),

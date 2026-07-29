@@ -127,6 +127,23 @@ func TestDelegatedTextRunStartInputInheritsFrozenWorkspace(t *testing.T) {
 	if start.Workspace != nil || start.Delegation == nil || start.Delegation.Manifest.Ref() != manifest.Ref() {
 		t.Fatalf("delegation contract = %#v", start)
 	}
+	if start.ToolKeys == nil || !slices.Equal(*start.ToolKeys, manifest.ToolKeys) {
+		t.Fatalf("inherited tool keys = %#v", start.ToolKeys)
+	}
+
+	noTools := []string{}
+	start, err = delegatedTextRunStartInput(DelegateTextRunInput{Actor: actor, ToolKeys: &noTools}, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start.ToolKeys == nil || len(*start.ToolKeys) != 0 {
+		t.Fatalf("frozen empty tool keys = %#v", start.ToolKeys)
+	}
+
+	unavailable := []string{"story.write"}
+	if _, err = delegatedTextRunStartInput(DelegateTextRunInput{Actor: actor, ToolKeys: &unavailable}, prepared); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("tool capability widening error = %v", err)
+	}
 }
 
 func (s *agentRuntimeTestStore) ListRunHandoffJoins(_ context.Context, _ model.ActorRef, _ model.RunHandoffJoinFilter) (model.RunHandoffJoinPage, error) {

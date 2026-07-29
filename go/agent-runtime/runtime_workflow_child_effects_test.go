@@ -93,11 +93,13 @@ func TestWorkflowAgentRegistersIntentBeforeChildStart(t *testing.T) {
 	}
 	store := &workflowChildEffectTestStore{events: map[string]model.Event{}, manifest: &manifest}
 	runner := newWorkflowChildEffectTestRunner(store)
+	noTools := []string{}
 	node := model.WorkflowNode{
 		ID:          testWorkflowChildAgentNodeID,
 		Type:        model.WorkflowNodeAgent,
 		ManifestRef: manifest.Ref(),
 		Goal:        workflowExprPointer(workflowTestLiteral("Perform bounded child work")),
+		ToolKeys:    &noTools,
 	}
 	activation := addWorkflowChildActivation(runner, node, node.ID)
 
@@ -123,6 +125,9 @@ func TestWorkflowAgentRegistersIntentBeforeChildStart(t *testing.T) {
 	}
 	if payload.RequestID != workflowChildRequestID(runner.run, activation) || len(payload.RequestID) > 64 {
 		t.Fatalf("agent child request ID = %q", payload.RequestID)
+	}
+	if payload.ToolKeys == nil || len(*payload.ToolKeys) != 0 {
+		t.Fatalf("agent child tool override = %#v", payload.ToolKeys)
 	}
 }
 

@@ -402,6 +402,7 @@ func TestWorkflowNodeUnionAcceptsEveryValidVariant(t *testing.T) {
 			ID: model.WorkflowNodeAgent, Type: model.WorkflowNodeAgent,
 			ManifestRef:  model.ResourceRef{Kind: model.AgentManifestKind, ID: "manifest"},
 			Goal:         workflowExprPointer(workflowTestLiteral("goal")),
+			ToolKeys:     func() *[]string { value := []string{}; return &value }(),
 			OutputSchema: json.RawMessage(`{"type":"string"}`),
 		},
 		{

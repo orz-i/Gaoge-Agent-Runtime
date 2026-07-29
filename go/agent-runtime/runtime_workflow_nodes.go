@@ -185,6 +185,7 @@ func (r *workflowRunner) advanceAgent(node *model.WorkflowNode, activation workf
 		RequestID:              workflowChildRequestID(r.run, activation),
 		MaxLLMCalls:            maxLLM,
 		MaxToolCalls:           maxTools,
+		ToolKeys:               cloneOptionalStrings(node.ToolKeys),
 		StructuredOutputSchema: append(json.RawMessage(nil), node.OutputSchema...),
 		ResultAttempts:         node.ResultAttempts,
 	})

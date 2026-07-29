@@ -234,6 +234,7 @@ type DelegateTextRunInput struct {
 	RequestID              string
 	HTMLVisualPrompt       bool
 	HTMLColorMode          string
+	ToolKeys               *[]string
 	MaxLLMCalls            int
 	MaxToolCalls           int
 	StructuredOutputSchema json.RawMessage
@@ -244,6 +245,15 @@ type DelegateTextRunResult struct {
 	Handoff model.RunHandoff
 	Run     model.Run
 	Step    model.Step
+}
+
+func cloneOptionalStrings(input *[]string) *[]string {
+	if input == nil {
+		return nil
+	}
+	result := make([]string, len(*input))
+	copy(result, *input)
+	return &result
 }
 
 type CreateRunHandoffJoinInput struct {
@@ -415,6 +425,18 @@ func (s *Engine) startDelegatedTextRun(ctx context.Context, input DelegateTextRu
 
 func delegatedTextRunStartInput(input DelegateTextRunInput, prepared preparedDelegation) (StartTextRunInput, error) {
 	toolKeys := append([]string(nil), prepared.manifest.ToolKeys...)
+	if input.ToolKeys != nil {
+		allowed := make(map[string]struct{}, len(prepared.manifest.ToolKeys))
+		for _, toolKey := range prepared.manifest.ToolKeys {
+			allowed[toolKey] = struct{}{}
+		}
+		toolKeys = append([]string(nil), (*input.ToolKeys)...)
+		for _, toolKey := range toolKeys {
+			if _, ok := allowed[toolKey]; !ok {
+				return StartTextRunInput{}, ErrInvalidInput
+			}
+		}
+	}
 	skillRefs := append([]model.ResourceRef(nil), prepared.manifest.SkillRefs...)
 	modelName := firstNonEmptyString(prepared.manifest.ModelName, prepared.parent.PlatformModelName)
 	executionMode := firstNonEmptyString(prepared.manifest.ExecutionMode, TextRunExecutionModeAuto)
@@ -637,12 +659,13 @@ func handoffRequestFingerprint(input DelegateTextRunInput, manifest model.Resour
 		Options                map[string]interface{}
 		MaxLLMCalls            int
 		MaxToolCalls           int
+		ToolKeys               *[]string
 		StructuredOutputSchema json.RawMessage
 		ResultAttempts         int
 	}{
 		input.Actor, strings.TrimSpace(input.ParentRunID), strings.TrimSpace(input.ClientHandoffID), manifest,
 		strings.TrimSpace(input.Goal), strings.TrimSpace(input.ContentType), outputs, evidence, input.Options,
-		input.MaxLLMCalls, input.MaxToolCalls, input.StructuredOutputSchema, input.ResultAttempts,
+		input.MaxLLMCalls, input.MaxToolCalls, input.ToolKeys, input.StructuredOutputSchema, input.ResultAttempts,
 	}
 	return hashAgentPayload(payload)
 }

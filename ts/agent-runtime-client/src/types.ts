@@ -110,6 +110,7 @@ export type WorkflowNodeDTO = {
   manifestRef?: ResourceRefDTO;
   definitionRef?: ResourceRefDTO;
   toolKey?: string;
+  toolKeys?: string[];
   goal?: WorkflowExprDTO;
   items?: WorkflowExprDTO;
   condition?: WorkflowExprDTO;

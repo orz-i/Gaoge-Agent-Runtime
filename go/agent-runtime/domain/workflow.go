@@ -167,6 +167,7 @@ type WorkflowNode struct {
 	ManifestRef   ResourceRef `json:"manifestRef,omitempty"`
 	DefinitionRef ResourceRef `json:"definitionRef,omitempty"`
 	ToolKey       string      `json:"toolKey,omitempty"`
+	ToolKeys      *[]string   `json:"toolKeys,omitempty"`
 
 	Goal         *WorkflowExpr `json:"goal,omitempty"`
 	ItemsExpr    *WorkflowExpr `json:"items,omitempty"`

@@ -28,7 +28,7 @@ func validateWorkflowNodeShape(node model.WorkflowNode) error {
 	}
 	allowed := map[string]map[string]bool{
 		model.WorkflowNodeSequence:    workflowAllowedFields("children"),
-		model.WorkflowNodeAgent:       workflowAllowedFields("manifestRef", "goal", "outputSchema", "resultAttempts", "perNodeLimits", "cache"),
+		model.WorkflowNodeAgent:       workflowAllowedFields("manifestRef", "goal", "toolKeys", "outputSchema", "resultAttempts", "perNodeLimits", "cache"),
 		model.WorkflowNodeParallel:    workflowAllowedFields("branches", "failurePolicy"),
 		model.WorkflowNodeForEach:     workflowAllowedFields("items", "body", "maxConcurrency", "failurePolicy"),
 		model.WorkflowNodePipeline:    workflowAllowedFields("items", "stages", "maxConcurrency", "failurePolicy"),
