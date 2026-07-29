@@ -11,7 +11,11 @@ import (
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
-const WorkflowSchemaVersion = 1
+const (
+	WorkflowSchemaVersion          = 1
+	maxWorkflowDefinitionIDRunes   = 64
+	workflowDefinitionIDSuffixSize = 12
+)
 
 var (
 	ErrWorkflowDefinitionConflict = errors.New("workflow definition revision conflict")
@@ -80,6 +84,7 @@ func (s *Engine) GetWorkflowDefinition(ctx context.Context, actor model.ActorRef
 	if s == nil || s.repo == nil || !validActorRef(actor) {
 		return nil, ErrInvalidInput
 	}
+	ref.ID = normalizeWorkflowID(ref.ID)
 	return s.repo.GetWorkflowDefinition(ctx, actor, ref)
 }
 
@@ -250,10 +255,19 @@ func normalizeWorkflowOwnership(input WorkflowDefinitionRevisionInput) (string, 
 
 func normalizeWorkflowID(value string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || strings.HasPrefix(value, "workflow_") {
+	if value == "" {
 		return value
 	}
-	return "workflow_" + value
+	if !strings.HasPrefix(value, "workflow_") {
+		value = "workflow_" + value
+	}
+	runes := []rune(value)
+	if len(runes) <= maxWorkflowDefinitionIDRunes {
+		return value
+	}
+	sum := sha256.Sum256([]byte(value))
+	suffix := "_" + hex.EncodeToString(sum[:workflowDefinitionIDSuffixSize/2])
+	return string(runes[:maxWorkflowDefinitionIDRunes-len(suffix)]) + suffix
 }
 
 func (s *Engine) workflowCeilings() WorkflowConfig {
