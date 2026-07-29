@@ -68,6 +68,60 @@ func TestApplyEventProjectsUsageAndLatency(t *testing.T) {
 	}
 }
 
+func TestApplyEventProjectsRouteWithoutUsage(t *testing.T) {
+	run := domain.Run{RunID: projectionTestRunID}
+	applyProjectionEvent(t, &run, nil, domain.Event{
+		EventType: eventLLMRouteSelected,
+		PayloadJSON: `{
+			"upstreamName":"GPT upstream",
+			"bindingCode":"gpt-primary",
+			"upstreamModel":"gpt-5.6-terra",
+			"protocol":"openai_responses",
+			"endpoint":"/v1/responses",
+			"modelVendor":"openai",
+			"modelIcon":"openai"
+		}`,
+	})
+	gotRoute := routePayload{
+		UpstreamName: run.UpstreamName, BindingCode: run.RoutedBindingCode,
+		UpstreamModel: run.UpstreamModelName, Protocol: run.ProviderProtocol,
+		Endpoint: run.Endpoint, ModelVendor: run.ModelVendor, ModelIcon: run.ModelIcon,
+	}
+	wantRoute := routePayload{
+		UpstreamName: "GPT upstream", BindingCode: "gpt-primary",
+		UpstreamModel: "gpt-5.6-terra", Protocol: "openai_responses",
+		Endpoint: "/v1/responses", ModelVendor: "openai", ModelIcon: "openai",
+	}
+	if gotRoute != wantRoute {
+		t.Fatalf("route projection = %#v, want %#v", gotRoute, wantRoute)
+	}
+	gotUsage := struct {
+		Calls                                                          int
+		Input, Output, CacheRead, CacheWrite, Reasoning, BilledNanousd int64
+		BillingSnapshot                                                string
+	}{
+		Calls: run.LLMCallsCount, Input: run.InputTokens, Output: run.OutputTokens,
+		CacheRead: run.CacheReadTokens, CacheWrite: run.CacheWriteTokens,
+		Reasoning: run.ReasoningTokens, BilledNanousd: run.BilledNanousd,
+		BillingSnapshot: run.LastBillingSnapshotJSON,
+	}
+	if gotUsage != (struct {
+		Calls                                                          int
+		Input, Output, CacheRead, CacheWrite, Reasoning, BilledNanousd int64
+		BillingSnapshot                                                string
+	}{}) {
+		t.Fatalf("route event changed usage or billing: %#v", gotUsage)
+	}
+
+	applyProjectionEvent(t, &run, nil, domain.Event{
+		EventType:   eventUsageUpdated,
+		PayloadJSON: `{"inputTokens":1,"outputTokens":2,"upstreamName":"confirmed upstream","bindingCode":"confirmed","upstreamModel":"gpt-5.6-terra-2","protocol":"openai_chat_completions"}`,
+	})
+	if run.LLMCallsCount != 1 || run.UpstreamName != "confirmed upstream" || run.RoutedBindingCode != "confirmed" || run.UpstreamModelName != "gpt-5.6-terra-2" || run.ProviderProtocol != "openai_chat_completions" {
+		t.Fatalf("usage did not confirm route exactly once: %#v", run)
+	}
+}
+
 func assertProjectedUsage(t *testing.T, run domain.Run) {
 	t.Helper()
 	if run.InputTokens != 14 || run.OutputTokens != 264 || run.CacheReadTokens != 4 || run.CacheWriteTokens != 3 || run.ReasoningTokens != 9 {
@@ -94,6 +148,14 @@ func TestApplyEventRejectsMalformedUsage(t *testing.T) {
 	err := ApplyEvent(&run, nil, domain.Event{RunID: run.RunID, EventType: eventUsageUpdated, PayloadJSON: "{"})
 	if err == nil {
 		t.Fatal("malformed usage event was accepted")
+	}
+}
+
+func TestApplyEventRejectsMalformedRoute(t *testing.T) {
+	run := domain.Run{RunID: projectionTestRunID}
+	err := ApplyEvent(&run, nil, domain.Event{RunID: run.RunID, EventType: eventLLMRouteSelected, PayloadJSON: "{"})
+	if err == nil {
+		t.Fatal("malformed route event was accepted")
 	}
 }
 

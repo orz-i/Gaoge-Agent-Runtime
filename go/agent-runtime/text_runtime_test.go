@@ -73,6 +73,40 @@ func TestPlannerUnsupportedCapabilityNeverCallsGateway(t *testing.T) {
 	}
 }
 
+func TestPlannerGenerateFailurePersistsRoute(t *testing.T) {
+	gatewayErr := &UpstreamError{StatusCode: 503, Message: "upstream unavailable", Body: "no available L1 node"}
+	gateway := &scriptedLLMGateway{errors: []error{gatewayErr}}
+	repo := &multiTurnRunRepo{}
+	engine := &Engine{repo: repo, llmGateway: gateway, generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{})}
+	run := model.Run{
+		RunID:         "run_planner_route_failure",
+		CurrentStepID: "step_planner",
+		Actor:         model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey},
+		Thread:        model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey},
+	}
+	route, err := gateway.PrepareTextRoute(t.Context(), LLMRouteInput{PlatformModelName: testRouteModelName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	route.ModelCapabilitiesJSON = `{"structuredOutput":{"mode":"json_object"}}`
+	_, err = engine.generatePlanAttempt(
+		t.Context(),
+		run,
+		effectiveTextRunConfig{PlatformModelName: testRouteModelName, PlanMaxSteps: 2, MaxLLMCalls: 4},
+		route,
+		1,
+		"",
+		false,
+		nil,
+	)
+	if !errors.Is(err, gatewayErr) {
+		t.Fatalf("planner error = %v", err)
+	}
+	if countRunEvents(repo.events, eventLLMRouteSelected) != 1 || countRunEvents(repo.events, valueUsageUpdatedABC8B0B2) != 0 {
+		t.Fatalf("planner failure events = %#v", repo.events)
+	}
+}
+
 func TestPlannerRequestNegotiatesStructuredOutputModes(t *testing.T) {
 	effective := effectiveTextRunConfig{
 		PlanMaxSteps: 3,

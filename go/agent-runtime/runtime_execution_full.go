@@ -532,6 +532,9 @@ func (s *Engine) generatePlanAttempt(ctx context.Context, run model.Run, effecti
 	if repair {
 		phase = "planner_repair"
 	}
+	if err = s.recordRunLLMRouteSelected(context.WithoutCancel(ctx), run, run.CurrentStepID, phase, route, request.RequestID); err != nil {
+		return planAttemptResult{}, err
+	}
 	fields := runTelemetryFields(run,
 		String("gen_ai.operation.name", "chat"),
 		String("gen_ai.request.model", effective.PlatformModelName),

@@ -34,6 +34,10 @@ func (s *Engine) streamRunAnswerAttempt(ctx context.Context, run model.Run, orch
 	}
 	holdForEvaluation := len(effective.StructuredOutputSchema) > 0 || s.evaluations != nil && s.evaluations.Enforces(EvaluationStageModelOutput)
 	collector := runDeltaCollector{service: s, ctx: ctx, run: run, stepID: orchestrationStepID, projection: run.OutputProjection, lastFlush: time.Now(), holdForEvaluation: holdForEvaluation}
+	request := GenerateInput{RequestID: run.RunID + ":" + requestKind, Messages: promptMessages, Instructions: instructions, HostedTools: hostedTools, DisableTools: len(hostedTools) == 0, Options: options}
+	if err = s.recordRunLLMRouteSelected(context.WithoutCancel(ctx), run, orchestrationStepID, phase, route, request.RequestID); err != nil {
+		return Usage{}, route, "", err
+	}
 	fields := runTelemetryFields(run,
 		String("gen_ai.operation.name", "chat"),
 		String("gen_ai.request.model", effective.PlatformModelName),
@@ -46,7 +50,7 @@ func (s *Engine) streamRunAnswerAttempt(ctx context.Context, run model.Run, orch
 		Bool("generation.held_for_evaluation", holdForEvaluation),
 	)
 	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate", fields...)
-	output, err := s.llmGateway.GenerateTextStream(generateCtx, route, GenerateInput{RequestID: run.RunID + ":" + requestKind, Messages: promptMessages, Instructions: instructions, HostedTools: hostedTools, DisableTools: len(hostedTools) == 0, Options: options}, collector.accept)
+	output, err := s.llmGateway.GenerateTextStream(generateCtx, route, request, collector.accept)
 	if err != nil {
 		generationSpan.RecordError(err)
 	}

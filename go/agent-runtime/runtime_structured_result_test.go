@@ -100,6 +100,9 @@ func assertStructuredCorrectionResult(t *testing.T, gateway *structuredResultGat
 	if len(gateway.inputs) != 2 {
 		t.Fatalf("gateway calls = %d, want 2", len(gateway.inputs))
 	}
+	if countRunEvents(repo.events, eventLLMRouteSelected) != 2 || countRunEvents(repo.events, valueUsageUpdatedABC8B0B2) != 2 {
+		t.Fatalf("route/usage events must match successful calls exactly once: %#v", repo.events)
+	}
 	assertStructuredGatewayFormats(t, gateway.inputs)
 	if len(gateway.inputs[1].Messages) <= len(gateway.inputs[0].Messages) {
 		t.Fatal("correction request did not include the invalid result and validation feedback")

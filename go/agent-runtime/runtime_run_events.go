@@ -2,12 +2,19 @@ package agentruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
+)
+
+const (
+	eventLLMRouteSelected       = "llm.route_selected"
+	llmRouteRequestIDPayloadKey = "requestID"
 )
 
 func (s *Engine) textRunStartResult(ctx context.Context, actor model.ActorRef, run *model.Run) (*TextRunStartResult, error) {
@@ -50,6 +57,44 @@ func newRunEvent(run model.Run, eventType, stepID, summary string, payload map[s
 		event.Projection = *projection
 	}
 	return event
+}
+
+func (s *Engine) recordRunLLMRouteSelected(ctx context.Context, run model.Run, stepID, phase string, route *LLMRoute, generationRequestID string) error {
+	generationRequestID = strings.TrimSpace(generationRequestID)
+	if route == nil || generationRequestID == "" {
+		return ErrInvalidInput
+	}
+	payload := map[string]interface{}{
+		llmRouteRequestIDPayloadKey: generationRequestID,
+		"phase":                     strings.TrimSpace(phase),
+		"platformModelRef":          route.PlatformModelRef,
+		"platformModelName":         strings.TrimSpace(route.PlatformModelName),
+		"routeRef":                  route.Ref,
+		"upstreamModelRef":          route.UpstreamModelRef,
+		"upstreamRef":               route.UpstreamRef,
+		"upstreamName":              strings.TrimSpace(route.UpstreamName),
+		"bindingCode":               strings.TrimSpace(route.BindingCode),
+		"upstreamModel":             strings.TrimSpace(route.UpstreamModel),
+		"protocol":                  strings.TrimSpace(route.Protocol),
+		"endpoint":                  strings.TrimSpace(routeEndpoint(route)),
+		"modelVendor":               strings.TrimSpace(route.ModelVendor),
+		"modelIcon":                 strings.TrimSpace(route.ModelIcon),
+	}
+	event := newRunEvent(run, eventLLMRouteSelected, stepID, phase, payload, nil)
+	event.EventID = llmRouteSelectedEventID(run.RunID, generationRequestID)
+	saved, created, err := s.repo.AppendRunEvent(ctx, &event)
+	if err != nil {
+		return err
+	}
+	if created {
+		s.PublishRunNotification(run.RunID, runEventEnvelope(saved))
+	}
+	return nil
+}
+
+func llmRouteSelectedEventID(runID, generationRequestID string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(runID) + "\x00" + strings.TrimSpace(generationRequestID)))
+	return "evt_llm_route_" + hex.EncodeToString(sum[:16])
 }
 
 func truncateRunEventSummary(value string) string {

@@ -401,6 +401,20 @@ func (s *Engine) generateRunStepTurn(ctx context.Context, run model.Run, step mo
 	if err := s.ensureRunCallBudgetWithReserve(ctx, run, effective, true, 1); err != nil {
 		return nil, err
 	}
+	request := GenerateInput{
+		RequestID:    fmt.Sprintf("%s:step:%s:%d", run.RunID, step.StepID, callNumber),
+		Thread:       run.Thread,
+		Messages:     prepared.messages,
+		Instructions: strings.TrimSpace(effective.Instructions + "\n" + runPublicProgressInstruction),
+		Tools:        prepared.tools,
+		HostedTools:  prepared.hosted,
+		DisableTools: false,
+		ToolChoice:   toolChoiceForRunStep(effective, prepared.forceToolChoiceRequired),
+		Options:      effective.Options,
+	}
+	if err := s.recordRunLLMRouteSelected(context.WithoutCancel(ctx), run, step.StepID, valueStepB959B536, prepared.route, request.RequestID); err != nil {
+		return nil, err
+	}
 	fields := runTelemetryFields(run,
 		String("gen_ai.operation.name", "chat"),
 		String("gen_ai.request.model", effective.PlatformModelName),
@@ -412,17 +426,7 @@ func (s *Engine) generateRunStepTurn(ctx context.Context, run model.Run, step mo
 		Int("generation.call_number", callNumber),
 	)
 	generateCtx, generationSpan := s.startSpan(ctx, "agentruntime.generation.generate", fields...)
-	output, err := s.llmGateway.GenerateText(generateCtx, prepared.route, GenerateInput{
-		RequestID:    fmt.Sprintf("%s:step:%s:%d", run.RunID, step.StepID, callNumber),
-		Thread:       run.Thread,
-		Messages:     prepared.messages,
-		Instructions: strings.TrimSpace(effective.Instructions + "\n" + runPublicProgressInstruction),
-		Tools:        prepared.tools,
-		HostedTools:  prepared.hosted,
-		DisableTools: false,
-		ToolChoice:   toolChoiceForRunStep(effective, prepared.forceToolChoiceRequired),
-		Options:      effective.Options,
-	})
+	output, err := s.llmGateway.GenerateText(generateCtx, prepared.route, request)
 	if err != nil {
 		generationSpan.RecordError(err)
 	}

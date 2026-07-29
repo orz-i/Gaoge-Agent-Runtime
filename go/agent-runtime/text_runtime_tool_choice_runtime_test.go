@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -22,10 +23,12 @@ const (
 	testStepAID         = "step_a"
 	testSideEffectWrite = "write"
 	testAskToolCallID   = "call_ask"
+	testRouteModelName  = "test-model"
 )
 
 type scriptedLLMGateway struct {
 	outputs []*GenerateOutput
+	errors  []error
 	inputs  []GenerateInput
 }
 
@@ -130,7 +133,16 @@ func TestExecuteRunStepRecoversFromUnavailableModelToolCall(t *testing.T) {
 }
 
 func (g *scriptedLLMGateway) PrepareTextRoute(context.Context, LLMRouteInput) (*LLMRoute, error) {
-	return &LLMRoute{PlatformModelName: "test-model", Protocol: AdapterOpenAIResponses, UpstreamModel: "test-model"}, nil
+	return &LLMRoute{
+		PlatformModelName: testRouteModelName,
+		UpstreamName:      "test-upstream",
+		BindingCode:       "test-binding",
+		Protocol:          AdapterOpenAIResponses,
+		Endpoint:          "/v1/responses",
+		ModelVendor:       "test-vendor",
+		ModelIcon:         "test-icon",
+		UpstreamModel:     testRouteModelName,
+	}, nil
 }
 
 func (g *scriptedLLMGateway) PrepareDefaultTextRoute(context.Context, LLMRouteInput) (*LLMRoute, error) {
@@ -139,6 +151,13 @@ func (g *scriptedLLMGateway) PrepareDefaultTextRoute(context.Context, LLMRouteIn
 
 func (g *scriptedLLMGateway) GenerateText(_ context.Context, _ *LLMRoute, input GenerateInput) (*GenerateOutput, error) {
 	g.inputs = append(g.inputs, input)
+	if len(g.errors) > 0 {
+		err := g.errors[0]
+		g.errors = g.errors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
 	if len(g.outputs) == 0 {
 		return &GenerateOutput{Text: "fallback"}, nil
 	}
@@ -149,6 +168,102 @@ func (g *scriptedLLMGateway) GenerateText(_ context.Context, _ *LLMRoute, input 
 
 func (g *scriptedLLMGateway) GenerateTextStream(context.Context, *LLMRoute, GenerateInput, func(GenerateStreamEvent) error) (*GenerateOutput, error) {
 	return nil, errCategoryFBB8372B5B
+}
+
+func TestRecordRunLLMRouteSelectedIsIdempotent(t *testing.T) {
+	repo := &multiTurnRunRepo{}
+	service := &Engine{repo: repo, generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{})}
+	run := model.Run{RunID: "run_route_replay", Actor: model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey}}
+	route := &LLMRoute{
+		PlatformModelName: "gpt-platform",
+		UpstreamName:      "GPT upstream",
+		BindingCode:       "gpt-primary",
+		UpstreamModel:     "gpt-5.6-terra",
+		Protocol:          AdapterOpenAIResponses,
+		Endpoint:          "/v1/responses",
+		ModelVendor:       "openai",
+		ModelIcon:         "openai",
+	}
+	for range 2 {
+		if err := service.recordRunLLMRouteSelected(t.Context(), run, "step_route", "step", route, "request_generation_1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count := countRunEvents(repo.events, eventLLMRouteSelected); count != 1 {
+		t.Fatalf("route events = %d, want 1", count)
+	}
+	event := repo.events[0]
+	if event.EventID != llmRouteSelectedEventID(run.RunID, "request_generation_1") {
+		t.Fatalf("event ID = %q", event.EventID)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{llmRouteRequestIDPayloadKey, "phase", "platformModelName", "upstreamName", "bindingCode", "upstreamModel", "protocol", "endpoint", "modelVendor", "modelIcon"} {
+		if _, ok := payload[key]; !ok {
+			t.Fatalf("route payload missing %q: %s", key, event.PayloadJSON)
+		}
+	}
+	for _, forbidden := range []string{"apiKey", "headers", "authorization", "rawResponse"} {
+		if _, ok := payload[forbidden]; ok {
+			t.Fatalf("route payload contains sensitive field %q", forbidden)
+		}
+	}
+}
+
+func TestToolLoopGenerateFailurePersistsRouteBeforeTerminalEvents(t *testing.T) {
+	gatewayErr := &UpstreamError{StatusCode: 503, Message: "upstream unavailable", Body: "no available L1 node"}
+	gateway := &scriptedLLMGateway{errors: []error{gatewayErr}}
+	repo := &multiTurnRunRepo{}
+	service := &Engine{repo: repo, llmGateway: gateway, generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{})}
+	run := model.Run{
+		RunID:         "run_tool_route_failure",
+		CurrentStepID: "step_tool_route_failure",
+		Actor:         model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey},
+		Thread:        model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey},
+	}
+	step := model.Step{StepID: run.CurrentStepID}
+	route, err := gateway.PrepareTextRoute(t.Context(), LLMRouteInput{PlatformModelName: testRouteModelName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.generateRunStepTurn(t.Context(), run, step, effectiveTextRunConfig{PlatformModelName: testRouteModelName, MaxLLMCalls: 1}, &preparedRunStepExecution{route: route}, 1)
+	if !errors.Is(err, gatewayErr) {
+		t.Fatalf("generate error = %v", err)
+	}
+	terminal := []model.Event{
+		newRunEvent(run, "step.failed", step.StepID, gatewayErr.Error(), nil, nil),
+		newRunEvent(run, "run.failed", step.StepID, gatewayErr.Error(), nil, nil),
+	}
+	if err = service.appendRunEvents(t.Context(), run.RunID, terminal); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.events) != 3 || repo.events[0].EventType != eventLLMRouteSelected || repo.events[1].EventType != "step.failed" || repo.events[2].EventType != "run.failed" {
+		t.Fatalf("failure event order = %#v", repo.events)
+	}
+	if countRunEvents(repo.events, valueUsageUpdatedABC8B0B2) != 0 {
+		t.Fatal("failed generation created usage")
+	}
+}
+
+func TestStreamGenerateFailurePersistsRoute(t *testing.T) {
+	gateway := &scriptedLLMGateway{}
+	repo := &multiTurnRunRepo{}
+	service := &Engine{repo: repo, llmGateway: gateway, generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{})}
+	run := model.Run{
+		RunID:     "run_stream_route_failure",
+		RequestID: "request_stream_route_failure",
+		Actor:     model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey},
+		Thread:    model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey},
+	}
+	_, _, _, err := service.streamRunAnswerAttempt(t.Context(), run, "step_stream", effectiveTextRunConfig{PlatformModelName: testRouteModelName, MaxLLMCalls: 1}, "direct", "direct", nil, "answer", false)
+	if err == nil {
+		t.Fatal("stream generation unexpectedly succeeded")
+	}
+	if countRunEvents(repo.events, eventLLMRouteSelected) != 1 || countRunEvents(repo.events, valueUsageUpdatedABC8B0B2) != 0 {
+		t.Fatalf("stream failure events = %#v", repo.events)
+	}
 }
 
 type multiTurnRunRepo struct {
@@ -162,6 +277,13 @@ type multiTurnRunRepo struct {
 }
 
 func (r *multiTurnRunRepo) AppendRunEvent(_ context.Context, item *model.Event) (*model.Event, bool, error) {
+	for index := range r.events {
+		if r.events[index].RunID == item.RunID && r.events[index].EventID == item.EventID {
+			saved := r.events[index]
+			*item = saved
+			return item, false, nil
+		}
+	}
 	r.nextSeq++
 	saved := *item
 	saved.Seq = r.nextSeq

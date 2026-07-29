@@ -50,6 +50,7 @@ type Run struct {
 	RequestedModelName       string
 	PlatformModelName        string
 	RoutedBindingCode        string
+	UpstreamName             string
 	ModelVendor              string
 	ModelIcon                string
 	UpstreamModelName        string

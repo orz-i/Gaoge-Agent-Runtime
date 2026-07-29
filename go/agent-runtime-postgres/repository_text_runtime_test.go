@@ -11,6 +11,8 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
+const routeProjectionVendor = "openai"
+
 func TestCreateRunStartBundlePersistsRefsOnlyAtomicRoot(t *testing.T) {
 	repo := newTestRepository(t)
 	run, step, snapshot, artifacts, checkpoint, events := runtimeStartBundleFixture("run_atomic")
@@ -35,6 +37,24 @@ func TestAppendRunEventProjectsRunAndStepExactlyOnce(t *testing.T) {
 		t.Fatalf("create start bundle: %v", err)
 	}
 
+	route := domain.Event{
+		EventID:     "route_event",
+		RunID:       run.RunID,
+		Actor:       run.Actor,
+		Thread:      run.Thread,
+		EventType:   "llm.route_selected",
+		StepID:      step.StepID,
+		PayloadJSON: `{"upstreamName":"GPT upstream","bindingCode":"route_selected","upstreamModel":"gpt-5.6-terra","protocol":"openai_responses","endpoint":"/v1/responses","modelVendor":"openai","modelIcon":"openai"}`,
+	}
+	appendProjectedEvent(t, repo, &route)
+	routed, err := repo.GetRun(context.Background(), run.Actor, run.RunID)
+	if err != nil {
+		t.Fatalf("get routed run: %v", err)
+	}
+	if routed.LLMCallsCount != 0 || routed.InputTokens != 0 || routed.UpstreamName != "GPT upstream" || routed.Endpoint != "/v1/responses" || routed.ModelVendor != routeProjectionVendor || routed.ModelIcon != routeProjectionVendor {
+		t.Fatalf("route-only projection mismatch: %#v", routed)
+	}
+
 	usage := domain.Event{
 		EventID:     "usage_event",
 		RunID:       run.RunID,
@@ -42,7 +62,7 @@ func TestAppendRunEventProjectsRunAndStepExactlyOnce(t *testing.T) {
 		Thread:      run.Thread,
 		EventType:   "usage.updated",
 		StepID:      step.StepID,
-		PayloadJSON: `{"inputTokens":17,"outputTokens":256,"bindingCode":"route_a","upstreamModel":"gemini","protocol":"google_generate_content"}`,
+		PayloadJSON: `{"inputTokens":17,"outputTokens":256,"upstreamName":"Gemini upstream","bindingCode":"route_a","upstreamModel":"gemini","protocol":"google_generate_content"}`,
 	}
 	appendProjectedEvent(t, repo, &usage)
 	duplicate := usage
@@ -80,7 +100,7 @@ func assertRepositoryRunProjection(t *testing.T, loaded *domain.Run) {
 	if loaded.Status != domain.RunStatusCompleted || loaded.InputTokens != 17 || loaded.OutputTokens != 256 || loaded.LLMCallsCount != 1 || loaded.TotalLatencyMS != 2000 {
 		t.Fatalf("run projection mismatch: %#v", loaded)
 	}
-	if loaded.RoutedBindingCode != "route_a" || loaded.UpstreamModelName != "gemini" || loaded.ProviderProtocol != "google_generate_content" {
+	if loaded.UpstreamName != "Gemini upstream" || loaded.RoutedBindingCode != "route_a" || loaded.UpstreamModelName != "gemini" || loaded.ProviderProtocol != "google_generate_content" || loaded.Endpoint != "/v1/responses" || loaded.ModelVendor != routeProjectionVendor || loaded.ModelIcon != routeProjectionVendor {
 		t.Fatalf("run route projection mismatch: %#v", loaded)
 	}
 }

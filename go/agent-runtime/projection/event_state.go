@@ -13,14 +13,19 @@ import (
 var errInvalidRunEventProjection = errors.New("runtime event projection: invalid run")
 
 const (
-	eventMessageDelta = "message.delta"
-	eventUsageUpdated = "usage.updated"
-	eventToolStarted  = "tool.started"
+	eventLLMRouteSelected = "llm.route_selected"
+	eventMessageDelta     = "message.delta"
+	eventUsageUpdated     = "usage.updated"
+	eventToolStarted      = "tool.started"
 )
 
+type routePayload struct {
+	UpstreamName, BindingCode, UpstreamModel, Protocol, Endpoint, ModelVendor, ModelIcon string
+}
+
 type usagePayload struct {
-	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens, ReasoningTokens int64
-	UpstreamName, BindingCode, UpstreamModel, Protocol                            string
+	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens, ReasoningTokens        int64
+	UpstreamName, BindingCode, UpstreamModel, Protocol, Endpoint, ModelVendor, ModelIcon string
 }
 
 // ApplyEvent updates the mutable Run and Step read models from one newly
@@ -92,6 +97,12 @@ func applyRunMetrics(run *domain.Run, event domain.Event) error {
 		if run.FirstTokenLatencyMS == 0 {
 			run.FirstTokenLatencyMS = nonnegativeDurationMS(run.StartedAt, eventTime(event))
 		}
+	case eventLLMRouteSelected:
+		var payload routePayload
+		if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err != nil {
+			return fmt.Errorf("runtime event projection: decode route for %s: %w", run.RunID, err)
+		}
+		applyRunRoute(run, payload)
 	case eventUsageUpdated:
 		var payload usagePayload
 		if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err != nil {
@@ -103,19 +114,43 @@ func applyRunMetrics(run *domain.Run, event domain.Event) error {
 		run.CacheWriteTokens += payload.CacheWriteTokens
 		run.ReasoningTokens += payload.ReasoningTokens
 		run.LLMCallsCount++
-		if strings.TrimSpace(payload.BindingCode) != "" {
-			run.RoutedBindingCode = payload.BindingCode
-		}
-		if strings.TrimSpace(payload.UpstreamModel) != "" {
-			run.UpstreamModelName = payload.UpstreamModel
-		}
-		if strings.TrimSpace(payload.Protocol) != "" {
-			run.ProviderProtocol = payload.Protocol
-		}
+		applyRunRoute(run, routePayload{
+			UpstreamName:  payload.UpstreamName,
+			BindingCode:   payload.BindingCode,
+			UpstreamModel: payload.UpstreamModel,
+			Protocol:      payload.Protocol,
+			Endpoint:      payload.Endpoint,
+			ModelVendor:   payload.ModelVendor,
+			ModelIcon:     payload.ModelIcon,
+		})
 	case eventToolStarted:
 		run.ToolCallsCount++
 	}
 	return nil
+}
+
+func applyRunRoute(run *domain.Run, payload routePayload) {
+	if strings.TrimSpace(payload.UpstreamName) != "" {
+		run.UpstreamName = payload.UpstreamName
+	}
+	if strings.TrimSpace(payload.BindingCode) != "" {
+		run.RoutedBindingCode = payload.BindingCode
+	}
+	if strings.TrimSpace(payload.UpstreamModel) != "" {
+		run.UpstreamModelName = payload.UpstreamModel
+	}
+	if strings.TrimSpace(payload.Protocol) != "" {
+		run.ProviderProtocol = payload.Protocol
+	}
+	if strings.TrimSpace(payload.Endpoint) != "" {
+		run.Endpoint = payload.Endpoint
+	}
+	if strings.TrimSpace(payload.ModelVendor) != "" {
+		run.ModelVendor = payload.ModelVendor
+	}
+	if strings.TrimSpace(payload.ModelIcon) != "" {
+		run.ModelIcon = payload.ModelIcon
+	}
 }
 
 func applyStepStatus(step *domain.Step, event domain.Event) {
