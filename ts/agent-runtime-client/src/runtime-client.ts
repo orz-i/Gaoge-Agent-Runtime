@@ -4,7 +4,7 @@ import type {
   OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
   RunHandoffJoinDTO, RunHandoffJoinFilterDTO, RunHandoffJoinPageDTO, RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RunTaskTreeDTO, RuntimeEvidenceSelectionDTO,
   RuntimeEvidenceSourceDTO, StartAgentTeamRequest, AgentTeamStartResultDTO, StartTextRunRequest, StartTextRunResult,
-  RunDetailDTO, RunDTO, RunResultDTO, StartWorkflowRequest, WorkflowDefinitionDTO, WorkflowDefinitionFilterDTO,
+  RunDetailDTO, RunDTO, RunResultDTO, StartWorkflowRequest, TextRunDetailDTO, WorkflowDefinitionDTO, WorkflowDefinitionFilterDTO,
   WorkflowDefinitionPageDTO, WorkflowDefinitionRevisionRequest, WorkflowDefinitionValidationDTO, WorkflowStartResult, WorkbenchDTO,
 } from "./types.js";
 
@@ -44,6 +44,13 @@ function requireRunProjectionRefs<T extends {inputProjectionRef:unknown;outputPr
   if (validProjectionRef(value.inputProjectionRef)&&validProjectionRef(value.outputProjectionRef)) return value;
   throw new RuntimeAPIError("runtime returned invalid projection references",502,"runtime.invalid_response",value.run?.requestID??"");
 }
+function isTextRunDetail(value:RunDetailDTO):value is TextRunDetailDTO {
+  return value.run.runtimeKind === "text";
+}
+function requireTextRunDetail(value:RunDetailDTO):TextRunDetailDTO {
+  if (isTextRunDetail(value)) return value;
+  throw new RuntimeAPIError("runtime returned a workflow run where a text run was required",409,"runtime.kind_mismatch",value.run.requestID);
+}
 
 export class RuntimeClient {
   readonly runs;
@@ -67,6 +74,7 @@ export class RuntimeClient {
       list: (thread: {kind:string;id:string}, page=1, pageSize=20, request?:RequestOptions) => this.request<{total:number;results:RunDTO[]}>(`/runs?threadKind=${pathPart(thread.kind)}&threadID=${pathPart(thread.id)}&page=${page}&pageSize=${pageSize}`, {}, request),
       create: async(payload:StartTextRunRequest, request?:RequestOptions) => requireRunProjectionRefs(await this.request<StartTextRunResult>("/runs", {method:"POST", body:JSON.stringify(payload)}, request)),
       get: async(runID:string, request?:RequestOptions) => requireRunProjectionRefs(await this.request<RunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request)),
+      getText: async(runID:string, request?:RequestOptions) => requireTextRunDetail(requireRunProjectionRefs(await this.request<RunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request))),
       result: <T=unknown>(runID:string, request?:RequestOptions) => this.request<RunResultDTO<T>>(`/runs/${pathPart(runID)}/result`, {}, request),
       cancel: (runID:string, request?:RequestOptions) => this.request<{canceled:boolean}>(`/runs/${pathPart(runID)}/cancel`, {method:"POST"}, request),
       resume: (runID:string,payload:{checkpointID?:string;clientResumeID:string},request?:RequestOptions)=>this.request<{checkpointID:string;runID:string;status:string;reused:boolean}>(`/runs/${pathPart(runID)}/resume`,{method:"POST",body:JSON.stringify(payload)},request),

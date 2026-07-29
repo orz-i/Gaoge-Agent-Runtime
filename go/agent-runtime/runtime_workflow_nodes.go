@@ -182,7 +182,7 @@ func (r *workflowRunner) advanceAgent(node *model.WorkflowNode, activation workf
 		ClientHandoffID:        clientID,
 		ManifestRef:            node.ManifestRef,
 		Goal:                   goal,
-		RequestID:              r.run.RequestID + ":" + node.ID,
+		RequestID:              workflowChildRequestID(r.run, activation),
 		MaxLLMCalls:            maxLLM,
 		MaxToolCalls:           maxTools,
 		StructuredOutputSchema: append(json.RawMessage(nil), node.OutputSchema...),
@@ -260,13 +260,23 @@ func (r *workflowRunner) advanceNestedWorkflow(node *model.WorkflowNode, activat
 		Definition:  node.DefinitionRef,
 		Input:       append(json.RawMessage(nil), canonicalInput...),
 		Limits:      definition.Limits,
-		RequestID:   r.run.RequestID + ":" + node.ID,
+		RequestID:   workflowChildRequestID(r.run, activation),
 	})
 	if err != nil {
 		r.releaseFailedChildReservation(&activation)
 		return nil, false, r.failActivation(*node, activation, workflowChildFailureInvalid, err.Error())
 	}
 	return nil, false, nil
+}
+
+func workflowChildRequestID(run model.Run, activation workflowActivationState) string {
+	return deterministicWorkflowID(
+		"request",
+		run.RequestID,
+		run.RunID,
+		activation.Path,
+		strconv.Itoa(activation.Attempt),
+	)
 }
 
 func workflowEffectiveThreadScope(effective effectiveWorkflowConfig) string {

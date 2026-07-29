@@ -1399,7 +1399,11 @@ func (s *Engine) ensureRunCallBudgetWithReserve(ctx context.Context, run model.R
 	if reservedCalls < 0 {
 		reservedCalls = 0
 	}
-	if limit <= 0 || counts[eventType]+reservedCalls >= limit {
+	requiredCalls := reservedCalls
+	if requiredCalls == 0 {
+		requiredCalls = 1
+	}
+	if limit <= 0 || counts[eventType]+requiredCalls > limit {
 		return withErrorMessage(errCategoryAFA87E325A, fmt.Sprintf("text run %s call limit reached", label))
 	}
 	return nil

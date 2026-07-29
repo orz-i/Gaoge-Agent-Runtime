@@ -121,6 +121,9 @@ func TestWorkflowAgentRegistersIntentBeforeChildStart(t *testing.T) {
 	if effect.ChildRunID != expectedChildRunID {
 		t.Fatalf("agent child run ID = %q, want %q", effect.ChildRunID, expectedChildRunID)
 	}
+	if payload.RequestID != workflowChildRequestID(runner.run, activation) || len(payload.RequestID) > 64 {
+		t.Fatalf("agent child request ID = %q", payload.RequestID)
+	}
 }
 
 func TestNestedWorkflowRegistersIntentBeforeChildStart(t *testing.T) {

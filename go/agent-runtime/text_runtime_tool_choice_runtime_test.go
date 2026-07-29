@@ -364,6 +364,26 @@ func TestExecuteRunStepStopsProtocolRetryWhenArtifactToolBudgetIsExhausted(t *te
 	}
 }
 
+func TestRunCallBudgetAllowsTheLastReservedCall(t *testing.T) {
+	repo := &multiTurnRunRepo{}
+	service := &Engine{repo: repo}
+	run := model.Run{
+		RunID: "run_last_reserved_call",
+		Actor: model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey},
+	}
+	effective := effectiveTextRunConfig{MaxLLMCalls: 1, MaxToolCalls: 1}
+
+	if err := service.ensureRunCallBudgetWithReserve(context.Background(), run, effective, true, 1); err != nil {
+		t.Fatalf("first and final reserved LLM call was rejected: %v", err)
+	}
+	if err := service.ensureRunCallBudgetWithReserve(context.Background(), run, effective, false, 1); err != nil {
+		t.Fatalf("first and final reserved tool call was rejected: %v", err)
+	}
+	if err := service.ensureRunCallBudgetWithReserve(context.Background(), run, effective, true, 2); err == nil {
+		t.Fatal("reservation beyond the LLM call limit was accepted")
+	}
+}
+
 func TestExecuteDirectStrategyStopsAtWaitingInteraction(t *testing.T) {
 	policy := storyToolPolicy(testReadToolKey, testReadToolName)
 	gateway := &scriptedLLMGateway{
