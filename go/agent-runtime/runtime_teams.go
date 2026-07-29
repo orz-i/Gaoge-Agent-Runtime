@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -38,13 +39,17 @@ func (e *AgentTeamStartError) Unwrap() error { return e.Cause }
 // AgentTeamMemberInput defines one specialist task in a coordinator-led team.
 // The member Manifest is frozen before the child Run starts.
 type AgentTeamMemberInput struct {
-	MemberID      string
-	AgentManifest model.ResourceRef
-	Goal          string
-	ContentType   string
-	OutputIDs     []string
-	EvidenceIDs   []string
-	Options       map[string]interface{}
+	MemberID               string
+	AgentManifest          model.ResourceRef
+	Goal                   string
+	ContentType            string
+	OutputIDs              []string
+	EvidenceIDs            []string
+	Options                map[string]interface{}
+	MaxLLMCalls            int
+	MaxToolCalls           int
+	StructuredOutputSchema json.RawMessage
+	ResultAttempts         int
 }
 
 // AgentTeamJoinInput defines the fan-in contract that resumes the coordinator.
@@ -191,8 +196,16 @@ func normalizeAgentTeamMember(member AgentTeamMemberInput, seen map[string]struc
 	}
 	_, duplicate := seen[member.MemberID]
 	validManifest := member.AgentManifest.Kind == model.AgentManifestKind && strings.TrimSpace(member.AgentManifest.ID) != ""
-	if member.MemberID == "" || len(member.MemberID) > 64 || duplicate || !validManifest || !validTextRunStartInput(member.Goal) {
+	validLimits := member.MaxLLMCalls >= 0 && member.MaxToolCalls >= 0 && member.ResultAttempts >= 0
+	if member.MemberID == "" || len(member.MemberID) > 64 || duplicate || !validManifest || !validTextRunStartInput(member.Goal) || !validLimits {
 		return AgentTeamMemberInput{}, ErrInvalidInput
+	}
+	if len(member.StructuredOutputSchema) > 0 {
+		spec, err := decodeStructuredRunOutput(member.StructuredOutputSchema)
+		if err != nil {
+			return AgentTeamMemberInput{}, err
+		}
+		member.StructuredOutputSchema = json.RawMessage(spec.SchemaJSON)
 	}
 	seen[member.MemberID] = struct{}{}
 	return member, nil
@@ -241,20 +254,7 @@ func validateDeferredAgentTeamRoot(run model.Run) error {
 }
 
 func (s *Engine) ensureAgentTeamMember(ctx context.Context, team StartAgentTeamInput, root model.Run, member AgentTeamMemberInput) (*DelegateTextRunResult, error) {
-	input := DelegateTextRunInput{
-		Actor:            team.Coordinator.Actor,
-		ParentRunID:      root.RunID,
-		ClientHandoffID:  agentTeamClientPartID("team_member", team.Coordinator.Actor, team.ClientTeamID, member.MemberID),
-		AgentManifest:    member.AgentManifest,
-		Goal:             member.Goal,
-		ContentType:      member.ContentType,
-		OutputIDs:        member.OutputIDs,
-		EvidenceIDs:      member.EvidenceIDs,
-		Options:          member.Options,
-		RequestID:        team.Coordinator.RequestID,
-		HTMLVisualPrompt: team.Coordinator.HTMLVisualPromptEnabled,
-		HTMLColorMode:    team.Coordinator.HTMLVisualColorMode,
-	}
+	input := agentTeamMemberDelegationInput(team, root, member)
 	manifest, err := s.repo.GetAgentManifest(ctx, input.Actor, input.AgentManifest)
 	if err != nil {
 		return nil, err
@@ -268,6 +268,27 @@ func (s *Engine) ensureAgentTeamMember(ctx context.Context, team StartAgentTeamI
 		return nil, err
 	}
 	return s.DelegateTextRun(ctx, input)
+}
+
+func agentTeamMemberDelegationInput(team StartAgentTeamInput, root model.Run, member AgentTeamMemberInput) DelegateTextRunInput {
+	return DelegateTextRunInput{
+		Actor:                  team.Coordinator.Actor,
+		ParentRunID:            root.RunID,
+		ClientHandoffID:        agentTeamClientPartID("team_member", team.Coordinator.Actor, team.ClientTeamID, member.MemberID),
+		AgentManifest:          member.AgentManifest,
+		Goal:                   member.Goal,
+		ContentType:            member.ContentType,
+		OutputIDs:              member.OutputIDs,
+		EvidenceIDs:            member.EvidenceIDs,
+		Options:                member.Options,
+		RequestID:              team.Coordinator.RequestID,
+		HTMLVisualPrompt:       team.Coordinator.HTMLVisualPromptEnabled,
+		HTMLColorMode:          team.Coordinator.HTMLVisualColorMode,
+		MaxLLMCalls:            member.MaxLLMCalls,
+		MaxToolCalls:           member.MaxToolCalls,
+		StructuredOutputSchema: append(json.RawMessage(nil), member.StructuredOutputSchema...),
+		ResultAttempts:         member.ResultAttempts,
+	}
 }
 
 func agentTeamClientPartID(prefix string, actor model.ActorRef, clientTeamID, part string) string {

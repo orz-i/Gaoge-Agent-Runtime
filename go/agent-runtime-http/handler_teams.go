@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -14,26 +15,34 @@ const (
 )
 
 type StartAgentTeamRequest struct {
-	Thread              RunThreadRequest          `json:"thread" binding:"required"`
-	Input               TextRunRequestInput       `json:"input" binding:"required"`
-	ClientTeamID        string                    `json:"clientTeamID" binding:"required,max=128"`
-	CoordinatorManifest ResourceRefDTO            `json:"coordinatorManifest" binding:"required"`
-	Model               string                    `json:"model" binding:"omitempty,max=128"`
-	ExecutionMode       string                    `json:"executionMode" binding:"omitempty,oneof=auto direct plan"`
-	Options             map[string]interface{}    `json:"options"`
-	Workspace           *runtime.WorkspaceRequest `json:"workspace"`
-	Members             []AgentTeamMemberRequest  `json:"members" binding:"required,min=1,max=16,dive"`
-	Join                AgentTeamJoinRequest      `json:"join" binding:"required"`
+	Thread                 RunThreadRequest          `json:"thread" binding:"required"`
+	Input                  TextRunRequestInput       `json:"input" binding:"required"`
+	ClientTeamID           string                    `json:"clientTeamID" binding:"required,max=128"`
+	CoordinatorManifest    ResourceRefDTO            `json:"coordinatorManifest" binding:"required"`
+	Model                  string                    `json:"model" binding:"omitempty,max=128"`
+	ExecutionMode          string                    `json:"executionMode" binding:"omitempty,oneof=auto direct plan"`
+	Options                map[string]interface{}    `json:"options"`
+	Workspace              *runtime.WorkspaceRequest `json:"workspace"`
+	MaxLLMCalls            int                       `json:"maxLLMCalls" binding:"omitempty,min=1,max=32"`
+	MaxToolCalls           int                       `json:"maxToolCalls" binding:"omitempty,min=1,max=64"`
+	StructuredOutputSchema json.RawMessage           `json:"structuredOutputSchema"`
+	ResultAttempts         int                       `json:"resultAttempts" binding:"omitempty,min=1,max=2"`
+	Members                []AgentTeamMemberRequest  `json:"members" binding:"required,min=1,max=16,dive"`
+	Join                   AgentTeamJoinRequest      `json:"join" binding:"required"`
 }
 
 type AgentTeamMemberRequest struct {
-	MemberID      string                 `json:"memberID" binding:"required,max=64"`
-	AgentManifest ResourceRefDTO         `json:"agentManifest" binding:"required"`
-	Goal          string                 `json:"goal" binding:"required,max=20000"`
-	ContentType   string                 `json:"contentType" binding:"omitempty,oneof=text markdown"`
-	OutputIDs     []string               `json:"outputIDs" binding:"max=128,dive,max=64"`
-	EvidenceIDs   []string               `json:"evidenceIDs" binding:"max=128,dive,max=64"`
-	Options       map[string]interface{} `json:"options"`
+	MemberID               string                 `json:"memberID" binding:"required,max=64"`
+	AgentManifest          ResourceRefDTO         `json:"agentManifest" binding:"required"`
+	Goal                   string                 `json:"goal" binding:"required,max=20000"`
+	ContentType            string                 `json:"contentType" binding:"omitempty,oneof=text markdown"`
+	OutputIDs              []string               `json:"outputIDs" binding:"max=128,dive,max=64"`
+	EvidenceIDs            []string               `json:"evidenceIDs" binding:"max=128,dive,max=64"`
+	Options                map[string]interface{} `json:"options"`
+	MaxLLMCalls            int                    `json:"maxLLMCalls" binding:"omitempty,min=1,max=32"`
+	MaxToolCalls           int                    `json:"maxToolCalls" binding:"omitempty,min=1,max=64"`
+	StructuredOutputSchema json.RawMessage        `json:"structuredOutputSchema"`
+	ResultAttempts         int                    `json:"resultAttempts" binding:"omitempty,min=1,max=2"`
 }
 
 type AgentTeamJoinRequest struct {
@@ -67,6 +76,8 @@ func (h *Handler) StartAgentTeam(c *gin.Context) {
 			HTMLVisualPromptEnabled: request.Input.HTMLVisualPrompt, HTMLVisualColorMode: request.Input.HTMLVisualColorMode,
 			ThreadModel: snapshot.DefaultModel, ThreadProvider: snapshot.ModelProvider, ThreadScope: snapshot.BindingScope,
 			Workspace: request.Workspace, AgentManifest: resourceRefDomain(request.CoordinatorManifest),
+			MaxLLMCalls: request.MaxLLMCalls, MaxToolCalls: request.MaxToolCalls,
+			StructuredOutputSchema: append(json.RawMessage(nil), request.StructuredOutputSchema...), ResultAttempts: request.ResultAttempts,
 		},
 		Members: agentTeamMembers(request.Members),
 		Join: runtime.AgentTeamJoinInput{
@@ -87,6 +98,8 @@ func agentTeamMembers(items []AgentTeamMemberRequest) []runtime.AgentTeamMemberI
 		result = append(result, runtime.AgentTeamMemberInput{
 			MemberID: item.MemberID, AgentManifest: resourceRefDomain(item.AgentManifest), Goal: item.Goal, ContentType: item.ContentType,
 			OutputIDs: item.OutputIDs, EvidenceIDs: item.EvidenceIDs, Options: sanitizeRunOptions(item.Options),
+			MaxLLMCalls: item.MaxLLMCalls, MaxToolCalls: item.MaxToolCalls,
+			StructuredOutputSchema: append(json.RawMessage(nil), item.StructuredOutputSchema...), ResultAttempts: item.ResultAttempts,
 		})
 	}
 	return result

@@ -81,6 +81,7 @@ type WorkspaceDirectiveSource struct {
 type WorkspaceDirective struct {
 	ActionID          string                    `json:"actionID,omitempty"`
 	ArtifactContract  string                    `json:"artifactContract,omitempty"`
+	ExecutionStage    string                    `json:"executionStage,omitempty"`
 	SourceChangeSetID string                    `json:"sourceChangeSetID,omitempty"`
 	Source            *WorkspaceDirectiveSource `json:"source,omitempty"`
 }
@@ -88,6 +89,7 @@ type WorkspaceDirective struct {
 type WorkspaceRequest struct {
 	SchemaVersion    int                 `json:"schemaVersion"`
 	Type             string              `json:"type"`
+	ResourceID       string              `json:"resourceID,omitempty"`
 	Selection        *WorkspaceSelection `json:"selection,omitempty"`
 	ExpectedRevision uint64              `json:"expectedRevision,omitempty"`
 	Directive        *WorkspaceDirective `json:"directive,omitempty"`

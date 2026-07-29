@@ -1,6 +1,7 @@
 package agentruntime
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -8,7 +9,11 @@ import (
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
-const testAgentTeamDuplicateMember = "same"
+const (
+	testAgentTeamDuplicateMember = "same"
+	testAgentTeamHTMLColorMode   = "dark"
+	testAgentTeamRootRunID       = "run-root"
+)
 
 func TestNormalizeStartAgentTeamInputFreezesJoinDefaults(t *testing.T) {
 	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
@@ -69,6 +74,82 @@ func TestNormalizeStartAgentTeamInputRejectsDuplicateMembers(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("duplicate member error = %v", err)
+	}
+}
+
+func TestNormalizeStartAgentTeamInputCanonicalizesStructuredMemberContract(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	input, err := normalizeStartAgentTeamInput(StartAgentTeamInput{
+		ClientTeamID: "team-structured",
+		Coordinator: StartTextRunInput{
+			Actor: actor, Thread: model.ThreadRef{Kind: threadKindConversation, ID: "conversation-1"},
+			Environment: model.ResourceRef{Kind: "environment", ID: "1"}, Goal: "Coordinate",
+			AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: "agent-lead"},
+		},
+		Members: []AgentTeamMemberInput{{
+			MemberID: " architect ", AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: "agent-architect"}, Goal: " Audit structure ",
+			MaxLLMCalls: 2, MaxToolCalls: 3, ResultAttempts: 1,
+			StructuredOutputSchema: json.RawMessage(`{ "type": "object", "additionalProperties": false, "required": ["summary"], "properties": { "summary": { "type": "string" } } }`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	member := input.Members[0]
+	if member.MemberID != "architect" || member.Goal != "Audit structure" || member.MaxLLMCalls != 2 || member.MaxToolCalls != 3 || member.ResultAttempts != 1 {
+		t.Fatalf("normalized member = %#v", member)
+	}
+	if got, want := string(member.StructuredOutputSchema), `{"additionalProperties":false,"properties":{"summary":{"type":"string"}},"required":["summary"],"type":"object"}`; got != want {
+		t.Fatalf("schema = %s, want %s", got, want)
+	}
+}
+
+func TestAgentTeamMemberDelegationInputForwardsStructuredContractAndBudgets(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	schema := json.RawMessage(`{"type":"object"}`)
+	input := agentTeamMemberDelegationInput(
+		StartAgentTeamInput{
+			ClientTeamID: "team-contract",
+			Coordinator: StartTextRunInput{
+				Actor: actor, RequestID: "request-1", HTMLVisualPromptEnabled: true, HTMLVisualColorMode: testAgentTeamHTMLColorMode,
+			},
+		},
+		model.Run{RunID: testAgentTeamRootRunID},
+		AgentTeamMemberInput{
+			MemberID: "architect", AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: "agent-architect", Revision: "2"},
+			Goal: "Audit structure", ContentType: "markdown", OutputIDs: []string{"output-1"}, EvidenceIDs: []string{"evidence-1"},
+			Options: map[string]interface{}{"temperature": 0.2}, MaxLLMCalls: 2, MaxToolCalls: 3,
+			StructuredOutputSchema: schema, ResultAttempts: 1,
+		},
+	)
+	if input.ParentRunID != testAgentTeamRootRunID || input.RequestID != "request-1" || input.MaxLLMCalls != 2 || input.MaxToolCalls != 3 || input.ResultAttempts != 1 {
+		t.Fatalf("delegation input = %#v", input)
+	}
+	if string(input.StructuredOutputSchema) != string(schema) || !input.HTMLVisualPrompt || input.HTMLColorMode != testAgentTeamHTMLColorMode {
+		t.Fatalf("delegation contract = %#v", input)
+	}
+	schema[0] = '['
+	if string(input.StructuredOutputSchema) != `{"type":"object"}` {
+		t.Fatal("delegation schema must be cloned")
+	}
+}
+
+func TestNormalizeStartAgentTeamInputRejectsNegativeMemberBudgets(t *testing.T) {
+	actor := model.ActorRef{TenantID: testAgentTenantID, ActorID: testAgentActorID}
+	_, err := normalizeStartAgentTeamInput(StartAgentTeamInput{
+		ClientTeamID: "team-invalid-budget",
+		Coordinator: StartTextRunInput{
+			Actor: actor, Thread: model.ThreadRef{Kind: threadKindConversation, ID: "conversation-1"},
+			Environment: model.ResourceRef{Kind: "environment", ID: "1"}, Goal: "Coordinate",
+			AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: "agent-lead"},
+		},
+		Members: []AgentTeamMemberInput{{
+			MemberID: "architect", AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: "agent-architect"},
+			Goal: "Audit structure", MaxLLMCalls: -1,
+		}},
+	})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("negative budget error = %v", err)
 	}
 }
 

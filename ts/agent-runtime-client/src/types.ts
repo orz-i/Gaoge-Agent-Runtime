@@ -33,6 +33,7 @@ export type RuntimeExtensionDTO = Readonly<Record<string, unknown>>;
 export type RuntimeWorkspaceExtensionDTO = RuntimeExtensionDTO & {
   schemaVersion: number;
   type: string;
+  resourceID?: string;
 };
 
 export type TextRunStatus = "queued" | "preparing" | "waiting_input" | "waiting_handoff" | "running" | "completed" | "failed" | "cancelled" | "suspended";
@@ -438,6 +439,10 @@ export type AgentTeamMemberRequest = {
   outputIDs?: string[];
   evidenceIDs?: string[];
   options?: Record<string, unknown>;
+  maxLLMCalls?: number;
+  maxToolCalls?: number;
+  structuredOutputSchema?: Record<string, unknown>;
+  resultAttempts?: number;
 };
 export type AgentTeamJoinRequest = Omit<CreateRunHandoffJoinRequest, "clientJoinID" | "handoffIDs">;
 export type StartAgentTeamRequest = {
@@ -449,6 +454,10 @@ export type StartAgentTeamRequest = {
   executionMode?: "auto" | "direct" | "plan";
   options?: Record<string, unknown>;
   workspace?: StartTextRunRequest["workspace"];
+  maxLLMCalls?: number;
+  maxToolCalls?: number;
+  structuredOutputSchema?: Record<string, unknown>;
+  resultAttempts?: number;
   members: AgentTeamMemberRequest[];
   join: AgentTeamJoinRequest;
 };
