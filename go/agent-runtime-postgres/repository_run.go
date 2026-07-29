@@ -325,7 +325,15 @@ func (r *Repository) ListRunEventsAfter(ctx context.Context, actor domain.ActorR
 }
 
 func (r *Repository) ListRunEventsBefore(ctx context.Context, actor domain.ActorRef, runID string, beforeSeq int64, limit int) ([]domain.Event, error) {
-	return r.listRunEvents(ctx, actor, runID, "seq < ?", beforeSeq, "seq DESC,id DESC", limit)
+	predicate, cursor := runEventHistoryPredicate(beforeSeq)
+	return r.listRunEvents(ctx, actor, runID, predicate, cursor, "seq DESC,id DESC", limit)
+}
+
+func runEventHistoryPredicate(beforeSeq int64) (string, int64) {
+	if beforeSeq <= 0 {
+		return "seq > ?", 0
+	}
+	return "seq < ?", beforeSeq
 }
 
 func (r *Repository) listRunEvents(ctx context.Context, actor domain.ActorRef, runID, predicate string, seq int64, order string, limit int) ([]domain.Event, error) {
