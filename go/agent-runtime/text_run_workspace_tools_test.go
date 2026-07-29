@@ -143,6 +143,26 @@ func TestFreezeWorkspaceForCoordinatorKeepsArtifactDuty(t *testing.T) {
 	}
 }
 
+func TestFreezeWorkspaceForExplicitEmptySelectionKeepsArtifactDuty(t *testing.T) {
+	workspace := &WorkspaceSnapshot{
+		ExpectedArtifact: testArtifactReview,
+		Request:          ResolvedWorkspaceContext{ArtifactContract: testArtifactReview},
+		Policy:           WorkspacePolicy{RequiredArtifact: true, TerminalArtifactTypes: []string{testArtifactReview}},
+		Tools: []WorkspaceToolDefinition{
+			{ToolKey: testStoryGetManifestKey, Name: testStoryGetManifestName},
+		},
+	}
+	noTools := []string{}
+	allowed := narrowRuntimeToolSelection(workspaceSnapshotToolKeys(workspace), &noTools)
+	freezeWorkspaceForAgentRole(workspace, allowed, false)
+	if got := workspaceSnapshotToolKeys(workspace); len(got) != 0 {
+		t.Fatalf("tools = %#v", got)
+	}
+	if workspace.ExpectedArtifact != testArtifactReview || !workspace.Policy.RequiredArtifact {
+		t.Fatalf("coordinator artifact policy changed: %#v", workspace)
+	}
+}
+
 func TestFrozenWorkspaceIsClonedAndValidated(t *testing.T) {
 	input := &WorkspaceSnapshot{
 		SchemaVersion: RuntimeSnapshotVersion,

@@ -589,8 +589,12 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 	if !textRunEnvironmentWorkspaceCompatible(profile, resources.Workspace) {
 		return textRunPreparedConfiguration{}, ErrEnvironmentBindingNotAllowed
 	}
-	if resources.Workspace != nil && agentManifest != nil {
-		allowedToolKeys := narrowRuntimeToolSelection(agentManifest.ToolKeys, input.ToolKeys)
+	if resources.Workspace != nil && (agentManifest != nil || input.ToolKeys != nil) {
+		allowedToolKeys := workspaceSnapshotToolKeys(resources.Workspace)
+		if agentManifest != nil {
+			allowedToolKeys = intersectRuntimeStrings(allowedToolKeys, agentManifest.ToolKeys)
+		}
+		allowedToolKeys = narrowRuntimeToolSelection(allowedToolKeys, input.ToolKeys)
 		freezeWorkspaceForAgentRole(resources.Workspace, allowedToolKeys, input.Delegation != nil)
 	}
 	workspaceType, workspaceMode := textRunWorkspaceScope(resources.Workspace)
