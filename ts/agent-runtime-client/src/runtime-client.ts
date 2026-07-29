@@ -3,7 +3,7 @@ import type {
   ContinuationJobPageDTO, CreateRunHandoffJoinRequest, DelegateRunRequest, DelegatedRunResult, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
   OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
   RunHandoffJoinDTO, RunHandoffJoinFilterDTO, RunHandoffJoinPageDTO, RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RunTaskTreeDTO, RuntimeEvidenceSelectionDTO,
-  RuntimeEvidenceSourceDTO, StartAgentTeamRequest, AgentTeamStartResultDTO, StartTextRunRequest, StartTextRunResult,
+  RuntimeEvidenceSourceDTO, RuntimeExecutionProvenanceV1, StartAgentTeamRequest, AgentTeamStartResultDTO, StartTextRunRequest, StartTextRunResult,
   RunDetailDTO, RunDTO, RunResultDTO, StartWorkflowRequest, TextRunDetailDTO, WorkflowDefinitionDTO, WorkflowDefinitionFilterDTO,
   WorkflowDefinitionPageDTO, WorkflowDefinitionRevisionRequest, WorkflowDefinitionValidationDTO, WorkflowStartResult, WorkbenchDTO,
 } from "./types.js";
@@ -75,6 +75,7 @@ export class RuntimeClient {
       create: async(payload:StartTextRunRequest, request?:RequestOptions) => requireRunProjectionRefs(await this.request<StartTextRunResult>("/runs", {method:"POST", body:JSON.stringify(payload)}, request)),
       get: async(runID:string, request?:RequestOptions) => requireRunProjectionRefs(await this.request<RunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request)),
       getText: async(runID:string, request?:RequestOptions) => requireTextRunDetail(requireRunProjectionRefs(await this.request<RunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request))),
+      provenance: (runID:string, request?:RequestOptions) => this.request<RuntimeExecutionProvenanceV1>(`/runs/${pathPart(runID)}/provenance`, {}, request),
       result: <T=unknown>(runID:string, request?:RequestOptions) => this.request<RunResultDTO<T>>(`/runs/${pathPart(runID)}/result`, {}, request),
       cancel: (runID:string, request?:RequestOptions) => this.request<{canceled:boolean}>(`/runs/${pathPart(runID)}/cancel`, {method:"POST"}, request),
       resume: (runID:string,payload:{checkpointID?:string;clientResumeID:string},request?:RequestOptions)=>this.request<{checkpointID:string;runID:string;status:string;reused:boolean}>(`/runs/${pathPart(runID)}/resume`,{method:"POST",body:JSON.stringify(payload)},request),

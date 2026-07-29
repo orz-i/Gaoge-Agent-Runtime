@@ -50,6 +50,7 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 		"POST /workflows":                                                      {status: "202", requestBody: "StartWorkflowRequest"},
 		"POST /agent-teams":                                                    {status: "202", requestBody: "StartAgentTeamRequest"},
 		"GET /runs/{runID}":                                                    {status: "200", parameters: []string{valueRunID1DA2F0B6}},
+		"GET /runs/{runID}/provenance":                                         {status: "200", parameters: []string{valueRunID1DA2F0B6}},
 		"GET /runs/{runID}/result":                                             {status: "200", parameters: []string{valueRunID1DA2F0B6}},
 		"POST /runs/{runID}/cancel":                                            {status: "200", parameters: []string{valueRunID1DA2F0B6}},
 		"POST /runs/{runID}/resume":                                            {status: "202", requestBody: "ResumeRunRequest", parameters: []string{valueRunID1DA2F0B6}},
@@ -132,6 +133,8 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	assertOpenAPISchemaRequired(t, schemas, "CreateRunHandoffJoinRequest", "clientJoinID")
 	assertOpenAPISchemaRequired(t, schemas, "CreateRunHandoffJoinRequest", "handoffIDs")
 	assertOpenAPISchemaRequired(t, schemas, "RunTaskTree", "joins")
+	assertOpenAPISchemaRequired(t, schemas, "RuntimeExecutionProvenanceV1", "snapshotHash")
+	assertOpenAPISchemaRequired(t, schemas, "RuntimeExecutionProvenanceV1", "stateHash")
 	assertOpenAPISchemaRequired(t, schemas, "AgentManifestRevisionRequest", "name")
 	assertOpenAPISchemaOptional(t, schemas, "AgentManifestRevisionRequest", openAPIManifestScope)
 	assertOpenAPISchemaRequired(t, schemas, "AgentManifest", openAPIManifestScope)

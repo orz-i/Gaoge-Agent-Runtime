@@ -90,6 +90,27 @@ export type ActorRefDTO = { tenantID?: string; id: string };
 export type ThreadRefDTO = { kind: string; id: string };
 export type ProjectionRefDTO = { kind: string; id: string };
 export type ResourceRefDTO = { kind: string; id: string; revision?: string };
+export type RuntimeModelRoutingSummaryV1 = Readonly<{
+  requestedModelName?: string;
+  platformModelName?: string;
+  provider?: string;
+  providerProtocol?: string;
+  routedBindingCode?: string;
+  modelVendor?: string;
+  upstreamModelName?: string;
+}>;
+export type RuntimeExecutionProvenanceV1 = Readonly<{
+  schemaVersion: 1;
+  runID: string;
+  rootRunID: string;
+  runtimeKind: "text" | "workflow";
+  environmentRef?: ResourceRefDTO;
+  agentManifestRef?: ResourceRefDTO;
+  workflowDefinitionRef?: ResourceRefDTO;
+  modelRouting: RuntimeModelRoutingSummaryV1;
+  snapshotHash: string;
+  stateHash: string;
+}>;
 export type StartTextRunResult = { run: TextRunDTO; rootStep: RunStepDTO; inputProjectionRef: ProjectionRefDTO; outputProjectionRef: ProjectionRefDTO };
 export type WorkflowExprOp = "literal" | "ref" | "object" | "array" | "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "and" | "or" | "not" | "coalesce" | "merge" | "append" | "concat" | "length" | "contains" | "add" | "sub" | "mul" | "div" | "mod";
 export type WorkflowExprDTO = { op: WorkflowExprOp; value?: unknown; ref?: string; fields?: Record<string, WorkflowExprDTO>; items?: WorkflowExprDTO[]; args?: WorkflowExprDTO[] };

@@ -234,6 +234,20 @@ paths:
                 $ref: '#/components/schemas/RunDetail'
         default:
           $ref: '#/components/responses/Error'
+  /runs/{runID}/provenance:
+    get:
+      operationId: getRunExecutionProvenance
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Frozen, neutral execution provenance for a terminal run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeExecutionProvenanceV1'
+        default:
+          $ref: '#/components/responses/Error'
   /runs/{runID}/result:
     get:
       operationId: getRunResult
@@ -1527,6 +1541,36 @@ components:
         contentHash: {type: string}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    RuntimeModelRoutingSummaryV1:
+      type: object
+      additionalProperties: false
+      properties:
+        requestedModelName: {type: string}
+        platformModelName: {type: string}
+        provider: {type: string}
+        providerProtocol: {type: string}
+        routedBindingCode: {type: string}
+        modelVendor: {type: string}
+        upstreamModelName: {type: string}
+    RuntimeExecutionProvenanceV1:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, runID, rootRunID, runtimeKind, modelRouting, snapshotHash, stateHash]
+      properties:
+        schemaVersion: {type: integer, enum: [1]}
+        runID: {type: string}
+        rootRunID: {type: string}
+        runtimeKind: {type: string, enum: [text, workflow]}
+        environmentRef:
+          $ref: '#/components/schemas/ResourceRef'
+        agentManifestRef:
+          $ref: '#/components/schemas/ResourceRef'
+        workflowDefinitionRef:
+          $ref: '#/components/schemas/ResourceRef'
+        modelRouting:
+          $ref: '#/components/schemas/RuntimeModelRoutingSummaryV1'
+        snapshotHash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        stateHash: {type: string, pattern: '^[a-f0-9]{64}$'}
     StartRunResult:
       type: object
       additionalProperties: false
