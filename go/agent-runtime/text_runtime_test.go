@@ -270,6 +270,26 @@ func TestParseAndValidatePlanCanonicalizesOmittedEmptyCollections(t *testing.T) 
 	}
 }
 
+func TestParseAndValidatePlanDerivesMissingSummaryAfterValidatingSteps(t *testing.T) {
+	payload, err := parseAndValidatePlan(`{
+	  "steps":[
+	    {"key":"inspect","title":"检查概览","description":"读取当前概览","dependsOn":[],"approvalRequired":false,"expectedTools":[],"resourceRefs":[]},
+	    {"key":"report","title":"汇总结果","description":"汇总只读检查","dependsOn":["inspect"],"approvalRequired":false,"expectedTools":[],"resourceRefs":[]}
+	  ]
+	}`, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Summary != "执行计划：检查概览；汇总结果" {
+		t.Fatalf("derived summary = %q", payload.Summary)
+	}
+
+	_, err = parseAndValidatePlan(`{"steps":[{"key":"inspect","title":"","description":"读取当前概览","dependsOn":[],"approvalRequired":false,"expectedTools":[],"resourceRefs":[]}]}`, 3)
+	if err == nil || !strings.Contains(err.Error(), "empty required fields") {
+		t.Fatalf("invalid steps were hidden by summary derivation: %v", err)
+	}
+}
+
 func TestParseAndValidatePlanNormalizesPlanSummary(t *testing.T) {
 	payload, err := parseAndValidatePlan(`{"planSummary":"Use local evidence","steps":[{"key":"collect","title":"Collect","description":"Collect evidence","dependsOn":[],"approvalRequired":false,"expectedTools":[],"resourceRefs":[]}]}`, 3)
 	if err != nil {

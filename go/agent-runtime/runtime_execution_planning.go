@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -337,7 +336,7 @@ func parseAndValidatePlan(raw string, maxSteps int) (planPayload, error) {
 	if err := json.Unmarshal([]byte(raw), &shape); err != nil {
 		return payload, fmt.Errorf("inspect planner JSON: %w", err)
 	}
-	if err := validatePlanSummaryAndSize(raw, payload, maxSteps); err != nil {
+	if err := validatePlanSize(payload, maxSteps); err != nil {
 		return payload, err
 	}
 	keys, err := normalizeAndValidatePlanSteps(payload.Steps, shape.Steps)
@@ -346,6 +345,10 @@ func parseAndValidatePlan(raw string, maxSteps int) (planPayload, error) {
 	}
 	if err = validatePlanDependencyGraph(payload.Steps, keys); err != nil {
 		return payload, err
+	}
+	payload.Summary = strings.TrimSpace(payload.Summary)
+	if payload.Summary == "" {
+		payload.Summary = derivePlanSummary(payload.Steps)
 	}
 	return payload, nil
 }
@@ -360,17 +363,7 @@ func unwrapPlannerJSON(raw string) string {
 	return strings.TrimSuffix(strings.TrimSpace(raw), "```")
 }
 
-func validatePlanSummaryAndSize(raw string, payload planPayload, maxSteps int) error {
-	if strings.TrimSpace(payload.Summary) == "" {
-		var fields map[string]json.RawMessage
-		_ = json.Unmarshal([]byte(raw), &fields)
-		keys := make([]string, 0, len(fields))
-		for key := range fields {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		return withErrorMessage(errCategory377637EA92, fmt.Sprintf("plan summary is required (fields=%s, steps=%d)", strings.Join(keys, ","), len(payload.Steps)))
-	}
+func validatePlanSize(payload planPayload, maxSteps int) error {
 	if len(payload.Steps) == 0 {
 		return errCategory440497AF28
 	}
@@ -378,6 +371,25 @@ func validatePlanSummaryAndSize(raw string, payload planPayload, maxSteps int) e
 		return fmt.Errorf("%w: plan must contain at most %d steps; got %d", errPlanBudgetExceeded, maxSteps, len(payload.Steps))
 	}
 	return nil
+}
+
+func derivePlanSummary(steps []planStepSpec) string {
+	const maxSummaryRunes = 240
+	titles := make([]string, 0, min(len(steps), 3))
+	for _, step := range steps {
+		if title := strings.TrimSpace(step.Title); title != "" {
+			titles = append(titles, title)
+		}
+		if len(titles) == 3 {
+			break
+		}
+	}
+	summary := "执行计划：" + strings.Join(titles, "；")
+	runes := []rune(summary)
+	if len(runes) > maxSummaryRunes {
+		return string(runes[:maxSummaryRunes])
+	}
+	return summary
 }
 
 func normalizeAndValidatePlanSteps(steps []planStepSpec, shapes []map[string]json.RawMessage) (map[string]struct{}, error) {
