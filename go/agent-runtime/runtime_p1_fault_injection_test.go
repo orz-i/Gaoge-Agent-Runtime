@@ -10,6 +10,8 @@ import (
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
+var errInjectedWorkflowTerminalPersist = errors.New("injected workflow terminal persist failure")
+
 type continuationHeartbeatFaultStore struct {
 	Store
 	err   error
@@ -116,5 +118,105 @@ func TestWorkflowToolCrossingDeadlinePersistsFailureTerminal(t *testing.T) {
 	var failure map[string]interface{}
 	if json.Unmarshal([]byte(terminal.ErrorJSON), &failure) != nil || failure[workflowPayloadCode] != workflowFailureDurationExceeded {
 		t.Fatalf("terminal failure = %#v", failure)
+	}
+}
+
+type workflowCASConflictStore struct {
+	Store
+	calls int
+}
+
+func (s *workflowCASConflictStore) ApplyWorkflowTransition(
+	_ context.Context,
+	_ model.ActorRef,
+	_ string,
+	transition model.WorkflowTransition,
+) (*model.WorkflowExecution, []model.Event, bool, error) {
+	s.calls++
+	current := transition.Execution
+	current.Version = transition.ExpectedVersion
+	return &current, nil, false, nil
+}
+
+func TestWorkflowCASConflictStopsBeforeEffectDispatch(t *testing.T) {
+	store := &workflowCASConflictStore{}
+	runner := newWorkflowEffectTestRunner(store)
+	runner.execution = model.WorkflowExecution{RunID: runner.run.RunID, Version: 4}
+	runner.budget.Limits.MaxStateBytes = 1 << 20
+	runner.dispatchEffectID = "effect-cas-conflict"
+
+	applied, err := runner.commit()
+	if err != nil || applied || store.calls != 1 {
+		t.Fatalf("applied=%v calls=%d err=%v", applied, store.calls, err)
+	}
+	if runner.dispatchEffectID != "effect-cas-conflict" {
+		t.Fatalf("CAS conflict mutated pending dispatch: %q", runner.dispatchEffectID)
+	}
+}
+
+type workflowTerminalPersistFaultStore struct {
+	Store
+	events      map[string]model.Event
+	appendCalls int
+}
+
+func (s *workflowTerminalPersistFaultStore) AppendRunEvent(_ context.Context, event *model.Event) (*model.Event, bool, error) {
+	s.appendCalls++
+	if s.appendCalls == 1 {
+		return nil, false, errInjectedWorkflowTerminalPersist
+	}
+	eventCopy := *event
+	s.events[event.EventID] = eventCopy
+	return &eventCopy, true, nil
+}
+
+type workflowReplayRecordingExecutor struct {
+	requestIDs []string
+}
+
+func (e *workflowReplayRecordingExecutor) Execute(_ context.Context, input ToolExecutionInput) (string, error) {
+	e.requestIDs = append(e.requestIDs, input.RequestID)
+	return `{"ok":true}`, nil
+}
+
+func TestWorkflowTerminalPersistFailureReplaysWithStableRequestKey(t *testing.T) {
+	store := &workflowTerminalPersistFaultStore{events: map[string]model.Event{}}
+	runner := newWorkflowEffectTestRunner(store)
+	runner.service.cfg = StaticConfigProvider(Config{Tools: ToolConfig{MaxConcurrentCalls: 1}})
+	runner.service.generationStreams = newGenerationStreamRegistry(nil, generationStreamOptions{})
+	tool, _ := frozenFirewallTestTool(t, json.RawMessage(`{"type":"object"}`), nil, valueNever4C6E2E88)
+	tool.IdempotencyMode = ToolIdempotencyRequestKey
+	fingerprint, err := hashWorkflowValue(tool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.definition.Dependencies = []model.WorkflowDependency{{
+		Kind: model.WorkflowDependencyTool, ToolKey: tool.ToolKey,
+		DefinitionVersion: tool.DefinitionVersion, Fingerprint: fingerprint,
+	}}
+	runner.service.toolCatalog = workflowDeadlineToolCatalog{tool: tool}
+	executor := &workflowReplayRecordingExecutor{}
+	runner.service.toolExecutor = executor
+	effect := workflowEffectState{
+		EffectID: "effect-terminal-replay", Kind: workflowEffectKindTool, Status: workflowEffectStatusDispatching,
+		ActivationPath: "tool-terminal-replay", StepID: "step-terminal-replay", ToolCallID: "call-terminal-replay",
+		ToolKey: tool.ToolKey, ToolName: tool.ModelName, ArgumentsJSON: `{}`, ReservedAttempts: 1,
+	}
+
+	if err = runner.dispatchWorkflowToolEffect(t.Context(), effect); !errors.Is(err, errInjectedWorkflowTerminalPersist) {
+		t.Fatalf("first dispatch error = %v", err)
+	}
+	if err = runner.dispatchWorkflowToolEffect(t.Context(), effect); err != nil {
+		t.Fatalf("replayed dispatch error = %v", err)
+	}
+	if len(executor.requestIDs) != 2 || executor.requestIDs[0] != executor.requestIDs[1] {
+		t.Fatalf("request IDs are not stable: %#v", executor.requestIDs)
+	}
+	wantRequestID := runner.run.RunID + ":tool:" + effect.ToolCallID
+	if executor.requestIDs[0] != wantRequestID {
+		t.Fatalf("request ID = %q, want %q", executor.requestIDs[0], wantRequestID)
+	}
+	if _, ok := store.events[workflowEffectTerminalEventID(effect.EffectID)]; !ok {
+		t.Fatal("replayed terminal event was not persisted")
 	}
 }
