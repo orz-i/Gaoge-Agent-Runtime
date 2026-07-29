@@ -169,6 +169,10 @@ func TestAgentManifestToolsNarrowWorkspaceTools(t *testing.T) {
 	if !slices.Equal(got, []string{testAgentStoryReadTool, testStoryContinuityToolKey}) {
 		t.Fatalf("intersection = %#v", got)
 	}
+	noTools := []string{}
+	if narrowed := narrowRuntimeToolSelection(got, &noTools); len(narrowed) != 0 {
+		t.Fatalf("explicit empty selection = %#v", narrowed)
+	}
 }
 
 func TestApplyWorkspaceToolDefinitionsRequiresEveryWorkspaceTool(t *testing.T) {

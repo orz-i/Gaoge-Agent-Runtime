@@ -112,6 +112,13 @@ func intersectRuntimeStrings(left, right []string) []string {
 	return uniqueRuntimeStrings(result)
 }
 
+func narrowRuntimeToolSelection(available []string, requested *[]string) []string {
+	if requested == nil {
+		return append([]string(nil), available...)
+	}
+	return intersectRuntimeStrings(available, *requested)
+}
+
 func effectiveTextRunConfigFromRun(run model.Run) (effectiveTextRunConfig, error) {
 	var effective effectiveTextRunConfig
 	if json.Unmarshal([]byte(run.RunConfigSnapshotJSON), &effective) != nil || effective.SemanticVersion != RuntimeSnapshotVersion {
@@ -734,10 +741,7 @@ func applyTextRunAgentManifest(input StartTextRunInput, manifest *model.AgentMan
 	if strings.TrimSpace(manifest.ExecutionMode) != "" {
 		input.ExecutionMode = manifest.ExecutionMode
 	}
-	toolKeys := append([]string(nil), manifest.ToolKeys...)
-	if input.ToolKeys != nil {
-		toolKeys = intersectRuntimeStrings(*input.ToolKeys, manifest.ToolKeys)
-	}
+	toolKeys := narrowRuntimeToolSelection(manifest.ToolKeys, input.ToolKeys)
 	skillRefs := append([]model.ResourceRef(nil), manifest.SkillRefs...)
 	input.ToolKeys, input.SkillRefs = &toolKeys, &skillRefs
 	return input
