@@ -146,7 +146,11 @@ func TestStructuredRunOutputModesAndUnsupportedCapability(t *testing.T) {
 			assertStructuredOutputMode(t, schema, test)
 		})
 	}
-	if _, err := resolveStructuredRunOutput(&LLMRoute{ModelCapabilitiesJSON: `{}`}, schema); !errors.Is(err, ErrStructuredOutputUnsupported) {
+	fallback, err := resolveStructuredRunOutput(&LLMRoute{ModelCapabilitiesJSON: `{}`}, schema)
+	if err != nil || fallback.Mode != modelcap.StructuredOutputJSONText {
+		t.Fatalf("absent capability fallback = %#v, %v", fallback, err)
+	}
+	if _, err = resolveStructuredRunOutput(&LLMRoute{ModelCapabilitiesJSON: testStructuredOutputUnsupportedJSON}, schema); !errors.Is(err, ErrStructuredOutputUnsupported) {
 		t.Fatalf("unsupported capability error = %v", err)
 	}
 }

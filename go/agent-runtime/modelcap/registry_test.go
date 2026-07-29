@@ -9,14 +9,15 @@ func TestDefaultRegistryReportsInferredProvenance(t *testing.T) {
 	}
 }
 
-func TestResolveStructuredOutputRequiresExplicitCapability(t *testing.T) {
+func TestResolveStructuredOutputFallsBackToValidatedJSONText(t *testing.T) {
 	tests := []struct {
 		name   string
 		raw    string
 		mode   StructuredOutputMode
 		status ConfigurationStatus
 	}{
-		{name: "absent", raw: `{}`, mode: StructuredOutputUnsupported, status: ConfigurationAbsent},
+		{name: "empty", raw: ``, mode: StructuredOutputJSONText, status: ConfigurationAbsent},
+		{name: "absent", raw: `{}`, mode: StructuredOutputJSONText, status: ConfigurationAbsent},
 		{name: "strict", raw: `{"structuredOutput":{"mode":"strict_json_schema"}}`, mode: StructuredOutputStrictJSONSchema, status: ConfigurationValid},
 		{name: "json object", raw: `{"structuredOutputMode":"json_object"}`, mode: StructuredOutputJSONObject, status: ConfigurationValid},
 		{name: "json text", raw: `{"structuredOutput":"json_text"}`, mode: StructuredOutputJSONText, status: ConfigurationValid},

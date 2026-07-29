@@ -40,12 +40,15 @@ type StructuredOutputResolution struct {
 
 func ResolveStructuredOutput(raw string) StructuredOutputResolution {
 	payload, status := parseCapabilities(raw)
+	if status == ConfigurationAbsent {
+		return StructuredOutputResolution{Mode: StructuredOutputJSONText, ConfigurationStatus: status}
+	}
 	if status != ConfigurationValid {
 		return StructuredOutputResolution{Mode: StructuredOutputUnsupported, ConfigurationStatus: status}
 	}
 	value, found := structuredOutputModeValue(payload)
 	if !found {
-		return StructuredOutputResolution{Mode: StructuredOutputUnsupported, ConfigurationStatus: ConfigurationAbsent}
+		return StructuredOutputResolution{Mode: StructuredOutputJSONText, ConfigurationStatus: ConfigurationAbsent}
 	}
 	mode := StructuredOutputMode(strings.ToLower(strings.TrimSpace(value)))
 	switch mode {

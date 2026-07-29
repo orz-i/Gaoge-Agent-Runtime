@@ -25,6 +25,7 @@ const (
 	testReplyContract                      = "reply"
 	testErrorCodeWorkspaceArgumentsInvalid = "workspace_arguments_invalid"
 	testLegacyPlannerOption                = "legacy"
+	testStructuredOutputUnsupportedJSON    = `{"structuredOutput":{"mode":"unsupported"}}`
 )
 
 var (
@@ -59,7 +60,7 @@ func TestPlannerUnsupportedCapabilityNeverCallsGateway(t *testing.T) {
 		t.Context(),
 		model.Run{RunID: "run_unsupported_plan"},
 		effectiveTextRunConfig{},
-		&LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: `{}`},
+		&LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: testStructuredOutputUnsupportedJSON},
 		1,
 		"",
 		false,
@@ -144,14 +145,13 @@ func TestPlannerRequestNegotiatesStructuredOutputModes(t *testing.T) {
 	}
 }
 
-func TestPlannerStructuredOutputRejectsUnconfiguredRoutes(t *testing.T) {
+func TestPlannerStructuredOutputRejectsUnavailableRoutes(t *testing.T) {
 	tests := []struct {
 		name  string
 		route *LLMRoute
 	}{
 		{name: "nil route"},
-		{name: "absent capability", route: &LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: `{}`}},
-		{name: "explicit unsupported", route: &LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: `{"structuredOutput":{"mode":"unsupported"}}`}},
+		{name: "explicit unsupported", route: &LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: testStructuredOutputUnsupportedJSON}},
 		{name: "invalid capability", route: &LLMRoute{UpstreamModel: valueModel22D48A8A, Protocol: AdapterOpenAIChatCompletions, ModelCapabilitiesJSON: `{"structuredOutput":{"mode":"yaml"}}`}},
 	}
 	for _, test := range tests {
@@ -160,6 +160,24 @@ func TestPlannerStructuredOutputRejectsUnconfiguredRoutes(t *testing.T) {
 				t.Fatalf("planner capability error = %v", err)
 			}
 		})
+	}
+}
+
+func TestPlannerStructuredOutputFallsBackToJSONTextWhenUnconfigured(t *testing.T) {
+	mode, err := plannerStructuredOutput(&LLMRoute{
+		UpstreamModel:         valueModel22D48A8A,
+		Protocol:              AdapterOpenAIChatCompletions,
+		ModelCapabilitiesJSON: `{}`,
+	})
+	if err != nil {
+		t.Fatalf("planner capability fallback error = %v", err)
+	}
+	if mode != modelcap.StructuredOutputJSONText {
+		t.Fatalf("planner capability fallback = %q", mode)
+	}
+	request := buildPlannerRequest("run_unconfigured", "goal", effectiveTextRunConfig{PlanMaxSteps: 3}, 1, "", false, 3, mode)
+	if _, exists := request.Options[plannerResponseFormatKey]; exists {
+		t.Fatalf("json_text fallback leaked provider response format: %#v", request.Options)
 	}
 }
 
