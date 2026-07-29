@@ -100,6 +100,17 @@ func TestResolveTextRunAgentManifestFreezesRootRevision(t *testing.T) {
 	if resolved.ToolKeys == nil || !slices.Equal(*resolved.ToolKeys, manifest.ToolKeys) || resolved.SkillRefs == nil || !slices.Equal(*resolved.SkillRefs, manifest.SkillRefs) {
 		t.Fatalf("resolved capabilities = tools=%#v skills=%#v", resolved.ToolKeys, resolved.SkillRefs)
 	}
+
+	noTools := []string{}
+	resolved, frozen, err = engine.resolveTextRunAgentManifest(t.Context(), StartTextRunInput{
+		Actor: actor, AgentManifest: model.ResourceRef{Kind: model.AgentManifestKind, ID: manifest.ManifestID}, ToolKeys: &noTools,
+	})
+	if err != nil || frozen == nil {
+		t.Fatalf("resolve narrowed root manifest = %#v, %v", frozen, err)
+	}
+	if resolved.ToolKeys == nil || len(*resolved.ToolKeys) != 0 {
+		t.Fatalf("resolved empty tool override = %#v", resolved.ToolKeys)
+	}
 }
 
 func TestDelegatedTextRunStartInputInheritsFrozenWorkspace(t *testing.T) {

@@ -735,6 +735,9 @@ func applyTextRunAgentManifest(input StartTextRunInput, manifest *model.AgentMan
 		input.ExecutionMode = manifest.ExecutionMode
 	}
 	toolKeys := append([]string(nil), manifest.ToolKeys...)
+	if input.ToolKeys != nil {
+		toolKeys = intersectRuntimeStrings(*input.ToolKeys, manifest.ToolKeys)
+	}
 	skillRefs := append([]model.ResourceRef(nil), manifest.SkillRefs...)
 	input.ToolKeys, input.SkillRefs = &toolKeys, &skillRefs
 	return input
