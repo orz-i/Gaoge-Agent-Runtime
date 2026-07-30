@@ -104,7 +104,21 @@ func (s *Engine) executeFrozenToolProvider(ctx context.Context, run model.Run, s
 		if !ok {
 			return ToolExecutionResult{}, ErrRunSnapshotIncompatible
 		}
-		input := WorkspaceToolExecution{Actor: run.Actor, Thread: run.Thread, RunID: run.RunID, RequestID: requestID, ToolName: tool.OriginalName, ArgumentsJSON: call.ArgumentsJSON, Snapshot: *effective.Workspace}
+		provenance, err := runtimeWorkspaceToolExecutionProvenance(
+			run,
+			stepID,
+			*effective.Workspace,
+			call.ToolCallID,
+		)
+		if err != nil {
+			return ToolExecutionResult{}, err
+		}
+		input := WorkspaceToolExecution{
+			Actor: run.Actor, Thread: run.Thread, RunID: run.RunID,
+			RequestID: requestID, ToolName: tool.OriginalName,
+			ArgumentsJSON: call.ArgumentsJSON, Snapshot: *effective.Workspace,
+			RuntimeProvenance: provenance,
+		}
 		if tool.IdempotencyMode == ToolIdempotencyProviderReceipt {
 			receiptProvider, receiptOK := provider.(WorkspaceReceiptProvider)
 			if !receiptOK {

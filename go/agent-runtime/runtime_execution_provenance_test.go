@@ -194,6 +194,45 @@ func TestRuntimeExecutionProvenanceRejectsMutableRun(t *testing.T) {
 	}
 }
 
+func TestWorkspaceToolExecutionProvenanceFreezesMutableRunInvocation(t *testing.T) {
+	run := model.Run{
+		RunID: testProvenanceRunID, RootRunID: testProvenanceRootRunID,
+		RuntimeKind: model.RuntimeKindText, Status: model.RunStatusRunning,
+		RunConfigSnapshotJSON: `{"prompt":"hidden","apiKey":"secret"}`,
+		RequestFingerprint:    "request_hash", CurrentStepID: "step_1",
+		LastEventSeq: 8, LastPresentationEventSeq: 7,
+		PlatformModelName: "5.6 Terra", UpstreamModelName: testProvenanceModel,
+	}
+	workspace := WorkspaceSnapshot{
+		SnapshotID: testProvenanceSnapshotID,
+		StateHash:  "story_state_hash",
+		Prompt:     "private workspace prompt",
+	}
+	first, err := runtimeWorkspaceToolExecutionProvenance(
+		run,
+		"step_1",
+		workspace,
+		"tool_call_1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := runtimeWorkspaceToolExecutionProvenance(
+		run,
+		"step_1",
+		workspace,
+		"tool_call_2",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RunID != run.RunID || first.StateHash == second.StateHash {
+		t.Fatalf("invocation provenance first=%#v second=%#v", first, second)
+	}
+	assertRuntimeExecutionProvenanceRouteAndHashes(t, first)
+	assertRuntimeExecutionProvenanceRedacted(t, first)
+}
+
 func TestRuntimeExecutionProvenanceStateHashCoversWorkflowState(t *testing.T) {
 	actor := model.ActorRef{TenantID: testProvenanceTenantID, ActorID: testProvenanceActorID}
 	store := &runtimeExecutionProvenanceStore{

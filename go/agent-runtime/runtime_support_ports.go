@@ -169,6 +169,7 @@ type WorkspaceToolExecution struct {
 	Thread                                    domain.ThreadRef
 	RunID, RequestID, ToolName, ArgumentsJSON string
 	Snapshot                                  WorkspaceSnapshot
+	RuntimeProvenance                         *RuntimeExecutionProvenanceV1
 }
 
 type WorkspaceProvider interface {

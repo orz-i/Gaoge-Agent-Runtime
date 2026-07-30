@@ -36,9 +36,10 @@ type RuntimeModelRoutingSummaryV1 struct {
 }
 
 // RuntimeExecutionProvenanceV1 is a frozen, provider-neutral execution source.
-// It is available only after a Run reaches a terminal state. SnapshotHash
-// covers the exact persisted Run configuration; StateHash covers terminal
-// Runtime state while exposing none of that state's payload.
+// Runtime attaches an invocation-time snapshot to Workspace Tool Execution and
+// exposes the same contract through terminal Run queries. SnapshotHash covers
+// the exact persisted Run configuration; StateHash covers the captured Runtime
+// state while exposing none of that state's payload.
 type RuntimeExecutionProvenanceV1 struct {
 	SchemaVersion         int                           `json:"schemaVersion"`
 	RunID                 string                        `json:"runID"`
@@ -66,6 +67,22 @@ type runtimeExecutionStateFingerprintV1 struct {
 	ContextContentHash       string
 	ResultContentHash        string
 	WorkflowStateHash        string
+}
+
+type runtimeWorkspaceToolStateFingerprintV1 struct {
+	RunID                    string
+	RootRunID                string
+	RuntimeKind              string
+	RequestFingerprint       string
+	Status                   string
+	CurrentStepID            string
+	CurrentPlanID            string
+	LastEventSeq             int64
+	LastPresentationEventSeq int64
+	WorkspaceSnapshotID      string
+	WorkspaceStateHash       string
+	StepID                   string
+	ToolCallID               string
 }
 
 type runtimeWorkflowStateFingerprintV1 struct {
@@ -96,27 +113,63 @@ func (s *Engine) GetRuntimeExecutionProvenance(
 	if !runtimeExecutionProvenanceFrozen(run.Status) {
 		return nil, ErrRuntimeExecutionProvenanceNotFrozen
 	}
-	snapshotHash := hashRuntimeExecutionBytes([]byte(run.RunConfigSnapshotJSON))
-	stateHash, err := s.runtimeExecutionStateHash(ctx, actor, *run)
+	return s.runtimeExecutionProvenance(ctx, actor, *run)
+}
+
+func (s *Engine) runtimeExecutionProvenance(
+	ctx context.Context,
+	actor model.ActorRef,
+	run model.Run,
+) (*RuntimeExecutionProvenanceV1, error) {
+	stateHash, err := s.runtimeExecutionStateHash(ctx, actor, run)
 	if err != nil {
 		return nil, err
 	}
+	return runtimeExecutionProvenanceFromStateHash(run, stateHash), nil
+}
+
+func runtimeWorkspaceToolExecutionProvenance(
+	run model.Run,
+	stepID string,
+	workspace WorkspaceSnapshot,
+	toolCallID string,
+) (*RuntimeExecutionProvenanceV1, error) {
+	stateHash, err := hashRuntimeExecutionValue(runtimeWorkspaceToolStateFingerprintV1{
+		RunID: run.RunID, RootRunID: run.RootRunID,
+		RuntimeKind:        model.NormalizeRuntimeKind(run.RuntimeKind),
+		RequestFingerprint: run.RequestFingerprint, Status: run.Status,
+		CurrentStepID: run.CurrentStepID, CurrentPlanID: run.CurrentPlanID,
+		LastEventSeq:             run.LastEventSeq,
+		LastPresentationEventSeq: run.LastPresentationEventSeq,
+		WorkspaceSnapshotID:      workspace.SnapshotID,
+		WorkspaceStateHash:       workspace.StateHash,
+		StepID:                   strings.TrimSpace(stepID), ToolCallID: strings.TrimSpace(toolCallID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return runtimeExecutionProvenanceFromStateHash(run, stateHash), nil
+}
+
+func runtimeExecutionProvenanceFromStateHash(
+	run model.Run,
+	stateHash string,
+) *RuntimeExecutionProvenanceV1 {
 	rootRunID := strings.TrimSpace(run.RootRunID)
 	if rootRunID == "" {
 		rootRunID = run.RunID
 	}
 	return &RuntimeExecutionProvenanceV1{
-		SchemaVersion:         RuntimeExecutionProvenanceSchemaVersion,
-		RunID:                 run.RunID,
-		RootRunID:             rootRunID,
+		SchemaVersion: RuntimeExecutionProvenanceSchemaVersion,
+		RunID:         run.RunID, RootRunID: rootRunID,
 		RuntimeKind:           model.NormalizeRuntimeKind(run.RuntimeKind),
 		EnvironmentRef:        runtimeExecutionRevisionRef(run.Environment),
 		AgentManifestRef:      runtimeExecutionRevisionRef(run.AgentManifest),
 		WorkflowDefinitionRef: runtimeExecutionRevisionRef(run.WorkflowDefinition),
-		ModelRouting:          runtimeExecutionModelRouting(*run),
-		SnapshotHash:          snapshotHash,
+		ModelRouting:          runtimeExecutionModelRouting(run),
+		SnapshotHash:          hashRuntimeExecutionBytes([]byte(run.RunConfigSnapshotJSON)),
 		StateHash:             stateHash,
-	}, nil
+	}
 }
 
 func (s *Engine) runtimeExecutionStateHash(
