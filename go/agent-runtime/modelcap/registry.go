@@ -79,8 +79,9 @@ func structuredOutputModeValue(payload map[string]interface{}) (string, bool) {
 }
 
 type Limits struct {
-	ContextWindow   int `json:"contextWindow"`
-	MaxOutputTokens int `json:"maxOutputTokens"`
+	ContextWindow                 int `json:"contextWindow"`
+	MaxOutputTokens               int `json:"maxOutputTokens"`
+	EffectiveContextWindowPercent int `json:"effectiveContextWindowPercent,omitempty"`
 }
 
 type Resolution struct {
@@ -155,7 +156,8 @@ func normalizedNeedles(values []string) []string {
 }
 
 func validLimits(limits Limits) bool {
-	return limits.ContextWindow > 0 && limits.MaxOutputTokens > 0
+	return limits.ContextWindow > 0 && limits.MaxOutputTokens > 0 &&
+		limits.EffectiveContextWindowPercent >= 0 && limits.EffectiveContextWindowPercent <= 100
 }
 
 func (registry Registry) Resolve(modelName, capabilitiesJSON string) Resolution {
@@ -168,6 +170,15 @@ func (registry Registry) Resolve(modelName, capabilitiesJSON string) Resolution 
 	if value, ok := firstPositiveInt(payload, "contextWindow", "context_window", "contextWindowTokens", "context_window_tokens"); ok {
 		resolution.ContextWindow = value
 		resolution.ContextWindowSource = SourceConfigured
+	}
+	if value, ok := firstPositiveInt(payload, "maxContextWindow", "max_context_window"); ok {
+		if resolution.ContextWindowSource != SourceConfigured || value < resolution.ContextWindow {
+			resolution.ContextWindow = value
+		}
+		resolution.ContextWindowSource = SourceConfigured
+	}
+	if value, ok := firstPositiveInt(payload, "effectiveContextWindowPercent", "effective_context_window_percent"); ok && value <= 100 {
+		resolution.EffectiveContextWindowPercent = value
 	}
 	if value, ok := firstPositiveInt(payload, "maxOutputTokens", "max_output_tokens"); ok {
 		resolution.MaxOutputTokens = value
@@ -276,7 +287,11 @@ func EffectiveContextBudget(limits Limits) int {
 	if reserve > maxOutputReserveTokens {
 		reserve = maxOutputReserveTokens
 	}
-	budget := limits.ContextWindow - reserve - autocompactBufferTokens
+	contextWindow := limits.ContextWindow
+	if limits.EffectiveContextWindowPercent > 0 {
+		contextWindow = int(int64(contextWindow) * int64(limits.EffectiveContextWindowPercent) / 100)
+	}
+	budget := contextWindow - reserve - autocompactBufferTokens
 	if budget < minimumContextBudget {
 		return minimumContextBudget
 	}

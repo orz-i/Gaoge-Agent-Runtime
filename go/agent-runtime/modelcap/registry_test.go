@@ -69,3 +69,20 @@ func TestEffectiveContextBudgetUsesResolvedLimits(t *testing.T) {
 		t.Fatalf("effective context budget = %d", got)
 	}
 }
+
+func TestEffectiveContextBudgetSupportsProviderWindowMetadata(t *testing.T) {
+	resolution := Default.Resolve("deepseek-v4-flash", `{
+		"context_window":1048576,
+		"max_context_window":1048576,
+		"effective_context_window_percent":95
+	}`)
+	if resolution.ContextWindow != 1_048_576 || resolution.EffectiveContextWindowPercent != 95 {
+		t.Fatalf("provider limits = %#v", resolution)
+	}
+	if resolution.ContextWindowSource != SourceConfigured {
+		t.Fatalf("context window source = %q", resolution.ContextWindowSource)
+	}
+	if got := resolution.EffectiveContextBudget(); got != 974_955 {
+		t.Fatalf("effective context budget = %d", got)
+	}
+}
