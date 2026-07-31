@@ -129,6 +129,9 @@ func validateStructuredRunText(text string, schemaJSON json.RawMessage) error {
 
 func unwrapStructuredRunJSON(text string) string {
 	value := strings.TrimSpace(text)
+	if fenced := fencedStructuredRunJSON(value); fenced != "" {
+		return fenced
+	}
 	if !strings.HasPrefix(value, "```") || !strings.HasSuffix(value, "```") {
 		return value
 	}
@@ -137,6 +140,24 @@ func unwrapStructuredRunJSON(text string) string {
 	value = strings.TrimPrefix(value, "```JSON")
 	value = strings.TrimPrefix(value, "```")
 	return strings.TrimSpace(value)
+}
+
+func fencedStructuredRunJSON(value string) string {
+	for _, marker := range []string{"```json", "```JSON"} {
+		start := strings.Index(value, marker)
+		if start < 0 {
+			continue
+		}
+		contentStart := start + len(marker)
+		endOffset := strings.Index(value[contentStart:], "```")
+		if endOffset < 0 {
+			continue
+		}
+		if candidate := strings.TrimSpace(value[contentStart : contentStart+endOffset]); candidate != "" {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func structuredRunCorrectionAttempts(effective effectiveTextRunConfig) int {

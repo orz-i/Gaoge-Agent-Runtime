@@ -134,6 +134,25 @@ func TestStructuredRunAnswerCanonicalizesJSONFenceWithoutCorrection(t *testing.T
 	assertRunEventCount(t, repo.events, "message.delta", 1)
 }
 
+func TestNormalizeStructuredRunTextExtractsFencedJSONAfterMarkdown(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type":"object",
+		"required":["value"],
+		"additionalProperties":false,
+		"properties":{"value":{"type":"integer"}}
+	}`)
+	text, err := normalizeStructuredRunText(
+		"# Result\nThe structured payload follows.\n```json\n{\"value\":7}\n```\n",
+		schema,
+	)
+	if err != nil {
+		t.Fatalf("normalizeStructuredRunText() error = %v", err)
+	}
+	if text != `{"value":7}` {
+		t.Fatalf("normalized text = %q", text)
+	}
+}
+
 func TestTextRunResultCanonicalizesJSONFenceAtWorkflowBoundary(t *testing.T) {
 	schema := json.RawMessage(`{
 		"type":"object",
