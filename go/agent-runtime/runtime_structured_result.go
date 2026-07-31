@@ -112,6 +112,11 @@ func normalizeStructuredRunText(text string, schemaJSON json.RawMessage) (string
 	if err != nil {
 		return "", errors.Join(ErrWorkflowResultInvalid, err)
 	}
+	schema, schemaErr := decodeWorkflowJSON(schemaJSON)
+	if schemaErr != nil {
+		return "", errors.Join(ErrWorkflowSchemaInvalid, schemaErr)
+	}
+	decoded = pruneStructuredRunTopLevelProperties(decoded, schema)
 	if err = validateWorkflowJSON(schemaJSON, decoded); err != nil {
 		return "", errors.Join(ErrWorkflowResultInvalid, err)
 	}
@@ -120,6 +125,25 @@ func normalizeStructuredRunText(text string, schemaJSON json.RawMessage) (string
 		return "", errors.Join(ErrWorkflowResultInvalid, err)
 	}
 	return string(canonical), nil
+}
+
+func pruneStructuredRunTopLevelProperties(value, schema interface{}) interface{} {
+	object, objectOK := value.(map[string]interface{})
+	contract, schemaOK := schema.(map[string]interface{})
+	if !objectOK || !schemaOK || contract["additionalProperties"] != false || contract["patternProperties"] != nil {
+		return value
+	}
+	properties, ok := contract["properties"].(map[string]interface{})
+	if !ok {
+		return value
+	}
+	result := make(map[string]interface{}, len(object))
+	for key, item := range object {
+		if _, allowed := properties[key]; allowed {
+			result[key] = item
+		}
+	}
+	return result
 }
 
 func validateStructuredRunText(text string, schemaJSON json.RawMessage) error {

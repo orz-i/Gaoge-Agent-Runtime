@@ -153,6 +153,27 @@ func TestNormalizeStructuredRunTextExtractsFencedJSONAfterMarkdown(t *testing.T)
 	}
 }
 
+func TestNormalizeStructuredRunTextPrunesForbiddenTopLevelProperties(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type":"object",
+		"additionalProperties":false,
+		"required":["title","operations"],
+		"properties":{"title":{"type":"string"},"operations":{"type":"array"}}
+	}`)
+	got, err := normalizeStructuredRunText(`{
+		"title":"Change set",
+		"operations":[],
+		"baseRevision":2,
+		"artifactContract":"change_set"
+	}`, schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `{"operations":[],"title":"Change set"}` {
+		t.Fatalf("normalized structured result = %s", got)
+	}
+}
+
 func TestTextRunResultCanonicalizesJSONFenceAtWorkflowBoundary(t *testing.T) {
 	schema := json.RawMessage(`{
 		"type":"object",
