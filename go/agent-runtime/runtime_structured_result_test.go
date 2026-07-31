@@ -2,6 +2,7 @@ package agentruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -90,6 +91,63 @@ func TestStructuredRunAnswerNegotiatesValidatesAndCorrectsOnce(t *testing.T) {
 		t.Fatalf("streamRunAnswer() error = %v", err)
 	}
 	assertStructuredCorrectionResult(t, gateway, repo, usage, text)
+}
+
+func TestStructuredRunAnswerCanonicalizesJSONFenceWithoutCorrection(t *testing.T) {
+	gateway := &structuredResultGateway{
+		capabilities: `{"structuredOutput":{"mode":"strict_json_schema"}}`,
+		outputs:      []*GenerateOutput{{Text: "```json\n{\"value\":7}\n```"}},
+	}
+	repo := &multiTurnRunRepo{}
+	engine := &Engine{
+		cfg:               StaticConfigProvider(Config{}),
+		repo:              repo,
+		llmGateway:        gateway,
+		generationStreams: newGenerationStreamRegistry(nil, generationStreamOptions{}),
+	}
+	run := model.Run{
+		RunID: "run_structured_fence", RequestID: "request_structured_fence",
+		Actor:  model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey},
+		Thread: model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey},
+	}
+	effective := effectiveTextRunConfig{
+		PlatformModelName: "structured-test-model", MaxLLMCalls: 2,
+		StructuredOutputSchema: []byte(`{
+			"type":"object",
+			"required":["value"],
+			"additionalProperties":false,
+			"properties":{"value":{"type":"integer"}}
+		}`),
+		ResultAttempts: 1,
+	}
+	_, _, text, err := engine.streamRunAnswer(
+		t.Context(), run, "step_result", effective, "direct", "direct",
+		[]Message{{Role: valueUser19341906, Content: "return a value"}}, "answer", false,
+	)
+	if err != nil {
+		t.Fatalf("streamRunAnswer() error = %v", err)
+	}
+	if text != `{"value":7}` || len(gateway.inputs) != 1 {
+		t.Fatalf("result text=%q calls=%d", text, len(gateway.inputs))
+	}
+	assertRunEventCount(t, repo.events, "result.correction.started", 0)
+	assertRunEventCount(t, repo.events, "message.delta", 1)
+}
+
+func TestTextRunResultCanonicalizesJSONFenceAtWorkflowBoundary(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type":"object",
+		"required":["value"],
+		"additionalProperties":false,
+		"properties":{"value":{"type":"integer"}}
+	}`)
+	result, err := textRunResult("run_fenced_workflow_child", "```json\n{\"value\":7}\n```", schema)
+	if err != nil {
+		t.Fatalf("textRunResult() error = %v", err)
+	}
+	if result.CanonicalJSON != `{"value":7}` {
+		t.Fatalf("canonical JSON = %q", result.CanonicalJSON)
+	}
 }
 
 func assertStructuredCorrectionResult(t *testing.T, gateway *structuredResultGateway, repo *multiTurnRunRepo, usage Usage, resultText string) {

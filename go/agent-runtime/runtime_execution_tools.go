@@ -412,6 +412,12 @@ func (s *Engine) generateRunStepTurn(ctx context.Context, run model.Run, step mo
 		ToolChoice:   toolChoiceForRunStep(effective, prepared.forceToolChoiceRequired),
 		Options:      effective.Options,
 	}
+	if s.cfg != nil {
+		maxInputTokens := s.cfg.Snapshot().Context.MaxInputTokens
+		toolTokens := estimateToolDefinitionTokens(request.Tools)
+		request.Messages = enforcePromptInputBudget(request.Messages, toolTokens, maxInputTokens)
+		request.Messages = enforcePromptTransportByteBudget(request.Messages, request.Tools, maxInputTokens)
+	}
 	if err := s.recordRunLLMRouteSelected(context.WithoutCancel(ctx), run, step.StepID, valueStepB959B536, prepared.route, request.RequestID); err != nil {
 		return nil, err
 	}

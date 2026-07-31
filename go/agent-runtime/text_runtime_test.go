@@ -300,6 +300,23 @@ func TestParseAndValidatePlanNormalizesPlanSummary(t *testing.T) {
 	}
 }
 
+func TestParseAndValidatePlanNormalizesProviderEnvelopeVariations(t *testing.T) {
+	for name, raw := range map[string]string{
+		"version metadata": `{"version":2,"summary":"Use local evidence","steps":[{"key":"collect","title":"Collect","description":"Collect evidence","dependsOn":[],"approvalRequired":false,"expectedTools":[],"resourceRefs":[]}]}`,
+		"top-level steps":  `[{"key":"collect","title":"Collect","description":"Collect evidence","dependsOn":[],"approvalRequired":false,"expectedTools":[],"resourceRefs":[]}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload, err := parseAndValidatePlan(raw, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(payload.Steps) != 1 || payload.Steps[0].Key != "collect" {
+				t.Fatalf("unexpected normalized plan: %#v", payload)
+			}
+		})
+	}
+}
+
 func TestParseAndValidatePlanRejectsConflictingSummaryAlias(t *testing.T) {
 	_, err := parseAndValidatePlan(`{"summary":"first","planSummary":"second","steps":[{"key":"collect","title":"Collect","description":"Collect evidence","dependsOn":[],"approvalRequired":false,"expectedTools":[],"resourceRefs":[]}]}`, 3)
 	if err == nil || !strings.Contains(err.Error(), "conflicts") {

@@ -13,7 +13,10 @@ import (
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v5"
 )
 
-const maxToolContractBytes = 256 * 1024
+const (
+	maxToolContractBytes = 256 * 1024
+	schemaKeywordAnyOf   = "anyOf"
+)
 
 var (
 	ErrToolSchemaInvalid    = errors.New("tool schema is invalid")
@@ -125,6 +128,7 @@ func validateAndCanonicalizeToolContract(schema json.RawMessage, value interface
 	if err != nil {
 		return "", err
 	}
+	value = canonicalizeToolContractPropertyNames(schema, value)
 	if missing := missingRootToolContractFields(schema, value); len(missing) > 0 {
 		return "", newToolContractError(kind, "$", "required parameters are missing: "+strings.Join(missing, ", "))
 	}
@@ -139,6 +143,130 @@ func validateAndCanonicalizeToolContract(schema json.RawMessage, value interface
 		return "", newToolContractError(kind, "$", "value cannot be canonicalized")
 	}
 	return string(encoded), nil
+}
+
+// canonicalizeToolContractPropertyNames repairs provider casing drift without
+// weakening the frozen contract. Unknown keys remain untouched and are still
+// rejected by additionalProperties:false; only a unique case-insensitive match
+// to a declared property is rewritten before validation.
+func canonicalizeToolContractPropertyNames(schema json.RawMessage, value interface{}) interface{} {
+	var node map[string]interface{}
+	if json.Unmarshal(schema, &node) != nil {
+		return value
+	}
+	return canonicalizeToolContractValue(node, value)
+}
+
+func canonicalizeToolContractValue(schema map[string]interface{}, value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return canonicalizeToolContractObject(schema, typed)
+	case []interface{}:
+		return canonicalizeToolContractArray(schema, typed)
+	default:
+		return value
+	}
+}
+
+func canonicalizeToolContractObject(schema map[string]interface{}, value map[string]interface{}) map[string]interface{} {
+	properties := collectToolContractProperties(schema)
+	canonicalByFold := canonicalToolContractPropertyNames(properties)
+	result := make(map[string]interface{}, len(value))
+	for name, item := range value {
+		canonical := canonicalToolContractPropertyName(name, properties, canonicalByFold)
+		if _, collision := result[canonical]; collision && canonical != name {
+			result[name] = item
+			continue
+		}
+		result[canonical] = canonicalizeToolContractValue(combinedToolContractSchema(properties[canonical]), item)
+	}
+	return result
+}
+
+func canonicalToolContractPropertyNames(properties map[string][]map[string]interface{}) map[string]string {
+	canonicalByFold := make(map[string]string, len(properties))
+	for name := range properties {
+		folded := strings.ToLower(name)
+		if existing, ok := canonicalByFold[folded]; ok && existing != name {
+			canonicalByFold[folded] = ""
+			continue
+		}
+		canonicalByFold[folded] = name
+	}
+	return canonicalByFold
+}
+
+func canonicalToolContractPropertyName(
+	name string,
+	properties map[string][]map[string]interface{},
+	canonicalByFold map[string]string,
+) string {
+	if _, exact := properties[name]; exact {
+		return name
+	}
+	if matched := canonicalByFold[strings.ToLower(name)]; matched != "" {
+		return matched
+	}
+	return name
+}
+
+func canonicalizeToolContractArray(schema map[string]interface{}, value []interface{}) []interface{} {
+	itemSchema := combinedToolContractSchema(collectToolContractItems(schema))
+	for index := range value {
+		value[index] = canonicalizeToolContractValue(itemSchema, value[index])
+	}
+	return value
+}
+
+func collectToolContractProperties(schema map[string]interface{}) map[string][]map[string]interface{} {
+	result := make(map[string][]map[string]interface{})
+	for _, candidate := range toolContractSchemaCandidates(schema) {
+		raw, _ := candidate["properties"].(map[string]interface{})
+		for name, property := range raw {
+			if propertySchema, ok := property.(map[string]interface{}); ok {
+				result[name] = append(result[name], propertySchema)
+			}
+		}
+	}
+	return result
+}
+
+func collectToolContractItems(schema map[string]interface{}) []map[string]interface{} {
+	var result []map[string]interface{}
+	for _, candidate := range toolContractSchemaCandidates(schema) {
+		if items, ok := candidate["items"].(map[string]interface{}); ok {
+			result = append(result, items)
+		}
+	}
+	return result
+}
+
+func toolContractSchemaCandidates(schema map[string]interface{}) []map[string]interface{} {
+	result := []map[string]interface{}{schema}
+	for _, keyword := range []string{"oneOf", schemaKeywordAnyOf, "allOf"} {
+		branches, _ := schema[keyword].([]interface{})
+		for _, branch := range branches {
+			if candidate, ok := branch.(map[string]interface{}); ok {
+				result = append(result, toolContractSchemaCandidates(candidate)...)
+			}
+		}
+	}
+	return result
+}
+
+func combinedToolContractSchema(candidates []map[string]interface{}) map[string]interface{} {
+	switch len(candidates) {
+	case 0:
+		return map[string]interface{}{}
+	case 1:
+		return candidates[0]
+	default:
+		branches := make([]interface{}, len(candidates))
+		for index := range candidates {
+			branches[index] = candidates[index]
+		}
+		return map[string]interface{}{schemaKeywordAnyOf: branches}
+	}
 }
 
 func unexpectedRootToolContractFields(schema json.RawMessage, value interface{}) []string {

@@ -133,11 +133,11 @@ func (s *Engine) finishStreamRun(ctx context.Context, run model.Run, stepID, pha
 	if err != nil {
 		return usageFromGenerateOutput(output), "", err
 	}
-	invalidText, err := s.finishStreamEvaluation(ctx, run, stepID, phase, output, collector, finalText, structuredSchema)
+	normalizedText, err := s.finishStreamEvaluation(ctx, run, stepID, phase, output, collector, finalText, structuredSchema)
 	if err != nil {
-		return usageFromGenerateOutput(output), invalidText, err
+		return usageFromGenerateOutput(output), normalizedText, err
 	}
-	return usageFromGenerateOutput(output), finalText, nil
+	return usageFromGenerateOutput(output), normalizedText, nil
 }
 
 func flushStreamBeforeEvaluation(collector *runDeltaCollector) error {
@@ -158,16 +158,23 @@ func (s *Engine) finishStreamEvaluation(ctx context.Context, run model.Run, step
 		collector.buffer.Reset()
 		return "", err
 	}
+	normalizedText := finalText
 	if len(structuredSchema) > 0 {
-		if err := validateStructuredRunText(finalText, structuredSchema); err != nil {
+		var err error
+		normalizedText, err = normalizeStructuredRunText(finalText, structuredSchema)
+		if err != nil {
 			collector.buffer.Reset()
 			return finalText, err
 		}
+		collector.buffer.Reset()
+		collector.buffer.WriteString(normalizedText)
 	}
 	if collector.holdForEvaluation {
-		return "", collector.flushFinal()
+		if err := collector.flushFinal(); err != nil {
+			return "", err
+		}
 	}
-	return "", nil
+	return normalizedText, nil
 }
 
 // finalizeStreamCollectorText applies the public-text gate after streaming ends.

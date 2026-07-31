@@ -567,19 +567,36 @@ func (s *Engine) generatePlanAttempt(ctx context.Context, run model.Run, effecti
 }
 
 // normalizePlanCollectionFields canonicalizes the narrow set of planner
-// variations that have an unambiguous v2 representation. Omitted collection
-// fields are empty, omitted approval is fail-safe true, and the observed
-// dependencies alias maps to dependsOn. Ambiguous aliases and every other scalar
-// contract field remain invalid so malformed plans still fail loudly.
+// variations that have an unambiguous v2 representation. A top-level array is
+// the steps collection, provider-added version metadata is discarded, omitted
+// collection fields are empty, omitted approval is fail-safe true, and the
+// observed dependencies alias maps to dependsOn. Ambiguous aliases and every
+// other scalar contract field remain invalid so malformed plans still fail
+// loudly.
 func normalizePlanCollectionFields(raw string) (string, error) {
 	var root map[string]json.RawMessage
+	arrayEnvelope := false
 	if err := json.Unmarshal([]byte(raw), &root); err != nil {
-		return "", err
+		var steps []json.RawMessage
+		if arrayErr := json.Unmarshal([]byte(raw), &steps); arrayErr != nil {
+			return "", err
+		}
+		stepsRaw, marshalErr := json.Marshal(steps)
+		if marshalErr != nil {
+			return "", marshalErr
+		}
+		root = map[string]json.RawMessage{valueSteps82EB3C5C: stepsRaw}
+		arrayEnvelope = true
+	}
+	_, providerVersion := root["version"]
+	if providerVersion {
+		delete(root, "version")
 	}
 	changed, err := normalizePlanSummaryAlias(root)
 	if err != nil {
 		return "", err
 	}
+	changed = changed || providerVersion || arrayEnvelope
 	stepsRaw, present := root[valueSteps82EB3C5C]
 	if !present {
 		if !changed {

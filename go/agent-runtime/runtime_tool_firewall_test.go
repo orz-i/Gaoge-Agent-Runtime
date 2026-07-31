@@ -337,6 +337,50 @@ func TestNormalizeToolArgumentsAgainstSchemaCanonicalizesAndValidates(t *testing
 	}
 }
 
+func TestNormalizeToolArgumentsAgainstSchemaRepairsNestedProviderCasing(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type":"object",
+		"required":["operations"],
+		"additionalProperties":false,
+		"properties":{
+			"operations":{
+				"type":"array",
+				"items":{
+					"oneOf":[{
+						"type":"object",
+						"required":["targetKind","evidence"],
+						"additionalProperties":false,
+						"properties":{
+							"targetKind":{"const":"foundation"},
+							"evidence":{
+								"type":"array",
+								"items":{
+									"type":"object",
+									"required":["targetID"],
+									"additionalProperties":false,
+									"properties":{"targetID":{"type":"string"},"blockID":{"type":"string"}}
+								}
+							}
+						}
+					}]
+				}
+			}
+		}
+	}`)
+
+	got, err := normalizeToolArgumentsAgainstSchema(
+		`{"operations":[{"targetkind":"foundation","evidence":[{"targetid":"story_1","blockid":"block_1"}]}]}`,
+		schema,
+	)
+	if err != nil {
+		t.Fatalf("normalizeToolArgumentsAgainstSchema() error = %v", err)
+	}
+	want := `{"operations":[{"evidence":[{"blockID":"block_1","targetID":"story_1"}],"targetKind":"foundation"}]}`
+	if got != want {
+		t.Fatalf("canonical arguments = %s, want %s", got, want)
+	}
+}
+
 func TestSnapshotResolvedRunToolRejectsInvalidContracts(t *testing.T) {
 	base := ResolvedTool{
 		ToolKey:            testFirewallToolKey,

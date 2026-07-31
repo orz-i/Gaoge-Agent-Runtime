@@ -208,13 +208,15 @@ func textRunResult(runID, finalText string, schemaJSON json.RawMessage) (*model.
 		return nil, err
 	}
 	if len(schemaJSON) > 0 {
-		decoded, err := decodeWorkflowJSON([]byte(finalText))
+		normalizedText, normalizeErr := normalizeStructuredRunText(finalText, schemaJSON)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		decoded, err := decodeWorkflowJSON([]byte(normalizedText))
 		if err != nil {
 			return nil, errors.Join(ErrWorkflowResultInvalid, err)
 		}
-		if err = validateWorkflowJSON(schemaJSON, decoded); err != nil {
-			return nil, errors.Join(ErrWorkflowResultInvalid, err)
-		}
+		finalText = normalizedText
 		value = decoded
 		schemaHash, err = hashWorkflowValue(schemaJSON)
 		if err != nil {

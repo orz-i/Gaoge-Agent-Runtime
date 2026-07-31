@@ -3,6 +3,7 @@ package agentruntime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -18,6 +19,19 @@ const (
 	valueAssistantB87088D6 = "assistant"
 	valueImageBE9EE30F     = "image"
 	valueSystemE36EB5DA    = "system"
+)
+
+// Provider request wrappers and token estimation both add uncertainty around
+// the configured input limit. Keep bounded transport headroom while accounting
+// for tool definitions, which providers count as input context too.
+const promptTransportBudgetPercent int64 = 80
+
+// The gateway request body includes JSON message and tool-schema envelopes in
+// addition to model tokens. Bound that serialized core independently so an
+// upstream HTTP body limit cannot be exceeded by a long transcript.
+const (
+	promptTransportBytesNumerator   int64 = 5
+	promptTransportBytesDenominator int64 = 2
 )
 
 // PromptBlockKind 标识 PromptPlan 中每一类上下文块。
@@ -133,6 +147,7 @@ func buildPromptPlan(ctx context.Context, input promptPlanInput) PromptPlan {
 
 	before = len(messages)
 	messages = injectMCPToolGuidance(messages, input.ToolRuntime, input.Config.Tools.Prompt)
+	toolTokens := estimateToolDefinitionTokens(input.ToolRuntime.definitions)
 	if len(messages) > before {
 		inserted := findToolGuidanceMessage(messages)
 		tokenEstimate := int64(0)
@@ -142,16 +157,144 @@ func buildPromptPlan(ctx context.Context, input promptPlanInput) PromptPlan {
 		trace.addBlock(PromptBlockTrace{
 			Kind:          PromptBlockToolGuidance,
 			Title:         "工具使用规则",
-			TokenEstimate: tokenEstimate,
+			TokenEstimate: tokenEstimate + toolTokens,
 			Cacheable:     true,
 			SourceCount:   len(input.ToolRuntime.definitions),
 			SourceRefs:    toolDefinitionSourceRefs(input.ToolRuntime.definitions),
 		})
 	}
+	messages = enforcePromptInputBudget(messages, toolTokens, input.Config.Context.MaxInputTokens)
+	messages = enforcePromptTransportByteBudget(messages, input.ToolRuntime.definitions, input.Config.Context.MaxInputTokens)
+	trace.updateTranscript(messages)
 	messages = markLeadingSystemMessagesCacheable(messages)
 
-	trace.TotalTokenEstimate = estimatePromptTokens(messages)
+	trace.TotalTokenEstimate = estimatePromptTokens(messages) + toolTokens
 	return PromptPlan{Messages: messages, Trace: trace}
+}
+
+func enforcePromptTransportByteBudget(messages []Message, definitions []ToolDefinition, maxInputTokens int) []Message {
+	if maxInputTokens <= 0 || len(messages) == 0 {
+		return messages
+	}
+	// Keep the multiplication expressed without a fractional constant.
+	budget := int64(maxInputTokens) * promptTransportBytesNumerator / promptTransportBytesDenominator
+	if budget < 1 {
+		budget = 1
+	}
+	result := cloneLLMMessages(messages)
+	for estimatePromptTransportBytes(result, definitions) > budget {
+		trimmed, ok := trimOldestPromptTurn(result)
+		if !ok {
+			trimmed, ok = trimSupersededFailedToolAttempt(result)
+		}
+		if !ok {
+			break
+		}
+		result = trimmed
+	}
+	return result
+}
+
+func estimatePromptTransportBytes(messages []Message, definitions []ToolDefinition) int64 {
+	raw, err := json.Marshal(struct {
+		Messages []Message        `json:"messages"`
+		Tools    []ToolDefinition `json:"tools,omitempty"`
+	}{Messages: messages, Tools: definitions})
+	if err != nil {
+		return 0
+	}
+	return int64(len(raw))
+}
+
+func estimateToolDefinitionTokens(definitions []ToolDefinition) int64 {
+	if len(definitions) == 0 {
+		return 0
+	}
+	raw, err := json.Marshal(definitions)
+	if err != nil {
+		return 0
+	}
+	return estimateTokens(string(raw))
+}
+
+func enforcePromptInputBudget(messages []Message, toolTokens int64, maxInputTokens int) []Message {
+	if maxInputTokens <= 0 || len(messages) == 0 {
+		return messages
+	}
+	budget := int64(maxInputTokens) * promptTransportBudgetPercent / 100
+	if budget < 1 {
+		budget = 1
+	}
+	result := cloneLLMMessages(messages)
+	for estimatePromptTokens(result)+toolTokens > budget {
+		trimmed, ok := trimOldestPromptTurn(result)
+		if !ok {
+			trimmed, ok = trimSupersededFailedToolAttempt(result)
+		}
+		if !ok {
+			break
+		}
+		result = trimmed
+	}
+	return result
+}
+
+func trimSupersededFailedToolAttempt(messages []Message) ([]Message, bool) {
+	failedResultMessages := 0
+	for _, message := range messages {
+		if messageHasFailedToolResult(message) {
+			failedResultMessages++
+		}
+	}
+	if failedResultMessages < 2 {
+		return messages, false
+	}
+	for index := 0; index+1 < len(messages); index++ {
+		if len(messages[index].ToolCalls) == 0 || !messageHasFailedToolResult(messages[index+1]) {
+			continue
+		}
+		result := make([]Message, 0, len(messages)-2)
+		result = append(result, messages[:index]...)
+		result = append(result, messages[index+2:]...)
+		return result, true
+	}
+	return messages, false
+}
+
+func messageHasFailedToolResult(message Message) bool {
+	for _, result := range message.ToolResults {
+		if strings.TrimSpace(result.Error) != "" || strings.EqualFold(strings.TrimSpace(result.Status), "failed") {
+			return true
+		}
+	}
+	return false
+}
+
+func trimOldestPromptTurn(messages []Message) ([]Message, bool) {
+	first := -1
+	latestUser := -1
+	for index, message := range messages {
+		if message.Role != valueSystemE36EB5DA && first < 0 {
+			first = index
+		}
+		if message.Role == valueUser90BA419D {
+			latestUser = index
+		}
+	}
+	if first < 0 || first >= latestUser {
+		return messages, false
+	}
+	end := latestUser
+	for index := first + 1; index < latestUser; index++ {
+		if messages[index].Role == valueUser90BA419D {
+			end = index
+			break
+		}
+	}
+	result := make([]Message, 0, len(messages)-(end-first))
+	result = append(result, messages[:first]...)
+	result = append(result, messages[end:]...)
+	return result, true
 }
 
 func injectDynamicPromptPlanContext(ctx context.Context, messages []Message, input promptPlanInput, trace *PromptTrace) []Message {
@@ -212,6 +355,18 @@ func (t *PromptTrace) addBlock(block PromptBlockTrace) {
 		block.SourceCount = 0
 	}
 	t.Blocks = append(t.Blocks, block)
+}
+
+func (t *PromptTrace) updateTranscript(messages []Message) {
+	for index := range t.Blocks {
+		if t.Blocks[index].Kind != PromptBlockTranscript {
+			continue
+		}
+		t.Blocks[index].TokenEstimate = estimateTranscriptTokens(messages)
+		t.Blocks[index].SourceCount = countMessagesByRole(messages, valueUser90BA419D) +
+			countMessagesByRole(messages, valueAssistantB87088D6)
+		return
+	}
 }
 
 // cloneLLMMessages 复制消息切片，避免规划过程修改调用方持有的切片头。

@@ -107,15 +107,36 @@ func truncateStructuredValidationError(err error) string {
 	return value
 }
 
-func validateStructuredRunText(text string, schemaJSON json.RawMessage) error {
-	decoded, err := decodeWorkflowJSON([]byte(text))
+func normalizeStructuredRunText(text string, schemaJSON json.RawMessage) (string, error) {
+	decoded, err := decodeWorkflowJSON([]byte(unwrapStructuredRunJSON(text)))
 	if err != nil {
-		return errors.Join(ErrWorkflowResultInvalid, err)
+		return "", errors.Join(ErrWorkflowResultInvalid, err)
 	}
 	if err = validateWorkflowJSON(schemaJSON, decoded); err != nil {
-		return errors.Join(ErrWorkflowResultInvalid, err)
+		return "", errors.Join(ErrWorkflowResultInvalid, err)
 	}
-	return nil
+	canonical, err := canonicalWorkflowJSON(decoded)
+	if err != nil {
+		return "", errors.Join(ErrWorkflowResultInvalid, err)
+	}
+	return string(canonical), nil
+}
+
+func validateStructuredRunText(text string, schemaJSON json.RawMessage) error {
+	_, err := normalizeStructuredRunText(text, schemaJSON)
+	return err
+}
+
+func unwrapStructuredRunJSON(text string) string {
+	value := strings.TrimSpace(text)
+	if !strings.HasPrefix(value, "```") || !strings.HasSuffix(value, "```") {
+		return value
+	}
+	value = strings.TrimSuffix(value, "```")
+	value = strings.TrimPrefix(value, "```json")
+	value = strings.TrimPrefix(value, "```JSON")
+	value = strings.TrimPrefix(value, "```")
+	return strings.TrimSpace(value)
 }
 
 func structuredRunCorrectionAttempts(effective effectiveTextRunConfig) int {
