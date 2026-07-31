@@ -105,17 +105,23 @@ func (s *Engine) applyExpiredRunHandoffJoin(ctx context.Context, result expiredR
 	if result.join == nil || result.parent == nil || result.join.TimeoutPolicy != model.RunHandoffJoinTimeoutCancelPending {
 		return
 	}
-	s.cancelHandoffJoinChildren(context.WithoutCancel(ctx), *result.parent, *result.join)
+	s.cancelHandoffJoinChildren(context.WithoutCancel(ctx), *result.parent, *result.join, "Delegated task wait timed out")
 }
 
-func (s *Engine) cancelHandoffJoinChildren(ctx context.Context, parent model.Run, join model.RunHandoffJoin) {
+func (s *Engine) cancelHandoffJoinChildren(ctx context.Context, parent model.Run, join model.RunHandoffJoin, reason string) {
 	for _, handoffID := range join.HandoffIDs {
 		handoff, err := s.repo.GetRunHandoff(ctx, join.Actor, handoffID)
 		if err != nil || handoff == nil || handoff.Status != model.RunHandoffStatusQueued {
 			continue
 		}
-		s.cancelDelegatedChild(ctx, parent, *handoff, "Delegated task wait timed out")
+		s.cancelDelegatedChild(ctx, parent, *handoff, reason)
 	}
+}
+
+func runHandoffJoinCancelsPendingOnReady(join model.RunHandoffJoin) bool {
+	return join.Status == model.RunHandoffJoinStatusReady &&
+		join.Mode != model.RunHandoffJoinModeAll &&
+		join.TimeoutPolicy == model.RunHandoffJoinTimeoutCancelPending
 }
 
 func runHandoffJoinContextFingerprint(value runHandoffJoinContext) string {
@@ -174,6 +180,9 @@ func (s *Engine) createRunHandoffJoinWait(ctx context.Context, input CreateRunHa
 	}
 	if result.continuationCreated {
 		s.wakeContinuationJobs()
+	}
+	if runHandoffJoinCancelsPendingOnReady(result.join) {
+		s.cancelHandoffJoinChildren(context.WithoutCancel(ctx), result.parent, result.join, "Delegated task was not required after the handoff join became ready")
 	}
 	join := result.join
 	return &join, result.reused, nil

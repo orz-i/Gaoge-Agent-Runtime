@@ -342,6 +342,39 @@ func TestResolveReadyRunHandoffJoinQueuesParentContinuation(t *testing.T) {
 	assertReadyRunHandoffJoinResolution(t, store, checkpoint, events, queued, err)
 }
 
+func TestRunHandoffJoinCancelsPendingOnReady(t *testing.T) {
+	tests := []struct {
+		name string
+		join model.RunHandoffJoin
+		want bool
+	}{
+		{
+			name: "quorum ready with cancel pending",
+			join: model.RunHandoffJoin{Status: model.RunHandoffJoinStatusReady, Mode: model.RunHandoffJoinModeQuorum, TimeoutPolicy: model.RunHandoffJoinTimeoutCancelPending},
+			want: true,
+		},
+		{
+			name: "any ready with leave running",
+			join: model.RunHandoffJoin{Status: model.RunHandoffJoinStatusReady, Mode: model.RunHandoffJoinModeAny, TimeoutPolicy: model.RunHandoffJoinTimeoutLeaveRunning},
+		},
+		{
+			name: "all ready",
+			join: model.RunHandoffJoin{Status: model.RunHandoffJoinStatusReady, Mode: model.RunHandoffJoinModeAll, TimeoutPolicy: model.RunHandoffJoinTimeoutCancelPending},
+		},
+		{
+			name: "quorum pending",
+			join: model.RunHandoffJoin{Status: model.RunHandoffJoinStatusPending, Mode: model.RunHandoffJoinModeQuorum, TimeoutPolicy: model.RunHandoffJoinTimeoutCancelPending},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := runHandoffJoinCancelsPendingOnReady(tt.join); got != tt.want {
+				t.Fatalf("runHandoffJoinCancelsPendingOnReady() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func assertReadyRunHandoffJoinResolution(t *testing.T, store *handoffJoinRuntimeStore, checkpoint model.Checkpoint, events []model.Event, queued bool, err error) {
 	t.Helper()
 	if err != nil || !queued || store.resumeStatus != model.RunStatusRunning || store.continuationJob == nil {

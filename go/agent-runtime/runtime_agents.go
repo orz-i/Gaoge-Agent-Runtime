@@ -925,6 +925,9 @@ func (s *Engine) finalizeRunHandoff(ctx context.Context, run model.Run, intent m
 			return "", nil, resolveErr
 		}
 		events = append(events, resolved...)
+		if runHandoffJoinCancelsPendingOnReady(join) {
+			s.cancelHandoffJoinChildren(context.WithoutCancel(ctx), *parent, join, "Delegated task was not required after the handoff join became ready")
+		}
 	}
 	return handoff.ParentRunID, events, nil
 }
