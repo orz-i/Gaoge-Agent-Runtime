@@ -33,6 +33,256 @@ type ToolContractError struct {
 	Reason string
 }
 
+// missingDiscriminatedToolContractFields resolves an anyOf/oneOf branch from
+// an exact discriminator such as operation.type before reporting nested
+// required-field failures. Without this preflight, generic JSON Schema error
+// trees can select a deeper error from an unrelated branch and tell an agent
+// to remove valid parameters instead of supplying the actually missing field.
+func missingDiscriminatedToolContractFields(schema json.RawMessage, value interface{}) (string, []string) {
+	var root map[string]interface{}
+	if json.Unmarshal(schema, &root) != nil {
+		return "", nil
+	}
+	return findMissingDiscriminatedToolContractFields(root, value, "$")
+}
+
+func findMissingDiscriminatedToolContractFields(schema map[string]interface{}, value interface{}, path string) (string, []string) {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return findMissingDiscriminatedObjectFields(schema, typed, path)
+	case []interface{}:
+		return findMissingDiscriminatedArrayFields(schema, typed, path)
+	}
+	return "", nil
+}
+
+func findMissingDiscriminatedObjectFields(schema map[string]interface{}, value map[string]interface{}, path string) (string, []string) {
+	candidates := discriminatedToolContractCandidates(schema, value)
+	if missing := firstMissingToolContractFields(candidates, value); len(missing) > 0 {
+		return path, missing
+	}
+	return findMissingDiscriminatedObjectChild(mergedToolContractProperties(candidates), value, path)
+}
+
+func discriminatedToolContractCandidates(schema map[string]interface{}, value map[string]interface{}) []map[string]interface{} {
+	candidates := []map[string]interface{}{schema}
+	if branch := matchingDiscriminatedToolContractBranch(schema, value); branch != nil {
+		candidates = append(candidates, branch)
+	}
+	return candidates
+}
+
+func firstMissingToolContractFields(candidates []map[string]interface{}, value map[string]interface{}) []string {
+	for _, candidate := range candidates {
+		if missing := missingToolContractFields(candidate, value); len(missing) > 0 {
+			return missing
+		}
+	}
+	return nil
+}
+
+func mergedToolContractProperties(candidates []map[string]interface{}) map[string][]map[string]interface{} {
+	properties := make(map[string][]map[string]interface{})
+	for _, candidate := range candidates {
+		for name, property := range directToolContractProperties(candidate) {
+			properties[name] = append(properties[name], property)
+		}
+	}
+	return properties
+}
+
+func findMissingDiscriminatedObjectChild(properties map[string][]map[string]interface{}, value map[string]interface{}, path string) (string, []string) {
+	for _, name := range sortedToolContractObjectNames(value) {
+		propertySchemas := properties[name]
+		if len(propertySchemas) == 0 {
+			continue
+		}
+		childPath, missing := findMissingDiscriminatedToolContractFields(
+			combinedToolContractSchema(propertySchemas),
+			value[name],
+			path+"/"+escapeToolContractJSONPointer(name),
+		)
+		if len(missing) > 0 {
+			return childPath, missing
+		}
+	}
+	return "", nil
+}
+
+func sortedToolContractObjectNames(value map[string]interface{}) []string {
+	names := make([]string, 0, len(value))
+	for name := range value {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func findMissingDiscriminatedArrayFields(schema map[string]interface{}, value []interface{}, path string) (string, []string) {
+	items := directToolContractItems(schema)
+	if len(items) == 0 {
+		return "", nil
+	}
+	itemSchema := combinedToolContractSchema(items)
+	for index, item := range value {
+		childPath, missing := findMissingDiscriminatedToolContractFields(
+			itemSchema,
+			item,
+			fmt.Sprintf("%s/%d", path, index),
+		)
+		if len(missing) > 0 {
+			return childPath, missing
+		}
+	}
+	return "", nil
+}
+
+func matchingDiscriminatedToolContractBranch(schema map[string]interface{}, value map[string]interface{}) map[string]interface{} {
+	for _, keyword := range []string{"oneOf", schemaKeywordAnyOf} {
+		if branch := matchingToolContractBranchSet(toolContractBranches(schema, keyword), value); branch != nil {
+			return branch
+		}
+	}
+	return nil
+}
+
+func toolContractBranches(schema map[string]interface{}, keyword string) []interface{} {
+	branches, _ := schema[keyword].([]interface{})
+	return branches
+}
+
+func matchingToolContractBranchSet(branches []interface{}, value map[string]interface{}) map[string]interface{} {
+	if len(branches) == 0 {
+		return nil
+	}
+	if branch := uniquelyMatchingToolContractBranch(branches, value, "type"); branch != nil {
+		return branch
+	}
+	return highestScoringToolContractBranch(branches, value)
+}
+
+func highestScoringToolContractBranch(branches []interface{}, value map[string]interface{}) map[string]interface{} {
+	bestScore := 0
+	var best map[string]interface{}
+	ambiguous := false
+	for _, raw := range branches {
+		branch, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		score := toolContractBranchDiscriminatorScore(branch, value)
+		if score > bestScore {
+			bestScore, best, ambiguous = score, branch, false
+			continue
+		}
+		if score > 0 && score == bestScore {
+			ambiguous = true
+		}
+	}
+	if bestScore == 0 || ambiguous {
+		return nil
+	}
+	return best
+}
+
+func uniquelyMatchingToolContractBranch(branches []interface{}, value map[string]interface{}, propertyName string) map[string]interface{} {
+	item, exists := value[propertyName]
+	if !exists {
+		return nil
+	}
+	var matched map[string]interface{}
+	for _, raw := range branches {
+		branch, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		property := directToolContractProperties(branch)[propertyName]
+		if property == nil || !toolContractSchemaAcceptsExactValue(property, item) {
+			continue
+		}
+		if matched != nil {
+			return nil
+		}
+		matched = branch
+	}
+	return matched
+}
+
+func toolContractBranchDiscriminatorScore(branch map[string]interface{}, value map[string]interface{}) int {
+	score := 0
+	for name, property := range directToolContractProperties(branch) {
+		item, exists := value[name]
+		if !exists || !toolContractSchemaHasExactValues(property) {
+			continue
+		}
+		if toolContractSchemaAcceptsExactValue(property, item) {
+			score++
+		}
+	}
+	return score
+}
+
+func toolContractSchemaHasExactValues(schema map[string]interface{}) bool {
+	if _, exists := schema["const"]; exists {
+		return true
+	}
+	values, _ := schema["enum"].([]interface{})
+	return len(values) > 0
+}
+
+func toolContractSchemaAcceptsExactValue(schema map[string]interface{}, value interface{}) bool {
+	if expected, exists := schema["const"]; exists {
+		return fmt.Sprint(expected) == fmt.Sprint(value)
+	}
+	values, _ := schema["enum"].([]interface{})
+	for _, expected := range values {
+		if fmt.Sprint(expected) == fmt.Sprint(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func missingToolContractFields(schema map[string]interface{}, value map[string]interface{}) []string {
+	required, _ := schema["required"].([]interface{})
+	missing := make([]string, 0, len(required))
+	for _, raw := range required {
+		name, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		if _, exists := value[name]; !exists {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+func directToolContractProperties(schema map[string]interface{}) map[string]map[string]interface{} {
+	raw, _ := schema["properties"].(map[string]interface{})
+	result := make(map[string]map[string]interface{}, len(raw))
+	for name, property := range raw {
+		if typed, ok := property.(map[string]interface{}); ok {
+			result[name] = typed
+		}
+	}
+	return result
+}
+
+func directToolContractItems(schema map[string]interface{}) []map[string]interface{} {
+	items, ok := schema["items"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return []map[string]interface{}{items}
+}
+
+func escapeToolContractJSONPointer(value string) string {
+	value = strings.ReplaceAll(value, "~", "~0")
+	return strings.ReplaceAll(value, "/", "~1")
+}
+
 func validateToolContractSchemas(inputSchema, outputSchema json.RawMessage) error {
 	if _, err := compileToolContractSchema(inputSchema); err != nil {
 		return err
@@ -134,6 +384,9 @@ func validateAndCanonicalizeToolContract(schema json.RawMessage, value interface
 	}
 	if unexpected := unexpectedRootToolContractFields(schema, value); len(unexpected) > 0 {
 		return "", newToolContractError(kind, "$/"+unexpected[0], "unexpected parameters are not allowed: "+strings.Join(unexpected, ", "))
+	}
+	if path, missing := missingDiscriminatedToolContractFields(schema, value); len(missing) > 0 {
+		return "", newToolContractError(kind, path, "required parameters are missing: "+strings.Join(missing, ", "))
 	}
 	if err = compiled.Validate(value); err != nil {
 		return "", toolContractValidationError(kind, err)

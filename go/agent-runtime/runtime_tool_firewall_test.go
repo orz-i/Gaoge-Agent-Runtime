@@ -486,6 +486,55 @@ func TestNormalizeToolArgumentsAgainstSchemaReportsNestedLeafViolation(t *testin
 	}
 }
 
+func TestNormalizeToolArgumentsAgainstSchemaPrefersMatchingDiscriminatedBranch(t *testing.T) {
+	schema := json.RawMessage(`{
+		"type":"object",
+		"required":["operations"],
+		"additionalProperties":false,
+		"properties":{
+			"operations":{
+				"type":"array",
+				"items":{
+					"anyOf":[
+						{
+							"type":"object",
+							"required":["type","targetID","after"],
+							"additionalProperties":false,
+							"properties":{
+								"type":{"type":"string","enum":["patch_foundation_fields"]},
+								"targetID":{"type":"string","enum":["foundation"]},
+								"after":{"type":"object","additionalProperties":false,"properties":{"premise":{"type":"string"}}}
+							}
+						},
+						{
+							"type":"object",
+							"required":["type","targetID","after"],
+							"additionalProperties":false,
+							"properties":{
+								"type":{"type":"string","enum":["patch_foundation_blocks"]},
+								"targetID":{"type":"string","enum":["foundation"]},
+								"after":{"type":"object","required":["patches"],"additionalProperties":false,"properties":{"patches":{"type":"array"}}}
+							}
+						}
+					]
+				}
+			}
+		}
+	}`)
+	_, err := normalizeToolArgumentsAgainstSchema(
+		`{"operations":[{"type":"patch_foundation_fields","after":{"premise":"A faithful premise"}}]}`,
+		schema,
+	)
+	if err == nil ||
+		!strings.Contains(err.Error(), "$/operations/0") ||
+		!strings.Contains(err.Error(), "required parameters are missing: targetID") {
+		t.Fatalf("discriminated validation error = %v, want missing targetID from matching branch", err)
+	}
+	if strings.Contains(err.Error(), "$/operations/0/after") || strings.Contains(err.Error(), "unexpected parameters") {
+		t.Fatalf("discriminated validation selected an unrelated branch: %v", err)
+	}
+}
+
 func TestNormalizeToolOutputAgainstSchema(t *testing.T) {
 	schema := json.RawMessage(`{
 		"type":"object",
