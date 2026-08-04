@@ -14,6 +14,7 @@ const (
 	AdapterAnthropicMessages     = "anthropic_messages"          // POST /v1/messages
 	AdapterGoogleGenerateContent = "google_generate_content"     // POST /v1beta/models/{model}:generateContent
 	AdapterXAIResponses          = "xai_responses"               // POST /v1/responses（OpenAI 兼容）
+	AdapterVolcengineResponses   = "volcengine_responses"        // POST /api/v3/responses
 )
 
 var (
@@ -41,7 +42,8 @@ func IsKnownAdapter(raw string) bool {
 		AdapterOpenAIChatCompletions,
 		AdapterAnthropicMessages,
 		AdapterGoogleGenerateContent,
-		AdapterXAIResponses:
+		AdapterXAIResponses,
+		AdapterVolcengineResponses:
 		return true
 	default:
 		return false
@@ -52,7 +54,7 @@ func IsKnownAdapter(raw string) bool {
 func IsImplementedAdapter(raw string) bool {
 	switch NormalizeAdapter(raw) {
 	case AdapterOpenAIResponses, AdapterOpenRouterChat, AdapterOpenRouterResponses, AdapterOpenAIChatCompletions, AdapterXAIResponses,
-		AdapterAnthropicMessages, AdapterGoogleGenerateContent:
+		AdapterAnthropicMessages, AdapterGoogleGenerateContent, AdapterVolcengineResponses:
 		return true
 	default:
 		return false
@@ -68,7 +70,8 @@ func SupportsStreamingAdapter(raw string) bool {
 		AdapterOpenAIChatCompletions,
 		AdapterAnthropicMessages,
 		AdapterGoogleGenerateContent,
-		AdapterXAIResponses:
+		AdapterXAIResponses,
+		AdapterVolcengineResponses:
 		return true
 	default:
 		return false
@@ -89,5 +92,10 @@ func DefaultEndpointForAdapter(adapter string) string {
 // SupportsPreviousResponseID 返回协议是否明确支持 previous_response_id 有状态续接。
 // 兼容/逆向实现即使复用 Responses 形状，也不一定支持该字段；默认保持关闭。
 func SupportsPreviousResponseID(adapter string) bool {
-	return NormalizeAdapter(adapter) == AdapterOpenAIResponses
+	switch NormalizeAdapter(adapter) {
+	case AdapterOpenAIResponses, AdapterVolcengineResponses:
+		return true
+	default:
+		return false
+	}
 }

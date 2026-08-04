@@ -26,6 +26,8 @@ const (
 	valueStreamAB9103AA                = "stream"
 	valueSystem81966A21                = "system"
 	valueXaiResponses11B30F67          = "xai_responses"
+	valueVolcengineResponses01990FC1   = "volcengine_responses"
+	valueVolcengineVideo0FBB1FA0       = "volcengine_video_generation"
 )
 
 const (
@@ -245,6 +247,10 @@ var modelOptionProtocolKeyByAdapter = map[string]string{
 	AdapterOpenRouterResponses:   valueOpenrouterResponses6266759F,
 	AdapterAnthropicMessages:     valueAnthropicMessagesBE0A4CA2,
 	AdapterXAIResponses:          valueXaiResponses11B30F67,
+	"volcengine":                 valueVolcengineResponses01990FC1,
+	"doubao":                     valueVolcengineResponses01990FC1,
+	AdapterVolcengineResponses:   valueVolcengineResponses01990FC1,
+	valueVolcengineVideo0FBB1FA0: valueVolcengineVideo0FBB1FA0,
 }
 
 func modelOptionPolicyProtocolKey(protocol string) string {

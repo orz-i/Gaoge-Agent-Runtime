@@ -16,6 +16,7 @@ const (
 	protocolAnthropicMessages     = "anthropic_messages"
 	protocolGoogleGenerateContent = "google_generate_content"
 	protocolXAIResponses          = "xai_responses"
+	protocolVolcengineResponses   = "volcengine_responses"
 
 	wireKeyParameters    = "parameters"
 	wireKeyInputSchema   = "input_schema"
@@ -49,7 +50,7 @@ func providerToolWirePayload(protocol string, tools []ToolDefinition) (interface
 	switch strings.TrimSpace(protocol) {
 	case protocolGoogleGenerateContent:
 		return wireGeminiTools(tools), nil
-	case protocolOpenAIResponses, protocolOpenRouterResponses, protocolXAIResponses:
+	case protocolOpenAIResponses, protocolOpenRouterResponses, protocolXAIResponses, protocolVolcengineResponses:
 		return wireOpenAITools(tools, false), nil
 	case protocolOpenAIChatCompletions, protocolOpenRouterChat:
 		return wireOpenAITools(tools, true), nil

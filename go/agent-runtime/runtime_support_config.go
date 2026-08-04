@@ -133,6 +133,8 @@ func DefaultModelOptionAllowedPathsJSON() string {
 		"\"openrouter_responses\":[\"reasoning.effort\",\"reasoning.summary\"]," +
 		"\"anthropic_messages\":[\"speed\",\"top_k\",\"thinking.type\",\"thinking.budget_tokens\"]," +
 		"\"xai_responses\":[\"reasoning.effort\"]," +
+		"\"volcengine_responses\":[\"thinking.type\",\"store\"]," +
+		"\"volcengine_video_generation\":[\"callback_url\",\"camerafixed\",\"draft\",\"duration\",\"execution_expires_after\",\"fps\",\"frames\",\"generate_audio\",\"image_role\",\"negative_prompt\",\"poll_interval_ms\",\"poll_timeout_ms\",\"ratio\",\"resolution\",\"return_last_frame\",\"seed\",\"service_tier\",\"watermark\"]," +
 		"\"gemini_generate_content\":[\"generationConfig.temperature\",\"generationConfig.topP\",\"generationConfig.maxOutputTokens\",\"generationConfig.responseMimeType\"]}"
 }
 
