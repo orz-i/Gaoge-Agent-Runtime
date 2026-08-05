@@ -30,6 +30,7 @@ type textRunContextSnapshotPayload struct {
 	PromptTrace     PromptTrace                     `json:"promptTrace"`
 	Outputs         []textRunContextOutputRef       `json:"outputs,omitempty"`
 	Workspace       *WorkspaceSnapshot              `json:"workspace,omitempty"`
+	Management      *ContextManagementTrace         `json:"management,omitempty"`
 }
 
 type textRunContextMessageSnapshot struct {
@@ -108,8 +109,8 @@ func (s *Engine) compileTextRunContext(ctx context.Context, run model.Run, effec
 	rawHash := sha256.Sum256(content)
 	ragCount, memoryCount, retrievalFallbackCount := countTextRunContextArtifacts(prompt.contextArtifacts)
 	includedFiles, skippedFiles := textRunContextFileCoverage(payload.Files, prompt.contextArtifacts)
-	snapshot := &model.ContextSnapshot{SnapshotID: "ctx_" + strings.ReplaceAll(run.RunID, "run_", ""), SchemaVersion: RuntimeSnapshotVersion, Actor: run.Actor, Thread: run.Thread, InputProjection: run.InputProjection, RunID: run.RunID, ThreadPathHash: pathHash, ContentJSON: string(content), ContentHash: hex.EncodeToString(rawHash[:]), TokenEstimate: prompt.promptPlan.Trace.TotalTokenEstimate, FileCount: includedFiles, RAGCount: ragCount, SkillCount: len(effective.SkillRefs), MemoryCount: memoryCount, OutputCount: len(outputs), EvidenceCount: len(effective.EvidenceRefs), RetrievalFallbackCount: retrievalFallbackCount, SkippedCount: skippedFiles}
-	return snapshot, prompt.contextArtifacts, nil
+	snapshot := &model.ContextSnapshot{SnapshotID: contextSnapshotID(run.RunID, 1), SchemaVersion: RuntimeSnapshotVersion, Revision: 1, ManagementStatus: model.ContextManagementStatusBaseline, Actor: run.Actor, Thread: run.Thread, InputProjection: run.InputProjection, RunID: run.RunID, ThreadPathHash: pathHash, ContentJSON: string(content), ContentHash: hex.EncodeToString(rawHash[:]), TokenEstimate: prompt.promptPlan.Trace.TotalTokenEstimate, FileCount: includedFiles, RAGCount: ragCount, SkillCount: len(effective.SkillRefs), MemoryCount: memoryCount, OutputCount: len(outputs), EvidenceCount: len(effective.EvidenceRefs), RetrievalFallbackCount: retrievalFallbackCount, SkippedCount: skippedFiles}
+	return snapshot, sealContextArtifacts(run.RunID, snapshot.SnapshotID, prompt.contextArtifacts), nil
 }
 
 func textRunContextFileCoverage(files []textRunContextFileRef, artifacts []model.ContextArtifact) (included, skipped int) {

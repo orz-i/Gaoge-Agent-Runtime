@@ -418,6 +418,11 @@ func (s *Engine) generateRunStepTurn(ctx context.Context, run model.Run, step mo
 		request.Messages = enforcePromptInputBudget(request.Messages, toolTokens, maxInputTokens)
 		request.Messages = enforcePromptTransportByteBudget(request.Messages, request.Tools, maxInputTokens)
 	}
+	guardedRequest, _, err := s.enforceGenerateInputBudget(ctx, run, effective, prepared.route, request)
+	if err != nil {
+		return nil, err
+	}
+	request = guardedRequest
 	if err := s.recordRunLLMRouteSelected(context.WithoutCancel(ctx), run, step.StepID, valueStepB959B536, prepared.route, request.RequestID); err != nil {
 		return nil, err
 	}

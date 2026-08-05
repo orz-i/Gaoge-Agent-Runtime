@@ -35,6 +35,10 @@ func (s *Engine) streamRunAnswerAttempt(ctx context.Context, run model.Run, orch
 	holdForEvaluation := len(effective.StructuredOutputSchema) > 0 || s.evaluations != nil && s.evaluations.Enforces(EvaluationStageModelOutput)
 	collector := runDeltaCollector{service: s, ctx: ctx, run: run, stepID: orchestrationStepID, projection: run.OutputProjection, lastFlush: time.Now(), holdForEvaluation: holdForEvaluation}
 	request := GenerateInput{RequestID: run.RunID + ":" + requestKind, Messages: promptMessages, Instructions: instructions, HostedTools: hostedTools, DisableTools: len(hostedTools) == 0, Options: options}
+	request, _, err = s.enforceGenerateInputBudget(ctx, run, effective, route, request)
+	if err != nil {
+		return Usage{}, route, "", err
+	}
 	if err = s.recordRunLLMRouteSelected(context.WithoutCancel(ctx), run, orchestrationStepID, phase, route, request.RequestID); err != nil {
 		return Usage{}, route, "", err
 	}

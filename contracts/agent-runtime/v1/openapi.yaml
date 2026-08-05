@@ -1721,6 +1721,66 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RunHandoffJoin'
+    TextRunContextSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - snapshotID
+        - revision
+        - mode
+        - managementStatus
+        - semanticVersion
+        - contentHash
+        - hardInputTokens
+        - softInputTokens
+        - rawTokenEstimate
+        - adjustedTokenEstimate
+        - tokenCountSource
+        - loadedMessageCount
+        - retainedMessageCount
+        - summarizedMessageCount
+        - trimmedMessageCount
+        - summaryTokenEstimate
+        - fileCount
+        - ragCount
+        - skillCount
+        - memoryCount
+        - outputCount
+        - evidenceCount
+        - retrievalFallbackCount
+        - skippedCount
+        - compiledAt
+      properties:
+        snapshotID: {type: string}
+        revision: {type: integer, minimum: 1}
+        supersedesSnapshotID: {type: string}
+        mode: {type: string, enum: [managed, legacy]}
+        managementStatus: {type: string, enum: [baseline, managed]}
+        semanticVersion: {type: integer, minimum: 1}
+        contentHash: {type: string}
+        hardInputTokens: {type: integer, format: int64, minimum: 0}
+        softInputTokens: {type: integer, format: int64, minimum: 0}
+        rawTokenEstimate: {type: integer, format: int64, minimum: 0}
+        adjustedTokenEstimate: {type: integer, format: int64, minimum: 0}
+        tokenCountSource: {type: string, enum: [exact, estimated]}
+        loadedMessageCount: {type: integer, minimum: 0}
+        retainedMessageCount: {type: integer, minimum: 0}
+        summarizedMessageCount: {type: integer, minimum: 0}
+        trimmedMessageCount: {type: integer, minimum: 0}
+        summaryArtifactID: {type: string}
+        summaryStrategy: {type: string}
+        coveredThrough:
+          $ref: '#/components/schemas/ProjectionRef'
+        summaryTokenEstimate: {type: integer, format: int64, minimum: 0}
+        fileCount: {type: integer, minimum: 0}
+        ragCount: {type: integer, minimum: 0}
+        skillCount: {type: integer, minimum: 0}
+        memoryCount: {type: integer, minimum: 0}
+        outputCount: {type: integer, minimum: 0}
+        evidenceCount: {type: integer, minimum: 0}
+        retrievalFallbackCount: {type: integer, minimum: 0}
+        skippedCount: {type: integer, minimum: 0}
+        compiledAt: {type: string, format: date-time}
     RunDetail:
       type: object
       additionalProperties: false
@@ -1737,7 +1797,8 @@ components:
         outputProjectionRef:
           $ref: '#/components/schemas/ProjectionRef'
         effectiveConfig: {type: object, additionalProperties: true}
-        context: {type: object, additionalProperties: true}
+        context:
+          $ref: '#/components/schemas/TextRunContextSummary'
     RunPage:
       type: object
       additionalProperties: false

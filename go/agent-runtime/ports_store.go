@@ -139,8 +139,15 @@ type ContextStore interface {
 	GetRunContextSnapshot(context.Context, domain.ActorRef, string) (*domain.ContextSnapshot, error)
 	CreateContextArtifacts(context.Context, []domain.ContextArtifact) error
 	ListRecentContextArtifacts(context.Context, domain.ActorRef, domain.ThreadRef, int) ([]domain.ContextArtifact, error)
+	ListRecentContextArtifactsByKind(context.Context, domain.ActorRef, domain.ThreadRef, domain.ContextArtifactKind, int) ([]domain.ContextArtifact, error)
 	GetContextArtifact(context.Context, domain.ActorRef, string) (*domain.ContextArtifact, error)
 	DeleteExpiredContextArtifacts(context.Context, time.Time, int) (int64, error)
+}
+
+// ContextArtifactKindStore names the required summary-safe artifact query
+// capability independently for adapters that expose narrower repository ports.
+type ContextArtifactKindStore interface {
+	ListRecentContextArtifactsByKind(context.Context, domain.ActorRef, domain.ThreadRef, domain.ContextArtifactKind, int) ([]domain.ContextArtifact, error)
 }
 
 type OutputStore interface {

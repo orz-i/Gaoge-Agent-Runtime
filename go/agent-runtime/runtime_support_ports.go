@@ -45,6 +45,7 @@ type Dependencies struct {
 	Settings            ActorSettingsSource
 	Cache               GenerationStreamCacheRepository
 	TextModelGateway    TextModelGateway
+	ContextTokenCounter ContextTokenCounter
 	Billing             Billing
 	Knowledge           KnowledgeDependencies
 	Memory              Memory

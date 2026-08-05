@@ -117,6 +117,10 @@ func (s *Engine) applyContextArtifactRetention(items []domainconversation.Contex
 	}
 	expiresAt := s.now().Add(time.Duration(days) * 24 * time.Hour)
 	for index := range items {
+		if items[index].Kind == domainconversation.ContextArtifactSummary {
+			items[index].ExpiresAt = nil
+			continue
+		}
 		items[index].ExpiresAt = &expiresAt
 	}
 }
@@ -277,7 +281,7 @@ func buildPromptContextArtifacts(input promptContextArtifactInput) []domainconve
 			}),
 		})
 	}
-	return items
+	return sealContextArtifacts(input.RunID, contextSnapshotID(input.RunID, 1), items)
 }
 
 // buildToolContextArtifacts 将工具调用结果转换为可召回的上下文证据。
@@ -317,7 +321,7 @@ func buildToolContextArtifacts(input toolContextArtifactInput) []domainconversat
 			}),
 		})
 	}
-	return items
+	return sealContextArtifacts(input.RunID, contextSnapshotID(input.RunID, 1), items)
 }
 
 // selectHistoricalContextArtifacts 从近期证据中选择与当前问题相关的少量历史证据。
@@ -452,6 +456,39 @@ func compactHistoricalArtifact(item domainconversation.ContextArtifact) (domainc
 func contextArtifactHash(kind domainconversation.ContextArtifactKind, sourceID string, content string) string {
 	sum := sha256.Sum256([]byte(string(kind) + "\x00" + strings.TrimSpace(sourceID) + "\x00" + content))
 	return hex.EncodeToString(sum[:])
+}
+
+// sealContextArtifacts assigns the immutable identity required by every Store
+// implementation. Builders deliberately focus on evidence semantics; sealing is
+// centralized so RAG, memory, tool, and summary artifacts share one contract.
+func sealContextArtifacts(runID, snapshotID string, items []domainconversation.ContextArtifact) []domainconversation.ContextArtifact {
+	for index := range items {
+		item := &items[index]
+		item.RunID = firstNonEmptyString(strings.TrimSpace(item.RunID), strings.TrimSpace(runID))
+		item.SnapshotID = firstNonEmptyString(strings.TrimSpace(item.SnapshotID), strings.TrimSpace(snapshotID))
+		if strings.TrimSpace(item.ContentHash) == "" {
+			item.ContentHash = contextArtifactHash(item.Kind, item.SourceID, item.Content)
+		}
+		if strings.TrimSpace(item.Resource.Kind) == "" {
+			item.Resource.Kind = string(item.Kind)
+		}
+		if strings.TrimSpace(item.Resource.ID) == "" {
+			item.Resource.ID = firstNonEmptyString(strings.TrimSpace(item.SourceID), strings.TrimSpace(item.ContentHash))
+		}
+		if strings.TrimSpace(item.ArtifactID) == "" {
+			digest := sha256.Sum256([]byte(item.RunID + "\x00" + string(item.Kind) + "\x00" + item.SourceType + "\x00" + item.SourceID + "\x00" + item.ContentHash))
+			item.ArtifactID = "ctxa_" + hex.EncodeToString(digest[:16])
+		}
+	}
+	return items
+}
+
+func contextSnapshotID(runID string, revision int) string {
+	base := "ctx_" + strings.ReplaceAll(strings.TrimSpace(runID), "run_", "")
+	if revision <= 1 {
+		return base
+	}
+	return fmt.Sprintf("%s_r%d", base, revision)
 }
 
 func contextArtifactMetadata(value map[string]interface{}) string {

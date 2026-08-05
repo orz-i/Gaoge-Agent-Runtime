@@ -47,11 +47,47 @@ type AttributionConfig struct {
 }
 
 type ContextConfig struct {
-	MaxMessages             int
-	MaxInputTokens          int
-	TokenBudgetEnabled      bool
-	MessageEmbeddingEnabled bool
-	SemanticEnabled         bool
+	MaxMessages             int    `json:"maxMessages"`
+	MaxTurns                int    `json:"maxTurns"`
+	MaxInputTokens          int    `json:"maxInputTokens"`
+	PreserveRecentTurns     int    `json:"preserveRecentTurns"`
+	SoftLimitPercent        int    `json:"softLimitPercent"`
+	SummaryMaxTokens        int    `json:"summaryMaxTokens"`
+	EstimateSafetyPercent   int    `json:"estimateSafetyPercent"`
+	ManagementMode          string `json:"managementMode"`
+	TokenBudgetEnabled      bool   `json:"tokenBudgetEnabled"`
+	MessageEmbeddingEnabled bool   `json:"messageEmbeddingEnabled"`
+	SemanticEnabled         bool   `json:"semanticEnabled"`
+}
+
+const (
+	ContextManagementManaged = "managed"
+	ContextManagementLegacy  = "legacy"
+)
+
+func normalizeContextConfig(input ContextConfig) ContextConfig {
+	if input.ManagementMode != ContextManagementLegacy {
+		input.ManagementMode = ContextManagementManaged
+	}
+	if input.MaxTurns <= 0 {
+		input.MaxTurns = 48
+	}
+	if input.MaxMessages <= 0 {
+		input.MaxMessages = 20
+	}
+	if input.PreserveRecentTurns <= 0 {
+		input.PreserveRecentTurns = 8
+	}
+	if input.SoftLimitPercent <= 0 || input.SoftLimitPercent >= 100 {
+		input.SoftLimitPercent = 80
+	}
+	if input.SummaryMaxTokens <= 0 {
+		input.SummaryMaxTokens = 1024
+	}
+	if input.EstimateSafetyPercent <= 0 {
+		input.EstimateSafetyPercent = 15
+	}
+	return input
 }
 
 type FileContextConfig struct {

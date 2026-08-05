@@ -1,6 +1,7 @@
 package agentruntime
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -82,6 +83,33 @@ type GenerateInput struct {
 	ToolChoice         ToolChoice
 	Options            map[string]interface{}
 	PreviousResponseID string
+}
+
+type ContextTokenCountSource string
+
+const (
+	ContextTokenCountExact     ContextTokenCountSource = "exact"
+	ContextTokenCountEstimated ContextTokenCountSource = "estimated"
+)
+
+type ContextTokenCountResult struct {
+	Tokens         int64
+	AdjustedTokens int64
+	Source         ContextTokenCountSource
+}
+
+type ContextTokenCountInput struct {
+	PlatformModelName     string
+	UpstreamModel         string
+	Protocol              string
+	ModelCapabilitiesJSON string
+	Request               GenerateInput
+}
+
+// ContextTokenCounter optionally supplies a route-aware exact tokenizer. The
+// Runtime always retains a deterministic estimator as a safe fallback.
+type ContextTokenCounter interface {
+	CountContextTokens(context.Context, ContextTokenCountInput) (ContextTokenCountResult, error)
 }
 
 type HostedToolVariant struct {

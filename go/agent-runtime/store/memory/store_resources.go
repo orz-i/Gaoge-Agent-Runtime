@@ -21,12 +21,26 @@ func (s *Store) CreateContextSnapshotBundle(_ context.Context, snapshot *domain.
 		if !ok {
 			return agentruntime.ErrNotFound
 		}
-		if _, ok = st.Contexts[snapshot.RunID]; ok {
+		if snapshot.Revision <= 0 {
+			snapshot.Revision = len(st.Contexts[snapshot.RunID]) + 1
+		}
+		if snapshot.ManagementStatus == "" {
+			snapshot.ManagementStatus = domain.ContextManagementStatusBaseline
+		}
+		for _, existing := range st.Contexts[snapshot.RunID] {
+			if existing.SnapshotID != snapshot.SnapshotID {
+				continue
+			}
+			if existing.ContentHash == snapshot.ContentHash && existing.Revision == snapshot.Revision {
+				return nil
+			}
 			return agentruntime.ErrDuplicate
 		}
-		st.Contexts[snapshot.RunID] = clone(*snapshot)
+		st.Contexts[snapshot.RunID] = append(st.Contexts[snapshot.RunID], clone(*snapshot))
 		for _, artifact := range artifacts {
-			st.Artifacts[artifact.ArtifactID] = clone(artifact)
+			if err := putContextArtifact(st, artifact); err != nil {
+				return err
+			}
 		}
 		if st.Checkpoints[snapshot.RunID] == nil {
 			st.Checkpoints[snapshot.RunID] = make(map[string]domain.Checkpoint)
@@ -48,9 +62,15 @@ func (s *Store) GetRunContextSnapshot(_ context.Context, actor domain.ActorRef, 
 	if !ok || !owned(run, actor) {
 		return nil, agentruntime.ErrNotFound
 	}
-	item, ok := s.state.Contexts[runID]
-	if !ok {
+	items := s.state.Contexts[runID]
+	if len(items) == 0 {
 		return nil, agentruntime.ErrNotFound
+	}
+	item := items[0]
+	for _, candidate := range items[1:] {
+		if candidate.Revision > item.Revision || candidate.Revision == item.Revision && candidate.CreatedAt.After(item.CreatedAt) {
+			item = candidate
+		}
 	}
 	result := clone(item)
 	return &result, nil
@@ -62,13 +82,26 @@ func (s *Store) CreateContextArtifacts(_ context.Context, artifacts []domain.Con
 			if item.ArtifactID == "" {
 				return agentruntime.ErrInvalidInput
 			}
-			if _, ok := st.Artifacts[item.ArtifactID]; ok {
-				return agentruntime.ErrDuplicate
+			if err := putContextArtifact(st, item); err != nil {
+				return err
 			}
-			st.Artifacts[item.ArtifactID] = clone(item)
 		}
 		return nil
 	})
+}
+
+func putContextArtifact(st *state, item domain.ContextArtifact) error {
+	if item.ArtifactID == "" {
+		return agentruntime.ErrInvalidInput
+	}
+	if existing, ok := st.Artifacts[item.ArtifactID]; ok {
+		if existing.ContentHash == item.ContentHash {
+			return nil
+		}
+		return agentruntime.ErrDuplicate
+	}
+	st.Artifacts[item.ArtifactID] = clone(item)
+	return nil
 }
 
 func (s *Store) ListRecentContextArtifacts(_ context.Context, actor domain.ActorRef, thread domain.ThreadRef, limit int) ([]domain.ContextArtifact, error) {
@@ -78,6 +111,23 @@ func (s *Store) ListRecentContextArtifacts(_ context.Context, actor domain.Actor
 	for _, item := range s.state.Artifacts {
 		run, ok := s.state.Runs[item.RunID]
 		if ok && owned(run, actor) && run.Thread == thread {
+			items = append(items, clone(item))
+		}
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+
+func (s *Store) ListRecentContextArtifactsByKind(_ context.Context, actor domain.ActorRef, thread domain.ThreadRef, kind domain.ContextArtifactKind, limit int) ([]domain.ContextArtifact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.ContextArtifact, 0)
+	for _, item := range s.state.Artifacts {
+		run, ok := s.state.Runs[item.RunID]
+		if ok && owned(run, actor) && run.Thread == thread && item.Kind == kind {
 			items = append(items, clone(item))
 		}
 	}
@@ -574,7 +624,13 @@ func (s *Store) LoadWorkbenchSnapshot(_ context.Context, actor domain.ActorRef, 
 		return nil, agentruntime.ErrNotFound
 	}
 	result := domain.WorkbenchSnapshot{Run: clone(run), Steps: clone(s.state.Steps[runID]), Plans: clone(s.state.Plans[runID]), Outputs: []domain.OutputRef{}, Events: clone(s.state.Events[runID]), Phases: clone(s.state.Phases[runID])}
-	if contextItem, ok := s.state.Contexts[runID]; ok {
+	if contextItems := s.state.Contexts[runID]; len(contextItems) > 0 {
+		contextItem := contextItems[0]
+		for _, candidate := range contextItems[1:] {
+			if candidate.Revision > contextItem.Revision || candidate.Revision == contextItem.Revision && candidate.CreatedAt.After(contextItem.CreatedAt) {
+				contextItem = candidate
+			}
+		}
 		item := clone(contextItem)
 		result.Context = &item
 	}

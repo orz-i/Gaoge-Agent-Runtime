@@ -16,7 +16,9 @@ const (
 
 type ContextSnapshot struct {
 	SnapshotID, RunID, ThreadPathHash, ContentJSON, ContentHash string
+	SupersedesSnapshotID, ManagementStatus                      string
 	SchemaVersion                                               int
+	Revision                                                    int
 	Actor                                                       ActorRef
 	Thread                                                      ThreadRef
 	InputProjection                                             ProjectionRef
@@ -26,6 +28,11 @@ type ContextSnapshot struct {
 	SkippedCount                                                int
 	CreatedAt, UpdatedAt                                        time.Time
 }
+
+const (
+	ContextManagementStatusBaseline = "baseline"
+	ContextManagementStatusManaged  = "managed"
+)
 
 type ContextArtifact struct {
 	ArtifactID, SnapshotID, RunID              string

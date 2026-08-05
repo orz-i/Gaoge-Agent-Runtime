@@ -94,6 +94,8 @@ func runFailureCode(err error) string {
 		return workspaceErr.Code()
 	}
 	switch {
+	case errors.Is(err, ErrContextBudgetExceeded):
+		return "context_budget_exceeded"
 	case errors.Is(err, errPlanBudgetExceeded):
 		return "plan_budget_exceeded"
 	case errors.Is(err, errPlanInvalid):

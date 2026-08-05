@@ -20,7 +20,7 @@ type state struct {
 	Plans         map[string][]domain.Plan                 `json:"plans"`
 	Interactions  map[string]map[string]domain.Interaction `json:"interactions"`
 	Checkpoints   map[string]map[string]domain.Checkpoint  `json:"checkpoints"`
-	Contexts      map[string]domain.ContextSnapshot        `json:"contexts"`
+	Contexts      map[string][]domain.ContextSnapshot      `json:"contexts"`
 	Artifacts     map[string]domain.ContextArtifact        `json:"artifacts"`
 	Outputs       map[string][]domain.OutputRef            `json:"outputs"`
 	Evidence      map[string]domain.Evidence               `json:"evidence"`
@@ -50,7 +50,7 @@ func newState() state {
 	return state{
 		Runs: make(map[string]domain.Run), Steps: make(map[string][]domain.Step), Events: make(map[string][]domain.Event),
 		Plans: make(map[string][]domain.Plan), Interactions: make(map[string]map[string]domain.Interaction),
-		Checkpoints: make(map[string]map[string]domain.Checkpoint), Contexts: make(map[string]domain.ContextSnapshot),
+		Checkpoints: make(map[string]map[string]domain.Checkpoint), Contexts: make(map[string][]domain.ContextSnapshot),
 		Artifacts: make(map[string]domain.ContextArtifact), Outputs: make(map[string][]domain.OutputRef),
 		Evidence: make(map[string]domain.Evidence), Queue: make(map[string]domain.QueueItem), Continuations: make(map[string]domain.ContinuationJob),
 		Manifests: make(map[string][]domain.AgentManifest), Workflows: make(map[string][]domain.WorkflowDefinition),
@@ -165,9 +165,17 @@ func (s *Store) CreateRunStartBundle(_ context.Context, run *domain.Run, step *d
 		run.RuntimeKind = domain.NormalizeRuntimeKind(run.RuntimeKind)
 		st.Runs[run.RunID] = clone(*run)
 		st.Steps[run.RunID] = []domain.Step{clone(*step)}
-		st.Contexts[run.RunID] = clone(*snapshot)
+		if snapshot.Revision <= 0 {
+			snapshot.Revision = 1
+		}
+		if snapshot.ManagementStatus == "" {
+			snapshot.ManagementStatus = domain.ContextManagementStatusBaseline
+		}
+		st.Contexts[run.RunID] = []domain.ContextSnapshot{clone(*snapshot)}
 		for _, artifact := range artifacts {
-			st.Artifacts[artifact.ArtifactID] = clone(artifact)
+			if err := putContextArtifact(st, artifact); err != nil {
+				return err
+			}
 		}
 		checkpoint.ContextSnapshotID = snapshot.SnapshotID
 		st.Checkpoints[run.RunID] = map[string]domain.Checkpoint{checkpoint.CheckpointID: clone(*checkpoint)}

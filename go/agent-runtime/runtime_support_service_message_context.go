@@ -88,9 +88,20 @@ func estimateMessageTokens(message Message) int64 {
 		for _, part := range message.Parts {
 			tokens += estimateContentPartTokens(part)
 		}
-		return tokens
+	} else {
+		tokens += estimateTokens(message.Content)
 	}
-	return tokens + estimateTokens(message.Content)
+	tokens += estimateTokens(message.ReasoningContent)
+	for _, call := range message.ToolCalls {
+		tokens += 8 + estimateTokens(call.ToolCallID) + estimateTokens(call.ToolType) + estimateTokens(call.ToolName) + estimateTokens(call.ArgumentsJSON) + estimateTokens(call.ThoughtSignature) + estimateTokens(call.Status) + estimateTokens(call.OutputJSON) + estimateTokens(call.ErrorJSON)
+	}
+	for _, result := range message.ToolResults {
+		tokens += 6 + estimateTokens(result.ToolCallID) + estimateTokens(result.ToolName) + estimateTokens(result.OutputJSON) + estimateTokens(result.Status) + estimateTokens(result.Error)
+	}
+	if message.CacheControl != nil {
+		tokens += 2 + estimateTokens(message.CacheControl.Type) + estimateTokens(message.CacheControl.TTL)
+	}
+	return tokens
 }
 
 func estimatePromptTokens(messages []Message) int64 {
@@ -166,6 +177,7 @@ var runErrorCodeMappings = []runErrorCodeMapping{
 	{err: ErrThreadNotFound, code: "thread_not_found"},
 	{err: ErrInvalidAttachmentReference, code: "invalid_attachment_reference"},
 	{err: ErrAttachmentNotFound, code: "attachment_not_found"},
+	{err: ErrContextBudgetExceeded, code: "context_budget_exceeded"},
 	{err: ErrModelRouteNotConfigured, code: "model_route_not_configured"},
 	{err: ErrUpstreamEmptyResponse, code: "upstream_empty_response"},
 	{err: ErrToolRunFinalAnswerMissing, code: "tool_run_final_answer_missing"},

@@ -1,6 +1,8 @@
 package postgres
 
 import (
+	"strings"
+
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
@@ -68,10 +70,26 @@ func toEventDomains(rows []models.EventRecord) []domain.Event {
 }
 
 func toContextSnapshotModel(item *domain.ContextSnapshot) models.ContextRecord {
-	return models.ContextRecord{RecordType: "snapshot", SnapshotID: item.SnapshotID, RunID: item.RunID, TenantID: item.Actor.TenantID, ActorID: item.Actor.ActorID, ThreadKind: item.Thread.Kind, ThreadID: item.Thread.ID, InputProjectionKind: item.InputProjection.Kind, InputProjectionID: item.InputProjection.ID, SchemaVersion: item.SchemaVersion, ThreadPathHash: item.ThreadPathHash, ContentJSON: item.ContentJSON, ContentHash: item.ContentHash, TokenEstimate: item.TokenEstimate, FileCount: item.FileCount, RAGCount: item.RAGCount, SkillCount: item.SkillCount, MemoryCount: item.MemoryCount, OutputCount: item.OutputCount, EvidenceCount: item.EvidenceCount, RetrievalFallbackCount: item.RetrievalFallbackCount, SkippedCount: item.SkippedCount}
+	revision := item.Revision
+	if revision <= 0 {
+		revision = 1
+	}
+	status := item.ManagementStatus
+	if strings.TrimSpace(status) == "" {
+		status = domain.ContextManagementStatusBaseline
+	}
+	return models.ContextRecord{RecordType: "snapshot", SnapshotID: item.SnapshotID, SnapshotRevision: revision, SupersedesSnapshotID: item.SupersedesSnapshotID, ManagementStatus: status, RunID: item.RunID, TenantID: item.Actor.TenantID, ActorID: item.Actor.ActorID, ThreadKind: item.Thread.Kind, ThreadID: item.Thread.ID, InputProjectionKind: item.InputProjection.Kind, InputProjectionID: item.InputProjection.ID, SchemaVersion: item.SchemaVersion, ThreadPathHash: item.ThreadPathHash, ContentJSON: item.ContentJSON, ContentHash: item.ContentHash, TokenEstimate: item.TokenEstimate, FileCount: item.FileCount, RAGCount: item.RAGCount, SkillCount: item.SkillCount, MemoryCount: item.MemoryCount, OutputCount: item.OutputCount, EvidenceCount: item.EvidenceCount, RetrievalFallbackCount: item.RetrievalFallbackCount, SkippedCount: item.SkippedCount}
 }
 func toContextSnapshotDomain(row models.ContextRecord) domain.ContextSnapshot {
-	return domain.ContextSnapshot{SnapshotID: row.SnapshotID, RunID: row.RunID, ThreadPathHash: row.ThreadPathHash, ContentJSON: row.ContentJSON, ContentHash: row.ContentHash, SchemaVersion: row.SchemaVersion, Actor: domain.ActorRef{TenantID: row.TenantID, ActorID: row.ActorID}, Thread: domain.ThreadRef{Kind: row.ThreadKind, ID: row.ThreadID}, InputProjection: domain.ProjectionRef{Kind: row.InputProjectionKind, ID: row.InputProjectionID}, TokenEstimate: row.TokenEstimate, FileCount: row.FileCount, RAGCount: row.RAGCount, SkillCount: row.SkillCount, MemoryCount: row.MemoryCount, OutputCount: row.OutputCount, EvidenceCount: row.EvidenceCount, RetrievalFallbackCount: row.RetrievalFallbackCount, SkippedCount: row.SkippedCount, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	revision := row.SnapshotRevision
+	if revision <= 0 {
+		revision = 1
+	}
+	status := row.ManagementStatus
+	if strings.TrimSpace(status) == "" {
+		status = domain.ContextManagementStatusBaseline
+	}
+	return domain.ContextSnapshot{SnapshotID: row.SnapshotID, RunID: row.RunID, ThreadPathHash: row.ThreadPathHash, ContentJSON: row.ContentJSON, ContentHash: row.ContentHash, SupersedesSnapshotID: row.SupersedesSnapshotID, ManagementStatus: status, SchemaVersion: row.SchemaVersion, Revision: revision, Actor: domain.ActorRef{TenantID: row.TenantID, ActorID: row.ActorID}, Thread: domain.ThreadRef{Kind: row.ThreadKind, ID: row.ThreadID}, InputProjection: domain.ProjectionRef{Kind: row.InputProjectionKind, ID: row.InputProjectionID}, TokenEstimate: row.TokenEstimate, FileCount: row.FileCount, RAGCount: row.RAGCount, SkillCount: row.SkillCount, MemoryCount: row.MemoryCount, OutputCount: row.OutputCount, EvidenceCount: row.EvidenceCount, RetrievalFallbackCount: row.RetrievalFallbackCount, SkippedCount: row.SkippedCount, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
 }
 func toContextArtifactModel(item domain.ContextArtifact) models.ContextRecord {
 	return models.ContextRecord{RecordType: "artifact", ArtifactID: item.ArtifactID, SnapshotID: item.SnapshotID, RunID: item.RunID, ResourceKind: item.Resource.Kind, ResourceID: item.Resource.ID, ResourceRevision: item.Resource.Revision, SourceType: item.SourceType, SourceID: item.SourceID, SourceTitle: item.SourceTitle, Content: item.Content, ContentJSON: item.ContentJSON, ContentHash: item.ContentHash, MetadataJSON: item.MetadataJSON, TokenEstimate: item.TokenEstimate, Score: item.Score, ExpiresAt: item.ExpiresAt}

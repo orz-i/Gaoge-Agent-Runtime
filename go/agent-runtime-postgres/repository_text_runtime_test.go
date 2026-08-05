@@ -144,7 +144,9 @@ func TestCreateRunStartBundleRollsBackEveryRowOnArtifactConflict(t *testing.T) {
 	db := openConversationRepositoryTestDB(t)
 	repo := New(db, StaticSessions(db))
 	run, step, snapshot, artifacts, checkpoint, events := runtimeStartBundleFixture("run_rollback")
-	artifacts = append(artifacts, artifacts[0])
+	conflict := artifacts[0]
+	conflict.ContentHash = conflict.ContentHash + "-conflict"
+	artifacts = append(artifacts, conflict)
 
 	if _, err := repo.CreateRunStartBundle(context.Background(), &run, &step, &snapshot, artifacts, &checkpoint, events); err == nil {
 		t.Fatal("expected duplicate artifact to abort the bundle")

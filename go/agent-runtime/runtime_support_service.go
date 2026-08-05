@@ -95,6 +95,7 @@ type Engine struct {
 	settingsRepo        ActorSettingsSource
 	cache               GenerationStreamCacheRepository
 	llmGateway          TextModelGateway
+	contextTokenCounter ContextTokenCounter
 	memoryRecorder      Memory
 	toolCatalog         ToolCatalog
 	toolExecutor        ToolExecutor
@@ -239,6 +240,7 @@ func New(cfg ConfigProvider, deps Dependencies) (*Engine, error) {
 		settingsRepo:        deps.Settings,
 		cache:               deps.Cache,
 		llmGateway:          deps.TextModelGateway,
+		contextTokenCounter: deps.ContextTokenCounter,
 		memoryRecorder:      deps.Memory,
 		toolCatalog:         deps.ToolCatalog,
 		toolExecutor:        deps.ToolExecutor,

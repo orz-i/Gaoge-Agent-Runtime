@@ -297,8 +297,16 @@ func createMemoryWorkflowRunStartBundle(
 	normalizeMemoryWorkflowStart(run, execution, now)
 	st.Runs[run.RunID] = clone(*run)
 	st.Steps[run.RunID] = []domain.Step{clone(*step)}
-	st.Contexts[run.RunID] = clone(*snapshot)
-	storeMemoryWorkflowArtifacts(st, artifacts)
+	if snapshot.Revision <= 0 {
+		snapshot.Revision = 1
+	}
+	if snapshot.ManagementStatus == "" {
+		snapshot.ManagementStatus = domain.ContextManagementStatusBaseline
+	}
+	st.Contexts[run.RunID] = []domain.ContextSnapshot{clone(*snapshot)}
+	if err := storeMemoryWorkflowArtifacts(st, artifacts); err != nil {
+		return nil, err
+	}
 	checkpoint.ContextSnapshotID = snapshot.SnapshotID
 	st.Checkpoints[run.RunID] = map[string]domain.Checkpoint{checkpoint.CheckpointID: clone(*checkpoint)}
 	st.Executions[run.RunID] = clone(*execution)
@@ -323,10 +331,13 @@ func normalizeMemoryWorkflowStart(run *domain.Run, execution *domain.WorkflowExe
 	}
 }
 
-func storeMemoryWorkflowArtifacts(st *state, artifacts []domain.ContextArtifact) {
+func storeMemoryWorkflowArtifacts(st *state, artifacts []domain.ContextArtifact) error {
 	for _, artifact := range artifacts {
-		st.Artifacts[artifact.ArtifactID] = clone(artifact)
+		if err := putContextArtifact(st, artifact); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (s *Store) GetWorkflowExecution(_ context.Context, actor domain.ActorRef, runID string) (*domain.WorkflowExecution, error) {

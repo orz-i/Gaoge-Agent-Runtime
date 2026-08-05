@@ -146,6 +146,10 @@ func testMigrateRepairsContextArtifactUniqueIndex(t *testing.T, db *gorm.DB) {
 	requirePostgresTestNoError(t, Migrate(db))
 	second := models.ContextRecord{RecordType: migrationContextSnapshot, SnapshotID: "snapshot_next", RunID: "run_next"}
 	requirePostgresTestNoError(t, db.Create(&second).Error)
+	duplicateSnapshot := models.ContextRecord{RecordType: migrationContextSnapshot, SnapshotID: first.SnapshotID, RunID: "run_duplicate_snapshot"}
+	if err := db.Create(&duplicateSnapshot).Error; err == nil {
+		t.Fatal("duplicate snapshot ID must remain rejected")
+	}
 	artifact := models.ContextRecord{RecordType: migrationContextArtifact, SnapshotID: first.SnapshotID, ArtifactID: "artifact_unique", RunID: first.RunID}
 	requirePostgresTestNoError(t, db.Create(&artifact).Error)
 	duplicate := models.ContextRecord{RecordType: migrationContextArtifact, SnapshotID: second.SnapshotID, ArtifactID: artifact.ArtifactID, RunID: second.RunID}

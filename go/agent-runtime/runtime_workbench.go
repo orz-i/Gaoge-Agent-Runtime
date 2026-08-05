@@ -195,8 +195,7 @@ func textRunDetailFromWorkbenchSnapshot(snapshot *model.WorkbenchSnapshot) TextR
 		detail.Config = summarizeTextRunConfig(effective, strings.TrimSpace(snapshot.Run.ProviderProtocol))
 	}
 	if snapshot.Context != nil {
-		item := snapshot.Context
-		detail.Context = &TextRunContextSummary{SnapshotID: item.SnapshotID, SemanticVersion: item.SchemaVersion, ContentHash: item.ContentHash, FileCount: item.FileCount, RAGCount: item.RAGCount, SkillCount: item.SkillCount, MemoryCount: item.MemoryCount, OutputCount: item.OutputCount, EvidenceCount: item.EvidenceCount, RetrievalFallbackCount: item.RetrievalFallbackCount, SkippedCount: item.SkippedCount, CompiledAt: item.CreatedAt}
+		detail.Context = textRunContextSummaryFromSnapshot(snapshot.Context, effective.Context.ManagementMode)
 	}
 	return detail
 }

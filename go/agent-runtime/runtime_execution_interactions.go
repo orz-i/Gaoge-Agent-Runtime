@@ -468,6 +468,14 @@ func (s *Engine) executeRunContinuation(ctx context.Context, run model.Run, root
 		return
 	}
 	s.logger.Info("run_continuation_started", String("run_id", run.RunID), String("checkpoint_id", checkpoint.CheckpointID), String("continuation_type", continuation.Type), String("source", source))
+	if checkpoint.Kind == runCheckpointInitialContext {
+		if err = s.manageInitialRunContext(ctx, run, effective, checkpoint); err != nil {
+			_ = s.ReleaseRunUsageReservation(context.WithoutCancel(ctx), reservation, "Context Manager 失败退回预扣")
+			s.failTextRun(context.WithoutCancel(ctx), run, checkpoint.StepID, err)
+			s.FinishRunNotifications(run.RunID)
+			return
+		}
+	}
 	if s.stopForHostedToolApproval(ctx, run, effective, reservation, continuation) || s.dispatchInitialRunContinuation(ctx, run, root, effective, reservation, continuation) {
 		return
 	}

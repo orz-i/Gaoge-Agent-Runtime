@@ -88,14 +88,27 @@ func TestPromptBudgetDropsOnlySupersededFailedToolAttempts(t *testing.T) {
 		{Role: valueAssistantB87088D6, ToolCalls: []ToolCall{{ToolCallID: "old", ToolName: promptBudgetPublishTool, ArgumentsJSON: strings.Repeat("x", 5000)}}},
 		{Role: valueToolCCF14517, ToolResults: []ToolResult{{ToolCallID: "old", ToolName: promptBudgetPublishTool, Status: "failed", Error: "old validation error"}}},
 		{Role: valueAssistantB87088D6, ToolCalls: []ToolCall{{ToolCallID: promptBudgetLatestCallID, ToolName: promptBudgetPublishTool, ArgumentsJSON: strings.Repeat("y", 5000)}}},
-		{Role: valueToolCCF14517, ToolResults: []ToolResult{{ToolCallID: promptBudgetLatestCallID, ToolName: promptBudgetPublishTool, Status: "failed", Error: "latest actionable error"}}},
+		{Role: valueToolCCF14517, ToolResults: []ToolResult{{ToolCallID: promptBudgetLatestCallID, ToolName: promptBudgetPublishTool, Status: valueSuccess4D886D19, OutputJSON: `{"published":true}`}}},
 	}
 	got := enforcePromptTransportByteBudget(messages, nil, 3000)
 
 	if len(got) != 4 {
 		t.Fatalf("trimmed messages = %#v, want system, user, and latest failed attempt", got)
 	}
-	if got[2].ToolCalls[0].ToolCallID != promptBudgetLatestCallID || got[3].ToolResults[0].Error != "latest actionable error" {
-		t.Fatalf("latest failed attempt was not preserved: %#v", got)
+	if got[2].ToolCalls[0].ToolCallID != promptBudgetLatestCallID || got[3].ToolResults[0].Status != valueSuccess4D886D19 {
+		t.Fatalf("successful replacement was not preserved: %#v", got)
+	}
+}
+
+func TestPromptBudgetDoesNotDropFailureWithoutSuccessfulReplacement(t *testing.T) {
+	messages := []Message{
+		{Role: valueUser90BA419D, Content: "publish a change set"},
+		{Role: valueAssistantB87088D6, ToolCalls: []ToolCall{{ToolCallID: "old", ToolName: promptBudgetPublishTool}}},
+		{Role: valueToolCCF14517, ToolResults: []ToolResult{{ToolCallID: "old", ToolName: promptBudgetPublishTool, Status: "failed", Error: "old validation error"}}},
+		{Role: valueAssistantB87088D6, ToolCalls: []ToolCall{{ToolCallID: "latest", ToolName: promptBudgetPublishTool}}},
+		{Role: valueToolCCF14517, ToolResults: []ToolResult{{ToolCallID: "latest", ToolName: promptBudgetPublishTool, Status: "failed", Error: "latest validation error"}}},
+	}
+	if got, ok := trimSupersededFailedToolAttempt(messages); ok || len(got) != len(messages) {
+		t.Fatalf("failure-only chain was trimmed: %#v", got)
 	}
 }

@@ -23,6 +23,7 @@ var (
 	ErrInvalidSkillUse              = errors.New("invalid skill use")
 	ErrInvalidThreadBranch          = errors.New("invalid thread branch")
 	ErrContextArtifactNotFound      = errors.New("context artifact not found")
+	ErrContextBudgetExceeded        = errors.New("context budget exceeded")
 	ErrModelRouteNotConfigured      = errors.New("model route not configured")
 	ErrStructuredOutputUnsupported  = errors.New("structured output is not supported by the selected model")
 	ErrLLMAllRoutesUnavailable      = errors.New("all llm routes unavailable")

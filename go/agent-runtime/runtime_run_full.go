@@ -247,18 +247,35 @@ type TextRunDetail struct {
 }
 
 type TextRunContextSummary struct {
-	SnapshotID             string    `json:"snapshotID"`
-	SemanticVersion        int       `json:"semanticVersion"`
-	ContentHash            string    `json:"contentHash"`
-	FileCount              int       `json:"fileCount"`
-	RAGCount               int       `json:"ragCount"`
-	SkillCount             int       `json:"skillCount"`
-	MemoryCount            int       `json:"memoryCount"`
-	OutputCount            int       `json:"outputCount"`
-	EvidenceCount          int       `json:"evidenceCount"`
-	RetrievalFallbackCount int       `json:"retrievalFallbackCount"`
-	SkippedCount           int       `json:"skippedCount"`
-	CompiledAt             time.Time `json:"compiledAt"`
+	SnapshotID             string               `json:"snapshotID"`
+	Revision               int                  `json:"revision"`
+	SupersedesSnapshotID   string               `json:"supersedesSnapshotID,omitempty"`
+	Mode                   string               `json:"mode"`
+	ManagementStatus       string               `json:"managementStatus"`
+	SemanticVersion        int                  `json:"semanticVersion"`
+	ContentHash            string               `json:"contentHash"`
+	HardInputTokens        int64                `json:"hardInputTokens"`
+	SoftInputTokens        int64                `json:"softInputTokens"`
+	RawTokenEstimate       int64                `json:"rawTokenEstimate"`
+	AdjustedTokenEstimate  int64                `json:"adjustedTokenEstimate"`
+	TokenCountSource       string               `json:"tokenCountSource"`
+	LoadedMessageCount     int                  `json:"loadedMessageCount"`
+	RetainedMessageCount   int                  `json:"retainedMessageCount"`
+	SummarizedMessageCount int                  `json:"summarizedMessageCount"`
+	TrimmedMessageCount    int                  `json:"trimmedMessageCount"`
+	SummaryArtifactID      string               `json:"summaryArtifactID,omitempty"`
+	SummaryStrategy        string               `json:"summaryStrategy,omitempty"`
+	CoveredThrough         *model.ProjectionRef `json:"coveredThrough,omitempty"`
+	SummaryTokenEstimate   int64                `json:"summaryTokenEstimate"`
+	FileCount              int                  `json:"fileCount"`
+	RAGCount               int                  `json:"ragCount"`
+	SkillCount             int                  `json:"skillCount"`
+	MemoryCount            int                  `json:"memoryCount"`
+	OutputCount            int                  `json:"outputCount"`
+	EvidenceCount          int                  `json:"evidenceCount"`
+	RetrievalFallbackCount int                  `json:"retrievalFallbackCount"`
+	SkippedCount           int                  `json:"skippedCount"`
+	CompiledAt             time.Time            `json:"compiledAt"`
 }
 
 type RunEventHistoryPage struct {
@@ -477,6 +494,7 @@ type effectiveTextRunConfig struct {
 	InitialContinuationDeferred bool                      `json:"initialContinuationDeferred,omitempty"`
 	StructuredOutputSchema      json.RawMessage           `json:"structuredOutputSchema,omitempty"`
 	ResultAttempts              int                       `json:"resultAttempts,omitempty"`
+	Context                     ContextConfig             `json:"context"`
 }
 
 type effectiveAgentManifest struct {
@@ -679,6 +697,7 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 		OutputIDs: uniqueRuntimeStrings(input.OutputIDs), OutputRefs: resources.OutputRefs, EvidenceIDs: resources.EvidenceIDs, EvidenceRefs: resources.EvidenceRefs, Workspace: resources.Workspace, AgentManifest: agentSnapshot,
 		InitialContinuationDeferred: input.DeferInitialContinuation,
 		StructuredOutputSchema:      append(json.RawMessage(nil), input.StructuredOutputSchema...), ResultAttempts: resultAttempts,
+		Context: normalizeContextConfig(cfg.Context),
 	}
 	snapshot, err := json.Marshal(effective)
 	if err != nil {

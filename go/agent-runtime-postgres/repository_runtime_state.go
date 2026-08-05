@@ -406,10 +406,26 @@ func (r *Repository) CreateContextSnapshotBundle(ctx context.Context, snapshot *
 	var saved []domain.Event
 	err := r.within(ctx, func(txCtx context.Context) error {
 		tx := r.dbFor(txCtx)
+		checkpoint.ContextSnapshotID = snapshot.SnapshotID
+		var existingCheckpoint models.RunCheckpoint
+		checkpointErr := tx.Where("checkpoint_id = ?", checkpoint.CheckpointID).Take(&existingCheckpoint).Error
+		if checkpointErr == nil {
+			if existingCheckpoint.RunID != checkpoint.RunID || existingCheckpoint.ContextSnapshotID != snapshot.SnapshotID {
+				return agentruntime.ErrDuplicate
+			}
+			if err := createContextSnapshotRows(tx, snapshot, artifacts); err != nil {
+				return err
+			}
+			var err error
+			saved, err = appendRunEventsTx(tx, events)
+			return err
+		}
+		if !errors.Is(checkpointErr, gorm.ErrRecordNotFound) {
+			return checkpointErr
+		}
 		if err := createContextSnapshotRows(tx, snapshot, artifacts); err != nil {
 			return err
 		}
-		checkpoint.ContextSnapshotID = snapshot.SnapshotID
 		row := toCheckpointModel(checkpoint)
 		if err := tx.Create(&row).Error; err != nil {
 			return err
@@ -423,27 +439,69 @@ func (r *Repository) CreateContextSnapshotBundle(ctx context.Context, snapshot *
 }
 
 func createContextSnapshotRows(tx *gorm.DB, snapshot *domain.ContextSnapshot, artifacts []domain.ContextArtifact) error {
+	if snapshot.Revision <= 0 {
+		snapshot.Revision = 1
+	}
+	if strings.TrimSpace(snapshot.ManagementStatus) == "" {
+		snapshot.ManagementStatus = domain.ContextManagementStatusBaseline
+	}
+	var existing models.ContextRecord
+	err := tx.Where("record_type = ? AND snapshot_id = ?", "snapshot", snapshot.SnapshotID).Take(&existing).Error
+	if err == nil {
+		if existing.ContentHash != snapshot.ContentHash || existing.SnapshotRevision != snapshot.Revision || existing.RunID != snapshot.RunID {
+			return agentruntime.ErrDuplicate
+		}
+		*snapshot = toContextSnapshotDomain(existing)
+		return createContextArtifactRows(tx, snapshot, artifacts)
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
 	row := toContextSnapshotModel(snapshot)
 	if err := tx.Create(&row).Error; err != nil {
 		return err
 	}
 	*snapshot = toContextSnapshotDomain(row)
+	return createContextArtifactRows(tx, snapshot, artifacts)
+}
+
+func createContextArtifactRows(tx *gorm.DB, snapshot *domain.ContextSnapshot, artifacts []domain.ContextArtifact) error {
 	if len(artifacts) == 0 {
 		return nil
 	}
-	rows := make([]models.ContextRecord, 0, len(artifacts))
 	for index := range artifacts {
 		if artifacts[index].SnapshotID == "" {
 			artifacts[index].SnapshotID = snapshot.SnapshotID
 		}
-		rows = append(rows, toContextArtifactModel(artifacts[index]))
+		if err := createContextArtifactRow(tx, artifacts[index]); err != nil {
+			return err
+		}
 	}
-	return tx.Create(&rows).Error
+	return nil
+}
+
+func createContextArtifactRow(tx *gorm.DB, item domain.ContextArtifact) error {
+	if strings.TrimSpace(item.ArtifactID) == "" {
+		return agentruntime.ErrInvalidInput
+	}
+	var existing models.ContextRecord
+	err := tx.Where("record_type = ? AND artifact_id = ?", "artifact", item.ArtifactID).Take(&existing).Error
+	if err == nil {
+		if existing.ContentHash == item.ContentHash {
+			return nil
+		}
+		return agentruntime.ErrDuplicate
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	row := toContextArtifactModel(item)
+	return tx.Create(&row).Error
 }
 
 func (r *Repository) GetRunContextSnapshot(ctx context.Context, actor domain.ActorRef, runID string) (*domain.ContextSnapshot, error) {
 	var row models.ContextRecord
-	err := r.dbFor(ctx).Where("record_type = ? AND tenant_id = ? AND actor_id = ? AND run_id = ?", "snapshot", actor.TenantID, actor.ActorID, runID).Take(&row).Error
+	err := r.dbFor(ctx).Where("record_type = ? AND tenant_id = ? AND actor_id = ? AND run_id = ?", "snapshot", actor.TenantID, actor.ActorID, runID).Order("snapshot_revision DESC, id DESC").Take(&row).Error
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -452,14 +510,18 @@ func (r *Repository) GetRunContextSnapshot(ctx context.Context, actor domain.Act
 }
 
 func (r *Repository) CreateContextArtifacts(ctx context.Context, items []domain.ContextArtifact) error {
-	rows := make([]models.ContextRecord, 0, len(items))
-	for _, item := range items {
-		rows = append(rows, toContextArtifactModel(item))
-	}
-	if len(rows) == 0 {
+	if len(items) == 0 {
 		return nil
 	}
-	return translateError(r.dbFor(ctx).Create(&rows).Error)
+	err := r.within(ctx, func(txCtx context.Context) error {
+		for _, item := range items {
+			if err := createContextArtifactRow(r.dbFor(txCtx), item); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return translateError(err)
 }
 
 func (r *Repository) ListRecentContextArtifacts(ctx context.Context, actor domain.ActorRef, thread domain.ThreadRef, limit int) ([]domain.ContextArtifact, error) {
@@ -468,6 +530,19 @@ func (r *Repository) ListRecentContextArtifacts(ctx context.Context, actor domai
 	}
 	var rows []models.ContextRecord
 	err := r.dbFor(ctx).Table("agent_context_records AS artifact").Select("artifact.*").Joins("JOIN agent_context_records AS snapshot ON snapshot.snapshot_id = artifact.snapshot_id AND snapshot.record_type = 'snapshot'").Where("artifact.record_type = ? AND snapshot.tenant_id = ? AND snapshot.actor_id = ? AND snapshot.thread_kind = ? AND snapshot.thread_id = ?", "artifact", actor.TenantID, actor.ActorID, thread.Kind, thread.ID).Order("artifact.id DESC").Limit(limit).Find(&rows).Error
+	items := make([]domain.ContextArtifact, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, toContextArtifactDomain(row))
+	}
+	return items, translateError(err)
+}
+
+func (r *Repository) ListRecentContextArtifactsByKind(ctx context.Context, actor domain.ActorRef, thread domain.ThreadRef, kind domain.ContextArtifactKind, limit int) ([]domain.ContextArtifact, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var rows []models.ContextRecord
+	err := r.dbFor(ctx).Table("agent_context_records AS artifact").Select("artifact.*").Joins("JOIN agent_context_records AS snapshot ON snapshot.snapshot_id = artifact.snapshot_id AND snapshot.record_type = 'snapshot'").Where("artifact.record_type = ? AND artifact.resource_kind = ? AND snapshot.tenant_id = ? AND snapshot.actor_id = ? AND snapshot.thread_kind = ? AND snapshot.thread_id = ?", "artifact", string(kind), actor.TenantID, actor.ActorID, thread.Kind, thread.ID).Order("artifact.id DESC").Limit(limit).Find(&rows).Error
 	items := make([]domain.ContextArtifact, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, toContextArtifactDomain(row))

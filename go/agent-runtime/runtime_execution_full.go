@@ -528,6 +528,10 @@ func (s *Engine) generatePlanAttempt(ctx context.Context, run model.Run, effecti
 	if err = s.ensureRunCallBudgetWithReserve(ctx, run, effective, true, 1); err != nil {
 		return planAttemptResult{}, err
 	}
+	request, _, err = s.enforceGenerateInputBudget(ctx, run, effective, route, request)
+	if err != nil {
+		return planAttemptResult{}, err
+	}
 	phase := "planner"
 	if repair {
 		phase = "planner_repair"
@@ -1409,10 +1413,12 @@ func normalizeRunInteractionResponse(value interface{}) (string, map[string]inte
 
 func (s *Engine) ensureRunCallBudgetWithReserve(ctx context.Context, run model.Run, effective effectiveTextRunConfig, llm bool, reservedCalls int) error {
 	eventType, limit, label := valueToolStartedB113F313, effective.MaxToolCalls, valueToolCCF14517
+	eventTypes := []string{eventType}
 	if llm {
 		eventType, limit, label = valueUsageUpdatedABC8B0B2, effective.MaxLLMCalls, "LLM"
+		eventTypes = []string{eventType, eventLLMRouteSelected}
 	}
-	counts, err := s.repo.CountRunEventsByType(ctx, run.Actor, run.RunID, []string{eventType})
+	counts, err := s.repo.CountRunEventsByType(ctx, run.Actor, run.RunID, eventTypes)
 	if err != nil {
 		return err
 	}
@@ -1423,7 +1429,11 @@ func (s *Engine) ensureRunCallBudgetWithReserve(ctx context.Context, run model.R
 	if requiredCalls == 0 {
 		requiredCalls = 1
 	}
-	if limit <= 0 || counts[eventType]+requiredCalls > limit {
+	used := counts[eventType]
+	if llm && counts[eventLLMRouteSelected] > used {
+		used = counts[eventLLMRouteSelected]
+	}
+	if limit <= 0 || used+requiredCalls > limit {
 		return withErrorMessage(errCategoryAFA87E325A, fmt.Sprintf("text run %s call limit reached", label))
 	}
 	return nil

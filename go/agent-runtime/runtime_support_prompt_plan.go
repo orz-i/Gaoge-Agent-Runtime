@@ -68,8 +68,22 @@ type PromptSourceRef struct {
 
 // PromptTrace 汇总本轮发送给上游前的上下文形态。
 type PromptTrace struct {
-	Blocks             []PromptBlockTrace
-	TotalTokenEstimate int64
+	Blocks                []PromptBlockTrace
+	TotalTokenEstimate    int64
+	HardInputTokens       int64              `json:"hardInputTokens,omitempty"`
+	SoftInputTokens       int64              `json:"softInputTokens,omitempty"`
+	RawTokenEstimate      int64              `json:"rawTokenEstimate,omitempty"`
+	AdjustedTokenEstimate int64              `json:"adjustedTokenEstimate,omitempty"`
+	TokenCountSource      string             `json:"tokenCountSource,omitempty"`
+	TrimActions           []PromptTrimAction `json:"trimActions,omitempty"`
+}
+
+// PromptTrimAction records a safe structural reduction without exposing prompt content.
+type PromptTrimAction struct {
+	Action       string `json:"action"`
+	MessageCount int    `json:"messageCount,omitempty"`
+	ArtifactID   string `json:"artifactID,omitempty"`
+	ContentHash  string `json:"contentHash,omitempty"`
 }
 
 // PromptPlan 是对话请求发送前的唯一上下文规划结果。
@@ -240,17 +254,11 @@ func enforcePromptInputBudget(messages []Message, toolTokens int64, maxInputToke
 }
 
 func trimSupersededFailedToolAttempt(messages []Message) ([]Message, bool) {
-	failedResultMessages := 0
-	for _, message := range messages {
-		if messageHasFailedToolResult(message) {
-			failedResultMessages++
-		}
-	}
-	if failedResultMessages < 2 {
-		return messages, false
-	}
 	for index := 0; index+1 < len(messages); index++ {
 		if len(messages[index].ToolCalls) == 0 || !messageHasFailedToolResult(messages[index+1]) {
+			continue
+		}
+		if !laterSuccessfulToolResult(messages[index+2:], messages[index].ToolCalls) {
 			continue
 		}
 		result := make([]Message, 0, len(messages)-2)
@@ -259,6 +267,27 @@ func trimSupersededFailedToolAttempt(messages []Message) ([]Message, bool) {
 		return result, true
 	}
 	return messages, false
+}
+
+func laterSuccessfulToolResult(messages []Message, failedCalls []ToolCall) bool {
+	failedNames := make(map[string]struct{}, len(failedCalls))
+	for _, call := range failedCalls {
+		if name := strings.TrimSpace(call.ToolName); name != "" {
+			failedNames[name] = struct{}{}
+		}
+	}
+	for _, message := range messages {
+		for _, result := range message.ToolResults {
+			if _, sameTool := failedNames[strings.TrimSpace(result.ToolName)]; !sameTool {
+				continue
+			}
+			status := strings.ToLower(strings.TrimSpace(result.Status))
+			if strings.TrimSpace(result.Error) == "" && (status == valueSuccess4D886D19 || status == "succeeded" || status == "completed") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func messageHasFailedToolResult(message Message) bool {

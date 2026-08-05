@@ -15,6 +15,7 @@ const (
 	testMutatedGoal      = "mutated"
 	testWorkflowRootNode = "root"
 	testRunStartedEvent  = "run.started"
+	testStepID           = "step-1"
 )
 
 // StoreFactory creates a fresh Store for one isolated contract test.
@@ -173,6 +174,54 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		}
 	})
 
+	t.Run("context snapshots are immutable revisions and artifacts are sealed idempotently", func(t *testing.T) {
+		store, actor, thread, run := seeded(t, factory)
+		ctx := context.Background()
+		baseline, err := store.GetRunContextSnapshot(ctx, actor, run.RunID)
+		if err != nil || baseline.Revision != 1 {
+			t.Fatalf("baseline snapshot = %+v, %v", baseline, err)
+		}
+		now := time.Now().UTC()
+		revision := domain.ContextSnapshot{
+			SnapshotID: "snapshot-1-r2", Revision: 2, SupersedesSnapshotID: baseline.SnapshotID,
+			ManagementStatus: domain.ContextManagementStatusManaged, RunID: run.RunID, Actor: actor, Thread: thread,
+			ContentJSON: `{"revision":2}`, ContentHash: "hash-r2", CreatedAt: now, UpdatedAt: now,
+		}
+		artifact := domain.ContextArtifact{
+			ArtifactID: "artifact-summary-r2", SnapshotID: revision.SnapshotID, RunID: run.RunID, Kind: domain.ContextArtifactSummary,
+			Resource:   domain.ResourceRef{Kind: string(domain.ContextArtifactSummary), ID: "message:covered"},
+			SourceType: "context_manager", SourceID: "message:covered", Content: "summary", ContentHash: "summary-hash", CreatedAt: now, UpdatedAt: now,
+		}
+		checkpoint := domain.Checkpoint{CheckpointID: "checkpoint-context-r2", RunID: run.RunID, StepID: testStepID, Kind: "context_management", Status: domain.CheckpointConsumed, CreatedAt: now, UpdatedAt: now}
+		event := domain.Event{EventID: "event-context-r2", RunID: run.RunID, EventType: "context.compacted", Actor: actor, Thread: thread, CreatedAt: now}
+		if _, err = store.CreateContextSnapshotBundle(ctx, &revision, []domain.ContextArtifact{artifact}, &checkpoint, []domain.Event{event}); err != nil {
+			t.Fatalf("create revision 2: %v", err)
+		}
+		latest, err := store.GetRunContextSnapshot(ctx, actor, run.RunID)
+		if err != nil || latest.Revision != 2 || latest.SupersedesSnapshotID != baseline.SnapshotID || latest.SnapshotID != revision.SnapshotID {
+			t.Fatalf("latest snapshot = %+v, %v", latest, err)
+		}
+		if _, err = store.CreateContextSnapshotBundle(ctx, &revision, []domain.ContextArtifact{artifact}, &checkpoint, []domain.Event{event}); err != nil {
+			t.Fatalf("idempotent revision replay: %v", err)
+		}
+		if err = store.CreateContextArtifacts(ctx, []domain.ContextArtifact{artifact}); err != nil {
+			t.Fatalf("idempotent artifact replay: %v", err)
+		}
+		conflict := artifact
+		conflict.ContentHash = "different-content-hash"
+		if err = store.CreateContextArtifacts(ctx, []domain.ContextArtifact{conflict}); !errors.Is(err, agentruntime.ErrDuplicate) {
+			t.Fatalf("artifact content conflict = %v", err)
+		}
+		kindStore, ok := store.(agentruntime.ContextArtifactKindStore)
+		if !ok {
+			t.Fatal("store does not implement ContextArtifactKindStore")
+		}
+		summaries, err := kindStore.ListRecentContextArtifactsByKind(ctx, actor, thread, domain.ContextArtifactSummary, 10)
+		if err != nil || len(summaries) != 1 || summaries[0].ArtifactID != artifact.ArtifactID {
+			t.Fatalf("summary artifacts = %+v, %v", summaries, err)
+		}
+	})
+
 	t.Run("continuation jobs are idempotent leased and reclaimable", func(t *testing.T) {
 		const checkpointID = "checkpoint-1"
 		store, actor, thread, run := seeded(t, factory)
@@ -257,7 +306,7 @@ func RunStore(t *testing.T, factory StoreFactory) {
 		if err = store.RetryContinuationJob(ctx, recoveryClaim.JobID, "recovery-worker", "still failing", requeuedAt.Add(time.Second), true); err != nil {
 			t.Fatalf("dead-letter requeued continuation: %v", err)
 		}
-		if _, _, _, err = store.FinalizeRun(ctx, domain.TerminalIntent{Actor: actor, Thread: thread, RunID: run.RunID, Outcome: domain.TerminalFailed, CurrentStepID: "step-1", Summary: "terminal"}); err != nil {
+		if _, _, _, err = store.FinalizeRun(ctx, domain.TerminalIntent{Actor: actor, Thread: thread, RunID: run.RunID, Outcome: domain.TerminalFailed, CurrentStepID: testStepID, Summary: "terminal"}); err != nil {
 			t.Fatalf("finalize continuation run: %v", err)
 		}
 		if _, err = store.RequeueDeadLetterContinuationJob(ctx, exhausted.JobID, requeuedAt.Add(2*time.Second)); !errors.Is(err, agentruntime.ErrContinuationRunTerminal) {
@@ -938,7 +987,7 @@ func prepareRunHandoffJoinWaitFixture(t *testing.T, store agentruntime.Store, ac
 		t.Fatal(err)
 	}
 	checkpoint := domain.Checkpoint{
-		CheckpointID: "checkpoint-join-wait", RunID: run.RunID, StepID: "step-1", Kind: "handoff_join_wait",
+		CheckpointID: "checkpoint-join-wait", RunID: run.RunID, StepID: testStepID, Kind: "handoff_join_wait",
 		Status: domain.CheckpointReady, ManifestHash: "manifest", ResumeStateJSON: `{}`,
 	}
 	join := domain.RunHandoffJoin{
@@ -947,8 +996,8 @@ func prepareRunHandoffJoinWaitFixture(t *testing.T, store agentruntime.Store, ac
 		Mode: domain.RunHandoffJoinModeAll, Quorum: 1, FailurePolicy: domain.RunHandoffJoinFailureCollect, Status: domain.RunHandoffJoinStatusPending,
 	}
 	events := []domain.Event{
-		{EventID: "event-join-wait-step", RunID: run.RunID, StepID: "step-1", EventType: "step.waiting_handoff", Actor: actor},
-		{EventID: "event-join-wait-run", RunID: run.RunID, StepID: "step-1", EventType: "run.waiting_handoff", Actor: actor},
+		{EventID: "event-join-wait-step", RunID: run.RunID, StepID: testStepID, EventType: "step.waiting_handoff", Actor: actor},
+		{EventID: "event-join-wait-run", RunID: run.RunID, StepID: testStepID, EventType: "run.waiting_handoff", Actor: actor},
 	}
 	return runHandoffJoinWaitFixture{ctx: ctx, actor: actor, run: run, current: *current, join: join, checkpoint: checkpoint, events: events}
 }
@@ -1011,7 +1060,7 @@ func seeded(t testing.TB, factory StoreFactory) (agentruntime.Store, domain.Acto
 	actor := domain.ActorRef{TenantID: "tenant-1", ActorID: "actor-1"}
 	thread := domain.ThreadRef{Kind: "thread", ID: "thread-1"}
 	run := domain.Run{RunID: "run-1", Actor: actor, Thread: thread, Goal: "goal", Status: domain.RunStatusRunning, CreatedAt: now, UpdatedAt: now}
-	step := domain.Step{StepID: "step-1", RunID: run.RunID, CreatedAt: now, UpdatedAt: now}
+	step := domain.Step{StepID: testStepID, RunID: run.RunID, CreatedAt: now, UpdatedAt: now}
 	snapshot := domain.ContextSnapshot{SnapshotID: "snapshot-1", RunID: run.RunID, Actor: actor, Thread: thread, CreatedAt: now, UpdatedAt: now}
 	checkpoint := domain.Checkpoint{CheckpointID: "checkpoint-1", RunID: run.RunID, Status: domain.CheckpointReady, CreatedAt: now, UpdatedAt: now}
 	event := domain.Event{EventID: "event-1", RunID: run.RunID, EventType: testRunStartedEvent, Actor: actor, Thread: thread, CreatedAt: now}

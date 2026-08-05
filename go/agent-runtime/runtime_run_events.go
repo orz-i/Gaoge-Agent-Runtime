@@ -60,9 +60,14 @@ func newRunEvent(run model.Run, eventType, stepID, summary string, payload map[s
 }
 
 func (s *Engine) recordRunLLMRouteSelected(ctx context.Context, run model.Run, stepID, phase string, route *LLMRoute, generationRequestID string) error {
+	_, err := s.recordRunLLMRouteSelectedOnce(ctx, run, stepID, phase, route, generationRequestID)
+	return err
+}
+
+func (s *Engine) recordRunLLMRouteSelectedOnce(ctx context.Context, run model.Run, stepID, phase string, route *LLMRoute, generationRequestID string) (bool, error) {
 	generationRequestID = strings.TrimSpace(generationRequestID)
 	if route == nil || generationRequestID == "" {
-		return ErrInvalidInput
+		return false, ErrInvalidInput
 	}
 	payload := map[string]interface{}{
 		llmRouteRequestIDPayloadKey: generationRequestID,
@@ -84,12 +89,12 @@ func (s *Engine) recordRunLLMRouteSelected(ctx context.Context, run model.Run, s
 	event.EventID = llmRouteSelectedEventID(run.RunID, generationRequestID)
 	saved, created, err := s.repo.AppendRunEvent(ctx, &event)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if created {
 		s.PublishRunNotification(run.RunID, runEventEnvelope(saved))
 	}
-	return nil
+	return created, nil
 }
 
 func llmRouteSelectedEventID(runID, generationRequestID string) string {
@@ -201,7 +206,7 @@ func (s *Engine) GetTextRunDetail(ctx context.Context, actor model.ActorRef, run
 		detail.Config = summarizeTextRunConfig(effective, protocol)
 	}
 	if snapshot, snapshotErr := s.repo.GetRunContextSnapshot(ctx, actor, runID); snapshotErr == nil {
-		detail.Context = &TextRunContextSummary{SnapshotID: snapshot.SnapshotID, SemanticVersion: snapshot.SchemaVersion, ContentHash: snapshot.ContentHash, FileCount: snapshot.FileCount, RAGCount: snapshot.RAGCount, SkillCount: snapshot.SkillCount, MemoryCount: snapshot.MemoryCount, OutputCount: snapshot.OutputCount, EvidenceCount: snapshot.EvidenceCount, RetrievalFallbackCount: snapshot.RetrievalFallbackCount, SkippedCount: snapshot.SkippedCount, CompiledAt: snapshot.CreatedAt}
+		detail.Context = textRunContextSummaryFromSnapshot(snapshot, effective.Context.ManagementMode)
 	}
 	return detail, nil
 }

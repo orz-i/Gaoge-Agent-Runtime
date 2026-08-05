@@ -9,6 +9,8 @@ import (
 	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
 )
 
+const runCheckpointInitialContext = "initial_context"
+
 func (s *Engine) StartTextRun(ctx context.Context, input StartTextRunInput) (*TextRunStartResult, error) {
 	input.DeferInitialContinuation = false
 	return s.startTextRun(ctx, input)
@@ -79,7 +81,7 @@ func (s *Engine) persistTextRunStart(ctx context.Context, input StartTextRunInpu
 	applyRunDelegation(&run, input.Delegation)
 	step := model.Step{StepID: stepID, RunID: runID, StepIndex: 0, Kind: valueOrchestration1BD4660D, Title: truncateRunTitle(goal), Description: goal, Status: model.RunStatusQueued, StartedAt: now}
 	continuationType, targetStatus := textRunInitialContinuation(strategy)
-	checkpoint := newRunContinuationCheckpoint(run, stepID, "initial_context", runContinuation{SemanticVersion: RuntimeSnapshotVersion, SegmentKey: startSegmentKey, Type: continuationType, TargetStatus: targetStatus, StepID: stepID, NextRevision: 1})
+	checkpoint := newRunContinuationCheckpoint(run, stepID, runCheckpointInitialContext, runContinuation{SemanticVersion: RuntimeSnapshotVersion, SegmentKey: startSegmentKey, Type: continuationType, TargetStatus: targetStatus, StepID: stepID, NextRevision: 1})
 	var initial textRunInitialContext
 	var savedEvents []model.Event
 	var parentEvents []model.Event
@@ -94,7 +96,7 @@ func (s *Engine) persistTextRunStart(ctx context.Context, input StartTextRunInpu
 			return prepareErr
 		}
 		run.InputProjection, run.OutputProjection = initial.Projection.Input, initial.Projection.Output
-		checkpoint = newRunContinuationCheckpoint(run, stepID, "initial_context", runContinuation{SemanticVersion: RuntimeSnapshotVersion, SegmentKey: startSegmentKey, Type: continuationType, TargetStatus: targetStatus, StepID: stepID, NextRevision: 1})
+		checkpoint = newRunContinuationCheckpoint(run, stepID, runCheckpointInitialContext, runContinuation{SemanticVersion: RuntimeSnapshotVersion, SegmentKey: startSegmentKey, Type: continuationType, TargetStatus: targetStatus, StepID: stepID, NextRevision: 1})
 		initialEvents := textRunInitialEvents(run, step, profile.Ref, strategy, effective.StrategyReason, initial.ContextSnapshot, prepared.InputEvaluation)
 		initialEvents = append(initialEvents, newRunEvent(run, "checkpoint.created", stepID, "Initial context checkpoint", map[string]interface{}{valueCheckpointID7923DD64: checkpoint.CheckpointID, valueKindDAA7F13C: checkpoint.Kind}, nil))
 		savedEvents, prepareErr = s.repo.CreateRunStartBundle(txCtx, &run, &step, initial.ContextSnapshot, initial.Artifacts, checkpoint, initialEvents)
