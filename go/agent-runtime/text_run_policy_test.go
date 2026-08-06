@@ -228,7 +228,7 @@ func TestRunQueueFreezesThreadDefaults(t *testing.T) {
 func TestRunQueueRejectsChangedCapabilityDefinitions(t *testing.T) {
 	toolCatalog := &queueToolCatalogStub{definitionVersion: "v1"}
 	skillResolver := &queueSkillResolverStub{updatedAt: time.Unix(1, 0)}
-	environment := &EnvironmentProfile{Ref: model.ResourceRef{Kind: resourceKindEnvironment, ID: "7", Revision: "3"}, Revision: 3, BindingScopes: []string{conversationGeneralEnvironment}, DefaultMode: TextRunExecutionModeAuto, AllowedModes: []string{TextRunExecutionModeDirect, TextRunExecutionModePlan}, Models: []EnvironmentModelPolicy{{PlatformModelName: defaultModelName, IsDefault: true, Available: true}}, Tools: []EnvironmentToolPolicy{{ToolKey: "allowed-tool", ActivationMode: activationOptional, Available: true}}, Skills: []EnvironmentSkillPolicy{{SkillRef: testSkillRef("2"), ActivationMode: activationOptional, Available: true}}}
+	environment := &EnvironmentProfile{Ref: model.ResourceRef{Kind: resourceKindEnvironment, ID: "7", Revision: "3"}, Revision: 3, BindingScopes: []string{conversationGeneralEnvironment}, Models: []EnvironmentModelPolicy{{PlatformModelName: defaultModelName, IsDefault: true, Available: true}}, Tools: []EnvironmentToolPolicy{{ToolKey: "allowed-tool", ActivationMode: activationOptional, Available: true}}, Skills: []EnvironmentSkillPolicy{{SkillRef: testSkillRef("2"), ActivationMode: activationOptional, Available: true}}}
 	service := &Engine{cfg: StaticConfigProvider(Config{}), environmentProfiles: environmentResolverTestStub{profile: environment}, toolCatalog: toolCatalog, skillResolver: skillResolver}
 	actor := model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey}
 	thread := &ThreadSnapshot{Thread: model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey}, Environment: model.ResourceRef{Kind: resourceKindEnvironment, ID: "7", Revision: "3"}, DefaultModel: defaultModelName, BindingScope: conversationGeneralEnvironment}
@@ -254,8 +254,6 @@ func freezeEmptyQueueCapabilities(t *testing.T) (*Engine, model.ActorRef, *Threa
 		Ref:           model.ResourceRef{Kind: resourceKindEnvironment, ID: "7", Revision: "3"},
 		Revision:      3,
 		BindingScopes: []string{conversationGeneralEnvironment},
-		DefaultMode:   TextRunExecutionModeAuto,
-		AllowedModes:  []string{TextRunExecutionModeDirect, TextRunExecutionModePlan},
 		Models:        []EnvironmentModelPolicy{{PlatformModelName: defaultModelName, IsDefault: true, Available: true}},
 	}
 	service := &Engine{cfg: StaticConfigProvider(Config{}), environmentProfiles: environmentResolverTestStub{profile: environment}}
@@ -333,7 +331,7 @@ func TestQueuedThreadSnapshotUsesEnvironmentIdentityAndOptionalRevision(t *testi
 }
 
 func TestTextRunConfigurationRejectsChangedQueuedEnvironmentRevision(t *testing.T) {
-	environment := &EnvironmentProfile{Ref: model.ResourceRef{Kind: resourceKindEnvironment, ID: "7", Revision: "4"}, Revision: 4, BindingScopes: []string{conversationGeneralEnvironment}, DefaultMode: TextRunExecutionModeAuto, AllowedModes: []string{TextRunExecutionModeDirect, TextRunExecutionModePlan}, Models: []EnvironmentModelPolicy{{PlatformModelName: defaultModelName, IsDefault: true, Available: true}}}
+	environment := &EnvironmentProfile{Ref: model.ResourceRef{Kind: resourceKindEnvironment, ID: "7", Revision: "4"}, Revision: 4, BindingScopes: []string{conversationGeneralEnvironment}, Models: []EnvironmentModelPolicy{{PlatformModelName: defaultModelName, IsDefault: true, Available: true}}}
 	service := &Engine{cfg: StaticConfigProvider(Config{}), environmentProfiles: environmentResolverTestStub{profile: environment}}
 	_, err := service.prepareTextRunConfiguration(t.Context(), StartTextRunInput{
 		Actor: model.ActorRef{TenantID: valueTenant, ActorID: valueActorRefKey}, Thread: model.ThreadRef{Kind: threadKindConversation, ID: valueThreadRefKey}, Environment: model.ResourceRef{Kind: resourceKindEnvironment, ID: "7", Revision: "3"},

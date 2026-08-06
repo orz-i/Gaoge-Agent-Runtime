@@ -19,7 +19,6 @@ func TestSummarizeTextRunConfigKeepsCollectionDTOsNonNull(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, field := range []string{
-		"allowedModes",
 		"skillRefs",
 		textRunSummaryToolKeysField,
 		"localToolKeys",

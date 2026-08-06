@@ -416,16 +416,16 @@ type UnavailableEnvironmentCapability struct {
 	Reason   string
 }
 type EnvironmentProfile struct {
-	Ref                                         domain.ResourceRef
-	Revision                                    uint
-	SystemKey, Name, Description, Instructions  string
-	DefaultMode, PlanApprovalMode, MemoryPolicy string
-	BindingScopes, AllowedModes                 []string
-	Models                                      []EnvironmentModelPolicy
-	Skills                                      []EnvironmentSkillPolicy
-	Tools                                       []EnvironmentToolPolicy
-	UnavailableRequiredCapabilities             []UnavailableEnvironmentCapability
-	UpdatedAt                                   time.Time
+	Ref                                        domain.ResourceRef
+	Revision                                   uint
+	SystemKey, Name, Description, Instructions string
+	MemoryPolicy                               string
+	BindingScopes                              []string
+	Models                                     []EnvironmentModelPolicy
+	Skills                                     []EnvironmentSkillPolicy
+	Tools                                      []EnvironmentToolPolicy
+	UnavailableRequiredCapabilities            []UnavailableEnvironmentCapability
+	UpdatedAt                                  time.Time
 }
 
 func (p *EnvironmentProfile) SupportsBindingScope(scope string) bool {

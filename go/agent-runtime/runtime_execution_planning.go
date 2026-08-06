@@ -62,24 +62,13 @@ func buildPlanningBundle(run model.Run, root model.Step, effective effectiveText
 		return planningBundle{}, err
 	}
 	status := model.PlanProposed
-	if effective.PlanApprovalMode == valueAuto60DC1905 {
-		status = model.PlanApproved
-	}
 	plan := model.Plan{PlanID: planID, RunID: run.RunID, Revision: revision, Status: status, Goal: run.Goal, Summary: payload.Summary, PayloadJSON: string(planJSON)}
 	steps, err := buildPlanningSteps(run, root, planID, payload.Steps)
 	if err != nil {
 		return planningBundle{}, err
 	}
 	bundle := planningBundle{Plan: plan, Steps: steps, Events: planningEvents(run, root, payload, planID, revision, steps)}
-	if effective.PlanApprovalMode == valueRequired26A4A382 {
-		return addRequiredPlanningApproval(bundle, run, root, effective, payload, revision)
-	}
-	bundle.Events = append(bundle.Events,
-		newRunEvent(run, "plan.approved", root.StepID, "Plan auto-approved", map[string]interface{}{valuePlanID320F2BB9: planID, valueRevision83764640: revision, valueMode06EC588F: valueAuto60DC1905}, nil),
-		newRunEvent(run, "run.status_changed", root.StepID, "Plan execution started", map[string]interface{}{valueStatus327C4193: model.RunStatusRunning}, nil),
-	)
-	bundle.Events[len(bundle.Events)-1].Status = model.RunStatusRunning
-	return bundle, nil
+	return addRequiredPlanningApproval(bundle, run, root, effective, payload, revision)
 }
 
 func buildPlanningSteps(run model.Run, root model.Step, planID string, specs []planStepSpec) ([]model.Step, error) {

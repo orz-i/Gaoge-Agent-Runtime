@@ -288,8 +288,6 @@ type TextRunConfigSummary struct {
 	Strategy               string              `json:"strategy"`
 	StrategyReason         string              `json:"strategyReason"`
 	RequestedMode          string              `json:"requestedMode"`
-	DefaultMode            string              `json:"defaultMode"`
-	AllowedModes           []string            `json:"allowedModes"`
 	EnvironmentRef         model.ResourceRef   `json:"environmentRef"`
 	EnvironmentProfileName string              `json:"environmentProfileName"`
 	PlatformModelName      string              `json:"platformModelName"`
@@ -312,17 +310,16 @@ type TextRunConfigSummary struct {
 	// ProviderPayloadObserved is true only when protocol was non-empty and the
 	// wire measure succeeded (including a legitimate zero-byte payload).
 	// Live Eval hard gates for maxToolSchemaBytes must require this flag.
-	ProviderPayloadObserved bool   `json:"providerPayloadObserved"`
-	FileCount               int    `json:"fileCount"`
-	MaxLLMCalls             int    `json:"maxLLMCalls"`
-	MaxToolCalls            int    `json:"maxToolCalls"`
-	ToolRetryCount          int    `json:"toolRetryCount"`
-	ToolConcurrency         int    `json:"toolConcurrency"`
-	PlanApprovalMode        string `json:"planApprovalMode,omitempty"`
-	PlanMaxSteps            int    `json:"planMaxSteps,omitempty"`
-	PlanMaxRevisions        int    `json:"planMaxRevisions,omitempty"`
-	InteractionTTLHours     int    `json:"interactionTTLHours,omitempty"`
-	OutputMaxPerRun         int    `json:"outputMaxPerRun,omitempty"`
+	ProviderPayloadObserved bool `json:"providerPayloadObserved"`
+	FileCount               int  `json:"fileCount"`
+	MaxLLMCalls             int  `json:"maxLLMCalls"`
+	MaxToolCalls            int  `json:"maxToolCalls"`
+	ToolRetryCount          int  `json:"toolRetryCount"`
+	ToolConcurrency         int  `json:"toolConcurrency"`
+	PlanMaxSteps            int  `json:"planMaxSteps,omitempty"`
+	PlanMaxRevisions        int  `json:"planMaxRevisions,omitempty"`
+	InteractionTTLHours     int  `json:"interactionTTLHours,omitempty"`
+	OutputMaxPerRun         int  `json:"outputMaxPerRun,omitempty"`
 }
 
 // summarizeTextRunConfig projects the frozen effective config for workbench /
@@ -337,7 +334,6 @@ func summarizeTextRunConfig(effective effectiveTextRunConfig, protocol string) *
 	payloadBytes, payloadObserved := measureProviderPayloadBytesIfProtocol(protocol, tools)
 	return &TextRunConfigSummary{
 		Strategy: effective.Strategy, StrategyReason: effective.StrategyReason, RequestedMode: effective.RequestedMode,
-		DefaultMode: effective.DefaultMode, AllowedModes: append([]string{}, effective.AllowedModes...),
 		EnvironmentRef: effective.Environment, EnvironmentProfileName: effective.EnvironmentProfileName,
 		PlatformModelName: effective.PlatformModelName,
 		MemoryEnabled:     effective.MemoryEnabled, SkillRefs: append([]model.ResourceRef{}, effective.SkillRefs...),
@@ -348,9 +344,9 @@ func summarizeTextRunConfig(effective effectiveTextRunConfig, protocol string) *
 		ProviderToolPayloadBytes: payloadBytes, ProviderPayloadObserved: payloadObserved,
 		FileCount: len(effective.FileIDs), MaxLLMCalls: effective.MaxLLMCalls, MaxToolCalls: effective.MaxToolCalls,
 		ToolRetryCount: effective.ToolRetryCount, ToolConcurrency: effective.ToolConcurrency,
-		PlanApprovalMode: effective.PlanApprovalMode, PlanMaxSteps: effective.PlanMaxSteps,
-		PlanMaxRevisions: effective.PlanMaxRevisions, InteractionTTLHours: effective.InteractionTTLHours,
-		OutputMaxPerRun: effective.OutputMaxPerRun,
+		PlanMaxSteps: effective.PlanMaxSteps, PlanMaxRevisions: effective.PlanMaxRevisions,
+		InteractionTTLHours: effective.InteractionTTLHours,
+		OutputMaxPerRun:     effective.OutputMaxPerRun,
 	}
 }
 
@@ -458,8 +454,6 @@ type effectiveTextRunConfig struct {
 	Strategy                    string                    `json:"strategy"`
 	StrategyReason              string                    `json:"strategyReason"`
 	RequestedMode               string                    `json:"requestedMode"`
-	DefaultMode                 string                    `json:"defaultMode"`
-	AllowedModes                []string                  `json:"allowedModes"`
 	Environment                 model.ResourceRef         `json:"environment"`
 	EnvironmentProfileName      string                    `json:"environmentProfileName"`
 	Instructions                string                    `json:"instructions"`
@@ -479,7 +473,6 @@ type effectiveTextRunConfig struct {
 	MaxToolCalls                int                       `json:"maxToolCalls"`
 	ToolRetryCount              int                       `json:"toolRetryCount"`
 	ToolConcurrency             int                       `json:"toolConcurrency"`
-	PlanApprovalMode            string                    `json:"planApprovalMode,omitempty"`
 	ToolPolicies                []effectiveRunToolPolicy  `json:"toolPolicies,omitempty"`
 	PlanMaxSteps                int                       `json:"planMaxSteps,omitempty"`
 	PlanMaxRevisions            int                       `json:"planMaxRevisions,omitempty"`
@@ -656,10 +649,7 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 			return textRunPreparedConfiguration{}, err
 		}
 	}
-	strategy, strategyReason, requestedMode, err := resolveTextRunStrategy(input.ExecutionMode, profile.DefaultMode, profile.AllowedModes, goal, toolResolution.Policies)
-	if err != nil {
-		return textRunPreparedConfiguration{}, err
-	}
+	strategy, strategyReason, requestedMode := TextRunStrategyDirect, textRunStrategyReasonRequestedDirect, TextRunExecutionModeDirect
 	if input.FrozenStrategy != "" {
 		if input.FrozenStrategy != strategy || input.FrozenStrategyReason != strategyReason || input.FrozenRequestedMode != requestedMode {
 			return textRunPreparedConfiguration{}, ErrRunSnapshotIncompatible
@@ -686,12 +676,12 @@ func (s *Engine) prepareTextRunConfiguration(ctx context.Context, input StartTex
 		return textRunPreparedConfiguration{}, ErrInvalidInput
 	}
 	effective := effectiveTextRunConfig{
-		SemanticVersion: RuntimeSnapshotVersion, Strategy: strategy, StrategyReason: strategyReason, RequestedMode: requestedMode, DefaultMode: profile.DefaultMode, AllowedModes: append([]string(nil), profile.AllowedModes...), Environment: input.Environment, EnvironmentProfileName: profile.Name,
+		SemanticVersion: RuntimeSnapshotVersion, Strategy: strategy, StrategyReason: strategyReason, RequestedMode: requestedMode, Environment: input.Environment, EnvironmentProfileName: profile.Name,
 		Instructions: instructions, PlatformModelName: modelName, AllowedModelSnapshot: append([]EnvironmentModelPolicy(nil), profile.Models...), MemoryPolicy: profile.MemoryPolicy, MemoryEnabled: profile.MemoryPolicy != "disabled", SkillRefs: selectedSkillRefs, UnavailableSkillRefs: unavailableSkillRefs,
 		ToolKeys: toolResolution.ResolvedKeys, UnavailableToolKeys: uniqueRuntimeStrings(toolResolution.Unavailable),
 		FileIDs: append([]string(nil), input.FileIDs...), Options: input.Options, HTMLVisualPromptEnabled: input.HTMLVisualPromptEnabled, HTMLVisualColorMode: input.HTMLVisualColorMode,
 		MaxLLMCalls: maxLLMCalls, MaxToolCalls: maxToolCalls, ToolRetryCount: toolRetryCount, ToolConcurrency: toolConcurrency,
-		PlanApprovalMode: normalizedPlanApprovalMode(profile.PlanApprovalMode), ToolPolicies: toolResolution.Policies,
+		ToolPolicies: toolResolution.Policies,
 		PlanMaxSteps: boundedTextRunConfig(cfg.Planner.MaxSteps, 12, 50), PlanMaxRevisions: boundedTextRunConfig(cfg.Planner.MaxRevisions, 5, 20),
 		InteractionTTLHours: boundedTextRunConfig(cfg.Execution.InteractionTTLHours, 168, 24*365), OutputMaxPerRun: boundedTextRunConfig(cfg.Outputs.MaxPerRun, 50, 500),
 		OutputIDs: uniqueRuntimeStrings(input.OutputIDs), OutputRefs: resources.OutputRefs, EvidenceIDs: resources.EvidenceIDs, EvidenceRefs: resources.EvidenceRefs, Workspace: resources.Workspace, AgentManifest: agentSnapshot,

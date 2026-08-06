@@ -242,10 +242,9 @@ func (s *Engine) freezeRunQueueCapabilities(ctx context.Context, actor model.Act
 		return RunQueueRequest{}, err
 	}
 	request.Model = firstNonEmptyString(request.Model, modelName)
-	request.ResolvedStrategy, request.StrategyReason, request.RequestedMode, err = resolveTextRunStrategy(request.ExecutionMode, environment.DefaultMode, environment.AllowedModes, request.Input.Content, effectiveTools.Policies)
-	if err != nil {
-		return RunQueueRequest{}, err
-	}
+	request.ResolvedStrategy = TextRunStrategyDirect
+	request.StrategyReason = textRunStrategyReasonRequestedDirect
+	request.RequestedMode = TextRunExecutionModeDirect
 	return request, nil
 }
 
