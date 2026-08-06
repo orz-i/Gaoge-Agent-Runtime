@@ -16,6 +16,7 @@ const (
 
 func Models() []interface{} {
 	return []interface{}{
+		&models.KernelRunRecord{}, &models.KernelEventRecord{},
 		&models.RunRecord{}, &models.EventRecord{}, &models.RunStep{},
 		&models.RuntimePlanRecord{}, &models.RunInteraction{}, &models.RunCheckpoint{},
 		&models.RuntimeOutputIdentityRecord{}, &models.RuntimeOutputRefRecord{},

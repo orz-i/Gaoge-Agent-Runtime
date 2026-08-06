@@ -12,7 +12,10 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 )
 
-const conformanceThreadID = "thread"
+const (
+	conformanceThreadID  = "thread"
+	conformanceValueJSON = `{"value":1}`
+)
 
 // KernelStoreFactory creates one empty isolated Store for each test.
 type KernelStoreFactory func(testing.TB) kernel.Store
@@ -25,8 +28,35 @@ func RunKernelStoreSuite(t *testing.T, factory KernelStoreFactory) {
 	}
 	t.Run("create-load-isolation", func(t *testing.T) { testCreateLoadIsolation(t, factory(t)) })
 	t.Run("duplicate-create", func(t *testing.T) { testDuplicateCreate(t, factory(t)) })
+	t.Run("checkpoint-result-isolation", func(t *testing.T) { testCheckpointResultIsolation(t, factory(t)) })
 	t.Run("cas-and-events", func(t *testing.T) { testCASAndEvents(t, factory(t)) })
 	t.Run("concurrent-cas", func(t *testing.T) { testConcurrentCAS(t, factory(t)) })
+}
+
+func testCheckpointResultIsolation(t *testing.T, store kernel.Store) {
+	t.Helper()
+	record := conformanceRecord("run_optional")
+	record.Checkpoint = &kernel.Checkpoint{
+		ID: "checkpoint_1", Kind: "approval", Status: kernel.CheckpointPending,
+		Payload: json.RawMessage(`{"required":true}`), CreatedAt: record.Run.CreatedAt,
+	}
+	record.Result = &kernel.Result{ContentType: "application/json", Content: json.RawMessage(`{"value":1}`)}
+	created, err := store.Create(context.Background(), record, nil)
+	if err != nil {
+		t.Fatalf("create optional record: %v", err)
+	}
+	record.Checkpoint.Payload[1] = 'x'
+	record.Result.Content[1] = 'x'
+	created.Checkpoint.Payload[1] = 'y'
+	created.Result.Content[1] = 'y'
+	loaded, err := store.Load(context.Background(), record.Run.ID)
+	if err != nil {
+		t.Fatalf("load optional record: %v", err)
+	}
+	if loaded.Checkpoint == nil || string(loaded.Checkpoint.Payload) != `{"required":true}` ||
+		loaded.Result == nil || string(loaded.Result.Content) != conformanceValueJSON {
+		t.Fatalf("checkpoint/result mutation leaked: %#v", loaded)
+	}
 }
 
 func testCreateLoadIsolation(t *testing.T, store kernel.Store) {
@@ -44,13 +74,13 @@ func testCreateLoadIsolation(t *testing.T, store kernel.Store) {
 	if err != nil {
 		t.Fatalf("load record: %v", err)
 	}
-	if string(loaded.State) != `{"value":1}` || loaded.Run.DeadlineAt == nil ||
+	if string(loaded.State) != conformanceValueJSON || loaded.Run.DeadlineAt == nil ||
 		!loaded.Run.DeadlineAt.Equal(time.Date(2026, 8, 6, 14, 0, 0, 0, time.UTC)) {
 		t.Fatalf("store did not isolate input/output: %#v", loaded)
 	}
 	loaded.State[1] = 'z'
 	again, err := store.Load(context.Background(), record.Run.ID)
-	if err != nil || string(again.State) != `{"value":1}` {
+	if err != nil || string(again.State) != conformanceValueJSON {
 		t.Fatalf("load result leaked mutation: %#v, %v", again, err)
 	}
 }
@@ -161,6 +191,6 @@ func conformanceRecord(runID string) kernel.Record {
 			Goal:   "test", Status: kernel.RunStatusRunning, Revision: 1,
 			DeadlineAt: &deadline, CreatedAt: now, UpdatedAt: now,
 		},
-		State: json.RawMessage(`{"value":1}`),
+		State: json.RawMessage(conformanceValueJSON),
 	}
 }
