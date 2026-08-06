@@ -1,27 +1,8 @@
 openapi: 3.0.3
 info:
-  title: Agent Runtime HTTP API
-  version: 0.1.0
-servers:
-  - url: /api/v1
+  title: Agent Runtime API
+  version: 1.0.0
 paths:
-  /runs:
-    get:
-      operationId: listRuns
-      parameters:
-        - $ref: '#/components/parameters/ThreadKind'
-        - $ref: '#/components/parameters/ThreadID'
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
-      responses:
-        '200':
-          description: Runtime runs for one host thread
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RunPage'
-        default:
-          $ref: '#/components/responses/Error'
   /text-runs:
     post:
       operationId: createTextRun
@@ -29,17 +10,14 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/CreateRunRequest'
+            schema: {$ref: '#/components/schemas/StartTextRunRequest'}
       responses:
         '202':
-          description: Accepted run and durable host projections
+          description: Accepted
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/StartRunResult'
-        default:
-          $ref: '#/components/responses/Error'
+              schema: {$ref: '#/components/schemas/RunSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
   /plan-runs:
     post:
       operationId: createPlanRun
@@ -47,218 +25,78 @@ paths:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/StartPlanRunRequest'
+            schema: {$ref: '#/components/schemas/StartPlanRunRequest'}
       responses:
         '202':
-          description: Accepted Plan-and-Execute run
+          description: Accepted
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PlanRunSnapshot'
-        default:
-          $ref: '#/components/responses/Error'
+              schema: {$ref: '#/components/schemas/RunSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
   /plan-runs/{runID}/approval:
     post:
-      operationId: resolvePlanRunApproval
+      operationId: resolvePlanApproval
       parameters:
         - $ref: '#/components/parameters/RunID'
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ResolvePlanApprovalRequest'
+            schema: {$ref: '#/components/schemas/ResolvePlanApprovalRequest'}
       responses:
         '200':
-          description: Resolved Plan approval and resumed execution
+          description: Resolved
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/PlanRunSnapshot'
-        default:
-          $ref: '#/components/responses/Error'
+              schema: {$ref: '#/components/schemas/RunSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
   /workflow-runs:
     post:
-      operationId: startWorkflow
+      operationId: createWorkflowRun
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/StartWorkflowRequest'
+            schema: {$ref: '#/components/schemas/StartWorkflowRunRequest'}
       responses:
         '202':
-          description: Accepted durable Workflow run
+          description: Accepted
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/WorkflowStartResult'
-        default:
-          $ref: '#/components/responses/Error'
+              schema: {$ref: '#/components/schemas/RunSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
+  /workflow-runs/{runID}/wait:
+    post:
+      operationId: resolveWorkflowWait
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResolveWorkflowWaitRequest'}
+      responses:
+        '200':
+          description: Resolved
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
   /team-runs:
     post:
-      operationId: startAgentTeam
+      operationId: createTeamRun
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/StartAgentTeamRequest'
+            schema: {$ref: '#/components/schemas/StartTeamRunRequest'}
       responses:
         '202':
-          description: Accepted coordinator-led Agent Team with durable member handoffs and fan-in join
+          description: Accepted
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/AgentTeamStartResult'
-        default:
-          $ref: '#/components/responses/Error'
-  /agent-manifests:
-    get:
-      operationId: listAgentManifests
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: Active Agent Manifest catalog
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentManifestPage'
-        default:
-          $ref: '#/components/responses/Error'
-  /agent-manifests/{manifestID}:
-    get:
-      operationId: getAgentManifest
-      parameters:
-        - $ref: '#/components/parameters/AgentManifestID'
-        - $ref: '#/components/parameters/OptionalRevision'
-      responses:
-        '200':
-          description: One immutable Agent Manifest revision
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentManifest'
-        default:
-          $ref: '#/components/responses/Error'
-  /workflow-definitions:
-    get:
-      operationId: listWorkflowDefinitions
-      parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: Active visible Workflow Definition revisions
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkflowDefinitionPage'
-        default:
-          $ref: '#/components/responses/Error'
-  /workflow-definitions/{workflowID}:
-    get:
-      operationId: getWorkflowDefinition
-      parameters:
-        - $ref: '#/components/parameters/WorkflowDefinitionID'
-        - $ref: '#/components/parameters/OptionalRevision'
-      responses:
-        '200':
-          description: One immutable Workflow Definition revision
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkflowDefinition'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/handoffs:
-    post:
-      operationId: delegateRun
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DelegateRunRequest'
-      responses:
-        '202':
-          description: Accepted delegated child run
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DelegatedRunResult'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/handoff-joins:
-    post:
-      operationId: createRunHandoffJoin
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateRunHandoffJoinRequest'
-      responses:
-        '201':
-          description: Created durable handoff fan-in contract and paused the parent run
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RunHandoffJoin'
-        default:
-          $ref: '#/components/responses/Error'
-    get:
-      operationId: listRunHandoffJoins
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-        - $ref: '#/components/parameters/RunHandoffJoinStatus'
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: Durable handoff fan-in contracts for the parent run
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RunHandoffJoinPage'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/handoff-joins/{joinID}:
-    get:
-      operationId: getRunHandoffJoin
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-        - $ref: '#/components/parameters/RunHandoffJoinID'
-      responses:
-        '200':
-          description: One durable handoff fan-in contract
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RunHandoffJoin'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/task-tree:
-    get:
-      operationId: getRunTaskTree
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      responses:
-        '200':
-          description: Durable parent and child run task tree
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RunTaskTree'
-        default:
-          $ref: '#/components/responses/Error'
+              schema: {$ref: '#/components/schemas/RunSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
   /runs/{runID}:
     get:
       operationId: getRun
@@ -266,1083 +104,100 @@ paths:
         - $ref: '#/components/parameters/RunID'
       responses:
         '200':
-          description: Run detail and durable host projections
+          description: Run snapshot
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/RunDetail'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/provenance:
-    get:
-      operationId: getRunExecutionProvenance
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      responses:
-        '200':
-          description: Frozen, neutral execution provenance for a terminal run
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RuntimeExecutionProvenanceV1'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/result:
-    get:
-      operationId: getRunResult
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      responses:
-        '200':
-          description: Canonical terminal result for a Text or Workflow run
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/RunResult'
-        default:
-          $ref: '#/components/responses/Error'
+              schema: {$ref: '#/components/schemas/RunSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
   /runs/{runID}/cancel:
     post:
       operationId: cancelRun
       parameters:
         - $ref: '#/components/parameters/RunID'
-      responses:
-        '200':
-          description: Cancellation result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CancelRunResponse'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/resume:
-    post:
-      operationId: resumeRun
-      parameters:
-        - $ref: '#/components/parameters/RunID'
       requestBody:
         required: true
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/ResumeRunRequest'
-      responses:
-        '202':
-          description: Accepted resume request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ResumeRunResponse'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/retire:
-    post:
-      operationId: retireRun
-      parameters:
-        - $ref: '#/components/parameters/RunID'
+            schema: {$ref: '#/components/schemas/CancelRunRequest'}
       responses:
         '200':
-          description: Retired run
+          description: Cancelled
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/RetireRunResponse'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/events:
-    get:
-      operationId: streamRunEvents
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-        - $ref: '#/components/parameters/AfterSeq'
-      responses:
-        '200':
-          description: Ordered NDJSON Runtime events
-          content:
-            application/x-ndjson:
-              schema:
-                $ref: '#/components/schemas/Event'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/events/history:
-    get:
-      operationId: listRunEventHistory
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-        - $ref: '#/components/parameters/BeforeSeq'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Historical Runtime events
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EventHistoryPage'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/events/{eventID}:
-    get:
-      operationId: getRunEvent
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-        - $ref: '#/components/parameters/EventID'
-      responses:
-        '200':
-          description: Runtime event with redacted diagnostic payloads
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EventDetail'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/plan:
-    get:
-      operationId: getRunPlan
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      responses:
-        '200':
-          description: Current plan and revisions
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PlanView'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/interactions:
-    get:
-      operationId: listRunInteractions
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      responses:
-        '200':
-          description: Runtime interactions
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/InteractionList'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/interactions/{interactionID}/resolve:
-    post:
-      operationId: resolveRunInteraction
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-        - $ref: '#/components/parameters/InteractionID'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ResolveInteractionRequest'
-      responses:
-        '200':
-          description: Resolved Runtime interaction
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Interaction'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/checkpoints:
-    get:
-      operationId: listRunCheckpoints
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      responses:
-        '200':
-          description: Durable Runtime checkpoints
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CheckpointList'
-        default:
-          $ref: '#/components/responses/Error'
-  /runs/{runID}/outputs:
-    get:
-      operationId: listRunOutputs
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      responses:
-        '200':
-          description: Outputs created by the run
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OutputList'
-        default:
-          $ref: '#/components/responses/Error'
+              schema: {$ref: '#/components/schemas/CancelRunResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /runs/{runID}/workbench:
     get:
-      operationId: getRunWorkbench
+      operationId: getWorkbench
       parameters:
         - $ref: '#/components/parameters/RunID'
       responses:
         '200':
-          description: Durable Runtime workbench projection
+          description: Workbench detail
           content:
             application/json:
-              schema:
-                $ref: '#/components/schemas/Workbench'
-        default:
-          $ref: '#/components/responses/Error'
-  /run-queue:
-    get:
-      operationId: listQueue
-      parameters:
-        - $ref: '#/components/parameters/ThreadKind'
-        - $ref: '#/components/parameters/ThreadID'
-      responses:
-        '200':
-          description: Durable queue for one host thread
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/QueueList'
-        default:
-          $ref: '#/components/responses/Error'
-    post:
-      operationId: enqueueRun
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/QueueCreateRequest'
-      responses:
-        '202':
-          description: Accepted queue item
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/QueueCreateResponse'
-        default:
-          $ref: '#/components/responses/Error'
-  /run-queue/{queueID}:
-    patch:
-      operationId: updateQueueItem
-      parameters:
-        - $ref: '#/components/parameters/QueueID'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/QueueUpdateRequest'
-      responses:
-        '200':
-          description: Updated queue item
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/QueueItem'
-        default:
-          $ref: '#/components/responses/Error'
-    delete:
-      operationId: cancelQueueItem
-      parameters:
-        - $ref: '#/components/parameters/QueueID'
-        - $ref: '#/components/parameters/ThreadKind'
-        - $ref: '#/components/parameters/ThreadID'
-      responses:
-        '200':
-          description: Cancelled queue item
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/QueueItem'
-        default:
-          $ref: '#/components/responses/Error'
-  /run-queue/{queueID}/prioritize:
-    post:
-      operationId: prioritizeQueueItem
-      parameters:
-        - $ref: '#/components/parameters/QueueID'
-        - $ref: '#/components/parameters/ThreadKind'
-        - $ref: '#/components/parameters/ThreadID'
-      responses:
-        '200':
-          description: Prioritized queue item
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/QueueItem'
-        default:
-          $ref: '#/components/responses/Error'
-  /run-queue/{queueID}/interrupt-and-send:
-    post:
-      operationId: interruptAndSendQueueItem
-      parameters:
-        - $ref: '#/components/parameters/QueueID'
-        - $ref: '#/components/parameters/ThreadKind'
-        - $ref: '#/components/parameters/ThreadID'
-      responses:
-        '200':
-          description: Queue item selected after interrupting the active run
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/QueueItem'
-        default:
-          $ref: '#/components/responses/Error'
-  /outputs:
-    get:
-      operationId: listOutputs
-      parameters:
-        - $ref: '#/components/parameters/SearchQuery'
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Actor output catalog
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OutputCatalogPage'
-        default:
-          $ref: '#/components/responses/Error'
-  /outputs/{outputID}:
-    get:
-      operationId: getOutput
-      parameters:
-        - $ref: '#/components/parameters/OutputID'
-        - $ref: '#/components/parameters/OptionalVersion'
-      responses:
-        '200':
-          description: One output version
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OutputCatalogItem'
-        default:
-          $ref: '#/components/responses/Error'
-  /outputs/{outputID}/versions:
-    get:
-      operationId: listOutputVersions
-      parameters:
-        - $ref: '#/components/parameters/OutputID'
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Version history for one output
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OutputVersionPage'
-        default:
-          $ref: '#/components/responses/Error'
-  /outputs/{outputID}/versions/{version}/preview:
-    get:
-      operationId: previewOutputVersion
-      parameters:
-        - $ref: '#/components/parameters/OutputID'
-        - $ref: '#/components/parameters/Version'
-      responses:
-        '200':
-          description: Renderable output preview
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OutputPreviewResult'
-        default:
-          $ref: '#/components/responses/Error'
-  /outputs/{outputID}/versions/{version}/download:
-    get:
-      operationId: downloadOutputVersion
-      parameters:
-        - $ref: '#/components/parameters/OutputID'
-        - $ref: '#/components/parameters/Version'
-      responses:
-        '200':
-          description: Output file content
-          content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
-        default:
-          $ref: '#/components/responses/Error'
-  /evidence:
-    post:
-      operationId: createEvidence
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateEvidenceRequest'
-      responses:
-        '200':
-          description: Frozen Runtime evidence
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Evidence'
-        default:
-          $ref: '#/components/responses/Error'
-  /admin/agentruntime/continuations:
-    get:
-      operationId: listContinuationJobs
-      parameters:
-        - {name: tenantID, in: query, required: false, schema: {type: string}}
-        - {name: actorID, in: query, required: false, schema: {type: string}}
-        - {name: status, in: query, required: false, schema: {type: string, enum: [queued, running, retry_wait, completed, dead_letter]}}
-        - {name: runID, in: query, required: false, schema: {type: string}}
-        - {name: jobID, in: query, required: false, schema: {type: string}}
-        - {name: source, in: query, required: false, schema: {type: string}}
-        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 0, maximum: 200, default: 50}}
-        - {name: offset, in: query, required: false, schema: {type: integer, minimum: 0, default: 0}}
-      responses:
-        '200':
-          description: Operator view of durable continuation jobs
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ContinuationJobPage'
-        default:
-          $ref: '#/components/responses/Error'
-  /admin/agentruntime/continuations/{jobID}/requeue:
-    post:
-      operationId: requeueContinuationJob
-      parameters:
-        - $ref: '#/components/parameters/ContinuationJobID'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RequeueContinuationRequest'
-      responses:
-        '200':
-          description: Requeued recoverable continuation job
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ContinuationJob'
-        default:
-          $ref: '#/components/responses/Error'
-  /admin/agentruntime/agent-manifests:
-    get:
-      operationId: listAdminAgentManifests
-      parameters:
-        - $ref: '#/components/parameters/AgentManifestStatus'
-        - $ref: '#/components/parameters/AgentManifestScope'
-        - $ref: '#/components/parameters/AgentManifestTenantID'
-        - $ref: '#/components/parameters/AgentManifestOwnerActorID'
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: Latest Agent Manifest revisions for administrators
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentManifestPage'
-        default:
-          $ref: '#/components/responses/Error'
-    post:
-      operationId: createAgentManifest
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AgentManifestRevisionRequest'
-      responses:
-        '201':
-          description: Created Agent Manifest revision
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentManifest'
-        default:
-          $ref: '#/components/responses/Error'
-  /admin/agentruntime/agent-manifests/{manifestID}/revisions:
-    post:
-      operationId: reviseAgentManifest
-      parameters:
-        - $ref: '#/components/parameters/AgentManifestID'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AgentManifestRevisionRequest'
-      responses:
-        '201':
-          description: Appended Agent Manifest revision
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentManifest'
-        default:
-          $ref: '#/components/responses/Error'
-  /admin/agentruntime/workflow-definitions:
-    get:
-      operationId: listAdminWorkflowDefinitions
-      parameters:
-        - $ref: '#/components/parameters/WorkflowDefinitionStatus'
-        - $ref: '#/components/parameters/WorkflowDefinitionScope'
-        - $ref: '#/components/parameters/AgentManifestTenantID'
-        - $ref: '#/components/parameters/AgentManifestOwnerActorID'
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Offset'
-      responses:
-        '200':
-          description: Latest Workflow Definition revisions for administrators
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkflowDefinitionPage'
-        default:
-          $ref: '#/components/responses/Error'
-    post:
-      operationId: createWorkflowDefinition
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/WorkflowDefinitionRevisionRequest'
-      responses:
-        '201':
-          description: Created and compiled Workflow Definition revision
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkflowDefinition'
-        default:
-          $ref: '#/components/responses/Error'
-  /admin/agentruntime/workflow-definitions/validate:
-    post:
-      operationId: validateWorkflowDefinition
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/WorkflowDefinitionRevisionRequest'
-      responses:
-        '200':
-          description: Strictly compiled Workflow Definition without publishing it
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkflowDefinitionValidation'
-        default:
-          $ref: '#/components/responses/Error'
-  /admin/agentruntime/workflow-definitions/{workflowID}/revisions:
-    post:
-      operationId: reviseWorkflowDefinition
-      parameters:
-        - $ref: '#/components/parameters/WorkflowDefinitionID'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/WorkflowDefinitionRevisionRequest'
-      responses:
-        '201':
-          description: Appended immutable Workflow Definition revision
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/WorkflowDefinition'
-        default:
-          $ref: '#/components/responses/Error'
+              schema: {type: object, additionalProperties: true}
+        default: {$ref: '#/components/responses/Error'}
 components:
   parameters:
     RunID:
       name: runID
       in: path
       required: true
-      schema: {type: string}
-    RunHandoffJoinID:
-      name: joinID
-      in: path
-      required: true
-      schema: {type: string}
-    AgentManifestID:
-      name: manifestID
-      in: path
-      required: true
-      schema: {type: string}
-    WorkflowDefinitionID:
-      name: workflowID
-      in: path
-      required: true
-      schema: {type: string}
-    ContinuationJobID:
-      name: jobID
-      in: path
-      required: true
-      schema: {type: string}
-    EventID:
-      name: eventID
-      in: path
-      required: true
-      schema: {type: string}
-    InteractionID:
-      name: interactionID
-      in: path
-      required: true
-      schema: {type: string}
-    QueueID:
-      name: queueID
-      in: path
-      required: true
-      schema: {type: string}
-    OutputID:
-      name: outputID
-      in: path
-      required: true
-      schema: {type: string}
-    Version:
-      name: version
-      in: path
-      required: true
-      schema: {type: integer, minimum: 1}
-    Offset:
-      name: offset
-      in: query
-      required: false
-      schema: {type: integer, minimum: 0, default: 0}
-    AgentManifestStatus:
-      name: status
-      in: query
-      required: false
-      schema: {type: string, enum: [active, disabled]}
-    AgentManifestScope:
-      name: scope
-      in: query
-      required: false
-      schema: {type: string, enum: [actor, tenant, system]}
-    AgentManifestTenantID:
-      name: tenantID
-      in: query
-      required: false
-      schema: {type: string, maxLength: 64}
-    AgentManifestOwnerActorID:
-      name: ownerActorID
-      in: query
-      required: false
-      schema: {type: string, maxLength: 64}
-    WorkflowDefinitionStatus:
-      name: status
-      in: query
-      required: false
-      schema: {type: string, enum: [active, disabled]}
-    WorkflowDefinitionScope:
-      name: scope
-      in: query
-      required: false
-      schema: {type: string, enum: [actor, tenant, system]}
-    RunHandoffJoinStatus:
-      name: status
-      in: query
-      required: false
-      schema: {type: string, enum: [pending, ready, failed, cancelled]}
-    OptionalRevision:
-      name: revision
-      in: query
-      required: false
-      schema: {type: string}
-    OptionalVersion:
-      name: version
-      in: query
-      required: false
-      schema: {type: integer, minimum: 1}
-    ThreadKind:
-      name: threadKind
-      in: query
-      required: true
-      schema: {type: string}
-    ThreadID:
-      name: threadID
-      in: query
-      required: true
-      schema: {type: string}
-    Page:
-      name: page
-      in: query
-      required: false
-      schema: {type: integer, minimum: 1, default: 1}
-    PageSize:
-      name: pageSize
-      in: query
-      required: false
-      schema: {type: integer, minimum: 1, default: 20}
-    Limit:
-      name: limit
-      in: query
-      required: false
-      schema: {type: integer, minimum: 1}
-    Cursor:
-      name: cursor
-      in: query
-      required: false
-      schema: {type: string}
-    SearchQuery:
-      name: q
-      in: query
-      required: false
-      schema: {type: string}
-    AfterSeq:
-      name: afterSeq
-      in: query
-      required: false
-      schema: {type: integer, format: int64, minimum: 0}
-    BeforeSeq:
-      name: beforeSeq
-      in: query
-      required: false
-      schema: {type: integer, format: int64, minimum: 1}
+      schema: {type: string, minLength: 1, maxLength: 128}
   responses:
     Error:
-      description: Stable Runtime error
+      description: Error
       content:
         application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
   schemas:
     ActorRef:
       type: object
       additionalProperties: false
-      required: [id]
+      required: [tenantID, actorID]
       properties:
         tenantID: {type: string}
-        id: {type: string}
+        actorID: {type: string}
     ThreadRef:
       type: object
       additionalProperties: false
       required: [kind, id]
       properties:
-        kind: {type: string}
-        id: {type: string}
-    ProjectionRef:
+        kind: {type: string, maxLength: 64}
+        id: {type: string, maxLength: 128}
+    ThreadRequest:
       type: object
       additionalProperties: false
       required: [kind, id]
       properties:
-        kind: {type: string}
-        id: {type: string}
-    ResourceRef:
+        kind: {type: string, maxLength: 64}
+        id: {type: string, maxLength: 128}
+    TextInputRequest:
       type: object
       additionalProperties: false
-      required: [kind, id]
+      required: [content]
       properties:
-        kind: {type: string}
-        id: {type: string}
-        revision: {type: string}
-    AgentManifestRevisionRequest:
+        content: {type: string, maxLength: 200000}
+    StartTextRunRequest:
       type: object
       additionalProperties: false
-      required: [name]
+      required: [thread, input]
       properties:
-        manifestID: {type: string, maxLength: 64}
-        expectedRevision: {type: integer, minimum: 0}
-        scope: {type: string, enum: [actor, tenant, system]}
-        tenantID: {type: string, maxLength: 64}
-        ownerActorID: {type: string, maxLength: 64}
-        name: {type: string, minLength: 1, maxLength: 128}
-        description: {type: string, maxLength: 4000}
-        instructions: {type: string, maxLength: 20000}
-        status: {type: string, enum: [active, disabled]}
-        modelName: {type: string, maxLength: 128}
-        toolKeys: {type: array, maxItems: 128, items: {type: string}}
-        skillKeys: {type: array, maxItems: 128, items: {type: string}}
-        maxChildRuns: {type: integer, minimum: 1, maximum: 16}
-        maxDepth: {type: integer, minimum: 1, maximum: 6}
-        maxLLMCalls: {type: integer, minimum: 2, maximum: 32, description: Zero or omitted inherits the environment limit.}
-        maxToolCalls: {type: integer, minimum: 1, maximum: 64, description: Zero or omitted inherits the environment limit.}
-        revisionNote: {type: string, maxLength: 255}
-    AgentManifest:
-      type: object
-      additionalProperties: false
-      required: [manifestID, revision, ref, scope, tenantID, ownerActorID, name, status, toolKeys, skillKeys, maxChildRuns, maxDepth, maxLLMCalls, maxToolCalls, createdAt, updatedAt]
-      properties:
-        manifestID: {type: string}
-        revision: {type: integer, minimum: 1}
-        ref:
-          $ref: '#/components/schemas/ResourceRef'
-        scope: {type: string, enum: [actor, tenant, system]}
-        tenantID: {type: string}
-        ownerActorID: {type: string}
-        name: {type: string}
-        description: {type: string}
-        instructions: {type: string}
-        status: {type: string, enum: [active, disabled]}
-        modelName: {type: string}
-        toolKeys: {type: array, items: {type: string}}
-        skillKeys: {type: array, items: {type: string}}
-        maxChildRuns: {type: integer, minimum: 1}
-        maxDepth: {type: integer, minimum: 1}
-        maxLLMCalls: {type: integer, minimum: 0, maximum: 32}
-        maxToolCalls: {type: integer, minimum: 0, maximum: 64}
-        revisionNote: {type: string}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-    AgentManifestPage:
-      type: object
-      additionalProperties: false
-      required: [total, results]
-      properties:
-        total: {type: integer, format: int64, minimum: 0}
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/AgentManifest'
-    WorkflowLimits:
-      type: object
-      additionalProperties: false
-      required: [maxNodeActivations, maxChildRuns, maxConcurrentRuns, maxTotalLLMCalls, maxTotalToolCalls, maxDurationSeconds, maxLoopIterations, maxNestedDepth, maxStateBytes]
-      properties:
-        maxNodeActivations: {type: integer, minimum: 1}
-        maxChildRuns: {type: integer, minimum: 1}
-        maxConcurrentRuns: {type: integer, minimum: 1}
-        maxTotalLLMCalls: {type: integer, minimum: 1}
-        maxTotalToolCalls: {type: integer, minimum: 1}
-        maxDurationSeconds: {type: integer, minimum: 1}
-        maxLoopIterations: {type: integer, minimum: 1}
-        maxNestedDepth: {type: integer, minimum: 1}
-        maxStateBytes: {type: integer, minimum: 1}
-    WorkflowNodeLimits:
-      type: object
-      additionalProperties: false
-      properties:
-        maxLLMCalls: {type: integer, minimum: 1}
-        maxToolCalls: {type: integer, minimum: 1}
-    WorkflowCachePolicy:
-      type: object
-      additionalProperties: false
-      required: [enabled]
-      properties:
-        enabled: {type: boolean}
-        ttlSeconds: {type: integer, minimum: 1}
-        mode: {type: string, enum: [use, refresh, bypass]}
-    WorkflowExpr:
-      type: object
-      additionalProperties: false
-      required: [op]
-      properties:
-        op:
-          type: string
-          enum: [literal, ref, object, array, eq, ne, lt, lte, gt, gte, and, or, not, coalesce, merge, append, concat, length, contains, add, sub, mul, div, mod]
-        value: {}
-        ref: {type: string}
-        fields:
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/WorkflowExpr'
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkflowExpr'
-        args:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkflowExpr'
-    JSONSchema:
-      description: Self-contained JSON Schema Draft 2020-12 document; remote references are rejected at validation time.
-      oneOf:
-        - type: object
-          additionalProperties: true
-        - type: boolean
-    WorkflowNode:
-      type: object
-      additionalProperties: false
-      required: [id, type]
-      properties:
-        id: {type: string, minLength: 1}
-        type:
-          type: string
-          enum: [sequence, agent, parallel, forEach, pipeline, if, loop, set, log, tool, workflow, interaction, timer, compensate, return]
-        children:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkflowNode'
-        branches:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkflowNode'
-        stages:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkflowNode'
-        body:
-          $ref: '#/components/schemas/WorkflowNode'
-        then:
-          $ref: '#/components/schemas/WorkflowNode'
-        else:
-          $ref: '#/components/schemas/WorkflowNode'
-        do:
-          $ref: '#/components/schemas/WorkflowNode'
-        undo:
-          $ref: '#/components/schemas/WorkflowNode'
-        manifestRef:
-          $ref: '#/components/schemas/ResourceRef'
-        definitionRef:
-          $ref: '#/components/schemas/ResourceRef'
-        toolKey: {type: string}
-        goal:
-          $ref: '#/components/schemas/WorkflowExpr'
-        items:
-          $ref: '#/components/schemas/WorkflowExpr'
-        condition:
-          $ref: '#/components/schemas/WorkflowExpr'
-        arguments:
-          $ref: '#/components/schemas/WorkflowExpr'
-        input:
-          $ref: '#/components/schemas/WorkflowExpr'
-        message:
-          $ref: '#/components/schemas/WorkflowExpr'
-        data:
-          $ref: '#/components/schemas/WorkflowExpr'
-        delaySeconds:
-          $ref: '#/components/schemas/WorkflowExpr'
-        wakeAt:
-          $ref: '#/components/schemas/WorkflowExpr'
-        value:
-          $ref: '#/components/schemas/WorkflowExpr'
-        presentation:
-          $ref: '#/components/schemas/WorkflowExpr'
-        assignments:
-          type: object
-          additionalProperties:
-            $ref: '#/components/schemas/WorkflowExpr'
-        outputSchema:
-          $ref: '#/components/schemas/JSONSchema'
-        schema:
-          $ref: '#/components/schemas/JSONSchema'
-        perNodeLimits:
-          $ref: '#/components/schemas/WorkflowNodeLimits'
-        maxConcurrency: {type: integer, minimum: 1}
-        maxIterations: {type: integer, minimum: 1}
-        resultAttempts: {type: integer, minimum: 0, maximum: 2}
-        failurePolicy: {type: string, enum: [collect, fail_fast]}
-        level: {type: string, enum: [debug, info, warn, error]}
-        title: {type: string}
-        prompt: {type: string}
-        expiresAfterSeconds: {type: integer, minimum: 1}
-        cache:
-          $ref: '#/components/schemas/WorkflowCachePolicy'
-    WorkflowDependency:
-      type: object
-      additionalProperties: false
-      required: [kind, ref, fingerprint]
-      properties:
-        kind: {type: string, enum: [agent_manifest, workflow_definition, tool]}
-        ref:
-          $ref: '#/components/schemas/ResourceRef'
-        toolKey: {type: string}
-        definitionVersion: {type: string}
-        fingerprint: {type: string}
-        sideEffectLevel: {type: string}
-    WorkflowDefinitionRevisionRequest:
-      type: object
-      additionalProperties: false
-      required: [name, inputSchema, outputSchema, root, limits]
-      properties:
-        workflowID: {type: string, maxLength: 64}
-        expectedRevision: {type: integer, minimum: 0}
-        schemaVersion: {type: integer, enum: [1], default: 1}
-        scope: {type: string, enum: [actor, tenant, system]}
-        tenantID: {type: string, maxLength: 64}
-        ownerActorID: {type: string, maxLength: 64}
-        name: {type: string, minLength: 1, maxLength: 128}
-        description: {type: string, maxLength: 4000}
-        status: {type: string, enum: [active, disabled]}
-        inputSchema:
-          $ref: '#/components/schemas/JSONSchema'
-        outputSchema:
-          $ref: '#/components/schemas/JSONSchema'
-        root:
-          $ref: '#/components/schemas/WorkflowNode'
-        limits:
-          $ref: '#/components/schemas/WorkflowLimits'
-        revisionNote: {type: string, maxLength: 255}
-    WorkflowDefinition:
-      type: object
-      additionalProperties: false
-      required: [workflowID, revision, ref, schemaVersion, scope, tenantID, ownerActorID, name, status, inputSchema, outputSchema, root, limits, dependencies, dependencyHash, definitionHash, createdAt, updatedAt]
-      properties:
-        workflowID: {type: string}
-        revision: {type: integer, minimum: 1}
-        ref:
-          $ref: '#/components/schemas/ResourceRef'
-        schemaVersion: {type: integer, enum: [1]}
-        scope: {type: string, enum: [actor, tenant, system]}
-        tenantID: {type: string}
-        ownerActorID: {type: string}
-        name: {type: string}
-        description: {type: string}
-        status: {type: string, enum: [active, disabled]}
-        inputSchema:
-          $ref: '#/components/schemas/JSONSchema'
-        outputSchema:
-          $ref: '#/components/schemas/JSONSchema'
-        root:
-          $ref: '#/components/schemas/WorkflowNode'
-        limits:
-          $ref: '#/components/schemas/WorkflowLimits'
-        dependencies:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkflowDependency'
-        dependencyHash: {type: string}
-        definitionHash: {type: string}
-        revisionNote: {type: string}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-    WorkflowDefinitionPage:
-      type: object
-      additionalProperties: false
-      required: [total, results]
-      properties:
-        total: {type: integer, format: int64, minimum: 0}
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/WorkflowDefinition'
-    WorkflowDefinitionValidation:
-      type: object
-      additionalProperties: false
-      required: [valid, nodeCount, definition]
-      properties:
-        valid: {type: boolean, enum: [true]}
-        nodeCount: {type: integer, minimum: 1}
-        definition:
-          $ref: '#/components/schemas/WorkflowDefinition'
-    StartWorkflowRequest:
-      type: object
-      additionalProperties: false
-      required: [thread, definition, input]
-      properties:
-        thread:
-          $ref: '#/components/schemas/RunThread'
-        definition:
-          $ref: '#/components/schemas/ResourceRef'
-        input: {}
+        thread: {$ref: '#/components/schemas/ThreadRequest'}
+        input: {$ref: '#/components/schemas/TextInputRequest'}
         clientRunID: {type: string, maxLength: 64}
-        limits:
-          $ref: '#/components/schemas/WorkflowLimits'
-        cacheMode: {type: string, enum: [use, refresh, bypass]}
-        workspace:
-          $ref: '#/components/schemas/WorkspaceExtension'
+        model: {type: string, maxLength: 128}
     StartPlanRunRequest:
       type: object
       additionalProperties: false
       required: [thread, input]
       properties:
-        thread:
-          $ref: '#/components/schemas/RunThread'
-        input:
-          $ref: '#/components/schemas/RunInput'
+        thread: {$ref: '#/components/schemas/ThreadRequest'}
+        input: {$ref: '#/components/schemas/TextInputRequest'}
         clientRunID: {type: string, maxLength: 64}
         model: {type: string, maxLength: 128}
-        approvalPolicy: {type: string, enum: [auto, required], default: auto}
+        approvalPolicy: {type: string, enum: [auto, required]}
         maxSteps: {type: integer, minimum: 1, maximum: 32}
     ResolvePlanApprovalRequest:
       type: object
@@ -1352,941 +207,116 @@ components:
         expectedRevision: {type: integer, minimum: 1}
         decision: {type: string, enum: [approve, reject]}
         comment: {type: string, maxLength: 2000}
-    RunThread:
+    StartWorkflowRunRequest:
       type: object
       additionalProperties: false
-      required: [kind, id]
+      required: [thread, goal, definition, input]
       properties:
-        kind: {type: string}
-        id: {type: string}
-        parentProjection:
-          $ref: '#/components/schemas/ProjectionRef'
-        sourceProjection:
-          $ref: '#/components/schemas/ProjectionRef'
-        branchReason:
-          type: string
-          enum: [default, retry, edit]
-    RunInput:
-      type: object
-      additionalProperties: false
-      required: [content, contentType]
-      properties:
-        content: {type: string, maxLength: 20000}
-        contentType: {type: string, enum: [text, markdown]}
-        fileIDs: {type: array, maxItems: 20, items: {type: string}}
-        outputIDs: {type: array, maxItems: 50, items: {type: string}}
-        evidenceIDs: {type: array, maxItems: 50, items: {type: string}}
-        htmlVisualPrompt: {type: boolean}
-        htmlVisualColorMode: {type: string, enum: [light, dark]}
-    CreateRunHandoffJoinRequest:
-      type: object
-      additionalProperties: false
-      required: [clientJoinID, handoffIDs]
-      properties:
-        clientJoinID: {type: string, minLength: 1, maxLength: 64}
-        handoffIDs:
-          type: array
-          minItems: 1
-          maxItems: 16
-          uniqueItems: true
-          items: {type: string, minLength: 1, maxLength: 64}
-        mode: {type: string, enum: [all, any, quorum], default: all}
-        quorum: {type: integer, minimum: 1, maximum: 16}
-        failurePolicy: {type: string, enum: [collect, fail_fast], default: collect}
-        timeoutSeconds: {type: integer, minimum: 60, maximum: 604800, default: 3600}
-        timeoutPolicy: {type: string, enum: [cancel_pending, leave_running], default: cancel_pending}
-    WorkspaceExtension:
-      type: object
-      required: [schemaVersion, type]
-      additionalProperties: true
-      properties:
-        schemaVersion: {type: integer, minimum: 1}
-        type: {type: string}
-        resourceID:
-          type: string
-          maxLength: 128
-          description: Optional host-authorized resource override, used for isolated Story branches.
-    CreateRunRequest:
-      type: object
-      additionalProperties: false
-      required: [thread, input]
-      properties:
-        thread:
-          $ref: '#/components/schemas/RunThread'
-        input:
-          $ref: '#/components/schemas/RunInput'
+        thread: {$ref: '#/components/schemas/ThreadRequest'}
+        goal: {type: string, maxLength: 200000}
         clientRunID: {type: string, maxLength: 64}
-        model: {type: string, maxLength: 128}
-        options: {type: object, additionalProperties: true}
-        toolKeys: {type: array, maxItems: 128, items: {type: string}}
-        skillKeys: {type: array, maxItems: 128, items: {type: string}}
-        agentManifest:
-          $ref: '#/components/schemas/ResourceRef'
-        workspace:
-          $ref: '#/components/schemas/WorkspaceExtension'
-    AgentTeamMemberRequest:
+        definition: {type: object, additionalProperties: true}
+        input: {}
+    ResolveWorkflowWaitRequest:
       type: object
       additionalProperties: false
-      required: [memberID, agentManifest, goal]
+      required: [expectedRevision, response]
       properties:
-        memberID: {type: string, minLength: 1, maxLength: 64}
-        agentManifest:
-          $ref: '#/components/schemas/ResourceRef'
-        goal: {type: string, minLength: 1, maxLength: 20000}
-        contentType: {type: string, enum: [text, markdown]}
-        outputIDs: {type: array, maxItems: 128, items: {type: string}}
-        evidenceIDs: {type: array, maxItems: 128, items: {type: string}}
-        options: {type: object, additionalProperties: true}
-        maxLLMCalls: {type: integer, minimum: 1, maximum: 32}
-        maxToolCalls: {type: integer, minimum: 1, maximum: 64}
-        structuredOutputSchema: {type: object, additionalProperties: true}
-        resultAttempts: {type: integer, minimum: 1, maximum: 2}
-    AgentTeamJoinRequest:
+        expectedRevision: {type: integer, minimum: 1}
+        response: {}
+    TeamMemberRequest:
       type: object
       additionalProperties: false
+      required: [id, goal]
       properties:
-        mode: {type: string, enum: [all, any, quorum], default: all}
+        id: {type: string, maxLength: 128}
+        goal: {type: string, maxLength: 200000}
+        toolKeys:
+          type: array
+          maxItems: 128
+          items: {type: string, maxLength: 255}
+    TeamJoinRequest:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [all, any, quorum]}
         quorum: {type: integer, minimum: 1, maximum: 16}
-        failurePolicy: {type: string, enum: [collect, fail_fast], default: collect}
-        timeoutSeconds: {type: integer, minimum: 60, maximum: 604800, default: 3600}
-        timeoutPolicy: {type: string, enum: [cancel_pending, leave_running], default: cancel_pending}
-    StartAgentTeamRequest:
+        failurePolicy: {type: string, enum: [collect, fail_fast]}
+    StartTeamRunRequest:
       type: object
       additionalProperties: false
-      required: [thread, input, clientTeamID, coordinatorManifest, members, join]
+      required: [thread, goal, mode, members, join]
       properties:
-        thread:
-          $ref: '#/components/schemas/RunThread'
-        input:
-          $ref: '#/components/schemas/RunInput'
-        clientTeamID: {type: string, minLength: 1, maxLength: 128}
-        coordinatorManifest:
-          $ref: '#/components/schemas/ResourceRef'
-        model: {type: string, maxLength: 128}
-        options: {type: object, additionalProperties: true}
-        workspace:
-          $ref: '#/components/schemas/WorkspaceExtension'
-        maxLLMCalls: {type: integer, minimum: 1, maximum: 32}
-        maxToolCalls: {type: integer, minimum: 1, maximum: 64}
-        structuredOutputSchema: {type: object, additionalProperties: true}
-        resultAttempts: {type: integer, minimum: 1, maximum: 2}
+        thread: {$ref: '#/components/schemas/ThreadRequest'}
+        goal: {type: string, maxLength: 200000}
+        clientRunID: {type: string, maxLength: 64}
+        mode: {type: string, enum: [sequential, parallel]}
         members:
           type: array
           minItems: 1
           maxItems: 16
-          items:
-            $ref: '#/components/schemas/AgentTeamMemberRequest'
-        join:
-          $ref: '#/components/schemas/AgentTeamJoinRequest'
-    DelegateRunRequest:
+          items: {$ref: '#/components/schemas/TeamMemberRequest'}
+        join: {$ref: '#/components/schemas/TeamJoinRequest'}
+    CancelRunRequest:
       type: object
       additionalProperties: false
-      required: [clientHandoffID, agentManifest, goal]
+      required: [expectedRevision]
       properties:
-        clientHandoffID: {type: string, minLength: 1, maxLength: 64}
-        agentManifest:
-          $ref: '#/components/schemas/ResourceRef'
-        goal: {type: string, minLength: 1, maxLength: 20000}
-        contentType: {type: string, enum: [text, markdown]}
-        outputIDs: {type: array, maxItems: 128, items: {type: string}}
-        evidenceIDs: {type: array, maxItems: 128, items: {type: string}}
-        options: {type: object, additionalProperties: true}
-        htmlVisualPrompt: {type: boolean}
-        htmlVisualColorMode: {type: string, enum: [light, dark]}
-    QueueCreateRequest:
-      type: object
-      additionalProperties: false
-      required: [thread, input, clientQueueID]
-      properties:
-        thread:
-          $ref: '#/components/schemas/RunThread'
-        input:
-          $ref: '#/components/schemas/RunInput'
-        clientQueueID: {type: string, maxLength: 64}
-        model: {type: string, maxLength: 128}
-        options: {type: object, additionalProperties: true}
-        toolKeys: {type: array, maxItems: 128, items: {type: string}}
-        skillKeys: {type: array, maxItems: 128, items: {type: string}}
-        agentManifest:
-          $ref: '#/components/schemas/ResourceRef'
-        workspace:
-          $ref: '#/components/schemas/WorkspaceExtension'
-    QueueUpdateRequest:
-      type: object
-      additionalProperties: false
-      required: [thread, input, expectedRevision]
-      properties:
-        thread:
-          $ref: '#/components/schemas/RunThread'
-        input:
-          $ref: '#/components/schemas/RunInput'
-        expectedRevision: {type: integer, minimum: 0}
-        model: {type: string, maxLength: 128}
-        options: {type: object, additionalProperties: true}
-        toolKeys: {type: array, maxItems: 128, items: {type: string}}
-        skillKeys: {type: array, maxItems: 128, items: {type: string}}
-        agentManifest:
-          $ref: '#/components/schemas/ResourceRef'
-        workspace:
-          $ref: '#/components/schemas/WorkspaceExtension'
-    ResumeRunRequest:
-      type: object
-      additionalProperties: false
-      required: [clientResumeID]
-      properties:
-        checkpointID: {type: string, maxLength: 96}
-        clientResumeID: {type: string, minLength: 1, maxLength: 64}
-    ResolveInteractionRequest:
-      type: object
-      additionalProperties: false
-      required: [clientResolveID, response]
-      properties:
-        clientResolveID: {type: string, minLength: 1, maxLength: 64}
-        response: {type: object, additionalProperties: true}
+        expectedRevision: {type: integer, minimum: 1}
+        reason: {type: string, maxLength: 2000}
     Run:
       type: object
-      additionalProperties: true
-      required: [schemaVersion, runtimeKind, actor, thread, runID, requestID, status]
+      additionalProperties: false
+      required: [id, kind, actor, thread, goal, status, revision, createdAt, updatedAt]
       properties:
-        schemaVersion: {type: integer, enum: [1]}
-        runtimeKind: {type: string, enum: [text, plan_execute, workflow, team]}
-        actor:
-          $ref: '#/components/schemas/ActorRef'
-        thread:
-          $ref: '#/components/schemas/ThreadRef'
-        runID: {type: string}
+        id: {type: string}
+        kind: {type: string, enum: [text, plan_execute, workflow, team]}
+        actor: {$ref: '#/components/schemas/ActorRef'}
+        thread: {$ref: '#/components/schemas/ThreadRef'}
         requestID: {type: string}
-        status: {type: string}
-        agentManifestRef:
-          $ref: '#/components/schemas/ResourceRef'
-        workflowDefinitionRef:
-          $ref: '#/components/schemas/ResourceRef'
-        agentName: {type: string}
-        rootRunID: {type: string}
-        parentRunID: {type: string}
-        handoffID: {type: string}
-        depth: {type: integer, minimum: 1}
-    PlanRunSnapshot:
-      type: object
-      additionalProperties: false
-      required: [run, state]
-      properties:
-        run:
-          $ref: '#/components/schemas/Run'
-        state: {}
-        checkpoint:
-          nullable: true
-        result:
-          nullable: true
-    RunStep:
-      type: object
-      additionalProperties: true
-      required: [stepID, runID, status]
-      properties:
-        stepID: {type: string}
-        runID: {type: string}
-        status: {type: string}
-        nodeID: {type: string}
-        activationPath: {type: string}
-        laneID: {type: string}
-        activationIndex: {type: integer, minimum: 0}
-        completionOrder: {type: integer, minimum: 0}
-        waitKind: {type: string}
-        waitID: {type: string}
-        childRunID: {type: string}
-    RunResult:
-      type: object
-      additionalProperties: false
-      required: [runID, runtimeKind, value, presentation, schemaHash, contentHash, createdAt, updatedAt]
-      properties:
-        runID: {type: string}
-        runtimeKind: {type: string, enum: [text, workflow]}
-        value: {}
-        presentation: {type: string}
-        schemaHash: {type: string}
-        contentHash: {type: string}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-    RuntimeModelRoutingSummaryV1:
-      type: object
-      additionalProperties: false
-      properties:
-        requestedModelName: {type: string}
-        platformModelName: {type: string}
-        provider: {type: string}
-        providerProtocol: {type: string}
-        routedBindingCode: {type: string}
-        modelVendor: {type: string}
-        upstreamModelName: {type: string}
-    RuntimeExecutionProvenanceV1:
-      type: object
-      additionalProperties: false
-      required: [schemaVersion, runID, rootRunID, runtimeKind, modelRouting, snapshotHash, stateHash]
-      properties:
-        schemaVersion: {type: integer, enum: [1]}
-        runID: {type: string}
-        rootRunID: {type: string}
-        runtimeKind: {type: string, enum: [text, workflow]}
-        environmentRef:
-          $ref: '#/components/schemas/ResourceRef'
-        agentManifestRef:
-          $ref: '#/components/schemas/ResourceRef'
-        workflowDefinitionRef:
-          $ref: '#/components/schemas/ResourceRef'
-        modelRouting:
-          $ref: '#/components/schemas/RuntimeModelRoutingSummaryV1'
-        snapshotHash: {type: string, pattern: '^[a-f0-9]{64}$'}
-        stateHash: {type: string, pattern: '^[a-f0-9]{64}$'}
-    StartRunResult:
-      type: object
-      additionalProperties: false
-      required: [run, rootStep, inputProjectionRef, outputProjectionRef]
-      properties:
-        run:
-          $ref: '#/components/schemas/Run'
-        rootStep:
-          $ref: '#/components/schemas/RunStep'
-        inputProjectionRef:
-          $ref: '#/components/schemas/ProjectionRef'
-        outputProjectionRef:
-          $ref: '#/components/schemas/ProjectionRef'
-    WorkflowStartResult:
-      allOf:
-        - $ref: '#/components/schemas/StartRunResult'
-    AgentTeamTaskStart:
-      type: object
-      additionalProperties: false
-      required: [memberID, handoff, run, rootStep]
-      properties:
-        memberID: {type: string}
-        handoff:
-          $ref: '#/components/schemas/RunHandoff'
-        run:
-          $ref: '#/components/schemas/Run'
-        rootStep:
-          $ref: '#/components/schemas/RunStep'
-    AgentTeamStartResult:
-      type: object
-      additionalProperties: false
-      required: [rootRun, rootStep, inputProjectionRef, outputProjectionRef, tasks, join]
-      properties:
-        rootRun:
-          $ref: '#/components/schemas/Run'
-        rootStep:
-          $ref: '#/components/schemas/RunStep'
-        inputProjectionRef:
-          $ref: '#/components/schemas/ProjectionRef'
-        outputProjectionRef:
-          $ref: '#/components/schemas/ProjectionRef'
-        tasks:
-          type: array
-          items:
-            $ref: '#/components/schemas/AgentTeamTaskStart'
-        join:
-          $ref: '#/components/schemas/RunHandoffJoin'
-    RunHandoff:
-      type: object
-      additionalProperties: false
-      required: [handoffID, clientHandoffID, rootRunID, parentRunID, childRunID, agentManifest, agentName, goal, status, depth, inputProjectionRef, resultOutputIDs, createdAt, updatedAt]
-      properties:
-        handoffID: {type: string}
-        clientHandoffID: {type: string}
-        rootRunID: {type: string}
-        parentRunID: {type: string}
-        childRunID: {type: string}
-        agentManifest:
-          $ref: '#/components/schemas/ResourceRef'
-        agentName: {type: string}
         goal: {type: string}
-        status: {type: string, enum: [queued, completed, failed, cancelled]}
-        depth: {type: integer, minimum: 1}
-        inputProjectionRef:
-          $ref: '#/components/schemas/ProjectionRef'
-        resultSummary: {type: string}
-        resultOutputIDs: {type: array, items: {type: string}}
-        errorCode: {type: string}
-        errorMessage: {type: string}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-        completedAt: {type: string, format: date-time, nullable: true}
-    RunHandoffJoin:
-      type: object
-      additionalProperties: false
-      required: [joinID, clientJoinID, rootRunID, parentRunID, handoffIDs, mode, quorum, failurePolicy, timeoutSeconds, timeoutPolicy, deadlineAt, status, completedCount, failedCount, cancelledCount, pendingCount, resultHandoffIDs, createdAt, updatedAt]
-      properties:
-        joinID: {type: string}
-        clientJoinID: {type: string}
-        rootRunID: {type: string}
-        parentRunID: {type: string}
-        handoffIDs:
-          type: array
-          items: {type: string}
-        mode: {type: string, enum: [all, any, quorum]}
-        quorum: {type: integer, minimum: 1}
-        failurePolicy: {type: string, enum: [collect, fail_fast]}
-        timeoutSeconds: {type: integer, minimum: 60, maximum: 604800}
-        timeoutPolicy: {type: string, enum: [cancel_pending, leave_running]}
-        deadlineAt: {type: string, format: date-time}
-        status: {type: string, enum: [pending, ready, failed, cancelled]}
-        completedCount: {type: integer, minimum: 0}
-        failedCount: {type: integer, minimum: 0}
-        cancelledCount: {type: integer, minimum: 0}
-        pendingCount: {type: integer, minimum: 0}
-        resultHandoffIDs:
-          type: array
-          items: {type: string}
-        errorCode: {type: string}
-        errorMessage: {type: string}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-        resolvedAt: {type: string, format: date-time, nullable: true}
-    RunHandoffJoinPage:
-      type: object
-      additionalProperties: false
-      required: [total, results]
-      properties:
-        total: {type: integer, format: int64, minimum: 0}
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/RunHandoffJoin'
-    DelegatedRunResult:
-      type: object
-      additionalProperties: false
-      required: [handoff, run, rootStep]
-      properties:
-        handoff:
-          $ref: '#/components/schemas/RunHandoff'
-        run:
-          $ref: '#/components/schemas/Run'
-        rootStep:
-          $ref: '#/components/schemas/RunStep'
-    RunTask:
-      type: object
-      additionalProperties: false
-      required: [handoff, run]
-      properties:
-        handoff:
-          $ref: '#/components/schemas/RunHandoff'
-        run:
-          $ref: '#/components/schemas/Run'
-    RunTaskTree:
-      type: object
-      additionalProperties: false
-      required: [rootRunID, currentRunID, rootRun, tasks, joins]
-      properties:
-        rootRunID: {type: string}
-        currentRunID: {type: string}
-        rootRun:
-          $ref: '#/components/schemas/Run'
-        tasks:
-          type: array
-          items:
-            $ref: '#/components/schemas/RunTask'
-        joins:
-          type: array
-          items:
-            $ref: '#/components/schemas/RunHandoffJoin'
-    TextRunContextSummary:
-      type: object
-      additionalProperties: false
-      required:
-        - snapshotID
-        - revision
-        - mode
-        - managementStatus
-        - semanticVersion
-        - contentHash
-        - hardInputTokens
-        - softInputTokens
-        - rawTokenEstimate
-        - adjustedTokenEstimate
-        - tokenCountSource
-        - loadedMessageCount
-        - retainedMessageCount
-        - summarizedMessageCount
-        - trimmedMessageCount
-        - summaryTokenEstimate
-        - fileCount
-        - ragCount
-        - skillCount
-        - memoryCount
-        - outputCount
-        - evidenceCount
-        - retrievalFallbackCount
-        - skippedCount
-        - compiledAt
-      properties:
-        snapshotID: {type: string}
+        status: {type: string, enum: [running, waiting_input, completed, failed, cancelled]}
         revision: {type: integer, minimum: 1}
-        supersedesSnapshotID: {type: string}
-        mode: {type: string, enum: [managed, legacy]}
-        managementStatus: {type: string, enum: [baseline, managed]}
-        semanticVersion: {type: integer, minimum: 1}
-        contentHash: {type: string}
-        hardInputTokens: {type: integer, format: int64, minimum: 0}
-        softInputTokens: {type: integer, format: int64, minimum: 0}
-        rawTokenEstimate: {type: integer, format: int64, minimum: 0}
-        adjustedTokenEstimate: {type: integer, format: int64, minimum: 0}
-        tokenCountSource: {type: string, enum: [exact, estimated]}
-        loadedMessageCount: {type: integer, minimum: 0}
-        retainedMessageCount: {type: integer, minimum: 0}
-        summarizedMessageCount: {type: integer, minimum: 0}
-        trimmedMessageCount: {type: integer, minimum: 0}
-        summaryArtifactID: {type: string}
-        summaryStrategy: {type: string}
-        coveredThrough:
-          $ref: '#/components/schemas/ProjectionRef'
-        summaryTokenEstimate: {type: integer, format: int64, minimum: 0}
-        fileCount: {type: integer, minimum: 0}
-        ragCount: {type: integer, minimum: 0}
-        skillCount: {type: integer, minimum: 0}
-        memoryCount: {type: integer, minimum: 0}
-        outputCount: {type: integer, minimum: 0}
-        evidenceCount: {type: integer, minimum: 0}
-        retrievalFallbackCount: {type: integer, minimum: 0}
-        skippedCount: {type: integer, minimum: 0}
-        compiledAt: {type: string, format: date-time}
-    RunDetail:
-      type: object
-      additionalProperties: false
-      required: [run, steps, inputProjectionRef, outputProjectionRef]
-      properties:
-        run:
-          $ref: '#/components/schemas/Run'
-        steps:
-          type: array
-          items:
-            $ref: '#/components/schemas/RunStep'
-        inputProjectionRef:
-          $ref: '#/components/schemas/ProjectionRef'
-        outputProjectionRef:
-          $ref: '#/components/schemas/ProjectionRef'
-        effectiveConfig: {type: object, additionalProperties: true}
-        context:
-          $ref: '#/components/schemas/TextRunContextSummary'
-    RunPage:
-      type: object
-      additionalProperties: false
-      required: [total, results]
-      properties:
-        total: {type: integer, format: int64, minimum: 0}
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/Run'
-    ContinuationJobPage:
-      type: object
-      additionalProperties: false
-      required: [total, results]
-      properties:
-        total: {type: integer, format: int64, minimum: 0}
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/ContinuationJob'
-    ContinuationJob:
-      type: object
-      additionalProperties: false
-      required:
-        - jobID
-        - segmentFingerprint
-        - runID
-        - checkpointID
-        - tenantID
-        - actorID
-        - source
-        - status
-        - recoverable
-        - reservationAmountNanousd
-        - attemptCount
-        - maxAttempts
-        - availableAt
-        - createdAt
-        - updatedAt
-      properties:
-        jobID: {type: string}
-        segmentFingerprint: {type: string}
-        runID: {type: string}
-        checkpointID: {type: string}
-        tenantID: {type: string}
-        actorID: {type: string}
-        source: {type: string}
-        status: {type: string, enum: [queued, running, retry_wait, completed, dead_letter]}
-        runStatus: {type: string}
-        recoverable: {type: boolean}
-        recoveryBlockReason: {type: string}
-        reservationAmountNanousd: {type: integer, format: int64}
-        reservationRefNo: {type: string}
-        attemptCount: {type: integer, minimum: 0}
-        maxAttempts: {type: integer, minimum: 1}
-        availableAt: {type: string, format: date-time}
-        leaseOwner: {type: string}
-        leaseExpiresAt: {type: string, format: date-time}
-        heartbeatAt: {type: string, format: date-time}
-        lastErrorSummary: {type: string}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-    RequeueContinuationRequest:
-      type: object
-      additionalProperties: false
-      required: [reason]
-      properties:
-        reason: {type: string, minLength: 3, maxLength: 500}
-    CancelRunResponse:
-      type: object
-      additionalProperties: false
-      required: [canceled]
-      properties:
-        canceled: {type: boolean}
-    ResumeRunResponse:
-      type: object
-      additionalProperties: false
-      required: [checkpointID, runID, status, reused]
-      properties:
-        checkpointID: {type: string}
-        runID: {type: string}
-        status: {type: string}
-        reused: {type: boolean}
-    RetireRunResponse:
-      type: object
-      additionalProperties: false
-      required: [runID, status, reused]
-      properties:
-        runID: {type: string}
-        status: {type: string, enum: [cancelled]}
-        reused: {type: boolean}
-    Event:
-      type: object
-      additionalProperties: true
-      required: [schemaVersion, eventID, runID, actor, thread, seq, type, timestamp, payload]
-      properties:
-        schemaVersion: {type: integer, enum: [1]}
-        eventID: {type: string}
-        runID: {type: string}
-        actor:
-          $ref: '#/components/schemas/ActorRef'
-        thread:
-          $ref: '#/components/schemas/ThreadRef'
-        projection:
-          $ref: '#/components/schemas/ProjectionRef'
-        seq: {type: integer, format: int64, minimum: 1}
-        type: {type: string}
-        timestamp: {type: string, format: date-time}
-        payload: {type: object, additionalProperties: true}
-    EventDetail:
-      allOf:
-        - $ref: '#/components/schemas/Event'
-        - type: object
-          properties:
-            inputJSON: {type: string}
-            outputJSON: {type: string}
-            errorJSON: {type: string}
-    EventHistoryPage:
-      type: object
-      additionalProperties: false
-      required: [results, hasMore]
-      properties:
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/Event'
-        hasMore: {type: boolean}
-        nextBeforeSeq: {type: integer, format: int64, minimum: 1}
-    Plan:
-      type: object
-      additionalProperties: true
-      required: [planID, runID, revision, status]
-      properties:
-        planID: {type: string}
-        runID: {type: string}
-        revision: {type: integer, minimum: 1}
-        status: {type: string}
-    PlanView:
-      type: object
-      additionalProperties: false
-      required: [current, revisions, steps]
-      properties:
-        current:
-          $ref: '#/components/schemas/Plan'
-        revisions:
-          type: array
-          items:
-            $ref: '#/components/schemas/Plan'
-        steps:
-          type: array
-          items:
-            $ref: '#/components/schemas/RunStep'
-    Interaction:
-      type: object
-      additionalProperties: true
-      required: [interactionID, runID, type, status, request, requestedAt]
-      properties:
-        interactionID: {type: string}
-        runID: {type: string}
-        type: {type: string}
-        status: {type: string}
-        request: {type: object, additionalProperties: true}
-        requestedAt: {type: string, format: date-time}
-    InteractionList:
-      type: object
-      additionalProperties: false
-      required: [results]
-      properties:
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/Interaction'
-    Checkpoint:
-      type: object
-      additionalProperties: false
-      required: [checkpointID, runID, eventSeq, stepID, kind, status, createdAt]
-      properties:
-        checkpointID: {type: string}
-        runID: {type: string}
-        eventSeq: {type: integer, format: int64, minimum: 1}
-        stepID: {type: string}
-        toolCallID: {type: string}
-        kind: {type: string}
-        status: {type: string}
-        createdAt: {type: string, format: date-time}
-    CheckpointList:
-      type: object
-      additionalProperties: false
-      required: [results]
-      properties:
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/Checkpoint'
-    Output:
-      type: object
-      additionalProperties: true
-      required: [outputID, runID, status, kind, title, version, createdAt]
-      properties:
-        outputID: {type: string}
-        runID: {type: string}
-        status: {type: string}
-        kind: {type: string}
-        title: {type: string}
-        version: {type: integer, minimum: 1}
-        createdAt: {type: string, format: date-time}
-    OutputCatalogItem:
-      allOf:
-        - $ref: '#/components/schemas/Output'
-        - type: object
-          required: [sourceRun, thread]
-          properties:
-            sourceRun: {type: object, additionalProperties: true}
-            thread:
-              allOf:
-                - $ref: '#/components/schemas/ThreadRef'
-                - type: object
-                  properties:
-                    title: {type: string}
-    OutputList:
-      type: object
-      additionalProperties: false
-      required: [results]
-      properties:
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/Output'
-    OutputCatalogPage:
-      type: object
-      additionalProperties: false
-      required: [results]
-      properties:
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/OutputCatalogItem'
-        nextCursor: {type: string}
-    OutputVersionPage:
-      type: object
-      additionalProperties: false
-      required: [results, hasMore]
-      properties:
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/OutputCatalogItem'
-        hasMore: {type: boolean}
-        nextCursor: {type: string}
-    OutputPreview:
-      type: object
-      additionalProperties: true
-      required: [type]
-      properties:
-        type: {type: string}
-    OutputPreviewResult:
-      type: object
-      additionalProperties: false
-      required: [output, preview]
-      properties:
-        output:
-          $ref: '#/components/schemas/OutputCatalogItem'
-        preview:
-          $ref: '#/components/schemas/OutputPreview'
-    QueueItem:
-      type: object
-      additionalProperties: true
-      required: [queueID, clientQueueID, thread, status, position, revision, attemptCount, request, createdAt, updatedAt]
-      properties:
-        queueID: {type: string}
-        clientQueueID: {type: string}
-        thread:
-          $ref: '#/components/schemas/ThreadRef'
-        status: {type: string}
-        position: {type: integer, minimum: 0}
-        revision: {type: integer, minimum: 0}
-        attemptCount: {type: integer, minimum: 0}
-        request:
-          $ref: '#/components/schemas/CreateRunRequest'
-        anchorRunID: {type: string}
-        startedRunID: {type: string}
         errorCode: {type: string}
-        errorMessage: {type: string}
-        nextAttemptAt: {type: string, format: date-time}
-        createdAt: {type: string, format: date-time}
-        updatedAt: {type: string, format: date-time}
-    QueueCreateResponse:
-      allOf:
-        - $ref: '#/components/schemas/QueueItem'
-        - type: object
-          required: [reused]
-          properties:
-            reused: {type: boolean}
-    QueueList:
-      type: object
-      additionalProperties: false
-      required: [results]
-      properties:
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/QueueItem'
-    WorkflowExecution:
-      type: object
-      additionalProperties: false
-      required: [runID, definitionRef, definitionHash, dependencyHash, budgetOwnerRunID, rootRunID, depth, version, status, state, vars, waits, compensations, budget, threadSnapshotHash, completionSeq, startedAt, createdAt, updatedAt]
-      properties:
-        runID: {type: string}
-        definitionRef:
-          $ref: '#/components/schemas/ResourceRef'
-        definitionHash: {type: string}
-        dependencyHash: {type: string}
-        budgetOwnerRunID: {type: string}
-        rootRunID: {type: string}
-        parentRunID: {type: string}
-        depth: {type: integer, minimum: 0}
-        version: {type: integer, format: int64, minimum: 1}
-        status: {type: string, enum: [running, waiting, cancelling, compensating, completed, failed, cancelled, suspended]}
-        state: {type: object, additionalProperties: true}
-        vars: {type: object, additionalProperties: true}
-        waits: {type: array, items: {type: object, additionalProperties: true}}
-        compensations: {type: array, items: {type: object, additionalProperties: true}}
-        budget: {type: object, additionalProperties: true}
-        threadSnapshotHash: {type: string}
-        completionSeq: {type: integer, format: int64, minimum: 0}
-        errorCode: {type: string}
-        errorMessage: {type: string}
-        startedAt: {type: string, format: date-time}
+        errorDetail: {type: string}
+        deadlineAt: {type: string, format: date-time, nullable: true}
         endedAt: {type: string, format: date-time, nullable: true}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
-    Workbench:
+    Event:
+      type: object
+      required: [seq, type, createdAt]
+      properties:
+        seq: {type: integer}
+        type: {type: string}
+        message: {type: string}
+        data: {}
+        createdAt: {type: string, format: date-time}
+    Checkpoint:
       type: object
       additionalProperties: true
-      required: [projectionVersion, projectionSeq, projectionPersisted, run, overview, phases, toolGroups, steps, interactions, checkpoints, outputs, graph, selectionIndex]
-      properties:
-        projectionVersion: {type: integer, enum: [1]}
-        projectionSeq: {type: integer, format: int64, minimum: 0}
-        projectionPersisted: {type: boolean}
-        run:
-          $ref: '#/components/schemas/Run'
-        workflow:
-          $ref: '#/components/schemas/WorkflowExecution'
-        result:
-          $ref: '#/components/schemas/RunResult'
-        overview: {type: object, additionalProperties: true}
-        phases: {type: array, items: {type: object, additionalProperties: true}}
-        toolGroups: {type: array, items: {type: object, additionalProperties: true}}
-        steps:
-          type: array
-          items:
-            $ref: '#/components/schemas/RunStep'
-        interactions:
-          type: array
-          items:
-            $ref: '#/components/schemas/Interaction'
-        checkpoints:
-          type: array
-          items:
-            $ref: '#/components/schemas/Checkpoint'
-        outputs:
-          type: array
-          items:
-            $ref: '#/components/schemas/Output'
-        graph: {type: object, additionalProperties: true}
-        selectionIndex: {type: object, additionalProperties: true}
-    EvidenceSource:
-      oneOf:
-        - type: object
-          additionalProperties: false
-          required: [kind, id, version]
-          properties:
-            kind: {type: string, enum: [output]}
-            id: {type: string}
-            version: {type: integer, minimum: 1}
-        - type: object
-          additionalProperties: false
-          required: [kind, thread, projection]
-          properties:
-            kind: {type: string, enum: [projection]}
-            thread:
-              $ref: '#/components/schemas/ThreadRef'
-            projection:
-              $ref: '#/components/schemas/ProjectionRef'
-    EvidenceSelection:
+    Result:
+      type: object
+      additionalProperties: true
+    RunSnapshot:
       type: object
       additionalProperties: false
-      required: [kind]
+      required: [run, state, events]
       properties:
-        kind: {type: string, enum: [full, text_range, table_range]}
-        title: {type: string}
-        start: {type: integer, minimum: 0}
-        end: {type: integer, minimum: 0}
-        rowStart: {type: integer, minimum: 0}
-        rowEnd: {type: integer, minimum: 0}
-        columnStart: {type: integer, minimum: 0}
-        columnEnd: {type: integer, minimum: 0}
-    CreateEvidenceRequest:
+        run: {$ref: '#/components/schemas/Run'}
+        state: {}
+        checkpoint: {$ref: '#/components/schemas/Checkpoint'}
+        result: {$ref: '#/components/schemas/Result'}
+        events:
+          type: array
+          items: {$ref: '#/components/schemas/Event'}
+    CancelRunResponse:
       type: object
       additionalProperties: false
-      required: [source, selection]
+      required: [run]
       properties:
-        source:
-          $ref: '#/components/schemas/EvidenceSource'
-        selection:
-          $ref: '#/components/schemas/EvidenceSelection'
-    Evidence:
-      type: object
-      additionalProperties: false
-      required: [evidenceID, source, kind, title, contentHash, createdAt]
-      properties:
-        evidenceID: {type: string}
-        source:
-          $ref: '#/components/schemas/EvidenceSource'
-        projectionRef:
-          $ref: '#/components/schemas/ProjectionRef'
-        kind: {type: string, enum: [full, text_range, table_range]}
-        title: {type: string}
-        excerpt: {type: string}
-        contentHash: {type: string}
-        sourceContentHash: {type: string}
-        createdAt: {type: string, format: date-time}
+        run: {$ref: '#/components/schemas/Run'}
     ErrorResponse:
       type: object
       additionalProperties: false

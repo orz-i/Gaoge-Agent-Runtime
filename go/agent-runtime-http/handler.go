@@ -5,12 +5,17 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	app "github.com/orz-i/Gaoge/sdk/go/agent-runtime"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
+// PrincipalResolver maps the authenticated host principal to an opaque Kernel actor.
 type PrincipalResolver interface {
-	ResolvePrincipal(*gin.Context) (domain.ActorRef, error)
+	ResolvePrincipal(*gin.Context) (kernel.ActorRef, error)
 }
 
 type RequestMetadata struct{ RequestID string }
@@ -19,78 +24,68 @@ type RequestMetadataResolver interface {
 	ResolveRequestMetadata(*gin.Context) RequestMetadata
 }
 
+// Dependencies are the explicit Runtime capabilities mounted by this HTTP adapter.
 type Dependencies struct {
+	Runtime                 *kernel.Runtime
+	Text                    *text.Runner
+	Plans                   *planexecute.Runner
+	Workflows               *workflow.Runner
+	Teams                   *team.Runner
+	Workbench               *workbench.Query
 	PrincipalResolver       PrincipalResolver
 	RequestMetadataResolver RequestMetadataResolver
-	PlanRuns                PlanRunCommands
 }
 
 type Handler struct {
-	service   Service
-	plans     PlanRunCommands
+	runtime   *kernel.Runtime
+	text      *text.Runner
+	plans     *planexecute.Runner
+	workflows *workflow.Runner
+	teams     *team.Runner
+	workbench *workbench.Query
 	principal PrincipalResolver
 	metadata  RequestMetadataResolver
 }
 
-func NewHandler(service Service, dependencies Dependencies) *Handler {
+func NewHandler(dependencies Dependencies) *Handler {
 	return &Handler{
-		service: service, plans: dependencies.PlanRuns,
+		runtime: dependencies.Runtime, text: dependencies.Text, plans: dependencies.Plans,
+		workflows: dependencies.Workflows, teams: dependencies.Teams, workbench: dependencies.Workbench,
 		principal: dependencies.PrincipalResolver, metadata: dependencies.RequestMetadataResolver,
 	}
 }
 
-func (h *Handler) actorRef(c *gin.Context) domain.ActorRef {
-	if h.principal == nil {
-		return domain.ActorRef{}
+func (handler *Handler) actorRef(context *gin.Context) (kernel.ActorRef, error) {
+	if handler == nil || handler.principal == nil {
+		return kernel.ActorRef{}, errPrincipalUnavailable
 	}
-	actor, _ := h.principal.ResolvePrincipal(c)
-	return actor
+	return handler.principal.ResolvePrincipal(context)
 }
 
-func (h *Handler) requestID(c *gin.Context) string {
-	if h.metadata == nil {
+func (handler *Handler) requestID(context *gin.Context) string {
+	if handler == nil || handler.metadata == nil {
 		return ""
 	}
-	return strings.TrimSpace(h.metadata.ResolveRequestMetadata(c).RequestID)
+	return strings.TrimSpace(handler.metadata.ResolveRequestMetadata(context).RequestID)
 }
 
 const requestIDContextKey = "agent-runtime.request-id"
 
-func requestID(c *gin.Context) string {
-	value, _ := c.Get(requestIDContextKey)
+func requestID(context *gin.Context) string {
+	value, _ := context.Get(requestIDContextKey)
 	result, _ := value.(string)
 	return result
 }
 
-func threadRef(kind, id string) domain.ThreadRef {
-	return domain.ThreadRef{Kind: strings.TrimSpace(kind), ID: strings.TrimSpace(id)}
-}
+var (
+	errRequiredPathParameter = errors.New("required path parameter is missing")
+	errPrincipalUnavailable  = errors.New("runtime principal is unavailable")
+)
 
-var errRequiredPathParameter = errors.New("required path parameter is missing")
-
-func stringParam(c *gin.Context, name string) (string, error) {
-	value := strings.TrimSpace(c.Param(name))
+func runIDParam(context *gin.Context) (string, error) {
+	value := strings.TrimSpace(context.Param("run_id"))
 	if value == "" {
 		return "", errRequiredPathParameter
 	}
 	return value, nil
-}
-
-func isEnvironmentModelError(err error) bool { _, _, ok := environmentModelError(err); return ok }
-
-func environmentModelError(err error) (string, string, bool) {
-	switch {
-	case errors.Is(err, app.ErrEnvironmentModelUnconfigured):
-		return "environment.model_unconfigured", "environment has no configured model", true
-	case errors.Is(err, app.ErrEnvironmentDefaultUnavailable):
-		return "environment.default_model_unavailable", "environment default model is unavailable", true
-	case errors.Is(err, app.ErrEnvironmentModelNotAccessible):
-		return "environment.model_not_accessible", "model is not accessible to the current user", true
-	case errors.Is(err, app.ErrEnvironmentModelNotAuthorized):
-		return "environment.model_not_authorized", "model is not authorized by the environment", true
-	case errors.Is(err, app.ErrRunEnvironmentUnavailable):
-		return "run.environment_unavailable", "environment is unavailable", true
-	default:
-		return "", "", false
-	}
 }

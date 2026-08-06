@@ -1,164 +1,134 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 
-	runtime "github.com/orz-i/Gaoge/sdk/go/agent-runtime"
-	model "github.com/orz-i/Gaoge/sdk/go/agent-runtime/domain"
+	"github.com/gin-gonic/gin"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
+var errInvalidJSONBody = errors.New("invalid JSON request body")
+
+type ThreadRequest struct {
+	Kind string `json:"kind" binding:"required,max=64"`
+	ID   string `json:"id" binding:"required,max=128"`
+}
+
+type TextInputRequest struct {
+	Content string `json:"content" binding:"required,max=200000"`
+}
+
+type StartTextRunRequest struct {
+	Thread      ThreadRequest    `json:"thread" binding:"required"`
+	Input       TextInputRequest `json:"input" binding:"required"`
+	ClientRunID string           `json:"clientRunID" binding:"omitempty,max=64"`
+	Model       string           `json:"model" binding:"omitempty,max=128"`
+}
+
+type StartPlanRunRequest struct {
+	Thread         ThreadRequest    `json:"thread" binding:"required"`
+	Input          TextInputRequest `json:"input" binding:"required"`
+	ClientRunID    string           `json:"clientRunID" binding:"omitempty,max=64"`
+	Model          string           `json:"model" binding:"omitempty,max=128"`
+	ApprovalPolicy string           `json:"approvalPolicy" binding:"omitempty,oneof=auto required"`
+	MaxSteps       int              `json:"maxSteps" binding:"omitempty,min=1,max=32"`
+}
+
+type ResolvePlanApprovalRequest struct {
+	ExpectedRevision uint64 `json:"expectedRevision" binding:"required,min=1"`
+	Decision         string `json:"decision" binding:"required,oneof=approve reject"`
+	Comment          string `json:"comment" binding:"omitempty,max=2000"`
+}
+
+type StartWorkflowRunRequest struct {
+	Thread      ThreadRequest            `json:"thread" binding:"required"`
+	Input       json.RawMessage          `json:"input" binding:"required"`
+	ClientRunID string                   `json:"clientRunID" binding:"omitempty,max=64"`
+	Goal        string                   `json:"goal" binding:"required,max=200000"`
+	Definition  workflow.DefinitionDraft `json:"definition" binding:"required"`
+}
+
+type ResolveWorkflowWaitRequest struct {
+	ExpectedRevision uint64          `json:"expectedRevision" binding:"required,min=1"`
+	Response         json.RawMessage `json:"response" binding:"required"`
+}
+
+type TeamMemberRequest struct {
+	ID       string   `json:"id" binding:"required,max=128"`
+	Goal     string   `json:"goal" binding:"required,max=200000"`
+	ToolKeys []string `json:"toolKeys" binding:"omitempty,max=128,dive,max=255"`
+}
+
+type TeamJoinRequest struct {
+	Mode          handoff.JoinMode      `json:"mode" binding:"required,oneof=all any quorum"`
+	Quorum        int                   `json:"quorum" binding:"omitempty,min=1,max=16"`
+	FailurePolicy handoff.FailurePolicy `json:"failurePolicy" binding:"omitempty,oneof=collect fail_fast"`
+}
+
+type StartTeamRunRequest struct {
+	Thread      ThreadRequest       `json:"thread" binding:"required"`
+	Goal        string              `json:"goal" binding:"required,max=200000"`
+	ClientRunID string              `json:"clientRunID" binding:"omitempty,max=64"`
+	Mode        team.ExecutionMode  `json:"mode" binding:"required,oneof=sequential parallel"`
+	Members     []TeamMemberRequest `json:"members" binding:"required,min=1,max=16,dive"`
+	Join        TeamJoinRequest     `json:"join" binding:"required"`
+}
+
+type CancelRunRequest struct {
+	ExpectedRevision uint64 `json:"expectedRevision" binding:"required,min=1"`
+	Reason           string `json:"reason" binding:"omitempty,max=2000"`
+}
+
 type CancelRunResponse struct {
-	Canceled bool `json:"canceled"`
+	Run kernel.Run `json:"run"`
 }
 
-type CreateEvidenceRequest struct {
-	Source    EvidenceSourceRequest    `json:"source" binding:"required"`
-	Selection EvidenceSelectionRequest `json:"selection" binding:"required"`
+type RunSnapshotResponse struct {
+	Run        kernel.Run         `json:"run"`
+	State      json.RawMessage    `json:"state"`
+	Checkpoint *kernel.Checkpoint `json:"checkpoint,omitempty"`
+	Result     *kernel.Result     `json:"result,omitempty"`
+	Events     []kernel.Event     `json:"events"`
 }
 
-type EvidenceSourceRequest struct {
-	Kind       string               `json:"kind" binding:"required,oneof=output projection"`
-	ID         string               `json:"id,omitempty" binding:"omitempty,max=128"`
-	Version    int                  `json:"version,omitempty" binding:"omitempty,min=1"`
-	Thread     *model.ThreadRef     `json:"thread,omitempty"`
-	Projection *model.ProjectionRef `json:"projection,omitempty"`
-}
-
-type EvidenceSelectionRequest struct {
-	Kind                                                 string `json:"kind" binding:"required,oneof=full text_range table_range"`
-	Title                                                string `json:"title,omitempty" binding:"omitempty,max=255"`
-	Start, End, RowStart, RowEnd, ColumnStart, ColumnEnd int
-}
-
-type threadRefDTO struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-}
-
-type projectionRefDTO struct {
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-}
-
-type resourceRefDTO struct {
-	Kind     string `json:"kind"`
-	ID       string `json:"id"`
-	Revision string `json:"revision,omitempty"`
-}
-
-func threadRefResponse(ref model.ThreadRef) threadRefDTO {
-	return threadRefDTO{Kind: ref.Kind, ID: ref.ID}
-}
-
-func projectionRefResponse(ref model.ProjectionRef) projectionRefDTO {
-	return projectionRefDTO{Kind: ref.Kind, ID: ref.ID}
-}
-
-func resourceRefResponse(ref model.ResourceRef) resourceRefDTO {
-	return resourceRefDTO{Kind: ref.Kind, ID: ref.ID, Revision: ref.Revision}
-}
-
-func resourceRefsResponse(refs []model.ResourceRef) []resourceRefDTO {
-	result := make([]resourceRefDTO, 0, len(refs))
-	for _, ref := range refs {
-		result = append(result, resourceRefResponse(ref))
-	}
-	return result
-}
-
-func textRunConfigResponse(item *runtime.TextRunConfigSummary) interface{} {
-	if item == nil {
-		return nil
-	}
-	raw, err := json.Marshal(item)
-	if err != nil {
-		return map[string]interface{}{}
-	}
-	var result map[string]interface{}
-	if json.Unmarshal(raw, &result) != nil {
-		return map[string]interface{}{}
-	}
-	result["environmentRef"] = resourceRefResponse(item.EnvironmentRef)
-	result["skillRefs"] = resourceRefsResponse(item.SkillRefs)
-	result["unavailableSkillRefs"] = resourceRefsResponse(item.UnavailableSkillRefs)
-	return result
-}
-
-func canonicalizeKnownRuntimeRefs(value interface{}) interface{} {
-	switch typed := value.(type) {
-	case []interface{}:
-		result := make([]interface{}, 0, len(typed))
-		for _, item := range typed {
-			result = append(result, canonicalizeKnownRuntimeRefs(item))
-		}
-		return result
-	case map[string]interface{}:
-		if ref, ok := canonicalRuntimeRefMap(typed); ok {
-			return ref
-		}
-		result := make(map[string]interface{}, len(typed))
-		for key, item := range typed {
-			result[key] = canonicalizeKnownRuntimeRefs(item)
-		}
-		return result
-	default:
-		return value
+func snapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
+	return RunSnapshotResponse{
+		Run: snapshot.Run, State: append(json.RawMessage(nil), snapshot.State...),
+		Checkpoint: snapshot.Checkpoint, Result: snapshot.Result,
+		Events: append([]kernel.Event(nil), snapshot.Events...),
 	}
 }
 
-func canonicalRuntimeRefMap(value map[string]interface{}) (map[string]interface{}, bool) {
-	kind, kindOK := value["Kind"].(string)
-	id, idOK := value["ID"].(string)
-	if !kindOK || !idOK {
-		return nil, false
+func workbenchResponse(detail workbench.Detail) workbench.Detail { return detail }
+
+func bindStrictJSON(context *gin.Context, target interface{}) error {
+	if context == nil || context.Request == nil || context.Request.Body == nil {
+		return errInvalidJSONBody
 	}
-	result := map[string]interface{}{"kind": kind, "id": id}
-	if revision, ok := value["Revision"].(string); ok && strings.TrimSpace(revision) != "" {
-		result["revision"] = revision
+	raw, err := io.ReadAll(context.Request.Body)
+	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
+		return errInvalidJSONBody
 	}
-	return result, true
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err = decoder.Decode(target); err != nil {
+		return errInvalidJSONBody
+	}
+	if decoder.More() {
+		return errInvalidJSONBody
+	}
+	context.Request.Body = io.NopCloser(bytes.NewReader(raw))
+	return nil
 }
 
-func toRunResponse(run model.Run, threadIDs ...string) map[string]interface{} {
-	threadID := run.Thread.ID
-	if len(threadIDs) > 0 && strings.TrimSpace(threadIDs[0]) != "" {
-		threadID = strings.TrimSpace(threadIDs[0])
-	}
-	result := map[string]interface{}{
-		"schemaVersion": 1,
-		"runtimeKind":   model.NormalizeRuntimeKind(run.RuntimeKind),
-		"actor":         map[string]string{"tenantID": run.Actor.TenantID, "id": run.Actor.ActorID},
-		valueThread:     map[string]string{valueKind72883EFB: run.Thread.Kind, "id": threadID},
-		"runID":         run.RunID, "requestID": run.RequestID, "goal": run.Goal, valueStatus00E8FE8E: run.Status,
-		"statusReason": run.StatusReason, "currentStepID": run.CurrentStepID, "currentPlanID": run.CurrentPlanID,
-		"pendingInteractionID": run.PendingInteractionID, "lastEventSeq": run.LastEventSeq,
-		"requestedModelName": run.RequestedModelName, "platformModelName": run.PlatformModelName,
-		"modelVendor": run.ModelVendor, "modelIcon": run.ModelIcon, "upstreamModelName": run.UpstreamModelName,
-		"inputTokens": run.InputTokens, "outputTokens": run.OutputTokens, "cacheReadTokens": run.CacheReadTokens,
-		"cacheWriteTokens": run.CacheWriteTokens, "reasoningTokens": run.ReasoningTokens, "llmCallsCount": run.LLMCallsCount,
-		"toolCallsCount": run.ToolCallsCount, valueErrorCode8B63C5B4: run.ErrorCode, valueErrorMessage: run.ErrorMessage,
-		"billedCurrency": run.BilledCurrency, "billedNanousd": run.BilledNanousd,
-		valueStartedAt: run.StartedAt, valueEndedAt: run.EndedAt, "createdAt": run.CreatedAt, valueUpdatedAt: run.UpdatedAt,
-	}
-	if strings.TrimSpace(run.AgentManifest.ID) != "" {
-		result["agentManifestRef"] = resourceRefResponse(run.AgentManifest)
-		result["agentName"] = run.AgentName
-	}
-	if strings.TrimSpace(run.WorkflowDefinition.ID) != "" {
-		result["workflowDefinitionRef"] = resourceRefResponse(run.WorkflowDefinition)
-	}
-	if strings.TrimSpace(run.RootRunID) != "" {
-		result["rootRunID"] = run.RootRunID
-	}
-	if strings.TrimSpace(run.ParentRunID) != "" {
-		result["parentRunID"] = run.ParentRunID
-	}
-	if strings.TrimSpace(run.HandoffID) != "" {
-		result["handoffID"] = run.HandoffID
-	}
-	if run.Depth > 0 {
-		result["depth"] = run.Depth
-	}
-	return result
+func normalizeThread(request ThreadRequest) kernel.ThreadRef {
+	return kernel.ThreadRef{Kind: strings.TrimSpace(request.Kind), ID: strings.TrimSpace(request.ID)}
 }
