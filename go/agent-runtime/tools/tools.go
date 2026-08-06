@@ -21,6 +21,66 @@ var (
 	ErrInvalidCall       = errors.New("invalid tool call")
 )
 
+const recoverableCallErrorMessageLimit = 2000
+
+// RecoverableCallError marks a Tool call rejection that the model can correct
+// without restarting the Run. Infrastructure, authorization, cancellation,
+// and concurrency failures must remain ordinary fatal errors.
+type RecoverableCallError struct {
+	Code    string
+	Message string
+	Cause   error
+}
+
+func (err *RecoverableCallError) Error() string {
+	if err == nil {
+		return ErrInvalidCall.Error()
+	}
+	if strings.TrimSpace(err.Message) != "" {
+		return strings.TrimSpace(err.Message)
+	}
+	if err.Cause != nil {
+		return err.Cause.Error()
+	}
+	return ErrInvalidCall.Error()
+}
+
+func (err *RecoverableCallError) Unwrap() error {
+	if err == nil {
+		return nil
+	}
+	return err.Cause
+}
+
+// NewRecoverableCallError creates an explicit model-correctable Tool error.
+func NewRecoverableCallError(code, message string, cause error) error {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		code = "tool_call_invalid"
+	}
+	message = strings.TrimSpace(message)
+	if message == "" && cause != nil {
+		message = strings.TrimSpace(cause.Error())
+	}
+	if message == "" {
+		message = ErrInvalidCall.Error()
+	}
+	runes := []rune(message)
+	if len(runes) > recoverableCallErrorMessageLimit {
+		message = string(runes[:recoverableCallErrorMessageLimit])
+	}
+	return &RecoverableCallError{Code: code, Message: message, Cause: cause}
+}
+
+// RecoverableCallErrorInfo returns safe model-facing correction metadata.
+func RecoverableCallErrorInfo(err error) (string, string, bool) {
+	var target *RecoverableCallError
+	if !errors.As(err, &target) || target == nil {
+		return "", "", false
+	}
+	return strings.TrimSpace(target.Code), target.Error(), true
+}
+
 // ApprovalMode declares whether a Tool call requires explicit interaction.
 type ApprovalMode string
 
@@ -36,6 +96,7 @@ type Definition struct {
 	Description  string          `json:"description,omitempty"`
 	InputSchema  json.RawMessage `json:"inputSchema"`
 	ApprovalMode ApprovalMode    `json:"approvalMode"`
+	Terminal     bool            `json:"terminal,omitempty"`
 }
 
 // Call is one stable Tool intent produced by a Text model.

@@ -31,7 +31,7 @@ func (handler *Handler) StartTextRun(context *gin.Context) {
 	snapshot, err := handler.text.StartRun(context.Request.Context(), text.StartRequest{
 		ID: strings.TrimSpace(request.ClientRunID), Actor: actor, Thread: normalizeThread(request.Thread),
 		RequestID: handler.requestID(context), Goal: strings.TrimSpace(request.Input.Content),
-		Model: strings.TrimSpace(request.Model),
+		Model: strings.TrimSpace(request.Model), ToolKeys: append([]string(nil), request.ToolKeys...),
 	})
 	if err != nil {
 		writeTargetRuntimeError(context, "text", err)

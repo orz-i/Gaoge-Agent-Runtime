@@ -425,9 +425,13 @@ func (runner *Runner) prepareEffect(
 		ID: activationID, NodeID: node.ID, NodeIndex: state.CurrentNode,
 		Status: ActivationRunning, Attempt: 1, EffectID: effectID,
 	})
+	effectInput := node.Effect.Input
+	if node.Effect.FromInput {
+		effectInput = state.Input
+	}
 	state.Effects = append(state.Effects, Effect{
 		ID: effectID, ActivationID: activationID, NodeID: node.ID,
-		Kind: node.Effect.Kind, Input: cloneJSON(node.Effect.Input), Status: EffectPending,
+		Kind: node.Effect.Kind, Input: cloneJSON(effectInput), Status: EffectPending,
 	})
 	state.Budget.NodeActivations++
 	state.Budget.Effects++
@@ -599,13 +603,17 @@ func (runner *Runner) complete(
 	state executionState,
 	node Node,
 ) (kernel.Snapshot, error) {
+	result, err := workflowReturnValue(state, *node.Return)
+	if err != nil {
+		return runner.fail(ctx, snapshot, state, "workflow.return_invalid", err)
+	}
 	activationID, err := runner.runtime.NewID("activation")
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
 	state.Activations = append(state.Activations, Activation{
 		ID: activationID, NodeID: node.ID, NodeIndex: state.CurrentNode,
-		Status: ActivationCompleted, Attempt: 1, Output: cloneJSON(node.Return.Value),
+		Status: ActivationCompleted, Attempt: 1, Output: cloneJSON(result),
 	})
 	state.Budget.NodeActivations++
 	state.CurrentNode++
@@ -615,9 +623,25 @@ func (runner *Runner) complete(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Result: &kernel.Result{ContentType: "application/json", Content: cloneJSON(node.Return.Value)},
+		Result: &kernel.Result{ContentType: "application/json", Content: cloneJSON(result)},
 		Events: []kernel.EventDraft{{Type: "workflow.completed", Message: state.Definition.Hash}},
 	})
+}
+
+func workflowReturnValue(state executionState, node ReturnNode) (json.RawMessage, error) {
+	if strings.TrimSpace(node.FromNode) == "" {
+		if !json.Valid(node.Value) {
+			return nil, ErrInvalidExecution
+		}
+		return cloneJSON(node.Value), nil
+	}
+	for index := len(state.Activations) - 1; index >= 0; index-- {
+		activation := state.Activations[index]
+		if activation.NodeID == node.FromNode && activation.Status == ActivationCompleted && json.Valid(activation.Output) {
+			return cloneJSON(activation.Output), nil
+		}
+	}
+	return nil, ErrInvalidExecution
 }
 
 func (runner *Runner) yield(

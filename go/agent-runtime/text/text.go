@@ -33,9 +33,33 @@ const (
 
 // Message is the provider-neutral transcript consumed by a Text model.
 type Message struct {
-	Role       Role   `json:"role"`
-	Content    string `json:"content"`
-	ToolCallID string `json:"toolCallID,omitempty"`
+	Role       Role         `json:"role"`
+	Content    string       `json:"content"`
+	ToolCalls  []tools.Call `json:"toolCalls,omitempty"`
+	ToolCallID string       `json:"toolCallID,omitempty"`
+}
+
+func (runner *Runner) completeWithToolResult(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state runState,
+	result tools.ExecutionResult,
+) (kernel.Snapshot, error) {
+	encodedState, err := encodeState(state)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusCompleted, State: encodedState, Checkpoint: snapshot.Checkpoint,
+		Result: &kernel.Result{
+			ContentType: "application/json",
+			Content:     append(json.RawMessage(nil), result.Content...),
+		},
+		Events: []kernel.EventDraft{
+			{Type: "tool.completed", Message: result.Receipt.Disposition},
+			{Type: "text.completed", Message: "Terminal Tool completed the Text loop"},
+		},
+	})
 }
 
 // ModelRequest is one direct Text loop model call.
@@ -46,7 +70,7 @@ type ModelRequest struct {
 	Tools    []tools.Definition
 }
 
-// ModelResponse returns either final content or one Tool call.
+// ModelResponse returns final content, a bounded Tool call batch, or both.
 type ModelResponse struct {
 	Content   string
 	ToolCalls []tools.Call
@@ -95,12 +119,12 @@ type Runner struct {
 }
 
 type runState struct {
-	Messages  []Message   `json:"messages"`
-	Model     string      `json:"model,omitempty"`
-	ToolKeys  []string    `json:"toolKeys"`
-	Pending   *tools.Call `json:"pending,omitempty"`
-	LLMCalls  int         `json:"llmCalls"`
-	ToolCalls int         `json:"toolCalls"`
+	Messages     []Message    `json:"messages"`
+	Model        string       `json:"model,omitempty"`
+	ToolKeys     []string     `json:"toolKeys"`
+	PendingCalls []tools.Call `json:"pendingCalls,omitempty"`
+	LLMCalls     int          `json:"llmCalls"`
+	ToolCalls    int          `json:"toolCalls"`
 }
 
 // NewRunner constructs a direct Text feature without planning or automatic routing.
@@ -174,7 +198,7 @@ func (runner *Runner) ResolveApproval(
 	if snapshot.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
-	if snapshot.Run.Status != kernel.RunStatusWaitingInput || state.Pending == nil {
+	if snapshot.Run.Status != kernel.RunStatusWaitingInput || len(state.PendingCalls) == 0 {
 		return kernel.Snapshot{}, ErrApprovalRequired
 	}
 	resolved, err := runner.approvals.Resolve(snapshot.Checkpoint, response)
@@ -212,8 +236,18 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		failed, failErr := runner.fail(ctx, snapshot, runState{}, "text.state_invalid", err)
 		return failed, true, failErr
 	}
-	if state.Pending != nil {
-		return snapshot, true, ErrApprovalRequired
+	if len(state.PendingCalls) > 0 {
+		definitions, catalogErr := runner.catalog.List(state.ToolKeys)
+		if catalogErr != nil {
+			failed, failErr := runner.fail(ctx, snapshot, state, "text.tool_invalid", catalogErr)
+			return failed, true, failErr
+		}
+		prepared, prepareErr := runner.preparePendingApproval(ctx, snapshot, state, definitions)
+		if prepareErr != nil || prepared.Run.Status != kernel.RunStatusRunning {
+			return prepared, true, prepareErr
+		}
+		executed, executeErr := runner.executePending(ctx, prepared)
+		return executed, executeErr != nil, executeErr
 	}
 	if state.LLMCalls >= runner.limits.MaxLLMCalls {
 		failed, failErr := runner.fail(ctx, snapshot, state, "text.llm_limit", ErrCallLimit)
@@ -229,12 +263,22 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		completed, completeErr := runner.complete(ctx, snapshot, state, response.Content)
 		return completed, true, completeErr
 	}
-	prepared, err := runner.prepareToolCall(ctx, snapshot, state, definitions, response.ToolCalls[0])
-	if err != nil || prepared.Run.Status != kernel.RunStatusRunning {
-		return prepared, true, err
+	if state.ToolCalls+len(response.ToolCalls) > runner.limits.MaxToolCalls {
+		failed, failErr := runner.fail(ctx, snapshot, state, "text.tool_limit", ErrCallLimit)
+		return failed, true, failErr
 	}
-	executed, err := runner.executePending(ctx, prepared)
-	return executed, err != nil, err
+	queued, err := runner.queueToolCalls(
+		ctx,
+		snapshot,
+		state,
+		definitions,
+		response.Content,
+		response.ToolCalls,
+	)
+	if err != nil {
+		return queued, true, err
+	}
+	return queued, false, nil
 }
 
 func (runner *Runner) callModel(
@@ -260,45 +304,72 @@ func (runner *Runner) callModel(
 	return definitions, response, nil
 }
 
-func (runner *Runner) prepareToolCall(
+func (runner *Runner) queueToolCalls(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state runState,
 	definitions []tools.Definition,
-	call tools.Call,
+	content string,
+	calls []tools.Call,
 ) (kernel.Snapshot, error) {
-	call.ToolKey = strings.TrimSpace(call.ToolKey)
-	if strings.TrimSpace(call.ID) == "" {
-		callID, err := runner.runtime.NewID("toolcall")
-		if err != nil {
-			return kernel.Snapshot{}, err
+	preparedCalls := make([]tools.Call, len(calls))
+	for index, call := range calls {
+		call.ToolKey = strings.TrimSpace(call.ToolKey)
+		if strings.TrimSpace(call.ID) == "" {
+			callID, err := runner.runtime.NewID("toolcall")
+			if err != nil {
+				return kernel.Snapshot{}, err
+			}
+			call.ID = callID
 		}
-		call.ID = callID
+		definition, ok := selectedDefinition(definitions, call.ToolKey)
+		if !ok || !json.Valid(call.Arguments) || definition.Terminal && index != len(calls)-1 {
+			return runner.fail(ctx, snapshot, state, "text.tool_invalid", tools.ErrInvalidCall)
+		}
+		preparedCalls[index] = call
+		preparedCalls[index].Arguments = append(json.RawMessage(nil), call.Arguments...)
 	}
-	definition, ok := selectedDefinition(definitions, call.ToolKey)
-	if !ok || !json.Valid(call.Arguments) {
-		return runner.fail(ctx, snapshot, state, "text.tool_invalid", tools.ErrInvalidCall)
-	}
-	state.Pending = &call
+	state.Messages = append(state.Messages, Message{
+		Role: RoleAssistant, Content: strings.TrimSpace(content),
+		ToolCalls: cloneToolCalls(preparedCalls),
+	})
+	state.PendingCalls = cloneToolCalls(preparedCalls)
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	intent, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.requested", Message: definition.Name}},
+		Events: []kernel.EventDraft{{Type: "tool.batch_requested", Message: "Tool call batch requested"}},
 	})
-	if err != nil {
-		return kernel.Snapshot{}, err
+}
+
+func (runner *Runner) preparePendingApproval(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state runState,
+	definitions []tools.Definition,
+) (kernel.Snapshot, error) {
+	call, ok := nextPendingCall(state)
+	if !ok {
+		return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+	}
+	definition, ok := selectedDefinition(definitions, call.ToolKey)
+	if !ok {
+		return runner.fail(ctx, snapshot, state, "text.tool_invalid", tools.ErrInvalidCall)
 	}
 	if definition.ApprovalMode == tools.ApprovalNever {
-		return intent, nil
+		return snapshot, nil
 	}
 	checkpoint, err := runner.approvals.PrepareToolApproval(call, definition)
 	if err != nil {
-		return runner.fail(ctx, intent, state, "text.approval_invalid", err)
+		return runner.fail(ctx, snapshot, state, "text.approval_invalid", err)
 	}
-	waiting, err := runner.runtime.Apply(ctx, intent.Run.ID, intent.Run.Revision, kernel.Mutation{
+	encoded, err := encodeState(state)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	waiting, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusWaitingInput, State: encoded, Checkpoint: checkpoint,
 		Events: []kernel.EventDraft{{Type: "interaction.created", Message: "Tool approval required"}},
 	})
@@ -307,21 +378,35 @@ func (runner *Runner) prepareToolCall(
 
 func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, error) {
 	state, err := decodeState(snapshot.State)
-	if err != nil || state.Pending == nil {
+	call, ok := nextPendingCall(state)
+	if err != nil || !ok {
 		return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+	}
+	definition, ok := runner.catalog.Resolve(call.ToolKey)
+	if !ok {
+		return runner.fail(ctx, snapshot, state, "text.tool_invalid", tools.ErrToolNotFound)
 	}
 	if state.ToolCalls >= runner.limits.MaxToolCalls {
 		return runner.fail(ctx, snapshot, state, "text.tool_limit", ErrCallLimit)
 	}
-	result, err := runner.executor.Execute(ctx, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: *state.Pending})
+	result, err := runner.executor.Execute(ctx, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
 	if err != nil {
+		if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
+			return runner.recordRecoverableToolError(ctx, snapshot, state, code, message)
+		}
 		return runner.fail(ctx, snapshot, state, "text.tool_failed", errors.Join(ErrToolFailure, err))
 	}
 	state.Messages = append(state.Messages, Message{
-		Role: RoleTool, Content: string(result.Content), ToolCallID: state.Pending.ID,
+		Role: RoleTool, Content: string(result.Content), ToolCallID: call.ID,
 	})
-	state.Pending = nil
+	state.PendingCalls = remainingPendingCalls(state)
 	state.ToolCalls++
+	if definition.Terminal {
+		if len(state.PendingCalls) != 0 {
+			return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+		}
+		return runner.completeWithToolResult(ctx, snapshot, state, result)
+	}
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -331,6 +416,51 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		Events: []kernel.EventDraft{{Type: "tool.completed", Message: result.Receipt.Disposition}},
 	})
 	return next, err
+}
+
+func (runner *Runner) recordRecoverableToolError(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state runState,
+	code string,
+	message string,
+) (kernel.Snapshot, error) {
+	call, ok := nextPendingCall(state)
+	if !ok {
+		return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+	}
+	content, err := json.Marshal(struct {
+		OK        bool `json:"ok"`
+		Retryable bool `json:"retryable"`
+		Error     struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}{
+		OK:        false,
+		Retryable: true,
+		Error: struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		}{Code: strings.TrimSpace(code), Message: strings.TrimSpace(message)},
+	})
+	if err != nil {
+		return runner.fail(ctx, snapshot, state, "text.tool_error_invalid", err)
+	}
+	callID := call.ID
+	state.Messages = append(state.Messages, Message{
+		Role: RoleTool, Content: string(content), ToolCallID: callID,
+	})
+	state.PendingCalls = remainingPendingCalls(state)
+	state.ToolCalls++
+	encoded, err := encodeState(state)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+		Events: []kernel.EventDraft{{Type: "tool.correction_requested", Message: strings.TrimSpace(code)}},
+	})
 }
 
 func (runner *Runner) resumeApproved(
@@ -364,10 +494,14 @@ func (runner *Runner) resumeRejected(
 	checkpoint *kernel.Checkpoint,
 	response interaction.ApprovalResponse,
 ) (kernel.Snapshot, error) {
+	call, ok := nextPendingCall(state)
+	if !ok {
+		return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+	}
 	state.Messages = append(state.Messages, Message{
-		Role: RoleTool, Content: rejectedToolContent(response.Comment), ToolCallID: state.Pending.ID,
+		Role: RoleTool, Content: rejectedToolContent(response.Comment), ToolCallID: call.ID,
 	})
-	state.Pending = nil
+	state.PendingCalls = remainingPendingCalls(state)
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -442,13 +576,30 @@ func selectedDefinition(definitions []tools.Definition, key string) (tools.Defin
 }
 
 func validModelResponse(response ModelResponse) bool {
-	if len(response.ToolCalls) > 1 {
-		return false
+	return len(response.ToolCalls) > 0 || response.Content != ""
+}
+
+func nextPendingCall(state runState) (tools.Call, bool) {
+	if len(state.PendingCalls) == 0 {
+		return tools.Call{}, false
 	}
-	if len(response.ToolCalls) == 1 {
-		return response.Content == ""
+	return state.PendingCalls[0], true
+}
+
+func remainingPendingCalls(state runState) []tools.Call {
+	if len(state.PendingCalls) <= 1 {
+		return nil
 	}
-	return response.Content != ""
+	return cloneToolCalls(state.PendingCalls[1:])
+}
+
+func cloneToolCalls(values []tools.Call) []tools.Call {
+	result := make([]tools.Call, len(values))
+	for index, call := range values {
+		result[index] = call
+		result[index].Arguments = append(json.RawMessage(nil), call.Arguments...)
+	}
+	return result
 }
 
 func encodeState(state runState) (json.RawMessage, error) {
@@ -485,7 +636,12 @@ func normalizedToolKeys(values []string) []string {
 }
 
 func cloneMessages(values []Message) []Message {
-	return append([]Message(nil), values...)
+	result := make([]Message, len(values))
+	for index, message := range values {
+		result[index] = message
+		result[index].ToolCalls = cloneToolCalls(message.ToolCalls)
+	}
+	return result
 }
 
 func rejectedToolContent(comment string) string {

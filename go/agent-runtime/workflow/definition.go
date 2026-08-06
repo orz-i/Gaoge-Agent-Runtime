@@ -33,8 +33,9 @@ type Limits struct {
 
 // EffectNode creates one durable external Effect intent.
 type EffectNode struct {
-	Kind  string          `json:"kind"`
-	Input json.RawMessage `json:"input"`
+	Kind      string          `json:"kind"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	FromInput bool            `json:"fromInput,omitempty"`
 }
 
 // WaitNode creates one explicit host-resolved Wait checkpoint.
@@ -45,7 +46,8 @@ type WaitNode struct {
 
 // ReturnNode completes the Workflow with canonical JSON.
 type ReturnNode struct {
-	Value json.RawMessage `json:"value"`
+	Value    json.RawMessage `json:"value,omitempty"`
+	FromNode string          `json:"fromNode,omitempty"`
 }
 
 // Node is a strict data-only union. Exactly one payload must match Type.
@@ -185,6 +187,7 @@ func normalizeNode(node Node) Node {
 	if node.Return != nil {
 		terminal := *node.Return
 		terminal.Value = cloneJSON(terminal.Value)
+		terminal.FromNode = strings.TrimSpace(terminal.FromNode)
 		node.Return = &terminal
 	}
 	return node
@@ -240,8 +243,11 @@ func validNode(node Node, last bool) bool {
 }
 
 func validEffectNode(node Node, last bool) bool {
-	return !last && node.Effect != nil && node.Wait == nil && node.Return == nil &&
-		node.Effect.Kind != "" && json.Valid(node.Effect.Input)
+	if last || node.Effect == nil || node.Wait != nil || node.Return != nil || node.Effect.Kind == "" {
+		return false
+	}
+	hasInput := len(node.Effect.Input) > 0 && json.Valid(node.Effect.Input)
+	return hasInput != node.Effect.FromInput
 }
 
 func validWaitNode(node Node, last bool) bool {
@@ -250,8 +256,12 @@ func validWaitNode(node Node, last bool) bool {
 }
 
 func validReturnNode(node Node, last bool) bool {
-	return last && node.Effect == nil && node.Wait == nil && node.Return != nil &&
-		json.Valid(node.Return.Value)
+	if !last || node.Effect != nil || node.Wait != nil || node.Return == nil {
+		return false
+	}
+	hasValue := len(node.Return.Value) > 0 && json.Valid(node.Return.Value)
+	hasSource := strings.TrimSpace(node.Return.FromNode) != ""
+	return hasValue != hasSource
 }
 
 func definitionHash(definition Definition) (string, error) {

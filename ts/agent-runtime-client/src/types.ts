@@ -54,6 +54,7 @@ export type StartTextRunRequest = {
   input: { content: string };
   clientRunID?: string;
   model?: string;
+  toolKeys?: string[];
 };
 
 export type StartPlanRunRequest = StartTextRunRequest & {
@@ -68,9 +69,11 @@ export type ResolvePlanApprovalRequest = {
 };
 
 export type WorkflowNode =
-  | { id: string; type: "effect"; effect: { kind: string; input: unknown } }
+  | { id: string; type: "effect"; effect: { kind: string; input: unknown; fromInput?: never } }
+  | { id: string; type: "effect"; effect: { kind: string; fromInput: true; input?: never } }
   | { id: string; type: "wait"; wait: { kind: string; payload: unknown } }
-  | { id: string; type: "return"; return: { value: unknown } };
+  | { id: string; type: "return"; return: { value: unknown; fromNode?: never } }
+  | { id: string; type: "return"; return: { fromNode: string; value?: never } };
 
 export type WorkflowDefinitionDraft = {
   id: string;

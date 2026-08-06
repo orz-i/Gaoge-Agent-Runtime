@@ -31,6 +31,7 @@ type StartTextRunRequest struct {
 	Input       TextInputRequest `json:"input" binding:"required"`
 	ClientRunID string           `json:"clientRunID" binding:"omitempty,max=64"`
 	Model       string           `json:"model" binding:"omitempty,max=128"`
+	ToolKeys    []string         `json:"toolKeys" binding:"omitempty,max=128,dive,max=255"`
 }
 
 type StartPlanRunRequest struct {
