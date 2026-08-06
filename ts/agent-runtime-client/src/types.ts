@@ -1,50 +1,62 @@
-export type StartTextRunRequest = {
-  thread: {
-    kind: string;
-    id: string;
-    parentProjection?: ProjectionRefDTO;
-    sourceProjection?: ProjectionRefDTO;
-    branchReason?: "default" | "retry" | "edit";
-  };
-  input: {
-    contentType: "text" | "markdown";
-    content: string;
-    fileIDs?: string[];
-    outputIDs?: string[];
-    evidenceIDs?: string[];
-    htmlVisualPrompt?: boolean;
-    htmlVisualColorMode?: "light" | "dark";
-  };
-  model?: string;
-  options?: Record<string, unknown>;
-  clientRunID?: string;
-  toolKeys?: string[];
-  skillKeys?: string[];
-  agentManifest?: {
-    kind: "agent_manifest";
-    id: string;
-    revision?: string;
-  };
-  workspace?: RuntimeWorkspaceExtensionDTO;
+export type RuntimeKind = "text" | "plan_execute" | "workflow" | "team";
+export type RunStatus = "running" | "waiting_input" | "completed" | "failed" | "cancelled";
+
+export type ActorRefDTO = { tenantID: string; actorID: string };
+export type ThreadRefDTO = { kind: string; id: string };
+
+export type RunDTO = {
+  id: string;
+  kind: RuntimeKind;
+  actor: ActorRefDTO;
+  thread: ThreadRefDTO;
+  requestID?: string;
+  goal: string;
+  status: RunStatus;
+  revision: number;
+  errorCode?: string;
+  errorDetail?: string;
+  deadlineAt?: string | null;
+  endedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
-export type StartPlanRunRequest = {
-  thread: {
-    kind: string;
-    id: string;
-    parentProjection?: ProjectionRefDTO;
-    sourceProjection?: ProjectionRefDTO;
-    branchReason?: "default" | "retry" | "edit";
-  };
-  input: {
-    contentType: "text" | "markdown";
-    content: string;
-    fileIDs?: string[];
-    outputIDs?: string[];
-    evidenceIDs?: string[];
-  };
+export type EventDTO = {
+  seq: number;
+  type: string;
+  message?: string;
+  data?: unknown;
+  createdAt: string;
+};
+
+export type CheckpointDTO = {
+  id: string;
+  kind: string;
+  status: string;
+  payload: unknown;
+  response?: unknown;
+  createdAt: string;
+  resolvedAt?: string | null;
+};
+
+export type ResultDTO = { contentType: string; content: unknown };
+
+export type RunSnapshotDTO = {
+  run: RunDTO;
+  state: unknown;
+  checkpoint?: CheckpointDTO | null;
+  result?: ResultDTO | null;
+  events: EventDTO[];
+};
+
+export type StartTextRunRequest = {
+  thread: ThreadRefDTO;
+  input: { content: string };
   clientRunID?: string;
   model?: string;
+};
+
+export type StartPlanRunRequest = StartTextRunRequest & {
   approvalPolicy?: "auto" | "required";
   maxSteps?: number;
 };
@@ -55,518 +67,80 @@ export type ResolvePlanApprovalRequest = {
   comment?: string;
 };
 
-export type RuntimeExtensionDTO = Readonly<Record<string, unknown>>;
-export type RuntimeWorkspaceExtensionDTO = RuntimeExtensionDTO & {
-  schemaVersion: number;
-  type: string;
-  resourceID?: string;
-};
+export type WorkflowNode =
+  | { id: string; type: "effect"; effect: { kind: string; input: unknown } }
+  | { id: string; type: "wait"; wait: { kind: string; payload: unknown } }
+  | { id: string; type: "return"; return: { value: unknown } };
 
-export type TextRunStatus = "queued" | "preparing" | "waiting_input" | "waiting_handoff" | "running" | "completed" | "failed" | "cancelled" | "suspended";
-export type WorkflowRunStatus = TextRunStatus | "waiting_timer" | "cancelling" | "compensating";
-export type RunStepDTO = { stepID: string; runID: string; parentStepID: string; planID?: string; stepIndex: number; attempt?: number; nodeID?: string; activationPath?: string; laneID?: string; activationIndex?: number; completionOrder?: number; waitKind?: string; waitID?: string; childRunID?: string; kind: string; title: string; description: string; status: string; dependsOn?: string[]; approvalRequired?: boolean; expectedTools?: string[]; resourceRefs?: string[]; resultSummary?: string; startedAt?: string | null; endedAt?: string };
-export type TextRunDTO = {
-  schemaVersion: 1;
-  runtimeKind: "text";
-  actor: { id: string };
-  thread: { kind: string; id: string };
-  runID: string;
-  requestID: string;
-  goal?: string;
-  status: TextRunStatus;
-  statusReason?: string;
-  currentStepID?: string;
-  currentPlanID?: string;
-  pendingInteractionID?: string;
-  lastEventSeq?: number;
-  agentManifestRef?: ResourceRefDTO;
-  agentName?: string;
-  rootRunID?: string;
-  parentRunID?: string;
-  handoffID?: string;
-  depth?: number;
-  requestedModelName: string;
-  platformModelName: string;
-  modelVendor: string;
-  modelIcon: string;
-  upstreamModelName: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheWriteTokens: number;
-  reasoningTokens: number;
-  llmCallsCount: number;
-  toolCallsCount: number;
-  billedCurrency: string;
-  billedNanousd: number;
-  errorCode: string;
-  errorMessage: string;
-  startedAt: string;
-  endedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-export type WorkflowRunDTO = Omit<TextRunDTO, "runtimeKind" | "status"> & {
-  runtimeKind: "workflow";
-  status: WorkflowRunStatus;
-  workflowDefinitionRef: ResourceRefDTO;
-};
-export type PlanExecuteRunDTO = {
-  schemaVersion: 1;
-  runtimeKind: "plan_execute";
-  actor: { tenantID: string; id: string };
-  thread: { kind: string; id: string };
-  runID: string;
-  requestID: string;
-  goal?: string;
-  status: TextRunStatus;
-  revision: number;
-  errorCode?: string;
-  errorMessage?: string;
-  deadlineAt?: string;
-  endedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-export type TeamRunDTO = Omit<PlanExecuteRunDTO, "runtimeKind"> & { runtimeKind: "team" };
-export type RunDTO = TextRunDTO | WorkflowRunDTO | PlanExecuteRunDTO | TeamRunDTO;
-export type PlanRunSnapshotDTO = {
-  run: PlanExecuteRunDTO;
-  state: unknown;
-  checkpoint?: unknown;
-  result?: unknown;
-};
-export type ActorRefDTO = { tenantID?: string; id: string };
-export type ThreadRefDTO = { kind: string; id: string };
-export type ProjectionRefDTO = { kind: string; id: string };
-export type ResourceRefDTO = { kind: string; id: string; revision?: string };
-export type RuntimeModelRoutingSummaryV1 = Readonly<{
-  requestedModelName?: string;
-  platformModelName?: string;
-  provider?: string;
-  providerProtocol?: string;
-  routedBindingCode?: string;
-  modelVendor?: string;
-  upstreamModelName?: string;
-}>;
-export type RuntimeExecutionProvenanceV1 = Readonly<{
-  schemaVersion: 1;
-  runID: string;
-  rootRunID: string;
-  runtimeKind: "text" | "workflow";
-  environmentRef?: ResourceRefDTO;
-  agentManifestRef?: ResourceRefDTO;
-  workflowDefinitionRef?: ResourceRefDTO;
-  modelRouting: RuntimeModelRoutingSummaryV1;
-  snapshotHash: string;
-  stateHash: string;
-}>;
-export type StartTextRunResult = { run: TextRunDTO; rootStep: RunStepDTO; inputProjectionRef: ProjectionRefDTO; outputProjectionRef: ProjectionRefDTO };
-export type WorkflowExprOp = "literal" | "ref" | "object" | "array" | "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "and" | "or" | "not" | "coalesce" | "merge" | "append" | "concat" | "length" | "contains" | "add" | "sub" | "mul" | "div" | "mod";
-export type WorkflowExprDTO = { op: WorkflowExprOp; value?: unknown; ref?: string; fields?: Record<string, WorkflowExprDTO>; items?: WorkflowExprDTO[]; args?: WorkflowExprDTO[] };
-export type JSONSchemaDTO = boolean | Record<string, unknown>;
-export type WorkflowLimitsDTO = { maxNodeActivations: number; maxChildRuns: number; maxConcurrentRuns: number; maxTotalLLMCalls: number; maxTotalToolCalls: number; maxDurationSeconds: number; maxLoopIterations: number; maxNestedDepth: number; maxStateBytes: number };
-export type WorkflowNodeType = "sequence" | "agent" | "parallel" | "forEach" | "pipeline" | "if" | "loop" | "set" | "log" | "tool" | "workflow" | "interaction" | "timer" | "compensate" | "return";
-export type WorkflowNodeDTO = {
+export type WorkflowDefinitionDraft = {
   id: string;
-  type: WorkflowNodeType;
-  children?: WorkflowNodeDTO[];
-  branches?: WorkflowNodeDTO[];
-  stages?: WorkflowNodeDTO[];
-  body?: WorkflowNodeDTO;
-  then?: WorkflowNodeDTO;
-  else?: WorkflowNodeDTO;
-  do?: WorkflowNodeDTO;
-  undo?: WorkflowNodeDTO;
-  manifestRef?: ResourceRefDTO;
-  definitionRef?: ResourceRefDTO;
-  toolKey?: string;
-  toolKeys?: string[];
-  goal?: WorkflowExprDTO;
-  items?: WorkflowExprDTO;
-  condition?: WorkflowExprDTO;
-  arguments?: WorkflowExprDTO;
-  input?: WorkflowExprDTO;
-  message?: WorkflowExprDTO;
-  data?: WorkflowExprDTO;
-  delaySeconds?: WorkflowExprDTO;
-  wakeAt?: WorkflowExprDTO;
-  value?: WorkflowExprDTO;
-  presentation?: WorkflowExprDTO;
-  assignments?: Record<string, WorkflowExprDTO>;
-  outputSchema?: JSONSchemaDTO;
-  schema?: JSONSchemaDTO;
-  perNodeLimits?: { maxLLMCalls?: number; maxToolCalls?: number };
-  maxConcurrency?: number;
-  maxIterations?: number;
-  resultAttempts?: number;
-  failurePolicy?: "collect" | "fail_fast";
-  level?: "debug" | "info" | "warn" | "error";
-  title?: string;
-  prompt?: string;
-  expiresAfterSeconds?: number;
-  cache?: { enabled: boolean; ttlSeconds?: number; mode?: "use" | "refresh" | "bypass" };
-};
-export type WorkflowDependencyDTO = { kind: "agent_manifest" | "workflow_definition" | "tool"; ref: ResourceRefDTO; toolKey?: string; definitionVersion?: string; fingerprint: string; sideEffectLevel?: string };
-export type WorkflowDefinitionStatus = "active" | "disabled";
-export type WorkflowDefinitionScope = "actor" | "tenant" | "system";
-export type WorkflowDefinitionDTO = {
-  workflowID: string;
   revision: number;
-  ref: ResourceRefDTO;
-  schemaVersion: 1;
-  scope: WorkflowDefinitionScope;
-  tenantID: string;
-  ownerActorID: string;
   name: string;
-  description: string;
-  status: WorkflowDefinitionStatus;
-  inputSchema: JSONSchemaDTO;
-  outputSchema: JSONSchemaDTO;
-  root: WorkflowNodeDTO;
-  limits: WorkflowLimitsDTO;
-  dependencies: WorkflowDependencyDTO[];
-  dependencyHash: string;
-  definitionHash: string;
-  revisionNote: string;
-  createdAt: string;
-  updatedAt: string;
-};
-export type WorkflowDefinitionRevisionRequest = {
-  workflowID?: string;
-  expectedRevision?: number;
-  schemaVersion?: 1;
-  scope?: WorkflowDefinitionScope;
-  tenantID?: string;
-  ownerActorID?: string;
-  name: string;
-  description?: string;
-  status?: WorkflowDefinitionStatus;
-  inputSchema: JSONSchemaDTO;
-  outputSchema: JSONSchemaDTO;
-  root: WorkflowNodeDTO;
-  limits: WorkflowLimitsDTO;
-  revisionNote?: string;
-};
-export type WorkflowDefinitionFilterDTO = { status?: WorkflowDefinitionStatus; scope?: WorkflowDefinitionScope; tenantID?: string; ownerActorID?: string; limit?: number; offset?: number };
-export type WorkflowDefinitionPageDTO = { total: number; results: WorkflowDefinitionDTO[] };
-export type WorkflowDefinitionValidationDTO = { valid: true; nodeCount: number; definition: WorkflowDefinitionDTO };
-export type StartWorkflowRequest = {
-  thread: StartTextRunRequest["thread"];
-  definition: ResourceRefDTO & { kind: "workflow_definition" };
-  input: unknown;
-  clientRunID?: string;
-  limits?: WorkflowLimitsDTO;
-  cacheMode?: "use" | "refresh" | "bypass";
-  workspace?: RuntimeWorkspaceExtensionDTO;
-};
-export type WorkflowStartResult = { run: WorkflowRunDTO; rootStep: RunStepDTO; inputProjectionRef: ProjectionRefDTO; outputProjectionRef: ProjectionRefDTO };
-export type RunResultDTO<T = unknown> = { runID: string; runtimeKind: "text" | "workflow"; value: T; presentation: string; schemaHash: string; contentHash: string; createdAt: string; updatedAt: string };
-export type WorkflowExecutionDTO = { runID: string; definitionRef: ResourceRefDTO; definitionHash: string; dependencyHash: string; budgetOwnerRunID: string; rootRunID: string; parentRunID?: string; depth: number; version: number; status: string; state: Record<string, unknown>; vars: Record<string, unknown>; waits: Array<Record<string, unknown>>; compensations: Array<Record<string, unknown>>; budget: Record<string, unknown>; threadSnapshotHash: string; completionSeq: number; errorCode: string; errorMessage: string; startedAt: string; endedAt?: string | null; createdAt: string; updatedAt: string };
-export type TextRunExecutionStrategyDTO = "" | "direct" | "planned";
-export type TextRunConfigSummaryDTO = { strategy: TextRunExecutionStrategyDTO; strategyReason: string; requestedMode: "auto" | "direct" | "plan"; defaultMode: "auto" | "direct" | "plan"; allowedModes: Array<"direct" | "plan">; environmentRef: ResourceRefDTO; environmentProfileName: string; platformModelName: string; memoryEnabled: boolean; skillRefs: ResourceRefDTO[]; toolKeys: string[]; localToolKeys: string[]; unavailableSkillRefs: ResourceRefDTO[]; unavailableToolKeys: string[]; providerToolNames?: string[]; toolSchemaBytes?: number; providerToolPayloadBytes?: number; providerPayloadObserved?: boolean; fileCount: number; maxLLMCalls: number; maxToolCalls: number; toolRetryCount: number; toolConcurrency: number; planApprovalMode?: "required" | "auto"; planMaxSteps?: number; planMaxRevisions?: number; interactionTTLHours?: number; outputMaxPerRun?: number };
-export type TextRunContextSummaryDTO = {
-  snapshotID: string;
-  revision: number;
-  supersedesSnapshotID?: string;
-  mode: "managed" | "legacy";
-  managementStatus: "baseline" | "managed" | string;
-  semanticVersion: number;
-  contentHash: string;
-  hardInputTokens: number;
-  softInputTokens: number;
-  rawTokenEstimate: number;
-  adjustedTokenEstimate: number;
-  tokenCountSource: "exact" | "estimated" | string;
-  loadedMessageCount: number;
-  retainedMessageCount: number;
-  summarizedMessageCount: number;
-  trimmedMessageCount: number;
-  summaryArtifactID?: string;
-  summaryStrategy?: string;
-  coveredThrough?: ProjectionRefDTO;
-  summaryTokenEstimate: number;
-  fileCount: number;
-  ragCount: number;
-  skillCount: number;
-  memoryCount: number;
-  outputCount: number;
-  evidenceCount: number;
-  retrievalFallbackCount: number;
-  skippedCount: number;
-  compiledAt: string;
-};
-export type TextRunDetailDTO = { run: TextRunDTO; steps: RunStepDTO[]; inputProjectionRef: ProjectionRefDTO; outputProjectionRef: ProjectionRefDTO; effectiveConfig?: TextRunConfigSummaryDTO; context?: TextRunContextSummaryDTO };
-export type WorkflowRunDetailDTO = Omit<TextRunDetailDTO, "run" | "effectiveConfig"> & { run: WorkflowRunDTO; effectiveConfig?: never };
-export type RunDetailDTO = TextRunDetailDTO | WorkflowRunDetailDTO;
-export type TextRunCompletionDTO = { run: TextRunDTO; inputProjectionRef: ProjectionRefDTO; outputProjectionRef: ProjectionRefDTO };
-export type PlanDTO = { planID: string; runID: string; revision: number; status: string; goal: string; summary: string; plan?: { summary?: string; steps?: Array<{ key: string; title: string; description: string; dependsOn: string[]; approvalRequired: boolean; expectedTools: string[]; resourceRefs: string[] }> }; approvedAt?: string; createdAt: string };
-export type ToolApprovalPreviewDTO = { action?: unknown; resource?: unknown; target?: unknown; sideEffectLevel: "read" | "staged_write" | "write" | "destructive" | "unknown"; redactedArguments: unknown };
-export type RunInteractionDTO = { interactionID: string; runID: string; stepID: string; toolCallID?: string; type: "submit_plan" | "ask_user" | "approve_tool" | "approve_tool_set" | "approve_step" | "workflow"; status: string; request: Record<string, unknown> & { preview?: ToolApprovalPreviewDTO }; responseSchemaJSON: string; requestedAt: string; expiresAt?: string; resolvedAt?: string };
-export type RunCheckpointDTO = { checkpointID: string; runID: string; eventSeq: number; stepID: string; toolCallID?: string; kind: string; status: string; createdAt: string };
-export type OutputStatus = "draft" | "published" | "aborted";
-export type OutputDTO = { outputID: string; runID: string; stepID: string; toolCallID?: string; sourceToolCallID?: string; sourceEventID: string; sourceSnapshotID?: string; parentOutputID?: string; status: OutputStatus; kind: string; title: string; summary: string; extension?: RuntimeExtensionDTO; fileID?: string; fileSHA256?: string; fileMIMEType?: string; projectionRef?: ProjectionRefDTO; version: number; createdAt: string };
-export type OutputCatalogItemDTO = OutputDTO & { sourceRun: { goal: string; status: string; model: string }; sourceThread: ThreadRefDTO & { title?: string } };
-export type OutputCatalogPageDTO = { results: OutputCatalogItemDTO[]; nextCursor?: string };
-export type PlanViewDTO = { current: PlanDTO; revisions: PlanDTO[]; steps: RunStepDTO[] };
-export type RunEventType = "context.compiled" | "progress.created" | "run.started" | "run.preparing" | "run.strategy_selected" | "run.waiting_input" | "run.waiting_handoff" | "run.resumed" | "run.status_changed" | "run.completed" | "run.failed" | "run.cancelled" | "run.suspended" | "handoff.join.created" | "handoff.join.ready" | "handoff.join.failed" | "handoff.join.cancelled" | "plan.created" | "plan.proposed" | "plan.approved" | "plan.rejected" | "plan.revised" | "step.created" | "step.started" | "step.approved" | "step.resumed" | "step.waiting_input" | "step.waiting_handoff" | "step.updated" | "step.completed" | "step.failed" | "step.cancelled" | "step.suspended" | "step.skipped" | "interaction.created" | "interaction.resolved" | "interaction.expired" | "checkpoint.created" | "output.created" | "output.updated" | "message.delta" | "message.completed" | "message.failed" | "message.cancelled" | "tool.started" | "tool.completed" | "tool.failed" | "usage.updated" | "billing.updated" | string;
-export type RunEventDTO = { schemaVersion: 1; eventID: string; runID: string; actor: ActorRefDTO; thread: ThreadRefDTO; projection?: ProjectionRefDTO; seq: number; type: RunEventType; stepID?: string; parentEventID?: string; timestamp: string; payload: Record<string, unknown> };
-export type RunEventDetailDTO = RunEventDTO & {
-  inputJSON?: string;
-  outputJSON?: string;
-  errorJSON?: string;
-};
-export type RunEventHistoryPage = { results: RunEventDTO[]; hasMore: boolean; nextBeforeSeq?: number };
-export type PhaseKind = "context" | "planning" | "execution" | "interaction" | "synthesis";
-export type PhaseProjectionDTO = { phaseID: string; kind: PhaseKind; title?: string; summary?: string; status: string; startSeq: number; endSeq?: number; stepIDs: string[]; toolCallIDs: string[]; outputIDs: string[]; startedAt?: string; endedAt?: string };
-export type RunActivityKind = "context" | "commentary" | "plan" | "operation" | "step_result" | "interaction" | "error";
-export type RunActivityItemDTO = {
-  id: string;
-  kind: RunActivityKind;
-  seq: number;
-  endSeq: number;
-  stepID?: string;
-  status: string;
-  title?: string;
-  summary?: string;
-  contentMarkdown?: string;
-  operationKind?: "command" | "edit" | "image" | "search" | "inspect" | "output" | "tool" | string;
-  count?: number;
-  interactionType?: string;
-  details?: Array<{ id: string; title: string; status: string; summary?: string }>;
-  sources?: Array<{ type: string; id: string; title: string }>;
-  context?: {
-    fileCount: number;
-    ragCount: number;
-    skillCount: number;
-    memoryCount: number;
-    outputCount: number;
-    evidenceCount: number;
-    retrievalFallbackCount: number;
-    includedCount: number;
-    skippedCount: number;
-    extension?: RuntimeExtensionDTO;
+  inputSchema?: unknown;
+  outputSchema?: unknown;
+  nodes: WorkflowNode[];
+  limits?: {
+    maxNodeActivations?: number;
+    maxEffects?: number;
+    maxSegments?: number;
+    maxActivationsPerSegment?: number;
+    maxStateBytes?: number;
   };
 };
-export type ToolGroupDTO = { groupID: string; phaseID: string; stepID?: string; title: string; status: string; startSeq: number; endSeq?: number; toolCallIDs: string[]; toolNames?: Record<string, string>; toolEventIDs?: Record<string, string>; toolStatuses?: Record<string, string> };
-export type WorkbenchGraphDTO = { nodes: Array<{ id: string; kind: string; label: string; subtitle?: string; status: string; entityID: string; phaseID?: string }>; edges: Array<{ id: string; source: string; target: string; kind: string }> };
-export type WorkbenchSelectionTarget = { tab: "overview" | "trace" | "outputs" | "details"; kind: "phase" | "step" | "tool" | "output" | "checkpoint" | "event"; id: string; phaseID?: string; seq?: number };
-export type WorkbenchDTO = { projectionVersion: 1; projectionSeq: number; projectionPersisted: boolean; run: RunDTO; workflow?: WorkflowExecutionDTO; result?: RunResultDTO; overview: { goal: string; status: string; currentPhaseID?: string; statusReason?: string; errorCode?: string; errorMessage?: string; strategy?: TextRunExecutionStrategyDTO; plannerRepairs: number; startedAt: string; endedAt?: string; llmCalls: number; toolCalls: number; inputTokens: number; outputTokens: number; reasoningTokens: number; billedCurrency?: string; billedNanousd: number }; phases: PhaseProjectionDTO[]; toolGroups: ToolGroupDTO[]; plan?: PlanViewDTO; steps: RunStepDTO[]; pendingInteraction?: RunInteractionDTO; interactions: RunInteractionDTO[]; checkpoints: RunCheckpointDTO[]; outputs: OutputDTO[]; context?: TextRunContextSummaryDTO; effectiveConfig?: TextRunConfigSummaryDTO; graph: WorkbenchGraphDTO; selectionIndex: Record<string, WorkbenchSelectionTarget> };
-export type OutputPreviewDTO = { type: "markdown" | "text" | "code" | "table" | "image" | "html" | "file" | "summary"; content?: string; language?: string; fileID?: string; mimeType?: string; rows?: string[][]; truncated?: boolean };
-export type OutputDetailDTO = OutputCatalogItemDTO;
-export type OutputVersionPageDTO = { results: OutputDetailDTO[]; hasMore: boolean; nextCursor?: string };
-export type RuntimeEvidenceSourceDTO =
-  | { kind: "output"; id: string; version: number }
-  | { kind: "projection"; thread: ThreadRefDTO; projection: ProjectionRefDTO };
-export type RuntimeEvidenceSelectionDTO =
-  | { kind: "full"; title?: string }
-  | { kind: "text_range"; start: number; end: number; title?: string }
-  | { kind: "table_range"; rowStart: number; rowEnd: number; columnStart: number; columnEnd: number; title?: string };
-export type EvidenceDTO = { evidenceID: string; source: RuntimeEvidenceSourceDTO; projectionRef?: ProjectionRefDTO; kind: RuntimeEvidenceSelectionDTO["kind"]; title: string; excerpt?: string; contentHash: string; sourceContentHash?: string; createdAt: string };
-export type RunQueueStatus = "queued" | "dispatching" | "started" | "failed" | "cancelled";
-export type RunQueueRequestDTO = Omit<StartTextRunRequest, "clientRunID">;
-export type RunQueueItemDTO = { queueID: string; clientQueueID: string; thread: { kind: string; id: string }; status: RunQueueStatus; position: number; revision: number; attemptCount: number; request: RunQueueRequestDTO; anchorRunID?: string; startedRunID?: string; errorCode?: string; errorMessage?: string; nextAttemptAt?: string; createdAt: string; updatedAt: string };
 
-export type ContinuationJobStatus = "queued" | "running" | "retry_wait" | "completed" | "dead_letter";
-export type ContinuationRecoveryBlockReason = "ready" | "not_dead_letter" | "run_terminal" | "run_missing" | string;
-export type ContinuationJobDTO = {
-  jobID: string;
-  segmentFingerprint: string;
-  runID: string;
-  checkpointID: string;
-  tenantID: string;
-  actorID: string;
+export type StartWorkflowRunRequest = {
+  thread: ThreadRefDTO;
+  input: unknown;
+  clientRunID?: string;
+  goal: string;
+  definition: WorkflowDefinitionDraft;
+};
+
+export type ResolveWorkflowWaitRequest = { expectedRevision: number; response: unknown };
+
+export type StartTeamRunRequest = {
+  thread: ThreadRefDTO;
+  goal: string;
+  clientRunID?: string;
+  mode: "sequential" | "parallel";
+  members: Array<{ id: string; goal: string; toolKeys?: string[] }>;
+  join: { mode: "all" | "any" | "quorum"; quorum?: number; failurePolicy?: "collect" | "fail_fast" };
+};
+
+export type CancelRunRequest = { expectedRevision: number; reason?: string };
+export type CancelRunResponse = { run: RunDTO };
+
+export type WorkbenchSectionDTO = { name: string; available: boolean; content?: unknown; hash?: string };
+export type WorkbenchTimelineItemDTO = {
+  id: string;
   source: string;
-  status: ContinuationJobStatus;
-  runStatus?: TextRunStatus | string;
-  recoverable: boolean;
-  recoveryBlockReason?: ContinuationRecoveryBlockReason;
-  reservationAmountNanousd: number;
-  reservationRefNo?: string;
-  attemptCount: number;
-  maxAttempts: number;
-  availableAt: string;
-  leaseOwner?: string;
-  leaseExpiresAt?: string;
-  heartbeatAt?: string;
-  lastErrorSummary?: string;
+  kind: string;
+  status?: string;
+  title?: string;
+  summary?: string;
+  seq?: number;
   createdAt: string;
-  updatedAt: string;
+  data?: unknown;
 };
-export type ContinuationJobPageDTO = { total: number; results: ContinuationJobDTO[] };
-export type ContinuationJobFilterDTO = {
-  tenantID?: string;
-  actorID?: string;
-  status?: ContinuationJobStatus;
-  runID?: string;
-  jobID?: string;
-  source?: string;
-  limit?: number;
-  offset?: number;
+export type WorkbenchDiagnosticDTO = { provider: string; operation: string; code: string; message?: string };
+export type WorkbenchDTO = {
+  overview: {
+    runID: string;
+    kind: RuntimeKind;
+    goal: string;
+    status: RunStatus;
+    revision: number;
+    errorCode?: string;
+    errorDetail?: string;
+    eventCount: number;
+    hasCheckpoint: boolean;
+    hasResult: boolean;
+  };
+  run: RunDTO;
+  checkpoint?: CheckpointDTO | null;
+  result?: ResultDTO | null;
+  sections: WorkbenchSectionDTO[];
+  timeline: WorkbenchTimelineItemDTO[];
+  diagnostics?: WorkbenchDiagnosticDTO[];
+  hash: string;
 };
-
-export type AgentManifestStatus = "active" | "disabled";
-export type AgentManifestScope = "actor" | "tenant" | "system";
-export type AgentManifestDTO = {
-  manifestID: string;
-  revision: number;
-  ref: ResourceRefDTO;
-  scope: AgentManifestScope;
-  tenantID: string;
-  ownerActorID: string;
-  name: string;
-  description: string;
-  instructions: string;
-  status: AgentManifestStatus;
-  modelName: string;
-  toolKeys: string[];
-  skillKeys: string[];
-  maxChildRuns: number;
-  maxDepth: number;
-  maxLLMCalls: number;
-  maxToolCalls: number;
-  revisionNote: string;
-  createdAt: string;
-  updatedAt: string;
-};
-export type AgentManifestPageDTO = { total: number; results: AgentManifestDTO[] };
-export type AgentManifestRevisionRequest = {
-  manifestID?: string;
-  expectedRevision?: number;
-  scope?: AgentManifestScope;
-  tenantID?: string;
-  ownerActorID?: string;
-  name: string;
-  description?: string;
-  instructions?: string;
-  status?: AgentManifestStatus;
-  modelName?: string;
-  toolKeys?: string[];
-  skillKeys?: string[];
-  maxChildRuns?: number;
-  maxDepth?: number;
-  maxLLMCalls?: number;
-  maxToolCalls?: number;
-  revisionNote?: string;
-};
-export type AgentManifestFilterDTO = {
-  status?: AgentManifestStatus;
-  scope?: AgentManifestScope;
-  tenantID?: string;
-  ownerActorID?: string;
-  limit?: number;
-  offset?: number;
-};
-export type RunHandoffStatus = "queued" | "completed" | "failed" | "cancelled";
-export type RunHandoffDTO = {
-  handoffID: string;
-  clientHandoffID: string;
-  rootRunID: string;
-  parentRunID: string;
-  childRunID: string;
-  agentManifest: ResourceRefDTO;
-  agentName: string;
-  goal: string;
-  status: RunHandoffStatus;
-  depth: number;
-  inputProjectionRef: ProjectionRefDTO;
-  resultSummary: string;
-  resultOutputIDs: string[];
-  errorCode: string;
-  errorMessage: string;
-  createdAt: string;
-  updatedAt: string;
-  completedAt?: string | null;
-};
-export type DelegateRunRequest = {
-  clientHandoffID: string;
-  agentManifest: ResourceRefDTO;
-  goal: string;
-  contentType?: "text" | "markdown";
-  outputIDs?: string[];
-  evidenceIDs?: string[];
-  options?: Record<string, unknown>;
-  htmlVisualPrompt?: boolean;
-  htmlVisualColorMode?: "light" | "dark";
-};
-export type RunHandoffJoinMode = "all" | "any" | "quorum";
-export type RunHandoffJoinFailurePolicy = "collect" | "fail_fast";
-export type RunHandoffJoinTimeoutPolicy = "cancel_pending" | "leave_running";
-export type RunHandoffJoinStatus = "pending" | "ready" | "failed" | "cancelled";
-export type CreateRunHandoffJoinRequest = {
-  clientJoinID: string;
-  handoffIDs: string[];
-  mode?: RunHandoffJoinMode;
-  quorum?: number;
-  failurePolicy?: RunHandoffJoinFailurePolicy;
-  timeoutSeconds?: number;
-  timeoutPolicy?: RunHandoffJoinTimeoutPolicy;
-};
-export type RunHandoffJoinDTO = {
-  joinID: string;
-  clientJoinID: string;
-  rootRunID: string;
-  parentRunID: string;
-  handoffIDs: string[];
-  mode: RunHandoffJoinMode;
-  quorum: number;
-  failurePolicy: RunHandoffJoinFailurePolicy;
-  timeoutSeconds: number;
-  timeoutPolicy: RunHandoffJoinTimeoutPolicy;
-  deadlineAt: string;
-  status: RunHandoffJoinStatus;
-  completedCount: number;
-  failedCount: number;
-  cancelledCount: number;
-  pendingCount: number;
-  resultHandoffIDs: string[];
-  errorCode: string;
-  errorMessage: string;
-  createdAt: string;
-  updatedAt: string;
-  resolvedAt?: string | null;
-};
-export type RunHandoffJoinPageDTO = { total: number; results: RunHandoffJoinDTO[] };
-export type RunHandoffJoinFilterDTO = { status?: RunHandoffJoinStatus; limit?: number; offset?: number };
-export type DelegatedRunResult = { handoff: RunHandoffDTO; run: TextRunDTO; rootStep: RunStepDTO };
-export type RunTaskDTO = { handoff: RunHandoffDTO; run: TextRunDTO };
-export type RunTaskTreeDTO = { rootRunID: string; currentRunID: string; rootRun: TextRunDTO; tasks: RunTaskDTO[]; joins: RunHandoffJoinDTO[] };
-export type AgentTeamMemberRequest = {
-  memberID: string;
-  agentManifest: ResourceRefDTO;
-  goal: string;
-  contentType?: "text" | "markdown";
-  outputIDs?: string[];
-  evidenceIDs?: string[];
-  options?: Record<string, unknown>;
-  maxLLMCalls?: number;
-  maxToolCalls?: number;
-  structuredOutputSchema?: Record<string, unknown>;
-  resultAttempts?: number;
-};
-export type AgentTeamJoinRequest = Omit<CreateRunHandoffJoinRequest, "clientJoinID" | "handoffIDs">;
-export type StartAgentTeamRequest = {
-  thread: StartTextRunRequest["thread"];
-  input: StartTextRunRequest["input"];
-  clientTeamID: string;
-  coordinatorManifest: ResourceRefDTO;
-  model?: string;
-  options?: Record<string, unknown>;
-  workspace?: StartTextRunRequest["workspace"];
-  maxLLMCalls?: number;
-  maxToolCalls?: number;
-  structuredOutputSchema?: Record<string, unknown>;
-  resultAttempts?: number;
-  members: AgentTeamMemberRequest[];
-  join: AgentTeamJoinRequest;
-};
-export type AgentTeamTaskStartDTO = { memberID: string; handoff: RunHandoffDTO; run: TextRunDTO; rootStep: RunStepDTO };
-export type AgentTeamStartResultDTO = {
-  rootRun: TextRunDTO;
-  rootStep: RunStepDTO;
-  inputProjectionRef: ProjectionRefDTO;
-  outputProjectionRef: ProjectionRefDTO;
-  tasks: AgentTeamTaskStartDTO[];
-  join: RunHandoffJoinDTO;
-};
-

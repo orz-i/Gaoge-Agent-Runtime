@@ -14,7 +14,17 @@ import (
 
 // KernelStore persists only the feature-neutral Kernel aggregate.
 type KernelStore struct {
-	repository *Repository
+	db *gorm.DB
+}
+
+func isKernelUniqueConstraint(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique constraint") ||
+		strings.Contains(message, "duplicate key") ||
+		strings.Contains(message, "unique failed")
 }
 
 func (store *KernelStore) applyKernelMutation(
@@ -45,6 +55,11 @@ const (
 	kernelColumnTenantID     = "tenant_id"
 	kernelColumnErrorDetail  = "error_detail"
 	kernelColumnLastEventSeq = "last_event_seq"
+	kernelColumnStatus       = "status"
+	kernelColumnRevision     = "revision"
+	kernelColumnErrorCode    = "error_code"
+	kernelColumnEndedAt      = "ended_at"
+	kernelColumnUpdatedAt    = "updated_at"
 )
 
 var (
@@ -57,8 +72,8 @@ var (
 var _ kernel.Store = (*KernelStore)(nil)
 
 // NewKernelStore creates the PostgreSQL Kernel adapter without exposing the legacy Store.
-func NewKernelStore(db *gorm.DB, sessions SessionProvider) *KernelStore {
-	return &KernelStore{repository: New(db, sessions)}
+func NewKernelStore(db *gorm.DB) *KernelStore {
+	return &KernelStore{db: db}
 }
 
 // Create atomically persists the initial Run and its Event stream.
@@ -67,19 +82,18 @@ func (store *KernelStore) Create(
 	record kernel.Record,
 	events []kernel.EventDraft,
 ) (kernel.Snapshot, error) {
-	if store == nil || store.repository == nil || record.Run.ID == "" {
+	if store == nil || store.db == nil || record.Run.ID == "" {
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
 	model, err := kernelRunRecordFrom(record, int64(len(events)))
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	err = store.repository.within(ctx, func(txContext context.Context) error {
-		db := store.repository.dbFor(txContext)
-		if createErr := db.Create(&model).Error; createErr != nil {
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if createErr := tx.Create(&model).Error; createErr != nil {
 			return translateKernelError(createErr)
 		}
-		return createKernelEvents(db, record.Run.ID, 0, record.Run.UpdatedAt, events)
+		return createKernelEvents(tx, record.Run.ID, 0, record.Run.UpdatedAt, events)
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -89,17 +103,14 @@ func (store *KernelStore) Create(
 
 // Load returns one isolated Kernel Snapshot with monotonic Events.
 func (store *KernelStore) Load(ctx context.Context, runID string) (kernel.Snapshot, error) {
-	if store == nil || store.repository == nil {
+	if store == nil || store.db == nil {
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
-	db := store.repository.dbFor(ctx)
-	if db == nil {
-		return kernel.Snapshot{}, ErrNilDatabase
-	}
+	db := store.db.WithContext(ctx)
 	var runRecord models.KernelRunRecord
 	if err := db.Where("run_id = ?", runID).First(&runRecord).Error; err != nil {
 		return kernel.Snapshot{}, translateKernelError(err)
@@ -118,7 +129,7 @@ func (store *KernelStore) Apply(
 	expectedRevision uint64,
 	mutation kernel.StoreMutation,
 ) (kernel.Snapshot, error) {
-	if store == nil || store.repository == nil || strings.TrimSpace(runID) == "" {
+	if store == nil || store.db == nil || strings.TrimSpace(runID) == "" {
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
 	if mutation.Record.Run.ID != runID || mutation.Record.Run.Revision != expectedRevision+1 {
@@ -128,10 +139,8 @@ func (store *KernelStore) Apply(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	err = store.repository.within(ctx, func(txContext context.Context) error {
-		return store.applyKernelMutation(
-			store.repository.dbFor(txContext), runID, expectedRevision, updatedModel, mutation,
-		)
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation)
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -179,13 +188,13 @@ func kernelRunUpdates(record models.KernelRunRecord, eventCount int) map[string]
 		"request_id": record.RequestID, "kind": record.Kind,
 		kernelColumnTenantID: record.TenantID, "actor_id": record.ActorID,
 		"thread_kind": record.ThreadKind, "thread_id": record.ThreadID,
-		"goal": record.Goal, columnStatus: record.Status, columnRevision: record.Revision,
-		columnErrorCode: record.ErrorCode, kernelColumnErrorDetail: record.ErrorDetail,
-		"deadline_at": record.DeadlineAt, columnEndedAt: record.EndedAt,
+		"goal": record.Goal, kernelColumnStatus: record.Status, kernelColumnRevision: record.Revision,
+		kernelColumnErrorCode: record.ErrorCode, kernelColumnErrorDetail: record.ErrorDetail,
+		"deadline_at": record.DeadlineAt, kernelColumnEndedAt: record.EndedAt,
 		"state_json": record.StateJSON, "checkpoint_json": record.CheckpointJSON,
 		"result_json":            record.ResultJSON,
 		kernelColumnLastEventSeq: gorm.Expr(kernelColumnLastEventSeq+" + ?", eventCount),
-		"created_at":             record.CreatedAt, columnUpdatedAt: record.UpdatedAt,
+		"created_at":             record.CreatedAt, kernelColumnUpdatedAt: record.UpdatedAt,
 	}
 }
 
@@ -323,22 +332,19 @@ func translateKernelError(err error) error {
 	if err == nil {
 		return nil
 	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "database table is locked") || strings.Contains(message, "database is locked") {
+		return kernel.ErrConflict
+	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return kernel.ErrNotFound
 	}
-	if isUniqueConstraint(err) {
+	if isKernelUniqueConstraint(err) {
 		return kernel.ErrAlreadyExists
 	}
 	return err
 }
 
 func translateKernelApplyError(err error) error {
-	if err == nil {
-		return nil
-	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "database table is locked") || strings.Contains(message, "database is locked") {
-		return kernel.ErrConflict
-	}
 	return translateKernelError(err)
 }

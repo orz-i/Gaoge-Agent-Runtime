@@ -15,6 +15,8 @@ import (
 	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
 )
 
+const defaultKeyPrefix = "agentruntime:"
+
 // QueueOptions configures the Redis delivery adapter.
 type QueueOptions struct {
 	KeyPrefix string
