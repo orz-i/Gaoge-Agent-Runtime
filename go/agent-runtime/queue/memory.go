@@ -43,27 +43,17 @@ func (queue *Memory) Enqueue(ctx context.Context, request EnqueueRequest) (Enque
 		return EnqueueResult{}, err
 	}
 	now := queue.now()
-	normalized, err := normalizeEnqueueRequest(request, now)
-	if err != nil {
-		return EnqueueResult{}, err
-	}
-	jobID, fingerprint, err := jobIdentity(normalized)
+	job, err := PrepareEnqueue(request, now)
 	if err != nil {
 		return EnqueueResult{}, err
 	}
 	queue.mu.Lock()
 	defer queue.mu.Unlock()
-	if existing, ok := queue.jobs[jobID]; ok {
-		if existing.Fingerprint != fingerprint {
+	if existing, ok := queue.jobs[job.ID]; ok {
+		if existing.Fingerprint != job.Fingerprint {
 			return EnqueueResult{}, ErrConflict
 		}
 		return EnqueueResult{Job: cloneJob(existing), Reused: true}, nil
-	}
-	job := Job{
-		ID: jobID, Queue: normalized.Queue, ClientJobID: normalized.ClientJobID,
-		Fingerprint: fingerprint, Kind: normalized.Kind, Payload: cloneJSON(normalized.Payload),
-		Priority: normalized.Priority, Policy: normalized.Policy,
-		Status: StatusQueued, AvailableAt: normalized.AvailableAt.UTC(), CreatedAt: now, UpdatedAt: now,
 	}
 	queue.jobs[job.ID] = job
 	return EnqueueResult{Job: cloneJob(job)}, nil

@@ -41,6 +41,26 @@ type Policy struct {
 	BackoffMultiplier int           `json:"backoffMultiplier"`
 }
 
+// PrepareEnqueue validates one request and returns the canonical initial Job.
+// Adapters must call this before their atomic insert operation.
+func PrepareEnqueue(request EnqueueRequest, now time.Time) (Job, error) {
+	normalized, err := normalizeEnqueueRequest(request, now.UTC())
+	if err != nil {
+		return Job{}, err
+	}
+	jobID, fingerprint, err := jobIdentity(normalized)
+	if err != nil {
+		return Job{}, err
+	}
+	return Job{
+		ID: jobID, Queue: normalized.Queue, ClientJobID: normalized.ClientJobID,
+		Fingerprint: fingerprint, Kind: normalized.Kind, Payload: cloneJSON(normalized.Payload),
+		Priority: normalized.Priority, Policy: normalized.Policy,
+		Status: StatusQueued, AvailableAt: normalized.AvailableAt.UTC(),
+		CreatedAt: now.UTC(), UpdatedAt: now.UTC(),
+	}, nil
+}
+
 // Lease is one monotonic claim generation.
 type Lease struct {
 	ID         string    `json:"id"`
