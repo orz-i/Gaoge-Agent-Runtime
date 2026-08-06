@@ -15,6 +15,18 @@ type Store struct {
 	records map[string]kernel.Snapshot
 }
 
+func cloneRun(run kernel.Run) kernel.Run {
+	if run.DeadlineAt != nil {
+		deadlineAt := *run.DeadlineAt
+		run.DeadlineAt = &deadlineAt
+	}
+	if run.EndedAt != nil {
+		endedAt := *run.EndedAt
+		run.EndedAt = &endedAt
+	}
+	return run
+}
+
 // NewStore creates an empty in-memory Kernel Store.
 func NewStore() *Store {
 	return &Store{records: make(map[string]kernel.Snapshot)}
@@ -81,6 +93,7 @@ func appendEvents(current []kernel.Event, drafts []kernel.EventDraft, createdAt 
 }
 
 func cloneSnapshot(snapshot kernel.Snapshot) kernel.Snapshot {
+	snapshot.Run = cloneRun(snapshot.Run)
 	snapshot.State = cloneJSON(snapshot.State)
 	snapshot.Checkpoint = cloneCheckpoint(snapshot.Checkpoint)
 	snapshot.Result = cloneResult(snapshot.Result)

@@ -48,18 +48,20 @@ type ThreadRef struct {
 
 // Run is the minimal durable runtime root.
 type Run struct {
-	ID          string    `json:"id"`
-	Kind        RunKind   `json:"kind"`
-	Actor       ActorRef  `json:"actor"`
-	Thread      ThreadRef `json:"thread"`
-	RequestID   string    `json:"requestID,omitempty"`
-	Goal        string    `json:"goal"`
-	Status      RunStatus `json:"status"`
-	Revision    uint64    `json:"revision"`
-	ErrorCode   string    `json:"errorCode,omitempty"`
-	ErrorDetail string    `json:"errorDetail,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          string     `json:"id"`
+	Kind        RunKind    `json:"kind"`
+	Actor       ActorRef   `json:"actor"`
+	Thread      ThreadRef  `json:"thread"`
+	RequestID   string     `json:"requestID,omitempty"`
+	Goal        string     `json:"goal"`
+	Status      RunStatus  `json:"status"`
+	Revision    uint64     `json:"revision"`
+	ErrorCode   string     `json:"errorCode,omitempty"`
+	ErrorDetail string     `json:"errorDetail,omitempty"`
+	DeadlineAt  *time.Time `json:"deadlineAt,omitempty"`
+	EndedAt     *time.Time `json:"endedAt,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
 // EventDraft is an unsequenced event submitted with an atomic transition.
@@ -114,14 +116,15 @@ type Snapshot struct {
 
 // CreateRequest creates one explicit Runtime Kind with opaque feature state.
 type CreateRequest struct {
-	ID        string
-	Kind      RunKind
-	Actor     ActorRef
-	Thread    ThreadRef
-	RequestID string
-	Goal      string
-	State     json.RawMessage
-	Events    []EventDraft
+	ID         string
+	Kind       RunKind
+	Actor      ActorRef
+	Thread     ThreadRef
+	RequestID  string
+	Goal       string
+	DeadlineAt *time.Time
+	State      json.RawMessage
+	Events     []EventDraft
 }
 
 // Mutation replaces feature state and advances the Run through one atomic CAS.

@@ -12,6 +12,7 @@ var (
 	ErrAlreadyExists = errors.New("kernel run already exists")
 	ErrConflict      = errors.New("kernel run revision conflict")
 	ErrTerminal      = errors.New("kernel run is terminal")
+	ErrDeadline      = errors.New("kernel run deadline exceeded")
 )
 
 // Record is the feature-neutral data persisted atomically with a Run.

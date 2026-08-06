@@ -33,7 +33,7 @@ func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("complete run: %v", err)
 	}
-	if completed.Run.Revision != 2 || completed.Result == nil || completed.Events[1].Seq != 2 {
+	if completed.Run.Revision != 2 || completed.Run.EndedAt == nil || completed.Result == nil || completed.Events[1].Seq != 2 {
 		t.Fatalf("unexpected completed snapshot: %#v", completed)
 	}
 	_, err = runtime.Apply(context.Background(), created.Run.ID, completed.Run.Revision, kernel.Mutation{
@@ -41,6 +41,96 @@ func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	})
 	if !errors.Is(err, kernel.ErrTerminal) {
 		t.Fatalf("expected terminal error, got %v", err)
+	}
+}
+
+func createTestRun(t *testing.T, runtime *kernel.Runtime, deadline *time.Time) kernel.Snapshot {
+	t.Helper()
+	created, err := runtime.Create(context.Background(), kernel.CreateRequest{
+		Kind: kernel.RunKindText, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "answer",
+		DeadlineAt: deadline, State: json.RawMessage(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	return created
+}
+
+func TestRuntimeCancelClearsCheckpointAndSetsEndedAt(t *testing.T) {
+	t.Parallel()
+	clock := &mutableClock{value: time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)}
+	runtime := newRuntimeWithClock(t, clock)
+	created := createTestRun(t, runtime, nil)
+	waiting, err := runtime.Apply(context.Background(), created.Run.ID, created.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusWaitingInput, State: json.RawMessage(`{"waiting":true}`),
+		Checkpoint: &kernel.Checkpoint{
+			ID: "checkpoint_1", Kind: "approval", Status: kernel.CheckpointPending,
+			Payload: json.RawMessage(`{"required":true}`), CreatedAt: clock.Now(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("wait run: %v", err)
+	}
+	clock.Advance(time.Second)
+	cancelled, err := runtime.Cancel(context.Background(), waiting.Run.ID, waiting.Run.Revision, "operator request")
+	if err != nil {
+		t.Fatalf("cancel run: %v", err)
+	}
+	if cancelled.Run.Status != kernel.RunStatusCancelled || cancelled.Run.EndedAt == nil ||
+		cancelled.Checkpoint != nil || cancelled.Run.ErrorCode != "run.cancelled" {
+		t.Fatalf("unexpected cancelled snapshot: %#v", cancelled)
+	}
+}
+
+func TestRuntimeExpiresAtFrozenDeadline(t *testing.T) {
+	t.Parallel()
+	clock := &mutableClock{value: time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)}
+	runtime := newRuntimeWithClock(t, clock)
+	deadline := clock.Now().Add(time.Minute)
+	created := createTestRun(t, runtime, &deadline)
+	assertFrozenDeadline(t, created, deadline)
+	before, applied, err := runtime.Expire(context.Background(), created.Run.ID, created.Run.Revision)
+	assertNotExpired(t, before, applied, err)
+	clock.Advance(time.Minute)
+	expired, applied, err := runtime.Expire(context.Background(), created.Run.ID, created.Run.Revision)
+	assertExpired(t, expired, applied, err)
+}
+
+func assertFrozenDeadline(t *testing.T, snapshot kernel.Snapshot, deadline time.Time) {
+	t.Helper()
+	if snapshot.Run.DeadlineAt == nil || !snapshot.Run.DeadlineAt.Equal(deadline) {
+		t.Fatalf("deadline was not frozen: %#v", snapshot.Run)
+	}
+}
+
+func assertNotExpired(t *testing.T, snapshot kernel.Snapshot, applied bool, err error) {
+	t.Helper()
+	if err != nil || applied || snapshot.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("deadline applied too early: %#v applied=%v err=%v", snapshot, applied, err)
+	}
+}
+
+func assertExpired(t *testing.T, expired kernel.Snapshot, applied bool, err error) {
+	t.Helper()
+	if err != nil || !applied || expired.Run.Status != kernel.RunStatusFailed ||
+		expired.Run.ErrorCode != "run.deadline_exceeded" || expired.Run.EndedAt == nil {
+		t.Fatalf("deadline did not expire run: %#v applied=%v err=%v", expired, applied, err)
+	}
+}
+
+func TestRuntimeRejectsDeadlineAlreadyDue(t *testing.T) {
+	t.Parallel()
+	clock := &mutableClock{value: time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)}
+	runtime := newRuntimeWithClock(t, clock)
+	deadline := clock.Now()
+	_, err := runtime.Create(context.Background(), kernel.CreateRequest{
+		Kind: kernel.RunKindText, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "answer",
+		DeadlineAt: &deadline, State: json.RawMessage(`{}`),
+	})
+	if !errors.Is(err, kernel.ErrDeadline) {
+		t.Fatalf("expected deadline rejection, got %v", err)
 	}
 }
 
@@ -64,8 +154,13 @@ func TestRuntimeRejectsStaleRevision(t *testing.T) {
 
 func newTestRuntime(t *testing.T) *kernel.Runtime {
 	t.Helper()
+	return newRuntimeWithClock(t, fixedClock{value: time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)})
+}
+
+func newRuntimeWithClock(t *testing.T, clock kernel.Clock) *kernel.Runtime {
+	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{
-		Store: memory.NewStore(), Clock: fixedClock{value: time.Date(2026, 8, 6, 0, 0, 0, 0, time.UTC)},
+		Store: memory.NewStore(), Clock: clock,
 		IDs: &sequenceIDs{},
 	})
 	if err != nil {
@@ -77,6 +172,12 @@ func newTestRuntime(t *testing.T) *kernel.Runtime {
 type fixedClock struct{ value time.Time }
 
 func (clock fixedClock) Now() time.Time { return clock.value }
+
+type mutableClock struct{ value time.Time }
+
+func (clock *mutableClock) Now() time.Time { return clock.value }
+
+func (clock *mutableClock) Advance(duration time.Duration) { clock.value = clock.value.Add(duration) }
 
 type sequenceIDs struct{ next int }
 

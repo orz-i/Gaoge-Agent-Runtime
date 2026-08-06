@@ -15,6 +15,59 @@ type Clock interface {
 	Now() time.Time
 }
 
+func normalizeDeadline(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := value.UTC()
+	return &normalized
+}
+
+// Cancel atomically terminates one non-terminal Run while preserving its last feature state.
+func (runtime *Runtime) Cancel(
+	ctx context.Context,
+	runID string,
+	expectedRevision uint64,
+	reason string,
+) (Snapshot, error) {
+	current, err := runtime.Load(ctx, runID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if current.Run.Revision != expectedRevision {
+		return Snapshot{}, ErrConflict
+	}
+	return runtime.Apply(ctx, runID, expectedRevision, Mutation{
+		Status: RunStatusCancelled, State: current.State,
+		ErrorCode: "run.cancelled", ErrorDetail: strings.TrimSpace(reason),
+		Events: []EventDraft{{Type: "run.cancelled", Message: strings.TrimSpace(reason)}},
+	})
+}
+
+// Expire fails one Run only when its frozen DeadlineAt is due.
+func (runtime *Runtime) Expire(
+	ctx context.Context,
+	runID string,
+	expectedRevision uint64,
+) (Snapshot, bool, error) {
+	current, err := runtime.Load(ctx, runID)
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	if current.Run.Revision != expectedRevision {
+		return Snapshot{}, false, ErrConflict
+	}
+	if current.Run.DeadlineAt == nil || current.Run.DeadlineAt.After(runtime.Now()) {
+		return current, false, nil
+	}
+	expired, err := runtime.Apply(ctx, runID, expectedRevision, Mutation{
+		Status: RunStatusFailed, State: current.State,
+		ErrorCode: "run.deadline_exceeded", ErrorDetail: ErrDeadline.Error(),
+		Events: []EventDraft{{Type: "run.deadline_exceeded", Message: ErrDeadline.Error()}},
+	})
+	return expired, true, err
+}
+
 // IDSource supplies non-deterministic public identifiers.
 type IDSource interface {
 	NewID(string) (string, error)
@@ -67,11 +120,15 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		}
 	}
 	now := runtime.Now()
+	deadlineAt := normalizeDeadline(request.DeadlineAt)
+	if deadlineAt != nil && !deadlineAt.After(now) {
+		return Snapshot{}, ErrDeadline
+	}
 	record := Record{
 		Run: Run{
 			ID: runID, Kind: request.Kind, Actor: request.Actor, Thread: request.Thread,
 			RequestID: strings.TrimSpace(request.RequestID), Goal: strings.TrimSpace(request.Goal),
-			Status: RunStatusRunning, Revision: 1, CreatedAt: now, UpdatedAt: now,
+			Status: RunStatusRunning, Revision: 1, DeadlineAt: deadlineAt, CreatedAt: now, UpdatedAt: now,
 		},
 		State: cloneJSON(request.State),
 	}
@@ -107,7 +164,12 @@ func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevisio
 	next.Revision++
 	next.ErrorCode = strings.TrimSpace(mutation.ErrorCode)
 	next.ErrorDetail = strings.TrimSpace(mutation.ErrorDetail)
-	next.UpdatedAt = runtime.Now()
+	now := runtime.Now()
+	next.UpdatedAt = now
+	if terminalStatus(next.Status) {
+		endedAt := now
+		next.EndedAt = &endedAt
+	}
 	record := Record{
 		Run: next, State: cloneJSON(mutation.State),
 		Checkpoint: cloneCheckpoint(mutation.Checkpoint), Result: cloneResult(mutation.Result),

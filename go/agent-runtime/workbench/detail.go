@@ -24,6 +24,18 @@ type RunSource interface {
 	Load(context.Context, string) (kernel.Snapshot, error)
 }
 
+func cloneRun(run kernel.Run) kernel.Run {
+	if run.DeadlineAt != nil {
+		deadlineAt := *run.DeadlineAt
+		run.DeadlineAt = &deadlineAt
+	}
+	if run.EndedAt != nil {
+		endedAt := *run.EndedAt
+		run.EndedAt = &endedAt
+	}
+	return run
+}
+
 // Provider contributes one optional named read-only Section and Timeline.
 type Provider interface {
 	Name() string
@@ -237,6 +249,7 @@ func sortDiagnostics(values []Diagnostic) {
 }
 
 func cloneDetail(detail Detail) Detail {
+	detail.Run = cloneRun(detail.Run)
 	detail.Checkpoint = cloneCheckpoint(detail.Checkpoint)
 	detail.Result = cloneResult(detail.Result)
 	detail.Sections = append([]Section(nil), detail.Sections...)
@@ -249,6 +262,7 @@ func cloneDetail(detail Detail) Detail {
 }
 
 func cloneSnapshot(snapshot kernel.Snapshot) kernel.Snapshot {
+	snapshot.Run = cloneRun(snapshot.Run)
 	snapshot.State = append(json.RawMessage(nil), snapshot.State...)
 	snapshot.Checkpoint = cloneCheckpoint(snapshot.Checkpoint)
 	snapshot.Result = cloneResult(snapshot.Result)
