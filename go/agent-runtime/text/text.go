@@ -183,6 +183,14 @@ func (runner *Runner) ResolveApproval(
 	return runner.resumeApproved(ctx, snapshot, state, resolved)
 }
 
+// LoadRun returns one Text Run snapshot for parent orchestrators and recovery.
+func (runner *Runner) LoadRun(ctx context.Context, runID string) (kernel.Snapshot, error) {
+	if runner == nil || runner.runtime == nil {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	return runner.runtime.Load(ctx, runID)
+}
+
 func (runner *Runner) drive(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, error) {
 	for snapshot.Run.Status == kernel.RunStatusRunning {
 		next, done, err := runner.driveStep(ctx, snapshot)
