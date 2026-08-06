@@ -30,7 +30,6 @@ type AgentManifestRevisionRequest struct {
 	Instructions     string   `json:"instructions" binding:"omitempty,max=20000"`
 	Status           string   `json:"status" binding:"omitempty,oneof=active disabled"`
 	ModelName        string   `json:"modelName" binding:"omitempty,max=128"`
-	ExecutionMode    string   `json:"executionMode" binding:"omitempty,oneof=auto direct plan"`
 	ToolKeys         []string `json:"toolKeys" binding:"max=128,dive,max=255"`
 	SkillKeys        []string `json:"skillKeys" binding:"max=128,dive,max=64"`
 	MaxChildRuns     int      `json:"maxChildRuns" binding:"omitempty,min=1,max=16"`
@@ -224,7 +223,7 @@ func (h *Handler) createAgentManifestRevision(c *gin.Context, request AgentManif
 		Actor: h.actorRef(c), ManifestID: request.ManifestID, ExpectedRevision: request.ExpectedRevision, Name: request.Name,
 		Scope: request.Scope, TenantID: request.TenantID, OwnerActorID: request.OwnerActorID,
 		Description: request.Description, Instructions: request.Instructions, Status: request.Status, ModelName: request.ModelName,
-		ExecutionMode: request.ExecutionMode, ToolKeys: request.ToolKeys, SkillRefs: skillRefsFromKeys(request.SkillKeys),
+		ToolKeys: request.ToolKeys, SkillRefs: skillRefsFromKeys(request.SkillKeys),
 		MaxChildRuns: request.MaxChildRuns, MaxDepth: request.MaxDepth, MaxLLMCalls: request.MaxLLMCalls, MaxToolCalls: request.MaxToolCalls,
 		RequestID: h.requestID(c), RevisionNote: request.RevisionNote,
 	})
@@ -304,7 +303,7 @@ func agentManifestResponse(item model.AgentManifest) map[string]interface{} {
 		"manifestID": item.ManifestID, agentFieldRevision: item.Revision, "ref": resourceRefResponse(item.Ref()), "name": item.Name,
 		"scope": item.Scope, agentFieldTenantID: item.TenantID, "ownerActorID": item.OwnerActorID,
 		"description": item.Description, "instructions": item.Instructions, agentFieldStatus: item.Status, "modelName": item.ModelName,
-		"executionMode": item.ExecutionMode, "toolKeys": item.ToolKeys, "skillKeys": skillKeys, "maxChildRuns": item.MaxChildRuns,
+		"toolKeys": item.ToolKeys, "skillKeys": skillKeys, "maxChildRuns": item.MaxChildRuns,
 		"maxDepth": item.MaxDepth, "maxLLMCalls": item.MaxLLMCalls, "maxToolCalls": item.MaxToolCalls,
 		"revisionNote": item.RevisionNote, valueCreatedAtE3B65D13: item.CreatedAt, valueUpdatedAt: item.UpdatedAt,
 	}

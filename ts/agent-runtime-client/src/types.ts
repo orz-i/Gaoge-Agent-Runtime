@@ -16,7 +16,6 @@ export type StartTextRunRequest = {
     htmlVisualColorMode?: "light" | "dark";
   };
   model?: string;
-  executionMode?: "auto" | "direct" | "plan";
   options?: Record<string, unknown>;
   clientRunID?: string;
   toolKeys?: string[];
@@ -27,6 +26,33 @@ export type StartTextRunRequest = {
     revision?: string;
   };
   workspace?: RuntimeWorkspaceExtensionDTO;
+};
+
+export type StartPlanRunRequest = {
+  thread: {
+    kind: string;
+    id: string;
+    parentProjection?: ProjectionRefDTO;
+    sourceProjection?: ProjectionRefDTO;
+    branchReason?: "default" | "retry" | "edit";
+  };
+  input: {
+    contentType: "text" | "markdown";
+    content: string;
+    fileIDs?: string[];
+    outputIDs?: string[];
+    evidenceIDs?: string[];
+  };
+  clientRunID?: string;
+  model?: string;
+  approvalPolicy?: "auto" | "required";
+  maxSteps?: number;
+};
+
+export type ResolvePlanApprovalRequest = {
+  expectedRevision: number;
+  decision: "approve" | "reject";
+  comment?: string;
 };
 
 export type RuntimeExtensionDTO = Readonly<Record<string, unknown>>;
@@ -85,7 +111,31 @@ export type WorkflowRunDTO = Omit<TextRunDTO, "runtimeKind" | "status"> & {
   status: WorkflowRunStatus;
   workflowDefinitionRef: ResourceRefDTO;
 };
-export type RunDTO = TextRunDTO | WorkflowRunDTO;
+export type PlanExecuteRunDTO = {
+  schemaVersion: 1;
+  runtimeKind: "plan_execute";
+  actor: { tenantID: string; id: string };
+  thread: { kind: string; id: string };
+  runID: string;
+  requestID: string;
+  goal?: string;
+  status: TextRunStatus;
+  revision: number;
+  errorCode?: string;
+  errorMessage?: string;
+  deadlineAt?: string;
+  endedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+export type TeamRunDTO = Omit<PlanExecuteRunDTO, "runtimeKind"> & { runtimeKind: "team" };
+export type RunDTO = TextRunDTO | WorkflowRunDTO | PlanExecuteRunDTO | TeamRunDTO;
+export type PlanRunSnapshotDTO = {
+  run: PlanExecuteRunDTO;
+  state: unknown;
+  checkpoint?: unknown;
+  result?: unknown;
+};
 export type ActorRefDTO = { tenantID?: string; id: string };
 export type ThreadRefDTO = { kind: string; id: string };
 export type ProjectionRefDTO = { kind: string; id: string };
@@ -369,7 +419,6 @@ export type AgentManifestDTO = {
   instructions: string;
   status: AgentManifestStatus;
   modelName: string;
-  executionMode: "" | "auto" | "direct" | "plan";
   toolKeys: string[];
   skillKeys: string[];
   maxChildRuns: number;
@@ -392,7 +441,6 @@ export type AgentManifestRevisionRequest = {
   instructions?: string;
   status?: AgentManifestStatus;
   modelName?: string;
-  executionMode?: "auto" | "direct" | "plan";
   toolKeys?: string[];
   skillKeys?: string[];
   maxChildRuns?: number;
@@ -503,7 +551,6 @@ export type StartAgentTeamRequest = {
   clientTeamID: string;
   coordinatorManifest: ResourceRefDTO;
   model?: string;
-  executionMode?: "auto" | "direct" | "plan";
   options?: Record<string, unknown>;
   workspace?: StartTextRunRequest["workspace"];
   maxLLMCalls?: number;

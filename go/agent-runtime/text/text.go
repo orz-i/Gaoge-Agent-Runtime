@@ -41,6 +41,7 @@ type Message struct {
 // ModelRequest is one direct Text loop model call.
 type ModelRequest struct {
 	RunID    string
+	Model    string
 	Messages []Message
 	Tools    []tools.Definition
 }
@@ -79,6 +80,7 @@ type StartRequest struct {
 	Thread    kernel.ThreadRef
 	RequestID string
 	Goal      string
+	Model     string
 	ToolKeys  []string
 }
 
@@ -94,6 +96,7 @@ type Runner struct {
 
 type runState struct {
 	Messages  []Message   `json:"messages"`
+	Model     string      `json:"model,omitempty"`
 	ToolKeys  []string    `json:"toolKeys"`
 	Pending   *tools.Call `json:"pending,omitempty"`
 	LLMCalls  int         `json:"llmCalls"`
@@ -139,6 +142,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	}
 	state := runState{
 		Messages: []Message{{Role: RoleUser, Content: strings.TrimSpace(request.Goal)}},
+		Model:    strings.TrimSpace(request.Model),
 		ToolKeys: normalizedToolKeys(request.ToolKeys),
 	}
 	encoded, err := encodeState(state)
@@ -243,7 +247,8 @@ func (runner *Runner) callModel(
 		return nil, ModelResponse{}, err
 	}
 	response, err := runner.model.Generate(ctx, ModelRequest{
-		RunID: snapshot.Run.ID, Messages: cloneMessages(state.Messages), Tools: definitions,
+		RunID: snapshot.Run.ID, Model: state.Model,
+		Messages: cloneMessages(state.Messages), Tools: definitions,
 	})
 	if err != nil {
 		return nil, ModelResponse{}, errors.Join(ErrModelFailure, err)

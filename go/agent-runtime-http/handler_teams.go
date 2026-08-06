@@ -20,7 +20,6 @@ type StartAgentTeamRequest struct {
 	ClientTeamID           string                    `json:"clientTeamID" binding:"required,max=128"`
 	CoordinatorManifest    ResourceRefDTO            `json:"coordinatorManifest" binding:"required"`
 	Model                  string                    `json:"model" binding:"omitempty,max=128"`
-	ExecutionMode          string                    `json:"executionMode" binding:"omitempty,oneof=auto direct plan"`
 	Options                map[string]interface{}    `json:"options"`
 	Workspace              *runtime.WorkspaceRequest `json:"workspace"`
 	MaxLLMCalls            int                       `json:"maxLLMCalls" binding:"omitempty,min=1,max=32"`
@@ -70,7 +69,7 @@ func (h *Handler) StartAgentTeam(c *gin.Context) {
 		ClientTeamID: request.ClientTeamID,
 		Coordinator: runtime.StartTextRunInput{
 			Actor: actor, Thread: thread, RequestID: h.requestID(c), Goal: request.Input.Content, ContentType: request.Input.ContentType,
-			Environment: snapshot.Environment, PlatformModelName: request.Model, ExecutionMode: request.ExecutionMode, Options: sanitizeRunOptions(request.Options),
+			Environment: snapshot.Environment, PlatformModelName: request.Model, Options: sanitizeRunOptions(request.Options),
 			FileIDs: request.Input.FileIDs, OutputIDs: request.Input.OutputIDs, EvidenceIDs: request.Input.EvidenceIDs,
 			ParentProjection: request.Thread.ParentProjection, SourceProjection: request.Thread.SourceProjection, BranchReason: request.Thread.BranchReason,
 			HTMLVisualPromptEnabled: request.Input.HTMLVisualPrompt, HTMLVisualColorMode: request.Input.HTMLVisualColorMode,

@@ -22,8 +22,9 @@ paths:
                 $ref: '#/components/schemas/RunPage'
         default:
           $ref: '#/components/responses/Error'
+  /text-runs:
     post:
-      operationId: createRun
+      operationId: createTextRun
       requestBody:
         required: true
         content:
@@ -39,7 +40,45 @@ paths:
                 $ref: '#/components/schemas/StartRunResult'
         default:
           $ref: '#/components/responses/Error'
-  /workflows:
+  /plan-runs:
+    post:
+      operationId: createPlanRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartPlanRunRequest'
+      responses:
+        '202':
+          description: Accepted Plan-and-Execute run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanRunSnapshot'
+        default:
+          $ref: '#/components/responses/Error'
+  /plan-runs/{runID}/approval:
+    post:
+      operationId: resolvePlanRunApproval
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResolvePlanApprovalRequest'
+      responses:
+        '200':
+          description: Resolved Plan approval and resumed execution
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanRunSnapshot'
+        default:
+          $ref: '#/components/responses/Error'
+  /workflow-runs:
     post:
       operationId: startWorkflow
       requestBody:
@@ -57,7 +96,7 @@ paths:
                 $ref: '#/components/schemas/WorkflowStartResult'
         default:
           $ref: '#/components/responses/Error'
-  /agent-teams:
+  /team-runs:
     post:
       operationId: startAgentTeam
       requestBody:
@@ -1012,7 +1051,6 @@ components:
         instructions: {type: string, maxLength: 20000}
         status: {type: string, enum: [active, disabled]}
         modelName: {type: string, maxLength: 128}
-        executionMode: {type: string, enum: [auto, direct, plan]}
         toolKeys: {type: array, maxItems: 128, items: {type: string}}
         skillKeys: {type: array, maxItems: 128, items: {type: string}}
         maxChildRuns: {type: integer, minimum: 1, maximum: 16}
@@ -1037,7 +1075,6 @@ components:
         instructions: {type: string}
         status: {type: string, enum: [active, disabled]}
         modelName: {type: string}
-        executionMode: {type: string, enum: [auto, direct, plan]}
         toolKeys: {type: array, items: {type: string}}
         skillKeys: {type: array, items: {type: string}}
         maxChildRuns: {type: integer, minimum: 1}
@@ -1294,6 +1331,27 @@ components:
         cacheMode: {type: string, enum: [use, refresh, bypass]}
         workspace:
           $ref: '#/components/schemas/WorkspaceExtension'
+    StartPlanRunRequest:
+      type: object
+      additionalProperties: false
+      required: [thread, input]
+      properties:
+        thread:
+          $ref: '#/components/schemas/RunThread'
+        input:
+          $ref: '#/components/schemas/RunInput'
+        clientRunID: {type: string, maxLength: 64}
+        model: {type: string, maxLength: 128}
+        approvalPolicy: {type: string, enum: [auto, required], default: auto}
+        maxSteps: {type: integer, minimum: 1, maximum: 32}
+    ResolvePlanApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedRevision, decision]
+      properties:
+        expectedRevision: {type: integer, minimum: 1}
+        decision: {type: string, enum: [approve, reject]}
+        comment: {type: string, maxLength: 2000}
     RunThread:
       type: object
       additionalProperties: false
@@ -1359,7 +1417,6 @@ components:
           $ref: '#/components/schemas/RunInput'
         clientRunID: {type: string, maxLength: 64}
         model: {type: string, maxLength: 128}
-        executionMode: {type: string, enum: [auto, direct, plan]}
         options: {type: object, additionalProperties: true}
         toolKeys: {type: array, maxItems: 128, items: {type: string}}
         skillKeys: {type: array, maxItems: 128, items: {type: string}}
@@ -1406,7 +1463,6 @@ components:
         coordinatorManifest:
           $ref: '#/components/schemas/ResourceRef'
         model: {type: string, maxLength: 128}
-        executionMode: {type: string, enum: [auto, direct, plan]}
         options: {type: object, additionalProperties: true}
         workspace:
           $ref: '#/components/schemas/WorkspaceExtension'
@@ -1448,7 +1504,6 @@ components:
           $ref: '#/components/schemas/RunInput'
         clientQueueID: {type: string, maxLength: 64}
         model: {type: string, maxLength: 128}
-        executionMode: {type: string, enum: [auto, direct, plan]}
         options: {type: object, additionalProperties: true}
         toolKeys: {type: array, maxItems: 128, items: {type: string}}
         skillKeys: {type: array, maxItems: 128, items: {type: string}}
@@ -1467,7 +1522,6 @@ components:
           $ref: '#/components/schemas/RunInput'
         expectedRevision: {type: integer, minimum: 0}
         model: {type: string, maxLength: 128}
-        executionMode: {type: string, enum: [auto, direct, plan]}
         options: {type: object, additionalProperties: true}
         toolKeys: {type: array, maxItems: 128, items: {type: string}}
         skillKeys: {type: array, maxItems: 128, items: {type: string}}
@@ -1495,7 +1549,7 @@ components:
       required: [schemaVersion, runtimeKind, actor, thread, runID, requestID, status]
       properties:
         schemaVersion: {type: integer, enum: [1]}
-        runtimeKind: {type: string, enum: [text, workflow]}
+        runtimeKind: {type: string, enum: [text, plan_execute, workflow, team]}
         actor:
           $ref: '#/components/schemas/ActorRef'
         thread:
@@ -1512,6 +1566,18 @@ components:
         parentRunID: {type: string}
         handoffID: {type: string}
         depth: {type: integer, minimum: 1}
+    PlanRunSnapshot:
+      type: object
+      additionalProperties: false
+      required: [run, state]
+      properties:
+        run:
+          $ref: '#/components/schemas/Run'
+        state: {}
+        checkpoint:
+          nullable: true
+        result:
+          nullable: true
     RunStep:
       type: object
       additionalProperties: true

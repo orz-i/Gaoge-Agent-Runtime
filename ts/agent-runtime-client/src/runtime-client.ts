@@ -1,9 +1,9 @@
 import type {
   AgentManifestDTO, AgentManifestFilterDTO, AgentManifestPageDTO, AgentManifestRevisionRequest, ContinuationJobDTO, ContinuationJobFilterDTO,
   ContinuationJobPageDTO, CreateRunHandoffJoinRequest, DelegateRunRequest, DelegatedRunResult, EvidenceDTO, OutputCatalogPageDTO, OutputDetailDTO, OutputDTO, OutputPreviewDTO,
-  OutputVersionPageDTO, PlanViewDTO, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
+  OutputVersionPageDTO, PlanRunSnapshotDTO, PlanViewDTO, ResolvePlanApprovalRequest, RunCheckpointDTO, RunEventDetailDTO, RunEventDTO, RunEventHistoryPage,
   RunHandoffJoinDTO, RunHandoffJoinFilterDTO, RunHandoffJoinPageDTO, RunInteractionDTO, RunQueueItemDTO, RunQueueRequestDTO, RunTaskTreeDTO, RuntimeEvidenceSelectionDTO,
-  RuntimeEvidenceSourceDTO, RuntimeExecutionProvenanceV1, StartAgentTeamRequest, AgentTeamStartResultDTO, StartTextRunRequest, StartTextRunResult,
+  RuntimeEvidenceSourceDTO, RuntimeExecutionProvenanceV1, StartAgentTeamRequest, AgentTeamStartResultDTO, StartPlanRunRequest, StartTextRunRequest, StartTextRunResult,
   RunDetailDTO, RunDTO, RunResultDTO, StartWorkflowRequest, TextRunDetailDTO, WorkflowDefinitionDTO, WorkflowDefinitionFilterDTO,
   WorkflowDefinitionPageDTO, WorkflowDefinitionRevisionRequest, WorkflowDefinitionValidationDTO, WorkflowStartResult, WorkbenchDTO,
 } from "./types.js";
@@ -54,6 +54,7 @@ function requireTextRunDetail(value:RunDetailDTO):TextRunDetailDTO {
 
 export class RuntimeClient {
   readonly runs;
+  readonly plans;
   readonly workflows;
   readonly teams;
   readonly events;
@@ -72,7 +73,7 @@ export class RuntimeClient {
     this.maxStreamRetries = options.maxStreamRetries ?? 5;
     this.runs = {
       list: (thread: {kind:string;id:string}, page=1, pageSize=20, request?:RequestOptions) => this.request<{total:number;results:RunDTO[]}>(`/runs?threadKind=${pathPart(thread.kind)}&threadID=${pathPart(thread.id)}&page=${page}&pageSize=${pageSize}`, {}, request),
-      create: async(payload:StartTextRunRequest, request?:RequestOptions) => requireRunProjectionRefs(await this.request<StartTextRunResult>("/runs", {method:"POST", body:JSON.stringify(payload)}, request)),
+      create: async(payload:StartTextRunRequest, request?:RequestOptions) => requireRunProjectionRefs(await this.request<StartTextRunResult>("/text-runs", {method:"POST", body:JSON.stringify(payload)}, request)),
       get: async(runID:string, request?:RequestOptions) => requireRunProjectionRefs(await this.request<RunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request)),
       getText: async(runID:string, request?:RequestOptions) => requireTextRunDetail(requireRunProjectionRefs(await this.request<RunDetailDTO>(`/runs/${pathPart(runID)}`, {}, request))),
       provenance: (runID:string, request?:RequestOptions) => this.request<RuntimeExecutionProvenanceV1>(`/runs/${pathPart(runID)}/provenance`, {}, request),
@@ -88,13 +89,17 @@ export class RuntimeClient {
       plan: (runID:string,request?:RequestOptions)=>this.request<PlanViewDTO>(`/runs/${pathPart(runID)}/plan`,{},request),
       checkpoints: async (runID:string,request?:RequestOptions)=>(await this.request<{results:RunCheckpointDTO[]}>(`/runs/${pathPart(runID)}/checkpoints`,{},request)).results ?? [],
     };
+    this.plans = {
+      start: (payload:StartPlanRunRequest, request?:RequestOptions) => this.request<PlanRunSnapshotDTO>("/plan-runs", {method:"POST", body:JSON.stringify(payload)}, request),
+      approve: (runID:string, payload:ResolvePlanApprovalRequest, request?:RequestOptions) => this.request<PlanRunSnapshotDTO>(`/plan-runs/${pathPart(runID)}/approval`, {method:"POST", body:JSON.stringify(payload)}, request),
+    };
     this.workflows = {
-      start: async(payload:StartWorkflowRequest, request?:RequestOptions) => requireRunProjectionRefs(await this.request<WorkflowStartResult>("/workflows", {method:"POST", body:JSON.stringify(payload)}, request)),
+      start: async(payload:StartWorkflowRequest, request?:RequestOptions) => requireRunProjectionRefs(await this.request<WorkflowStartResult>("/workflow-runs", {method:"POST", body:JSON.stringify(payload)}, request)),
       list: (options:WorkflowDefinitionFilterDTO&RequestOptions={}) => {const q=new URLSearchParams();for(const [key,value] of Object.entries(options)){if(key!=="signal"&&value!==undefined&&value!=="")q.set(key,String(value))}return this.request<WorkflowDefinitionPageDTO>(`/workflow-definitions${q.size?`?${q}`:""}`,{},options)},
       get: (workflowID:string,revision?:number,request?:RequestOptions) => this.request<WorkflowDefinitionDTO>(`/workflow-definitions/${pathPart(workflowID)}${revision?`?revision=${revision}`:""}`,{},request),
     };
     this.teams = {
-      start: async(payload:StartAgentTeamRequest, request?:RequestOptions) => requireAgentTeamProjectionRefs(await this.request<AgentTeamStartResultDTO>("/agent-teams", {method:"POST", body:JSON.stringify(payload)}, request)),
+      start: async(payload:StartAgentTeamRequest, request?:RequestOptions) => requireAgentTeamProjectionRefs(await this.request<AgentTeamStartResultDTO>("/team-runs", {method:"POST", body:JSON.stringify(payload)}, request)),
     };
     this.events = {
       get:(runID:string,eventID:string,request?:RequestOptions)=>this.request<RunEventDetailDTO>(`/runs/${pathPart(runID)}/events/${pathPart(eventID)}`,{},request),

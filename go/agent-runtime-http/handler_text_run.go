@@ -69,7 +69,6 @@ type StartTextRunRequest struct {
 	Input         TextRunRequestInput       `json:"input" binding:"required"`
 	ClientRunID   string                    `json:"clientRunID" binding:"omitempty,max=64"`
 	Model         string                    `json:"model" binding:"omitempty,max=128"`
-	ExecutionMode string                    `json:"executionMode" binding:"omitempty,oneof=auto direct plan"`
 	Options       map[string]interface{}    `json:"options"`
 	ToolKeys      *[]string                 `json:"toolKeys" binding:"omitempty,max=128,dive,max=255"`
 	SkillKeys     *[]string                 `json:"skillKeys" binding:"omitempty,max=128,dive,max=64"`
@@ -90,7 +89,6 @@ type RunQueueRequest struct {
 	Input            TextRunRequestInput       `json:"input" binding:"required"`
 	ClientQueueID    string                    `json:"clientQueueID" binding:"omitempty,max=64"`
 	Model            string                    `json:"model" binding:"omitempty,max=128"`
-	ExecutionMode    string                    `json:"executionMode" binding:"omitempty,oneof=auto direct plan"`
 	Options          map[string]interface{}    `json:"options"`
 	ToolKeys         *[]string                 `json:"toolKeys" binding:"omitempty,max=128,dive,max=255"`
 	SkillKeys        *[]string                 `json:"skillKeys" binding:"omitempty,max=128,dive,max=64"`
@@ -121,7 +119,7 @@ func (h *Handler) StartTextRun(c *gin.Context) {
 	if req.AgentManifest != nil {
 		agentManifest = *req.AgentManifest
 	}
-	result, err := h.service.StartTextRun(c.Request.Context(), runtime.StartTextRunInput{Actor: actor, Thread: thread, RequestID: h.requestID(c), Goal: req.Input.Content, ContentType: req.Input.ContentType, Environment: snapshot.Environment, ClientRunID: req.ClientRunID, PlatformModelName: req.Model, ExecutionMode: req.ExecutionMode, Options: sanitizeRunOptions(req.Options), FileIDs: req.Input.FileIDs, OutputIDs: req.Input.OutputIDs, EvidenceIDs: req.Input.EvidenceIDs, ToolKeys: req.ToolKeys, SkillRefs: skillRefs(req.SkillKeys), ParentProjection: req.Thread.ParentProjection, SourceProjection: req.Thread.SourceProjection, BranchReason: req.Thread.BranchReason, HTMLVisualPromptEnabled: req.Input.HTMLVisualPrompt, HTMLVisualColorMode: req.Input.HTMLVisualColorMode, ThreadModel: snapshot.DefaultModel, ThreadProvider: snapshot.ModelProvider, ThreadScope: snapshot.BindingScope, Workspace: req.Workspace, AgentManifest: agentManifest})
+	result, err := h.service.StartTextRun(c.Request.Context(), runtime.StartTextRunInput{Actor: actor, Thread: thread, RequestID: h.requestID(c), Goal: req.Input.Content, ContentType: req.Input.ContentType, Environment: snapshot.Environment, ClientRunID: req.ClientRunID, PlatformModelName: req.Model, Options: sanitizeRunOptions(req.Options), FileIDs: req.Input.FileIDs, OutputIDs: req.Input.OutputIDs, EvidenceIDs: req.Input.EvidenceIDs, ToolKeys: req.ToolKeys, SkillRefs: skillRefs(req.SkillKeys), ParentProjection: req.Thread.ParentProjection, SourceProjection: req.Thread.SourceProjection, BranchReason: req.Thread.BranchReason, HTMLVisualPromptEnabled: req.Input.HTMLVisualPrompt, HTMLVisualColorMode: req.Input.HTMLVisualColorMode, ThreadModel: snapshot.DefaultModel, ThreadProvider: snapshot.ModelProvider, ThreadScope: snapshot.BindingScope, Workspace: req.Workspace, AgentManifest: agentManifest})
 	if err != nil {
 		writeTextRunError(c, err)
 		return
@@ -177,7 +175,7 @@ func toRunQueueRequest(req RunQueueRequest, snapshot *runtime.ThreadSnapshot) ru
 	if req.AgentManifest != nil {
 		agentManifest = *req.AgentManifest
 	}
-	request := runtime.RunQueueRequest{Input: runtime.RunQueueInput{Content: req.Input.Content, ContentType: req.Input.ContentType, FileIDs: req.Input.FileIDs, OutputIDs: req.Input.OutputIDs, EvidenceIDs: req.Input.EvidenceIDs, HTMLVisualPrompt: req.Input.HTMLVisualPrompt, HTMLVisualColorMode: req.Input.HTMLVisualColorMode}, Model: req.Model, ExecutionMode: req.ExecutionMode, Options: sanitizeRunOptions(req.Options), ToolKeys: req.ToolKeys, SkillRefs: skillRefs(req.SkillKeys), AgentManifest: agentManifest, ParentProjection: req.Thread.ParentProjection, SourceProjection: req.Thread.SourceProjection, BranchReason: req.Thread.BranchReason, Workspace: req.Workspace}
+	request := runtime.RunQueueRequest{Input: runtime.RunQueueInput{Content: req.Input.Content, ContentType: req.Input.ContentType, FileIDs: req.Input.FileIDs, OutputIDs: req.Input.OutputIDs, EvidenceIDs: req.Input.EvidenceIDs, HTMLVisualPrompt: req.Input.HTMLVisualPrompt, HTMLVisualColorMode: req.Input.HTMLVisualColorMode}, Model: req.Model, Options: sanitizeRunOptions(req.Options), ToolKeys: req.ToolKeys, SkillRefs: skillRefs(req.SkillKeys), AgentManifest: agentManifest, ParentProjection: req.Thread.ParentProjection, SourceProjection: req.Thread.SourceProjection, BranchReason: req.Thread.BranchReason, Workspace: req.Workspace}
 	if snapshot != nil {
 		request.Environment = snapshot.Environment
 	}
@@ -950,7 +948,6 @@ func mapRunControlError(err error) runControlErrorMapping {
 		{runtime.ErrEnvironmentDefaultUnavailable, http.StatusUnprocessableEntity, "environment.default_model_unavailable", "environment default model is unavailable"},
 		{runtime.ErrEnvironmentModelNotAccessible, http.StatusUnprocessableEntity, "environment.model_not_accessible", "model is not accessible to the current user"},
 		{runtime.ErrEnvironmentModelNotAuthorized, http.StatusUnprocessableEntity, "environment.model_not_authorized", "model is not authorized by the environment"},
-		{runtime.ErrExecutionModeNotAllowed, http.StatusUnprocessableEntity, "run.execution_mode_not_allowed", "execution mode is not allowed by the environment"},
 		{runtime.ErrRunToolProviderReceiptRequired, http.StatusUnprocessableEntity, "run.tool_provider_receipt_required", "write or destructive tool does not provide a verifiable execution receipt"},
 		{runtime.ErrRunToolUnavailable, http.StatusUnprocessableEntity, "run.tool_unavailable", "one or more selected tools are unavailable"},
 		{runtime.ErrRunSkillUnavailable, http.StatusUnprocessableEntity, "run.skill_unavailable", "one or more selected skills are unavailable"},

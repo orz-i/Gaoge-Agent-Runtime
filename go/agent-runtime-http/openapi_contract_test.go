@@ -18,6 +18,15 @@ type openAPIOperationExpectation struct {
 	parameters  []string
 }
 
+func assertOpenAPISchemaAbsent(t *testing.T, schemas map[string]any, schemaName, field string) {
+	t.Helper()
+	schema := openAPIObject(t, schemas, schemaName)
+	properties := openAPIObject(t, schema, "properties")
+	if _, found := properties[field]; found {
+		t.Fatalf("OpenAPI schema %s must not expose removed field %s", schemaName, field)
+	}
+}
+
 const (
 	openAPIThreadKind    = "threadKind"
 	openAPIThreadID      = "threadID"
@@ -46,9 +55,11 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 
 	expected := map[string]openAPIOperationExpectation{
 		"GET /runs":                                                            {status: "200", parameters: []string{openAPIThreadKind, openAPIThreadID, "page", "pageSize"}},
-		"POST /runs":                                                           {status: "202", requestBody: "CreateRunRequest"},
-		"POST /workflows":                                                      {status: "202", requestBody: "StartWorkflowRequest"},
-		"POST /agent-teams":                                                    {status: "202", requestBody: "StartAgentTeamRequest"},
+		"POST /text-runs":                                                      {status: "202", requestBody: "CreateRunRequest"},
+		"POST /plan-runs":                                                      {status: "202", requestBody: "StartPlanRunRequest"},
+		"POST /plan-runs/{runID}/approval":                                     {status: "200", requestBody: "ResolvePlanApprovalRequest", parameters: []string{valueRunID1DA2F0B6}},
+		"POST /workflow-runs":                                                  {status: "202", requestBody: "StartWorkflowRequest"},
+		"POST /team-runs":                                                      {status: "202", requestBody: "StartAgentTeamRequest"},
 		"GET /runs/{runID}":                                                    {status: "200", parameters: []string{valueRunID1DA2F0B6}},
 		"GET /runs/{runID}/provenance":                                         {status: "200", parameters: []string{valueRunID1DA2F0B6}},
 		"GET /runs/{runID}/result":                                             {status: "200", parameters: []string{valueRunID1DA2F0B6}},
@@ -119,6 +130,12 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	assertOpenAPISchemaRequired(t, schemas, "StartAgentTeamRequest", "coordinatorManifest")
 	assertOpenAPISchemaRequired(t, schemas, "StartAgentTeamRequest", "members")
 	assertOpenAPISchemaRequired(t, schemas, "StartAgentTeamRequest", "join")
+	assertOpenAPISchemaRequired(t, schemas, "StartPlanRunRequest", "thread")
+	assertOpenAPISchemaRequired(t, schemas, "StartPlanRunRequest", "input")
+	assertOpenAPISchemaRequired(t, schemas, "ResolvePlanApprovalRequest", "expectedRevision")
+	assertOpenAPISchemaRequired(t, schemas, "ResolvePlanApprovalRequest", "decision")
+	assertOpenAPISchemaRequired(t, schemas, "PlanRunSnapshot", "run")
+	assertOpenAPISchemaRequired(t, schemas, "PlanRunSnapshot", "state")
 	assertOpenAPISchemaRequired(t, schemas, "AgentTeamMemberRequest", "memberID")
 	assertOpenAPISchemaRequired(t, schemas, "AgentTeamMemberRequest", "agentManifest")
 	assertOpenAPISchemaRequired(t, schemas, "AgentTeamStartResult", "rootRun")
@@ -145,6 +162,12 @@ func TestOpenAPIContractMatchesRuntimeRouterAndHandlerSemantics(t *testing.T) {
 	assertOpenAPISchemaRequired(t, schemas, "WorkflowDefinitionRevisionRequest", "root")
 	assertOpenAPISchemaRequired(t, schemas, "WorkflowDefinitionRevisionRequest", "limits")
 	assertOpenAPISchemaRequired(t, schemas, "WorkflowDefinition", "dependencies")
+	for _, schemaName := range []string{
+		"AgentManifestRevisionRequest", "AgentManifest", "CreateRunRequest",
+		"StartAgentTeamRequest", "QueueCreateRequest", "QueueUpdateRequest",
+	} {
+		assertOpenAPISchemaAbsent(t, schemas, schemaName, "executionMode")
+	}
 	assertOpenAPISchemaReferencesExist(t, document, schemas)
 }
 

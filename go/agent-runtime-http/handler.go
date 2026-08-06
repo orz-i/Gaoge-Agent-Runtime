@@ -22,16 +22,21 @@ type RequestMetadataResolver interface {
 type Dependencies struct {
 	PrincipalResolver       PrincipalResolver
 	RequestMetadataResolver RequestMetadataResolver
+	PlanRuns                PlanRunCommands
 }
 
 type Handler struct {
-	service   *app.Engine
+	service   Service
+	plans     PlanRunCommands
 	principal PrincipalResolver
 	metadata  RequestMetadataResolver
 }
 
-func NewHandler(service *app.Engine, dependencies Dependencies) *Handler {
-	return &Handler{service: service, principal: dependencies.PrincipalResolver, metadata: dependencies.RequestMetadataResolver}
+func NewHandler(service Service, dependencies Dependencies) *Handler {
+	return &Handler{
+		service: service, plans: dependencies.PlanRuns,
+		principal: dependencies.PrincipalResolver, metadata: dependencies.RequestMetadataResolver,
+	}
 }
 
 func (h *Handler) actorRef(c *gin.Context) domain.ActorRef {

@@ -80,6 +80,7 @@ type PlanDraft struct {
 type PlannerRequest struct {
 	RunID    string
 	Goal     string
+	Model    string
 	MaxSteps int
 }
 
@@ -129,6 +130,7 @@ type StartRequest struct {
 	Thread         kernel.ThreadRef
 	RequestID      string
 	Goal           string
+	Model          string
 	ApprovalPolicy ApprovalPolicy
 	MaxSteps       int
 }
@@ -156,6 +158,7 @@ type Runner struct {
 }
 
 type executionState struct {
+	Model          string         `json:"model,omitempty"`
 	ApprovalPolicy ApprovalPolicy `json:"approvalPolicy"`
 	Plan           Plan           `json:"plan"`
 	NextStep       int            `json:"nextStep"`
@@ -196,7 +199,9 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if !validStartRequest(request) {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	initial, err := encodeState(executionState{ApprovalPolicy: request.ApprovalPolicy})
+	initial, err := encodeState(executionState{
+		Model: strings.TrimSpace(request.Model), ApprovalPolicy: request.ApprovalPolicy,
+	})
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -209,14 +214,15 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 		return kernel.Snapshot{}, err
 	}
 	draft, err := runner.planner.GeneratePlan(ctx, PlannerRequest{
-		RunID: snapshot.Run.ID, Goal: snapshot.Run.Goal, MaxSteps: request.MaxSteps,
+		RunID: snapshot.Run.ID, Goal: snapshot.Run.Goal,
+		Model: request.Model, MaxSteps: request.MaxSteps,
 	})
 	if err != nil {
-		return runner.fail(ctx, snapshot, executionState{ApprovalPolicy: request.ApprovalPolicy}, "planexecute.planner_failed", errors.Join(ErrPlannerFailure, err))
+		return runner.fail(ctx, snapshot, executionState{Model: request.Model, ApprovalPolicy: request.ApprovalPolicy}, "planexecute.planner_failed", errors.Join(ErrPlannerFailure, err))
 	}
-	state, err := runner.materializePlan(draft, request.ApprovalPolicy, request.MaxSteps)
+	state, err := runner.materializePlan(draft, request.Model, request.ApprovalPolicy, request.MaxSteps)
 	if err != nil {
-		return runner.fail(ctx, snapshot, executionState{ApprovalPolicy: request.ApprovalPolicy}, "planexecute.plan_invalid", err)
+		return runner.fail(ctx, snapshot, executionState{Model: request.Model, ApprovalPolicy: request.ApprovalPolicy}, "planexecute.plan_invalid", err)
 	}
 	proposed, err := runner.persistPlan(ctx, snapshot, state)
 	if err != nil {
@@ -292,7 +298,12 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 	return View{ApprovalPolicy: state.ApprovalPolicy, Plan: clonePlan(state.Plan), NextStep: state.NextStep}, nil
 }
 
-func (runner *Runner) materializePlan(draft PlanDraft, policy ApprovalPolicy, maxSteps int) (executionState, error) {
+func (runner *Runner) materializePlan(
+	draft PlanDraft,
+	model string,
+	policy ApprovalPolicy,
+	maxSteps int,
+) (executionState, error) {
 	draft.Summary = strings.TrimSpace(draft.Summary)
 	if draft.Summary == "" || len(draft.Steps) == 0 || len(draft.Steps) > maxSteps {
 		return executionState{}, ErrInvalidPlan
@@ -318,6 +329,7 @@ func (runner *Runner) materializePlan(draft PlanDraft, policy ApprovalPolicy, ma
 		})
 	}
 	return executionState{
+		Model:          strings.TrimSpace(model),
 		ApprovalPolicy: policy,
 		Plan:           Plan{ID: planID, Revision: 1, Status: PlanProposed, Summary: draft.Summary, Steps: steps},
 	}, nil
@@ -411,7 +423,7 @@ func (runner *Runner) executeStep(ctx context.Context, snapshot kernel.Snapshot)
 		}
 		step = state.Plan.Steps[state.NextStep]
 	}
-	child, childErr := runner.loadOrStartChild(ctx, snapshot, step)
+	child, childErr := runner.loadOrStartChild(ctx, snapshot, state.Model, step)
 	if childErr != nil && child.Run.ID == "" {
 		failed, failErr := runner.fail(ctx, snapshot, state, "planexecute.step_start_failed", childErr)
 		return failed, true, failErr
@@ -444,6 +456,7 @@ func (runner *Runner) prepareStep(
 func (runner *Runner) loadOrStartChild(
 	ctx context.Context,
 	parent kernel.Snapshot,
+	model string,
 	step Step,
 ) (kernel.Snapshot, error) {
 	child, err := runner.text.LoadRun(ctx, step.ChildRunID)
@@ -455,7 +468,8 @@ func (runner *Runner) loadOrStartChild(
 	}
 	return runner.text.StartRun(ctx, text.StartRequest{
 		ID: step.ChildRunID, Actor: parent.Run.Actor, Thread: parent.Run.Thread,
-		RequestID: parent.Run.ID + ":" + step.ID, Goal: step.Goal, ToolKeys: step.ToolKeys,
+		RequestID: parent.Run.ID + ":" + step.ID, Goal: step.Goal,
+		Model: model, ToolKeys: step.ToolKeys,
 	})
 }
 
@@ -530,7 +544,9 @@ func (runner *Runner) complete(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	result, err := json.Marshal(View(state))
+	result, err := json.Marshal(View{
+		ApprovalPolicy: state.ApprovalPolicy, Plan: clonePlan(state.Plan), NextStep: state.NextStep,
+	})
 	if err != nil {
 		return kernel.Snapshot{}, errors.Join(ErrInvalidPlan, err)
 	}

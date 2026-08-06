@@ -26,11 +26,12 @@ func TestRunFirstRouteInventoryContract(t *testing.T) {
 		"GET /api/v1/runs/:run_id/handoff-joins", "GET /api/v1/runs/:run_id/handoff-joins/:join_id",
 		"GET /api/v1/runs/:run_id/plan", "GET /api/v1/runs/:run_id/provenance", "GET /api/v1/runs/:run_id/task-tree", "GET /api/v1/runs/:run_id/workbench",
 		"GET /api/v1/runs/:run_id/result", "GET /api/v1/workflow-definitions", "GET /api/v1/workflow-definitions/:workflow_id",
-		"PATCH /api/v1/run-queue/:queue_id", "POST /api/v1/agent-teams", "POST /api/v1/evidence", "POST /api/v1/run-queue",
-		"POST /api/v1/run-queue/:queue_id/interrupt-and-send", "POST /api/v1/run-queue/:queue_id/prioritize", "POST /api/v1/runs",
+		"PATCH /api/v1/run-queue/:queue_id", "POST /api/v1/evidence", "POST /api/v1/run-queue", "POST /api/v1/team-runs",
+		"POST /api/v1/plan-runs", "POST /api/v1/plan-runs/:run_id/approval",
+		"POST /api/v1/run-queue/:queue_id/interrupt-and-send", "POST /api/v1/run-queue/:queue_id/prioritize", "POST /api/v1/text-runs",
 		"POST /api/v1/runs/:run_id/cancel", "POST /api/v1/runs/:run_id/handoff-joins", "POST /api/v1/runs/:run_id/handoffs", "POST /api/v1/runs/:run_id/interactions/:interaction_id/resolve",
 		"POST /api/v1/runs/:run_id/resume", "POST /api/v1/runs/:run_id/retire",
-		"POST /api/v1/workflows",
+		"POST /api/v1/workflow-runs",
 	}
 	got := make([]string, 0, len(engine.Routes()))
 	for _, route := range engine.Routes() {
@@ -47,7 +48,10 @@ func TestRunFirstRouteInventoryContract(t *testing.T) {
 		}
 	}
 
-	for _, oldPath := range []string{"/api/v1/conversation-runs/run_1", "/api/v1/conversations/thread_1/runs", "/api/v1/conversations/thread_1/run-queue"} {
+	for _, oldPath := range []string{
+		"/api/v1/conversation-runs/run_1", "/api/v1/conversations/thread_1/runs",
+		"/api/v1/conversations/thread_1/run-queue", "/api/v1/workflows", "/api/v1/agent-teams",
+	} {
 		response := httptest.NewRecorder()
 		engine.ServeHTTP(response, httptest.NewRequestWithContext(context.Background(), http.MethodGet, oldPath, nil))
 		if response.Code != http.StatusNotFound {
