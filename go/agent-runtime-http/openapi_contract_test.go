@@ -32,11 +32,11 @@ func TestOpenAPIExposesOnlyTargetRuntimeResources(t *testing.T) {
 	expected := []string{
 		"get /runs/{runID}",
 		"get /runs/{runID}/workbench",
+		"post /agent-runs",
 		"post /plan-runs",
 		"post /plan-runs/{runID}/approval",
 		"post /runs/{runID}/cancel",
 		"post /team-runs",
-		"post /text-runs",
 		"post /workflow-runs",
 		"post /workflow-runs/{runID}/wait",
 	}
@@ -44,7 +44,7 @@ func TestOpenAPIExposesOnlyTargetRuntimeResources(t *testing.T) {
 		t.Fatalf("OpenAPI operations = %#v, want %#v", operations, expected)
 	}
 	if containsBytes(raw, []byte("executionMode")) || containsBytes(raw, []byte("auto, direct, plan")) {
-		t.Fatal("OpenAPI revived removed Text execution modes")
+		t.Fatal("OpenAPI revived removed Agent execution modes")
 	}
 }
 

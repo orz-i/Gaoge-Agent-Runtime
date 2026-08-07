@@ -1,4 +1,4 @@
-package text_test
+package agent_test
 
 import (
 	"context"
@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -49,15 +49,15 @@ type perRunLimitModel struct {
 	calls int
 }
 
-func (model *perRunLimitModel) Generate(_ context.Context, _ text.ModelRequest) (text.ModelResponse, error) {
+func (model *perRunLimitModel) Generate(_ context.Context, _ agent.ModelRequest) (agent.ModelResponse, error) {
 	model.calls++
 	if model.calls == 1 {
-		return text.ModelResponse{ToolCalls: []tools.Call{
+		return agent.ModelResponse{ToolCalls: []tools.Call{
 			{ID: callOne, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
 			{ID: callTwo, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
 		}}, nil
 	}
-	return text.ModelResponse{Content: "done"}, nil
+	return agent.ModelResponse{Content: "done"}, nil
 }
 
 func TestRunnerFreezesPerRunLimits(t *testing.T) {
@@ -75,15 +75,15 @@ func TestRunnerFreezesPerRunLimits(t *testing.T) {
 		}),
 	}})
 	model := &perRunLimitModel{}
-	runner, err := text.NewRunner(text.Dependencies{
+	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals,
-		Limits: text.Limits{MaxLLMCalls: 1, MaxToolCalls: 1},
+		Limits: agent.Limits{MaxLLMCalls: 1, MaxToolCalls: 1},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := startRequest("run_per_limits", "request_per_limits", "read twice", manifestToolKey)
-	request.Limits = text.Limits{MaxLLMCalls: 2, MaxToolCalls: 2}
+	request.Limits = agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 2}
 	snapshot, err := runner.StartRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -109,11 +109,11 @@ func mustRunner(
 	t *testing.T,
 	runtime *kernel.Runtime,
 	approvals *interaction.Approvals,
-	model text.Model,
+	model agent.Model,
 	registry *tools.Registry,
-) *text.Runner {
+) *agent.Runner {
 	t.Helper()
-	runner, err := text.NewRunner(text.Dependencies{
+	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals,
 	})
 	if err != nil {
@@ -122,8 +122,8 @@ func mustRunner(
 	return runner
 }
 
-func startRequest(id, requestID, goal string, toolKeys ...string) text.StartRequest {
-	return text.StartRequest{
+func startRequest(id, requestID, goal string, toolKeys ...string) agent.StartRequest {
+	return agent.StartRequest{
 		ID: id, Actor: kernel.ActorRef{TenantID: defaultTenantID, ActorID: "1"},
 		Thread:    kernel.ThreadRef{Kind: conversationThreadKind, ID: "conversation_1"},
 		RequestID: requestID, Goal: goal, ToolKeys: toolKeys,
@@ -132,7 +132,7 @@ func startRequest(id, requestID, goal string, toolKeys ...string) text.StartRequ
 
 type transcriptModel struct {
 	t        *testing.T
-	requests []text.ModelRequest
+	requests []agent.ModelRequest
 }
 
 type terminalToolModel struct {
@@ -142,13 +142,13 @@ type terminalToolModel struct {
 
 func (model *terminalToolModel) Generate(
 	_ context.Context,
-	_ text.ModelRequest,
-) (text.ModelResponse, error) {
+	_ agent.ModelRequest,
+) (agent.ModelResponse, error) {
 	model.calls++
 	if model.calls > 1 {
 		model.t.Fatalf("terminal Tool triggered an extra model call")
 	}
-	return text.ModelResponse{ToolCalls: []tools.Call{{
+	return agent.ModelResponse{ToolCalls: []tools.Call{{
 		ID: "call_publish", ToolKey: publishToolKey,
 		Arguments: json.RawMessage(`{"title":"ready"}`),
 	}}}, nil
@@ -189,8 +189,8 @@ func TestRunnerCompletesImmediatelyAfterTerminalTool(t *testing.T) {
 
 type invalidTerminalBatchModel struct{}
 
-func (invalidTerminalBatchModel) Generate(_ context.Context, _ text.ModelRequest) (text.ModelResponse, error) {
-	return text.ModelResponse{ToolCalls: []tools.Call{
+func (invalidTerminalBatchModel) Generate(_ context.Context, _ agent.ModelRequest) (agent.ModelResponse, error) {
+	return agent.ModelResponse{ToolCalls: []tools.Call{
 		{ID: "call_publish", ToolKey: publishToolKey, Arguments: json.RawMessage(`{}`)},
 		{ID: "call_read", ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
 	}}, nil
@@ -235,17 +235,17 @@ func TestRunnerRejectsTerminalToolBeforeBatchEnd(t *testing.T) {
 
 type correctionModel struct {
 	t        *testing.T
-	requests []text.ModelRequest
+	requests []agent.ModelRequest
 }
 
 func (model *correctionModel) Generate(
 	_ context.Context,
-	request text.ModelRequest,
-) (text.ModelResponse, error) {
+	request agent.ModelRequest,
+) (agent.ModelResponse, error) {
 	model.requests = append(model.requests, request)
 	switch len(model.requests) {
 	case 1:
-		return text.ModelResponse{ToolCalls: []tools.Call{{
+		return agent.ModelResponse{ToolCalls: []tools.Call{{
 			ID: "call_bad", ToolKey: publishToolKey,
 			Arguments: json.RawMessage(`{"unexpected":true}`),
 		}}}, nil
@@ -255,21 +255,21 @@ func (model *correctionModel) Generate(
 		return correctionCompletionResponse(model.t, request)
 	default:
 		model.t.Fatalf("unexpected correction model call %d", len(model.requests))
-		return text.ModelResponse{}, nil
+		return agent.ModelResponse{}, nil
 	}
 }
 
-func correctionRetryResponse(t *testing.T, request text.ModelRequest) (text.ModelResponse, error) {
+func correctionRetryResponse(t *testing.T, request agent.ModelRequest) (agent.ModelResponse, error) {
 	t.Helper()
 	if len(request.Messages) != 3 {
 		t.Fatalf("correction transcript length = %d, want 3", len(request.Messages))
 	}
 	toolResult := request.Messages[2]
-	if toolResult.Role != text.RoleTool || toolResult.ToolCallID != "call_bad" {
+	if toolResult.Role != agent.RoleTool || toolResult.ToolCallID != "call_bad" {
 		t.Fatalf("correction tool result = %#v", toolResult)
 	}
 	assertRecoverableCorrectionPayload(t, toolResult.Content)
-	return text.ModelResponse{ToolCalls: []tools.Call{{
+	return agent.ModelResponse{ToolCalls: []tools.Call{{
 		ID: callGood, ToolKey: publishToolKey,
 		Arguments: json.RawMessage(`{"title":"fixed"}`),
 	}}}, nil
@@ -293,12 +293,12 @@ func assertRecoverableCorrectionPayload(t *testing.T, content string) {
 	}
 }
 
-func correctionCompletionResponse(t *testing.T, request text.ModelRequest) (text.ModelResponse, error) {
+func correctionCompletionResponse(t *testing.T, request agent.ModelRequest) (agent.ModelResponse, error) {
 	t.Helper()
-	if len(request.Messages) != 5 || request.Messages[4].Role != text.RoleTool || request.Messages[4].ToolCallID != callGood {
+	if len(request.Messages) != 5 || request.Messages[4].Role != agent.RoleTool || request.Messages[4].ToolCallID != callGood {
 		t.Fatalf("corrected transcript = %#v", request.Messages)
 	}
-	return text.ModelResponse{Content: "completed after correction"}, nil
+	return agent.ModelResponse{Content: "completed after correction"}, nil
 }
 
 func TestRunnerLetsModelCorrectExplicitRecoverableToolError(t *testing.T) {
@@ -346,8 +346,8 @@ func TestRunnerLetsModelCorrectExplicitRecoverableToolError(t *testing.T) {
 
 type fatalToolModel struct{}
 
-func (fatalToolModel) Generate(_ context.Context, _ text.ModelRequest) (text.ModelResponse, error) {
-	return text.ModelResponse{ToolCalls: []tools.Call{{
+func (fatalToolModel) Generate(_ context.Context, _ agent.ModelRequest) (agent.ModelResponse, error) {
+	return agent.ModelResponse{ToolCalls: []tools.Call{{
 		ID: "call_fatal", ToolKey: publishToolKey, Arguments: json.RawMessage(`{}`),
 	}}}, nil
 }
@@ -368,15 +368,15 @@ func TestRunnerStillFailsUnmarkedToolErrors(t *testing.T) {
 	snapshot, err := runner.StartRun(t.Context(), startRequest(
 		"run_fatal", "request_fatal", "publish a change set", publishToolKey,
 	))
-	if !errors.Is(err, text.ErrToolFailure) || snapshot.Run.Status != kernel.RunStatusFailed || snapshot.Run.ErrorCode != "text.tool_failed" {
+	if !errors.Is(err, agent.ErrToolFailure) || snapshot.Run.Status != kernel.RunStatusFailed || snapshot.Run.ErrorCode != "agent.tool_failed" {
 		t.Fatalf("snapshot = %#v, error = %v", snapshot.Run, err)
 	}
 }
 
 func (model *transcriptModel) Generate(
 	_ context.Context,
-	request text.ModelRequest,
-) (text.ModelResponse, error) {
+	request agent.ModelRequest,
+) (agent.ModelResponse, error) {
 	model.requests = append(model.requests, request)
 	switch len(model.requests) {
 	case 1:
@@ -385,16 +385,16 @@ func (model *transcriptModel) Generate(
 		return transcriptCompletionResponse(model.t, request)
 	default:
 		model.t.Fatalf("unexpected model call %d", len(model.requests))
-		return text.ModelResponse{}, nil
+		return agent.ModelResponse{}, nil
 	}
 }
 
-func transcriptInitialResponse(t *testing.T, request text.ModelRequest) (text.ModelResponse, error) {
+func transcriptInitialResponse(t *testing.T, request agent.ModelRequest) (agent.ModelResponse, error) {
 	t.Helper()
-	if len(request.Messages) != 1 || request.Messages[0].Role != text.RoleUser {
+	if len(request.Messages) != 1 || request.Messages[0].Role != agent.RoleUser {
 		t.Fatalf("first transcript = %#v", request.Messages)
 	}
-	return text.ModelResponse{
+	return agent.ModelResponse{
 		Content: "I will inspect the frozen manifest and current units first.",
 		ToolCalls: []tools.Call{
 			{ID: callOne, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
@@ -403,19 +403,19 @@ func transcriptInitialResponse(t *testing.T, request text.ModelRequest) (text.Mo
 	}, nil
 }
 
-func transcriptCompletionResponse(t *testing.T, request text.ModelRequest) (text.ModelResponse, error) {
+func transcriptCompletionResponse(t *testing.T, request agent.ModelRequest) (agent.ModelResponse, error) {
 	t.Helper()
 	if len(request.Messages) != 4 {
 		t.Fatalf("second transcript length = %d, want 4", len(request.Messages))
 	}
 	assertAssistantToolBatch(t, request.Messages[1])
 	assertOrderedToolResults(t, request.Messages[2:])
-	return text.ModelResponse{Content: "completed"}, nil
+	return agent.ModelResponse{Content: "completed"}, nil
 }
 
-func assertAssistantToolBatch(t *testing.T, assistant text.Message) {
+func assertAssistantToolBatch(t *testing.T, assistant agent.Message) {
 	t.Helper()
-	if assistant.Role != text.RoleAssistant ||
+	if assistant.Role != agent.RoleAssistant ||
 		assistant.Content != "I will inspect the frozen manifest and current units first." ||
 		len(assistant.ToolCalls) != 2 ||
 		assistant.ToolCalls[0].ID != callOne || assistant.ToolCalls[0].ToolKey != manifestToolKey ||
@@ -424,11 +424,11 @@ func assertAssistantToolBatch(t *testing.T, assistant text.Message) {
 	}
 }
 
-func assertOrderedToolResults(t *testing.T, messages []text.Message) {
+func assertOrderedToolResults(t *testing.T, messages []agent.Message) {
 	t.Helper()
 	for index, callID := range []string{callOne, callTwo} {
 		toolResult := messages[index]
-		if toolResult.Role != text.RoleTool || toolResult.ToolCallID != callID ||
+		if toolResult.Role != agent.RoleTool || toolResult.ToolCallID != callID ||
 			toolResult.Content != `{"storyID":"story_1"}` {
 			t.Fatalf("tool result turn %d = %#v", index, toolResult)
 		}
@@ -467,7 +467,7 @@ func TestRunnerPreservesAssistantToolCallBatchBeforeOrderedResults(t *testing.T)
 	if snapshot.Run.Status != kernel.RunStatusCompleted || len(model.requests) != 2 {
 		t.Fatalf("run = %#v, model calls = %d", snapshot.Run, len(model.requests))
 	}
-	view, err := text.ViewState(snapshot)
+	view, err := agent.ViewState(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestRunnerPreservesAssistantToolCallBatchBeforeOrderedResults(t *testing.T)
 	}
 	view.Messages[1].ToolCalls[0].ID = "mutated"
 	view.ToolKeys[0] = "mutated"
-	reloaded, err := text.ViewState(snapshot)
+	reloaded, err := agent.ViewState(snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}

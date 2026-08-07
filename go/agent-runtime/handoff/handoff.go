@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
 )
 
 const CapabilityCoordinator kernel.Capability = "handoff.coordinator"
@@ -58,7 +58,7 @@ const (
 	JoinFailed  JoinStatus = "failed"
 )
 
-// Delegation is a durable parent-owned reference to one stable Child Text Run.
+// Delegation is a durable parent-owned reference to one stable Child Agent Run.
 type Delegation struct {
 	ID         string          `json:"id"`
 	MemberID   string          `json:"memberID"`
@@ -86,13 +86,13 @@ type Join struct {
 	Error         string        `json:"error,omitempty"`
 }
 
-// ChildRunner is the narrow direct Text capability consumed by Handoff.
+// ChildRunner is the narrow direct Agent capability consumed by Handoff.
 type ChildRunner interface {
-	StartRun(context.Context, text.StartRequest) (kernel.Snapshot, error)
+	StartRun(context.Context, agent.StartRequest) (kernel.Snapshot, error)
 	LoadRun(context.Context, string) (kernel.Snapshot, error)
 }
 
-// Coordinator starts or recovers stable delegated Child Text Runs.
+// Coordinator starts or recovers stable delegated Child Agent Runs.
 type Coordinator struct {
 	children ChildRunner
 }
@@ -109,7 +109,7 @@ func New(children ChildRunner) (*Coordinator, error) {
 func (coordinator *Coordinator) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{
 		Name:     "handoff",
-		Requires: []kernel.Capability{text.CapabilityRunner},
+		Requires: []kernel.Capability{agent.CapabilityRunner},
 		Provides: []kernel.Capability{CapabilityCoordinator},
 	}
 }
@@ -130,7 +130,7 @@ func (coordinator *Coordinator) StartOrLoad(
 	if !errors.Is(err, kernel.ErrNotFound) {
 		return Delegation{}, err
 	}
-	child, err = coordinator.children.StartRun(ctx, text.StartRequest{
+	child, err = coordinator.children.StartRun(ctx, agent.StartRequest{
 		ID:        delegation.ChildRunID,
 		Actor:     parent.Run.Actor,
 		Thread:    parent.Run.Thread,

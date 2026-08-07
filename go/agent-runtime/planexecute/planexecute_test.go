@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
 )
 
 var errChildFailed = errors.New("child failed")
@@ -19,7 +19,7 @@ var errChildFailed = errors.New("child failed")
 func TestRequiredApprovalExecutesPlanSteps(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
-	children := newFakeTextRunner(childComplete)
+	children := newFakeAgentRunner(childComplete)
 	runner := newPlanRunner(t, runtime, children, planexecute.PlanDraft{
 		Summary: "Collect and summarize",
 		Steps: []planexecute.StepDraft{
@@ -56,7 +56,7 @@ func TestRequiredApprovalExecutesPlanSteps(t *testing.T) {
 func TestAutoApprovalResumesExistingChildWithoutDuplicateStart(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
-	children := newFakeTextRunner(childPending)
+	children := newFakeAgentRunner(childPending)
 	runner := newPlanRunner(t, runtime, children, planexecute.PlanDraft{
 		Summary: "One recoverable step",
 		Steps:   []planexecute.StepDraft{{Title: "Draft", Goal: "draft result"}},
@@ -86,7 +86,7 @@ func TestAutoApprovalResumesExistingChildWithoutDuplicateStart(t *testing.T) {
 func TestChildFailureFailsPlanExecuteRun(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
-	children := newFakeTextRunner(childFail)
+	children := newFakeAgentRunner(childFail)
 	runner := newPlanRunner(t, runtime, children, planexecute.PlanDraft{
 		Summary: "Failing step",
 		Steps:   []planexecute.StepDraft{{Title: "Fail", Goal: "fail now"}},
@@ -127,12 +127,12 @@ func newRuntime(t *testing.T) *kernel.Runtime {
 func newPlanRunner(
 	t *testing.T,
 	runtime *kernel.Runtime,
-	children *fakeTextRunner,
+	children *fakeAgentRunner,
 	draft planexecute.PlanDraft,
 ) *planexecute.Runner {
 	t.Helper()
 	runner, err := planexecute.NewRunner(planexecute.Dependencies{
-		Runtime: runtime, Planner: staticPlanner{draft: draft}, Text: children, MaxSteps: 8,
+		Runtime: runtime, Planner: staticPlanner{draft: draft}, Agent: children, MaxSteps: 8,
 	})
 	if err != nil {
 		t.Fatalf("create planexecute runner: %v", err)
@@ -184,23 +184,23 @@ const (
 	childFail
 )
 
-type fakeTextRunner struct {
+type fakeAgentRunner struct {
 	behavior   childBehavior
 	runs       map[string]kernel.Snapshot
 	startCount int
 }
 
-func newFakeTextRunner(behavior childBehavior) *fakeTextRunner {
-	return &fakeTextRunner{behavior: behavior, runs: make(map[string]kernel.Snapshot)}
+func newFakeAgentRunner(behavior childBehavior) *fakeAgentRunner {
+	return &fakeAgentRunner{behavior: behavior, runs: make(map[string]kernel.Snapshot)}
 }
 
-func (runner *fakeTextRunner) StartRun(
+func (runner *fakeAgentRunner) StartRun(
 	_ context.Context,
-	request text.StartRequest,
+	request agent.StartRequest,
 ) (kernel.Snapshot, error) {
 	runner.startCount++
 	snapshot := kernel.Snapshot{Run: kernel.Run{
-		ID: request.ID, Kind: kernel.RunKindText, Actor: request.Actor, Thread: request.Thread,
+		ID: request.ID, Kind: kernel.RunKindAgent, Actor: request.Actor, Thread: request.Thread,
 		Goal: request.Goal, Revision: 1, Status: kernel.RunStatusRunning,
 	}}
 	switch runner.behavior {
@@ -209,7 +209,7 @@ func (runner *fakeTextRunner) StartRun(
 		snapshot.Result = &kernel.Result{ContentType: "text", Content: json.RawMessage(fmt.Sprintf("%q", request.Goal))}
 	case childFail:
 		snapshot.Run.Status = kernel.RunStatusFailed
-		snapshot.Run.ErrorCode = "text.failed"
+		snapshot.Run.ErrorCode = "agent.failed"
 		snapshot.Run.ErrorDetail = "child failed"
 		runner.runs[request.ID] = snapshot
 		return snapshot, errChildFailed
@@ -219,7 +219,7 @@ func (runner *fakeTextRunner) StartRun(
 	return snapshot, nil
 }
 
-func (runner *fakeTextRunner) LoadRun(_ context.Context, runID string) (kernel.Snapshot, error) {
+func (runner *fakeAgentRunner) LoadRun(_ context.Context, runID string) (kernel.Snapshot, error) {
 	snapshot, ok := runner.runs[runID]
 	if !ok {
 		return kernel.Snapshot{}, kernel.ErrNotFound
@@ -227,7 +227,7 @@ func (runner *fakeTextRunner) LoadRun(_ context.Context, runID string) (kernel.S
 	return snapshot, nil
 }
 
-func (runner *fakeTextRunner) complete(runID string, result json.RawMessage) {
+func (runner *fakeAgentRunner) complete(runID string, result json.RawMessage) {
 	snapshot := runner.runs[runID]
 	snapshot.Run.Status = kernel.RunStatusCompleted
 	snapshot.Result = &kernel.Result{ContentType: "text", Content: append(json.RawMessage(nil), result...)}

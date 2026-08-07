@@ -4,7 +4,7 @@ import { RuntimeAPIError, RuntimeClient } from "./runtime-client";
 
 const snapshot = {
   run: {
-    id: "run-1", kind: "text", actor: { tenantID: "default", actorID: "1" },
+    id: "run-1", kind: "agent", actor: { tenantID: "default", actorID: "1" },
     thread: { kind: "conversation", id: "thread-1" }, goal: "Answer", status: "completed",
     revision: 2, createdAt: "2026-08-06T00:00:00Z", updatedAt: "2026-08-06T00:00:01Z",
   },
@@ -20,7 +20,7 @@ describe("RuntimeClient target API", () => {
   it("uses only the nine target Runtime endpoints", async () => {
     const fetcher = vi.fn().mockImplementation(() => Promise.resolve(json(snapshot)));
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
-    await client.text.start({ thread: { kind: "conversation", id: "thread-1" }, input: { content: "Answer" } });
+    await client.agent.start({ thread: { kind: "conversation", id: "thread-1" }, input: { content: "Answer" } });
     await client.plans.start({ thread: { kind: "conversation", id: "thread-1" }, input: { content: "Plan" } });
     await client.plans.approve("plan/1", { expectedRevision: 2, decision: "approve" });
     await client.workflows.start({ thread: { kind: "conversation", id: "thread-1" }, input: {}, goal: "Flow", definition: { id: "flow", revision: 1, name: "Flow", nodes: [{ id: "return", type: "return", return: { value: {} } }] } });
@@ -30,7 +30,7 @@ describe("RuntimeClient target API", () => {
     await client.runs.cancel("run/1", { expectedRevision: 2, reason: "stop" });
     await client.runs.workbench("run/1");
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
-      "https://runtime.test/api/v1/text-runs",
+      "https://runtime.test/api/v1/agent-runs",
       "https://runtime.test/api/v1/plan-runs",
       "https://runtime.test/api/v1/plan-runs/plan%2F1/approval",
       "https://runtime.test/api/v1/workflow-runs",

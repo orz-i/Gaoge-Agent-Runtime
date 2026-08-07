@@ -1,4 +1,4 @@
-package text
+package agent
 
 import (
 	"context"
@@ -11,18 +11,18 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
-const CapabilityRunner kernel.Capability = "text.runner"
+const CapabilityRunner kernel.Capability = "agent.runner"
 
 var (
-	ErrInvalidRequest       = errors.New("invalid text run request")
-	ErrInvalidModelResponse = errors.New("invalid text model response")
-	ErrModelFailure         = errors.New("text model failure")
-	ErrToolFailure          = errors.New("text tool failure")
-	ErrCallLimit            = errors.New("text run call limit exceeded")
-	ErrApprovalRequired     = errors.New("text run approval is required")
+	ErrInvalidRequest       = errors.New("invalid agent run request")
+	ErrInvalidModelResponse = errors.New("invalid agent model response")
+	ErrModelFailure         = errors.New("agent model failure")
+	ErrToolFailure          = errors.New("agent tool failure")
+	ErrCallLimit            = errors.New("agent run call limit exceeded")
+	ErrApprovalRequired     = errors.New("agent run approval is required")
 )
 
-// Role identifies one direct Text loop message role.
+// Role identifies one direct Agent loop message role.
 type Role string
 
 const (
@@ -31,7 +31,7 @@ const (
 	RoleTool      Role = "tool"
 )
 
-// Message is the provider-neutral transcript consumed by a Text model.
+// Message is the provider-neutral transcript consumed by an Agent model.
 type Message struct {
 	Role       Role         `json:"role"`
 	Content    string       `json:"content"`
@@ -57,12 +57,12 @@ func (runner *Runner) completeWithToolResult(
 		},
 		Events: []kernel.EventDraft{
 			{Type: "tool.completed", Message: result.Receipt.Disposition},
-			{Type: "text.completed", Message: "Terminal Tool completed the Text loop"},
+			{Type: "agent.completed", Message: "Terminal Tool completed the Agent loop"},
 		},
 	})
 }
 
-// ModelRequest is one direct Text loop model call.
+// ModelRequest is one direct Agent loop model call.
 type ModelRequest struct {
 	RunID    string
 	Model    string
@@ -76,18 +76,18 @@ type ModelResponse struct {
 	ToolCalls []tools.Call
 }
 
-// Model is the only model dependency of the Text feature.
+// Model is the only model dependency of the Agent feature.
 type Model interface {
 	Generate(context.Context, ModelRequest) (ModelResponse, error)
 }
 
-// Limits are hard ceilings for one direct Text loop.
+// Limits are hard ceilings for one direct Agent loop.
 type Limits struct {
 	MaxLLMCalls  int `json:"maxLLMCalls"`
 	MaxToolCalls int `json:"maxToolCalls"`
 }
 
-// Dependencies explicitly provide the direct Text loop capabilities.
+// Dependencies explicitly provide the direct Agent loop capabilities.
 type Dependencies struct {
 	Runtime   *kernel.Runtime
 	Model     Model
@@ -97,7 +97,7 @@ type Dependencies struct {
 	Limits    Limits
 }
 
-// StartRequest starts one direct Text Agent Run.
+// StartRequest starts one direct Agent Run.
 type StartRequest struct {
 	ID        string
 	Actor     kernel.ActorRef
@@ -109,7 +109,7 @@ type StartRequest struct {
 	Limits    Limits
 }
 
-// Runner owns only the direct Text model and Tool loop.
+// Runner owns only the direct Agent model and Tool loop.
 type Runner struct {
 	runtime   *kernel.Runtime
 	model     Model
@@ -129,7 +129,7 @@ type runState struct {
 	ToolCalls    int          `json:"toolCalls"`
 }
 
-// View is an isolated public projection of one persisted Text run. It exposes
+// View is an isolated public projection of one persisted Agent Run. It exposes
 // the durable transcript and bounded usage state without leaking the private
 // execution representation or allowing callers to mutate Kernel state.
 type View struct {
@@ -141,7 +141,7 @@ type View struct {
 	ToolCalls int
 }
 
-// ViewState decodes an isolated public view from a Kernel Text snapshot.
+// ViewState decodes an isolated public view from a Kernel Agent snapshot.
 func ViewState(snapshot kernel.Snapshot) (View, error) {
 	state, err := decodeState(snapshot.State)
 	if err != nil {
@@ -157,7 +157,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 	}, nil
 }
 
-// NewRunner constructs a direct Text feature without planning or automatic routing.
+// NewRunner constructs a direct Agent feature without planning or automatic routing.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Model == nil || dependencies.Catalog == nil ||
 		dependencies.Executor == nil || dependencies.Approvals == nil {
@@ -175,10 +175,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}, nil
 }
 
-// Descriptor declares the explicit Text capability graph.
+// Descriptor declares the explicit Agent capability graph.
 func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{
-		Name: "text",
+		Name: "agent",
 		Requires: []kernel.Capability{
 			kernel.CapabilityRuntime, tools.CapabilityCatalog, tools.CapabilityExecutor, interaction.CapabilityApproval,
 		},
@@ -186,7 +186,7 @@ func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
 	}
 }
 
-// StartRun creates and drives one direct Text Run until terminal or approval wait.
+// StartRun creates and drives one direct Agent Run until terminal or approval wait.
 func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
 	if runner == nil || strings.TrimSpace(request.Goal) == "" {
 		return kernel.Snapshot{}, ErrInvalidRequest
@@ -209,9 +209,9 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 		return kernel.Snapshot{}, err
 	}
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
-		ID: request.ID, Kind: kernel.RunKindText, Actor: request.Actor, Thread: request.Thread,
+		ID: request.ID, Kind: kernel.RunKindAgent, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
-		Events: []kernel.EventDraft{{Type: "text.started", Message: "Direct Text loop started"}},
+		Events: []kernel.EventDraft{{Type: "agent.started", Message: "Direct Agent loop started"}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -219,7 +219,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	return runner.drive(ctx, snapshot)
 }
 
-// ResolveApproval resumes one waiting Text Run with an explicit decision.
+// ResolveApproval resumes one waiting Agent Run with an explicit decision.
 func (runner *Runner) ResolveApproval(
 	ctx context.Context,
 	runID string,
@@ -246,7 +246,7 @@ func (runner *Runner) ResolveApproval(
 	return runner.resumeApproved(ctx, snapshot, state, resolved)
 }
 
-// LoadRun returns one Text Run snapshot for parent orchestrators and recovery.
+// LoadRun returns one Agent Run snapshot for parent orchestrators and recovery.
 func (runner *Runner) LoadRun(ctx context.Context, runID string) (kernel.Snapshot, error) {
 	if runner == nil || runner.runtime == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
@@ -268,13 +268,13 @@ func (runner *Runner) drive(ctx context.Context, snapshot kernel.Snapshot) (kern
 func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, bool, error) {
 	state, err := decodeState(snapshot.State)
 	if err != nil {
-		failed, failErr := runner.fail(ctx, snapshot, runState{}, "text.state_invalid", err)
+		failed, failErr := runner.fail(ctx, snapshot, runState{}, "agent.state_invalid", err)
 		return failed, true, failErr
 	}
 	if len(state.PendingCalls) > 0 {
 		definitions, catalogErr := runner.catalog.List(state.ToolKeys)
 		if catalogErr != nil {
-			failed, failErr := runner.fail(ctx, snapshot, state, "text.tool_invalid", catalogErr)
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_invalid", catalogErr)
 			return failed, true, failErr
 		}
 		prepared, prepareErr := runner.preparePendingApproval(ctx, snapshot, state, definitions)
@@ -285,12 +285,12 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return executed, executeErr != nil, executeErr
 	}
 	if state.LLMCalls >= state.Limits.MaxLLMCalls {
-		failed, failErr := runner.fail(ctx, snapshot, state, "text.llm_limit", ErrCallLimit)
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.llm_limit", ErrCallLimit)
 		return failed, true, failErr
 	}
 	definitions, response, err := runner.callModel(ctx, snapshot, state)
 	if err != nil {
-		failed, failErr := runner.fail(ctx, snapshot, state, "text.model_failed", err)
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_failed", err)
 		return failed, true, failErr
 	}
 	state.LLMCalls++
@@ -299,7 +299,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return completed, true, completeErr
 	}
 	if state.ToolCalls+len(response.ToolCalls) > state.Limits.MaxToolCalls {
-		failed, failErr := runner.fail(ctx, snapshot, state, "text.tool_limit", ErrCallLimit)
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_limit", ErrCallLimit)
 		return failed, true, failErr
 	}
 	queued, err := runner.queueToolCalls(
@@ -359,7 +359,7 @@ func (runner *Runner) queueToolCalls(
 		}
 		definition, ok := selectedDefinition(definitions, call.ToolKey)
 		if !ok || !json.Valid(call.Arguments) || definition.Terminal && index != len(calls)-1 {
-			return runner.fail(ctx, snapshot, state, "text.tool_invalid", tools.ErrInvalidCall)
+			return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
 		}
 		preparedCalls[index] = call
 		preparedCalls[index].Arguments = append(json.RawMessage(nil), call.Arguments...)
@@ -387,18 +387,18 @@ func (runner *Runner) preparePendingApproval(
 ) (kernel.Snapshot, error) {
 	call, ok := nextPendingCall(state)
 	if !ok {
-		return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 	}
 	definition, ok := selectedDefinition(definitions, call.ToolKey)
 	if !ok {
-		return runner.fail(ctx, snapshot, state, "text.tool_invalid", tools.ErrInvalidCall)
+		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
 	}
 	if definition.ApprovalMode == tools.ApprovalNever {
 		return snapshot, nil
 	}
 	checkpoint, err := runner.approvals.PrepareToolApproval(call, definition)
 	if err != nil {
-		return runner.fail(ctx, snapshot, state, "text.approval_invalid", err)
+		return runner.fail(ctx, snapshot, state, "agent.approval_invalid", err)
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
@@ -415,21 +415,21 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	state, err := decodeState(snapshot.State)
 	call, ok := nextPendingCall(state)
 	if err != nil || !ok {
-		return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 	}
 	definition, ok := runner.catalog.Resolve(call.ToolKey)
 	if !ok {
-		return runner.fail(ctx, snapshot, state, "text.tool_invalid", tools.ErrToolNotFound)
+		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrToolNotFound)
 	}
 	if state.ToolCalls >= state.Limits.MaxToolCalls {
-		return runner.fail(ctx, snapshot, state, "text.tool_limit", ErrCallLimit)
+		return runner.fail(ctx, snapshot, state, "agent.tool_limit", ErrCallLimit)
 	}
 	result, err := runner.executor.Execute(ctx, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
 	if err != nil {
 		if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
 			return runner.recordRecoverableToolError(ctx, snapshot, state, code, message)
 		}
-		return runner.fail(ctx, snapshot, state, "text.tool_failed", errors.Join(ErrToolFailure, err))
+		return runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
 	}
 	state.Messages = append(state.Messages, Message{
 		Role: RoleTool, Content: string(result.Content), ToolCallID: call.ID,
@@ -438,7 +438,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	state.ToolCalls++
 	if definition.Terminal {
 		if len(state.PendingCalls) != 0 {
-			return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+			return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 		}
 		return runner.completeWithToolResult(ctx, snapshot, state, result)
 	}
@@ -462,7 +462,7 @@ func (runner *Runner) recordRecoverableToolError(
 ) (kernel.Snapshot, error) {
 	call, ok := nextPendingCall(state)
 	if !ok {
-		return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 	}
 	content, err := json.Marshal(struct {
 		OK        bool `json:"ok"`
@@ -480,7 +480,7 @@ func (runner *Runner) recordRecoverableToolError(
 		}{Code: strings.TrimSpace(code), Message: strings.TrimSpace(message)},
 	})
 	if err != nil {
-		return runner.fail(ctx, snapshot, state, "text.tool_error_invalid", err)
+		return runner.fail(ctx, snapshot, state, "agent.tool_error_invalid", err)
 	}
 	callID := call.ID
 	state.Messages = append(state.Messages, Message{
@@ -531,7 +531,7 @@ func (runner *Runner) resumeRejected(
 ) (kernel.Snapshot, error) {
 	call, ok := nextPendingCall(state)
 	if !ok {
-		return runner.fail(ctx, snapshot, state, "text.state_invalid", ErrInvalidRequest)
+		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 	}
 	state.Messages = append(state.Messages, Message{
 		Role: RoleTool, Content: rejectedToolContent(response.Comment), ToolCallID: call.ID,
@@ -569,7 +569,7 @@ func (runner *Runner) complete(
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encodedState, Checkpoint: snapshot.Checkpoint,
 		Result: &kernel.Result{ContentType: "text", Content: encodedContent},
-		Events: []kernel.EventDraft{{Type: "text.completed", Message: "Direct Text loop completed"}},
+		Events: []kernel.EventDraft{{Type: "agent.completed", Message: "Direct Agent loop completed"}},
 	})
 }
 
@@ -587,7 +587,7 @@ func (runner *Runner) fail(
 	failed, transitionErr := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusFailed, State: encoded, Checkpoint: snapshot.Checkpoint,
 		ErrorCode: code, ErrorDetail: cause.Error(),
-		Events: []kernel.EventDraft{{Type: "text.failed", Message: code}},
+		Events: []kernel.EventDraft{{Type: "agent.failed", Message: code}},
 	})
 	return failed, errors.Join(cause, transitionErr)
 }

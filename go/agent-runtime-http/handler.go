@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
@@ -27,7 +27,7 @@ type RequestMetadataResolver interface {
 // Dependencies are the explicit Runtime capabilities mounted by this HTTP adapter.
 type Dependencies struct {
 	Runtime                 *kernel.Runtime
-	Text                    *text.Runner
+	Agent                   *agent.Runner
 	Plans                   *planexecute.Runner
 	Workflows               *workflow.Runner
 	Teams                   *team.Runner
@@ -38,7 +38,7 @@ type Dependencies struct {
 
 type Handler struct {
 	runtime   *kernel.Runtime
-	text      *text.Runner
+	agent     *agent.Runner
 	plans     *planexecute.Runner
 	workflows *workflow.Runner
 	teams     *team.Runner
@@ -49,7 +49,7 @@ type Handler struct {
 
 func NewHandler(dependencies Dependencies) *Handler {
 	return &Handler{
-		runtime: dependencies.Runtime, text: dependencies.Text, plans: dependencies.Plans,
+		runtime: dependencies.Runtime, agent: dependencies.Agent, plans: dependencies.Plans,
 		workflows: dependencies.Workflows, teams: dependencies.Teams, workbench: dependencies.Workbench,
 		principal: dependencies.PrincipalResolver, metadata: dependencies.RequestMetadataResolver,
 	}

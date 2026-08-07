@@ -4,9 +4,9 @@ import type {
   ResolvePlanApprovalRequest,
   ResolveWorkflowWaitRequest,
   RunSnapshotDTO,
+  StartAgentRunRequest,
   StartPlanRunRequest,
   StartTeamRunRequest,
-  StartTextRunRequest,
   StartWorkflowRunRequest,
   WorkbenchDTO,
 } from "./types.js";
@@ -26,7 +26,7 @@ type ErrorResponse = { error?: { code?: string; message?: string; requestID?: st
 const pathPart = (value: string): string => encodeURIComponent(value);
 
 export class RuntimeClient {
-  readonly text;
+  readonly agent;
   readonly plans;
   readonly workflows;
   readonly teams;
@@ -35,9 +35,9 @@ export class RuntimeClient {
 
   constructor(private readonly options: RuntimeClientOptions) {
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
-    this.text = {
-      start: (payload: StartTextRunRequest, request?: RequestOptions) =>
-        this.request<RunSnapshotDTO>("/text-runs", { method: "POST", body: JSON.stringify(payload) }, request),
+    this.agent = {
+      start: (payload: StartAgentRunRequest, request?: RequestOptions) =>
+        this.request<RunSnapshotDTO>("/agent-runs", { method: "POST", body: JSON.stringify(payload) }, request),
     };
     this.plans = {
       start: (payload: StartPlanRunRequest, request?: RequestOptions) =>

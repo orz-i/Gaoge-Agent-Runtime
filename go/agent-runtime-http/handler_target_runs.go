@@ -6,19 +6,19 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
-func (handler *Handler) StartTextRun(context *gin.Context) {
-	if handler == nil || handler.text == nil {
-		writeError(context, http.StatusServiceUnavailable, "text.unavailable", "text runtime is unavailable")
+func (handler *Handler) StartAgentRun(context *gin.Context) {
+	if handler == nil || handler.agent == nil {
+		writeError(context, http.StatusServiceUnavailable, "agent.unavailable", "agent runtime is unavailable")
 		return
 	}
-	var request StartTextRunRequest
+	var request StartAgentRunRequest
 	if err := bindStrictJSON(context, &request); err != nil {
 		invalidBody(context, err)
 		return
@@ -28,13 +28,13 @@ func (handler *Handler) StartTextRun(context *gin.Context) {
 		writeError(context, http.StatusUnauthorized, "auth.unauthorized", err.Error())
 		return
 	}
-	snapshot, err := handler.text.StartRun(context.Request.Context(), text.StartRequest{
+	snapshot, err := handler.agent.StartRun(context.Request.Context(), agent.StartRequest{
 		ID: strings.TrimSpace(request.ClientRunID), Actor: actor, Thread: normalizeThread(request.Thread),
 		RequestID: handler.requestID(context), Goal: strings.TrimSpace(request.Input.Content),
 		Model: strings.TrimSpace(request.Model), ToolKeys: append([]string(nil), request.ToolKeys...),
 	})
 	if err != nil {
-		writeTargetRuntimeError(context, "text", err)
+		writeTargetRuntimeError(context, "agent", err)
 		return
 	}
 	context.JSON(http.StatusAccepted, snapshotResponse(snapshot))

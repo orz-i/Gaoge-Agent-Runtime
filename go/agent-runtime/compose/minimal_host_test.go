@@ -7,26 +7,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/compose"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
 const minimalToolKey = "lookup"
 
-func TestMinimalHostCompletesApprovedToolTextRun(t *testing.T) {
+func TestMinimalHostCompletesApprovedToolAgentRun(t *testing.T) {
 	t.Parallel()
 	fixture := newMinimalHost(t)
-	waiting, err := fixture.runner.StartRun(context.Background(), text.StartRequest{
+	waiting, err := fixture.runner.StartRun(context.Background(), agent.StartRequest{
 		Actor:  kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},
 		Goal:   "look up the answer", ToolKeys: []string{minimalToolKey},
 	})
 	if err != nil {
-		t.Fatalf("start text run: %v", err)
+		t.Fatalf("start agent run: %v", err)
 	}
 	assertWaitingApproval(t, waiting)
 
@@ -35,7 +35,7 @@ func TestMinimalHostCompletesApprovedToolTextRun(t *testing.T) {
 		interaction.ApprovalResponse{Decision: interaction.DecisionApprove},
 	)
 	if err != nil {
-		t.Fatalf("approve text run: %v", err)
+		t.Fatalf("approve agent run: %v", err)
 	}
 	if completed.Run.Status != kernel.RunStatusCompleted || completed.Result == nil ||
 		string(completed.Result.Content) != `"The answer is 42."` {
@@ -44,7 +44,7 @@ func TestMinimalHostCompletesApprovedToolTextRun(t *testing.T) {
 }
 
 type minimalHost struct {
-	runner *text.Runner
+	runner *agent.Runner
 }
 
 func newMinimalHost(t *testing.T) minimalHost {
@@ -55,12 +55,12 @@ func newMinimalHost(t *testing.T) minimalHost {
 	if err != nil {
 		t.Fatalf("create interactions: %v", err)
 	}
-	runner, err := text.NewRunner(text.Dependencies{
+	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: &minimalModel{}, Catalog: registry, Executor: registry,
-		Approvals: approvals, Limits: text.Limits{MaxLLMCalls: 3, MaxToolCalls: 1},
+		Approvals: approvals, Limits: agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 1},
 	})
 	if err != nil {
-		t.Fatalf("create text runner: %v", err)
+		t.Fatalf("create agent runner: %v", err)
 	}
 	application, err := compose.New(runtime, registry, approvals, runner)
 	if err != nil {
@@ -134,16 +134,16 @@ func (ids *minimalIDs) NewID(prefix string) (string, error) {
 
 type minimalModel struct{ calls int }
 
-func (model *minimalModel) Generate(_ context.Context, request text.ModelRequest) (text.ModelResponse, error) {
+func (model *minimalModel) Generate(_ context.Context, request agent.ModelRequest) (agent.ModelResponse, error) {
 	model.calls++
 	if model.calls == 1 {
-		return text.ModelResponse{ToolCalls: []tools.Call{{
+		return agent.ModelResponse{ToolCalls: []tools.Call{{
 			ToolKey: minimalToolKey, Arguments: json.RawMessage(`{"id":"42"}`),
 		}}}, nil
 	}
 	last := request.Messages[len(request.Messages)-1]
-	if last.Role != text.RoleTool || last.Content != `{"value":"42"}` {
-		return text.ModelResponse{}, text.ErrInvalidModelResponse
+	if last.Role != agent.RoleTool || last.Content != `{"value":"42"}` {
+		return agent.ModelResponse{}, agent.ErrInvalidModelResponse
 	}
-	return text.ModelResponse{Content: "The answer is 42."}, nil
+	return agent.ModelResponse{Content: "The answer is 42."}, nil
 }

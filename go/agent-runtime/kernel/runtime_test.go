@@ -11,12 +11,20 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
 )
 
+const (
+	testTenantID   = "tenant"
+	testActorID    = "actor"
+	testThreadKind = "conversation"
+	testThreadID   = "thread"
+	testGoal       = "answer"
+)
+
 func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	t.Parallel()
 	runtime := newTestRuntime(t)
 	created, err := runtime.Create(context.Background(), kernel.CreateRequest{
-		Kind: kernel.RunKindText, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
-		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "answer", State: json.RawMessage(`{"step":0}`),
+		Kind: kernel.RunKindAgent, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: testGoal, State: json.RawMessage(`{"step":0}`),
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
@@ -47,8 +55,8 @@ func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 func createTestRun(t *testing.T, runtime *kernel.Runtime, deadline *time.Time) kernel.Snapshot {
 	t.Helper()
 	created, err := runtime.Create(context.Background(), kernel.CreateRequest{
-		Kind: kernel.RunKindText, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
-		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "answer",
+		Kind: kernel.RunKindAgent, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: testGoal,
 		DeadlineAt: deadline, State: json.RawMessage(`{}`),
 	})
 	if err != nil {
@@ -125,8 +133,8 @@ func TestRuntimeRejectsDeadlineAlreadyDue(t *testing.T) {
 	runtime := newRuntimeWithClock(t, clock)
 	deadline := clock.Now()
 	_, err := runtime.Create(context.Background(), kernel.CreateRequest{
-		Kind: kernel.RunKindText, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
-		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "answer",
+		Kind: kernel.RunKindAgent, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: testGoal,
 		DeadlineAt: &deadline, State: json.RawMessage(`{}`),
 	})
 	if !errors.Is(err, kernel.ErrDeadline) {
@@ -138,8 +146,8 @@ func TestRuntimeRejectsStaleRevision(t *testing.T) {
 	t.Parallel()
 	runtime := newTestRuntime(t)
 	created, err := runtime.Create(context.Background(), kernel.CreateRequest{
-		Kind: kernel.RunKindText, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
-		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "answer", State: json.RawMessage(`{}`),
+		Kind: kernel.RunKindAgent, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: testGoal, State: json.RawMessage(`{}`),
 	})
 	if err != nil {
 		t.Fatalf("create run: %v", err)

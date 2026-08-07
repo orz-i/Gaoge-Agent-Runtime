@@ -6,9 +6,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
 )
 
 func TestStartOrLoadReusesStableChildRun(t *testing.T) {
@@ -81,11 +81,11 @@ func newFakeChildren() *fakeChildren {
 
 func (children *fakeChildren) StartRun(
 	_ context.Context,
-	request text.StartRequest,
+	request agent.StartRequest,
 ) (kernel.Snapshot, error) {
 	children.starts++
 	snapshot := kernel.Snapshot{Run: kernel.Run{
-		ID: request.ID, Kind: kernel.RunKindText, Actor: request.Actor,
+		ID: request.ID, Kind: kernel.RunKindAgent, Actor: request.Actor,
 		Thread: request.Thread, Goal: request.Goal, Status: kernel.RunStatusRunning, Revision: 1,
 	}}
 	children.runs[request.ID] = snapshot

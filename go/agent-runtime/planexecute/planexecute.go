@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
 )
 
 const CapabilityRunner kernel.Capability = "planexecute.runner"
@@ -25,7 +25,7 @@ var (
 	ErrPlanAlreadyTerminal = errors.New("planexecute run is terminal")
 )
 
-// ApprovalPolicy controls only Plan approval and is not a Text execution mode.
+// ApprovalPolicy controls only Plan approval and is not an Agent execution mode.
 type ApprovalPolicy string
 
 const (
@@ -89,13 +89,13 @@ type Planner interface {
 	GeneratePlan(context.Context, PlannerRequest) (PlanDraft, error)
 }
 
-// TextRunner is the narrow direct Text capability consumed by PlanExecute.
-type TextRunner interface {
-	StartRun(context.Context, text.StartRequest) (kernel.Snapshot, error)
+// AgentRunner is the narrow direct Agent capability consumed by PlanExecute.
+type AgentRunner interface {
+	StartRun(context.Context, agent.StartRequest) (kernel.Snapshot, error)
 	LoadRun(context.Context, string) (kernel.Snapshot, error)
 }
 
-// Step is one durable Plan step and its stable Child Text Run identity.
+// Step is one durable Plan step and its stable Child Agent Run identity.
 type Step struct {
 	ID         string          `json:"id"`
 	Title      string          `json:"title"`
@@ -145,7 +145,7 @@ type ApprovalResponse struct {
 type Dependencies struct {
 	Runtime  *kernel.Runtime
 	Planner  Planner
-	Text     TextRunner
+	Agent    AgentRunner
 	MaxSteps int
 }
 
@@ -153,7 +153,7 @@ type Dependencies struct {
 type Runner struct {
 	runtime  *kernel.Runtime
 	planner  Planner
-	text     TextRunner
+	agent    AgentRunner
 	maxSteps int
 }
 
@@ -172,7 +172,7 @@ type approvalPayload struct {
 
 // NewRunner creates an independent Plan-and-Execute feature.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
-	if dependencies.Runtime == nil || dependencies.Planner == nil || dependencies.Text == nil {
+	if dependencies.Runtime == nil || dependencies.Planner == nil || dependencies.Agent == nil {
 		return nil, ErrInvalidRequest
 	}
 	if dependencies.MaxSteps <= 0 {
@@ -180,7 +180,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}
 	return &Runner{
 		runtime: dependencies.Runtime, planner: dependencies.Planner,
-		text: dependencies.Text, maxSteps: dependencies.MaxSteps,
+		agent: dependencies.Agent, maxSteps: dependencies.MaxSteps,
 	}, nil
 }
 
@@ -188,7 +188,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{
 		Name:     "planexecute",
-		Requires: []kernel.Capability{kernel.CapabilityRuntime, text.CapabilityRunner},
+		Requires: []kernel.Capability{kernel.CapabilityRuntime, agent.CapabilityRunner},
 		Provides: []kernel.Capability{CapabilityRunner},
 	}
 }
@@ -459,14 +459,14 @@ func (runner *Runner) loadOrStartChild(
 	model string,
 	step Step,
 ) (kernel.Snapshot, error) {
-	child, err := runner.text.LoadRun(ctx, step.ChildRunID)
+	child, err := runner.agent.LoadRun(ctx, step.ChildRunID)
 	if err == nil {
 		return child, nil
 	}
 	if !errors.Is(err, kernel.ErrNotFound) {
 		return kernel.Snapshot{}, err
 	}
-	return runner.text.StartRun(ctx, text.StartRequest{
+	return runner.agent.StartRun(ctx, agent.StartRequest{
 		ID: step.ChildRunID, Actor: parent.Run.Actor, Thread: parent.Run.Thread,
 		RequestID: parent.Run.ID + ":" + step.ID, Goal: step.Goal,
 		Model: model, ToolKeys: step.ToolKeys,

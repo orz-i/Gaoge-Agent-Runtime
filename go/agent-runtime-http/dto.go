@@ -26,7 +26,7 @@ type TextInputRequest struct {
 	Content string `json:"content" binding:"required,max=200000"`
 }
 
-type StartTextRunRequest struct {
+type StartAgentRunRequest struct {
 	Thread      ThreadRequest    `json:"thread" binding:"required"`
 	Input       TextInputRequest `json:"input" binding:"required"`
 	ClientRunID string           `json:"clientRunID" binding:"omitempty,max=64"`

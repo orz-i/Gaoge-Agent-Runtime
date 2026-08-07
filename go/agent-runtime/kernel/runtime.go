@@ -238,7 +238,7 @@ func validTransition(current, next RunStatus) bool {
 }
 
 func validRunKind(kind RunKind) bool {
-	return kind == RunKindText || kind == RunKindPlanExecute || kind == RunKindWorkflow || kind == RunKindTeam
+	return kind == RunKindAgent || kind == RunKindPlanExecute || kind == RunKindWorkflow || kind == RunKindTeam
 }
 
 func validActor(actor ActorRef) bool {

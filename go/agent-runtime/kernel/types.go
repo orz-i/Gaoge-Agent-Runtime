@@ -17,7 +17,7 @@ const (
 type RunKind string
 
 const (
-	RunKindText        RunKind = "text"
+	RunKindAgent       RunKind = "agent"
 	RunKindPlanExecute RunKind = "plan_execute"
 	RunKindWorkflow    RunKind = "workflow"
 	RunKindTeam        RunKind = "team"

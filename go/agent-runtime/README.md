@@ -1,40 +1,35 @@
 # Agent Runtime Core
 
 `github.com/orz-i/Gaoge/sdk/go/agent-runtime` is the host-neutral Agent Runtime
-Core. Create an `Engine` with explicit ports, call `Start` after host assembly,
-and call the idempotent `Close` during shutdown. The package does not start
-workers in `New` and never closes host-owned adapters.
+Core. The module is split into explicit capability packages such as `kernel`,
+`agent`, `tools`, `interaction`, `planexecute`, `workflow`, `team`, and
+`compose`. Hosts construct only the capabilities they need; there is no
+compatibility `Engine` facade or automatic Runtime-kind selector.
 
-For an in-process durable-contract implementation, use `store/memory`:
+For an in-process durable-contract implementation, use `memory`:
 
 ```go
 store := memory.NewStore()
-var runtimeStore agentruntime.Store = store
+runtime, err := kernel.New(kernel.Dependencies{Store: store})
 ```
 
 Production hosts normally pair Core with the PostgreSQL Store and either the
 Redis or memory generation stream adapter.
 
-## Orchestration modes
+## Runtime kinds
 
-Agent Runtime exposes two independent orchestration modes over the same durable
-Run primitives:
+Agent Runtime exposes explicit Run kinds over the same durable Kernel primitives:
 
+- Agent Run is the direct model/Tool loop and is provided by `agent.Runner`.
+- Plan-and-Execute owns model-generated plans and executes steps through an injected Agent Runner.
 - Agent Team is coordinator-led, open-ended multi-agent collaboration.
 - Dynamic Workflow is a versioned, deterministic DSL with structured data,
   bounded concurrency, hard budgets, durable waits, cache policy, and
   compensation.
 
-Neither mode wraps the other. Workflow `agent` nodes delegate a bounded Text
-Run through the Core delegation primitive, while nested workflows create child
-Workflow Runs.
+These kinds do not masquerade as one another through modes or compatibility
+facades. Callers select the Runtime kind before Run creation.
 
-Use `ValidateWorkflowDefinition` before publishing an immutable revision with
-`CreateWorkflowDefinition`. Start an exact revision with `StartWorkflow`, and
-read the canonical structured terminal value with `GetRunResult`. Successful
-Text Runs also expose a `RunResult`; when no structured contract was requested,
-the JSON value is the original text string.
-
-The Workflow DSL and expression AST are data-only and closed to arbitrary
-callbacks. All structured boundaries use self-contained JSON Schema Draft
-2020-12 documents; remote `$ref` values are rejected.
+Kernel terminal output remains feature-neutral through `kernel.Result`; each
+Feature owns the schema placed in that result. Provider-specific protocols and
+host business objects stay outside Kernel.

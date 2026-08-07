@@ -6,7 +6,7 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 	if module == nil || module.Handler == nil || routes == nil {
 		return
 	}
-	routes.POST("/text-runs", module.Handler.StartTextRun)
+	routes.POST("/agent-runs", module.Handler.StartAgentRun)
 	routes.POST("/plan-runs", module.Handler.StartPlanRun)
 	routes.POST("/plan-runs/:run_id/approval", module.Handler.ResolvePlanApproval)
 	routes.POST("/workflow-runs", module.Handler.StartWorkflowRun)

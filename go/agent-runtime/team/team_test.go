@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/text"
 )
 
 func TestSequentialTeamCompletesAllMembers(t *testing.T) {
@@ -160,13 +160,13 @@ func newFakeChildren(behavior childBehavior) *fakeChildren {
 
 func (children *fakeChildren) StartRun(
 	_ context.Context,
-	request text.StartRequest,
+	request agent.StartRequest,
 ) (kernel.Snapshot, error) {
 	children.mu.Lock()
 	defer children.mu.Unlock()
 	children.starts++
 	snapshot := kernel.Snapshot{Run: kernel.Run{
-		ID: request.ID, Kind: kernel.RunKindText, Actor: request.Actor, Thread: request.Thread,
+		ID: request.ID, Kind: kernel.RunKindAgent, Actor: request.Actor, Thread: request.Thread,
 		Goal: request.Goal, Status: kernel.RunStatusRunning, Revision: 1,
 	}}
 	switch {
@@ -175,7 +175,7 @@ func (children *fakeChildren) StartRun(
 		snapshot.Result = &kernel.Result{ContentType: "text", Content: json.RawMessage(fmt.Sprintf("%q", request.Goal))}
 	case children.behavior == childFailsFirst && children.starts == 1:
 		snapshot.Run.Status = kernel.RunStatusFailed
-		snapshot.Run.ErrorCode = "text.failed"
+		snapshot.Run.ErrorCode = "agent.failed"
 		snapshot.Run.ErrorDetail = "member failed"
 	}
 	children.runs[request.ID] = snapshot

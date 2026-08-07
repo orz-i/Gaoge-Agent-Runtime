@@ -1,4 +1,4 @@
-export type RuntimeKind = "text" | "plan_execute" | "workflow" | "team";
+export type RuntimeKind = "agent" | "plan_execute" | "workflow" | "team";
 export type RunStatus = "running" | "waiting_input" | "completed" | "failed" | "cancelled";
 
 export type ActorRefDTO = { tenantID: string; actorID: string };
@@ -49,7 +49,7 @@ export type RunSnapshotDTO = {
   events: EventDTO[];
 };
 
-export type StartTextRunRequest = {
+export type StartAgentRunRequest = {
   thread: ThreadRefDTO;
   input: { content: string };
   clientRunID?: string;
@@ -57,7 +57,7 @@ export type StartTextRunRequest = {
   toolKeys?: string[];
 };
 
-export type StartPlanRunRequest = StartTextRunRequest & {
+export type StartPlanRunRequest = StartAgentRunRequest & {
   approvalPolicy?: "auto" | "required";
   maxSteps?: number;
 };

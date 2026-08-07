@@ -185,7 +185,7 @@ func conformanceRecord(runID string) kernel.Record {
 	deadline := now.Add(time.Hour)
 	return kernel.Record{
 		Run: kernel.Run{
-			ID: runID, Kind: kernel.RunKindText,
+			ID: runID, Kind: kernel.RunKindAgent,
 			Actor:  kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: conformanceThreadID},
 			Goal:   "test", Status: kernel.RunStatusRunning, Revision: 1,

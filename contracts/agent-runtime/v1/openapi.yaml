@@ -3,14 +3,14 @@ info:
   title: Agent Runtime API
   version: 1.0.0
 paths:
-  /text-runs:
+  /agent-runs:
     post:
-      operationId: createTextRun
+      operationId: createAgentRun
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/StartTextRunRequest'}
+            schema: {$ref: '#/components/schemas/StartAgentRunRequest'}
       responses:
         '202':
           description: Accepted
@@ -179,7 +179,7 @@ components:
       required: [content]
       properties:
         content: {type: string, maxLength: 200000}
-    StartTextRunRequest:
+    StartAgentRunRequest:
       type: object
       additionalProperties: false
       required: [thread, input]
