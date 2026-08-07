@@ -22,6 +22,7 @@ func TestRouterExposesOnlyTargetRuntimeResources(t *testing.T) {
 	sort.Strings(operations)
 	expected := []string{
 		"GET /api/v1/runs/:run_id",
+		"GET /api/v1/runs/:run_id/feed",
 		"GET /api/v1/runs/:run_id/workbench",
 		"POST /api/v1/agent-runs",
 		"POST /api/v1/plan-runs",

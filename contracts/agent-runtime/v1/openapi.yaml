@@ -126,6 +126,22 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/CancelRunResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /runs/{runID}/feed:
+    get:
+      operationId: streamRunFeed
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - name: afterSeq
+          in: query
+          required: false
+          schema: {type: integer, minimum: 0, default: 0}
+      responses:
+        '200':
+          description: Replayable Run Feed event stream
+          content:
+            text/event-stream:
+              schema: {type: string}
+        default: {$ref: '#/components/responses/Error'}
   /runs/{runID}/workbench:
     get:
       operationId: getWorkbench
@@ -292,6 +308,21 @@ components:
         type: {type: string}
         message: {type: string}
         data: {}
+        createdAt: {type: string, format: date-time}
+    RunFeedEvent:
+      type: object
+      additionalProperties: false
+      required: [seq, runID, type, createdAt]
+      properties:
+        seq: {type: integer, minimum: 1}
+        runID: {type: string}
+        type: {type: string}
+        delta: {type: string}
+        message: {type: string}
+        data: {}
+        revision: {type: integer, minimum: 1}
+        status: {type: string}
+        terminal: {type: boolean}
         createdAt: {type: string, format: date-time}
     Checkpoint:
       type: object

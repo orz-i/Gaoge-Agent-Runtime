@@ -17,8 +17,14 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 });
 
 describe("RuntimeClient target API", () => {
-  it("uses only the nine target Runtime endpoints", async () => {
-    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(json(snapshot)));
+  it("uses only the ten target Runtime endpoints", async () => {
+    const fetcher = vi.fn().mockImplementation((url: string) => Promise.resolve(
+      url.includes("/feed?")
+        ? new Response(`id: 1\ndata: {"seq":1,"runID":"run/1","type":"run.completed","terminal":true,"createdAt":"2026-08-06T00:00:01Z"}\n\n`, {
+            headers: { "content-type": "text/event-stream" },
+          })
+        : json(snapshot),
+    ));
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
     await client.agent.start({ thread: { kind: "conversation", id: "thread-1" }, input: { content: "Answer" } });
     await client.plans.start({ thread: { kind: "conversation", id: "thread-1" }, input: { content: "Plan" } });
@@ -29,6 +35,9 @@ describe("RuntimeClient target API", () => {
     await client.runs.get("run/1");
     await client.runs.cancel("run/1", { expectedRevision: 2, reason: "stop" });
     await client.runs.workbench("run/1");
+    for await (const event of client.runs.feed("run/1", { reconnectDelayMS: 0 })) {
+      expect(event.terminal).toBe(true);
+    }
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
       "https://runtime.test/api/v1/agent-runs",
       "https://runtime.test/api/v1/plan-runs",
@@ -39,6 +48,7 @@ describe("RuntimeClient target API", () => {
       "https://runtime.test/api/v1/runs/run%2F1",
       "https://runtime.test/api/v1/runs/run%2F1/cancel",
       "https://runtime.test/api/v1/runs/run%2F1/workbench",
+      "https://runtime.test/api/v1/runs/run%2F1/feed?afterSeq=0",
     ]);
   });
 
@@ -48,5 +58,26 @@ describe("RuntimeClient target API", () => {
     await expect(client.runs.get("run-1")).rejects.toEqual(expect.objectContaining<Partial<RuntimeAPIError>>({
       status: 409, code: "run.conflict", requestID: "request-1",
     }));
+  });
+
+  it("reconnects the Run Feed from the last sequence without duplicates", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        `id: 1\r\ndata: {"seq":1,"runID":"run-1","type":"model.delta","delta":"hel","createdAt":"2026-08-06T00:00:00Z"}\r\n\r\n`,
+      ))
+      .mockResolvedValueOnce(new Response(
+        `id: 2\ndata: {"seq":2,"runID":"run-1","type":"run.completed","terminal":true,"createdAt":"2026-08-06T00:00:01Z"}\n\n`,
+      ));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+    const events = [];
+    for await (const event of client.runs.feed("run-1", { reconnectDelayMS: 0 })) events.push(event);
+    expect(events.map((event) => [event.seq, event.type])).toEqual([
+      [1, "model.delta"],
+      [2, "run.completed"],
+    ]);
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "https://runtime.test/api/v1/runs/run-1/feed?afterSeq=0",
+      "https://runtime.test/api/v1/runs/run-1/feed?afterSeq=1",
+    ]);
   });
 });

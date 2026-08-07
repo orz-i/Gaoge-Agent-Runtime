@@ -4,6 +4,7 @@ import type {
   ResolvePlanApprovalRequest,
   ResolveWorkflowWaitRequest,
   RunSnapshotDTO,
+  RunFeedEventDTO,
   StartAgentRunRequest,
   StartPlanRunRequest,
   StartTeamRunRequest,
@@ -14,6 +15,11 @@ import type {
 export type RuntimeHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 export type RuntimeClientOptions = { baseURL: string; fetch?: typeof globalThis.fetch; headers?: RuntimeHeaders };
 export type RequestOptions = { signal?: AbortSignal };
+export type RunFeedOptions = RequestOptions & {
+  afterSeq?: number;
+  reconnectDelayMS?: number;
+  maxReconnects?: number;
+};
 
 export class RuntimeAPIError extends Error {
   constructor(message: string, public readonly status: number, public readonly code: string, public readonly requestID: string) {
@@ -62,6 +68,7 @@ export class RuntimeClient {
         this.request<CancelRunResponse>(`/runs/${pathPart(runID)}/cancel`, { method: "POST", body: JSON.stringify(payload) }, request),
       workbench: (runID: string, request?: RequestOptions) =>
         this.request<WorkbenchDTO>(`/runs/${pathPart(runID)}/workbench`, {}, request),
+      feed: (runID: string, request?: RunFeedOptions) => this.streamRunFeed(runID, request),
     };
   }
 
@@ -81,20 +88,129 @@ export class RuntimeClient {
     if (init.body) headers.set("Content-Type", "application/json");
     const response = await this.fetcher(this.url(path), { ...init, headers, signal: request?.signal });
     if (!response.ok) {
-      let payload: ErrorResponse = {};
-      try {
-        payload = await response.json() as ErrorResponse;
-      } catch {
-        // Non-JSON failures use stable fallback values.
-      }
-      throw new RuntimeAPIError(
-        payload.error?.message ?? `runtime request failed: ${response.status}`,
-        response.status,
-        payload.error?.code ?? "runtime.internal",
-        payload.error?.requestID ?? response.headers.get("x-request-id") ?? "",
-      );
+      throw await runtimeAPIError(response);
     }
     if (response.status === 204) return undefined as T;
     return response.json() as Promise<T>;
   }
+
+  private async *streamRunFeed(runID: string, request: RunFeedOptions = {}): AsyncGenerator<RunFeedEventDTO> {
+    let afterSeq = Math.max(0, Math.trunc(request.afterSeq ?? 0));
+    const reconnectDelayMS = Math.max(0, Math.trunc(request.reconnectDelayMS ?? 250));
+    const maxReconnects = Math.max(0, Math.trunc(request.maxReconnects ?? 20));
+    let reconnects = 0;
+    while (!request.signal?.aborted) {
+      let response: Response;
+      try {
+        const headers = await this.headers();
+        headers.set("Accept", "text/event-stream");
+        response = await this.fetcher(
+          this.url(`/runs/${pathPart(runID)}/feed?afterSeq=${afterSeq}`),
+          { headers, signal: request.signal },
+        );
+      } catch (error) {
+        if (request.signal?.aborted) return;
+        if (reconnects >= maxReconnects) throw error;
+        reconnects += 1;
+        await reconnectDelay(reconnectDelayMS, request.signal);
+        continue;
+      }
+      if (!response.ok) {
+        if (response.status === 404 && reconnects < maxReconnects) {
+          reconnects += 1;
+          await reconnectDelay(reconnectDelayMS, request.signal);
+          continue;
+        }
+        throw await runtimeAPIError(response);
+      }
+      if (!response.body) {
+        throw new RuntimeAPIError("runtime feed response has no body", response.status, "runfeed.invalid_response", "");
+      }
+      let received = false;
+      for await (const event of decodeRunFeed(response.body)) {
+        if (event.seq <= afterSeq) continue;
+        received = true;
+        reconnects = 0;
+        afterSeq = event.seq;
+        yield event;
+        if (event.terminal) return;
+      }
+      if (request.signal?.aborted) return;
+      if (!received) reconnects += 1;
+      if (reconnects > maxReconnects) {
+        throw new RuntimeAPIError("runtime feed disconnected", 0, "runfeed.disconnected", "");
+      }
+      await reconnectDelay(reconnectDelayMS, request.signal);
+    }
+  }
+}
+
+async function runtimeAPIError(response: Response): Promise<RuntimeAPIError> {
+  let payload: ErrorResponse = {};
+  try {
+    payload = await response.json() as ErrorResponse;
+  } catch {
+    // Non-JSON failures use stable fallback values.
+  }
+  return new RuntimeAPIError(
+    payload.error?.message ?? `runtime request failed: ${response.status}`,
+    response.status,
+    payload.error?.code ?? "runtime.internal",
+    payload.error?.requestID ?? response.headers.get("x-request-id") ?? "",
+  );
+}
+
+async function* decodeRunFeed(body: ReadableStream<Uint8Array>): AsyncGenerator<RunFeedEventDTO> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      buffer = buffer.replaceAll("\r\n", "\n");
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        const block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        const event = parseRunFeedBlock(block);
+        if (event) yield event;
+        boundary = buffer.indexOf("\n\n");
+      }
+      if (done) {
+        const event = parseRunFeedBlock(buffer);
+        if (event) yield event;
+        return;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseRunFeedBlock(block: string): RunFeedEventDTO | null {
+  const data = block
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+    .trim();
+  if (!data) return null;
+  const event = JSON.parse(data) as RunFeedEventDTO;
+  return Number.isSafeInteger(event.seq) && event.seq > 0 && typeof event.runID === "string" && typeof event.type === "string"
+    ? event
+    : null;
+}
+
+function reconnectDelay(durationMS: number, signal?: AbortSignal): Promise<void> {
+  if (durationMS <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const finish = () => {
+      globalThis.clearTimeout(timeout);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timeout = globalThis.setTimeout(finish, durationMS);
+    signal?.addEventListener("abort", finish, { once: true });
+  });
 }

@@ -31,6 +31,7 @@ func TestOpenAPIExposesOnlyTargetRuntimeResources(t *testing.T) {
 	sort.Strings(operations)
 	expected := []string{
 		"get /runs/{runID}",
+		"get /runs/{runID}/feed",
 		"get /runs/{runID}/workbench",
 		"post /agent-runs",
 		"post /plan-runs",

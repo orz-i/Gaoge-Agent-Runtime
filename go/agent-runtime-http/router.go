@@ -13,6 +13,7 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 	routes.POST("/workflow-runs/:run_id/wait", module.Handler.ResolveWorkflowWait)
 	routes.POST("/team-runs", module.Handler.StartTeamRun)
 	routes.GET("/runs/:run_id", module.Handler.GetRun)
+	routes.GET("/runs/:run_id/feed", module.Handler.StreamRunFeed)
 	routes.POST("/runs/:run_id/cancel", module.Handler.CancelRun)
 	routes.GET("/runs/:run_id/workbench", module.Handler.GetWorkbench)
 }

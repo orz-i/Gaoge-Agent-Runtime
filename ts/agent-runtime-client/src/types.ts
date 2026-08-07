@@ -29,6 +29,19 @@ export type EventDTO = {
   createdAt: string;
 };
 
+export type RunFeedEventDTO = {
+  seq: number;
+  runID: string;
+  type: string;
+  delta?: string;
+  message?: string;
+  data?: unknown;
+  revision?: number;
+  status?: RunStatus | string;
+  terminal?: boolean;
+  createdAt: string;
+};
+
 export type CheckpointDTO = {
   id: string;
   kind: string;

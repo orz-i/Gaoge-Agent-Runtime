@@ -6,11 +6,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -236,6 +238,7 @@ func (model *terminalToolModel) Generate(
 
 func TestRunnerCompletesImmediatelyAfterTerminalTool(t *testing.T) {
 	runtime, approvals := newTestRuntimeAndApprovals(t)
+	feed := newAgentTestFeed(t)
 	executions := 0
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{
@@ -252,7 +255,12 @@ func TestRunnerCompletesImmediatelyAfterTerminalTool(t *testing.T) {
 		}),
 	}})
 	model := &terminalToolModel{t: t}
-	runner := mustRunner(t, runtime, approvals, model, registry)
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals, Feed: feed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	snapshot, err := runner.StartRun(t.Context(), startRequest(
 		"run_terminal", "request_terminal", "publish", publishToolKey,
 	))
@@ -264,6 +272,113 @@ func TestRunnerCompletesImmediatelyAfterTerminalTool(t *testing.T) {
 	}
 	if snapshot.Result.ContentType != "application/json" || string(snapshot.Result.Content) != `{"changeSetID":"change_1"}` {
 		t.Fatalf("terminal result = %#v", snapshot.Result)
+	}
+	assertAgentFeedTypes(t, feed, "run_terminal", []string{
+		runfeed.EventRunStarted,
+		runfeed.EventModelStarted,
+		runfeed.EventModelCompleted,
+		runfeed.EventToolRequested,
+		runfeed.EventToolStarted,
+		runfeed.EventToolCompleted,
+		runfeed.EventRunCompleted,
+	})
+}
+
+type deltaThenFailureModel struct {
+	streamCalls int
+	unaryCalls  int
+}
+
+func (model *deltaThenFailureModel) Generate(context.Context, agent.ModelRequest) (agent.ModelResponse, error) {
+	model.unaryCalls++
+	return agent.ModelResponse{Content: "unexpected"}, nil
+}
+
+func (model *deltaThenFailureModel) GenerateStream(
+	_ context.Context,
+	_ agent.ModelRequest,
+	onEvent func(agent.ModelStreamEvent) error,
+) (agent.ModelResponse, error) {
+	model.streamCalls++
+	if err := onEvent(agent.ModelStreamEvent{Delta: "partial"}); err != nil {
+		return agent.ModelResponse{}, err
+	}
+	return agent.ModelResponse{}, errDatabaseUnavailable
+}
+
+func TestRunnerDoesNotReplayModelAfterStreamDeltaFailure(t *testing.T) {
+	t.Parallel()
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	feed := newAgentTestFeed(t)
+	registry := mustRegistry(t, nil)
+	model := &deltaThenFailureModel{}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals, Feed: feed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), startRequest("run_stream_failure", "request_stream_failure", "answer"))
+	assertStreamFailureRun(t, snapshot, err, model)
+	assertStreamFailureFeed(t, feed, snapshot.Run.ID)
+}
+
+func assertStreamFailureRun(
+	t *testing.T,
+	snapshot kernel.Snapshot,
+	err error,
+	model *deltaThenFailureModel,
+) {
+	t.Helper()
+	if !errors.Is(err, agent.ErrModelFailure) || snapshot.Run.Status != kernel.RunStatusFailed {
+		t.Fatalf("snapshot = %#v, error = %v", snapshot.Run, err)
+	}
+	if model.streamCalls != 1 || model.unaryCalls != 0 {
+		t.Fatalf("model calls = stream %d, unary %d", model.streamCalls, model.unaryCalls)
+	}
+}
+
+func assertStreamFailureFeed(t *testing.T, feed *runfeed.Feed, runID string) {
+	t.Helper()
+	events, replayErr := feed.Replay(t.Context(), runID, 0)
+	if replayErr != nil {
+		t.Fatal(replayErr)
+	}
+	assertAgentFeedTypes(t, feed, runID, []string{
+		runfeed.EventRunStarted,
+		runfeed.EventModelStarted,
+		runfeed.EventModelDelta,
+		runfeed.EventRunFailed,
+	})
+	var streamEvent agent.ModelStreamEvent
+	if len(events) != 4 || json.Unmarshal(events[2].Data, &streamEvent) != nil || streamEvent.Delta != "partial" || !events[3].Terminal {
+		t.Fatalf("stream failure events = %#v", events)
+	}
+}
+
+func newAgentTestFeed(t *testing.T) *runfeed.Feed {
+	t.Helper()
+	feed, err := runfeed.New(memory.NewRunFeedStore(), runfeed.Options{
+		Retention: time.Minute, PollInterval: time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return feed
+}
+
+func assertAgentFeedTypes(t *testing.T, feed *runfeed.Feed, runID string, want []string) {
+	t.Helper()
+	events, err := feed.Replay(t.Context(), runID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(events))
+	for _, event := range events {
+		got = append(got, event.Type)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("feed types = %#v, want %#v", got, want)
 	}
 }
 

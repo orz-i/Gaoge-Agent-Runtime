@@ -8,6 +8,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
@@ -32,6 +33,7 @@ type Dependencies struct {
 	Workflows               *workflow.Runner
 	Teams                   *team.Runner
 	Workbench               *workbench.Query
+	Feed                    *runfeed.Feed
 	PrincipalResolver       PrincipalResolver
 	RequestMetadataResolver RequestMetadataResolver
 }
@@ -43,6 +45,7 @@ type Handler struct {
 	workflows *workflow.Runner
 	teams     *team.Runner
 	workbench *workbench.Query
+	feed      *runfeed.Feed
 	principal PrincipalResolver
 	metadata  RequestMetadataResolver
 }
@@ -51,6 +54,7 @@ func NewHandler(dependencies Dependencies) *Handler {
 	return &Handler{
 		runtime: dependencies.Runtime, agent: dependencies.Agent, plans: dependencies.Plans,
 		workflows: dependencies.Workflows, teams: dependencies.Teams, workbench: dependencies.Workbench,
+		feed:      dependencies.Feed,
 		principal: dependencies.PrincipalResolver, metadata: dependencies.RequestMetadataResolver,
 	}
 }

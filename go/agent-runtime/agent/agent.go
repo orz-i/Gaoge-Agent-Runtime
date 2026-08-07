@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -49,7 +51,7 @@ func (runner *Runner) completeWithToolResult(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encodedState, Checkpoint: snapshot.Checkpoint,
 		Result: &kernel.Result{
 			ContentType: "application/json",
@@ -60,6 +62,11 @@ func (runner *Runner) completeWithToolResult(
 			{Type: "agent.completed", Message: "Terminal Tool completed the Agent loop"},
 		},
 	})
+	if err == nil {
+		runner.publishToolEvent(ctx, completed, runfeed.EventToolCompleted, result.Receipt)
+		runner.publishRunEvent(ctx, completed, runfeed.EventRunCompleted, true)
+	}
+	return completed, err
 }
 
 // ModelRequest is one direct Agent loop model call.
@@ -115,9 +122,46 @@ type ModelResponse struct {
 	Citations       []string
 }
 
+// ModelReasoningDelta is one provider-neutral reasoning progress observation.
+type ModelReasoningDelta struct {
+	EventType string `json:"eventType,omitempty"`
+	ItemID    string `json:"itemID,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Text      string `json:"text,omitempty"`
+}
+
+// ModelUsage is one cumulative provider-neutral token usage observation.
+type ModelUsage struct {
+	InputTokens        int64  `json:"inputTokens,omitempty"`
+	OutputTokens       int64  `json:"outputTokens,omitempty"`
+	CacheReadTokens    int64  `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens   int64  `json:"cacheWriteTokens,omitempty"`
+	CacheWrite5mTokens int64  `json:"cacheWrite5mTokens,omitempty"`
+	CacheWrite1hTokens int64  `json:"cacheWrite1hTokens,omitempty"`
+	ReasoningTokens    int64  `json:"reasoningTokens,omitempty"`
+	Speed              string `json:"speed,omitempty"`
+	ServiceTier        string `json:"serviceTier,omitempty"`
+	BillingRateClass   string `json:"billingRateClass,omitempty"`
+}
+
+// ModelStreamEvent is the provider-neutral live model event consumed by Agent Runtime.
+type ModelStreamEvent struct {
+	Delta          string               `json:"delta,omitempty"`
+	Reasoning      *ModelReasoningDelta `json:"reasoning,omitempty"`
+	Usage          *ModelUsage          `json:"usage,omitempty"`
+	HostedToolCall *HostedToolCall      `json:"hostedToolCall,omitempty"`
+	ResponseID     string               `json:"responseID,omitempty"`
+}
+
 // Model is the only model dependency of the Agent feature.
 type Model interface {
 	Generate(context.Context, ModelRequest) (ModelResponse, error)
+}
+
+// StreamingModel optionally exposes real provider stream events while preserving the final ModelResponse contract.
+type StreamingModel interface {
+	GenerateStream(context.Context, ModelRequest, func(ModelStreamEvent) error) (ModelResponse, error)
 }
 
 // HostedToolCatalog resolves provider-hosted Tool activations by canonical Tool Key.
@@ -139,6 +183,7 @@ type Dependencies struct {
 	Executor    tools.Executor
 	Approvals   *interaction.Approvals
 	HostedTools HostedToolCatalog
+	Feed        runfeed.Publisher
 	Limits      Limits
 }
 
@@ -162,6 +207,7 @@ type Runner struct {
 	executor    tools.Executor
 	approvals   *interaction.Approvals
 	hostedTools HostedToolCatalog
+	feed        runfeed.Publisher
 	limits      Limits
 }
 
@@ -218,17 +264,21 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
-		hostedTools: dependencies.HostedTools, limits: dependencies.Limits,
+		hostedTools: dependencies.HostedTools, feed: dependencies.Feed, limits: dependencies.Limits,
 	}, nil
 }
 
 // Descriptor declares the explicit Agent capability graph.
 func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
+	requires := []kernel.Capability{
+		kernel.CapabilityRuntime, tools.CapabilityCatalog, tools.CapabilityExecutor, interaction.CapabilityApproval,
+	}
+	if runner != nil && runner.feed != nil {
+		requires = append(requires, runfeed.CapabilityFeed)
+	}
 	return kernel.FeatureDescriptor{
-		Name: "agent",
-		Requires: []kernel.Capability{
-			kernel.CapabilityRuntime, tools.CapabilityCatalog, tools.CapabilityExecutor, interaction.CapabilityApproval,
-		},
+		Name:     "agent",
+		Requires: requires,
 		Provides: []kernel.Capability{CapabilityRunner},
 	}
 }
@@ -263,6 +313,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	runner.publishRunEvent(ctx, snapshot, runfeed.EventRunStarted, false)
 	return runner.drive(ctx, snapshot)
 }
 
@@ -372,10 +423,14 @@ func (runner *Runner) callModel(
 	if err != nil {
 		return nil, ModelResponse{}, err
 	}
-	response, err := runner.model.Generate(ctx, ModelRequest{
+	request := ModelRequest{
 		RunID: snapshot.Run.ID, Model: state.Model,
 		Messages: cloneMessages(state.Messages), Tools: definitions, HostedTools: cloneHostedTools(hostedTools),
+	}
+	runner.publish(ctx, snapshot.Run.ID, runfeed.Draft{
+		Type: runfeed.EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
+	response, err := runner.generateModel(ctx, request)
 	if err != nil {
 		return nil, ModelResponse{}, errors.Join(ErrModelFailure, err)
 	}
@@ -383,7 +438,23 @@ func (runner *Runner) callModel(
 	if !validModelResponse(response) {
 		return nil, ModelResponse{}, ErrInvalidModelResponse
 	}
+	runner.publish(ctx, snapshot.Run.ID, runfeed.Draft{
+		Type: runfeed.EventModelCompleted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
+	})
 	return definitions, response, nil
+}
+
+func (runner *Runner) generateModel(ctx context.Context, request ModelRequest) (ModelResponse, error) {
+	streaming, ok := runner.model.(StreamingModel)
+	if !ok {
+		return runner.model.Generate(ctx, request)
+	}
+	return streaming.GenerateStream(ctx, request, func(event ModelStreamEvent) error {
+		runner.publishValue(ctx, request.RunID, runfeed.Draft{
+			Type: runfeed.EventModelDelta, Delta: event.Delta,
+		}, event)
+		return nil
+	})
 }
 
 func (runner *Runner) resolveSelectedTools(
@@ -472,10 +543,18 @@ func (runner *Runner) queueToolCalls(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{Type: "tool.batch_requested", Message: "Tool call batch requested"}},
 	})
+	if err == nil {
+		for _, call := range preparedCalls {
+			runner.publishValue(ctx, next.Run.ID, runfeed.Draft{
+				Type: runfeed.EventToolRequested, Revision: next.Run.Revision, Status: string(next.Run.Status),
+			}, call)
+		}
+	}
+	return next, err
 }
 
 func (runner *Runner) preparePendingApproval(
@@ -507,6 +586,12 @@ func (runner *Runner) preparePendingApproval(
 		Status: kernel.RunStatusWaitingInput, State: encoded, Checkpoint: checkpoint,
 		Events: []kernel.EventDraft{{Type: "interaction.created", Message: "Tool approval required"}},
 	})
+	if err == nil {
+		runner.publishRunEvent(ctx, waiting, runfeed.EventRunWaitingInput, false)
+		runner.publishValue(ctx, waiting.Run.ID, runfeed.Draft{
+			Type: runfeed.EventInteractionRequired, Revision: waiting.Run.Revision, Status: string(waiting.Run.Status),
+		}, checkpoint)
+	}
 	return waiting, err
 }
 
@@ -523,6 +608,9 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if state.ToolCalls >= state.Limits.MaxToolCalls {
 		return runner.fail(ctx, snapshot, state, "agent.tool_limit", ErrCallLimit)
 	}
+	runner.publishValue(ctx, snapshot.Run.ID, runfeed.Draft{
+		Type: runfeed.EventToolStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
+	}, call)
 	result, err := runner.executor.Execute(ctx, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
 	if err != nil {
 		if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
@@ -549,6 +637,9 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{Type: "tool.completed", Message: result.Receipt.Disposition}},
 	})
+	if err == nil {
+		runner.publishToolEvent(ctx, next, runfeed.EventToolCompleted, result.Receipt)
+	}
 	return next, err
 }
 
@@ -591,10 +682,17 @@ func (runner *Runner) recordRecoverableToolError(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{Type: "tool.correction_requested", Message: strings.TrimSpace(code)}},
 	})
+	if err == nil {
+		runner.publishValue(ctx, next.Run.ID, runfeed.Draft{
+			Type: runfeed.EventToolCompleted, Message: strings.TrimSpace(code),
+			Revision: next.Run.Revision, Status: string(next.Run.Status),
+		}, call)
+	}
+	return next, err
 }
 
 func (runner *Runner) resumeApproved(
@@ -665,11 +763,15 @@ func (runner *Runner) complete(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encodedState, Checkpoint: snapshot.Checkpoint,
 		Result: result,
 		Events: []kernel.EventDraft{{Type: "agent.completed", Message: "Direct Agent loop completed"}},
 	})
+	if err == nil {
+		runner.publishRunEvent(ctx, completed, runfeed.EventRunCompleted, true)
+	}
+	return completed, err
 }
 
 func terminalResult(response ModelResponse) (*kernel.Result, error) {
@@ -709,7 +811,46 @@ func (runner *Runner) fail(
 		ErrorCode: code, ErrorDetail: cause.Error(),
 		Events: []kernel.EventDraft{{Type: "agent.failed", Message: code}},
 	})
+	if transitionErr == nil {
+		runner.publishRunEvent(ctx, failed, runfeed.EventRunFailed, true)
+	}
 	return failed, errors.Join(cause, transitionErr)
+}
+
+func (runner *Runner) publishRunEvent(ctx context.Context, snapshot kernel.Snapshot, eventType string, terminal bool) {
+	runner.publish(ctx, snapshot.Run.ID, runfeed.Draft{
+		Type: eventType, Message: snapshot.Run.ErrorDetail, Revision: snapshot.Run.Revision,
+		Status: string(snapshot.Run.Status), Terminal: terminal,
+	})
+}
+
+func (runner *Runner) publishToolEvent(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	eventType string,
+	value interface{},
+) {
+	runner.publishValue(ctx, snapshot.Run.ID, runfeed.Draft{
+		Type: eventType, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
+	}, value)
+}
+
+func (runner *Runner) publishValue(ctx context.Context, runID string, draft runfeed.Draft, value interface{}) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return
+	}
+	draft.Data = data
+	runner.publish(ctx, runID, draft)
+}
+
+func (runner *Runner) publish(ctx context.Context, runID string, draft runfeed.Draft) {
+	if runner == nil || runner.feed == nil {
+		return
+	}
+	publishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	_, _ = runner.feed.Publish(publishContext, runID, draft)
 }
 
 func (runner *Runner) loadState(ctx context.Context, runID string) (kernel.Snapshot, runState, error) {

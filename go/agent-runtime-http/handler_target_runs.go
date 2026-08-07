@@ -9,6 +9,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
@@ -175,6 +176,12 @@ func (handler *Handler) CancelRun(context *gin.Context) {
 	if err != nil {
 		writeTargetRuntimeError(context, "run", err)
 		return
+	}
+	if handler.feed != nil {
+		_, _ = handler.feed.Publish(context.Request.Context(), snapshot.Run.ID, runfeed.Draft{
+			Type: runfeed.EventRunCancelled, Message: snapshot.Run.ErrorDetail,
+			Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status), Terminal: true,
+		})
 	}
 	writeSuccess(context, CancelRunResponse{Run: snapshot.Run})
 }
