@@ -83,8 +83,8 @@ type Model interface {
 
 // Limits are hard ceilings for one direct Text loop.
 type Limits struct {
-	MaxLLMCalls  int
-	MaxToolCalls int
+	MaxLLMCalls  int `json:"maxLLMCalls"`
+	MaxToolCalls int `json:"maxToolCalls"`
 }
 
 // Dependencies explicitly provide the direct Text loop capabilities.
@@ -106,6 +106,7 @@ type StartRequest struct {
 	Goal      string
 	Model     string
 	ToolKeys  []string
+	Limits    Limits
 }
 
 // Runner owns only the direct Text model and Tool loop.
@@ -122,6 +123,7 @@ type runState struct {
 	Messages     []Message    `json:"messages"`
 	Model        string       `json:"model,omitempty"`
 	ToolKeys     []string     `json:"toolKeys"`
+	Limits       Limits       `json:"limits"`
 	PendingCalls []tools.Call `json:"pendingCalls,omitempty"`
 	LLMCalls     int          `json:"llmCalls"`
 	ToolCalls    int          `json:"toolCalls"`
@@ -164,10 +166,15 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if _, err := runner.catalog.List(request.ToolKeys); err != nil {
 		return kernel.Snapshot{}, err
 	}
+	limits, err := resolveRunLimits(runner.limits, request.Limits)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
 	state := runState{
 		Messages: []Message{{Role: RoleUser, Content: strings.TrimSpace(request.Goal)}},
 		Model:    strings.TrimSpace(request.Model),
 		ToolKeys: normalizedToolKeys(request.ToolKeys),
+		Limits:   limits,
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
@@ -249,7 +256,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		executed, executeErr := runner.executePending(ctx, prepared)
 		return executed, executeErr != nil, executeErr
 	}
-	if state.LLMCalls >= runner.limits.MaxLLMCalls {
+	if state.LLMCalls >= state.Limits.MaxLLMCalls {
 		failed, failErr := runner.fail(ctx, snapshot, state, "text.llm_limit", ErrCallLimit)
 		return failed, true, failErr
 	}
@@ -263,7 +270,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		completed, completeErr := runner.complete(ctx, snapshot, state, response.Content)
 		return completed, true, completeErr
 	}
-	if state.ToolCalls+len(response.ToolCalls) > runner.limits.MaxToolCalls {
+	if state.ToolCalls+len(response.ToolCalls) > state.Limits.MaxToolCalls {
 		failed, failErr := runner.fail(ctx, snapshot, state, "text.tool_limit", ErrCallLimit)
 		return failed, true, failErr
 	}
@@ -386,7 +393,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if !ok {
 		return runner.fail(ctx, snapshot, state, "text.tool_invalid", tools.ErrToolNotFound)
 	}
-	if state.ToolCalls >= runner.limits.MaxToolCalls {
+	if state.ToolCalls >= state.Limits.MaxToolCalls {
 		return runner.fail(ctx, snapshot, state, "text.tool_limit", ErrCallLimit)
 	}
 	result, err := runner.executor.Execute(ctx, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
@@ -615,7 +622,27 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	if err := json.Unmarshal(encoded, &state); err != nil {
 		return runState{}, errors.Join(ErrInvalidRequest, err)
 	}
+	if state.Limits.MaxLLMCalls <= 0 || state.Limits.MaxToolCalls <= 0 {
+		return runState{}, ErrInvalidRequest
+	}
 	return state, nil
+}
+
+func resolveRunLimits(defaults Limits, requested Limits) (Limits, error) {
+	if requested.MaxLLMCalls < 0 || requested.MaxToolCalls < 0 {
+		return Limits{}, ErrInvalidRequest
+	}
+	resolved := requested
+	if resolved.MaxLLMCalls == 0 {
+		resolved.MaxLLMCalls = defaults.MaxLLMCalls
+	}
+	if resolved.MaxToolCalls == 0 {
+		resolved.MaxToolCalls = defaults.MaxToolCalls
+	}
+	if resolved.MaxLLMCalls <= 0 || resolved.MaxToolCalls <= 0 {
+		return Limits{}, ErrInvalidRequest
+	}
+	return resolved, nil
 }
 
 func normalizedToolKeys(values []string) []string {

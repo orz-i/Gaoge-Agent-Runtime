@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
@@ -42,6 +43,57 @@ func newTestRuntimeAndApprovals(t *testing.T) (*kernel.Runtime, *interaction.App
 		t.Fatal(err)
 	}
 	return runtime, approvals
+}
+
+type perRunLimitModel struct {
+	calls int
+}
+
+func (model *perRunLimitModel) Generate(_ context.Context, _ text.ModelRequest) (text.ModelResponse, error) {
+	model.calls++
+	if model.calls == 1 {
+		return text.ModelResponse{ToolCalls: []tools.Call{
+			{ID: callOne, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
+			{ID: callTwo, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
+		}}, nil
+	}
+	return text.ModelResponse{Content: "done"}, nil
+}
+
+func TestRunnerFreezesPerRunLimits(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	registry := mustRegistry(t, []tools.Registration{{
+		Definition: tools.Definition{
+			Key: manifestToolKey, Name: manifestToolName,
+			InputSchema: json.RawMessage(`{"type":"object"}`), ApprovalMode: tools.ApprovalNever,
+		},
+		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			return tools.ExecutionResult{
+				Content: json.RawMessage(`{"ok":true}`),
+				Receipt: tools.Receipt{ExecutionID: "read", Disposition: committedDisposition},
+			}, nil
+		}),
+	}})
+	model := &perRunLimitModel{}
+	runner, err := text.NewRunner(text.Dependencies{
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals,
+		Limits: text.Limits{MaxLLMCalls: 1, MaxToolCalls: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := startRequest("run_per_limits", "request_per_limits", "read twice", manifestToolKey)
+	request.Limits = text.Limits{MaxLLMCalls: 2, MaxToolCalls: 2}
+	snapshot, err := runner.StartRun(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted || model.calls != 2 {
+		t.Fatalf("snapshot = %#v, model calls = %d", snapshot.Run, model.calls)
+	}
+	if !strings.Contains(string(snapshot.State), `"limits":{"maxLLMCalls":2,"maxToolCalls":2}`) {
+		t.Fatalf("per-run limits were not frozen in state: %s", snapshot.State)
+	}
 }
 
 func mustRegistry(t *testing.T, registrations []tools.Registration) *tools.Registry {
