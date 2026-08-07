@@ -25,6 +25,7 @@ const (
 	callGood               = "call_good"
 	callOne                = "call_1"
 	callTwo                = "call_2"
+	hostedImageToolKey     = "openai.image_generation"
 )
 
 var (
@@ -138,6 +139,85 @@ type transcriptModel struct {
 type terminalToolModel struct {
 	t     *testing.T
 	calls int
+}
+
+type hostedCatalog struct {
+	tool agent.HostedTool
+}
+
+func (catalog hostedCatalog) Resolve(_ context.Context, key string, _ string) (agent.HostedTool, bool, error) {
+	if key != catalog.tool.Key {
+		return agent.HostedTool{}, false, nil
+	}
+	return catalog.tool, true, nil
+}
+
+type hostedArtifactModel struct {
+	t       *testing.T
+	request agent.ModelRequest
+}
+
+func (model *hostedArtifactModel) Generate(_ context.Context, request agent.ModelRequest) (agent.ModelResponse, error) {
+	model.request = request
+	if len(request.Tools) != 0 {
+		model.t.Fatalf("hosted Tool leaked into local definitions: %#v", request.Tools)
+	}
+	if len(request.HostedTools) != 1 || request.HostedTools[0].Key != hostedImageToolKey {
+		model.t.Fatalf("hosted Tool activation missing: %#v", request.HostedTools)
+	}
+	return agent.ModelResponse{
+		HostedToolCalls: []agent.HostedToolCall{{
+			ID: "image_call_1", ToolKey: hostedImageToolKey, Status: "completed",
+			Input: json.RawMessage(`{"prompt":"cat"}`),
+		}},
+		Artifacts: []agent.ArtifactRef{{
+			ID: "file_image_1", Kind: "image", MediaType: "image/png", Name: "generated.png", SizeBytes: 128,
+		}},
+		Citations: []string{"artifact:file_image_1"},
+	}, nil
+}
+
+func TestRunnerCompletesHostedToolArtifactWithoutPersistingBinary(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	registry := mustRegistry(t, nil)
+	model := &hostedArtifactModel{t: t}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals,
+		HostedTools: hostedCatalog{tool: agent.HostedTool{
+			Key:    hostedImageToolKey,
+			Target: json.RawMessage(`{"variants":[{"protocol":"openai_responses","payload":{"type":"image_generation"}}]}`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), startRequest(
+		"run_hosted_image", "request_hosted_image", "draw a cat", hostedImageToolKey,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHostedArtifactResult(t, snapshot)
+}
+
+func assertHostedArtifactResult(t *testing.T, snapshot kernel.Snapshot) {
+	t.Helper()
+	if snapshot.Run.Status != kernel.RunStatusCompleted || snapshot.Result == nil {
+		t.Fatalf("unexpected snapshot: %#v", snapshot)
+	}
+	if snapshot.Result.ContentType != "agent_result" {
+		t.Fatalf("content type = %q", snapshot.Result.ContentType)
+	}
+	var result agent.Result
+	if err := json.Unmarshal(snapshot.Result.Content, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.HostedToolCalls) != 1 || len(result.Artifacts) != 1 || result.Artifacts[0].ID != "file_image_1" {
+		t.Fatalf("unexpected result: %#v", result)
+	}
+	if strings.Contains(string(snapshot.State), "iVBOR") || strings.Contains(string(snapshot.Result.Content), "iVBOR") {
+		t.Fatalf("binary payload leaked into durable runtime data")
+	}
 }
 
 func (model *terminalToolModel) Generate(

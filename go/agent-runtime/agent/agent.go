@@ -64,21 +64,65 @@ func (runner *Runner) completeWithToolResult(
 
 // ModelRequest is one direct Agent loop model call.
 type ModelRequest struct {
-	RunID    string
-	Model    string
-	Messages []Message
-	Tools    []tools.Definition
+	RunID       string
+	Model       string
+	Messages    []Message
+	Tools       []tools.Definition
+	HostedTools []HostedTool
 }
 
-// ModelResponse returns final content, a bounded Tool call batch, or both.
+// HostedTool is one provider-hosted Tool activation resolved by the host.
+// Target is opaque host metadata; Agent Runtime does not interpret provider protocols or payloads.
+type HostedTool struct {
+	Key    string          `json:"key"`
+	Target json.RawMessage `json:"target,omitempty"`
+}
+
+// HostedToolCall records one provider-executed Tool fact. It never enters the local Tool executor.
+type HostedToolCall struct {
+	ID      string          `json:"id,omitempty"`
+	ToolKey string          `json:"toolKey"`
+	Status  string          `json:"status,omitempty"`
+	Input   json.RawMessage `json:"input,omitempty"`
+	Output  json.RawMessage `json:"output,omitempty"`
+	Error   json.RawMessage `json:"error,omitempty"`
+}
+
+// ArtifactRef is a durable host-owned artifact reference. Binary payloads must not enter Runtime state or result.
+type ArtifactRef struct {
+	ID        string          `json:"id"`
+	Kind      string          `json:"kind"`
+	MediaType string          `json:"mediaType,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	SizeBytes int64           `json:"sizeBytes,omitempty"`
+	Metadata  json.RawMessage `json:"metadata,omitempty"`
+}
+
+// Result is the structured terminal Agent output when hosted Tool facts or artifacts are present.
+type Result struct {
+	Content         string           `json:"content,omitempty"`
+	HostedToolCalls []HostedToolCall `json:"hostedToolCalls,omitempty"`
+	Artifacts       []ArtifactRef    `json:"artifacts,omitempty"`
+	Citations       []string         `json:"citations,omitempty"`
+}
+
+// ModelResponse returns final content, local Tool calls, provider-hosted Tool facts, and durable artifact refs.
 type ModelResponse struct {
-	Content   string
-	ToolCalls []tools.Call
+	Content         string
+	ToolCalls       []tools.Call
+	HostedToolCalls []HostedToolCall
+	Artifacts       []ArtifactRef
+	Citations       []string
 }
 
 // Model is the only model dependency of the Agent feature.
 type Model interface {
 	Generate(context.Context, ModelRequest) (ModelResponse, error)
+}
+
+// HostedToolCatalog resolves provider-hosted Tool activations by canonical Tool Key.
+type HostedToolCatalog interface {
+	Resolve(context.Context, string, string) (HostedTool, bool, error)
 }
 
 // Limits are hard ceilings for one direct Agent loop.
@@ -89,12 +133,13 @@ type Limits struct {
 
 // Dependencies explicitly provide the direct Agent loop capabilities.
 type Dependencies struct {
-	Runtime   *kernel.Runtime
-	Model     Model
-	Catalog   tools.Catalog
-	Executor  tools.Executor
-	Approvals *interaction.Approvals
-	Limits    Limits
+	Runtime     *kernel.Runtime
+	Model       Model
+	Catalog     tools.Catalog
+	Executor    tools.Executor
+	Approvals   *interaction.Approvals
+	HostedTools HostedToolCatalog
+	Limits      Limits
 }
 
 // StartRequest starts one direct Agent Run.
@@ -111,12 +156,13 @@ type StartRequest struct {
 
 // Runner owns only the direct Agent model and Tool loop.
 type Runner struct {
-	runtime   *kernel.Runtime
-	model     Model
-	catalog   tools.Catalog
-	executor  tools.Executor
-	approvals *interaction.Approvals
-	limits    Limits
+	runtime     *kernel.Runtime
+	model       Model
+	catalog     tools.Catalog
+	executor    tools.Executor
+	approvals   *interaction.Approvals
+	hostedTools HostedToolCatalog
+	limits      Limits
 }
 
 type runState struct {
@@ -171,7 +217,8 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, catalog: dependencies.Catalog,
-		executor: dependencies.Executor, approvals: dependencies.Approvals, limits: dependencies.Limits,
+		executor: dependencies.Executor, approvals: dependencies.Approvals,
+		hostedTools: dependencies.HostedTools, limits: dependencies.Limits,
 	}, nil
 }
 
@@ -191,7 +238,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if runner == nil || strings.TrimSpace(request.Goal) == "" {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	if _, err := runner.catalog.List(request.ToolKeys); err != nil {
+	if _, _, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	limits, err := resolveRunLimits(runner.limits, request.Limits)
@@ -272,7 +319,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return failed, true, failErr
 	}
 	if len(state.PendingCalls) > 0 {
-		definitions, catalogErr := runner.catalog.List(state.ToolKeys)
+		definitions, _, catalogErr := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model)
 		if catalogErr != nil {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_invalid", catalogErr)
 			return failed, true, failErr
@@ -295,7 +342,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	state.LLMCalls++
 	if len(response.ToolCalls) == 0 {
-		completed, completeErr := runner.complete(ctx, snapshot, state, response.Content)
+		completed, completeErr := runner.complete(ctx, snapshot, state, response)
 		return completed, true, completeErr
 	}
 	if state.ToolCalls+len(response.ToolCalls) > state.Limits.MaxToolCalls {
@@ -321,13 +368,13 @@ func (runner *Runner) callModel(
 	snapshot kernel.Snapshot,
 	state runState,
 ) ([]tools.Definition, ModelResponse, error) {
-	definitions, err := runner.catalog.List(state.ToolKeys)
+	definitions, hostedTools, err := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model)
 	if err != nil {
 		return nil, ModelResponse{}, err
 	}
 	response, err := runner.model.Generate(ctx, ModelRequest{
 		RunID: snapshot.Run.ID, Model: state.Model,
-		Messages: cloneMessages(state.Messages), Tools: definitions,
+		Messages: cloneMessages(state.Messages), Tools: definitions, HostedTools: cloneHostedTools(hostedTools),
 	})
 	if err != nil {
 		return nil, ModelResponse{}, errors.Join(ErrModelFailure, err)
@@ -337,6 +384,58 @@ func (runner *Runner) callModel(
 		return nil, ModelResponse{}, ErrInvalidModelResponse
 	}
 	return definitions, response, nil
+}
+
+func (runner *Runner) resolveSelectedTools(
+	ctx context.Context,
+	keys []string,
+	model string,
+) ([]tools.Definition, []HostedTool, error) {
+	local := make([]tools.Definition, 0, len(keys))
+	hosted := make([]HostedTool, 0, len(keys))
+	seen := make(map[string]struct{}, len(keys))
+	for _, rawKey := range keys {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			return nil, nil, tools.ErrToolNotFound
+		}
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		definition, hostedTool, err := runner.resolveSelectedTool(ctx, key, model)
+		if err != nil {
+			return nil, nil, err
+		}
+		if definition != nil {
+			local = append(local, *definition)
+		} else {
+			hosted = append(hosted, *hostedTool)
+		}
+	}
+	return local, hosted, nil
+}
+
+func (runner *Runner) resolveSelectedTool(
+	ctx context.Context,
+	key string,
+	model string,
+) (*tools.Definition, *HostedTool, error) {
+	if definition, ok := runner.catalog.Resolve(key); ok {
+		return &definition, nil, nil
+	}
+	if runner.hostedTools == nil {
+		return nil, nil, tools.ErrToolNotFound
+	}
+	resolved, ok, err := runner.hostedTools.Resolve(ctx, key, strings.TrimSpace(model))
+	if err != nil {
+		return nil, nil, err
+	}
+	if !ok || strings.TrimSpace(resolved.Key) != key {
+		return nil, nil, tools.ErrToolNotFound
+	}
+	resolved.Target = cloneRawJSON(resolved.Target)
+	return nil, &resolved, nil
 }
 
 func (runner *Runner) queueToolCalls(
@@ -555,22 +654,43 @@ func (runner *Runner) complete(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state runState,
-	content string,
+	response ModelResponse,
 ) (kernel.Snapshot, error) {
-	state.Messages = append(state.Messages, Message{Role: RoleAssistant, Content: content})
+	state.Messages = append(state.Messages, Message{Role: RoleAssistant, Content: response.Content})
 	encodedState, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	encodedContent, err := json.Marshal(content)
+	result, err := terminalResult(response)
 	if err != nil {
-		return kernel.Snapshot{}, errors.Join(ErrInvalidModelResponse, err)
+		return kernel.Snapshot{}, err
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encodedState, Checkpoint: snapshot.Checkpoint,
-		Result: &kernel.Result{ContentType: "text", Content: encodedContent},
+		Result: result,
 		Events: []kernel.EventDraft{{Type: "agent.completed", Message: "Direct Agent loop completed"}},
 	})
+}
+
+func terminalResult(response ModelResponse) (*kernel.Result, error) {
+	if len(response.HostedToolCalls) == 0 && len(response.Artifacts) == 0 && len(response.Citations) == 0 {
+		encodedContent, err := json.Marshal(response.Content)
+		if err != nil {
+			return nil, errors.Join(ErrInvalidModelResponse, err)
+		}
+		return &kernel.Result{ContentType: "text", Content: encodedContent}, nil
+	}
+	value := Result{
+		Content:         response.Content,
+		HostedToolCalls: cloneHostedToolCalls(response.HostedToolCalls),
+		Artifacts:       cloneArtifactRefs(response.Artifacts),
+		Citations:       append([]string(nil), response.Citations...),
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidModelResponse, err)
+	}
+	return &kernel.Result{ContentType: "agent_result", Content: encoded}, nil
 }
 
 func (runner *Runner) fail(
@@ -611,7 +731,7 @@ func selectedDefinition(definitions []tools.Definition, key string) (tools.Defin
 }
 
 func validModelResponse(response ModelResponse) bool {
-	return len(response.ToolCalls) > 0 || response.Content != ""
+	return len(response.ToolCalls) > 0 || response.Content != "" || len(response.HostedToolCalls) > 0 || len(response.Artifacts) > 0
 }
 
 func nextPendingCall(state runState) (tools.Call, bool) {
@@ -635,6 +755,39 @@ func cloneToolCalls(values []tools.Call) []tools.Call {
 		result[index].Arguments = append(json.RawMessage(nil), call.Arguments...)
 	}
 	return result
+}
+
+func cloneHostedTools(values []HostedTool) []HostedTool {
+	result := make([]HostedTool, len(values))
+	for index, item := range values {
+		result[index] = item
+		result[index].Target = cloneRawJSON(item.Target)
+	}
+	return result
+}
+
+func cloneHostedToolCalls(values []HostedToolCall) []HostedToolCall {
+	result := make([]HostedToolCall, len(values))
+	for index, item := range values {
+		result[index] = item
+		result[index].Input = cloneRawJSON(item.Input)
+		result[index].Output = cloneRawJSON(item.Output)
+		result[index].Error = cloneRawJSON(item.Error)
+	}
+	return result
+}
+
+func cloneArtifactRefs(values []ArtifactRef) []ArtifactRef {
+	result := make([]ArtifactRef, len(values))
+	for index, item := range values {
+		result[index] = item
+		result[index].Metadata = cloneRawJSON(item.Metadata)
+	}
+	return result
+}
+
+func cloneRawJSON(value json.RawMessage) json.RawMessage {
+	return append(json.RawMessage(nil), value...)
 }
 
 func encodeState(state runState) (json.RawMessage, error) {
