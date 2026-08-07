@@ -152,7 +152,7 @@ paths:
           description: Workbench detail
           content:
             application/json:
-              schema: {type: object, additionalProperties: true}
+              schema: {$ref: '#/components/schemas/Workbench'}
         default: {$ref: '#/components/responses/Error'}
 components:
   parameters:
@@ -204,6 +204,10 @@ components:
         input: {$ref: '#/components/schemas/TextInputRequest'}
         clientRunID: {type: string, maxLength: 64}
         model: {type: string, maxLength: 128}
+        toolKeys:
+          type: array
+          maxItems: 128
+          items: {type: string, maxLength: 255}
     StartPlanRunRequest:
       type: object
       additionalProperties: false
@@ -287,7 +291,7 @@ components:
       required: [id, kind, actor, thread, goal, status, revision, createdAt, updatedAt]
       properties:
         id: {type: string}
-        kind: {type: string, enum: [text, plan_execute, workflow, team]}
+        kind: {type: string, enum: [agent, plan_execute, workflow, team]}
         actor: {$ref: '#/components/schemas/ActorRef'}
         thread: {$ref: '#/components/schemas/ThreadRef'}
         requestID: {type: string}
@@ -348,6 +352,121 @@ components:
       required: [run]
       properties:
         run: {$ref: '#/components/schemas/Run'}
+    WorkbenchOverview:
+      type: object
+      additionalProperties: false
+      required:
+        - runID
+        - kind
+        - goal
+        - status
+        - revision
+        - eventCount
+        - hasCheckpoint
+        - hasResult
+      properties:
+        runID: {type: string}
+        kind: {type: string, enum: [agent, plan_execute, workflow, team]}
+        goal: {type: string}
+        status: {type: string, enum: [running, waiting_input, completed, failed, cancelled]}
+        revision: {type: integer, minimum: 1}
+        errorCode: {type: string}
+        errorDetail: {type: string}
+        eventCount: {type: integer, minimum: 0}
+        hasCheckpoint: {type: boolean}
+        hasResult: {type: boolean}
+    WorkbenchSection:
+      type: object
+      additionalProperties: false
+      required: [name, available]
+      properties:
+        name: {type: string}
+        available: {type: boolean}
+        content: {}
+        hash: {type: string}
+    WorkbenchTimelineItem:
+      type: object
+      additionalProperties: false
+      required: [id, source, kind, createdAt]
+      properties:
+        id: {type: string}
+        source: {type: string}
+        kind: {type: string}
+        status: {type: string}
+        title: {type: string}
+        summary: {type: string}
+        seq: {type: integer, minimum: 0}
+        createdAt: {type: string, format: date-time}
+        data: {}
+    WorkbenchDiagnostic:
+      type: object
+      additionalProperties: false
+      required: [provider, operation, code]
+      properties:
+        provider: {type: string}
+        operation: {type: string}
+        code: {type: string}
+        message: {type: string}
+    TopologyNode:
+      type: object
+      additionalProperties: false
+      required: [id, kind, label, status]
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        label: {type: string}
+        status: {type: string}
+        runID: {type: string}
+        groupID: {type: string}
+        data: {}
+    TopologyEdge:
+      type: object
+      additionalProperties: false
+      required: [id, source, target, kind]
+      properties:
+        id: {type: string}
+        source: {type: string}
+        target: {type: string}
+        kind:
+          type: string
+          enum: [sequence, dependency, delegation, handoff, produces, consumes]
+        status: {type: string}
+        data: {}
+    TopologyV1:
+      type: object
+      additionalProperties: false
+      required: [schemaVersion, rootNodeID, revision, hash, nodes, edges]
+      properties:
+        schemaVersion: {type: integer, enum: [1]}
+        rootNodeID: {type: string}
+        revision: {type: integer, minimum: 1}
+        hash: {type: string}
+        nodes:
+          type: array
+          items: {$ref: '#/components/schemas/TopologyNode'}
+        edges:
+          type: array
+          items: {$ref: '#/components/schemas/TopologyEdge'}
+    Workbench:
+      type: object
+      additionalProperties: false
+      required: [overview, run, sections, timeline, hash]
+      properties:
+        overview: {$ref: '#/components/schemas/WorkbenchOverview'}
+        run: {$ref: '#/components/schemas/Run'}
+        checkpoint: {$ref: '#/components/schemas/Checkpoint'}
+        result: {$ref: '#/components/schemas/Result'}
+        sections:
+          type: array
+          items: {$ref: '#/components/schemas/WorkbenchSection'}
+        timeline:
+          type: array
+          items: {$ref: '#/components/schemas/WorkbenchTimelineItem'}
+        topology: {$ref: '#/components/schemas/TopologyV1'}
+        diagnostics:
+          type: array
+          items: {$ref: '#/components/schemas/WorkbenchDiagnostic'}
+        hash: {type: string}
     ErrorResponse:
       type: object
       additionalProperties: false

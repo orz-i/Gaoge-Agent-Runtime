@@ -14,6 +14,11 @@ import (
 
 const CapabilityQuery kernel.Capability = "workbench.query"
 
+const (
+	diagnosticProviderError = "provider_error"
+	diagnosticUnavailable   = "unavailable"
+)
+
 var (
 	ErrInvalidInput = errors.New("invalid workbench input")
 	ErrUnavailable  = errors.New("workbench section unavailable")
@@ -46,6 +51,7 @@ type Provider interface {
 // Registration freezes one optional feature provider.
 type Registration struct {
 	Provider Provider
+	Topology TopologyProvider
 }
 
 // Section is one canonical optional feature projection.
@@ -86,14 +92,16 @@ type Detail struct {
 	Result      *kernel.Result     `json:"result,omitempty"`
 	Sections    []Section          `json:"sections"`
 	Timeline    []TimelineItem     `json:"timeline"`
+	Topology    *TopologyV1        `json:"topology,omitempty"`
 	Diagnostics []Diagnostic       `json:"diagnostics,omitempty"`
 	Hash        string             `json:"hash"`
 }
 
 // Query composes one immutable set of narrow read providers.
 type Query struct {
-	runs      RunSource
-	providers []Provider
+	runs              RunSource
+	providers         []Provider
+	topologyProviders []TopologyProvider
 }
 
 // NewQuery freezes provider order by name and rejects duplicates.
@@ -101,26 +109,11 @@ func NewQuery(runs RunSource, registrations []Registration) (*Query, error) {
 	if runs == nil {
 		return nil, ErrInvalidInput
 	}
-	providers := make([]Provider, 0, len(registrations))
-	seen := make(map[string]struct{}, len(registrations))
-	for _, registration := range registrations {
-		if registration.Provider == nil {
-			return nil, ErrInvalidInput
-		}
-		name := strings.TrimSpace(registration.Provider.Name())
-		if name == "" {
-			return nil, ErrInvalidInput
-		}
-		if _, duplicate := seen[name]; duplicate {
-			return nil, ErrInvalidInput
-		}
-		seen[name] = struct{}{}
-		providers = append(providers, registration.Provider)
+	providers, topologyProviders, err := freezeRegistrations(registrations)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(providers, func(left int, right int) bool {
-		return strings.TrimSpace(providers[left].Name()) < strings.TrimSpace(providers[right].Name())
-	})
-	return &Query{runs: runs, providers: providers}, nil
+	return &Query{runs: runs, providers: providers, topologyProviders: topologyProviders}, nil
 }
 
 // Descriptor declares the Workbench read capability.
@@ -141,11 +134,13 @@ func (query *Query) Get(ctx context.Context, runID string) (Detail, error) {
 	sections, diagnostics := query.loadSections(ctx, snapshot)
 	timeline, timelineDiagnostics := query.loadTimeline(ctx, snapshot)
 	diagnostics = append(diagnostics, timelineDiagnostics...)
+	topology, topologyDiagnostics := query.loadTopology(ctx, snapshot)
+	diagnostics = append(diagnostics, topologyDiagnostics...)
 	sortDiagnostics(diagnostics)
 	detail := Detail{
 		Overview: overview(snapshot), Run: snapshot.Run,
 		Checkpoint: cloneCheckpoint(snapshot.Checkpoint), Result: cloneResult(snapshot.Result),
-		Sections: sections, Timeline: timeline, Diagnostics: diagnostics,
+		Sections: sections, Timeline: timeline, Topology: topology, Diagnostics: diagnostics,
 	}
 	hash, err := detailHash(detail)
 	if err != nil {
@@ -174,9 +169,9 @@ func normalizeSection(name string, content json.RawMessage, available bool, sect
 	section := Section{Name: name, Available: available}
 	if sectionErr != nil {
 		section.Available = false
-		code := "provider_error"
+		code := diagnosticProviderError
 		if errors.Is(sectionErr, ErrUnavailable) {
-			code = "unavailable"
+			code = diagnosticUnavailable
 		}
 		return section, &Diagnostic{
 			Provider: name, Operation: "section", Code: code, Message: truncate(sectionErr.Error(), 512),
@@ -257,6 +252,7 @@ func cloneDetail(detail Detail) Detail {
 		detail.Sections[index].Content = append(json.RawMessage(nil), detail.Sections[index].Content...)
 	}
 	detail.Timeline = cloneTimeline(detail.Timeline)
+	detail.Topology = cloneTopology(detail.Topology)
 	detail.Diagnostics = append([]Diagnostic(nil), detail.Diagnostics...)
 	return detail
 }

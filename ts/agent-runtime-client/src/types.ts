@@ -139,6 +139,31 @@ export type WorkbenchTimelineItemDTO = {
   data?: unknown;
 };
 export type WorkbenchDiagnosticDTO = { provider: string; operation: string; code: string; message?: string };
+export type TopologyNodeDTO = {
+  id: string;
+  kind: string;
+  label: string;
+  status: string;
+  runID?: string;
+  groupID?: string;
+  data?: unknown;
+};
+export type TopologyEdgeDTO = {
+  id: string;
+  source: string;
+  target: string;
+  kind: "sequence" | "dependency" | "delegation" | "handoff" | "produces" | "consumes";
+  status?: string;
+  data?: unknown;
+};
+export type TopologyV1DTO = {
+  schemaVersion: 1;
+  rootNodeID: string;
+  revision: number;
+  hash: string;
+  nodes: TopologyNodeDTO[];
+  edges: TopologyEdgeDTO[];
+};
 export type WorkbenchDTO = {
   overview: {
     runID: string;
@@ -157,6 +182,7 @@ export type WorkbenchDTO = {
   result?: ResultDTO | null;
   sections: WorkbenchSectionDTO[];
   timeline: WorkbenchTimelineItemDTO[];
+  topology?: TopologyV1DTO;
   diagnostics?: WorkbenchDiagnosticDTO[];
   hash: string;
 };
