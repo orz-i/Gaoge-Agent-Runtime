@@ -85,6 +85,37 @@ func TestWaitCheckpointResumesWorkflow(t *testing.T) {
 	assertResolvedWait(t, completed, response)
 }
 
+func TestDeferredWaitRequiresExplicitResume(t *testing.T) {
+	t.Parallel()
+	runtime := newWorkflowRuntime(t)
+	runner, err := workflow.NewRunner(workflow.Dependencies{
+		Runtime: runtime, Effects: &scriptedExecutor{runtime: runtime}, DeferResumption: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := compileWorkflow(t, []workflow.Node{
+		{
+			ID: "approval", Type: workflow.NodeWait,
+			Wait: &workflow.WaitNode{Kind: "editor.approval", Payload: json.RawMessage(`{"required":true}`)},
+		},
+		returnNode(json.RawMessage(`{"status":"approved"}`)),
+	}, workflow.Limits{})
+	waiting, err := runner.StartRun(t.Context(), workflowRequest(definition))
+	assertWorkflowWaiting(t, waiting, err)
+	resolved, err := runner.ResolveWait(
+		t.Context(), waiting.Run.ID, waiting.Run.Revision, json.RawMessage(`{"approved":true}`),
+	)
+	if err != nil || resolved.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("resolved=%#v err=%v", resolved.Run, err)
+	}
+	completed, err := runner.Resume(t.Context(), resolved.Run.ID, resolved.Run.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWorkflowCompleted(t, completed)
+}
+
 func TestWorkflowEffectRecordsStableChildRelation(t *testing.T) {
 	t.Parallel()
 	runtime := newWorkflowRuntime(t)

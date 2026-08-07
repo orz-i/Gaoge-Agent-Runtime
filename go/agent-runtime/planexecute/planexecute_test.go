@@ -17,6 +17,8 @@ import (
 
 var errChildFailed = errors.New("child failed")
 
+const draftStepTitle = "Draft"
+
 func TestRequiredApprovalExecutesPlanSteps(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
@@ -54,13 +56,42 @@ func TestRequiredApprovalExecutesPlanSteps(t *testing.T) {
 	}
 }
 
+func TestDeferredApprovalRequiresExplicitResume(t *testing.T) {
+	t.Parallel()
+	runtime := newRuntime(t)
+	children := newFakeAgentRunner(childComplete)
+	runner, err := planexecute.NewRunner(planexecute.Dependencies{
+		Runtime: runtime, Planner: staticPlanner{draft: planexecute.PlanDraft{
+			Summary: "Deferred plan", Steps: []planexecute.StepDraft{{Title: draftStepTitle, Goal: "draft"}},
+		}},
+		Agent: children, MaxSteps: 4, DeferResumption: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := runner.StartRun(t.Context(), baseStartRequest(planexecute.ApprovalRequired))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := runner.ResolveApproval(t.Context(), waiting.Run.ID, waiting.Run.Revision,
+		planexecute.ApprovalResponse{Decision: planexecute.DecisionApprove})
+	if err != nil || resolved.Run.Status != kernel.RunStatusRunning || children.startCount != 0 {
+		t.Fatalf("resolved=%#v starts=%d err=%v", resolved.Run, children.startCount, err)
+	}
+	completed, err := runner.Resume(t.Context(), resolved.Run.ID, resolved.Run.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCompletedPlan(t, completed, 1)
+}
+
 func TestAutoApprovalResumesExistingChildWithoutDuplicateStart(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
 	children := newFakeAgentRunner(childPending)
 	runner := newPlanRunner(t, runtime, children, planexecute.PlanDraft{
 		Summary: "One recoverable step",
-		Steps:   []planexecute.StepDraft{{Title: "Draft", Goal: "draft result"}},
+		Steps:   []planexecute.StepDraft{{Title: draftStepTitle, Goal: "draft result"}},
 	})
 
 	pending, err := runner.StartRun(context.Background(), baseStartRequest(planexecute.ApprovalAuto))
@@ -116,7 +147,7 @@ func TestPlanStepRecordsStableChildRelation(t *testing.T) {
 	}
 	runner, err := planexecute.NewRunner(planexecute.Dependencies{
 		Runtime: runtime, Planner: staticPlanner{draft: planexecute.PlanDraft{
-			Summary: "Related step", Steps: []planexecute.StepDraft{{Title: "Draft", Goal: "draft"}},
+			Summary: "Related step", Steps: []planexecute.StepDraft{{Title: draftStepTitle, Goal: "draft"}},
 		}},
 		Agent: children, Relations: relations, MaxSteps: 4,
 	})

@@ -72,6 +72,11 @@ func testRunRelationQueries(t *testing.T, store runrelation.Store) {
 	if err != nil || resolved.OwnerNodeID != "step-2" {
 		t.Fatalf("resolved = %#v, err=%v", resolved, err)
 	}
+	all, err := store.ListAll(context.Background())
+	if err != nil || len(all) != 3 || all[0].ChildRunID != "child-3" ||
+		all[1].ChildRunID != "child-1" || all[2].ChildRunID != "child-2" {
+		t.Fatalf("all = %#v, err=%v", all, err)
+	}
 }
 
 func testRunRelation(parent, child string, kind runrelation.Kind, owner string, seconds int) runrelation.Relation {

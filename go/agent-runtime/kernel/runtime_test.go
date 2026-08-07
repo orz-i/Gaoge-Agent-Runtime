@@ -52,6 +52,86 @@ func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	}
 }
 
+func TestRuntimeObservesCommittedTransitionsWithIsolatedSnapshots(t *testing.T) {
+	t.Parallel()
+	sink := &recordingTransitionSink{}
+	runtime := newObservedRuntime(t, sink)
+	created := createObservedRun(t, runtime)
+	assertCreateTransition(t, sink)
+	completeObservedRun(t, runtime, created)
+	assertApplyTransition(t, sink, created)
+	assertObservedState(t, runtime, created.Run.ID)
+}
+
+func newObservedRuntime(t *testing.T, sink kernel.TransitionSink) *kernel.Runtime {
+	t.Helper()
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Transitions: sink})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runtime
+}
+
+func createObservedRun(t *testing.T, runtime *kernel.Runtime) kernel.Snapshot {
+	t.Helper()
+	created, err := runtime.Create(t.Context(), kernel.CreateRequest{
+		ID: "observed", Kind: kernel.RunKindAgent,
+		Actor:  kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID},
+		Goal:   testGoal, State: json.RawMessage(`{"step":0}`),
+		Events: []kernel.EventDraft{{Type: "agent.started", Data: json.RawMessage(`{"value":1}`)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return created
+}
+
+func assertCreateTransition(t *testing.T, sink *recordingTransitionSink) {
+	t.Helper()
+	if len(sink.transitions) != 1 || sink.transitions[0].Previous != nil {
+		t.Fatalf("create transitions = %#v", sink.transitions)
+	}
+}
+
+func completeObservedRun(t *testing.T, runtime *kernel.Runtime, created kernel.Snapshot) {
+	t.Helper()
+	_, err := runtime.Apply(t.Context(), created.Run.ID, created.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusCompleted, State: json.RawMessage(`{"step":1}`),
+		Result: &kernel.Result{ContentType: "text", Content: json.RawMessage(`"done"`)},
+		Events: []kernel.EventDraft{{Type: "agent.completed"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertApplyTransition(t *testing.T, sink *recordingTransitionSink, created kernel.Snapshot) {
+	t.Helper()
+	if len(sink.transitions) != 2 || sink.transitions[1].Previous == nil ||
+		sink.transitions[1].Previous.Run.Revision != created.Run.Revision ||
+		sink.transitions[1].Current.Run.Revision != created.Run.Revision+1 {
+		t.Fatalf("apply transitions = %#v", sink.transitions)
+	}
+}
+
+func assertObservedState(t *testing.T, runtime *kernel.Runtime, runID string) {
+	t.Helper()
+	loaded, err := runtime.Load(t.Context(), runID)
+	if err != nil || string(loaded.State) != `{"step":1}` {
+		t.Fatalf("observer mutated durable snapshot: %s, %v", loaded.State, err)
+	}
+}
+
+type recordingTransitionSink struct {
+	transitions []kernel.Transition
+}
+
+func (sink *recordingTransitionSink) ObserveTransition(_ context.Context, transition kernel.Transition) {
+	sink.transitions = append(sink.transitions, transition)
+	transition.Current.State = json.RawMessage(`{"mutated":true}`)
+}
+
 func createTestRun(t *testing.T, runtime *kernel.Runtime, deadline *time.Time) kernel.Snapshot {
 	t.Helper()
 	created, err := runtime.Create(context.Background(), kernel.CreateRequest{

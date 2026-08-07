@@ -161,18 +161,20 @@ type EffectExecutor interface {
 
 // Dependencies are the only requirements of the Workflow feature.
 type Dependencies struct {
-	Runtime   *kernel.Runtime
-	Effects   EffectExecutor
-	Relations runrelation.Recorder
-	Ceiling   Limits
+	Runtime         *kernel.Runtime
+	Effects         EffectExecutor
+	Relations       runrelation.Recorder
+	Ceiling         Limits
+	DeferResumption bool
 }
 
 // Runner owns deterministic Workflow interpretation and no background workers.
 type Runner struct {
-	runtime   *kernel.Runtime
-	effects   EffectExecutor
-	relations runrelation.Recorder
-	ceiling   Limits
+	runtime     *kernel.Runtime
+	effects     EffectExecutor
+	relations   runrelation.Recorder
+	ceiling     Limits
+	deferResume bool
 }
 
 type executionState View
@@ -199,6 +201,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, effects: dependencies.Effects,
 		relations: dependencies.Relations, ceiling: ceiling,
+		deferResume: dependencies.DeferResumption,
 	}, nil
 }
 
@@ -292,6 +295,9 @@ func (runner *Runner) ResolveWait(
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	if runner.deferResume {
+		return running, nil
 	}
 	return runner.runSegment(ctx, running)
 }

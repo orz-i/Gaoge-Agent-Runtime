@@ -22,6 +22,7 @@ var (
 	ErrToolFailure          = errors.New("agent tool failure")
 	ErrCallLimit            = errors.New("agent run call limit exceeded")
 	ErrApprovalRequired     = errors.New("agent run approval is required")
+	ErrRunTerminal          = errors.New("agent run is terminal")
 )
 
 // Role identifies one direct Agent loop message role.
@@ -185,6 +186,9 @@ type Dependencies struct {
 	HostedTools HostedToolCatalog
 	Feed        runfeed.Publisher
 	Limits      Limits
+	// DeferResumption leaves resolved approval transitions running for a composed
+	// continuation worker. The standalone SDK keeps synchronous behavior by default.
+	DeferResumption bool
 }
 
 // StartRequest starts one direct Agent Run.
@@ -209,6 +213,7 @@ type Runner struct {
 	hostedTools HostedToolCatalog
 	feed        runfeed.Publisher
 	limits      Limits
+	deferResume bool
 }
 
 type runState struct {
@@ -265,6 +270,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		runtime: dependencies.Runtime, model: dependencies.Model, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		hostedTools: dependencies.HostedTools, feed: dependencies.Feed, limits: dependencies.Limits,
+		deferResume: dependencies.DeferResumption,
 	}, nil
 }
 
@@ -350,6 +356,24 @@ func (runner *Runner) LoadRun(ctx context.Context, runID string) (kernel.Snapsho
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	return runner.runtime.Load(ctx, runID)
+}
+
+// Resume continues one running Agent after a persisted approval resolution.
+func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision uint64) (kernel.Snapshot, error) {
+	snapshot, state, err := runner.loadState(ctx, runID)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if snapshot.Run.Revision != expectedRevision {
+		return kernel.Snapshot{}, kernel.ErrConflict
+	}
+	if snapshot.Run.Status == kernel.RunStatusWaitingInput {
+		return snapshot, ErrApprovalRequired
+	}
+	if snapshot.Run.Status != kernel.RunStatusRunning {
+		return snapshot, ErrRunTerminal
+	}
+	return runner.resumeRunning(ctx, snapshot, state)
 }
 
 func (runner *Runner) drive(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, error) {
@@ -712,11 +736,10 @@ func (runner *Runner) resumeApproved(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	running, err = runner.executePending(ctx, running)
-	if err != nil {
-		return running, err
+	if runner.deferResume {
+		return running, nil
 	}
-	return runner.drive(ctx, running)
+	return runner.resumeRunning(ctx, running, state)
 }
 
 func (runner *Runner) resumeRejected(
@@ -745,7 +768,26 @@ func (runner *Runner) resumeRejected(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	if runner.deferResume {
+		return running, nil
+	}
 	return runner.drive(ctx, running)
+}
+
+func (runner *Runner) resumeRunning(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state runState,
+) (kernel.Snapshot, error) {
+	if len(state.PendingCalls) > 0 && snapshot.Checkpoint != nil &&
+		snapshot.Checkpoint.Status == kernel.CheckpointResolved {
+		executed, err := runner.executePending(ctx, snapshot)
+		if err != nil {
+			return executed, err
+		}
+		return runner.drive(ctx, executed)
+	}
+	return runner.drive(ctx, snapshot)
 }
 
 func (runner *Runner) complete(

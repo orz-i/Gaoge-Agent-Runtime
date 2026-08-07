@@ -50,6 +50,7 @@ type Store interface {
 	Put(context.Context, Relation) (Relation, bool, error)
 	GetByChild(context.Context, string) (Relation, error)
 	ListChildren(context.Context, string) ([]Relation, error)
+	ListAll(context.Context) ([]Relation, error)
 }
 
 // Recorder is the narrow capability consumed by parent Runtime features.
@@ -109,6 +110,19 @@ func (registry *Registry) ListChildren(ctx context.Context, parentRunID string) 
 		return nil, ErrInvalidInput
 	}
 	items, err := registry.store.ListChildren(ctx, strings.TrimSpace(parentRunID))
+	if err != nil {
+		return nil, err
+	}
+	Sort(items)
+	return items, nil
+}
+
+// ListAll returns every immutable ownership fact for continuation reconciliation.
+func (registry *Registry) ListAll(ctx context.Context) ([]Relation, error) {
+	if registry == nil || registry.store == nil {
+		return nil, ErrInvalidInput
+	}
+	items, err := registry.store.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}

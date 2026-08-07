@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 )
@@ -112,6 +113,20 @@ type Snapshot struct {
 	Checkpoint *Checkpoint     `json:"checkpoint,omitempty"`
 	Result     *Result         `json:"result,omitempty"`
 	Events     []Event         `json:"events"`
+}
+
+// Transition is one already-committed Kernel state change observed by optional host features.
+// Observers cannot participate in or roll back the owning Store transaction.
+type Transition struct {
+	Previous *Snapshot
+	Current  Snapshot
+	Events   []EventDraft
+}
+
+// TransitionSink observes committed transitions for best-effort host side effects such as
+// durable continuation delivery. Feature state remains authoritative when an observer fails.
+type TransitionSink interface {
+	ObserveTransition(context.Context, Transition)
 }
 
 // CreateRequest creates one explicit Runtime Kind with opaque feature state.

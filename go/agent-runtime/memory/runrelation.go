@@ -91,6 +91,21 @@ func (store *RunRelationStore) ListChildren(
 	return result, nil
 }
 
+// ListAll returns every relation in deterministic order.
+func (store *RunRelationStore) ListAll(_ context.Context) ([]runrelation.Relation, error) {
+	if store == nil {
+		return nil, runrelation.ErrInvalidInput
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	result := make([]runrelation.Relation, 0, len(store.byChild))
+	for _, relation := range store.byChild {
+		result = append(result, relation)
+	}
+	runrelation.Sort(result)
+	return result, nil
+}
+
 func runRelationOwnerKey(relation runrelation.Relation) string {
 	return relation.ParentRunID + "\x00" + string(relation.Kind) + "\x00" + relation.OwnerNodeID
 }

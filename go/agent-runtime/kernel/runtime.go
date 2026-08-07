@@ -75,16 +75,18 @@ type IDSource interface {
 
 // Dependencies are the only requirements of the minimal Kernel.
 type Dependencies struct {
-	Store Store
-	Clock Clock
-	IDs   IDSource
+	Store       Store
+	Clock       Clock
+	IDs         IDSource
+	Transitions TransitionSink
 }
 
 // Runtime owns feature-neutral Run transitions and no background workers.
 type Runtime struct {
-	store Store
-	clock Clock
-	ids   IDSource
+	store       Store
+	clock       Clock
+	ids         IDSource
+	transitions TransitionSink
 }
 
 // New creates a minimal Runtime with no optional feature dependencies.
@@ -98,7 +100,10 @@ func New(dependencies Dependencies) (*Runtime, error) {
 	if dependencies.IDs == nil {
 		dependencies.IDs = randomIDSource{}
 	}
-	return &Runtime{store: dependencies.Store, clock: dependencies.Clock, ids: dependencies.IDs}, nil
+	return &Runtime{
+		store: dependencies.Store, clock: dependencies.Clock,
+		ids: dependencies.IDs, transitions: dependencies.Transitions,
+	}, nil
 }
 
 // Descriptor exposes only the minimal Kernel capability.
@@ -133,7 +138,11 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		State: cloneJSON(request.State),
 	}
 	events := append([]EventDraft{{Type: "run.created", Message: "Run created"}}, request.Events...)
-	return runtime.store.Create(ctx, record, events)
+	snapshot, err := runtime.store.Create(ctx, record, events)
+	if err == nil {
+		runtime.observe(ctx, Transition{Current: snapshot, Events: events})
+	}
+	return snapshot, err
 }
 
 // Load returns one atomic Run snapshot.
@@ -174,7 +183,12 @@ func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevisio
 		Run: next, State: cloneJSON(mutation.State),
 		Checkpoint: cloneCheckpoint(mutation.Checkpoint), Result: cloneResult(mutation.Result),
 	}
-	return runtime.store.Apply(ctx, runID, expectedRevision, StoreMutation{Record: record, Events: mutation.Events})
+	updated, err := runtime.store.Apply(ctx, runID, expectedRevision, StoreMutation{Record: record, Events: mutation.Events})
+	if err == nil {
+		previous := cloneSnapshot(current)
+		runtime.observe(ctx, Transition{Previous: &previous, Current: updated, Events: mutation.Events})
+	}
+	return updated, err
 }
 
 // NewID creates a public identifier through the configured entropy source.
@@ -191,6 +205,19 @@ func (runtime *Runtime) Now() time.Time {
 		return time.Time{}
 	}
 	return runtime.clock.Now().UTC()
+}
+
+func (runtime *Runtime) observe(ctx context.Context, transition Transition) {
+	if runtime == nil || runtime.transitions == nil {
+		return
+	}
+	transition.Current = cloneSnapshot(transition.Current)
+	if transition.Previous != nil {
+		previous := cloneSnapshot(*transition.Previous)
+		transition.Previous = &previous
+	}
+	transition.Events = cloneEventDrafts(transition.Events)
+	runtime.transitions.ObserveTransition(ctx, transition)
 }
 
 func validCreateRequest(request CreateRequest) bool {
@@ -297,6 +324,25 @@ func cloneResult(value *Result) *Result {
 	cloned := *value
 	cloned.Content = cloneJSON(value.Content)
 	return &cloned
+}
+
+func cloneSnapshot(value Snapshot) Snapshot {
+	value.State = cloneJSON(value.State)
+	value.Checkpoint = cloneCheckpoint(value.Checkpoint)
+	value.Result = cloneResult(value.Result)
+	value.Events = append([]Event(nil), value.Events...)
+	for index := range value.Events {
+		value.Events[index].Data = cloneJSON(value.Events[index].Data)
+	}
+	return value
+}
+
+func cloneEventDrafts(values []EventDraft) []EventDraft {
+	result := append([]EventDraft(nil), values...)
+	for index := range result {
+		result[index].Data = cloneJSON(result[index].Data)
+	}
+	return result
 }
 
 type systemClock struct{}

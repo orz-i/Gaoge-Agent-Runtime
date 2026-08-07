@@ -103,6 +103,23 @@ func (store *RunRelationStore) ListChildren(
 	return result, nil
 }
 
+// ListAll returns every immutable relation for continuation reconciliation.
+func (store *RunRelationStore) ListAll(ctx context.Context) ([]runrelation.Relation, error) {
+	if store == nil || store.db == nil {
+		return nil, runrelation.ErrInvalidInput
+	}
+	var records []models.RunRelationRecord
+	if err := store.db.WithContext(ctx).
+		Order("created_at ASC, kind ASC, owner_node_id ASC, child_run_id ASC").Find(&records).Error; err != nil {
+		return nil, err
+	}
+	result := make([]runrelation.Relation, 0, len(records))
+	for _, record := range records {
+		result = append(result, runRelationFromRecord(record))
+	}
+	return result, nil
+}
+
 func runRelationRecordFrom(relation runrelation.Relation) models.RunRelationRecord {
 	return models.RunRelationRecord{
 		ParentRunID: relation.ParentRunID, ChildRunID: relation.ChildRunID,

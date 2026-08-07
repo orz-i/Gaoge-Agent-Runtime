@@ -144,20 +144,22 @@ type ApprovalResponse struct {
 
 // Dependencies are the only requirements of the PlanExecute feature.
 type Dependencies struct {
-	Runtime   *kernel.Runtime
-	Planner   Planner
-	Agent     AgentRunner
-	Relations runrelation.Recorder
-	MaxSteps  int
+	Runtime         *kernel.Runtime
+	Planner         Planner
+	Agent           AgentRunner
+	Relations       runrelation.Recorder
+	MaxSteps        int
+	DeferResumption bool
 }
 
 // Runner owns Plan generation, approval, sequential Step execution and recovery.
 type Runner struct {
-	runtime   *kernel.Runtime
-	planner   Planner
-	agent     AgentRunner
-	relations runrelation.Recorder
-	maxSteps  int
+	runtime     *kernel.Runtime
+	planner     Planner
+	agent       AgentRunner
+	relations   runrelation.Recorder
+	maxSteps    int
+	deferResume bool
 }
 
 type executionState struct {
@@ -184,6 +186,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, planner: dependencies.Planner,
 		agent: dependencies.Agent, relations: dependencies.Relations, maxSteps: dependencies.MaxSteps,
+		deferResume: dependencies.DeferResumption,
 	}, nil
 }
 
@@ -237,7 +240,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if request.ApprovalPolicy == ApprovalRequired {
 		return runner.waitForApproval(ctx, proposed, state)
 	}
-	approved, err := runner.approvePlan(ctx, proposed, state, nil, "Plan auto-approved")
+	approved, err := runner.approvePlan(ctx, proposed, state, nil, "plan.auto_approved", "Plan auto-approved")
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -270,9 +273,12 @@ func (runner *Runner) ResolveApproval(
 		state.Plan.Status = PlanRejected
 		return runner.cancel(ctx, snapshot, state, resolved, response.Comment)
 	}
-	approved, err := runner.approvePlan(ctx, snapshot, state, resolved, "Plan approved")
+	approved, err := runner.approvePlan(ctx, snapshot, state, resolved, "plan.approved", "Plan approved")
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	if runner.deferResume {
+		return approved, nil
 	}
 	return runner.execute(ctx, approved)
 }
@@ -380,6 +386,7 @@ func (runner *Runner) approvePlan(
 	snapshot kernel.Snapshot,
 	state executionState,
 	checkpoint *kernel.Checkpoint,
+	eventType string,
 	message string,
 ) (kernel.Snapshot, error) {
 	state.Plan.Status = PlanApproved
@@ -389,7 +396,7 @@ func (runner *Runner) approvePlan(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: "plan.approved", Message: message}},
+		Events: []kernel.EventDraft{{Type: eventType, Message: message}},
 	})
 }
 

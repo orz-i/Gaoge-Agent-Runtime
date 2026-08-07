@@ -284,6 +284,104 @@ func TestRunnerCompletesImmediatelyAfterTerminalTool(t *testing.T) {
 	})
 }
 
+type approvalModel struct {
+	calls int
+}
+
+func (model *approvalModel) Generate(context.Context, agent.ModelRequest) (agent.ModelResponse, error) {
+	model.calls++
+	if model.calls == 1 {
+		return agent.ModelResponse{ToolCalls: []tools.Call{{
+			ID: "approval_call", ToolKey: publishToolKey, Arguments: json.RawMessage(`{"title":"ready"}`),
+		}}}, nil
+	}
+	return agent.ModelResponse{Content: "approved"}, nil
+}
+
+func TestDeferredToolApprovalRequiresExplicitResume(t *testing.T) {
+	t.Parallel()
+	fixture := newDeferredApprovalFixture(t)
+	waiting := startDeferredApproval(t, fixture)
+	resolved := resolveDeferredApproval(t, fixture, waiting)
+	completed, err := fixture.runner.Resume(t.Context(), resolved.Run.ID, resolved.Run.Revision)
+	assertDeferredApprovalCompleted(t, fixture, completed, err)
+}
+
+type deferredApprovalFixture struct {
+	runner     *agent.Runner
+	model      *approvalModel
+	executions *int
+}
+
+func newDeferredApprovalFixture(t *testing.T) deferredApprovalFixture {
+	t.Helper()
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	executions := 0
+	registry := mustRegistry(t, []tools.Registration{{
+		Definition: tools.Definition{
+			Key: publishToolKey, Name: publishToolName,
+			InputSchema: json.RawMessage(`{"type":"object"}`), ApprovalMode: tools.ApprovalAlways,
+		},
+		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			executions++
+			return tools.ExecutionResult{
+				Content: json.RawMessage(`{"ok":true}`),
+				Receipt: tools.Receipt{ExecutionID: "approved", Disposition: committedDisposition},
+			}, nil
+		}),
+	}})
+	model := &approvalModel{}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
+		Approvals: approvals, DeferResumption: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return deferredApprovalFixture{runner: runner, model: model, executions: &executions}
+}
+
+func startDeferredApproval(t *testing.T, fixture deferredApprovalFixture) kernel.Snapshot {
+	t.Helper()
+	waiting, err := fixture.runner.StartRun(t.Context(), startRequest(
+		"run_deferred_approval", "request_deferred_approval", "publish", publishToolKey,
+	))
+	if err != nil || waiting.Run.Status != kernel.RunStatusWaitingInput || *fixture.executions != 0 {
+		t.Fatalf("waiting=%#v executions=%d err=%v", waiting.Run, *fixture.executions, err)
+	}
+	return waiting
+}
+
+func resolveDeferredApproval(
+	t *testing.T,
+	fixture deferredApprovalFixture,
+	waiting kernel.Snapshot,
+) kernel.Snapshot {
+	t.Helper()
+	resolved, err := fixture.runner.ResolveApproval(t.Context(), waiting.Run.ID, waiting.Run.Revision,
+		interaction.ApprovalResponse{Decision: interaction.DecisionApprove})
+	if err != nil || resolved.Run.Status != kernel.RunStatusRunning || *fixture.executions != 0 {
+		t.Fatalf("resolved=%#v executions=%d err=%v", resolved.Run, *fixture.executions, err)
+	}
+	return resolved
+}
+
+func assertDeferredApprovalCompleted(
+	t *testing.T,
+	fixture deferredApprovalFixture,
+	completed kernel.Snapshot,
+	err error,
+) {
+	t.Helper()
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted ||
+		*fixture.executions != 1 || fixture.model.calls != 2 {
+		t.Fatalf(
+			"completed=%#v executions=%d calls=%d err=%v",
+			completed.Run, *fixture.executions, fixture.model.calls, err,
+		)
+	}
+}
+
 type deltaThenFailureModel struct {
 	streamCalls int
 	unaryCalls  int
