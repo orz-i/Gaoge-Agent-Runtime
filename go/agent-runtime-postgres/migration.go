@@ -10,7 +10,9 @@ import (
 var ErrNilDatabase = errors.New("postgres kernel store database is nil")
 
 func Models() []interface{} {
-	return []interface{}{&models.KernelRunRecord{}, &models.KernelEventRecord{}}
+	return []interface{}{
+		&models.KernelRunRecord{}, &models.KernelEventRecord{}, &models.RunRelationRecord{},
+	}
 }
 
 func Migrate(db *gorm.DB) error {

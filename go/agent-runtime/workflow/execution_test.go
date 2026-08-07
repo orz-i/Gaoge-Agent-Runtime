@@ -11,6 +11,7 @@ import (
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
@@ -82,6 +83,41 @@ func TestWaitCheckpointResumesWorkflow(t *testing.T) {
 	}
 	assertWorkflowCompleted(t, completed)
 	assertResolvedWait(t, completed, response)
+}
+
+func TestWorkflowEffectRecordsStableChildRelation(t *testing.T) {
+	t.Parallel()
+	runtime := newWorkflowRuntime(t)
+	executor := &scriptedExecutor{
+		runtime: runtime,
+		results: []workflow.EffectResult{{
+			Disposition: workflow.DispositionCompleted, ChildRunID: "child-1",
+			ReceiptID: "receipt-1", Output: json.RawMessage(`{"ok":true}`),
+		}},
+	}
+	relations, err := runrelation.New(memory.NewRunRelationStore(), workflowClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := workflow.NewRunner(workflow.Dependencies{
+		Runtime: runtime, Effects: executor, Relations: relations,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := compileWorkflow(t, []workflow.Node{
+		effectNode("draft", "agent.run"), returnNode(json.RawMessage(`{"done":true}`)),
+	}, workflow.Limits{})
+	completed, err := runner.StartRun(t.Context(), workflowRequest(definition))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := mustWorkflowView(t, completed)
+	items, err := relations.ListChildren(t.Context(), completed.Run.ID)
+	if err != nil || len(items) != 1 || view.Effects[0].ChildRunID != "child-1" ||
+		items[0].Kind != runrelation.KindWorkflowEffect || items[0].OwnerNodeID != "draft" {
+		t.Fatalf("view=%#v relations=%#v err=%v", view, items, err)
+	}
 }
 
 func TestSegmentDispatchesAtMostOneEffect(t *testing.T) {

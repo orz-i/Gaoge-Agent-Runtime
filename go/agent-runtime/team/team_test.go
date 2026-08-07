@@ -13,6 +13,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
 )
 
@@ -81,6 +82,51 @@ func TestFailFastTeamFailsOnMemberFailure(t *testing.T) {
 	view := mustView(t, failed)
 	if view.Join.Status != handoff.JoinFailed || view.Join.Failed != 1 {
 		t.Fatalf("unexpected failed join: %#v", view.Join)
+	}
+}
+
+func TestTeamRecordsStableMemberRelations(t *testing.T) {
+	t.Parallel()
+	runner, relations := newTeamRunnerWithRelations(t)
+	completed, err := runner.StartRun(t.Context(), teamRequest(team.ExecutionParallel, handoff.JoinAll))
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := relations.ListChildren(t.Context(), completed.Run.ID)
+	assertTeamRelations(t, items, err)
+}
+
+func newTeamRunnerWithRelations(t *testing.T) (*team.Runner, *runrelation.Registry) {
+	t.Helper()
+	runtime, err := kernel.New(kernel.Dependencies{
+		Store: memory.NewStore(), Clock: teamClock{}, IDs: &teamIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	children := newFakeChildren(childCompletes)
+	coordinator, err := handoff.New(children)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relations, err := runrelation.New(memory.NewRunRelationStore(), teamClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := team.NewRunner(team.Dependencies{
+		Runtime: runtime, Handoffs: coordinator, Relations: relations, MaxMembers: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runner, relations
+}
+
+func assertTeamRelations(t *testing.T, items []runrelation.Relation, err error) {
+	t.Helper()
+	if err != nil || len(items) != 2 || items[0].Kind != runrelation.KindTeamMember ||
+		items[0].OwnerNodeID != "researcher" || items[1].OwnerNodeID != "writer" {
+		t.Fatalf("relations = %#v, err=%v", items, err)
 	}
 }
 

@@ -40,3 +40,14 @@ type KernelEventRecord struct {
 }
 
 func (KernelEventRecord) TableName() string { return "agent_kernel_events" }
+
+// RunRelationRecord stores immutable parent/child Run ownership.
+type RunRelationRecord struct {
+	ChildRunID  string    `gorm:"size:64;primaryKey"`
+	ParentRunID string    `gorm:"size:64;not null;index:idx_agent_run_relations_parent;uniqueIndex:idx_agent_run_relations_owner,priority:1"`
+	Kind        string    `gorm:"size:32;not null;uniqueIndex:idx_agent_run_relations_owner,priority:2"`
+	OwnerNodeID string    `gorm:"size:128;not null;uniqueIndex:idx_agent_run_relations_owner,priority:3"`
+	CreatedAt   time.Time `gorm:"not null;index:idx_agent_run_relations_created"`
+}
+
+func (RunRelationRecord) TableName() string { return "agent_run_relations" }

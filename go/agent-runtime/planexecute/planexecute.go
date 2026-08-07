@@ -8,6 +8,7 @@ import (
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 )
 
 const CapabilityRunner kernel.Capability = "planexecute.runner"
@@ -143,18 +144,20 @@ type ApprovalResponse struct {
 
 // Dependencies are the only requirements of the PlanExecute feature.
 type Dependencies struct {
-	Runtime  *kernel.Runtime
-	Planner  Planner
-	Agent    AgentRunner
-	MaxSteps int
+	Runtime   *kernel.Runtime
+	Planner   Planner
+	Agent     AgentRunner
+	Relations runrelation.Recorder
+	MaxSteps  int
 }
 
 // Runner owns Plan generation, approval, sequential Step execution and recovery.
 type Runner struct {
-	runtime  *kernel.Runtime
-	planner  Planner
-	agent    AgentRunner
-	maxSteps int
+	runtime   *kernel.Runtime
+	planner   Planner
+	agent     AgentRunner
+	relations runrelation.Recorder
+	maxSteps  int
 }
 
 type executionState struct {
@@ -180,15 +183,18 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}
 	return &Runner{
 		runtime: dependencies.Runtime, planner: dependencies.Planner,
-		agent: dependencies.Agent, maxSteps: dependencies.MaxSteps,
+		agent: dependencies.Agent, relations: dependencies.Relations, maxSteps: dependencies.MaxSteps,
 	}, nil
 }
 
 // Descriptor declares the explicit PlanExecute capability graph.
 func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
+	requires := []kernel.Capability{kernel.CapabilityRuntime, agent.CapabilityRunner}
+	if runner != nil && runner.relations != nil {
+		requires = append(requires, runrelation.CapabilityRelations)
+	}
 	return kernel.FeatureDescriptor{
-		Name:     "planexecute",
-		Requires: []kernel.Capability{kernel.CapabilityRuntime, agent.CapabilityRunner},
+		Name: "planexecute", Requires: requires,
 		Provides: []kernel.Capability{CapabilityRunner},
 	}
 }
@@ -459,6 +465,15 @@ func (runner *Runner) loadOrStartChild(
 	model string,
 	step Step,
 ) (kernel.Snapshot, error) {
+	if runner.relations != nil {
+		_, err := runner.relations.Ensure(ctx, runrelation.Draft{
+			ParentRunID: parent.Run.ID, ChildRunID: step.ChildRunID,
+			Kind: runrelation.KindPlanStep, OwnerNodeID: step.ID,
+		})
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
 	child, err := runner.agent.LoadRun(ctx, step.ChildRunID)
 	if err == nil {
 		return child, nil

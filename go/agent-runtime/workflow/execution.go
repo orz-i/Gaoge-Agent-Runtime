@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 )
 
 const CapabilityRunner kernel.Capability = "workflow.runner"
@@ -83,6 +84,7 @@ type Effect struct {
 	Kind         string          `json:"kind"`
 	Input        json.RawMessage `json:"input"`
 	Status       EffectStatus    `json:"status"`
+	ChildRunID   string          `json:"childRunID,omitempty"`
 	ReceiptID    string          `json:"receiptID,omitempty"`
 	Output       json.RawMessage `json:"output,omitempty"`
 	ErrorCode    string          `json:"errorCode,omitempty"`
@@ -145,6 +147,7 @@ type EffectRequest struct {
 // EffectResult is one executor observation. Completed results require a receipt.
 type EffectResult struct {
 	Disposition EffectDisposition
+	ChildRunID  string
 	ReceiptID   string
 	Output      json.RawMessage
 	ErrorCode   string
@@ -158,16 +161,18 @@ type EffectExecutor interface {
 
 // Dependencies are the only requirements of the Workflow feature.
 type Dependencies struct {
-	Runtime *kernel.Runtime
-	Effects EffectExecutor
-	Ceiling Limits
+	Runtime   *kernel.Runtime
+	Effects   EffectExecutor
+	Relations runrelation.Recorder
+	Ceiling   Limits
 }
 
 // Runner owns deterministic Workflow interpretation and no background workers.
 type Runner struct {
-	runtime *kernel.Runtime
-	effects EffectExecutor
-	ceiling Limits
+	runtime   *kernel.Runtime
+	effects   EffectExecutor
+	relations runrelation.Recorder
+	ceiling   Limits
 }
 
 type executionState View
@@ -191,13 +196,20 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		return nil, ErrInvalidExecution
 	}
 	ceiling := normalizeCeiling(dependencies.Ceiling)
-	return &Runner{runtime: dependencies.Runtime, effects: dependencies.Effects, ceiling: ceiling}, nil
+	return &Runner{
+		runtime: dependencies.Runtime, effects: dependencies.Effects,
+		relations: dependencies.Relations, ceiling: ceiling,
+	}, nil
 }
 
 // Descriptor declares the explicit Workflow capability graph.
 func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
+	requires := []kernel.Capability{kernel.CapabilityRuntime}
+	if runner != nil && runner.relations != nil {
+		requires = append(requires, runrelation.CapabilityRelations)
+	}
 	return kernel.FeatureDescriptor{
-		Name: "workflow", Requires: []kernel.Capability{kernel.CapabilityRuntime},
+		Name: "workflow", Requires: requires,
 		Provides: []kernel.Capability{CapabilityRunner},
 	}
 }
@@ -467,6 +479,13 @@ func (runner *Runner) dispatchEffect(
 		failed, failErr := runner.failEffect(ctx, snapshot, state, activationIndex, effectIndex, "workflow.effect_dispatch", err)
 		return failed, true, failErr
 	}
+	state.Effects[effectIndex].ChildRunID = strings.TrimSpace(result.ChildRunID)
+	if err = runner.ensureEffectRelation(ctx, snapshot.Run.ID, state.Effects[effectIndex]); err != nil {
+		failed, failErr := runner.failEffect(
+			ctx, snapshot, state, activationIndex, effectIndex, "workflow.effect_relation", err,
+		)
+		return failed, true, failErr
+	}
 	switch result.Disposition {
 	case DispositionPending:
 		yielded, yieldErr := runner.yield(ctx, snapshot, state, "effect_pending")
@@ -481,6 +500,17 @@ func (runner *Runner) dispatchEffect(
 		failed, failErr := runner.failEffect(ctx, snapshot, state, activationIndex, effectIndex, "workflow.effect_result", ErrInvalidExecution)
 		return failed, true, failErr
 	}
+}
+
+func (runner *Runner) ensureEffectRelation(ctx context.Context, parentRunID string, effect Effect) error {
+	if runner.relations == nil || effect.ChildRunID == "" {
+		return nil
+	}
+	_, err := runner.relations.Ensure(ctx, runrelation.Draft{
+		ParentRunID: parentRunID, ChildRunID: effect.ChildRunID,
+		Kind: runrelation.KindWorkflowEffect, OwnerNodeID: effect.NodeID,
+	})
+	return err
 }
 
 func (runner *Runner) completeEffect(

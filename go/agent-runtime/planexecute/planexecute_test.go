@@ -12,6 +12,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 )
 
 var errChildFailed = errors.New("child failed")
@@ -102,6 +103,35 @@ func TestChildFailureFailsPlanExecuteRun(t *testing.T) {
 	view := mustView(t, failed)
 	if view.Plan.Status != planexecute.PlanFailed || view.Plan.Steps[0].Status != planexecute.StepFailed {
 		t.Fatalf("unexpected failed plan: %#v", view)
+	}
+}
+
+func TestPlanStepRecordsStableChildRelation(t *testing.T) {
+	t.Parallel()
+	runtime := newRuntime(t)
+	children := newFakeAgentRunner(childComplete)
+	relations, err := runrelation.New(memory.NewRunRelationStore(), planClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := planexecute.NewRunner(planexecute.Dependencies{
+		Runtime: runtime, Planner: staticPlanner{draft: planexecute.PlanDraft{
+			Summary: "Related step", Steps: []planexecute.StepDraft{{Title: "Draft", Goal: "draft"}},
+		}},
+		Agent: children, Relations: relations, MaxSteps: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := runner.StartRun(t.Context(), baseStartRequest(planexecute.ApprovalAuto))
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := mustView(t, completed)
+	items, err := relations.ListChildren(t.Context(), completed.Run.ID)
+	if err != nil || len(items) != 1 || items[0].Kind != runrelation.KindPlanStep ||
+		items[0].OwnerNodeID != view.Plan.Steps[0].ID || items[0].ChildRunID != view.Plan.Steps[0].ChildRunID {
+		t.Fatalf("relations = %#v, err=%v", items, err)
 	}
 }
 

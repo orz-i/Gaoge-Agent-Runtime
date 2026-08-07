@@ -10,6 +10,7 @@ import (
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 )
 
 const CapabilityRunner kernel.Capability = "team.runner"
@@ -70,6 +71,7 @@ type Delegator interface {
 type Dependencies struct {
 	Runtime    *kernel.Runtime
 	Handoffs   Delegator
+	Relations  runrelation.Recorder
 	MaxMembers int
 }
 
@@ -77,6 +79,7 @@ type Dependencies struct {
 type Runner struct {
 	runtime    *kernel.Runtime
 	handoffs   Delegator
+	relations  runrelation.Recorder
 	maxMembers int
 }
 
@@ -98,15 +101,19 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}
 	return &Runner{
 		runtime: dependencies.Runtime, handoffs: dependencies.Handoffs,
-		maxMembers: dependencies.MaxMembers,
+		relations: dependencies.Relations, maxMembers: dependencies.MaxMembers,
 	}, nil
 }
 
 // Descriptor declares the explicit Team capability graph.
 func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
+	requires := []kernel.Capability{kernel.CapabilityRuntime, handoff.CapabilityCoordinator}
+	if runner != nil && runner.relations != nil {
+		requires = append(requires, runrelation.CapabilityRelations)
+	}
 	return kernel.FeatureDescriptor{
 		Name:     "team",
-		Requires: []kernel.Capability{kernel.CapabilityRuntime, handoff.CapabilityCoordinator},
+		Requires: requires,
 		Provides: []kernel.Capability{CapabilityRunner},
 	}
 }
@@ -224,6 +231,9 @@ func (runner *Runner) runSequentialMember(
 	if terminalDelegation(state.Members[index].Delegation.Status) {
 		return false, nil
 	}
+	if err := runner.ensureMemberRelation(ctx, parent, state.Members[index]); err != nil {
+		return true, err
+	}
 	delegation, err := runner.handoffs.StartOrLoad(ctx, parent, state.Members[index].Delegation)
 	if delegation.ID != "" {
 		state.Members[index].Delegation = delegation
@@ -254,6 +264,9 @@ func (runner *Runner) runParallel(
 		if terminalDelegation(state.Members[index].Delegation.Status) {
 			continue
 		}
+		if err := runner.ensureMemberRelation(ctx, parent, state.Members[index]); err != nil {
+			return err
+		}
 		launched++
 		delegation := cloneDelegation(state.Members[index].Delegation)
 		group.Go(func() error {
@@ -282,6 +295,21 @@ func (runner *Runner) runParallel(
 		}
 	}
 	return resultError
+}
+
+func (runner *Runner) ensureMemberRelation(
+	ctx context.Context,
+	parent kernel.Snapshot,
+	member MemberState,
+) error {
+	if runner.relations == nil {
+		return nil
+	}
+	_, err := runner.relations.Ensure(ctx, runrelation.Draft{
+		ParentRunID: parent.Run.ID, ChildRunID: member.Delegation.ChildRunID,
+		Kind: runrelation.KindTeamMember, OwnerNodeID: member.Member.ID,
+	})
+	return err
 }
 
 func (runner *Runner) resolve(
