@@ -467,4 +467,23 @@ func TestRunnerPreservesAssistantToolCallBatchBeforeOrderedResults(t *testing.T)
 	if snapshot.Run.Status != kernel.RunStatusCompleted || len(model.requests) != 2 {
 		t.Fatalf("run = %#v, model calls = %d", snapshot.Run, len(model.requests))
 	}
+	view, err := text.ViewState(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Messages) != 5 || view.LLMCalls != 2 || view.ToolCalls != 2 {
+		t.Fatalf("view = %#v", view)
+	}
+	if view.Messages[1].ToolCalls[0].ID != callOne || view.Messages[2].ToolCallID != callOne {
+		t.Fatalf("view transcript = %#v", view.Messages)
+	}
+	view.Messages[1].ToolCalls[0].ID = "mutated"
+	view.ToolKeys[0] = "mutated"
+	reloaded, err := text.ViewState(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Messages[1].ToolCalls[0].ID != callOne || reloaded.ToolKeys[0] != manifestToolKey {
+		t.Fatalf("view mutated persisted state = %#v", reloaded)
+	}
 }

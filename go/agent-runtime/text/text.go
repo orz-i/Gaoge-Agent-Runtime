@@ -129,6 +129,34 @@ type runState struct {
 	ToolCalls    int          `json:"toolCalls"`
 }
 
+// View is an isolated public projection of one persisted Text run. It exposes
+// the durable transcript and bounded usage state without leaking the private
+// execution representation or allowing callers to mutate Kernel state.
+type View struct {
+	Messages  []Message
+	Model     string
+	ToolKeys  []string
+	Limits    Limits
+	LLMCalls  int
+	ToolCalls int
+}
+
+// ViewState decodes an isolated public view from a Kernel Text snapshot.
+func ViewState(snapshot kernel.Snapshot) (View, error) {
+	state, err := decodeState(snapshot.State)
+	if err != nil {
+		return View{}, err
+	}
+	return View{
+		Messages:  cloneMessages(state.Messages),
+		Model:     state.Model,
+		ToolKeys:  append([]string(nil), state.ToolKeys...),
+		Limits:    state.Limits,
+		LLMCalls:  state.LLMCalls,
+		ToolCalls: state.ToolCalls,
+	}, nil
+}
+
 // NewRunner constructs a direct Text feature without planning or automatic routing.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Model == nil || dependencies.Catalog == nil ||
