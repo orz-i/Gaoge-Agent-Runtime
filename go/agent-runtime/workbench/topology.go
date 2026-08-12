@@ -209,7 +209,7 @@ func normalizeTopologyEdges(
 	values []TopologyEdge,
 	nodeIDs map[string]struct{},
 ) ([]TopologyEdge, error) {
-	edges := append([]TopologyEdge(nil), values...)
+	edges := append(make([]TopologyEdge, 0, len(values)), values...)
 	ids := make(map[string]struct{}, len(edges))
 	for index := range edges {
 		normalized, err := normalizeTopologyEdge(edges[index], nodeIDs, ids)
@@ -264,7 +264,7 @@ func cloneTopology(value *TopologyV1) *TopologyV1 {
 	for index := range cloned.Nodes {
 		cloned.Nodes[index].Data = append(json.RawMessage(nil), value.Nodes[index].Data...)
 	}
-	cloned.Edges = append([]TopologyEdge(nil), value.Edges...)
+	cloned.Edges = append(make([]TopologyEdge, 0, len(value.Edges)), value.Edges...)
 	for index := range cloned.Edges {
 		cloned.Edges[index].Data = append(json.RawMessage(nil), value.Edges[index].Data...)
 	}

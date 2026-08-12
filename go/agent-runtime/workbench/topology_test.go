@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
@@ -53,6 +54,40 @@ func TestQueryNormalizesAndClonesTopology(t *testing.T) {
 	}
 	if second.Topology == nil || second.Topology.Hash != firstHash || second.Topology.Nodes[0].Label != "A" {
 		t.Fatalf("topology was not stable and isolated: %#v", second.Topology)
+	}
+}
+
+func TestQuerySerializesEmptyWorkbenchCollectionsAsArrays(t *testing.T) {
+	t.Parallel()
+	snapshot := baseSnapshot()
+	query := mustQuery(t, snapshot, []workbench.Registration{{
+		Topology: staticTopologyProvider{
+			name: "topology.single-node",
+			value: workbench.TopologyV1{
+				SchemaVersion: workbench.TopologySchemaVersion,
+				RootNodeID:    staticRootNodeID,
+				Revision:      snapshot.Run.Revision,
+				Nodes: []workbench.TopologyNode{{
+					ID: staticRootNodeID, Kind: "agent", Label: "Agent", Status: "completed",
+				}},
+			},
+		},
+	}})
+
+	detail, err := query.Get(context.Background(), snapshot.Run.ID)
+	if err != nil {
+		t.Fatalf("get single-node topology detail: %v", err)
+	}
+	if detail.Sections == nil || detail.Topology == nil || detail.Topology.Edges == nil {
+		t.Fatalf("empty collections must remain non-nil: %#v", detail)
+	}
+	encoded, err := json.Marshal(detail)
+	if err != nil {
+		t.Fatalf("marshal detail: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"sections":[]`) ||
+		!strings.Contains(string(encoded), `"edges":[]`) {
+		t.Fatalf("empty collections were not serialized as arrays: %s", encoded)
 	}
 }
 

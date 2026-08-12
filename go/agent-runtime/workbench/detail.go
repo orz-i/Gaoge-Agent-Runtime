@@ -247,7 +247,7 @@ func cloneDetail(detail Detail) Detail {
 	detail.Run = cloneRun(detail.Run)
 	detail.Checkpoint = cloneCheckpoint(detail.Checkpoint)
 	detail.Result = cloneResult(detail.Result)
-	detail.Sections = append([]Section(nil), detail.Sections...)
+	detail.Sections = append(make([]Section, 0, len(detail.Sections)), detail.Sections...)
 	for index := range detail.Sections {
 		detail.Sections[index].Content = append(json.RawMessage(nil), detail.Sections[index].Content...)
 	}
