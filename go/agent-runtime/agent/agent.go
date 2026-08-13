@@ -74,6 +74,7 @@ func (runner *Runner) completeWithToolResult(
 type ModelRequest struct {
 	RunID       string
 	Model       string
+	ModelOptions json.RawMessage
 	Messages    []Message
 	Tools       []tools.Definition
 	HostedTools []HostedTool
@@ -199,6 +200,7 @@ type StartRequest struct {
 	RequestID string
 	Goal      string
 	Model     string
+	ModelOptions json.RawMessage
 	ToolKeys  []string
 	Limits    Limits
 }
@@ -219,6 +221,7 @@ type Runner struct {
 type runState struct {
 	Messages     []Message    `json:"messages"`
 	Model        string       `json:"model,omitempty"`
+	ModelOptions json.RawMessage `json:"modelOptions,omitempty"`
 	ToolKeys     []string     `json:"toolKeys"`
 	Limits       Limits       `json:"limits"`
 	PendingCalls []tools.Call `json:"pendingCalls,omitempty"`
@@ -232,6 +235,7 @@ type runState struct {
 type View struct {
 	Messages  []Message
 	Model     string
+	ModelOptions json.RawMessage
 	ToolKeys  []string
 	Limits    Limits
 	LLMCalls  int
@@ -247,6 +251,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 	return View{
 		Messages:  cloneMessages(state.Messages),
 		Model:     state.Model,
+		ModelOptions: cloneRawJSON(state.ModelOptions),
 		ToolKeys:  append([]string(nil), state.ToolKeys...),
 		Limits:    state.Limits,
 		LLMCalls:  state.LLMCalls,
@@ -304,6 +309,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	state := runState{
 		Messages: []Message{{Role: RoleUser, Content: strings.TrimSpace(request.Goal)}},
 		Model:    strings.TrimSpace(request.Model),
+		ModelOptions: cloneRawJSON(request.ModelOptions),
 		ToolKeys: normalizedToolKeys(request.ToolKeys),
 		Limits:   limits,
 	}
@@ -449,6 +455,7 @@ func (runner *Runner) callModel(
 	}
 	request := ModelRequest{
 		RunID: snapshot.Run.ID, Model: state.Model,
+		ModelOptions: cloneRawJSON(state.ModelOptions),
 		Messages: cloneMessages(state.Messages), Tools: definitions, HostedTools: cloneHostedTools(hostedTools),
 	}
 	runner.publish(ctx, snapshot.Run.ID, runfeed.Draft{

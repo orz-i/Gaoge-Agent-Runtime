@@ -193,11 +193,21 @@ func TestRunnerCompletesHostedToolArtifactWithoutPersistingBinary(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := runner.StartRun(t.Context(), startRequest(
-		"run_hosted_image", "request_hosted_image", "draw a cat", hostedImageToolKey,
-	))
+	request := startRequest("run_hosted_image", "request_hosted_image", "draw a cat", hostedImageToolKey)
+	request.ModelOptions = json.RawMessage(`{"reasoning":{"effort":"high"}}`)
+	snapshot, err := runner.StartRun(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if string(model.request.ModelOptions) != string(request.ModelOptions) {
+		t.Fatalf("model options = %s, want %s", model.request.ModelOptions, request.ModelOptions)
+	}
+	view, err := agent.ViewState(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(view.ModelOptions) != string(request.ModelOptions) {
+		t.Fatalf("durable model options = %s, want %s", view.ModelOptions, request.ModelOptions)
 	}
 	assertHostedArtifactResult(t, snapshot)
 }
