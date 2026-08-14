@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	runtimemodel "github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -275,17 +276,17 @@ type approvalIntegrationModel struct {
 
 func (model *approvalIntegrationModel) Generate(
 	context.Context,
-	agent.ModelRequest,
-) (agent.ModelResponse, error) {
+	runtimemodel.Request,
+) (runtimemodel.Response, error) {
 	model.mu.Lock()
 	defer model.mu.Unlock()
 	model.calls++
 	if model.calls == 1 {
-		return agent.ModelResponse{ToolCalls: []tools.Call{{
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
 			ID: "publish-call", ToolKey: integrationToolKey, Arguments: json.RawMessage(`{}`),
 		}}}, nil
 	}
-	return agent.ModelResponse{Content: "published"}, nil
+	return runtimemodel.Response{Content: "published"}, nil
 }
 
 func (model *approvalIntegrationModel) CallCount() int {

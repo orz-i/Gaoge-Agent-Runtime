@@ -3,6 +3,7 @@ package compose_test
 import (
 	"context"
 	"encoding/json"
+	runtimemodel "github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 	"strconv"
 	"testing"
 	"time"
@@ -170,20 +171,20 @@ type minimalModel struct{ calls int }
 
 type modelOnlyModel struct{}
 
-func (modelOnlyModel) Generate(context.Context, agent.ModelRequest) (agent.ModelResponse, error) {
-	return agent.ModelResponse{Content: "direct answer"}, nil
+func (modelOnlyModel) Generate(context.Context, runtimemodel.Request) (runtimemodel.Response, error) {
+	return runtimemodel.Response{Content: "direct answer"}, nil
 }
 
-func (model *minimalModel) Generate(_ context.Context, request agent.ModelRequest) (agent.ModelResponse, error) {
+func (model *minimalModel) Generate(_ context.Context, request runtimemodel.Request) (runtimemodel.Response, error) {
 	model.calls++
 	if model.calls == 1 {
-		return agent.ModelResponse{ToolCalls: []tools.Call{{
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
 			ToolKey: minimalToolKey, Arguments: json.RawMessage(`{"id":"42"}`),
 		}}}, nil
 	}
 	last := request.Messages[len(request.Messages)-1]
-	if last.Role != agent.RoleTool || last.Content != `{"value":"42"}` {
-		return agent.ModelResponse{}, agent.ErrInvalidModelResponse
+	if last.Role != runtimemodel.RoleTool || last.Content != `{"value":"42"}` {
+		return runtimemodel.Response{}, agent.ErrInvalidModelResponse
 	}
-	return agent.ModelResponse{Content: "The answer is 42."}, nil
+	return runtimemodel.Response{Content: "The answer is 42."}, nil
 }

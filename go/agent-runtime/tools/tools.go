@@ -32,6 +32,38 @@ type RecoverableCallError struct {
 	Cause   error
 }
 
+// CloneDefinition returns an isolated Tool definition copy.
+func CloneDefinition(definition Definition) Definition {
+	definition.InputSchema = cloneJSON(definition.InputSchema)
+	return definition
+}
+
+// CloneCall returns an isolated Tool call copy.
+func CloneCall(call Call) Call {
+	call.Arguments = cloneJSON(call.Arguments)
+	return call
+}
+
+// CloneExecutionRequest returns an isolated Tool execution request copy.
+func CloneExecutionRequest(request ExecutionRequest) ExecutionRequest {
+	request.Call = CloneCall(request.Call)
+	return request
+}
+
+// CloneExecutionResult returns an isolated Tool execution result copy.
+func CloneExecutionResult(result ExecutionResult) ExecutionResult {
+	result.Content = cloneJSON(result.Content)
+	return result
+}
+
+// ValidateExecutionResult validates the stable Tool result boundary.
+func ValidateExecutionResult(result ExecutionResult) error {
+	if !validExecutionResult(result) {
+		return ErrInvalidCall
+	}
+	return nil
+}
+
 func (err *RecoverableCallError) Error() string {
 	if err == nil {
 		return ErrInvalidCall.Error()

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -25,23 +26,6 @@ var (
 	ErrApprovalRequired     = errors.New("agent run approval is required")
 	ErrRunTerminal          = errors.New("agent run is terminal")
 )
-
-// Role identifies one direct Agent loop message role.
-type Role string
-
-const (
-	RoleUser      Role = "user"
-	RoleAssistant Role = "assistant"
-	RoleTool      Role = "tool"
-)
-
-// Message is the provider-neutral transcript consumed by an Agent model.
-type Message struct {
-	Role       Role         `json:"role"`
-	Content    string       `json:"content"`
-	ToolCalls  []tools.Call `json:"toolCalls,omitempty"`
-	ToolCallID string       `json:"toolCallID,omitempty"`
-}
 
 func (runner *Runner) completeWithToolResult(
 	ctx context.Context,
@@ -71,105 +55,17 @@ func (runner *Runner) completeWithToolResult(
 	return completed, err
 }
 
-// ModelRequest is one direct Agent loop model call.
-type ModelRequest struct {
-	RunID       string
-	Model       string
-	ModelOptions json.RawMessage
-	Messages    []Message
-	Tools       []tools.Definition
-	HostedTools []HostedTool
-}
-
-// HostedTool is one provider-hosted Tool activation resolved by the host.
-// Target is opaque host metadata; Agent Runtime does not interpret provider protocols or payloads.
-type HostedTool struct {
-	Key    string          `json:"key"`
-	Target json.RawMessage `json:"target,omitempty"`
-}
-
-// HostedToolCall records one provider-executed Tool fact. It never enters the local Tool executor.
-type HostedToolCall struct {
-	ID      string          `json:"id,omitempty"`
-	ToolKey string          `json:"toolKey"`
-	Status  string          `json:"status,omitempty"`
-	Input   json.RawMessage `json:"input,omitempty"`
-	Output  json.RawMessage `json:"output,omitempty"`
-	Error   json.RawMessage `json:"error,omitempty"`
-}
-
-// ArtifactRef is a durable host-owned artifact reference. Binary payloads must not enter Runtime state or result.
-type ArtifactRef struct {
-	ID        string          `json:"id"`
-	Kind      string          `json:"kind"`
-	MediaType string          `json:"mediaType,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	SizeBytes int64           `json:"sizeBytes,omitempty"`
-	Metadata  json.RawMessage `json:"metadata,omitempty"`
-}
-
 // Result is the structured terminal Agent output when hosted Tool facts or artifacts are present.
 type Result struct {
-	Content         string           `json:"content,omitempty"`
-	HostedToolCalls []HostedToolCall `json:"hostedToolCalls,omitempty"`
-	Artifacts       []ArtifactRef    `json:"artifacts,omitempty"`
-	Citations       []string         `json:"citations,omitempty"`
-}
-
-// ModelResponse returns final content, local Tool calls, provider-hosted Tool facts, and durable artifact refs.
-type ModelResponse struct {
-	Content         string
-	ToolCalls       []tools.Call
-	HostedToolCalls []HostedToolCall
-	Artifacts       []ArtifactRef
-	Citations       []string
-}
-
-// ModelReasoningDelta is one provider-neutral reasoning progress observation.
-type ModelReasoningDelta struct {
-	EventType string `json:"eventType,omitempty"`
-	ItemID    string `json:"itemID,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	Text      string `json:"text,omitempty"`
-}
-
-// ModelUsage is one cumulative provider-neutral token usage observation.
-type ModelUsage struct {
-	InputTokens        int64  `json:"inputTokens,omitempty"`
-	OutputTokens       int64  `json:"outputTokens,omitempty"`
-	CacheReadTokens    int64  `json:"cacheReadTokens,omitempty"`
-	CacheWriteTokens   int64  `json:"cacheWriteTokens,omitempty"`
-	CacheWrite5mTokens int64  `json:"cacheWrite5mTokens,omitempty"`
-	CacheWrite1hTokens int64  `json:"cacheWrite1hTokens,omitempty"`
-	ReasoningTokens    int64  `json:"reasoningTokens,omitempty"`
-	Speed              string `json:"speed,omitempty"`
-	ServiceTier        string `json:"serviceTier,omitempty"`
-	BillingRateClass   string `json:"billingRateClass,omitempty"`
-}
-
-// ModelStreamEvent is the provider-neutral live model event consumed by Agent Runtime.
-type ModelStreamEvent struct {
-	Delta          string               `json:"delta,omitempty"`
-	Reasoning      *ModelReasoningDelta `json:"reasoning,omitempty"`
-	Usage          *ModelUsage          `json:"usage,omitempty"`
-	HostedToolCall *HostedToolCall      `json:"hostedToolCall,omitempty"`
-	ResponseID     string               `json:"responseID,omitempty"`
-}
-
-// Model is the only model dependency of the Agent feature.
-type Model interface {
-	Generate(context.Context, ModelRequest) (ModelResponse, error)
-}
-
-// StreamingModel optionally exposes real provider stream events while preserving the final ModelResponse contract.
-type StreamingModel interface {
-	GenerateStream(context.Context, ModelRequest, func(ModelStreamEvent) error) (ModelResponse, error)
+	Content         string                 `json:"content,omitempty"`
+	HostedToolCalls []model.HostedToolCall `json:"hostedToolCalls,omitempty"`
+	Artifacts       []model.ArtifactRef    `json:"artifacts,omitempty"`
+	Citations       []string               `json:"citations,omitempty"`
 }
 
 // HostedToolCatalog resolves provider-hosted Tool activations by canonical Tool Key.
 type HostedToolCatalog interface {
-	Resolve(context.Context, string, string) (HostedTool, bool, error)
+	Resolve(context.Context, string, string) (model.HostedTool, bool, error)
 }
 
 // Limits are hard ceilings for one direct Agent loop.
@@ -181,7 +77,7 @@ type Limits struct {
 // Dependencies explicitly provide the direct Agent loop capabilities.
 type Dependencies struct {
 	Runtime     *kernel.Runtime
-	Model       Model
+	Model       model.Client
 	Catalog     tools.Catalog
 	Executor    tools.Executor
 	Approvals   ToolApprovalGate
@@ -195,21 +91,21 @@ type Dependencies struct {
 
 // StartRequest starts one direct Agent Run.
 type StartRequest struct {
-	ID        string
-	Actor     kernel.ActorRef
-	Thread    kernel.ThreadRef
-	RequestID string
-	Goal      string
-	Model     string
+	ID           string
+	Actor        kernel.ActorRef
+	Thread       kernel.ThreadRef
+	RequestID    string
+	Goal         string
+	Model        string
 	ModelOptions json.RawMessage
-	ToolKeys  []string
-	Limits    Limits
+	ToolKeys     []string
+	Limits       Limits
 }
 
 // Runner owns only the direct Agent model and Tool loop.
 type Runner struct {
 	runtime     *kernel.Runtime
-	model       Model
+	model       model.Client
 	catalog     tools.Catalog
 	executor    tools.Executor
 	approvals   ToolApprovalGate
@@ -220,27 +116,27 @@ type Runner struct {
 }
 
 type runState struct {
-	Messages     []Message    `json:"messages"`
-	Model        string       `json:"model,omitempty"`
+	Messages     []model.Message `json:"messages"`
+	Model        string          `json:"model,omitempty"`
 	ModelOptions json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys     []string     `json:"toolKeys"`
-	Limits       Limits       `json:"limits"`
-	PendingCalls []tools.Call `json:"pendingCalls,omitempty"`
-	LLMCalls     int          `json:"llmCalls"`
-	ToolCalls    int          `json:"toolCalls"`
+	ToolKeys     []string        `json:"toolKeys"`
+	Limits       Limits          `json:"limits"`
+	PendingCalls []tools.Call    `json:"pendingCalls,omitempty"`
+	LLMCalls     int             `json:"llmCalls"`
+	ToolCalls    int             `json:"toolCalls"`
 }
 
 // View is an isolated public projection of one persisted Agent Run. It exposes
 // the durable transcript and bounded usage state without leaking the private
 // execution representation or allowing callers to mutate Kernel state.
 type View struct {
-	Messages  []Message
-	Model     string
+	Messages     []model.Message
+	Model        string
 	ModelOptions json.RawMessage
-	ToolKeys  []string
-	Limits    Limits
-	LLMCalls  int
-	ToolCalls int
+	ToolKeys     []string
+	Limits       Limits
+	LLMCalls     int
+	ToolCalls    int
 }
 
 // ViewState decodes an isolated public view from a Kernel Agent snapshot.
@@ -250,13 +146,13 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		return View{}, err
 	}
 	return View{
-		Messages:  cloneMessages(state.Messages),
-		Model:     state.Model,
+		Messages:     model.CloneMessages(state.Messages),
+		Model:        state.Model,
 		ModelOptions: cloneRawJSON(state.ModelOptions),
-		ToolKeys:  append([]string(nil), state.ToolKeys...),
-		Limits:    state.Limits,
-		LLMCalls:  state.LLMCalls,
-		ToolCalls: state.ToolCalls,
+		ToolKeys:     append([]string(nil), state.ToolKeys...),
+		Limits:       state.Limits,
+		LLMCalls:     state.LLMCalls,
+		ToolCalls:    state.ToolCalls,
 	}, nil
 }
 
@@ -306,11 +202,11 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 		return kernel.Snapshot{}, err
 	}
 	state := runState{
-		Messages: []Message{{Role: RoleUser, Content: strings.TrimSpace(request.Goal)}},
-		Model:    strings.TrimSpace(request.Model),
+		Messages:     []model.Message{{Role: model.RoleUser, Content: strings.TrimSpace(request.Goal)}},
+		Model:        strings.TrimSpace(request.Model),
 		ModelOptions: cloneRawJSON(request.ModelOptions),
-		ToolKeys: normalizedToolKeys(request.ToolKeys),
-		Limits:   limits,
+		ToolKeys:     normalizedToolKeys(request.ToolKeys),
+		Limits:       limits,
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
@@ -450,26 +346,26 @@ func (runner *Runner) callModel(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state runState,
-) ([]tools.Definition, ModelResponse, error) {
+) ([]tools.Definition, model.Response, error) {
 	definitions, hostedTools, err := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model)
 	if err != nil {
-		return nil, ModelResponse{}, err
+		return nil, model.Response{}, err
 	}
-	request := ModelRequest{
+	request := model.Request{
 		RunID: snapshot.Run.ID, Model: state.Model,
 		ModelOptions: cloneRawJSON(state.ModelOptions),
-		Messages: cloneMessages(state.Messages), Tools: definitions, HostedTools: cloneHostedTools(hostedTools),
+		Messages:     model.CloneMessages(state.Messages), Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
 	}
 	runner.publish(ctx, snapshot.Run.ID, Observation{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
 	response, err := runner.generateModel(ctx, request)
 	if err != nil {
-		return nil, ModelResponse{}, errors.Join(ErrModelFailure, err)
+		return nil, model.Response{}, errors.Join(ErrModelFailure, err)
 	}
 	response.Content = strings.TrimSpace(response.Content)
 	if !validModelResponse(response) {
-		return nil, ModelResponse{}, ErrInvalidModelResponse
+		return nil, model.Response{}, ErrInvalidModelResponse
 	}
 	runner.publish(ctx, snapshot.Run.ID, Observation{
 		Type: EventModelCompleted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
@@ -477,12 +373,12 @@ func (runner *Runner) callModel(
 	return definitions, response, nil
 }
 
-func (runner *Runner) generateModel(ctx context.Context, request ModelRequest) (ModelResponse, error) {
-	streaming, ok := runner.model.(StreamingModel)
+func (runner *Runner) generateModel(ctx context.Context, request model.Request) (model.Response, error) {
+	streaming, ok := runner.model.(model.StreamingClient)
 	if !ok {
 		return runner.model.Generate(ctx, request)
 	}
-	return streaming.GenerateStream(ctx, request, func(event ModelStreamEvent) error {
+	return streaming.GenerateStream(ctx, request, func(event model.StreamEvent) error {
 		runner.publishValue(ctx, request.RunID, Observation{
 			Type: EventModelDelta, Delta: event.Delta,
 		}, event)
@@ -493,10 +389,10 @@ func (runner *Runner) generateModel(ctx context.Context, request ModelRequest) (
 func (runner *Runner) resolveSelectedTools(
 	ctx context.Context,
 	keys []string,
-	model string,
-) ([]tools.Definition, []HostedTool, error) {
+	modelName string,
+) ([]tools.Definition, []model.HostedTool, error) {
 	local := make([]tools.Definition, 0, len(keys))
-	hosted := make([]HostedTool, 0, len(keys))
+	hosted := make([]model.HostedTool, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))
 	for _, rawKey := range keys {
 		key := strings.TrimSpace(rawKey)
@@ -507,7 +403,7 @@ func (runner *Runner) resolveSelectedTools(
 			continue
 		}
 		seen[key] = struct{}{}
-		definition, hostedTool, err := runner.resolveSelectedTool(ctx, key, model)
+		definition, hostedTool, err := runner.resolveSelectedTool(ctx, key, modelName)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -523,8 +419,8 @@ func (runner *Runner) resolveSelectedTools(
 func (runner *Runner) resolveSelectedTool(
 	ctx context.Context,
 	key string,
-	model string,
-) (*tools.Definition, *HostedTool, error) {
+	modelName string,
+) (*tools.Definition, *model.HostedTool, error) {
 	if runner.catalog != nil {
 		if definition, ok := runner.catalog.Resolve(key); ok {
 			return &definition, nil, nil
@@ -533,7 +429,7 @@ func (runner *Runner) resolveSelectedTool(
 	if runner.hostedTools == nil {
 		return nil, nil, tools.ErrToolNotFound
 	}
-	resolved, ok, err := runner.hostedTools.Resolve(ctx, key, strings.TrimSpace(model))
+	resolved, ok, err := runner.hostedTools.Resolve(ctx, key, strings.TrimSpace(modelName))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -569,8 +465,8 @@ func (runner *Runner) queueToolCalls(
 		preparedCalls[index] = call
 		preparedCalls[index].Arguments = append(json.RawMessage(nil), call.Arguments...)
 	}
-	state.Messages = append(state.Messages, Message{
-		Role: RoleAssistant, Content: strings.TrimSpace(content),
+	state.Messages = append(state.Messages, model.Message{
+		Role: model.RoleAssistant, Content: strings.TrimSpace(content),
 		ToolCalls: cloneToolCalls(preparedCalls),
 	})
 	state.PendingCalls = cloneToolCalls(preparedCalls)
@@ -659,8 +555,8 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		}
 		return runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
 	}
-	state.Messages = append(state.Messages, Message{
-		Role: RoleTool, Content: string(result.Content), ToolCallID: call.ID,
+	state.Messages = append(state.Messages, model.Message{
+		Role: model.RoleTool, Content: string(result.Content), ToolCallID: call.ID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ToolCalls++
@@ -714,8 +610,8 @@ func (runner *Runner) recordRecoverableToolError(
 		return runner.fail(ctx, snapshot, state, "agent.tool_error_invalid", err)
 	}
 	callID := call.ID
-	state.Messages = append(state.Messages, Message{
-		Role: RoleTool, Content: string(content), ToolCallID: callID,
+	state.Messages = append(state.Messages, model.Message{
+		Role: model.RoleTool, Content: string(content), ToolCallID: callID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ToolCalls++
@@ -770,8 +666,8 @@ func (runner *Runner) resumeRejected(
 	if !ok {
 		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 	}
-	state.Messages = append(state.Messages, Message{
-		Role: RoleTool, Content: rejectedToolContent(response.Comment), ToolCallID: call.ID,
+	state.Messages = append(state.Messages, model.Message{
+		Role: model.RoleTool, Content: rejectedToolContent(response.Comment), ToolCallID: call.ID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
 	encoded, err := encodeState(state)
@@ -811,9 +707,9 @@ func (runner *Runner) complete(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state runState,
-	response ModelResponse,
+	response model.Response,
 ) (kernel.Snapshot, error) {
-	state.Messages = append(state.Messages, Message{Role: RoleAssistant, Content: response.Content})
+	state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: response.Content})
 	encodedState, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -833,7 +729,7 @@ func (runner *Runner) complete(
 	return completed, err
 }
 
-func terminalResult(response ModelResponse) (*kernel.Result, error) {
+func terminalResult(response model.Response) (*kernel.Result, error) {
 	if len(response.HostedToolCalls) == 0 && len(response.Artifacts) == 0 && len(response.Citations) == 0 {
 		encodedContent, err := json.Marshal(response.Content)
 		if err != nil {
@@ -843,8 +739,8 @@ func terminalResult(response ModelResponse) (*kernel.Result, error) {
 	}
 	value := Result{
 		Content:         response.Content,
-		HostedToolCalls: cloneHostedToolCalls(response.HostedToolCalls),
-		Artifacts:       cloneArtifactRefs(response.Artifacts),
+		HostedToolCalls: model.CloneHostedToolCalls(response.HostedToolCalls),
+		Artifacts:       model.CloneArtifactRefs(response.Artifacts),
 		Citations:       append([]string(nil), response.Citations...),
 	}
 	encoded, err := json.Marshal(value)
@@ -930,7 +826,7 @@ func selectedDefinition(definitions []tools.Definition, key string) (tools.Defin
 	return tools.Definition{}, false
 }
 
-func validModelResponse(response ModelResponse) bool {
+func validModelResponse(response model.Response) bool {
 	return len(response.ToolCalls) > 0 || response.Content != "" || len(response.HostedToolCalls) > 0 || len(response.Artifacts) > 0
 }
 
@@ -953,35 +849,6 @@ func cloneToolCalls(values []tools.Call) []tools.Call {
 	for index, call := range values {
 		result[index] = call
 		result[index].Arguments = append(json.RawMessage(nil), call.Arguments...)
-	}
-	return result
-}
-
-func cloneHostedTools(values []HostedTool) []HostedTool {
-	result := make([]HostedTool, len(values))
-	for index, item := range values {
-		result[index] = item
-		result[index].Target = cloneRawJSON(item.Target)
-	}
-	return result
-}
-
-func cloneHostedToolCalls(values []HostedToolCall) []HostedToolCall {
-	result := make([]HostedToolCall, len(values))
-	for index, item := range values {
-		result[index] = item
-		result[index].Input = cloneRawJSON(item.Input)
-		result[index].Output = cloneRawJSON(item.Output)
-		result[index].Error = cloneRawJSON(item.Error)
-	}
-	return result
-}
-
-func cloneArtifactRefs(values []ArtifactRef) []ArtifactRef {
-	result := make([]ArtifactRef, len(values))
-	for index, item := range values {
-		result[index] = item
-		result[index].Metadata = cloneRawJSON(item.Metadata)
 	}
 	return result
 }
@@ -1039,15 +906,6 @@ func normalizedToolKeys(values []string) []string {
 		}
 		seen[value] = struct{}{}
 		result = append(result, value)
-	}
-	return result
-}
-
-func cloneMessages(values []Message) []Message {
-	result := make([]Message, len(values))
-	for index, message := range values {
-		result[index] = message
-		result[index].ToolCalls = cloneToolCalls(message.ToolCalls)
 	}
 	return result
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	runtimemodel "github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 	"strings"
 	"testing"
 	"time"
@@ -54,15 +55,15 @@ type perRunLimitModel struct {
 	calls int
 }
 
-func (model *perRunLimitModel) Generate(_ context.Context, _ agent.ModelRequest) (agent.ModelResponse, error) {
+func (model *perRunLimitModel) Generate(_ context.Context, _ runtimemodel.Request) (runtimemodel.Response, error) {
 	model.calls++
 	if model.calls == 1 {
-		return agent.ModelResponse{ToolCalls: []tools.Call{
+		return runtimemodel.Response{ToolCalls: []tools.Call{
 			{ID: callOne, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
 			{ID: callTwo, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
 		}}, nil
 	}
-	return agent.ModelResponse{Content: "done"}, nil
+	return runtimemodel.Response{Content: "done"}, nil
 }
 
 func TestRunnerFreezesPerRunLimits(t *testing.T) {
@@ -83,7 +84,7 @@ func TestRunnerFreezesPerRunLimits(t *testing.T) {
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals),
-		Limits: agent.Limits{MaxLLMCalls: 1, MaxToolCalls: 1},
+		Limits:    agent.Limits{MaxLLMCalls: 1, MaxToolCalls: 1},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +116,7 @@ func mustRunner(
 	t *testing.T,
 	runtime *kernel.Runtime,
 	approvals *interaction.Approvals,
-	model agent.Model,
+	model runtimemodel.Client,
 	registry *tools.Registry,
 ) *agent.Runner {
 	t.Helper()
@@ -139,7 +140,7 @@ func startRequest(id, requestID, goal string, toolKeys ...string) agent.StartReq
 
 type transcriptModel struct {
 	t        *testing.T
-	requests []agent.ModelRequest
+	requests []runtimemodel.Request
 }
 
 type terminalToolModel struct {
@@ -148,22 +149,22 @@ type terminalToolModel struct {
 }
 
 type hostedCatalog struct {
-	tool agent.HostedTool
+	tool runtimemodel.HostedTool
 }
 
-func (catalog hostedCatalog) Resolve(_ context.Context, key string, _ string) (agent.HostedTool, bool, error) {
+func (catalog hostedCatalog) Resolve(_ context.Context, key string, _ string) (runtimemodel.HostedTool, bool, error) {
 	if key != catalog.tool.Key {
-		return agent.HostedTool{}, false, nil
+		return runtimemodel.HostedTool{}, false, nil
 	}
 	return catalog.tool, true, nil
 }
 
 type hostedArtifactModel struct {
 	t       *testing.T
-	request agent.ModelRequest
+	request runtimemodel.Request
 }
 
-func (model *hostedArtifactModel) Generate(_ context.Context, request agent.ModelRequest) (agent.ModelResponse, error) {
+func (model *hostedArtifactModel) Generate(_ context.Context, request runtimemodel.Request) (runtimemodel.Response, error) {
 	model.request = request
 	if len(request.Tools) != 0 {
 		model.t.Fatalf("hosted Tool leaked into local definitions: %#v", request.Tools)
@@ -171,12 +172,12 @@ func (model *hostedArtifactModel) Generate(_ context.Context, request agent.Mode
 	if len(request.HostedTools) != 1 || request.HostedTools[0].Key != hostedImageToolKey {
 		model.t.Fatalf("hosted Tool activation missing: %#v", request.HostedTools)
 	}
-	return agent.ModelResponse{
-		HostedToolCalls: []agent.HostedToolCall{{
+	return runtimemodel.Response{
+		HostedToolCalls: []runtimemodel.HostedToolCall{{
 			ID: "image_call_1", ToolKey: hostedImageToolKey, Status: "completed",
 			Input: json.RawMessage(`{"prompt":"cat"}`),
 		}},
-		Artifacts: []agent.ArtifactRef{{
+		Artifacts: []runtimemodel.ArtifactRef{{
 			ID: "file_image_1", Kind: "image", MediaType: "image/png", Name: "generated.png", SizeBytes: 128,
 		}},
 		Citations: []string{"artifact:file_image_1"},
@@ -190,7 +191,7 @@ func TestRunnerCompletesHostedToolArtifactWithoutPersistingBinary(t *testing.T) 
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals),
-		HostedTools: hostedCatalog{tool: agent.HostedTool{
+		HostedTools: hostedCatalog{tool: runtimemodel.HostedTool{
 			Key:    hostedImageToolKey,
 			Target: json.RawMessage(`{"variants":[{"protocol":"openai_responses","payload":{"type":"image_generation"}}]}`),
 		}},
@@ -239,13 +240,13 @@ func assertHostedArtifactResult(t *testing.T, snapshot kernel.Snapshot) {
 
 func (model *terminalToolModel) Generate(
 	_ context.Context,
-	_ agent.ModelRequest,
-) (agent.ModelResponse, error) {
+	_ runtimemodel.Request,
+) (runtimemodel.Response, error) {
 	model.calls++
 	if model.calls > 1 {
 		model.t.Fatalf("terminal Tool triggered an extra model call")
 	}
-	return agent.ModelResponse{ToolCalls: []tools.Call{{
+	return runtimemodel.Response{ToolCalls: []tools.Call{{
 		ID: "call_publish", ToolKey: publishToolKey,
 		Arguments: json.RawMessage(`{"title":"ready"}`),
 	}}}, nil
@@ -304,14 +305,14 @@ type approvalModel struct {
 	calls int
 }
 
-func (model *approvalModel) Generate(context.Context, agent.ModelRequest) (agent.ModelResponse, error) {
+func (model *approvalModel) Generate(context.Context, runtimemodel.Request) (runtimemodel.Response, error) {
 	model.calls++
 	if model.calls == 1 {
-		return agent.ModelResponse{ToolCalls: []tools.Call{{
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
 			ID: "approval_call", ToolKey: publishToolKey, Arguments: json.RawMessage(`{"title":"ready"}`),
 		}}}, nil
 	}
-	return agent.ModelResponse{Content: "approved"}, nil
+	return runtimemodel.Response{Content: "approved"}, nil
 }
 
 func TestDeferredToolApprovalRequiresExplicitResume(t *testing.T) {
@@ -403,21 +404,21 @@ type deltaThenFailureModel struct {
 	unaryCalls  int
 }
 
-func (model *deltaThenFailureModel) Generate(context.Context, agent.ModelRequest) (agent.ModelResponse, error) {
+func (model *deltaThenFailureModel) Generate(context.Context, runtimemodel.Request) (runtimemodel.Response, error) {
 	model.unaryCalls++
-	return agent.ModelResponse{Content: "unexpected"}, nil
+	return runtimemodel.Response{Content: "unexpected"}, nil
 }
 
 func (model *deltaThenFailureModel) GenerateStream(
 	_ context.Context,
-	_ agent.ModelRequest,
-	onEvent func(agent.ModelStreamEvent) error,
-) (agent.ModelResponse, error) {
+	_ runtimemodel.Request,
+	onEvent func(runtimemodel.StreamEvent) error,
+) (runtimemodel.Response, error) {
 	model.streamCalls++
-	if err := onEvent(agent.ModelStreamEvent{Delta: "partial"}); err != nil {
-		return agent.ModelResponse{}, err
+	if err := onEvent(runtimemodel.StreamEvent{Delta: "partial"}); err != nil {
+		return runtimemodel.Response{}, err
 	}
-	return agent.ModelResponse{}, errDatabaseUnavailable
+	return runtimemodel.Response{}, errDatabaseUnavailable
 }
 
 func TestRunnerDoesNotReplayModelAfterStreamDeltaFailure(t *testing.T) {
@@ -465,7 +466,7 @@ func assertStreamFailureFeed(t *testing.T, feed *runfeed.Feed, runID string) {
 		runfeed.EventModelDelta,
 		runfeed.EventRunFailed,
 	})
-	var streamEvent agent.ModelStreamEvent
+	var streamEvent runtimemodel.StreamEvent
 	if len(events) != 4 || json.Unmarshal(events[2].Data, &streamEvent) != nil || streamEvent.Delta != "partial" || !events[3].Terminal {
 		t.Fatalf("stream failure events = %#v", events)
 	}
@@ -499,8 +500,8 @@ func assertAgentFeedTypes(t *testing.T, feed *runfeed.Feed, runID string, want [
 
 type invalidTerminalBatchModel struct{}
 
-func (invalidTerminalBatchModel) Generate(_ context.Context, _ agent.ModelRequest) (agent.ModelResponse, error) {
-	return agent.ModelResponse{ToolCalls: []tools.Call{
+func (invalidTerminalBatchModel) Generate(_ context.Context, _ runtimemodel.Request) (runtimemodel.Response, error) {
+	return runtimemodel.Response{ToolCalls: []tools.Call{
 		{ID: "call_publish", ToolKey: publishToolKey, Arguments: json.RawMessage(`{}`)},
 		{ID: "call_read", ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
 	}}, nil
@@ -545,17 +546,17 @@ func TestRunnerRejectsTerminalToolBeforeBatchEnd(t *testing.T) {
 
 type correctionModel struct {
 	t        *testing.T
-	requests []agent.ModelRequest
+	requests []runtimemodel.Request
 }
 
 func (model *correctionModel) Generate(
 	_ context.Context,
-	request agent.ModelRequest,
-) (agent.ModelResponse, error) {
+	request runtimemodel.Request,
+) (runtimemodel.Response, error) {
 	model.requests = append(model.requests, request)
 	switch len(model.requests) {
 	case 1:
-		return agent.ModelResponse{ToolCalls: []tools.Call{{
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
 			ID: "call_bad", ToolKey: publishToolKey,
 			Arguments: json.RawMessage(`{"unexpected":true}`),
 		}}}, nil
@@ -565,21 +566,21 @@ func (model *correctionModel) Generate(
 		return correctionCompletionResponse(model.t, request)
 	default:
 		model.t.Fatalf("unexpected correction model call %d", len(model.requests))
-		return agent.ModelResponse{}, nil
+		return runtimemodel.Response{}, nil
 	}
 }
 
-func correctionRetryResponse(t *testing.T, request agent.ModelRequest) (agent.ModelResponse, error) {
+func correctionRetryResponse(t *testing.T, request runtimemodel.Request) (runtimemodel.Response, error) {
 	t.Helper()
 	if len(request.Messages) != 3 {
 		t.Fatalf("correction transcript length = %d, want 3", len(request.Messages))
 	}
 	toolResult := request.Messages[2]
-	if toolResult.Role != agent.RoleTool || toolResult.ToolCallID != "call_bad" {
+	if toolResult.Role != runtimemodel.RoleTool || toolResult.ToolCallID != "call_bad" {
 		t.Fatalf("correction tool result = %#v", toolResult)
 	}
 	assertRecoverableCorrectionPayload(t, toolResult.Content)
-	return agent.ModelResponse{ToolCalls: []tools.Call{{
+	return runtimemodel.Response{ToolCalls: []tools.Call{{
 		ID: callGood, ToolKey: publishToolKey,
 		Arguments: json.RawMessage(`{"title":"fixed"}`),
 	}}}, nil
@@ -603,12 +604,12 @@ func assertRecoverableCorrectionPayload(t *testing.T, content string) {
 	}
 }
 
-func correctionCompletionResponse(t *testing.T, request agent.ModelRequest) (agent.ModelResponse, error) {
+func correctionCompletionResponse(t *testing.T, request runtimemodel.Request) (runtimemodel.Response, error) {
 	t.Helper()
-	if len(request.Messages) != 5 || request.Messages[4].Role != agent.RoleTool || request.Messages[4].ToolCallID != callGood {
+	if len(request.Messages) != 5 || request.Messages[4].Role != runtimemodel.RoleTool || request.Messages[4].ToolCallID != callGood {
 		t.Fatalf("corrected transcript = %#v", request.Messages)
 	}
-	return agent.ModelResponse{Content: "completed after correction"}, nil
+	return runtimemodel.Response{Content: "completed after correction"}, nil
 }
 
 func TestRunnerLetsModelCorrectExplicitRecoverableToolError(t *testing.T) {
@@ -656,8 +657,8 @@ func TestRunnerLetsModelCorrectExplicitRecoverableToolError(t *testing.T) {
 
 type fatalToolModel struct{}
 
-func (fatalToolModel) Generate(_ context.Context, _ agent.ModelRequest) (agent.ModelResponse, error) {
-	return agent.ModelResponse{ToolCalls: []tools.Call{{
+func (fatalToolModel) Generate(_ context.Context, _ runtimemodel.Request) (runtimemodel.Response, error) {
+	return runtimemodel.Response{ToolCalls: []tools.Call{{
 		ID: "call_fatal", ToolKey: publishToolKey, Arguments: json.RawMessage(`{}`),
 	}}}, nil
 }
@@ -685,8 +686,8 @@ func TestRunnerStillFailsUnmarkedToolErrors(t *testing.T) {
 
 func (model *transcriptModel) Generate(
 	_ context.Context,
-	request agent.ModelRequest,
-) (agent.ModelResponse, error) {
+	request runtimemodel.Request,
+) (runtimemodel.Response, error) {
 	model.requests = append(model.requests, request)
 	switch len(model.requests) {
 	case 1:
@@ -695,16 +696,16 @@ func (model *transcriptModel) Generate(
 		return transcriptCompletionResponse(model.t, request)
 	default:
 		model.t.Fatalf("unexpected model call %d", len(model.requests))
-		return agent.ModelResponse{}, nil
+		return runtimemodel.Response{}, nil
 	}
 }
 
-func transcriptInitialResponse(t *testing.T, request agent.ModelRequest) (agent.ModelResponse, error) {
+func transcriptInitialResponse(t *testing.T, request runtimemodel.Request) (runtimemodel.Response, error) {
 	t.Helper()
-	if len(request.Messages) != 1 || request.Messages[0].Role != agent.RoleUser {
+	if len(request.Messages) != 1 || request.Messages[0].Role != runtimemodel.RoleUser {
 		t.Fatalf("first transcript = %#v", request.Messages)
 	}
-	return agent.ModelResponse{
+	return runtimemodel.Response{
 		Content: "I will inspect the frozen manifest and current units first.",
 		ToolCalls: []tools.Call{
 			{ID: callOne, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
@@ -713,19 +714,19 @@ func transcriptInitialResponse(t *testing.T, request agent.ModelRequest) (agent.
 	}, nil
 }
 
-func transcriptCompletionResponse(t *testing.T, request agent.ModelRequest) (agent.ModelResponse, error) {
+func transcriptCompletionResponse(t *testing.T, request runtimemodel.Request) (runtimemodel.Response, error) {
 	t.Helper()
 	if len(request.Messages) != 4 {
 		t.Fatalf("second transcript length = %d, want 4", len(request.Messages))
 	}
 	assertAssistantToolBatch(t, request.Messages[1])
 	assertOrderedToolResults(t, request.Messages[2:])
-	return agent.ModelResponse{Content: "completed"}, nil
+	return runtimemodel.Response{Content: "completed"}, nil
 }
 
-func assertAssistantToolBatch(t *testing.T, assistant agent.Message) {
+func assertAssistantToolBatch(t *testing.T, assistant runtimemodel.Message) {
 	t.Helper()
-	if assistant.Role != agent.RoleAssistant ||
+	if assistant.Role != runtimemodel.RoleAssistant ||
 		assistant.Content != "I will inspect the frozen manifest and current units first." ||
 		len(assistant.ToolCalls) != 2 ||
 		assistant.ToolCalls[0].ID != callOne || assistant.ToolCalls[0].ToolKey != manifestToolKey ||
@@ -734,11 +735,11 @@ func assertAssistantToolBatch(t *testing.T, assistant agent.Message) {
 	}
 }
 
-func assertOrderedToolResults(t *testing.T, messages []agent.Message) {
+func assertOrderedToolResults(t *testing.T, messages []runtimemodel.Message) {
 	t.Helper()
 	for index, callID := range []string{callOne, callTwo} {
 		toolResult := messages[index]
-		if toolResult.Role != agent.RoleTool || toolResult.ToolCallID != callID ||
+		if toolResult.Role != runtimemodel.RoleTool || toolResult.ToolCallID != callID ||
 			toolResult.Content != `{"storyID":"story_1"}` {
 			t.Fatalf("tool result turn %d = %#v", index, toolResult)
 		}
