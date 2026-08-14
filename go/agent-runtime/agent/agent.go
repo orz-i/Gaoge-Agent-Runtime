@@ -7,9 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -67,8 +65,8 @@ func (runner *Runner) completeWithToolResult(
 		},
 	})
 	if err == nil {
-		runner.publishToolEvent(ctx, completed, runfeed.EventToolCompleted, result.Receipt)
-		runner.publishRunEvent(ctx, completed, runfeed.EventRunCompleted, true)
+		runner.publishToolEvent(ctx, completed, EventToolCompleted, result.Receipt)
+		runner.publishRunEvent(ctx, completed, EventRunCompleted, true)
 	}
 	return completed, err
 }
@@ -186,9 +184,9 @@ type Dependencies struct {
 	Model       Model
 	Catalog     tools.Catalog
 	Executor    tools.Executor
-	Approvals   *interaction.Approvals
+	Approvals   ToolApprovalGate
 	HostedTools HostedToolCatalog
-	Feed        runfeed.Publisher
+	Feed        Observer
 	Limits      Limits
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
@@ -214,9 +212,9 @@ type Runner struct {
 	model       Model
 	catalog     tools.Catalog
 	executor    tools.Executor
-	approvals   *interaction.Approvals
+	approvals   ToolApprovalGate
 	hostedTools HostedToolCatalog
-	feed        runfeed.Publisher
+	feed        Observer
 	limits      Limits
 	deferResume bool
 }
@@ -264,8 +262,8 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 
 // NewRunner constructs a direct Agent feature without planning or automatic routing.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
-	if dependencies.Runtime == nil || dependencies.Model == nil || dependencies.Catalog == nil ||
-		dependencies.Executor == nil || dependencies.Approvals == nil {
+	if dependencies.Runtime == nil || dependencies.Model == nil ||
+		(dependencies.Catalog == nil) != (dependencies.Executor == nil) {
 		return nil, ErrInvalidRequest
 	}
 	if dependencies.Limits.MaxLLMCalls <= 0 {
@@ -284,11 +282,9 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 
 // Descriptor declares the explicit Agent capability graph.
 func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
-	requires := []kernel.Capability{
-		kernel.CapabilityRuntime, tools.CapabilityCatalog, tools.CapabilityExecutor, interaction.CapabilityApproval,
-	}
-	if runner != nil && runner.feed != nil {
-		requires = append(requires, runfeed.CapabilityFeed)
+	requires := []kernel.Capability{kernel.CapabilityRuntime}
+	if runner != nil && runner.catalog != nil && runner.executor != nil {
+		requires = append(requires, tools.CapabilityCatalog, tools.CapabilityExecutor)
 	}
 	return kernel.FeatureDescriptor{
 		Name:     "agent",
@@ -328,7 +324,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	runner.publishRunEvent(ctx, snapshot, runfeed.EventRunStarted, false)
+	runner.publishRunEvent(ctx, snapshot, EventRunStarted, false)
 	return runner.drive(ctx, snapshot)
 }
 
@@ -337,8 +333,11 @@ func (runner *Runner) ResolveApproval(
 	ctx context.Context,
 	runID string,
 	expectedRevision uint64,
-	response interaction.ApprovalResponse,
+	response ApprovalResponse,
 ) (kernel.Snapshot, error) {
+	if runner == nil || runner.approvals == nil {
+		return kernel.Snapshot{}, ErrApprovalRequired
+	}
 	snapshot, state, err := runner.loadState(ctx, runID)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -349,11 +348,11 @@ func (runner *Runner) ResolveApproval(
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput || len(state.PendingCalls) == 0 {
 		return kernel.Snapshot{}, ErrApprovalRequired
 	}
-	resolved, err := runner.approvals.Resolve(snapshot.Checkpoint, response)
+	resolved, err := runner.approvals.ResolveToolApproval(snapshot.Checkpoint, response)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if response.Decision == interaction.DecisionReject {
+	if response.Decision == ApprovalReject {
 		return runner.resumeRejected(ctx, snapshot, state, resolved, response)
 	}
 	return runner.resumeApproved(ctx, snapshot, state, resolved)
@@ -461,8 +460,8 @@ func (runner *Runner) callModel(
 		ModelOptions: cloneRawJSON(state.ModelOptions),
 		Messages: cloneMessages(state.Messages), Tools: definitions, HostedTools: cloneHostedTools(hostedTools),
 	}
-	runner.publish(ctx, snapshot.Run.ID, runfeed.Draft{
-		Type: runfeed.EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
+	runner.publish(ctx, snapshot.Run.ID, Observation{
+		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
 	response, err := runner.generateModel(ctx, request)
 	if err != nil {
@@ -472,8 +471,8 @@ func (runner *Runner) callModel(
 	if !validModelResponse(response) {
 		return nil, ModelResponse{}, ErrInvalidModelResponse
 	}
-	runner.publish(ctx, snapshot.Run.ID, runfeed.Draft{
-		Type: runfeed.EventModelCompleted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
+	runner.publish(ctx, snapshot.Run.ID, Observation{
+		Type: EventModelCompleted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
 	return definitions, response, nil
 }
@@ -484,8 +483,8 @@ func (runner *Runner) generateModel(ctx context.Context, request ModelRequest) (
 		return runner.model.Generate(ctx, request)
 	}
 	return streaming.GenerateStream(ctx, request, func(event ModelStreamEvent) error {
-		runner.publishValue(ctx, request.RunID, runfeed.Draft{
-			Type: runfeed.EventModelDelta, Delta: event.Delta,
+		runner.publishValue(ctx, request.RunID, Observation{
+			Type: EventModelDelta, Delta: event.Delta,
 		}, event)
 		return nil
 	})
@@ -526,8 +525,10 @@ func (runner *Runner) resolveSelectedTool(
 	key string,
 	model string,
 ) (*tools.Definition, *HostedTool, error) {
-	if definition, ok := runner.catalog.Resolve(key); ok {
-		return &definition, nil, nil
+	if runner.catalog != nil {
+		if definition, ok := runner.catalog.Resolve(key); ok {
+			return &definition, nil, nil
+		}
 	}
 	if runner.hostedTools == nil {
 		return nil, nil, tools.ErrToolNotFound
@@ -583,8 +584,8 @@ func (runner *Runner) queueToolCalls(
 	})
 	if err == nil {
 		for _, call := range preparedCalls {
-			runner.publishValue(ctx, next.Run.ID, runfeed.Draft{
-				Type: runfeed.EventToolRequested, Revision: next.Run.Revision, Status: string(next.Run.Status),
+			runner.publishValue(ctx, next.Run.ID, Observation{
+				Type: EventToolRequested, Revision: next.Run.Revision, Status: string(next.Run.Status),
 			}, call)
 		}
 	}
@@ -608,6 +609,9 @@ func (runner *Runner) preparePendingApproval(
 	if definition.ApprovalMode == tools.ApprovalNever {
 		return snapshot, nil
 	}
+	if runner.approvals == nil {
+		return runner.fail(ctx, snapshot, state, "agent.approval_unavailable", ErrApprovalRequired)
+	}
 	checkpoint, err := runner.approvals.PrepareToolApproval(call, definition)
 	if err != nil {
 		return runner.fail(ctx, snapshot, state, "agent.approval_invalid", err)
@@ -621,9 +625,9 @@ func (runner *Runner) preparePendingApproval(
 		Events: []kernel.EventDraft{{Type: "interaction.created", Message: "Tool approval required"}},
 	})
 	if err == nil {
-		runner.publishRunEvent(ctx, waiting, runfeed.EventRunWaitingInput, false)
-		runner.publishValue(ctx, waiting.Run.ID, runfeed.Draft{
-			Type: runfeed.EventInteractionRequired, Revision: waiting.Run.Revision, Status: string(waiting.Run.Status),
+		runner.publishRunEvent(ctx, waiting, EventRunWaitingInput, false)
+		runner.publishValue(ctx, waiting.Run.ID, Observation{
+			Type: EventInteractionRequired, Revision: waiting.Run.Revision, Status: string(waiting.Run.Status),
 		}, checkpoint)
 	}
 	return waiting, err
@@ -635,6 +639,9 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if err != nil || !ok {
 		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 	}
+	if runner.catalog == nil || runner.executor == nil {
+		return runner.fail(ctx, snapshot, state, "agent.tool_unavailable", ErrToolFailure)
+	}
 	definition, ok := runner.catalog.Resolve(call.ToolKey)
 	if !ok {
 		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrToolNotFound)
@@ -642,8 +649,8 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if state.ToolCalls >= state.Limits.MaxToolCalls {
 		return runner.fail(ctx, snapshot, state, "agent.tool_limit", ErrCallLimit)
 	}
-	runner.publishValue(ctx, snapshot.Run.ID, runfeed.Draft{
-		Type: runfeed.EventToolStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
+	runner.publishValue(ctx, snapshot.Run.ID, Observation{
+		Type: EventToolStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	}, call)
 	result, err := runner.executor.Execute(ctx, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
 	if err != nil {
@@ -672,7 +679,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		Events: []kernel.EventDraft{{Type: "tool.completed", Message: result.Receipt.Disposition}},
 	})
 	if err == nil {
-		runner.publishToolEvent(ctx, next, runfeed.EventToolCompleted, result.Receipt)
+		runner.publishToolEvent(ctx, next, EventToolCompleted, result.Receipt)
 	}
 	return next, err
 }
@@ -721,8 +728,8 @@ func (runner *Runner) recordRecoverableToolError(
 		Events: []kernel.EventDraft{{Type: "tool.correction_requested", Message: strings.TrimSpace(code)}},
 	})
 	if err == nil {
-		runner.publishValue(ctx, next.Run.ID, runfeed.Draft{
-			Type: runfeed.EventToolCompleted, Message: strings.TrimSpace(code),
+		runner.publishValue(ctx, next.Run.ID, Observation{
+			Type: EventToolCompleted, Message: strings.TrimSpace(code),
 			Revision: next.Run.Revision, Status: string(next.Run.Status),
 		}, call)
 	}
@@ -757,7 +764,7 @@ func (runner *Runner) resumeRejected(
 	snapshot kernel.Snapshot,
 	state runState,
 	checkpoint *kernel.Checkpoint,
-	response interaction.ApprovalResponse,
+	response ApprovalResponse,
 ) (kernel.Snapshot, error) {
 	call, ok := nextPendingCall(state)
 	if !ok {
@@ -821,7 +828,7 @@ func (runner *Runner) complete(
 		Events: []kernel.EventDraft{{Type: "agent.completed", Message: "Direct Agent loop completed"}},
 	})
 	if err == nil {
-		runner.publishRunEvent(ctx, completed, runfeed.EventRunCompleted, true)
+		runner.publishRunEvent(ctx, completed, EventRunCompleted, true)
 	}
 	return completed, err
 }
@@ -864,13 +871,13 @@ func (runner *Runner) fail(
 		Events: []kernel.EventDraft{{Type: "agent.failed", Message: code}},
 	})
 	if transitionErr == nil {
-		runner.publishRunEvent(ctx, failed, runfeed.EventRunFailed, true)
+		runner.publishRunEvent(ctx, failed, EventRunFailed, true)
 	}
 	return failed, errors.Join(cause, transitionErr)
 }
 
 func (runner *Runner) publishRunEvent(ctx context.Context, snapshot kernel.Snapshot, eventType string, terminal bool) {
-	runner.publish(ctx, snapshot.Run.ID, runfeed.Draft{
+	runner.publish(ctx, snapshot.Run.ID, Observation{
 		Type: eventType, Message: snapshot.Run.ErrorDetail, Revision: snapshot.Run.Revision,
 		Status: string(snapshot.Run.Status), Terminal: terminal,
 	})
@@ -882,12 +889,12 @@ func (runner *Runner) publishToolEvent(
 	eventType string,
 	value interface{},
 ) {
-	runner.publishValue(ctx, snapshot.Run.ID, runfeed.Draft{
+	runner.publishValue(ctx, snapshot.Run.ID, Observation{
 		Type: eventType, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	}, value)
 }
 
-func (runner *Runner) publishValue(ctx context.Context, runID string, draft runfeed.Draft, value interface{}) {
+func (runner *Runner) publishValue(ctx context.Context, runID string, draft Observation, value interface{}) {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return
@@ -896,13 +903,13 @@ func (runner *Runner) publishValue(ctx context.Context, runID string, draft runf
 	runner.publish(ctx, runID, draft)
 }
 
-func (runner *Runner) publish(ctx context.Context, runID string, draft runfeed.Draft) {
+func (runner *Runner) publish(ctx context.Context, runID string, draft Observation) {
 	if runner == nil || runner.feed == nil {
 		return
 	}
 	publishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
-	_, _ = runner.feed.Publish(publishContext, runID, draft)
+	runner.feed.ObserveAgent(publishContext, runID, draft)
 }
 
 func (runner *Runner) loadState(ctx context.Context, runID string) (kernel.Snapshot, runState, error) {

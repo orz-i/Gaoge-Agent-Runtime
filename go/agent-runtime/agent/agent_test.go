@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	interactionadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/interaction"
+	runfeedadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/runfeed"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
@@ -79,7 +81,8 @@ func TestRunnerFreezesPerRunLimits(t *testing.T) {
 	}})
 	model := &perRunLimitModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals,
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
+		Approvals: interactionadapter.New(approvals),
 		Limits: agent.Limits{MaxLLMCalls: 1, MaxToolCalls: 1},
 	})
 	if err != nil {
@@ -117,7 +120,8 @@ func mustRunner(
 ) *agent.Runner {
 	t.Helper()
 	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals,
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
+		Approvals: interactionadapter.New(approvals),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -184,7 +188,8 @@ func TestRunnerCompletesHostedToolArtifactWithoutPersistingBinary(t *testing.T) 
 	registry := mustRegistry(t, nil)
 	model := &hostedArtifactModel{t: t}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals,
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
+		Approvals: interactionadapter.New(approvals),
 		HostedTools: hostedCatalog{tool: agent.HostedTool{
 			Key:    hostedImageToolKey,
 			Target: json.RawMessage(`{"variants":[{"protocol":"openai_responses","payload":{"type":"image_generation"}}]}`),
@@ -266,7 +271,8 @@ func TestRunnerCompletesImmediatelyAfterTerminalTool(t *testing.T) {
 	}})
 	model := &terminalToolModel{t: t}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals, Feed: feed,
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
+		Approvals: interactionadapter.New(approvals), Feed: runfeedadapter.New(feed),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -343,7 +349,7 @@ func newDeferredApprovalFixture(t *testing.T) deferredApprovalFixture {
 	model := &approvalModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
-		Approvals: approvals, DeferResumption: true,
+		Approvals: interactionadapter.New(approvals), DeferResumption: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -369,7 +375,7 @@ func resolveDeferredApproval(
 ) kernel.Snapshot {
 	t.Helper()
 	resolved, err := fixture.runner.ResolveApproval(t.Context(), waiting.Run.ID, waiting.Run.Revision,
-		interaction.ApprovalResponse{Decision: interaction.DecisionApprove})
+		agent.ApprovalResponse{Decision: agent.ApprovalApprove})
 	if err != nil || resolved.Run.Status != kernel.RunStatusRunning || *fixture.executions != 0 {
 		t.Fatalf("resolved=%#v executions=%d err=%v", resolved.Run, *fixture.executions, err)
 	}
@@ -421,7 +427,8 @@ func TestRunnerDoesNotReplayModelAfterStreamDeltaFailure(t *testing.T) {
 	registry := mustRegistry(t, nil)
 	model := &deltaThenFailureModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: model, Catalog: registry, Executor: registry, Approvals: approvals, Feed: feed,
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
+		Approvals: interactionadapter.New(approvals), Feed: runfeedadapter.New(feed),
 	})
 	if err != nil {
 		t.Fatal(err)

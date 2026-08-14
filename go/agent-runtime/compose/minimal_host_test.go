@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	interactionadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/compose"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
@@ -16,6 +17,39 @@ import (
 )
 
 const minimalToolKey = "lookup"
+
+func TestMinimalHostCompletesModelOnlyAgentRun(t *testing.T) {
+	t.Parallel()
+	runtime := newMinimalKernel(t)
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: modelOnlyModel{}})
+	if err != nil {
+		t.Fatalf("create model-only agent runner: %v", err)
+	}
+	application, err := compose.New(runtime, runner)
+	if err != nil {
+		t.Fatalf("compose model-only host: %v", err)
+	}
+	if err = application.Start(t.Context()); err != nil {
+		t.Fatalf("start model-only host: %v", err)
+	}
+	t.Cleanup(func() {
+		if closeErr := application.Close(context.Background()); closeErr != nil {
+			t.Errorf("close model-only host: %v", closeErr)
+		}
+	})
+	completed, err := runner.StartRun(t.Context(), agent.StartRequest{
+		Actor:  kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},
+		Goal:   "answer directly",
+	})
+	if err != nil {
+		t.Fatalf("run model-only agent: %v", err)
+	}
+	if completed.Run.Status != kernel.RunStatusCompleted || completed.Result == nil ||
+		string(completed.Result.Content) != `"direct answer"` {
+		t.Fatalf("unexpected model-only run: %#v", completed)
+	}
+}
 
 func TestMinimalHostCompletesApprovedToolAgentRun(t *testing.T) {
 	t.Parallel()
@@ -32,7 +66,7 @@ func TestMinimalHostCompletesApprovedToolAgentRun(t *testing.T) {
 
 	completed, err := fixture.runner.ResolveApproval(
 		context.Background(), waiting.Run.ID, waiting.Run.Revision,
-		interaction.ApprovalResponse{Decision: interaction.DecisionApprove},
+		agent.ApprovalResponse{Decision: agent.ApprovalApprove},
 	)
 	if err != nil {
 		t.Fatalf("approve agent run: %v", err)
@@ -57,7 +91,7 @@ func newMinimalHost(t *testing.T) minimalHost {
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: &minimalModel{}, Catalog: registry, Executor: registry,
-		Approvals: approvals, Limits: agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 1},
+		Approvals: interactionadapter.New(approvals), Limits: agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 1},
 	})
 	if err != nil {
 		t.Fatalf("create agent runner: %v", err)
@@ -133,6 +167,12 @@ func (ids *minimalIDs) NewID(prefix string) (string, error) {
 }
 
 type minimalModel struct{ calls int }
+
+type modelOnlyModel struct{}
+
+func (modelOnlyModel) Generate(context.Context, agent.ModelRequest) (agent.ModelResponse, error) {
+	return agent.ModelResponse{Content: "direct answer"}, nil
+}
 
 func (model *minimalModel) Generate(_ context.Context, request agent.ModelRequest) (agent.ModelResponse, error) {
 	model.calls++

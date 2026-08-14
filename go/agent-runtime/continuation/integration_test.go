@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	interactionadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/continuation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
@@ -125,7 +126,7 @@ func newIntegrationAgent(
 	model := &approvalIntegrationModel{}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
-		Approvals: approvals, DeferResumption: true,
+		Approvals: interactionadapter.New(approvals), DeferResumption: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +210,7 @@ func (fixture continuationIntegrationFixture) waitingChild(
 func (fixture continuationIntegrationFixture) approveChild(t *testing.T, child kernel.Snapshot) {
 	t.Helper()
 	resolved, err := fixture.agent.ResolveApproval(t.Context(), child.Run.ID, child.Run.Revision,
-		interaction.ApprovalResponse{Decision: interaction.DecisionApprove})
+		agent.ApprovalResponse{Decision: agent.ApprovalApprove})
 	if err != nil || resolved.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("resolved=%#v err=%v", resolved.Run, err)
 	}
