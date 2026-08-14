@@ -95,8 +95,11 @@ func normalizeEndpoint(raw string) (string, error) {
 type RemoteAgentDescriptor struct {
 	Name            string
 	Description     string
+	AgentVersion    string
 	PreferredURL    string
 	ProtocolVersion string
+	ProtocolBinding string
+	Tenant          string
 	Capabilities    []string
 }
 
