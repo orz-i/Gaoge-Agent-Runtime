@@ -9,13 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
 	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
 // WorkerOptions bound polling, lease consumption and error reporting.
@@ -66,8 +62,6 @@ func (worker *Worker) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{
 		Name: "continuation", Requires: []kernel.Capability{
 			kernel.CapabilityRuntime, queuecore.CapabilityQueue, runrelation.CapabilityRelations,
-			agent.CapabilityRunner, planexecute.CapabilityRunner,
-			workflow.CapabilityRunner, team.CapabilityRunner,
 		},
 		Provides: []kernel.Capability{CapabilityDispatcher},
 	}

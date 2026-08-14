@@ -4,41 +4,31 @@ import (
 	"context"
 	"errors"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
 // Dispatcher routes a valid Job to the feature that owns the parent Run.
 type Dispatcher struct {
-	runs      SnapshotLoader
-	agent     Resumer
-	plans     Resumer
-	workflows Resumer
-	teams     Resumer
-}
-
-// DispatcherDependencies enumerate every explicit Runtime Kind recovery surface.
-type DispatcherDependencies struct {
-	Runs      SnapshotLoader
-	Agent     Resumer
-	Plans     Resumer
-	Workflows Resumer
-	Teams     Resumer
+	runs     SnapshotLoader
+	resumers map[kernel.RunKind]Resumer
 }
 
 // NewDispatcher constructs a feature-neutral continuation router.
-func NewDispatcher(dependencies DispatcherDependencies) (*Dispatcher, error) {
-	if dependencies.Runs == nil || dependencies.Agent == nil || dependencies.Plans == nil ||
-		dependencies.Workflows == nil || dependencies.Teams == nil {
+func NewDispatcher(runs SnapshotLoader, registrations ...ResumerRegistration) (*Dispatcher, error) {
+	if runs == nil || len(registrations) == 0 {
 		return nil, ErrInvalidInput
 	}
-	return &Dispatcher{
-		runs: dependencies.Runs, agent: dependencies.Agent, plans: dependencies.Plans,
-		workflows: dependencies.Workflows, teams: dependencies.Teams,
-	}, nil
+	resumers := make(map[kernel.RunKind]Resumer, len(registrations))
+	for _, registration := range registrations {
+		if !validRegistrationKind(registration.kind) || registration.resumer == nil {
+			return nil, ErrInvalidInput
+		}
+		if _, duplicate := resumers[registration.kind]; duplicate {
+			return nil, ErrInvalidInput
+		}
+		resumers[registration.kind] = registration.resumer
+	}
+	return &Dispatcher{runs: runs, resumers: resumers}, nil
 }
 
 // Dispatch performs at most one revision-guarded feature resumption. Stale and
@@ -92,16 +82,9 @@ func nonRetryableResumeError(err error) bool {
 }
 
 func (dispatcher *Dispatcher) resumer(kind kernel.RunKind) (Resumer, error) {
-	switch kind {
-	case agent.RunKind:
-		return dispatcher.agent, nil
-	case planexecute.RunKind:
-		return dispatcher.plans, nil
-	case workflow.RunKind:
-		return dispatcher.workflows, nil
-	case team.RunKind:
-		return dispatcher.teams, nil
-	default:
+	resumer, ok := dispatcher.resumers[kind]
+	if !ok {
 		return nil, ErrUnsupportedRunKind
 	}
+	return resumer, nil
 }

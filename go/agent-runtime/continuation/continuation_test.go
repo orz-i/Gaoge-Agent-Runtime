@@ -3,10 +3,12 @@ package continuation_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	continuationadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/continuation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/continuation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
@@ -33,6 +35,41 @@ func TestSchedulerEnqueuesOneOwningParentContinuation(t *testing.T) {
 	fixture.scheduler.ObserveTransition(t.Context(), transition)
 	jobs := queuedJobs(t, fixture.delivery, 1)
 	assertParentPayload(t, jobs[0], parent, completed)
+}
+
+func TestDispatcherRejectsDuplicateResumerRegistration(t *testing.T) {
+	t.Parallel()
+	runtime := newRuntime(t)
+	resumer := &recordingResumer{}
+	_, err := continuation.NewDispatcher(
+		runtime,
+		continuation.RegisterResumer(kernel.RunKind("echo"), resumer),
+		continuation.RegisterResumer(kernel.RunKind("echo"), resumer),
+	)
+	if !errors.Is(err, continuation.ErrInvalidInput) {
+		t.Fatalf("duplicate resumer error = %v", err)
+	}
+}
+
+func TestSchedulerRejectsDuplicateTriggerRegistration(t *testing.T) {
+	t.Parallel()
+	runtime := newRuntime(t)
+	relations, err := runrelation.New(memory.NewRunRelationStore(), fixedClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := queuecore.NewMemory(queuecore.Dependencies{Clock: fixedClock{}})
+	resolver := func(kernel.EventDraft) (continuation.Trigger, bool) {
+		return continuation.TriggerSegmentYielded, true
+	}
+	_, err = continuation.NewScheduler(
+		continuation.SchedulerDependencies{Queue: delivery, Relations: relations, Runs: runtime},
+		continuation.RegisterTriggers(kernel.RunKind("echo"), resolver),
+		continuation.RegisterTriggers(kernel.RunKind("echo"), resolver),
+	)
+	if !errors.Is(err, continuation.ErrInvalidInput) {
+		t.Fatalf("duplicate trigger error = %v", err)
+	}
 }
 
 func assertParentPayload(
@@ -75,11 +112,13 @@ func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
 		planexecute.RunKind: &recordingResumer{},
 		workflow.RunKind:    &recordingResumer{},
 		team.RunKind:        &recordingResumer{},
+		kernel.RunKind("echo"): &recordingResumer{},
 	}
-	dispatcher, err := continuation.NewDispatcher(continuation.DispatcherDependencies{
-		Runs: runtime, Agent: resumers[agent.RunKind], Plans: resumers[planexecute.RunKind],
-		Workflows: resumers[workflow.RunKind], Teams: resumers[team.RunKind],
-	})
+	registrations := make([]continuation.ResumerRegistration, 0, len(resumers))
+	for kind, resumer := range resumers {
+		registrations = append(registrations, continuation.RegisterResumer(kind, resumer))
+	}
+	dispatcher, err := continuation.NewDispatcher(runtime, registrations...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +202,7 @@ func newSchedulerFixture(t *testing.T) schedulerFixture {
 	delivery := queuecore.NewMemory(queuecore.Dependencies{Clock: fixedClock{}})
 	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{
 		Queue: delivery, Relations: relations, Runs: runtime,
-	})
+	}, continuationadapter.Triggers()...)
 	if err != nil {
 		t.Fatal(err)
 	}

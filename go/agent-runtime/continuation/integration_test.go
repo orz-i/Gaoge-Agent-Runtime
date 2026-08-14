@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	continuationadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/continuation"
 	interactionadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/continuation"
@@ -79,7 +80,7 @@ func newIntegrationRuntime(
 		Runs: continuation.LoaderFunc(func(ctx context.Context, runID string) (kernel.Snapshot, error) {
 			return runtime.Load(ctx, runID)
 		}),
-	})
+	}, continuationadapter.Triggers()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,9 +162,13 @@ func newIntegrationWorker(
 ) *continuation.Worker {
 	t.Helper()
 	unused := unusedResumer{}
-	dispatcher, err := continuation.NewDispatcher(continuation.DispatcherDependencies{
-		Runs: runtime, Agent: agentRunner, Plans: planRunner, Workflows: unused, Teams: unused,
-	})
+	dispatcher, err := continuation.NewDispatcher(
+		runtime,
+		continuation.RegisterResumer(agent.RunKind, agentRunner),
+		continuation.RegisterResumer(planexecute.RunKind, planRunner),
+		continuation.RegisterResumer(kernel.RunKind("unused_workflow"), unused),
+		continuation.RegisterResumer(kernel.RunKind("unused_team"), unused),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

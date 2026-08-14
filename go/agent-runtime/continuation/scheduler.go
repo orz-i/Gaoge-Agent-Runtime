@@ -5,18 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
 	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
-
-const workflowEffectPendingReason = "effect_pending"
 
 // ErrorReporter receives non-transactional scheduling failures for host observability.
 type ErrorReporter func(error)
@@ -31,6 +25,7 @@ type Scheduler struct {
 	runs      SnapshotLoader
 	report    ErrorReporter
 	jobPolicy queuecore.Policy
+	triggers  map[kernel.RunKind]SelfTriggerResolver
 }
 
 // SchedulerDependencies explicitly provide transition projection dependencies.
@@ -73,13 +68,23 @@ func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 }
 
 // NewScheduler creates a committed-transition observer.
-func NewScheduler(dependencies SchedulerDependencies) (*Scheduler, error) {
+func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRegistration) (*Scheduler, error) {
 	if dependencies.Queue == nil || dependencies.Relations == nil || dependencies.Runs == nil {
 		return nil, ErrInvalidInput
 	}
+	triggers := make(map[kernel.RunKind]SelfTriggerResolver, len(registrations))
+	for _, registration := range registrations {
+		if !validRegistrationKind(registration.kind) || registration.resolver == nil {
+			return nil, ErrInvalidInput
+		}
+		if _, duplicate := triggers[registration.kind]; duplicate {
+			return nil, ErrInvalidInput
+		}
+		triggers[registration.kind] = registration.resolver
+	}
 	return &Scheduler{
 		queue: dependencies.Queue, relations: dependencies.Relations, runs: dependencies.Runs,
-		report: dependencies.Report,
+		report: dependencies.Report, triggers: triggers,
 		jobPolicy: queuecore.Policy{
 			MaxAttempts: 8, VisibilityTimeout: 2 * time.Minute,
 			InitialBackoff: 250 * time.Millisecond, MaxBackoff: 30 * time.Second, BackoffMultiplier: 2,
@@ -99,7 +104,7 @@ func (scheduler *Scheduler) ObserveTransition(ctx context.Context, transition ke
 		scheduler.reportError(scheduler.scheduleOwningParent(deliveryCtx, transition.Current))
 	}
 	for _, event := range transition.Events {
-		trigger, ok := selfTrigger(transition.Current.Run.Kind, event)
+		trigger, ok := scheduler.selfTrigger(transition.Current.Run.Kind, event)
 		if !ok {
 			continue
 		}
@@ -169,34 +174,12 @@ func (scheduler *Scheduler) reportError(err error) {
 	}
 }
 
-func selfTrigger(kind kernel.RunKind, event kernel.EventDraft) (Trigger, bool) {
-	eventType := strings.TrimSpace(event.Type)
-	switch kind {
-	case agent.RunKind:
-		return agentSelfTrigger(eventType)
-	case planexecute.RunKind:
-		return planSelfTrigger(eventType)
-	case workflow.RunKind:
-		return workflowSelfTrigger(eventType, event.Message)
-	default:
+func (scheduler *Scheduler) selfTrigger(kind kernel.RunKind, event kernel.EventDraft) (Trigger, bool) {
+	resolver, ok := scheduler.triggers[kind]
+	if !ok {
 		return "", false
 	}
-}
-
-func agentSelfTrigger(eventType string) (Trigger, bool) {
-	return TriggerApprovalResolved, eventType == "interaction.resolved" || eventType == "tool.rejected"
-}
-
-func planSelfTrigger(eventType string) (Trigger, bool) {
-	return TriggerApprovalResolved, eventType == "plan.approved"
-}
-
-func workflowSelfTrigger(eventType string, message string) (Trigger, bool) {
-	if eventType == "workflow.wait.resolved" {
-		return TriggerWaitResolved, true
-	}
-	return TriggerSegmentYielded, eventType == "workflow.segment.yielded" &&
-		strings.TrimSpace(message) != workflowEffectPendingReason
+	return resolver(event)
 }
 
 func clientJobID(payload Payload) string {
