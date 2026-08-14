@@ -9,6 +9,7 @@ import (
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -55,6 +56,13 @@ func (runner *Runner) completeWithToolResult(
 	return completed, err
 }
 
+func runInvocation(operation plugin.RunOperation, snapshot kernel.Snapshot) plugin.RunInvocation {
+	return plugin.RunInvocation{
+		Operation: operation, Kind: snapshot.Run.Kind, RunID: snapshot.Run.ID,
+		Actor: snapshot.Run.Actor, Thread: snapshot.Run.Thread, Goal: snapshot.Run.Goal,
+	}
+}
+
 // Result is the structured terminal Agent output when hosted Tool facts or artifacts are present.
 type Result struct {
 	Content         string                 `json:"content,omitempty"`
@@ -76,14 +84,17 @@ type Limits struct {
 
 // Dependencies explicitly provide the direct Agent loop capabilities.
 type Dependencies struct {
-	Runtime     *kernel.Runtime
-	Model       model.Client
-	Catalog     tools.Catalog
-	Executor    tools.Executor
-	Approvals   ToolApprovalGate
-	HostedTools HostedToolCatalog
-	Feed        Observer
-	Limits      Limits
+	Runtime         *kernel.Runtime
+	Model           model.Client
+	Catalog         tools.Catalog
+	Executor        tools.Executor
+	Approvals       ToolApprovalGate
+	HostedTools     HostedToolCatalog
+	Feed            Observer
+	RunMiddleware   []plugin.RunMiddleware
+	ModelMiddleware []plugin.ModelMiddleware
+	ToolMiddleware  []plugin.ToolMiddleware
+	Limits          Limits
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
 	DeferResumption bool
@@ -111,6 +122,9 @@ type Runner struct {
 	approvals   ToolApprovalGate
 	hostedTools HostedToolCatalog
 	feed        Observer
+	runChain    *plugin.RunChain
+	modelChain  *plugin.ModelChain
+	toolChain   *plugin.ToolChain
 	limits      Limits
 	deferResume bool
 }
@@ -162,6 +176,18 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		(dependencies.Catalog == nil) != (dependencies.Executor == nil) {
 		return nil, ErrInvalidRequest
 	}
+	runChain, err := plugin.NewRunChain(dependencies.RunMiddleware...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidRequest, err)
+	}
+	modelChain, err := plugin.NewModelChain(dependencies.ModelMiddleware...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidRequest, err)
+	}
+	toolChain, err := plugin.NewToolChain(dependencies.ToolMiddleware...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidRequest, err)
+	}
 	if dependencies.Limits.MaxLLMCalls <= 0 {
 		dependencies.Limits.MaxLLMCalls = 8
 	}
@@ -172,6 +198,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		runtime: dependencies.Runtime, model: dependencies.Model, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		hostedTools: dependencies.HostedTools, feed: dependencies.Feed, limits: dependencies.Limits,
+		runChain: runChain, modelChain: modelChain, toolChain: toolChain,
 		deferResume: dependencies.DeferResumption,
 	}, nil
 }
@@ -194,6 +221,16 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if runner == nil || strings.TrimSpace(request.Goal) == "" {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
+	invocation := plugin.RunInvocation{
+		Operation: plugin.RunStart, Kind: RunKind, RunID: strings.TrimSpace(request.ID),
+		Actor: request.Actor, Thread: request.Thread, Goal: strings.TrimSpace(request.Goal),
+	}
+	return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+		return runner.startRun(nextCtx, request)
+	})
+}
+
+func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
 	if _, _, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model); err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -244,6 +281,18 @@ func (runner *Runner) ResolveApproval(
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput || len(state.PendingCalls) == 0 {
 		return kernel.Snapshot{}, ErrApprovalRequired
 	}
+	invocation := runInvocation(plugin.RunResolveApproval, snapshot)
+	return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+		return runner.resolveApproval(nextCtx, snapshot, state, response)
+	})
+}
+
+func (runner *Runner) resolveApproval(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state runState,
+	response ApprovalResponse,
+) (kernel.Snapshot, error) {
 	resolved, err := runner.approvals.ResolveToolApproval(snapshot.Checkpoint, response)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -277,7 +326,10 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrRunTerminal
 	}
-	return runner.resumeRunning(ctx, snapshot, state)
+	invocation := runInvocation(plugin.RunResume, snapshot)
+	return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+		return runner.resumeRunning(nextCtx, snapshot, state)
+	})
 }
 
 func (runner *Runner) drive(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, error) {
@@ -374,15 +426,29 @@ func (runner *Runner) callModel(
 }
 
 func (runner *Runner) generateModel(ctx context.Context, request model.Request) (model.Response, error) {
+	emit := func(event model.StreamEvent) error {
+		runner.publishValue(ctx, request.RunID, Observation{
+			Type: EventModelDelta, Delta: event.Delta,
+		}, event)
+		return nil
+	}
+	return runner.modelChain.Invoke(ctx, request, emit, runner.generateProviderModel)
+}
+
+func (runner *Runner) generateProviderModel(
+	ctx context.Context,
+	request model.Request,
+	emit model.StreamSink,
+) (model.Response, error) {
 	streaming, ok := runner.model.(model.StreamingClient)
 	if !ok {
 		return runner.model.Generate(ctx, request)
 	}
 	return streaming.GenerateStream(ctx, request, func(event model.StreamEvent) error {
-		runner.publishValue(ctx, request.RunID, Observation{
-			Type: EventModelDelta, Delta: event.Delta,
-		}, event)
-		return nil
+		if emit == nil {
+			return nil
+		}
+		return emit(event)
 	})
 }
 
@@ -548,13 +614,23 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	runner.publishValue(ctx, snapshot.Run.ID, Observation{
 		Type: EventToolStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	}, call)
-	result, err := runner.executor.Execute(ctx, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
+	executionRequest := tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: tools.CloneCall(call)}
+	invocation := plugin.ToolInvocation{
+		Run: snapshot.Run, Definition: tools.CloneDefinition(definition), Request: executionRequest,
+	}
+	result, err := runner.toolChain.Invoke(ctx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
+		return runner.executor.Execute(nextCtx, executionRequest)
+	})
 	if err != nil {
 		if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
 			return runner.recordRecoverableToolError(ctx, snapshot, state, code, message)
 		}
 		return runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
 	}
+	if err = tools.ValidateExecutionResult(result); err != nil {
+		return runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
+	}
+	result = tools.CloneExecutionResult(result)
 	state.Messages = append(state.Messages, model.Message{
 		Role: model.RoleTool, Content: string(result.Content), ToolCallID: call.ID,
 	})
