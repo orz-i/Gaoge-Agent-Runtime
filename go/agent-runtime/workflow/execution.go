@@ -11,7 +11,10 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 )
 
-const CapabilityRunner kernel.Capability = "workflow.runner"
+const (
+	RunKind          kernel.RunKind    = "workflow"
+	CapabilityRunner kernel.Capability = "workflow.runner"
+)
 
 const workflowWaitCheckpointKind = "workflow_wait"
 
@@ -232,7 +235,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 		return kernel.Snapshot{}, err
 	}
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
-		ID: request.ID, Kind: kernel.RunKindWorkflow, Actor: request.Actor, Thread: request.Thread,
+		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
 		Events: []kernel.EventDraft{{Type: "workflow.started", Message: request.Definition.Hash}},
 	})

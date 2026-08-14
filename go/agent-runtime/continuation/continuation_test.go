@@ -7,18 +7,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/continuation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
 	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
 func TestSchedulerEnqueuesOneOwningParentContinuation(t *testing.T) {
 	t.Parallel()
 	fixture := newSchedulerFixture(t)
-	parent := createRun(t, fixture.runtime, "parent", kernel.RunKindPlanExecute)
-	child := createRun(t, fixture.runtime, "child", kernel.RunKindAgent)
+	parent := createRun(t, fixture.runtime, "parent", planexecute.RunKind)
+	child := createRun(t, fixture.runtime, "child", agent.RunKind)
 	ensureRelation(t, fixture.relations, runrelation.Draft{
 		ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
 		Kind: runrelation.KindPlanStep, OwnerNodeID: "step-1",
@@ -52,7 +56,7 @@ func assertParentPayload(
 func TestSchedulerProjectsOnlyActionableSelfTransitions(t *testing.T) {
 	t.Parallel()
 	fixture := newSchedulerFixture(t)
-	workflowRun := createRun(t, fixture.runtime, "workflow", kernel.RunKindWorkflow)
+	workflowRun := createRun(t, fixture.runtime, "workflow", workflow.RunKind)
 	fixture.scheduler.ObserveTransition(t.Context(), kernel.Transition{
 		Current: workflowRun,
 		Events: []kernel.EventDraft{
@@ -67,14 +71,14 @@ func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
 	resumers := map[kernel.RunKind]*recordingResumer{
-		kernel.RunKindAgent:       &recordingResumer{},
-		kernel.RunKindPlanExecute: &recordingResumer{},
-		kernel.RunKindWorkflow:    &recordingResumer{},
-		kernel.RunKindTeam:        &recordingResumer{},
+		agent.RunKind:       &recordingResumer{},
+		planexecute.RunKind: &recordingResumer{},
+		workflow.RunKind:    &recordingResumer{},
+		team.RunKind:        &recordingResumer{},
 	}
 	dispatcher, err := continuation.NewDispatcher(continuation.DispatcherDependencies{
-		Runs: runtime, Agent: resumers[kernel.RunKindAgent], Plans: resumers[kernel.RunKindPlanExecute],
-		Workflows: resumers[kernel.RunKindWorkflow], Teams: resumers[kernel.RunKindTeam],
+		Runs: runtime, Agent: resumers[agent.RunKind], Plans: resumers[planexecute.RunKind],
+		Workflows: resumers[workflow.RunKind], Teams: resumers[team.RunKind],
 	})
 	if err != nil {
 		t.Fatal(err)

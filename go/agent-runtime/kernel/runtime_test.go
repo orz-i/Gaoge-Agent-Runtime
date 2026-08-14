@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,13 +18,14 @@ const (
 	testThreadKind = "conversation"
 	testThreadID   = "thread"
 	testGoal       = "answer"
+	testRunKind    = kernel.RunKind("kernel_test")
 )
 
 func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	t.Parallel()
 	runtime := newTestRuntime(t)
 	created, err := runtime.Create(context.Background(), kernel.CreateRequest{
-		Kind: kernel.RunKindAgent, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Kind: testRunKind, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
 		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: testGoal, State: json.RawMessage(`{"step":0}`),
 	})
 	if err != nil {
@@ -52,6 +54,49 @@ func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	}
 }
 
+func TestRuntimeAcceptsFeatureOwnedRunKindWithoutKernelRegistration(t *testing.T) {
+	t.Parallel()
+	runtime := newTestRuntime(t)
+	const extensionKind kernel.RunKind = "echo.plugin_v1"
+	created, err := runtime.Create(t.Context(), kernel.CreateRequest{
+		ID: "extension-run", Kind: extensionKind,
+		Actor:  kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID},
+		Goal:   testGoal, State: json.RawMessage(`{"step":0}`),
+	})
+	if err != nil {
+		t.Fatalf("create extension run: %v", err)
+	}
+	loaded, err := runtime.Load(t.Context(), created.Run.ID)
+	if err != nil || loaded.Run.Kind != extensionKind {
+		t.Fatalf("extension kind was not preserved: %#v, %v", loaded.Run, err)
+	}
+	updated, err := runtime.Apply(t.Context(), loaded.Run.ID, loaded.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: json.RawMessage(`{"step":1}`),
+	})
+	if err != nil || updated.Run.Kind != extensionKind || updated.Run.Revision != 2 {
+		t.Fatalf("extension run did not apply: %#v, %v", updated.Run, err)
+	}
+}
+
+func TestRuntimeRejectsInvalidRunKindNames(t *testing.T) {
+	t.Parallel()
+	runtime := newTestRuntime(t)
+	invalid := []kernel.RunKind{
+		"", " Agent", "Agent", "agent/tool", "_agent", kernel.RunKind(strings.Repeat("a", 65)),
+	}
+	for _, kind := range invalid {
+		_, err := runtime.Create(t.Context(), kernel.CreateRequest{
+			Kind: kind, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+			Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: testGoal,
+			State: json.RawMessage(`{}`),
+		})
+		if !errors.Is(err, kernel.ErrInvalidInput) {
+			t.Fatalf("kind %q error = %v, want invalid input", kind, err)
+		}
+	}
+}
+
 func TestRuntimeObservesCommittedTransitionsWithIsolatedSnapshots(t *testing.T) {
 	t.Parallel()
 	sink := &recordingTransitionSink{}
@@ -75,7 +120,7 @@ func newObservedRuntime(t *testing.T, sink kernel.TransitionSink) *kernel.Runtim
 func createObservedRun(t *testing.T, runtime *kernel.Runtime) kernel.Snapshot {
 	t.Helper()
 	created, err := runtime.Create(t.Context(), kernel.CreateRequest{
-		ID: "observed", Kind: kernel.RunKindAgent,
+		ID: "observed", Kind: testRunKind,
 		Actor:  kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
 		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID},
 		Goal:   testGoal, State: json.RawMessage(`{"step":0}`),
@@ -135,7 +180,7 @@ func (sink *recordingTransitionSink) ObserveTransition(_ context.Context, transi
 func createTestRun(t *testing.T, runtime *kernel.Runtime, deadline *time.Time) kernel.Snapshot {
 	t.Helper()
 	created, err := runtime.Create(context.Background(), kernel.CreateRequest{
-		Kind: kernel.RunKindAgent, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Kind: testRunKind, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
 		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: testGoal,
 		DeadlineAt: deadline, State: json.RawMessage(`{}`),
 	})
@@ -213,7 +258,7 @@ func TestRuntimeRejectsDeadlineAlreadyDue(t *testing.T) {
 	runtime := newRuntimeWithClock(t, clock)
 	deadline := clock.Now()
 	_, err := runtime.Create(context.Background(), kernel.CreateRequest{
-		Kind: kernel.RunKindAgent, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Kind: testRunKind, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
 		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: testGoal,
 		DeadlineAt: &deadline, State: json.RawMessage(`{}`),
 	})
@@ -226,7 +271,7 @@ func TestRuntimeRejectsStaleRevision(t *testing.T) {
 	t.Parallel()
 	runtime := newTestRuntime(t)
 	created, err := runtime.Create(context.Background(), kernel.CreateRequest{
-		Kind: kernel.RunKindAgent, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
+		Kind: testRunKind, Actor: kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
 		Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: testGoal, State: json.RawMessage(`{}`),
 	})
 	if err != nil {

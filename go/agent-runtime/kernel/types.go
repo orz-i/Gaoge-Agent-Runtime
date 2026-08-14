@@ -17,13 +17,6 @@ const (
 // RunKind identifies the state-machine owner selected before Run creation.
 type RunKind string
 
-const (
-	RunKindAgent       RunKind = "agent"
-	RunKindPlanExecute RunKind = "plan_execute"
-	RunKindWorkflow    RunKind = "workflow"
-	RunKindTeam        RunKind = "team"
-)
-
 // RunStatus is the lifecycle state shared by all runtime features.
 type RunStatus string
 

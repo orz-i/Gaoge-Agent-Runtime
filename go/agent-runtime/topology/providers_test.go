@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
@@ -163,11 +164,11 @@ type topologyFixtureSet struct {
 func topologyFixtures(t *testing.T) topologyFixtureSet {
 	t.Helper()
 	agentSnapshot := topologySnapshot(
-		"agent-1", kernel.RunKindAgent, kernel.RunStatusCompleted, 2,
+		"agent-1", agent.RunKind, kernel.RunStatusCompleted, 2,
 		json.RawMessage(`{"messages":[{"role":"user","content":"draft"}],"model":"terra","toolKeys":[],"limits":{"maxLLMCalls":8,"maxToolCalls":16},"llmCalls":1,"toolCalls":0}`),
 	)
 	planSnapshot := topologySnapshot(
-		"plan-1", kernel.RunKindPlanExecute, kernel.RunStatusRunning, 4,
+		"plan-1", planexecute.RunKind, kernel.RunStatusRunning, 4,
 		mustStateJSON(t, planexecute.View{
 			ApprovalPolicy: planexecute.ApprovalAuto,
 			Plan: planexecute.Plan{ID: "plan-spec", Revision: 1, Status: planexecute.PlanRunning, Summary: "Delivery plan", Steps: []planexecute.Step{
@@ -178,7 +179,7 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 		}),
 	)
 	teamSnapshot := topologySnapshot(
-		"team-1", kernel.RunKindTeam, kernel.RunStatusRunning, 3,
+		"team-1", team.RunKind, kernel.RunStatusRunning, 3,
 		mustStateJSON(t, team.View{
 			Mode: team.ExecutionParallel,
 			Members: []team.MemberState{
@@ -198,11 +199,11 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 		planSnapshot.Run.ID:     planSnapshot,
 		teamSnapshot.Run.ID:     teamSnapshot,
 		workflowSnapshot.Run.ID: workflowSnapshot,
-		testPlanChildOne:        topologySnapshot(testPlanChildOne, kernel.RunKindAgent, kernel.RunStatusCompleted, 2, agentSnapshot.State),
-		testPlanChildTwo:        topologySnapshot(testPlanChildTwo, kernel.RunKindAgent, kernel.RunStatusRunning, 1, agentSnapshot.State),
-		testTeamWriterChild:     topologySnapshot(testTeamWriterChild, kernel.RunKindAgent, kernel.RunStatusRunning, 1, agentSnapshot.State),
-		testTeamEditorChild:     topologySnapshot(testTeamEditorChild, kernel.RunKindAgent, kernel.RunStatusRunning, 1, agentSnapshot.State),
-		testWorkflowDraftChild:  topologySnapshot(testWorkflowDraftChild, kernel.RunKindAgent, kernel.RunStatusRunning, 1, agentSnapshot.State),
+		testPlanChildOne:        topologySnapshot(testPlanChildOne, agent.RunKind, kernel.RunStatusCompleted, 2, agentSnapshot.State),
+		testPlanChildTwo:        topologySnapshot(testPlanChildTwo, agent.RunKind, kernel.RunStatusRunning, 1, agentSnapshot.State),
+		testTeamWriterChild:     topologySnapshot(testTeamWriterChild, agent.RunKind, kernel.RunStatusRunning, 1, agentSnapshot.State),
+		testTeamEditorChild:     topologySnapshot(testTeamEditorChild, agent.RunKind, kernel.RunStatusRunning, 1, agentSnapshot.State),
+		testWorkflowDraftChild:  topologySnapshot(testWorkflowDraftChild, agent.RunKind, kernel.RunStatusRunning, 1, agentSnapshot.State),
 	}}
 	relations := topologyRelationSource{children: map[string][]runrelation.Relation{
 		planSnapshot.Run.ID: {
@@ -251,7 +252,7 @@ func topologyWorkflowSnapshot(t *testing.T) kernel.Snapshot {
 		},
 		CurrentWaitID: testWorkflowApprovalWait, Budget: workflow.Budget{NodeActivations: 2, Effects: 1, Segments: 2, StateBytes: 1024},
 	}
-	return topologySnapshot("workflow-1", kernel.RunKindWorkflow, kernel.RunStatusWaitingInput, 5, mustStateJSON(t, state))
+	return topologySnapshot("workflow-1", workflow.RunKind, kernel.RunStatusWaitingInput, 5, mustStateJSON(t, state))
 }
 
 func mustStateJSON(t *testing.T, value any) json.RawMessage {

@@ -265,7 +265,24 @@ func validTransition(current, next RunStatus) bool {
 }
 
 func validRunKind(kind RunKind) bool {
-	return kind == RunKindAgent || kind == RunKindPlanExecute || kind == RunKindWorkflow || kind == RunKindTeam
+	value := string(kind)
+	if value == "" || len(value) > 64 || strings.TrimSpace(value) != value {
+		return false
+	}
+	for index := range len(value) {
+		character := value[index]
+		if character >= 'a' && character <= 'z' {
+			continue
+		}
+		if index > 0 && character >= '0' && character <= '9' {
+			continue
+		}
+		if index > 0 && (character == '_' || character == '-' || character == '.') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validActor(actor ActorRef) bool {

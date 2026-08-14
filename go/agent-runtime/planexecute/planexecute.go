@@ -11,7 +11,10 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 )
 
-const CapabilityRunner kernel.Capability = "planexecute.runner"
+const (
+	RunKind          kernel.RunKind    = "plan_execute"
+	CapabilityRunner kernel.Capability = "planexecute.runner"
+)
 
 const planApprovalCheckpointKind = "plan_approval"
 
@@ -215,7 +218,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 		return kernel.Snapshot{}, err
 	}
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
-		ID: request.ID, Kind: kernel.RunKindPlanExecute, Actor: request.Actor, Thread: request.Thread,
+		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: initial,
 		Events: []kernel.EventDraft{{Type: "planexecute.started", Message: "Plan generation started"}},
 	})

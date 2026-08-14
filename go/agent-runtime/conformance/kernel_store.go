@@ -15,6 +15,7 @@ import (
 const (
 	conformanceThreadID  = "thread"
 	conformanceValueJSON = `{"value":1}`
+	conformanceRunKind   = kernel.RunKind("conformance")
 )
 
 // KernelStoreFactory creates one empty isolated Store for each test.
@@ -185,7 +186,7 @@ func conformanceRecord(runID string) kernel.Record {
 	deadline := now.Add(time.Hour)
 	return kernel.Record{
 		Run: kernel.Run{
-			ID: runID, Kind: kernel.RunKindAgent,
+			ID: runID, Kind: conformanceRunKind,
 			Actor:  kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: conformanceThreadID},
 			Goal:   "test", Status: kernel.RunStatusRunning, Revision: 1,

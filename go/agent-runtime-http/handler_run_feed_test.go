@@ -101,7 +101,7 @@ func newRunFeedHTTPTest(t *testing.T) (*gin.Engine, *kernel.Runtime, *runfeed.Fe
 func createHTTPTestRun(t *testing.T, runtime *kernel.Runtime, actor kernel.ActorRef, runID string) {
 	t.Helper()
 	_, err := runtime.Create(t.Context(), kernel.CreateRequest{
-		ID: runID, Kind: kernel.RunKindAgent, Actor: actor,
+		ID: runID, Kind: kernel.RunKind("http_test"), Actor: actor,
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "conversation-1"},
 		Goal:   "test", State: json.RawMessage(`{}`),
 	})

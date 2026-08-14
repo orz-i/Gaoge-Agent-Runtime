@@ -157,7 +157,7 @@ func baseSnapshot() kernel.Snapshot {
 	createdAt := time.Date(2026, 8, 6, 13, 0, 0, 0, time.UTC)
 	return kernel.Snapshot{
 		Run: kernel.Run{
-			ID: "run_1", Kind: kernel.RunKindWorkflow,
+			ID: "run_1", Kind: kernel.RunKind("workbench_test"),
 			Actor:  kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},
 			Goal:   "execute", Status: kernel.RunStatusWaitingInput, Revision: 3,

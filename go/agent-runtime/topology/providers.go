@@ -49,7 +49,7 @@ func NewPlanTopologyProvider(
 	relations RelationSource,
 ) workbench.TopologyProvider {
 	return childTopologyProvider{
-		name: PlanTopologyProviderName, kind: kernel.RunKindPlanExecute,
+		name: PlanTopologyProviderName, kind: planexecute.RunKind,
 		runs: runs, relations: relations, project: projectPlanTopology,
 	}
 }
@@ -60,7 +60,7 @@ func NewTeamTopologyProvider(
 	relations RelationSource,
 ) workbench.TopologyProvider {
 	return childTopologyProvider{
-		name: TeamTopologyProviderName, kind: kernel.RunKindTeam,
+		name: TeamTopologyProviderName, kind: team.RunKind,
 		runs: runs, relations: relations, project: projectTeamTopology,
 	}
 }
@@ -71,7 +71,7 @@ func NewWorkflowTopologyProvider(
 	relations RelationSource,
 ) workbench.TopologyProvider {
 	return childTopologyProvider{
-		name: WorkflowTopologyProviderName, kind: kernel.RunKindWorkflow,
+		name: WorkflowTopologyProviderName, kind: workflow.RunKind,
 		runs: runs, relations: relations, project: projectWorkflowTopology,
 	}
 }
@@ -82,7 +82,7 @@ func (agentTopologyProvider) Topology(
 	_ context.Context,
 	snapshot kernel.Snapshot,
 ) (workbench.TopologyV1, bool, error) {
-	if snapshot.Run.Kind != kernel.RunKindAgent {
+	if snapshot.Run.Kind != agent.RunKind {
 		return workbench.TopologyV1{}, false, nil
 	}
 	view, err := agent.ViewState(snapshot)

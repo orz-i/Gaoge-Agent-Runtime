@@ -8,9 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
 	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
 const workflowEffectPendingReason = "effect_pending"
@@ -169,11 +172,11 @@ func (scheduler *Scheduler) reportError(err error) {
 func selfTrigger(kind kernel.RunKind, event kernel.EventDraft) (Trigger, bool) {
 	eventType := strings.TrimSpace(event.Type)
 	switch kind {
-	case kernel.RunKindAgent:
+	case agent.RunKind:
 		return agentSelfTrigger(eventType)
-	case kernel.RunKindPlanExecute:
+	case planexecute.RunKind:
 		return planSelfTrigger(eventType)
-	case kernel.RunKindWorkflow:
+	case workflow.RunKind:
 		return workflowSelfTrigger(eventType, event.Message)
 	default:
 		return "", false

@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
 // Dispatcher routes a valid Job to the feature that owns the parent Run.
@@ -89,13 +93,13 @@ func nonRetryableResumeError(err error) bool {
 
 func (dispatcher *Dispatcher) resumer(kind kernel.RunKind) (Resumer, error) {
 	switch kind {
-	case kernel.RunKindAgent:
+	case agent.RunKind:
 		return dispatcher.agent, nil
-	case kernel.RunKindPlanExecute:
+	case planexecute.RunKind:
 		return dispatcher.plans, nil
-	case kernel.RunKindWorkflow:
+	case workflow.RunKind:
 		return dispatcher.workflows, nil
-	case kernel.RunKindTeam:
+	case team.RunKind:
 		return dispatcher.teams, nil
 	default:
 		return nil, ErrUnsupportedRunKind

@@ -212,7 +212,7 @@ func (children *fakeChildren) StartRun(
 	defer children.mu.Unlock()
 	children.starts++
 	snapshot := kernel.Snapshot{Run: kernel.Run{
-		ID: request.ID, Kind: kernel.RunKindAgent, Actor: request.Actor, Thread: request.Thread,
+		ID: request.ID, Kind: agent.RunKind, Actor: request.Actor, Thread: request.Thread,
 		Goal: request.Goal, Status: kernel.RunStatusRunning, Revision: 1,
 	}}
 	switch {

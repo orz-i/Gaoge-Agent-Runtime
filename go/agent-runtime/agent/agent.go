@@ -13,7 +13,10 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
-const CapabilityRunner kernel.Capability = "agent.runner"
+const (
+	RunKind          kernel.RunKind    = "agent"
+	CapabilityRunner kernel.Capability = "agent.runner"
+)
 
 var (
 	ErrInvalidRequest       = errors.New("invalid agent run request")
@@ -318,7 +321,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 		return kernel.Snapshot{}, err
 	}
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
-		ID: request.ID, Kind: kernel.RunKindAgent, Actor: request.Actor, Thread: request.Thread,
+		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
 		Events: []kernel.EventDraft{{Type: "agent.started", Message: "Direct Agent loop started"}},
 	})

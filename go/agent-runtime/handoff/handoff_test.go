@@ -85,7 +85,7 @@ func (children *fakeChildren) StartRun(
 ) (kernel.Snapshot, error) {
 	children.starts++
 	snapshot := kernel.Snapshot{Run: kernel.Run{
-		ID: request.ID, Kind: kernel.RunKindAgent, Actor: request.Actor,
+		ID: request.ID, Kind: agent.RunKind, Actor: request.Actor,
 		Thread: request.Thread, Goal: request.Goal, Status: kernel.RunStatusRunning, Revision: 1,
 	}}
 	children.runs[request.ID] = snapshot

@@ -261,7 +261,7 @@ func (runner *fakeAgentRunner) StartRun(
 ) (kernel.Snapshot, error) {
 	runner.startCount++
 	snapshot := kernel.Snapshot{Run: kernel.Run{
-		ID: request.ID, Kind: kernel.RunKindAgent, Actor: request.Actor, Thread: request.Thread,
+		ID: request.ID, Kind: agent.RunKind, Actor: request.Actor, Thread: request.Thread,
 		Goal: request.Goal, Revision: 1, Status: kernel.RunStatusRunning,
 	}}
 	switch runner.behavior {
