@@ -91,6 +91,27 @@ type Observer interface {
 	Observe(context.Context, Event)
 }
 
+// ObserverSet freezes explicit observer order and isolates best-effort fan-out failures.
+type ObserverSet struct{ observers []Observer }
+
+// NewObserverSet validates and freezes observers in delivery order.
+func NewObserverSet(observers ...Observer) (*ObserverSet, error) {
+	if err := validateNamed(observerNames(observers)); err != nil {
+		return nil, err
+	}
+	return &ObserverSet{observers: append([]Observer(nil), observers...)}, nil
+}
+
+// Observe delivers isolated Event copies in registration order. Observer panics are contained.
+func (set *ObserverSet) Observe(ctx context.Context, event Event) {
+	if set == nil {
+		return
+	}
+	for _, observer := range set.observers {
+		observeSafely(ctx, observer, cloneEvent(event))
+	}
+}
+
 // ApprovalRequirement is one Tool approval policy outcome.
 type ApprovalRequirement string
 
@@ -291,6 +312,29 @@ func toolMiddlewareNames(values []ToolMiddleware) []string {
 		result[index] = value.Name()
 	}
 	return result
+}
+
+func observerNames(values []Observer) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		if value == nil {
+			return append(result[:index], "")
+		}
+		result[index] = value.Name()
+	}
+	return result
+}
+
+func observeSafely(ctx context.Context, observer Observer, event Event) {
+	defer func() {
+		_ = recover()
+	}()
+	observer.Observe(ctx, event)
+}
+
+func cloneEvent(event Event) Event {
+	event.Data = append(json.RawMessage(nil), event.Data...)
+	return event
 }
 
 func cloneToolInvocation(value ToolInvocation) ToolInvocation {

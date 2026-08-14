@@ -90,7 +90,7 @@ type Dependencies struct {
 	Executor        tools.Executor
 	Approvals       ToolApprovalGate
 	HostedTools     HostedToolCatalog
-	Feed            Observer
+	Observers       []plugin.Observer
 	RunMiddleware   []plugin.RunMiddleware
 	ModelMiddleware []plugin.ModelMiddleware
 	ToolMiddleware  []plugin.ToolMiddleware
@@ -121,7 +121,7 @@ type Runner struct {
 	executor    tools.Executor
 	approvals   ToolApprovalGate
 	hostedTools HostedToolCatalog
-	feed        Observer
+	observers   *plugin.ObserverSet
 	runChain    *plugin.RunChain
 	modelChain  *plugin.ModelChain
 	toolChain   *plugin.ToolChain
@@ -188,6 +188,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if err != nil {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
+	observers, err := plugin.NewObserverSet(dependencies.Observers...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidRequest, err)
+	}
 	if dependencies.Limits.MaxLLMCalls <= 0 {
 		dependencies.Limits.MaxLLMCalls = 8
 	}
@@ -197,7 +201,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
-		hostedTools: dependencies.HostedTools, feed: dependencies.Feed, limits: dependencies.Limits,
+		hostedTools: dependencies.HostedTools, observers: observers, limits: dependencies.Limits,
 		runChain: runChain, modelChain: modelChain, toolChain: toolChain,
 		deferResume: dependencies.DeferResumption,
 	}, nil
@@ -408,7 +412,7 @@ func (runner *Runner) callModel(
 		ModelOptions: cloneRawJSON(state.ModelOptions),
 		Messages:     model.CloneMessages(state.Messages), Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
 	}
-	runner.publish(ctx, snapshot.Run.ID, Observation{
+	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
 	response, err := runner.generateModel(ctx, request)
@@ -419,7 +423,7 @@ func (runner *Runner) callModel(
 	if !validModelResponse(response) {
 		return nil, model.Response{}, ErrInvalidModelResponse
 	}
-	runner.publish(ctx, snapshot.Run.ID, Observation{
+	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelCompleted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
 	return definitions, response, nil
@@ -427,7 +431,7 @@ func (runner *Runner) callModel(
 
 func (runner *Runner) generateModel(ctx context.Context, request model.Request) (model.Response, error) {
 	emit := func(event model.StreamEvent) error {
-		runner.publishValue(ctx, request.RunID, Observation{
+		runner.publishValue(ctx, request.RunID, plugin.Event{
 			Type: EventModelDelta, Delta: event.Delta,
 		}, event)
 		return nil
@@ -546,7 +550,7 @@ func (runner *Runner) queueToolCalls(
 	})
 	if err == nil {
 		for _, call := range preparedCalls {
-			runner.publishValue(ctx, next.Run.ID, Observation{
+			runner.publishValue(ctx, next.Run.ID, plugin.Event{
 				Type: EventToolRequested, Revision: next.Run.Revision, Status: string(next.Run.Status),
 			}, call)
 		}
@@ -588,7 +592,7 @@ func (runner *Runner) preparePendingApproval(
 	})
 	if err == nil {
 		runner.publishRunEvent(ctx, waiting, EventRunWaitingInput, false)
-		runner.publishValue(ctx, waiting.Run.ID, Observation{
+		runner.publishValue(ctx, waiting.Run.ID, plugin.Event{
 			Type: EventInteractionRequired, Revision: waiting.Run.Revision, Status: string(waiting.Run.Status),
 		}, checkpoint)
 	}
@@ -611,7 +615,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if state.ToolCalls >= state.Limits.MaxToolCalls {
 		return runner.fail(ctx, snapshot, state, "agent.tool_limit", ErrCallLimit)
 	}
-	runner.publishValue(ctx, snapshot.Run.ID, Observation{
+	runner.publishValue(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventToolStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	}, call)
 	executionRequest := tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: tools.CloneCall(call)}
@@ -700,7 +704,7 @@ func (runner *Runner) recordRecoverableToolError(
 		Events: []kernel.EventDraft{{Type: "tool.correction_requested", Message: strings.TrimSpace(code)}},
 	})
 	if err == nil {
-		runner.publishValue(ctx, next.Run.ID, Observation{
+		runner.publishValue(ctx, next.Run.ID, plugin.Event{
 			Type: EventToolCompleted, Message: strings.TrimSpace(code),
 			Revision: next.Run.Revision, Status: string(next.Run.Status),
 		}, call)
@@ -849,7 +853,7 @@ func (runner *Runner) fail(
 }
 
 func (runner *Runner) publishRunEvent(ctx context.Context, snapshot kernel.Snapshot, eventType string, terminal bool) {
-	runner.publish(ctx, snapshot.Run.ID, Observation{
+	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: eventType, Message: snapshot.Run.ErrorDetail, Revision: snapshot.Run.Revision,
 		Status: string(snapshot.Run.Status), Terminal: terminal,
 	})
@@ -861,27 +865,29 @@ func (runner *Runner) publishToolEvent(
 	eventType string,
 	value interface{},
 ) {
-	runner.publishValue(ctx, snapshot.Run.ID, Observation{
+	runner.publishValue(ctx, snapshot.Run.ID, plugin.Event{
 		Type: eventType, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	}, value)
 }
 
-func (runner *Runner) publishValue(ctx context.Context, runID string, draft Observation, value interface{}) {
+func (runner *Runner) publishValue(ctx context.Context, runID string, event plugin.Event, value interface{}) {
 	data, err := json.Marshal(value)
 	if err != nil {
 		return
 	}
-	draft.Data = data
-	runner.publish(ctx, runID, draft)
+	event.Data = data
+	runner.publish(ctx, runID, event)
 }
 
-func (runner *Runner) publish(ctx context.Context, runID string, draft Observation) {
-	if runner == nil || runner.feed == nil {
+func (runner *Runner) publish(ctx context.Context, runID string, event plugin.Event) {
+	if runner == nil || runner.observers == nil {
 		return
 	}
+	event.RunID = strings.TrimSpace(runID)
+	event.RunKind = RunKind
 	publishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
-	runner.feed.ObserveAgent(publishContext, runID, draft)
+	runner.observers.Observe(publishContext, event)
 }
 
 func (runner *Runner) loadState(ctx context.Context, runID string) (kernel.Snapshot, runState, error) {

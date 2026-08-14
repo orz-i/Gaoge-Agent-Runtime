@@ -39,6 +39,44 @@ func TestRunChainPreservesExplicitOrderAndRejectsDoubleNext(t *testing.T) {
 	}
 }
 
+type mutatingObserver struct {
+	name       string
+	order      *[]string
+	panicAfter bool
+}
+
+func (observer mutatingObserver) Name() string { return observer.name }
+
+func (observer mutatingObserver) Observe(_ context.Context, event plugin.Event) {
+	*observer.order = append(*observer.order, observer.name)
+	if len(event.Data) > 0 {
+		event.Data[0] = '['
+	}
+	if observer.panicAfter {
+		panic("observer failure")
+	}
+}
+
+func TestObserverSetPreservesOrderIsolationAndContainsPanics(t *testing.T) {
+	t.Parallel()
+	order := make([]string, 0, 2)
+	set, err := plugin.NewObserverSet(
+		mutatingObserver{name: "first", order: &order, panicAfter: true},
+		mutatingObserver{name: "second", order: &order},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := plugin.Event{RunID: "run-1", Type: "test", Data: []byte(`{"ok":true}`)}
+	set.Observe(t.Context(), event)
+	if len(order) != 2 || order[0] != "first" || order[1] != "second" {
+		t.Fatalf("observer order = %#v", order)
+	}
+	if string(event.Data) != `{"ok":true}` {
+		t.Fatalf("observer mutated source event: %s", event.Data)
+	}
+}
+
 func TestModelChainClonesRequestAcrossMiddlewareBoundary(t *testing.T) {
 	t.Parallel()
 	chain, err := plugin.NewModelChain(modelMiddleware{name: "mutator"})

@@ -15,6 +15,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
@@ -273,7 +274,7 @@ func TestRunnerCompletesImmediatelyAfterTerminalTool(t *testing.T) {
 	model := &terminalToolModel{t: t}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
-		Approvals: interactionadapter.New(approvals), Feed: runfeedadapter.New(feed),
+		Approvals: interactionadapter.New(approvals), Observers: []plugin.Observer{runfeedadapter.New(feed)},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -429,7 +430,7 @@ func TestRunnerDoesNotReplayModelAfterStreamDeltaFailure(t *testing.T) {
 	model := &deltaThenFailureModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
-		Approvals: interactionadapter.New(approvals), Feed: runfeedadapter.New(feed),
+		Approvals: interactionadapter.New(approvals), Observers: []plugin.Observer{runfeedadapter.New(feed)},
 	})
 	if err != nil {
 		t.Fatal(err)
