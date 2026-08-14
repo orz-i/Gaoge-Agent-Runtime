@@ -1,9 +1,9 @@
 package interactionadapter
 
 import (
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -26,7 +26,7 @@ func (gate *Gate) PrepareToolApproval(call tools.Call, definition tools.Definiti
 
 func (gate *Gate) ResolveToolApproval(
 	checkpoint *kernel.Checkpoint,
-	response agent.ApprovalResponse,
+	response plugin.ApprovalResponse,
 ) (*kernel.Checkpoint, error) {
 	if gate == nil || gate.approvals == nil {
 		return nil, interaction.ErrInvalidApproval

@@ -11,6 +11,13 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
+const (
+	testPluginFirst  = "first"
+	testPluginSecond = "second"
+)
+
+var errPolicyFailed = errors.New("policy failed")
+
 func TestRunChainPreservesExplicitOrderAndRejectsDoubleNext(t *testing.T) {
 	t.Parallel()
 	order := make([]string, 0, 5)
@@ -39,6 +46,53 @@ func TestRunChainPreservesExplicitOrderAndRejectsDoubleNext(t *testing.T) {
 	}
 }
 
+type approvalPolicy struct {
+	name   string
+	result plugin.ApprovalRequirement
+	err    error
+	order  *[]string
+}
+
+func (policy approvalPolicy) Name() string { return policy.name }
+
+func (policy approvalPolicy) Approval(context.Context, plugin.ToolInvocation) (plugin.ApprovalRequirement, error) {
+	if policy.order != nil {
+		*policy.order = append(*policy.order, policy.name)
+	}
+	return policy.result, policy.err
+}
+
+func TestApprovalPolicySetEvaluatesAllPoliciesAndRequiresAny(t *testing.T) {
+	t.Parallel()
+	order := make([]string, 0, 2)
+	set, err := plugin.NewApprovalPolicySet(
+		approvalPolicy{name: testPluginFirst, result: plugin.ApprovalRequired, order: &order},
+		approvalPolicy{name: testPluginSecond, result: plugin.ApprovalNotRequired, order: &order},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, err := set.RequiresApproval(t.Context(), plugin.ToolInvocation{})
+	if err != nil || !required || len(order) != 2 || order[0] != testPluginFirst || order[1] != testPluginSecond {
+		t.Fatalf("required=%v order=%#v err=%v", required, order, err)
+	}
+}
+
+func TestApprovalPolicySetFailsClosedOnPolicyError(t *testing.T) {
+	t.Parallel()
+	set, err := plugin.NewApprovalPolicySet(
+		approvalPolicy{name: "required", result: plugin.ApprovalRequired},
+		approvalPolicy{name: "broken", err: errPolicyFailed},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, err := set.RequiresApproval(t.Context(), plugin.ToolInvocation{})
+	if required || !errors.Is(err, errPolicyFailed) {
+		t.Fatalf("required=%v err=%v", required, err)
+	}
+}
+
 type mutatingObserver struct {
 	name       string
 	order      *[]string
@@ -61,15 +115,15 @@ func TestObserverSetPreservesOrderIsolationAndContainsPanics(t *testing.T) {
 	t.Parallel()
 	order := make([]string, 0, 2)
 	set, err := plugin.NewObserverSet(
-		mutatingObserver{name: "first", order: &order, panicAfter: true},
-		mutatingObserver{name: "second", order: &order},
+		mutatingObserver{name: testPluginFirst, order: &order, panicAfter: true},
+		mutatingObserver{name: testPluginSecond, order: &order},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	event := plugin.Event{RunID: "run-1", Type: "test", Data: []byte(`{"ok":true}`)}
 	set.Observe(t.Context(), event)
-	if len(order) != 2 || order[0] != "first" || order[1] != "second" {
+	if len(order) != 2 || order[0] != testPluginFirst || order[1] != testPluginSecond {
 		t.Fatalf("observer order = %#v", order)
 	}
 	if string(event.Data) != `{"ok":true}` {

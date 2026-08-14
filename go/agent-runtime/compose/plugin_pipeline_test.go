@@ -13,12 +13,15 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
+var errPipelineToolBlocked = errors.New("pipeline tool blocked")
+
 const (
-	pipelineToolKey    = "pipeline.lookup"
-	pipelineTenantID   = "tenant"
-	pipelineActorID    = "actor"
-	pipelineThreadKind = "conversation"
-	pipelineThreadID   = "thread"
+	pipelineToolKey     = "pipeline.lookup"
+	pipelineDisposition = "committed"
+	pipelineTenantID    = "tenant"
+	pipelineActorID     = "actor"
+	pipelineThreadKind  = "conversation"
+	pipelineThreadID    = "thread"
 )
 
 func TestAgentPluginPipelinePreservesExplicitRunAndModelOrder(t *testing.T) {
@@ -49,6 +52,58 @@ func TestAgentPluginPipelinePreservesExplicitRunAndModelOrder(t *testing.T) {
 	}
 	want := []string{"run:before", "model:before", "provider", "model:after", "run:after"}
 	assertPipelineOrder(t, order, want)
+}
+
+type blockingToolMiddleware struct{ name string }
+
+func (middleware blockingToolMiddleware) Name() string { return middleware.name }
+
+func (middleware blockingToolMiddleware) Tool(
+	context.Context,
+	plugin.ToolInvocation,
+	plugin.ToolNext,
+) (tools.ExecutionResult, error) {
+	return tools.ExecutionResult{}, errPipelineToolBlocked
+}
+
+func TestAgentToolMiddlewareCanBlockWithoutChangingToolDefinition(t *testing.T) {
+	t.Parallel()
+	runtime := newMinimalKernel(t)
+	executions := 0
+	registry, err := tools.NewRegistry([]tools.Registration{{
+		Definition: tools.Definition{
+			Key: pipelineToolKey, Name: pipelineToolKey,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		},
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			executions++
+			return tools.ExecutionResult{
+				Content: json.RawMessage(`{"ok":true}`),
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: pipelineDisposition},
+			}, nil
+		}),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: singleToolPipelineModel{}, Catalog: registry, Executor: registry,
+		ToolMiddleware: []plugin.ToolMiddleware{blockingToolMiddleware{name: "guardrail"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := runner.StartRun(t.Context(), agent.StartRequest{
+		Actor:  kernel.ActorRef{TenantID: pipelineTenantID, ActorID: pipelineActorID},
+		Thread: kernel.ThreadRef{Kind: pipelineThreadKind, ID: pipelineThreadID},
+		Goal:   "block tool", ToolKeys: []string{pipelineToolKey},
+	})
+	if !errors.Is(err, errPipelineToolBlocked) || failed.Run.Status != kernel.RunStatusFailed {
+		t.Fatalf("failed=%#v err=%v", failed.Run, err)
+	}
+	if executions != 0 {
+		t.Fatalf("blocked tool executions = %d, want 0", executions)
+	}
 }
 
 func TestAgentStreamingModelUsesSameModelMiddlewareChain(t *testing.T) {
@@ -83,13 +138,13 @@ func TestAgentToolMiddlewareDoubleNextExecutesToolOnce(t *testing.T) {
 	registry, err := tools.NewRegistry([]tools.Registration{{
 		Definition: tools.Definition{
 			Key: pipelineToolKey, Name: pipelineToolKey,
-			InputSchema: json.RawMessage(`{"type":"object"}`), ApprovalMode: tools.ApprovalNever,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
 		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			executions++
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"ok":true}`),
-				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"},
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: pipelineDisposition},
 			}, nil
 		}),
 	}})

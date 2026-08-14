@@ -18,7 +18,7 @@ func TestCloneRequestIsolatesNestedModelContract(t *testing.T) {
 			Role:      model.RoleAssistant,
 			ToolCalls: []tools.Call{{ID: "call-1", ToolKey: testToolKey, Arguments: json.RawMessage(`{"id":1}`)}},
 		}},
-		Tools:       []tools.Definition{{Key: testToolKey, Name: testToolKey, InputSchema: json.RawMessage(`{"type":"object"}`), ApprovalMode: tools.ApprovalNever}},
+		Tools:       []tools.Definition{{Key: testToolKey, Name: testToolKey, InputSchema: json.RawMessage(`{"type":"object"}`)}},
 		HostedTools: []model.HostedTool{{Key: "web", Target: json.RawMessage(`{"provider":"openai"}`)}},
 	}
 	cloned := model.CloneRequest(request)

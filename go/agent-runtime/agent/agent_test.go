@@ -39,6 +39,17 @@ var (
 	errDatabaseUnavailable = errors.New("database unavailable")
 )
 
+type requiredApprovalPolicy struct{ name string }
+
+func (policy requiredApprovalPolicy) Name() string { return policy.name }
+
+func (policy requiredApprovalPolicy) Approval(
+	context.Context,
+	plugin.ToolInvocation,
+) (plugin.ApprovalRequirement, error) {
+	return plugin.ApprovalRequired, nil
+}
+
 func newTestRuntimeAndApprovals(t *testing.T) (*kernel.Runtime, *interaction.Approvals) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
@@ -72,7 +83,7 @@ func TestRunnerFreezesPerRunLimits(t *testing.T) {
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{
 			Key: manifestToolKey, Name: manifestToolName,
-			InputSchema: json.RawMessage(`{"type":"object"}`), ApprovalMode: tools.ApprovalNever,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
 		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			return tools.ExecutionResult{
@@ -260,8 +271,8 @@ func TestRunnerCompletesImmediatelyAfterTerminalTool(t *testing.T) {
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{
 			Key: publishToolKey, Name: publishToolName,
-			InputSchema:  json.RawMessage(`{"type":"object"}`),
-			ApprovalMode: tools.ApprovalNever, Terminal: true,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+			Terminal:    true,
 		},
 		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			executions++
@@ -338,7 +349,7 @@ func newDeferredApprovalFixture(t *testing.T) deferredApprovalFixture {
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{
 			Key: publishToolKey, Name: publishToolName,
-			InputSchema: json.RawMessage(`{"type":"object"}`), ApprovalMode: tools.ApprovalAlways,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
 		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			executions++
@@ -351,7 +362,9 @@ func newDeferredApprovalFixture(t *testing.T) deferredApprovalFixture {
 	model := &approvalModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
-		Approvals: interactionadapter.New(approvals), DeferResumption: true,
+		Approvals:        interactionadapter.New(approvals),
+		ApprovalPolicies: []plugin.ApprovalPolicy{requiredApprovalPolicy{name: "test-required"}},
+		DeferResumption:  true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -377,7 +390,7 @@ func resolveDeferredApproval(
 ) kernel.Snapshot {
 	t.Helper()
 	resolved, err := fixture.runner.ResolveApproval(t.Context(), waiting.Run.ID, waiting.Run.Revision,
-		agent.ApprovalResponse{Decision: agent.ApprovalApprove})
+		plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
 	if err != nil || resolved.Run.Status != kernel.RunStatusRunning || *fixture.executions != 0 {
 		t.Fatalf("resolved=%#v executions=%d err=%v", resolved.Run, *fixture.executions, err)
 	}
@@ -522,15 +535,15 @@ func TestRunnerRejectsTerminalToolBeforeBatchEnd(t *testing.T) {
 		{
 			Definition: tools.Definition{
 				Key: publishToolKey, Name: publishToolName,
-				InputSchema:  json.RawMessage(`{"type":"object"}`),
-				ApprovalMode: tools.ApprovalNever, Terminal: true,
+				InputSchema: json.RawMessage(`{"type":"object"}`),
+				Terminal:    true,
 			},
 			Handler: handler,
 		},
 		{
 			Definition: tools.Definition{
 				Key: manifestToolKey, Name: manifestToolName,
-				InputSchema: json.RawMessage(`{"type":"object"}`), ApprovalMode: tools.ApprovalNever,
+				InputSchema: json.RawMessage(`{"type":"object"}`),
 			},
 			Handler: handler,
 		},
@@ -619,8 +632,7 @@ func TestRunnerLetsModelCorrectExplicitRecoverableToolError(t *testing.T) {
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{
 			Key: publishToolKey, Name: publishToolName,
-			InputSchema:  json.RawMessage(`{"type":"object"}`),
-			ApprovalMode: tools.ApprovalNever,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
 		Handler: tools.HandlerFunc(func(
 			_ context.Context,
@@ -669,8 +681,7 @@ func TestRunnerStillFailsUnmarkedToolErrors(t *testing.T) {
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{
 			Key: publishToolKey, Name: publishToolName,
-			InputSchema:  json.RawMessage(`{"type":"object"}`),
-			ApprovalMode: tools.ApprovalNever,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
 		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			return tools.ExecutionResult{}, errDatabaseUnavailable
@@ -752,8 +763,7 @@ func TestRunnerPreservesAssistantToolCallBatchBeforeOrderedResults(t *testing.T)
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{
 			Key: manifestToolKey, Name: manifestToolName,
-			InputSchema:  json.RawMessage(`{"type":"object","additionalProperties":false}`),
-			ApprovalMode: tools.ApprovalNever,
+			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
 		},
 		Handler: tools.HandlerFunc(func(
 			_ context.Context,

@@ -113,22 +113,13 @@ func RecoverableCallErrorInfo(err error) (string, string, bool) {
 	return strings.TrimSpace(target.Code), target.Error(), true
 }
 
-// ApprovalMode declares whether a Tool call requires explicit interaction.
-type ApprovalMode string
-
-const (
-	ApprovalNever  ApprovalMode = "never"
-	ApprovalAlways ApprovalMode = "always"
-)
-
 // Definition is the model-visible, provider-neutral Tool contract.
 type Definition struct {
-	Key          string          `json:"key"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description,omitempty"`
-	InputSchema  json.RawMessage `json:"inputSchema"`
-	ApprovalMode ApprovalMode    `json:"approvalMode"`
-	Terminal     bool            `json:"terminal,omitempty"`
+	Key         string          `json:"key"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema json.RawMessage `json:"inputSchema"`
+	Terminal    bool            `json:"terminal,omitempty"`
 }
 
 // Call is one stable Tool intent produced by a Text model.
@@ -275,8 +266,7 @@ func normalizeDefinition(definition Definition) (Definition, error) {
 	definition.Name = strings.TrimSpace(definition.Name)
 	definition.Description = strings.TrimSpace(definition.Description)
 	definition.InputSchema = cloneJSON(definition.InputSchema)
-	if definition.Key == "" || definition.Name == "" || !json.Valid(definition.InputSchema) ||
-		(definition.ApprovalMode != ApprovalNever && definition.ApprovalMode != ApprovalAlways) {
+	if definition.Key == "" || definition.Name == "" || !json.Valid(definition.InputSchema) {
 		return Definition{}, ErrInvalidDefinition
 	}
 	return definition, nil

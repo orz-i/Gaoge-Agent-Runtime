@@ -14,6 +14,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -52,6 +53,20 @@ func TestMinimalHostCompletesModelOnlyAgentRun(t *testing.T) {
 	}
 }
 
+type minimalApprovalPolicy struct{}
+
+func (minimalApprovalPolicy) Name() string { return "minimal-tool-approval" }
+
+func (minimalApprovalPolicy) Approval(
+	_ context.Context,
+	invocation plugin.ToolInvocation,
+) (plugin.ApprovalRequirement, error) {
+	if invocation.Definition.Key == minimalToolKey {
+		return plugin.ApprovalRequired, nil
+	}
+	return plugin.ApprovalNotRequired, nil
+}
+
 func TestMinimalHostCompletesApprovedToolAgentRun(t *testing.T) {
 	t.Parallel()
 	fixture := newMinimalHost(t)
@@ -67,7 +82,7 @@ func TestMinimalHostCompletesApprovedToolAgentRun(t *testing.T) {
 
 	completed, err := fixture.runner.ResolveApproval(
 		context.Background(), waiting.Run.ID, waiting.Run.Revision,
-		agent.ApprovalResponse{Decision: agent.ApprovalApprove},
+		plugin.ApprovalResponse{Decision: plugin.ApprovalApprove},
 	)
 	if err != nil {
 		t.Fatalf("approve agent run: %v", err)
@@ -92,7 +107,9 @@ func newMinimalHost(t *testing.T) minimalHost {
 	}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: &minimalModel{}, Catalog: registry, Executor: registry,
-		Approvals: interactionadapter.New(approvals), Limits: agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 1},
+		Approvals:        interactionadapter.New(approvals),
+		ApprovalPolicies: []plugin.ApprovalPolicy{minimalApprovalPolicy{}},
+		Limits:           agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 1},
 	})
 	if err != nil {
 		t.Fatalf("create agent runner: %v", err)
@@ -128,7 +145,6 @@ func newMinimalTools(t *testing.T) *tools.Registry {
 	registry, err := tools.NewRegistry([]tools.Registration{{
 		Definition: tools.Definition{
 			Key: minimalToolKey, Name: "Lookup", InputSchema: json.RawMessage(`{"type":"object"}`),
-			ApprovalMode: tools.ApprovalAlways,
 		},
 		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			return tools.ExecutionResult{

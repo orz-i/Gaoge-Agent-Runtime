@@ -38,6 +38,17 @@ type RunInvocation struct {
 	Goal      string
 }
 
+func approvalPolicyNames(values []ApprovalPolicy) []string {
+	result := make([]string, len(values))
+	for index, value := range values {
+		if value == nil {
+			return append(result[:index], "")
+		}
+		result[index] = value.Name()
+	}
+	return result
+}
+
 // RunNext executes the next Run middleware or the Feature operation exactly once.
 type RunNext func(context.Context) (kernel.Snapshot, error)
 
@@ -124,6 +135,39 @@ const (
 type ApprovalPolicy interface {
 	Name() string
 	Approval(context.Context, ToolInvocation) (ApprovalRequirement, error)
+}
+
+// ApprovalPolicySet freezes explicit approval policy order and OR-composes requirements.
+type ApprovalPolicySet struct{ policies []ApprovalPolicy }
+
+// NewApprovalPolicySet validates and freezes approval policies in evaluation order.
+func NewApprovalPolicySet(policies ...ApprovalPolicy) (*ApprovalPolicySet, error) {
+	if err := validateNamed(approvalPolicyNames(policies)); err != nil {
+		return nil, err
+	}
+	return &ApprovalPolicySet{policies: append([]ApprovalPolicy(nil), policies...)}, nil
+}
+
+// RequiresApproval evaluates every policy. Any error fails closed; any required result wins.
+func (set *ApprovalPolicySet) RequiresApproval(ctx context.Context, invocation ToolInvocation) (bool, error) {
+	if set == nil {
+		return false, ErrInvalidRegistration
+	}
+	required := false
+	for _, policy := range set.policies {
+		result, err := policy.Approval(ctx, cloneToolInvocation(invocation))
+		if err != nil {
+			return false, err
+		}
+		switch result {
+		case ApprovalNotRequired:
+		case ApprovalRequired:
+			required = true
+		default:
+			return false, ErrInvalidRegistration
+		}
+	}
+	return required, nil
 }
 
 // ApprovalDecision is the explicit outcome of an approval interaction.

@@ -84,17 +84,18 @@ type Limits struct {
 
 // Dependencies explicitly provide the direct Agent loop capabilities.
 type Dependencies struct {
-	Runtime         *kernel.Runtime
-	Model           model.Client
-	Catalog         tools.Catalog
-	Executor        tools.Executor
-	Approvals       ToolApprovalGate
-	HostedTools     HostedToolCatalog
-	Observers       []plugin.Observer
-	RunMiddleware   []plugin.RunMiddleware
-	ModelMiddleware []plugin.ModelMiddleware
-	ToolMiddleware  []plugin.ToolMiddleware
-	Limits          Limits
+	Runtime          *kernel.Runtime
+	Model            model.Client
+	Catalog          tools.Catalog
+	Executor         tools.Executor
+	Approvals        plugin.ApprovalHandler
+	ApprovalPolicies []plugin.ApprovalPolicy
+	HostedTools      HostedToolCatalog
+	Observers        []plugin.Observer
+	RunMiddleware    []plugin.RunMiddleware
+	ModelMiddleware  []plugin.ModelMiddleware
+	ToolMiddleware   []plugin.ToolMiddleware
+	Limits           Limits
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
 	DeferResumption bool
@@ -115,18 +116,19 @@ type StartRequest struct {
 
 // Runner owns only the direct Agent model and Tool loop.
 type Runner struct {
-	runtime     *kernel.Runtime
-	model       model.Client
-	catalog     tools.Catalog
-	executor    tools.Executor
-	approvals   ToolApprovalGate
-	hostedTools HostedToolCatalog
-	observers   *plugin.ObserverSet
-	runChain    *plugin.RunChain
-	modelChain  *plugin.ModelChain
-	toolChain   *plugin.ToolChain
-	limits      Limits
-	deferResume bool
+	runtime          *kernel.Runtime
+	model            model.Client
+	catalog          tools.Catalog
+	executor         tools.Executor
+	approvals        plugin.ApprovalHandler
+	approvalPolicies *plugin.ApprovalPolicySet
+	hostedTools      HostedToolCatalog
+	observers        *plugin.ObserverSet
+	runChain         *plugin.RunChain
+	modelChain       *plugin.ModelChain
+	toolChain        *plugin.ToolChain
+	limits           Limits
+	deferResume      bool
 }
 
 type runState struct {
@@ -192,6 +194,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if err != nil {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
+	approvalPolicies, err := plugin.NewApprovalPolicySet(dependencies.ApprovalPolicies...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidRequest, err)
+	}
 	if dependencies.Limits.MaxLLMCalls <= 0 {
 		dependencies.Limits.MaxLLMCalls = 8
 	}
@@ -201,7 +207,8 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
-		hostedTools: dependencies.HostedTools, observers: observers, limits: dependencies.Limits,
+		hostedTools: dependencies.HostedTools, observers: observers, approvalPolicies: approvalPolicies,
+		limits:   dependencies.Limits,
 		runChain: runChain, modelChain: modelChain, toolChain: toolChain,
 		deferResume: dependencies.DeferResumption,
 	}, nil
@@ -270,7 +277,7 @@ func (runner *Runner) ResolveApproval(
 	ctx context.Context,
 	runID string,
 	expectedRevision uint64,
-	response ApprovalResponse,
+	response plugin.ApprovalResponse,
 ) (kernel.Snapshot, error) {
 	if runner == nil || runner.approvals == nil {
 		return kernel.Snapshot{}, ErrApprovalRequired
@@ -295,13 +302,13 @@ func (runner *Runner) resolveApproval(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state runState,
-	response ApprovalResponse,
+	response plugin.ApprovalResponse,
 ) (kernel.Snapshot, error) {
 	resolved, err := runner.approvals.ResolveToolApproval(snapshot.Checkpoint, response)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if response.Decision == ApprovalReject {
+	if response.Decision == plugin.ApprovalReject {
 		return runner.resumeRejected(ctx, snapshot, state, resolved, response)
 	}
 	return runner.resumeApproved(ctx, snapshot, state, resolved)
@@ -572,7 +579,19 @@ func (runner *Runner) preparePendingApproval(
 	if !ok {
 		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
 	}
-	if definition.ApprovalMode == tools.ApprovalNever {
+	invocation := plugin.ToolInvocation{
+		Run:        snapshot.Run,
+		Definition: tools.CloneDefinition(definition),
+		Request: tools.ExecutionRequest{
+			RunID: snapshot.Run.ID,
+			Call:  tools.CloneCall(call),
+		},
+	}
+	requiresApproval, err := runner.approvalPolicies.RequiresApproval(ctx, invocation)
+	if err != nil {
+		return runner.fail(ctx, snapshot, state, "agent.approval_policy_failed", err)
+	}
+	if !requiresApproval {
 		return snapshot, nil
 	}
 	if runner.approvals == nil {
@@ -740,7 +759,7 @@ func (runner *Runner) resumeRejected(
 	snapshot kernel.Snapshot,
 	state runState,
 	checkpoint *kernel.Checkpoint,
-	response ApprovalResponse,
+	response plugin.ApprovalResponse,
 ) (kernel.Snapshot, error) {
 	call, ok := nextPendingCall(state)
 	if !ok {

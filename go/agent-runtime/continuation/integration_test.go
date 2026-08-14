@@ -19,6 +19,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
 	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
@@ -99,7 +100,7 @@ func newIntegrationToolRegistry(t *testing.T, executions *atomic.Int32) *tools.R
 	registry, err := tools.NewRegistry([]tools.Registration{{
 		Definition: tools.Definition{
 			Key: integrationToolKey, Name: "test_publish",
-			InputSchema: json.RawMessage(`{"type":"object"}`), ApprovalMode: tools.ApprovalAlways,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
 		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			executions.Add(1)
@@ -128,12 +129,25 @@ func newIntegrationAgent(
 	model := &approvalIntegrationModel{}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
-		Approvals: interactionadapter.New(approvals), DeferResumption: true,
+		Approvals:        interactionadapter.New(approvals),
+		ApprovalPolicies: []plugin.ApprovalPolicy{integrationApprovalPolicy{}},
+		DeferResumption:  true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return agentRunner, model
+}
+
+type integrationApprovalPolicy struct{}
+
+func (integrationApprovalPolicy) Name() string { return "integration-tool-approval" }
+
+func (integrationApprovalPolicy) Approval(
+	context.Context,
+	plugin.ToolInvocation,
+) (plugin.ApprovalRequirement, error) {
+	return plugin.ApprovalRequired, nil
 }
 
 func newIntegrationPlan(
@@ -216,7 +230,7 @@ func (fixture continuationIntegrationFixture) waitingChild(
 func (fixture continuationIntegrationFixture) approveChild(t *testing.T, child kernel.Snapshot) {
 	t.Helper()
 	resolved, err := fixture.agent.ResolveApproval(t.Context(), child.Run.ID, child.Run.Revision,
-		agent.ApprovalResponse{Decision: agent.ApprovalApprove})
+		plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
 	if err != nil || resolved.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("resolved=%#v err=%v", resolved.Run, err)
 	}
