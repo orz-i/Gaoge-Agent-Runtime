@@ -1,0 +1,6 @@
+{
+  "capability": "agent",
+  "operations": [
+    {"method": "post", "path": "/agent-runs", "operationId": "createAgentRun"}
+  ]
+}

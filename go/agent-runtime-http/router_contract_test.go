@@ -8,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func TestRouterExposesOnlyTargetRuntimeResources(t *testing.T) {
+func TestCoreRouterExposesOnlyFeatureNeutralResources(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
@@ -24,13 +24,7 @@ func TestRouterExposesOnlyTargetRuntimeResources(t *testing.T) {
 		"GET /api/v1/runs/:run_id",
 		"GET /api/v1/runs/:run_id/feed",
 		"GET /api/v1/runs/:run_id/workbench",
-		"POST /api/v1/agent-runs",
-		"POST /api/v1/plan-runs",
-		"POST /api/v1/plan-runs/:run_id/approval",
 		"POST /api/v1/runs/:run_id/cancel",
-		"POST /api/v1/team-runs",
-		"POST /api/v1/workflow-runs",
-		"POST /api/v1/workflow-runs/:run_id/wait",
 	}
 	if !reflect.DeepEqual(operations, expected) {
 		t.Fatalf("routes = %#v, want %#v", operations, expected)

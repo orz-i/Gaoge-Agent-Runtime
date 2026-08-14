@@ -1,16 +1,15 @@
 import type {
   CancelRunRequest,
   CancelRunResponse,
-  ResolvePlanApprovalRequest,
-  ResolveWorkflowWaitRequest,
   RunSnapshotDTO,
   RunFeedEventDTO,
-  StartAgentRunRequest,
-  StartPlanRunRequest,
-  StartTeamRunRequest,
-  StartWorkflowRunRequest,
   WorkbenchDTO,
 } from "./types.js";
+import { createAgentCapability } from "./capabilities/agent.js";
+import { createPlansCapability } from "./capabilities/plans.js";
+import { pathPart } from "./capabilities/shared.js";
+import { createTeamsCapability } from "./capabilities/teams.js";
+import { createWorkflowsCapability } from "./capabilities/workflows.js";
 
 export type RuntimeHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 export type RuntimeClientOptions = { baseURL: string; fetch?: typeof globalThis.fetch; headers?: RuntimeHeaders };
@@ -29,38 +28,23 @@ export class RuntimeAPIError extends Error {
 }
 
 type ErrorResponse = { error?: { code?: string; message?: string; requestID?: string } };
-const pathPart = (value: string): string => encodeURIComponent(value);
 
 export class RuntimeClient {
-  readonly agent;
-  readonly plans;
-  readonly workflows;
-  readonly teams;
+  readonly agent: ReturnType<typeof createAgentCapability>;
+  readonly plans: ReturnType<typeof createPlansCapability>;
+  readonly workflows: ReturnType<typeof createWorkflowsCapability>;
+  readonly teams: ReturnType<typeof createTeamsCapability>;
   readonly runs;
   private readonly fetcher: typeof globalThis.fetch;
 
   constructor(private readonly options: RuntimeClientOptions) {
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
-    this.agent = {
-      start: (payload: StartAgentRunRequest, request?: RequestOptions) =>
-        this.request<RunSnapshotDTO>("/agent-runs", { method: "POST", body: JSON.stringify(payload) }, request),
-    };
-    this.plans = {
-      start: (payload: StartPlanRunRequest, request?: RequestOptions) =>
-        this.request<RunSnapshotDTO>("/plan-runs", { method: "POST", body: JSON.stringify(payload) }, request),
-      approve: (runID: string, payload: ResolvePlanApprovalRequest, request?: RequestOptions) =>
-        this.request<RunSnapshotDTO>(`/plan-runs/${pathPart(runID)}/approval`, { method: "POST", body: JSON.stringify(payload) }, request),
-    };
-    this.workflows = {
-      start: (payload: StartWorkflowRunRequest, request?: RequestOptions) =>
-        this.request<RunSnapshotDTO>("/workflow-runs", { method: "POST", body: JSON.stringify(payload) }, request),
-      resolveWait: (runID: string, payload: ResolveWorkflowWaitRequest, request?: RequestOptions) =>
-        this.request<RunSnapshotDTO>(`/workflow-runs/${pathPart(runID)}/wait`, { method: "POST", body: JSON.stringify(payload) }, request),
-    };
-    this.teams = {
-      start: (payload: StartTeamRunRequest, request?: RequestOptions) =>
-        this.request<RunSnapshotDTO>("/team-runs", { method: "POST", body: JSON.stringify(payload) }, request),
-    };
+    const capabilityRequest = <T>(path: string, init: RequestInit = {}, request?: RequestOptions) =>
+      this.request<T>(path, init, request);
+    this.agent = createAgentCapability(capabilityRequest);
+    this.plans = createPlansCapability(capabilityRequest);
+    this.workflows = createWorkflowsCapability(capabilityRequest);
+    this.teams = createTeamsCapability(capabilityRequest);
     this.runs = {
       get: (runID: string, request?: RequestOptions) =>
         this.request<RunSnapshotDTO>(`/runs/${pathPart(runID)}`, {}, request),

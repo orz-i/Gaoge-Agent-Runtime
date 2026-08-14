@@ -93,7 +93,7 @@ func newRunFeedHTTPTest(t *testing.T) (*gin.Engine, *kernel.Runtime, *runfeed.Fe
 	actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 	engine := gin.New()
 	NewModule(NewHandler(Dependencies{
-		Runtime: runtime, Feed: feed, PrincipalResolver: runFeedPrincipal{actor: actor},
+		Runtime: runtime, Feed: feed, Shared: NewShared(runFeedPrincipal{actor: actor}, nil),
 	})).RegisterRoutes(engine.Group("/api/v1"))
 	return engine, runtime, feed, actor
 }

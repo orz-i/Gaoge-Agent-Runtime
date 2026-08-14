@@ -1,0 +1,6 @@
+{
+  "capability": "team",
+  "operations": [
+    {"method": "post", "path": "/team-runs", "operationId": "createTeamRun"}
+  ]
+}

@@ -8,11 +8,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
 var errInvalidJSONBody = errors.New("invalid JSON request body")
@@ -22,65 +19,17 @@ type ThreadRequest struct {
 	ID   string `json:"id" binding:"required,max=128"`
 }
 
+// NormalizeThread converts the shared HTTP thread contract to a Kernel reference.
+func NormalizeThread(request ThreadRequest) kernel.ThreadRef { return normalizeThread(request) }
+
+// BindStrictJSON decodes one request body and rejects unknown fields.
+func BindStrictJSON(context *gin.Context, target interface{}) error { return bindStrictJSON(context, target) }
+
+// SnapshotResponse projects one durable Kernel snapshot without Feature interpretation.
+func SnapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse { return snapshotResponse(snapshot) }
+
 type TextInputRequest struct {
 	Content string `json:"content" binding:"required,max=200000"`
-}
-
-type StartAgentRunRequest struct {
-	Thread      ThreadRequest    `json:"thread" binding:"required"`
-	Input       TextInputRequest `json:"input" binding:"required"`
-	ClientRunID string           `json:"clientRunID" binding:"omitempty,max=64"`
-	Model       string           `json:"model" binding:"omitempty,max=128"`
-	ToolKeys    []string         `json:"toolKeys" binding:"omitempty,max=128,dive,max=255"`
-}
-
-type StartPlanRunRequest struct {
-	Thread         ThreadRequest    `json:"thread" binding:"required"`
-	Input          TextInputRequest `json:"input" binding:"required"`
-	ClientRunID    string           `json:"clientRunID" binding:"omitempty,max=64"`
-	Model          string           `json:"model" binding:"omitempty,max=128"`
-	ApprovalPolicy string           `json:"approvalPolicy" binding:"omitempty,oneof=auto required"`
-	MaxSteps       int              `json:"maxSteps" binding:"omitempty,min=1,max=32"`
-}
-
-type ResolvePlanApprovalRequest struct {
-	ExpectedRevision uint64 `json:"expectedRevision" binding:"required,min=1"`
-	Decision         string `json:"decision" binding:"required,oneof=approve reject"`
-	Comment          string `json:"comment" binding:"omitempty,max=2000"`
-}
-
-type StartWorkflowRunRequest struct {
-	Thread      ThreadRequest            `json:"thread" binding:"required"`
-	Input       json.RawMessage          `json:"input" binding:"required"`
-	ClientRunID string                   `json:"clientRunID" binding:"omitempty,max=64"`
-	Goal        string                   `json:"goal" binding:"required,max=200000"`
-	Definition  workflow.DefinitionDraft `json:"definition" binding:"required"`
-}
-
-type ResolveWorkflowWaitRequest struct {
-	ExpectedRevision uint64          `json:"expectedRevision" binding:"required,min=1"`
-	Response         json.RawMessage `json:"response" binding:"required"`
-}
-
-type TeamMemberRequest struct {
-	ID       string   `json:"id" binding:"required,max=128"`
-	Goal     string   `json:"goal" binding:"required,max=200000"`
-	ToolKeys []string `json:"toolKeys" binding:"omitempty,max=128,dive,max=255"`
-}
-
-type TeamJoinRequest struct {
-	Mode          handoff.JoinMode      `json:"mode" binding:"required,oneof=all any quorum"`
-	Quorum        int                   `json:"quorum" binding:"omitempty,min=1,max=16"`
-	FailurePolicy handoff.FailurePolicy `json:"failurePolicy" binding:"omitempty,oneof=collect fail_fast"`
-}
-
-type StartTeamRunRequest struct {
-	Thread      ThreadRequest       `json:"thread" binding:"required"`
-	Goal        string              `json:"goal" binding:"required,max=200000"`
-	ClientRunID string              `json:"clientRunID" binding:"omitempty,max=64"`
-	Mode        team.ExecutionMode  `json:"mode" binding:"required,oneof=sequential parallel"`
-	Members     []TeamMemberRequest `json:"members" binding:"required,min=1,max=16,dive"`
-	Join        TeamJoinRequest     `json:"join" binding:"required"`
 }
 
 type CancelRunRequest struct {

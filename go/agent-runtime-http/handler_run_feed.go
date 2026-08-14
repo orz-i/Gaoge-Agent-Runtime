@@ -50,12 +50,12 @@ func (handler *Handler) prepareRunFeed(
 	}
 	snapshot, err := handler.authorizedRun(context, runID)
 	if err != nil {
-		writeTargetRuntimeError(context, "runfeed", err)
+		WriteKernelError(context, "runfeed", err)
 		return nil, kernel.Snapshot{}, 0, false
 	}
 	subscription, err := handler.feed.Subscribe(context.Request.Context(), runID, afterSeq)
 	if err != nil {
-		writeTargetRuntimeError(context, "runfeed", err)
+		WriteKernelError(context, "runfeed", err)
 		return nil, kernel.Snapshot{}, 0, false
 	}
 	return subscription, snapshot, afterSeq, true

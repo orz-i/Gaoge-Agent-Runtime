@@ -12,6 +12,9 @@ type errorBody struct {
 	Error apiError `json:"error"`
 }
 
+// WriteError writes the shared Runtime error envelope.
+func WriteError(c *gin.Context, status int, code, message string) { writeError(c, status, code, message) }
+
 type apiError struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
@@ -19,6 +22,9 @@ type apiError struct {
 }
 
 func writeSuccess(c *gin.Context, value interface{}) { c.JSON(stdhttp.StatusOK, value) }
+
+// WriteSuccess writes the shared Runtime success envelope.
+func WriteSuccess(c *gin.Context, value interface{}) { writeSuccess(c, value) }
 
 func writePage(c *gin.Context, total int64, results interface{}) {
 	c.JSON(stdhttp.StatusOK, gin.H{"total": total, "results": results})
@@ -67,3 +73,6 @@ func publicMessage(status int, message string) string {
 func invalidBody(c *gin.Context, err error) {
 	writeError(c, stdhttp.StatusBadRequest, "request.invalid_json", fmt.Sprintf("invalid request body: %v", err))
 }
+
+// InvalidBody writes the canonical strict-JSON request error.
+func InvalidBody(c *gin.Context, err error) { invalidBody(c, err) }

@@ -1,0 +1,7 @@
+{
+  "capability": "workflow",
+  "operations": [
+    {"method": "post", "path": "/workflow-runs", "operationId": "createWorkflowRun"},
+    {"method": "post", "path": "/workflow-runs/{runID}/wait", "operationId": "resolveWorkflowWait"}
+  ]
+}

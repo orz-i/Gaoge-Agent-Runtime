@@ -1,0 +1,7 @@
+{
+  "capability": "planexecute",
+  "operations": [
+    {"method": "post", "path": "/plan-runs", "operationId": "createPlanRun"},
+    {"method": "post", "path": "/plan-runs/{runID}/approval", "operationId": "resolvePlanApproval"}
+  ]
+}
