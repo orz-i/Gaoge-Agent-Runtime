@@ -11,12 +11,18 @@ import (
 	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
 const (
-	ProtocolVersion  = "2026-07-28"
-	maxToolListPages = 100
+	ProtocolVersion          = "2026-07-28"
+	maxToolListPages         = 100
+	maxDiscoveredTools       = 2048
+	maxRemoteTextBytes       = 16 * 1024
+	maxRemoteToolSchemaBytes = 1024 * 1024
+	eventDiscovery           = "protocol.mcp.discovery"
+	eventToolCall            = "protocol.mcp.tool_call"
 )
 
 var (
@@ -29,6 +35,7 @@ var (
 	ErrToolResult          = errors.New("MCP tool returned an error")
 	ErrInputRequired       = errors.New("MCP tool requires additional input")
 	ErrToolPageLimit       = errors.New("MCP tool page limit exceeded")
+	ErrDiscoveryLimit      = errors.New("MCP discovery limit exceeded")
 )
 
 // ClientDependencies keep protocol construction explicit and host-neutral.
@@ -36,6 +43,22 @@ type ClientDependencies struct {
 	Transport             *Transport
 	ImplementationName    string
 	ImplementationVersion string
+	Observers             []plugin.Observer
+}
+
+func (client *Client) observe(ctx context.Context, eventType, status string, terminal bool) {
+	if client == nil || client.observers == nil {
+		return
+	}
+	client.observers.Observe(ctx, plugin.Event{Type: eventType, Status: status, Terminal: terminal})
+}
+
+func (client *Client) observeOutcome(ctx context.Context, eventType string, err error) {
+	status := "completed"
+	if err != nil {
+		status = "failed"
+	}
+	client.observe(ctx, eventType, status, true)
 }
 
 // Client owns only the MCP wire adapter. It does not own host security,
@@ -43,6 +66,7 @@ type ClientDependencies struct {
 type Client struct {
 	transport *Transport
 	impl      mcpsdk.Implementation
+	observers *plugin.ObserverSet
 }
 
 // DiscoveredTool preserves MCP discovery metadata while exposing a stable
@@ -80,15 +104,27 @@ func NewClient(dependencies ClientDependencies) (*Client, error) {
 	if dependencies.Transport == nil || name == "" || version == "" {
 		return nil, ErrInvalidClient
 	}
+	observers, err := plugin.NewObserverSet(dependencies.Observers...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidClient, err)
+	}
 	return &Client{
 		transport: dependencies.Transport,
 		impl:      mcpsdk.Implementation{Name: name, Version: version},
+		observers: observers,
 	}, nil
 }
 
 // DiscoverTools returns the complete deterministic Tool catalog exposed by one
 // modern stateless MCP endpoint.
 func (client *Client) DiscoverTools(ctx context.Context, rawEndpoint string) (Discovery, error) {
+	client.observe(ctx, eventDiscovery, "started", false)
+	discovery, err := client.discoverTools(ctx, rawEndpoint)
+	client.observeOutcome(ctx, eventDiscovery, err)
+	return discovery, err
+}
+
+func (client *Client) discoverTools(ctx context.Context, rawEndpoint string) (Discovery, error) {
 	session, endpoint, err := client.connect(ctx, rawEndpoint)
 	if err != nil {
 		return Discovery{}, err
@@ -144,6 +180,9 @@ func appendToolPage(discovery *Discovery, result *mcpsdk.ListToolsResult, seenNa
 		return ErrInvalidTool
 	}
 	for _, item := range result.Tools {
+		if len(discovery.Tools) >= maxDiscoveredTools {
+			return ErrDiscoveryLimit
+		}
 		projected, err := projectTool(item)
 		if err != nil {
 			return err
@@ -173,6 +212,13 @@ func nextToolCursor(raw string, seen map[string]struct{}) (string, error) {
 // CallTool executes one Tool through the official MCP SDK and returns its full
 // protocol result JSON. Business Tool errors remain errors at this edge.
 func (client *Client) CallTool(ctx context.Context, rawEndpoint string, request CallRequest) (json.RawMessage, error) {
+	client.observe(ctx, eventToolCall, "started", false)
+	result, err := client.callTool(ctx, rawEndpoint, request)
+	client.observeOutcome(ctx, eventToolCall, err)
+	return result, err
+}
+
+func (client *Client) callTool(ctx context.Context, rawEndpoint string, request CallRequest) (json.RawMessage, error) {
 	name := strings.TrimSpace(request.Name)
 	if name == "" {
 		return nil, ErrInvalidTool
@@ -321,9 +367,17 @@ func projectTool(item *mcpsdk.Tool) (DiscoveredTool, error) {
 		return DiscoveredTool{}, ErrInvalidTool
 	}
 	name := strings.TrimSpace(item.Name)
+	title := strings.TrimSpace(item.Title)
+	description := strings.TrimSpace(item.Description)
+	if len(name) > maxRemoteTextBytes || len(title) > maxRemoteTextBytes || len(description) > maxRemoteTextBytes {
+		return DiscoveredTool{}, ErrDiscoveryLimit
+	}
 	input, err := json.Marshal(item.InputSchema)
 	if err != nil || name == "" || !json.Valid(input) {
 		return DiscoveredTool{}, ErrInvalidTool
+	}
+	if len(input) > maxRemoteToolSchemaBytes {
+		return DiscoveredTool{}, ErrDiscoveryLimit
 	}
 	var output json.RawMessage
 	if item.OutputSchema != nil {
@@ -331,12 +385,15 @@ func projectTool(item *mcpsdk.Tool) (DiscoveredTool, error) {
 		if err != nil || !json.Valid(output) {
 			return DiscoveredTool{}, ErrInvalidTool
 		}
+		if len(output) > maxRemoteToolSchemaBytes {
+			return DiscoveredTool{}, ErrDiscoveryLimit
+		}
 	}
 	definition := tools.Definition{
-		Key: name, Name: name, Description: strings.TrimSpace(item.Description), InputSchema: append(json.RawMessage(nil), input...),
+		Key: name, Name: name, Description: description, InputSchema: append(json.RawMessage(nil), input...),
 	}
 	return DiscoveredTool{
-		Name: name, Title: strings.TrimSpace(item.Title), Description: definition.Description,
+		Name: name, Title: title, Description: definition.Description,
 		InputSchema: append(json.RawMessage(nil), input...), OutputSchema: append(json.RawMessage(nil), output...),
 		Definition: tools.CloneDefinition(definition),
 	}, nil

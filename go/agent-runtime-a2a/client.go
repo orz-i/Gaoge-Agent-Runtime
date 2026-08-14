@@ -11,9 +11,20 @@ import (
 	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
 	"github.com/a2aproject/a2a-go/v2/a2aclient/agentcard"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
 )
 
-const ProtocolVersion = "1.0"
+const (
+	ProtocolVersion    = "1.0"
+	maxAgentSkills     = 1024
+	maxAgentExtensions = 256
+	maxAgentSkillItems = 256
+	maxRemoteTextBytes = 16 * 1024
+	eventDiscovery     = "protocol.a2a.discovery"
+	eventMessage       = "protocol.a2a.message"
+	eventTaskGet       = "protocol.a2a.task_get"
+	eventTaskCancel    = "protocol.a2a.task_cancel"
+)
 
 var (
 	ErrInvalidClient       = errors.New("invalid A2A client")
@@ -22,16 +33,19 @@ var (
 	ErrInvalidMessage      = errors.New("invalid A2A message")
 	ErrInvalidTask         = errors.New("invalid A2A task")
 	ErrInvalidResult       = errors.New("invalid A2A result")
+	ErrDiscoveryLimit      = errors.New("A2A discovery limit exceeded")
 )
 
 // ClientDependencies keep A2A protocol construction explicit.
 type ClientDependencies struct {
 	Transport *Transport
+	Observers []plugin.Observer
 }
 
 // Client is the A2A v1 HTTP+JSON edge adapter.
 type Client struct {
 	transport *Transport
+	observers *plugin.ObserverSet
 }
 
 // RemoteAgentSkill is the host-neutral projection of one Agent Card skill.
@@ -94,12 +108,23 @@ func NewClient(dependencies ClientDependencies) (*Client, error) {
 	if dependencies.Transport == nil {
 		return nil, ErrInvalidClient
 	}
-	return &Client{transport: dependencies.Transport}, nil
+	observers, err := plugin.NewObserverSet(dependencies.Observers...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidClient, err)
+	}
+	return &Client{transport: dependencies.Transport, observers: observers}, nil
 }
 
 // Discover resolves the public Agent Card and selects only an exact v1
 // HTTP+JSON interface. JSON-RPC/gRPC are never implicit fallbacks.
 func (client *Client) Discover(ctx context.Context, rawBaseURL string) (Discovery, error) {
+	client.observe(ctx, eventDiscovery, "started", false)
+	discovery, err := client.discover(ctx, rawBaseURL)
+	client.observeOutcome(ctx, eventDiscovery, err)
+	return discovery, err
+}
+
+func (client *Client) discover(ctx context.Context, rawBaseURL string) (Discovery, error) {
 	baseURL, httpClient, err := client.protocolHTTPClient(ctx, rawBaseURL)
 	if err != nil {
 		return Discovery{}, err
@@ -120,6 +145,13 @@ func (client *Client) Discover(ctx context.Context, rawBaseURL string) (Discover
 
 // SendMessage sends one user text message using only the selected v1 HTTP+JSON interface.
 func (client *Client) SendMessage(ctx context.Context, discovery Discovery, request SendRequest) (Interaction, error) {
+	client.observe(ctx, eventMessage, "started", false)
+	interaction, err := client.sendMessage(ctx, discovery, request)
+	client.observeOutcome(ctx, eventMessage, err)
+	return interaction, err
+}
+
+func (client *Client) sendMessage(ctx context.Context, discovery Discovery, request SendRequest) (Interaction, error) {
 	messageID := strings.TrimSpace(request.MessageID)
 	text := strings.TrimSpace(request.Text)
 	if messageID == "" || text == "" {
@@ -145,12 +177,18 @@ func (client *Client) SendMessage(ctx context.Context, discovery Discovery, requ
 
 // GetTask reads one remote task by stable identity.
 func (client *Client) GetTask(ctx context.Context, discovery Discovery, taskID string) (TaskSnapshot, error) {
-	return client.taskOperation(ctx, discovery, taskID, taskActionGet)
+	client.observe(ctx, eventTaskGet, "started", false)
+	task, err := client.taskOperation(ctx, discovery, taskID, taskActionGet)
+	client.observeOutcome(ctx, eventTaskGet, err)
+	return task, err
 }
 
 // CancelTask asks the remote agent to cancel one task.
 func (client *Client) CancelTask(ctx context.Context, discovery Discovery, taskID string) (TaskSnapshot, error) {
-	return client.taskOperation(ctx, discovery, taskID, taskActionCancel)
+	client.observe(ctx, eventTaskCancel, "started", false)
+	task, err := client.taskOperation(ctx, discovery, taskID, taskActionCancel)
+	client.observeOutcome(ctx, eventTaskCancel, err)
+	return task, err
 }
 
 type taskAction uint8
@@ -281,6 +319,9 @@ func projectDiscovery(card *a2asdk.AgentCard, selected *a2asdk.AgentInterface) (
 	if card == nil || selected == nil {
 		return Discovery{}, ErrInvalidAgentCard
 	}
+	if err := validateAgentCardProjection(card, selected); err != nil {
+		return Discovery{}, err
+	}
 	capabilitiesJSON, err := json.Marshal(card.Capabilities)
 	if err != nil {
 		return Discovery{}, err
@@ -298,13 +339,68 @@ func projectDiscovery(card *a2asdk.AgentCard, selected *a2asdk.AgentInterface) (
 		Skills:             make([]RemoteAgentSkill, 0, len(card.Skills)),
 	}
 	for _, skill := range card.Skills {
-		discovery.Skills = append(discovery.Skills, RemoteAgentSkill{
-			ID: strings.TrimSpace(skill.ID), Name: strings.TrimSpace(skill.Name), Description: strings.TrimSpace(skill.Description),
-			Tags: append([]string(nil), skill.Tags...), Examples: append([]string(nil), skill.Examples...),
-			InputModes: append([]string(nil), skill.InputModes...), OutputModes: append([]string(nil), skill.OutputModes...),
-		})
+		projected, projectErr := projectSkill(skill)
+		if projectErr != nil {
+			return Discovery{}, projectErr
+		}
+		discovery.Skills = append(discovery.Skills, projected)
 	}
 	return cloneDiscovery(discovery), nil
+}
+
+func validateAgentCardProjection(card *a2asdk.AgentCard, selected *a2asdk.AgentInterface) error {
+	if len(card.Skills) > maxAgentSkills || len(card.Capabilities.Extensions) > maxAgentExtensions {
+		return ErrDiscoveryLimit
+	}
+	if !validAgentCardIdentity(card, selected) ||
+		validateRemoteStrings(card.DefaultInputModes) != nil ||
+		validateRemoteStrings(card.DefaultOutputModes) != nil {
+		return ErrDiscoveryLimit
+	}
+	for _, extension := range card.Capabilities.Extensions {
+		if !validRemoteText(extension.URI, true) {
+			return ErrDiscoveryLimit
+		}
+	}
+	return nil
+}
+
+func validAgentCardIdentity(card *a2asdk.AgentCard, selected *a2asdk.AgentInterface) bool {
+	return validRemoteText(card.Name, true) && validRemoteText(card.Description, false) &&
+		validRemoteText(card.Version, false) && validRemoteText(selected.URL, true) &&
+		validRemoteText(selected.Tenant, false)
+}
+
+func projectSkill(skill a2asdk.AgentSkill) (RemoteAgentSkill, error) {
+	if !validRemoteText(skill.ID, true) || !validRemoteText(skill.Name, true) || !validRemoteText(skill.Description, false) ||
+		validateRemoteStrings(skill.Tags) != nil ||
+		validateRemoteStrings(skill.Examples) != nil ||
+		validateRemoteStrings(skill.InputModes) != nil ||
+		validateRemoteStrings(skill.OutputModes) != nil {
+		return RemoteAgentSkill{}, ErrDiscoveryLimit
+	}
+	return RemoteAgentSkill{
+		ID: strings.TrimSpace(skill.ID), Name: strings.TrimSpace(skill.Name), Description: strings.TrimSpace(skill.Description),
+		Tags: append([]string(nil), skill.Tags...), Examples: append([]string(nil), skill.Examples...),
+		InputModes: append([]string(nil), skill.InputModes...), OutputModes: append([]string(nil), skill.OutputModes...),
+	}, nil
+}
+
+func validateRemoteStrings(values []string) error {
+	if len(values) > maxAgentSkillItems {
+		return ErrDiscoveryLimit
+	}
+	for _, value := range values {
+		if !validRemoteText(value, false) {
+			return ErrDiscoveryLimit
+		}
+	}
+	return nil
+}
+
+func validRemoteText(value string, required bool) bool {
+	normalized := strings.TrimSpace(value)
+	return (!required || normalized != "") && len(normalized) <= maxRemoteTextBytes
 }
 
 func projectCapabilities(capabilities a2asdk.AgentCapabilities) []string {
@@ -410,4 +506,19 @@ func cloneInteraction(interaction Interaction) Interaction {
 		interaction.Task = &task
 	}
 	return interaction
+}
+
+func (client *Client) observe(ctx context.Context, eventType, status string, terminal bool) {
+	if client == nil || client.observers == nil {
+		return
+	}
+	client.observers.Observe(ctx, plugin.Event{Type: eventType, Status: status, Terminal: terminal})
+}
+
+func (client *Client) observeOutcome(ctx context.Context, eventType string, err error) {
+	status := "completed"
+	if err != nil {
+		status = "failed"
+	}
+	client.observe(ctx, eventType, status, true)
 }

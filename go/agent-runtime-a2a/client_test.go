@@ -2,6 +2,7 @@ package a2a
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"iter"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
 )
 
 const (
@@ -18,10 +20,51 @@ const (
 	testMessageID = "message-1"
 )
 
+type testA2AObserver struct {
+	name   string
+	events []plugin.Event
+}
+
+func assertA2AObserverSafe(
+	t *testing.T,
+	observer *testA2AObserver,
+	endpoint string,
+	secret string,
+	want []string,
+) {
+	t.Helper()
+	got := make([]string, 0, len(observer.events))
+	for _, event := range observer.events {
+		got = append(got, event.Type+":"+event.Status)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("observer events = %#v, want %#v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("observer events = %#v, want %#v", got, want)
+		}
+	}
+	raw, err := json.Marshal(observer.events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), endpoint) || strings.Contains(string(raw), secret) {
+		t.Fatalf("protocol observer leaked endpoint or secret: %s", raw)
+	}
+}
+
+func (observer *testA2AObserver) Name() string { return observer.name }
+
+func (observer *testA2AObserver) Observe(_ context.Context, event plugin.Event) {
+	observer.events = append(observer.events, event)
+}
+
 func TestClientDiscoversA2A10HTTPJSONAndSendsMessage(t *testing.T) {
 	t.Parallel()
 	server, card := newA2ATestServer(t, false)
-	client := newA2ATestClient(t, server.Client())
+	observer := &testA2AObserver{name: "a2a-observer"}
+	client := newA2ATestClient(t, server.Client(), observer)
 	discovery, err := client.Discover(t.Context(), server.URL)
 	if err != nil {
 		t.Fatal(err)
@@ -38,6 +81,11 @@ func TestClientDiscoversA2A10HTTPJSONAndSendsMessage(t *testing.T) {
 	if err != nil || loaded.ID != interaction.Task.ID || loaded.State != string(a2asdk.TaskStateCompleted) {
 		t.Fatalf("loaded=%#v err=%v", loaded, err)
 	}
+	assertA2AObserverSafe(t, observer, server.URL, "a2a-observer-secret", []string{
+		eventDiscovery + ":started", eventDiscovery + ":completed",
+		eventMessage + ":started", eventMessage + ":completed",
+		eventTaskGet + ":started", eventTaskGet + ":completed",
+	})
 }
 
 func TestClientCancelTaskUsesExactA2AVersion(t *testing.T) {
@@ -70,25 +118,46 @@ func TestClientRejectsAgentCardWithoutA2A10HTTPJSON(t *testing.T) {
 		}},
 	}
 	mux.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(card))
-	client := newA2ATestClient(t, server.Client())
+	observer := &testA2AObserver{name: "a2a-failure-observer"}
+	client := newA2ATestClient(t, server.Client(), observer)
 	if _, err := client.Discover(t.Context(), server.URL); !errors.Is(err, ErrUnsupportedProtocol) {
 		t.Fatalf("protocol error = %v", err)
 	}
+	assertA2AObserverSafe(t, observer, server.URL, "a2a-observer-secret", []string{
+		eventDiscovery + ":started", eventDiscovery + ":failed",
+	})
 }
 
-func newA2ATestClient(t *testing.T, httpClient *http.Client) *Client {
+func TestProjectDiscoveryRejectsOversizedRemoteSkillSet(t *testing.T) {
+	t.Parallel()
+	selected := &a2asdk.AgentInterface{
+		URL: testShadowRemoteURL, ProtocolBinding: a2asdk.TransportProtocolHTTPJSON, ProtocolVersion: a2asdk.Version,
+	}
+	card := &a2asdk.AgentCard{
+		Name: testAgentName, Version: "1.0.0", SupportedInterfaces: []*a2asdk.AgentInterface{selected},
+		Skills: make([]a2asdk.AgentSkill, maxAgentSkills+1),
+	}
+	if _, err := projectDiscovery(card, selected); !errors.Is(err, ErrDiscoveryLimit) {
+		t.Fatalf("discovery limit error = %v", err)
+	}
+}
+
+func newA2ATestClient(t *testing.T, httpClient *http.Client, observers ...plugin.Observer) *Client {
 	t.Helper()
 	transport, err := NewTransport(TransportDependencies{
 		HTTPClient:        httpClient,
 		EndpointValidator: EndpointValidatorFunc(func(string) error { return nil }),
 		Headers: HeaderProviderFunc(func(context.Context) (http.Header, error) {
-			return http.Header{"X-Gaoge-Test": []string{"true"}, "A2A-Version": []string{"legacy"}}, nil
+			return http.Header{
+				"X-Gaoge-Test": []string{"true"}, "A2A-Version": []string{"legacy"},
+				"Authorization": []string{"Bearer a2a-observer-secret"},
+			}, nil
 		}),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, err := NewClient(ClientDependencies{Transport: transport})
+	client, err := NewClient(ClientDependencies{Transport: transport, Observers: observers})
 	if err != nil {
 		t.Fatal(err)
 	}
