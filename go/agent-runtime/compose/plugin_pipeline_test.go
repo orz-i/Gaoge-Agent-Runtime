@@ -18,6 +18,7 @@ var errPipelineToolBlocked = errors.New("pipeline tool blocked")
 const (
 	pipelineToolKey     = "pipeline.lookup"
 	pipelineDisposition = "committed"
+	pipelineDoneContent = "done"
 	pipelineTenantID    = "tenant"
 	pipelineActorID     = "actor"
 	pipelineThreadKind  = "conversation"
@@ -220,7 +221,7 @@ func (provider *pipelineModel) Generate(_ context.Context, request runtimemodel.
 	if len(request.Messages) != 1 || request.Messages[0].Content != provider.expectedContent {
 		return runtimemodel.Response{}, agent.ErrInvalidModelResponse
 	}
-	return runtimemodel.Response{Content: "done"}, nil
+	return runtimemodel.Response{Content: pipelineDoneContent}, nil
 }
 
 type streamingPipelineModel struct {
