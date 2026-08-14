@@ -1,4 +1,4 @@
-package topology_test
+package topologyadapter_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/topology"
+	topologyadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/topology"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
@@ -103,12 +103,12 @@ func assertLinearWorkflowTopology(t *testing.T, topology *workbench.TopologyV1) 
 	assertEdge(t, topology, "workflow-node:"+testWorkflowApprovalNode, "workflow-node:publish", workbench.EdgeSequence)
 }
 
-func topologyRegistrations(runs workbench.RunSource, relations topology.RelationSource) []workbench.Registration {
+func topologyRegistrations(runs workbench.RunSource, relations topologyadapter.RelationSource) []workbench.Registration {
 	return []workbench.Registration{
-		{Topology: topology.NewAgentTopologyProvider()},
-		{Topology: topology.NewPlanTopologyProvider(runs, relations)},
-		{Topology: topology.NewTeamTopologyProvider(runs, relations)},
-		{Topology: topology.NewWorkflowTopologyProvider(runs, relations)},
+		{Topology: topologyadapter.NewAgentTopologyProvider()},
+		{Topology: topologyadapter.NewPlanTopologyProvider(runs, relations)},
+		{Topology: topologyadapter.NewTeamTopologyProvider(runs, relations)},
+		{Topology: topologyadapter.NewWorkflowTopologyProvider(runs, relations)},
 	}
 }
 

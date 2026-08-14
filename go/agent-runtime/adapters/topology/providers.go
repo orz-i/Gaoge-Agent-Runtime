@@ -1,4 +1,4 @@
-package topology
+package topologyadapter
 
 import (
 	"context"
