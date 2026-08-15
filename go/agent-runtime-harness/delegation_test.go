@@ -50,7 +50,116 @@ func TestHarnessDelegationToolStartsStableChildAndRecordsRelation(t *testing.T) 
 	assertDelegationCompleted(t, completed, relations, capture)
 }
 
+func TestHarnessDelegationRelationsWaitForRootTerminalState(t *testing.T) {
+	t.Parallel()
+	client := &blockingDelegationModel{
+		secondChildStarted: make(chan struct{}),
+		releaseSecondChild: make(chan struct{}),
+	}
+	runner, relations := newDelegationHarnessWithModel(t, client, 4)
+	hostThread := harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-terminal"}
+	hostTurn := harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-terminal"}
+	rootRunID := delegationRootRunID(t, hostThread, hostTurn)
+	result := startBlockingDelegationHarness(t, runner, hostThread, hostTurn)
+	waitForSecondDelegation(t, client.secondChildStarted)
+	assertNoDelegationRelations(t, relations, rootRunID)
+	close(client.releaseSecondChild)
+	assertTerminalDelegationRelations(t, relations, result)
+}
+
+type delegationStartResult struct {
+	snapshot harness.Snapshot
+	err      error
+}
+
+func delegationRootRunID(t *testing.T, hostThread harness.HostRef, hostTurn harness.HostRef) string {
+	t.Helper()
+	sessionID, err := harness.SessionID(hostThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := harness.TurnID(sessionID, hostTurn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return harness.RootRunID(turnID)
+}
+
+func startBlockingDelegationHarness(
+	t *testing.T,
+	runner *harness.Runner,
+	hostThread harness.HostRef,
+	hostTurn harness.HostRef,
+) <-chan delegationStartResult {
+	t.Helper()
+	result := make(chan delegationStartResult, 1)
+	go func() {
+		snapshot, err := runner.Start(t.Context(), harness.StartRequest{
+			HostThread: hostThread,
+			HostTurn:   hostTurn,
+			Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+			Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-terminal"},
+			Goal:       "delegate two analyses and synthesize them",
+			Config: harness.ConfigSnapshot{
+				Model:        delegationTestModelName,
+				ToolKeys:     []string{harness.DelegationToolKey},
+				ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+			},
+		})
+		result <- delegationStartResult{snapshot: snapshot, err: err}
+	}()
+	return result
+}
+
+func waitForSecondDelegation(t *testing.T, started <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("second delegated child did not start")
+	}
+}
+
+func assertNoDelegationRelations(t *testing.T, relations *runrelation.Registry, rootRunID string) {
+	t.Helper()
+	children, err := relations.ListChildren(t.Context(), rootRunID)
+	if err != nil || len(children) != 0 {
+		t.Fatalf("relations were projected before root terminal state: %#v, err=%v", children, err)
+	}
+}
+
+func assertTerminalDelegationRelations(
+	t *testing.T,
+	relations *runrelation.Registry,
+	result <-chan delegationStartResult,
+) {
+	t.Helper()
+	select {
+	case completed := <-result:
+		if completed.err != nil || completed.snapshot.Turn.Status != harness.TurnCompleted {
+			t.Fatalf("completed snapshot=%#v err=%v", completed.snapshot.Turn, completed.err)
+		}
+		children, err := relations.ListChildren(t.Context(), completed.snapshot.Turn.RootRunID)
+		if err != nil || len(children) != 2 {
+			t.Fatalf("terminal delegation relations=%#v err=%v", children, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("delegated Harness turn did not complete")
+	}
+}
+
 func newDelegationHarness(t *testing.T) (*harness.Runner, *runrelation.Registry, *delegationModel) {
+	t.Helper()
+	capture := &delegationModel{}
+	runner, relations := newDelegationHarnessWithModel(t, capture, 2)
+	return runner, relations, capture
+}
+
+func newDelegationHarnessWithModel(
+	t *testing.T,
+	client model.Client,
+	maxToolCalls int,
+) (*harness.Runner, *runrelation.Registry) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -66,10 +175,10 @@ func newDelegationHarness(t *testing.T) (*harness.Runner, *runrelation.Registry,
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture := &delegationModel{}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: capture, Catalog: registry, Executor: registry,
-		ApprovalPolicies: []plugin.ApprovalPolicy{policy}, Limits: agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 2},
+		Runtime: runtime, Model: client, Catalog: registry, Executor: registry,
+		ApprovalPolicies: []plugin.ApprovalPolicy{policy},
+		Limits:           agent.Limits{MaxLLMCalls: 4, MaxToolCalls: maxToolCalls},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +201,7 @@ func newDelegationHarness(t *testing.T) (*harness.Runner, *runrelation.Registry,
 	if err = delegationTool.Bind(runner); err != nil {
 		t.Fatal(err)
 	}
-	return runner, relations, capture
+	return runner, relations
 }
 
 func assertDelegationCompleted(
@@ -152,6 +261,38 @@ func assertDelegationModelRequests(t *testing.T, requests []model.Request) {
 type delegationModel struct {
 	mu       sync.Mutex
 	requests []model.Request
+}
+
+type blockingDelegationModel struct {
+	mu                 sync.Mutex
+	rootCalls          int
+	childCalls         int
+	secondChildStarted chan struct{}
+	releaseSecondChild chan struct{}
+}
+
+func (client *blockingDelegationModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
+	client.mu.Lock()
+	if len(request.Tools) > 0 {
+		client.rootCalls++
+		rootCall := client.rootCalls
+		client.mu.Unlock()
+		if rootCall == 1 {
+			return model.Response{ToolCalls: []tools.Call{
+				{ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"architect","goal":"analyze structure"}`)},
+				{ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"previs","goal":"analyze visuals"}`)},
+			}}, nil
+		}
+		return model.Response{Content: "root synthesis"}, nil
+	}
+	client.childCalls++
+	childCall := client.childCalls
+	client.mu.Unlock()
+	if childCall == 2 {
+		close(client.secondChildStarted)
+		<-client.releaseSecondChild
+	}
+	return model.Response{Content: "specialist result"}, nil
 }
 
 func (client *delegationModel) Generate(_ context.Context, request model.Request) (model.Response, error) {

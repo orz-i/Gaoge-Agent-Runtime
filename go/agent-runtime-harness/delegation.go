@@ -112,9 +112,6 @@ func (runner *Runner) executeDelegation(
 	startedItemID string,
 ) (DelegationResult, error) {
 	delegation, delegateErr := runner.handoffs.StartOrLoad(ctx, parent, delegation)
-	if relationErr := runner.ensureDelegationRelation(ctx, parent.Run.ID, delegation); relationErr != nil {
-		return DelegationResult{}, errors.Join(delegateErr, relationErr)
-	}
 	status := delegationItemStatus(delegation.Status)
 	if _, itemErr := runner.recordDelegationItem(ctx, turn, delegation, status, startedItemID); itemErr != nil {
 		return DelegationResult{}, errors.Join(delegateErr, itemErr)
@@ -124,6 +121,33 @@ func (runner *Runner) executeDelegation(
 		delegateErr = nil
 	}
 	return DelegationResult{Delegation: delegation, Snapshot: snapshot}, errors.Join(delegateErr, loadErr)
+}
+
+func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn) error {
+	items, err := runner.store.ListItems(ctx, turn.ID, 0, defaultItemListLimit)
+	if err != nil {
+		return err
+	}
+	projected := make(map[string]struct{})
+	for _, item := range items {
+		if item.Kind != ItemDelegation {
+			continue
+		}
+		var payload delegationItemPayload
+		if err = json.Unmarshal(item.Payload, &payload); err != nil {
+			return err
+		}
+		if _, exists := projected[payload.DelegationID]; exists {
+			continue
+		}
+		if err = runner.ensureDelegationRelation(ctx, turn.RootRunID, handoff.Delegation{
+			ID: payload.DelegationID, ChildRunID: payload.ChildRunID,
+		}); err != nil {
+			return err
+		}
+		projected[payload.DelegationID] = struct{}{}
+	}
+	return nil
 }
 
 func (runner *Runner) ensureDelegationRelation(ctx context.Context, parentRunID string, delegation handoff.Delegation) error {

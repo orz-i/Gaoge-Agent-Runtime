@@ -344,6 +344,15 @@ func (runner *Runner) syncRuntimeSnapshot(ctx context.Context, turn Turn, runtim
 	if err = runner.recordApprovalRequestItem(ctx, turn, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
+	// Delegation relations are continuation signals as well as provenance. Project
+	// them only after the synchronous root call stack has committed its terminal
+	// state, otherwise a completed sibling can race the remaining Tool calls and
+	// resume the same Agent revision concurrently.
+	if terminalTurnStatus(turn.Status) {
+		if err = runner.projectDelegationRelations(ctx, turn); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 }
 
