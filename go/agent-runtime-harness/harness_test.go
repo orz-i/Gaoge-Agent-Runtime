@@ -32,6 +32,53 @@ func TestMinimalModelOnlyHarnessCompletesDirectAgentTurn(t *testing.T) {
 	assertHarnessReplay(t, snapshot, replayed, err)
 }
 
+func TestCancelWhileAgentIsRunningConvergesBothCallersToCancelled(t *testing.T) {
+	t.Parallel()
+	model := &blockingModel{started: make(chan struct{}), release: make(chan struct{})}
+	runner := newHarnessRunnerWithModel(t, model)
+	type startResult struct {
+		snapshot harness.Snapshot
+		err      error
+	}
+	started := make(chan startResult, 1)
+	go func() {
+		snapshot, err := runner.Start(t.Context(), testStartRequest())
+		started <- startResult{snapshot: snapshot, err: err}
+	}()
+
+	select {
+	case <-model.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent model did not start")
+	}
+	cancelled, err := runner.Cancel(t.Context(), harnessTurnID(t), "operator request")
+	if err != nil || cancelled.Turn.Status != harness.TurnCancelled {
+		t.Fatalf("cancel snapshot=%#v err=%v", cancelled, err)
+	}
+	close(model.release)
+	select {
+	case result := <-started:
+		if result.err != nil || result.snapshot.Turn.Status != harness.TurnCancelled {
+			t.Fatalf("start snapshot=%#v err=%v", result.snapshot, result.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent start did not converge after cancellation")
+	}
+}
+
+func harnessTurnID(t *testing.T) string {
+	t.Helper()
+	sessionID, err := harness.SessionID(testStartRequest().HostThread)
+	if err != nil {
+		t.Fatalf("session id: %v", err)
+	}
+	turnID, err := harness.TurnID(sessionID, testStartRequest().HostTurn)
+	if err != nil {
+		t.Fatalf("turn id: %v", err)
+	}
+	return turnID
+}
+
 func assertCompletedHarnessSnapshot(t *testing.T, snapshot harness.Snapshot, err error) {
 	t.Helper()
 	if err != nil {
@@ -166,11 +213,16 @@ func TestConfigSnapshotIsDeterministicAndIsolated(t *testing.T) {
 
 func newHarnessRunner(t *testing.T) *harness.Runner {
 	t.Helper()
+	return newHarnessRunnerWithModel(t, directModel{})
+}
+
+func newHarnessRunnerWithModel(t *testing.T, agentModel model.Client) *harness.Runner {
+	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
 	if err != nil {
 		t.Fatalf("create kernel: %v", err)
 	}
-	agentRunner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: directModel{}})
+	agentRunner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: agentModel})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -200,6 +252,21 @@ type directModel struct{}
 
 func (directModel) Generate(_ context.Context, _ model.Request) (model.Response, error) {
 	return model.Response{Content: "direct answer"}, nil
+}
+
+type blockingModel struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (client *blockingModel) Generate(ctx context.Context, _ model.Request) (model.Response, error) {
+	close(client.started)
+	select {
+	case <-ctx.Done():
+		return model.Response{}, ctx.Err()
+	case <-client.release:
+		return model.Response{Content: "too late"}, nil
+	}
 }
 
 type fixedClock struct{}

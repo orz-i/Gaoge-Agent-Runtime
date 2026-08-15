@@ -15,7 +15,10 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
-const defaultItemListLimit = 500
+const (
+	defaultItemListLimit        = 500
+	maxRuntimeSyncRetryAttempts = 8
+)
 
 // Clock supplies Harness orchestration time.
 type Clock interface {
@@ -199,10 +202,19 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...), Limits: config.Limits,
 	})
 	if runtimeSnapshot.Run.ID == "" {
+		if errors.Is(startErr, kernel.ErrConflict) {
+			recovered, recoverErr := runner.Refresh(ctx, createdTurn.ID)
+			if recoverErr == nil && recovered.Turn.Status == TurnCancelled {
+				return recovered, nil
+			}
+		}
 		failed, failErr := runner.failTurn(ctx, createdTurn, startErr)
 		return failed, errors.Join(startErr, failErr)
 	}
-	snapshot, syncErr := runner.syncRuntimeSnapshot(ctx, createdTurn, runtimeSnapshot)
+	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, createdTurn, runtimeSnapshot)
+	if snapshot.Turn.Status == TurnCancelled && errors.Is(startErr, kernel.ErrConflict) {
+		startErr = nil
+	}
 	return snapshot, errors.Join(startErr, syncErr)
 }
 
@@ -283,22 +295,67 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 
 // Cancel cancels the direct Agent root Run and persists the resulting Harness Turn state.
 func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (Snapshot, error) {
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
-	if err != nil {
-		return Snapshot{}, err
+	turnID = strings.TrimSpace(turnID)
+	for range maxRuntimeSyncRetryAttempts {
+		turn, err := runner.store.GetTurn(ctx, turnID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if strings.TrimSpace(turn.RootRunID) == "" || terminalTurnStatus(turn.Status) {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+		runtimeSnapshot, err := runner.runtime.Load(ctx, turn.RootRunID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+			return runner.syncRuntimeSnapshotWithRetry(ctx, turn, runtimeSnapshot)
+		}
+		cancelled, err := runner.runtime.Cancel(
+			ctx,
+			runtimeSnapshot.Run.ID,
+			runtimeSnapshot.Run.Revision,
+			strings.TrimSpace(reason),
+		)
+		if errors.Is(err, kernel.ErrConflict) {
+			continue
+		}
+		if err != nil {
+			return Snapshot{}, err
+		}
+		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, cancelled)
 	}
-	if strings.TrimSpace(turn.RootRunID) == "" || terminalTurnStatus(turn.Status) {
-		return runner.loadSnapshot(ctx, turn, nil)
+	return Snapshot{}, ErrConflict
+}
+
+func (runner *Runner) syncRuntimeSnapshotWithRetry(
+	ctx context.Context,
+	turn Turn,
+	runtimeSnapshot kernel.Snapshot,
+) (Snapshot, error) {
+	for range maxRuntimeSyncRetryAttempts {
+		snapshot, err := runner.syncRuntimeSnapshot(ctx, turn, runtimeSnapshot)
+		if !errors.Is(err, ErrConflict) {
+			return snapshot, err
+		}
+		turn, err = runner.store.GetTurn(ctx, turn.ID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if terminalTurnStatus(turn.Status) {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+		runtimeSnapshot, err = runner.runtime.Load(ctx, turn.RootRunID)
+		if err != nil {
+			return Snapshot{}, err
+		}
 	}
-	runtimeSnapshot, err := runner.runtime.Load(ctx, turn.RootRunID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	cancelled, err := runner.runtime.Cancel(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision, strings.TrimSpace(reason))
-	if err != nil {
-		return Snapshot{}, err
-	}
-	return runner.syncRuntimeSnapshot(ctx, turn, cancelled)
+	return Snapshot{}, ErrConflict
+}
+
+func terminalRuntimeStatus(status kernel.RunStatus) bool {
+	return status == kernel.RunStatusCompleted || status == kernel.RunStatusFailed ||
+		status == kernel.RunStatusCancelled
 }
 
 func normalizeStartRequest(request StartRequest) (StartRequest, string, string, error) {
