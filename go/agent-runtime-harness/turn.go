@@ -28,6 +28,7 @@ type Turn struct {
 	RootRunID         string     `json:"rootRunID,omitempty"`
 	ConfigSnapshotID  string     `json:"configSnapshotID"`
 	ContextSnapshotID string     `json:"contextSnapshotID,omitempty"`
+	ContextRef        ContextRef `json:"contextRef,omitempty"`
 	Status            TurnStatus `json:"status"`
 	Revision          uint64     `json:"revision"`
 	ErrorCode         string     `json:"errorCode,omitempty"`

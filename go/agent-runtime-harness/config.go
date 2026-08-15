@@ -20,6 +20,31 @@ type VersionRef struct {
 	Revision uint64 `json:"revision"`
 }
 
+func normalizeContextBudget(value runtimecontext.Budget) runtimecontext.Budget {
+	if value.MaxInputTokens <= 0 && value.EffectiveModelTokens <= 0 {
+		value.MaxInputTokens = 32_768
+	}
+	if value.SoftLimitPercent <= 0 || value.SoftLimitPercent >= 100 {
+		value.SoftLimitPercent = 80
+	}
+	if value.EstimateSafetyPercent <= 0 {
+		value.EstimateSafetyPercent = 15
+	}
+	if value.MaxSerializedBytes <= 0 {
+		value.MaxSerializedBytes = 4 << 20
+	}
+	if value.PreserveRecentTurns <= 0 {
+		value.PreserveRecentTurns = 8
+	}
+	if value.MaxSummaryTokens <= 0 {
+		value.MaxSummaryTokens = 1024
+	}
+	if value.MaxToolResultBytes <= 0 {
+		value.MaxToolResultBytes = 2048
+	}
+	return value
+}
+
 // ConfigSnapshot is one immutable execution configuration. It intentionally excludes secrets and transport endpoints.
 type ConfigSnapshot struct {
 	ID                    string                `json:"id"`
@@ -65,6 +90,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	value.Instructions = strings.TrimSpace(value.Instructions)
 	value.Model = strings.TrimSpace(value.Model)
 	value.MemoryPolicy = strings.TrimSpace(value.MemoryPolicy)
+	value.ContextBudget = normalizeContextBudget(value.ContextBudget)
 	if (value.Environment.ID == "") != (value.Environment.Revision == 0) {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}

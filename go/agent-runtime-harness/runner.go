@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
+	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
 const defaultItemListLimit = 500
@@ -16,6 +18,43 @@ const defaultItemListLimit = 500
 // Clock supplies Harness orchestration time.
 type Clock interface {
 	Now() time.Time
+}
+
+func (runner *Runner) buildContext(
+	ctx context.Context,
+	runID string,
+	config ConfigSnapshot,
+	seed *ContextSeed,
+) (runtimecontext.Snapshot, error) {
+	if runner.context == nil {
+		return runtimecontext.Snapshot{}, ErrInvalidRequest
+	}
+	normalized, err := normalizeContextSeed(seed)
+	if err != nil || normalized == nil {
+		return runtimecontext.Snapshot{}, ErrInvalidRequest
+	}
+	definitions, err := buildContextTools(runner.catalog, config.ToolKeys)
+	if err != nil {
+		return runtimecontext.Snapshot{}, err
+	}
+	result, err := runner.context.Build(ctx, runtimecontext.BuildRequest{
+		RunID: runID, Revision: 1, ThreadPathHash: normalized.ThreadPathHash,
+		CurrentTurnID: normalized.CurrentTurnID,
+		Prompt: runtimecontext.Prompt{
+			Instructions: strings.TrimSpace(strings.Join([]string{config.Instructions, normalized.Instructions}, "\n\n")),
+			Items:        append([]runtimecontext.Item(nil), normalized.Items...),
+			Tools:        definitions, Options: defaultJSON(config.ModelOptions),
+		},
+		Budget: config.ContextBudget,
+	})
+	if err != nil {
+		return runtimecontext.Snapshot{}, err
+	}
+	if result.Snapshot.RunID != runID || result.Snapshot.Revision != 1 ||
+		result.Snapshot.ThreadPathHash != normalized.ThreadPathHash {
+		return runtimecontext.Snapshot{}, ErrConflict
+	}
+	return result.Snapshot, nil
 }
 
 // AgentStarter is the narrow direct Agent capability required by Harness.
@@ -29,6 +68,8 @@ type Dependencies struct {
 	Agent   AgentStarter
 	Store   Store
 	Clock   Clock
+	Context *runtimecontext.Builder
+	Catalog tools.Catalog
 }
 
 // Runner owns durable Harness Session/Turn/Item lifecycle around one direct Agent root Run.
@@ -37,6 +78,8 @@ type Runner struct {
 	agent   AgentStarter
 	store   Store
 	clock   Clock
+	context *runtimecontext.Builder
+	catalog tools.Catalog
 }
 
 // StartRequest starts or idempotently reloads one Harness Turn.
@@ -49,6 +92,7 @@ type StartRequest struct {
 	RootRunID  string
 	Goal       string
 	Config     ConfigSnapshot
+	Context    *ContextSeed
 }
 
 // NewRunner constructs a minimal first-party Harness composition layer.
@@ -56,7 +100,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil || dependencies.Clock == nil {
 		return nil, ErrInvalidRequest
 	}
-	return &Runner{runtime: dependencies.Runtime, agent: dependencies.Agent, store: dependencies.Store, clock: dependencies.Clock}, nil
+	return &Runner{
+		runtime: dependencies.Runtime, agent: dependencies.Agent, store: dependencies.Store, clock: dependencies.Clock,
+		context: dependencies.Context, catalog: dependencies.Catalog,
+	}, nil
 }
 
 // Start starts one direct Agent root Run after durable Session/Turn/Config creation.
@@ -95,7 +142,23 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	if rootRunID == "" {
 		rootRunID = RootRunID(turnID)
 	}
-	runtimeSnapshot, startErr := runner.agent.StartRun(ctx, agent.StartRequest{
+	runCtx := ctx
+	if request.Context != nil {
+		contextSnapshot, buildErr := runner.buildContext(ctx, rootRunID, config, request.Context)
+		if buildErr != nil {
+			failed, failErr := runner.failTurn(ctx, createdTurn, buildErr)
+			return failed, errors.Join(buildErr, failErr)
+		}
+		createdTurn.ContextSnapshotID = contextSnapshot.ID
+		createdTurn.ContextRef = contextRef(contextSnapshot)
+		createdTurn.UpdatedAt = runner.clock.Now().UTC()
+		createdTurn, err = runner.store.UpdateTurn(ctx, createdTurn, createdTurn.Revision)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		runCtx = withContextSnapshot(ctx, contextSnapshot)
+	}
+	runtimeSnapshot, startErr := runner.agent.StartRun(runCtx, agent.StartRequest{
 		ID: rootRunID, Actor: request.Actor, Thread: request.Thread,
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
 		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
