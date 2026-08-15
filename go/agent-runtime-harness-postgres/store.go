@@ -25,6 +25,18 @@ func New(db *gorm.DB) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+func (store *Store) GetTurnByRootRunID(ctx context.Context, rootRunID string) (harness.Turn, error) {
+	rootRunID = strings.TrimSpace(rootRunID)
+	if store == nil || store.db == nil || rootRunID == "" {
+		return harness.Turn{}, harness.ErrInvalidRequest
+	}
+	var record turnRecord
+	if err := store.db.WithContext(ctx).Where("root_run_id = ?", rootRunID).Take(&record).Error; err != nil {
+		return harness.Turn{}, mapError(err)
+	}
+	return turnFromRecord(record), nil
+}
+
 func createOrReplay[T any](
 	ctx context.Context,
 	db *gorm.DB,

@@ -10,6 +10,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -18,6 +19,45 @@ const defaultItemListLimit = 500
 // Clock supplies Harness orchestration time.
 type Clock interface {
 	Now() time.Time
+}
+
+// ResolveApproval resolves the active Tool approval using the durable Harness Turn identity.
+func (runner *Runner) ResolveApproval(
+	ctx context.Context,
+	turnID string,
+	request ResolveApprovalRequest,
+) (Snapshot, error) {
+	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if turn.Status != TurnWaitingInput || strings.TrimSpace(turn.RootRunID) == "" {
+		return Snapshot{}, ErrConflict
+	}
+	runtimeSnapshot, err := runner.runtime.Load(ctx, turn.RootRunID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	pending, ok, err := approvalRequestFromSnapshot(runtimeSnapshot)
+	if err != nil || !ok {
+		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	decision, err := pluginApprovalDecision(request.Decision)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	resolved, resolveErr := runner.agent.ResolveApproval(
+		ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
+		plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)},
+	)
+	if resolved.Run.ID == "" {
+		return Snapshot{}, resolveErr
+	}
+	if err = runner.recordApprovalDecisionItem(ctx, turn, pending, request); err != nil {
+		return Snapshot{}, errors.Join(resolveErr, err)
+	}
+	snapshot, syncErr := runner.syncRuntimeSnapshot(ctx, turn, resolved)
+	return snapshot, errors.Join(resolveErr, syncErr)
 }
 
 func (runner *Runner) buildContext(
@@ -60,6 +100,7 @@ func (runner *Runner) buildContext(
 // AgentStarter is the narrow direct Agent capability required by Harness.
 type AgentStarter interface {
 	StartRun(context.Context, agent.StartRequest) (kernel.Snapshot, error)
+	ResolveApproval(context.Context, string, uint64, plugin.ApprovalResponse) (kernel.Snapshot, error)
 }
 
 // Dependencies statically compose the minimal Harness core.
@@ -157,6 +198,12 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 			return Snapshot{}, err
 		}
 		runCtx = withContextSnapshot(ctx, contextSnapshot)
+	}
+	createdTurn.RootRunID = rootRunID
+	createdTurn.UpdatedAt = runner.clock.Now().UTC()
+	createdTurn, err = runner.store.UpdateTurn(ctx, createdTurn, createdTurn.Revision)
+	if err != nil {
+		return Snapshot{}, err
 	}
 	runtimeSnapshot, startErr := runner.agent.StartRun(runCtx, agent.StartRequest{
 		ID: rootRunID, Actor: request.Actor, Thread: request.Thread,
@@ -261,7 +308,61 @@ func (runner *Runner) syncRuntimeSnapshot(ctx context.Context, turn Turn, runtim
 	if err = runner.recordAgentRunItem(ctx, turn, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
+	if err = runner.recordApprovalRequestItem(ctx, turn, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
+	}
 	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+}
+
+func (runner *Runner) recordApprovalRequestItem(ctx context.Context, turn Turn, snapshot kernel.Snapshot) error {
+	pending, ok, err := approvalRequestFromSnapshot(snapshot)
+	if err != nil || !ok {
+		return err
+	}
+	payload, err := json.Marshal(pending)
+	if err != nil {
+		return err
+	}
+	now := runner.clock.Now().UTC()
+	_, _, err = runner.store.AppendItem(ctx, Item{
+		ID: stableID("hia", turn.ID, pending.CheckpointID), TurnID: turn.ID,
+		Kind: ItemApproval, Status: ItemWaiting, RunID: snapshot.Run.ID,
+		Payload: payload, CreatedAt: now, UpdatedAt: now,
+	})
+	return err
+}
+
+func (runner *Runner) recordApprovalDecisionItem(
+	ctx context.Context,
+	turn Turn,
+	pending approvalRequestItemPayload,
+	request ResolveApprovalRequest,
+) error {
+	payload, err := json.Marshal(approvalDecisionItemPayload{
+		CheckpointID: pending.CheckpointID, Decision: request.Decision, Comment: strings.TrimSpace(request.Comment),
+	})
+	if err != nil {
+		return err
+	}
+	now := runner.clock.Now().UTC()
+	_, _, err = runner.store.AppendItem(ctx, Item{
+		ID: stableID("hia", turn.ID, pending.CheckpointID, "decision"), TurnID: turn.ID,
+		Kind: ItemApproval, Status: ItemCompleted, RunID: turn.RootRunID,
+		ParentItemID: stableID("hia", turn.ID, pending.CheckpointID),
+		Payload:      payload, CreatedAt: now, UpdatedAt: now,
+	})
+	return err
+}
+
+func pluginApprovalDecision(value ApprovalDecision) (plugin.ApprovalDecision, error) {
+	switch value {
+	case ApprovalApprove:
+		return plugin.ApprovalApprove, nil
+	case ApprovalReject:
+		return plugin.ApprovalReject, nil
+	default:
+		return "", ErrInvalidRequest
+	}
 }
 
 func (runner *Runner) recordAgentRunItem(ctx context.Context, turn Turn, snapshot kernel.Snapshot) error {

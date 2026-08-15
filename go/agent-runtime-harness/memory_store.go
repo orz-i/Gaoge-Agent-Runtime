@@ -19,6 +19,21 @@ type MemoryStore struct {
 	itemIDs  map[string]Item
 }
 
+func (store *MemoryStore) GetTurnByRootRunID(_ context.Context, rootRunID string) (Turn, error) {
+	rootRunID = strings.TrimSpace(rootRunID)
+	if rootRunID == "" {
+		return Turn{}, ErrInvalidRequest
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	for _, value := range store.turns {
+		if value.RootRunID == rootRunID {
+			return value, nil
+		}
+	}
+	return Turn{}, ErrNotFound
+}
+
 // NewMemoryStore creates an empty isolated Harness Store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{

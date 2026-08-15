@@ -8,6 +8,7 @@ type Store interface {
 	GetSession(context.Context, string) (Session, error)
 	CreateTurn(context.Context, Turn) (Turn, bool, error)
 	GetTurn(context.Context, string) (Turn, error)
+	GetTurnByRootRunID(context.Context, string) (Turn, error)
 	UpdateTurn(context.Context, Turn, uint64) (Turn, error)
 	PutConfigSnapshot(context.Context, ConfigSnapshot) (ConfigSnapshot, bool, error)
 	GetConfigSnapshot(context.Context, string) (ConfigSnapshot, error)

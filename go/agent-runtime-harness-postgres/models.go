@@ -20,7 +20,7 @@ type turnRecord struct {
 	SessionID         string    `gorm:"size:64;not null;index:idx_harness_turn_session;uniqueIndex:uk_harness_turn_host,priority:1"`
 	HostTurnKind      string    `gorm:"size:64;not null;uniqueIndex:uk_harness_turn_host,priority:2"`
 	HostTurnID        string    `gorm:"size:128;not null;uniqueIndex:uk_harness_turn_host,priority:3"`
-	RootRunID         string    `gorm:"size:64;not null;default:'';index:idx_harness_turn_root"`
+	RootRunID         string    `gorm:"size:64;not null;default:'';uniqueIndex:uk_harness_turn_root,where:root_run_id <> ''"`
 	ConfigSnapshotID  string    `gorm:"size:64;not null;index:idx_harness_turn_config"`
 	ContextSnapshotID string    `gorm:"size:128;not null;default:''"`
 	Status            string    `gorm:"size:32;not null;index:idx_harness_turn_status"`
