@@ -19,7 +19,11 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
-const delegationTestModelName = "frozen-delegation-model"
+const (
+	delegationTestModelName        = "frozen-delegation-model"
+	delegationTestSpecialistResult = "specialist result"
+	delegationTestRootSynthesis    = "root synthesis"
+)
 
 func TestDelegationToolNameIsProviderPortable(t *testing.T) {
 	t.Parallel()
@@ -65,6 +69,35 @@ func TestHarnessDelegationRelationsWaitForRootTerminalState(t *testing.T) {
 	assertNoDelegationRelations(t, relations, rootRunID)
 	close(client.releaseSecondChild)
 	assertTerminalDelegationRelations(t, relations, result)
+}
+
+func TestHarnessDelegatesDifferentGoalsToSameMember(t *testing.T) {
+	t.Parallel()
+	client := &sameMemberDelegationModel{}
+	runner, relations := newDelegationHarnessWithModel(t, client, 4)
+	completed, err := runner.Start(t.Context(), harness.StartRequest{
+		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-same-member"},
+		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-same-member"},
+		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-same-member"},
+		Goal:       "delegate two goals to the same specialist and synthesize them",
+		Config: harness.ConfigSnapshot{
+			Model:        delegationTestModelName,
+			ToolKeys:     []string{harness.DelegationToolKey},
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+		},
+	})
+	if err != nil || completed.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("completed snapshot=%#v err=%v", completed.Turn, err)
+	}
+	items := itemsOfKind(completed.Items, harness.ItemDelegation)
+	if len(items) != 4 || items[1].RunID == items[3].RunID {
+		t.Fatalf("same-member delegation items = %#v", items)
+	}
+	children, err := relations.ListChildren(t.Context(), completed.Turn.RootRunID)
+	if err != nil || len(children) != 2 {
+		t.Fatalf("same-member delegation relations=%#v err=%v", children, err)
+	}
 }
 
 type delegationStartResult struct {
@@ -271,6 +304,24 @@ type blockingDelegationModel struct {
 	releaseSecondChild chan struct{}
 }
 
+type sameMemberDelegationModel struct {
+	rootCalls int
+}
+
+func (client *sameMemberDelegationModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
+	if len(request.Tools) == 0 {
+		return model.Response{Content: delegationTestSpecialistResult}, nil
+	}
+	client.rootCalls++
+	if client.rootCalls > 1 {
+		return model.Response{Content: delegationTestRootSynthesis}, nil
+	}
+	return model.Response{ToolCalls: []tools.Call{
+		{ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"architect","goal":"analyze structure"}`)},
+		{ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"architect","goal":"analyze visuals"}`)},
+	}}, nil
+}
+
 func (client *blockingDelegationModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	client.mu.Lock()
 	if len(request.Tools) > 0 {
@@ -283,7 +334,7 @@ func (client *blockingDelegationModel) Generate(_ context.Context, request model
 				{ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"previs","goal":"analyze visuals"}`)},
 			}}, nil
 		}
-		return model.Response{Content: "root synthesis"}, nil
+		return model.Response{Content: delegationTestRootSynthesis}, nil
 	}
 	client.childCalls++
 	childCall := client.childCalls
@@ -292,7 +343,7 @@ func (client *blockingDelegationModel) Generate(_ context.Context, request model
 		close(client.secondChildStarted)
 		<-client.releaseSecondChild
 	}
-	return model.Response{Content: "specialist result"}, nil
+	return model.Response{Content: delegationTestSpecialistResult}, nil
 }
 
 func (client *delegationModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
@@ -300,11 +351,11 @@ func (client *delegationModel) Generate(_ context.Context, request model.Request
 	client.requests = append(client.requests, model.CloneRequest(request))
 	client.mu.Unlock()
 	if len(request.Tools) == 0 {
-		return model.Response{Content: "specialist result"}, nil
+		return model.Response{Content: delegationTestSpecialistResult}, nil
 	}
 	last := request.Messages[len(request.Messages)-1]
 	if last.Role == model.RoleTool {
-		return model.Response{Content: "root synthesis"}, nil
+		return model.Response{Content: delegationTestRootSynthesis}, nil
 	}
 	return model.Response{ToolCalls: []tools.Call{{
 		ToolKey:   harness.DelegationToolKey,

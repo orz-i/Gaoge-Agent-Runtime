@@ -95,7 +95,7 @@ func (runner *Runner) prepareDelegation(
 	if err != nil {
 		return handoff.Delegation{}, kernel.Snapshot{}, err
 	}
-	delegationID := stableID("hd", turn.ID, request.MemberID)
+	delegationID := stableID("hd", turn.ID, request.MemberID, request.Goal)
 	childRunID := stableID("hchild", turn.RootRunID, delegationID)
 	return handoff.Delegation{
 		ID: delegationID, MemberID: request.MemberID, ChildRunID: childRunID,
