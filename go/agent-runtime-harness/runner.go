@@ -11,6 +11,7 @@ import (
 	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -105,22 +106,26 @@ type AgentStarter interface {
 
 // Dependencies statically compose the minimal Harness core.
 type Dependencies struct {
-	Runtime *kernel.Runtime
-	Agent   AgentStarter
-	Store   Store
-	Clock   Clock
-	Context *runtimecontext.Builder
-	Catalog tools.Catalog
+	Runtime   *kernel.Runtime
+	Agent     AgentStarter
+	Store     Store
+	Clock     Clock
+	Context   *runtimecontext.Builder
+	Catalog   tools.Catalog
+	Handoffs  HandoffStarter
+	Relations runrelation.Recorder
 }
 
 // Runner owns durable Harness Session/Turn/Item lifecycle around one direct Agent root Run.
 type Runner struct {
-	runtime *kernel.Runtime
-	agent   AgentStarter
-	store   Store
-	clock   Clock
-	context *runtimecontext.Builder
-	catalog tools.Catalog
+	runtime   *kernel.Runtime
+	agent     AgentStarter
+	store     Store
+	clock     Clock
+	context   *runtimecontext.Builder
+	catalog   tools.Catalog
+	handoffs  HandoffStarter
+	relations runrelation.Recorder
 }
 
 // StartRequest starts or idempotently reloads one Harness Turn.
@@ -144,6 +149,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, agent: dependencies.Agent, store: dependencies.Store, clock: dependencies.Clock,
 		context: dependencies.Context, catalog: dependencies.Catalog,
+		handoffs: dependencies.Handoffs, relations: dependencies.Relations,
 	}, nil
 }
 

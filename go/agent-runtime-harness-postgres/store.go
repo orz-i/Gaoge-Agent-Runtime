@@ -342,7 +342,15 @@ func sameTurn(left, right harness.Turn) bool {
 
 func sameItem(left, right harness.Item) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.Kind == right.Kind && left.Status == right.Status &&
-		left.RunID == right.RunID && left.ParentItemID == right.ParentItemID
+		left.RunID == right.RunID && left.ParentItemID == right.ParentItemID && string(left.Payload) == string(right.Payload) &&
+		sameItemHostRef(left.HostRef, right.HostRef)
+}
+
+func sameItemHostRef(left, right *harness.HostRef) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func mapError(err error) error {

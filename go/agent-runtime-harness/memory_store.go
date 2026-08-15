@@ -216,5 +216,13 @@ func sameTurnIdentity(left, right Turn) bool {
 
 func sameItemIdentity(left, right Item) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.Kind == right.Kind && left.Status == right.Status &&
-		left.RunID == right.RunID && left.ParentItemID == right.ParentItemID
+		left.RunID == right.RunID && left.ParentItemID == right.ParentItemID &&
+		string(left.Payload) == string(right.Payload) && sameHostRef(left.HostRef, right.HostRef)
+}
+
+func sameHostRef(left, right *HostRef) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
