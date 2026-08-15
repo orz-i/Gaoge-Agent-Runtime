@@ -146,7 +146,10 @@ func TestConfigSnapshotIsDeterministicAndIsolated(t *testing.T) {
 		Environment:  harness.VersionRef{ID: "general", Revision: 3},
 		ModelOptions: json.RawMessage(`{ "temperature": 0, "max_output_tokens": 512 }`),
 		ToolKeys:     []string{"lookup", "lookup", "artifact"},
-		Skills:       []harness.VersionRef{{ID: "writing", Revision: 2}, {ID: "analysis", Revision: 1}},
+		Skills: []harness.SkillSnapshot{
+			{ID: "writing", Revision: 2, Title: "Writing", Markdown: "# Writing\nWrite clearly."},
+			{ID: "analysis", Revision: 1, Title: "Analysis", Markdown: "# Analysis\nAnalyze carefully."},
+		},
 	}
 	first, err := harness.SealConfigSnapshot("ht_config", input, now)
 	if err != nil {

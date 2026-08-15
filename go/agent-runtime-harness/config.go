@@ -20,6 +20,84 @@ type VersionRef struct {
 	Revision uint64 `json:"revision"`
 }
 
+func normalizeToolPolicies(values []ToolPolicySnapshot) ([]ToolPolicySnapshot, error) {
+	result := make([]ToolPolicySnapshot, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for index, value := range values {
+		value.Key = strings.TrimSpace(value.Key)
+		value.DefinitionVersion = strings.TrimSpace(value.DefinitionVersion)
+		value.ApprovalCapability = strings.TrimSpace(value.ApprovalCapability)
+		value.ApprovalMode = strings.TrimSpace(value.ApprovalMode)
+		value.RiskLevel = strings.TrimSpace(value.RiskLevel)
+		value.SideEffectLevel = strings.TrimSpace(value.SideEffectLevel)
+		value.IdempotencyMode = strings.TrimSpace(value.IdempotencyMode)
+		if value.Key == "" || value.DefinitionVersion == "" {
+			return nil, ErrInvalidRequest
+		}
+		if _, duplicate := seen[value.Key]; duplicate {
+			return nil, ErrInvalidRequest
+		}
+		seen[value.Key] = struct{}{}
+		result[index] = value
+	}
+	slices.SortFunc(result, func(left, right ToolPolicySnapshot) int { return strings.Compare(left.Key, right.Key) })
+	return result, nil
+}
+
+func normalizeSkillSnapshots(values []SkillSnapshot) ([]SkillSnapshot, error) {
+	result := make([]SkillSnapshot, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for index, value := range values {
+		value.ID = strings.TrimSpace(value.ID)
+		value.Title = strings.TrimSpace(value.Title)
+		value.Trigger = strings.TrimSpace(value.Trigger)
+		value.Description = strings.TrimSpace(value.Description)
+		value.Markdown = strings.TrimSpace(value.Markdown)
+		value.ContentHash = strings.TrimSpace(value.ContentHash)
+		if value.ID == "" || value.Revision == 0 || value.Title == "" || value.Markdown == "" {
+			return nil, ErrInvalidRequest
+		}
+		hash := sha256.Sum256([]byte(value.Markdown))
+		wantHash := hex.EncodeToString(hash[:])
+		if value.ContentHash == "" {
+			value.ContentHash = wantHash
+		} else if value.ContentHash != wantHash {
+			return nil, ErrInvalidRequest
+		}
+		if _, duplicate := seen[value.ID]; duplicate {
+			return nil, ErrInvalidRequest
+		}
+		seen[value.ID] = struct{}{}
+		result[index] = value
+	}
+	slices.SortFunc(result, func(left, right SkillSnapshot) int { return strings.Compare(left.ID, right.ID) })
+	return result, nil
+}
+
+// ToolPolicySnapshot freezes one selected Tool's policy and provider-definition version.
+// It intentionally contains no credentials, provider endpoint or executable implementation detail.
+type ToolPolicySnapshot struct {
+	Key                string `json:"key"`
+	DefinitionVersion  string `json:"definitionVersion"`
+	ApprovalCapability string `json:"approvalCapability,omitempty"`
+	ApprovalMode       string `json:"approvalMode,omitempty"`
+	RiskLevel          string `json:"riskLevel,omitempty"`
+	SideEffectLevel    string `json:"sideEffectLevel,omitempty"`
+	IdempotencyMode    string `json:"idempotencyMode,omitempty"`
+}
+
+// SkillSnapshot freezes one selected Skill revision and its progressive-disclosure content.
+// The full markdown is durable Harness configuration, not mutable host lookup state.
+type SkillSnapshot struct {
+	ID          string `json:"id"`
+	Revision    uint64 `json:"revision"`
+	Title       string `json:"title"`
+	Trigger     string `json:"trigger,omitempty"`
+	Description string `json:"description,omitempty"`
+	Markdown    string `json:"markdown"`
+	ContentHash string `json:"contentHash"`
+}
+
 func normalizeContextBudget(value runtimecontext.Budget) runtimecontext.Budget {
 	if value.MaxInputTokens <= 0 && value.EffectiveModelTokens <= 0 {
 		value.MaxInputTokens = 32_768
@@ -54,8 +132,8 @@ type ConfigSnapshot struct {
 	Model                 string                `json:"model,omitempty"`
 	ModelOptions          json.RawMessage       `json:"modelOptions,omitempty"`
 	ToolKeys              []string              `json:"toolKeys"`
-	ToolPolicies          []VersionRef          `json:"toolPolicies"`
-	Skills                []VersionRef          `json:"skills"`
+	ToolPolicies          []ToolPolicySnapshot  `json:"toolPolicies"`
+	Skills                []SkillSnapshot       `json:"skills"`
 	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
 	ContextBudget         runtimecontext.Budget `json:"contextBudget"`
 	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
@@ -71,8 +149,8 @@ type configPayload struct {
 	Model                 string                `json:"model,omitempty"`
 	ModelOptions          json.RawMessage       `json:"modelOptions,omitempty"`
 	ToolKeys              []string              `json:"toolKeys"`
-	ToolPolicies          []VersionRef          `json:"toolPolicies"`
-	Skills                []VersionRef          `json:"skills"`
+	ToolPolicies          []ToolPolicySnapshot  `json:"toolPolicies"`
+	Skills                []SkillSnapshot       `json:"skills"`
 	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
 	ContextBudget         runtimecontext.Budget `json:"contextBudget"`
 	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
@@ -100,11 +178,11 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		return ConfigSnapshot{}, err
 	}
 	value.ToolKeys = normalizeStrings(value.ToolKeys)
-	value.ToolPolicies, err = normalizeVersionRefs(value.ToolPolicies)
+	value.ToolPolicies, err = normalizeToolPolicies(value.ToolPolicies)
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
-	value.Skills, err = normalizeVersionRefs(value.Skills)
+	value.Skills, err = normalizeSkillSnapshots(value.Skills)
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
@@ -186,8 +264,8 @@ func normalizeVersionRefs(values []VersionRef) ([]VersionRef, error) {
 func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
 	value.ModelOptions = append(json.RawMessage(nil), value.ModelOptions...)
 	value.ToolKeys = append([]string(nil), value.ToolKeys...)
-	value.ToolPolicies = append([]VersionRef(nil), value.ToolPolicies...)
-	value.Skills = append([]VersionRef(nil), value.Skills...)
+	value.ToolPolicies = append([]ToolPolicySnapshot(nil), value.ToolPolicies...)
+	value.Skills = append([]SkillSnapshot(nil), value.Skills...)
 	return value
 }
 
