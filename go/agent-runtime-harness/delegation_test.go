@@ -100,6 +100,57 @@ func TestHarnessDelegatesDifferentGoalsToSameMember(t *testing.T) {
 	}
 }
 
+type blockingDelegationGuard struct {
+	calls int
+}
+
+func (guard *blockingDelegationGuard) GuardDelegation(
+	_ context.Context,
+	_ tools.ExecutionRequest,
+	input harness.DelegateRequest,
+) error {
+	guard.calls++
+	if input.MemberID != "researcher" {
+		return tools.ErrInvalidCall
+	}
+	return tools.NewRecoverableCallErrorWithBlockedTools(
+		"story.delegation_budget_exhausted",
+		"publish now",
+		tools.ErrInvalidCall,
+		harness.DelegationToolKey,
+	)
+}
+
+func TestHarnessDelegationGuardRemovesBlockedToolFromLaterTurns(t *testing.T) {
+	t.Parallel()
+	capture := &delegationModel{}
+	guard := &blockingDelegationGuard{}
+	runner, relations := newDelegationHarnessWithModel(t, capture, 2, guard)
+	completed, err := runner.Start(t.Context(), harness.StartRequest{
+		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-guard"},
+		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-guard"},
+		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-guard"},
+		Goal:       "respect the product delegation budget",
+		Config: harness.ConfigSnapshot{
+			Model:        delegationTestModelName,
+			ToolKeys:     []string{harness.DelegationToolKey},
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+		},
+	})
+	if err != nil || completed.Turn.Status != harness.TurnCompleted || guard.calls != 1 {
+		t.Fatalf("completed=%#v err=%v guard calls=%d", completed.Turn, err, guard.calls)
+	}
+	children, err := relations.ListChildren(t.Context(), completed.Turn.RootRunID)
+	if err != nil || len(children) != 0 {
+		t.Fatalf("guarded delegation children=%#v err=%v", children, err)
+	}
+	requests := capture.requestsCopy()
+	if len(requests) != 2 || len(requests[0].Tools) != 1 || len(requests[1].Tools) != 0 {
+		t.Fatalf("guarded delegation requests=%#v", requests)
+	}
+}
+
 type delegationStartResult struct {
 	snapshot harness.Snapshot
 	err      error
@@ -192,6 +243,7 @@ func newDelegationHarnessWithModel(
 	t *testing.T,
 	client model.Client,
 	maxToolCalls int,
+	guards ...harness.DelegationToolGuard,
 ) (*harness.Runner, *runrelation.Registry) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
@@ -203,7 +255,7 @@ func newDelegationHarnessWithModel(
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegationTool := harness.NewDelegationToolHandler()
+	delegationTool := harness.NewDelegationToolHandler(guards...)
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegationTool)})
 	if err != nil {
 		t.Fatal(err)

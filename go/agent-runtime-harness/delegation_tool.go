@@ -14,14 +14,29 @@ const DelegationToolKey = "harness.delegate_agent"
 
 var ErrDelegationToolUnbound = errors.New("harness delegation tool is not bound")
 
+// DelegationToolGuard applies product-owned, run-scoped delegation constraints
+// before Harness starts or loads a child Agent Run.
+type DelegationToolGuard interface {
+	GuardDelegation(context.Context, tools.ExecutionRequest, DelegateRequest) error
+}
+
 // DelegationToolHandler is explicitly bound once by the composition root after Runner construction.
 // The Tool Registry remains immutable; this is not a dynamic capability registry.
 type DelegationToolHandler struct {
 	mu     sync.RWMutex
 	runner *Runner
+	guards []DelegationToolGuard
 }
 
-func NewDelegationToolHandler() *DelegationToolHandler { return &DelegationToolHandler{} }
+func NewDelegationToolHandler(guards ...DelegationToolGuard) *DelegationToolHandler {
+	bound := make([]DelegationToolGuard, 0, len(guards))
+	for _, guard := range guards {
+		if guard != nil {
+			bound = append(bound, guard)
+		}
+	}
+	return &DelegationToolHandler{guards: bound}
+}
 
 func (handler *DelegationToolHandler) Bind(runner *Runner) error {
 	if handler == nil || runner == nil {
@@ -53,6 +68,11 @@ func (handler *DelegationToolHandler) Execute(
 	var input DelegateRequest
 	if err := json.Unmarshal(request.Call.Arguments, &input); err != nil {
 		return tools.ExecutionResult{}, tools.NewRecoverableCallError("delegation.invalid_input", "invalid delegation input", err)
+	}
+	for _, guard := range handler.guards {
+		if err := guard.GuardDelegation(ctx, tools.CloneExecutionRequest(request), input); err != nil {
+			return tools.ExecutionResult{}, err
+		}
 	}
 	result, err := runner.DelegateByRootRunID(ctx, request.RunID, input)
 	if err != nil {
