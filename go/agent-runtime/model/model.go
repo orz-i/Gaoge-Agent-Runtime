@@ -34,6 +34,9 @@ type Request struct {
 	Messages     []Message
 	Tools        []tools.Definition
 	HostedTools  []HostedTool
+	// RequireToolCall asks the host model adapter to enforce a provider Tool call
+	// instead of accepting another text-only response.
+	RequireToolCall bool
 }
 
 // HostedTool is one provider-hosted Tool activation resolved by the host.

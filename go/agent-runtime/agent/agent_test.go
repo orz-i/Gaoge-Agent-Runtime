@@ -129,6 +129,9 @@ func (model *requiredPublisherModel) Generate(
 	model.calls++
 	switch model.calls {
 	case 1:
+		if request.RequireToolCall {
+			model.t.Fatal("required Tool choice activated before completion correction")
+		}
 		return runtimemodel.Response{Content: "the publisher is unavailable"}, nil
 	case 2:
 		guidanceFound := false
@@ -142,6 +145,9 @@ func (model *requiredPublisherModel) Generate(
 		}
 		if len(request.Tools) != 1 || request.Tools[0].Key != publishToolKey {
 			model.t.Fatalf("completion correction did not isolate required Tool: %#v", request.Tools)
+		}
+		if !request.RequireToolCall {
+			model.t.Fatal("required Tool choice missing after completion correction")
 		}
 		return runtimemodel.Response{ToolCalls: []tools.Call{{
 			ID: callGood, ToolKey: publishToolKey, Arguments: json.RawMessage(`{"title":"draft"}`),

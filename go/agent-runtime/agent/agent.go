@@ -139,6 +139,7 @@ type runState struct {
 	ToolKeys         []string        `json:"toolKeys"`
 	RequiredToolKeys []string        `json:"requiredToolKeys,omitempty"`
 	BlockedToolKeys  []string        `json:"blockedToolKeys,omitempty"`
+	RequireToolCall  bool            `json:"requireToolCall,omitempty"`
 	Limits           Limits          `json:"limits"`
 	PendingCalls     []tools.Call    `json:"pendingCalls,omitempty"`
 	LLMCalls         int             `json:"llmCalls"`
@@ -442,8 +443,11 @@ func (runner *Runner) callModel(
 	}
 	request := model.Request{
 		RunID: snapshot.Run.ID, Model: state.Model,
-		ModelOptions: cloneRawJSON(state.ModelOptions),
-		Messages:     messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
+		ModelOptions:    cloneRawJSON(state.ModelOptions),
+		Messages:        messages,
+		Tools:           definitions,
+		HostedTools:     model.CloneHostedTools(hostedTools),
+		RequireToolCall: state.RequireToolCall && len(missingRequiredToolKeys(state)) != 0,
 	}
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
@@ -672,6 +676,7 @@ func (runner *Runner) correctRequiredToolCompletion(
 		state.BlockedToolKeys,
 		toolKeysExcept(state.ToolKeys, missing)...,
 	))
+	state.RequireToolCall = true
 	guidance := "Completion rejected because these required Tools have not completed successfully: " +
 		strings.Join(missing, ", ") + ". All other Tools are now unavailable. " +
 		"Use the successful Tool results already present in the transcript and call a missing required Tool next. " +
