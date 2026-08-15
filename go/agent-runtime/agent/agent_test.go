@@ -140,6 +140,9 @@ func (model *requiredPublisherModel) Generate(
 		if !guidanceFound {
 			model.t.Fatalf("required Tool completion guidance missing: %#v", request.Messages)
 		}
+		if len(request.Tools) != 1 || request.Tools[0].Key != publishToolKey {
+			model.t.Fatalf("completion correction did not isolate required Tool: %#v", request.Tools)
+		}
 		return runtimemodel.Response{ToolCalls: []tools.Call{{
 			ID: callGood, ToolKey: publishToolKey, Arguments: json.RawMessage(`{"title":"draft"}`),
 		}}}, nil
@@ -150,21 +153,41 @@ func (model *requiredPublisherModel) Generate(
 
 func TestRunnerRejectsCompletionUntilRequiredToolSucceeds(t *testing.T) {
 	runtime, approvals := newTestRuntimeAndApprovals(t)
-	registry := mustRegistry(t, []tools.Registration{{
-		Definition: tools.Definition{
-			Key: publishToolKey, Name: publishToolName,
-			InputSchema: json.RawMessage(`{"type":"object"}`),
+	registry := mustRegistry(t, []tools.Registration{
+		{
+			Definition: tools.Definition{
+				Key: publishToolKey, Name: publishToolName,
+				InputSchema: json.RawMessage(`{"type":"object"}`),
+			},
+			Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				return tools.ExecutionResult{
+					Content: json.RawMessage(`{"changeSetID":"change_set_1"}`),
+					Receipt: tools.Receipt{ExecutionID: callGood, Disposition: committedDisposition},
+				}, nil
+			}),
 		},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
-			return tools.ExecutionResult{
-				Content: json.RawMessage(`{"changeSetID":"change_set_1"}`),
-				Receipt: tools.Receipt{ExecutionID: callGood, Disposition: committedDisposition},
-			}, nil
-		}),
-	}})
+		{
+			Definition: tools.Definition{
+				Key: selectionToolKey, Name: selectionToolName,
+				InputSchema: json.RawMessage(`{"type":"object"}`),
+			},
+			Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				return tools.ExecutionResult{
+					Content: json.RawMessage(`{"selection":"foundation"}`),
+					Receipt: tools.Receipt{ExecutionID: callGood, Disposition: committedDisposition},
+				}, nil
+			}),
+		},
+	})
 	model := &requiredPublisherModel{t: t}
 	runner := mustRunner(t, runtime, approvals, model, registry)
-	request := startRequest("run_required_publisher", "request_required_publisher", "publish", publishToolKey)
+	request := startRequest(
+		"run_required_publisher",
+		"request_required_publisher",
+		"publish",
+		publishToolKey,
+		selectionToolKey,
+	)
 	request.RequiredToolKeys = []string{publishToolKey}
 
 	snapshot, err := runner.StartRun(t.Context(), request)

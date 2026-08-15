@@ -665,12 +665,16 @@ func (runner *Runner) correctRequiredToolCompletion(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state runState,
-	response model.Response,
+	_ model.Response,
 	missing []string,
 ) (kernel.Snapshot, error) {
-	state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: response.Content})
+	state.BlockedToolKeys = normalizedToolKeys(append(
+		state.BlockedToolKeys,
+		toolKeysExcept(state.ToolKeys, missing)...,
+	))
 	guidance := "Completion rejected because these required Tools have not completed successfully: " +
-		strings.Join(missing, ", ") + ". Call the required Tool before giving a final response. " +
+		strings.Join(missing, ", ") + ". All other Tools are now unavailable. " +
+		"Use the successful Tool results already present in the transcript and call a missing required Tool next. " +
 		"The previous response was not delivered to the user; do not repeat it as the answer."
 	state.Messages = withSystemGuidance(state.Messages, guidance)
 	encoded, err := encodeState(state)
@@ -681,6 +685,21 @@ func (runner *Runner) correctRequiredToolCompletion(
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{Type: "agent.completion_corrected", Message: strings.Join(missing, ",")}},
 	})
+}
+
+func toolKeysExcept(toolKeys []string, keep []string) []string {
+	kept := make(map[string]struct{}, len(keep))
+	for _, key := range keep {
+		kept[strings.TrimSpace(key)] = struct{}{}
+	}
+	excluded := make([]string, 0, len(toolKeys))
+	for _, key := range toolKeys {
+		key = strings.TrimSpace(key)
+		if _, ok := kept[key]; key != "" && !ok {
+			excluded = append(excluded, key)
+		}
+	}
+	return excluded
 }
 
 func withSystemGuidance(messages []model.Message, guidance string) []model.Message {
