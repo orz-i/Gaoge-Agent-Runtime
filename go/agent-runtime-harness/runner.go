@@ -130,15 +130,16 @@ type Runner struct {
 
 // StartRequest starts or idempotently reloads one Harness Turn.
 type StartRequest struct {
-	HostThread HostRef
-	HostTurn   HostRef
-	Actor      kernel.ActorRef
-	Thread     kernel.ThreadRef
-	RequestID  string
-	RootRunID  string
-	Goal       string
-	Config     ConfigSnapshot
-	Context    *ContextSeed
+	HostThread       HostRef
+	HostTurn         HostRef
+	Actor            kernel.ActorRef
+	Thread           kernel.ThreadRef
+	RequestID        string
+	RootRunID        string
+	Goal             string
+	RequiredToolKeys []string
+	Config           ConfigSnapshot
+	Context          *ContextSeed
 }
 
 // NewRunner constructs a minimal first-party Harness composition layer.
@@ -194,7 +195,8 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		ID: rootRunID, Actor: request.Actor, Thread: request.Thread,
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
 		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-		ToolKeys: append([]string(nil), config.ToolKeys...), Limits: config.Limits,
+		ToolKeys:         append([]string(nil), config.ToolKeys...),
+		RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...), Limits: config.Limits,
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		failed, failErr := runner.failTurn(ctx, createdTurn, startErr)

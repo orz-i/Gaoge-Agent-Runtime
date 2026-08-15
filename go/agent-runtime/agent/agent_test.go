@@ -117,6 +117,72 @@ func TestRunnerFreezesPerRunLimits(t *testing.T) {
 	}
 }
 
+type requiredPublisherModel struct {
+	t     *testing.T
+	calls int
+}
+
+func (model *requiredPublisherModel) Generate(
+	_ context.Context,
+	request runtimemodel.Request,
+) (runtimemodel.Response, error) {
+	model.calls++
+	switch model.calls {
+	case 1:
+		return runtimemodel.Response{Content: "the publisher is unavailable"}, nil
+	case 2:
+		guidanceFound := false
+		for _, message := range request.Messages {
+			if message.Role == runtimemodel.RoleSystem && strings.Contains(message.Content, "Completion rejected") {
+				guidanceFound = true
+			}
+		}
+		if !guidanceFound {
+			model.t.Fatalf("required Tool completion guidance missing: %#v", request.Messages)
+		}
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
+			ID: callGood, ToolKey: publishToolKey, Arguments: json.RawMessage(`{"title":"draft"}`),
+		}}}, nil
+	default:
+		return runtimemodel.Response{Content: "published"}, nil
+	}
+}
+
+func TestRunnerRejectsCompletionUntilRequiredToolSucceeds(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	registry := mustRegistry(t, []tools.Registration{{
+		Definition: tools.Definition{
+			Key: publishToolKey, Name: publishToolName,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		},
+		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			return tools.ExecutionResult{
+				Content: json.RawMessage(`{"changeSetID":"change_set_1"}`),
+				Receipt: tools.Receipt{ExecutionID: callGood, Disposition: committedDisposition},
+			}, nil
+		}),
+	}})
+	model := &requiredPublisherModel{t: t}
+	runner := mustRunner(t, runtime, approvals, model, registry)
+	request := startRequest("run_required_publisher", "request_required_publisher", "publish", publishToolKey)
+	request.RequiredToolKeys = []string{publishToolKey}
+
+	snapshot, err := runner.StartRun(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted || model.calls != 3 {
+		t.Fatalf("snapshot = %#v, model calls = %d", snapshot.Run, model.calls)
+	}
+	view, err := agent.ViewState(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.RequiredToolKeys) != 1 || view.RequiredToolKeys[0] != publishToolKey {
+		t.Fatalf("required Tool Keys = %#v", view.RequiredToolKeys)
+	}
+}
+
 type repeatedReadModel struct {
 	t        *testing.T
 	requests []runtimemodel.Request

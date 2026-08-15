@@ -103,15 +103,16 @@ type Dependencies struct {
 
 // StartRequest starts one direct Agent Run.
 type StartRequest struct {
-	ID           string
-	Actor        kernel.ActorRef
-	Thread       kernel.ThreadRef
-	RequestID    string
-	Goal         string
-	Model        string
-	ModelOptions json.RawMessage
-	ToolKeys     []string
-	Limits       Limits
+	ID               string
+	Actor            kernel.ActorRef
+	Thread           kernel.ThreadRef
+	RequestID        string
+	Goal             string
+	Model            string
+	ModelOptions     json.RawMessage
+	ToolKeys         []string
+	RequiredToolKeys []string
+	Limits           Limits
 }
 
 // Runner owns only the direct Agent model and Tool loop.
@@ -132,28 +133,30 @@ type Runner struct {
 }
 
 type runState struct {
-	Messages        []model.Message `json:"messages"`
-	Model           string          `json:"model,omitempty"`
-	ModelOptions    json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys        []string        `json:"toolKeys"`
-	BlockedToolKeys []string        `json:"blockedToolKeys,omitempty"`
-	Limits          Limits          `json:"limits"`
-	PendingCalls    []tools.Call    `json:"pendingCalls,omitempty"`
-	LLMCalls        int             `json:"llmCalls"`
-	ToolCalls       int             `json:"toolCalls"`
+	Messages         []model.Message `json:"messages"`
+	Model            string          `json:"model,omitempty"`
+	ModelOptions     json.RawMessage `json:"modelOptions,omitempty"`
+	ToolKeys         []string        `json:"toolKeys"`
+	RequiredToolKeys []string        `json:"requiredToolKeys,omitempty"`
+	BlockedToolKeys  []string        `json:"blockedToolKeys,omitempty"`
+	Limits           Limits          `json:"limits"`
+	PendingCalls     []tools.Call    `json:"pendingCalls,omitempty"`
+	LLMCalls         int             `json:"llmCalls"`
+	ToolCalls        int             `json:"toolCalls"`
 }
 
 // View is an isolated public projection of one persisted Agent Run. It exposes
 // the durable transcript and bounded usage state without leaking the private
 // execution representation or allowing callers to mutate Kernel state.
 type View struct {
-	Messages     []model.Message
-	Model        string
-	ModelOptions json.RawMessage
-	ToolKeys     []string
-	Limits       Limits
-	LLMCalls     int
-	ToolCalls    int
+	Messages         []model.Message
+	Model            string
+	ModelOptions     json.RawMessage
+	ToolKeys         []string
+	RequiredToolKeys []string
+	Limits           Limits
+	LLMCalls         int
+	ToolCalls        int
 }
 
 // ViewState decodes an isolated public view from a Kernel Agent snapshot.
@@ -163,13 +166,14 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		return View{}, err
 	}
 	return View{
-		Messages:     model.CloneMessages(state.Messages),
-		Model:        state.Model,
-		ModelOptions: cloneRawJSON(state.ModelOptions),
-		ToolKeys:     append([]string(nil), state.ToolKeys...),
-		Limits:       state.Limits,
-		LLMCalls:     state.LLMCalls,
-		ToolCalls:    state.ToolCalls,
+		Messages:         model.CloneMessages(state.Messages),
+		Model:            state.Model,
+		ModelOptions:     cloneRawJSON(state.ModelOptions),
+		ToolKeys:         append([]string(nil), state.ToolKeys...),
+		RequiredToolKeys: append([]string(nil), state.RequiredToolKeys...),
+		Limits:           state.Limits,
+		LLMCalls:         state.LLMCalls,
+		ToolCalls:        state.ToolCalls,
 	}, nil
 }
 
@@ -250,12 +254,18 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	toolKeys := normalizedToolKeys(request.ToolKeys)
+	requiredToolKeys := normalizedToolKeys(request.RequiredToolKeys)
+	if !toolKeysContainAll(toolKeys, requiredToolKeys) {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
 	state := runState{
-		Messages:     []model.Message{{Role: model.RoleUser, Content: strings.TrimSpace(request.Goal)}},
-		Model:        strings.TrimSpace(request.Model),
-		ModelOptions: cloneRawJSON(request.ModelOptions),
-		ToolKeys:     normalizedToolKeys(request.ToolKeys),
-		Limits:       limits,
+		Messages:         []model.Message{{Role: model.RoleUser, Content: strings.TrimSpace(request.Goal)}},
+		Model:            strings.TrimSpace(request.Model),
+		ModelOptions:     cloneRawJSON(request.ModelOptions),
+		ToolKeys:         toolKeys,
+		RequiredToolKeys: requiredToolKeys,
+		Limits:           limits,
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
@@ -385,6 +395,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	state.LLMCalls++
 	if len(response.ToolCalls) == 0 {
+		if missing := missingRequiredToolKeys(state); len(missing) != 0 {
+			corrected, correctionErr := runner.correctRequiredToolCompletion(ctx, snapshot, state, response, missing)
+			return corrected, correctionErr != nil, correctionErr
+		}
 		completed, completeErr := runner.complete(ctx, snapshot, state, response)
 		return completed, true, completeErr
 	}
@@ -578,6 +592,105 @@ func toolKeySet(keys []string) map[string]struct{} {
 		result[key] = struct{}{}
 	}
 	return result
+}
+
+func toolKeysContainAll(toolKeys, required []string) bool {
+	available := toolKeySet(toolKeys)
+	for _, key := range required {
+		if _, ok := available[key]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func missingRequiredToolKeys(state runState) []string {
+	if len(state.RequiredToolKeys) == 0 {
+		return nil
+	}
+	completed := completedToolKeys(state.Messages)
+	missing := make([]string, 0, len(state.RequiredToolKeys))
+	for _, key := range state.RequiredToolKeys {
+		if _, ok := completed[key]; !ok {
+			missing = append(missing, key)
+		}
+	}
+	return missing
+}
+
+func completedToolKeys(messages []model.Message) map[string]struct{} {
+	calls := toolCallKeysByID(messages)
+	completed := make(map[string]struct{})
+	for _, message := range messages {
+		if message.Role != model.RoleTool || toolResultRejectedOrRetryable(message.Content) {
+			continue
+		}
+		if key := calls[strings.TrimSpace(message.ToolCallID)]; key != "" {
+			completed[key] = struct{}{}
+		}
+	}
+	return completed
+}
+
+func toolCallKeysByID(messages []model.Message) map[string]string {
+	calls := make(map[string]string)
+	for _, message := range messages {
+		if message.Role != model.RoleAssistant {
+			continue
+		}
+		for _, call := range message.ToolCalls {
+			id, key := strings.TrimSpace(call.ID), strings.TrimSpace(call.ToolKey)
+			if id != "" && key != "" {
+				calls[id] = key
+			}
+		}
+	}
+	return calls
+}
+
+func toolResultRejectedOrRetryable(content string) bool {
+	var payload struct {
+		OK        *bool  `json:"ok"`
+		Retryable bool   `json:"retryable"`
+		Status    string `json:"status"`
+	}
+	if !json.Valid([]byte(content)) || json.Unmarshal([]byte(content), &payload) != nil {
+		return true
+	}
+	return strings.TrimSpace(payload.Status) == "rejected" ||
+		(payload.OK != nil && !*payload.OK) || payload.Retryable
+}
+
+func (runner *Runner) correctRequiredToolCompletion(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state runState,
+	response model.Response,
+	missing []string,
+) (kernel.Snapshot, error) {
+	state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: response.Content})
+	guidance := "Completion rejected because these required Tools have not completed successfully: " +
+		strings.Join(missing, ", ") + ". Call the required Tool before giving a final response. " +
+		"The previous response was not delivered to the user; do not repeat it as the answer."
+	state.Messages = withSystemGuidance(state.Messages, guidance)
+	encoded, err := encodeState(state)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+		Events: []kernel.EventDraft{{Type: "agent.completion_corrected", Message: strings.Join(missing, ",")}},
+	})
+}
+
+func withSystemGuidance(messages []model.Message, guidance string) []model.Message {
+	for index := range messages {
+		if messages[index].Role == model.RoleSystem {
+			messages[index].Content = strings.TrimSpace(messages[index].Content) + "\n\n" + guidance
+			return messages
+		}
+	}
+	return append([]model.Message{{Role: model.RoleSystem, Content: guidance}}, messages...)
 }
 
 func withRepeatedToolGuidance(messages []model.Message, toolKeys []string) []model.Message {
@@ -1149,7 +1262,8 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	if err := json.Unmarshal(encoded, &state); err != nil {
 		return runState{}, errors.Join(ErrInvalidRequest, err)
 	}
-	if state.Limits.MaxLLMCalls <= 0 || state.Limits.MaxToolCalls <= 0 {
+	if state.Limits.MaxLLMCalls <= 0 || state.Limits.MaxToolCalls <= 0 ||
+		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) {
 		return runState{}, ErrInvalidRequest
 	}
 	return state, nil
