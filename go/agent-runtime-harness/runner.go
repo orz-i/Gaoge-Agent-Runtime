@@ -203,6 +203,9 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		if err != nil {
 			return Snapshot{}, err
 		}
+		if err = runner.recordContextItem(ctx, createdTurn); err != nil {
+			return Snapshot{}, err
+		}
 		runCtx = withContextSnapshot(ctx, contextSnapshot)
 	}
 	createdTurn.RootRunID = rootRunID
