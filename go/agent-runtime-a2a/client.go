@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http"
 	"strings"
 
@@ -22,6 +23,8 @@ const (
 	maxRemoteTextBytes = 16 * 1024
 	eventDiscovery     = "protocol.a2a.discovery"
 	eventMessage       = "protocol.a2a.message"
+	eventMessageStream = "protocol.a2a.message_stream"
+	eventTaskSubscribe = "protocol.a2a.task_subscribe"
 	eventTaskGet       = "protocol.a2a.task_get"
 	eventTaskCancel    = "protocol.a2a.task_cancel"
 )
@@ -40,6 +43,135 @@ var (
 type ClientDependencies struct {
 	Transport *Transport
 	Observers []plugin.Observer
+}
+
+func cloneStreamEvent(event StreamEvent) StreamEvent {
+	event.Raw = append(json.RawMessage(nil), event.Raw...)
+	if event.Task != nil {
+		task := *event.Task
+		task.Raw = append(json.RawMessage(nil), task.Raw...)
+		event.Task = &task
+	}
+	if event.Message != nil {
+		message := *event.Message
+		message.Raw = append(json.RawMessage(nil), message.Raw...)
+		event.Message = &message
+	}
+	if event.Artifact != nil {
+		artifact := *event.Artifact
+		artifact.Raw = append(json.RawMessage(nil), artifact.Raw...)
+		event.Artifact = &artifact
+	}
+	return event
+}
+
+func projectStreamEvent(event a2asdk.Event) (StreamEvent, error) {
+	if event == nil {
+		return StreamEvent{}, ErrInvalidResult
+	}
+	switch value := event.(type) {
+	case *a2asdk.Task:
+		return projectTaskStreamEvent(value)
+	case *a2asdk.Message:
+		return projectMessageStreamEvent(value)
+	case *a2asdk.TaskStatusUpdateEvent:
+		return projectStatusStreamEvent(value)
+	case *a2asdk.TaskArtifactUpdateEvent:
+		return projectArtifactStreamEvent(value)
+	default:
+		return StreamEvent{}, fmt.Errorf("%w: %T", ErrInvalidResult, event)
+	}
+}
+
+func projectTaskStreamEvent(task *a2asdk.Task) (StreamEvent, error) {
+	projected, err := projectTask(task)
+	if err != nil {
+		return StreamEvent{}, err
+	}
+	return newStreamEvent(StreamEvent{Kind: StreamEventTask, Task: &projected}, task)
+}
+
+func projectMessageStreamEvent(message *a2asdk.Message) (StreamEvent, error) {
+	projected, err := projectMessage(message)
+	if err != nil {
+		return StreamEvent{}, err
+	}
+	return newStreamEvent(StreamEvent{Kind: StreamEventMessage, Message: &projected}, message)
+}
+
+func projectStatusStreamEvent(event *a2asdk.TaskStatusUpdateEvent) (StreamEvent, error) {
+	if event == nil {
+		return StreamEvent{}, ErrInvalidTask
+	}
+	task, err := newTaskSnapshot(event.TaskID, event.ContextID, event.Status, event)
+	if err != nil {
+		return StreamEvent{}, err
+	}
+	return newStreamEvent(StreamEvent{Kind: StreamEventStatus, Task: &task}, event)
+}
+
+func projectArtifactStreamEvent(event *a2asdk.TaskArtifactUpdateEvent) (StreamEvent, error) {
+	artifact, err := projectArtifactEvent(event)
+	if err != nil {
+		return StreamEvent{}, err
+	}
+	return newStreamEvent(StreamEvent{Kind: StreamEventArtifact, Artifact: &artifact}, event)
+}
+
+func newStreamEvent(projected StreamEvent, source any) (StreamEvent, error) {
+	raw, err := json.Marshal(source)
+	if err != nil {
+		return StreamEvent{}, err
+	}
+	projected.Raw = append(json.RawMessage(nil), raw...)
+	return cloneStreamEvent(projected), nil
+}
+
+func projectArtifactEvent(event *a2asdk.TaskArtifactUpdateEvent) (ArtifactSnapshot, error) {
+	if event == nil || event.Artifact == nil || strings.TrimSpace(string(event.Artifact.ID)) == "" ||
+		strings.TrimSpace(string(event.TaskID)) == "" || strings.TrimSpace(event.ContextID) == "" {
+		return ArtifactSnapshot{}, ErrInvalidResult
+	}
+	raw, err := json.Marshal(event)
+	if err != nil {
+		return ArtifactSnapshot{}, err
+	}
+	return ArtifactSnapshot{
+		ID: strings.TrimSpace(string(event.Artifact.ID)), TaskID: strings.TrimSpace(string(event.TaskID)),
+		ContextID: strings.TrimSpace(event.ContextID), Name: strings.TrimSpace(event.Artifact.Name),
+		Append: event.Append, LastChunk: event.LastChunk, Raw: append(json.RawMessage(nil), raw...),
+	}, nil
+}
+
+// StreamEventKind identifies one host-neutral A2A streaming event shape.
+type StreamEventKind string
+
+const (
+	StreamEventTask     StreamEventKind = "task"
+	StreamEventMessage  StreamEventKind = "message"
+	StreamEventStatus   StreamEventKind = "status"
+	StreamEventArtifact StreamEventKind = "artifact"
+)
+
+// ArtifactSnapshot is one isolated A2A artifact update projection.
+type ArtifactSnapshot struct {
+	ID        string
+	TaskID    string
+	ContextID string
+	Name      string
+	Append    bool
+	LastChunk bool
+	Raw       json.RawMessage
+}
+
+// StreamEvent keeps official A2A streaming types inside the edge module while
+// preserving exact wire order and raw evidence for host observability.
+type StreamEvent struct {
+	Kind     StreamEventKind
+	Task     *TaskSnapshot
+	Message  *MessageSnapshot
+	Artifact *ArtifactSnapshot
+	Raw      json.RawMessage
 }
 
 // Client is the A2A v1 HTTP+JSON edge adapter.
@@ -152,20 +284,15 @@ func (client *Client) SendMessage(ctx context.Context, discovery Discovery, requ
 }
 
 func (client *Client) sendMessage(ctx context.Context, discovery Discovery, request SendRequest) (Interaction, error) {
-	messageID := strings.TrimSpace(request.MessageID)
-	text := strings.TrimSpace(request.Text)
-	if messageID == "" || text == "" {
-		return Interaction{}, ErrInvalidMessage
+	message, err := newUserMessage(request)
+	if err != nil {
+		return Interaction{}, err
 	}
 	protocolClient, err := client.newProtocolClient(ctx, discovery.Descriptor)
 	if err != nil {
 		return Interaction{}, err
 	}
 	defer func() { _ = protocolClient.Destroy() }()
-	message := a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.NewTextPart(text))
-	message.ID = messageID
-	message.ContextID = strings.TrimSpace(request.ContextID)
-	message.TaskID = a2asdk.TaskID(strings.TrimSpace(request.TaskID))
 	result, err := protocolClient.SendMessage(ctx, &a2asdk.SendMessageRequest{
 		Tenant: discovery.Descriptor.Tenant, Message: message,
 	})
@@ -173,6 +300,118 @@ func (client *Client) sendMessage(ctx context.Context, discovery Discovery, requ
 		return Interaction{}, err
 	}
 	return projectInteraction(result)
+}
+
+// SendStreamingMessage yields one host-neutral event for every official A2A
+// streaming event without reordering, coalescing or implicit retries.
+func (client *Client) SendStreamingMessage(
+	ctx context.Context,
+	discovery Discovery,
+	request SendRequest,
+) iter.Seq2[StreamEvent, error] {
+	return func(yield func(StreamEvent, error) bool) {
+		client.observe(ctx, eventMessageStream, "started", false)
+		err := client.streamMessage(ctx, discovery, request, yield)
+		client.observeOutcome(ctx, eventMessageStream, err)
+	}
+}
+
+func (client *Client) streamMessage(
+	ctx context.Context,
+	discovery Discovery,
+	request SendRequest,
+	yield func(StreamEvent, error) bool,
+) error {
+	message, err := newUserMessage(request)
+	if err != nil {
+		yield(StreamEvent{}, err)
+		return err
+	}
+	protocolClient, err := client.newProtocolClient(ctx, discovery.Descriptor)
+	if err != nil {
+		yield(StreamEvent{}, err)
+		return err
+	}
+	defer func() { _ = protocolClient.Destroy() }()
+	for event, streamErr := range protocolClient.SendStreamingMessage(ctx, &a2asdk.SendMessageRequest{
+		Tenant: discovery.Descriptor.Tenant, Message: message,
+	}) {
+		if streamErr != nil {
+			yield(StreamEvent{}, streamErr)
+			return streamErr
+		}
+		projected, projectErr := projectStreamEvent(event)
+		if projectErr != nil {
+			yield(StreamEvent{}, projectErr)
+			return projectErr
+		}
+		if !yield(projected, nil) {
+			return nil
+		}
+	}
+	return nil
+}
+
+// SubscribeToTask yields future events for one stable remote task.
+func (client *Client) SubscribeToTask(
+	ctx context.Context,
+	discovery Discovery,
+	taskID string,
+) iter.Seq2[StreamEvent, error] {
+	return func(yield func(StreamEvent, error) bool) {
+		client.observe(ctx, eventTaskSubscribe, "started", false)
+		err := client.subscribeTask(ctx, discovery, taskID, yield)
+		client.observeOutcome(ctx, eventTaskSubscribe, err)
+	}
+}
+
+func (client *Client) subscribeTask(
+	ctx context.Context,
+	discovery Discovery,
+	taskID string,
+	yield func(StreamEvent, error) bool,
+) error {
+	id := strings.TrimSpace(taskID)
+	if id == "" {
+		yield(StreamEvent{}, ErrInvalidTask)
+		return ErrInvalidTask
+	}
+	protocolClient, err := client.newProtocolClient(ctx, discovery.Descriptor)
+	if err != nil {
+		yield(StreamEvent{}, err)
+		return err
+	}
+	defer func() { _ = protocolClient.Destroy() }()
+	for event, streamErr := range protocolClient.SubscribeToTask(ctx, &a2asdk.SubscribeToTaskRequest{
+		Tenant: discovery.Descriptor.Tenant, ID: a2asdk.TaskID(id),
+	}) {
+		if streamErr != nil {
+			yield(StreamEvent{}, streamErr)
+			return streamErr
+		}
+		projected, projectErr := projectStreamEvent(event)
+		if projectErr != nil {
+			yield(StreamEvent{}, projectErr)
+			return projectErr
+		}
+		if !yield(projected, nil) {
+			return nil
+		}
+	}
+	return nil
+}
+
+func newUserMessage(request SendRequest) (*a2asdk.Message, error) {
+	messageID := strings.TrimSpace(request.MessageID)
+	text := strings.TrimSpace(request.Text)
+	if messageID == "" || text == "" {
+		return nil, ErrInvalidMessage
+	}
+	message := a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.NewTextPart(text))
+	message.ID = messageID
+	message.ContextID = strings.TrimSpace(request.ContextID)
+	message.TaskID = a2asdk.TaskID(strings.TrimSpace(request.TaskID))
+	return message, nil
 }
 
 // GetTask reads one remote task by stable identity.
@@ -465,16 +704,30 @@ func projectMessage(message *a2asdk.Message) (MessageSnapshot, error) {
 }
 
 func projectTask(task *a2asdk.Task) (TaskSnapshot, error) {
-	if task == nil || strings.TrimSpace(string(task.ID)) == "" || strings.TrimSpace(task.ContextID) == "" {
+	if task == nil {
 		return TaskSnapshot{}, ErrInvalidTask
 	}
-	raw, err := json.Marshal(task)
+	return newTaskSnapshot(task.ID, task.ContextID, task.Status, task)
+}
+
+func newTaskSnapshot(
+	id a2asdk.TaskID,
+	contextID string,
+	status a2asdk.TaskStatus,
+	source any,
+) (TaskSnapshot, error) {
+	normalizedID := strings.TrimSpace(string(id))
+	normalizedContextID := strings.TrimSpace(contextID)
+	if normalizedID == "" || normalizedContextID == "" {
+		return TaskSnapshot{}, ErrInvalidTask
+	}
+	raw, err := json.Marshal(source)
 	if err != nil {
 		return TaskSnapshot{}, err
 	}
 	return TaskSnapshot{
-		ID: strings.TrimSpace(string(task.ID)), ContextID: strings.TrimSpace(task.ContextID),
-		State: string(task.Status.State), Terminal: task.Status.State.Terminal(), Raw: append(json.RawMessage(nil), raw...),
+		ID: normalizedID, ContextID: normalizedContextID,
+		State: string(status.State), Terminal: status.State.Terminal(), Raw: append(json.RawMessage(nil), raw...),
 	}, nil
 }
 

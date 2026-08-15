@@ -26,6 +26,55 @@ type testA2AObserver struct {
 	events []plugin.Event
 }
 
+func TestClientStreamsA2A10HTTPJSON(t *testing.T) {
+	t.Parallel()
+	server, _ := newA2ATestServer(t, false)
+	client := newA2ATestClient(t, server.Client())
+	discovery, err := client.Discover(t.Context(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make([]StreamEvent, 0, 4)
+	for event, streamErr := range client.SendStreamingMessage(t.Context(), discovery, SendRequest{
+		MessageID: testMessageID + "-stream", Text: "stream",
+	}) {
+		if streamErr != nil {
+			t.Fatal(streamErr)
+		}
+		events = append(events, event)
+	}
+	if len(events) < 2 || events[0].Kind != StreamEventTask || events[len(events)-1].Kind != StreamEventStatus ||
+		events[len(events)-1].Task == nil || !events[len(events)-1].Task.Terminal {
+		t.Fatalf("stream events = %#v", events)
+	}
+}
+
+func TestClientSubscribesToRunningTask(t *testing.T) {
+	t.Parallel()
+	server, _ := newA2ATestServer(t, true)
+	client := newA2ATestClient(t, server.Client())
+	discovery, err := client.Discover(t.Context(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interaction, err := client.SendMessage(t.Context(), discovery, SendRequest{
+		MessageID: testMessageID + "-subscribe", Text: "work",
+	})
+	if err != nil || interaction.Task == nil || interaction.Task.State != string(a2asdk.TaskStateInputRequired) {
+		t.Fatalf("interaction=%#v err=%v", interaction, err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	var streamErr error
+	for _, err = range client.SubscribeToTask(ctx, discovery, interaction.Task.ID) {
+		streamErr = err
+		break
+	}
+	if !errors.Is(streamErr, context.Canceled) {
+		t.Fatalf("subscription cancellation error = %v", streamErr)
+	}
+}
+
 func assertA2AObserverSafe(
 	t *testing.T,
 	observer *testA2AObserver,
