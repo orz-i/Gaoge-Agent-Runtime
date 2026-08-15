@@ -46,6 +46,7 @@ type StartRequest struct {
 	Actor      kernel.ActorRef
 	Thread     kernel.ThreadRef
 	RequestID  string
+	RootRunID  string
 	Goal       string
 	Config     ConfigSnapshot
 }
@@ -90,8 +91,12 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	if !created {
 		return runner.Load(ctx, createdTurn.ID)
 	}
+	rootRunID := strings.TrimSpace(request.RootRunID)
+	if rootRunID == "" {
+		rootRunID = RootRunID(turnID)
+	}
 	runtimeSnapshot, startErr := runner.agent.StartRun(ctx, agent.StartRequest{
-		ID: RootRunID(turnID), Actor: request.Actor, Thread: request.Thread,
+		ID: rootRunID, Actor: request.Actor, Thread: request.Thread,
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
 		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
 		ToolKeys: append([]string(nil), config.ToolKeys...), Limits: config.Limits,

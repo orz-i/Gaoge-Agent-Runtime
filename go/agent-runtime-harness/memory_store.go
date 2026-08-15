@@ -184,8 +184,9 @@ func validTurnStatus(value TurnStatus) bool {
 }
 
 func validConfigSnapshot(value ConfigSnapshot) bool {
+	environmentValid := (strings.TrimSpace(value.Environment.ID) == "") == (value.Environment.Revision == 0)
 	return strings.TrimSpace(value.ID) != "" && strings.TrimSpace(value.TurnID) != "" &&
-		strings.TrimSpace(value.Environment.ID) != "" && value.Environment.Revision > 0 &&
+		environmentValid &&
 		len(value.ContentHash) == 64 && !value.CreatedAt.IsZero()
 }
 

@@ -65,7 +65,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	value.Instructions = strings.TrimSpace(value.Instructions)
 	value.Model = strings.TrimSpace(value.Model)
 	value.MemoryPolicy = strings.TrimSpace(value.MemoryPolicy)
-	if value.Environment.ID == "" || value.Environment.Revision == 0 {
+	if (value.Environment.ID == "") != (value.Environment.Revision == 0) {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
 	var err error
