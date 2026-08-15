@@ -414,10 +414,16 @@ func (runner *Runner) callModel(
 	if err != nil {
 		return nil, model.Response{}, err
 	}
+	messages := model.CloneMessages(state.Messages)
+	if repeatedToolKeys := consecutiveUnchangedToolKeys(messages); len(repeatedToolKeys) != 0 {
+		definitions = definitionsWithoutKeys(definitions, repeatedToolKeys)
+		hostedTools = hostedToolsWithoutKeys(hostedTools, repeatedToolKeys)
+		messages = withRepeatedToolGuidance(messages, repeatedToolKeys)
+	}
 	request := model.Request{
 		RunID: snapshot.Run.ID, Model: state.Model,
 		ModelOptions: cloneRawJSON(state.ModelOptions),
-		Messages:     model.CloneMessages(state.Messages), Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
+		Messages:     messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
 	}
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
@@ -434,6 +440,131 @@ func (runner *Runner) callModel(
 		Type: EventModelCompleted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
 	return definitions, response, nil
+}
+
+type completedToolCall struct {
+	call   tools.Call
+	result string
+}
+
+func consecutiveUnchangedToolKeys(messages []model.Message) []string {
+	latest, previousEnd, latestOK := completedToolBatchEndingAt(messages, len(messages))
+	previous, _, previousOK := completedToolBatchEndingAt(messages, previousEnd)
+	if !latestOK || !previousOK {
+		return nil
+	}
+	keys := make([]string, 0, len(latest))
+	seen := make(map[string]struct{}, len(latest))
+	for _, latestCall := range latest {
+		if _, exists := seen[latestCall.call.ToolKey]; exists || recoverableToolResult(latestCall.result) {
+			continue
+		}
+		if completedBatchContains(previous, latestCall) {
+			seen[latestCall.call.ToolKey] = struct{}{}
+			keys = append(keys, latestCall.call.ToolKey)
+		}
+	}
+	return keys
+}
+
+func completedToolBatchEndingAt(messages []model.Message, end int) ([]completedToolCall, int, bool) {
+	toolStart := end
+	for toolStart > 0 && messages[toolStart-1].Role == model.RoleTool {
+		toolStart--
+	}
+	if toolStart == end || toolStart == 0 {
+		return nil, 0, false
+	}
+	assistantIndex := toolStart - 1
+	completed, ok := completedToolCalls(messages[assistantIndex], messages[toolStart:end])
+	return completed, assistantIndex, ok
+}
+
+func completedToolCalls(assistant model.Message, toolResults []model.Message) ([]completedToolCall, bool) {
+	if assistant.Role != model.RoleAssistant || len(assistant.ToolCalls) != len(toolResults) {
+		return nil, false
+	}
+	results := make(map[string]string, len(toolResults))
+	for _, toolResult := range toolResults {
+		results[toolResult.ToolCallID] = strings.TrimSpace(toolResult.Content)
+	}
+	completed := make([]completedToolCall, 0, len(assistant.ToolCalls))
+	for _, call := range assistant.ToolCalls {
+		result, ok := results[call.ID]
+		if !ok || strings.TrimSpace(call.ToolKey) == "" {
+			return nil, false
+		}
+		completed = append(completed, completedToolCall{call: call, result: result})
+	}
+	return completed, true
+}
+
+func completedBatchContains(batch []completedToolCall, target completedToolCall) bool {
+	for _, candidate := range batch {
+		if candidate.result == target.result && sameToolCall(candidate.call, target.call) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameToolCall(left tools.Call, right tools.Call) bool {
+	return left.ToolKey == right.ToolKey &&
+		strings.TrimSpace(string(left.Arguments)) == strings.TrimSpace(string(right.Arguments))
+}
+
+func recoverableToolResult(content string) bool {
+	var payload struct {
+		OK        *bool `json:"ok"`
+		Retryable bool  `json:"retryable"`
+	}
+	if !json.Valid([]byte(content)) || json.Unmarshal([]byte(content), &payload) != nil {
+		return false
+	}
+	return payload.OK != nil && !*payload.OK && payload.Retryable
+}
+
+func definitionsWithoutKeys(definitions []tools.Definition, keys []string) []tools.Definition {
+	blocked := toolKeySet(keys)
+	result := make([]tools.Definition, 0, len(definitions))
+	for _, definition := range definitions {
+		if _, suppressed := blocked[definition.Key]; !suppressed {
+			result = append(result, definition)
+		}
+	}
+	return result
+}
+
+func hostedToolsWithoutKeys(hostedTools []model.HostedTool, keys []string) []model.HostedTool {
+	blocked := toolKeySet(keys)
+	result := make([]model.HostedTool, 0, len(hostedTools))
+	for _, hostedTool := range hostedTools {
+		if _, suppressed := blocked[hostedTool.Key]; !suppressed {
+			result = append(result, hostedTool)
+		}
+	}
+	return result
+}
+
+func toolKeySet(keys []string) map[string]struct{} {
+	result := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		result[key] = struct{}{}
+	}
+	return result
+}
+
+func withRepeatedToolGuidance(messages []model.Message, toolKeys []string) []model.Message {
+	guidance := "These exact Tool calls have already returned the same successful results twice: " +
+		strings.Join(toolKeys, ", ") + ". " +
+		"Do not repeat them now; continue from the existing results, choose a different action, or answer the user."
+	for index := range messages {
+		if messages[index].Role == model.RoleSystem {
+			messages[index].Content = strings.TrimSpace(messages[index].Content) + "\n\n" + guidance
+			return messages
+		}
+	}
+	return append([]model.Message{{Role: model.RoleSystem, Content: guidance}}, messages...)
 }
 
 func (runner *Runner) generateModel(ctx context.Context, request model.Request) (model.Response, error) {

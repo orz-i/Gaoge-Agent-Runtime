@@ -25,6 +25,8 @@ const (
 	publishToolName        = "story_publish_change_set"
 	manifestToolKey        = "story.get_manifest"
 	manifestToolName       = "story_get_manifest"
+	selectionToolKey       = "story.get_selection"
+	selectionToolName      = "story_get_selection"
 	committedDisposition   = "committed"
 	defaultTenantID        = "default"
 	conversationThreadKind = "conversation"
@@ -112,6 +114,136 @@ func TestRunnerFreezesPerRunLimits(t *testing.T) {
 	}
 	if !strings.Contains(string(snapshot.State), `"limits":{"maxLLMCalls":2,"maxToolCalls":2}`) {
 		t.Fatalf("per-run limits were not frozen in state: %s", snapshot.State)
+	}
+}
+
+type repeatedReadModel struct {
+	t        *testing.T
+	requests []runtimemodel.Request
+}
+
+func (model *repeatedReadModel) Generate(
+	_ context.Context,
+	request runtimemodel.Request,
+) (runtimemodel.Response, error) {
+	model.requests = append(model.requests, request)
+	hasRepeatedTool := false
+	for _, definition := range request.Tools {
+		if definition.Key == manifestToolKey {
+			hasRepeatedTool = true
+			break
+		}
+	}
+	if hasRepeatedTool {
+		callIDs := [...]string{"repeat_1", "repeat_2", "repeat_3", "repeat_4", "repeat_5", "repeat_6", "repeat_7", "repeat_8"}
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
+			ID: callIDs[len(model.requests)-1], ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`),
+		}}}, nil
+	}
+	if len(model.requests) != 3 {
+		model.t.Fatalf("tool suppressed after %d model requests", len(model.requests))
+	}
+	guarded := false
+	for _, message := range request.Messages {
+		if message.Role == runtimemodel.RoleSystem && strings.Contains(message.Content, "same successful results twice") {
+			guarded = true
+		}
+	}
+	if !guarded {
+		model.t.Fatalf("repeated Tool guidance missing: %#v", request.Messages)
+	}
+	return runtimemodel.Response{Content: "continued without repeating the read"}, nil
+}
+
+type repeatedReadBatchModel struct {
+	t        *testing.T
+	requests []runtimemodel.Request
+}
+
+func (model *repeatedReadBatchModel) Generate(
+	_ context.Context,
+	request runtimemodel.Request,
+) (runtimemodel.Response, error) {
+	model.requests = append(model.requests, request)
+	available := make(map[string]bool, len(request.Tools))
+	for _, definition := range request.Tools {
+		available[definition.Key] = true
+	}
+	if len(model.requests) == 1 {
+		return runtimemodel.Response{ToolCalls: []tools.Call{
+			{ID: "batch_selection_1", ToolKey: selectionToolKey, Arguments: json.RawMessage(`{}`)},
+			{ID: "batch_manifest_1", ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
+		}}, nil
+	}
+	if available[selectionToolKey] {
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
+			ID: "batch_selection_2", ToolKey: selectionToolKey, Arguments: json.RawMessage(`{}`),
+		}}}, nil
+	}
+	if len(model.requests) != 3 || !available[manifestToolKey] {
+		model.t.Fatalf("batch Tool suppression request = %#v", request)
+	}
+	return runtimemodel.Response{Content: "continued after the repeated batch subset"}, nil
+}
+
+func TestRunnerSuppressesRepeatedToolSubsetAcrossConsecutiveBatches(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	toolCalls := 0
+	readHandler := tools.HandlerFunc(func(requestContext context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		toolCalls++
+		return tools.ExecutionResult{
+			Content: json.RawMessage(`{"storyID":"story_1"}`),
+			Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: committedDisposition},
+		}, nil
+	})
+	registry := mustRegistry(t, []tools.Registration{
+		{Definition: tools.Definition{
+			Key: selectionToolKey, Name: selectionToolName, InputSchema: json.RawMessage(`{"type":"object"}`),
+		}, Handler: readHandler},
+		{Definition: tools.Definition{
+			Key: manifestToolKey, Name: manifestToolName, InputSchema: json.RawMessage(`{"type":"object"}`),
+		}, Handler: readHandler},
+	})
+	model := &repeatedReadBatchModel{t: t}
+	runner := mustRunner(t, runtime, approvals, model, registry)
+	snapshot, err := runner.StartRun(t.Context(), startRequest(
+		"run_repeated_batch", "request_repeated_batch", "continue after reading",
+		selectionToolKey, manifestToolKey,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted || len(model.requests) != 3 || toolCalls != 3 {
+		t.Fatalf("run = %#v, model calls = %d, tool calls = %d", snapshot.Run, len(model.requests), toolCalls)
+	}
+}
+
+func TestRunnerSuppressesConsecutiveUnchangedToolLoopForOneModelStep(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	toolCalls := 0
+	registry := mustRegistry(t, []tools.Registration{{
+		Definition: tools.Definition{
+			Key: manifestToolKey, Name: manifestToolName,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		},
+		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			toolCalls++
+			return tools.ExecutionResult{
+				Content: json.RawMessage(`{"storyID":"story_1"}`),
+				Receipt: tools.Receipt{ExecutionID: "read", Disposition: committedDisposition},
+			}, nil
+		}),
+	}})
+	model := &repeatedReadModel{t: t}
+	runner := mustRunner(t, runtime, approvals, model, registry)
+	snapshot, err := runner.StartRun(t.Context(), startRequest(
+		"run_repeated_read", "request_repeated_read", "continue after reading", manifestToolKey,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted || len(model.requests) != 3 || toolCalls != 2 {
+		t.Fatalf("run = %#v, model calls = %d, tool calls = %d", snapshot.Run, len(model.requests), toolCalls)
 	}
 }
 
