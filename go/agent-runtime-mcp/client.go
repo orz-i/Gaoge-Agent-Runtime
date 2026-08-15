@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -21,6 +22,10 @@ const (
 	maxDiscoveredTools       = 2048
 	maxRemoteTextBytes       = 16 * 1024
 	maxRemoteToolSchemaBytes = 1024 * 1024
+	maxDiscoveredExtensions  = 64
+	maxExtensionIDBytes      = 256
+	maxExtensionSettings     = 64 * 1024
+	maxExtensionBytes        = 256 * 1024
 	eventDiscovery           = "protocol.mcp.discovery"
 	eventToolCall            = "protocol.mcp.tool_call"
 )
@@ -80,6 +85,15 @@ type DiscoveredTool struct {
 	Definition   tools.Definition
 }
 
+// Extension is one immutable server-declared MCP extension capability.
+// The edge intentionally keeps the settings opaque: extension-specific wire
+// semantics remain outside the Core until an official typed implementation is
+// explicitly adopted.
+type Extension struct {
+	ID       string
+	Settings json.RawMessage
+}
+
 // Discovery is one immutable MCP tools snapshot.
 type Discovery struct {
 	ProtocolVersion  string
@@ -87,6 +101,7 @@ type Discovery struct {
 	ServerVersion    string
 	CapabilitiesJSON json.RawMessage
 	ToolsListChanged bool
+	Extensions       []Extension
 	Tools            []DiscoveredTool
 	Catalog          CatalogSnapshot
 }
@@ -204,11 +219,75 @@ func newDiscovery(initialize *mcpsdk.InitializeResult, endpoint string) (Discove
 		ProtocolVersion: ProtocolVersion, CapabilitiesJSON: append(json.RawMessage(nil), capabilitiesJSON...),
 		ToolsListChanged: initialize.Capabilities.Tools.ListChanged, Catalog: CatalogSnapshot{Endpoint: endpoint},
 	}
+	extensions, err := projectExtensions(initialize.Capabilities.Extensions)
+	if err != nil {
+		return Discovery{}, err
+	}
+	discovery.Extensions = extensions
 	if initialize.ServerInfo != nil {
 		discovery.ServerName = strings.TrimSpace(initialize.ServerInfo.Name)
 		discovery.ServerVersion = strings.TrimSpace(initialize.ServerInfo.Version)
 	}
 	return discovery, nil
+}
+
+func projectExtensions(values map[string]any) ([]Extension, error) {
+	if len(values) > maxDiscoveredExtensions {
+		return nil, ErrDiscoveryLimit
+	}
+	exts := make([]Extension, 0, len(values))
+	totalBytes := 0
+	for id, settings := range values {
+		normalizedID := strings.TrimSpace(id)
+		if !validExtensionID(normalizedID) {
+			return nil, ErrDiscoveryLimit
+		}
+		payload, err := json.Marshal(settings)
+		if err != nil || !json.Valid(payload) || !jsonObject(payload) {
+			return nil, ErrDiscoveryLimit
+		}
+		if len(payload) > maxExtensionSettings {
+			return nil, ErrDiscoveryLimit
+		}
+		totalBytes += len(normalizedID) + len(payload)
+		if totalBytes > maxExtensionBytes {
+			return nil, ErrDiscoveryLimit
+		}
+		exts = append(exts, Extension{ID: normalizedID, Settings: append(json.RawMessage(nil), payload...)})
+	}
+	sort.Slice(exts, func(left int, right int) bool { return exts[left].ID < exts[right].ID })
+	return exts, nil
+}
+
+func validExtensionID(value string) bool {
+	if value == "" || len(value) > maxExtensionIDBytes || strings.TrimSpace(value) != value {
+		return false
+	}
+	prefix, name, found := strings.Cut(value, "/")
+	if !found || prefix == "" || name == "" || !strings.Contains(prefix, ".") || strings.Contains(name, "/") {
+		return false
+	}
+	return validExtensionToken(prefix, true) && validExtensionToken(name, false)
+}
+
+func validExtensionToken(value string, allowDot bool) bool {
+	for index := range len(value) {
+		if !validExtensionCharacter(value[index], allowDot) {
+			return false
+		}
+	}
+	return true
+}
+
+func validExtensionCharacter(character byte, allowDot bool) bool {
+	alphaNumeric := character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
+		character >= '0' && character <= '9'
+	return alphaNumeric || character == '-' || character == '_' || allowDot && character == '.'
+}
+
+func jsonObject(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) >= 2 && trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}'
 }
 
 func appendToolPage(discovery *Discovery, result *mcpsdk.ListToolsResult, seenNames map[string]struct{}) error {
@@ -458,6 +537,10 @@ func toolResultMessage(raw json.RawMessage) string {
 
 func cloneDiscovery(discovery Discovery) Discovery {
 	discovery.CapabilitiesJSON = append(json.RawMessage(nil), discovery.CapabilitiesJSON...)
+	discovery.Extensions = append([]Extension(nil), discovery.Extensions...)
+	for index := range discovery.Extensions {
+		discovery.Extensions[index].Settings = append(json.RawMessage(nil), discovery.Extensions[index].Settings...)
+	}
 	discovery.Tools = append([]DiscoveredTool(nil), discovery.Tools...)
 	for index := range discovery.Tools {
 		discovery.Tools[index].InputSchema = append(json.RawMessage(nil), discovery.Tools[index].InputSchema...)

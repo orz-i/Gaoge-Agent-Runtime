@@ -18,6 +18,59 @@ type lookupInput struct {
 	ID string `json:"id"`
 }
 
+func TestClientProjectsNegotiatedExtensions(t *testing.T) {
+	t.Parallel()
+	capabilities := &mcpsdk.ServerCapabilities{Extensions: map[string]any{
+		"io.modelcontextprotocol/ui": map[string]any{"version": "2026-01-26", "enabled": true},
+		"com.example/audit":          map[string]any{"mode": "strict"},
+	}}
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: testServerName, Version: "1.0.0"}, &mcpsdk.ServerOptions{
+		Capabilities: capabilities,
+	})
+	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: testLookupTool},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, input lookupInput) (*mcpsdk.CallToolResult, lookupOutput, error) {
+			return nil, lookupOutput{Value: input.ID}, nil
+		})
+	handler := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{
+		Stateless: true, JSONResponse: true,
+	})
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	client := newTestClient(t, httpServer.Client())
+	discovery, err := client.DiscoverTools(t.Context(), httpServer.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(discovery.Extensions) != 2 || discovery.Extensions[0].ID != "com.example/audit" ||
+		discovery.Extensions[1].ID != "io.modelcontextprotocol/ui" {
+		t.Fatalf("extensions = %#v", discovery.Extensions)
+	}
+	if !strings.Contains(string(discovery.Extensions[1].Settings), `"version":"2026-01-26"`) {
+		t.Fatalf("extension settings = %s", discovery.Extensions[1].Settings)
+	}
+	clone := cloneDiscovery(discovery)
+	discovery.Extensions[0].Settings[0] = '['
+	if string(clone.Extensions[0].Settings) != `{"mode":"strict"}` {
+		t.Fatalf("clone extension settings mutated: %s", clone.Extensions[0].Settings)
+	}
+}
+
+func TestDiscoveryRejectsInvalidOrOversizedExtensions(t *testing.T) {
+	t.Parallel()
+	base := &mcpsdk.InitializeResult{Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}}
+	base.Capabilities.Extensions = map[string]any{"invalid": map[string]any{}}
+	if _, err := newDiscovery(base, "https://mcp.example/rpc"); !errors.Is(err, ErrDiscoveryLimit) {
+		t.Fatalf("invalid extension id error = %v", err)
+	}
+	base.Capabilities.Extensions = map[string]any{
+		"com.example/oversized": map[string]any{"payload": strings.Repeat("x", maxExtensionSettings)},
+	}
+	if _, err := newDiscovery(base, "https://mcp.example/rpc"); !errors.Is(err, ErrDiscoveryLimit) {
+		t.Fatalf("oversized extension error = %v", err)
+	}
+}
+
 func assertTestDiscovery(t *testing.T, discovery Discovery) {
 	t.Helper()
 	if discovery.ProtocolVersion != ProtocolVersion || discovery.ServerName != "fixture" || len(discovery.Tools) != 1 {
@@ -33,7 +86,10 @@ type lookupOutput struct {
 	Value string `json:"value"`
 }
 
-const testLookupTool = "lookup"
+const (
+	testLookupTool = "lookup"
+	testServerName = "fixture"
+)
 
 type testProtocolObserver struct {
 	name   string
@@ -48,7 +104,7 @@ func (observer *testProtocolObserver) Observe(_ context.Context, event plugin.Ev
 
 func TestClientUses20260728StatelessDiscoveryAndToolCall(t *testing.T) {
 	t.Parallel()
-	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "fixture", Version: "1.0.0"}, nil)
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: testServerName, Version: "1.0.0"}, nil)
 	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: testLookupTool, Title: "Lookup", Description: "Find a value"},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, input lookupInput) (*mcpsdk.CallToolResult, lookupOutput, error) {
 			return nil, lookupOutput{Value: "value:" + input.ID}, nil
