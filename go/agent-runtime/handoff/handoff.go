@@ -60,15 +60,17 @@ const (
 
 // Delegation is a durable parent-owned reference to one stable Child Agent Run.
 type Delegation struct {
-	ID         string          `json:"id"`
-	MemberID   string          `json:"memberID"`
-	ChildRunID string          `json:"childRunID"`
-	Goal       string          `json:"goal"`
-	ToolKeys   []string        `json:"toolKeys,omitempty"`
-	Status     Status          `json:"status"`
-	Result     json.RawMessage `json:"result,omitempty"`
-	ErrorCode  string          `json:"errorCode,omitempty"`
-	Error      string          `json:"error,omitempty"`
+	ID           string          `json:"id"`
+	MemberID     string          `json:"memberID"`
+	ChildRunID   string          `json:"childRunID"`
+	Goal         string          `json:"goal"`
+	Model        string          `json:"model,omitempty"`
+	ModelOptions json.RawMessage `json:"modelOptions,omitempty"`
+	ToolKeys     []string        `json:"toolKeys,omitempty"`
+	Status       Status          `json:"status"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	ErrorCode    string          `json:"errorCode,omitempty"`
+	Error        string          `json:"error,omitempty"`
 }
 
 // Join describes a deterministic fan-in contract over stable Delegation IDs.
@@ -131,12 +133,14 @@ func (coordinator *Coordinator) StartOrLoad(
 		return Delegation{}, err
 	}
 	child, err = coordinator.children.StartRun(ctx, agent.StartRequest{
-		ID:        delegation.ChildRunID,
-		Actor:     parent.Run.Actor,
-		Thread:    parent.Run.Thread,
-		RequestID: parent.Run.ID + ":" + delegation.ID,
-		Goal:      delegation.Goal,
-		ToolKeys:  append([]string(nil), delegation.ToolKeys...),
+		ID:           delegation.ChildRunID,
+		Actor:        parent.Run.Actor,
+		Thread:       parent.Run.Thread,
+		RequestID:    parent.Run.ID + ":" + delegation.ID,
+		Goal:         delegation.Goal,
+		Model:        delegation.Model,
+		ModelOptions: append(json.RawMessage(nil), delegation.ModelOptions...),
+		ToolKeys:     append([]string(nil), delegation.ToolKeys...),
 	})
 	if child.Run.ID == "" {
 		return Delegation{}, err
@@ -297,6 +301,7 @@ func validJoin(join Join, delegations []Delegation) bool {
 }
 
 func cloneDelegation(delegation Delegation) Delegation {
+	delegation.ModelOptions = append(json.RawMessage(nil), delegation.ModelOptions...)
 	delegation.ToolKeys = append([]string(nil), delegation.ToolKeys...)
 	delegation.Result = append(json.RawMessage(nil), delegation.Result...)
 	return delegation

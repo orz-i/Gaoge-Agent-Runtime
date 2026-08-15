@@ -1,0 +1,246 @@
+package harness
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
+	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
+)
+
+// VersionRef freezes one host-owned configuration resource identity and revision.
+type VersionRef struct {
+	ID       string `json:"id"`
+	Revision uint64 `json:"revision"`
+}
+
+func normalizeToolPolicies(values []ToolPolicySnapshot) ([]ToolPolicySnapshot, error) {
+	result := make([]ToolPolicySnapshot, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for index, value := range values {
+		value.Key = strings.TrimSpace(value.Key)
+		value.DefinitionVersion = strings.TrimSpace(value.DefinitionVersion)
+		value.ApprovalCapability = strings.TrimSpace(value.ApprovalCapability)
+		value.ApprovalMode = strings.TrimSpace(value.ApprovalMode)
+		value.RiskLevel = strings.TrimSpace(value.RiskLevel)
+		value.SideEffectLevel = strings.TrimSpace(value.SideEffectLevel)
+		value.IdempotencyMode = strings.TrimSpace(value.IdempotencyMode)
+		if value.Key == "" || value.DefinitionVersion == "" {
+			return nil, ErrInvalidRequest
+		}
+		if _, duplicate := seen[value.Key]; duplicate {
+			return nil, ErrInvalidRequest
+		}
+		seen[value.Key] = struct{}{}
+		result[index] = value
+	}
+	slices.SortFunc(result, func(left, right ToolPolicySnapshot) int { return strings.Compare(left.Key, right.Key) })
+	return result, nil
+}
+
+func normalizeSkillSnapshots(values []SkillSnapshot) ([]SkillSnapshot, error) {
+	result := make([]SkillSnapshot, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for index, value := range values {
+		value.ID = strings.TrimSpace(value.ID)
+		value.Title = strings.TrimSpace(value.Title)
+		value.Trigger = strings.TrimSpace(value.Trigger)
+		value.Description = strings.TrimSpace(value.Description)
+		value.Markdown = strings.TrimSpace(value.Markdown)
+		value.ContentHash = strings.TrimSpace(value.ContentHash)
+		if value.ID == "" || value.Revision == 0 || value.Title == "" || value.Markdown == "" {
+			return nil, ErrInvalidRequest
+		}
+		hash := sha256.Sum256([]byte(value.Markdown))
+		wantHash := hex.EncodeToString(hash[:])
+		if value.ContentHash == "" {
+			value.ContentHash = wantHash
+		} else if value.ContentHash != wantHash {
+			return nil, ErrInvalidRequest
+		}
+		if _, duplicate := seen[value.ID]; duplicate {
+			return nil, ErrInvalidRequest
+		}
+		seen[value.ID] = struct{}{}
+		result[index] = value
+	}
+	slices.SortFunc(result, func(left, right SkillSnapshot) int { return strings.Compare(left.ID, right.ID) })
+	return result, nil
+}
+
+// ToolPolicySnapshot freezes one selected Tool's policy and provider-definition version.
+// It intentionally contains no credentials, provider endpoint or executable implementation detail.
+type ToolPolicySnapshot struct {
+	Key                string `json:"key"`
+	DefinitionVersion  string `json:"definitionVersion"`
+	ApprovalCapability string `json:"approvalCapability,omitempty"`
+	ApprovalMode       string `json:"approvalMode,omitempty"`
+	RiskLevel          string `json:"riskLevel,omitempty"`
+	SideEffectLevel    string `json:"sideEffectLevel,omitempty"`
+	IdempotencyMode    string `json:"idempotencyMode,omitempty"`
+}
+
+// SkillSnapshot freezes one selected Skill revision and its progressive-disclosure content.
+// The full markdown is durable Harness configuration, not mutable host lookup state.
+type SkillSnapshot struct {
+	ID          string `json:"id"`
+	Revision    uint64 `json:"revision"`
+	Title       string `json:"title"`
+	Trigger     string `json:"trigger,omitempty"`
+	Description string `json:"description,omitempty"`
+	Markdown    string `json:"markdown"`
+	ContentHash string `json:"contentHash"`
+}
+
+func normalizeContextBudget(value runtimecontext.Budget) runtimecontext.Budget {
+	if value.MaxInputTokens <= 0 && value.EffectiveModelTokens <= 0 {
+		value.MaxInputTokens = 32_768
+	}
+	if value.SoftLimitPercent <= 0 || value.SoftLimitPercent >= 100 {
+		value.SoftLimitPercent = 80
+	}
+	if value.EstimateSafetyPercent <= 0 {
+		value.EstimateSafetyPercent = 15
+	}
+	if value.MaxSerializedBytes <= 0 {
+		value.MaxSerializedBytes = 4 << 20
+	}
+	if value.PreserveRecentTurns <= 0 {
+		value.PreserveRecentTurns = 8
+	}
+	if value.MaxSummaryTokens <= 0 {
+		value.MaxSummaryTokens = 1024
+	}
+	if value.MaxToolResultBytes <= 0 {
+		value.MaxToolResultBytes = 2048
+	}
+	return value
+}
+
+// ConfigSnapshot is one immutable execution configuration. It intentionally excludes secrets and transport endpoints.
+type ConfigSnapshot struct {
+	ID                    string                `json:"id"`
+	TurnID                string                `json:"turnID"`
+	Environment           VersionRef            `json:"environment"`
+	Instructions          string                `json:"instructions,omitempty"`
+	Model                 string                `json:"model,omitempty"`
+	ModelOptions          json.RawMessage       `json:"modelOptions,omitempty"`
+	ToolKeys              []string              `json:"toolKeys"`
+	ToolPolicies          []ToolPolicySnapshot  `json:"toolPolicies"`
+	Skills                []SkillSnapshot       `json:"skills"`
+	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
+	ContextBudget         runtimecontext.Budget `json:"contextBudget"`
+	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
+	Limits                agent.Limits          `json:"limits"`
+	ContentHash           string                `json:"contentHash"`
+	CreatedAt             time.Time             `json:"createdAt"`
+}
+
+type configPayload struct {
+	TurnID                string                `json:"turnID"`
+	Environment           VersionRef            `json:"environment"`
+	Instructions          string                `json:"instructions,omitempty"`
+	Model                 string                `json:"model,omitempty"`
+	ModelOptions          json.RawMessage       `json:"modelOptions,omitempty"`
+	ToolKeys              []string              `json:"toolKeys"`
+	ToolPolicies          []ToolPolicySnapshot  `json:"toolPolicies"`
+	Skills                []SkillSnapshot       `json:"skills"`
+	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
+	ContextBudget         runtimecontext.Budget `json:"contextBudget"`
+	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
+	Limits                agent.Limits          `json:"limits"`
+}
+
+// SealConfigSnapshot normalizes, hashes and seals one immutable configuration for a Harness Turn.
+func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (ConfigSnapshot, error) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" || now.IsZero() {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
+	value.TurnID = turnID
+	value.Environment.ID = strings.TrimSpace(value.Environment.ID)
+	value.Instructions = strings.TrimSpace(value.Instructions)
+	value.Model = strings.TrimSpace(value.Model)
+	value.MemoryPolicy = strings.TrimSpace(value.MemoryPolicy)
+	value.ContextBudget = normalizeContextBudget(value.ContextBudget)
+	if (value.Environment.ID == "") != (value.Environment.Revision == 0) {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
+	var err error
+	value.ModelOptions, err = canonicalJSON(value.ModelOptions)
+	if err != nil {
+		return ConfigSnapshot{}, err
+	}
+	value.ToolKeys = normalizeStrings(value.ToolKeys)
+	value.ToolPolicies, err = normalizeToolPolicies(value.ToolPolicies)
+	if err != nil {
+		return ConfigSnapshot{}, err
+	}
+	value.Skills, err = normalizeSkillSnapshots(value.Skills)
+	if err != nil {
+		return ConfigSnapshot{}, err
+	}
+	payload := configPayload{
+		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
+		Model: value.Model, ModelOptions: value.ModelOptions, ToolKeys: value.ToolKeys,
+		ToolPolicies: value.ToolPolicies, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
+		ContextBudget: value.ContextBudget, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return ConfigSnapshot{}, err
+	}
+	hash := sha256.Sum256(raw)
+	value.ContentHash = hex.EncodeToString(hash[:])
+	value.ID = "hcfg_" + value.ContentHash[:24]
+	value.CreatedAt = now.UTC()
+	return value, nil
+}
+
+func canonicalJSON(value json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(value)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	var decoded any
+	if err := json.Unmarshal(trimmed, &decoded); err != nil {
+		return nil, ErrInvalidRequest
+	}
+	encoded, err := json.Marshal(decoded)
+	if err != nil {
+		return nil, ErrInvalidRequest
+	}
+	return encoded, nil
+}
+
+func normalizeStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	slices.Sort(result)
+	return slices.Compact(result)
+}
+
+func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
+	value.ModelOptions = append(json.RawMessage(nil), value.ModelOptions...)
+	value.ToolKeys = append([]string(nil), value.ToolKeys...)
+	value.ToolPolicies = append([]ToolPolicySnapshot(nil), value.ToolPolicies...)
+	value.Skills = append([]SkillSnapshot(nil), value.Skills...)
+	return value
+}
+
+func defaultJSON(value json.RawMessage) json.RawMessage {
+	if len(bytes.TrimSpace(value)) == 0 {
+		return json.RawMessage(`{}`)
+	}
+	return value
+}
