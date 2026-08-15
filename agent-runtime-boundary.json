@@ -3,6 +3,7 @@
   "goModules": [
     "github.com/orz-i/Gaoge/sdk/go/agent-runtime",
     "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness",
+    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness-postgres",
     "github.com/orz-i/Gaoge/sdk/go/agent-runtime-mcp",
     "github.com/orz-i/Gaoge/sdk/go/agent-runtime-a2a",
     "github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres",
