@@ -27,9 +27,10 @@ const recoverableCallErrorMessageLimit = 2000
 // without restarting the Run. Infrastructure, authorization, cancellation,
 // and concurrency failures must remain ordinary fatal errors.
 type RecoverableCallError struct {
-	Code    string
-	Message string
-	Cause   error
+	Code            string
+	Message         string
+	Cause           error
+	BlockedToolKeys []string
 }
 
 // CloneDefinition returns an isolated Tool definition copy.
@@ -86,6 +87,26 @@ func (err *RecoverableCallError) Unwrap() error {
 
 // NewRecoverableCallError creates an explicit model-correctable Tool error.
 func NewRecoverableCallError(code, message string, cause error) error {
+	return newRecoverableCallError(code, message, cause, nil)
+}
+
+// NewRecoverableCallErrorWithBlockedTools creates a correctable Tool error and
+// marks Tools that cannot make further progress for removal from later turns.
+func NewRecoverableCallErrorWithBlockedTools(
+	code string,
+	message string,
+	cause error,
+	blockedToolKeys ...string,
+) error {
+	return newRecoverableCallError(code, message, cause, blockedToolKeys)
+}
+
+func newRecoverableCallError(
+	code string,
+	message string,
+	cause error,
+	blockedToolKeys []string,
+) error {
 	code = strings.TrimSpace(code)
 	if code == "" {
 		code = "tool_call_invalid"
@@ -101,7 +122,10 @@ func NewRecoverableCallError(code, message string, cause error) error {
 	if len(runes) > recoverableCallErrorMessageLimit {
 		message = string(runes[:recoverableCallErrorMessageLimit])
 	}
-	return &RecoverableCallError{Code: code, Message: message, Cause: cause}
+	return &RecoverableCallError{
+		Code: code, Message: message, Cause: cause,
+		BlockedToolKeys: normalizedBlockedToolKeys(blockedToolKeys),
+	}
 }
 
 // RecoverableCallErrorInfo returns safe model-facing correction metadata.
@@ -111,6 +135,33 @@ func RecoverableCallErrorInfo(err error) (string, string, bool) {
 		return "", "", false
 	}
 	return strings.TrimSpace(target.Code), target.Error(), true
+}
+
+// RecoverableCallErrorBlockedToolKeys returns an isolated list of Tools that
+// must not be offered again after this correction.
+func RecoverableCallErrorBlockedToolKeys(err error) []string {
+	var target *RecoverableCallError
+	if !errors.As(err, &target) || target == nil {
+		return nil
+	}
+	return append([]string(nil), target.BlockedToolKeys...)
+}
+
+func normalizedBlockedToolKeys(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, duplicate := seen[value]; duplicate {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }
 
 // Definition is the model-visible, provider-neutral Tool contract.

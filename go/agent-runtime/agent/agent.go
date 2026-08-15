@@ -132,14 +132,15 @@ type Runner struct {
 }
 
 type runState struct {
-	Messages     []model.Message `json:"messages"`
-	Model        string          `json:"model,omitempty"`
-	ModelOptions json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys     []string        `json:"toolKeys"`
-	Limits       Limits          `json:"limits"`
-	PendingCalls []tools.Call    `json:"pendingCalls,omitempty"`
-	LLMCalls     int             `json:"llmCalls"`
-	ToolCalls    int             `json:"toolCalls"`
+	Messages        []model.Message `json:"messages"`
+	Model           string          `json:"model,omitempty"`
+	ModelOptions    json.RawMessage `json:"modelOptions,omitempty"`
+	ToolKeys        []string        `json:"toolKeys"`
+	BlockedToolKeys []string        `json:"blockedToolKeys,omitempty"`
+	Limits          Limits          `json:"limits"`
+	PendingCalls    []tools.Call    `json:"pendingCalls,omitempty"`
+	LLMCalls        int             `json:"llmCalls"`
+	ToolCalls       int             `json:"toolCalls"`
 }
 
 // View is an isolated public projection of one persisted Agent Run. It exposes
@@ -415,6 +416,11 @@ func (runner *Runner) callModel(
 		return nil, model.Response{}, err
 	}
 	messages := model.CloneMessages(state.Messages)
+	if len(state.BlockedToolKeys) != 0 {
+		definitions = definitionsWithoutKeys(definitions, state.BlockedToolKeys)
+		hostedTools = hostedToolsWithoutKeys(hostedTools, state.BlockedToolKeys)
+		messages = withBlockedToolGuidance(messages, state.BlockedToolKeys)
+	}
 	if repeatedToolKeys := repeatedUnchangedToolKeys(messages); len(repeatedToolKeys) != 0 {
 		definitions = definitionsWithoutKeys(definitions, repeatedToolKeys)
 		hostedTools = hostedToolsWithoutKeys(hostedTools, repeatedToolKeys)
@@ -578,6 +584,18 @@ func withRepeatedToolGuidance(messages []model.Message, toolKeys []string) []mod
 	guidance := "These exact Tool calls have already returned the same successful results twice: " +
 		strings.Join(toolKeys, ", ") + ". " +
 		"Do not repeat them now; continue from the existing results, choose a different action, or answer the user."
+	for index := range messages {
+		if messages[index].Role == model.RoleSystem {
+			messages[index].Content = strings.TrimSpace(messages[index].Content) + "\n\n" + guidance
+			return messages
+		}
+	}
+	return append([]model.Message{{Role: model.RoleSystem, Content: guidance}}, messages...)
+}
+
+func withBlockedToolGuidance(messages []model.Message, toolKeys []string) []model.Message {
+	guidance := "These Tools are no longer available for this run: " +
+		strings.Join(toolKeys, ", ") + ". Continue now using only the remaining Tools."
 	for index := range messages {
 		if messages[index].Role == model.RoleSystem {
 			messages[index].Content = strings.TrimSpace(messages[index].Content) + "\n\n" + guidance
@@ -797,7 +815,14 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	})
 	if err != nil {
 		if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
-			return runner.recordRecoverableToolError(ctx, snapshot, state, code, message)
+			return runner.recordRecoverableToolError(
+				ctx,
+				snapshot,
+				state,
+				code,
+				message,
+				tools.RecoverableCallErrorBlockedToolKeys(err),
+			)
 		}
 		return runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
 	}
@@ -836,6 +861,7 @@ func (runner *Runner) recordRecoverableToolError(
 	state runState,
 	code string,
 	message string,
+	blockedToolKeys []string,
 ) (kernel.Snapshot, error) {
 	call, ok := nextPendingCall(state)
 	if !ok {
@@ -865,6 +891,7 @@ func (runner *Runner) recordRecoverableToolError(
 	})
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ToolCalls++
+	state.BlockedToolKeys = normalizedToolKeys(append(state.BlockedToolKeys, blockedToolKeys...))
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err

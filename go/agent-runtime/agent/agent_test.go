@@ -876,6 +876,137 @@ func TestRunnerLetsModelCorrectExplicitRecoverableToolError(t *testing.T) {
 	}
 }
 
+type blockedCorrectionModel struct {
+	t     *testing.T
+	calls int
+}
+
+func (model *blockedCorrectionModel) Generate(
+	_ context.Context,
+	request runtimemodel.Request,
+) (runtimemodel.Response, error) {
+	model.calls++
+	switch model.calls {
+	case 1:
+		assertModelToolAvailability(
+			model.t,
+			request,
+			[]string{manifestToolKey, selectionToolKey, publishToolKey},
+			nil,
+		)
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
+			ID: "call_read_budget", ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`),
+		}}}, nil
+	case 2:
+		assertModelToolAvailability(
+			model.t,
+			request,
+			[]string{publishToolKey},
+			[]string{manifestToolKey, selectionToolKey},
+		)
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
+			ID: callGood, ToolKey: publishToolKey, Arguments: json.RawMessage(`{"title":"ready"}`),
+		}}}, nil
+	default:
+		model.t.Fatalf("unexpected blocked correction model call %d", model.calls)
+		return runtimemodel.Response{}, nil
+	}
+}
+
+func assertModelToolAvailability(
+	t *testing.T,
+	request runtimemodel.Request,
+	want []string,
+	blocked []string,
+) {
+	t.Helper()
+	available := make(map[string]struct{}, len(request.Tools))
+	for _, definition := range request.Tools {
+		available[definition.Key] = struct{}{}
+	}
+	for _, key := range want {
+		if _, ok := available[key]; !ok {
+			t.Fatalf("model Tool %q unavailable in %#v", key, request.Tools)
+		}
+	}
+	for _, key := range blocked {
+		if _, ok := available[key]; ok {
+			t.Fatalf("blocked model Tool %q still available in %#v", key, request.Tools)
+		}
+	}
+}
+
+func TestRunnerStopsOfferingToolsBlockedByRecoverableError(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	readCalls := 0
+	publishCalls := 0
+	handler := tools.HandlerFunc(func(
+		_ context.Context,
+		request tools.ExecutionRequest,
+	) (tools.ExecutionResult, error) {
+		if request.Call.ToolKey != publishToolKey {
+			readCalls++
+			return tools.ExecutionResult{}, tools.NewRecoverableCallErrorWithBlockedTools(
+				"story.read_budget_exhausted",
+				"publish now",
+				errDomainRejected,
+				manifestToolKey,
+				selectionToolKey,
+			)
+		}
+		publishCalls++
+		return tools.ExecutionResult{
+			Content: json.RawMessage(`{"changeSetID":"change_ready"}`),
+			Receipt: tools.Receipt{ExecutionID: "change_ready", Disposition: committedDisposition},
+		}, nil
+	})
+	registry := mustRegistry(t, []tools.Registration{
+		{
+			Definition: tools.Definition{
+				Key: manifestToolKey, Name: manifestToolName,
+				InputSchema: json.RawMessage(`{"type":"object"}`),
+			},
+			Handler: handler,
+		},
+		{
+			Definition: tools.Definition{
+				Key: selectionToolKey, Name: selectionToolName,
+				InputSchema: json.RawMessage(`{"type":"object"}`),
+			},
+			Handler: handler,
+		},
+		{
+			Definition: tools.Definition{
+				Key: publishToolKey, Name: publishToolName,
+				InputSchema: json.RawMessage(`{"type":"object"}`), Terminal: true,
+			},
+			Handler: handler,
+		},
+	})
+	model := &blockedCorrectionModel{t: t}
+	runner := mustRunner(t, runtime, approvals, model, registry)
+	snapshot, err := runner.StartRun(t.Context(), startRequest(
+		"run_blocked_correction",
+		"request_blocked_correction",
+		"publish after the read budget",
+		manifestToolKey,
+		selectionToolKey,
+		publishToolKey,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted || model.calls != 2 || readCalls != 1 || publishCalls != 1 {
+		t.Fatalf(
+			"run = %#v, model calls = %d, read calls = %d, publish calls = %d",
+			snapshot.Run,
+			model.calls,
+			readCalls,
+			publishCalls,
+		)
+	}
+}
+
 type fatalToolModel struct{}
 
 func (fatalToolModel) Generate(_ context.Context, _ runtimemodel.Request) (runtimemodel.Response, error) {
