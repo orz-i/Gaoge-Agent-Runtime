@@ -160,6 +160,62 @@ type repeatedReadBatchModel struct {
 	requests []runtimemodel.Request
 }
 
+type alternatingRepeatedReadModel struct {
+	t        *testing.T
+	requests []runtimemodel.Request
+}
+
+func (model *alternatingRepeatedReadModel) Generate(
+	_ context.Context,
+	request runtimemodel.Request,
+) (runtimemodel.Response, error) {
+	model.requests = append(model.requests, request)
+	available := make(map[string]bool, len(request.Tools))
+	for _, definition := range request.Tools {
+		available[definition.Key] = true
+	}
+	switch len(model.requests) {
+	case 1:
+		return runtimemodel.Response{ToolCalls: []tools.Call{
+			{ID: "alternating_selection_1", ToolKey: selectionToolKey, Arguments: json.RawMessage(`{}`)},
+			{ID: "alternating_manifest_1", ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
+		}}, nil
+	case 2:
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
+			ID: "alternating_selection_2", ToolKey: selectionToolKey, Arguments: json.RawMessage(`{}`),
+		}}}, nil
+	case 3:
+		return model.alternatingManifestResponse(request, available), nil
+	case 4:
+		return model.alternatingCompletionResponse(request, available), nil
+	default:
+		model.t.Fatalf("unexpected model request count: %d", len(model.requests))
+		return runtimemodel.Response{}, nil
+	}
+}
+
+func (model *alternatingRepeatedReadModel) alternatingManifestResponse(
+	request runtimemodel.Request,
+	available map[string]bool,
+) runtimemodel.Response {
+	if available[selectionToolKey] || !available[manifestToolKey] {
+		model.t.Fatalf("selection Tool was not isolated after repetition: %#v", request.Tools)
+	}
+	return runtimemodel.Response{ToolCalls: []tools.Call{{
+		ID: "alternating_manifest_2", ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`),
+	}}}
+}
+
+func (model *alternatingRepeatedReadModel) alternatingCompletionResponse(
+	request runtimemodel.Request,
+	available map[string]bool,
+) runtimemodel.Response {
+	if available[selectionToolKey] || available[manifestToolKey] {
+		model.t.Fatalf("alternating repeated Tools remained available: %#v", request.Tools)
+	}
+	return runtimemodel.Response{Content: "continued after alternating reads"}
+}
+
 func (model *repeatedReadBatchModel) Generate(
 	_ context.Context,
 	request runtimemodel.Request,
@@ -187,9 +243,40 @@ func (model *repeatedReadBatchModel) Generate(
 }
 
 func TestRunnerSuppressesRepeatedToolSubsetAcrossConsecutiveBatches(t *testing.T) {
+	model := &repeatedReadBatchModel{t: t}
+	runner, toolCalls := newRepeatedBatchRunner(t, model)
+	snapshot, err := runner.StartRun(t.Context(), startRequest(
+		"run_repeated_batch", "request_repeated_batch", "continue after reading",
+		selectionToolKey, manifestToolKey,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted || len(model.requests) != 3 || *toolCalls != 3 {
+		t.Fatalf("run = %#v, model calls = %d, tool calls = %d", snapshot.Run, len(model.requests), *toolCalls)
+	}
+}
+
+func TestRunnerSuppressesRepeatedToolKeysAcrossAlternatingBatches(t *testing.T) {
+	model := &alternatingRepeatedReadModel{t: t}
+	runner, toolCalls := newRepeatedBatchRunner(t, model)
+	snapshot, err := runner.StartRun(t.Context(), startRequest(
+		"run_alternating_repeated_batch", "request_alternating_repeated_batch", "continue after reading",
+		selectionToolKey, manifestToolKey,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted || len(model.requests) != 4 || *toolCalls != 4 {
+		t.Fatalf("run = %#v, model calls = %d, tool calls = %d", snapshot.Run, len(model.requests), *toolCalls)
+	}
+}
+
+func newRepeatedBatchRunner(t *testing.T, client runtimemodel.Client) (*agent.Runner, *int) {
+	t.Helper()
 	runtime, approvals := newTestRuntimeAndApprovals(t)
 	toolCalls := 0
-	readHandler := tools.HandlerFunc(func(requestContext context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+	readHandler := tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 		toolCalls++
 		return tools.ExecutionResult{
 			Content: json.RawMessage(`{"storyID":"story_1"}`),
@@ -204,18 +291,7 @@ func TestRunnerSuppressesRepeatedToolSubsetAcrossConsecutiveBatches(t *testing.T
 			Key: manifestToolKey, Name: manifestToolName, InputSchema: json.RawMessage(`{"type":"object"}`),
 		}, Handler: readHandler},
 	})
-	model := &repeatedReadBatchModel{t: t}
-	runner := mustRunner(t, runtime, approvals, model, registry)
-	snapshot, err := runner.StartRun(t.Context(), startRequest(
-		"run_repeated_batch", "request_repeated_batch", "continue after reading",
-		selectionToolKey, manifestToolKey,
-	))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snapshot.Run.Status != kernel.RunStatusCompleted || len(model.requests) != 3 || toolCalls != 3 {
-		t.Fatalf("run = %#v, model calls = %d, tool calls = %d", snapshot.Run, len(model.requests), toolCalls)
-	}
+	return mustRunner(t, runtime, approvals, client, registry), &toolCalls
 }
 
 func TestRunnerSuppressesConsecutiveUnchangedToolLoopForOneModelStep(t *testing.T) {

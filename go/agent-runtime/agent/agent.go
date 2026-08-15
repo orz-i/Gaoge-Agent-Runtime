@@ -415,7 +415,7 @@ func (runner *Runner) callModel(
 		return nil, model.Response{}, err
 	}
 	messages := model.CloneMessages(state.Messages)
-	if repeatedToolKeys := consecutiveUnchangedToolKeys(messages); len(repeatedToolKeys) != 0 {
+	if repeatedToolKeys := repeatedUnchangedToolKeys(messages); len(repeatedToolKeys) != 0 {
 		definitions = definitionsWithoutKeys(definitions, repeatedToolKeys)
 		hostedTools = hostedToolsWithoutKeys(hostedTools, repeatedToolKeys)
 		messages = withRepeatedToolGuidance(messages, repeatedToolKeys)
@@ -447,24 +447,44 @@ type completedToolCall struct {
 	result string
 }
 
-func consecutiveUnchangedToolKeys(messages []model.Message) []string {
-	latest, previousEnd, latestOK := completedToolBatchEndingAt(messages, len(messages))
-	previous, _, previousOK := completedToolBatchEndingAt(messages, previousEnd)
-	if !latestOK || !previousOK {
-		return nil
-	}
-	keys := make([]string, 0, len(latest))
-	seen := make(map[string]struct{}, len(latest))
-	for _, latestCall := range latest {
-		if _, exists := seen[latestCall.call.ToolKey]; exists || recoverableToolResult(latestCall.result) {
-			continue
-		}
-		if completedBatchContains(previous, latestCall) {
-			seen[latestCall.call.ToolKey] = struct{}{}
-			keys = append(keys, latestCall.call.ToolKey)
+func repeatedUnchangedToolKeys(messages []model.Message) []string {
+	batches := completedToolBatches(messages)
+	keys := make([]string, 0)
+	seen := make(map[string]struct{})
+	for batchIndex, batch := range batches {
+		for _, current := range batch {
+			if _, exists := seen[current.call.ToolKey]; exists || recoverableToolResult(current.result) {
+				continue
+			}
+			if completedBatchesContain(batches[batchIndex+1:], current) {
+				seen[current.call.ToolKey] = struct{}{}
+				keys = append(keys, current.call.ToolKey)
+			}
 		}
 	}
 	return keys
+}
+
+func completedToolBatches(messages []model.Message) [][]completedToolCall {
+	batches := make([][]completedToolCall, 0)
+	for end := len(messages); end > 0; {
+		batch, previousEnd, ok := completedToolBatchEndingAt(messages, end)
+		if !ok {
+			break
+		}
+		batches = append(batches, batch)
+		end = previousEnd
+	}
+	return batches
+}
+
+func completedBatchesContain(batches [][]completedToolCall, target completedToolCall) bool {
+	for _, batch := range batches {
+		if completedBatchContains(batch, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func completedToolBatchEndingAt(messages []model.Message, end int) ([]completedToolCall, int, bool) {
