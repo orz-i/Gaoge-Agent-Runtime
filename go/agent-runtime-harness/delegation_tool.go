@@ -82,7 +82,7 @@ func DelegationToolRegistration(handler *DelegationToolHandler) tools.Registrati
 	return tools.Registration{
 		Definition: tools.Definition{
 			Key:         DelegationToolKey,
-			Name:        "Delegate to specialist agent",
+			Name:        "delegate_to_specialist_agent",
 			Description: "Delegate one focused subtask to a child agent. The child cannot inherit or widen parent Tool permissions.",
 			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["memberID","goal"],"properties":{"memberID":{"type":"string","minLength":1,"maxLength":64},"goal":{"type":"string","minLength":1,"maxLength":200000}}}`),
 		},

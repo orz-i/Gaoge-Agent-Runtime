@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -19,6 +20,14 @@ import (
 )
 
 const delegationTestModelName = "frozen-delegation-model"
+
+func TestDelegationToolNameIsProviderPortable(t *testing.T) {
+	t.Parallel()
+	registration := harness.DelegationToolRegistration(harness.NewDelegationToolHandler())
+	if !regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`).MatchString(registration.Definition.Name) {
+		t.Fatalf("delegation Tool name is not provider-portable: %q", registration.Definition.Name)
+	}
+}
 
 func TestHarnessDelegationToolStartsStableChildAndRecordsRelation(t *testing.T) {
 	t.Parallel()
