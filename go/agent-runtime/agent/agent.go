@@ -447,7 +447,7 @@ func (runner *Runner) callModel(
 		Messages:        messages,
 		Tools:           definitions,
 		HostedTools:     model.CloneHostedTools(hostedTools),
-		RequireToolCall: state.RequireToolCall && len(missingRequiredToolKeys(state)) != 0,
+		RequireToolCall: state.RequireToolCall && (len(definitions) != 0 || len(hostedTools) != 0),
 	}
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
@@ -853,6 +853,7 @@ func (runner *Runner) queueToolCalls(
 		ToolCalls: cloneToolCalls(preparedCalls),
 	})
 	state.PendingCalls = cloneToolCalls(preparedCalls)
+	state.RequireToolCall = false
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -1029,6 +1030,7 @@ func (runner *Runner) recordRecoverableToolError(
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ToolCalls++
 	state.BlockedToolKeys = normalizedToolKeys(append(state.BlockedToolKeys, blockedToolKeys...))
+	state.RequireToolCall = true
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err

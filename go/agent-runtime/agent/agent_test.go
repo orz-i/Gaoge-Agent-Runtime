@@ -999,6 +999,9 @@ func (model *blockedCorrectionModel) Generate(
 			[]string{publishToolKey},
 			[]string{manifestToolKey, selectionToolKey},
 		)
+		if !request.RequireToolCall {
+			model.t.Fatal("recoverable Tool correction did not require the next Tool call")
+		}
 		return runtimemodel.Response{ToolCalls: []tools.Call{{
 			ID: callGood, ToolKey: publishToolKey, Arguments: json.RawMessage(`{"title":"ready"}`),
 		}}}, nil
