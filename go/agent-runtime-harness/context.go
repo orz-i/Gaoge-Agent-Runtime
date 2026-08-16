@@ -56,8 +56,61 @@ func (contextModelMiddleware) Model(
 	if err != nil {
 		return model.Response{}, err
 	}
-	request.Messages = messages
+	request.Messages, err = mergeContextRuntimeMessages(messages, request.Messages)
+	if err != nil {
+		return model.Response{}, err
+	}
 	return next(ctx, request, emit)
+}
+
+func mergeContextRuntimeMessages(contextMessages, runtimeMessages []model.Message) ([]model.Message, error) {
+	if len(contextMessages) == 0 || len(runtimeMessages) == 0 {
+		return nil, ErrInvalidRequest
+	}
+	goalIndex := runtimeGoalIndex(runtimeMessages)
+	contextGoal := contextMessages[len(contextMessages)-1]
+	if !sameCurrentGoal(contextGoal, runtimeMessages, goalIndex) {
+		return nil, ErrInvalidRequest
+	}
+	merged := mergeRuntimeGuidance(contextMessages, runtimeMessages[:goalIndex])
+	return append(merged, model.CloneMessages(runtimeMessages[goalIndex+1:])...), nil
+}
+
+func runtimeGoalIndex(messages []model.Message) int {
+	index := 0
+	for index < len(messages) && messages[index].Role == model.RoleSystem {
+		index++
+	}
+	return index
+}
+
+func sameCurrentGoal(contextGoal model.Message, runtimeMessages []model.Message, goalIndex int) bool {
+	return goalIndex < len(runtimeMessages) && runtimeMessages[goalIndex].Role == model.RoleUser &&
+		contextGoal.Role == model.RoleUser &&
+		strings.TrimSpace(runtimeMessages[goalIndex].Content) == strings.TrimSpace(contextGoal.Content)
+}
+
+func mergeRuntimeGuidance(contextMessages, guidanceMessages []model.Message) []model.Message {
+	merged := model.CloneMessages(contextMessages)
+	guidance := runtimeGuidance(guidanceMessages)
+	if guidance == "" {
+		return merged
+	}
+	if merged[0].Role == model.RoleSystem {
+		merged[0].Content = strings.TrimSpace(merged[0].Content) + "\n\n" + guidance
+		return merged
+	}
+	return append([]model.Message{{Role: model.RoleSystem, Content: guidance}}, merged...)
+}
+
+func runtimeGuidance(messages []model.Message) string {
+	guidance := make([]string, 0, len(messages))
+	for _, message := range messages {
+		if content := strings.TrimSpace(message.Content); content != "" {
+			guidance = append(guidance, content)
+		}
+	}
+	return strings.Join(guidance, "\n\n")
 }
 
 func withContextSnapshot(ctx context.Context, snapshot runtimecontext.Snapshot) context.Context {
