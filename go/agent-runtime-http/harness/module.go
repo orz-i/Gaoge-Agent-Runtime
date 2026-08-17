@@ -60,14 +60,24 @@ func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
 		}
 		items = append(items, projected)
 	}
+	status := snapshot.Turn.Status
+	errorCode := snapshot.Turn.ErrorCode
+	errorDetail := snapshot.Turn.ErrorDetail
+	output := snapshot.Output
+	if terminalHarnessTurn(status) && !harness.TerminalFeedReady(snapshot) {
+		status = harness.TurnRunning
+		errorCode = ""
+		errorDetail = ""
+		output = nil
+	}
 	return SnapshotResponse{
 		Turn: TurnResponse{
-			ID: snapshot.Turn.ID, HostTurn: snapshot.Turn.HostTurn, Status: snapshot.Turn.Status,
-			Revision: snapshot.Turn.Revision, ErrorCode: snapshot.Turn.ErrorCode, ErrorDetail: snapshot.Turn.ErrorDetail,
+			ID: snapshot.Turn.ID, HostTurn: snapshot.Turn.HostTurn, Status: status,
+			Revision: snapshot.Turn.Revision, ErrorCode: errorCode, ErrorDetail: errorDetail,
 			CreatedAt: snapshot.Turn.CreatedAt, UpdatedAt: snapshot.Turn.UpdatedAt,
 		},
 		Items:  items,
-		Output: snapshot.Output,
+		Output: output,
 	}, nil
 }
 
@@ -203,7 +213,7 @@ func (handler *Handler) StreamTurnFeed(context *gin.Context) {
 	if terminal {
 		return
 	}
-	if terminalHarnessTurn(snapshot.Turn.Status) {
+	if terminalHarnessTurn(snapshot.Turn.Status) && harness.TerminalFeedReady(snapshot) {
 		_ = writeTurnFeedEvent(context, terminalTurnSnapshotEvent(snapshot, lastSeq+1))
 		return
 	}

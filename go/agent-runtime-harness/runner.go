@@ -422,7 +422,11 @@ func (runner *Runner) syncRuntimeSnapshot(ctx context.Context, turn Turn, runtim
 	if err = runner.recordApprovalRequestItem(ctx, turn, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
-	if terminalTurnStatus(turn.Status) {
+	deferTerminalProjection, err := runner.hostOutputProjectionPending(ctx, turn)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if terminalTurnStatus(turn.Status) && !deferTerminalProjection {
 		if err = runner.recordTerminalAgentMessageItem(ctx, turn, runtimeSnapshot); err != nil {
 			return Snapshot{}, err
 		}
@@ -435,10 +439,62 @@ func (runner *Runner) syncRuntimeSnapshot(ctx context.Context, turn Turn, runtim
 		if err = runner.projectDelegationRelations(ctx, turn); err != nil {
 			return Snapshot{}, err
 		}
-		if turnChanged {
+		if turnChanged && !deferTerminalProjection {
 			runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
 		}
 	}
+	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+}
+
+func (runner *Runner) terminalRuntimeSnapshot(ctx context.Context, turn Turn) (kernel.Snapshot, error) {
+	result := kernel.Snapshot{Run: kernel.Run{ID: turn.RootRunID}}
+	rootRunID := strings.TrimSpace(turn.RootRunID)
+	if rootRunID == "" {
+		return result, nil
+	}
+	loaded, err := runner.runtime.Load(ctx, rootRunID)
+	if err == nil {
+		return loaded, nil
+	}
+	if turn.Status == TurnFailed {
+		return result, nil
+	}
+	return kernel.Snapshot{}, err
+}
+
+// FinalizeHostOutput acknowledges that the host-owned output projection is
+// durable. A Harness Turn with a bound host Assistant Message does not publish
+// its terminal message/Turn events until this acknowledgement succeeds.
+func (runner *Runner) FinalizeHostOutput(ctx context.Context, turnID string) (Snapshot, error) {
+	turnID = strings.TrimSpace(turnID)
+	if runner == nil || turnID == "" {
+		return Snapshot{}, ErrInvalidRequest
+	}
+	turn, err := runner.store.GetTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !terminalTurnStatus(turn.Status) {
+		return Snapshot{}, ErrConflict
+	}
+	pending, finalized, err := hostOutputProjectionState(ctx, runner.store, turn)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if finalized {
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	if !pending {
+		return Snapshot{}, ErrConflict
+	}
+	runtimeSnapshot, err := runner.terminalRuntimeSnapshot(ctx, turn)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.recordTerminalAgentMessageItem(ctx, turn, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
+	}
+	runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
 	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 }
 
@@ -468,9 +524,10 @@ func (runner *Runner) recordTerminalAgentMessageItem(
 		return err
 	}
 	now := runner.clock.Now().UTC()
+	runID := firstNonEmpty(strings.TrimSpace(snapshot.Run.ID), strings.TrimSpace(turn.RootRunID))
 	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
-		ID:     stableID("him", turn.ID, snapshot.Run.ID, string(status), payload.ContentHash),
-		TurnID: turn.ID, Kind: ItemAgentMessage, Status: status, RunID: snapshot.Run.ID,
+		ID:     stableID("him", turn.ID, runID, string(status), payload.ContentHash),
+		TurnID: turn.ID, Kind: ItemAgentMessage, Status: status, RunID: runID,
 		HostRef: hostRef, ParentItemID: parentItemID, Payload: raw,
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -568,11 +625,38 @@ func (runner *Runner) failTurn(ctx context.Context, turn Turn, cause error) (Sna
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err = runner.recordTerminalAgentMessageItem(ctx, updated, kernel.Snapshot{Run: kernel.Run{ID: updated.RootRunID}}); err != nil {
+	pending, _, err := hostOutputProjectionState(ctx, runner.store, updated)
+	if err != nil {
 		return Snapshot{}, err
 	}
-	runner.publishTurnStatus(ctx, updated, EventTurnFailed, true)
+	if !pending {
+		if err = runner.recordTerminalAgentMessageItem(ctx, updated, kernel.Snapshot{Run: kernel.Run{ID: updated.RootRunID}}); err != nil {
+			return Snapshot{}, err
+		}
+		runner.publishTurnStatus(ctx, updated, EventTurnFailed, true)
+	}
 	return runner.loadSnapshot(ctx, updated, nil)
+}
+
+func (runner *Runner) hostOutputProjectionPending(ctx context.Context, turn Turn) (bool, error) {
+	if !terminalTurnStatus(turn.Status) {
+		return false, nil
+	}
+	pending, _, err := hostOutputProjectionState(ctx, runner.store, turn)
+	return pending, err
+}
+
+func hostOutputProjectionState(ctx context.Context, store Store, turn Turn) (bool, bool, error) {
+	items, err := store.ListItems(ctx, turn.ID, 0, defaultItemListLimit)
+	if err != nil {
+		return false, false, err
+	}
+	startedID := hostOutputStartedMessageItemID(items)
+	if startedID == "" {
+		return false, false, nil
+	}
+	finalized := hostOutputLifecycleFinalized(items, startedID)
+	return !finalized, finalized, nil
 }
 
 func normalizeOptionalHostRef(value **HostRef) error {

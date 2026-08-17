@@ -238,6 +238,40 @@ func itemLifecycleID(item Item) string {
 	return strings.TrimSpace(item.ID)
 }
 
+// TerminalFeedReady reports whether a terminal Turn may be synthesized from a
+// durable Snapshot when retained live events are unavailable. Host-bound
+// Assistant Messages must have their terminal child Item first so clients can
+// never observe Turn completion ahead of the product projection commit.
+func TerminalFeedReady(snapshot Snapshot) bool {
+	if !terminalTurnStatus(snapshot.Turn.Status) {
+		return false
+	}
+	startedID := hostOutputStartedMessageItemID(snapshot.Items)
+	return startedID == "" || hostOutputLifecycleFinalized(snapshot.Items, startedID)
+}
+
+func hostOutputStartedMessageItemID(items []Item) string {
+	for index := len(items) - 1; index >= 0; index-- {
+		item := items[index]
+		if item.Kind == ItemAgentMessage && item.Status == ItemStarted && strings.TrimSpace(item.ParentItemID) == "" && item.HostRef != nil {
+			return item.ID
+		}
+	}
+	return ""
+}
+
+func hostOutputLifecycleFinalized(items []Item, startedID string) bool {
+	for _, item := range items {
+		if item.Kind != ItemAgentMessage || strings.TrimSpace(item.ParentItemID) != startedID {
+			continue
+		}
+		if item.Status == ItemCompleted || item.Status == ItemFailed || item.Status == ItemCancelled {
+			return true
+		}
+	}
+	return false
+}
+
 func appendItemFact(
 	ctx context.Context,
 	store Store,

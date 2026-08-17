@@ -47,10 +47,29 @@ func TestConversationMessageItemsAndTurnFeedUseStableProductIdentity(t *testing.
 		t.Fatalf("start snapshot=%#v err=%v", snapshot.Turn, err)
 	}
 	userItem, startedAgent, completedAgent := messageLifecycleItems(snapshot.Items)
-	assertStableMessageItems(t, snapshot.Items, userItem, startedAgent, completedAgent)
+	assertMessageHostRef(t, snapshot.Items, userItem, testUserMessage, "user")
+	assertMessageHostRef(t, snapshot.Items, startedAgent, testAgentMessage, "started assistant")
+	if completedAgent != nil || harness.TerminalFeedReady(snapshot) {
+		t.Fatalf("host-bound terminal projection was published before acknowledgement: %#v", snapshot.Items)
+	}
 	events, err := turnFeed.Replay(t.Context(), snapshot.Turn.ID, 0)
 	if err != nil {
 		t.Fatalf("replay turn feed: %v", err)
+	}
+	assertNoTerminalTurnFeed(t, events)
+
+	finalized, err := runner.FinalizeHostOutput(t.Context(), snapshot.Turn.ID)
+	if err != nil {
+		t.Fatalf("finalize host output: %v", err)
+	}
+	userItem, startedAgent, completedAgent = messageLifecycleItems(finalized.Items)
+	assertStableMessageItems(t, finalized.Items, userItem, startedAgent, completedAgent)
+	if !harness.TerminalFeedReady(finalized) {
+		t.Fatalf("host-bound terminal projection was not acknowledged: %#v", finalized.Items)
+	}
+	events, err = turnFeed.Replay(t.Context(), snapshot.Turn.ID, 0)
+	if err != nil {
+		t.Fatalf("replay finalized turn feed: %v", err)
 	}
 	assertTerminalTurnFeedOrder(t, events, startedAgent.ID)
 }
@@ -111,6 +130,15 @@ func assertStableMessageItems(
 	assertMessageHostRef(t, items, completedAgent, testAgentMessage, "completed assistant")
 	if completedAgent.ParentItemID != startedAgent.ID {
 		t.Fatalf("assistant message lifecycle is not stable: %#v", items)
+	}
+}
+
+func assertNoTerminalTurnFeed(t *testing.T, events []harness.TurnEvent) {
+	t.Helper()
+	for _, event := range events {
+		if event.Terminal || event.Type == harness.EventTurnCompleted || event.Type == harness.EventTurnFailed || event.Type == harness.EventTurnCancelled {
+			t.Fatalf("terminal Turn event was published before host projection acknowledgement: %#v", events)
+		}
 	}
 }
 
