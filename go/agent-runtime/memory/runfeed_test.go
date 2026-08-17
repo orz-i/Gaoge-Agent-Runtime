@@ -1,6 +1,7 @@
 package memory_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -37,8 +38,9 @@ func TestRunFeedStoreSequenceReplayAndTTL(t *testing.T) {
 		t.Fatalf("sequence replay = (%#v, %#v, %#v), %v", first, second, items, err)
 	}
 	clock.now = clock.now.Add(time.Minute + time.Second)
-	items, err = store.List(t.Context(), "run-1", 0, 10)
-	if err != nil || len(items) != 0 {
-		t.Fatalf("expired items = %#v, %v", items, err)
+	_, err = store.List(t.Context(), "run-1", 0, 10)
+	var expired *runfeed.CursorExpiredError
+	if !errors.As(err, &expired) || expired.HeadSeq != second.Seq {
+		t.Fatalf("expired cursor = %#v, %v", expired, err)
 	}
 }

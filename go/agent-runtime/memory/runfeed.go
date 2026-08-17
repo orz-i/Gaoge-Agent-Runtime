@@ -17,6 +17,8 @@ type RunFeedOptions struct {
 }
 
 type runFeedRecord struct {
+	sequence  int64
+	terminal  bool
 	events    []runfeed.Event
 	expiresAt time.Time
 }
@@ -52,14 +54,16 @@ func (store *RunFeedStore) Append(
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	store.removeExpiredLocked(runID)
+	store.expireEventsLocked(runID)
 	record := store.records[runID]
+	record.sequence++
 	event := runfeed.Event{
-		Seq: int64(len(record.events) + 1), RunID: runID, Type: draft.Type,
+		Seq: record.sequence, RunID: runID, Type: draft.Type,
 		Delta: draft.Delta, Message: draft.Message, Data: append([]byte(nil), draft.Data...),
 		Revision: draft.Revision, Status: draft.Status, Terminal: draft.Terminal, CreatedAt: createdAt.UTC(),
 	}
 	record.events = append(record.events, event)
+	record.terminal = draft.Terminal
 	record.expiresAt = store.clock.Now().UTC().Add(retention)
 	store.records[runID] = record
 	return cloneRunFeedEvent(event), nil
@@ -73,8 +77,11 @@ func (store *RunFeedStore) List(_ context.Context, runID string, afterSeq int64,
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	store.removeExpiredLocked(runID)
+	store.expireEventsLocked(runID)
 	record := store.records[runID]
+	if cursorExpired(record, afterSeq) {
+		return nil, &runfeed.CursorExpiredError{AfterSeq: afterSeq, HeadSeq: record.sequence}
+	}
 	result := make([]runfeed.Event, 0)
 	for _, event := range record.events {
 		if event.Seq <= afterSeq {
@@ -88,11 +95,27 @@ func (store *RunFeedStore) List(_ context.Context, runID string, afterSeq int64,
 	return result, nil
 }
 
-func (store *RunFeedStore) removeExpiredLocked(runID string) {
+func (store *RunFeedStore) expireEventsLocked(runID string) {
 	record, ok := store.records[runID]
 	if ok && !record.expiresAt.After(store.clock.Now().UTC()) {
-		delete(store.records, runID)
+		if record.terminal {
+			delete(store.records, runID)
+			return
+		}
+		record.events = nil
+		record.expiresAt = time.Time{}
+		store.records[runID] = record
 	}
+}
+
+func cursorExpired(record runFeedRecord, afterSeq int64) bool {
+	if record.sequence <= afterSeq {
+		return false
+	}
+	if len(record.events) == 0 {
+		return true
+	}
+	return record.events[0].Seq > afterSeq+1
 }
 
 func cloneRunFeedEvent(event runfeed.Event) runfeed.Event {

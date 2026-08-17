@@ -2,10 +2,15 @@ package harnesshttp
 
 import (
 	"encoding/json"
+	stdhttp "net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 )
 
 const testHarnessTurnID = "ht-1"
@@ -47,5 +52,19 @@ func TestSnapshotResponseMasksTerminalHostOutputUntilProjectionAcknowledgement(t
 	}
 	if finalized.Turn.Status != harness.TurnCompleted || finalized.Output == nil || string(finalized.Output.Content) != `"final"` {
 		t.Fatalf("acknowledged terminal host output was not exposed: %#v", finalized)
+	}
+}
+
+func TestWriteTurnFeedCursorExpiredReturnsRecoveryHead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+
+	if !writeTurnFeedCursorExpired(context, &runfeed.CursorExpiredError{AfterSeq: 3, HeadSeq: 9}) {
+		t.Fatal("cursor expiry was not handled")
+	}
+	if recorder.Code != stdhttp.StatusConflict || recorder.Header().Get("X-Harness-Feed-Head") != "9" ||
+		!strings.Contains(recorder.Body.String(), `"code":"harness.feed_cursor_expired"`) {
+		t.Fatalf("cursor response = %d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
 	}
 }

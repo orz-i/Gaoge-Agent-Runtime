@@ -77,6 +77,20 @@ func TestStreamRunFeedHidesAnotherActorsRun(t *testing.T) {
 	}
 }
 
+func TestWriteRunFeedCursorExpiredReturnsRecoveryHead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+
+	if !writeRunFeedCursorExpired(context, &runfeed.CursorExpiredError{AfterSeq: 2, HeadSeq: 7}) {
+		t.Fatal("cursor expiry was not handled")
+	}
+	if recorder.Code != http.StatusConflict || recorder.Header().Get("X-Run-Feed-Head") != "7" ||
+		!strings.Contains(recorder.Body.String(), `"code":"runfeed.cursor_expired"`) {
+		t.Fatalf("cursor response = %d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+}
+
 func newRunFeedHTTPTest(t *testing.T) (*gin.Engine, *kernel.Runtime, *runfeed.Feed, kernel.ActorRef) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

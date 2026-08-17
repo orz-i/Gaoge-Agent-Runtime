@@ -117,4 +117,56 @@ describe("RuntimeClient target API", () => {
     ]);
     expect(fetcher.mock.calls.some((call) => String(call[0]).includes("/runs/"))).toBe(false);
   });
+
+  it("restores a Harness Turn snapshot before continuing after an expired feed cursor", async () => {
+    const harnessSnapshot = {
+      turn: {
+        id: "ht-1", hostTurn: { kind: "conversation_turn", id: "client-turn-1" },
+        status: "waiting_input", revision: 4,
+        createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:16:00Z",
+      },
+      items: [],
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: { code: "harness.feed_cursor_expired", message: "expired" } }),
+        { status: 409, headers: { "content-type": "application/json", "x-harness-feed-head": "7" } },
+      ))
+      .mockResolvedValueOnce(json(harnessSnapshot))
+      .mockResolvedValueOnce(new Response(
+        `id: 8\ndata: {"seq":8,"turnID":"ht-1","type":"turn.completed","status":"completed","terminal":true,"createdAt":"2026-08-17T00:16:01Z"}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      ));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+    const restored = vi.fn();
+    const events = [];
+
+    for await (const event of client.harness.turns.feed("ht-1", {
+      afterSeq: 2,
+      reconnectDelayMS: 0,
+      onCursorExpired: restored,
+    })) events.push(event);
+
+    expect(restored).toHaveBeenCalledWith(harnessSnapshot);
+    expect(events.map((event) => event.seq)).toEqual([8]);
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "https://runtime.test/api/v1/harness/turns/ht-1/feed?afterSeq=2",
+      "https://runtime.test/api/v1/harness/turns/ht-1",
+      "https://runtime.test/api/v1/harness/turns/ht-1/feed?afterSeq=7",
+    ]);
+  });
+
+  it("never skips an expired Harness cursor without a snapshot recovery callback", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: { code: "harness.feed_cursor_expired", message: "expired" } }),
+      { status: 409, headers: { "content-type": "application/json", "x-harness-feed-head": "7" } },
+    ));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+
+    const iterator = client.harness.turns.feed("ht-1", { afterSeq: 2, reconnectDelayMS: 0 });
+    await expect(iterator.next()).rejects.toEqual(expect.objectContaining<Partial<RuntimeAPIError>>({
+      status: 409,
+      code: "harness.feed_cursor_expired",
+    }));
+  });
 });

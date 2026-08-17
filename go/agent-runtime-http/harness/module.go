@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
 	runtimehttp "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 )
 
 type TurnResponse struct {
@@ -23,6 +24,21 @@ type TurnResponse struct {
 	ErrorDetail string             `json:"errorDetail,omitempty"`
 	CreatedAt   time.Time          `json:"createdAt"`
 	UpdatedAt   time.Time          `json:"updatedAt"`
+}
+
+func writeTurnFeedCursorExpired(context *gin.Context, err error) bool {
+	var expired *runfeed.CursorExpiredError
+	if !errors.As(err, &expired) {
+		return false
+	}
+	context.Header("X-Harness-Feed-Head", strconv.FormatInt(expired.HeadSeq, 10))
+	runtimehttp.WriteError(
+		context,
+		stdhttp.StatusConflict,
+		"harness.feed_cursor_expired",
+		"Harness Turn feed cursor is outside retained history",
+	)
+	return true
 }
 
 func (handler *Handler) ResolveApproval(context *gin.Context) {
@@ -204,6 +220,9 @@ func (handler *Handler) StreamTurnFeed(context *gin.Context) {
 	}
 	subscription, err := handler.runner.SubscribeTurnFeed(context.Request.Context(), snapshot.Turn.ID, afterSeq)
 	if err != nil {
+		if writeTurnFeedCursorExpired(context, err) {
+			return
+		}
 		writeHarnessError(context, err)
 		return
 	}

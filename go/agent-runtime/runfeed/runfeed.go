@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -29,7 +30,27 @@ const (
 	EventInteractionRequired = "interaction.required"
 )
 
-var ErrInvalidInput = errors.New("invalid run feed input")
+var (
+	ErrInvalidInput   = errors.New("invalid run feed input")
+	ErrCursorExpired  = errors.New("run feed cursor expired")
+)
+
+// CursorExpiredError reports that retained events no longer cover the
+// requested cursor. HeadSeq is the current monotonic feed high-water mark;
+// callers must restore durable state before continuing from that cursor.
+type CursorExpiredError struct {
+	AfterSeq int64
+	HeadSeq  int64
+}
+
+func (err *CursorExpiredError) Error() string {
+	if err == nil {
+		return ErrCursorExpired.Error()
+	}
+	return fmt.Sprintf("%s: after=%d head=%d", ErrCursorExpired, err.AfterSeq, err.HeadSeq)
+}
+
+func (err *CursorExpiredError) Unwrap() error { return ErrCursorExpired }
 
 // Draft is one provider-neutral live event before the Store assigns its sequence.
 type Draft struct {

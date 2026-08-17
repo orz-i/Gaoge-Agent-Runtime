@@ -21,6 +21,9 @@ export type RunFeedOptions = RequestOptions & {
   reconnectDelayMS?: number;
   maxReconnects?: number;
 };
+export type HarnessTurnFeedOptions = RunFeedOptions & {
+  onCursorExpired?: (snapshot: HarnessTurnSnapshotDTO) => void | Promise<void>;
+};
 
 export class RuntimeAPIError extends Error {
   constructor(message: string, public readonly status: number, public readonly code: string, public readonly requestID: string) {
@@ -102,7 +105,7 @@ export class RuntimeClient {
       turns: {
         get: (turnID: string, request?: RequestOptions) =>
           this.request<HarnessTurnSnapshotDTO>(`/harness/turns/${pathPart(turnID)}`, {}, request),
-        feed: (turnID: string, request?: RunFeedOptions) => this.streamHarnessTurnFeed(turnID, request),
+        feed: (turnID: string, request?: HarnessTurnFeedOptions) => this.streamHarnessTurnFeed(turnID, request),
         resolveApproval: (
           turnID: string,
           decision: "approve" | "reject",
@@ -150,7 +153,7 @@ export class RuntimeClient {
 
   private async *streamHarnessTurnFeed(
     turnID: string,
-    request: RunFeedOptions = {},
+    request: HarnessTurnFeedOptions = {},
   ): AsyncGenerator<HarnessTurnFeedEventDTO> {
     let afterSeq = Math.max(0, Math.trunc(request.afterSeq ?? 0));
     const reconnectDelayMS = Math.max(0, Math.trunc(request.reconnectDelayMS ?? 250));
@@ -178,7 +181,21 @@ export class RuntimeClient {
           await reconnectDelay(reconnectDelayMS, request.signal);
           continue;
         }
-        throw await runtimeAPIError(response);
+        const apiError = await runtimeAPIError(response);
+        if (apiError.code === "harness.feed_cursor_expired") {
+          const headSeq = Number.parseInt(response.headers.get("x-harness-feed-head") ?? "", 10);
+          if (!request.onCursorExpired || !Number.isSafeInteger(headSeq) || headSeq <= afterSeq) throw apiError;
+          const snapshot = await this.request<HarnessTurnSnapshotDTO>(
+            `/harness/turns/${pathPart(turnID)}`,
+            {},
+            { signal: request.signal },
+          );
+          await request.onCursorExpired(snapshot);
+          afterSeq = headSeq;
+          reconnects = 0;
+          continue;
+        }
+        throw apiError;
       }
       if (!response.body) {
         throw new RuntimeAPIError("Harness Turn feed response has no body", response.status, "harness.feed_invalid_response", "");
