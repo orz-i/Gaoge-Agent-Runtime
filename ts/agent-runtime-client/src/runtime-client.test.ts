@@ -80,4 +80,41 @@ describe("RuntimeClient target API", () => {
       "https://runtime.test/api/v1/runs/run-1/feed?afterSeq=1",
     ]);
   });
+
+  it("uses Harness Turn identity for snapshot, semantic feed, and approval", async () => {
+    const harnessSnapshot = {
+      turn: {
+        id: "ht/1", hostTurn: { kind: "conversation_turn", id: "client-turn-1" },
+        status: "completed", revision: 3,
+        createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:00:01Z",
+      },
+      items: [],
+      output: { contentType: "text", content: "done" },
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(json(harnessSnapshot))
+      .mockResolvedValueOnce(new Response(
+        `id: 1\ndata: {"seq":1,"turnID":"ht/1","type":"item.delta","itemID":"message-1","itemKind":"agent_message","delta":"hi","createdAt":"2026-08-17T00:00:00Z"}\n\n` +
+        `id: 2\ndata: {"seq":2,"turnID":"ht/1","type":"turn.completed","status":"completed","terminal":true,"createdAt":"2026-08-17T00:00:01Z"}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      ))
+      .mockResolvedValueOnce(json(harnessSnapshot));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+
+    await expect(client.harness.turns.get("ht/1")).resolves.toEqual(harnessSnapshot);
+    const events = [];
+    for await (const event of client.harness.turns.feed("ht/1", { reconnectDelayMS: 0 })) events.push(event);
+    await client.harness.turns.resolveApproval("ht/1", "approve", "continue");
+
+    expect(events.map((event) => [event.seq, event.type, event.itemID])).toEqual([
+      [1, "item.delta", "message-1"],
+      [2, "turn.completed", undefined],
+    ]);
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "https://runtime.test/api/v1/harness/turns/ht%2F1",
+      "https://runtime.test/api/v1/harness/turns/ht%2F1/feed?afterSeq=0",
+      "https://runtime.test/api/v1/harness/turns/ht%2F1/approval",
+    ]);
+    expect(fetcher.mock.calls.some((call) => String(call[0]).includes("/runs/"))).toBe(false);
+  });
 });
