@@ -131,16 +131,14 @@ paths:
       operationId: streamRunFeed
       parameters:
         - $ref: '#/components/parameters/RunID'
-        - name: afterSeq
-          in: query
-          required: false
-          schema: {type: integer, minimum: 0, default: 0}
+        - $ref: '#/components/parameters/AfterSeq'
       responses:
         '200':
           description: Replayable Run Feed event stream
           content:
             text/event-stream:
               schema: {type: string}
+        '409': {$ref: '#/components/responses/RunFeedCursorExpired'}
         default: {$ref: '#/components/responses/Error'}
   /runs/{runID}/workbench:
     get:
@@ -154,6 +152,49 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Workbench'}
         default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}:
+    get:
+      operationId: getHarnessTurn
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+      responses:
+        '200':
+          description: Durable Harness Turn snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/feed:
+    get:
+      operationId: streamHarnessTurnFeed
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+        - $ref: '#/components/parameters/AfterSeq'
+      responses:
+        '200':
+          description: Replayable Harness Turn semantic item stream
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '409': {$ref: '#/components/responses/HarnessFeedCursorExpired'}
+        default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/approval:
+    post:
+      operationId: resolveHarnessApproval
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResolveHarnessApprovalRequest'}
+      responses:
+        '200':
+          description: Harness approval resolved on the same Turn
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
 components:
   parameters:
     RunID:
@@ -161,9 +202,35 @@ components:
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 128}
+    HarnessTurnID:
+      name: turnID
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
+    AfterSeq:
+      name: afterSeq
+      in: query
+      required: false
+      schema: {type: integer, minimum: 0, default: 0}
   responses:
     Error:
       description: Error
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    RunFeedCursorExpired:
+      description: Error code `runfeed.cursor_expired`. Restore the durable Run snapshot before continuing from the returned high-water mark.
+      headers:
+        X-Run-Feed-Head:
+          schema: {type: integer, minimum: 1}
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
+    HarnessFeedCursorExpired:
+      description: Error code `harness.feed_cursor_expired`. Restore the durable Harness Turn snapshot before continuing from the returned high-water mark.
+      headers:
+        X-Harness-Feed-Head:
+          schema: {type: integer, minimum: 1}
       content:
         application/json:
           schema: {$ref: '#/components/schemas/ErrorResponse'}
@@ -176,6 +243,13 @@ components:
         tenantID: {type: string}
         actorID: {type: string}
     ThreadRef:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string, maxLength: 64}
+        id: {type: string, maxLength: 128}
+    HostRef:
       type: object
       additionalProperties: false
       required: [kind, id]
@@ -227,6 +301,13 @@ components:
         expectedRevision: {type: integer, minimum: 1}
         decision: {type: string, enum: [approve, reject]}
         comment: {type: string, maxLength: 2000}
+    ResolveHarnessApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [decision]
+      properties:
+        decision: {type: string, enum: [approve, reject]}
+        comment: {type: string}
     StartWorkflowRunRequest:
       type: object
       additionalProperties: false
@@ -328,6 +409,66 @@ components:
         status: {type: string}
         terminal: {type: boolean}
         createdAt: {type: string, format: date-time}
+    HarnessTurn:
+      type: object
+      additionalProperties: false
+      required: [id, hostTurn, status, revision, createdAt, updatedAt]
+      properties:
+        id: {type: string}
+        hostTurn: {$ref: '#/components/schemas/HostRef'}
+        status: {type: string, enum: [accepted, running, waiting_input, completed, failed, cancelled]}
+        revision: {type: integer, minimum: 1}
+        errorCode: {type: string}
+        errorDetail: {type: string}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    HarnessItem:
+      type: object
+      additionalProperties: false
+      required: [id, turnID, seq, kind, status, createdAt, updatedAt]
+      properties:
+        id: {type: string}
+        turnID: {type: string}
+        seq: {type: integer, minimum: 1}
+        kind:
+          type: string
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, artifact, context, diagnostic]
+        status: {type: string, enum: [started, waiting, completed, failed, cancelled]}
+        hostRef: {$ref: '#/components/schemas/HostRef'}
+        parentItemID: {type: string}
+        payload: {}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    HarnessTurnFeedEvent:
+      type: object
+      additionalProperties: false
+      required: [seq, turnID, type, createdAt]
+      properties:
+        seq: {type: integer, minimum: 1}
+        turnID: {type: string}
+        type:
+          type: string
+          enum: [turn.started, turn.waiting_input, turn.completed, turn.failed, turn.cancelled, item.started, item.delta, item.completed]
+        itemID: {type: string}
+        itemKind:
+          type: string
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, artifact, context, diagnostic]
+        delta: {type: string}
+        message: {type: string}
+        data: {}
+        status: {type: string}
+        terminal: {type: boolean}
+        createdAt: {type: string, format: date-time}
+    HarnessTurnSnapshot:
+      type: object
+      additionalProperties: false
+      required: [turn, items]
+      properties:
+        turn: {$ref: '#/components/schemas/HarnessTurn'}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/HarnessItem'}
+        output: {$ref: '#/components/schemas/Result'}
     Checkpoint:
       type: object
       additionalProperties: true

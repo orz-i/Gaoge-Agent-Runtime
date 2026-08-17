@@ -18,7 +18,7 @@ type openAPIMethod struct {
 
 type openAPIPaths map[string]map[string]openAPIMethod
 
-func TestOpenAPIExposesOnlyTargetRuntimeResources(t *testing.T) {
+func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "contracts", "agent-runtime", "v1", "openapi.yaml"))
 	if err != nil {
@@ -38,10 +38,13 @@ func TestOpenAPIExposesOnlyTargetRuntimeResources(t *testing.T) {
 	}
 	sort.Strings(operations)
 	expected := []string{
+		"get /harness/turns/{turnID}",
+		"get /harness/turns/{turnID}/feed",
 		"get /runs/{runID}",
 		"get /runs/{runID}/feed",
 		"get /runs/{runID}/workbench",
 		"post /agent-runs",
+		"post /harness/turns/{turnID}/approval",
 		"post /plan-runs",
 		"post /plan-runs/{runID}/approval",
 		"post /runs/{runID}/cancel",
@@ -53,6 +56,17 @@ func TestOpenAPIExposesOnlyTargetRuntimeResources(t *testing.T) {
 		t.Fatalf("OpenAPI operations = %#v, want %#v", operations, expected)
 	}
 	assertCapabilityFragments(t, document.Paths)
+	for _, marker := range []string{
+		"runfeed.cursor_expired",
+		"X-Run-Feed-Head",
+		"harness.feed_cursor_expired",
+		"X-Harness-Feed-Head",
+		"HarnessTurnSnapshot",
+	} {
+		if !containsBytes(raw, []byte(marker)) {
+			t.Fatalf("OpenAPI missing formal recovery/Harness marker %q", marker)
+		}
+	}
 	if containsBytes(raw, []byte("executionMode")) || containsBytes(raw, []byte("auto, direct, plan")) {
 		t.Fatal("OpenAPI revived removed Agent execution modes")
 	}
@@ -70,7 +84,7 @@ type capabilityFragment struct {
 func assertCapabilityFragments(t *testing.T, paths openAPIPaths) {
 	t.Helper()
 	fragmentFS := os.DirFS(filepath.Join("..", "..", "contracts", "agent-runtime", "v1", "capabilities"))
-	fragmentNames := []string{"core.json", "agent.json", "planexecute.json", "workflow.json", "team.json"}
+	fragmentNames := []string{"core.json", "agent.json", "planexecute.json", "workflow.json", "team.json", "harness.json"}
 	actual := make([]string, 0)
 	seenCapabilities := map[string]struct{}{}
 	for _, fragmentName := range fragmentNames {

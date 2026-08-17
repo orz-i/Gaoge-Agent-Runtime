@@ -1,0 +1,8 @@
+{
+  "capability": "harness",
+  "operations": [
+    {"method": "get", "path": "/harness/turns/{turnID}", "operationId": "getHarnessTurn"},
+    {"method": "get", "path": "/harness/turns/{turnID}/feed", "operationId": "streamHarnessTurnFeed"},
+    {"method": "post", "path": "/harness/turns/{turnID}/approval", "operationId": "resolveHarnessApproval"}
+  ]
+}
