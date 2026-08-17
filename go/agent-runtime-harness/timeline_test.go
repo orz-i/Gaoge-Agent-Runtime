@@ -92,14 +92,92 @@ func hostedTimelineResponse() model.Response {
 		Content: "hosted tool answer",
 		HostedToolCalls: []model.HostedToolCall{{
 			ID: hostedTimelineCallID, ToolKey: hostedTimelineTool, Status: "completed",
-			Input: json.RawMessage(`{"prompt":"sensitive hosted input"}`),
+			Input:  json.RawMessage(`{"prompt":"sensitive hosted input"}`),
 			Output: json.RawMessage(`{"artifact":"file-1"}`),
 		}},
 	}
 }
 
+type idlessHostedTimelineModel struct{}
+
+func (idlessHostedTimelineModel) Generate(_ context.Context, _ model.Request) (model.Response, error) {
+	return idlessHostedTimelineResponse(), nil
+}
+
+func (idlessHostedTimelineModel) GenerateStream(
+	_ context.Context,
+	_ model.Request,
+	emit func(model.StreamEvent) error,
+) (model.Response, error) {
+	for _, status := range []string{"in_progress", "completed"} {
+		if err := emit(model.StreamEvent{HostedToolCall: &model.HostedToolCall{
+			ToolKey: hostedTimelineTool, Status: status,
+		}}); err != nil {
+			return model.Response{}, err
+		}
+	}
+	return idlessHostedTimelineResponse(), nil
+}
+
+func idlessHostedTimelineResponse() model.Response {
+	return model.Response{
+		Content: "two idless hosted tool facts",
+		HostedToolCalls: []model.HostedToolCall{
+			{ToolKey: hostedTimelineTool, Status: "completed"},
+			{ToolKey: hostedTimelineTool, Status: "completed"},
+		},
+	}
+}
+
 func TestHostedToolStreamUsesStableToolItemLifecycle(t *testing.T) {
 	t.Parallel()
+	snapshot, events := runHostedToolTimeline(t, hostedTimelineModel{}, "stable")
+	assertHostedToolLifecycle(t, snapshot, events)
+}
+
+func TestHostedToolStreamDoesNotGuessIdlessLifecycle(t *testing.T) {
+	t.Parallel()
+	snapshot, events := runHostedToolTimeline(t, idlessHostedTimelineModel{}, "idless")
+	toolFeedIDs := assertNoIdlessHostedToolLiveLifecycle(t, events)
+	toolItems := assertDistinctIdlessHostedToolFacts(t, snapshot.Items)
+	if len(toolFeedIDs) != 2 || len(toolItems) != 2 {
+		t.Fatalf("idless final hosted Tool facts collapsed: feed=%#v items=%#v", toolFeedIDs, toolItems)
+	}
+}
+
+func assertNoIdlessHostedToolLiveLifecycle(t *testing.T, events []harness.TurnEvent) map[string]struct{} {
+	t.Helper()
+	toolFeedIDs := make(map[string]struct{})
+	for _, event := range events {
+		if event.ItemKind != harness.ItemTool {
+			continue
+		}
+		if event.Type == harness.EventItemStarted || event.Type == harness.EventItemDelta {
+			t.Fatalf("Harness fabricated live identity for idless hosted Tool progress: %#v", event)
+		}
+		if event.Type == harness.EventItemCompleted {
+			toolFeedIDs[event.ItemID] = struct{}{}
+		}
+	}
+	return toolFeedIDs
+}
+
+func assertDistinctIdlessHostedToolFacts(t *testing.T, items []harness.Item) map[string]struct{} {
+	t.Helper()
+	toolItems := make(map[string]struct{})
+	for _, item := range items {
+		if item.Kind == harness.ItemTool && item.Status == harness.ItemCompleted {
+			if item.ParentItemID != "" {
+				t.Fatalf("idless final hosted Tool was attached to guessed stream lifecycle: %#v", item)
+			}
+			toolItems[item.ID] = struct{}{}
+		}
+	}
+	return toolItems
+}
+
+func runHostedToolTimeline(t *testing.T, client model.Client, suffix string) (harness.Snapshot, []harness.TurnEvent) {
+	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: timelineTestClock{}})
 	if err != nil {
 		t.Fatal(err)
@@ -120,7 +198,7 @@ func TestHostedToolStreamUsesStableToolItemLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: hostedTimelineModel{}, ModelMiddleware: []plugin.ModelMiddleware{modelTimeline},
+		Runtime: runtime, Model: client, ModelMiddleware: []plugin.ModelMiddleware{modelTimeline},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -132,9 +210,9 @@ func TestHostedToolStreamUsesStableToolItemLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := testStartRequest()
-	request.HostThread.ID = "thread-hosted-tool-timeline"
+	request.HostThread.ID = "thread-hosted-tool-timeline-" + suffix
 	request.Thread.ID = request.HostThread.ID
-	request.HostTurn.ID = "turn-hosted-tool-timeline"
+	request.HostTurn.ID = "turn-hosted-tool-timeline-" + suffix
 	snapshot, err := runner.Start(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +221,7 @@ func TestHostedToolStreamUsesStableToolItemLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertHostedToolLifecycle(t, snapshot, events)
+	return snapshot, events
 }
 
 func assertHostedToolLifecycle(t *testing.T, snapshot harness.Snapshot, events []harness.TurnEvent) {

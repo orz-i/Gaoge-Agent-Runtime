@@ -46,16 +46,15 @@ func appendHostedToolStartedItem(
 }
 
 type hostedToolStreamState struct {
-	ItemID     string
-	CallID     string
-	ToolKey    string
-	InputHash  string
-	Closed     bool
+	ItemID    string
+	CallID    string
+	ToolKey   string
+	InputHash string
+	Closed    bool
 }
 
 type hostedToolStreamTracker struct {
 	turnID string
-	next   int
 	states []hostedToolStreamState
 }
 
@@ -75,6 +74,9 @@ func (middleware *ModelTimelineMiddleware) recordHostedToolStreamEvent(
 	tracker *hostedToolStreamTracker,
 	call model.HostedToolCall,
 ) error {
+	if strings.TrimSpace(call.ID) == "" {
+		return nil
+	}
 	state, created := tracker.resolveStream(call)
 	if created {
 		if err := appendHostedToolStartedItem(ctx, middleware.store, middleware.clock, middleware.feed, turn, runID, state, call); err != nil {
@@ -99,34 +101,19 @@ func (tracker *hostedToolStreamTracker) resolveStream(call model.HostedToolCall)
 	callID := strings.TrimSpace(call.ID)
 	toolKey := strings.TrimSpace(call.ToolKey)
 	inputHash := hashTimelineBytes(call.Input)
-	if index := tracker.findStreamState(callID, toolKey, inputHash); index >= 0 {
+	if index := tracker.stateIndexByCallID(callID); index >= 0 {
 		state := &tracker.states[index]
-		if state.CallID == "" && callID != "" {
-			state.CallID = callID
-		}
 		if state.InputHash == "" && inputHash != "" {
 			state.InputHash = inputHash
 		}
 		return *state, false
 	}
-	tracker.next++
-	identity := firstNonEmpty(callID, inputHash, strconv.Itoa(tracker.next))
 	state := hostedToolStreamState{
-		ItemID: stableID("hihts", tracker.turnID, toolKey, identity),
+		ItemID: stableID("hihts", tracker.turnID, toolKey, callID),
 		CallID: callID, ToolKey: toolKey, InputHash: inputHash,
 	}
 	tracker.states = append(tracker.states, state)
 	return state, true
-}
-
-func (tracker *hostedToolStreamTracker) findStreamState(callID, toolKey, inputHash string) int {
-	if index := tracker.stateIndexByCallID(callID); index >= 0 {
-		return index
-	}
-	if index := tracker.stateIndexByInput(toolKey, inputHash); index >= 0 {
-		return index
-	}
-	return tracker.uniqueOpenStateIndex(toolKey)
 }
 
 func (tracker *hostedToolStreamTracker) stateIndexByCallID(callID string) int {
@@ -139,34 +126,6 @@ func (tracker *hostedToolStreamTracker) stateIndexByCallID(callID string) int {
 		}
 	}
 	return -1
-}
-
-func (tracker *hostedToolStreamTracker) stateIndexByInput(toolKey, inputHash string) int {
-	if inputHash == "" {
-		return -1
-	}
-	for index := range tracker.states {
-		state := tracker.states[index]
-		if state.ToolKey == toolKey && state.InputHash == inputHash {
-			return index
-		}
-	}
-	return -1
-}
-
-func (tracker *hostedToolStreamTracker) uniqueOpenStateIndex(toolKey string) int {
-	candidate := -1
-	for index := len(tracker.states) - 1; index >= 0; index-- {
-		state := tracker.states[index]
-		if state.ToolKey != toolKey || state.Closed {
-			continue
-		}
-		if candidate >= 0 {
-			return -1
-		}
-		candidate = index
-	}
-	return candidate
 }
 
 func (tracker *hostedToolStreamTracker) markStreamStatus(itemID, status string) {
@@ -183,29 +142,10 @@ func (tracker *hostedToolStreamTracker) markStreamStatus(itemID, status string) 
 
 func (tracker *hostedToolStreamTracker) finalParent(call model.HostedToolCall) string {
 	callID := strings.TrimSpace(call.ID)
-	toolKey := strings.TrimSpace(call.ToolKey)
-	inputHash := hashTimelineBytes(call.Input)
 	if index := tracker.stateIndexByCallID(callID); index >= 0 {
 		return tracker.states[index].ItemID
 	}
-	if index := tracker.stateIndexByInput(toolKey, inputHash); index >= 0 {
-		return tracker.states[index].ItemID
-	}
-	return tracker.uniqueItemIDForTool(toolKey)
-}
-
-func (tracker *hostedToolStreamTracker) uniqueItemIDForTool(toolKey string) string {
-	parent := ""
-	for _, state := range tracker.states {
-		if state.ToolKey != toolKey {
-			continue
-		}
-		if parent != "" {
-			return ""
-		}
-		parent = state.ItemID
-	}
-	return parent
+	return ""
 }
 
 func hostedToolTerminalStatus(status string) bool {
