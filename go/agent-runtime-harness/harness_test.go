@@ -12,15 +12,19 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 )
 
 const (
-	testTenant      = "tenant"
-	testActor       = "actor"
-	testThreadKind  = "conversation"
-	testThreadID    = "conversation_1"
-	testTurnID      = "conversation_turn_1"
-	testEnvironment = "general"
+	testTenant       = "tenant"
+	testActor        = "actor"
+	testThreadKind   = "conversation"
+	testThreadID     = "conversation_1"
+	testTurnID       = "conversation_turn_1"
+	testEnvironment  = "general"
+	testMessageKind  = "conversation_message"
+	testUserMessage  = "message_user_1"
+	testAgentMessage = "message_assistant_1"
 )
 
 func TestMinimalModelOnlyHarnessCompletesDirectAgentTurn(t *testing.T) {
@@ -30,6 +34,131 @@ func TestMinimalModelOnlyHarnessCompletesDirectAgentTurn(t *testing.T) {
 	assertCompletedHarnessSnapshot(t, snapshot, err)
 	replayed, err := runner.Start(t.Context(), testStartRequest())
 	assertHarnessReplay(t, snapshot, replayed, err)
+}
+
+func TestConversationMessageItemsAndTurnFeedUseStableProductIdentity(t *testing.T) {
+	t.Parallel()
+	runner, turnFeed := newTurnFeedHarnessRunner(t)
+	request := testStartRequest()
+	request.InputMessage = &harness.HostRef{Kind: testMessageKind, ID: testUserMessage}
+	request.OutputMessage = &harness.HostRef{Kind: testMessageKind, ID: testAgentMessage}
+	snapshot, err := runner.Start(t.Context(), request)
+	if err != nil || snapshot.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("start snapshot=%#v err=%v", snapshot.Turn, err)
+	}
+	userItem, startedAgent, completedAgent := messageLifecycleItems(snapshot.Items)
+	assertMessageHostRef(t, snapshot.Items, userItem, testUserMessage, "user")
+	assertMessageHostRef(t, snapshot.Items, startedAgent, testAgentMessage, "started assistant")
+	if completedAgent != nil || harness.TerminalFeedReady(snapshot) {
+		t.Fatalf("host-bound terminal projection was published before acknowledgement: %#v", snapshot.Items)
+	}
+	events, err := turnFeed.Replay(t.Context(), snapshot.Turn.ID, 0)
+	if err != nil {
+		t.Fatalf("replay turn feed: %v", err)
+	}
+	assertNoTerminalTurnFeed(t, events)
+
+	finalized, err := runner.FinalizeHostOutput(t.Context(), snapshot.Turn.ID)
+	if err != nil {
+		t.Fatalf("finalize host output: %v", err)
+	}
+	userItem, startedAgent, completedAgent = messageLifecycleItems(finalized.Items)
+	assertStableMessageItems(t, finalized.Items, userItem, startedAgent, completedAgent)
+	if !harness.TerminalFeedReady(finalized) {
+		t.Fatalf("host-bound terminal projection was not acknowledged: %#v", finalized.Items)
+	}
+	events, err = turnFeed.Replay(t.Context(), snapshot.Turn.ID, 0)
+	if err != nil {
+		t.Fatalf("replay finalized turn feed: %v", err)
+	}
+	assertTerminalTurnFeedOrder(t, events, startedAgent.ID)
+}
+
+func newTurnFeedHarnessRunner(t *testing.T) (*harness.Runner, *harness.TurnFeed) {
+	t.Helper()
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
+	if err != nil {
+		t.Fatalf("create kernel: %v", err)
+	}
+	agentRunner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: directModel{}})
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	feed, err := runfeed.New(memory.NewRunFeedStore(), runfeed.Options{Clock: fixedClock{}})
+	if err != nil {
+		t.Fatalf("create run feed: %v", err)
+	}
+	turnFeed, err := harness.NewTurnFeed(feed)
+	if err != nil {
+		t.Fatalf("create turn feed: %v", err)
+	}
+	store := harness.NewMemoryStore()
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: agentRunner, Store: store, Clock: fixedClock{}, TurnFeed: turnFeed,
+	})
+	if err != nil {
+		t.Fatalf("create harness: %v", err)
+	}
+	return runner, turnFeed
+}
+
+func messageLifecycleItems(items []harness.Item) (userItem, startedAgent, completedAgent *harness.Item) {
+	for index := range items {
+		item := &items[index]
+		switch {
+		case item.Kind == harness.ItemUserMessage:
+			userItem = item
+		case item.Kind == harness.ItemAgentMessage && item.Status == harness.ItemStarted:
+			startedAgent = item
+		case item.Kind == harness.ItemAgentMessage && item.Status == harness.ItemCompleted:
+			completedAgent = item
+		}
+	}
+	return userItem, startedAgent, completedAgent
+}
+
+func assertStableMessageItems(
+	t *testing.T,
+	items []harness.Item,
+	userItem *harness.Item,
+	startedAgent *harness.Item,
+	completedAgent *harness.Item,
+) {
+	t.Helper()
+	assertMessageHostRef(t, items, userItem, testUserMessage, "user")
+	assertMessageHostRef(t, items, startedAgent, testAgentMessage, "started assistant")
+	assertMessageHostRef(t, items, completedAgent, testAgentMessage, "completed assistant")
+	if completedAgent.ParentItemID != startedAgent.ID {
+		t.Fatalf("assistant message lifecycle is not stable: %#v", items)
+	}
+}
+
+func assertNoTerminalTurnFeed(t *testing.T, events []harness.TurnEvent) {
+	t.Helper()
+	for _, event := range events {
+		if event.Terminal || event.Type == harness.EventTurnCompleted || event.Type == harness.EventTurnFailed || event.Type == harness.EventTurnCancelled {
+			t.Fatalf("terminal Turn event was published before host projection acknowledgement: %#v", events)
+		}
+	}
+}
+
+func assertMessageHostRef(t *testing.T, items []harness.Item, item *harness.Item, expectedID, label string) {
+	t.Helper()
+	if item == nil || item.HostRef == nil || item.HostRef.ID != expectedID {
+		t.Fatalf("missing %s message HostRef: %#v", label, items)
+	}
+}
+
+func assertTerminalTurnFeedOrder(t *testing.T, events []harness.TurnEvent, startedAgentItemID string) {
+	t.Helper()
+	if len(events) < 2 || events[len(events)-1].Type != harness.EventTurnCompleted || !events[len(events)-1].Terminal {
+		t.Fatalf("terminal Turn event must be last: %#v", events)
+	}
+	terminalMessageEvent := events[len(events)-2]
+	if terminalMessageEvent.Type != harness.EventItemCompleted || terminalMessageEvent.ItemKind != harness.ItemAgentMessage ||
+		terminalMessageEvent.ItemID != startedAgentItemID {
+		t.Fatalf("terminal assistant item must precede terminal Turn event: %#v", events)
+	}
 }
 
 func TestCancelWhileAgentIsRunningConvergesBothCallersToCancelled(t *testing.T) {

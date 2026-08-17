@@ -1,6 +1,8 @@
 import type {
   CancelRunRequest,
   CancelRunResponse,
+  HarnessTurnFeedEventDTO,
+  HarnessTurnSnapshotDTO,
   RunSnapshotDTO,
   RunFeedEventDTO,
   WorkbenchDTO,
@@ -14,10 +16,16 @@ import { createWorkflowsCapability } from "./capabilities/workflows.js";
 export type RuntimeHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 export type RuntimeClientOptions = { baseURL: string; fetch?: typeof globalThis.fetch; headers?: RuntimeHeaders };
 export type RequestOptions = { signal?: AbortSignal };
-export type RunFeedOptions = RequestOptions & {
+type FeedOptions = RequestOptions & {
   afterSeq?: number;
   reconnectDelayMS?: number;
   maxReconnects?: number;
+};
+export type RunFeedOptions = FeedOptions & {
+  onCursorExpired?: (snapshot: RunSnapshotDTO) => void | Promise<void>;
+};
+export type HarnessTurnFeedOptions = FeedOptions & {
+  onCursorExpired?: (snapshot: HarnessTurnSnapshotDTO) => void | Promise<void>;
 };
 
 export class RuntimeAPIError extends Error {
@@ -27,6 +35,56 @@ export class RuntimeAPIError extends Error {
   }
 }
 
+async function* decodeHarnessTurnFeed(body: ReadableStream<Uint8Array>): AsyncGenerator<HarnessTurnFeedEventDTO> {
+  for await (const data of decodeSSEData(body)) {
+    const event = JSON.parse(data) as HarnessTurnFeedEventDTO;
+    if (
+      Number.isSafeInteger(event.seq) &&
+      event.seq > 0 &&
+      typeof event.turnID === "string" &&
+      typeof event.type === "string"
+    ) {
+      yield event;
+    }
+  }
+}
+
+async function* decodeSSEData(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      buffer = buffer.replaceAll("\r\n", "\n");
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary >= 0) {
+        const data = sseData(buffer.slice(0, boundary));
+        buffer = buffer.slice(boundary + 2);
+        if (data) yield data;
+        boundary = buffer.indexOf("\n\n");
+      }
+      if (done) {
+        const data = sseData(buffer);
+        if (data) yield data;
+        return;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function sseData(block: string): string {
+  return block
+    .split("\n")
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n")
+    .trim();
+}
+
 type ErrorResponse = { error?: { code?: string; message?: string; requestID?: string } };
 
 export class RuntimeClient {
@@ -34,6 +92,7 @@ export class RuntimeClient {
   readonly plans: ReturnType<typeof createPlansCapability>;
   readonly workflows: ReturnType<typeof createWorkflowsCapability>;
   readonly teams: ReturnType<typeof createTeamsCapability>;
+  readonly harness;
   readonly runs;
   private readonly fetcher: typeof globalThis.fetch;
 
@@ -45,6 +104,23 @@ export class RuntimeClient {
     this.plans = createPlansCapability(capabilityRequest);
     this.workflows = createWorkflowsCapability(capabilityRequest);
     this.teams = createTeamsCapability(capabilityRequest);
+    this.harness = {
+      turns: {
+        get: (turnID: string, request?: RequestOptions) =>
+          this.request<HarnessTurnSnapshotDTO>(`/harness/turns/${pathPart(turnID)}`, {}, request),
+        feed: (turnID: string, request?: HarnessTurnFeedOptions) => this.streamHarnessTurnFeed(turnID, request),
+        resolveApproval: (
+          turnID: string,
+          decision: "approve" | "reject",
+          comment = "",
+          request?: RequestOptions,
+        ) => this.request<HarnessTurnSnapshotDTO>(
+          `/harness/turns/${pathPart(turnID)}/approval`,
+          { method: "POST", body: JSON.stringify({ decision, comment }) },
+          request,
+        ),
+      },
+    };
     this.runs = {
       get: (runID: string, request?: RequestOptions) =>
         this.request<RunSnapshotDTO>(`/runs/${pathPart(runID)}`, {}, request),
@@ -78,6 +154,73 @@ export class RuntimeClient {
     return response.json() as Promise<T>;
   }
 
+  private async *streamHarnessTurnFeed(
+    turnID: string,
+    request: HarnessTurnFeedOptions = {},
+  ): AsyncGenerator<HarnessTurnFeedEventDTO> {
+    let afterSeq = Math.max(0, Math.trunc(request.afterSeq ?? 0));
+    const reconnectDelayMS = Math.max(0, Math.trunc(request.reconnectDelayMS ?? 250));
+    const maxReconnects = Math.max(0, Math.trunc(request.maxReconnects ?? 20));
+    let reconnects = 0;
+    while (!request.signal?.aborted) {
+      let response: Response;
+      try {
+        const headers = await this.headers();
+        headers.set("Accept", "text/event-stream");
+        response = await this.fetcher(
+          this.url(`/harness/turns/${pathPart(turnID)}/feed?afterSeq=${afterSeq}`),
+          { headers, signal: request.signal },
+        );
+      } catch (error) {
+        if (request.signal?.aborted) return;
+        if (reconnects >= maxReconnects) throw error;
+        reconnects += 1;
+        await reconnectDelay(reconnectDelayMS, request.signal);
+        continue;
+      }
+      if (!response.ok) {
+        if (response.status === 404 && reconnects < maxReconnects) {
+          reconnects += 1;
+          await reconnectDelay(reconnectDelayMS, request.signal);
+          continue;
+        }
+        const apiError = await runtimeAPIError(response);
+        if (apiError.code === "harness.feed_cursor_expired") {
+          const headSeq = Number.parseInt(response.headers.get("x-harness-feed-head") ?? "", 10);
+          if (!request.onCursorExpired || !Number.isSafeInteger(headSeq) || headSeq <= afterSeq) throw apiError;
+          const snapshot = await this.request<HarnessTurnSnapshotDTO>(
+            `/harness/turns/${pathPart(turnID)}`,
+            {},
+            { signal: request.signal },
+          );
+          await request.onCursorExpired(snapshot);
+          afterSeq = headSeq;
+          reconnects = 0;
+          continue;
+        }
+        throw apiError;
+      }
+      if (!response.body) {
+        throw new RuntimeAPIError("Harness Turn feed response has no body", response.status, "harness.feed_invalid_response", "");
+      }
+      let received = false;
+      for await (const event of decodeHarnessTurnFeed(response.body)) {
+        if (event.seq <= afterSeq) continue;
+        received = true;
+        reconnects = 0;
+        afterSeq = event.seq;
+        yield event;
+        if (event.terminal) return;
+      }
+      if (request.signal?.aborted) return;
+      if (!received) reconnects += 1;
+      if (reconnects > maxReconnects) {
+        throw new RuntimeAPIError("Harness Turn feed disconnected", 0, "harness.feed_disconnected", "");
+      }
+      await reconnectDelay(reconnectDelayMS, request.signal);
+    }
+  }
+
   private async *streamRunFeed(runID: string, request: RunFeedOptions = {}): AsyncGenerator<RunFeedEventDTO> {
     let afterSeq = Math.max(0, Math.trunc(request.afterSeq ?? 0));
     const reconnectDelayMS = Math.max(0, Math.trunc(request.reconnectDelayMS ?? 250));
@@ -105,7 +248,21 @@ export class RuntimeClient {
           await reconnectDelay(reconnectDelayMS, request.signal);
           continue;
         }
-        throw await runtimeAPIError(response);
+        const apiError = await runtimeAPIError(response);
+        if (apiError.code === "runfeed.cursor_expired") {
+          const headSeq = Number.parseInt(response.headers.get("x-run-feed-head") ?? "", 10);
+          if (!request.onCursorExpired || !Number.isSafeInteger(headSeq) || headSeq <= afterSeq) throw apiError;
+          const snapshot = await this.request<RunSnapshotDTO>(
+            `/runs/${pathPart(runID)}`,
+            {},
+            { signal: request.signal },
+          );
+          await request.onCursorExpired(snapshot);
+          afterSeq = headSeq;
+          reconnects = 0;
+          continue;
+        }
+        throw apiError;
       }
       if (!response.body) {
         throw new RuntimeAPIError("runtime feed response has no body", response.status, "runfeed.invalid_response", "");

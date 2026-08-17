@@ -1,8 +1,73 @@
 export type RuntimeKind = "agent" | "plan_execute" | "workflow" | "team";
 export type RunStatus = "running" | "waiting_input" | "completed" | "failed" | "cancelled";
+export type HarnessTurnStatus = "accepted" | RunStatus;
+export type HarnessItemKind =
+  | "user_message"
+  | "agent_run"
+  | "agent_message"
+  | "tool"
+  | "approval"
+  | "delegation"
+  | "artifact"
+  | "context"
+  | "diagnostic";
+export type HarnessItemStatus = "started" | "waiting" | "completed" | "failed" | "cancelled";
 
 export type ActorRefDTO = { tenantID: string; actorID: string };
 export type ThreadRefDTO = { kind: string; id: string };
+export type HostRefDTO = { kind: string; id: string };
+
+export type HarnessItemDTO = {
+  id: string;
+  turnID: string;
+  seq: number;
+  kind: HarnessItemKind;
+  status: HarnessItemStatus;
+  hostRef?: HostRefDTO;
+  parentItemID?: string;
+  payload?: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type HarnessTurnDTO = {
+  id: string;
+  hostTurn: HostRefDTO;
+  status: HarnessTurnStatus;
+  revision: number;
+  errorCode?: string;
+  errorDetail?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type HarnessTurnSnapshotDTO = {
+  turn: HarnessTurnDTO;
+  items: HarnessItemDTO[];
+  output?: ResultDTO | null;
+};
+
+export type HarnessTurnFeedEventDTO = {
+  seq: number;
+  turnID: string;
+  type:
+    | "turn.started"
+    | "turn.waiting_input"
+    | "turn.completed"
+    | "turn.failed"
+    | "turn.cancelled"
+    | "item.started"
+    | "item.delta"
+    | "item.completed";
+  itemID?: string;
+  itemKind?: HarnessItemKind;
+  delta?: string;
+  message?: string;
+  data?: unknown;
+  status?: HarnessTurnStatus | HarnessItemStatus | string;
+  terminal?: boolean;
+  createdAt: string;
+};
 
 export type RunDTO = {
   id: string;

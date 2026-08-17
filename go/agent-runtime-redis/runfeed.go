@@ -69,7 +69,13 @@ func (store *RunFeedStore) Append(
 		return runfeed.Event{}, err
 	}
 	retentionMilliseconds := max(int64(1), retention.Milliseconds())
-	sequence, err := appendRunFeedScript.Run(ctx, store.client, store.keys(runID), string(payload), retentionMilliseconds).Int64()
+	terminal := "0"
+	if draft.Terminal {
+		terminal = "1"
+	}
+	sequence, err := appendRunFeedScript.Run(
+		ctx, store.client, store.keys(runID), string(payload), retentionMilliseconds, terminal,
+	).Int64()
 	if err != nil {
 		return runfeed.Event{}, err
 	}
@@ -86,10 +92,54 @@ func (store *RunFeedStore) List(ctx context.Context, runID string, afterSeq int6
 		limit = 128
 	}
 	sequences, values, err := store.loadRunFeedPayloads(ctx, runID, afterSeq, limit)
-	if err != nil || len(sequences) == 0 {
+	if err != nil {
 		return nil, err
 	}
+	if len(sequences) == 0 {
+		headSeq, headErr := store.runFeedHead(ctx, runID)
+		if headErr != nil {
+			return nil, headErr
+		}
+		if headSeq > afterSeq {
+			return nil, &runfeed.CursorExpiredError{AfterSeq: afterSeq, HeadSeq: headSeq}
+		}
+		return nil, nil
+	}
+	firstSeq, err := strconv.ParseInt(sequences[0], 10, 64)
+	if err != nil {
+		return nil, errors.Join(runfeed.ErrInvalidInput, err)
+	}
+	if firstSeq > afterSeq+1 {
+		headSeq, headErr := store.runFeedHead(ctx, runID)
+		if headErr != nil {
+			return nil, headErr
+		}
+		return nil, &runfeed.CursorExpiredError{AfterSeq: afterSeq, HeadSeq: headSeq}
+	}
 	return decodeRunFeedEvents(runID, sequences, values)
+}
+
+// ReleaseTerminal starts retention for existing sequence metadata after the
+// durable Runtime has authoritatively confirmed terminal state. Missing feed
+// state is an idempotent no-op.
+func (store *RunFeedStore) ReleaseTerminal(ctx context.Context, runID string, retention time.Duration) error {
+	runID = strings.TrimSpace(runID)
+	if store == nil || store.client == nil || runID == "" || retention <= 0 {
+		return runfeed.ErrInvalidInput
+	}
+	retentionMilliseconds := max(int64(1), retention.Milliseconds())
+	_, err := releaseTerminalRunFeedScript.Run(
+		ctx, store.client, store.keys(runID), retentionMilliseconds,
+	).Result()
+	return err
+}
+
+func (store *RunFeedStore) runFeedHead(ctx context.Context, runID string) (int64, error) {
+	head, err := store.client.Get(ctx, store.keys(runID)[0]).Int64()
+	if errors.Is(err, goredis.Nil) {
+		return 0, nil
+	}
+	return head, err
 }
 
 func (store *RunFeedStore) loadRunFeedPayloads(
@@ -150,8 +200,23 @@ local sequence = redis.call('INCR', KEYS[1])
 redis.call('ZADD', KEYS[2], sequence, tostring(sequence))
 redis.call('HSET', KEYS[3], tostring(sequence), ARGV[1])
 local ttl = tonumber(ARGV[2])
-redis.call('PEXPIRE', KEYS[1], ttl)
+if ARGV[3] == '1' then
+  redis.call('PEXPIRE', KEYS[1], ttl)
+else
+  redis.call('PERSIST', KEYS[1])
+end
 redis.call('PEXPIRE', KEYS[2], ttl)
 redis.call('PEXPIRE', KEYS[3], ttl)
 return sequence
+`)
+
+var releaseTerminalRunFeedScript = goredis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then
+  return 0
+end
+local ttl = tonumber(ARGV[1])
+redis.call('PEXPIRE', KEYS[1], ttl)
+redis.call('PEXPIRE', KEYS[2], ttl)
+redis.call('PEXPIRE', KEYS[3], ttl)
+return 1
 `)

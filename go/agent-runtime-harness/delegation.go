@@ -174,7 +174,7 @@ func (runner *Runner) recordDelegationItem(
 	}
 	itemID := stableID("hid", turn.ID, delegation.ID, string(status))
 	now := runner.clock.Now().UTC()
-	_, _, err = runner.store.AppendItem(ctx, Item{
+	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID: itemID, TurnID: turn.ID, Kind: ItemDelegation, Status: status,
 		RunID: delegation.ChildRunID, ParentItemID: parentItemID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,

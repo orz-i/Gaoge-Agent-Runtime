@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -31,6 +32,16 @@ func (handler *Handler) StreamRunFeed(context *gin.Context) {
 	followRunFeed(context, subscription)
 }
 
+func writeRunFeedCursorExpired(context *gin.Context, err error) bool {
+	var expired *runfeed.CursorExpiredError
+	if !errors.As(err, &expired) {
+		return false
+	}
+	context.Header("X-Run-Feed-Head", strconv.FormatInt(expired.HeadSeq, 10))
+	writeError(context, http.StatusConflict, "runfeed.cursor_expired", "run feed cursor is outside retained history")
+	return true
+}
+
 func (handler *Handler) prepareRunFeed(
 	context *gin.Context,
 ) (*runfeed.Subscription, kernel.Snapshot, int64, bool) {
@@ -53,8 +64,12 @@ func (handler *Handler) prepareRunFeed(
 		WriteKernelError(context, "runfeed", err)
 		return nil, kernel.Snapshot{}, 0, false
 	}
+	handler.releaseTerminalRunFeed(context, snapshot)
 	subscription, err := handler.feed.Subscribe(context.Request.Context(), runID, afterSeq)
 	if err != nil {
+		if writeRunFeedCursorExpired(context, err) {
+			return nil, kernel.Snapshot{}, 0, false
+		}
 		WriteKernelError(context, "runfeed", err)
 		return nil, kernel.Snapshot{}, 0, false
 	}
