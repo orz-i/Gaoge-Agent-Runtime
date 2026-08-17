@@ -81,6 +81,54 @@ describe("RuntimeClient target API", () => {
     ]);
   });
 
+  it("restores the Run snapshot before continuing after an expired feed cursor", async () => {
+    const runningSnapshot = {
+      ...snapshot,
+      run: { ...snapshot.run, status: "running", revision: 4 },
+    };
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: { code: "runfeed.cursor_expired", message: "expired" } }),
+        { status: 409, headers: { "content-type": "application/json", "x-run-feed-head": "7" } },
+      ))
+      .mockResolvedValueOnce(json(runningSnapshot))
+      .mockResolvedValueOnce(new Response(
+        `id: 8\ndata: {"seq":8,"runID":"run-1","type":"run.completed","terminal":true,"createdAt":"2026-08-17T00:16:01Z"}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      ));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+    const restored = vi.fn();
+    const events = [];
+
+    for await (const event of client.runs.feed("run-1", {
+      afterSeq: 2,
+      reconnectDelayMS: 0,
+      onCursorExpired: restored,
+    })) events.push(event);
+
+    expect(restored).toHaveBeenCalledWith(runningSnapshot);
+    expect(events.map((event) => event.seq)).toEqual([8]);
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "https://runtime.test/api/v1/runs/run-1/feed?afterSeq=2",
+      "https://runtime.test/api/v1/runs/run-1",
+      "https://runtime.test/api/v1/runs/run-1/feed?afterSeq=7",
+    ]);
+  });
+
+  it("never skips an expired Run cursor without a snapshot recovery callback", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ error: { code: "runfeed.cursor_expired", message: "expired" } }),
+      { status: 409, headers: { "content-type": "application/json", "x-run-feed-head": "7" } },
+    ));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+
+    const iterator = client.runs.feed("run-1", { afterSeq: 2, reconnectDelayMS: 0 });
+    await expect(iterator.next()).rejects.toEqual(expect.objectContaining<Partial<RuntimeAPIError>>({
+      status: 409,
+      code: "runfeed.cursor_expired",
+    }));
+  });
+
   it("uses Harness Turn identity for snapshot, semantic feed, and approval", async () => {
     const harnessSnapshot = {
       turn: {

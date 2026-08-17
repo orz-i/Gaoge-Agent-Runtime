@@ -16,12 +16,15 @@ import { createWorkflowsCapability } from "./capabilities/workflows.js";
 export type RuntimeHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 export type RuntimeClientOptions = { baseURL: string; fetch?: typeof globalThis.fetch; headers?: RuntimeHeaders };
 export type RequestOptions = { signal?: AbortSignal };
-export type RunFeedOptions = RequestOptions & {
+type FeedOptions = RequestOptions & {
   afterSeq?: number;
   reconnectDelayMS?: number;
   maxReconnects?: number;
 };
-export type HarnessTurnFeedOptions = RunFeedOptions & {
+export type RunFeedOptions = FeedOptions & {
+  onCursorExpired?: (snapshot: RunSnapshotDTO) => void | Promise<void>;
+};
+export type HarnessTurnFeedOptions = FeedOptions & {
   onCursorExpired?: (snapshot: HarnessTurnSnapshotDTO) => void | Promise<void>;
 };
 
@@ -245,7 +248,21 @@ export class RuntimeClient {
           await reconnectDelay(reconnectDelayMS, request.signal);
           continue;
         }
-        throw await runtimeAPIError(response);
+        const apiError = await runtimeAPIError(response);
+        if (apiError.code === "runfeed.cursor_expired") {
+          const headSeq = Number.parseInt(response.headers.get("x-run-feed-head") ?? "", 10);
+          if (!request.onCursorExpired || !Number.isSafeInteger(headSeq) || headSeq <= afterSeq) throw apiError;
+          const snapshot = await this.request<RunSnapshotDTO>(
+            `/runs/${pathPart(runID)}`,
+            {},
+            { signal: request.signal },
+          );
+          await request.onCursorExpired(snapshot);
+          afterSeq = headSeq;
+          reconnects = 0;
+          continue;
+        }
+        throw apiError;
       }
       if (!response.body) {
         throw new RuntimeAPIError("runtime feed response has no body", response.status, "runfeed.invalid_response", "");
