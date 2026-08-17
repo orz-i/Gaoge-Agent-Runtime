@@ -49,7 +49,7 @@ func (runner *Runner) RecordExternalItem(
 	if input.ParentKey != "" {
 		parentItemID = stableID("hix", turn.ID, input.ParentKey)
 	}
-	item, _, err := runner.store.AppendItem(ctx, Item{
+	item, err := appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID: stableID("hix", turn.ID, input.Key), TurnID: turn.ID,
 		Kind: input.Kind, Status: input.Status, HostRef: input.HostRef,
 		ParentItemID: parentItemID,

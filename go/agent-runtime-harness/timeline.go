@@ -17,13 +17,14 @@ import (
 type ToolTimelineMiddleware struct {
 	store Store
 	clock Clock
+	feed  *TurnFeed
 }
 
-func NewToolTimelineMiddleware(store Store, clock Clock) (*ToolTimelineMiddleware, error) {
+func NewToolTimelineMiddleware(store Store, clock Clock, feed *TurnFeed) (*ToolTimelineMiddleware, error) {
 	if store == nil || clock == nil {
 		return nil, ErrInvalidRequest
 	}
-	return &ToolTimelineMiddleware{store: store, clock: clock}, nil
+	return &ToolTimelineMiddleware{store: store, clock: clock, feed: feed}, nil
 }
 
 func (*ToolTimelineMiddleware) Name() string { return "harness.timeline.tool" }
@@ -41,7 +42,7 @@ func (middleware *ToolTimelineMiddleware) Tool(
 		return next(ctx)
 	}
 	startedID, err := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, turn, invocation, tools.ExecutionResult{}, ItemStarted, "",
+		ctx, middleware.store, middleware.clock, middleware.feed, turn, invocation, tools.ExecutionResult{}, ItemStarted, "",
 	)
 	if err != nil {
 		return tools.ExecutionResult{}, err
@@ -52,7 +53,7 @@ func (middleware *ToolTimelineMiddleware) Tool(
 		status = ItemFailed
 	}
 	_, itemErr := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, turn, invocation, result, status, startedID,
+		ctx, middleware.store, middleware.clock, middleware.feed, turn, invocation, result, status, startedID,
 	)
 	return result, errors.Join(executeErr, itemErr)
 }
@@ -60,13 +61,14 @@ func (middleware *ToolTimelineMiddleware) Tool(
 type ModelTimelineMiddleware struct {
 	store Store
 	clock Clock
+	feed  *TurnFeed
 }
 
-func NewModelTimelineMiddleware(store Store, clock Clock) (*ModelTimelineMiddleware, error) {
+func NewModelTimelineMiddleware(store Store, clock Clock, feed *TurnFeed) (*ModelTimelineMiddleware, error) {
 	if store == nil || clock == nil {
 		return nil, ErrInvalidRequest
 	}
-	return &ModelTimelineMiddleware{store: store, clock: clock}, nil
+	return &ModelTimelineMiddleware{store: store, clock: clock, feed: feed}, nil
 }
 
 func (*ModelTimelineMiddleware) Name() string { return "harness.timeline.model" }
@@ -77,15 +79,46 @@ func (middleware *ModelTimelineMiddleware) Model(
 	emit model.StreamSink,
 	next plugin.ModelNext,
 ) (model.Response, error) {
-	response, callErr := next(ctx, request, emit)
+	turn, harnessRun, err := timelineTurn(ctx, middleware.store, request.RunID)
+	if err != nil {
+		return model.Response{}, err
+	}
+	if !harnessRun {
+		return next(ctx, request, emit)
+	}
+	messageItemID, hasMessageItem, err := activeAgentMessageItemID(ctx, middleware.store, turn)
+	if err != nil {
+		return model.Response{}, err
+	}
+	if !hasMessageItem {
+		messageItemID = stableID("him", turn.ID, request.RunID, strconv.Itoa(len(request.Messages)))
+		if middleware.feed != nil {
+			_, _ = middleware.feed.Publish(ctx, turn.ID, TurnEventDraft{
+				Type: EventItemStarted, ItemID: messageItemID, ItemKind: ItemAgentMessage, Status: string(ItemStarted),
+			})
+		}
+	}
+	stream := emit
+	if middleware.feed != nil {
+		stream = func(event model.StreamEvent) error {
+			raw, marshalErr := json.Marshal(event)
+			if marshalErr == nil {
+				_, _ = middleware.feed.Publish(ctx, turn.ID, TurnEventDraft{
+					Type: EventItemDelta, ItemID: messageItemID, ItemKind: ItemAgentMessage,
+					Delta: event.Delta, Data: raw, Status: string(ItemStarted),
+				})
+			}
+			if emit != nil {
+				return emit(event)
+			}
+			return nil
+		}
+	}
+	response, callErr := next(ctx, request, stream)
 	if callErr != nil {
 		return response, callErr
 	}
-	turn, harnessRun, err := timelineTurn(ctx, middleware.store, request.RunID)
-	if err != nil || !harnessRun {
-		return response, err
-	}
-	if err = appendModelTimelineItems(ctx, middleware.store, middleware.clock, turn, request, response); err != nil {
+	if err = appendModelTimelineItems(ctx, middleware.store, middleware.clock, middleware.feed, turn, request, response); err != nil {
 		return response, err
 	}
 	return response, nil
@@ -101,9 +134,8 @@ type toolTimelinePayload struct {
 }
 
 type modelTimelinePayload struct {
-	ContentHash   string `json:"contentHash"`
-	ContentBytes  int    `json:"contentBytes"`
-	CitationCount int    `json:"citationCount"`
+	ContentHash  string `json:"contentHash"`
+	ContentBytes int    `json:"contentBytes"`
 }
 
 type artifactTimelinePayload struct {
@@ -135,6 +167,7 @@ func appendToolTimelineItem(
 	ctx context.Context,
 	store Store,
 	clock Clock,
+	feed *TurnFeed,
 	turn Turn,
 	invocation plugin.ToolInvocation,
 	result tools.ExecutionResult,
@@ -152,7 +185,7 @@ func appendToolTimelineItem(
 	}
 	itemID := stableID("hit", turn.ID, invocation.Request.Call.ID, string(status))
 	now := clock.Now().UTC()
-	_, _, err = store.AppendItem(ctx, Item{
+	_, err = appendItemFact(ctx, store, feed, Item{
 		ID: itemID, TurnID: turn.ID, Kind: ItemTool, Status: status, RunID: invocation.Run.ID,
 		ParentItemID: parentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
@@ -163,56 +196,54 @@ func appendModelTimelineItems(
 	ctx context.Context,
 	store Store,
 	clock Clock,
+	feed *TurnFeed,
 	turn Turn,
 	request model.Request,
 	response model.Response,
 ) error {
-	if content := strings.TrimSpace(response.Content); content != "" {
-		if err := appendAgentMessageTimelineItem(ctx, store, clock, turn, request, response, content); err != nil {
-			return err
-		}
-	}
 	for _, artifact := range response.Artifacts {
-		if err := appendArtifactTimelineItem(ctx, store, clock, turn, request.RunID, artifact); err != nil {
+		if err := appendArtifactTimelineItem(ctx, store, clock, feed, turn, request.RunID, artifact); err != nil {
 			return err
 		}
 	}
 	for _, call := range response.HostedToolCalls {
-		if err := appendHostedToolTimelineItem(ctx, store, clock, turn, request, call); err != nil {
+		if err := appendHostedToolTimelineItem(ctx, store, clock, feed, turn, request, call); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func appendAgentMessageTimelineItem(
-	ctx context.Context,
-	store Store,
-	clock Clock,
-	turn Turn,
-	request model.Request,
-	response model.Response,
-	content string,
-) error {
-	payload, err := json.Marshal(modelTimelinePayload{
-		ContentHash: hashTimelineString(content), ContentBytes: len(content), CitationCount: len(response.Citations),
-	})
+func activeAgentMessageItemID(ctx context.Context, store Store, turn Turn) (string, bool, error) {
+	itemID, _, err := activeAgentMessageBinding(ctx, store, turn)
+	return itemID, itemID != "", err
+}
+
+func activeAgentMessageBinding(ctx context.Context, store Store, turn Turn) (string, *HostRef, error) {
+	items, err := store.ListItems(ctx, turn.ID, 0, defaultItemListLimit)
 	if err != nil {
-		return err
+		return "", nil, err
 	}
-	now := clock.Now().UTC()
-	itemID := stableID("him", turn.ID, request.RunID, strconv.Itoa(len(request.Messages)), hashTimelineString(content))
-	_, _, err = store.AppendItem(ctx, Item{
-		ID: itemID, TurnID: turn.ID, Kind: ItemAgentMessage, Status: ItemCompleted, RunID: request.RunID,
-		Payload: payload, CreatedAt: now, UpdatedAt: now,
-	})
-	return err
+	for index := len(items) - 1; index >= 0; index-- {
+		item := items[index]
+		if item.Kind != ItemAgentMessage || item.Status != ItemStarted || strings.TrimSpace(item.ParentItemID) != "" {
+			continue
+		}
+		var hostRef *HostRef
+		if item.HostRef != nil {
+			value := *item.HostRef
+			hostRef = &value
+		}
+		return item.ID, hostRef, nil
+	}
+	return "", nil, nil
 }
 
 func appendArtifactTimelineItem(
 	ctx context.Context,
 	store Store,
 	clock Clock,
+	feed *TurnFeed,
 	turn Turn,
 	runID string,
 	artifact model.ArtifactRef,
@@ -224,7 +255,7 @@ func appendArtifactTimelineItem(
 		return err
 	}
 	now := clock.Now().UTC()
-	_, _, err = store.AppendItem(ctx, Item{
+	_, err = appendItemFact(ctx, store, feed, Item{
 		ID: stableID("hiaf", turn.ID, artifact.ID), TurnID: turn.ID,
 		Kind: ItemArtifact, Status: ItemCompleted, RunID: runID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
@@ -236,6 +267,7 @@ func appendHostedToolTimelineItem(
 	ctx context.Context,
 	store Store,
 	clock Clock,
+	feed *TurnFeed,
 	turn Turn,
 	request model.Request,
 	call model.HostedToolCall,
@@ -252,7 +284,7 @@ func appendHostedToolTimelineItem(
 		identity = hashTimelineBytes(call.Input)
 	}
 	now := clock.Now().UTC()
-	_, _, err = store.AppendItem(ctx, Item{
+	_, err = appendItemFact(ctx, store, feed, Item{
 		ID: stableID("hiht", turn.ID, call.ToolKey, identity), TurnID: turn.ID,
 		Kind: ItemTool, Status: ItemCompleted, RunID: request.RunID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
@@ -269,15 +301,13 @@ func (runner *Runner) recordContextItem(ctx context.Context, turn Turn) error {
 		return err
 	}
 	now := runner.clock.Now().UTC()
-	_, _, err = runner.store.AppendItem(ctx, Item{
+	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID: stableID("hic", turn.ID, turn.ContextRef.ID), TurnID: turn.ID,
 		Kind: ItemContext, Status: ItemCompleted, RunID: turn.RootRunID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err
 }
-
-func hashTimelineString(value string) string { return hashTimelineBytes([]byte(value)) }
 
 func hashTimelineBytes(value []byte) string {
 	if len(value) == 0 {

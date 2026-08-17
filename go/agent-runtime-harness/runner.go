@@ -113,6 +113,7 @@ type Dependencies struct {
 	Agent     AgentStarter
 	Store     Store
 	Clock     Clock
+	TurnFeed  *TurnFeed
 	Context   *runtimecontext.Builder
 	Catalog   tools.Catalog
 	Handoffs  HandoffStarter
@@ -125,6 +126,7 @@ type Runner struct {
 	agent     AgentStarter
 	store     Store
 	clock     Clock
+	turnFeed  *TurnFeed
 	context   *runtimecontext.Builder
 	catalog   tools.Catalog
 	handoffs  HandoffStarter
@@ -135,6 +137,8 @@ type Runner struct {
 type StartRequest struct {
 	HostThread       HostRef
 	HostTurn         HostRef
+	InputMessage     *HostRef
+	OutputMessage    *HostRef
 	Actor            kernel.ActorRef
 	Thread           kernel.ThreadRef
 	RequestID        string
@@ -152,7 +156,8 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}
 	return &Runner{
 		runtime: dependencies.Runtime, agent: dependencies.Agent, store: dependencies.Store, clock: dependencies.Clock,
-		context: dependencies.Context, catalog: dependencies.Catalog,
+		turnFeed: dependencies.TurnFeed,
+		context:  dependencies.Context, catalog: dependencies.Catalog,
 		handoffs: dependencies.Handoffs, relations: dependencies.Relations,
 	}, nil
 }
@@ -176,6 +181,10 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		return runner.Load(ctx, createdTurn.ID)
 	}
 	rootRunID := startRootRunID(request.RootRunID, turnID)
+	if err = runner.recordHostMessageItems(ctx, createdTurn, rootRunID, request.InputMessage, request.OutputMessage); err != nil {
+		return Snapshot{}, err
+	}
+	runner.publishTurnStatus(ctx, createdTurn, EventTurnStarted, false)
 	runCtx := ctx
 	if request.Context != nil {
 		contextSnapshot, buildErr := runner.buildContext(ctx, rootRunID, config, request.Context)
@@ -370,6 +379,12 @@ func normalizeStartRequest(request StartRequest) (StartRequest, string, string, 
 		return StartRequest{}, "", "", ErrInvalidRequest
 	}
 	request.Goal = strings.TrimSpace(request.Goal)
+	if err = normalizeOptionalHostRef(&request.InputMessage); err != nil {
+		return StartRequest{}, "", "", err
+	}
+	if err = normalizeOptionalHostRef(&request.OutputMessage); err != nil {
+		return StartRequest{}, "", "", err
+	}
 	sessionID, err := SessionID(request.HostThread)
 	if err != nil {
 		return StartRequest{}, "", "", err
@@ -386,7 +401,8 @@ func (runner *Runner) syncRuntimeSnapshot(ctx context.Context, turn Turn, runtim
 	if runtimeSnapshotConflicts(turn, runtimeSnapshot) {
 		return Snapshot{}, ErrConflict
 	}
-	if runtimeSnapshotChangesTurn(turn, runtimeSnapshot, status) {
+	turnChanged := runtimeSnapshotChangesTurn(turn, runtimeSnapshot, status)
+	if turnChanged {
 		turn.RootRunID = runtimeSnapshot.Run.ID
 		turn.Status = status
 		turn.ErrorCode = strings.TrimSpace(runtimeSnapshot.Run.ErrorCode)
@@ -396,12 +412,20 @@ func (runner *Runner) syncRuntimeSnapshot(ctx context.Context, turn Turn, runtim
 		if err != nil {
 			return Snapshot{}, err
 		}
+		if !terminalTurnStatus(turn.Status) {
+			runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), false)
+		}
 	}
 	if err = runner.recordAgentRunItem(ctx, turn, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
 	if err = runner.recordApprovalRequestItem(ctx, turn, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
+	}
+	if terminalTurnStatus(turn.Status) {
+		if err = runner.recordTerminalAgentMessageItem(ctx, turn, runtimeSnapshot); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	// Delegation relations are continuation signals as well as provenance. Project
 	// them only after the synchronous root call stack has committed its terminal
@@ -411,8 +435,46 @@ func (runner *Runner) syncRuntimeSnapshot(ctx context.Context, turn Turn, runtim
 		if err = runner.projectDelegationRelations(ctx, turn); err != nil {
 			return Snapshot{}, err
 		}
+		if turnChanged {
+			runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
+		}
 	}
 	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+}
+
+func (runner *Runner) recordTerminalAgentMessageItem(
+	ctx context.Context,
+	turn Turn,
+	snapshot kernel.Snapshot,
+) error {
+	parentItemID, hostRef, err := activeAgentMessageBinding(ctx, runner.store, turn)
+	if err != nil || parentItemID == "" {
+		return err
+	}
+	status := ItemCompleted
+	switch turn.Status {
+	case TurnFailed:
+		status = ItemFailed
+	case TurnCancelled:
+		status = ItemCancelled
+	}
+	payload := modelTimelinePayload{}
+	if snapshot.Result != nil {
+		payload.ContentHash = hashTimelineBytes(snapshot.Result.Content)
+		payload.ContentBytes = len(snapshot.Result.Content)
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	now := runner.clock.Now().UTC()
+	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
+		ID:     stableID("him", turn.ID, snapshot.Run.ID, string(status), payload.ContentHash),
+		TurnID: turn.ID, Kind: ItemAgentMessage, Status: status, RunID: snapshot.Run.ID,
+		HostRef: hostRef, ParentItemID: parentItemID, Payload: raw,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	return err
 }
 
 func runtimeSnapshotConflicts(turn Turn, snapshot kernel.Snapshot) bool {
@@ -435,7 +497,7 @@ func (runner *Runner) recordApprovalRequestItem(ctx context.Context, turn Turn, 
 		return err
 	}
 	now := runner.clock.Now().UTC()
-	_, _, err = runner.store.AppendItem(ctx, Item{
+	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID: stableID("hia", turn.ID, pending.CheckpointID), TurnID: turn.ID,
 		Kind: ItemApproval, Status: ItemWaiting, RunID: snapshot.Run.ID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
@@ -456,7 +518,7 @@ func (runner *Runner) recordApprovalDecisionItem(
 		return err
 	}
 	now := runner.clock.Now().UTC()
-	_, _, err = runner.store.AppendItem(ctx, Item{
+	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID: stableID("hia", turn.ID, pending.CheckpointID, "decision"), TurnID: turn.ID,
 		Kind: ItemApproval, Status: ItemCompleted, RunID: turn.RootRunID,
 		ParentItemID: stableID("hia", turn.ID, pending.CheckpointID),
@@ -490,7 +552,7 @@ func (runner *Runner) recordAgentRunItem(ctx context.Context, turn Turn, snapsho
 		TurnID: turn.ID, Kind: ItemAgentRun, Status: status, RunID: snapshot.Run.ID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	}
-	_, _, err = runner.store.AppendItem(ctx, item)
+	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, item)
 	return err
 }
 
@@ -506,7 +568,89 @@ func (runner *Runner) failTurn(ctx context.Context, turn Turn, cause error) (Sna
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if err = runner.recordTerminalAgentMessageItem(ctx, updated, kernel.Snapshot{Run: kernel.Run{ID: updated.RootRunID}}); err != nil {
+		return Snapshot{}, err
+	}
+	runner.publishTurnStatus(ctx, updated, EventTurnFailed, true)
 	return runner.loadSnapshot(ctx, updated, nil)
+}
+
+func normalizeOptionalHostRef(value **HostRef) error {
+	if value == nil || *value == nil {
+		return nil
+	}
+	normalized, err := normalizeHostRef(**value)
+	if err != nil {
+		return err
+	}
+	*value = &normalized
+	return nil
+}
+
+func (runner *Runner) recordHostMessageItems(
+	ctx context.Context,
+	turn Turn,
+	runID string,
+	input *HostRef,
+	output *HostRef,
+) error {
+	now := runner.clock.Now().UTC()
+	if input != nil {
+		if _, err := appendItemFact(ctx, runner.store, runner.turnFeed, Item{
+			ID: stableID("hium", turn.ID, input.Kind, input.ID), TurnID: turn.ID,
+			Kind: ItemUserMessage, Status: ItemCompleted, HostRef: input, RunID: runID,
+			Payload: json.RawMessage(`{"role":"user"}`), CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			return err
+		}
+	}
+	if output != nil {
+		if _, err := appendItemFact(ctx, runner.store, runner.turnFeed, Item{
+			ID: stableID("hiam", turn.ID, output.Kind, output.ID), TurnID: turn.ID,
+			Kind: ItemAgentMessage, Status: ItemStarted, HostRef: output, RunID: runID,
+			Payload: json.RawMessage(`{"role":"assistant"}`), CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (runner *Runner) publishTurnStatus(ctx context.Context, turn Turn, eventType string, terminal bool) {
+	if runner == nil || runner.turnFeed == nil {
+		return
+	}
+	_, _ = runner.turnFeed.Publish(ctx, turn.ID, TurnEventDraft{
+		Type: eventType, Status: string(turn.Status), Message: turn.ErrorDetail, Terminal: terminal,
+	})
+}
+
+func turnEventTypeForStatus(status TurnStatus) string {
+	switch status {
+	case TurnWaitingInput:
+		return EventTurnWaitingInput
+	case TurnCompleted:
+		return EventTurnCompleted
+	case TurnFailed:
+		return EventTurnFailed
+	case TurnCancelled:
+		return EventTurnCancelled
+	default:
+		return EventTurnStarted
+	}
+}
+
+// SubscribeTurnFeed returns retained semantic events followed by live events for
+// one Harness Turn. Durable Items remain available through Load regardless of feed retention.
+func (runner *Runner) SubscribeTurnFeed(ctx context.Context, turnID string, afterSeq int64) (*TurnSubscription, error) {
+	turnID = strings.TrimSpace(turnID)
+	if runner == nil || runner.turnFeed == nil || turnID == "" || afterSeq < 0 {
+		return nil, ErrInvalidRequest
+	}
+	if _, err := runner.store.GetTurn(ctx, turnID); err != nil {
+		return nil, err
+	}
+	return runner.turnFeed.Subscribe(ctx, turnID, afterSeq)
 }
 
 func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *kernel.Snapshot) (Snapshot, error) {

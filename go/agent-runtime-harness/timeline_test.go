@@ -85,11 +85,11 @@ func newTimelineHarnessDependencies(t *testing.T) (*kernel.Runtime, *agent.Runne
 		t.Fatal(err)
 	}
 	clock := timelineTestClock{}
-	modelTimeline, err := harness.NewModelTimelineMiddleware(store, clock)
+	modelTimeline, err := harness.NewModelTimelineMiddleware(store, clock, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	toolTimeline, err := harness.NewToolTimelineMiddleware(store, clock)
+	toolTimeline, err := harness.NewToolTimelineMiddleware(store, clock, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func assertDurableTimeline(t *testing.T, snapshot harness.Snapshot) {
 		payloads.Write(item.Payload)
 	}
 	if snapshot.Turn.Status != harness.TurnCompleted || counts[harness.ItemTool] != 2 ||
-		counts[harness.ItemAgentMessage] != 1 || counts[harness.ItemArtifact] != 1 ||
+		counts[harness.ItemAgentMessage] != 0 || counts[harness.ItemArtifact] != 1 ||
 		counts[harness.ItemAgentRun] != 1 {
 		t.Fatalf("unexpected durable timeline: turn=%#v counts=%#v items=%#v", snapshot.Turn, counts, snapshot.Items)
 	}
