@@ -95,6 +95,26 @@ func (store *RunFeedStore) List(_ context.Context, runID string, afterSeq int64,
 	return result, nil
 }
 
+// ReleaseTerminal marks existing non-authoritative feed metadata as eligible
+// for full removal after retention without appending or renumbering events.
+func (store *RunFeedStore) ReleaseTerminal(_ context.Context, runID string, retention time.Duration) error {
+	runID = strings.TrimSpace(runID)
+	if store == nil || runID == "" || retention <= 0 {
+		return runfeed.ErrInvalidInput
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.expireEventsLocked(runID)
+	record, ok := store.records[runID]
+	if !ok || record.sequence == 0 {
+		return nil
+	}
+	record.terminal = true
+	record.expiresAt = store.clock.Now().UTC().Add(retention)
+	store.records[runID] = record
+	return nil
+}
+
 func (store *RunFeedStore) expireEventsLocked(runID string) {
 	record, ok := store.records[runID]
 	if ok && !record.expiresAt.After(store.clock.Now().UTC()) {

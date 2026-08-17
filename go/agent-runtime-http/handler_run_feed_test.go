@@ -15,10 +15,63 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 )
 
+const testRunFeedTenantID = "tenant"
+
 type runFeedPrincipal struct{ actor kernel.ActorRef }
 
 func (principal runFeedPrincipal) ResolvePrincipal(*gin.Context) (kernel.ActorRef, error) {
 	return principal.actor, nil
+}
+
+func TestGetRunReleasesFeedMetadataForAuthoritativeTerminalSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := kernel.ActorRef{TenantID: testRunFeedTenantID, ActorID: "actor"}
+	created, err := runtime.Create(t.Context(), kernel.CreateRequest{
+		ID: "run-terminal-release", Kind: kernel.RunKind("http_test"), Actor: actor,
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "conversation-1"},
+		Goal:   "test", State: json.RawMessage(`{"step":0}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.Apply(t.Context(), created.Run.ID, created.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusCompleted, State: json.RawMessage(`{"step":1}`),
+		Result: &kernel.Result{ContentType: "text", Content: json.RawMessage(`"done"`)},
+		Events: []kernel.EventDraft{{Type: "run.completed"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &releaseRecordingRunFeedStore{Store: memory.NewRunFeedStore()}
+	feed, err := runfeed.New(store, runfeed.Options{Retention: time.Minute, PollInterval: time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishHTTPTestEvent(t, feed, created.Run.ID, runfeed.Draft{Type: runfeed.EventRunStarted})
+	engine := gin.New()
+	NewModule(NewHandler(Dependencies{Runtime: runtime, Feed: feed})).RegisterRoutes(engine.Group("/api/v1"))
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runs/run-terminal-release", nil)
+	recorder := httptest.NewRecorder()
+	engine.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || len(store.releases) != 1 || store.releases[0] != created.Run.ID {
+		t.Fatalf("terminal Run observation did not release feed metadata: status=%d releases=%#v body=%s", recorder.Code, store.releases, recorder.Body.String())
+	}
+}
+
+type releaseRecordingRunFeedStore struct {
+	runfeed.Store
+	releases []string
+}
+
+func (store *releaseRecordingRunFeedStore) ReleaseTerminal(ctx context.Context, runID string, retention time.Duration) error {
+	store.releases = append(store.releases, runID)
+	return store.Store.ReleaseTerminal(ctx, runID, retention)
 }
 
 func TestStreamRunFeedReplaysAfterSequenceThroughTerminal(t *testing.T) {
@@ -68,7 +121,7 @@ func TestStreamRunFeedDisconnectDoesNotCancelRun(t *testing.T) {
 
 func TestStreamRunFeedHidesAnotherActorsRun(t *testing.T) {
 	engine, runtime, _, _ := newRunFeedHTTPTest(t)
-	createHTTPTestRun(t, runtime, kernel.ActorRef{TenantID: "tenant", ActorID: "other"}, "run-hidden")
+	createHTTPTestRun(t, runtime, kernel.ActorRef{TenantID: testRunFeedTenantID, ActorID: "other"}, "run-hidden")
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runs/run-hidden/feed", nil)
 	recorder := httptest.NewRecorder()
 	engine.ServeHTTP(recorder, request)
@@ -104,7 +157,7 @@ func newRunFeedHTTPTest(t *testing.T) (*gin.Engine, *kernel.Runtime, *runfeed.Fe
 	if err != nil {
 		t.Fatal(err)
 	}
-	actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
+	actor := kernel.ActorRef{TenantID: testRunFeedTenantID, ActorID: "actor"}
 	engine := gin.New()
 	NewModule(NewHandler(Dependencies{
 		Runtime: runtime, Feed: feed, Shared: NewShared(runFeedPrincipal{actor: actor}, nil),

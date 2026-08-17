@@ -31,8 +31,8 @@ const (
 )
 
 var (
-	ErrInvalidInput   = errors.New("invalid run feed input")
-	ErrCursorExpired  = errors.New("run feed cursor expired")
+	ErrInvalidInput  = errors.New("invalid run feed input")
+	ErrCursorExpired = errors.New("run feed cursor expired")
 )
 
 // CursorExpiredError reports that retained events no longer cover the
@@ -81,6 +81,7 @@ type Event struct {
 type Store interface {
 	Append(context.Context, string, Draft, time.Time, time.Duration) (Event, error)
 	List(context.Context, string, int64, int) ([]Event, error)
+	ReleaseTerminal(context.Context, string, time.Duration) error
 }
 
 // Publisher is the narrow write capability consumed by Runtime features.
@@ -155,6 +156,18 @@ func (feed *Feed) Replay(ctx context.Context, runID string, afterSeq int64) ([]E
 		return nil, ErrInvalidInput
 	}
 	return feed.store.List(ctx, runID, afterSeq, feed.batchSize)
+}
+
+// ReleaseTerminal starts the retention countdown for feed metadata after an
+// authoritative durable Run observation has confirmed terminal state. It does
+// not fabricate a terminal event or advance the sequence and must never be
+// used for running or waiting-input Runs.
+func (feed *Feed) ReleaseTerminal(ctx context.Context, runID string) error {
+	runID = strings.TrimSpace(runID)
+	if feed == nil || feed.store == nil || runID == "" {
+		return ErrInvalidInput
+	}
+	return feed.store.ReleaseTerminal(ctx, runID, feed.retention)
 }
 
 // Subscription exposes an initial replay followed by a lossless polling stream.

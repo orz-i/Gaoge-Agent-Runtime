@@ -64,6 +64,7 @@ func (handler *Handler) prepareRunFeed(
 		WriteKernelError(context, "runfeed", err)
 		return nil, kernel.Snapshot{}, 0, false
 	}
+	handler.releaseTerminalRunFeed(context, snapshot)
 	subscription, err := handler.feed.Subscribe(context.Request.Context(), runID, afterSeq)
 	if err != nil {
 		if writeRunFeedCursorExpired(context, err) {

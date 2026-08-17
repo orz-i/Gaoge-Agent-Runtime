@@ -119,6 +119,21 @@ func (store *RunFeedStore) List(ctx context.Context, runID string, afterSeq int6
 	return decodeRunFeedEvents(runID, sequences, values)
 }
 
+// ReleaseTerminal starts retention for existing sequence metadata after the
+// durable Runtime has authoritatively confirmed terminal state. Missing feed
+// state is an idempotent no-op.
+func (store *RunFeedStore) ReleaseTerminal(ctx context.Context, runID string, retention time.Duration) error {
+	runID = strings.TrimSpace(runID)
+	if store == nil || store.client == nil || runID == "" || retention <= 0 {
+		return runfeed.ErrInvalidInput
+	}
+	retentionMilliseconds := max(int64(1), retention.Milliseconds())
+	_, err := releaseTerminalRunFeedScript.Run(
+		ctx, store.client, store.keys(runID), retentionMilliseconds,
+	).Result()
+	return err
+}
+
 func (store *RunFeedStore) runFeedHead(ctx context.Context, runID string) (int64, error) {
 	head, err := store.client.Get(ctx, store.keys(runID)[0]).Int64()
 	if errors.Is(err, goredis.Nil) {
@@ -193,4 +208,15 @@ end
 redis.call('PEXPIRE', KEYS[2], ttl)
 redis.call('PEXPIRE', KEYS[3], ttl)
 return sequence
+`)
+
+var releaseTerminalRunFeedScript = goredis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then
+  return 0
+end
+local ttl = tonumber(ARGV[1])
+redis.call('PEXPIRE', KEYS[1], ttl)
+redis.call('PEXPIRE', KEYS[2], ttl)
+redis.call('PEXPIRE', KEYS[3], ttl)
+return 1
 `)

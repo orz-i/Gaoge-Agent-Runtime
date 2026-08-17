@@ -24,6 +24,7 @@ func (handler *Handler) GetRun(context *gin.Context) {
 		WriteKernelError(context, "run", err)
 		return
 	}
+	handler.releaseTerminalRunFeed(context, snapshot)
 	writeSuccess(context, snapshotResponse(snapshot))
 }
 
@@ -74,6 +75,13 @@ func (handler *Handler) GetWorkbench(context *gin.Context) {
 		return
 	}
 	writeSuccess(context, workbenchResponse(detail))
+}
+
+func (handler *Handler) releaseTerminalRunFeed(context *gin.Context, snapshot kernel.Snapshot) {
+	if handler == nil || handler.feed == nil || !terminalRunStatus(snapshot.Run.Status) {
+		return
+	}
+	_ = handler.feed.ReleaseTerminal(context.Request.Context(), snapshot.Run.ID)
 }
 
 // WriteKernelError maps only feature-neutral Kernel failures. Feature modules

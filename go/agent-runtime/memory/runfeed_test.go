@@ -21,6 +21,33 @@ func TestRunFeedStoreConformance(t *testing.T) {
 	})
 }
 
+func TestRunFeedStoreReleaseTerminalRemovesPreservedSequenceAfterRetention(t *testing.T) {
+	t.Parallel()
+	clock := &runFeedClock{now: time.Date(2026, 8, 17, 2, 0, 0, 0, time.UTC)}
+	store := memory.NewRunFeedStore(memory.RunFeedOptions{Clock: clock})
+	first, err := store.Append(t.Context(), "run-release", runfeed.Draft{Type: "waiting"}, clock.Now(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.now = clock.now.Add(time.Minute + time.Second)
+	_, err = store.List(t.Context(), "run-release", 0, 10)
+	var expired *runfeed.CursorExpiredError
+	if !errors.As(err, &expired) || expired.HeadSeq != first.Seq {
+		t.Fatalf("preserved sequence = %#v, %v", expired, err)
+	}
+	if err = store.ReleaseTerminal(t.Context(), "run-release", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	clock.now = clock.now.Add(time.Minute + time.Second)
+	items, err := store.List(t.Context(), "run-release", 0, 10)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("released memory metadata = %#v, %v", items, err)
+	}
+	if err = store.ReleaseTerminal(t.Context(), "missing-run", time.Minute); err != nil {
+		t.Fatalf("missing terminal metadata release = %v", err)
+	}
+}
+
 func TestRunFeedStoreSequenceReplayAndTTL(t *testing.T) {
 	t.Parallel()
 	clock := &runFeedClock{now: time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)}
