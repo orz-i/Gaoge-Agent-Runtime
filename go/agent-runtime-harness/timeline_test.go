@@ -13,6 +13,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
@@ -23,6 +24,8 @@ const (
 	timelineArgumentText = "sensitive query"
 	timelineResultText   = "sensitive result"
 	timelineFinalText    = "final timeline answer"
+	hostedTimelineTool   = "provider.image_generation"
+	hostedTimelineCallID = "hosted-call-1"
 )
 
 func TestHarnessTimelinePersistsTerminalFactsWithoutStreamingOrBodies(t *testing.T) {
@@ -56,6 +59,168 @@ func TestHarnessTimelinePersistsTerminalFactsWithoutStreamingOrBodies(t *testing
 	if len(reloaded.Items) != len(completed.Items) || reloaded.Turn.RootRunID != completed.Turn.RootRunID ||
 		reloaded.Turn.Status != harness.TurnCompleted || reloaded.Output == nil {
 		t.Fatalf("reloaded Harness timeline diverged: %#v", reloaded)
+	}
+}
+
+type hostedTimelineModel struct{}
+
+func (hostedTimelineModel) Generate(_ context.Context, _ model.Request) (model.Response, error) {
+	return hostedTimelineResponse(), nil
+}
+
+func (hostedTimelineModel) GenerateStream(
+	_ context.Context,
+	_ model.Request,
+	emit func(model.StreamEvent) error,
+) (model.Response, error) {
+	if err := emit(model.StreamEvent{Delta: "provider text"}); err != nil {
+		return model.Response{}, err
+	}
+	for _, status := range []string{"in_progress", "completed"} {
+		if err := emit(model.StreamEvent{HostedToolCall: &model.HostedToolCall{
+			ID: hostedTimelineCallID, ToolKey: hostedTimelineTool, Status: status,
+			Input: json.RawMessage(`{"prompt":"sensitive hosted input"}`),
+		}}); err != nil {
+			return model.Response{}, err
+		}
+	}
+	return hostedTimelineResponse(), nil
+}
+
+func hostedTimelineResponse() model.Response {
+	return model.Response{
+		Content: "hosted tool answer",
+		HostedToolCalls: []model.HostedToolCall{{
+			ID: hostedTimelineCallID, ToolKey: hostedTimelineTool, Status: "completed",
+			Input: json.RawMessage(`{"prompt":"sensitive hosted input"}`),
+			Output: json.RawMessage(`{"artifact":"file-1"}`),
+		}},
+	}
+}
+
+func TestHostedToolStreamUsesStableToolItemLifecycle(t *testing.T) {
+	t.Parallel()
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: timelineTestClock{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := harness.NewMemoryStore()
+	feed, err := runfeed.New(memory.NewRunFeedStore(), runfeed.Options{
+		Retention: time.Hour, PollInterval: time.Millisecond, BatchSize: 128, BufferSize: 16, Clock: timelineTestClock{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnFeed, err := harness.NewTurnFeed(feed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelTimeline, err := harness.NewModelTimelineMiddleware(store, timelineTestClock{}, turnFeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRunner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: hostedTimelineModel{}, ModelMiddleware: []plugin.ModelMiddleware{modelTimeline},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: agentRunner, Store: store, Clock: timelineTestClock{}, TurnFeed: turnFeed,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := testStartRequest()
+	request.HostThread.ID = "thread-hosted-tool-timeline"
+	request.Thread.ID = request.HostThread.ID
+	request.HostTurn.ID = "turn-hosted-tool-timeline"
+	snapshot, err := runner.Start(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := turnFeed.Replay(t.Context(), snapshot.Turn.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHostedToolLifecycle(t, snapshot, events)
+}
+
+func assertHostedToolLifecycle(t *testing.T, snapshot harness.Snapshot, events []harness.TurnEvent) {
+	t.Helper()
+	startedID, deltaCount, completed := assertHostedToolFeedEvents(t, events)
+	if startedID == "" || deltaCount != 2 || !completed {
+		t.Fatalf("incomplete hosted Tool feed lifecycle: started=%q deltas=%d completed=%v events=%#v", startedID, deltaCount, completed, events)
+	}
+	assertHostedToolDurableItems(t, snapshot.Items, startedID)
+}
+
+func assertHostedToolFeedEvents(t *testing.T, events []harness.TurnEvent) (string, int, bool) {
+	t.Helper()
+	startedID := ""
+	deltaCount := 0
+	completed := false
+	for _, event := range events {
+		assertNoHostedToolInAgentMessage(t, event)
+		if event.ItemKind != harness.ItemTool {
+			continue
+		}
+		startedID, deltaCount, completed = advanceHostedToolFeedAssertion(t, event, startedID, deltaCount, completed)
+	}
+	return startedID, deltaCount, completed
+}
+
+func assertNoHostedToolInAgentMessage(t *testing.T, event harness.TurnEvent) {
+	t.Helper()
+	if event.ItemKind == harness.ItemAgentMessage && event.Type == harness.EventItemDelta &&
+		strings.Contains(string(event.Data), "hostedToolCall") {
+		t.Fatalf("hosted Tool leaked into agent_message delta: %#v", event)
+	}
+}
+
+func advanceHostedToolFeedAssertion(
+	t *testing.T,
+	event harness.TurnEvent,
+	startedID string,
+	deltaCount int,
+	completed bool,
+) (string, int, bool) {
+	t.Helper()
+	switch event.Type {
+	case harness.EventItemStarted:
+		return event.ItemID, deltaCount, completed
+	case harness.EventItemDelta:
+		if startedID == "" || event.ItemID != startedID || !strings.Contains(string(event.Data), hostedTimelineTool) {
+			t.Fatalf("unstable hosted Tool delta: started=%q event=%#v", startedID, event)
+		}
+		return startedID, deltaCount + 1, completed
+	case harness.EventItemCompleted:
+		if startedID == "" || event.ItemID != startedID {
+			t.Fatalf("hosted Tool completion lost lifecycle identity: started=%q event=%#v", startedID, event)
+		}
+		return startedID, deltaCount, true
+	default:
+		return startedID, deltaCount, completed
+	}
+}
+
+func assertHostedToolDurableItems(t *testing.T, items []harness.Item, startedID string) {
+	t.Helper()
+	var started, terminal *harness.Item
+	for index := range items {
+		item := &items[index]
+		if item.Kind != harness.ItemTool {
+			continue
+		}
+		switch item.Status {
+		case harness.ItemStarted:
+			started = item
+		case harness.ItemCompleted:
+			terminal = item
+		}
+	}
+	if started == nil || terminal == nil || terminal.ParentItemID != started.ID || started.ID != startedID {
+		t.Fatalf("durable hosted Tool lifecycle diverged: started=%#v terminal=%#v", started, terminal)
 	}
 }
 
