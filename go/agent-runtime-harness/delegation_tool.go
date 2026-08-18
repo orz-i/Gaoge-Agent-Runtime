@@ -14,28 +14,30 @@ const DelegationToolKey = "harness.delegate_agent"
 
 var ErrDelegationToolUnbound = errors.New("harness delegation tool is not bound")
 
-// DelegationToolGuard applies product-owned, run-scoped delegation constraints
-// before Harness starts or loads a child Agent Run.
-type DelegationToolGuard interface {
-	GuardDelegation(context.Context, tools.ExecutionRequest, DelegateRequest) error
+// DelegationToolPolicy applies product-owned, run-scoped delegation
+// normalization and constraints before Harness starts or loads a child Agent
+// Run. Products may attach immutable host-owned evidence here instead of
+// requiring the model to restate it in Tool arguments.
+type DelegationToolPolicy interface {
+	PrepareDelegation(context.Context, tools.ExecutionRequest, DelegateRequest) (DelegateRequest, error)
 }
 
 // DelegationToolHandler is explicitly bound once by the composition root after Runner construction.
 // The Tool Registry remains immutable; this is not a dynamic capability registry.
 type DelegationToolHandler struct {
-	mu     sync.RWMutex
-	runner *Runner
-	guards []DelegationToolGuard
+	mu       sync.RWMutex
+	runner   *Runner
+	policies []DelegationToolPolicy
 }
 
-func NewDelegationToolHandler(guards ...DelegationToolGuard) *DelegationToolHandler {
-	bound := make([]DelegationToolGuard, 0, len(guards))
-	for _, guard := range guards {
-		if guard != nil {
-			bound = append(bound, guard)
+func NewDelegationToolHandler(policies ...DelegationToolPolicy) *DelegationToolHandler {
+	bound := make([]DelegationToolPolicy, 0, len(policies))
+	for _, policy := range policies {
+		if policy != nil {
+			bound = append(bound, policy)
 		}
 	}
-	return &DelegationToolHandler{guards: bound}
+	return &DelegationToolHandler{policies: bound}
 }
 
 func (handler *DelegationToolHandler) Bind(runner *Runner) error {
@@ -69,10 +71,12 @@ func (handler *DelegationToolHandler) Execute(
 	if err := json.Unmarshal(request.Call.Arguments, &input); err != nil {
 		return tools.ExecutionResult{}, tools.NewRecoverableCallError("delegation.invalid_input", "invalid delegation input", err)
 	}
-	for _, guard := range handler.guards {
-		if err := guard.GuardDelegation(ctx, tools.CloneExecutionRequest(request), input); err != nil {
+	for _, policy := range handler.policies {
+		prepared, err := policy.PrepareDelegation(ctx, tools.CloneExecutionRequest(request), input)
+		if err != nil {
 			return tools.ExecutionResult{}, err
 		}
+		input = prepared
 	}
 	result, err := runner.DelegateByRootRunID(ctx, request.RunID, input)
 	if err != nil {

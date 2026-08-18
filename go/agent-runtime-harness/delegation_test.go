@@ -91,6 +91,47 @@ func TestHarnessDelegationToolStartsStableChildAndRecordsRelation(t *testing.T) 
 	assertDelegationCompleted(t, completed, relations, capture)
 }
 
+type appendingDelegationPolicy struct{}
+
+func (appendingDelegationPolicy) PrepareDelegation(
+	_ context.Context,
+	_ tools.ExecutionRequest,
+	input harness.DelegateRequest,
+) (harness.DelegateRequest, error) {
+	input.Goal += "\n\nhost-frozen evidence"
+	return input, nil
+}
+
+func TestHarnessDelegationPolicyPreparesActualChildGoal(t *testing.T) {
+	t.Parallel()
+	capture := &delegationModel{}
+	runner, relations := newDelegationHarnessWithModel(t, capture, 2, appendingDelegationPolicy{})
+	completed, err := runner.Start(t.Context(), harness.StartRequest{
+		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-policy"},
+		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-policy"},
+		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-policy"},
+		Goal:       "delegate the research and synthesize it",
+		Config: harness.ConfigSnapshot{
+			Model:        delegationTestModelName,
+			ToolKeys:     []string{harness.DelegationToolKey},
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run policy-prepared delegated Harness turn: %v", err)
+	}
+	assertDelegationCompleted(t, completed, relations, capture)
+	requests := capture.requestsCopy()
+	if len(requests) != 3 {
+		t.Fatalf("model requests = %#v", requests)
+	}
+	childGoal := requests[1].Messages[len(requests[1].Messages)-1].Content
+	if childGoal != "analyze the evidence\n\nhost-frozen evidence" {
+		t.Fatalf("prepared child goal = %q", childGoal)
+	}
+}
+
 func TestHarnessDelegationRelationsWaitForRootTerminalState(t *testing.T) {
 	t.Parallel()
 	client := &blockingDelegationModel{
@@ -137,20 +178,20 @@ func TestHarnessDelegatesDifferentGoalsToSameMember(t *testing.T) {
 	}
 }
 
-type blockingDelegationGuard struct {
+type blockingDelegationPolicy struct {
 	calls int
 }
 
-func (guard *blockingDelegationGuard) GuardDelegation(
+func (policy *blockingDelegationPolicy) PrepareDelegation(
 	_ context.Context,
 	_ tools.ExecutionRequest,
 	input harness.DelegateRequest,
-) error {
-	guard.calls++
+) (harness.DelegateRequest, error) {
+	policy.calls++
 	if input.MemberID != "researcher" {
-		return tools.ErrInvalidCall
+		return harness.DelegateRequest{}, tools.ErrInvalidCall
 	}
-	return tools.NewRecoverableCallErrorWithBlockedTools(
+	return harness.DelegateRequest{}, tools.NewRecoverableCallErrorWithBlockedTools(
 		"story.delegation_budget_exhausted",
 		"publish now",
 		tools.ErrInvalidCall,
@@ -161,8 +202,8 @@ func (guard *blockingDelegationGuard) GuardDelegation(
 func TestHarnessDelegationGuardRemovesBlockedToolFromLaterTurns(t *testing.T) {
 	t.Parallel()
 	capture := &delegationModel{}
-	guard := &blockingDelegationGuard{}
-	runner, relations := newDelegationHarnessWithModel(t, capture, 2, guard)
+	policy := &blockingDelegationPolicy{}
+	runner, relations := newDelegationHarnessWithModel(t, capture, 2, policy)
 	completed, err := runner.Start(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-guard"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-guard"},
@@ -175,8 +216,8 @@ func TestHarnessDelegationGuardRemovesBlockedToolFromLaterTurns(t *testing.T) {
 			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
 		},
 	})
-	if err != nil || completed.Turn.Status != harness.TurnCompleted || guard.calls != 1 {
-		t.Fatalf("completed=%#v err=%v guard calls=%d", completed.Turn, err, guard.calls)
+	if err != nil || completed.Turn.Status != harness.TurnCompleted || policy.calls != 1 {
+		t.Fatalf("completed=%#v err=%v policy calls=%d", completed.Turn, err, policy.calls)
 	}
 	children, err := relations.ListChildren(t.Context(), completed.Turn.RootRunID)
 	if err != nil || len(children) != 0 {
@@ -280,9 +321,9 @@ func newDelegationHarnessWithModel(
 	t *testing.T,
 	client model.Client,
 	maxToolCalls int,
-	guards ...harness.DelegationToolGuard,
+	policies ...harness.DelegationToolPolicy,
 ) (*harness.Runner, *runrelation.Registry) {
-	return newDelegationHarnessWithOptions(t, client, maxToolCalls, false, guards...)
+	return newDelegationHarnessWithOptions(t, client, maxToolCalls, false, policies...)
 }
 
 func newDelegationHarnessWithOptions(
@@ -290,7 +331,7 @@ func newDelegationHarnessWithOptions(
 	client model.Client,
 	maxToolCalls int,
 	contextAware bool,
-	guards ...harness.DelegationToolGuard,
+	policies ...harness.DelegationToolPolicy,
 ) (*harness.Runner, *runrelation.Registry) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
@@ -302,7 +343,7 @@ func newDelegationHarnessWithOptions(
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegationTool := harness.NewDelegationToolHandler(guards...)
+	delegationTool := harness.NewDelegationToolHandler(policies...)
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegationTool)})
 	if err != nil {
 		t.Fatal(err)
