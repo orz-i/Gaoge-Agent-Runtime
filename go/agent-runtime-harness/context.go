@@ -117,6 +117,13 @@ func withContextSnapshot(ctx context.Context, snapshot runtimecontext.Snapshot) 
 	return context.WithValue(ctx, contextSnapshotKey{}, snapshot)
 }
 
+// withoutContextSnapshot preserves cancellation, deadlines, and unrelated host values while
+// preventing a delegated child Agent from inheriting its parent Harness Turn's sealed context.
+// Child delegation goals already carry their explicit frozen evidence boundary.
+func withoutContextSnapshot(ctx context.Context) context.Context {
+	return context.WithValue(ctx, contextSnapshotKey{}, runtimecontext.Snapshot{})
+}
+
 func contextMessages(snapshot runtimecontext.Snapshot) ([]model.Message, error) {
 	var prompt runtimecontext.Prompt
 	if !json.Valid(snapshot.Content) || json.Unmarshal(snapshot.Content, &prompt) != nil {

@@ -111,7 +111,7 @@ func (runner *Runner) executeDelegation(
 	delegation handoff.Delegation,
 	startedItemID string,
 ) (DelegationResult, error) {
-	delegation, delegateErr := runner.handoffs.StartOrLoad(ctx, parent, delegation)
+	delegation, delegateErr := runner.handoffs.StartOrLoad(withoutContextSnapshot(ctx), parent, delegation)
 	status := delegationItemStatus(delegation.Status)
 	if _, itemErr := runner.recordDelegationItem(ctx, turn, delegation, status, startedItemID); itemErr != nil {
 		return DelegationResult{}, errors.Join(delegateErr, itemErr)

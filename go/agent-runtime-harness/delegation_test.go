@@ -10,6 +10,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
+	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
@@ -23,6 +24,7 @@ const (
 	delegationTestModelName        = "frozen-delegation-model"
 	delegationTestSpecialistResult = "specialist result"
 	delegationTestRootSynthesis    = "root synthesis"
+	delegationContextTurnID        = "turn-delegation-context"
 )
 
 func TestDelegationToolNameIsProviderPortable(t *testing.T) {
@@ -30,6 +32,41 @@ func TestDelegationToolNameIsProviderPortable(t *testing.T) {
 	registration := harness.DelegationToolRegistration(harness.NewDelegationToolHandler())
 	if !regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`).MatchString(registration.Definition.Name) {
 		t.Fatalf("delegation Tool name is not provider-portable: %q", registration.Definition.Name)
+	}
+}
+
+func TestHarnessDelegationChildDoesNotInheritParentContextSnapshot(t *testing.T) {
+	t.Parallel()
+	capture := &delegationModel{}
+	runner, relations := newDelegationHarnessWithOptions(t, capture, 2, true)
+	goal := "delegate the research and synthesize it"
+	completed, err := runner.Start(t.Context(), harness.StartRequest{
+		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-context"},
+		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: delegationContextTurnID},
+		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-context"},
+		Goal:       goal,
+		Config: harness.ConfigSnapshot{
+			Model:        delegationTestModelName,
+			ToolKeys:     []string{harness.DelegationToolKey},
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+		},
+		Context: &harness.ContextSeed{
+			ThreadPathHash: harness.ContextPathHash("message-delegation-context", delegationContextTurnID),
+			CurrentTurnID:  delegationContextTurnID,
+			Items: []runtimecontext.Item{{
+				ID: "message-delegation-context", TurnID: delegationContextTurnID,
+				Kind: runtimecontext.ItemMessage, Role: runtimecontext.RoleUser, Content: goal, Required: true,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("run context-bound delegated Harness turn: %v", err)
+	}
+	assertDelegationCompleted(t, completed, relations, capture)
+	requests := capture.requestsCopy()
+	if len(requests) != 3 || requests[1].Messages[len(requests[1].Messages)-1].Content != "analyze the evidence" {
+		t.Fatalf("delegated child inherited parent context: %#v", requests)
 	}
 }
 
@@ -245,6 +282,16 @@ func newDelegationHarnessWithModel(
 	maxToolCalls int,
 	guards ...harness.DelegationToolGuard,
 ) (*harness.Runner, *runrelation.Registry) {
+	return newDelegationHarnessWithOptions(t, client, maxToolCalls, false, guards...)
+}
+
+func newDelegationHarnessWithOptions(
+	t *testing.T,
+	client model.Client,
+	maxToolCalls int,
+	contextAware bool,
+	guards ...harness.DelegationToolGuard,
+) (*harness.Runner, *runrelation.Registry) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -260,11 +307,8 @@ func newDelegationHarnessWithModel(
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentRunner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: client, Catalog: registry, Executor: registry,
-		ApprovalPolicies: []plugin.ApprovalPolicy{policy},
-		Limits:           agent.Limits{MaxLLMCalls: 4, MaxToolCalls: maxToolCalls},
-	})
+	dependencies := delegationAgentDependencies(runtime, client, registry, policy, maxToolCalls, contextAware)
+	agentRunner, err := agent.NewRunner(dependencies)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,10 +320,8 @@ func newDelegationHarnessWithModel(
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: agentRunner, Store: store, Clock: delegationTestClock{}, Catalog: registry,
-		Handoffs: handoffs, Relations: relations,
-	})
+	harnessDependencies := delegationHarnessDependencies(runtime, agentRunner, store, registry, handoffs, relations, contextAware)
+	runner, err := harness.NewRunner(harnessDependencies)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,6 +329,44 @@ func newDelegationHarnessWithModel(
 		t.Fatal(err)
 	}
 	return runner, relations
+}
+
+func delegationAgentDependencies(
+	runtime *kernel.Runtime,
+	client model.Client,
+	registry *tools.Registry,
+	policy plugin.ApprovalPolicy,
+	maxToolCalls int,
+	contextAware bool,
+) agent.Dependencies {
+	dependencies := agent.Dependencies{
+		Runtime: runtime, Model: client, Catalog: registry, Executor: registry,
+		ApprovalPolicies: []plugin.ApprovalPolicy{policy},
+		Limits:           agent.Limits{MaxLLMCalls: 4, MaxToolCalls: maxToolCalls},
+	}
+	if contextAware {
+		dependencies.ModelMiddleware = []plugin.ModelMiddleware{harness.NewContextModelMiddleware()}
+	}
+	return dependencies
+}
+
+func delegationHarnessDependencies(
+	runtime *kernel.Runtime,
+	agentRunner *agent.Runner,
+	store harness.Store,
+	registry *tools.Registry,
+	handoffs *handoff.Coordinator,
+	relations *runrelation.Registry,
+	contextAware bool,
+) harness.Dependencies {
+	dependencies := harness.Dependencies{
+		Runtime: runtime, Agent: agentRunner, Store: store, Clock: delegationTestClock{}, Catalog: registry,
+		Handoffs: handoffs, Relations: relations,
+	}
+	if contextAware {
+		dependencies.Context = runtimecontext.NewBuilder(runtimecontext.Dependencies{})
+	}
+	return dependencies
 }
 
 func assertDelegationCompleted(
