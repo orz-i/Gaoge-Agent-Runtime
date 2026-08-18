@@ -37,8 +37,9 @@ const (
 )
 
 var (
-	errDomainRejected      = errors.New("domain rejected arguments")
-	errDatabaseUnavailable = errors.New("database unavailable")
+	errDomainRejected           = errors.New("domain rejected arguments")
+	errDatabaseUnavailable      = errors.New("database unavailable")
+	errUnexpectedCompletionTool = errors.New("completion repair must not call Tools")
 )
 
 type requiredApprovalPolicy struct{ name string }
@@ -210,6 +211,104 @@ func TestRunnerRejectsCompletionUntilRequiredToolSucceeds(t *testing.T) {
 	if len(view.RequiredToolKeys) != 1 || view.RequiredToolKeys[0] != publishToolKey {
 		t.Fatalf("required Tool Keys = %#v", view.RequiredToolKeys)
 	}
+}
+
+type correctingCompletionPolicy struct{}
+
+func (correctingCompletionPolicy) ValidateCompletion(
+	_ context.Context,
+	_ kernel.Run,
+	response runtimemodel.Response,
+) (agent.CompletionCorrection, error) {
+	if json.Valid([]byte(response.Content)) {
+		return agent.CompletionCorrection{}, nil
+	}
+	return agent.CompletionCorrection{
+		Code:            "test.invalid_json",
+		Message:         "return valid JSON without trailing commas",
+		BlockedToolKeys: []string{manifestToolKey},
+	}, nil
+}
+
+type correctingCompletionModel struct {
+	t     *testing.T
+	calls int
+}
+
+func (model *correctingCompletionModel) Generate(
+	_ context.Context,
+	request runtimemodel.Request,
+) (runtimemodel.Response, error) {
+	model.calls++
+	if model.calls == 1 {
+		return runtimemodel.Response{Content: `{"ok":true,}`}, nil
+	}
+	if len(request.Tools) != 0 {
+		model.t.Fatalf("blocked Tools remained available during completion repair: %#v", request.Tools)
+	}
+	var sawInvalid, sawGuidance bool
+	for _, message := range request.Messages {
+		if message.Role == runtimemodel.RoleAssistant && message.Content == `{"ok":true,}` {
+			sawInvalid = true
+		}
+		if message.Role == runtimemodel.RoleSystem && strings.Contains(message.Content, "return valid JSON without trailing commas") {
+			sawGuidance = true
+		}
+	}
+	if !sawInvalid || !sawGuidance {
+		model.t.Fatalf("completion repair transcript = %#v", request.Messages)
+	}
+	return runtimemodel.Response{Content: `{"ok":true}`}, nil
+}
+
+func completionRepairRegistry(t *testing.T) *tools.Registry {
+	t.Helper()
+	return mustRegistry(t, []tools.Registration{{
+		Definition: tools.Definition{
+			Key: manifestToolKey, Name: manifestToolName,
+			InputSchema: json.RawMessage(`{"type":"object"}`),
+		},
+		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			return tools.ExecutionResult{}, errUnexpectedCompletionTool
+		}),
+	}})
+}
+
+func assertCorrectedCompletionSnapshot(t *testing.T, snapshot kernel.Snapshot, modelCalls int) {
+	t.Helper()
+	if snapshot.Run.Status != kernel.RunStatusCompleted || modelCalls != 2 {
+		t.Fatalf("snapshot = %#v, model calls = %d", snapshot.Run, modelCalls)
+	}
+	if snapshot.Result == nil || string(snapshot.Result.Content) != `"{\"ok\":true}"` {
+		t.Fatalf("terminal result = %#v", snapshot.Result)
+	}
+	for _, event := range snapshot.Events {
+		if event.Type == "agent.completion_corrected" && event.Message == "test.invalid_json" {
+			return
+		}
+	}
+	t.Fatalf("completion correction event missing: %#v", snapshot.Events)
+}
+
+func TestRunnerCorrectsRejectedTerminalCompletionInSameRun(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	registry := completionRepairRegistry(t)
+	model := &correctingCompletionModel{t: t}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
+		Approvals:          interactionadapter.New(approvals),
+		CompletionPolicies: []agent.CompletionPolicy{correctingCompletionPolicy{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), startRequest(
+		"run_completion_repair", "request_completion_repair", "return JSON", manifestToolKey,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCorrectedCompletionSnapshot(t, snapshot, model.calls)
 }
 
 type repeatedReadModel struct {

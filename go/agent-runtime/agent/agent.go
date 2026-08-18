@@ -56,6 +56,90 @@ func (runner *Runner) completeWithToolResult(
 	return completed, err
 }
 
+func (runner *Runner) validateCompletion(
+	ctx context.Context,
+	run kernel.Run,
+	response model.Response,
+) (CompletionCorrection, error) {
+	for _, policy := range runner.completionPolicies {
+		correction, err := policy.ValidateCompletion(ctx, run, response)
+		if err != nil {
+			return CompletionCorrection{}, err
+		}
+		if !completionCorrectionRequired(correction) {
+			continue
+		}
+		correction.Code = strings.TrimSpace(correction.Code)
+		correction.Message = strings.TrimSpace(correction.Message)
+		correction.BlockedToolKeys = normalizedToolKeys(correction.BlockedToolKeys)
+		if correction.Code == "" || correction.Message == "" {
+			return CompletionCorrection{}, ErrInvalidRequest
+		}
+		return correction, nil
+	}
+	return CompletionCorrection{}, nil
+}
+
+func completionCorrectionRequired(value CompletionCorrection) bool {
+	return strings.TrimSpace(value.Code) != "" ||
+		strings.TrimSpace(value.Message) != "" ||
+		len(value.BlockedToolKeys) != 0
+}
+
+func (runner *Runner) correctCompletion(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state runState,
+	response model.Response,
+	correction CompletionCorrection,
+) (kernel.Snapshot, error) {
+	state.Messages = append(state.Messages, model.Message{
+		Role: model.RoleAssistant, Content: strings.TrimSpace(response.Content),
+	})
+	state.Messages = withSystemGuidance(
+		state.Messages,
+		"Completion rejected by the Runtime: "+correction.Message+
+			" The previous response was not delivered to the user. Repair only the terminal answer using the successful results already present in this transcript.",
+	)
+	state.BlockedToolKeys = normalizedToolKeys(append(state.BlockedToolKeys, correction.BlockedToolKeys...))
+	state.RequireToolCall = false
+	encoded, err := encodeState(state)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+		Events: []kernel.EventDraft{{Type: "agent.completion_corrected", Message: correction.Code}},
+	})
+}
+
+func compactCompletionPolicies(values []CompletionPolicy) []CompletionPolicy {
+	result := make([]CompletionPolicy, 0, len(values))
+	for _, value := range values {
+		if value != nil {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+// CompletionCorrection describes a recoverable terminal-output contract
+// violation. The invalid model response is kept in the durable transcript and
+// the same Agent Run is asked to repair only its terminal answer.
+type CompletionCorrection struct {
+	Code            string
+	Message         string
+	BlockedToolKeys []string
+}
+
+// CompletionPolicy lets a product validate a proposed terminal Agent response
+// before the Runtime commits the Run as completed. It cannot mutate topology or
+// call the provider; it may only accept the response, request one bounded
+// correction, or return a fatal validation error.
+type CompletionPolicy interface {
+	ValidateCompletion(context.Context, kernel.Run, model.Response) (CompletionCorrection, error)
+}
+
 func runInvocation(operation plugin.RunOperation, snapshot kernel.Snapshot) plugin.RunInvocation {
 	return plugin.RunInvocation{
 		Operation: operation, Kind: snapshot.Run.Kind, RunID: snapshot.Run.ID,
@@ -84,18 +168,19 @@ type Limits struct {
 
 // Dependencies explicitly provide the direct Agent loop capabilities.
 type Dependencies struct {
-	Runtime          *kernel.Runtime
-	Model            model.Client
-	Catalog          tools.Catalog
-	Executor         tools.Executor
-	Approvals        plugin.ApprovalHandler
-	ApprovalPolicies []plugin.ApprovalPolicy
-	HostedTools      HostedToolCatalog
-	Observers        []plugin.Observer
-	RunMiddleware    []plugin.RunMiddleware
-	ModelMiddleware  []plugin.ModelMiddleware
-	ToolMiddleware   []plugin.ToolMiddleware
-	Limits           Limits
+	Runtime            *kernel.Runtime
+	Model              model.Client
+	Catalog            tools.Catalog
+	Executor           tools.Executor
+	Approvals          plugin.ApprovalHandler
+	ApprovalPolicies   []plugin.ApprovalPolicy
+	HostedTools        HostedToolCatalog
+	Observers          []plugin.Observer
+	RunMiddleware      []plugin.RunMiddleware
+	ModelMiddleware    []plugin.ModelMiddleware
+	ToolMiddleware     []plugin.ToolMiddleware
+	CompletionPolicies []CompletionPolicy
+	Limits             Limits
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
 	DeferResumption bool
@@ -117,19 +202,20 @@ type StartRequest struct {
 
 // Runner owns only the direct Agent model and Tool loop.
 type Runner struct {
-	runtime          *kernel.Runtime
-	model            model.Client
-	catalog          tools.Catalog
-	executor         tools.Executor
-	approvals        plugin.ApprovalHandler
-	approvalPolicies *plugin.ApprovalPolicySet
-	hostedTools      HostedToolCatalog
-	observers        *plugin.ObserverSet
-	runChain         *plugin.RunChain
-	modelChain       *plugin.ModelChain
-	toolChain        *plugin.ToolChain
-	limits           Limits
-	deferResume      bool
+	runtime            *kernel.Runtime
+	model              model.Client
+	catalog            tools.Catalog
+	executor           tools.Executor
+	approvals          plugin.ApprovalHandler
+	approvalPolicies   *plugin.ApprovalPolicySet
+	hostedTools        HostedToolCatalog
+	observers          *plugin.ObserverSet
+	runChain           *plugin.RunChain
+	modelChain         *plugin.ModelChain
+	toolChain          *plugin.ToolChain
+	completionPolicies []CompletionPolicy
+	limits             Limits
+	deferResume        bool
 }
 
 type runState struct {
@@ -214,8 +300,9 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		runtime: dependencies.Runtime, model: dependencies.Model, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		hostedTools: dependencies.HostedTools, observers: observers, approvalPolicies: approvalPolicies,
-		limits:   dependencies.Limits,
-		runChain: runChain, modelChain: modelChain, toolChain: toolChain,
+		completionPolicies: compactCompletionPolicies(dependencies.CompletionPolicies),
+		limits:             dependencies.Limits,
+		runChain:           runChain, modelChain: modelChain, toolChain: toolChain,
 		deferResume: dependencies.DeferResumption,
 	}, nil
 }
@@ -398,6 +485,15 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	if len(response.ToolCalls) == 0 {
 		if missing := missingRequiredToolKeys(state); len(missing) != 0 {
 			corrected, correctionErr := runner.correctRequiredToolCompletion(ctx, snapshot, state, response, missing)
+			return corrected, correctionErr != nil, correctionErr
+		}
+		correction, validationErr := runner.validateCompletion(ctx, snapshot.Run, response)
+		if validationErr != nil {
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.completion_validation_failed", validationErr)
+			return failed, true, failErr
+		}
+		if completionCorrectionRequired(correction) {
+			corrected, correctionErr := runner.correctCompletion(ctx, snapshot, state, response, correction)
 			return corrected, correctionErr != nil, correctionErr
 		}
 		completed, completeErr := runner.complete(ctx, snapshot, state, response)
