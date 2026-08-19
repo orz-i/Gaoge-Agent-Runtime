@@ -220,6 +220,9 @@ type AgentStarter interface {
 type Dependencies struct {
 	Runtime   *kernel.Runtime
 	Agent     AgentStarter
+	Plans     PlanExecuteFeature
+	Teams     TeamFeature
+	Workflows WorkflowFeature
 	Store     Store
 	Clock     Clock
 	TurnFeed  *TurnFeed
@@ -234,6 +237,9 @@ type Dependencies struct {
 type Runner struct {
 	runtime   *kernel.Runtime
 	agent     AgentStarter
+	plans     PlanExecuteFeature
+	teams     TeamFeature
+	workflows WorkflowFeature
 	store     Store
 	clock     Clock
 	turnFeed  *TurnFeed
@@ -264,7 +270,9 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		return nil, ErrInvalidRequest
 	}
 	return &Runner{
-		runtime: dependencies.Runtime, agent: dependencies.Agent, store: dependencies.Store, clock: dependencies.Clock,
+		runtime: dependencies.Runtime, agent: dependencies.Agent,
+		plans: dependencies.Plans, teams: dependencies.Teams, workflows: dependencies.Workflows,
+		store: dependencies.Store, clock: dependencies.Clock,
 		turnFeed: dependencies.TurnFeed,
 		context:  dependencies.Context, catalog: dependencies.Catalog,
 		handoffs: dependencies.Handoffs, relations: dependencies.Relations,

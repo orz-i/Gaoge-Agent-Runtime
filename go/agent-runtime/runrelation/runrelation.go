@@ -27,6 +27,7 @@ const (
 	KindTeamMember     Kind = "team_member"
 	KindWorkflowEffect Kind = "workflow_effect"
 	KindDelegation     Kind = "delegation"
+	KindCapability     Kind = "capability"
 )
 
 // Draft is one relation before its creation timestamp is assigned.
@@ -168,7 +169,8 @@ func Sort(items []Relation) {
 }
 
 func validKind(kind Kind) bool {
-	return kind == KindPlanStep || kind == KindTeamMember || kind == KindWorkflowEffect || kind == KindDelegation
+	return kind == KindPlanStep || kind == KindTeamMember || kind == KindWorkflowEffect ||
+		kind == KindDelegation || kind == KindCapability
 }
 
 type systemClock struct{}
