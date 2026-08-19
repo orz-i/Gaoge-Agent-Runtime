@@ -53,6 +53,24 @@ type invocationRecord struct {
 
 func (invocationRecord) TableName() string { return "agent_harness_invocations" }
 
+type interactionRecord struct {
+	ID               string    `gorm:"primaryKey;size:64"`
+	TurnID           string    `gorm:"size:64;not null;index:idx_harness_interaction_turn"`
+	InvocationID     string    `gorm:"size:64;not null;index:idx_harness_interaction_invocation"`
+	ParentItemID     string    `gorm:"size:64;not null;default:''"`
+	Key              string    `gorm:"size:128;not null"`
+	Kind             string    `gorm:"size:32;not null"`
+	SchemaJSON       string    `gorm:"type:text;not null"`
+	PresentationJSON string    `gorm:"type:text;not null;default:''"`
+	Status           string    `gorm:"size:32;not null;index:idx_harness_interaction_status"`
+	ResponseJSON     string    `gorm:"type:text;not null;default:''"`
+	Revision         uint64    `gorm:"not null"`
+	CreatedAt        time.Time `gorm:"not null"`
+	UpdatedAt        time.Time `gorm:"not null"`
+}
+
+func (interactionRecord) TableName() string { return "agent_harness_interactions" }
+
 type configRecord struct {
 	ID          string    `gorm:"primaryKey;size:64"`
 	TurnID      string    `gorm:"size:64;not null;index:idx_harness_config_turn"`

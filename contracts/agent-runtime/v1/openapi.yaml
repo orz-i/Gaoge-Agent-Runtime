@@ -195,10 +195,33 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
         default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/interactions/{interactionID}:
+    post:
+      operationId: resolveHarnessInteraction
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+        - $ref: '#/components/parameters/HarnessInteractionID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ResolveHarnessInteractionRequest'}
+      responses:
+        '200':
+          description: Harness interaction response recorded on the same Turn
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
 components:
   parameters:
     RunID:
       name: runID
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
+    HarnessInteractionID:
+      name: interactionID
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 128}
@@ -308,6 +331,12 @@ components:
       properties:
         decision: {type: string, enum: [approve, reject]}
         comment: {type: string}
+    ResolveHarnessInteractionRequest:
+      type: object
+      additionalProperties: false
+      required: [response]
+      properties:
+        response: {}
     StartWorkflowRunRequest:
       type: object
       additionalProperties: false
@@ -432,7 +461,7 @@ components:
         seq: {type: integer, minimum: 1}
         kind:
           type: string
-          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, artifact, context, diagnostic]
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, interaction, artifact, context, diagnostic]
         status: {type: string, enum: [started, waiting, completed, failed, cancelled]}
         hostRef: {$ref: '#/components/schemas/HostRef'}
         invocationID: {type: string}
@@ -453,7 +482,7 @@ components:
         itemID: {type: string}
         itemKind:
           type: string
-          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, artifact, context, diagnostic]
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, interaction, artifact, context, diagnostic]
         delta: {type: string}
         message: {type: string}
         data: {}
@@ -482,15 +511,36 @@ components:
         revision: {type: integer, minimum: 1}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    HarnessInteraction:
+      type: object
+      additionalProperties: false
+      required: [id, turnID, invocationID, key, kind, schema, status, revision, createdAt, updatedAt]
+      properties:
+        id: {type: string}
+        turnID: {type: string}
+        invocationID: {type: string}
+        parentItemID: {type: string}
+        key: {type: string}
+        kind: {type: string, enum: [choice, confirmation, input]}
+        schema: {}
+        presentation: {}
+        status: {type: string, enum: [waiting, resolved]}
+        response: {}
+        revision: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
     HarnessTurnSnapshot:
       type: object
       additionalProperties: false
-      required: [turn, invocations, items]
+      required: [turn, invocations, interactions, items]
       properties:
         turn: {$ref: '#/components/schemas/HarnessTurn'}
         invocations:
           type: array
           items: {$ref: '#/components/schemas/HarnessCapabilityInvocation'}
+        interactions:
+          type: array
+          items: {$ref: '#/components/schemas/HarnessInteraction'}
         items:
           type: array
           items: {$ref: '#/components/schemas/HarnessItem'}

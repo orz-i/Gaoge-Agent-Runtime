@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 const maxListItems = 500
@@ -16,6 +17,7 @@ type MemoryStore struct {
 	turns                   map[string]Turn
 	invocations             map[string]Invocation
 	invocationExecutionRefs map[string]string
+	interactions            map[string]Interaction
 	configs                 map[string]ConfigSnapshot
 	items                   map[string][]Item
 	itemIDs                 map[string]Item
@@ -33,20 +35,18 @@ func (store *MemoryStore) CreateInvocation(_ context.Context, value Invocation) 
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if existing, ok := store.invocations[value.ID]; ok {
-		if !sameInvocationIdentity(existing, value) {
-			return Invocation{}, false, ErrConflict
-		}
-		return cloneInvocation(existing), false, nil
+	created, fresh, err := createMemoryValue(store.invocations, value.ID, value, sameInvocationIdentity, cloneInvocation)
+	if err != nil || !fresh {
+		return created, fresh, err
 	}
 	if executionRef := strings.TrimSpace(value.ExecutionRefID); executionRef != "" {
 		if existingID := store.invocationExecutionRefs[executionRef]; existingID != "" && existingID != value.ID {
+			delete(store.invocations, value.ID)
 			return Invocation{}, false, ErrConflict
 		}
 		store.invocationExecutionRefs[executionRef] = value.ID
 	}
-	store.invocations[value.ID] = cloneInvocation(value)
-	return cloneInvocation(value), true, nil
+	return created, fresh, nil
 }
 
 func (store *MemoryStore) GetInvocation(_ context.Context, id string) (Invocation, error) {
@@ -96,28 +96,124 @@ func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, 
 }
 
 func (store *MemoryStore) ListInvocations(_ context.Context, turnID string) ([]Invocation, error) {
+	return listMemoryStoreValues(
+		store, turnID, store.invocations,
+		func(value Invocation) string { return value.TurnID },
+		func(value Invocation) (time.Time, string) { return value.CreatedAt, value.ID },
+		cloneInvocation,
+	)
+}
+
+func (store *MemoryStore) CreateInteraction(_ context.Context, value Interaction) (Interaction, bool, error) {
+	if store == nil || !validInteraction(value) {
+		return Interaction{}, false, ErrInvalidRequest
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return createMemoryValue(store.interactions, value.ID, value, sameInteractionIdentity, cloneInteraction)
+}
+
+func (store *MemoryStore) GetInteraction(_ context.Context, id string) (Interaction, error) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	value, ok := store.interactions[strings.TrimSpace(id)]
+	if !ok {
+		return Interaction{}, ErrNotFound
+	}
+	return cloneInteraction(value), nil
+}
+
+func (store *MemoryStore) UpdateInteraction(
+	_ context.Context,
+	value Interaction,
+	expectedRevision uint64,
+) (Interaction, error) {
+	if store == nil || !validInteraction(value) || expectedRevision == 0 {
+		return Interaction{}, ErrInvalidRequest
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current, ok := store.interactions[value.ID]
+	if !ok {
+		return Interaction{}, ErrNotFound
+	}
+	if current.Revision != expectedRevision || !sameInteractionIdentity(current, value) {
+		return Interaction{}, ErrConflict
+	}
+	value.Revision = expectedRevision + 1
+	store.interactions[value.ID] = cloneInteraction(value)
+	return cloneInteraction(value), nil
+}
+
+func (store *MemoryStore) ListInteractions(_ context.Context, turnID string) ([]Interaction, error) {
+	return listMemoryStoreValues(
+		store, turnID, store.interactions,
+		func(value Interaction) string { return value.TurnID },
+		func(value Interaction) (time.Time, string) { return value.CreatedAt, value.ID },
+		cloneInteraction,
+	)
+}
+
+func createMemoryValue[T any](
+	values map[string]T,
+	id string,
+	value T,
+	same func(T, T) bool,
+	clone func(T) T,
+) (T, bool, error) {
+	if existing, ok := values[id]; ok {
+		if !same(existing, value) {
+			var zero T
+			return zero, false, ErrConflict
+		}
+		return clone(existing), false, nil
+	}
+	values[id] = clone(value)
+	return clone(value), true, nil
+}
+
+func listMemoryValues[T any](
+	values map[string]T,
+	turnID string,
+	owner func(T) string,
+	order func(T) (time.Time, string),
+	clone func(T) T,
+) []T {
+	result := make([]T, 0)
+	for _, value := range values {
+		if owner(value) == turnID {
+			result = append(result, clone(value))
+		}
+	}
+	slices.SortFunc(result, func(left, right T) int {
+		leftTime, leftID := order(left)
+		rightTime, rightID := order(right)
+		if leftTime.Before(rightTime) {
+			return -1
+		}
+		if leftTime.After(rightTime) {
+			return 1
+		}
+		return strings.Compare(leftID, rightID)
+	})
+	return result
+}
+
+func listMemoryStoreValues[T any](
+	store *MemoryStore,
+	turnID string,
+	values map[string]T,
+	owner func(T) string,
+	order func(T) (time.Time, string),
+	clone func(T) T,
+) ([]T, error) {
 	turnID = strings.TrimSpace(turnID)
 	if store == nil || turnID == "" {
 		return nil, ErrInvalidRequest
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	result := make([]Invocation, 0)
-	for _, value := range store.invocations {
-		if value.TurnID == turnID {
-			result = append(result, cloneInvocation(value))
-		}
-	}
-	slices.SortFunc(result, func(left, right Invocation) int {
-		if left.CreatedAt.Before(right.CreatedAt) {
-			return -1
-		}
-		if left.CreatedAt.After(right.CreatedAt) {
-			return 1
-		}
-		return strings.Compare(left.ID, right.ID)
-	})
-	return result, nil
+	return listMemoryValues(values, turnID, owner, order, clone), nil
 }
 
 // NewMemoryStore creates an empty isolated Harness Store.
@@ -125,7 +221,8 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		sessions: map[string]Session{}, turns: map[string]Turn{}, configs: map[string]ConfigSnapshot{},
 		invocations: map[string]Invocation{}, invocationExecutionRefs: map[string]string{},
-		items: map[string][]Item{}, itemIDs: map[string]Item{},
+		interactions: map[string]Interaction{},
+		items:        map[string][]Item{}, itemIDs: map[string]Item{},
 	}
 }
 

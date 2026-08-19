@@ -26,6 +26,36 @@ type TurnResponse struct {
 	UpdatedAt   time.Time          `json:"updatedAt"`
 }
 
+type ResolveInteractionRequest struct {
+	Response json.RawMessage `json:"response" binding:"required"`
+}
+
+type InteractionResponse struct {
+	ID           string                    `json:"id"`
+	TurnID       string                    `json:"turnID"`
+	InvocationID string                    `json:"invocationID"`
+	ParentItemID string                    `json:"parentItemID,omitempty"`
+	Key          string                    `json:"key"`
+	Kind         harness.InteractionKind   `json:"kind"`
+	Schema       json.RawMessage           `json:"schema"`
+	Presentation json.RawMessage           `json:"presentation,omitempty"`
+	Status       harness.InteractionStatus `json:"status"`
+	Response     json.RawMessage           `json:"response,omitempty"`
+	Revision     uint64                    `json:"revision"`
+	CreatedAt    time.Time                 `json:"createdAt"`
+	UpdatedAt    time.Time                 `json:"updatedAt"`
+}
+
+func interactionResponse(value harness.Interaction) InteractionResponse {
+	return InteractionResponse{
+		ID: value.ID, TurnID: value.TurnID, InvocationID: value.InvocationID, ParentItemID: value.ParentItemID,
+		Key: value.Key, Kind: value.Kind, Schema: append(json.RawMessage(nil), value.Schema...),
+		Presentation: append(json.RawMessage(nil), value.Presentation...), Status: value.Status,
+		Response: append(json.RawMessage(nil), value.Response...), Revision: value.Revision,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
 func writeTurnFeedCursorExpired(context *gin.Context, err error) bool {
 	var expired *runfeed.CursorExpiredError
 	if !errors.As(err, &expired) {
@@ -67,10 +97,41 @@ func (handler *Handler) ResolveApproval(context *gin.Context) {
 	context.JSON(stdhttp.StatusOK, response)
 }
 
+func (handler *Handler) ResolveInteraction(context *gin.Context) {
+	snapshot, ok := handler.authorizedTurn(context)
+	if !ok {
+		return
+	}
+	interactionID := strings.TrimSpace(context.Param("interaction_id"))
+	var request ResolveInteractionRequest
+	if interactionID == "" || context.ShouldBindJSON(&request) != nil || len(request.Response) == 0 || !json.Valid(request.Response) {
+		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "harness.interaction_invalid_request", "invalid Harness interaction response")
+		return
+	}
+	resolved, err := handler.runner.ResolveInteraction(
+		context.Request.Context(), snapshot.Turn.ID, interactionID,
+		harness.ResolveInteractionRequest{Response: request.Response},
+	)
+	if err != nil {
+		writeHarnessError(context, err)
+		return
+	}
+	response, err := snapshotResponse(resolved)
+	if err != nil {
+		writeHarnessError(context, err)
+		return
+	}
+	context.JSON(stdhttp.StatusOK, response)
+}
+
 func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
 	invocations := make([]InvocationResponse, 0, len(snapshot.Invocations))
 	for _, invocation := range snapshot.Invocations {
 		invocations = append(invocations, invocationResponse(invocation))
+	}
+	interactions := make([]InteractionResponse, 0, len(snapshot.Interactions))
+	for _, interaction := range snapshot.Interactions {
+		interactions = append(interactions, interactionResponse(interaction))
 	}
 	items := make([]ItemResponse, 0, len(snapshot.Items))
 	for _, item := range snapshot.Items {
@@ -96,9 +157,10 @@ func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
 			Revision: snapshot.Turn.Revision, ErrorCode: errorCode, ErrorDetail: errorDetail,
 			CreatedAt: snapshot.Turn.CreatedAt, UpdatedAt: snapshot.Turn.UpdatedAt,
 		},
-		Invocations: invocations,
-		Items:       items,
-		Output:      output,
+		Invocations:  invocations,
+		Interactions: interactions,
+		Items:        items,
+		Output:       output,
 	}, nil
 }
 
@@ -201,10 +263,11 @@ type InvocationResponse struct {
 }
 
 type SnapshotResponse struct {
-	Turn        TurnResponse         `json:"turn"`
-	Invocations []InvocationResponse `json:"invocations"`
-	Items       []ItemResponse       `json:"items"`
-	Output      *harness.Output      `json:"output,omitempty"`
+	Turn         TurnResponse          `json:"turn"`
+	Invocations  []InvocationResponse  `json:"invocations"`
+	Interactions []InteractionResponse `json:"interactions"`
+	Items        []ItemResponse        `json:"items"`
+	Output       *harness.Output       `json:"output,omitempty"`
 }
 
 type ResolveApprovalRequest struct {
@@ -237,6 +300,7 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 	routes.GET("/harness/turns/:turn_id", module.Handler.GetTurn)
 	routes.GET("/harness/turns/:turn_id/feed", module.Handler.StreamTurnFeed)
 	routes.POST("/harness/turns/:turn_id/approval", module.Handler.ResolveApproval)
+	routes.POST("/harness/turns/:turn_id/interactions/:interaction_id", module.Handler.ResolveInteraction)
 }
 
 func (handler *Handler) GetTurn(context *gin.Context) {

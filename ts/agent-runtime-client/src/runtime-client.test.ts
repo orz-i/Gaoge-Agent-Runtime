@@ -141,6 +141,7 @@ describe("RuntimeClient target API", () => {
         status: "completed", attempt: 1, outputRefs: [], revision: 2,
         createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:00:01Z",
       }],
+      interactions: [],
       items: [],
       output: { contentType: "text", content: "done" },
     };
@@ -151,6 +152,7 @@ describe("RuntimeClient target API", () => {
         `id: 2\ndata: {"seq":2,"turnID":"ht/1","type":"turn.completed","status":"completed","terminal":true,"createdAt":"2026-08-17T00:00:01Z"}\n\n`,
         { headers: { "content-type": "text/event-stream" } },
       ))
+      .mockResolvedValueOnce(json(harnessSnapshot))
       .mockResolvedValueOnce(json(harnessSnapshot));
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
 
@@ -158,6 +160,7 @@ describe("RuntimeClient target API", () => {
     const events = [];
     for await (const event of client.harness.turns.feed("ht/1", { reconnectDelayMS: 0 })) events.push(event);
     await client.harness.turns.resolveApproval("ht/1", "approve", "continue");
+    await client.harness.turns.resolveInteraction("ht/1", "interaction/1", { candidateID: "candidate-2" });
 
     expect(events.map((event) => [event.seq, event.type, event.itemID])).toEqual([
       [1, "item.delta", "message-1"],
@@ -167,6 +170,7 @@ describe("RuntimeClient target API", () => {
       "https://runtime.test/api/v1/harness/turns/ht%2F1",
       "https://runtime.test/api/v1/harness/turns/ht%2F1/feed?afterSeq=0",
       "https://runtime.test/api/v1/harness/turns/ht%2F1/approval",
+      "https://runtime.test/api/v1/harness/turns/ht%2F1/interactions/interaction%2F1",
     ]);
     expect(fetcher.mock.calls.some((call) => String(call[0]).includes("/runs/"))).toBe(false);
   });
@@ -183,6 +187,7 @@ describe("RuntimeClient target API", () => {
         status: "waiting_input", attempt: 1, outputRefs: [], revision: 2,
         createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:16:00Z",
       }],
+      interactions: [],
       items: [],
     };
     const fetcher = vi.fn()

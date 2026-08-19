@@ -122,23 +122,117 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 }
 
 func (store *Store) ListInvocations(ctx context.Context, turnID string) ([]harness.Invocation, error) {
+	return listTurnRecords(ctx, store.db, turnID, invocationFromRecord)
+}
+
+func (store *Store) CreateInteraction(ctx context.Context, value harness.Interaction) (harness.Interaction, bool, error) {
+	record, err := interactionToRecord(value)
+	if err != nil {
+		return harness.Interaction{}, false, err
+	}
+	return createOrReplay(ctx, store.db, &record, value,
+		func() (harness.Interaction, error) { return store.GetInteraction(ctx, value.ID) }, sameInteraction)
+}
+
+func (store *Store) GetInteraction(ctx context.Context, id string) (harness.Interaction, error) {
+	var record interactionRecord
+	if err := store.db.WithContext(ctx).Where("id = ?", strings.TrimSpace(id)).Take(&record).Error; err != nil {
+		return harness.Interaction{}, mapError(err)
+	}
+	return interactionFromRecord(record)
+}
+
+func (store *Store) UpdateInteraction(
+	ctx context.Context,
+	value harness.Interaction,
+	expectedRevision uint64,
+) (harness.Interaction, error) {
+	if strings.TrimSpace(value.ID) == "" || expectedRevision == 0 {
+		return harness.Interaction{}, harness.ErrInvalidRequest
+	}
+	record, err := interactionToRecord(value)
+	if err != nil {
+		return harness.Interaction{}, err
+	}
+	record.Revision = expectedRevision + 1
+	result := store.db.WithContext(ctx).Model(&interactionRecord{}).
+		Where("id = ? AND revision = ? AND turn_id = ? AND invocation_id = ? AND parent_item_id = ? AND key = ? AND kind = ? AND schema_json = ? AND presentation_json = ?",
+			value.ID, expectedRevision, value.TurnID, value.InvocationID, value.ParentItemID, value.Key, string(value.Kind),
+			record.SchemaJSON, record.PresentationJSON).
+		Updates(map[string]any{
+			"status": record.Status, "response_json": record.ResponseJSON,
+			"revision": record.Revision, "updated_at": record.UpdatedAt,
+		})
+	if result.Error != nil {
+		return harness.Interaction{}, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return harness.Interaction{}, harness.ErrConflict
+	}
+	value.Revision = record.Revision
+	return value, nil
+}
+
+func (store *Store) ListInteractions(ctx context.Context, turnID string) ([]harness.Interaction, error) {
+	return listTurnRecords(ctx, store.db, turnID, interactionFromRecord)
+}
+
+func listTurnRecords[Record any, Value any](
+	ctx context.Context,
+	db *gorm.DB,
+	turnID string,
+	convert func(Record) (Value, error),
+) ([]Value, error) {
 	turnID = strings.TrimSpace(turnID)
-	if turnID == "" {
+	if db == nil || turnID == "" {
 		return nil, harness.ErrInvalidRequest
 	}
-	var records []invocationRecord
-	if err := store.db.WithContext(ctx).Where("turn_id = ?", turnID).Order("created_at ASC, id ASC").Find(&records).Error; err != nil {
+	var records []Record
+	if err := db.WithContext(ctx).Where("turn_id = ?", turnID).Order("created_at ASC, id ASC").Find(&records).Error; err != nil {
 		return nil, err
 	}
-	result := make([]harness.Invocation, len(records))
+	result := make([]Value, len(records))
 	for index, record := range records {
-		value, err := invocationFromRecord(record)
+		value, err := convert(record)
 		if err != nil {
 			return nil, err
 		}
 		result[index] = value
 	}
 	return result, nil
+}
+
+func sameInteraction(left, right harness.Interaction) bool {
+	return left.ID == right.ID && left.TurnID == right.TurnID && left.InvocationID == right.InvocationID &&
+		left.ParentItemID == right.ParentItemID && left.Key == right.Key && left.Kind == right.Kind &&
+		string(left.Schema) == string(right.Schema) && string(left.Presentation) == string(right.Presentation)
+}
+
+func interactionToRecord(value harness.Interaction) (interactionRecord, error) {
+	if value.ID == "" || value.TurnID == "" || value.InvocationID == "" || value.Key == "" ||
+		len(value.Schema) == 0 || !json.Valid(value.Schema) || value.Revision == 0 {
+		return interactionRecord{}, harness.ErrInvalidRequest
+	}
+	return interactionRecord{
+		ID: value.ID, TurnID: value.TurnID, InvocationID: value.InvocationID, ParentItemID: value.ParentItemID,
+		Key: value.Key, Kind: string(value.Kind), SchemaJSON: string(value.Schema),
+		PresentationJSON: string(value.Presentation), Status: string(value.Status), ResponseJSON: string(value.Response),
+		Revision: value.Revision, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}, nil
+}
+
+func interactionFromRecord(value interactionRecord) (harness.Interaction, error) {
+	if !json.Valid([]byte(value.SchemaJSON)) || value.PresentationJSON != "" && !json.Valid([]byte(value.PresentationJSON)) ||
+		value.ResponseJSON != "" && !json.Valid([]byte(value.ResponseJSON)) {
+		return harness.Interaction{}, harness.ErrConflict
+	}
+	return harness.Interaction{
+		ID: value.ID, TurnID: value.TurnID, InvocationID: value.InvocationID, ParentItemID: value.ParentItemID,
+		Key: value.Key, Kind: harness.InteractionKind(value.Kind), Schema: json.RawMessage(value.SchemaJSON),
+		Presentation: json.RawMessage(value.PresentationJSON), Status: harness.InteractionStatus(value.Status),
+		Response: json.RawMessage(value.ResponseJSON), Revision: value.Revision,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}, nil
 }
 
 func createOrReplay[T any](
@@ -162,7 +256,7 @@ func createOrReplay[T any](
 
 // Models returns the complete Harness persistence model set.
 func Models() []any {
-	return []any{&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &configRecord{}, &itemRecord{}}
+	return []any{&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &interactionRecord{}, &configRecord{}, &itemRecord{}}
 }
 
 // Migrate creates or updates only Harness-owned persistence tables.

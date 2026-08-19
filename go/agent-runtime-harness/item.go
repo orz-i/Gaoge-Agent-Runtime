@@ -17,6 +17,7 @@ const (
 	ItemApproval     ItemKind = "approval"
 	ItemDelegation   ItemKind = "delegation"
 	ItemInvocation   ItemKind = "capability_invocation"
+	ItemInteraction  ItemKind = "interaction"
 	ItemArtifact     ItemKind = "artifact"
 	ItemContext      ItemKind = "context"
 	ItemDiagnostic   ItemKind = "diagnostic"
@@ -63,7 +64,7 @@ func validItem(value Item) bool {
 
 func validItemKind(value ItemKind) bool {
 	switch value {
-	case ItemUserMessage, ItemAgentRun, ItemAgentMessage, ItemTool, ItemApproval, ItemDelegation, ItemInvocation, ItemArtifact, ItemContext, ItemDiagnostic:
+	case ItemUserMessage, ItemAgentRun, ItemAgentMessage, ItemTool, ItemApproval, ItemDelegation, ItemInvocation, ItemInteraction, ItemArtifact, ItemContext, ItemDiagnostic:
 		return true
 	default:
 		return false

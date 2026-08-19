@@ -39,6 +39,7 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 		t.Fatalf("stale turn update error = %v", err)
 	}
 	invocation := assertInvocationLifecycle(t, store, turn.ID, now)
+	assertInteractionLifecycle(t, store, turn.ID, invocation.ID, now)
 	assertItemLifecycle(t, store, turn.ID, invocation.ID, now)
 }
 
@@ -138,6 +139,82 @@ func assertInvocationList(t *testing.T, store *harnesspostgres.Store, turnID str
 	listed, err := store.ListInvocations(t.Context(), turnID)
 	if err != nil || len(listed) != 1 || listed[0].ID != updated.ID {
 		t.Fatalf("list invocations: %#v err=%v", listed, err)
+	}
+}
+
+func assertInteractionLifecycle(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	turnID, invocationID string,
+	now time.Time,
+) {
+	t.Helper()
+	created := createInteractionFixture(t, store, turnID, invocationID, now)
+	assertInteractionLoad(t, store, invocationID, created)
+	updated := updateInteractionFixture(t, store, created, now)
+	assertInteractionList(t, store, turnID, updated)
+}
+
+func createInteractionFixture(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	turnID, invocationID string,
+	now time.Time,
+) harness.Interaction {
+	t.Helper()
+	value := harness.Interaction{
+		ID: "hinteraction_pg", TurnID: turnID, InvocationID: invocationID, ParentItemID: "parent-item",
+		Key: "candidate-choice", Kind: harness.InteractionChoice,
+		Schema: json.RawMessage(`{"type":"object"}`), Presentation: json.RawMessage(`{"title":"Choose"}`),
+		Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	created, fresh, err := store.CreateInteraction(t.Context(), value)
+	if err != nil || !fresh || created.Status != harness.InteractionWaiting {
+		t.Fatalf("create interaction: %#v fresh=%v err=%v", created, fresh, err)
+	}
+	return created
+}
+
+func assertInteractionLoad(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	invocationID string,
+	created harness.Interaction,
+) {
+	t.Helper()
+	loaded, err := store.GetInteraction(t.Context(), created.ID)
+	if err != nil || loaded.InvocationID != invocationID || string(loaded.Schema) != string(created.Schema) {
+		t.Fatalf("load interaction: %#v err=%v", loaded, err)
+	}
+}
+
+func updateInteractionFixture(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	created harness.Interaction,
+	now time.Time,
+) harness.Interaction {
+	t.Helper()
+	created.Status = harness.InteractionResolved
+	created.Response = json.RawMessage(`{"candidateID":"candidate-2"}`)
+	created.UpdatedAt = now.Add(2 * time.Second)
+	updated, err := store.UpdateInteraction(t.Context(), created, 1)
+	if err != nil || updated.Revision != 2 || updated.Status != harness.InteractionResolved {
+		t.Fatalf("update interaction: %#v err=%v", updated, err)
+	}
+	return updated
+}
+
+func assertInteractionList(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	turnID string,
+	updated harness.Interaction,
+) {
+	t.Helper()
+	listed, err := store.ListInteractions(t.Context(), turnID)
+	if err != nil || len(listed) != 1 || string(listed[0].Response) != string(updated.Response) {
+		t.Fatalf("list interactions: %#v err=%v", listed, err)
 	}
 }
 

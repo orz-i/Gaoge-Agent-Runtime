@@ -9,6 +9,7 @@ export type HarnessItemKind =
   | "approval"
   | "delegation"
   | "capability_invocation"
+  | "interaction"
   | "artifact"
   | "context"
   | "diagnostic";
@@ -28,6 +29,25 @@ export type HarnessItemDTO = {
   invocationID?: string;
   parentItemID?: string;
   payload?: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type HarnessInteractionKind = "choice" | "confirmation" | "input";
+export type HarnessInteractionStatus = "waiting" | "resolved";
+
+export type HarnessInteractionDTO = {
+  id: string;
+  turnID: string;
+  invocationID: string;
+  parentItemID?: string;
+  key: string;
+  kind: HarnessInteractionKind;
+  schema: unknown;
+  presentation?: unknown;
+  status: HarnessInteractionStatus;
+  response?: unknown;
+  revision: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -67,6 +87,7 @@ export type HarnessTurnDTO = {
 export type HarnessTurnSnapshotDTO = {
   turn: HarnessTurnDTO;
   invocations: HarnessCapabilityInvocationDTO[];
+  interactions: HarnessInteractionDTO[];
   items: HarnessItemDTO[];
   output?: ResultDTO | null;
 };

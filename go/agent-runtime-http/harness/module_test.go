@@ -13,7 +13,10 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
 )
 
-const testHarnessTurnID = "ht-1"
+const (
+	testHarnessTurnID       = "ht-1"
+	testHarnessInvocationID = "hiv-1"
+)
 
 func TestSnapshotResponseMasksTerminalHostOutputUntilProjectionAcknowledgement(t *testing.T) {
 	now := time.Date(2026, time.August, 17, 0, 0, 0, 0, time.UTC)
@@ -55,10 +58,42 @@ func TestSnapshotResponseMasksTerminalHostOutputUntilProjectionAcknowledgement(t
 	}
 }
 
+func TestSnapshotResponseProjectsGenericInteraction(t *testing.T) {
+	now := time.Date(2026, time.August, 19, 4, 30, 0, 0, time.UTC)
+	snapshot := harness.Snapshot{
+		Turn: harness.Turn{
+			ID: testHarnessTurnID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "client-1"},
+			Status: harness.TurnWaitingInput, Revision: 3, CreatedAt: now, UpdatedAt: now,
+		},
+		Interactions: []harness.Interaction{{
+			ID: "hinteraction-1", TurnID: testHarnessTurnID, InvocationID: testHarnessInvocationID, ParentItemID: "item-1",
+			Key: "candidate-choice", Kind: harness.InteractionChoice,
+			Schema: json.RawMessage(`{"type":"object"}`), Presentation: json.RawMessage(`{"title":"Choose"}`),
+			Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		}},
+		Items: []harness.Item{{
+			ID: "interaction-item-1", TurnID: testHarnessTurnID, Seq: 1, Kind: harness.ItemInteraction,
+			Status: harness.ItemWaiting, InvocationID: testHarnessInvocationID, ParentItemID: "item-1",
+			Payload:   json.RawMessage(`{"interactionID":"hinteraction-1","status":"waiting"}`),
+			CreatedAt: now, UpdatedAt: now,
+		}},
+	}
+
+	response, err := snapshotResponse(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Interactions) != 1 || response.Interactions[0].ID != "hinteraction-1" ||
+		response.Interactions[0].Status != harness.InteractionWaiting || len(response.Items) != 1 ||
+		response.Items[0].Kind != harness.ItemInteraction {
+		t.Fatalf("interaction projection = %#v", response)
+	}
+}
+
 func TestSnapshotResponseProjectsInvocationWithoutRuntimeExecutionIdentity(t *testing.T) {
 	now := time.Date(2026, time.August, 17, 0, 0, 0, 0, time.UTC)
 	invocation := harness.Invocation{
-		ID: "hiv-1", TurnID: testHarnessTurnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1",
+		ID: testHarnessInvocationID, TurnID: testHarnessTurnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1",
 		ExecutionClass: harness.ExecutionAgent, InputHash: strings.Repeat("a", 64), ExecutionRefID: "private-run-1",
 		Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 2,
 		CreatedAt: now, UpdatedAt: now,

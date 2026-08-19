@@ -982,7 +982,14 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	if err != nil {
 		return Snapshot{}, err
 	}
-	result := Snapshot{Session: session, Turn: turn, Config: config, Invocations: invocations, Items: items}
+	interactions, err := runner.store.ListInteractions(ctx, turn.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result := Snapshot{
+		Session: session, Turn: turn, Config: config, Invocations: invocations,
+		Interactions: interactions, Items: items,
+	}
 	runtimeSnapshot := provided
 	rootInvocation, hasRootInvocation := topLevelInvocation(invocations)
 	if runtimeSnapshot == nil && hasRootInvocation && strings.TrimSpace(rootInvocation.ExecutionRefID) != "" {
@@ -1005,6 +1012,7 @@ func cloneSnapshot(value Snapshot) Snapshot {
 	value.Session = cloneSession(value.Session)
 	value.Config = cloneConfigSnapshot(value.Config)
 	value.Invocations = cloneInvocations(value.Invocations)
+	value.Interactions = cloneInteractions(value.Interactions)
 	value.Items = cloneItems(value.Items)
 	value.Output = cloneOutput(value.Output)
 	return value

@@ -45,12 +45,13 @@ type Output struct {
 
 // Snapshot is a complete durable Harness Turn projection plus the current root output if available.
 type Snapshot struct {
-	Session     Session        `json:"session"`
-	Turn        Turn           `json:"turn"`
-	Config      ConfigSnapshot `json:"config"`
-	Invocations []Invocation   `json:"invocations"`
-	Items       []Item         `json:"items"`
-	Output      *Output        `json:"output,omitempty"`
+	Session      Session        `json:"session"`
+	Turn         Turn           `json:"turn"`
+	Config       ConfigSnapshot `json:"config"`
+	Invocations  []Invocation   `json:"invocations"`
+	Interactions []Interaction  `json:"interactions"`
+	Items        []Item         `json:"items"`
+	Output       *Output        `json:"output,omitempty"`
 }
 
 // TurnID deterministically derives one Harness Turn identity within a Session.

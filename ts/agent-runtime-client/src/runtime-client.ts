@@ -119,6 +119,16 @@ export class RuntimeClient {
           { method: "POST", body: JSON.stringify({ decision, comment }) },
           request,
         ),
+        resolveInteraction: (
+          turnID: string,
+          interactionID: string,
+          response: unknown,
+          request?: RequestOptions,
+        ) => this.request<HarnessTurnSnapshotDTO>(
+          `/harness/turns/${pathPart(turnID)}/interactions/${pathPart(interactionID)}`,
+          { method: "POST", body: JSON.stringify({ response }) },
+          request,
+        ),
       },
     };
     this.runs = {
