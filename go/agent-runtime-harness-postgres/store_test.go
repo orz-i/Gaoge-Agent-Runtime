@@ -25,6 +25,7 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	assertSessionLifecycle(t, store, session)
 	config, err := harness.SealConfigSnapshot("ht_pg", harness.ConfigSnapshot{
 		Environment: harness.VersionRef{ID: "general", Revision: 7}, Model: "model",
+		Commands: harness.FirstPartyCommandDescriptors(),
 	}, now)
 	if err != nil {
 		t.Fatalf("seal config: %v", err)
@@ -62,7 +63,8 @@ func assertConfigLifecycle(t *testing.T, store *harnesspostgres.Store, config ha
 		t.Fatalf("put config: %#v fresh=%v err=%v", created, fresh, err)
 	}
 	loaded, err := store.GetConfigSnapshot(t.Context(), config.ID)
-	if err != nil || loaded.ContentHash != config.ContentHash || loaded.Model != config.Model {
+	if err != nil || loaded.ContentHash != config.ContentHash || loaded.Model != config.Model ||
+		len(loaded.Commands) != len(config.Commands) || loaded.Commands[0].ID != config.Commands[0].ID {
 		t.Fatalf("load config: %#v err=%v", loaded, err)
 	}
 }

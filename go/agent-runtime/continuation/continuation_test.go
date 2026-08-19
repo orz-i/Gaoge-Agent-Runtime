@@ -22,19 +22,33 @@ import (
 
 func TestSchedulerEnqueuesOneOwningParentContinuation(t *testing.T) {
 	t.Parallel()
-	fixture := newSchedulerFixture(t)
-	parent := createRun(t, fixture.runtime, "parent", planexecute.RunKind)
-	child := createRun(t, fixture.runtime, "child", agent.RunKind)
-	ensureRelation(t, fixture.relations, runrelation.Draft{
-		ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-		Kind: runrelation.KindPlanStep, OwnerNodeID: "step-1",
-	})
-	completed := completeRun(t, fixture.runtime, child)
-	transition := kernel.Transition{Current: completed}
-	fixture.scheduler.ObserveTransition(t.Context(), transition)
-	fixture.scheduler.ObserveTransition(t.Context(), transition)
-	jobs := queuedJobs(t, fixture.delivery, 1)
-	assertParentPayload(t, jobs[0], parent, completed)
+	tests := []struct {
+		name         string
+		parentKind   kernel.RunKind
+		childKind    kernel.RunKind
+		relationKind runrelation.Kind
+		ownerNodeID  string
+	}{
+		{name: "plan step", parentKind: planexecute.RunKind, childKind: agent.RunKind, relationKind: runrelation.KindPlanStep, ownerNodeID: "step-1"},
+		{name: "harness capability", parentKind: agent.RunKind, childKind: workflow.RunKind, relationKind: runrelation.KindCapability, ownerNodeID: "invocation-1"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newSchedulerFixture(t)
+			parent := createRun(t, fixture.runtime, "parent", test.parentKind)
+			child := createRun(t, fixture.runtime, "child", test.childKind)
+			ensureRelation(t, fixture.relations, runrelation.Draft{
+				ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
+				Kind: test.relationKind, OwnerNodeID: test.ownerNodeID,
+			})
+			completed := completeRun(t, fixture.runtime, child)
+			transition := kernel.Transition{Current: completed}
+			fixture.scheduler.ObserveTransition(t.Context(), transition)
+			fixture.scheduler.ObserveTransition(t.Context(), transition)
+			jobs := queuedJobs(t, fixture.delivery, 1)
+			assertParentPayload(t, jobs[0], parent, completed)
+		})
+	}
 }
 
 func TestDispatcherRejectsDuplicateResumerRegistration(t *testing.T) {

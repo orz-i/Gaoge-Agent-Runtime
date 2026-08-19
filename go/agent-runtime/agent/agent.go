@@ -469,8 +469,8 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		if prepareErr != nil || prepared.Run.Status != kernel.RunStatusRunning {
 			return prepared, true, prepareErr
 		}
-		executed, executeErr := runner.executePending(ctx, prepared)
-		return executed, executeErr != nil, executeErr
+		executed, yielded, executeErr := runner.executePending(ctx, prepared)
+		return executed, yielded || executeErr != nil, executeErr
 	}
 	if state.LLMCalls >= state.Limits.MaxLLMCalls {
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.llm_limit", ErrCallLimit)
@@ -1021,22 +1021,54 @@ func (runner *Runner) preparePendingApproval(
 	return waiting, err
 }
 
-func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, error) {
+func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, bool, error) {
+	execution, failCode, err := runner.preparePendingToolExecution(snapshot)
+	if err != nil {
+		failed, failErr := runner.fail(ctx, snapshot, execution.state, failCode, err)
+		return failed, false, failErr
+	}
+	result, err := runner.invokePendingTool(ctx, snapshot, execution.call, execution.definition)
+	if err != nil {
+		return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, err)
+	}
+	if err = tools.ValidateExecutionResult(result); err != nil {
+		failed, failErr := runner.fail(ctx, snapshot, execution.state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
+		return failed, false, failErr
+	}
+	return runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(result))
+}
+
+type pendingToolExecution struct {
+	state      runState
+	call       tools.Call
+	definition tools.Definition
+}
+
+func (runner *Runner) preparePendingToolExecution(snapshot kernel.Snapshot) (pendingToolExecution, string, error) {
 	state, err := decodeState(snapshot.State)
 	call, ok := nextPendingCall(state)
 	if err != nil || !ok {
-		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
+		return pendingToolExecution{state: state}, "agent.state_invalid", ErrInvalidRequest
 	}
 	if runner.catalog == nil || runner.executor == nil {
-		return runner.fail(ctx, snapshot, state, "agent.tool_unavailable", ErrToolFailure)
+		return pendingToolExecution{state: state}, "agent.tool_unavailable", ErrToolFailure
 	}
 	definition, ok := runner.catalog.Resolve(call.ToolKey)
 	if !ok {
-		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrToolNotFound)
+		return pendingToolExecution{state: state}, "agent.tool_invalid", tools.ErrToolNotFound
 	}
 	if state.ToolCalls >= state.Limits.MaxToolCalls {
-		return runner.fail(ctx, snapshot, state, "agent.tool_limit", ErrCallLimit)
+		return pendingToolExecution{state: state}, "agent.tool_limit", ErrCallLimit
 	}
+	return pendingToolExecution{state: state, call: call, definition: definition}, "", nil
+}
+
+func (runner *Runner) invokePendingTool(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	call tools.Call,
+	definition tools.Definition,
+) (tools.ExecutionResult, error) {
 	runner.publishValue(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventToolStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	}, call)
@@ -1044,40 +1076,82 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	invocation := plugin.ToolInvocation{
 		Run: snapshot.Run, Definition: tools.CloneDefinition(definition), Request: executionRequest,
 	}
-	result, err := runner.toolChain.Invoke(ctx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
+	return runner.toolChain.Invoke(ctx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
 		return runner.executor.Execute(nextCtx, executionRequest)
 	})
+}
+
+func (runner *Runner) handlePendingToolExecutionError(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state runState,
+	err error,
+) (kernel.Snapshot, bool, error) {
+	if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
+		corrected, correctionErr := runner.recordRecoverableToolError(
+			ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(err),
+		)
+		return corrected, false, correctionErr
+	}
+	failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
+	return failed, false, failErr
+}
+
+func (runner *Runner) persistPendingToolResult(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	execution pendingToolExecution,
+	result tools.ExecutionResult,
+) (kernel.Snapshot, bool, error) {
+	if strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
+		return runner.persistPendingToolYield(ctx, snapshot, execution.state, result)
+	}
+	return runner.persistCompletedToolCall(ctx, snapshot, execution, result)
+}
+
+func (runner *Runner) persistPendingToolYield(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state runState,
+	result tools.ExecutionResult,
+) (kernel.Snapshot, bool, error) {
+	encoded, err := encodeState(state)
 	if err != nil {
-		if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
-			return runner.recordRecoverableToolError(
-				ctx,
-				snapshot,
-				state,
-				code,
-				message,
-				tools.RecoverableCallErrorBlockedToolKeys(err),
-			)
-		}
-		return runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
+		return kernel.Snapshot{}, false, err
 	}
-	if err = tools.ValidateExecutionResult(result); err != nil {
-		return runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
+	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+		Events: []kernel.EventDraft{{Type: EventToolPending, Message: tools.ReceiptDispositionPending}},
+	})
+	if err == nil {
+		runner.publishToolEvent(ctx, next, EventToolPending, result.Receipt)
 	}
-	result = tools.CloneExecutionResult(result)
+	return next, true, err
+}
+
+func (runner *Runner) persistCompletedToolCall(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	execution pendingToolExecution,
+	result tools.ExecutionResult,
+) (kernel.Snapshot, bool, error) {
+	state := execution.state
 	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleTool, Content: string(result.Content), ToolCallID: call.ID,
+		Role: model.RoleTool, Content: string(result.Content), ToolCallID: execution.call.ID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ToolCalls++
-	if definition.Terminal {
+	if execution.definition.Terminal {
 		if len(state.PendingCalls) != 0 {
-			return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
+			return failed, false, failErr
 		}
-		return runner.completeWithToolResult(ctx, snapshot, state, result)
+		completed, completeErr := runner.completeWithToolResult(ctx, snapshot, state, result)
+		return completed, false, completeErr
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return kernel.Snapshot{}, false, err
 	}
 	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
@@ -1086,7 +1160,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if err == nil {
 		runner.publishToolEvent(ctx, next, EventToolCompleted, result.Receipt)
 	}
-	return next, err
+	return next, false, err
 }
 
 func (runner *Runner) recordRecoverableToolError(
@@ -1206,8 +1280,8 @@ func (runner *Runner) resumeRunning(
 ) (kernel.Snapshot, error) {
 	if len(state.PendingCalls) > 0 && snapshot.Checkpoint != nil &&
 		snapshot.Checkpoint.Status == kernel.CheckpointResolved {
-		executed, err := runner.executePending(ctx, snapshot)
-		if err != nil {
+		executed, yielded, err := runner.executePending(ctx, snapshot)
+		if err != nil || yielded {
 			return executed, err
 		}
 		return runner.drive(ctx, executed)

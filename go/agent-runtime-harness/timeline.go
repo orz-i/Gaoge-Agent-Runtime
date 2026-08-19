@@ -187,6 +187,9 @@ func (middleware *ToolTimelineMiddleware) Tool(
 		return tools.ExecutionResult{}, err
 	}
 	result, executeErr := next(ctx)
+	if executeErr == nil && strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
+		return result, nil
+	}
 	status := ItemCompleted
 	if executeErr != nil {
 		status = ItemFailed

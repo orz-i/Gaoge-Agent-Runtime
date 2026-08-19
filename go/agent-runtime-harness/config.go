@@ -132,6 +132,7 @@ type ConfigSnapshot struct {
 	ModelOptions          json.RawMessage       `json:"modelOptions,omitempty"`
 	ToolKeys              []string              `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot  `json:"toolPolicies"`
+	Commands              []CommandDescriptor   `json:"commands"`
 	Skills                []SkillSnapshot       `json:"skills"`
 	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
 	ContextBudget         runtimecontext.Budget `json:"contextBudget"`
@@ -149,6 +150,7 @@ type configPayload struct {
 	ModelOptions          json.RawMessage       `json:"modelOptions,omitempty"`
 	ToolKeys              []string              `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot  `json:"toolPolicies"`
+	Commands              []CommandDescriptor   `json:"commands"`
 	Skills                []SkillSnapshot       `json:"skills"`
 	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
 	ContextBudget         runtimecontext.Budget `json:"contextBudget"`
@@ -181,6 +183,11 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
+	commandCatalog, err := NewCommandCatalog(value.Commands...)
+	if err != nil {
+		return ConfigSnapshot{}, err
+	}
+	value.Commands = commandCatalog.List()
 	value.Skills, err = normalizeSkillSnapshots(value.Skills)
 	if err != nil {
 		return ConfigSnapshot{}, err
@@ -188,7 +195,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	payload := configPayload{
 		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
 		Model: value.Model, ModelOptions: value.ModelOptions, ToolKeys: value.ToolKeys,
-		ToolPolicies: value.ToolPolicies, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
+		ToolPolicies: value.ToolPolicies, Commands: value.Commands, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
 		ContextBudget: value.ContextBudget, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
 	}
 	raw, err := json.Marshal(payload)
@@ -234,6 +241,7 @@ func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
 	value.ModelOptions = append(json.RawMessage(nil), value.ModelOptions...)
 	value.ToolKeys = append([]string(nil), value.ToolKeys...)
 	value.ToolPolicies = append([]ToolPolicySnapshot(nil), value.ToolPolicies...)
+	value.Commands = cloneCommandDescriptors(value.Commands)
 	value.Skills = append([]SkillSnapshot(nil), value.Skills...)
 	return value
 }

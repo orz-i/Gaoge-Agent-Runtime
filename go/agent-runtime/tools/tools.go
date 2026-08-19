@@ -192,6 +192,11 @@ type Receipt struct {
 	Disposition string `json:"disposition"`
 }
 
+// ReceiptDispositionPending keeps the current Agent Tool call durable without
+// consuming it. A composed continuation may resume the same idempotent call
+// after its child execution changes state.
+const ReceiptDispositionPending = "pending"
+
 // ExecutionResult is the JSON Tool output and its durable receipt.
 type ExecutionResult struct {
 	Content json.RawMessage `json:"content"`

@@ -10,6 +10,7 @@ const (
 	EventModelCompleted      = "model.completed"
 	EventToolRequested       = "tool.requested"
 	EventToolStarted         = "tool.started"
+	EventToolPending         = "tool.pending"
 	EventToolCompleted       = "tool.completed"
 	EventInteractionRequired = "interaction.required"
 )

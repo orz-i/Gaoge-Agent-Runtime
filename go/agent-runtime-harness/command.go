@@ -132,3 +132,11 @@ func cloneCommandDescriptor(value CommandDescriptor) CommandDescriptor {
 	value.InputSchema = append(json.RawMessage(nil), value.InputSchema...)
 	return value
 }
+
+func cloneCommandDescriptors(values []CommandDescriptor) []CommandDescriptor {
+	result := make([]CommandDescriptor, len(values))
+	for index, value := range values {
+		result[index] = cloneCommandDescriptor(value)
+	}
+	return result
+}
