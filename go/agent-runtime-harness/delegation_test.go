@@ -24,6 +24,7 @@ const (
 	delegationTestModelName        = "frozen-delegation-model"
 	delegationTestSpecialistResult = "specialist result"
 	delegationTestRootSynthesis    = "root synthesis"
+	delegationTestRootGoal         = "delegate the research and synthesize it"
 	delegationContextTurnID        = "turn-delegation-context"
 )
 
@@ -39,7 +40,7 @@ func TestHarnessDelegationChildDoesNotInheritParentContextSnapshot(t *testing.T)
 	t.Parallel()
 	capture := &delegationModel{}
 	runner, relations := newDelegationHarnessWithOptions(t, capture, 2, true)
-	goal := "delegate the research and synthesize it"
+	goal := delegationTestRootGoal
 	completed, err := runner.Start(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-context"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: delegationContextTurnID},
@@ -78,7 +79,7 @@ func TestHarnessDelegationToolStartsStableChildAndRecordsRelation(t *testing.T) 
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation"},
-		Goal:       "delegate the research and synthesize it",
+		Goal:       delegationTestRootGoal,
 		Config: harness.ConfigSnapshot{
 			Model:        delegationTestModelName,
 			ToolKeys:     []string{harness.DelegationToolKey},
@@ -111,7 +112,7 @@ func TestHarnessDelegationPolicyPreparesActualChildGoal(t *testing.T) {
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-policy"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-policy"},
-		Goal:       "delegate the research and synthesize it",
+		Goal:       delegationTestRootGoal,
 		Config: harness.ConfigSnapshot{
 			Model:        delegationTestModelName,
 			ToolKeys:     []string{harness.DelegationToolKey},
