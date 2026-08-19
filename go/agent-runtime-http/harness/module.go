@@ -26,6 +26,40 @@ type TurnResponse struct {
 	UpdatedAt   time.Time          `json:"updatedAt"`
 }
 
+func (handler *Handler) ListCommands(context *gin.Context) {
+	if handler == nil || handler.commands == nil || handler.shared == nil {
+		runtimehttp.WriteError(context, stdhttp.StatusServiceUnavailable, "harness.unavailable", "Harness runtime is unavailable")
+		return
+	}
+	if _, err := handler.shared.ActorRef(context); err != nil {
+		runtimehttp.WriteError(context, stdhttp.StatusUnauthorized, "harness.unauthorized", "authenticated principal is required")
+		return
+	}
+	commands := handler.commands.List()
+	response := make([]CommandResponse, len(commands))
+	for index, command := range commands {
+		response[index] = CommandResponse{
+			ID: command.ID, Trigger: command.Trigger, Title: command.Title, Description: command.Description,
+			CapabilityKey: command.CapabilityKey, DefinitionVersion: command.DefinitionVersion,
+			ExecutionClass: command.ExecutionClass, Source: command.Source,
+			InputSchema: append(json.RawMessage(nil), command.InputSchema...),
+		}
+	}
+	context.JSON(stdhttp.StatusOK, response)
+}
+
+type CommandResponse struct {
+	ID                string                 `json:"id"`
+	Trigger           string                 `json:"trigger"`
+	Title             string                 `json:"title"`
+	Description       string                 `json:"description,omitempty"`
+	CapabilityKey     string                 `json:"capabilityKey"`
+	DefinitionVersion string                 `json:"definitionVersion"`
+	ExecutionClass    harness.ExecutionClass `json:"executionClass"`
+	Source            string                 `json:"source"`
+	InputSchema       json.RawMessage        `json:"inputSchema"`
+}
+
 type ResolveInteractionRequest struct {
 	Response json.RawMessage `json:"response" binding:"required"`
 }
@@ -276,17 +310,19 @@ type ResolveApprovalRequest struct {
 }
 
 type Dependencies struct {
-	Runner *harness.Runner
-	Shared *runtimehttp.Shared
+	Runner   *harness.Runner
+	Commands *harness.CommandCatalog
+	Shared   *runtimehttp.Shared
 }
 
 type Handler struct {
-	runner *harness.Runner
-	shared *runtimehttp.Shared
+	runner   *harness.Runner
+	commands *harness.CommandCatalog
+	shared   *runtimehttp.Shared
 }
 
 func NewHandler(dependencies Dependencies) *Handler {
-	return &Handler{runner: dependencies.Runner, shared: dependencies.Shared}
+	return &Handler{runner: dependencies.Runner, commands: dependencies.Commands, shared: dependencies.Shared}
 }
 
 type Module struct{ Handler *Handler }
@@ -297,6 +333,7 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 	if module == nil || module.Handler == nil || routes == nil {
 		return
 	}
+	routes.GET("/harness/commands", module.Handler.ListCommands)
 	routes.GET("/harness/turns/:turn_id", module.Handler.GetTurn)
 	routes.GET("/harness/turns/:turn_id/feed", module.Handler.StreamTurnFeed)
 	routes.POST("/harness/turns/:turn_id/approval", module.Handler.ResolveApproval)

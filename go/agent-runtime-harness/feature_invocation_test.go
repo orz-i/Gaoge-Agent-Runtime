@@ -26,6 +26,63 @@ func TestTypedFeatureInvocationsShareHarnessTurnAndRecoverByTurnID(t *testing.T)
 	assertRecoveredFeatureInvocationTree(t, runner, turnID, relations, parentRunID)
 }
 
+func TestWorkflowCanOwnTopLevelHarnessTurnWithoutAgentRoot(t *testing.T) {
+	t.Parallel()
+	runtime := newFeatureInvocationRuntime(t)
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: unusedFeatureAgent{}, Store: harness.NewMemoryStore(), Clock: featureInvocationClock{},
+		Workflows: completedWorkflowFeature{runtime},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := harness.WorkflowTurnRequest{
+		StartRequest: harness.StartRequest{
+			HostThread: harness.HostRef{Kind: testThreadKind, ID: "command-workflow-thread"},
+			HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "command-workflow-turn"},
+			Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+			Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "command-workflow-thread"},
+			RequestID: "command-workflow-request", Goal: "run the explicit workflow command",
+			Config: harness.ConfigSnapshot{Model: "fixture-model"},
+		},
+		Input: json.RawMessage(`{"goal":"run the explicit workflow command"}`),
+	}
+	first, err := runner.StartWorkflowTurn(t.Context(), request)
+	assertTopLevelWorkflowTurn(t, first, err)
+	replayed, err := runner.StartWorkflowTurn(t.Context(), request)
+	assertTopLevelWorkflowTurn(t, replayed, err)
+	if replayed.Turn.ID != first.Turn.ID || replayed.Invocations[0].ID != first.Invocations[0].ID {
+		t.Fatalf("replay changed durable identity: first=%#v replayed=%#v", first, replayed)
+	}
+}
+
+func assertTopLevelWorkflowTurn(t *testing.T, snapshot harness.Snapshot, err error) {
+	t.Helper()
+	if err != nil || snapshot.Turn.Status != harness.TurnCompleted || snapshot.Output == nil {
+		t.Fatalf("top-level workflow snapshot=%#v err=%v", snapshot, err)
+	}
+	assertTopLevelWorkflowInvocation(t, snapshot.Invocations)
+	assertNoPlaceholderAgentItem(t, snapshot.Items)
+}
+
+func assertTopLevelWorkflowInvocation(t *testing.T, invocations []harness.Invocation) {
+	t.Helper()
+	if len(invocations) != 1 || invocations[0].ExecutionClass != harness.ExecutionWorkflow ||
+		invocations[0].CapabilityKey != harness.CapabilityWorkflow || invocations[0].ParentItemID != "" ||
+		invocations[0].Status != harness.InvocationCompleted {
+		t.Fatalf("top-level workflow invocations=%#v", invocations)
+	}
+}
+
+func assertNoPlaceholderAgentItem(t *testing.T, items []harness.Item) {
+	t.Helper()
+	for _, item := range items {
+		if item.Kind == harness.ItemAgentRun {
+			t.Fatalf("explicit workflow command created placeholder Agent item: %#v", items)
+		}
+	}
+}
+
 func assertStartedTeamInvocation(t *testing.T, runner *harness.Runner, turnID, parentItemID string) {
 	t.Helper()
 	snapshot, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{

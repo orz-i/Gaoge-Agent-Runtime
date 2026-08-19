@@ -70,7 +70,7 @@ func newExternalItemTestRunner(t *testing.T) (*Runner, *MemoryStore, Turn) {
 		t.Fatalf("create turn: %v", err)
 	}
 	if _, _, err = store.CreateInvocation(context.Background(), Invocation{
-		ID: "hiv_external", TurnID: turn.ID, CapabilityKey: directAgentCapabilityKey,
+		ID: "hiv_external", TurnID: turn.ID, CapabilityKey: CapabilityAgent,
 		DefinitionVersion: "v1", ExecutionClass: ExecutionAgent, InputHash: hashInvocationInput("external fixture"),
 		ExecutionRefID: "hr_external", Status: InvocationRunning, Attempt: 1, OutputRefs: []HostRef{}, Revision: 1,
 		CreatedAt: externalItemTestClock{}.Now(), UpdatedAt: externalItemTestClock{}.Now(),

@@ -18,6 +18,7 @@ import (
 const (
 	defaultItemListLimit        = 500
 	maxRuntimeSyncRetryAttempts = 8
+	capabilityStartFailedCode   = "harness.capability_start_failed"
 )
 
 // Clock supplies Harness orchestration time.
@@ -88,7 +89,7 @@ func (runner *Runner) resumeDirectAgentStart(
 		Limits: config.Limits,
 	})
 	if runtimeSnapshot.Run.ID == "" {
-		failed, failErr := runner.failInvocationAndTurn(ctx, turn, invocation, startErr)
+		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
 		return failed, errors.Join(startErr, failErr)
 	}
 	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
@@ -126,7 +127,7 @@ func (runner *Runner) resumeDirectAgentContext(
 	}
 	contextSnapshot, err := runner.buildContext(ctx, invocation.ExecutionRefID, config, seed)
 	if err != nil {
-		_, failErr := runner.failInvocationAndTurn(ctx, turn, invocation, err)
+		_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
 		return Turn{}, nil, errors.Join(err, failErr)
 	}
 	return runner.attachContextSnapshot(ctx, turn, contextSnapshot)
@@ -322,7 +323,7 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	if request.Context != nil {
 		contextSnapshot, buildErr := runner.buildContext(ctx, invocation.ExecutionRefID, config, request.Context)
 		if buildErr != nil {
-			failed, failErr := runner.failInvocationAndTurn(ctx, createdTurn, invocation, buildErr)
+			failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, buildErr)
 			return failed, errors.Join(buildErr, failErr)
 		}
 		createdTurn, runCtx, err = runner.attachContextSnapshot(ctx, createdTurn, contextSnapshot)
@@ -344,7 +345,7 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 				return recovered, nil
 			}
 		}
-		failed, failErr := runner.failInvocationAndTurn(ctx, createdTurn, invocation, startErr)
+		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, startErr)
 		return failed, errors.Join(startErr, failErr)
 	}
 	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, createdTurn, invocation, runtimeSnapshot)
@@ -617,6 +618,9 @@ func (runner *Runner) recordRuntimeSnapshotItems(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) error {
+	if invocation.ExecutionClass != ExecutionAgent {
+		return runner.projectChildInvocationOutcome(ctx, invocation, runtimeSnapshot)
+	}
 	if err := runner.recordAgentRunItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
 		return err
 	}
@@ -827,12 +831,12 @@ func (runner *Runner) recordAgentRunItem(ctx context.Context, turn Turn, invocat
 	return err
 }
 
-func (runner *Runner) failInvocationAndTurn(ctx context.Context, turn Turn, invocation Invocation, cause error) (Snapshot, error) {
+func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Turn, invocation Invocation, cause error) (Snapshot, error) {
 	invocation.Status = InvocationFailed
-	invocation.ErrorCode = "harness.agent_start_failed"
-	invocation.ErrorDetail = "agent capability did not start"
+	invocation.ErrorCode = capabilityStartFailedCode
+	invocation.ErrorDetail = "capability execution did not start"
 	if cause == nil {
-		invocation.ErrorDetail = "agent capability returned no execution identity"
+		invocation.ErrorDetail = "capability returned no execution identity"
 	}
 	invocation.UpdatedAt = runner.clock.Now().UTC()
 	if updatedInvocation, err := runner.store.UpdateInvocation(ctx, invocation, invocation.Revision); err == nil {
@@ -844,10 +848,10 @@ func (runner *Runner) failInvocationAndTurn(ctx context.Context, turn Turn, invo
 		return Snapshot{}, err
 	}
 	turn.Status = TurnFailed
-	turn.ErrorCode = "harness.agent_start_failed"
-	turn.ErrorDetail = "agent root run did not start"
+	turn.ErrorCode = capabilityStartFailedCode
+	turn.ErrorDetail = "top-level capability execution did not start"
 	if cause == nil {
-		turn.ErrorDetail = "agent root run returned no identity"
+		turn.ErrorDetail = "top-level capability returned no execution identity"
 	}
 	turn.UpdatedAt = runner.clock.Now().UTC()
 	updated, err := runner.store.UpdateTurn(ctx, turn, turn.Revision)

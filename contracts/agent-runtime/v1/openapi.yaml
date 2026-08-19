@@ -152,6 +152,18 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Workbench'}
         default: {$ref: '#/components/responses/Error'}
+  /harness/commands:
+    get:
+      operationId: listHarnessCommands
+      responses:
+        '200':
+          description: Discoverable Harness command descriptors
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/HarnessCommand'}
+        default: {$ref: '#/components/responses/Error'}
   /harness/turns/{turnID}:
     get:
       operationId: getHarnessTurn
@@ -529,6 +541,20 @@ components:
         revision: {type: integer, minimum: 1}
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
+    HarnessCommand:
+      type: object
+      additionalProperties: false
+      required: [id, trigger, title, capabilityKey, definitionVersion, executionClass, source, inputSchema]
+      properties:
+        id: {type: string}
+        trigger: {type: string}
+        title: {type: string}
+        description: {type: string}
+        capabilityKey: {type: string}
+        definitionVersion: {type: string}
+        executionClass: {type: string, enum: [agent, team, plan_execute, workflow, application]}
+        source: {type: string, enum: [first_party, application]}
+        inputSchema: {}
     HarnessTurnSnapshot:
       type: object
       additionalProperties: false

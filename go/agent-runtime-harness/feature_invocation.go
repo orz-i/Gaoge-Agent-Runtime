@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
@@ -14,17 +15,278 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
-const (
-	teamCapabilityKey        = "runtime.team"
-	planExecuteCapabilityKey = "runtime.plan_execute"
-	workflowCapabilityKey    = "runtime.workflow"
-	runtimeCapabilityVersion = "v1"
-)
-
 // TeamFeature is the narrow Team Runtime capability consumed by Harness.
 type TeamFeature interface {
 	StartRun(context.Context, team.StartRequest) (kernel.Snapshot, error)
 	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
+}
+
+// TeamTurnRequest starts Team as the top-level capability of one Harness Turn.
+type TeamTurnRequest struct {
+	StartRequest
+	Mode    team.ExecutionMode
+	Members []team.Member
+	Join    handoff.Join
+}
+
+// PlanExecuteTurnRequest starts Plan-and-Execute as the top-level capability.
+type PlanExecuteTurnRequest struct {
+	StartRequest
+	ApprovalPolicy planexecute.ApprovalPolicy
+	MaxSteps       int
+}
+
+// WorkflowTurnRequest starts one compiled Dynamic Workflow as the top-level capability.
+type WorkflowTurnRequest struct {
+	StartRequest
+	Definition workflow.Definition
+	Input      json.RawMessage
+}
+
+type topLevelFeatureStart struct {
+	turn       Turn
+	invocation Invocation
+	runContext context.Context
+	replayed   bool
+}
+
+type topLevelFeatureEnvelope struct {
+	request StartRequest
+	turn    Turn
+	config  ConfigSnapshot
+	created bool
+	now     time.Time
+}
+
+// StartTeamTurn starts Team without creating a placeholder Agent root.
+func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest) (Snapshot, error) {
+	if runner == nil || runner.teams == nil {
+		return Snapshot{}, ErrInvalidRequest
+	}
+	inputHash, err := hashInvocationValue(struct {
+		Goal    string
+		Mode    team.ExecutionMode
+		Members []team.Member
+		Join    handoff.Join
+	}{request.Goal, request.Mode, request.Members, request.Join})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	prepared, err := runner.prepareTopLevelFeatureStart(
+		ctx, request.StartRequest, CapabilityTeam, ExecutionTeam, inputHash,
+	)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if prepared.replayed {
+		if snapshot, handled, replayErr := runner.replayTopLevelFeatureStart(ctx, prepared); handled || replayErr != nil {
+			return snapshot, replayErr
+		}
+	}
+	runtimeSnapshot, startErr := runner.teams.StartRun(prepared.runContext, team.StartRequest{
+		ID: prepared.invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
+		Mode: request.Mode, Members: append([]team.Member(nil), request.Members...), Join: request.Join,
+	})
+	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+}
+
+// StartPlanExecuteTurn starts Plan-and-Execute without a placeholder Agent root.
+func (runner *Runner) StartPlanExecuteTurn(ctx context.Context, request PlanExecuteTurnRequest) (Snapshot, error) {
+	if runner == nil || runner.plans == nil {
+		return Snapshot{}, ErrInvalidRequest
+	}
+	inputHash, err := hashInvocationValue(struct {
+		Goal           string
+		Model          string
+		ApprovalPolicy planexecute.ApprovalPolicy
+		MaxSteps       int
+	}{request.Goal, request.Config.Model, request.ApprovalPolicy, request.MaxSteps})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	prepared, err := runner.prepareTopLevelFeatureStart(
+		ctx, request.StartRequest, CapabilityPlanExecute, ExecutionPlanExecute, inputHash,
+	)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if prepared.replayed {
+		if snapshot, handled, replayErr := runner.replayTopLevelFeatureStart(ctx, prepared); handled || replayErr != nil {
+			return snapshot, replayErr
+		}
+	}
+	runtimeSnapshot, startErr := runner.plans.StartRun(prepared.runContext, planexecute.StartRequest{
+		ID: prepared.invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
+		Model: request.Config.Model, ApprovalPolicy: request.ApprovalPolicy, MaxSteps: request.MaxSteps,
+	})
+	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+}
+
+// StartWorkflowTurn starts Workflow without a placeholder Agent root.
+func (runner *Runner) StartWorkflowTurn(ctx context.Context, request WorkflowTurnRequest) (Snapshot, error) {
+	if runner == nil || runner.workflows == nil {
+		return Snapshot{}, ErrInvalidRequest
+	}
+	inputHash, err := hashInvocationValue(struct {
+		Goal       string
+		Definition workflow.Definition
+		Input      json.RawMessage
+	}{request.Goal, request.Definition, request.Input})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	prepared, err := runner.prepareTopLevelFeatureStart(
+		ctx, request.StartRequest, CapabilityWorkflow, ExecutionWorkflow, inputHash,
+	)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if prepared.replayed {
+		if snapshot, handled, replayErr := runner.replayTopLevelFeatureStart(ctx, prepared); handled || replayErr != nil {
+			return snapshot, replayErr
+		}
+	}
+	runtimeSnapshot, startErr := runner.workflows.StartRun(prepared.runContext, workflow.StartRequest{
+		ID: prepared.invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
+		Definition: request.Definition, Input: append(json.RawMessage(nil), request.Input...),
+	})
+	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+}
+
+func (runner *Runner) prepareTopLevelFeatureStart(
+	ctx context.Context,
+	request StartRequest,
+	capabilityKey string,
+	executionClass ExecutionClass,
+	inputHash string,
+) (topLevelFeatureStart, error) {
+	envelope, err := runner.prepareTopLevelFeatureEnvelope(ctx, request)
+	if err != nil {
+		return topLevelFeatureStart{}, err
+	}
+	invocation, err := runner.prepareTopLevelFeatureInvocation(
+		ctx, envelope, capabilityKey, executionClass, inputHash,
+	)
+	if err != nil {
+		return topLevelFeatureStart{}, err
+	}
+	if !envelope.created {
+		return topLevelFeatureStart{turn: envelope.turn, invocation: invocation, runContext: ctx, replayed: true}, nil
+	}
+	turn, runCtx, err := runner.prepareTopLevelFeatureContext(ctx, envelope, invocation)
+	if err != nil {
+		return topLevelFeatureStart{}, err
+	}
+	return topLevelFeatureStart{turn: turn, invocation: invocation, runContext: runCtx}, nil
+}
+
+func (runner *Runner) prepareTopLevelFeatureEnvelope(
+	ctx context.Context,
+	request StartRequest,
+) (topLevelFeatureEnvelope, error) {
+	request, sessionID, turnID, err := normalizeStartRequest(request)
+	if err != nil {
+		return topLevelFeatureEnvelope{}, err
+	}
+	now := runner.clock.Now().UTC()
+	config, err := SealConfigSnapshot(turnID, request.Config, now)
+	if err != nil {
+		return topLevelFeatureEnvelope{}, err
+	}
+	turn, created, err := runner.persistStartEnvelope(ctx, request, sessionID, turnID, config, now)
+	if err != nil {
+		return topLevelFeatureEnvelope{}, err
+	}
+	return topLevelFeatureEnvelope{request: request, turn: turn, config: config, created: created, now: now}, nil
+}
+
+func (runner *Runner) prepareTopLevelFeatureInvocation(
+	ctx context.Context,
+	envelope topLevelFeatureEnvelope,
+	capabilityKey string,
+	executionClass ExecutionClass,
+	inputHash string,
+) (Invocation, error) {
+	requestID := firstNonEmpty(strings.TrimSpace(envelope.request.RequestID), envelope.turn.ID)
+	invocationID, err := InvocationID(envelope.turn.ID, "", capabilityKey, requestID)
+	if err != nil {
+		return Invocation{}, err
+	}
+	invocation, fresh, err := runner.store.CreateInvocation(ctx, Invocation{
+		ID: invocationID, TurnID: envelope.turn.ID, CapabilityKey: capabilityKey,
+		DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: executionClass,
+		InputHash: inputHash, ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
+		Attempt: 1, OutputRefs: []HostRef{}, Revision: 1, CreatedAt: envelope.now, UpdatedAt: envelope.now,
+	})
+	if err != nil {
+		return Invocation{}, err
+	}
+	if envelope.created && !fresh {
+		return Invocation{}, ErrConflict
+	}
+	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
+		return Invocation{}, err
+	}
+	return invocation, nil
+}
+
+func (runner *Runner) prepareTopLevelFeatureContext(
+	ctx context.Context,
+	envelope topLevelFeatureEnvelope,
+	invocation Invocation,
+) (Turn, context.Context, error) {
+	turn := envelope.turn
+	request := envelope.request
+	if err := runner.recordHostMessageItems(ctx, turn, request.InputMessage, request.OutputMessage); err != nil {
+		return Turn{}, nil, err
+	}
+	runner.publishTurnStatus(ctx, turn, EventTurnStarted, false)
+	if request.Context == nil {
+		return turn, ctx, nil
+	}
+	contextSnapshot, err := runner.buildContext(ctx, invocation.ExecutionRefID, envelope.config, request.Context)
+	if err != nil {
+		_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
+		return Turn{}, nil, errors.Join(err, failErr)
+	}
+	return runner.attachContextSnapshot(ctx, turn, contextSnapshot)
+}
+
+func (runner *Runner) replayTopLevelFeatureStart(
+	ctx context.Context,
+	prepared topLevelFeatureStart,
+) (Snapshot, bool, error) {
+	if terminalTurnStatus(prepared.turn.Status) || terminalInvocationStatus(prepared.invocation.Status) {
+		snapshot, err := runner.loadSnapshot(ctx, prepared.turn, nil)
+		return snapshot, true, err
+	}
+	runtimeSnapshot, err := runner.runtime.Load(ctx, prepared.invocation.ExecutionRefID)
+	if err == nil {
+		snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, prepared.turn, prepared.invocation, runtimeSnapshot)
+		return snapshot, true, syncErr
+	}
+	if errors.Is(err, kernel.ErrNotFound) && prepared.invocation.Status == InvocationAccepted {
+		return Snapshot{}, false, nil
+	}
+	return Snapshot{}, true, err
+}
+
+func (runner *Runner) finishTopLevelFeatureStart(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+	runtimeSnapshot kernel.Snapshot,
+	startErr error,
+) (Snapshot, error) {
+	if runtimeSnapshot.Run.ID == "" {
+		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
+		return failed, errors.Join(startErr, failErr)
+	}
+	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	return snapshot, errors.Join(startErr, syncErr)
 }
 
 // PlanExecuteFeature is the narrow Plan-and-Execute Runtime capability consumed by Harness.
@@ -95,7 +357,7 @@ func (runner *Runner) StartTeamInvocation(
 	}
 	invocation, child, replayed, err := runner.beginChildInvocation(
 		ctx, turnID, request.ParentItemID, request.RequestID,
-		teamCapabilityKey, ExecutionTeam, inputHash,
+		CapabilityTeam, ExecutionTeam, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -133,7 +395,7 @@ func (runner *Runner) StartPlanExecuteInvocation(
 	}
 	invocation, child, replayed, err := runner.beginChildInvocation(
 		ctx, turnID, request.ParentItemID, request.RequestID,
-		planExecuteCapabilityKey, ExecutionPlanExecute, inputHash,
+		CapabilityPlanExecute, ExecutionPlanExecute, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -170,7 +432,7 @@ func (runner *Runner) StartWorkflowInvocation(
 	}
 	invocation, child, replayed, err := runner.beginChildInvocation(
 		ctx, turnID, request.ParentItemID, request.RequestID,
-		workflowCapabilityKey, ExecutionWorkflow, inputHash,
+		CapabilityWorkflow, ExecutionWorkflow, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -250,8 +512,8 @@ func (runner *Runner) beginChildInvocation(
 	now := runner.clock.Now().UTC()
 	value := Invocation{
 		ID: invocationID, TurnID: child.turn.ID, ParentItemID: strings.TrimSpace(parentItemID),
-		CapabilityKey: capabilityKey, DefinitionVersion: runtimeCapabilityVersion, ExecutionClass: executionClass,
-		InputHash: inputHash, ExecutionRefID: stableID("hcr", invocationID), Status: InvocationAccepted,
+		CapabilityKey: capabilityKey, DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: executionClass,
+		InputHash: inputHash, ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
 		Attempt: 1, OutputRefs: []HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	created, fresh, err := runner.store.CreateInvocation(ctx, value)

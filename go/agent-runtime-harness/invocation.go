@@ -9,7 +9,13 @@ import (
 	"time"
 )
 
-const directAgentCapabilityKey = "runtime.agent"
+const (
+	CapabilityAgent       = "runtime.agent"
+	CapabilityTeam        = "runtime.team"
+	CapabilityPlanExecute = "runtime.plan_execute"
+	CapabilityWorkflow    = "runtime.workflow"
+	RuntimeCapabilityVersion = "v1"
+)
 
 // ExecutionClass identifies one already-selected execution implementation.
 // It is never an automatic routing mode; selection happens before the
@@ -58,6 +64,16 @@ type Invocation struct {
 	UpdatedAt         time.Time        `json:"updatedAt"`
 }
 
+// CapabilityExecutionRefID deterministically derives the Runtime execution
+// identity for a non-Agent typed capability Invocation.
+func CapabilityExecutionRefID(invocationID string) string {
+	invocationID = strings.TrimSpace(invocationID)
+	if invocationID == "" {
+		return ""
+	}
+	return stableID("hcr", invocationID)
+}
+
 // AgentExecutionRefID deterministically derives the direct Agent Runtime Run
 // identity owned by one already-created Agent Invocation. It is used only by
 // host composition that must bind Tool state before the Agent begins.
@@ -90,7 +106,7 @@ func TopLevelInvocation(snapshot Snapshot) (Invocation, bool) {
 // AgentInvocationID derives the first-party direct Agent Invocation identity
 // without exposing the Harness-owned capability key to host code.
 func AgentInvocationID(turnID, requestID string) (string, error) {
-	return InvocationID(turnID, "", directAgentCapabilityKey, requestID)
+	return InvocationID(turnID, "", CapabilityAgent, requestID)
 }
 
 func newDirectAgentInvocation(turnID, requestID, goal string, now time.Time) (Invocation, error) {
@@ -99,8 +115,8 @@ func newDirectAgentInvocation(turnID, requestID, goal string, now time.Time) (In
 		return Invocation{}, err
 	}
 	return Invocation{
-		ID: id, TurnID: strings.TrimSpace(turnID), CapabilityKey: directAgentCapabilityKey,
-		DefinitionVersion: "v1", ExecutionClass: ExecutionAgent,
+		ID: id, TurnID: strings.TrimSpace(turnID), CapabilityKey: CapabilityAgent,
+		DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: ExecutionAgent,
 		InputHash: hashInvocationInput(goal), ExecutionRefID: AgentExecutionRefID(id),
 		Status: InvocationAccepted, Attempt: 1, OutputRefs: []HostRef{}, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,

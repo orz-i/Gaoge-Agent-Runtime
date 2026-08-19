@@ -33,6 +33,18 @@ export type HarnessItemDTO = {
   updatedAt: string;
 };
 
+export type HarnessCommandDTO = {
+  id: string;
+  trigger: string;
+  title: string;
+  description?: string;
+  capabilityKey: string;
+  definitionVersion: string;
+  executionClass: HarnessExecutionClass;
+  source: "first_party" | "application";
+  inputSchema: unknown;
+};
+
 export type HarnessInteractionKind = "choice" | "confirmation" | "input";
 export type HarnessInteractionStatus = "waiting" | "resolved";
 
