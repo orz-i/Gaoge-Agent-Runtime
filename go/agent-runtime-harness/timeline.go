@@ -26,6 +26,7 @@ func appendHostedToolStartedItem(
 	clock Clock,
 	feed *TurnFeed,
 	turn Turn,
+	invocation Invocation,
 	runID string,
 	state hostedToolStreamState,
 	call model.HostedToolCall,
@@ -39,7 +40,7 @@ func appendHostedToolStartedItem(
 	}
 	now := clock.Now().UTC()
 	_, err = appendItemFact(ctx, store, feed, Item{
-		ID: state.ItemID, TurnID: turn.ID, Kind: ItemTool, Status: ItemStarted, RunID: runID,
+		ID: state.ItemID, TurnID: turn.ID, Kind: ItemTool, Status: ItemStarted, RunID: runID, InvocationID: invocation.ID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err
@@ -70,6 +71,7 @@ func agentMessagePreviewEvent(event model.StreamEvent) (model.StreamEvent, bool)
 func (middleware *ModelTimelineMiddleware) recordHostedToolStreamEvent(
 	ctx context.Context,
 	turn Turn,
+	invocation Invocation,
 	runID string,
 	tracker *hostedToolStreamTracker,
 	call model.HostedToolCall,
@@ -79,7 +81,7 @@ func (middleware *ModelTimelineMiddleware) recordHostedToolStreamEvent(
 	}
 	state, created := tracker.resolveStream(call)
 	if created {
-		if err := appendHostedToolStartedItem(ctx, middleware.store, middleware.clock, middleware.feed, turn, runID, state, call); err != nil {
+		if err := appendHostedToolStartedItem(ctx, middleware.store, middleware.clock, middleware.feed, turn, invocation, runID, state, call); err != nil {
 			return err
 		}
 	}
@@ -171,7 +173,7 @@ func (middleware *ToolTimelineMiddleware) Tool(
 	invocation plugin.ToolInvocation,
 	next plugin.ToolNext,
 ) (tools.ExecutionResult, error) {
-	turn, harnessRun, err := timelineTurn(ctx, middleware.store, invocation.Run.ID)
+	turn, capabilityInvocation, harnessRun, err := timelineTurn(ctx, middleware.store, invocation.Run.ID)
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
@@ -179,7 +181,7 @@ func (middleware *ToolTimelineMiddleware) Tool(
 		return next(ctx)
 	}
 	startedID, err := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, invocation, tools.ExecutionResult{}, ItemStarted, "",
+		ctx, middleware.store, middleware.clock, middleware.feed, turn, capabilityInvocation, invocation, tools.ExecutionResult{}, ItemStarted, "",
 	)
 	if err != nil {
 		return tools.ExecutionResult{}, err
@@ -190,7 +192,7 @@ func (middleware *ToolTimelineMiddleware) Tool(
 		status = ItemFailed
 	}
 	_, itemErr := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, invocation, result, status, startedID,
+		ctx, middleware.store, middleware.clock, middleware.feed, turn, capabilityInvocation, invocation, result, status, startedID,
 	)
 	return result, errors.Join(executeErr, itemErr)
 }
@@ -216,7 +218,7 @@ func (middleware *ModelTimelineMiddleware) Model(
 	emit model.StreamSink,
 	next plugin.ModelNext,
 ) (model.Response, error) {
-	turn, harnessRun, err := timelineTurn(ctx, middleware.store, request.RunID)
+	turn, invocation, harnessRun, err := timelineTurn(ctx, middleware.store, request.RunID)
 	if err != nil {
 		return model.Response{}, err
 	}
@@ -238,7 +240,7 @@ func (middleware *ModelTimelineMiddleware) Model(
 	hostedTools := newHostedToolStreamTracker(turn.ID)
 	stream := func(event model.StreamEvent) error {
 		if event.HostedToolCall != nil {
-			if streamErr := middleware.recordHostedToolStreamEvent(ctx, turn, request.RunID, hostedTools, *event.HostedToolCall); streamErr != nil {
+			if streamErr := middleware.recordHostedToolStreamEvent(ctx, turn, invocation, request.RunID, hostedTools, *event.HostedToolCall); streamErr != nil {
 				return streamErr
 			}
 		}
@@ -264,7 +266,7 @@ func (middleware *ModelTimelineMiddleware) Model(
 		return response, callErr
 	}
 	if err = appendModelTimelineItems(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, request, response, hostedTools,
+		ctx, middleware.store, middleware.clock, middleware.feed, turn, invocation, request, response, hostedTools,
 	); err != nil {
 		return response, err
 	}
@@ -302,12 +304,16 @@ type hostedToolTimelinePayload struct {
 	ErrorHash  string `json:"errorHash,omitempty"`
 }
 
-func timelineTurn(ctx context.Context, store Store, rootRunID string) (Turn, bool, error) {
-	turn, err := store.GetTurnByRootRunID(ctx, strings.TrimSpace(rootRunID))
+func timelineTurn(ctx context.Context, store Store, executionRefID string) (Turn, Invocation, bool, error) {
+	invocation, err := store.GetInvocationByExecutionRefID(ctx, strings.TrimSpace(executionRefID))
 	if errors.Is(err, ErrNotFound) {
-		return Turn{}, false, nil
+		return Turn{}, Invocation{}, false, nil
 	}
-	return turn, err == nil, err
+	if err != nil {
+		return Turn{}, Invocation{}, false, err
+	}
+	turn, err := store.GetTurn(ctx, invocation.TurnID)
+	return turn, invocation, err == nil, err
 }
 
 func appendToolTimelineItem(
@@ -316,6 +322,7 @@ func appendToolTimelineItem(
 	clock Clock,
 	feed *TurnFeed,
 	turn Turn,
+	capabilityInvocation Invocation,
 	invocation plugin.ToolInvocation,
 	result tools.ExecutionResult,
 	status ItemStatus,
@@ -333,7 +340,7 @@ func appendToolTimelineItem(
 	itemID := stableID("hit", turn.ID, invocation.Request.Call.ID, string(status))
 	now := clock.Now().UTC()
 	_, err = appendItemFact(ctx, store, feed, Item{
-		ID: itemID, TurnID: turn.ID, Kind: ItemTool, Status: status, RunID: invocation.Run.ID,
+		ID: itemID, TurnID: turn.ID, Kind: ItemTool, Status: status, RunID: invocation.Run.ID, InvocationID: capabilityInvocation.ID,
 		ParentItemID: parentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return itemID, err
@@ -345,17 +352,18 @@ func appendModelTimelineItems(
 	clock Clock,
 	feed *TurnFeed,
 	turn Turn,
+	invocation Invocation,
 	request model.Request,
 	response model.Response,
 	hostedTools *hostedToolStreamTracker,
 ) error {
 	for _, artifact := range response.Artifacts {
-		if err := appendArtifactTimelineItem(ctx, store, clock, feed, turn, request.RunID, artifact); err != nil {
+		if err := appendArtifactTimelineItem(ctx, store, clock, feed, turn, invocation, request.RunID, artifact); err != nil {
 			return err
 		}
 	}
 	for index, call := range response.HostedToolCalls {
-		if err := appendHostedToolTimelineItem(ctx, store, clock, feed, turn, request, call, hostedTools, index); err != nil {
+		if err := appendHostedToolTimelineItem(ctx, store, clock, feed, turn, invocation, request, call, hostedTools, index); err != nil {
 			return err
 		}
 	}
@@ -393,6 +401,7 @@ func appendArtifactTimelineItem(
 	clock Clock,
 	feed *TurnFeed,
 	turn Turn,
+	invocation Invocation,
 	runID string,
 	artifact model.ArtifactRef,
 ) error {
@@ -405,7 +414,7 @@ func appendArtifactTimelineItem(
 	now := clock.Now().UTC()
 	_, err = appendItemFact(ctx, store, feed, Item{
 		ID: stableID("hiaf", turn.ID, artifact.ID), TurnID: turn.ID,
-		Kind: ItemArtifact, Status: ItemCompleted, RunID: runID,
+		Kind: ItemArtifact, Status: ItemCompleted, RunID: runID, InvocationID: invocation.ID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err
@@ -417,6 +426,7 @@ func appendHostedToolTimelineItem(
 	clock Clock,
 	feed *TurnFeed,
 	turn Turn,
+	invocation Invocation,
 	request model.Request,
 	call model.HostedToolCall,
 	tracker *hostedToolStreamTracker,
@@ -444,7 +454,7 @@ func appendHostedToolTimelineItem(
 	now := clock.Now().UTC()
 	_, err = appendItemFact(ctx, store, feed, Item{
 		ID: stableID("hiht", turn.ID, call.ToolKey, identity, string(status)), TurnID: turn.ID,
-		Kind: ItemTool, Status: status, RunID: request.RunID, ParentItemID: parentItemID,
+		Kind: ItemTool, Status: status, RunID: request.RunID, InvocationID: invocation.ID, ParentItemID: parentItemID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err
@@ -470,9 +480,10 @@ func (runner *Runner) recordContextItem(ctx context.Context, turn Turn) error {
 		return err
 	}
 	now := runner.clock.Now().UTC()
+	invocation, _ := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID: stableID("hic", turn.ID, turn.ContextRef.ID), TurnID: turn.ID,
-		Kind: ItemContext, Status: ItemCompleted, RunID: turn.RootRunID,
+		Kind: ItemContext, Status: ItemCompleted, RunID: invocation.ExecutionRefID, InvocationID: invocation.ID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err

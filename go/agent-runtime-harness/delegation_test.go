@@ -36,6 +36,12 @@ func TestDelegationToolNameIsProviderPortable(t *testing.T) {
 	}
 }
 
+func (client *blockingDelegationModel) rootExecutionRef() string {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.rootRunID
+}
+
 func TestHarnessDelegationChildDoesNotInheritParentContextSnapshot(t *testing.T) {
 	t.Parallel()
 	capture := &delegationModel{}
@@ -142,10 +148,9 @@ func TestHarnessDelegationRelationsWaitForRootTerminalState(t *testing.T) {
 	runner, relations := newDelegationHarnessWithModel(t, client, 4)
 	hostThread := harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-terminal"}
 	hostTurn := harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-terminal"}
-	rootRunID := delegationRootRunID(t, hostThread, hostTurn)
 	result := startBlockingDelegationHarness(t, runner, hostThread, hostTurn)
 	waitForSecondDelegation(t, client.secondChildStarted)
-	assertNoDelegationRelations(t, relations, rootRunID)
+	assertNoDelegationRelations(t, relations, client.rootExecutionRef())
 	close(client.releaseSecondChild)
 	assertTerminalDelegationRelations(t, relations, result)
 }
@@ -173,7 +178,7 @@ func TestHarnessDelegatesDifferentGoalsToSameMember(t *testing.T) {
 	if len(items) != 4 || items[1].RunID == items[3].RunID {
 		t.Fatalf("same-member delegation items = %#v", items)
 	}
-	children, err := relations.ListChildren(t.Context(), completed.Turn.RootRunID)
+	children, err := relations.ListChildren(t.Context(), snapshotExecutionRef(t, completed))
 	if err != nil || len(children) != 2 {
 		t.Fatalf("same-member delegation relations=%#v err=%v", children, err)
 	}
@@ -220,7 +225,7 @@ func TestHarnessDelegationGuardRemovesBlockedToolFromLaterTurns(t *testing.T) {
 	if err != nil || completed.Turn.Status != harness.TurnCompleted || policy.calls != 1 {
 		t.Fatalf("completed=%#v err=%v policy calls=%d", completed.Turn, err, policy.calls)
 	}
-	children, err := relations.ListChildren(t.Context(), completed.Turn.RootRunID)
+	children, err := relations.ListChildren(t.Context(), snapshotExecutionRef(t, completed))
 	if err != nil || len(children) != 0 {
 		t.Fatalf("guarded delegation children=%#v err=%v", children, err)
 	}
@@ -235,17 +240,13 @@ type delegationStartResult struct {
 	err      error
 }
 
-func delegationRootRunID(t *testing.T, hostThread harness.HostRef, hostTurn harness.HostRef) string {
+func snapshotExecutionRef(t *testing.T, snapshot harness.Snapshot) string {
 	t.Helper()
-	sessionID, err := harness.SessionID(hostThread)
-	if err != nil {
-		t.Fatal(err)
+	invocation, ok := harness.TopLevelInvocation(snapshot)
+	if !ok || invocation.ExecutionRefID == "" {
+		t.Fatalf("missing top-level capability invocation: %#v", snapshot.Invocations)
 	}
-	turnID, err := harness.TurnID(sessionID, hostTurn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return harness.RootRunID(turnID)
+	return invocation.ExecutionRefID
 }
 
 func startBlockingDelegationHarness(
@@ -302,7 +303,7 @@ func assertTerminalDelegationRelations(
 		if completed.err != nil || completed.snapshot.Turn.Status != harness.TurnCompleted {
 			t.Fatalf("completed snapshot=%#v err=%v", completed.snapshot.Turn, completed.err)
 		}
-		children, err := relations.ListChildren(t.Context(), completed.snapshot.Turn.RootRunID)
+		children, err := relations.ListChildren(t.Context(), snapshotExecutionRef(t, completed.snapshot))
 		if err != nil || len(children) != 2 {
 			t.Fatalf("terminal delegation relations=%#v err=%v", children, err)
 		}
@@ -426,7 +427,7 @@ func assertDelegationCompleted(
 		delegationItems[1].Status != harness.ItemCompleted || delegationItems[1].ParentItemID != delegationItems[0].ID {
 		t.Fatalf("delegation items = %#v", delegationItems)
 	}
-	children, err := relations.ListChildren(t.Context(), snapshot.Turn.RootRunID)
+	children, err := relations.ListChildren(t.Context(), snapshotExecutionRef(t, snapshot))
 	if err != nil || len(children) != 1 || children[0].Kind != runrelation.KindDelegation ||
 		children[0].ChildRunID != delegationItems[1].RunID {
 		t.Fatalf("delegation relations = %#v, err=%v", children, err)
@@ -474,6 +475,7 @@ type blockingDelegationModel struct {
 	mu                 sync.Mutex
 	rootCalls          int
 	childCalls         int
+	rootRunID          string
 	secondChildStarted chan struct{}
 	releaseSecondChild chan struct{}
 }
@@ -500,6 +502,9 @@ func (client *blockingDelegationModel) Generate(_ context.Context, request model
 	client.mu.Lock()
 	if len(request.Tools) > 0 {
 		client.rootCalls++
+		if client.rootRunID == "" {
+			client.rootRunID = request.RunID
+		}
 		rootCall := client.rootCalls
 		client.mu.Unlock()
 		if rootCall == 1 {

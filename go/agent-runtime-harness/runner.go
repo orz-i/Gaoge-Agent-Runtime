@@ -25,6 +25,113 @@ type Clock interface {
 	Now() time.Time
 }
 
+func invocationLifecycleItemID(invocation Invocation, status InvocationStatus, revision uint64) string {
+	return stableID("hivitem", invocation.ID, string(status), uintString(revision))
+}
+
+func invocationItemStatus(status InvocationStatus) ItemStatus {
+	switch status {
+	case InvocationWaitingInput:
+		return ItemWaiting
+	case InvocationCompleted:
+		return ItemCompleted
+	case InvocationFailed:
+		return ItemFailed
+	case InvocationCancelled:
+		return ItemCancelled
+	default:
+		return ItemStarted
+	}
+}
+
+func (runner *Runner) recordInvocationItem(ctx context.Context, invocation Invocation) error {
+	if runner == nil || runner.store == nil || strings.TrimSpace(invocation.ID) == "" {
+		return ErrInvalidRequest
+	}
+	now := runner.clock.Now().UTC()
+	parentItemID := strings.TrimSpace(invocation.ParentItemID)
+	if invocation.Revision > 1 {
+		parentItemID = invocationLifecycleItemID(invocation, InvocationAccepted, 1)
+	}
+	payload, err := invocationItemPayload(invocation)
+	if err != nil {
+		return err
+	}
+	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
+		ID:     invocationLifecycleItemID(invocation, invocation.Status, invocation.Revision),
+		TurnID: invocation.TurnID, Kind: ItemInvocation, Status: invocationItemStatus(invocation.Status),
+		RunID: invocation.ExecutionRefID, InvocationID: invocation.ID, ParentItemID: parentItemID,
+		Payload: payload, CreatedAt: now, UpdatedAt: now,
+	})
+	return err
+}
+
+func (runner *Runner) resumeDirectAgentStart(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+	request StartRequest,
+	config ConfigSnapshot,
+) (Snapshot, error) {
+	if snapshot, replayed, err := runner.replayDirectAgentStart(ctx, turn, invocation); replayed || err != nil {
+		return snapshot, err
+	}
+	turn, runCtx, err := runner.resumeDirectAgentContext(ctx, turn, invocation, request.Context, config)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	runtimeSnapshot, startErr := runner.agent.StartRun(runCtx, agent.StartRequest{
+		ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turn.ID), Goal: request.Goal,
+		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+		ToolKeys: append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
+		Limits: config.Limits,
+	})
+	if runtimeSnapshot.Run.ID == "" {
+		failed, failErr := runner.failInvocationAndTurn(ctx, turn, invocation, startErr)
+		return failed, errors.Join(startErr, failErr)
+	}
+	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+}
+
+func (runner *Runner) replayDirectAgentStart(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+) (Snapshot, bool, error) {
+	if terminalTurnStatus(turn.Status) || terminalInvocationStatus(invocation.Status) {
+		snapshot, err := runner.loadSnapshot(ctx, turn, nil)
+		return snapshot, true, err
+	}
+	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+	if err == nil {
+		snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, loaded)
+		return snapshot, true, syncErr
+	}
+	if errors.Is(err, kernel.ErrNotFound) || errors.Is(err, ErrNotFound) {
+		return Snapshot{}, false, nil
+	}
+	return Snapshot{}, false, err
+}
+
+func (runner *Runner) resumeDirectAgentContext(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+	seed *ContextSeed,
+	config ConfigSnapshot,
+) (Turn, context.Context, error) {
+	if seed == nil || strings.TrimSpace(turn.ContextSnapshotID) != "" {
+		return turn, ctx, nil
+	}
+	contextSnapshot, err := runner.buildContext(ctx, invocation.ExecutionRefID, config, seed)
+	if err != nil {
+		_, failErr := runner.failInvocationAndTurn(ctx, turn, invocation, err)
+		return Turn{}, nil, errors.Join(err, failErr)
+	}
+	return runner.attachContextSnapshot(ctx, turn, contextSnapshot)
+}
+
 // ResolveApproval resolves the active Tool approval using the durable Harness Turn identity.
 func (runner *Runner) ResolveApproval(
 	ctx context.Context,
@@ -35,10 +142,12 @@ func (runner *Runner) ResolveApproval(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if turn.Status != TurnWaitingInput || strings.TrimSpace(turn.RootRunID) == "" {
+	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+	if err != nil || turn.Status != TurnWaitingInput || invocation.ExecutionClass != ExecutionAgent ||
+		strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, ErrConflict
 	}
-	runtimeSnapshot, err := runner.runtime.Load(ctx, turn.RootRunID)
+	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -57,10 +166,10 @@ func (runner *Runner) ResolveApproval(
 	if resolved.Run.ID == "" {
 		return Snapshot{}, resolveErr
 	}
-	if err = runner.recordApprovalDecisionItem(ctx, turn, pending, request); err != nil {
+	if err = runner.recordApprovalDecisionItem(ctx, turn, invocation, pending, request); err != nil {
 		return Snapshot{}, errors.Join(resolveErr, err)
 	}
-	snapshot, syncErr := runner.syncRuntimeSnapshot(ctx, turn, resolved)
+	snapshot, syncErr := runner.syncRuntimeSnapshot(ctx, turn, invocation, resolved)
 	return snapshot, errors.Join(resolveErr, syncErr)
 }
 
@@ -120,7 +229,8 @@ type Dependencies struct {
 	Relations runrelation.Recorder
 }
 
-// Runner owns durable Harness Session/Turn/Item lifecycle around one direct Agent root Run.
+// Runner owns durable Harness Session/Turn/Invocation/Item lifecycle. Runtime
+// Feature execution is represented by durable Capability Invocations.
 type Runner struct {
 	runtime   *kernel.Runtime
 	agent     AgentStarter
@@ -142,7 +252,6 @@ type StartRequest struct {
 	Actor            kernel.ActorRef
 	Thread           kernel.ThreadRef
 	RequestID        string
-	RootRunID        string
 	Goal             string
 	RequiredToolKeys []string
 	Config           ConfigSnapshot
@@ -162,7 +271,8 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}, nil
 }
 
-// Start starts one direct Agent root Run after durable Session/Turn/Config creation.
+// Start starts the default direct-Agent capability as a durable top-level
+// Invocation after Session/Turn/Config creation.
 func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot, error) {
 	request, sessionID, turnID, err := normalizeStartRequest(request)
 	if err != nil {
@@ -177,19 +287,34 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if !created {
-		return runner.Load(ctx, createdTurn.ID)
+	invocation, err := newDirectAgentInvocation(
+		turnID, firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), request.Goal, now,
+	)
+	if err != nil {
+		return Snapshot{}, err
 	}
-	rootRunID := startRootRunID(request.RootRunID, turnID)
-	if err = runner.recordHostMessageItems(ctx, createdTurn, rootRunID, request.InputMessage, request.OutputMessage); err != nil {
+	invocation, invocationCreated, err := runner.store.CreateInvocation(ctx, invocation)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if created && !invocationCreated {
+		return Snapshot{}, ErrConflict
+	}
+	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
+		return Snapshot{}, err
+	}
+	if !created {
+		return runner.resumeDirectAgentStart(ctx, createdTurn, invocation, request, config)
+	}
+	if err = runner.recordHostMessageItems(ctx, createdTurn, request.InputMessage, request.OutputMessage); err != nil {
 		return Snapshot{}, err
 	}
 	runner.publishTurnStatus(ctx, createdTurn, EventTurnStarted, false)
 	runCtx := ctx
 	if request.Context != nil {
-		contextSnapshot, buildErr := runner.buildContext(ctx, rootRunID, config, request.Context)
+		contextSnapshot, buildErr := runner.buildContext(ctx, invocation.ExecutionRefID, config, request.Context)
 		if buildErr != nil {
-			failed, failErr := runner.failTurn(ctx, createdTurn, buildErr)
+			failed, failErr := runner.failInvocationAndTurn(ctx, createdTurn, invocation, buildErr)
 			return failed, errors.Join(buildErr, failErr)
 		}
 		createdTurn, runCtx, err = runner.attachContextSnapshot(ctx, createdTurn, contextSnapshot)
@@ -197,14 +322,8 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 			return Snapshot{}, err
 		}
 	}
-	createdTurn.RootRunID = rootRunID
-	createdTurn.UpdatedAt = runner.clock.Now().UTC()
-	createdTurn, err = runner.store.UpdateTurn(ctx, createdTurn, createdTurn.Revision)
-	if err != nil {
-		return Snapshot{}, err
-	}
 	runtimeSnapshot, startErr := runner.agent.StartRun(runCtx, agent.StartRequest{
-		ID: rootRunID, Actor: request.Actor, Thread: request.Thread,
+		ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
 		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
 		ToolKeys:         append([]string(nil), config.ToolKeys...),
@@ -217,10 +336,10 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 				return recovered, nil
 			}
 		}
-		failed, failErr := runner.failTurn(ctx, createdTurn, startErr)
+		failed, failErr := runner.failInvocationAndTurn(ctx, createdTurn, invocation, startErr)
 		return failed, errors.Join(startErr, failErr)
 	}
-	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, createdTurn, runtimeSnapshot)
+	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, createdTurn, invocation, runtimeSnapshot)
 	if snapshot.Turn.Status == TurnCancelled && errors.Is(startErr, kernel.ErrConflict) {
 		startErr = nil
 	}
@@ -252,13 +371,6 @@ func (runner *Runner) persistStartEnvelope(
 	return runner.store.CreateTurn(ctx, turn)
 }
 
-func startRootRunID(requested string, turnID string) string {
-	if rootRunID := strings.TrimSpace(requested); rootRunID != "" {
-		return rootRunID
-	}
-	return RootRunID(turnID)
-}
-
 func (runner *Runner) attachContextSnapshot(
 	ctx context.Context,
 	turn Turn,
@@ -286,23 +398,28 @@ func (runner *Runner) Load(ctx context.Context, turnID string) (Snapshot, error)
 	return runner.loadSnapshot(ctx, turn, nil)
 }
 
-// Refresh synchronizes one active Harness Turn from the authoritative root Runtime snapshot.
+// Refresh synchronizes one active Harness Turn from its top-level Invocation.
 func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, error) {
 	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if strings.TrimSpace(turn.RootRunID) == "" || terminalTurnStatus(turn.Status) {
+	if terminalTurnStatus(turn.Status) {
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
-	runtimeSnapshot, err := runner.runtime.Load(ctx, turn.RootRunID)
+	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
+		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return runner.syncRuntimeSnapshot(ctx, turn, runtimeSnapshot)
+	return runner.syncRuntimeSnapshot(ctx, turn, invocation, runtimeSnapshot)
 }
 
-// Cancel cancels the direct Agent root Run and persists the resulting Harness Turn state.
+// Cancel cancels the active top-level Invocation and persists the resulting
+// Harness Turn state. C2 extends dispatch to the other explicit Feature adapters.
 func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (Snapshot, error) {
 	turnID = strings.TrimSpace(turnID)
 	for range maxRuntimeSyncRetryAttempts {
@@ -310,15 +427,19 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		if err != nil {
 			return Snapshot{}, err
 		}
-		if strings.TrimSpace(turn.RootRunID) == "" || terminalTurnStatus(turn.Status) {
+		if terminalTurnStatus(turn.Status) {
 			return runner.loadSnapshot(ctx, turn, nil)
 		}
-		runtimeSnapshot, err := runner.runtime.Load(ctx, turn.RootRunID)
+		invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+		if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
+			return Snapshot{}, errors.Join(ErrConflict, err)
+		}
+		runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 		if err != nil {
 			return Snapshot{}, err
 		}
 		if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
-			return runner.syncRuntimeSnapshotWithRetry(ctx, turn, runtimeSnapshot)
+			return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
 		}
 		cancelled, err := runner.runtime.Cancel(
 			ctx,
@@ -332,7 +453,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		if err != nil {
 			return Snapshot{}, err
 		}
-		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, cancelled)
+		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, cancelled)
 	}
 	return Snapshot{}, ErrConflict
 }
@@ -340,10 +461,11 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 func (runner *Runner) syncRuntimeSnapshotWithRetry(
 	ctx context.Context,
 	turn Turn,
+	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
 	for range maxRuntimeSyncRetryAttempts {
-		snapshot, err := runner.syncRuntimeSnapshot(ctx, turn, runtimeSnapshot)
+		snapshot, err := runner.syncRuntimeSnapshot(ctx, turn, invocation, runtimeSnapshot)
 		if !errors.Is(err, ErrConflict) {
 			return snapshot, err
 		}
@@ -354,7 +476,11 @@ func (runner *Runner) syncRuntimeSnapshotWithRetry(
 		if terminalTurnStatus(turn.Status) {
 			return runner.loadSnapshot(ctx, turn, nil)
 		}
-		runtimeSnapshot, err = runner.runtime.Load(ctx, turn.RootRunID)
+		invocation, err = runner.store.GetInvocation(ctx, invocation.ID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		runtimeSnapshot, err = runner.runtime.Load(ctx, invocation.ExecutionRefID)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -393,66 +519,144 @@ func normalizeStartRequest(request StartRequest) (StartRequest, string, string, 
 	return request, sessionID, turnID, err
 }
 
-func (runner *Runner) syncRuntimeSnapshot(ctx context.Context, turn Turn, runtimeSnapshot kernel.Snapshot) (Snapshot, error) {
+func (runner *Runner) syncRuntimeSnapshot(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+	runtimeSnapshot kernel.Snapshot,
+) (Snapshot, error) {
 	status, err := turnStatusFromRuntime(runtimeSnapshot.Run.Status)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if runtimeSnapshotConflicts(turn, runtimeSnapshot) {
+	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) {
 		return Snapshot{}, ErrConflict
 	}
-	turnChanged := runtimeSnapshotChangesTurn(turn, runtimeSnapshot, status)
-	if turnChanged {
-		turn.RootRunID = runtimeSnapshot.Run.ID
-		turn.Status = status
-		turn.ErrorCode = strings.TrimSpace(runtimeSnapshot.Run.ErrorCode)
-		turn.ErrorDetail = strings.TrimSpace(runtimeSnapshot.Run.ErrorDetail)
-		turn.UpdatedAt = runner.clock.Now().UTC()
-		turn, err = runner.store.UpdateTurn(ctx, turn, turn.Revision)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if !terminalTurnStatus(turn.Status) {
-			runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), false)
-		}
-	}
-	if err = runner.recordAgentRunItem(ctx, turn, runtimeSnapshot); err != nil {
+	invocation, err = runner.syncInvocationProjection(ctx, invocation, runtimeSnapshot, status)
+	if err != nil {
 		return Snapshot{}, err
 	}
-	if err = runner.recordApprovalRequestItem(ctx, turn, runtimeSnapshot); err != nil {
+	turn, turnChanged, err := runner.syncTurnProjection(ctx, turn, runtimeSnapshot, status)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.recordRuntimeSnapshotItems(ctx, turn, invocation, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
 	deferTerminalProjection, err := runner.hostOutputProjectionPending(ctx, turn)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if terminalTurnStatus(turn.Status) && !deferTerminalProjection {
-		if err = runner.recordTerminalAgentMessageItem(ctx, turn, runtimeSnapshot); err != nil {
-			return Snapshot{}, err
+	if err = runner.finalizeTerminalRuntimeProjection(
+		ctx, turn, runtimeSnapshot, turnChanged, deferTerminalProjection,
+	); err != nil {
+		return Snapshot{}, err
+	}
+	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+}
+
+func (runner *Runner) syncInvocationProjection(
+	ctx context.Context,
+	invocation Invocation,
+	runtimeSnapshot kernel.Snapshot,
+	status TurnStatus,
+) (Invocation, error) {
+	nextStatus := invocationStatusFromTurn(status)
+	if nextStatus == invocation.Status && invocation.ErrorCode == runtimeSnapshot.Run.ErrorCode &&
+		invocation.ErrorDetail == runtimeSnapshot.Run.ErrorDetail {
+		return invocation, nil
+	}
+	invocation.Status = nextStatus
+	invocation.ErrorCode = strings.TrimSpace(runtimeSnapshot.Run.ErrorCode)
+	invocation.ErrorDetail = strings.TrimSpace(runtimeSnapshot.Run.ErrorDetail)
+	invocation.UpdatedAt = runner.clock.Now().UTC()
+	updated, err := runner.store.UpdateInvocation(ctx, invocation, invocation.Revision)
+	if err != nil {
+		return Invocation{}, err
+	}
+	if err = runner.recordInvocationItem(ctx, updated); err != nil {
+		return Invocation{}, err
+	}
+	return updated, nil
+}
+
+func (runner *Runner) syncTurnProjection(
+	ctx context.Context,
+	turn Turn,
+	runtimeSnapshot kernel.Snapshot,
+	status TurnStatus,
+) (Turn, bool, error) {
+	if !runtimeSnapshotChangesTurn(turn, runtimeSnapshot, status) {
+		return turn, false, nil
+	}
+	turn.Status = status
+	turn.ErrorCode = strings.TrimSpace(runtimeSnapshot.Run.ErrorCode)
+	turn.ErrorDetail = strings.TrimSpace(runtimeSnapshot.Run.ErrorDetail)
+	turn.UpdatedAt = runner.clock.Now().UTC()
+	updated, err := runner.store.UpdateTurn(ctx, turn, turn.Revision)
+	if err != nil {
+		return Turn{}, false, err
+	}
+	if !terminalTurnStatus(updated.Status) {
+		runner.publishTurnStatus(ctx, updated, turnEventTypeForStatus(updated.Status), false)
+	}
+	return updated, true, nil
+}
+
+func (runner *Runner) recordRuntimeSnapshotItems(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+	runtimeSnapshot kernel.Snapshot,
+) error {
+	if err := runner.recordAgentRunItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
+		return err
+	}
+	return runner.recordApprovalRequestItem(ctx, turn, invocation, runtimeSnapshot)
+}
+
+func (runner *Runner) finalizeTerminalRuntimeProjection(
+	ctx context.Context,
+	turn Turn,
+	runtimeSnapshot kernel.Snapshot,
+	turnChanged bool,
+	deferHostProjection bool,
+) error {
+	if !terminalTurnStatus(turn.Status) {
+		return nil
+	}
+	if !deferHostProjection {
+		if err := runner.recordTerminalAgentMessageItem(ctx, turn, runtimeSnapshot); err != nil {
+			return err
 		}
 	}
 	// Delegation relations are continuation signals as well as provenance. Project
 	// them only after the synchronous root call stack has committed its terminal
 	// state, otherwise a completed sibling can race the remaining Tool calls and
 	// resume the same Agent revision concurrently.
-	if terminalTurnStatus(turn.Status) {
-		if err = runner.projectDelegationRelations(ctx, turn); err != nil {
-			return Snapshot{}, err
-		}
-		if turnChanged && !deferTerminalProjection {
-			runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
-		}
+	if err := runner.projectDelegationRelations(ctx, turn); err != nil {
+		return err
 	}
-	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+	if turnChanged && !deferHostProjection {
+		runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
+	}
+	return nil
 }
 
 func (runner *Runner) terminalRuntimeSnapshot(ctx context.Context, turn Turn) (kernel.Snapshot, error) {
-	result := kernel.Snapshot{Run: kernel.Run{ID: turn.RootRunID}}
-	rootRunID := strings.TrimSpace(turn.RootRunID)
-	if rootRunID == "" {
+	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+	if errors.Is(err, ErrNotFound) {
+		return kernel.Snapshot{}, nil
+	}
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	result := kernel.Snapshot{Run: kernel.Run{ID: invocation.ExecutionRefID}}
+	executionRefID := strings.TrimSpace(invocation.ExecutionRefID)
+	if executionRefID == "" {
 		return result, nil
 	}
-	loaded, err := runner.runtime.Load(ctx, rootRunID)
+	loaded, err := runner.runtime.Load(ctx, executionRefID)
 	if err == nil {
 		return loaded, nil
 	}
@@ -524,27 +728,27 @@ func (runner *Runner) recordTerminalAgentMessageItem(
 		return err
 	}
 	now := runner.clock.Now().UTC()
-	runID := firstNonEmpty(strings.TrimSpace(snapshot.Run.ID), strings.TrimSpace(turn.RootRunID))
+	invocation, _ := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+	runID := firstNonEmpty(strings.TrimSpace(snapshot.Run.ID), strings.TrimSpace(invocation.ExecutionRefID))
 	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID:     stableID("him", turn.ID, runID, string(status), payload.ContentHash),
-		TurnID: turn.ID, Kind: ItemAgentMessage, Status: status, RunID: runID,
+		TurnID: turn.ID, Kind: ItemAgentMessage, Status: status, RunID: runID, InvocationID: invocation.ID,
 		HostRef: hostRef, ParentItemID: parentItemID, Payload: raw,
 		CreatedAt: now, UpdatedAt: now,
 	})
 	return err
 }
 
-func runtimeSnapshotConflicts(turn Turn, snapshot kernel.Snapshot) bool {
-	rootRunID := strings.TrimSpace(turn.RootRunID)
-	return rootRunID != "" && rootRunID != snapshot.Run.ID
+func runtimeSnapshotConflicts(invocation Invocation, snapshot kernel.Snapshot) bool {
+	executionRefID := strings.TrimSpace(invocation.ExecutionRefID)
+	return executionRefID != "" && executionRefID != snapshot.Run.ID
 }
 
 func runtimeSnapshotChangesTurn(turn Turn, snapshot kernel.Snapshot, status TurnStatus) bool {
-	return turn.RootRunID != snapshot.Run.ID || turn.Status != status ||
-		turn.ErrorCode != snapshot.Run.ErrorCode || turn.ErrorDetail != snapshot.Run.ErrorDetail
+	return turn.Status != status || turn.ErrorCode != snapshot.Run.ErrorCode || turn.ErrorDetail != snapshot.Run.ErrorDetail
 }
 
-func (runner *Runner) recordApprovalRequestItem(ctx context.Context, turn Turn, snapshot kernel.Snapshot) error {
+func (runner *Runner) recordApprovalRequestItem(ctx context.Context, turn Turn, invocation Invocation, snapshot kernel.Snapshot) error {
 	pending, ok, err := approvalRequestFromSnapshot(snapshot)
 	if err != nil || !ok {
 		return err
@@ -556,7 +760,7 @@ func (runner *Runner) recordApprovalRequestItem(ctx context.Context, turn Turn, 
 	now := runner.clock.Now().UTC()
 	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID: stableID("hia", turn.ID, pending.CheckpointID), TurnID: turn.ID,
-		Kind: ItemApproval, Status: ItemWaiting, RunID: snapshot.Run.ID,
+		Kind: ItemApproval, Status: ItemWaiting, RunID: snapshot.Run.ID, InvocationID: invocation.ID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err
@@ -565,6 +769,7 @@ func (runner *Runner) recordApprovalRequestItem(ctx context.Context, turn Turn, 
 func (runner *Runner) recordApprovalDecisionItem(
 	ctx context.Context,
 	turn Turn,
+	invocation Invocation,
 	pending approvalRequestItemPayload,
 	request ResolveApprovalRequest,
 ) error {
@@ -577,7 +782,7 @@ func (runner *Runner) recordApprovalDecisionItem(
 	now := runner.clock.Now().UTC()
 	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID: stableID("hia", turn.ID, pending.CheckpointID, "decision"), TurnID: turn.ID,
-		Kind: ItemApproval, Status: ItemCompleted, RunID: turn.RootRunID,
+		Kind: ItemApproval, Status: ItemCompleted, RunID: invocation.ExecutionRefID, InvocationID: invocation.ID,
 		ParentItemID: stableID("hia", turn.ID, pending.CheckpointID),
 		Payload:      payload, CreatedAt: now, UpdatedAt: now,
 	})
@@ -595,7 +800,7 @@ func pluginApprovalDecision(value ApprovalDecision) (plugin.ApprovalDecision, er
 	}
 }
 
-func (runner *Runner) recordAgentRunItem(ctx context.Context, turn Turn, snapshot kernel.Snapshot) error {
+func (runner *Runner) recordAgentRunItem(ctx context.Context, turn Turn, invocation Invocation, snapshot kernel.Snapshot) error {
 	status := itemStatusFromTurn(turn.Status)
 	payload, err := json.Marshal(struct {
 		RuntimeRevision uint64 `json:"runtimeRevision"`
@@ -606,14 +811,30 @@ func (runner *Runner) recordAgentRunItem(ctx context.Context, turn Turn, snapsho
 	now := runner.clock.Now().UTC()
 	item := Item{
 		ID:     stableID("hi", turn.ID, snapshot.Run.ID, string(status), uintString(snapshot.Run.Revision)),
-		TurnID: turn.ID, Kind: ItemAgentRun, Status: status, RunID: snapshot.Run.ID,
-		Payload: payload, CreatedAt: now, UpdatedAt: now,
+		TurnID: turn.ID, Kind: ItemAgentRun, Status: status, RunID: snapshot.Run.ID, InvocationID: invocation.ID,
+		ParentItemID: invocationLifecycleItemID(invocation, InvocationAccepted, 1),
+		Payload:      payload, CreatedAt: now, UpdatedAt: now,
 	}
 	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, item)
 	return err
 }
 
-func (runner *Runner) failTurn(ctx context.Context, turn Turn, cause error) (Snapshot, error) {
+func (runner *Runner) failInvocationAndTurn(ctx context.Context, turn Turn, invocation Invocation, cause error) (Snapshot, error) {
+	invocation.Status = InvocationFailed
+	invocation.ErrorCode = "harness.agent_start_failed"
+	invocation.ErrorDetail = "agent capability did not start"
+	if cause == nil {
+		invocation.ErrorDetail = "agent capability returned no execution identity"
+	}
+	invocation.UpdatedAt = runner.clock.Now().UTC()
+	if updatedInvocation, err := runner.store.UpdateInvocation(ctx, invocation, invocation.Revision); err == nil {
+		invocation = updatedInvocation
+		if err = runner.recordInvocationItem(ctx, invocation); err != nil {
+			return Snapshot{}, err
+		}
+	} else {
+		return Snapshot{}, err
+	}
 	turn.Status = TurnFailed
 	turn.ErrorCode = "harness.agent_start_failed"
 	turn.ErrorDetail = "agent root run did not start"
@@ -630,7 +851,7 @@ func (runner *Runner) failTurn(ctx context.Context, turn Turn, cause error) (Sna
 		return Snapshot{}, err
 	}
 	if !pending {
-		if err = runner.recordTerminalAgentMessageItem(ctx, updated, kernel.Snapshot{Run: kernel.Run{ID: updated.RootRunID}}); err != nil {
+		if err = runner.recordTerminalAgentMessageItem(ctx, updated, kernel.Snapshot{Run: kernel.Run{ID: invocation.ExecutionRefID}}); err != nil {
 			return Snapshot{}, err
 		}
 		runner.publishTurnStatus(ctx, updated, EventTurnFailed, true)
@@ -674,7 +895,6 @@ func normalizeOptionalHostRef(value **HostRef) error {
 func (runner *Runner) recordHostMessageItems(
 	ctx context.Context,
 	turn Turn,
-	runID string,
 	input *HostRef,
 	output *HostRef,
 ) error {
@@ -682,7 +902,7 @@ func (runner *Runner) recordHostMessageItems(
 	if input != nil {
 		if _, err := appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 			ID: stableID("hium", turn.ID, input.Kind, input.ID), TurnID: turn.ID,
-			Kind: ItemUserMessage, Status: ItemCompleted, HostRef: input, RunID: runID,
+			Kind: ItemUserMessage, Status: ItemCompleted, HostRef: input,
 			Payload: json.RawMessage(`{"role":"user"}`), CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -691,7 +911,7 @@ func (runner *Runner) recordHostMessageItems(
 	if output != nil {
 		if _, err := appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 			ID: stableID("hiam", turn.ID, output.Kind, output.ID), TurnID: turn.ID,
-			Kind: ItemAgentMessage, Status: ItemStarted, HostRef: output, RunID: runID,
+			Kind: ItemAgentMessage, Status: ItemStarted, HostRef: output,
 			Payload: json.RawMessage(`{"role":"assistant"}`), CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			return err
@@ -750,10 +970,15 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	if err != nil {
 		return Snapshot{}, err
 	}
-	result := Snapshot{Session: session, Turn: turn, Config: config, Items: items}
+	invocations, err := runner.store.ListInvocations(ctx, turn.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result := Snapshot{Session: session, Turn: turn, Config: config, Invocations: invocations, Items: items}
 	runtimeSnapshot := provided
-	if runtimeSnapshot == nil && strings.TrimSpace(turn.RootRunID) != "" {
-		loaded, loadErr := runner.runtime.Load(ctx, turn.RootRunID)
+	rootInvocation, hasRootInvocation := topLevelInvocation(invocations)
+	if runtimeSnapshot == nil && hasRootInvocation && strings.TrimSpace(rootInvocation.ExecutionRefID) != "" {
+		loaded, loadErr := runner.runtime.Load(ctx, rootInvocation.ExecutionRefID)
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
@@ -771,6 +996,7 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 func cloneSnapshot(value Snapshot) Snapshot {
 	value.Session = cloneSession(value.Session)
 	value.Config = cloneConfigSnapshot(value.Config)
+	value.Invocations = cloneInvocations(value.Invocations)
 	value.Items = cloneItems(value.Items)
 	value.Output = cloneOutput(value.Output)
 	return value

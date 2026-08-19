@@ -37,6 +37,10 @@ func (runner *Runner) RecordExternalItem(
 	if err != nil {
 		return Item{}, err
 	}
+	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+	if err != nil {
+		return Item{}, err
+	}
 	if input.HostRef != nil {
 		ref, normalizeErr := normalizeHostRef(*input.HostRef)
 		if normalizeErr != nil {
@@ -52,8 +56,8 @@ func (runner *Runner) RecordExternalItem(
 	item, err := appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID: stableID("hix", turn.ID, input.Key), TurnID: turn.ID,
 		Kind: input.Kind, Status: input.Status, HostRef: input.HostRef,
-		ParentItemID: parentItemID,
-		Payload:      append(json.RawMessage(nil), input.Payload...), CreatedAt: now, UpdatedAt: now,
+		InvocationID: invocation.ID, ParentItemID: parentItemID,
+		Payload: append(json.RawMessage(nil), input.Payload...), CreatedAt: now, UpdatedAt: now,
 	})
 	return item, err
 }

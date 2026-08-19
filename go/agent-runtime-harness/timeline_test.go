@@ -18,14 +18,14 @@ import (
 )
 
 const (
-	timelineToolKey      = "timeline.lookup"
-	timelineModelName    = "timeline-model"
-	timelineStreamDelta  = "ephemeral-stream-delta"
-	timelineArgumentText = "sensitive query"
-	timelineResultText   = "sensitive result"
-	timelineFinalText    = "final timeline answer"
-	hostedTimelineTool   = "provider.image_generation"
-	hostedTimelineCallID = "hosted-call-1"
+	timelineToolKey       = "timeline.lookup"
+	timelineModelName     = "timeline-model"
+	timelineStreamDelta   = "ephemeral-stream-delta"
+	timelineArgumentText  = "sensitive query"
+	timelineResultText    = "sensitive result"
+	timelineFinalText     = "final timeline answer"
+	hostedTimelineTool    = "provider.image_generation"
+	hostedTimelineCallID  = "hosted-call-1"
 	hostedCompletedStatus = "completed"
 )
 
@@ -57,7 +57,7 @@ func TestHarnessTimelinePersistsTerminalFactsWithoutStreamingOrBodies(t *testing
 	if err != nil {
 		t.Fatalf("reload timeline after restart: %v", err)
 	}
-	if len(reloaded.Items) != len(completed.Items) || reloaded.Turn.RootRunID != completed.Turn.RootRunID ||
+	if len(reloaded.Items) != len(completed.Items) || len(reloaded.Invocations) != len(completed.Invocations) ||
 		reloaded.Turn.Status != harness.TurnCompleted || reloaded.Output == nil {
 		t.Fatalf("reloaded Harness timeline diverged: %#v", reloaded)
 	}

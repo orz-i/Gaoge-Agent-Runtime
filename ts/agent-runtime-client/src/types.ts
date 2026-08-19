@@ -8,6 +8,7 @@ export type HarnessItemKind =
   | "tool"
   | "approval"
   | "delegation"
+  | "capability_invocation"
   | "artifact"
   | "context"
   | "diagnostic";
@@ -24,8 +25,30 @@ export type HarnessItemDTO = {
   kind: HarnessItemKind;
   status: HarnessItemStatus;
   hostRef?: HostRefDTO;
+  invocationID?: string;
   parentItemID?: string;
   payload?: unknown;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type HarnessExecutionClass = "agent" | "team" | "plan_execute" | "workflow" | "application";
+export type HarnessInvocationStatus = "accepted" | RunStatus;
+
+export type HarnessCapabilityInvocationDTO = {
+  id: string;
+  turnID: string;
+  parentItemID?: string;
+  capabilityKey: string;
+  definitionVersion?: string;
+  executionClass: HarnessExecutionClass;
+  inputHash?: string;
+  status: HarnessInvocationStatus;
+  attempt: number;
+  outputRefs: HostRefDTO[];
+  errorCode?: string;
+  errorDetail?: string;
+  revision: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -43,6 +66,7 @@ export type HarnessTurnDTO = {
 
 export type HarnessTurnSnapshotDTO = {
   turn: HarnessTurnDTO;
+  invocations: HarnessCapabilityInvocationDTO[];
   items: HarnessItemDTO[];
   output?: ResultDTO | null;
 };

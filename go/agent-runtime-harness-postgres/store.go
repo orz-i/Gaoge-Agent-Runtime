@@ -14,7 +14,7 @@ import (
 
 var ErrNilDatabase = errors.New("harness postgres database is nil")
 
-// Store persists Harness Session/Turn/Config/Item state in PostgreSQL-compatible GORM databases.
+// Store persists Harness Session/Turn/Invocation/Config/Item state in PostgreSQL-compatible GORM databases.
 type Store struct{ db *gorm.DB }
 
 // New creates a durable Harness Store. Schema migration remains an explicit host operation.
@@ -25,16 +25,120 @@ func New(db *gorm.DB) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func (store *Store) GetTurnByRootRunID(ctx context.Context, rootRunID string) (harness.Turn, error) {
-	rootRunID = strings.TrimSpace(rootRunID)
-	if store == nil || store.db == nil || rootRunID == "" {
-		return harness.Turn{}, harness.ErrInvalidRequest
+func sameInvocation(left, right harness.Invocation) bool {
+	return left.ID == right.ID && left.TurnID == right.TurnID && left.ParentItemID == right.ParentItemID &&
+		left.CapabilityKey == right.CapabilityKey && left.DefinitionVersion == right.DefinitionVersion &&
+		left.ExecutionClass == right.ExecutionClass && left.InputHash == right.InputHash && left.Attempt == right.Attempt
+}
+
+func invocationToRecord(value harness.Invocation) (invocationRecord, error) {
+	if value.ID == "" || value.TurnID == "" || value.CapabilityKey == "" || value.Attempt <= 0 || value.Revision == 0 {
+		return invocationRecord{}, harness.ErrInvalidRequest
 	}
-	var record turnRecord
-	if err := store.db.WithContext(ctx).Where("root_run_id = ?", rootRunID).Take(&record).Error; err != nil {
-		return harness.Turn{}, mapError(err)
+	outputRefs, err := json.Marshal(value.OutputRefs)
+	if err != nil {
+		return invocationRecord{}, err
 	}
-	return turnFromRecord(record), nil
+	return invocationRecord{
+		ID: value.ID, TurnID: value.TurnID, ParentItemID: value.ParentItemID,
+		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
+		ExecutionClass: string(value.ExecutionClass), InputHash: value.InputHash, ExecutionRefID: value.ExecutionRefID,
+		Status: string(value.Status), Attempt: value.Attempt, OutputRefsJSON: string(outputRefs),
+		ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail, Revision: value.Revision,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}, nil
+}
+
+func invocationFromRecord(value invocationRecord) (harness.Invocation, error) {
+	var outputRefs []harness.HostRef
+	if err := json.Unmarshal([]byte(value.OutputRefsJSON), &outputRefs); err != nil {
+		return harness.Invocation{}, harness.ErrConflict
+	}
+	return harness.Invocation{
+		ID: value.ID, TurnID: value.TurnID, ParentItemID: value.ParentItemID,
+		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
+		ExecutionClass: harness.ExecutionClass(value.ExecutionClass), InputHash: value.InputHash,
+		ExecutionRefID: value.ExecutionRefID, Status: harness.InvocationStatus(value.Status), Attempt: value.Attempt,
+		OutputRefs: outputRefs, ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail, Revision: value.Revision,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}, nil
+}
+
+func (store *Store) CreateInvocation(ctx context.Context, value harness.Invocation) (harness.Invocation, bool, error) {
+	record, err := invocationToRecord(value)
+	if err != nil {
+		return harness.Invocation{}, false, err
+	}
+	return createOrReplay(ctx, store.db, &record, value,
+		func() (harness.Invocation, error) { return store.GetInvocation(ctx, value.ID) }, sameInvocation)
+}
+
+func (store *Store) GetInvocation(ctx context.Context, id string) (harness.Invocation, error) {
+	var record invocationRecord
+	if err := store.db.WithContext(ctx).Where("id = ?", strings.TrimSpace(id)).Take(&record).Error; err != nil {
+		return harness.Invocation{}, mapError(err)
+	}
+	return invocationFromRecord(record)
+}
+
+func (store *Store) GetInvocationByExecutionRefID(ctx context.Context, executionRefID string) (harness.Invocation, error) {
+	executionRefID = strings.TrimSpace(executionRefID)
+	if executionRefID == "" {
+		return harness.Invocation{}, harness.ErrInvalidRequest
+	}
+	var record invocationRecord
+	if err := store.db.WithContext(ctx).Where("execution_ref_id = ?", executionRefID).Take(&record).Error; err != nil {
+		return harness.Invocation{}, mapError(err)
+	}
+	return invocationFromRecord(record)
+}
+
+func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocation, expectedRevision uint64) (harness.Invocation, error) {
+	if strings.TrimSpace(value.ID) == "" || expectedRevision == 0 {
+		return harness.Invocation{}, harness.ErrInvalidRequest
+	}
+	record, err := invocationToRecord(value)
+	if err != nil {
+		return harness.Invocation{}, err
+	}
+	record.Revision = expectedRevision + 1
+	result := store.db.WithContext(ctx).Model(&invocationRecord{}).
+		Where("id = ? AND revision = ? AND turn_id = ? AND parent_item_id = ? AND capability_key = ? AND definition_version = ? AND execution_class = ? AND input_hash = ? AND attempt = ? AND execution_ref_id = ?",
+			value.ID, expectedRevision, value.TurnID, value.ParentItemID, value.CapabilityKey, value.DefinitionVersion,
+			string(value.ExecutionClass), value.InputHash, value.Attempt, value.ExecutionRefID).
+		Updates(map[string]any{
+			"status": record.Status, "output_refs_json": record.OutputRefsJSON,
+			"error_code": record.ErrorCode, "error_detail": record.ErrorDetail,
+			"revision": record.Revision, "updated_at": record.UpdatedAt,
+		})
+	if result.Error != nil {
+		return harness.Invocation{}, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return harness.Invocation{}, harness.ErrConflict
+	}
+	value.Revision = record.Revision
+	return value, nil
+}
+
+func (store *Store) ListInvocations(ctx context.Context, turnID string) ([]harness.Invocation, error) {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		return nil, harness.ErrInvalidRequest
+	}
+	var records []invocationRecord
+	if err := store.db.WithContext(ctx).Where("turn_id = ?", turnID).Order("created_at ASC, id ASC").Find(&records).Error; err != nil {
+		return nil, err
+	}
+	result := make([]harness.Invocation, len(records))
+	for index, record := range records {
+		value, err := invocationFromRecord(record)
+		if err != nil {
+			return nil, err
+		}
+		result[index] = value
+	}
+	return result, nil
 }
 
 func createOrReplay[T any](
@@ -58,7 +162,7 @@ func createOrReplay[T any](
 
 // Models returns the complete Harness persistence model set.
 func Models() []any {
-	return []any{&sessionRecord{}, &turnRecord{}, &configRecord{}, &itemRecord{}}
+	return []any{&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &configRecord{}, &itemRecord{}}
 }
 
 // Migrate creates or updates only Harness-owned persistence tables.
@@ -113,8 +217,8 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 		Where("id = ? AND revision = ? AND session_id = ? AND host_turn_kind = ? AND host_turn_id = ? AND config_snapshot_id = ?",
 			value.ID, expectedRevision, value.SessionID, value.HostTurn.Kind, value.HostTurn.ID, value.ConfigSnapshotID).
 		Updates(map[string]any{
-			"root_run_id": record.RootRunID, "context_snapshot_id": record.ContextSnapshotID,
-			"status": record.Status, "revision": record.Revision, "error_code": record.ErrorCode,
+			"context_snapshot_id": record.ContextSnapshotID,
+			"status":              record.Status, "revision": record.Revision, "error_code": record.ErrorCode,
 			"error_detail": record.ErrorDetail, "updated_at": record.UpdatedAt,
 		})
 	if result.Error != nil {
@@ -269,7 +373,7 @@ func sessionFromRecord(value sessionRecord) harness.Session {
 func turnToRecord(value harness.Turn) turnRecord {
 	return turnRecord{
 		ID: value.ID, SessionID: value.SessionID, HostTurnKind: value.HostTurn.Kind, HostTurnID: value.HostTurn.ID,
-		RootRunID: value.RootRunID, ConfigSnapshotID: value.ConfigSnapshotID, ContextSnapshotID: value.ContextSnapshotID,
+		ConfigSnapshotID: value.ConfigSnapshotID, ContextSnapshotID: value.ContextSnapshotID,
 		Status: string(value.Status), Revision: value.Revision, ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
@@ -278,7 +382,7 @@ func turnToRecord(value harness.Turn) turnRecord {
 func turnFromRecord(value turnRecord) harness.Turn {
 	return harness.Turn{
 		ID: value.ID, SessionID: value.SessionID, HostTurn: harness.HostRef{Kind: value.HostTurnKind, ID: value.HostTurnID},
-		RootRunID: value.RootRunID, ConfigSnapshotID: value.ConfigSnapshotID, ContextSnapshotID: value.ContextSnapshotID,
+		ConfigSnapshotID: value.ConfigSnapshotID, ContextSnapshotID: value.ContextSnapshotID,
 		Status: harness.TurnStatus(value.Status), Revision: value.Revision, ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
@@ -312,7 +416,7 @@ func itemToRecord(value harness.Item) (itemRecord, error) {
 	}
 	return itemRecord{
 		ID: value.ID, TurnID: value.TurnID, Seq: value.Seq, Kind: string(value.Kind), Status: string(value.Status),
-		HostRefKind: hostKind, HostRefID: hostID, RunID: value.RunID, ParentItemID: value.ParentItemID,
+		HostRefKind: hostKind, HostRefID: hostID, RunID: value.RunID, InvocationID: value.InvocationID, ParentItemID: value.ParentItemID,
 		PayloadJSON: payload, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}, nil
 }
@@ -320,7 +424,7 @@ func itemToRecord(value harness.Item) (itemRecord, error) {
 func itemFromRecord(value itemRecord) (harness.Item, error) {
 	result := harness.Item{
 		ID: value.ID, TurnID: value.TurnID, Seq: value.Seq, Kind: harness.ItemKind(value.Kind), Status: harness.ItemStatus(value.Status),
-		RunID: value.RunID, ParentItemID: value.ParentItemID, Payload: json.RawMessage(value.PayloadJSON),
+		RunID: value.RunID, InvocationID: value.InvocationID, ParentItemID: value.ParentItemID, Payload: json.RawMessage(value.PayloadJSON),
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
 	if value.HostRefKind != "" || value.HostRefID != "" {
@@ -342,7 +446,7 @@ func sameTurn(left, right harness.Turn) bool {
 
 func sameItem(left, right harness.Item) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.Kind == right.Kind && left.Status == right.Status &&
-		left.RunID == right.RunID && left.ParentItemID == right.ParentItemID && string(left.Payload) == string(right.Payload) &&
+		left.RunID == right.RunID && left.InvocationID == right.InvocationID && left.ParentItemID == right.ParentItemID && string(left.Payload) == string(right.Payload) &&
 		sameItemHostRef(left.HostRef, right.HostRef)
 }
 

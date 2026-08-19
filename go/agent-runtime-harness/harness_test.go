@@ -220,7 +220,13 @@ func assertCompletedHarnessSnapshot(t *testing.T, snapshot harness.Snapshot, err
 	if decodeErr := json.Unmarshal(snapshot.Output.Content, &output); decodeErr != nil || output != "direct answer" {
 		t.Fatalf("unexpected harness output: %#v err=%v", snapshot.Output, decodeErr)
 	}
-	if len(snapshot.Items) != 1 || snapshot.Items[0].Kind != harness.ItemAgentRun || snapshot.Items[0].Status != harness.ItemCompleted {
+	if len(snapshot.Invocations) != 1 || snapshot.Invocations[0].ExecutionClass != harness.ExecutionAgent ||
+		snapshot.Invocations[0].Status != harness.InvocationCompleted || snapshot.Invocations[0].ExecutionRefID == "" {
+		t.Fatalf("unexpected capability invocations: %#v", snapshot.Invocations)
+	}
+	if len(snapshot.Items) != 3 || snapshot.Items[0].Kind != harness.ItemInvocation ||
+		snapshot.Items[1].Kind != harness.ItemInvocation || snapshot.Items[1].Status != harness.ItemCompleted ||
+		snapshot.Items[2].Kind != harness.ItemAgentRun || snapshot.Items[2].Status != harness.ItemCompleted {
 		t.Fatalf("unexpected durable items: %#v", snapshot.Items)
 	}
 }
@@ -230,7 +236,8 @@ func assertHarnessReplay(t *testing.T, first, replayed harness.Snapshot, err err
 	if err != nil {
 		t.Fatalf("replay harness turn: %v", err)
 	}
-	if replayed.Turn.ID != first.Turn.ID || len(replayed.Items) != 1 {
+	if replayed.Turn.ID != first.Turn.ID || len(replayed.Invocations) != len(first.Invocations) ||
+		len(replayed.Items) != len(first.Items) {
 		t.Fatalf("replay changed durable identity: %#v", replayed)
 	}
 }

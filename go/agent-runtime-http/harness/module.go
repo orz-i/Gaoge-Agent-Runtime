@@ -68,6 +68,10 @@ func (handler *Handler) ResolveApproval(context *gin.Context) {
 }
 
 func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
+	invocations := make([]InvocationResponse, 0, len(snapshot.Invocations))
+	for _, invocation := range snapshot.Invocations {
+		invocations = append(invocations, invocationResponse(invocation))
+	}
 	items := make([]ItemResponse, 0, len(snapshot.Items))
 	for _, item := range snapshot.Items {
 		projected, err := itemResponse(item)
@@ -92,9 +96,21 @@ func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
 			Revision: snapshot.Turn.Revision, ErrorCode: errorCode, ErrorDetail: errorDetail,
 			CreatedAt: snapshot.Turn.CreatedAt, UpdatedAt: snapshot.Turn.UpdatedAt,
 		},
-		Items:  items,
-		Output: output,
+		Invocations: invocations,
+		Items:       items,
+		Output:      output,
 	}, nil
+}
+
+func invocationResponse(value harness.Invocation) InvocationResponse {
+	return InvocationResponse{
+		ID: value.ID, TurnID: value.TurnID, ParentItemID: value.ParentItemID,
+		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
+		ExecutionClass: value.ExecutionClass, InputHash: value.InputHash, Status: value.Status,
+		Attempt: value.Attempt, OutputRefs: append([]harness.HostRef(nil), value.OutputRefs...),
+		ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail, Revision: value.Revision,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
 }
 
 func itemResponse(item harness.Item) (ItemResponse, error) {
@@ -109,20 +125,25 @@ func itemResponse(item harness.Item) (ItemResponse, error) {
 	}
 	return ItemResponse{
 		ID: item.ID, TurnID: item.TurnID, Seq: item.Seq, Kind: item.Kind, Status: item.Status,
-		HostRef: hostRef, ParentItemID: item.ParentItemID, Payload: payload,
+		HostRef: hostRef, InvocationID: item.InvocationID, ParentItemID: item.ParentItemID, Payload: payload,
 		CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
 	}, nil
 }
 
 func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.RawMessage, error) {
-	if len(payload) == 0 || kind != harness.ItemDelegation {
+	if len(payload) == 0 || kind != harness.ItemDelegation && kind != harness.ItemInvocation {
 		return append(json.RawMessage(nil), payload...), nil
 	}
 	var value map[string]any
 	if err := json.Unmarshal(payload, &value); err != nil {
 		return nil, errors.Join(harness.ErrConflict, err)
 	}
-	delete(value, "childRunID")
+	if kind == harness.ItemDelegation {
+		delete(value, "childRunID")
+	}
+	if kind == harness.ItemInvocation {
+		delete(value, "executionRefID")
+	}
 	return json.Marshal(value)
 }
 
@@ -151,16 +172,39 @@ type ItemResponse struct {
 	Kind         harness.ItemKind   `json:"kind"`
 	Status       harness.ItemStatus `json:"status"`
 	HostRef      *harness.HostRef   `json:"hostRef,omitempty"`
+	InvocationID string             `json:"invocationID,omitempty"`
 	ParentItemID string             `json:"parentItemID,omitempty"`
 	Payload      json.RawMessage    `json:"payload,omitempty"`
 	CreatedAt    time.Time          `json:"createdAt"`
 	UpdatedAt    time.Time          `json:"updatedAt"`
 }
 
+// InvocationResponse intentionally omits ExecutionRefID. Runtime Feature IDs
+// are internal topology; Conversation clients recover the Harness invocation
+// lifecycle by invocation identity instead.
+type InvocationResponse struct {
+	ID                string                   `json:"id"`
+	TurnID            string                   `json:"turnID"`
+	ParentItemID      string                   `json:"parentItemID,omitempty"`
+	CapabilityKey     string                   `json:"capabilityKey"`
+	DefinitionVersion string                   `json:"definitionVersion,omitempty"`
+	ExecutionClass    harness.ExecutionClass   `json:"executionClass"`
+	InputHash         string                   `json:"inputHash,omitempty"`
+	Status            harness.InvocationStatus `json:"status"`
+	Attempt           int                      `json:"attempt"`
+	OutputRefs        []harness.HostRef        `json:"outputRefs"`
+	ErrorCode         string                   `json:"errorCode,omitempty"`
+	ErrorDetail       string                   `json:"errorDetail,omitempty"`
+	Revision          uint64                   `json:"revision"`
+	CreatedAt         time.Time                `json:"createdAt"`
+	UpdatedAt         time.Time                `json:"updatedAt"`
+}
+
 type SnapshotResponse struct {
-	Turn   TurnResponse    `json:"turn"`
-	Items  []ItemResponse  `json:"items"`
-	Output *harness.Output `json:"output,omitempty"`
+	Turn        TurnResponse         `json:"turn"`
+	Invocations []InvocationResponse `json:"invocations"`
+	Items       []ItemResponse       `json:"items"`
+	Output      *harness.Output      `json:"output,omitempty"`
 }
 
 type ResolveApprovalRequest struct {

@@ -38,10 +38,14 @@ func (policy *FrozenApprovalPolicy) Approval(
 		strings.TrimSpace(invocation.Definition.Key) == "" {
 		return plugin.ApprovalNotRequired, ErrInvalidRequest
 	}
-	turn, err := policy.store.GetTurnByRootRunID(ctx, invocation.Run.ID)
+	capabilityInvocation, err := policy.store.GetInvocationByExecutionRefID(ctx, invocation.Run.ID)
 	if errors.Is(err, ErrNotFound) {
 		return plugin.ApprovalNotRequired, nil
 	}
+	if err != nil {
+		return plugin.ApprovalNotRequired, err
+	}
+	turn, err := policy.store.GetTurn(ctx, capabilityInvocation.TurnID)
 	if err != nil {
 		return plugin.ApprovalNotRequired, err
 	}

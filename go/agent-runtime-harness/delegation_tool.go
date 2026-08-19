@@ -78,7 +78,7 @@ func (handler *DelegationToolHandler) Execute(
 		}
 		input = prepared
 	}
-	result, err := runner.DelegateByRootRunID(ctx, request.RunID, input)
+	result, err := runner.DelegateByExecutionRefID(ctx, request.RunID, input)
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}

@@ -20,12 +20,12 @@ const (
 	TurnCancelled    TurnStatus = "cancelled"
 )
 
-// Turn binds one product Turn to one direct Agent root Run and immutable configuration snapshot.
+// Turn is the durable root of one Harness execution tree. Child execution
+// identities live in Capability Invocations rather than on the Turn itself.
 type Turn struct {
 	ID                string     `json:"id"`
 	SessionID         string     `json:"sessionID"`
 	HostTurn          HostRef    `json:"hostTurn"`
-	RootRunID         string     `json:"rootRunID,omitempty"`
 	ConfigSnapshotID  string     `json:"configSnapshotID"`
 	ContextSnapshotID string     `json:"contextSnapshotID,omitempty"`
 	ContextRef        ContextRef `json:"contextRef,omitempty"`
@@ -45,11 +45,12 @@ type Output struct {
 
 // Snapshot is a complete durable Harness Turn projection plus the current root output if available.
 type Snapshot struct {
-	Session Session        `json:"session"`
-	Turn    Turn           `json:"turn"`
-	Config  ConfigSnapshot `json:"config"`
-	Items   []Item         `json:"items"`
-	Output  *Output        `json:"output,omitempty"`
+	Session     Session        `json:"session"`
+	Turn        Turn           `json:"turn"`
+	Config      ConfigSnapshot `json:"config"`
+	Invocations []Invocation   `json:"invocations"`
+	Items       []Item         `json:"items"`
+	Output      *Output        `json:"output,omitempty"`
 }
 
 // TurnID deterministically derives one Harness Turn identity within a Session.
@@ -60,15 +61,6 @@ func TurnID(sessionID string, hostTurn HostRef) (string, error) {
 		return "", ErrInvalidRequest
 	}
 	return stableID("ht", sessionID, normalized.Kind, normalized.ID), nil
-}
-
-// RootRunID deterministically derives the direct Agent root Run identity for one Harness Turn.
-func RootRunID(turnID string) string {
-	turnID = strings.TrimSpace(turnID)
-	if turnID == "" {
-		return ""
-	}
-	return stableID("hr", turnID)
 }
 
 func turnStatusFromRuntime(status kernel.RunStatus) (TurnStatus, error) {

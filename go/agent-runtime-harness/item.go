@@ -16,6 +16,7 @@ const (
 	ItemTool         ItemKind = "tool"
 	ItemApproval     ItemKind = "approval"
 	ItemDelegation   ItemKind = "delegation"
+	ItemInvocation   ItemKind = "capability_invocation"
 	ItemArtifact     ItemKind = "artifact"
 	ItemContext      ItemKind = "context"
 	ItemDiagnostic   ItemKind = "diagnostic"
@@ -41,6 +42,7 @@ type Item struct {
 	Status       ItemStatus      `json:"status"`
 	HostRef      *HostRef        `json:"hostRef,omitempty"`
 	RunID        string          `json:"runID,omitempty"`
+	InvocationID string          `json:"invocationID,omitempty"`
 	ParentItemID string          `json:"parentItemID,omitempty"`
 	Payload      json.RawMessage `json:"payload,omitempty"`
 	CreatedAt    time.Time       `json:"createdAt"`
@@ -61,7 +63,7 @@ func validItem(value Item) bool {
 
 func validItemKind(value ItemKind) bool {
 	switch value {
-	case ItemUserMessage, ItemAgentRun, ItemAgentMessage, ItemTool, ItemApproval, ItemDelegation, ItemArtifact, ItemContext, ItemDiagnostic:
+	case ItemUserMessage, ItemAgentRun, ItemAgentMessage, ItemTool, ItemApproval, ItemDelegation, ItemInvocation, ItemArtifact, ItemContext, ItemDiagnostic:
 		return true
 	default:
 		return false

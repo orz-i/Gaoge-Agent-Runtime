@@ -20,7 +20,6 @@ type turnRecord struct {
 	SessionID         string    `gorm:"size:64;not null;index:idx_harness_turn_session;uniqueIndex:uk_harness_turn_host,priority:1"`
 	HostTurnKind      string    `gorm:"size:64;not null;uniqueIndex:uk_harness_turn_host,priority:2"`
 	HostTurnID        string    `gorm:"size:128;not null;uniqueIndex:uk_harness_turn_host,priority:3"`
-	RootRunID         string    `gorm:"size:64;not null;default:'';uniqueIndex:uk_harness_turn_root,where:root_run_id <> ''"`
 	ConfigSnapshotID  string    `gorm:"size:64;not null;index:idx_harness_turn_config"`
 	ContextSnapshotID string    `gorm:"size:128;not null;default:''"`
 	Status            string    `gorm:"size:32;not null;index:idx_harness_turn_status"`
@@ -32,6 +31,27 @@ type turnRecord struct {
 }
 
 func (turnRecord) TableName() string { return "agent_harness_turns" }
+
+type invocationRecord struct {
+	ID                string    `gorm:"primaryKey;size:64"`
+	TurnID            string    `gorm:"size:64;not null;index:idx_harness_invocation_turn"`
+	ParentItemID      string    `gorm:"size:64;not null;default:''"`
+	CapabilityKey     string    `gorm:"size:128;not null"`
+	DefinitionVersion string    `gorm:"size:128;not null;default:''"`
+	ExecutionClass    string    `gorm:"size:32;not null"`
+	InputHash         string    `gorm:"size:64;not null;default:''"`
+	ExecutionRefID    string    `gorm:"size:128;not null;default:'';uniqueIndex:uk_harness_invocation_execution,where:execution_ref_id <> ''"`
+	Status            string    `gorm:"size:32;not null;index:idx_harness_invocation_status"`
+	Attempt           int       `gorm:"not null"`
+	OutputRefsJSON    string    `gorm:"type:text;not null;default:'[]'"`
+	ErrorCode         string    `gorm:"size:128;not null;default:''"`
+	ErrorDetail       string    `gorm:"type:text;not null;default:''"`
+	Revision          uint64    `gorm:"not null"`
+	CreatedAt         time.Time `gorm:"not null"`
+	UpdatedAt         time.Time `gorm:"not null"`
+}
+
+func (invocationRecord) TableName() string { return "agent_harness_invocations" }
 
 type configRecord struct {
 	ID          string    `gorm:"primaryKey;size:64"`
@@ -52,6 +72,7 @@ type itemRecord struct {
 	HostRefKind  string    `gorm:"size:64;not null;default:''"`
 	HostRefID    string    `gorm:"size:128;not null;default:''"`
 	RunID        string    `gorm:"size:64;not null;default:'';index:idx_harness_item_run"`
+	InvocationID string    `gorm:"size:64;not null;default:'';index:idx_harness_item_invocation"`
 	ParentItemID string    `gorm:"size:64;not null;default:''"`
 	PayloadJSON  string    `gorm:"type:text;not null;default:'{}'"`
 	CreatedAt    time.Time `gorm:"not null"`

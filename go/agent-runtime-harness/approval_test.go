@@ -103,7 +103,8 @@ func resolveApproval(t *testing.T, runner *harness.Runner, turnID string, commen
 
 func assertHarnessApprovalWait(t *testing.T, snapshot harness.Snapshot, wantWaiting int) {
 	t.Helper()
-	if snapshot.Turn.Status != harness.TurnWaitingInput || snapshot.Turn.RootRunID == "" {
+	invocation, ok := harness.TopLevelInvocation(snapshot)
+	if snapshot.Turn.Status != harness.TurnWaitingInput || !ok || invocation.ExecutionRefID == "" {
 		t.Fatalf("expected durable approval wait, got %#v", snapshot.Turn)
 	}
 	if got := approvalItemCount(snapshot.Items, harness.ItemWaiting); got != wantWaiting {

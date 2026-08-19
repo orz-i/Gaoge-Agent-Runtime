@@ -432,9 +432,10 @@ components:
         seq: {type: integer, minimum: 1}
         kind:
           type: string
-          enum: [user_message, agent_run, agent_message, tool, approval, delegation, artifact, context, diagnostic]
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, artifact, context, diagnostic]
         status: {type: string, enum: [started, waiting, completed, failed, cancelled]}
         hostRef: {$ref: '#/components/schemas/HostRef'}
+        invocationID: {type: string}
         parentItemID: {type: string}
         payload: {}
         createdAt: {type: string, format: date-time}
@@ -452,19 +453,44 @@ components:
         itemID: {type: string}
         itemKind:
           type: string
-          enum: [user_message, agent_run, agent_message, tool, approval, delegation, artifact, context, diagnostic]
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, artifact, context, diagnostic]
         delta: {type: string}
         message: {type: string}
         data: {}
         status: {type: string}
         terminal: {type: boolean}
         createdAt: {type: string, format: date-time}
+    HarnessCapabilityInvocation:
+      type: object
+      additionalProperties: false
+      required: [id, turnID, capabilityKey, executionClass, status, attempt, outputRefs, revision, createdAt, updatedAt]
+      properties:
+        id: {type: string}
+        turnID: {type: string}
+        parentItemID: {type: string}
+        capabilityKey: {type: string}
+        definitionVersion: {type: string}
+        executionClass: {type: string, enum: [agent, team, plan_execute, workflow, application]}
+        inputHash: {type: string}
+        status: {type: string, enum: [accepted, running, waiting_input, completed, failed, cancelled]}
+        attempt: {type: integer, minimum: 1}
+        outputRefs:
+          type: array
+          items: {$ref: '#/components/schemas/HostRef'}
+        errorCode: {type: string}
+        errorDetail: {type: string}
+        revision: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
     HarnessTurnSnapshot:
       type: object
       additionalProperties: false
-      required: [turn, items]
+      required: [turn, invocations, items]
       properties:
         turn: {$ref: '#/components/schemas/HarnessTurn'}
+        invocations:
+          type: array
+          items: {$ref: '#/components/schemas/HarnessCapabilityInvocation'}
         items:
           type: array
           items: {$ref: '#/components/schemas/HarnessItem'}

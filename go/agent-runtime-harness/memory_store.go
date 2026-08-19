@@ -11,33 +11,120 @@ const maxListItems = 500
 
 // MemoryStore is the reference Store implementation used by conformance and small embedded hosts.
 type MemoryStore struct {
-	mu       sync.RWMutex
-	sessions map[string]Session
-	turns    map[string]Turn
-	configs  map[string]ConfigSnapshot
-	items    map[string][]Item
-	itemIDs  map[string]Item
+	mu                      sync.RWMutex
+	sessions                map[string]Session
+	turns                   map[string]Turn
+	invocations             map[string]Invocation
+	invocationExecutionRefs map[string]string
+	configs                 map[string]ConfigSnapshot
+	items                   map[string][]Item
+	itemIDs                 map[string]Item
 }
 
-func (store *MemoryStore) GetTurnByRootRunID(_ context.Context, rootRunID string) (Turn, error) {
-	rootRunID = strings.TrimSpace(rootRunID)
-	if rootRunID == "" {
-		return Turn{}, ErrInvalidRequest
+func sameInvocationIdentity(left, right Invocation) bool {
+	return left.ID == right.ID && left.TurnID == right.TurnID && left.ParentItemID == right.ParentItemID &&
+		left.CapabilityKey == right.CapabilityKey && left.DefinitionVersion == right.DefinitionVersion &&
+		left.ExecutionClass == right.ExecutionClass && left.InputHash == right.InputHash && left.Attempt == right.Attempt
+}
+
+func (store *MemoryStore) CreateInvocation(_ context.Context, value Invocation) (Invocation, bool, error) {
+	if store == nil || !validInvocation(value) {
+		return Invocation{}, false, ErrInvalidRequest
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if existing, ok := store.invocations[value.ID]; ok {
+		if !sameInvocationIdentity(existing, value) {
+			return Invocation{}, false, ErrConflict
+		}
+		return cloneInvocation(existing), false, nil
+	}
+	if executionRef := strings.TrimSpace(value.ExecutionRefID); executionRef != "" {
+		if existingID := store.invocationExecutionRefs[executionRef]; existingID != "" && existingID != value.ID {
+			return Invocation{}, false, ErrConflict
+		}
+		store.invocationExecutionRefs[executionRef] = value.ID
+	}
+	store.invocations[value.ID] = cloneInvocation(value)
+	return cloneInvocation(value), true, nil
+}
+
+func (store *MemoryStore) GetInvocation(_ context.Context, id string) (Invocation, error) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	value, ok := store.invocations[strings.TrimSpace(id)]
+	if !ok {
+		return Invocation{}, ErrNotFound
+	}
+	return cloneInvocation(value), nil
+}
+
+func (store *MemoryStore) GetInvocationByExecutionRefID(_ context.Context, executionRefID string) (Invocation, error) {
+	executionRefID = strings.TrimSpace(executionRefID)
+	if executionRefID == "" {
+		return Invocation{}, ErrInvalidRequest
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	for _, value := range store.turns {
-		if value.RootRunID == rootRunID {
-			return value, nil
+	id := store.invocationExecutionRefs[executionRefID]
+	value, ok := store.invocations[id]
+	if !ok {
+		return Invocation{}, ErrNotFound
+	}
+	return cloneInvocation(value), nil
+}
+
+func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, expectedRevision uint64) (Invocation, error) {
+	if store == nil || !validInvocation(value) || expectedRevision == 0 {
+		return Invocation{}, ErrInvalidRequest
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current, ok := store.invocations[value.ID]
+	if !ok {
+		return Invocation{}, ErrNotFound
+	}
+	if current.Revision != expectedRevision || !sameInvocationIdentity(current, value) {
+		return Invocation{}, ErrConflict
+	}
+	if current.ExecutionRefID != value.ExecutionRefID {
+		return Invocation{}, ErrConflict
+	}
+	value.Revision = expectedRevision + 1
+	store.invocations[value.ID] = cloneInvocation(value)
+	return cloneInvocation(value), nil
+}
+
+func (store *MemoryStore) ListInvocations(_ context.Context, turnID string) ([]Invocation, error) {
+	turnID = strings.TrimSpace(turnID)
+	if store == nil || turnID == "" {
+		return nil, ErrInvalidRequest
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	result := make([]Invocation, 0)
+	for _, value := range store.invocations {
+		if value.TurnID == turnID {
+			result = append(result, cloneInvocation(value))
 		}
 	}
-	return Turn{}, ErrNotFound
+	slices.SortFunc(result, func(left, right Invocation) int {
+		if left.CreatedAt.Before(right.CreatedAt) {
+			return -1
+		}
+		if left.CreatedAt.After(right.CreatedAt) {
+			return 1
+		}
+		return strings.Compare(left.ID, right.ID)
+	})
+	return result, nil
 }
 
 // NewMemoryStore creates an empty isolated Harness Store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		sessions: map[string]Session{}, turns: map[string]Turn{}, configs: map[string]ConfigSnapshot{},
+		invocations: map[string]Invocation{}, invocationExecutionRefs: map[string]string{},
 		items: map[string][]Item{}, itemIDs: map[string]Item{},
 	}
 }
@@ -216,7 +303,7 @@ func sameTurnIdentity(left, right Turn) bool {
 
 func sameItemIdentity(left, right Item) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.Kind == right.Kind && left.Status == right.Status &&
-		left.RunID == right.RunID && left.ParentItemID == right.ParentItemID &&
+		left.RunID == right.RunID && left.InvocationID == right.InvocationID && left.ParentItemID == right.ParentItemID &&
 		string(left.Payload) == string(right.Payload) && sameHostRef(left.HostRef, right.HostRef)
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,7 +38,8 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	if _, err = store.UpdateTurn(t.Context(), updated, 1); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("stale turn update error = %v", err)
 	}
-	assertItemLifecycle(t, store, turn.ID, now)
+	invocation := assertInvocationLifecycle(t, store, turn.ID, now)
+	assertItemLifecycle(t, store, turn.ID, invocation.ID, now)
 }
 
 func assertSessionLifecycle(t *testing.T, store *harnesspostgres.Store, session harness.Session) {
@@ -71,10 +73,9 @@ func assertTurnLifecycle(t *testing.T, store *harnesspostgres.Store, turn harnes
 		t.Fatalf("create turn: %#v fresh=%v err=%v", created, fresh, err)
 	}
 	created.Status = harness.TurnRunning
-	created.RootRunID = "hr_pg"
 	created.UpdatedAt = now.Add(time.Second)
 	updated, err := store.UpdateTurn(t.Context(), created, 1)
-	if err != nil || updated.Revision != 2 || updated.RootRunID != "hr_pg" {
+	if err != nil || updated.Revision != 2 {
 		t.Fatalf("update turn: %#v err=%v", updated, err)
 	}
 	loaded, err := store.GetTurn(t.Context(), turn.ID)
@@ -84,12 +85,69 @@ func assertTurnLifecycle(t *testing.T, store *harnesspostgres.Store, turn harnes
 	return updated
 }
 
-func assertItemLifecycle(t *testing.T, store *harnesspostgres.Store, turnID string, now time.Time) {
+func assertInvocationLifecycle(t *testing.T, store *harnesspostgres.Store, turnID string, now time.Time) harness.Invocation {
+	t.Helper()
+	created := createInvocationFixture(t, store, turnID, now)
+	assertInvocationLookupByExecutionRef(t, store, created)
+	updated := updateInvocationFixture(t, store, created, now)
+	assertInvocationList(t, store, turnID, updated)
+	return updated
+}
+
+func createInvocationFixture(t *testing.T, store *harnesspostgres.Store, turnID string, now time.Time) harness.Invocation {
+	t.Helper()
+	value := harness.Invocation{
+		ID: "hiv_pg", TurnID: turnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1",
+		ExecutionClass: harness.ExecutionAgent, InputHash: strings.Repeat("a", 64), ExecutionRefID: "hr_pg",
+		Status: harness.InvocationAccepted, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	created, fresh, err := store.CreateInvocation(t.Context(), value)
+	if err != nil || !fresh || created.ExecutionRefID != "hr_pg" {
+		t.Fatalf("create invocation: %#v fresh=%v err=%v", created, fresh, err)
+	}
+	return created
+}
+
+func assertInvocationLookupByExecutionRef(t *testing.T, store *harnesspostgres.Store, created harness.Invocation) {
+	t.Helper()
+	byExecution, err := store.GetInvocationByExecutionRefID(t.Context(), "hr_pg")
+	if err != nil || byExecution.ID != created.ID {
+		t.Fatalf("load invocation by execution ref: %#v err=%v", byExecution, err)
+	}
+}
+
+func updateInvocationFixture(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	created harness.Invocation,
+	now time.Time,
+) harness.Invocation {
+	t.Helper()
+	created.Status = harness.InvocationRunning
+	created.UpdatedAt = now.Add(time.Second)
+	updated, err := store.UpdateInvocation(t.Context(), created, 1)
+	if err != nil || updated.Revision != 2 || updated.Status != harness.InvocationRunning {
+		t.Fatalf("update invocation: %#v err=%v", updated, err)
+	}
+	return updated
+}
+
+func assertInvocationList(t *testing.T, store *harnesspostgres.Store, turnID string, updated harness.Invocation) {
+	t.Helper()
+	listed, err := store.ListInvocations(t.Context(), turnID)
+	if err != nil || len(listed) != 1 || listed[0].ID != updated.ID {
+		t.Fatalf("list invocations: %#v err=%v", listed, err)
+	}
+}
+
+func assertItemLifecycle(t *testing.T, store *harnesspostgres.Store, turnID, invocationID string, now time.Time) {
 	t.Helper()
 	for _, id := range []string{"hi_pg_1", "hi_pg_2"} {
 		item := harness.Item{
 			ID: id, TurnID: turnID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-			Payload: json.RawMessage(`{"ok":true}`), CreatedAt: now, UpdatedAt: now,
+			InvocationID: invocationID,
+			Payload:      json.RawMessage(`{"ok":true}`), CreatedAt: now, UpdatedAt: now,
 		}
 		created, fresh, err := store.AppendItem(t.Context(), item)
 		if err != nil || !fresh || created.Seq == 0 {
@@ -97,7 +155,7 @@ func assertItemLifecycle(t *testing.T, store *harnesspostgres.Store, turnID stri
 		}
 	}
 	items, err := store.ListItems(t.Context(), turnID, 0, 10)
-	if err != nil || len(items) != 2 || items[0].Seq != 1 || items[1].Seq != 2 {
+	if err != nil || len(items) != 2 || items[0].Seq != 1 || items[1].Seq != 2 || items[0].InvocationID != invocationID {
 		t.Fatalf("list items: %#v err=%v", items, err)
 	}
 }

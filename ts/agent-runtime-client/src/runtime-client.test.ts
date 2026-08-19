@@ -136,6 +136,11 @@ describe("RuntimeClient target API", () => {
         status: "completed", revision: 3,
         createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:00:01Z",
       },
+      invocations: [{
+        id: "hiv-1", turnID: "ht/1", capabilityKey: "runtime.agent", executionClass: "agent",
+        status: "completed", attempt: 1, outputRefs: [], revision: 2,
+        createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:00:01Z",
+      }],
       items: [],
       output: { contentType: "text", content: "done" },
     };
@@ -173,6 +178,11 @@ describe("RuntimeClient target API", () => {
         status: "waiting_input", revision: 4,
         createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:16:00Z",
       },
+      invocations: [{
+        id: "hiv-1", turnID: "ht-1", capabilityKey: "runtime.agent", executionClass: "agent",
+        status: "waiting_input", attempt: 1, outputRefs: [], revision: 2,
+        createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:16:00Z",
+      }],
       items: [],
     };
     const fetcher = vi.fn()
