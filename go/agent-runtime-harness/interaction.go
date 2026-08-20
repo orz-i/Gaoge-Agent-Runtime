@@ -59,6 +59,14 @@ type ResolveInteractionRequest struct {
 	Response json.RawMessage
 }
 
+// InteractionResolution is the atomically persisted transition that resumes
+// an Invocation and its owning Turn after generic input is resolved.
+type InteractionResolution struct {
+	Interaction Interaction
+	Invocation  Invocation
+	Turn        Turn
+}
+
 func interactionID(turnID, invocationID, key string) string {
 	return stableID("hinteraction", strings.TrimSpace(turnID), strings.TrimSpace(invocationID), strings.TrimSpace(key))
 }
@@ -180,11 +188,25 @@ func (runner *Runner) ResolveInteraction(
 	interaction.Response = append(json.RawMessage(nil), request.Response...)
 	interaction.Status = InteractionResolved
 	interaction.UpdatedAt = runner.clock.Now().UTC()
-	interaction, err = runner.store.UpdateInteraction(ctx, interaction, interaction.Revision)
+	resolution, err := runner.store.ResolveInteraction(ctx, interaction, interaction.Revision)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return runner.reconcileInteractionState(ctx, interaction, InvocationRunning, TurnRunning, EventTurnStarted)
+	return runner.projectInteractionResolution(ctx, resolution)
+}
+
+func (runner *Runner) projectInteractionResolution(
+	ctx context.Context,
+	resolution InteractionResolution,
+) (Snapshot, error) {
+	if err := runner.recordInteractionItem(ctx, resolution.Interaction); err != nil {
+		return Snapshot{}, err
+	}
+	if err := runner.recordInvocationItem(ctx, resolution.Invocation); err != nil {
+		return Snapshot{}, err
+	}
+	runner.publishTurnStatus(ctx, resolution.Turn, EventTurnStarted, false)
+	return runner.loadSnapshot(ctx, resolution.Turn, nil)
 }
 
 func (runner *Runner) loadInteractionRequestOwners(

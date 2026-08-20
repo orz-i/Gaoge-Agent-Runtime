@@ -164,7 +164,7 @@ func (handler *Handler) RetryInvocation(context *gin.Context) {
 		return
 	}
 	invocationID := strings.TrimSpace(context.Param("invocation_id"))
-	if invocationID == "" || !snapshotContainsInvocation(snapshot, invocationID) {
+	if invocationID == "" || !snapshotContainsRetryableChildInvocation(snapshot, invocationID) {
 		runtimehttp.WriteError(context, stdhttp.StatusNotFound, "harness.invocation_not_found", "Harness invocation not found")
 		return
 	}
@@ -181,9 +181,9 @@ func (handler *Handler) RetryInvocation(context *gin.Context) {
 	context.JSON(stdhttp.StatusOK, response)
 }
 
-func snapshotContainsInvocation(snapshot harness.Snapshot, invocationID string) bool {
+func snapshotContainsRetryableChildInvocation(snapshot harness.Snapshot, invocationID string) bool {
 	for _, invocation := range snapshot.Invocations {
-		if invocation.ID == invocationID {
+		if invocation.ID == invocationID && strings.TrimSpace(invocation.ParentItemID) != "" {
 			return true
 		}
 	}

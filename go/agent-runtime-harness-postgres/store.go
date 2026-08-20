@@ -369,6 +369,132 @@ func (store *Store) UpdateInteraction(
 	return value, nil
 }
 
+func (store *Store) ResolveInteraction(
+	ctx context.Context,
+	value harness.Interaction,
+	expectedRevision uint64,
+) (harness.InteractionResolution, error) {
+	record, err := interactionToRecord(value)
+	if err != nil || expectedRevision == 0 || value.Status != harness.InteractionResolved ||
+		len(value.Response) == 0 || !json.Valid(value.Response) {
+		if err == nil {
+			err = harness.ErrInvalidRequest
+		}
+		return harness.InteractionResolution{}, err
+	}
+	var resolution harness.InteractionResolution
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		resolution, err = resolveInteractionTransaction(tx, value, record, expectedRevision)
+		return err
+	})
+	return resolution, err
+}
+
+func resolveInteractionTransaction(
+	tx *gorm.DB,
+	value harness.Interaction,
+	record interactionRecord,
+	expectedRevision uint64,
+) (harness.InteractionResolution, error) {
+	turnRow, invocationRow, currentRow, err := lockInteractionResolutionState(
+		tx, value, expectedRevision,
+	)
+	if err != nil {
+		return harness.InteractionResolution{}, err
+	}
+	current, err := interactionFromRecord(currentRow)
+	if err != nil || current.Status != harness.InteractionWaiting || !sameInteraction(current, value) {
+		return harness.InteractionResolution{}, errors.Join(harness.ErrConflict, err)
+	}
+	if err = persistInteractionResolution(tx, record, currentRow, invocationRow, turnRow); err != nil {
+		return harness.InteractionResolution{}, err
+	}
+	value.Revision = expectedRevision + 1
+	invocation, err := invocationFromRecord(invocationRow)
+	if err != nil {
+		return harness.InteractionResolution{}, err
+	}
+	invocation.Status = harness.InvocationRunning
+	invocation.Revision++
+	invocation.UpdatedAt = value.UpdatedAt
+	turn := turnFromRecord(turnRow)
+	turn.Status = harness.TurnRunning
+	turn.Revision++
+	turn.UpdatedAt = value.UpdatedAt
+	return harness.InteractionResolution{Interaction: value, Invocation: invocation, Turn: turn}, nil
+}
+
+func lockInteractionResolutionState(
+	tx *gorm.DB,
+	value harness.Interaction,
+	expectedRevision uint64,
+) (turnRecord, invocationRecord, interactionRecord, error) {
+	var turn turnRecord
+	err := tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).
+		Where("id = ? AND status = ?", value.TurnID, string(harness.TurnWaitingInput)).Take(&turn).Error
+	if err = interactionOwnerLockError(err); err != nil {
+		return turnRecord{}, invocationRecord{}, interactionRecord{}, err
+	}
+	var invocation invocationRecord
+	err = tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).
+		Where("id = ? AND turn_id = ? AND status = ?", value.InvocationID, value.TurnID, string(harness.InvocationWaitingInput)).
+		Take(&invocation).Error
+	if err = interactionOwnerLockError(err); err != nil {
+		return turnRecord{}, invocationRecord{}, interactionRecord{}, err
+	}
+	var interaction interactionRecord
+	err = tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).
+		Where("id = ? AND revision = ? AND turn_id = ? AND invocation_id = ? AND status = ?",
+			value.ID, expectedRevision, value.TurnID, value.InvocationID, string(harness.InteractionWaiting)).
+		Take(&interaction).Error
+	if err = interactionOwnerLockError(err); err != nil {
+		return turnRecord{}, invocationRecord{}, interactionRecord{}, err
+	}
+	return turn, invocation, interaction, nil
+}
+
+func persistInteractionResolution(
+	tx *gorm.DB,
+	resolved interactionRecord,
+	current interactionRecord,
+	invocation invocationRecord,
+	turn turnRecord,
+) error {
+	interactionUpdate := tx.Model(&interactionRecord{}).
+		Where("id = ? AND revision = ? AND status = ?", current.ID, current.Revision, string(harness.InteractionWaiting)).
+		Updates(map[string]any{
+			"status": resolved.Status, "response_json": resolved.ResponseJSON,
+			"revision": current.Revision + 1, "updated_at": resolved.UpdatedAt,
+		})
+	if err := singleInteractionResolutionUpdate(interactionUpdate); err != nil {
+		return err
+	}
+	invocationUpdate := tx.Model(&invocationRecord{}).
+		Where("id = ? AND revision = ? AND status = ?", invocation.ID, invocation.Revision, string(harness.InvocationWaitingInput)).
+		Updates(map[string]any{
+			"status": string(harness.InvocationRunning), "revision": invocation.Revision + 1, "updated_at": resolved.UpdatedAt,
+		})
+	if err := singleInteractionResolutionUpdate(invocationUpdate); err != nil {
+		return err
+	}
+	turnUpdate := tx.Model(&turnRecord{}).
+		Where("id = ? AND revision = ? AND status = ?", turn.ID, turn.Revision, string(harness.TurnWaitingInput)).
+		Updates(map[string]any{
+			"status": string(harness.TurnRunning), "revision": turn.Revision + 1, "updated_at": resolved.UpdatedAt,
+		})
+	return singleInteractionResolutionUpdate(turnUpdate)
+}
+
+func singleInteractionResolutionUpdate(result *gorm.DB) error {
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return harness.ErrConflict
+	}
+	return nil
+}
+
 func (store *Store) ListInteractions(ctx context.Context, turnID string) ([]harness.Interaction, error) {
 	return listTurnRecords(ctx, store.db, turnID, interactionFromRecord)
 }

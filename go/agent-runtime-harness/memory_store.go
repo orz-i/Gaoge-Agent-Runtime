@@ -3,6 +3,7 @@ package harness
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
@@ -268,6 +269,58 @@ func (store *MemoryStore) UpdateInteraction(
 	value.Revision = expectedRevision + 1
 	store.interactions[value.ID] = cloneInteraction(value)
 	return cloneInteraction(value), nil
+}
+
+func (store *MemoryStore) ResolveInteraction(
+	_ context.Context,
+	value Interaction,
+	expectedRevision uint64,
+) (InteractionResolution, error) {
+	if store == nil || !validResolvedInteraction(value, expectedRevision) {
+		return InteractionResolution{}, ErrInvalidRequest
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current, interactionFound := store.interactions[value.ID]
+	turn, turnFound := store.turns[value.TurnID]
+	invocation, invocationFound := store.invocations[value.InvocationID]
+	if !interactionFound || !turnFound || !invocationFound {
+		return InteractionResolution{}, ErrConflict
+	}
+	if !memoryInteractionCanResolve(current, value, turn, invocation, expectedRevision) {
+		return InteractionResolution{}, ErrConflict
+	}
+	value.Revision = expectedRevision + 1
+	value.UpdatedAt = value.UpdatedAt.UTC()
+	invocation.Status = InvocationRunning
+	invocation.Revision++
+	invocation.UpdatedAt = value.UpdatedAt
+	turn.Status = TurnRunning
+	turn.Revision++
+	turn.UpdatedAt = value.UpdatedAt
+	store.interactions[value.ID] = cloneInteraction(value)
+	store.invocations[invocation.ID] = cloneInvocation(invocation)
+	store.turns[turn.ID] = turn
+	return InteractionResolution{
+		Interaction: cloneInteraction(value), Invocation: cloneInvocation(invocation), Turn: turn,
+	}, nil
+}
+
+func memoryInteractionCanResolve(
+	current Interaction,
+	resolved Interaction,
+	turn Turn,
+	invocation Invocation,
+	expectedRevision uint64,
+) bool {
+	return current.Revision == expectedRevision && current.Status == InteractionWaiting &&
+		sameInteractionIdentity(current, resolved) && turn.Status == TurnWaitingInput &&
+		invocation.TurnID == turn.ID && invocation.Status == InvocationWaitingInput
+}
+
+func validResolvedInteraction(value Interaction, expectedRevision uint64) bool {
+	return validInteraction(value) && expectedRevision > 0 && value.Status == InteractionResolved &&
+		len(value.Response) > 0 && json.Valid(value.Response)
 }
 
 func (store *MemoryStore) ListInteractions(_ context.Context, turnID string) ([]Interaction, error) {

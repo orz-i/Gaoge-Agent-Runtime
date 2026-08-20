@@ -23,6 +23,7 @@ type Store interface {
 	CreateInteraction(context.Context, Interaction, uint64, uint64) (Interaction, bool, error)
 	GetInteraction(context.Context, string) (Interaction, error)
 	UpdateInteraction(context.Context, Interaction, uint64) (Interaction, error)
+	ResolveInteraction(context.Context, Interaction, uint64) (InteractionResolution, error)
 	ListInteractions(context.Context, string) ([]Interaction, error)
 	PutConfigSnapshot(context.Context, ConfigSnapshot) (ConfigSnapshot, bool, error)
 	GetConfigSnapshot(context.Context, string) (ConfigSnapshot, error)

@@ -129,6 +129,20 @@ func TestSnapshotResponseProjectsInvocationWithoutRuntimeExecutionIdentity(t *te
 	}
 }
 
+func TestSnapshotContainsRetryableChildInvocationAllowsOnlyChildRetry(t *testing.T) {
+	snapshot := harness.Snapshot{Invocations: []harness.Invocation{
+		{ID: "hiv-root", TurnID: testHarnessTurnID},
+		{ID: "hiv-child", TurnID: testHarnessTurnID, ParentItemID: "parent-item"},
+	}}
+
+	if snapshotContainsRetryableChildInvocation(snapshot, "hiv-root") {
+		t.Fatal("top-level Invocation must not be retryable through the public Harness endpoint")
+	}
+	if !snapshotContainsRetryableChildInvocation(snapshot, "hiv-child") {
+		t.Fatal("child Invocation should remain retryable through the public Harness endpoint")
+	}
+}
+
 func TestWriteTurnFeedCursorExpiredReturnsRecoveryHead(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

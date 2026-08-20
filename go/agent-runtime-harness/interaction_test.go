@@ -52,6 +52,42 @@ func TestGenericInteractionWaitResolveAndReplay(t *testing.T) {
 	}
 }
 
+func TestResolveInteractionAfterCancellationLeavesInteractionWaiting(t *testing.T) {
+	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
+		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		Key: "cancelled-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	interaction := assertWaitingInteraction(t, waiting)
+	if _, err = runner.Cancel(t.Context(), turnID, "cancel before response"); err != nil {
+		t.Fatalf("cancel waiting interaction: %v", err)
+	}
+
+	_, err = runner.ResolveInteraction(t.Context(), turnID, interaction.ID, harness.ResolveInteractionRequest{
+		Response: json.RawMessage(`{"candidateID":"candidate-2"}`),
+	})
+	if !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("late interaction response error = %v", err)
+	}
+	persisted, loadErr := store.GetInteraction(t.Context(), interaction.ID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if persisted.Status != harness.InteractionWaiting || len(persisted.Response) != 0 || persisted.Revision != interaction.Revision {
+		t.Fatalf("late response mutated cancelled interaction: %#v", persisted)
+	}
+	snapshot, loadErr := runner.Load(t.Context(), turnID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if countInteractionItems(snapshot.Items, harness.ItemCompleted) != 0 {
+		t.Fatalf("late response recorded a completed interaction item: %#v", snapshot.Items)
+	}
+}
+
 func TestGenericInteractionAllowsOnlyOneWaitingInputPerTurn(t *testing.T) {
 	t.Parallel()
 	runner, turnID, parentItemID, _, _, _ := newFeatureInvocationHarness(t)

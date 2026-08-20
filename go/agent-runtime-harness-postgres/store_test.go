@@ -77,6 +77,102 @@ func TestStoreRetriesTopLevelInvocationAndReopensTurnAtomically(t *testing.T) {
 	assertTopLevelTurnReopened(t, store, turn.ID)
 }
 
+func TestStoreResolvesInteractionAndOwnersAtomically(t *testing.T) {
+	store := newStore(t)
+	turn, invocation, interaction := createWaitingInteractionFixture(t, store, "resolve")
+	interaction.Status = harness.InteractionResolved
+	interaction.Response = json.RawMessage(`{"candidateID":"candidate-2"}`)
+	interaction.UpdatedAt = interaction.UpdatedAt.Add(time.Second)
+
+	resolution, err := store.ResolveInteraction(t.Context(), interaction, interaction.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Interaction.Status != harness.InteractionResolved || resolution.Interaction.Revision != 2 ||
+		resolution.Invocation.Status != harness.InvocationRunning || resolution.Invocation.Revision != invocation.Revision+1 ||
+		resolution.Turn.Status != harness.TurnRunning || resolution.Turn.Revision != turn.Revision+1 {
+		t.Fatalf("atomic interaction resolution = %#v", resolution)
+	}
+}
+
+func TestStoreRejectsInteractionResolutionAfterCancellation(t *testing.T) {
+	store := newStore(t)
+	turn, invocation, interaction := createWaitingInteractionFixture(t, store, "cancel")
+	invocation.Status = harness.InvocationCancelled
+	invocation.UpdatedAt = invocation.UpdatedAt.Add(time.Second)
+	if _, err := store.UpdateInvocation(t.Context(), invocation, invocation.Revision); err != nil {
+		t.Fatal(err)
+	}
+	turn.Status = harness.TurnCancelled
+	turn.UpdatedAt = turn.UpdatedAt.Add(time.Second)
+	if _, err := store.UpdateTurn(t.Context(), turn, turn.Revision); err != nil {
+		t.Fatal(err)
+	}
+	interaction.Status = harness.InteractionResolved
+	interaction.Response = json.RawMessage(`{"candidateID":"candidate-2"}`)
+	interaction.UpdatedAt = interaction.UpdatedAt.Add(2 * time.Second)
+
+	if _, err := store.ResolveInteraction(t.Context(), interaction, interaction.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("late interaction resolution error = %v", err)
+	}
+	persisted, err := store.GetInteraction(t.Context(), interaction.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != harness.InteractionWaiting || len(persisted.Response) != 0 || persisted.Revision != 1 {
+		t.Fatalf("late resolution mutated interaction: %#v", persisted)
+	}
+}
+
+func createWaitingInteractionFixture(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	suffix string,
+) (harness.Turn, harness.Invocation, harness.Interaction) {
+	t.Helper()
+	now := time.Date(2026, 8, 20, 5, 0, 0, 0, time.UTC)
+	turn := harness.Turn{
+		ID: "turn_interaction_" + suffix, SessionID: "session_interaction_" + suffix,
+		HostTurn:         harness.HostRef{Kind: "conversation_turn", ID: "host_" + suffix},
+		ConfigSnapshotID: "config_interaction_" + suffix, Status: harness.TurnRunning,
+		Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, fresh, err := store.CreateTurn(t.Context(), turn); err != nil || !fresh {
+		t.Fatalf("create interaction turn fresh=%v err=%v", fresh, err)
+	}
+	invocation := harness.Invocation{
+		ID: "invocation_interaction_" + suffix, TurnID: turn.ID, CapabilityKey: "runtime.agent",
+		DefinitionVersion: "v1", ExecutionClass: harness.ExecutionAgent,
+		ExecutionRefID: "run_interaction_" + suffix, Status: harness.InvocationRunning,
+		Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, fresh, err := store.CreateInvocation(t.Context(), invocation); err != nil || !fresh {
+		t.Fatalf("create interaction invocation fresh=%v err=%v", fresh, err)
+	}
+	interaction := harness.Interaction{
+		ID: "interaction_" + suffix, TurnID: turn.ID, InvocationID: invocation.ID,
+		Key: "candidate-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
+		Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, fresh, err := store.CreateInteraction(t.Context(), interaction, turn.Revision, invocation.Revision); err != nil || !fresh {
+		t.Fatalf("create interaction fresh=%v err=%v", fresh, err)
+	}
+	invocation.Status = harness.InvocationWaitingInput
+	invocation.UpdatedAt = now.Add(time.Second)
+	var err error
+	invocation, err = store.UpdateInvocation(t.Context(), invocation, invocation.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn.Status = harness.TurnWaitingInput
+	turn.UpdatedAt = now.Add(time.Second)
+	turn, err = store.UpdateTurn(t.Context(), turn, turn.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return turn, invocation, interaction
+}
+
 func createTopLevelRetryFixture(
 	t *testing.T,
 	store *harnesspostgres.Store,
