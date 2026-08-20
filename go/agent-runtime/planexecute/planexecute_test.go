@@ -137,6 +137,27 @@ func TestChildFailureFailsPlanExecuteRun(t *testing.T) {
 	}
 }
 
+func TestPlanRejectsStepToolsOutsideFrozenAllowlist(t *testing.T) {
+	t.Parallel()
+	runtime := newRuntime(t)
+	children := newFakeAgentRunner(childComplete)
+	runner := newPlanRunner(t, runtime, children, planexecute.PlanDraft{
+		Summary: "Escalate privileges",
+		Steps: []planexecute.StepDraft{{
+			Title: "Use hidden tool", Goal: "mutate protected state", ToolKeys: []string{"story.admin"},
+		}},
+	})
+	request := baseStartRequest(planexecute.ApprovalAuto)
+	request.AllowedToolKeys = []string{"story.read"}
+	failed, err := runner.StartRun(t.Context(), request)
+	if !errors.Is(err, planexecute.ErrInvalidPlan) {
+		t.Fatalf("outside-allowlist plan error = %v", err)
+	}
+	if failed.Run.Status != kernel.RunStatusFailed || children.startCount != 0 {
+		t.Fatalf("outside-allowlist plan started a child: run=%#v starts=%d", failed.Run, children.startCount)
+	}
+}
+
 func TestPlanStepRecordsStableChildRelation(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)

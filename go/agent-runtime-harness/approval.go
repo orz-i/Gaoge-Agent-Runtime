@@ -9,6 +9,7 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 )
 
 const (
@@ -19,13 +20,27 @@ const (
 
 // FrozenApprovalPolicy evaluates only the immutable ConfigSnapshot attached to the Harness Turn.
 // Non-Harness Agent runs are outside this policy and retain their feature-owned policy composition.
-type FrozenApprovalPolicy struct{ store Store }
+type FrozenApprovalPolicy struct {
+	store   Store
+	parents interface {
+		GetByChild(context.Context, string) (runrelation.Relation, error)
+	}
+}
 
-func NewFrozenApprovalPolicy(store Store) (*FrozenApprovalPolicy, error) {
-	if store == nil {
+func NewFrozenApprovalPolicy(
+	store Store,
+	parents ...interface {
+		GetByChild(context.Context, string) (runrelation.Relation, error)
+	},
+) (*FrozenApprovalPolicy, error) {
+	if store == nil || len(parents) > 1 {
 		return nil, ErrInvalidRequest
 	}
-	return &FrozenApprovalPolicy{store: store}, nil
+	policy := &FrozenApprovalPolicy{store: store}
+	if len(parents) == 1 {
+		policy.parents = parents[0]
+	}
+	return policy, nil
 }
 
 func (*FrozenApprovalPolicy) Name() string { return "harness.frozen_tool_policy" }
@@ -38,7 +53,7 @@ func (policy *FrozenApprovalPolicy) Approval(
 		strings.TrimSpace(invocation.Definition.Key) == "" {
 		return plugin.ApprovalNotRequired, ErrInvalidRequest
 	}
-	capabilityInvocation, err := policy.store.GetInvocationByExecutionRefID(ctx, invocation.Run.ID)
+	capabilityInvocation, err := policy.resolveCapabilityInvocation(ctx, invocation.Run.ID)
 	if errors.Is(err, ErrNotFound) {
 		return plugin.ApprovalNotRequired, nil
 	}
@@ -54,6 +69,41 @@ func (policy *FrozenApprovalPolicy) Approval(
 		return plugin.ApprovalNotRequired, err
 	}
 	return frozenApprovalRequirement(config, invocation.Definition.Key)
+}
+
+func (policy *FrozenApprovalPolicy) resolveCapabilityInvocation(
+	ctx context.Context,
+	runID string,
+) (Invocation, error) {
+	seen := make(map[string]struct{})
+	for {
+		runID = strings.TrimSpace(runID)
+		if runID == "" {
+			return Invocation{}, ErrNotFound
+		}
+		if _, duplicate := seen[runID]; duplicate {
+			return Invocation{}, ErrConflict
+		}
+		seen[runID] = struct{}{}
+		invocation, err := policy.store.GetInvocationByExecutionRefID(ctx, runID)
+		if err == nil {
+			return invocation, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return Invocation{}, err
+		}
+		if policy.parents == nil {
+			return Invocation{}, ErrNotFound
+		}
+		relation, relationErr := policy.parents.GetByChild(ctx, runID)
+		if errors.Is(relationErr, runrelation.ErrNotFound) {
+			return Invocation{}, ErrNotFound
+		}
+		if relationErr != nil {
+			return Invocation{}, relationErr
+		}
+		runID = relation.ParentRunID
+	}
 }
 
 func frozenApprovalRequirement(config ConfigSnapshot, toolKey string) (plugin.ApprovalRequirement, error) {

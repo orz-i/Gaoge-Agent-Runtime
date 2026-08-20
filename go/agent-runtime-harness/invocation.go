@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 )
 
 const (
@@ -140,17 +142,26 @@ func AgentInvocationID(turnID, requestID string) (string, error) {
 }
 
 type agentInvocationInput struct {
-	Goal             string   `json:"goal"`
-	RequiredToolKeys []string `json:"requiredToolKeys,omitempty"`
+	Goal             string           `json:"goal"`
+	Actor            kernel.ActorRef  `json:"actor"`
+	Thread           kernel.ThreadRef `json:"thread"`
+	RequiredToolKeys []string         `json:"requiredToolKeys,omitempty"`
 }
 
-func newDirectAgentInvocation(turnID, requestID, goal string, requiredToolKeys []string, now time.Time) (Invocation, error) {
+func newDirectAgentInvocation(
+	turnID, requestID, goal string,
+	actor kernel.ActorRef,
+	thread kernel.ThreadRef,
+	requiredToolKeys []string,
+	now time.Time,
+) (Invocation, error) {
 	id, err := AgentInvocationID(turnID, requestID)
 	if err != nil {
 		return Invocation{}, err
 	}
 	input, inputHash, err := marshalInvocationValue(agentInvocationInput{
-		Goal: strings.TrimSpace(goal), RequiredToolKeys: normalizeStrings(requiredToolKeys),
+		Goal: strings.TrimSpace(goal), Actor: actor, Thread: thread,
+		RequiredToolKeys: normalizeStrings(requiredToolKeys),
 	})
 	if err != nil {
 		return Invocation{}, err

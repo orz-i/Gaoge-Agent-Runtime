@@ -17,6 +17,8 @@ import (
 
 var ErrNilDatabase = errors.New("harness postgres database is nil")
 
+const rowLockStrengthUpdate = "UPDATE"
+
 // Store persists Harness Session/Turn/Invocation/Config/Item state in PostgreSQL-compatible GORM databases.
 type Store struct{ db *gorm.DB }
 
@@ -144,7 +146,25 @@ func (store *Store) RetryInvocation(
 	if !validStoredInvocationRetry(current, expectedRevision) {
 		return harness.Invocation{}, harness.ErrConflict
 	}
-	if err = store.rotateInvocationAttempt(ctx, current, expectedRevision, nextExecutionRefID, now); err != nil {
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if strings.TrimSpace(current.ParentItemID) == "" {
+			result := tx.Model(&turnRecord{}).
+				Where("id = ? AND status IN ?", current.TurnID,
+					[]string{string(harness.TurnFailed), string(harness.TurnCancelled)}).
+				Updates(map[string]any{
+					"status": string(harness.TurnRunning), "error_code": "", "error_detail": "",
+					"revision": gorm.Expr("revision + ?", 1), "updated_at": now.UTC(),
+				})
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return harness.ErrConflict
+			}
+		}
+		return rotateInvocationAttempt(tx, current, expectedRevision, nextExecutionRefID, now)
+	})
+	if err != nil {
 		return harness.Invocation{}, err
 	}
 	return store.GetInvocation(ctx, current.ID)
@@ -163,14 +183,14 @@ func validStoredInvocationRetry(current harness.Invocation, expectedRevision uin
 	return current.Revision == expectedRevision && retryableInvocationStatus(current.Status) && len(current.Input) > 0
 }
 
-func (store *Store) rotateInvocationAttempt(
-	ctx context.Context,
+func rotateInvocationAttempt(
+	db *gorm.DB,
 	current harness.Invocation,
 	expectedRevision uint64,
 	nextExecutionRefID string,
 	now time.Time,
 ) error {
-	result := store.db.WithContext(ctx).Model(&invocationRecord{}).
+	result := db.Model(&invocationRecord{}).
 		Where("id = ? AND revision = ? AND attempt = ? AND execution_ref_id = ? AND status IN ?",
 			current.ID, expectedRevision, current.Attempt, current.ExecutionRefID,
 			[]string{string(harness.InvocationFailed), string(harness.InvocationCancelled)}).
@@ -196,13 +216,118 @@ func (store *Store) ListInvocations(ctx context.Context, turnID string) ([]harne
 	return listTurnRecords(ctx, store.db, turnID, invocationFromRecord)
 }
 
-func (store *Store) CreateInteraction(ctx context.Context, value harness.Interaction) (harness.Interaction, bool, error) {
+func (store *Store) CreateInteraction(
+	ctx context.Context,
+	value harness.Interaction,
+	expectedTurnRevision uint64,
+	expectedInvocationRevision uint64,
+) (harness.Interaction, bool, error) {
 	record, err := interactionToRecord(value)
+	if err != nil || expectedTurnRevision == 0 || expectedInvocationRevision == 0 {
+		if err == nil {
+			err = harness.ErrInvalidRequest
+		}
+		return harness.Interaction{}, false, err
+	}
+	var created harness.Interaction
+	fresh := false
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		created, fresh, err = createInteractionTransaction(
+			tx, record, value, expectedTurnRevision, expectedInvocationRevision,
+		)
+		return err
+	})
 	if err != nil {
 		return harness.Interaction{}, false, err
 	}
-	return createOrReplay(ctx, store.db, &record, value,
-		func() (harness.Interaction, error) { return store.GetInteraction(ctx, value.ID) }, sameInteraction)
+	return created, fresh, nil
+}
+
+func createInteractionTransaction(
+	tx *gorm.DB,
+	record interactionRecord,
+	value harness.Interaction,
+	expectedTurnRevision uint64,
+	expectedInvocationRevision uint64,
+) (harness.Interaction, bool, error) {
+	existing, replayed, err := replayInteractionRecord(tx, record.ID, value)
+	if err != nil || replayed {
+		return existing, false, err
+	}
+	if err = lockInteractionOwners(tx, value, expectedTurnRevision, expectedInvocationRevision); err != nil {
+		return harness.Interaction{}, false, err
+	}
+	if err = ensureNoWaitingInteraction(tx, value.TurnID); err != nil {
+		return harness.Interaction{}, false, err
+	}
+	if err = tx.Create(&record).Error; err != nil {
+		return harness.Interaction{}, false, err
+	}
+	created, err := interactionFromRecord(record)
+	return created, err == nil, err
+}
+
+func replayInteractionRecord(
+	tx *gorm.DB,
+	interactionID string,
+	candidate harness.Interaction,
+) (harness.Interaction, bool, error) {
+	var record interactionRecord
+	err := tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).Where("id = ?", interactionID).Take(&record).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return harness.Interaction{}, false, nil
+	}
+	if err != nil {
+		return harness.Interaction{}, false, err
+	}
+	existing, err := interactionFromRecord(record)
+	if err != nil {
+		return harness.Interaction{}, true, err
+	}
+	if !sameInteraction(existing, candidate) {
+		return harness.Interaction{}, true, harness.ErrConflict
+	}
+	return existing, true, nil
+}
+
+func lockInteractionOwners(
+	tx *gorm.DB,
+	value harness.Interaction,
+	expectedTurnRevision uint64,
+	expectedInvocationRevision uint64,
+) error {
+	var turn turnRecord
+	err := tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).
+		Where("id = ? AND revision = ? AND status = ?", value.TurnID, expectedTurnRevision, string(harness.TurnRunning)).
+		Take(&turn).Error
+	if err = interactionOwnerLockError(err); err != nil {
+		return err
+	}
+	var invocation invocationRecord
+	err = tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).
+		Where("id = ? AND turn_id = ? AND revision = ? AND status IN ?", value.InvocationID, value.TurnID, expectedInvocationRevision,
+			[]string{string(harness.InvocationAccepted), string(harness.InvocationRunning)}).
+		Take(&invocation).Error
+	return interactionOwnerLockError(err)
+}
+
+func interactionOwnerLockError(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return harness.ErrConflict
+	}
+	return err
+}
+
+func ensureNoWaitingInteraction(tx *gorm.DB, turnID string) error {
+	var waiting interactionRecord
+	err := tx.Where("turn_id = ? AND status = ?", turnID, string(harness.InteractionWaiting)).Take(&waiting).Error
+	if err == nil {
+		return harness.ErrConflict
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (store *Store) GetInteraction(ctx context.Context, id string) (harness.Interaction, error) {

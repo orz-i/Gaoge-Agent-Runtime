@@ -82,10 +82,11 @@ type PlanDraft struct {
 
 // PlannerRequest is one provider-neutral planning request.
 type PlannerRequest struct {
-	RunID    string
-	Goal     string
-	Model    string
-	MaxSteps int
+	RunID           string
+	Goal            string
+	Model           string
+	MaxSteps        int
+	AllowedToolKeys []string
 }
 
 // Planner generates a bounded Plan without executing it.
@@ -129,14 +130,15 @@ type View struct {
 
 // StartRequest starts one explicit Plan-and-Execute Run.
 type StartRequest struct {
-	ID             string
-	Actor          kernel.ActorRef
-	Thread         kernel.ThreadRef
-	RequestID      string
-	Goal           string
-	Model          string
-	ApprovalPolicy ApprovalPolicy
-	MaxSteps       int
+	ID              string
+	Actor           kernel.ActorRef
+	Thread          kernel.ThreadRef
+	RequestID       string
+	Goal            string
+	Model           string
+	ApprovalPolicy  ApprovalPolicy
+	MaxSteps        int
+	AllowedToolKeys []string
 }
 
 // ApprovalResponse resolves one pending Plan approval checkpoint.
@@ -166,10 +168,11 @@ type Runner struct {
 }
 
 type executionState struct {
-	Model          string         `json:"model,omitempty"`
-	ApprovalPolicy ApprovalPolicy `json:"approvalPolicy"`
-	Plan           Plan           `json:"plan"`
-	NextStep       int            `json:"nextStep"`
+	Model           string         `json:"model,omitempty"`
+	ApprovalPolicy  ApprovalPolicy `json:"approvalPolicy"`
+	AllowedToolKeys []string       `json:"allowedToolKeys"`
+	Plan            Plan           `json:"plan"`
+	NextStep        int            `json:"nextStep"`
 }
 
 type approvalPayload struct {
@@ -213,6 +216,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	}
 	initial, err := encodeState(executionState{
 		Model: strings.TrimSpace(request.Model), ApprovalPolicy: request.ApprovalPolicy,
+		AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys),
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -228,13 +232,22 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	draft, err := runner.planner.GeneratePlan(ctx, PlannerRequest{
 		RunID: snapshot.Run.ID, Goal: snapshot.Run.Goal,
 		Model: request.Model, MaxSteps: request.MaxSteps,
+		AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys),
 	})
 	if err != nil {
-		return runner.fail(ctx, snapshot, executionState{Model: request.Model, ApprovalPolicy: request.ApprovalPolicy}, "planexecute.planner_failed", errors.Join(ErrPlannerFailure, err))
+		return runner.fail(ctx, snapshot, executionState{
+			Model: request.Model, ApprovalPolicy: request.ApprovalPolicy,
+			AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys),
+		}, "planexecute.planner_failed", errors.Join(ErrPlannerFailure, err))
 	}
-	state, err := runner.materializePlan(draft, request.Model, request.ApprovalPolicy, request.MaxSteps)
+	state, err := runner.materializePlan(
+		draft, request.Model, request.ApprovalPolicy, request.MaxSteps, request.AllowedToolKeys,
+	)
 	if err != nil {
-		return runner.fail(ctx, snapshot, executionState{Model: request.Model, ApprovalPolicy: request.ApprovalPolicy}, "planexecute.plan_invalid", err)
+		return runner.fail(ctx, snapshot, executionState{
+			Model: request.Model, ApprovalPolicy: request.ApprovalPolicy,
+			AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys),
+		}, "planexecute.plan_invalid", err)
 	}
 	proposed, err := runner.persistPlan(ctx, snapshot, state)
 	if err != nil {
@@ -318,6 +331,7 @@ func (runner *Runner) materializePlan(
 	model string,
 	policy ApprovalPolicy,
 	maxSteps int,
+	allowedToolKeys []string,
 ) (executionState, error) {
 	draft.Summary = strings.TrimSpace(draft.Summary)
 	if draft.Summary == "" || len(draft.Steps) == 0 || len(draft.Steps) > maxSteps {
@@ -328,6 +342,7 @@ func (runner *Runner) materializePlan(
 		return executionState{}, err
 	}
 	steps := make([]Step, 0, len(draft.Steps))
+	allowedToolKeys = normalizedOptionalStrings(allowedToolKeys)
 	for _, item := range draft.Steps {
 		item.Title = strings.TrimSpace(item.Title)
 		item.Goal = strings.TrimSpace(item.Goal)
@@ -338,15 +353,20 @@ func (runner *Runner) materializePlan(
 		if idErr != nil {
 			return executionState{}, idErr
 		}
+		toolKeys := normalizedStrings(item.ToolKeys)
+		if !toolKeysAllowed(toolKeys, allowedToolKeys) {
+			return executionState{}, ErrInvalidPlan
+		}
 		steps = append(steps, Step{
 			ID: stepID, Title: item.Title, Goal: item.Goal,
-			ToolKeys: normalizedStrings(item.ToolKeys), Status: StepPending,
+			ToolKeys: toolKeys, Status: StepPending,
 		})
 	}
 	return executionState{
-		Model:          strings.TrimSpace(model),
-		ApprovalPolicy: policy,
-		Plan:           Plan{ID: planID, Revision: 1, Status: PlanProposed, Summary: draft.Summary, Steps: steps},
+		Model:           strings.TrimSpace(model),
+		ApprovalPolicy:  policy,
+		AllowedToolKeys: allowedToolKeys,
+		Plan:            Plan{ID: planID, Revision: 1, Status: PlanProposed, Summary: draft.Summary, Steps: steps},
 	}, nil
 }
 
@@ -672,6 +692,7 @@ func (runner *Runner) load(ctx context.Context, runID string) (kernel.Snapshot, 
 func normalizeStartRequest(request StartRequest, defaultMax int) StartRequest {
 	request.Goal = strings.TrimSpace(request.Goal)
 	request.RequestID = strings.TrimSpace(request.RequestID)
+	request.AllowedToolKeys = normalizedOptionalStrings(request.AllowedToolKeys)
 	if request.ApprovalPolicy == "" {
 		request.ApprovalPolicy = ApprovalRequired
 	}
@@ -726,6 +747,36 @@ func normalizedStrings(values []string) []string {
 		result = append(result, value)
 	}
 	return result
+}
+
+func normalizedOptionalStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return normalizedStrings(values)
+}
+
+func cloneOptionalStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	return append([]string{}, values...)
+}
+
+func toolKeysAllowed(toolKeys, allowedToolKeys []string) bool {
+	if allowedToolKeys == nil {
+		return true
+	}
+	allowed := make(map[string]struct{}, len(allowedToolKeys))
+	for _, key := range allowedToolKeys {
+		allowed[key] = struct{}{}
+	}
+	for _, key := range toolKeys {
+		if _, ok := allowed[key]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func errorText(err error) string {

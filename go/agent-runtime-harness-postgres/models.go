@@ -60,7 +60,7 @@ func (invocationRecord) TableName() string { return "agent_harness_invocations" 
 
 type interactionRecord struct {
 	ID               string    `gorm:"primaryKey;size:64"`
-	TurnID           string    `gorm:"size:64;not null;index:idx_harness_interaction_turn"`
+	TurnID           string    `gorm:"size:64;not null;index:idx_harness_interaction_turn;uniqueIndex:uk_harness_interaction_waiting_turn,where:status = 'waiting'"`
 	InvocationID     string    `gorm:"size:64;not null;index:idx_harness_interaction_invocation"`
 	ParentItemID     string    `gorm:"size:64;not null;default:''"`
 	Key              string    `gorm:"size:128;not null"`

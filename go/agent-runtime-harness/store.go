@@ -20,7 +20,7 @@ type Store interface {
 	UpdateInvocation(context.Context, Invocation, uint64) (Invocation, error)
 	RetryInvocation(context.Context, string, uint64, string, time.Time) (Invocation, error)
 	ListInvocations(context.Context, string) ([]Invocation, error)
-	CreateInteraction(context.Context, Interaction) (Interaction, bool, error)
+	CreateInteraction(context.Context, Interaction, uint64, uint64) (Interaction, bool, error)
 	GetInteraction(context.Context, string) (Interaction, error)
 	UpdateInteraction(context.Context, Interaction, uint64) (Interaction, error)
 	ListInteractions(context.Context, string) ([]Interaction, error)

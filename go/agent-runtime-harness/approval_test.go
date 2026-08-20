@@ -2,7 +2,9 @@ package harness_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,10 +16,14 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
-const approvalTestToolKey = "approval.lookup"
+const (
+	approvalTestToolKey           = "approval.lookup"
+	approvalTestCapabilityPerCall = "per_call"
+)
 
 func TestHarnessApprovalUsesFrozenToolPolicyAndPersistsDecisionItems(t *testing.T) {
 	t.Parallel()
@@ -33,6 +39,65 @@ func TestHarnessApprovalUsesFrozenToolPolicyAndPersistsDecisionItems(t *testing.
 	completed := resolveApproval(t, harnessRunner, waitingAgain.Turn.ID, "second approved")
 	if completed.Turn.Status != harness.TurnCompleted || approvalItemCount(completed.Items, harness.ItemCompleted) != 2 {
 		t.Fatalf("approval lifecycle did not complete: turn=%#v items=%#v", completed.Turn, completed.Items)
+	}
+}
+
+func TestFrozenApprovalPolicyFollowsChildRunRelations(t *testing.T) {
+	t.Parallel()
+	store := harness.NewMemoryStore()
+	relations, err := runrelation.New(memory.NewRunRelationStore(), approvalTestClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := harness.NewFrozenApprovalPolicy(store, relations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := approvalTestClock{}.Now()
+	config, err := harness.SealConfigSnapshot("turn-descendant-approval", harness.ConfigSnapshot{
+		ToolKeys: []string{approvalTestToolKey},
+		ToolPolicies: []harness.ToolPolicySnapshot{{
+			Key: approvalTestToolKey, DefinitionVersion: "v1",
+			ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always",
+		}},
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.PutConfigSnapshot(t.Context(), config); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.CreateTurn(t.Context(), harness.Turn{
+		ID: config.TurnID, SessionID: "session-descendant-approval",
+		HostTurn:         harness.HostRef{Kind: testContextHostKind, ID: "host-descendant-approval"},
+		ConfigSnapshotID: config.ID, Status: harness.TurnRunning, Revision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(`{"goal":"plan"}`)
+	inputHash := sha256.Sum256(input)
+	if _, _, err = store.CreateInvocation(t.Context(), harness.Invocation{
+		ID: "invocation-descendant-approval", TurnID: config.TurnID,
+		CapabilityKey: harness.CapabilityPlanExecute, DefinitionVersion: harness.RuntimeCapabilityVersion,
+		ExecutionClass: harness.ExecutionPlanExecute, Input: input, InputHash: fmt.Sprintf("%x", inputHash),
+		ExecutionRefID: "plan-run", Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = relations.Ensure(t.Context(), runrelation.Draft{
+		ParentRunID: "plan-run", ChildRunID: "step-agent-run",
+		Kind: runrelation.KindPlanStep, OwnerNodeID: "step-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	requirement, err := policy.Approval(t.Context(), plugin.ToolInvocation{
+		Run:        kernel.Run{ID: "step-agent-run"},
+		Definition: tools.Definition{Key: approvalTestToolKey},
+	})
+	if err != nil || requirement != plugin.ApprovalRequired {
+		t.Fatalf("descendant approval requirement = %q, err=%v", requirement, err)
 	}
 }
 
@@ -70,7 +135,7 @@ func newApprovalHarness(t *testing.T) (*harness.Runner, harness.ConfigSnapshot) 
 		ToolKeys: []string{approvalTestToolKey},
 		ToolPolicies: []harness.ToolPolicySnapshot{{
 			Key: approvalTestToolKey, DefinitionVersion: "v1",
-			ApprovalCapability: "per_call", ApprovalMode: "always",
+			ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always",
 		}},
 	}
 }

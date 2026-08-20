@@ -220,10 +220,14 @@ type pendingWorkflowFeature struct {
 
 func (feature *pendingWorkflowFeature) StartRun(ctx context.Context, request workflow.StartRequest) (kernel.Snapshot, error) {
 	feature.starts++
-	return feature.runtime.Create(ctx, kernel.CreateRequest{
+	snapshot, err := feature.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: workflow.RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: json.RawMessage(`{}`),
 	})
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return snapshot, workflow.ErrEffectPending
 }
 
 func (feature *pendingWorkflowFeature) Resume(ctx context.Context, runID string, _ uint64) (kernel.Snapshot, error) {

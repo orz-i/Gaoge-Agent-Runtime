@@ -38,9 +38,10 @@ type TeamCapabilitySpec struct {
 }
 
 type PlanExecuteCapabilitySpec struct {
-	Model          string
-	ApprovalPolicy planexecute.ApprovalPolicy
-	MaxSteps       int
+	Model           string
+	AllowedToolKeys []string
+	ApprovalPolicy  planexecute.ApprovalPolicy
+	MaxSteps        int
 }
 
 type WorkflowCapabilitySpec struct {
@@ -235,7 +236,8 @@ func (runner *Runner) startMaterializedCapability(
 	case spec.PlanExecute != nil:
 		return runner.StartPlanExecuteInvocation(ctx, turnID, PlanExecuteInvocationRequest{
 			ParentItemID: parentItemID, RequestID: requestID, Goal: goal,
-			Model: spec.PlanExecute.Model, ApprovalPolicy: spec.PlanExecute.ApprovalPolicy, MaxSteps: spec.PlanExecute.MaxSteps,
+			AllowedToolKeys: append([]string{}, spec.PlanExecute.AllowedToolKeys...),
+			Model:           spec.PlanExecute.Model, ApprovalPolicy: spec.PlanExecute.ApprovalPolicy, MaxSteps: spec.PlanExecute.MaxSteps,
 		})
 	case spec.Workflow != nil:
 		return runner.StartWorkflowInvocation(ctx, turnID, WorkflowInvocationRequest{
@@ -349,8 +351,8 @@ func capabilityInvocationToolSchema(commands []CommandDescriptor) (json.RawMessa
 			"required":             []string{capabilityCommandIDField, "goal"},
 			"properties": map[string]any{
 				capabilityCommandIDField: map[string]any{"const": descriptor.ID},
-				"goal":      map[string]any{"type": "string", "minLength": 1, "maxLength": 200000},
-				"arguments": descriptor.InputSchema,
+				"goal":                   map[string]any{"type": "string", "minLength": 1, "maxLength": 200000},
+				"arguments":              descriptor.InputSchema,
 			},
 		})
 	}

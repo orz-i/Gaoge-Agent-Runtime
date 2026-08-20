@@ -55,18 +55,39 @@ func TestGenericInteractionWaitResolveAndReplay(t *testing.T) {
 func TestGenericInteractionAllowsOnlyOneWaitingInputPerTurn(t *testing.T) {
 	t.Parallel()
 	runner, turnID, parentItemID, _, _, _ := newFeatureInvocationHarness(t)
-	if _, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
+	first, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
 		Key: "first", Kind: harness.InteractionConfirmation, Schema: json.RawMessage(`{"type":"boolean"}`),
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("request first interaction: %v", err)
 	}
-	_, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
+	if len(first.Interactions) != 1 {
+		t.Fatalf("first interaction snapshot = %#v", first.Interactions)
+	}
+	_, err = runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
 		Key: "second", Kind: harness.InteractionInput, Schema: json.RawMessage(`{"type":"string"}`),
 	})
 	if !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("second waiting interaction error = %v", err)
+	}
+	reloaded, err := runner.Load(t.Context(), turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Interactions) != 1 || reloaded.Interactions[0].ID != first.Interactions[0].ID {
+		t.Fatalf("conflicting request persisted an orphan interaction: %#v", reloaded.Interactions)
+	}
+	if _, err = runner.ResolveInteraction(t.Context(), turnID, first.Interactions[0].ID,
+		harness.ResolveInteractionRequest{Response: json.RawMessage(`true`)}); err != nil {
+		t.Fatalf("resolve first interaction: %v", err)
+	}
+	if _, err = runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
+		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		Key: "third", Kind: harness.InteractionInput, Schema: json.RawMessage(`{"type":"string"}`),
+	}); err != nil {
+		t.Fatalf("request interaction after resolution: %v", err)
 	}
 }
 

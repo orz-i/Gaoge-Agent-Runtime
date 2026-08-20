@@ -142,7 +142,7 @@ func (runner *Runner) RequestInteraction(
 		Schema: append(json.RawMessage(nil), request.Schema...), Presentation: append(json.RawMessage(nil), request.Presentation...),
 		Status: InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	interaction, fresh, err := runner.store.CreateInteraction(ctx, candidate)
+	interaction, _, err := runner.store.CreateInteraction(ctx, candidate, turn.Revision, invocation.Revision)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -151,14 +151,6 @@ func (runner *Runner) RequestInteraction(
 	}
 	if interaction.Status == InteractionResolved {
 		return runner.loadInteractionSnapshot(ctx, interaction)
-	}
-	if fresh {
-		if turn.Status != TurnRunning || invocation.Status == InvocationWaitingInput || terminalInvocationStatus(invocation.Status) {
-			return Snapshot{}, ErrConflict
-		}
-		if err = runner.ensureNoOtherWaitingInteraction(ctx, turn.ID, interaction.ID); err != nil {
-			return Snapshot{}, err
-		}
 	}
 	return runner.reconcileInteractionState(ctx, interaction, InvocationWaitingInput, TurnWaitingInput, EventTurnWaitingInput)
 }
@@ -217,19 +209,6 @@ func validateInteractionRequestContract(request RequestInteraction) error {
 	if !validInteractionKind(request.Kind) || !validInteractionJSON(request.Schema, true) ||
 		!validInteractionJSON(request.Presentation, false) {
 		return ErrInvalidRequest
-	}
-	return nil
-}
-
-func (runner *Runner) ensureNoOtherWaitingInteraction(ctx context.Context, turnID, interactionID string) error {
-	interactions, err := runner.store.ListInteractions(ctx, turnID)
-	if err != nil {
-		return err
-	}
-	for _, value := range interactions {
-		if value.Status == InteractionWaiting && value.ID != interactionID {
-			return ErrConflict
-		}
 	}
 	return nil
 }

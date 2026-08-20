@@ -325,7 +325,8 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		return Snapshot{}, err
 	}
 	invocation, err := newDirectAgentInvocation(
-		turnID, firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), request.Goal, request.RequiredToolKeys, now,
+		turnID, firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), request.Goal,
+		request.Actor, request.Thread, request.RequiredToolKeys, now,
 	)
 	if err != nil {
 		return Snapshot{}, err

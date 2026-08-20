@@ -68,6 +68,61 @@ func TestStoreRetriesInvocationWithAtomicAttemptRotation(t *testing.T) {
 	assertRetriedInvocation(t, store, value, retried, err)
 }
 
+func TestStoreRetriesTopLevelInvocationAndReopensTurnAtomically(t *testing.T) {
+	store := newStore(t)
+	now := time.Date(2026, 8, 20, 4, 25, 0, 0, time.UTC)
+	turn, invocation := createTopLevelRetryFixture(t, store, now)
+	retried, err := store.RetryInvocation(t.Context(), invocation.ID, invocation.Revision, "run_retry_root_pg_2", now.Add(time.Second))
+	assertTopLevelInvocationRetried(t, retried, err)
+	assertTopLevelTurnReopened(t, store, turn.ID)
+}
+
+func createTopLevelRetryFixture(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	now time.Time,
+) (harness.Turn, harness.Invocation) {
+	t.Helper()
+	turn := harness.Turn{
+		ID: "turn_retry_root_pg", SessionID: "session_retry_root_pg",
+		HostTurn:         harness.HostRef{Kind: "conversation_turn", ID: "retry-root"},
+		ConfigSnapshotID: "config_retry_root_pg", Status: harness.TurnFailed, Revision: 1,
+		ErrorCode: "fixture.failed", ErrorDetail: "first attempt failed", CreatedAt: now, UpdatedAt: now,
+	}
+	if _, fresh, err := store.CreateTurn(t.Context(), turn); err != nil || !fresh {
+		t.Fatalf("create root retry turn fresh=%v err=%v", fresh, err)
+	}
+	input := json.RawMessage(`{"goal":"retry root"}`)
+	hash := sha256.Sum256(input)
+	invocation := harness.Invocation{
+		ID: "hiv_retry_root_pg", TurnID: turn.ID, CapabilityKey: harness.CapabilityWorkflow,
+		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionWorkflow,
+		Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_root_pg_1",
+		Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if _, fresh, err := store.CreateInvocation(t.Context(), invocation); err != nil || !fresh {
+		t.Fatalf("create root retry invocation fresh=%v err=%v", fresh, err)
+	}
+	return turn, invocation
+}
+
+func assertTopLevelInvocationRetried(t *testing.T, retried harness.Invocation, err error) {
+	t.Helper()
+	if err != nil || retried.Attempt != 2 || retried.Status != harness.InvocationAccepted {
+		t.Fatalf("retry root invocation = %#v err=%v", retried, err)
+	}
+}
+
+func assertTopLevelTurnReopened(t *testing.T, store *harnesspostgres.Store, turnID string) {
+	t.Helper()
+	reopened, err := store.GetTurn(t.Context(), turnID)
+	if err != nil || reopened.Status != harness.TurnRunning || reopened.Revision != 2 ||
+		reopened.ErrorCode != "" || reopened.ErrorDetail != "" {
+		t.Fatalf("reopened root turn = %#v err=%v", reopened, err)
+	}
+}
+
 func createRetryInvocationFixture(
 	t *testing.T,
 	store *harnesspostgres.Store,
@@ -77,7 +132,7 @@ func createRetryInvocationFixture(
 	input := json.RawMessage(`{"goal":"retry"}`)
 	hash := sha256.Sum256(input)
 	value := harness.Invocation{
-		ID: "hiv_retry_pg", TurnID: "turn_retry_pg", CapabilityKey: harness.CapabilityTeam,
+		ID: "hiv_retry_pg", TurnID: "turn_retry_pg", ParentItemID: "parent-item", CapabilityKey: harness.CapabilityTeam,
 		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionTeam,
 		Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_pg_1",
 		Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
@@ -251,9 +306,31 @@ func createInteractionFixture(
 		Schema: json.RawMessage(`{"type":"object"}`), Presentation: json.RawMessage(`{"title":"Choose"}`),
 		Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	created, fresh, err := store.CreateInteraction(t.Context(), value)
+	turn, err := store.GetTurn(t.Context(), turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation, err := store.GetInvocation(t.Context(), invocationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, fresh, err := store.CreateInteraction(t.Context(), value, turn.Revision, invocation.Revision)
 	if err != nil || !fresh || created.Status != harness.InteractionWaiting {
 		t.Fatalf("create interaction: %#v fresh=%v err=%v", created, fresh, err)
+	}
+	replayed, fresh, err := store.CreateInteraction(t.Context(), value, turn.Revision, invocation.Revision)
+	if err != nil || fresh || replayed.ID != created.ID {
+		t.Fatalf("replay interaction: %#v fresh=%v err=%v", replayed, fresh, err)
+	}
+	conflict := value
+	conflict.ID = "hinteraction_pg_conflict"
+	conflict.Key = "other-choice"
+	if _, _, err = store.CreateInteraction(t.Context(), conflict, turn.Revision, invocation.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("second waiting interaction error = %v", err)
+	}
+	listed, err := store.ListInteractions(t.Context(), turnID)
+	if err != nil || len(listed) != 1 || listed[0].ID != created.ID {
+		t.Fatalf("conflicting interaction left durable state: %#v err=%v", listed, err)
 	}
 	return created
 }

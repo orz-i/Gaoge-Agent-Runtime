@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -154,6 +155,57 @@ func TestWorkflowCanOwnTopLevelHarnessTurnWithoutAgentRoot(t *testing.T) {
 	assertTopLevelWorkflowTurn(t, replayed, err)
 	if replayed.Turn.ID != first.Turn.ID || replayed.Invocations[0].ID != first.Invocations[0].ID {
 		t.Fatalf("replay changed durable identity: first=%#v replayed=%#v", first, replayed)
+	}
+}
+
+func TestRetryInvocationReopensTopLevelFeatureTurn(t *testing.T) {
+	t.Parallel()
+	runtime := newFeatureInvocationRuntime(t)
+	feature := &retryTopLevelWorkflowFeature{runtime: runtime}
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: unusedFeatureAgent{}, Store: harness.NewMemoryStore(),
+		Clock: featureInvocationClock{}, Workflows: feature,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, startErr := runner.StartWorkflowTurn(t.Context(), harness.WorkflowTurnRequest{
+		StartRequest: harness.StartRequest{
+			HostThread: harness.HostRef{Kind: testThreadKind, ID: "retry-command-thread"},
+			HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "retry-command-turn"},
+			Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+			Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "retry-command-thread"},
+			RequestID:  "retry-command-request", Goal: "retry explicit workflow",
+			Config: harness.ConfigSnapshot{Model: "fixture-model"},
+		},
+		Input: json.RawMessage(`{"goal":"retry explicit workflow"}`),
+	})
+	invocation := requireFailedTopLevelWorkflow(t, failed, startErr)
+	retried, err := runner.RetryInvocation(t.Context(), invocation.ID)
+	if err != nil {
+		t.Fatalf("retry top-level invocation: %v", err)
+	}
+	assertCompletedTopLevelRetry(t, retried, invocation)
+}
+
+func requireFailedTopLevelWorkflow(t *testing.T, failed harness.Snapshot, err error) harness.Invocation {
+	t.Helper()
+	if !errors.Is(err, errRetryTopLevelWorkflow) || failed.Turn.Status != harness.TurnFailed {
+		t.Fatalf("initial top-level failure = %#v, err=%v", failed.Turn, err)
+	}
+	invocation, ok := harness.TopLevelInvocation(failed)
+	if !ok || invocation.ParentItemID != "" {
+		t.Fatalf("top-level invocation = %#v", failed.Invocations)
+	}
+	return invocation
+}
+
+func assertCompletedTopLevelRetry(t *testing.T, retried harness.Snapshot, previous harness.Invocation) {
+	t.Helper()
+	retriedInvocation, ok := harness.TopLevelInvocation(retried)
+	if !ok || retried.Turn.Status != harness.TurnCompleted || retriedInvocation.Status != harness.InvocationCompleted ||
+		retriedInvocation.Attempt != 2 || retriedInvocation.ExecutionRefID == previous.ExecutionRefID {
+		t.Fatalf("retried top-level snapshot = %#v", retried)
 	}
 }
 
@@ -449,6 +501,36 @@ func (feature completedWorkflowFeature) StartRun(ctx context.Context, request wo
 }
 
 func (feature completedWorkflowFeature) Resume(ctx context.Context, runID string, _ uint64) (kernel.Snapshot, error) {
+	return feature.runtime.Load(ctx, runID)
+}
+
+var errRetryTopLevelWorkflow = errors.New("retry top-level workflow fixture")
+
+type retryTopLevelWorkflowFeature struct {
+	runtime *kernel.Runtime
+	starts  int
+}
+
+func (feature *retryTopLevelWorkflowFeature) StartRun(ctx context.Context, request workflow.StartRequest) (kernel.Snapshot, error) {
+	feature.starts++
+	if feature.starts > 1 {
+		return completeFeatureRun(ctx, feature.runtime, request.ID, workflow.RunKind, request.Actor, request.Thread, request.RequestID, request.Goal)
+	}
+	started, err := feature.runtime.Create(ctx, kernel.CreateRequest{
+		ID: request.ID, Kind: workflow.RunKind, Actor: request.Actor, Thread: request.Thread,
+		RequestID: request.RequestID, Goal: request.Goal, State: json.RawMessage(`{}`),
+	})
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	failed, failErr := feature.runtime.Apply(ctx, request.ID, started.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusFailed, State: started.State,
+		ErrorCode: "fixture.failed", ErrorDetail: errRetryTopLevelWorkflow.Error(),
+	})
+	return failed, errors.Join(errRetryTopLevelWorkflow, failErr)
+}
+
+func (feature *retryTopLevelWorkflowFeature) Resume(ctx context.Context, runID string, _ uint64) (kernel.Snapshot, error) {
 	return feature.runtime.Load(ctx, runID)
 }
 

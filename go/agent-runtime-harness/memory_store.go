@@ -122,6 +122,14 @@ func (store *MemoryStore) RetryInvocation(
 	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 {
 		return Invocation{}, ErrConflict
 	}
+	var rootTurn Turn
+	if strings.TrimSpace(current.ParentItemID) == "" {
+		var found bool
+		rootTurn, found = store.turns[current.TurnID]
+		if !found || !terminalTurnStatus(rootTurn.Status) {
+			return Invocation{}, ErrConflict
+		}
+	}
 	if owner := store.invocationExecutionRefs[nextExecutionRefID]; owner != "" && owner != current.ID {
 		return Invocation{}, ErrConflict
 	}
@@ -136,6 +144,14 @@ func (store *MemoryStore) RetryInvocation(
 	current.UpdatedAt = now.UTC()
 	store.invocations[current.ID] = cloneInvocation(current)
 	store.invocationExecutionRefs[nextExecutionRefID] = current.ID
+	if rootTurn.ID != "" {
+		rootTurn.Status = TurnRunning
+		rootTurn.ErrorCode = ""
+		rootTurn.ErrorDetail = ""
+		rootTurn.Revision++
+		rootTurn.UpdatedAt = now.UTC()
+		store.turns[rootTurn.ID] = rootTurn
+	}
 	return cloneInvocation(current), nil
 }
 
@@ -152,13 +168,74 @@ func (store *MemoryStore) ListInvocations(_ context.Context, turnID string) ([]I
 	)
 }
 
-func (store *MemoryStore) CreateInteraction(_ context.Context, value Interaction) (Interaction, bool, error) {
-	if store == nil || !validInteraction(value) {
+func (store *MemoryStore) CreateInteraction(
+	_ context.Context,
+	value Interaction,
+	expectedTurnRevision uint64,
+	expectedInvocationRevision uint64,
+) (Interaction, bool, error) {
+	if invalidMemoryInteractionCreate(store, value, expectedTurnRevision, expectedInvocationRevision) {
 		return Interaction{}, false, ErrInvalidRequest
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	return createMemoryValue(store.interactions, value.ID, value, sameInteractionIdentity, cloneInteraction)
+	if replay, found, err := memoryInteractionReplay(store.interactions, value); found || err != nil {
+		return replay, false, err
+	}
+	turn, turnFound := store.turns[value.TurnID]
+	invocation, invocationFound := store.invocations[value.InvocationID]
+	if !memoryInteractionOwnersCanWait(
+		turn, turnFound, invocation, invocationFound, expectedTurnRevision, expectedInvocationRevision,
+	) || memoryHasWaitingInteraction(store.interactions, turn.ID) {
+		return Interaction{}, false, ErrConflict
+	}
+	store.interactions[value.ID] = cloneInteraction(value)
+	return cloneInteraction(value), true, nil
+}
+
+func invalidMemoryInteractionCreate(
+	store *MemoryStore,
+	value Interaction,
+	expectedTurnRevision uint64,
+	expectedInvocationRevision uint64,
+) bool {
+	return store == nil || !validInteraction(value) || expectedTurnRevision == 0 || expectedInvocationRevision == 0
+}
+
+func memoryInteractionReplay(values map[string]Interaction, candidate Interaction) (Interaction, bool, error) {
+	existing, found := values[candidate.ID]
+	if !found {
+		return Interaction{}, false, nil
+	}
+	if !sameInteractionIdentity(existing, candidate) {
+		return Interaction{}, true, ErrConflict
+	}
+	return cloneInteraction(existing), true, nil
+}
+
+func memoryInteractionOwnersCanWait(
+	turn Turn,
+	turnFound bool,
+	invocation Invocation,
+	invocationFound bool,
+	expectedTurnRevision uint64,
+	expectedInvocationRevision uint64,
+) bool {
+	if !turnFound || !invocationFound || turn.Revision != expectedTurnRevision ||
+		invocation.Revision != expectedInvocationRevision {
+		return false
+	}
+	return turn.Status == TurnRunning && invocation.TurnID == turn.ID &&
+		invocation.Status != InvocationWaitingInput && !terminalInvocationStatus(invocation.Status)
+}
+
+func memoryHasWaitingInteraction(values map[string]Interaction, turnID string) bool {
+	for _, existing := range values {
+		if existing.TurnID == turnID && existing.Status == InteractionWaiting {
+			return true
+		}
+	}
+	return false
 }
 
 func (store *MemoryStore) GetInteraction(_ context.Context, id string) (Interaction, error) {
