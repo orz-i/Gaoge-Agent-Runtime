@@ -61,8 +61,19 @@ type ResolveInteractionRequest struct {
 	Response json.RawMessage
 }
 
-// InteractionResolution is the atomically persisted transition that resumes
-// an Invocation and its owning Turn after generic input is resolved.
+// InteractionResponseHandler persists the application-owned meaning of one
+// resolved generic response. Implementations must be idempotent by Interaction
+// identity and response because crash recovery can invoke the handler again.
+type InteractionResponseHandler interface {
+	HandleInteractionResponse(context.Context, Interaction, Invocation) error
+}
+
+// ErrInteractionResponseHandlerUnavailable reports missing static application
+// composition for a response that has already been durably accepted.
+var ErrInteractionResponseHandlerUnavailable = errors.New("harness interaction response handler unavailable")
+
+// InteractionResolution is the atomically persisted response plus the still
+// waiting owners that may only resume after application handling succeeds.
 type InteractionResolution struct {
 	Interaction Interaction
 	Invocation  Invocation
@@ -165,9 +176,9 @@ func (runner *Runner) RequestInteraction(
 	return runner.reconcileInteractionState(ctx, interaction, InvocationWaitingInput, TurnWaitingInput, EventTurnWaitingInput)
 }
 
-// ResolveInteraction persists generic input only. Application business meaning
-// remains outside Harness; this method only makes the generic lifecycle
-// crash-recoverable and returns the Invocation to running state.
+// ResolveInteraction durably records generic input, delegates its business
+// meaning to the statically composed application handler, then resumes the
+// exact owning execution before projecting it back to running.
 func (runner *Runner) ResolveInteraction(
 	ctx context.Context,
 	turnID string,
@@ -194,34 +205,64 @@ func (runner *Runner) ResolveInteraction(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return runner.projectInteractionResolution(ctx, resolution)
+	return runner.continueResolvedInteraction(ctx, resolution.Interaction)
 }
 
 func (runner *Runner) replayResolvedInteraction(ctx context.Context, interaction Interaction) (Snapshot, error) {
+	return runner.continueResolvedInteraction(ctx, interaction)
+}
+
+func (runner *Runner) continueResolvedInteraction(ctx context.Context, interaction Interaction) (Snapshot, error) {
 	if err := runner.recordInteractionItem(ctx, interaction); err != nil {
 		return Snapshot{}, err
 	}
+	_, invocation, snapshot, handled, err := runner.prepareResolvedInteractionContinuation(ctx, interaction)
+	if err != nil || handled {
+		return snapshot, err
+	}
+	if runner.interactions == nil {
+		return Snapshot{}, ErrInteractionResponseHandlerUnavailable
+	}
+	if err = runner.interactions.HandleInteractionResponse(
+		ctx, cloneInteraction(interaction), cloneInvocation(invocation),
+	); err != nil {
+		return Snapshot{}, err
+	}
+	turn, invocation, snapshot, handled, err := runner.prepareResolvedInteractionContinuation(ctx, interaction)
+	if err != nil || handled {
+		return snapshot, err
+	}
+	return runner.resumeResolvedInteractionOwner(ctx, turn, invocation)
+}
+
+func (runner *Runner) prepareResolvedInteractionContinuation(
+	ctx context.Context,
+	interaction Interaction,
+) (Turn, Invocation, Snapshot, bool, error) {
 	turn, invocation, err := runner.loadResolvedInteractionOwners(ctx, interaction)
 	if err != nil {
-		return Snapshot{}, err
+		return Turn{}, Invocation{}, Snapshot{}, false, err
 	}
-	if terminalTurnStatus(turn.Status) || terminalInvocationStatus(invocation.Status) {
-		return runner.loadSnapshot(ctx, turn, nil)
+	if terminalTurnStatus(turn.Status) {
+		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
+		return turn, invocation, snapshot, true, loadErr
 	}
-	blocked, err := runner.resolvedInteractionReplayBlocked(ctx, interaction, turn, invocation)
+	waiting, err := runner.hasOtherWaitingInteraction(ctx, interaction)
 	if err != nil {
-		return Snapshot{}, err
+		return Turn{}, Invocation{}, Snapshot{}, false, err
 	}
-	if blocked {
-		return runner.loadSnapshot(ctx, turn, nil)
+	if waiting || interactionOwnersRunning(turn, invocation) {
+		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
+		return turn, invocation, snapshot, true, loadErr
 	}
-	snapshot, err := runner.reconcileInteractionState(
-		ctx, interaction, InvocationRunning, TurnRunning, EventTurnStarted,
-	)
-	if errors.Is(err, ErrConflict) {
-		return runner.loadInteractionSnapshot(ctx, interaction)
+	if terminalInvocationStatus(invocation.Status) {
+		snapshot, finishErr := runner.finishResolvedInteractionOwner(ctx, turn, invocation, kernel.Snapshot{})
+		return turn, invocation, snapshot, true, finishErr
 	}
-	return snapshot, err
+	if !interactionOwnerCanResume(turn.Status, invocation.Status) {
+		return Turn{}, Invocation{}, Snapshot{}, false, ErrConflict
+	}
+	return turn, invocation, Snapshot{}, false, nil
 }
 
 func (runner *Runner) loadResolvedInteractionOwners(
@@ -239,22 +280,6 @@ func (runner *Runner) loadResolvedInteractionOwners(
 	return turn, invocation, nil
 }
 
-func (runner *Runner) resolvedInteractionReplayBlocked(
-	ctx context.Context,
-	interaction Interaction,
-	turn Turn,
-	invocation Invocation,
-) (bool, error) {
-	waiting, err := runner.hasOtherWaitingInteraction(ctx, interaction)
-	if err != nil || waiting {
-		return waiting, err
-	}
-	if !interactionOwnerCanResume(turn.Status, invocation.Status) {
-		return true, nil
-	}
-	return runner.runtimeBlocksInteractionResume(ctx, invocation.ExecutionRefID)
-}
-
 func (runner *Runner) hasOtherWaitingInteraction(ctx context.Context, interaction Interaction) (bool, error) {
 	interactions, err := runner.store.ListInteractions(ctx, interaction.TurnID)
 	if err != nil {
@@ -268,40 +293,107 @@ func (runner *Runner) hasOtherWaitingInteraction(ctx context.Context, interactio
 	return false, nil
 }
 
-func (runner *Runner) runtimeBlocksInteractionResume(ctx context.Context, runID string) (bool, error) {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return false, nil
-	}
-	runtimeSnapshot, err := runner.runtime.Load(ctx, runID)
-	if errors.Is(err, kernel.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return runtimeSnapshot.Run.Status == kernel.RunStatusWaitingInput ||
-		terminalRuntimeStatus(runtimeSnapshot.Run.Status), nil
-}
-
 func interactionOwnerCanResume(turnStatus TurnStatus, invocationStatus InvocationStatus) bool {
 	turnResumable := turnStatus == TurnRunning || turnStatus == TurnWaitingInput
 	invocationResumable := invocationStatus == InvocationRunning || invocationStatus == InvocationWaitingInput
 	return turnResumable && invocationResumable
 }
 
-func (runner *Runner) projectInteractionResolution(
+func interactionOwnersRunning(turn Turn, invocation Invocation) bool {
+	return turn.Status == TurnRunning && invocation.Status == InvocationRunning
+}
+
+func (runner *Runner) resumeResolvedInteractionOwner(
 	ctx context.Context,
-	resolution InteractionResolution,
+	turn Turn,
+	invocation Invocation,
 ) (Snapshot, error) {
-	if err := runner.recordInteractionItem(ctx, resolution.Interaction); err != nil {
+	if invocation.ExecutionClass == ExecutionApplication {
+		return runner.resumeApplicationInteractionOwner(ctx, turn, invocation)
+	}
+	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+	if err != nil {
 		return Snapshot{}, err
 	}
-	if err := runner.recordInvocationItem(ctx, resolution.Invocation); err != nil {
+	return runner.resumeRuntimeInteractionOwner(ctx, turn, invocation, runtimeSnapshot)
+}
+
+func (runner *Runner) resumeApplicationInteractionOwner(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+) (Snapshot, error) {
+	if err := runner.reconcileInvocationStatus(ctx, invocation.ID, InvocationRunning); err != nil {
 		return Snapshot{}, err
 	}
-	runner.publishTurnStatus(ctx, resolution.Turn, EventTurnStarted, false)
-	return runner.loadSnapshot(ctx, resolution.Turn, nil)
+	updated, changed, err := runner.reconcileTurnStatus(ctx, turn.ID, TurnRunning)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if changed {
+		runner.publishTurnStatus(ctx, updated, EventTurnStarted, false)
+	}
+	return runner.loadSnapshot(ctx, updated, nil)
+}
+
+func (runner *Runner) resumeRuntimeInteractionOwner(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+	runtimeSnapshot kernel.Snapshot,
+) (Snapshot, error) {
+	if runtimeSnapshot.Run.Status == kernel.RunStatusWaitingInput {
+		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+	}
+	if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		return runner.finishResolvedInteractionOwner(ctx, turn, invocation, runtimeSnapshot)
+	}
+	if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
+		return Snapshot{}, ErrConflict
+	}
+	resumed, resumeErr := runner.resumeInvocationExecution(ctx, invocation, runtimeSnapshot.Run.Revision)
+	if resumed.Run.ID == "" {
+		return Snapshot{}, resumeErr
+	}
+	snapshot, syncErr := runner.finishResolvedInteractionOwner(ctx, turn, invocation, resumed)
+	if invocation.ExecutionClass == ExecutionAgent {
+		return snapshot, errors.Join(resumeErr, syncErr)
+	}
+	return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, resumed, resumeErr, syncErr)
+}
+
+func (runner *Runner) finishResolvedInteractionOwner(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+	runtimeSnapshot kernel.Snapshot,
+) (Snapshot, error) {
+	if strings.TrimSpace(invocation.ParentItemID) == "" {
+		if runtimeSnapshot.Run.ID == "" {
+			loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+			if err != nil {
+				return Snapshot{}, err
+			}
+			runtimeSnapshot = loaded
+		}
+		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	}
+	if runtimeSnapshot.Run.ID != "" {
+		if _, err := runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	updated, changed, err := runner.reconcileTurnStatus(ctx, turn.ID, TurnRunning)
+	if errors.Is(err, ErrConflict) {
+		return runner.loadInteractionSnapshot(ctx, Interaction{TurnID: turn.ID})
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if changed {
+		runner.publishTurnStatus(ctx, updated, EventTurnStarted, false)
+	}
+	return runner.loadSnapshot(ctx, updated, nil)
 }
 
 func (runner *Runner) loadInteractionRequestOwners(

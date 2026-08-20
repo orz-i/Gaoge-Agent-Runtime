@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -156,6 +157,39 @@ func TestWorkflowCanOwnTopLevelHarnessTurnWithoutAgentRoot(t *testing.T) {
 	if replayed.Turn.ID != first.Turn.ID || replayed.Invocations[0].ID != first.Invocations[0].ID {
 		t.Fatalf("replay changed durable identity: first=%#v replayed=%#v", first, replayed)
 	}
+}
+
+func TestTopLevelFeatureReplayResumesPersistedRunningExecution(t *testing.T) {
+	runner, feature := newBlockedWorkflowHarness(t, true)
+	request := blockedWorkflowTurnRequest("resume")
+	result := make(chan error, 1)
+	go func() {
+		_, startErr := runner.StartWorkflowTurn(t.Context(), request)
+		result <- startErr
+	}()
+	defer finishBlockedWorkflowStart(t, feature, result)
+	waitForBlockedWorkflowStart(t, feature)
+
+	replayed, err := runner.StartWorkflowTurn(t.Context(), request)
+	assertRunningWorkflowResumed(t, replayed, feature, err)
+}
+
+func TestCancelAcceptedTopLevelInvocationWithoutRuntimeRunIsDurable(t *testing.T) {
+	runner, feature := newBlockedWorkflowHarness(t, false)
+	request := blockedWorkflowTurnRequest("cancel-before-run")
+	result := make(chan error, 1)
+	go func() {
+		_, startErr := runner.StartWorkflowTurn(t.Context(), request)
+		result <- startErr
+	}()
+	defer finishBlockedWorkflowStart(t, feature, result)
+	waitForBlockedWorkflowStart(t, feature)
+
+	turnID := workflowTurnID(t, request)
+	cancelled, err := runner.Cancel(t.Context(), turnID, "cancel before runtime create")
+	assertDurableTopLevelCancellation(t, cancelled, err)
+	assertSyntheticCancellationLoadable(t, runner, turnID)
+	assertCancelledWorkflowDoesNotReplay(t, runner, request, feature)
 }
 
 func TestTopLevelFeatureStartFailureWithoutRuntimeRunRemainsLoadable(t *testing.T) {
@@ -427,9 +461,9 @@ func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string,
 	store := harness.NewMemoryStore()
 	relations := newFeatureInvocationRelations(t)
 	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: unusedFeatureAgent{}, Store: store, Clock: featureInvocationClock{},
+		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{},
 		Teams: completedTeamFeature{runtime}, Plans: completedPlanFeature{runtime}, Workflows: completedWorkflowFeature{runtime},
-		Relations: relations,
+		Relations: relations, Interactions: noopInteractionResponseHandler{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -541,8 +575,31 @@ func (unusedFeatureAgent) StartRun(context.Context, agent.StartRequest) (kernel.
 	return kernel.Snapshot{}, harness.ErrInvalidRequest
 }
 
+func (unusedFeatureAgent) Resume(context.Context, string, uint64) (kernel.Snapshot, error) {
+	return kernel.Snapshot{}, harness.ErrInvalidRequest
+}
+
 func (unusedFeatureAgent) ResolveApproval(context.Context, string, uint64, plugin.ApprovalResponse) (kernel.Snapshot, error) {
 	return kernel.Snapshot{}, harness.ErrInvalidRequest
+}
+
+type loadingFeatureAgent struct {
+	unusedFeatureAgent
+	runtime *kernel.Runtime
+}
+
+func (feature loadingFeatureAgent) Resume(ctx context.Context, runID string, _ uint64) (kernel.Snapshot, error) {
+	return feature.runtime.Load(ctx, runID)
+}
+
+type noopInteractionResponseHandler struct{}
+
+func (noopInteractionResponseHandler) HandleInteractionResponse(
+	context.Context,
+	harness.Interaction,
+	harness.Invocation,
+) error {
+	return nil
 }
 
 type completedTeamFeature struct{ runtime *kernel.Runtime }
@@ -585,6 +642,166 @@ func (rejectedWorkflowFeature) StartRun(context.Context, workflow.StartRequest) 
 
 func (rejectedWorkflowFeature) Resume(context.Context, string, uint64) (kernel.Snapshot, error) {
 	return kernel.Snapshot{}, kernel.ErrNotFound
+}
+
+type blockedWorkflowFeature struct {
+	runtime     *kernel.Runtime
+	createRun   bool
+	entered     chan struct{}
+	release     chan struct{}
+	startCalls  atomic.Int32
+	resumeCalls atomic.Int32
+}
+
+func newBlockedWorkflowFeature(runtime *kernel.Runtime, createRun bool) *blockedWorkflowFeature {
+	return &blockedWorkflowFeature{
+		runtime: runtime, createRun: createRun, entered: make(chan struct{}, 1), release: make(chan struct{}),
+	}
+}
+
+func newBlockedWorkflowHarness(t *testing.T, createRun bool) (*harness.Runner, *blockedWorkflowFeature) {
+	t.Helper()
+	runtime := newFeatureInvocationRuntime(t)
+	feature := newBlockedWorkflowFeature(runtime, createRun)
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: unusedFeatureAgent{}, Store: harness.NewMemoryStore(), Clock: featureInvocationClock{},
+		Workflows: feature,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runner, feature
+}
+
+func (feature *blockedWorkflowFeature) StartRun(
+	ctx context.Context,
+	request workflow.StartRequest,
+) (kernel.Snapshot, error) {
+	call := feature.startCalls.Add(1)
+	var snapshot kernel.Snapshot
+	var err error
+	if feature.createRun {
+		snapshot, err = feature.runtime.Create(ctx, kernel.CreateRequest{
+			ID: request.ID, Kind: workflow.RunKind, Actor: request.Actor, Thread: request.Thread,
+			RequestID: request.RequestID, Goal: request.Goal, State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
+	if call == 1 {
+		feature.entered <- struct{}{}
+		select {
+		case <-feature.release:
+		case <-ctx.Done():
+			return kernel.Snapshot{}, ctx.Err()
+		}
+	}
+	if !feature.createRun {
+		return kernel.Snapshot{}, kernel.ErrConflict
+	}
+	return snapshot, nil
+}
+
+func (feature *blockedWorkflowFeature) Resume(
+	ctx context.Context,
+	runID string,
+	_ uint64,
+) (kernel.Snapshot, error) {
+	feature.resumeCalls.Add(1)
+	return feature.runtime.Load(ctx, runID)
+}
+
+func blockedWorkflowTurnRequest(suffix string) harness.WorkflowTurnRequest {
+	threadID := "blocked-workflow-thread-" + suffix
+	return harness.WorkflowTurnRequest{
+		StartRequest: harness.StartRequest{
+			HostThread: harness.HostRef{Kind: testThreadKind, ID: threadID},
+			HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "blocked-workflow-turn-" + suffix},
+			Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+			Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: threadID},
+			RequestID:  "blocked-workflow-request-" + suffix,
+			Goal:       "recover blocked workflow " + suffix,
+			Config:     harness.ConfigSnapshot{Model: "fixture-model"},
+		},
+		Input: json.RawMessage(`{"fixture":true}`),
+	}
+}
+
+func workflowTurnID(t *testing.T, request harness.WorkflowTurnRequest) string {
+	t.Helper()
+	sessionID, err := harness.SessionID(request.HostThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := harness.TurnID(sessionID, request.HostTurn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return turnID
+}
+
+func waitForBlockedWorkflowStart(t *testing.T, feature *blockedWorkflowFeature) {
+	t.Helper()
+	select {
+	case <-feature.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("workflow feature did not enter StartRun")
+	}
+}
+
+func finishBlockedWorkflowStart(t *testing.T, feature *blockedWorkflowFeature, result <-chan error) {
+	t.Helper()
+	close(feature.release)
+	select {
+	case <-result:
+	case <-time.After(5 * time.Second):
+		t.Error("blocked workflow StartRun did not finish")
+	}
+}
+
+func assertRunningWorkflowResumed(
+	t *testing.T,
+	snapshot harness.Snapshot,
+	feature *blockedWorkflowFeature,
+	err error,
+) {
+	t.Helper()
+	if err != nil || snapshot.Turn.Status != harness.TurnRunning || feature.resumeCalls.Load() != 1 {
+		t.Fatalf("running workflow replay did not resume: turn=%#v resumeCalls=%d err=%v", snapshot.Turn, feature.resumeCalls.Load(), err)
+	}
+}
+
+func assertDurableTopLevelCancellation(t *testing.T, snapshot harness.Snapshot, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("cancel accepted invocation without runtime run: %v", err)
+	}
+	invocation, ok := harness.TopLevelInvocation(snapshot)
+	if !ok || snapshot.Turn.Status != harness.TurnCancelled || invocation.Status != harness.InvocationCancelled {
+		t.Fatalf("missing durable cancellation: turn=%#v invocations=%#v", snapshot.Turn, snapshot.Invocations)
+	}
+}
+
+func assertSyntheticCancellationLoadable(t *testing.T, runner *harness.Runner, turnID string) {
+	t.Helper()
+	loaded, err := runner.Load(t.Context(), turnID)
+	if err != nil || loaded.Turn.Status != harness.TurnCancelled {
+		t.Fatalf("load synthetic cancellation: turn=%#v err=%v", loaded.Turn, err)
+	}
+}
+
+func assertCancelledWorkflowDoesNotReplay(
+	t *testing.T,
+	runner *harness.Runner,
+	request harness.WorkflowTurnRequest,
+	feature *blockedWorkflowFeature,
+) {
+	t.Helper()
+	replayed, err := runner.StartWorkflowTurn(t.Context(), request)
+	if err != nil || replayed.Turn.Status != harness.TurnCancelled || feature.startCalls.Load() != 1 {
+		t.Fatalf("cancelled start replayed execution: turn=%#v startCalls=%d err=%v", replayed.Turn, feature.startCalls.Load(), err)
+	}
 }
 
 var errRetryTopLevelWorkflow = errors.New("retry top-level workflow fixture")

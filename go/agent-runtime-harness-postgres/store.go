@@ -406,7 +406,7 @@ func resolveInteractionTransaction(
 	if err != nil || current.Status != harness.InteractionWaiting || !sameInteraction(current, value) {
 		return harness.InteractionResolution{}, errors.Join(harness.ErrConflict, err)
 	}
-	if err = persistInteractionResolution(tx, record, currentRow, invocationRow, turnRow); err != nil {
+	if err = persistInteractionResolution(tx, record, currentRow); err != nil {
 		return harness.InteractionResolution{}, err
 	}
 	value.Revision = expectedRevision + 1
@@ -414,13 +414,7 @@ func resolveInteractionTransaction(
 	if err != nil {
 		return harness.InteractionResolution{}, err
 	}
-	invocation.Status = harness.InvocationRunning
-	invocation.Revision++
-	invocation.UpdatedAt = value.UpdatedAt
 	turn := turnFromRecord(turnRow)
-	turn.Status = harness.TurnRunning
-	turn.Revision++
-	turn.UpdatedAt = value.UpdatedAt
 	return harness.InteractionResolution{Interaction: value, Invocation: invocation, Turn: turn}, nil
 }
 
@@ -457,8 +451,6 @@ func persistInteractionResolution(
 	tx *gorm.DB,
 	resolved interactionRecord,
 	current interactionRecord,
-	invocation invocationRecord,
-	turn turnRecord,
 ) error {
 	interactionUpdate := tx.Model(&interactionRecord{}).
 		Where("id = ? AND revision = ? AND status = ?", current.ID, current.Revision, string(harness.InteractionWaiting)).
@@ -466,23 +458,7 @@ func persistInteractionResolution(
 			"status": resolved.Status, "response_json": resolved.ResponseJSON,
 			"revision": current.Revision + 1, "updated_at": resolved.UpdatedAt,
 		})
-	if err := singleInteractionResolutionUpdate(interactionUpdate); err != nil {
-		return err
-	}
-	invocationUpdate := tx.Model(&invocationRecord{}).
-		Where("id = ? AND revision = ? AND status = ?", invocation.ID, invocation.Revision, string(harness.InvocationWaitingInput)).
-		Updates(map[string]any{
-			"status": string(harness.InvocationRunning), "revision": invocation.Revision + 1, "updated_at": resolved.UpdatedAt,
-		})
-	if err := singleInteractionResolutionUpdate(invocationUpdate); err != nil {
-		return err
-	}
-	turnUpdate := tx.Model(&turnRecord{}).
-		Where("id = ? AND revision = ? AND status = ?", turn.ID, turn.Revision, string(harness.TurnWaitingInput)).
-		Updates(map[string]any{
-			"status": string(harness.TurnRunning), "revision": turn.Revision + 1, "updated_at": resolved.UpdatedAt,
-		})
-	return singleInteractionResolutionUpdate(turnUpdate)
+	return singleInteractionResolutionUpdate(interactionUpdate)
 }
 
 func singleInteractionResolutionUpdate(result *gorm.DB) error {

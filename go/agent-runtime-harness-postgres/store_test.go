@@ -77,7 +77,7 @@ func TestStoreRetriesTopLevelInvocationAndReopensTurnAtomically(t *testing.T) {
 	assertTopLevelTurnReopened(t, store, turn.ID)
 }
 
-func TestStoreResolvesInteractionAndOwnersAtomically(t *testing.T) {
+func TestStorePersistsInteractionResolutionBeforeOwnersResume(t *testing.T) {
 	store := newStore(t)
 	turn, invocation, interaction := createWaitingInteractionFixture(t, store, "resolve")
 	interaction.Status = harness.InteractionResolved
@@ -89,9 +89,9 @@ func TestStoreResolvesInteractionAndOwnersAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resolution.Interaction.Status != harness.InteractionResolved || resolution.Interaction.Revision != 2 ||
-		resolution.Invocation.Status != harness.InvocationRunning || resolution.Invocation.Revision != invocation.Revision+1 ||
-		resolution.Turn.Status != harness.TurnRunning || resolution.Turn.Revision != turn.Revision+1 {
-		t.Fatalf("atomic interaction resolution = %#v", resolution)
+		resolution.Invocation.Status != harness.InvocationWaitingInput || resolution.Invocation.Revision != invocation.Revision ||
+		resolution.Turn.Status != harness.TurnWaitingInput || resolution.Turn.Revision != turn.Revision {
+		t.Fatalf("interaction resolution resumed owners before continuation = %#v", resolution)
 	}
 }
 

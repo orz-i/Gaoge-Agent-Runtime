@@ -245,20 +245,25 @@ type AgentStarter interface {
 	ResolveApproval(context.Context, string, uint64, plugin.ApprovalResponse) (kernel.Snapshot, error)
 }
 
+type agentResumer interface {
+	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
+}
+
 // Dependencies statically compose the minimal Harness core.
 type Dependencies struct {
-	Runtime   *kernel.Runtime
-	Agent     AgentStarter
-	Plans     PlanExecuteFeature
-	Teams     TeamFeature
-	Workflows WorkflowFeature
-	Store     Store
-	Clock     Clock
-	TurnFeed  *TurnFeed
-	Context   *runtimecontext.Builder
-	Catalog   tools.Catalog
-	Handoffs  HandoffStarter
-	Relations runrelation.Recorder
+	Runtime      *kernel.Runtime
+	Agent        AgentStarter
+	Plans        PlanExecuteFeature
+	Teams        TeamFeature
+	Workflows    WorkflowFeature
+	Store        Store
+	Clock        Clock
+	TurnFeed     *TurnFeed
+	Context      *runtimecontext.Builder
+	Catalog      tools.Catalog
+	Handoffs     HandoffStarter
+	Relations    runrelation.Recorder
+	Interactions InteractionResponseHandler
 }
 
 type runRelationReader interface {
@@ -281,6 +286,7 @@ type Runner struct {
 	handoffs       HandoffStarter
 	relations      runrelation.Recorder
 	relationReader runRelationReader
+	interactions   InteractionResponseHandler
 }
 
 // StartRequest starts or idempotently reloads one Harness Turn.
@@ -303,6 +309,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil || dependencies.Clock == nil {
 		return nil, ErrInvalidRequest
 	}
+	if dependencies.Interactions != nil {
+		if _, ok := dependencies.Agent.(agentResumer); !ok {
+			return nil, ErrInvalidRequest
+		}
+	}
 	runner := &Runner{
 		runtime: dependencies.Runtime, agent: dependencies.Agent,
 		plans: dependencies.Plans, teams: dependencies.Teams, workflows: dependencies.Workflows,
@@ -310,6 +321,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		turnFeed: dependencies.TurnFeed,
 		context:  dependencies.Context, catalog: dependencies.Catalog,
 		handoffs: dependencies.Handoffs, relations: dependencies.Relations,
+		interactions: dependencies.Interactions,
 	}
 	if reader, ok := dependencies.Relations.(runRelationReader); ok {
 		runner.relationReader = reader
@@ -491,7 +503,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		return Snapshot{}, err
 	}
 	if !found {
-		return Snapshot{}, kernel.ErrNotFound
+		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
 	}
 	if runtimeSnapshot.Run.Status != kernel.RunStatusCancelled {
 		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
@@ -714,7 +726,7 @@ func (runner *Runner) terminalRuntimeSnapshot(ctx context.Context, turn Turn) (k
 	if err == nil {
 		return loaded, nil
 	}
-	if turn.Status == TurnFailed {
+	if errors.Is(err, kernel.ErrNotFound) && missingRuntimeSnapshotAllowed(turn, invocation) {
 		return result, nil
 	}
 	return kernel.Snapshot{}, err
@@ -1041,7 +1053,7 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	if runtimeSnapshot == nil && hasRootInvocation && strings.TrimSpace(rootInvocation.ExecutionRefID) != "" {
 		loaded, loadErr := runner.runtime.Load(ctx, rootInvocation.ExecutionRefID)
 		if loadErr != nil {
-			if !errors.Is(loadErr, kernel.ErrNotFound) || turn.Status != TurnFailed || rootInvocation.Status != InvocationFailed {
+			if !errors.Is(loadErr, kernel.ErrNotFound) || !missingRuntimeSnapshotAllowed(turn, rootInvocation) {
 				return Snapshot{}, loadErr
 			}
 		} else {
@@ -1055,6 +1067,11 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 		}
 	}
 	return cloneSnapshot(result), nil
+}
+
+func missingRuntimeSnapshotAllowed(turn Turn, invocation Invocation) bool {
+	return turn.Status == TurnFailed && invocation.Status == InvocationFailed ||
+		turn.Status == TurnCancelled && invocation.Status == InvocationCancelled
 }
 
 func cloneSnapshot(value Snapshot) Snapshot {

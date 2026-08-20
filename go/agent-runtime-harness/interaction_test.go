@@ -1,11 +1,13 @@
 package harness_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 )
 
 const interactionParentInvocationID = "hiv_parent"
@@ -50,6 +52,17 @@ func TestGenericInteractionWaitResolveAndReplay(t *testing.T) {
 	if !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("conflicting interaction replay error = %v", err)
 	}
+}
+
+func TestResolveInteractionHandlesApplicationResponseBeforeResumingOwner(t *testing.T) {
+	fixture := newInteractionResumeFixture(t)
+	interaction := requestHandledInteraction(t, fixture)
+	response := json.RawMessage(`{"candidateID":"candidate-2"}`)
+	assertHandlerFailureKeepsOwnerWaiting(t, fixture, interaction, response)
+	resolved := resolveHandledInteraction(t, fixture, interaction, response)
+	assertResolvedInteraction(t, resolved, response)
+	assertInteractionContinuationCalls(t, fixture, interaction)
+	assertHandledInteractionReplayIsSideEffectFree(t, fixture, interaction, response)
 }
 
 func TestResolveInteractionAfterCancellationLeavesInteractionWaiting(t *testing.T) {
@@ -329,4 +342,151 @@ func countInteractionItems(items []harness.Item, status harness.ItemStatus) int 
 		}
 	}
 	return count
+}
+
+type recordingInteractionResponseHandler struct {
+	calls         int
+	interactionID string
+	failures      int
+}
+
+type interactionResumeFixture struct {
+	runner  *harness.Runner
+	turnID  string
+	parent  string
+	handler *recordingInteractionResponseHandler
+	agent   *recordingInteractionAgent
+}
+
+func newInteractionResumeFixture(t *testing.T) interactionResumeFixture {
+	t.Helper()
+	runtime := newFeatureInvocationRuntime(t)
+	store := harness.NewMemoryStore()
+	handler := &recordingInteractionResponseHandler{failures: 1}
+	agentFeature := &recordingInteractionAgent{loadingFeatureAgent: loadingFeatureAgent{runtime: runtime}}
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: agentFeature, Store: store, Clock: featureInvocationClock{}, Interactions: handler,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := featureInvocationClock{}.Now()
+	hostThread := harness.HostRef{Kind: testThreadKind, ID: "interaction-resume-thread"}
+	hostTurn := harness.HostRef{Kind: testContextHostKind, ID: "interaction-resume-turn"}
+	sessionID, err := harness.SessionID(hostThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := harness.TurnID(sessionID, hostTurn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := kernel.ActorRef{TenantID: testTenant, ActorID: testActor}
+	thread := kernel.ThreadRef{Kind: testThreadKind, ID: hostThread.ID}
+	seedFeatureInvocationEnvelope(t, store, sessionID, turnID, hostThread, hostTurn, actor, now)
+	_, parentItemID := seedFeatureInvocationParent(t, runtime, store, turnID, actor, thread, now)
+	return interactionResumeFixture{runner: runner, turnID: turnID, parent: parentItemID, handler: handler, agent: agentFeature}
+}
+
+func requestHandledInteraction(t *testing.T, fixture interactionResumeFixture) harness.Interaction {
+	t.Helper()
+	waiting, err := fixture.runner.RequestInteraction(t.Context(), fixture.turnID, harness.RequestInteraction{
+		InvocationID: interactionParentInvocationID, ParentItemID: fixture.parent,
+		Key: "handled-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return assertWaitingInteraction(t, waiting)
+}
+
+func assertHandlerFailureKeepsOwnerWaiting(
+	t *testing.T,
+	fixture interactionResumeFixture,
+	interaction harness.Interaction,
+	response json.RawMessage,
+) {
+	t.Helper()
+	_, err := fixture.runner.ResolveInteraction(
+		t.Context(), fixture.turnID, interaction.ID, harness.ResolveInteractionRequest{Response: response},
+	)
+	if !errors.Is(err, errInteractionHandlerFixture) {
+		t.Fatalf("first application handler error = %v", err)
+	}
+	paused, err := fixture.runner.Load(t.Context(), fixture.turnID)
+	if err != nil || paused.Turn.Status != harness.TurnWaitingInput ||
+		invocationByID(t, paused, interactionParentInvocationID).Status != harness.InvocationWaitingInput ||
+		interactionByKey(t, paused, "handled-choice").Status != harness.InteractionResolved || fixture.agent.resumeCalls != 0 {
+		t.Fatalf("handler failure advanced owner: snapshot=%#v resumeCalls=%d err=%v", paused, fixture.agent.resumeCalls, err)
+	}
+}
+
+func resolveHandledInteraction(
+	t *testing.T,
+	fixture interactionResumeFixture,
+	interaction harness.Interaction,
+	response json.RawMessage,
+) harness.Snapshot {
+	t.Helper()
+	resolved, err := fixture.runner.ResolveInteraction(
+		t.Context(), fixture.turnID, interaction.ID, harness.ResolveInteractionRequest{Response: response},
+	)
+	if err != nil {
+		t.Fatalf("resolve handled interaction: %v", err)
+	}
+	return resolved
+}
+
+func assertInteractionContinuationCalls(t *testing.T, fixture interactionResumeFixture, interaction harness.Interaction) {
+	t.Helper()
+	if fixture.handler.calls != 2 || fixture.agent.resumeCalls != 1 || fixture.handler.interactionID != interaction.ID {
+		t.Fatalf("interaction continuation calls: handler=%d resume=%d interaction=%q", fixture.handler.calls, fixture.agent.resumeCalls, fixture.handler.interactionID)
+	}
+}
+
+func assertHandledInteractionReplayIsSideEffectFree(
+	t *testing.T,
+	fixture interactionResumeFixture,
+	interaction harness.Interaction,
+	response json.RawMessage,
+) {
+	t.Helper()
+	if _, err := fixture.runner.ResolveInteraction(
+		t.Context(), fixture.turnID, interaction.ID, harness.ResolveInteractionRequest{Response: response},
+	); err != nil {
+		t.Fatalf("replay handled interaction: %v", err)
+	}
+	if fixture.handler.calls != 2 || fixture.agent.resumeCalls != 1 {
+		t.Fatalf("resolved replay repeated side effects: handler=%d resume=%d", fixture.handler.calls, fixture.agent.resumeCalls)
+	}
+}
+
+var errInteractionHandlerFixture = errors.New("interaction handler fixture")
+
+func (handler *recordingInteractionResponseHandler) HandleInteractionResponse(
+	_ context.Context,
+	interaction harness.Interaction,
+	_ harness.Invocation,
+) error {
+	handler.calls++
+	handler.interactionID = interaction.ID
+	if handler.failures > 0 {
+		handler.failures--
+		return errInteractionHandlerFixture
+	}
+	return nil
+}
+
+type recordingInteractionAgent struct {
+	loadingFeatureAgent
+	resumeCalls int
+}
+
+func (feature *recordingInteractionAgent) Resume(
+	ctx context.Context,
+	runID string,
+	expectedRevision uint64,
+) (kernel.Snapshot, error) {
+	feature.resumeCalls++
+	return feature.loadingFeatureAgent.Resume(ctx, runID, expectedRevision)
 }

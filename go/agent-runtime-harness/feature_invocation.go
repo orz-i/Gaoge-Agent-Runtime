@@ -301,8 +301,20 @@ func (runner *Runner) replayTopLevelFeatureStart(
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, prepared.invocation.ExecutionRefID)
 	if err == nil {
-		snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, prepared.turn, prepared.invocation, runtimeSnapshot)
-		return snapshot, true, syncErr
+		if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
+			snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, prepared.turn, prepared.invocation, runtimeSnapshot)
+			return snapshot, true, syncErr
+		}
+		resumed, resumeErr := runner.resumeFeature(
+			prepared.runContext, prepared.invocation, runtimeSnapshot.Run.Revision,
+		)
+		if resumed.Run.ID == "" {
+			return Snapshot{}, true, resumeErr
+		}
+		snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, prepared.turn, prepared.invocation, resumed)
+		return snapshot, true, normalizedFeatureStartError(
+			prepared.invocation.ExecutionClass, resumed, resumeErr, syncErr,
+		)
 	}
 	if errors.Is(err, kernel.ErrNotFound) && prepared.invocation.Status == InvocationAccepted {
 		return Snapshot{}, false, nil
@@ -318,6 +330,12 @@ func (runner *Runner) finishTopLevelFeatureStart(
 	startErr error,
 ) (Snapshot, error) {
 	if runtimeSnapshot.Run.ID == "" {
+		if errors.Is(startErr, kernel.ErrConflict) {
+			recovered, recoverErr := runner.Refresh(ctx, turn.ID)
+			if recoverErr == nil && recovered.Turn.Status == TurnCancelled {
+				return recovered, nil
+			}
+		}
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
 		return failed, errors.Join(startErr, failErr)
 	}
@@ -980,6 +998,21 @@ func (runner *Runner) resumeFeature(
 	default:
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
+}
+
+func (runner *Runner) resumeInvocationExecution(
+	ctx context.Context,
+	invocation Invocation,
+	expectedRevision uint64,
+) (kernel.Snapshot, error) {
+	if invocation.ExecutionClass == ExecutionAgent {
+		resumer, ok := runner.agent.(agentResumer)
+		if !ok {
+			return kernel.Snapshot{}, ErrInvalidRequest
+		}
+		return resumer.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+	}
+	return runner.resumeFeature(ctx, invocation, expectedRevision)
 }
 
 func (runner *Runner) syncChildInvocationSnapshot(

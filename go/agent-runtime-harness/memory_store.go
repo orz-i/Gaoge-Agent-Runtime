@@ -292,15 +292,7 @@ func (store *MemoryStore) ResolveInteraction(
 	}
 	value.Revision = expectedRevision + 1
 	value.UpdatedAt = value.UpdatedAt.UTC()
-	invocation.Status = InvocationRunning
-	invocation.Revision++
-	invocation.UpdatedAt = value.UpdatedAt
-	turn.Status = TurnRunning
-	turn.Revision++
-	turn.UpdatedAt = value.UpdatedAt
 	store.interactions[value.ID] = cloneInteraction(value)
-	store.invocations[invocation.ID] = cloneInvocation(invocation)
-	store.turns[turn.ID] = turn
 	return InteractionResolution{
 		Interaction: cloneInteraction(value), Invocation: cloneInvocation(invocation), Turn: turn,
 	}, nil
