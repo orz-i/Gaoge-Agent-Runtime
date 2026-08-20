@@ -12,7 +12,7 @@ const interactionParentInvocationID = "hiv_parent"
 
 func TestGenericInteractionWaitResolveAndReplay(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, _, _ := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, _, _, _ := newFeatureInvocationHarness(t)
 
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
@@ -54,7 +54,7 @@ func TestGenericInteractionWaitResolveAndReplay(t *testing.T) {
 
 func TestGenericInteractionAllowsOnlyOneWaitingInputPerTurn(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, _, _ := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, _, _, _ := newFeatureInvocationHarness(t)
 	if _, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
 		Key: "first", Kind: harness.InteractionConfirmation, Schema: json.RawMessage(`{"type":"boolean"}`),
@@ -67,6 +67,73 @@ func TestGenericInteractionAllowsOnlyOneWaitingInputPerTurn(t *testing.T) {
 	})
 	if !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("second waiting interaction error = %v", err)
+	}
+}
+
+func TestInteractionRequestReplayRepairsPartialWaitingProjection(t *testing.T) {
+	t.Parallel()
+	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	request := harness.RequestInteraction{
+		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		Key: "repair-wait", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
+	}
+	waiting, err := runner.RequestInteraction(t.Context(), turnID, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertWaitingInteraction(t, waiting)
+	forceInteractionOwnersRunning(t, store, turnID)
+
+	repaired, err := runner.RequestInteraction(t.Context(), turnID, request)
+	if err != nil {
+		t.Fatalf("repair waiting replay: %v", err)
+	}
+	assertWaitingInteraction(t, repaired)
+}
+
+func TestInteractionResolutionReplayRepairsPartialOwnerProjection(t *testing.T) {
+	t.Parallel()
+	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
+		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		Key: "repair-resolve", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	interaction := assertWaitingInteraction(t, waiting)
+	response := json.RawMessage(`{"candidateID":"candidate-2"}`)
+	interaction.Status = harness.InteractionResolved
+	interaction.Response = append(json.RawMessage(nil), response...)
+	updated, err := store.UpdateInteraction(t.Context(), interaction, interaction.Revision)
+	if err != nil || updated.Status != harness.InteractionResolved {
+		t.Fatalf("seed partial resolution: %#v err=%v", updated, err)
+	}
+
+	repaired, err := runner.ResolveInteraction(t.Context(), turnID, interaction.ID, harness.ResolveInteractionRequest{Response: response})
+	if err != nil {
+		t.Fatalf("repair resolved replay: %v", err)
+	}
+	assertResolvedInteraction(t, repaired, response)
+}
+
+func forceInteractionOwnersRunning(t *testing.T, store *harness.MemoryStore, turnID string) {
+	t.Helper()
+	invocation, err := store.GetInvocation(t.Context(), interactionParentInvocationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation.Status = harness.InvocationRunning
+	if _, err = store.UpdateInvocation(t.Context(), invocation, invocation.Revision); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := store.GetTurn(t.Context(), turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn.Status = harness.TurnRunning
+	if _, err = store.UpdateTurn(t.Context(), turn, turn.Revision); err != nil {
+		t.Fatal(err)
 	}
 }
 

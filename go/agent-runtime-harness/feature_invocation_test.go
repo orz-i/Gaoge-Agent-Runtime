@@ -19,7 +19,7 @@ import (
 
 func TestTypedFeatureInvocationsShareHarnessTurnAndRecoverByTurnID(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, relations, parentRunID := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, relations, parentRunID, _ := newFeatureInvocationHarness(t)
 	assertStartedTeamInvocation(t, runner, turnID, parentItemID)
 	assertStartedPlanInvocation(t, runner, turnID, parentItemID)
 	assertStartedWorkflowInvocation(t, runner, turnID, parentItemID)
@@ -39,10 +39,10 @@ func TestWorkflowCanOwnTopLevelHarnessTurnWithoutAgentRoot(t *testing.T) {
 	request := harness.WorkflowTurnRequest{
 		StartRequest: harness.StartRequest{
 			HostThread: harness.HostRef{Kind: testThreadKind, ID: "command-workflow-thread"},
-			HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "command-workflow-turn"},
-			Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
-			Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "command-workflow-thread"},
-			RequestID: "command-workflow-request", Goal: "run the explicit workflow command",
+			HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "command-workflow-turn"},
+			Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+			Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "command-workflow-thread"},
+			RequestID:  "command-workflow-request", Goal: "run the explicit workflow command",
 			Config: harness.ConfigSnapshot{Model: "fixture-model"},
 		},
 		Input: json.RawMessage(`{"goal":"run the explicit workflow command"}`),
@@ -197,7 +197,7 @@ func completedChildArtifactCount(items []harness.Item) int {
 	return count
 }
 
-func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string, *runrelation.Registry, string) {
+func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string, *runrelation.Registry, string, *harness.MemoryStore) {
 	t.Helper()
 	runtime := newFeatureInvocationRuntime(t)
 	store := harness.NewMemoryStore()
@@ -225,7 +225,7 @@ func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string,
 	thread := kernel.ThreadRef{Kind: testThreadKind, ID: "feature-thread"}
 	seedFeatureInvocationEnvelope(t, store, sessionID, turnID, hostThread, hostTurn, actor, now)
 	parentRunID, parentItemID := seedFeatureInvocationParent(t, runtime, store, turnID, actor, thread, now)
-	return runner, turnID, parentItemID, relations, parentRunID
+	return runner, turnID, parentItemID, relations, parentRunID, store
 }
 
 func newFeatureInvocationRuntime(t *testing.T) *kernel.Runtime {

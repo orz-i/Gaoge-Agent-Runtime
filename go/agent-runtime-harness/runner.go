@@ -607,6 +607,9 @@ func (runner *Runner) syncInvocationProjection(
 	nextStatus := invocationStatusFromTurn(status)
 	if nextStatus == invocation.Status && invocation.ErrorCode == runtimeSnapshot.Run.ErrorCode &&
 		invocation.ErrorDetail == runtimeSnapshot.Run.ErrorDetail {
+		if err := runner.recordInvocationItem(ctx, invocation); err != nil {
+			return Invocation{}, err
+		}
 		return invocation, nil
 	}
 	invocation.Status = nextStatus
