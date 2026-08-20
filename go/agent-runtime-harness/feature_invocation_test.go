@@ -25,7 +25,7 @@ const (
 
 func TestTypedFeatureInvocationsShareHarnessTurnAndRecoverByTurnID(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, relations, parentRunID, _ := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, relations, parentRunID, _, _ := newFeatureInvocationHarness(t)
 	assertStartedTeamInvocation(t, runner, turnID, parentItemID)
 	assertStartedPlanInvocation(t, runner, turnID, parentItemID)
 	assertStartedWorkflowInvocation(t, runner, turnID, parentItemID)
@@ -34,7 +34,7 @@ func TestTypedFeatureInvocationsShareHarnessTurnAndRecoverByTurnID(t *testing.T)
 
 func TestRetryInvocationAdvancesOneAttemptAndReplaysTerminalAttempt(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
 		ParentItemID: parentItemID, RequestID: "retry-team", Goal: "retry this team",
 		Mode: team.ExecutionSequential, Members: []team.Member{{ID: retryTeamMemberID, Goal: retryTeamMemberGoal}},
@@ -69,7 +69,7 @@ func TestRetryInvocationAdvancesOneAttemptAndReplaysTerminalAttempt(t *testing.T
 
 func TestRetryInvocationRecoversAcceptedAttemptWithoutAllocatingAnother(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
 		ParentItemID: parentItemID, RequestID: "retry-crash-team", Goal: "recover retry",
 		Mode: team.ExecutionSequential, Members: []team.Member{{ID: retryTeamMemberID, Goal: retryTeamMemberGoal}},
@@ -155,6 +155,77 @@ func TestWorkflowCanOwnTopLevelHarnessTurnWithoutAgentRoot(t *testing.T) {
 	assertTopLevelWorkflowTurn(t, replayed, err)
 	if replayed.Turn.ID != first.Turn.ID || replayed.Invocations[0].ID != first.Invocations[0].ID {
 		t.Fatalf("replay changed durable identity: first=%#v replayed=%#v", first, replayed)
+	}
+}
+
+func TestTopLevelFeatureStartFailureWithoutRuntimeRunRemainsLoadable(t *testing.T) {
+	t.Parallel()
+	runtime := newFeatureInvocationRuntime(t)
+	store := harness.NewMemoryStore()
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: unusedFeatureAgent{}, Store: store, Clock: featureInvocationClock{},
+		Workflows: rejectedWorkflowFeature{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, startErr := runner.StartWorkflowTurn(t.Context(), harness.WorkflowTurnRequest{
+		StartRequest: harness.StartRequest{
+			HostThread: harness.HostRef{Kind: testThreadKind, ID: "rejected-workflow-thread"},
+			HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "rejected-workflow-turn"},
+			Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+			Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "rejected-workflow-thread"},
+			RequestID:  "rejected-workflow-request", Goal: "reject before runtime create",
+			Config: harness.ConfigSnapshot{Model: "fixture-model"},
+		},
+		Input: json.RawMessage(`{"goal":"reject before runtime create"}`),
+	})
+	if !errors.Is(startErr, errRejectedTopLevelWorkflow) || failed.Turn.Status != harness.TurnFailed {
+		t.Fatalf("failed start snapshot=%#v err=%v", failed, startErr)
+	}
+	reloaded, err := runner.Load(t.Context(), failed.Turn.ID)
+	if err != nil || reloaded.Turn.Status != harness.TurnFailed {
+		t.Fatalf("reload failed start snapshot=%#v err=%v", reloaded, err)
+	}
+}
+
+func TestCancelCascadesAcrossCapabilityRunTree(t *testing.T) {
+	t.Parallel()
+	runner, turnID, parentItemID, relations, parentRunID, store, runtime := newFeatureInvocationHarness(t)
+	now := featureInvocationClock{}.Now()
+	childRun := createRunningFeatureRun(t, runtime, "cancel-child-run", team.RunKind)
+	nestedRun := createRunningFeatureRun(t, runtime, "cancel-nested-run", agent.RunKind)
+	childInvocation := harness.Invocation{
+		ID: "hiv_cancel_child", TurnID: turnID, ParentItemID: parentItemID,
+		CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
+		ExecutionClass: harness.ExecutionTeam, InputHash: "cancel-child", ExecutionRefID: childRun.Run.ID,
+		Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if _, _, err := store.CreateInvocation(t.Context(), childInvocation); err != nil {
+		t.Fatal(err)
+	}
+	for _, draft := range []runrelation.Draft{
+		{ParentRunID: parentRunID, ChildRunID: childRun.Run.ID, Kind: runrelation.KindCapability, OwnerNodeID: childInvocation.ID},
+		{ParentRunID: childRun.Run.ID, ChildRunID: nestedRun.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "writer"},
+	} {
+		if _, err := relations.Ensure(t.Context(), draft); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cancelled, err := runner.Cancel(t.Context(), turnID, "operator request")
+	if err != nil || cancelled.Turn.Status != harness.TurnCancelled {
+		t.Fatalf("cancel tree snapshot=%#v err=%v", cancelled, err)
+	}
+	if invocationByID(t, cancelled, childInvocation.ID).Status != harness.InvocationCancelled {
+		t.Fatalf("child invocation was not cancelled: %#v", cancelled.Invocations)
+	}
+	for _, runID := range []string{parentRunID, childRun.Run.ID, nestedRun.Run.ID} {
+		loaded, loadErr := runtime.Load(t.Context(), runID)
+		if loadErr != nil || loaded.Run.Status != kernel.RunStatusCancelled {
+			t.Fatalf("run %s was not cancelled: %#v err=%v", runID, loaded.Run, loadErr)
+		}
 	}
 }
 
@@ -350,7 +421,7 @@ func completedChildArtifactCount(items []harness.Item) int {
 	return count
 }
 
-func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string, *runrelation.Registry, string, *harness.MemoryStore) {
+func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string, *runrelation.Registry, string, *harness.MemoryStore, *kernel.Runtime) {
 	t.Helper()
 	runtime := newFeatureInvocationRuntime(t)
 	store := harness.NewMemoryStore()
@@ -378,7 +449,7 @@ func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string,
 	thread := kernel.ThreadRef{Kind: testThreadKind, ID: "feature-thread"}
 	seedFeatureInvocationEnvelope(t, store, sessionID, turnID, hostThread, hostTurn, actor, now)
 	parentRunID, parentItemID := seedFeatureInvocationParent(t, runtime, store, turnID, actor, thread, now)
-	return runner, turnID, parentItemID, relations, parentRunID, store
+	return runner, turnID, parentItemID, relations, parentRunID, store, runtime
 }
 
 func newFeatureInvocationRuntime(t *testing.T) *kernel.Runtime {
@@ -504,6 +575,18 @@ func (feature completedWorkflowFeature) Resume(ctx context.Context, runID string
 	return feature.runtime.Load(ctx, runID)
 }
 
+var errRejectedTopLevelWorkflow = errors.New("rejected before runtime create")
+
+type rejectedWorkflowFeature struct{}
+
+func (rejectedWorkflowFeature) StartRun(context.Context, workflow.StartRequest) (kernel.Snapshot, error) {
+	return kernel.Snapshot{}, errRejectedTopLevelWorkflow
+}
+
+func (rejectedWorkflowFeature) Resume(context.Context, string, uint64) (kernel.Snapshot, error) {
+	return kernel.Snapshot{}, kernel.ErrNotFound
+}
+
 var errRetryTopLevelWorkflow = errors.New("retry top-level workflow fixture")
 
 type retryTopLevelWorkflowFeature struct {
@@ -553,6 +636,20 @@ func completeFeatureRun(
 		Status: kernel.RunStatusCompleted, State: started.State,
 		Result: &kernel.Result{ContentType: "application/json", Content: json.RawMessage(`{"ok":true}`)},
 	})
+}
+
+func createRunningFeatureRun(t *testing.T, runtime *kernel.Runtime, id string, kind kernel.RunKind) kernel.Snapshot {
+	t.Helper()
+	created, err := runtime.Create(t.Context(), kernel.CreateRequest{
+		ID: id, Kind: kind,
+		Actor:     kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+		Thread:    kernel.ThreadRef{Kind: testThreadKind, ID: "feature-thread"},
+		RequestID: id, Goal: id, State: json.RawMessage(`{}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return created
 }
 
 type featureInvocationClock struct{}

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 )
 
 // InteractionKind describes a host-renderable input shape without embedding
@@ -183,7 +185,7 @@ func (runner *Runner) ResolveInteraction(
 		if !bytes.Equal(interaction.Response, request.Response) {
 			return Snapshot{}, ErrConflict
 		}
-		return runner.reconcileInteractionState(ctx, interaction, InvocationRunning, TurnRunning, EventTurnStarted)
+		return runner.replayResolvedInteraction(ctx, interaction)
 	}
 	interaction.Response = append(json.RawMessage(nil), request.Response...)
 	interaction.Status = InteractionResolved
@@ -193,6 +195,99 @@ func (runner *Runner) ResolveInteraction(
 		return Snapshot{}, err
 	}
 	return runner.projectInteractionResolution(ctx, resolution)
+}
+
+func (runner *Runner) replayResolvedInteraction(ctx context.Context, interaction Interaction) (Snapshot, error) {
+	if err := runner.recordInteractionItem(ctx, interaction); err != nil {
+		return Snapshot{}, err
+	}
+	turn, invocation, err := runner.loadResolvedInteractionOwners(ctx, interaction)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if terminalTurnStatus(turn.Status) || terminalInvocationStatus(invocation.Status) {
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	blocked, err := runner.resolvedInteractionReplayBlocked(ctx, interaction, turn, invocation)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if blocked {
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	snapshot, err := runner.reconcileInteractionState(
+		ctx, interaction, InvocationRunning, TurnRunning, EventTurnStarted,
+	)
+	if errors.Is(err, ErrConflict) {
+		return runner.loadInteractionSnapshot(ctx, interaction)
+	}
+	return snapshot, err
+}
+
+func (runner *Runner) loadResolvedInteractionOwners(
+	ctx context.Context,
+	interaction Interaction,
+) (Turn, Invocation, error) {
+	turn, err := runner.store.GetTurn(ctx, interaction.TurnID)
+	if err != nil {
+		return Turn{}, Invocation{}, err
+	}
+	invocation, err := runner.store.GetInvocation(ctx, interaction.InvocationID)
+	if err != nil || invocation.TurnID != turn.ID {
+		return Turn{}, Invocation{}, errors.Join(ErrConflict, err)
+	}
+	return turn, invocation, nil
+}
+
+func (runner *Runner) resolvedInteractionReplayBlocked(
+	ctx context.Context,
+	interaction Interaction,
+	turn Turn,
+	invocation Invocation,
+) (bool, error) {
+	waiting, err := runner.hasOtherWaitingInteraction(ctx, interaction)
+	if err != nil || waiting {
+		return waiting, err
+	}
+	if !interactionOwnerCanResume(turn.Status, invocation.Status) {
+		return true, nil
+	}
+	return runner.runtimeBlocksInteractionResume(ctx, invocation.ExecutionRefID)
+}
+
+func (runner *Runner) hasOtherWaitingInteraction(ctx context.Context, interaction Interaction) (bool, error) {
+	interactions, err := runner.store.ListInteractions(ctx, interaction.TurnID)
+	if err != nil {
+		return false, err
+	}
+	for _, candidate := range interactions {
+		if candidate.ID != interaction.ID && candidate.Status == InteractionWaiting {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (runner *Runner) runtimeBlocksInteractionResume(ctx context.Context, runID string) (bool, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return false, nil
+	}
+	runtimeSnapshot, err := runner.runtime.Load(ctx, runID)
+	if errors.Is(err, kernel.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return runtimeSnapshot.Run.Status == kernel.RunStatusWaitingInput ||
+		terminalRuntimeStatus(runtimeSnapshot.Run.Status), nil
+}
+
+func interactionOwnerCanResume(turnStatus TurnStatus, invocationStatus InvocationStatus) bool {
+	turnResumable := turnStatus == TurnRunning || turnStatus == TurnWaitingInput
+	invocationResumable := invocationStatus == InvocationRunning || invocationStatus == InvocationWaitingInput
+	return turnResumable && invocationResumable
 }
 
 func (runner *Runner) projectInteractionResolution(

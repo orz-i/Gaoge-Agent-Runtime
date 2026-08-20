@@ -728,21 +728,38 @@ func (runner *Runner) startRetriedWorkflow(ctx context.Context, invocation Invoc
 
 // CancelInvocation cancels one child Runtime Feature by its durable Invocation identity.
 func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason string) (Snapshot, error) {
-	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
+	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
-		return runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
+	if strings.TrimSpace(invocation.ParentItemID) == "" {
+		return Snapshot{}, ErrConflict
 	}
-	cancelled, cancelErr := runner.runtime.Cancel(
-		ctx, invocation.ExecutionRefID, runtimeSnapshot.Run.Revision, strings.TrimSpace(reason),
-	)
-	if cancelled.Run.ID == "" {
-		return Snapshot{}, cancelErr
+	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	if err != nil {
+		return Snapshot{}, err
 	}
-	snapshot, syncErr := runner.syncChildInvocationSnapshot(ctx, turn, invocation, cancelled)
-	return snapshot, errors.Join(cancelErr, syncErr)
+	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !found {
+		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
+	}
+	runs := map[string]kernel.Snapshot{invocation.ExecutionRefID: runtimeSnapshot}
+	if runtimeSnapshot.Run.Status == kernel.RunStatusCancelled {
+		descendants, cancelErr := runner.cancelRelatedRuns(ctx, invocation.ExecutionRefID, nil, reason)
+		if cancelErr != nil {
+			return Snapshot{}, cancelErr
+		}
+		for runID, snapshot := range descendants {
+			runs[runID] = snapshot
+		}
+	}
+	if err = runner.syncInvocationRuns(ctx, turn, runs); err != nil {
+		return Snapshot{}, err
+	}
+	return runner.loadSnapshot(ctx, turn, nil)
 }
 
 func (runner *Runner) beginChildInvocation(
@@ -802,8 +819,8 @@ func (runner *Runner) childInvocationContext(
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, parent.ExecutionRefID)
-	if err != nil {
-		return childInvocationContext{}, err
+	if err != nil || terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		return childInvocationContext{}, errors.Join(ErrConflict, err)
 	}
 	return childInvocationContext{
 		turn: turn, parentExecutionRefID: parent.ExecutionRefID,

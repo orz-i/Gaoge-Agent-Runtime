@@ -12,7 +12,7 @@ const interactionParentInvocationID = "hiv_parent"
 
 func TestGenericInteractionWaitResolveAndReplay(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, _, _, _ := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, _, _, _, _ := newFeatureInvocationHarness(t)
 
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
@@ -53,7 +53,7 @@ func TestGenericInteractionWaitResolveAndReplay(t *testing.T) {
 }
 
 func TestResolveInteractionAfterCancellationLeavesInteractionWaiting(t *testing.T) {
-	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
 		Key: "cancelled-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
@@ -90,7 +90,7 @@ func TestResolveInteractionAfterCancellationLeavesInteractionWaiting(t *testing.
 
 func TestGenericInteractionAllowsOnlyOneWaitingInputPerTurn(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, _, _, _ := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, _, _, _, _ := newFeatureInvocationHarness(t)
 	first, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
 		Key: "first", Kind: harness.InteractionConfirmation, Schema: json.RawMessage(`{"type":"boolean"}`),
@@ -127,9 +127,76 @@ func TestGenericInteractionAllowsOnlyOneWaitingInputPerTurn(t *testing.T) {
 	}
 }
 
+func TestResolvedInteractionReplayDoesNotRewindLaterWait(t *testing.T) {
+	t.Parallel()
+	runner, turnID, parentItemID, _, _, _, _ := newFeatureInvocationHarness(t)
+	first, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
+		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		Key: "first-replay", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstInteraction := assertWaitingInteraction(t, first)
+	response := json.RawMessage(`{"candidateID":"candidate-2"}`)
+	if _, err = runner.ResolveInteraction(t.Context(), turnID, firstInteraction.ID,
+		harness.ResolveInteractionRequest{Response: response}); err != nil {
+		t.Fatal(err)
+	}
+	second, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
+		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		Key: "second-wait", Kind: harness.InteractionInput, Schema: json.RawMessage(`{"type":"string"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInteraction := interactionByKey(t, second, "second-wait")
+
+	replayed, err := runner.ResolveInteraction(t.Context(), turnID, firstInteraction.ID,
+		harness.ResolveInteractionRequest{Response: response})
+	if err != nil {
+		t.Fatalf("replay earlier resolution: %v", err)
+	}
+	if replayed.Turn.Status != harness.TurnWaitingInput ||
+		invocationByID(t, replayed, interactionParentInvocationID).Status != harness.InvocationWaitingInput {
+		t.Fatalf("earlier replay rewound owner state: turn=%#v invocations=%#v", replayed.Turn, replayed.Invocations)
+	}
+	persistedSecond := interactionByKey(t, replayed, "second-wait")
+	if persistedSecond.ID != secondInteraction.ID || persistedSecond.Status != harness.InteractionWaiting {
+		t.Fatalf("later interaction changed after replay: %#v", replayed.Interactions)
+	}
+}
+
+func TestResolvedInteractionReplayPreservesTerminalTurn(t *testing.T) {
+	t.Parallel()
+	runner, turnID, parentItemID, _, _, _, _ := newFeatureInvocationHarness(t)
+	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
+		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		Key: "terminal-replay", Kind: harness.InteractionConfirmation, Schema: json.RawMessage(`{"type":"boolean"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	interaction := assertWaitingInteraction(t, waiting)
+	response := json.RawMessage(`true`)
+	if _, err = runner.ResolveInteraction(t.Context(), turnID, interaction.ID,
+		harness.ResolveInteractionRequest{Response: response}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runner.Cancel(t.Context(), turnID, "operator request"); err != nil {
+		t.Fatal(err)
+	}
+
+	replayed, err := runner.ResolveInteraction(t.Context(), turnID, interaction.ID,
+		harness.ResolveInteractionRequest{Response: response})
+	if err != nil || replayed.Turn.Status != harness.TurnCancelled {
+		t.Fatalf("terminal replay snapshot=%#v err=%v", replayed.Turn, err)
+	}
+}
+
 func TestInteractionRequestReplayRepairsPartialWaitingProjection(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	request := harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
 		Key: "repair-wait", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
@@ -150,7 +217,7 @@ func TestInteractionRequestReplayRepairsPartialWaitingProjection(t *testing.T) {
 
 func TestInteractionResolutionReplayRepairsPartialOwnerProjection(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
 		Key: "repair-resolve", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
@@ -241,6 +308,17 @@ func invocationByID(t *testing.T, snapshot harness.Snapshot, id string) harness.
 	}
 	t.Fatalf("missing invocation %s: %#v", id, snapshot.Invocations)
 	return harness.Invocation{}
+}
+
+func interactionByKey(t *testing.T, snapshot harness.Snapshot, key string) harness.Interaction {
+	t.Helper()
+	for _, interaction := range snapshot.Interactions {
+		if interaction.Key == key {
+			return interaction
+		}
+	}
+	t.Fatalf("missing interaction %s: %#v", key, snapshot.Interactions)
+	return harness.Interaction{}
 }
 
 func countInteractionItems(items []harness.Item, status harness.ItemStatus) int {

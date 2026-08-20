@@ -261,21 +261,26 @@ type Dependencies struct {
 	Relations runrelation.Recorder
 }
 
+type runRelationReader interface {
+	ListChildren(context.Context, string) ([]runrelation.Relation, error)
+}
+
 // Runner owns durable Harness Session/Turn/Invocation/Item lifecycle. Runtime
 // Feature execution is represented by durable Capability Invocations.
 type Runner struct {
-	runtime   *kernel.Runtime
-	agent     AgentStarter
-	plans     PlanExecuteFeature
-	teams     TeamFeature
-	workflows WorkflowFeature
-	store     Store
-	clock     Clock
-	turnFeed  *TurnFeed
-	context   *runtimecontext.Builder
-	catalog   tools.Catalog
-	handoffs  HandoffStarter
-	relations runrelation.Recorder
+	runtime        *kernel.Runtime
+	agent          AgentStarter
+	plans          PlanExecuteFeature
+	teams          TeamFeature
+	workflows      WorkflowFeature
+	store          Store
+	clock          Clock
+	turnFeed       *TurnFeed
+	context        *runtimecontext.Builder
+	catalog        tools.Catalog
+	handoffs       HandoffStarter
+	relations      runrelation.Recorder
+	relationReader runRelationReader
 }
 
 // StartRequest starts or idempotently reloads one Harness Turn.
@@ -298,14 +303,18 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil || dependencies.Clock == nil {
 		return nil, ErrInvalidRequest
 	}
-	return &Runner{
+	runner := &Runner{
 		runtime: dependencies.Runtime, agent: dependencies.Agent,
 		plans: dependencies.Plans, teams: dependencies.Teams, workflows: dependencies.Workflows,
 		store: dependencies.Store, clock: dependencies.Clock,
 		turnFeed: dependencies.TurnFeed,
 		context:  dependencies.Context, catalog: dependencies.Catalog,
 		handoffs: dependencies.Handoffs, relations: dependencies.Relations,
-	}, nil
+	}
+	if reader, ok := dependencies.Relations.(runRelationReader); ok {
+		runner.relationReader = reader
+	}
+	return runner, nil
 }
 
 // Start starts the default direct-Agent capability as a durable top-level
@@ -466,40 +475,35 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 // Harness Turn state. C2 extends dispatch to the other explicit Feature adapters.
 func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (Snapshot, error) {
 	turnID = strings.TrimSpace(turnID)
-	for range maxRuntimeSyncRetryAttempts {
-		turn, err := runner.store.GetTurn(ctx, turnID)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if terminalTurnStatus(turn.Status) {
-			return runner.loadSnapshot(ctx, turn, nil)
-		}
-		invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-		if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
-			return Snapshot{}, errors.Join(ErrConflict, err)
-		}
-		runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
-			return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
-		}
-		cancelled, err := runner.runtime.Cancel(
-			ctx,
-			runtimeSnapshot.Run.ID,
-			runtimeSnapshot.Run.Revision,
-			strings.TrimSpace(reason),
-		)
-		if errors.Is(err, kernel.ErrConflict) {
-			continue
-		}
-		if err != nil {
-			return Snapshot{}, err
-		}
-		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, cancelled)
+	turn, err := runner.store.GetTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
 	}
-	return Snapshot{}, ErrConflict
+	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
+		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if !found {
+		return Snapshot{}, kernel.ErrNotFound
+	}
+	if runtimeSnapshot.Run.Status != kernel.RunStatusCancelled {
+		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	}
+	descendants, err := runner.cancelTurnDescendants(ctx, turn.ID, invocation.ID, invocation.ExecutionRefID, reason)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.syncInvocationRuns(ctx, turn, descendants); err != nil {
+		return Snapshot{}, err
+	}
+	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
 }
 
 func (runner *Runner) syncRuntimeSnapshotWithRetry(
@@ -1037,9 +1041,12 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	if runtimeSnapshot == nil && hasRootInvocation && strings.TrimSpace(rootInvocation.ExecutionRefID) != "" {
 		loaded, loadErr := runner.runtime.Load(ctx, rootInvocation.ExecutionRefID)
 		if loadErr != nil {
-			return Snapshot{}, loadErr
+			if !errors.Is(loadErr, kernel.ErrNotFound) || turn.Status != TurnFailed || rootInvocation.Status != InvocationFailed {
+				return Snapshot{}, loadErr
+			}
+		} else {
+			runtimeSnapshot = &loaded
 		}
-		runtimeSnapshot = &loaded
 	}
 	if runtimeSnapshot != nil && runtimeSnapshot.Result != nil {
 		result.Output = &Output{

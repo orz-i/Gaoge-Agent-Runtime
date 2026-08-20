@@ -103,8 +103,8 @@ func (runner *Runner) prepareDelegation(
 		return handoff.Delegation{}, kernel.Snapshot{}, err
 	}
 	parent, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
-	if err != nil {
-		return handoff.Delegation{}, kernel.Snapshot{}, err
+	if err != nil || terminalRuntimeStatus(parent.Run.Status) {
+		return handoff.Delegation{}, kernel.Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	delegationID := stableID("hd", turn.ID, request.MemberID, request.Goal)
 	childRunID := stableID("hchild", invocation.ExecutionRefID, delegationID)

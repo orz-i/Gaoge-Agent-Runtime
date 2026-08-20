@@ -155,6 +155,50 @@ func TestHarnessDelegationRelationsWaitForRootTerminalState(t *testing.T) {
 	assertTerminalDelegationRelations(t, relations, result)
 }
 
+func TestHarnessCancelCascadesToUnprojectedDelegation(t *testing.T) {
+	t.Parallel()
+	client := &blockingDelegationModel{
+		secondChildStarted: make(chan struct{}),
+		releaseSecondChild: make(chan struct{}),
+	}
+	release := sync.OnceFunc(func() { close(client.releaseSecondChild) })
+	defer release()
+	runner, relations, runtime := newDelegationHarnessWithRuntime(t, client, 4, false)
+	hostThread := harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-cancel"}
+	hostTurn := harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-cancel"}
+	result := startBlockingDelegationHarness(t, runner, hostThread, hostTurn)
+	waitForSecondDelegation(t, client.secondChildStarted)
+	assertNoDelegationRelations(t, relations, client.rootExecutionRef())
+
+	sessionID, err := harness.SessionID(hostThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := harness.TurnID(sessionID, hostTurn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := runner.Load(t.Context(), turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeChildRunID := activeDelegationRunID(t, runtime, before.Items)
+	cancelled, err := runner.Cancel(t.Context(), turnID, "operator request")
+	if err != nil || cancelled.Turn.Status != harness.TurnCancelled {
+		t.Fatalf("cancelled snapshot=%#v err=%v", cancelled.Turn, err)
+	}
+	release()
+	activeChild, err := runtime.Load(t.Context(), activeChildRunID)
+	if err != nil || activeChild.Run.Status != kernel.RunStatusCancelled {
+		t.Fatalf("delegated child=%#v err=%v", activeChild.Run, err)
+	}
+	select {
+	case <-result:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled delegated Harness turn did not return")
+	}
+}
+
 func TestHarnessDelegatesDifferentGoalsToSameMember(t *testing.T) {
 	t.Parallel()
 	client := &sameMemberDelegationModel{}
@@ -335,6 +379,17 @@ func newDelegationHarnessWithOptions(
 	contextAware bool,
 	policies ...harness.DelegationToolPolicy,
 ) (*harness.Runner, *runrelation.Registry) {
+	runner, relations, _ := newDelegationHarnessWithRuntime(t, client, maxToolCalls, contextAware, policies...)
+	return runner, relations
+}
+
+func newDelegationHarnessWithRuntime(
+	t *testing.T,
+	client model.Client,
+	maxToolCalls int,
+	contextAware bool,
+	policies ...harness.DelegationToolPolicy,
+) (*harness.Runner, *runrelation.Registry, *kernel.Runtime) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -371,7 +426,24 @@ func newDelegationHarnessWithOptions(
 	if err = delegationTool.Bind(runner); err != nil {
 		t.Fatal(err)
 	}
-	return runner, relations
+	return runner, relations, runtime
+}
+
+func activeDelegationRunID(t *testing.T, runtime *kernel.Runtime, items []harness.Item) string {
+	t.Helper()
+	seen := make(map[string]struct{})
+	for _, item := range itemsOfKind(items, harness.ItemDelegation) {
+		if _, ok := seen[item.RunID]; ok {
+			continue
+		}
+		seen[item.RunID] = struct{}{}
+		snapshot, err := runtime.Load(t.Context(), item.RunID)
+		if err == nil && snapshot.Run.Status == kernel.RunStatusRunning {
+			return item.RunID
+		}
+	}
+	t.Fatal("missing active delegated child Run")
+	return ""
 }
 
 func delegationAgentDependencies(
