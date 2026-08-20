@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"time"
 
 	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 )
@@ -17,6 +18,7 @@ type Store interface {
 	GetInvocation(context.Context, string) (Invocation, error)
 	GetInvocationByExecutionRefID(context.Context, string) (Invocation, error)
 	UpdateInvocation(context.Context, Invocation, uint64) (Invocation, error)
+	RetryInvocation(context.Context, string, uint64, string, time.Time) (Invocation, error)
 	ListInvocations(context.Context, string) ([]Invocation, error)
 	CreateInteraction(context.Context, Interaction) (Interaction, bool, error)
 	GetInteraction(context.Context, string) (Interaction, error)

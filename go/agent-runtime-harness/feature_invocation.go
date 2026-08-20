@@ -58,22 +58,39 @@ type topLevelFeatureEnvelope struct {
 	now     time.Time
 }
 
+type teamInvocationInput struct {
+	Goal    string             `json:"goal"`
+	Mode    team.ExecutionMode `json:"mode"`
+	Members []team.Member      `json:"members"`
+	Join    handoff.Join       `json:"join"`
+}
+
+type planExecuteInvocationInput struct {
+	Goal           string                     `json:"goal"`
+	Model          string                     `json:"model"`
+	ApprovalPolicy planexecute.ApprovalPolicy `json:"approvalPolicy"`
+	MaxSteps       int                        `json:"maxSteps"`
+}
+
+type workflowInvocationInput struct {
+	Goal       string              `json:"goal"`
+	Definition workflow.Definition `json:"definition"`
+	Input      json.RawMessage     `json:"input"`
+}
+
 // StartTeamTurn starts Team without creating a placeholder Agent root.
 func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest) (Snapshot, error) {
 	if runner == nil || runner.teams == nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	inputHash, err := hashInvocationValue(struct {
-		Goal    string
-		Mode    team.ExecutionMode
-		Members []team.Member
-		Join    handoff.Join
-	}{request.Goal, request.Mode, request.Members, request.Join})
+	input, inputHash, err := marshalInvocationValue(teamInvocationInput{
+		Goal: strings.TrimSpace(request.Goal), Mode: request.Mode, Members: append([]team.Member(nil), request.Members...), Join: request.Join,
+	})
 	if err != nil {
 		return Snapshot{}, err
 	}
 	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityTeam, ExecutionTeam, inputHash,
+		ctx, request.StartRequest, CapabilityTeam, ExecutionTeam, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -96,17 +113,15 @@ func (runner *Runner) StartPlanExecuteTurn(ctx context.Context, request PlanExec
 	if runner == nil || runner.plans == nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	inputHash, err := hashInvocationValue(struct {
-		Goal           string
-		Model          string
-		ApprovalPolicy planexecute.ApprovalPolicy
-		MaxSteps       int
-	}{request.Goal, request.Config.Model, request.ApprovalPolicy, request.MaxSteps})
+	input, inputHash, err := marshalInvocationValue(planExecuteInvocationInput{
+		Goal: strings.TrimSpace(request.Goal), Model: strings.TrimSpace(request.Config.Model),
+		ApprovalPolicy: request.ApprovalPolicy, MaxSteps: request.MaxSteps,
+	})
 	if err != nil {
 		return Snapshot{}, err
 	}
 	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityPlanExecute, ExecutionPlanExecute, inputHash,
+		ctx, request.StartRequest, CapabilityPlanExecute, ExecutionPlanExecute, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -129,16 +144,14 @@ func (runner *Runner) StartWorkflowTurn(ctx context.Context, request WorkflowTur
 	if runner == nil || runner.workflows == nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	inputHash, err := hashInvocationValue(struct {
-		Goal       string
-		Definition workflow.Definition
-		Input      json.RawMessage
-	}{request.Goal, request.Definition, request.Input})
+	input, inputHash, err := marshalInvocationValue(workflowInvocationInput{
+		Goal: strings.TrimSpace(request.Goal), Definition: request.Definition, Input: append(json.RawMessage(nil), request.Input...),
+	})
 	if err != nil {
 		return Snapshot{}, err
 	}
 	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityWorkflow, ExecutionWorkflow, inputHash,
+		ctx, request.StartRequest, CapabilityWorkflow, ExecutionWorkflow, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -161,6 +174,7 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 	request StartRequest,
 	capabilityKey string,
 	executionClass ExecutionClass,
+	input json.RawMessage,
 	inputHash string,
 ) (topLevelFeatureStart, error) {
 	envelope, err := runner.prepareTopLevelFeatureEnvelope(ctx, request)
@@ -168,7 +182,7 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 		return topLevelFeatureStart{}, err
 	}
 	invocation, err := runner.prepareTopLevelFeatureInvocation(
-		ctx, envelope, capabilityKey, executionClass, inputHash,
+		ctx, envelope, capabilityKey, executionClass, input, inputHash,
 	)
 	if err != nil {
 		return topLevelFeatureStart{}, err
@@ -215,6 +229,7 @@ func (runner *Runner) prepareTopLevelFeatureInvocation(
 	envelope topLevelFeatureEnvelope,
 	capabilityKey string,
 	executionClass ExecutionClass,
+	input json.RawMessage,
 	inputHash string,
 ) (Invocation, error) {
 	requestID := firstNonEmpty(strings.TrimSpace(envelope.request.RequestID), envelope.turn.ID)
@@ -225,7 +240,8 @@ func (runner *Runner) prepareTopLevelFeatureInvocation(
 	invocation, fresh, err := runner.store.CreateInvocation(ctx, Invocation{
 		ID: invocationID, TurnID: envelope.turn.ID, CapabilityKey: capabilityKey,
 		DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: executionClass,
-		InputHash: inputHash, ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
+		Input: append(json.RawMessage(nil), input...), InputHash: inputHash,
+		ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
 		Attempt: 1, OutputRefs: []HostRef{}, Revision: 1, CreatedAt: envelope.now, UpdatedAt: envelope.now,
 	})
 	if err != nil {
@@ -352,18 +368,15 @@ func (runner *Runner) StartTeamInvocation(
 	if runner == nil || runner.teams == nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	inputHash, err := hashInvocationValue(struct {
-		Goal    string
-		Mode    team.ExecutionMode
-		Members []team.Member
-		Join    handoff.Join
-	}{request.Goal, request.Mode, request.Members, request.Join})
+	input, inputHash, err := marshalInvocationValue(teamInvocationInput{
+		Goal: strings.TrimSpace(request.Goal), Mode: request.Mode, Members: append([]team.Member(nil), request.Members...), Join: request.Join,
+	})
 	if err != nil {
 		return Snapshot{}, err
 	}
 	invocation, child, replayed, err := runner.beginChildInvocation(
 		ctx, turnID, request.ParentItemID, request.RequestID,
-		CapabilityTeam, ExecutionTeam, inputHash,
+		CapabilityTeam, ExecutionTeam, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -390,18 +403,16 @@ func (runner *Runner) StartPlanExecuteInvocation(
 	if runner == nil || runner.plans == nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	inputHash, err := hashInvocationValue(struct {
-		Goal           string
-		Model          string
-		ApprovalPolicy planexecute.ApprovalPolicy
-		MaxSteps       int
-	}{request.Goal, request.Model, request.ApprovalPolicy, request.MaxSteps})
+	input, inputHash, err := marshalInvocationValue(planExecuteInvocationInput{
+		Goal: strings.TrimSpace(request.Goal), Model: strings.TrimSpace(request.Model),
+		ApprovalPolicy: request.ApprovalPolicy, MaxSteps: request.MaxSteps,
+	})
 	if err != nil {
 		return Snapshot{}, err
 	}
 	invocation, child, replayed, err := runner.beginChildInvocation(
 		ctx, turnID, request.ParentItemID, request.RequestID,
-		CapabilityPlanExecute, ExecutionPlanExecute, inputHash,
+		CapabilityPlanExecute, ExecutionPlanExecute, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -428,17 +439,15 @@ func (runner *Runner) StartWorkflowInvocation(
 	if runner == nil || runner.workflows == nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	inputHash, err := hashInvocationValue(struct {
-		Goal       string
-		Definition workflow.Definition
-		Input      json.RawMessage
-	}{request.Goal, request.Definition, request.Input})
+	input, inputHash, err := marshalInvocationValue(workflowInvocationInput{
+		Goal: strings.TrimSpace(request.Goal), Definition: request.Definition, Input: append(json.RawMessage(nil), request.Input...),
+	})
 	if err != nil {
 		return Snapshot{}, err
 	}
 	invocation, child, replayed, err := runner.beginChildInvocation(
 		ctx, turnID, request.ParentItemID, request.RequestID,
-		CapabilityWorkflow, ExecutionWorkflow, inputHash,
+		CapabilityWorkflow, ExecutionWorkflow, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -482,6 +491,137 @@ func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string)
 	return snapshot, errors.Join(resumeErr, syncErr)
 }
 
+// RetryInvocation starts the next durable attempt of one failed or cancelled
+// child Feature Invocation. Replaying a partially-started retry repairs the
+// same attempt rather than allocating another execution identity.
+func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) (Snapshot, error) {
+	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if strings.TrimSpace(invocation.ParentItemID) == "" || len(invocation.Input) == 0 {
+		return Snapshot{}, ErrConflict
+	}
+	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	if err != nil || terminalTurnStatus(turn.Status) {
+		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if invocation.Attempt > 1 && !retryableInvocationStatus(invocation.Status) {
+		return runner.replayRetriedInvocation(ctx, turn, invocation)
+	}
+	if !retryableInvocationStatus(invocation.Status) {
+		return Snapshot{}, ErrConflict
+	}
+	return runner.startNextInvocationAttempt(ctx, turn, invocation)
+}
+
+func (runner *Runner) startNextInvocationAttempt(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+) (Snapshot, error) {
+	nextAttempt := invocation.Attempt + 1
+	nextRef := invocationExecutionRefID(invocation.ID, invocation.ExecutionClass, nextAttempt)
+	retried, err := runner.store.RetryInvocation(ctx, invocation.ID, invocation.Revision, nextRef, runner.clock.Now().UTC())
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.recordInvocationItem(ctx, retried); err != nil {
+		return Snapshot{}, err
+	}
+	return runner.startRetriedInvocation(ctx, turn, retried)
+}
+
+func (runner *Runner) replayRetriedInvocation(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+) (Snapshot, error) {
+	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+	if err == nil {
+		return runner.syncChildInvocationSnapshot(ctx, turn, invocation, loaded)
+	}
+	if !errors.Is(err, kernel.ErrNotFound) || invocation.Status != InvocationAccepted {
+		return Snapshot{}, err
+	}
+	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
+		return Snapshot{}, err
+	}
+	return runner.startRetriedInvocation(ctx, turn, invocation)
+}
+
+func (runner *Runner) startRetriedInvocation(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+) (Snapshot, error) {
+	child, err := runner.childInvocationContext(ctx, turn.ID, invocation.ParentItemID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if runner.relations != nil {
+		if _, err = runner.relations.Ensure(ctx, runrelation.Draft{
+			ParentRunID: child.parentExecutionRefID, ChildRunID: invocation.ExecutionRefID,
+			Kind: runrelation.KindCapability, OwnerNodeID: invocationRelationOwnerID(invocation),
+		}); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	runtimeSnapshot, startErr := runner.startInvocationAttempt(ctx, invocation, child)
+	return runner.finishChildInvocationStart(ctx, turn, invocation, runtimeSnapshot, startErr)
+}
+
+func (runner *Runner) startInvocationAttempt(
+	ctx context.Context,
+	invocation Invocation,
+	child childInvocationContext,
+) (kernel.Snapshot, error) {
+	requestID := stableID("hretry", invocation.ID, attemptString(invocation.Attempt))
+	switch invocation.ExecutionClass {
+	case ExecutionTeam:
+		return runner.startRetriedTeam(ctx, invocation, child, requestID)
+	case ExecutionPlanExecute:
+		return runner.startRetriedPlanExecute(ctx, invocation, child, requestID)
+	case ExecutionWorkflow:
+		return runner.startRetriedWorkflow(ctx, invocation, child, requestID)
+	default:
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+}
+
+func (runner *Runner) startRetriedTeam(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
+	if runner.teams == nil {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	var input teamInvocationInput
+	if err := json.Unmarshal(invocation.Input, &input); err != nil {
+		return kernel.Snapshot{}, ErrConflict
+	}
+	return runner.teams.StartRun(ctx, team.StartRequest{ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal, Mode: input.Mode, Members: append([]team.Member(nil), input.Members...), Join: input.Join})
+}
+
+func (runner *Runner) startRetriedPlanExecute(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
+	if runner.plans == nil {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	var input planExecuteInvocationInput
+	if err := json.Unmarshal(invocation.Input, &input); err != nil {
+		return kernel.Snapshot{}, ErrConflict
+	}
+	return runner.plans.StartRun(ctx, planexecute.StartRequest{ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal, Model: input.Model, ApprovalPolicy: input.ApprovalPolicy, MaxSteps: input.MaxSteps})
+}
+
+func (runner *Runner) startRetriedWorkflow(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
+	if runner.workflows == nil {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	var input workflowInvocationInput
+	if err := json.Unmarshal(invocation.Input, &input); err != nil {
+		return kernel.Snapshot{}, ErrConflict
+	}
+	return runner.workflows.StartRun(ctx, workflow.StartRequest{ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal, Definition: input.Definition, Input: append(json.RawMessage(nil), input.Input...)})
+}
+
 // CancelInvocation cancels one child Runtime Feature by its durable Invocation identity.
 func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason string) (Snapshot, error) {
 	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
@@ -505,6 +645,7 @@ func (runner *Runner) beginChildInvocation(
 	ctx context.Context,
 	turnID, parentItemID, requestID, capabilityKey string,
 	executionClass ExecutionClass,
+	input json.RawMessage,
 	inputHash string,
 ) (Invocation, childInvocationContext, bool, error) {
 	child, err := runner.childInvocationContext(ctx, turnID, parentItemID)
@@ -519,7 +660,8 @@ func (runner *Runner) beginChildInvocation(
 	value := Invocation{
 		ID: invocationID, TurnID: child.turn.ID, ParentItemID: strings.TrimSpace(parentItemID),
 		CapabilityKey: capabilityKey, DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: executionClass,
-		InputHash: inputHash, ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
+		Input: append(json.RawMessage(nil), input...), InputHash: inputHash,
+		ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
 		Attempt: 1, OutputRefs: []HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	created, fresh, err := runner.store.CreateInvocation(ctx, value)
@@ -532,7 +674,7 @@ func (runner *Runner) beginChildInvocation(
 	if runner.relations != nil {
 		if _, err = runner.relations.Ensure(ctx, runrelation.Draft{
 			ParentRunID: child.parentExecutionRefID, ChildRunID: created.ExecutionRefID,
-			Kind: runrelation.KindCapability, OwnerNodeID: created.ID,
+			Kind: runrelation.KindCapability, OwnerNodeID: invocationRelationOwnerID(created),
 		}); err != nil {
 			return Invocation{}, childInvocationContext{}, false, err
 		}
@@ -721,7 +863,7 @@ func (runner *Runner) projectChildInvocationOutcome(
 		}
 		now := runner.clock.Now().UTC()
 		_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
-			ID: stableID("hico", invocation.ID, "result"), TurnID: invocation.TurnID,
+			ID: stableID("hico", invocation.ID, "result", attemptString(invocation.Attempt)), TurnID: invocation.TurnID,
 			Kind: ItemArtifact, Status: ItemCompleted, RunID: invocation.ExecutionRefID,
 			InvocationID: invocation.ID, ParentItemID: invocationLifecycleItemID(invocation, InvocationAccepted, 1),
 			Payload: payload, CreatedAt: now, UpdatedAt: now,
@@ -740,18 +882,10 @@ func (runner *Runner) projectChildInvocationOutcome(
 	}
 	now := runner.clock.Now().UTC()
 	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
-		ID: stableID("hicd", invocation.ID, string(invocation.Status)), TurnID: invocation.TurnID,
+		ID: stableID("hicd", invocation.ID, string(invocation.Status), attemptString(invocation.Attempt)), TurnID: invocation.TurnID,
 		Kind: ItemDiagnostic, Status: invocationItemStatus(invocation.Status), RunID: invocation.ExecutionRefID,
 		InvocationID: invocation.ID, ParentItemID: invocationLifecycleItemID(invocation, InvocationAccepted, 1),
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err
-}
-
-func hashInvocationValue(value any) (string, error) {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "", err
-	}
-	return hashInvocationInput(string(raw)), nil
 }

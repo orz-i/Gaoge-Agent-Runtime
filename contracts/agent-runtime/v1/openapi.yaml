@@ -225,6 +225,19 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
         default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/invocations/{invocationID}/retry:
+    post:
+      operationId: retryHarnessInvocation
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+        - $ref: '#/components/parameters/HarnessInvocationID'
+      responses:
+        '200':
+          description: Harness child Invocation retried as the next durable attempt
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
 components:
   parameters:
     RunID:
@@ -234,6 +247,11 @@ components:
       schema: {type: string, minLength: 1, maxLength: 128}
     HarnessInteractionID:
       name: interactionID
+      in: path
+      required: true
+      schema: {type: string, minLength: 1, maxLength: 128}
+    HarnessInvocationID:
+      name: invocationID
       in: path
       required: true
       schema: {type: string, minLength: 1, maxLength: 128}

@@ -133,6 +133,12 @@ export class RuntimeClient {
           { method: "POST", body: JSON.stringify({ response }) },
           request,
         ),
+        retryInvocation: (turnID: string, invocationID: string, request?: RequestOptions) =>
+          this.request<HarnessTurnSnapshotDTO>(
+            `/harness/turns/${pathPart(turnID)}/invocations/${pathPart(invocationID)}/retry`,
+            { method: "POST" },
+            request,
+          ),
       },
     };
     this.runs = {

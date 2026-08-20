@@ -158,6 +158,38 @@ func (handler *Handler) ResolveInteraction(context *gin.Context) {
 	context.JSON(stdhttp.StatusOK, response)
 }
 
+func (handler *Handler) RetryInvocation(context *gin.Context) {
+	snapshot, ok := handler.authorizedTurn(context)
+	if !ok {
+		return
+	}
+	invocationID := strings.TrimSpace(context.Param("invocation_id"))
+	if invocationID == "" || !snapshotContainsInvocation(snapshot, invocationID) {
+		runtimehttp.WriteError(context, stdhttp.StatusNotFound, "harness.invocation_not_found", "Harness invocation not found")
+		return
+	}
+	retried, err := handler.runner.RetryInvocation(context.Request.Context(), invocationID)
+	if err != nil {
+		writeHarnessError(context, err)
+		return
+	}
+	response, err := snapshotResponse(retried)
+	if err != nil {
+		writeHarnessError(context, err)
+		return
+	}
+	context.JSON(stdhttp.StatusOK, response)
+}
+
+func snapshotContainsInvocation(snapshot harness.Snapshot, invocationID string) bool {
+	for _, invocation := range snapshot.Invocations {
+		if invocation.ID == invocationID {
+			return true
+		}
+	}
+	return false
+}
+
 func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
 	invocations := make([]InvocationResponse, 0, len(snapshot.Invocations))
 	for _, invocation := range snapshot.Invocations {
@@ -338,6 +370,7 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 	routes.GET("/harness/turns/:turn_id/feed", module.Handler.StreamTurnFeed)
 	routes.POST("/harness/turns/:turn_id/approval", module.Handler.ResolveApproval)
 	routes.POST("/harness/turns/:turn_id/interactions/:interaction_id", module.Handler.ResolveInteraction)
+	routes.POST("/harness/turns/:turn_id/invocations/:invocation_id/retry", module.Handler.RetryInvocation)
 }
 
 func (handler *Handler) GetTurn(context *gin.Context) {

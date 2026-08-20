@@ -1,6 +1,7 @@
 package harnesspostgres_test
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +56,56 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	invocation := assertInvocationLifecycle(t, store, turn.ID, now)
 	assertInteractionLifecycle(t, store, turn.ID, invocation.ID, now)
 	assertItemLifecycle(t, store, turn.ID, invocation.ID, now)
+}
+
+func TestStoreRetriesInvocationWithAtomicAttemptRotation(t *testing.T) {
+	store := newStore(t)
+	now := time.Date(2026, 8, 20, 4, 20, 0, 0, time.UTC)
+	value := createRetryInvocationFixture(t, store, now)
+	retried, err := store.RetryInvocation(
+		t.Context(), value.ID, value.Revision, "run_retry_pg_2", now.Add(time.Second),
+	)
+	assertRetriedInvocation(t, store, value, retried, err)
+}
+
+func createRetryInvocationFixture(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	now time.Time,
+) harness.Invocation {
+	t.Helper()
+	input := json.RawMessage(`{"goal":"retry"}`)
+	hash := sha256.Sum256(input)
+	value := harness.Invocation{
+		ID: "hiv_retry_pg", TurnID: "turn_retry_pg", CapabilityKey: harness.CapabilityTeam,
+		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionTeam,
+		Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_pg_1",
+		Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if _, fresh, err := store.CreateInvocation(t.Context(), value); err != nil || !fresh {
+		t.Fatalf("create retry fixture fresh=%v err=%v", fresh, err)
+	}
+	return value
+}
+
+func assertRetriedInvocation(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	original harness.Invocation,
+	retried harness.Invocation,
+	err error,
+) {
+	t.Helper()
+	if err != nil || retried.Attempt != 2 || retried.Status != harness.InvocationAccepted ||
+		retried.ExecutionRefID != "run_retry_pg_2" || string(retried.Input) != string(original.Input) ||
+		retried.InputHash != original.InputHash {
+		t.Fatalf("retry invocation=%#v err=%v", retried, err)
+	}
+	byRef, loadErr := store.GetInvocationByExecutionRefID(t.Context(), retried.ExecutionRefID)
+	if loadErr != nil || byRef.ID != original.ID {
+		t.Fatalf("retry execution lookup=%#v err=%v", byRef, loadErr)
+	}
 }
 
 func assertSessionLifecycle(t *testing.T, store *harnesspostgres.Store, session harness.Session) {

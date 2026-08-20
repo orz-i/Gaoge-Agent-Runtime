@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"reflect"
 	"slices"
@@ -30,7 +31,8 @@ type MemoryStore struct {
 func sameInvocationIdentity(left, right Invocation) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.ParentItemID == right.ParentItemID &&
 		left.CapabilityKey == right.CapabilityKey && left.DefinitionVersion == right.DefinitionVersion &&
-		left.ExecutionClass == right.ExecutionClass && left.InputHash == right.InputHash && left.Attempt == right.Attempt
+		left.ExecutionClass == right.ExecutionClass && bytes.Equal(left.Input, right.Input) &&
+		left.InputHash == right.InputHash && left.Attempt == right.Attempt
 }
 
 func (store *MemoryStore) CreateInvocation(_ context.Context, value Invocation) (Invocation, bool, error) {
@@ -97,6 +99,48 @@ func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, 
 	value.Revision = expectedRevision + 1
 	store.invocations[value.ID] = cloneInvocation(value)
 	return cloneInvocation(value), nil
+}
+
+func (store *MemoryStore) RetryInvocation(
+	_ context.Context,
+	invocationID string,
+	expectedRevision uint64,
+	nextExecutionRefID string,
+	now time.Time,
+) (Invocation, error) {
+	invocationID = strings.TrimSpace(invocationID)
+	nextExecutionRefID = strings.TrimSpace(nextExecutionRefID)
+	if invalidInvocationRetryRequest(store, invocationID, expectedRevision, nextExecutionRefID, now) {
+		return Invocation{}, ErrInvalidRequest
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	current, ok := store.invocations[invocationID]
+	if !ok {
+		return Invocation{}, ErrNotFound
+	}
+	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 {
+		return Invocation{}, ErrConflict
+	}
+	if owner := store.invocationExecutionRefs[nextExecutionRefID]; owner != "" && owner != current.ID {
+		return Invocation{}, ErrConflict
+	}
+	delete(store.invocationExecutionRefs, current.ExecutionRefID)
+	current.Attempt++
+	current.ExecutionRefID = nextExecutionRefID
+	current.Status = InvocationAccepted
+	current.OutputRefs = []HostRef{}
+	current.ErrorCode = ""
+	current.ErrorDetail = ""
+	current.Revision++
+	current.UpdatedAt = now.UTC()
+	store.invocations[current.ID] = cloneInvocation(current)
+	store.invocationExecutionRefs[nextExecutionRefID] = current.ID
+	return cloneInvocation(current), nil
+}
+
+func invalidInvocationRetryRequest(store *MemoryStore, invocationID string, expectedRevision uint64, nextExecutionRefID string, now time.Time) bool {
+	return store == nil || invocationID == "" || expectedRevision == 0 || nextExecutionRefID == "" || now.IsZero()
 }
 
 func (store *MemoryStore) ListInvocations(_ context.Context, turnID string) ([]Invocation, error) {

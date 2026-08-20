@@ -5,15 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 )
 
 const (
-	CapabilityAgent       = "runtime.agent"
-	CapabilityTeam        = "runtime.team"
-	CapabilityPlanExecute = "runtime.plan_execute"
-	CapabilityWorkflow    = "runtime.workflow"
+	CapabilityAgent          = "runtime.agent"
+	CapabilityTeam           = "runtime.team"
+	CapabilityPlanExecute    = "runtime.plan_execute"
+	CapabilityWorkflow       = "runtime.workflow"
 	RuntimeCapabilityVersion = "v1"
 )
 
@@ -52,6 +53,7 @@ type Invocation struct {
 	CapabilityKey     string           `json:"capabilityKey"`
 	DefinitionVersion string           `json:"definitionVersion,omitempty"`
 	ExecutionClass    ExecutionClass   `json:"executionClass"`
+	Input             json.RawMessage  `json:"input,omitempty"`
 	InputHash         string           `json:"inputHash,omitempty"`
 	ExecutionRefID    string           `json:"executionRefID,omitempty"`
 	Status            InvocationStatus `json:"status"`
@@ -85,6 +87,34 @@ func AgentExecutionRefID(invocationID string) string {
 	return stableID("hr", invocationID)
 }
 
+func invocationExecutionRefID(invocationID string, executionClass ExecutionClass, attempt int) string {
+	invocationID = strings.TrimSpace(invocationID)
+	if invocationID == "" || attempt <= 0 {
+		return ""
+	}
+	prefix := "hcr"
+	if executionClass == ExecutionAgent {
+		prefix = "hr"
+	}
+	if attempt == 1 {
+		return stableID(prefix, invocationID)
+	}
+	return stableID(prefix, invocationID, attemptString(attempt))
+}
+
+func retryableInvocationStatus(status InvocationStatus) bool {
+	return status == InvocationFailed || status == InvocationCancelled
+}
+
+func attemptString(attempt int) string { return strconv.Itoa(attempt) }
+
+func invocationRelationOwnerID(invocation Invocation) string {
+	if invocation.Attempt <= 1 {
+		return invocation.ID
+	}
+	return stableID("hivattempt", invocation.ID, attemptString(invocation.Attempt))
+}
+
 func loadTopLevelInvocation(ctx context.Context, store Store, turnID string) (Invocation, error) {
 	values, err := store.ListInvocations(ctx, strings.TrimSpace(turnID))
 	if err != nil {
@@ -109,23 +139,46 @@ func AgentInvocationID(turnID, requestID string) (string, error) {
 	return InvocationID(turnID, "", CapabilityAgent, requestID)
 }
 
-func newDirectAgentInvocation(turnID, requestID, goal string, now time.Time) (Invocation, error) {
+type agentInvocationInput struct {
+	Goal             string   `json:"goal"`
+	RequiredToolKeys []string `json:"requiredToolKeys,omitempty"`
+}
+
+func newDirectAgentInvocation(turnID, requestID, goal string, requiredToolKeys []string, now time.Time) (Invocation, error) {
 	id, err := AgentInvocationID(turnID, requestID)
+	if err != nil {
+		return Invocation{}, err
+	}
+	input, inputHash, err := marshalInvocationValue(agentInvocationInput{
+		Goal: strings.TrimSpace(goal), RequiredToolKeys: normalizeStrings(requiredToolKeys),
+	})
 	if err != nil {
 		return Invocation{}, err
 	}
 	return Invocation{
 		ID: id, TurnID: strings.TrimSpace(turnID), CapabilityKey: CapabilityAgent,
 		DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: ExecutionAgent,
-		InputHash: hashInvocationInput(goal), ExecutionRefID: AgentExecutionRefID(id),
+		Input: input, InputHash: inputHash, ExecutionRefID: AgentExecutionRefID(id),
 		Status: InvocationAccepted, Attempt: 1, OutputRefs: []HostRef{}, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
 	}, nil
 }
 
-func hashInvocationInput(value string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(value)))
+func marshalInvocationValue(value any) (json.RawMessage, string, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, "", err
+	}
+	return raw, hashInvocationBytes(raw), nil
+}
+
+func hashInvocationBytes(value []byte) string {
+	sum := sha256.Sum256(value)
 	return hex.EncodeToString(sum[:])
+}
+
+func hashInvocationInput(value string) string {
+	return hashInvocationBytes([]byte(strings.TrimSpace(value)))
 }
 
 func topLevelInvocation(values []Invocation) (Invocation, bool) {
@@ -174,6 +227,9 @@ func validInvocation(value Invocation) bool {
 	if value.ExecutionRefID == "" && value.Status != InvocationAccepted {
 		return false
 	}
+	if len(value.Input) != 0 && (!json.Valid(value.Input) || hashInvocationBytes(value.Input) != value.InputHash) {
+		return false
+	}
 	return validInvocationOutputRefs(value.OutputRefs)
 }
 
@@ -207,6 +263,7 @@ func validInvocationOutputRefs(values []HostRef) bool {
 }
 
 func cloneInvocation(value Invocation) Invocation {
+	value.Input = append(json.RawMessage(nil), value.Input...)
 	value.OutputRefs = append([]HostRef(nil), value.OutputRefs...)
 	return value
 }

@@ -17,6 +17,11 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
 )
 
+const (
+	retryTeamMemberGoal = "draft"
+	retryTeamMemberID   = "writer"
+)
+
 func TestTypedFeatureInvocationsShareHarnessTurnAndRecoverByTurnID(t *testing.T) {
 	t.Parallel()
 	runner, turnID, parentItemID, relations, parentRunID, _ := newFeatureInvocationHarness(t)
@@ -24,6 +29,102 @@ func TestTypedFeatureInvocationsShareHarnessTurnAndRecoverByTurnID(t *testing.T)
 	assertStartedPlanInvocation(t, runner, turnID, parentItemID)
 	assertStartedWorkflowInvocation(t, runner, turnID, parentItemID)
 	assertRecoveredFeatureInvocationTree(t, runner, turnID, relations, parentRunID)
+}
+
+func TestRetryInvocationAdvancesOneAttemptAndReplaysTerminalAttempt(t *testing.T) {
+	t.Parallel()
+	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
+		ParentItemID: parentItemID, RequestID: "retry-team", Goal: "retry this team",
+		Mode: team.ExecutionSequential, Members: []team.Member{{ID: retryTeamMemberID, Goal: retryTeamMemberGoal}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := teamChildInvocation(t, started)
+	failed := markInvocationFailed(t, store, first)
+
+	retried, err := runner.RetryInvocation(t.Context(), failed.ID)
+	if err != nil {
+		t.Fatalf("retry invocation: %v", err)
+	}
+	second := teamChildInvocation(t, retried)
+	if second.Attempt != 2 || second.Status != harness.InvocationCompleted || second.ExecutionRefID == first.ExecutionRefID {
+		t.Fatalf("retry did not advance exactly one attempt: first=%#v second=%#v", first, second)
+	}
+	if got := invocationArtifactCount(retried.Items, second.ID); got != 2 {
+		t.Fatalf("retry artifacts=%d items=%#v", got, retried.Items)
+	}
+
+	replayed, err := runner.RetryInvocation(t.Context(), second.ID)
+	if err != nil {
+		t.Fatalf("replay terminal retry: %v", err)
+	}
+	replayedInvocation := teamChildInvocation(t, replayed)
+	if replayedInvocation.Attempt != 2 || replayedInvocation.ExecutionRefID != second.ExecutionRefID {
+		t.Fatalf("terminal retry replay allocated another attempt: %#v", replayedInvocation)
+	}
+}
+
+func TestRetryInvocationRecoversAcceptedAttemptWithoutAllocatingAnother(t *testing.T) {
+	t.Parallel()
+	runner, turnID, parentItemID, _, _, store := newFeatureInvocationHarness(t)
+	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
+		ParentItemID: parentItemID, RequestID: "retry-crash-team", Goal: "recover retry",
+		Mode: team.ExecutionSequential, Members: []team.Member{{ID: retryTeamMemberID, Goal: retryTeamMemberGoal}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := teamChildInvocation(t, started)
+	failed := markInvocationFailed(t, store, first)
+	accepted, err := store.RetryInvocation(t.Context(), failed.ID, failed.Revision, "retry-crash-execution", featureInvocationClock{}.Now())
+	if err != nil || accepted.Attempt != 2 || accepted.Status != harness.InvocationAccepted {
+		t.Fatalf("seed accepted retry: %#v err=%v", accepted, err)
+	}
+
+	recovered, err := runner.RetryInvocation(t.Context(), accepted.ID)
+	if err != nil {
+		t.Fatalf("recover accepted retry: %v", err)
+	}
+	invocation := teamChildInvocation(t, recovered)
+	if invocation.Attempt != 2 || invocation.ExecutionRefID != accepted.ExecutionRefID || invocation.Status != harness.InvocationCompleted {
+		t.Fatalf("accepted retry recovery allocated a new attempt: %#v", invocation)
+	}
+}
+
+func teamChildInvocation(t *testing.T, snapshot harness.Snapshot) harness.Invocation {
+	t.Helper()
+	for _, invocation := range snapshot.Invocations {
+		if invocation.ExecutionClass == harness.ExecutionTeam && invocation.ParentItemID != "" {
+			return invocation
+		}
+	}
+	t.Fatalf("missing child Team invocation: %#v", snapshot.Invocations)
+	return harness.Invocation{}
+}
+
+func markInvocationFailed(t *testing.T, store *harness.MemoryStore, invocation harness.Invocation) harness.Invocation {
+	t.Helper()
+	invocation.Status = harness.InvocationFailed
+	invocation.ErrorCode = "fixture.failed"
+	invocation.ErrorDetail = "retry fixture"
+	invocation.UpdatedAt = featureInvocationClock{}.Now()
+	updated, err := store.UpdateInvocation(t.Context(), invocation, invocation.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return updated
+}
+
+func invocationArtifactCount(items []harness.Item, invocationID string) int {
+	count := 0
+	for _, item := range items {
+		if item.Kind == harness.ItemArtifact && item.InvocationID == invocationID {
+			count++
+		}
+	}
+	return count
 }
 
 func TestWorkflowCanOwnTopLevelHarnessTurnWithoutAgentRoot(t *testing.T) {
@@ -87,7 +188,7 @@ func assertStartedTeamInvocation(t *testing.T, runner *harness.Runner, turnID, p
 	t.Helper()
 	snapshot, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
 		ParentItemID: parentItemID, RequestID: "team-1", Goal: "compare approaches",
-		Mode: team.ExecutionSequential, Members: []team.Member{{ID: "writer", Goal: "draft"}},
+		Mode: team.ExecutionSequential, Members: []team.Member{{ID: retryTeamMemberID, Goal: retryTeamMemberGoal}},
 	})
 	if err != nil {
 		t.Fatalf("start Team invocation: %v", err)
