@@ -16,18 +16,22 @@ type sessionRecord struct {
 func (sessionRecord) TableName() string { return "agent_harness_sessions" }
 
 type turnRecord struct {
-	ID                string    `gorm:"primaryKey;size:64"`
-	SessionID         string    `gorm:"size:64;not null;index:idx_harness_turn_session;uniqueIndex:uk_harness_turn_host,priority:1"`
-	HostTurnKind      string    `gorm:"size:64;not null;uniqueIndex:uk_harness_turn_host,priority:2"`
-	HostTurnID        string    `gorm:"size:128;not null;uniqueIndex:uk_harness_turn_host,priority:3"`
-	ConfigSnapshotID  string    `gorm:"size:64;not null;index:idx_harness_turn_config"`
-	ContextSnapshotID string    `gorm:"size:128;not null;default:''"`
-	Status            string    `gorm:"size:32;not null;index:idx_harness_turn_status"`
-	Revision          uint64    `gorm:"not null"`
-	ErrorCode         string    `gorm:"size:128;not null;default:''"`
-	ErrorDetail       string    `gorm:"type:text;not null;default:''"`
-	CreatedAt         time.Time `gorm:"not null"`
-	UpdatedAt         time.Time `gorm:"not null"`
+	ID                 string    `gorm:"primaryKey;size:64"`
+	SessionID          string    `gorm:"size:64;not null;index:idx_harness_turn_session;uniqueIndex:uk_harness_turn_host,priority:1"`
+	HostTurnKind       string    `gorm:"size:64;not null;uniqueIndex:uk_harness_turn_host,priority:2"`
+	HostTurnID         string    `gorm:"size:128;not null;uniqueIndex:uk_harness_turn_host,priority:3"`
+	ConfigSnapshotID   string    `gorm:"size:64;not null;index:idx_harness_turn_config"`
+	ContextSnapshotID  string    `gorm:"size:128;not null;default:''"`
+	ContextRefID       string    `gorm:"size:128;not null;default:''"`
+	ContextRefRevision int       `gorm:"not null;default:0"`
+	ContextPathHash    string    `gorm:"size:64;not null;default:''"`
+	ContextContentHash string    `gorm:"size:64;not null;default:''"`
+	Status             string    `gorm:"size:32;not null;index:idx_harness_turn_status"`
+	Revision           uint64    `gorm:"not null"`
+	ErrorCode          string    `gorm:"size:128;not null;default:''"`
+	ErrorDetail        string    `gorm:"type:text;not null;default:''"`
+	CreatedAt          time.Time `gorm:"not null"`
+	UpdatedAt          time.Time `gorm:"not null"`
 }
 
 func (turnRecord) TableName() string { return "agent_harness_turns" }
@@ -80,6 +84,14 @@ type configRecord struct {
 }
 
 func (configRecord) TableName() string { return "agent_harness_config_snapshots" }
+
+type contextSnapshotRecord struct {
+	ID          string `gorm:"primaryKey;size:128"`
+	RunID       string `gorm:"size:128;not null;index:idx_harness_context_run"`
+	PayloadJSON string `gorm:"type:text;not null"`
+}
+
+func (contextSnapshotRecord) TableName() string { return "agent_harness_context_snapshots" }
 
 type itemRecord struct {
 	ID           string    `gorm:"primaryKey;size:64"`

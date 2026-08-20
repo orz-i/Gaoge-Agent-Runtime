@@ -379,7 +379,7 @@ func activeAgentMessageItemID(ctx context.Context, store Store, turn Turn) (stri
 }
 
 func activeAgentMessageBinding(ctx context.Context, store Store, turn Turn) (string, *HostRef, error) {
-	items, err := store.ListItems(ctx, turn.ID, 0, defaultItemListLimit)
+	items, err := listAllItems(ctx, store, turn.ID)
 	if err != nil {
 		return "", nil, err
 	}

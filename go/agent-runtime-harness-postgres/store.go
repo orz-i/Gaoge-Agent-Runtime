@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 
 	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
+	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -256,7 +258,7 @@ func createOrReplay[T any](
 
 // Models returns the complete Harness persistence model set.
 func Models() []any {
-	return []any{&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &interactionRecord{}, &configRecord{}, &itemRecord{}}
+	return []any{&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &interactionRecord{}, &configRecord{}, &contextSnapshotRecord{}, &itemRecord{}}
 }
 
 // Migrate creates or updates only Harness-owned persistence tables.
@@ -311,8 +313,10 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 		Where("id = ? AND revision = ? AND session_id = ? AND host_turn_kind = ? AND host_turn_id = ? AND config_snapshot_id = ?",
 			value.ID, expectedRevision, value.SessionID, value.HostTurn.Kind, value.HostTurn.ID, value.ConfigSnapshotID).
 		Updates(map[string]any{
-			"context_snapshot_id": record.ContextSnapshotID,
-			"status":              record.Status, "revision": record.Revision, "error_code": record.ErrorCode,
+			"context_snapshot_id": record.ContextSnapshotID, "context_ref_id": record.ContextRefID,
+			"context_ref_revision": record.ContextRefRevision, "context_path_hash": record.ContextPathHash,
+			"context_content_hash": record.ContextContentHash,
+			"status":               record.Status, "revision": record.Revision, "error_code": record.ErrorCode,
 			"error_detail": record.ErrorDetail, "updated_at": record.UpdatedAt,
 		})
 	if result.Error != nil {
@@ -348,6 +352,46 @@ func (store *Store) GetConfigSnapshot(ctx context.Context, id string) (harness.C
 	var value harness.ConfigSnapshot
 	if err := json.Unmarshal([]byte(record.PayloadJSON), &value); err != nil {
 		return harness.ConfigSnapshot{}, harness.ErrConflict
+	}
+	return value, nil
+}
+
+func (store *Store) PutContextSnapshot(
+	ctx context.Context,
+	value runtimecontext.Snapshot,
+) (runtimecontext.Snapshot, bool, error) {
+	if !validContextSnapshot(value) {
+		return runtimecontext.Snapshot{}, false, harness.ErrInvalidRequest
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return runtimecontext.Snapshot{}, false, err
+	}
+	record := contextSnapshotRecord{ID: value.ID, RunID: value.RunID, PayloadJSON: string(payload)}
+	if err = store.db.WithContext(ctx).Create(&record).Error; err == nil {
+		return value, true, nil
+	}
+	existing, loadErr := store.GetContextSnapshot(ctx, value.ID)
+	if loadErr != nil || !reflect.DeepEqual(existing, value) {
+		return runtimecontext.Snapshot{}, false, harness.ErrConflict
+	}
+	return existing, false, nil
+}
+
+func validContextSnapshot(value runtimecontext.Snapshot) bool {
+	return strings.TrimSpace(value.ID) != "" && strings.TrimSpace(value.RunID) != "" && value.Revision > 0 &&
+		strings.TrimSpace(value.ThreadPathHash) != "" && strings.TrimSpace(value.ContentHash) != "" &&
+		len(value.Content) > 0 && json.Valid(value.Content)
+}
+
+func (store *Store) GetContextSnapshot(ctx context.Context, id string) (runtimecontext.Snapshot, error) {
+	var record contextSnapshotRecord
+	if err := store.db.WithContext(ctx).Where("id = ?", strings.TrimSpace(id)).Take(&record).Error; err != nil {
+		return runtimecontext.Snapshot{}, mapError(err)
+	}
+	var value runtimecontext.Snapshot
+	if err := json.Unmarshal([]byte(record.PayloadJSON), &value); err != nil || value.ID != record.ID || value.RunID != record.RunID {
+		return runtimecontext.Snapshot{}, harness.ErrConflict
 	}
 	return value, nil
 }
@@ -468,6 +512,8 @@ func turnToRecord(value harness.Turn) turnRecord {
 	return turnRecord{
 		ID: value.ID, SessionID: value.SessionID, HostTurnKind: value.HostTurn.Kind, HostTurnID: value.HostTurn.ID,
 		ConfigSnapshotID: value.ConfigSnapshotID, ContextSnapshotID: value.ContextSnapshotID,
+		ContextRefID: value.ContextRef.ID, ContextRefRevision: value.ContextRef.Revision,
+		ContextPathHash: value.ContextRef.ThreadPathHash, ContextContentHash: value.ContextRef.ContentHash,
 		Status: string(value.Status), Revision: value.Revision, ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
@@ -477,6 +523,8 @@ func turnFromRecord(value turnRecord) harness.Turn {
 	return harness.Turn{
 		ID: value.ID, SessionID: value.SessionID, HostTurn: harness.HostRef{Kind: value.HostTurnKind, ID: value.HostTurnID},
 		ConfigSnapshotID: value.ConfigSnapshotID, ContextSnapshotID: value.ContextSnapshotID,
+		ContextRef: harness.ContextRef{ID: value.ContextRefID, Revision: value.ContextRefRevision,
+			ThreadPathHash: value.ContextPathHash, ContentHash: value.ContextContentHash},
 		Status: harness.TurnStatus(value.Status), Revision: value.Revision, ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}

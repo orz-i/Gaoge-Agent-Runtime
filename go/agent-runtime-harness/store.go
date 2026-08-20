@@ -1,6 +1,10 @@
 package harness
 
-import "context"
+import (
+	"context"
+
+	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
+)
 
 // Store is the durable Harness state boundary. Implementations must clone values at every boundary.
 type Store interface {
@@ -20,6 +24,37 @@ type Store interface {
 	ListInteractions(context.Context, string) ([]Interaction, error)
 	PutConfigSnapshot(context.Context, ConfigSnapshot) (ConfigSnapshot, bool, error)
 	GetConfigSnapshot(context.Context, string) (ConfigSnapshot, error)
+	PutContextSnapshot(context.Context, runtimecontext.Snapshot) (runtimecontext.Snapshot, bool, error)
+	GetContextSnapshot(context.Context, string) (runtimecontext.Snapshot, error)
 	AppendItem(context.Context, Item) (Item, bool, error)
 	ListItems(context.Context, string, uint64, int) ([]Item, error)
+}
+
+// listAllItems is the correctness path for durable Harness facts. ListItems is
+// deliberately bounded, so state derivation must consume every page.
+func listAllItems(ctx context.Context, store Store, turnID string) ([]Item, error) {
+	if store == nil {
+		return nil, ErrInvalidRequest
+	}
+	result := make([]Item, 0)
+	var afterSeq uint64
+	for {
+		page, err := store.ListItems(ctx, turnID, afterSeq, defaultItemListLimit)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			return result, nil
+		}
+		for _, item := range page {
+			if item.Seq <= afterSeq {
+				return nil, ErrConflict
+			}
+			result = append(result, item)
+			afterSeq = item.Seq
+		}
+		if len(page) < defaultItemListLimit {
+			return result, nil
+		}
+	}
 }

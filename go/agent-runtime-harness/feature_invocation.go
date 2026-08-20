@@ -174,7 +174,14 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 		return topLevelFeatureStart{}, err
 	}
 	if !envelope.created {
-		return topLevelFeatureStart{turn: envelope.turn, invocation: invocation, runContext: ctx, replayed: true}, nil
+		turn, runCtx, contextErr := runner.restoreOrBuildContext(
+			ctx, envelope.turn, invocation.ExecutionRefID, envelope.request.Context, envelope.config,
+		)
+		if contextErr != nil {
+			_, failErr := runner.failTopLevelInvocationAndTurn(ctx, envelope.turn, invocation, contextErr)
+			return topLevelFeatureStart{}, errors.Join(contextErr, failErr)
+		}
+		return topLevelFeatureStart{turn: turn, invocation: invocation, runContext: runCtx, replayed: true}, nil
 	}
 	turn, runCtx, err := runner.prepareTopLevelFeatureContext(ctx, envelope, invocation)
 	if err != nil {
@@ -244,15 +251,14 @@ func (runner *Runner) prepareTopLevelFeatureContext(
 		return Turn{}, nil, err
 	}
 	runner.publishTurnStatus(ctx, turn, EventTurnStarted, false)
-	if request.Context == nil {
-		return turn, ctx, nil
-	}
-	contextSnapshot, err := runner.buildContext(ctx, invocation.ExecutionRefID, envelope.config, request.Context)
+	updated, runCtx, err := runner.restoreOrBuildContext(
+		ctx, turn, invocation.ExecutionRefID, request.Context, envelope.config,
+	)
 	if err != nil {
 		_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
 		return Turn{}, nil, errors.Join(err, failErr)
 	}
-	return runner.attachContextSnapshot(ctx, turn, contextSnapshot)
+	return updated, runCtx, nil
 }
 
 func (runner *Runner) replayTopLevelFeatureStart(
@@ -564,7 +570,7 @@ func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItem
 	if parentItemID == "" {
 		return nil
 	}
-	items, err := runner.store.ListItems(ctx, turnID, 0, defaultItemListLimit)
+	items, err := listAllItems(ctx, runner.store, turnID)
 	if err != nil {
 		return err
 	}

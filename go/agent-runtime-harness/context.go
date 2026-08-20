@@ -233,3 +233,20 @@ func contextRef(snapshot runtimecontext.Snapshot) ContextRef {
 		ThreadPathHash: snapshot.ThreadPathHash, ContentHash: snapshot.ContentHash,
 	}
 }
+
+func cloneContextSnapshot(value runtimecontext.Snapshot) runtimecontext.Snapshot {
+	value.Content = append(json.RawMessage(nil), value.Content...)
+	value.ArtifactIDs = append([]string(nil), value.ArtifactIDs...)
+	value.Trace.Actions = append([]runtimecontext.TrimAction(nil), value.Trace.Actions...)
+	if value.Trace.Summary != nil {
+		summary := *value.Trace.Summary
+		value.Trace.Summary = &summary
+	}
+	return value
+}
+
+func validContextSnapshot(value runtimecontext.Snapshot) bool {
+	return strings.TrimSpace(value.ID) != "" && strings.TrimSpace(value.RunID) != "" && value.Revision > 0 &&
+		strings.TrimSpace(value.ThreadPathHash) != "" && strings.TrimSpace(value.ContentHash) != "" &&
+		len(value.Content) > 0 && json.Valid(value.Content)
+}

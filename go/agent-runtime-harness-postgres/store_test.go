@@ -10,10 +10,13 @@ import (
 
 	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
 	harnesspostgres "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness-postgres"
+	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+const testHarnessExecutionRefID = "hr_pg"
 
 func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	store := newStore(t)
@@ -31,9 +34,19 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 		t.Fatalf("seal config: %v", err)
 	}
 	assertConfigLifecycle(t, store, config)
+	contextSnapshot := runtimecontext.Snapshot{
+		ID: "ctx_pg", RunID: testHarnessExecutionRefID, Revision: 1, ThreadPathHash: "path_pg",
+		Content: json.RawMessage(`{"instructions":"sealed"}`), ContentHash: "content_pg",
+	}
+	assertContextSnapshotLifecycle(t, store, contextSnapshot)
 	turn := harness.Turn{
 		ID: "ht_pg", SessionID: session.ID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "turn_pg"},
-		ConfigSnapshotID: config.ID, Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		ConfigSnapshotID: config.ID, ContextSnapshotID: contextSnapshot.ID,
+		ContextRef: harness.ContextRef{
+			ID: contextSnapshot.ID, Revision: contextSnapshot.Revision,
+			ThreadPathHash: contextSnapshot.ThreadPathHash, ContentHash: contextSnapshot.ContentHash,
+		},
+		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	updated := assertTurnLifecycle(t, store, turn, now)
 	if _, err = store.UpdateTurn(t.Context(), updated, 1); !errors.Is(err, harness.ErrConflict) {
@@ -69,6 +82,22 @@ func assertConfigLifecycle(t *testing.T, store *harnesspostgres.Store, config ha
 	}
 }
 
+func assertContextSnapshotLifecycle(t *testing.T, store *harnesspostgres.Store, snapshot runtimecontext.Snapshot) {
+	t.Helper()
+	created, fresh, err := store.PutContextSnapshot(t.Context(), snapshot)
+	if err != nil || !fresh || created.ID != snapshot.ID {
+		t.Fatalf("put context snapshot: %#v fresh=%v err=%v", created, fresh, err)
+	}
+	replayed, fresh, err := store.PutContextSnapshot(t.Context(), snapshot)
+	if err != nil || fresh || replayed.ContentHash != snapshot.ContentHash {
+		t.Fatalf("replay context snapshot: %#v fresh=%v err=%v", replayed, fresh, err)
+	}
+	loaded, err := store.GetContextSnapshot(t.Context(), snapshot.ID)
+	if err != nil || loaded.RunID != snapshot.RunID || loaded.ContentHash != snapshot.ContentHash {
+		t.Fatalf("load context snapshot: %#v err=%v", loaded, err)
+	}
+}
+
 func assertTurnLifecycle(t *testing.T, store *harnesspostgres.Store, turn harness.Turn, now time.Time) harness.Turn {
 	t.Helper()
 	created, fresh, err := store.CreateTurn(t.Context(), turn)
@@ -82,7 +111,8 @@ func assertTurnLifecycle(t *testing.T, store *harnesspostgres.Store, turn harnes
 		t.Fatalf("update turn: %#v err=%v", updated, err)
 	}
 	loaded, err := store.GetTurn(t.Context(), turn.ID)
-	if err != nil || loaded.Revision != 2 || loaded.Status != harness.TurnRunning {
+	if err != nil || loaded.Revision != 2 || loaded.Status != harness.TurnRunning ||
+		loaded.ContextSnapshotID != turn.ContextSnapshotID || loaded.ContextRef != turn.ContextRef {
 		t.Fatalf("load turn: %#v err=%v", loaded, err)
 	}
 	return updated
@@ -101,12 +131,12 @@ func createInvocationFixture(t *testing.T, store *harnesspostgres.Store, turnID 
 	t.Helper()
 	value := harness.Invocation{
 		ID: "hiv_pg", TurnID: turnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1",
-		ExecutionClass: harness.ExecutionAgent, InputHash: strings.Repeat("a", 64), ExecutionRefID: "hr_pg",
+		ExecutionClass: harness.ExecutionAgent, InputHash: strings.Repeat("a", 64), ExecutionRefID: testHarnessExecutionRefID,
 		Status: harness.InvocationAccepted, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	created, fresh, err := store.CreateInvocation(t.Context(), value)
-	if err != nil || !fresh || created.ExecutionRefID != "hr_pg" {
+	if err != nil || !fresh || created.ExecutionRefID != testHarnessExecutionRefID {
 		t.Fatalf("create invocation: %#v fresh=%v err=%v", created, fresh, err)
 	}
 	return created
@@ -114,7 +144,7 @@ func createInvocationFixture(t *testing.T, store *harnesspostgres.Store, turnID 
 
 func assertInvocationLookupByExecutionRef(t *testing.T, store *harnesspostgres.Store, created harness.Invocation) {
 	t.Helper()
-	byExecution, err := store.GetInvocationByExecutionRefID(t.Context(), "hr_pg")
+	byExecution, err := store.GetInvocationByExecutionRefID(t.Context(), testHarnessExecutionRefID)
 	if err != nil || byExecution.ID != created.ID {
 		t.Fatalf("load invocation by execution ref: %#v err=%v", byExecution, err)
 	}

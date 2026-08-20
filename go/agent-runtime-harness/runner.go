@@ -122,15 +122,43 @@ func (runner *Runner) resumeDirectAgentContext(
 	seed *ContextSeed,
 	config ConfigSnapshot,
 ) (Turn, context.Context, error) {
-	if seed == nil || strings.TrimSpace(turn.ContextSnapshotID) != "" {
+	updated, runCtx, err := runner.restoreOrBuildContext(ctx, turn, invocation.ExecutionRefID, seed, config)
+	if err == nil {
+		return updated, runCtx, nil
+	}
+	_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
+	return Turn{}, nil, errors.Join(err, failErr)
+}
+
+func (runner *Runner) restoreOrBuildContext(
+	ctx context.Context,
+	turn Turn,
+	executionRefID string,
+	seed *ContextSeed,
+	config ConfigSnapshot,
+) (Turn, context.Context, error) {
+	if snapshotID := strings.TrimSpace(turn.ContextSnapshotID); snapshotID != "" {
+		snapshot, err := runner.store.GetContextSnapshot(ctx, snapshotID)
+		if err != nil {
+			return Turn{}, nil, err
+		}
+		ref := contextRef(snapshot)
+		if strings.TrimSpace(snapshot.RunID) != strings.TrimSpace(executionRefID) || ref.ID != snapshotID || ref != turn.ContextRef {
+			return Turn{}, nil, ErrConflict
+		}
+		if err = runner.recordContextItem(ctx, turn); err != nil {
+			return Turn{}, nil, err
+		}
+		return turn, withContextSnapshot(ctx, snapshot), nil
+	}
+	if seed == nil {
 		return turn, ctx, nil
 	}
-	contextSnapshot, err := runner.buildContext(ctx, invocation.ExecutionRefID, config, seed)
+	snapshot, err := runner.buildContext(ctx, executionRefID, config, seed)
 	if err != nil {
-		_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
-		return Turn{}, nil, errors.Join(err, failErr)
+		return Turn{}, nil, err
 	}
-	return runner.attachContextSnapshot(ctx, turn, contextSnapshot)
+	return runner.attachContextSnapshot(ctx, turn, snapshot)
 }
 
 // ResolveApproval resolves the active Tool approval using the durable Harness Turn identity.
@@ -385,6 +413,12 @@ func (runner *Runner) attachContextSnapshot(
 	turn Turn,
 	snapshot runtimecontext.Snapshot,
 ) (Turn, context.Context, error) {
+	if !validContextSnapshot(snapshot) {
+		return Turn{}, nil, ErrInvalidRequest
+	}
+	if _, _, err := runner.store.PutContextSnapshot(ctx, snapshot); err != nil {
+		return Turn{}, nil, err
+	}
 	turn.ContextSnapshotID = snapshot.ID
 	turn.ContextRef = contextRef(snapshot)
 	turn.UpdatedAt = runner.clock.Now().UTC()
@@ -880,7 +914,7 @@ func (runner *Runner) hostOutputProjectionPending(ctx context.Context, turn Turn
 }
 
 func hostOutputProjectionState(ctx context.Context, store Store, turn Turn) (bool, bool, error) {
-	items, err := store.ListItems(ctx, turn.ID, 0, defaultItemListLimit)
+	items, err := listAllItems(ctx, store, turn.ID)
 	if err != nil {
 		return false, false, err
 	}
@@ -978,7 +1012,7 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	if err != nil {
 		return Snapshot{}, err
 	}
-	items, err := runner.store.ListItems(ctx, turn.ID, 0, defaultItemListLimit)
+	items, err := listAllItems(ctx, runner.store, turn.ID)
 	if err != nil {
 		return Snapshot{}, err
 	}

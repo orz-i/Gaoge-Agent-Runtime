@@ -140,7 +140,7 @@ func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn)
 	if err != nil {
 		return err
 	}
-	items, err := runner.store.ListItems(ctx, turn.ID, 0, defaultItemListLimit)
+	items, err := listAllItems(ctx, runner.store, turn.ID)
 	if err != nil {
 		return err
 	}

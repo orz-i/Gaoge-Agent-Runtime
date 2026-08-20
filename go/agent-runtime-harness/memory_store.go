@@ -2,10 +2,13 @@ package harness
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 )
 
 const maxListItems = 500
@@ -19,6 +22,7 @@ type MemoryStore struct {
 	invocationExecutionRefs map[string]string
 	interactions            map[string]Interaction
 	configs                 map[string]ConfigSnapshot
+	contextSnapshots        map[string]runtimecontext.Snapshot
 	items                   map[string][]Item
 	itemIDs                 map[string]Item
 }
@@ -221,9 +225,38 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		sessions: map[string]Session{}, turns: map[string]Turn{}, configs: map[string]ConfigSnapshot{},
 		invocations: map[string]Invocation{}, invocationExecutionRefs: map[string]string{},
-		interactions: map[string]Interaction{},
-		items:        map[string][]Item{}, itemIDs: map[string]Item{},
+		interactions: map[string]Interaction{}, contextSnapshots: map[string]runtimecontext.Snapshot{},
+		items: map[string][]Item{}, itemIDs: map[string]Item{},
 	}
+}
+
+func (store *MemoryStore) PutContextSnapshot(
+	_ context.Context,
+	value runtimecontext.Snapshot,
+) (runtimecontext.Snapshot, bool, error) {
+	if store == nil || !validContextSnapshot(value) {
+		return runtimecontext.Snapshot{}, false, ErrInvalidRequest
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if existing, ok := store.contextSnapshots[value.ID]; ok {
+		if !reflect.DeepEqual(existing, value) {
+			return runtimecontext.Snapshot{}, false, ErrConflict
+		}
+		return cloneContextSnapshot(existing), false, nil
+	}
+	store.contextSnapshots[value.ID] = cloneContextSnapshot(value)
+	return cloneContextSnapshot(value), true, nil
+}
+
+func (store *MemoryStore) GetContextSnapshot(_ context.Context, id string) (runtimecontext.Snapshot, error) {
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	value, ok := store.contextSnapshots[strings.TrimSpace(id)]
+	if !ok {
+		return runtimecontext.Snapshot{}, ErrNotFound
+	}
+	return cloneContextSnapshot(value), nil
 }
 
 func (store *MemoryStore) CreateSession(_ context.Context, value Session) (Session, bool, error) {
