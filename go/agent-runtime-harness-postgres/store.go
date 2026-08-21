@@ -503,6 +503,7 @@ func listTurnRecords[Record any, Value any](
 func sameInteraction(left, right harness.Interaction) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.InvocationID == right.InvocationID &&
 		left.ParentItemID == right.ParentItemID && left.Key == right.Key && left.Kind == right.Kind &&
+		reflect.DeepEqual(left.ApplicationRef, right.ApplicationRef) && reflect.DeepEqual(left.ArtifactRefs, right.ArtifactRefs) &&
 		string(left.Schema) == string(right.Schema) && string(left.Presentation) == string(right.Presentation)
 }
 
@@ -511,8 +512,21 @@ func interactionToRecord(value harness.Interaction) (interactionRecord, error) {
 		len(value.Schema) == 0 || !json.Valid(value.Schema) || value.Revision == 0 {
 		return interactionRecord{}, harness.ErrInvalidRequest
 	}
+	applicationRefJSON := ""
+	if value.ApplicationRef != nil {
+		raw, err := json.Marshal(value.ApplicationRef)
+		if err != nil {
+			return interactionRecord{}, err
+		}
+		applicationRefJSON = string(raw)
+	}
+	artifactRefsJSON, err := json.Marshal(value.ArtifactRefs)
+	if err != nil {
+		return interactionRecord{}, err
+	}
 	return interactionRecord{
 		ID: value.ID, TurnID: value.TurnID, InvocationID: value.InvocationID, ParentItemID: value.ParentItemID,
+		ApplicationRefJSON: applicationRefJSON, ArtifactRefsJSON: string(artifactRefsJSON),
 		Key: value.Key, Kind: string(value.Kind), SchemaJSON: string(value.Schema),
 		PresentationJSON: string(value.Presentation), Status: string(value.Status), ResponseJSON: string(value.Response),
 		Revision: value.Revision, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
@@ -521,11 +535,25 @@ func interactionToRecord(value harness.Interaction) (interactionRecord, error) {
 
 func interactionFromRecord(value interactionRecord) (harness.Interaction, error) {
 	if !json.Valid([]byte(value.SchemaJSON)) || value.PresentationJSON != "" && !json.Valid([]byte(value.PresentationJSON)) ||
-		value.ResponseJSON != "" && !json.Valid([]byte(value.ResponseJSON)) {
+		value.ResponseJSON != "" && !json.Valid([]byte(value.ResponseJSON)) ||
+		value.ApplicationRefJSON != "" && !json.Valid([]byte(value.ApplicationRefJSON)) || !json.Valid([]byte(value.ArtifactRefsJSON)) {
+		return harness.Interaction{}, harness.ErrConflict
+	}
+	var applicationRef *harness.HostRef
+	if value.ApplicationRefJSON != "" {
+		var ref harness.HostRef
+		if err := json.Unmarshal([]byte(value.ApplicationRefJSON), &ref); err != nil {
+			return harness.Interaction{}, harness.ErrConflict
+		}
+		applicationRef = &ref
+	}
+	artifactRefs := []harness.HostRef{}
+	if err := json.Unmarshal([]byte(value.ArtifactRefsJSON), &artifactRefs); err != nil {
 		return harness.Interaction{}, harness.ErrConflict
 	}
 	return harness.Interaction{
 		ID: value.ID, TurnID: value.TurnID, InvocationID: value.InvocationID, ParentItemID: value.ParentItemID,
+		ApplicationRef: applicationRef, ArtifactRefs: artifactRefs,
 		Key: value.Key, Kind: harness.InteractionKind(value.Kind), Schema: json.RawMessage(value.SchemaJSON),
 		Presentation: json.RawMessage(value.PresentationJSON), Status: harness.InteractionStatus(value.Status),
 		Response: json.RawMessage(value.ResponseJSON), Revision: value.Revision,

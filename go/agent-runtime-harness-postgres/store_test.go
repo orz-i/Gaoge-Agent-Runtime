@@ -398,7 +398,9 @@ func createInteractionFixture(
 	t.Helper()
 	value := harness.Interaction{
 		ID: "hinteraction_pg", TurnID: turnID, InvocationID: invocationID, ParentItemID: "parent-item",
-		Key: "candidate-choice", Kind: harness.InteractionChoice,
+		ApplicationRef: &harness.HostRef{Kind: "story", ID: "story_pg"},
+		ArtifactRefs:   []harness.HostRef{{Kind: "story_candidate_portfolio", ID: "portfolio_pg"}},
+		Key:            "candidate-choice", Kind: harness.InteractionChoice,
 		Schema: json.RawMessage(`{"type":"object"}`), Presentation: json.RawMessage(`{"title":"Choose"}`),
 		Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -439,7 +441,9 @@ func assertInteractionLoad(
 ) {
 	t.Helper()
 	loaded, err := store.GetInteraction(t.Context(), created.ID)
-	if err != nil || loaded.InvocationID != invocationID || string(loaded.Schema) != string(created.Schema) {
+	if err != nil || loaded.InvocationID != invocationID || string(loaded.Schema) != string(created.Schema) ||
+		loaded.ApplicationRef == nil || *loaded.ApplicationRef != *created.ApplicationRef ||
+		len(loaded.ArtifactRefs) != 1 || loaded.ArtifactRefs[0] != created.ArtifactRefs[0] {
 		t.Fatalf("load interaction: %#v err=%v", loaded, err)
 	}
 }

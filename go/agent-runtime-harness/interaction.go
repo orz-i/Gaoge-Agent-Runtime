@@ -33,39 +33,77 @@ const (
 // contracts only. The application that owns the referenced artifact persists
 // the business decision separately.
 type Interaction struct {
-	ID           string            `json:"id"`
-	TurnID       string            `json:"turnID"`
-	InvocationID string            `json:"invocationID"`
-	ParentItemID string            `json:"parentItemID,omitempty"`
-	Key          string            `json:"key"`
-	Kind         InteractionKind   `json:"kind"`
-	Schema       json.RawMessage   `json:"schema"`
-	Presentation json.RawMessage   `json:"presentation,omitempty"`
-	Status       InteractionStatus `json:"status"`
-	Response     json.RawMessage   `json:"response,omitempty"`
-	Revision     uint64            `json:"revision"`
-	CreatedAt    time.Time         `json:"createdAt"`
-	UpdatedAt    time.Time         `json:"updatedAt"`
+	ID             string            `json:"id"`
+	TurnID         string            `json:"turnID"`
+	InvocationID   string            `json:"invocationID"`
+	ParentItemID   string            `json:"parentItemID,omitempty"`
+	ApplicationRef *HostRef          `json:"applicationRef,omitempty"`
+	ArtifactRefs   []HostRef         `json:"artifactRefs"`
+	Key            string            `json:"key"`
+	Kind           InteractionKind   `json:"kind"`
+	Schema         json.RawMessage   `json:"schema"`
+	Presentation   json.RawMessage   `json:"presentation,omitempty"`
+	Status         InteractionStatus `json:"status"`
+	Response       json.RawMessage   `json:"response,omitempty"`
+	Revision       uint64            `json:"revision"`
+	CreatedAt      time.Time         `json:"createdAt"`
+	UpdatedAt      time.Time         `json:"updatedAt"`
+}
+
+func (runner *Runner) interactionResponseContext(
+	ctx context.Context,
+	interaction Interaction,
+	response json.RawMessage,
+) (InteractionResponseContext, error) {
+	turn, invocation, err := runner.loadResolvedInteractionOwners(ctx, interaction)
+	if err != nil {
+		return InteractionResponseContext{}, err
+	}
+	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	if err != nil {
+		return InteractionResponseContext{}, err
+	}
+	candidate := cloneInteraction(interaction)
+	candidate.Response = append(json.RawMessage(nil), response...)
+	return InteractionResponseContext{Interaction: candidate, Invocation: cloneInvocation(invocation), Session: session}, nil
 }
 
 type RequestInteraction struct {
-	InvocationID string
-	ParentItemID string
-	Key          string
-	Kind         InteractionKind
-	Schema       json.RawMessage
-	Presentation json.RawMessage
+	InvocationID   string
+	ParentItemID   string
+	ApplicationRef *HostRef
+	ArtifactRefs   []HostRef
+	Key            string
+	Kind           InteractionKind
+	Schema         json.RawMessage
+	Presentation   json.RawMessage
 }
 
 type ResolveInteractionRequest struct {
 	Response json.RawMessage
 }
 
+// InteractionResponseContext contains the durable application references and
+// authenticated Harness Session needed to persist the meaning of one generic
+// response without teaching Harness any application-specific schema.
+type InteractionResponseContext struct {
+	Interaction Interaction
+	Invocation  Invocation
+	Session     Session
+}
+
 // InteractionResponseHandler persists the application-owned meaning of one
 // resolved generic response. Implementations must be idempotent by Interaction
 // identity and response because crash recovery can invoke the handler again.
 type InteractionResponseHandler interface {
-	HandleInteractionResponse(context.Context, Interaction, Invocation) error
+	HandleInteractionResponse(context.Context, InteractionResponseContext) error
+}
+
+// InteractionResponseValidator optionally rejects an application response
+// before the durable Interaction transitions to resolved. This prevents an
+// invalid business choice from permanently consuming the only waiting input.
+type InteractionResponseValidator interface {
+	ValidateInteractionResponse(context.Context, InteractionResponseContext) error
 }
 
 // ErrInteractionResponseHandlerUnavailable reports missing static application
@@ -89,7 +127,7 @@ func validInteraction(value Interaction) bool {
 		return false
 	}
 	return validInteractionJSON(value.Schema, true) && validInteractionJSON(value.Presentation, false) &&
-		validInteractionJSON(value.Response, false)
+		validInteractionJSON(value.Response, false) && validInteractionReferences(value.ApplicationRef, value.ArtifactRefs)
 }
 
 func validInteractionIdentity(value Interaction) bool {
@@ -120,10 +158,16 @@ func validInteractionJSON(value json.RawMessage, required bool) bool {
 func sameInteractionIdentity(left, right Interaction) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.InvocationID == right.InvocationID &&
 		left.ParentItemID == right.ParentItemID && left.Key == right.Key && left.Kind == right.Kind &&
+		sameOptionalHostRef(left.ApplicationRef, right.ApplicationRef) && sameHostRefs(left.ArtifactRefs, right.ArtifactRefs) &&
 		bytes.Equal(left.Schema, right.Schema) && bytes.Equal(left.Presentation, right.Presentation)
 }
 
 func cloneInteraction(value Interaction) Interaction {
+	if value.ApplicationRef != nil {
+		ref := *value.ApplicationRef
+		value.ApplicationRef = &ref
+	}
+	value.ArtifactRefs = append([]HostRef(nil), value.ArtifactRefs...)
 	value.Schema = append(json.RawMessage(nil), value.Schema...)
 	value.Presentation = append(json.RawMessage(nil), value.Presentation...)
 	value.Response = append(json.RawMessage(nil), value.Response...)
@@ -149,6 +193,10 @@ func (runner *Runner) RequestInteraction(
 	if err := validateInteractionRequestContract(request); err != nil {
 		return Snapshot{}, err
 	}
+	applicationRef, artifactRefs, err := normalizeInteractionReferences(request.ApplicationRef, request.ArtifactRefs)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	turn, invocation, err := runner.loadInteractionRequestOwners(ctx, turnID, request.InvocationID)
 	if err != nil {
 		return Snapshot{}, err
@@ -160,6 +208,7 @@ func (runner *Runner) RequestInteraction(
 	candidate := Interaction{
 		ID: interactionID(turn.ID, invocation.ID, request.Key), TurnID: turn.ID, InvocationID: invocation.ID,
 		ParentItemID: strings.TrimSpace(request.ParentItemID), Key: strings.TrimSpace(request.Key), Kind: request.Kind,
+		ApplicationRef: applicationRef, ArtifactRefs: artifactRefs,
 		Schema: append(json.RawMessage(nil), request.Schema...), Presentation: append(json.RawMessage(nil), request.Presentation...),
 		Status: InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -198,6 +247,18 @@ func (runner *Runner) ResolveInteraction(
 		}
 		return runner.replayResolvedInteraction(ctx, interaction)
 	}
+	if runner.interactions == nil {
+		return Snapshot{}, ErrInteractionResponseHandlerUnavailable
+	}
+	validationContext, err := runner.interactionResponseContext(ctx, interaction, request.Response)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if validator, ok := runner.interactions.(InteractionResponseValidator); ok {
+		if err = validator.ValidateInteractionResponse(ctx, validationContext); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	interaction.Response = append(json.RawMessage(nil), request.Response...)
 	interaction.Status = InteractionResolved
 	interaction.UpdatedAt = runner.clock.Now().UTC()
@@ -216,19 +277,23 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 	if err := runner.recordInteractionItem(ctx, interaction); err != nil {
 		return Snapshot{}, err
 	}
-	_, invocation, snapshot, handled, err := runner.prepareResolvedInteractionContinuation(ctx, interaction)
+	turn, invocation, snapshot, handled, err := runner.prepareResolvedInteractionContinuation(ctx, interaction)
 	if err != nil || handled {
 		return snapshot, err
 	}
 	if runner.interactions == nil {
 		return Snapshot{}, ErrInteractionResponseHandlerUnavailable
 	}
-	if err = runner.interactions.HandleInteractionResponse(
-		ctx, cloneInteraction(interaction), cloneInvocation(invocation),
-	); err != nil {
+	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	if err != nil {
 		return Snapshot{}, err
 	}
-	turn, invocation, snapshot, handled, err := runner.prepareResolvedInteractionContinuation(ctx, interaction)
+	if err = runner.interactions.HandleInteractionResponse(ctx, InteractionResponseContext{
+		Interaction: cloneInteraction(interaction), Invocation: cloneInvocation(invocation), Session: session,
+	}); err != nil {
+		return Snapshot{}, err
+	}
+	turn, invocation, snapshot, handled, err = runner.prepareResolvedInteractionContinuation(ctx, interaction)
 	if err != nil || handled {
 		return snapshot, err
 	}
@@ -416,10 +481,57 @@ func validateInteractionRequestContract(request RequestInteraction) error {
 		return ErrInvalidRequest
 	}
 	if !validInteractionKind(request.Kind) || !validInteractionJSON(request.Schema, true) ||
-		!validInteractionJSON(request.Presentation, false) {
+		!validInteractionJSON(request.Presentation, false) || !validInteractionReferences(request.ApplicationRef, request.ArtifactRefs) {
 		return ErrInvalidRequest
 	}
 	return nil
+}
+
+func normalizeInteractionReferences(applicationRef *HostRef, artifactRefs []HostRef) (*HostRef, []HostRef, error) {
+	var application *HostRef
+	if applicationRef != nil {
+		normalized, err := normalizeHostRef(*applicationRef)
+		if err != nil {
+			return nil, nil, err
+		}
+		application = &normalized
+	}
+	artifacts := make([]HostRef, len(artifactRefs))
+	for index, value := range artifactRefs {
+		normalized, err := normalizeHostRef(value)
+		if err != nil {
+			return nil, nil, err
+		}
+		artifacts[index] = normalized
+	}
+	return application, artifacts, nil
+}
+
+func validInteractionReferences(applicationRef *HostRef, artifactRefs []HostRef) bool {
+	application, artifacts, err := normalizeInteractionReferences(applicationRef, artifactRefs)
+	if err != nil || !sameOptionalHostRef(applicationRef, application) || !sameHostRefs(artifactRefs, artifacts) {
+		return false
+	}
+	return true
+}
+
+func sameOptionalHostRef(left, right *HostRef) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func sameHostRefs(left, right []HostRef) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (runner *Runner) reconcileInteractionState(
@@ -518,15 +630,18 @@ func (runner *Runner) recordInteractionItem(ctx context.Context, interaction Int
 
 func interactionItemPayload(interaction Interaction) (json.RawMessage, error) {
 	return json.Marshal(struct {
-		InteractionID string            `json:"interactionID"`
-		Key           string            `json:"key"`
-		Kind          InteractionKind   `json:"kind"`
-		Schema        json.RawMessage   `json:"schema"`
-		Presentation  json.RawMessage   `json:"presentation,omitempty"`
-		Status        InteractionStatus `json:"status"`
-		Response      json.RawMessage   `json:"response,omitempty"`
+		InteractionID  string            `json:"interactionID"`
+		ApplicationRef *HostRef          `json:"applicationRef,omitempty"`
+		ArtifactRefs   []HostRef         `json:"artifactRefs"`
+		Key            string            `json:"key"`
+		Kind           InteractionKind   `json:"kind"`
+		Schema         json.RawMessage   `json:"schema"`
+		Presentation   json.RawMessage   `json:"presentation,omitempty"`
+		Status         InteractionStatus `json:"status"`
+		Response       json.RawMessage   `json:"response,omitempty"`
 	}{
-		interaction.ID, interaction.Key, interaction.Kind, interaction.Schema,
+		interaction.ID, interaction.ApplicationRef, append([]HostRef(nil), interaction.ArtifactRefs...),
+		interaction.Key, interaction.Kind, interaction.Schema,
 		interaction.Presentation, interaction.Status, interaction.Response,
 	})
 }

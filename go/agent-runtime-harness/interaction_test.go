@@ -54,6 +54,31 @@ func TestGenericInteractionWaitResolveAndReplay(t *testing.T) {
 	}
 }
 
+func TestResolveInteractionValidatesBeforeDurableResolution(t *testing.T) {
+	t.Parallel()
+	fixture := newInteractionResumeFixture(t)
+	fixture.handler.failures = 0
+	fixture.handler.validationFailures = 1
+	interaction := requestHandledInteraction(t, fixture)
+	response := json.RawMessage(`{"candidateID":"candidate-1"}`)
+
+	_, err := fixture.runner.ResolveInteraction(
+		t.Context(), fixture.turnID, interaction.ID, harness.ResolveInteractionRequest{Response: response},
+	)
+	if !errors.Is(err, errInteractionValidationFixture) {
+		t.Fatalf("interaction preflight error = %v", err)
+	}
+	paused, err := fixture.runner.Load(t.Context(), fixture.turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := interactionByKey(t, paused, "handled-choice")
+	if got.Status != harness.InteractionWaiting || len(got.Response) != 0 ||
+		paused.Turn.Status != harness.TurnWaitingInput || fixture.handler.calls != 0 || fixture.handler.validationCalls != 1 {
+		t.Fatalf("invalid response consumed interaction: interaction=%#v turn=%#v handler=%#v", got, paused.Turn, fixture.handler)
+	}
+}
+
 func TestResolveInteractionHandlesApplicationResponseBeforeResumingOwner(t *testing.T) {
 	fixture := newInteractionResumeFixture(t)
 	interaction := requestHandledInteraction(t, fixture)
@@ -345,9 +370,12 @@ func countInteractionItems(items []harness.Item, status harness.ItemStatus) int 
 }
 
 type recordingInteractionResponseHandler struct {
-	calls         int
-	interactionID string
-	failures      int
+	calls              int
+	interactionID      string
+	actorID            string
+	failures           int
+	validationCalls    int
+	validationFailures int
 }
 
 type interactionResumeFixture struct {
@@ -392,7 +420,9 @@ func requestHandledInteraction(t *testing.T, fixture interactionResumeFixture) h
 	t.Helper()
 	waiting, err := fixture.runner.RequestInteraction(t.Context(), fixture.turnID, harness.RequestInteraction{
 		InvocationID: interactionParentInvocationID, ParentItemID: fixture.parent,
-		Key: "handled-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
+		ApplicationRef: &harness.HostRef{Kind: "story", ID: "story_1"},
+		ArtifactRefs:   []harness.HostRef{{Kind: "story_candidate_portfolio", ID: "portfolio_1"}},
+		Key:            "handled-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -462,14 +492,31 @@ func assertHandledInteractionReplayIsSideEffectFree(
 }
 
 var errInteractionHandlerFixture = errors.New("interaction handler fixture")
+var errInteractionValidationFixture = errors.New("interaction validation fixture")
+
+func (handler *recordingInteractionResponseHandler) ValidateInteractionResponse(
+	_ context.Context,
+	response harness.InteractionResponseContext,
+) error {
+	handler.validationCalls++
+	if response.Session.Actor.ActorID == "" || response.Interaction.ApplicationRef == nil ||
+		len(response.Interaction.ArtifactRefs) != 1 {
+		return errInteractionValidationFixture
+	}
+	if handler.validationFailures > 0 {
+		handler.validationFailures--
+		return errInteractionValidationFixture
+	}
+	return nil
+}
 
 func (handler *recordingInteractionResponseHandler) HandleInteractionResponse(
 	_ context.Context,
-	interaction harness.Interaction,
-	_ harness.Invocation,
+	response harness.InteractionResponseContext,
 ) error {
 	handler.calls++
-	handler.interactionID = interaction.ID
+	handler.interactionID = response.Interaction.ID
+	handler.actorID = response.Session.Actor.ActorID
 	if handler.failures > 0 {
 		handler.failures--
 		return errInteractionHandlerFixture

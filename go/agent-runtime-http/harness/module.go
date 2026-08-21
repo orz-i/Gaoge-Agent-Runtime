@@ -65,24 +65,27 @@ type ResolveInteractionRequest struct {
 }
 
 type InteractionResponse struct {
-	ID           string                    `json:"id"`
-	TurnID       string                    `json:"turnID"`
-	InvocationID string                    `json:"invocationID"`
-	ParentItemID string                    `json:"parentItemID,omitempty"`
-	Key          string                    `json:"key"`
-	Kind         harness.InteractionKind   `json:"kind"`
-	Schema       json.RawMessage           `json:"schema"`
-	Presentation json.RawMessage           `json:"presentation,omitempty"`
-	Status       harness.InteractionStatus `json:"status"`
-	Response     json.RawMessage           `json:"response,omitempty"`
-	Revision     uint64                    `json:"revision"`
-	CreatedAt    time.Time                 `json:"createdAt"`
-	UpdatedAt    time.Time                 `json:"updatedAt"`
+	ID             string                    `json:"id"`
+	TurnID         string                    `json:"turnID"`
+	InvocationID   string                    `json:"invocationID"`
+	ParentItemID   string                    `json:"parentItemID,omitempty"`
+	ApplicationRef *harness.HostRef          `json:"applicationRef,omitempty"`
+	ArtifactRefs   []harness.HostRef         `json:"artifactRefs"`
+	Key            string                    `json:"key"`
+	Kind           harness.InteractionKind   `json:"kind"`
+	Schema         json.RawMessage           `json:"schema"`
+	Presentation   json.RawMessage           `json:"presentation,omitempty"`
+	Status         harness.InteractionStatus `json:"status"`
+	Response       json.RawMessage           `json:"response,omitempty"`
+	Revision       uint64                    `json:"revision"`
+	CreatedAt      time.Time                 `json:"createdAt"`
+	UpdatedAt      time.Time                 `json:"updatedAt"`
 }
 
 func interactionResponse(value harness.Interaction) InteractionResponse {
 	return InteractionResponse{
 		ID: value.ID, TurnID: value.TurnID, InvocationID: value.InvocationID, ParentItemID: value.ParentItemID,
+		ApplicationRef: value.ApplicationRef, ArtifactRefs: append([]harness.HostRef(nil), value.ArtifactRefs...),
 		Key: value.Key, Kind: value.Kind, Schema: append(json.RawMessage(nil), value.Schema...),
 		Presentation: append(json.RawMessage(nil), value.Presentation...), Status: value.Status,
 		Response: append(json.RawMessage(nil), value.Response...), Revision: value.Revision,

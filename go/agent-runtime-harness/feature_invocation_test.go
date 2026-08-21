@@ -596,8 +596,7 @@ type noopInteractionResponseHandler struct{}
 
 func (noopInteractionResponseHandler) HandleInteractionResponse(
 	context.Context,
-	harness.Interaction,
-	harness.Invocation,
+	harness.InteractionResponseContext,
 ) error {
 	return nil
 }
