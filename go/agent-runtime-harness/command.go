@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	CommandSourceFirstParty   = "first_party"
+	CommandSourceFirstParty  = "first_party"
 	CommandSourceApplication = "application"
 )
 
@@ -22,6 +22,7 @@ type CommandDescriptor struct {
 	DefinitionVersion string          `json:"definitionVersion"`
 	ExecutionClass    ExecutionClass  `json:"executionClass"`
 	Source            string          `json:"source"`
+	ApplicationKind   string          `json:"applicationKind,omitempty"`
 	InputSchema       json.RawMessage `json:"inputSchema"`
 }
 
@@ -109,6 +110,7 @@ func normalizeCommandDescriptor(value CommandDescriptor) (CommandDescriptor, err
 	value.CapabilityKey = strings.TrimSpace(value.CapabilityKey)
 	value.DefinitionVersion = strings.TrimSpace(value.DefinitionVersion)
 	value.Source = strings.TrimSpace(value.Source)
+	value.ApplicationKind = strings.TrimSpace(value.ApplicationKind)
 	if !validCommandIdentity(value) || !validCommandExecution(value) || !validCommandSchema(value.InputSchema) {
 		return CommandDescriptor{}, ErrInvalidRequest
 	}
@@ -122,8 +124,17 @@ func validCommandIdentity(value CommandDescriptor) bool {
 }
 
 func validCommandExecution(value CommandDescriptor) bool {
-	return validExecutionClass(value.ExecutionClass) &&
-		(value.Source == CommandSourceFirstParty || value.Source == CommandSourceApplication)
+	if !validExecutionClass(value.ExecutionClass) {
+		return false
+	}
+	switch value.Source {
+	case CommandSourceFirstParty:
+		return value.ApplicationKind == ""
+	case CommandSourceApplication:
+		return value.ExecutionClass == ExecutionApplication && value.ApplicationKind != ""
+	default:
+		return false
+	}
 }
 
 func validCommandSchema(value json.RawMessage) bool { return len(value) > 0 && json.Valid(value) }

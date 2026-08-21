@@ -264,6 +264,7 @@ type Dependencies struct {
 	Handoffs     HandoffStarter
 	Relations    runrelation.Recorder
 	Interactions InteractionResponseHandler
+	Applications ApplicationCapabilityExecutor
 }
 
 type runRelationReader interface {
@@ -287,6 +288,7 @@ type Runner struct {
 	relations      runrelation.Recorder
 	relationReader runRelationReader
 	interactions   InteractionResponseHandler
+	applications   ApplicationCapabilityExecutor
 }
 
 // StartRequest starts or idempotently reloads one Harness Turn.
@@ -321,7 +323,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		turnFeed: dependencies.TurnFeed,
 		context:  dependencies.Context, catalog: dependencies.Catalog,
 		handoffs: dependencies.Handoffs, relations: dependencies.Relations,
-		interactions: dependencies.Interactions,
+		interactions: dependencies.Interactions, applications: dependencies.Applications,
 	}
 	if reader, ok := dependencies.Relations.(runRelationReader); ok {
 		runner.relationReader = reader
@@ -476,6 +478,9 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
+	if invocation.ExecutionClass == ExecutionApplication {
+		return runner.refreshApplicationInvocation(ctx, invocation, turn)
+	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err != nil {
 		return Snapshot{}, err
@@ -497,6 +502,9 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if invocation.ExecutionClass == ExecutionApplication {
+		return runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
 	if err != nil {
@@ -1070,7 +1078,8 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 }
 
 func missingRuntimeSnapshotAllowed(turn Turn, invocation Invocation) bool {
-	return turn.Status == TurnFailed && invocation.Status == InvocationFailed ||
+	return invocation.ExecutionClass == ExecutionApplication ||
+		turn.Status == TurnFailed && invocation.Status == InvocationFailed ||
 		turn.Status == TurnCancelled && invocation.Status == InvocationCancelled
 }
 

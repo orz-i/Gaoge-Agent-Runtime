@@ -597,8 +597,8 @@ type noopInteractionResponseHandler struct{}
 func (noopInteractionResponseHandler) HandleInteractionResponse(
 	context.Context,
 	harness.InteractionResponseContext,
-) error {
-	return nil
+) (harness.InteractionResponseResult, error) {
+	return harness.InteractionResponseResult{}, nil
 }
 
 type completedTeamFeature struct{ runtime *kernel.Runtime }

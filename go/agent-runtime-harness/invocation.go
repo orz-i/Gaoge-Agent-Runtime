@@ -316,9 +316,10 @@ func invocationItemPayload(value Invocation) (json.RawMessage, error) {
 		ExecutionRefID    string         `json:"executionRefID,omitempty"`
 		Attempt           int            `json:"attempt"`
 		InputHash         string         `json:"inputHash,omitempty"`
+		OutputRefs        []HostRef      `json:"outputRefs"`
 	}{
 		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
 		ExecutionClass: value.ExecutionClass, ExecutionRefID: value.ExecutionRefID,
-		Attempt: value.Attempt, InputHash: value.InputHash,
+		Attempt: value.Attempt, InputHash: value.InputHash, OutputRefs: append([]HostRef(nil), value.OutputRefs...),
 	})
 }

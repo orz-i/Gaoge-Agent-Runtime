@@ -49,12 +49,17 @@ type WorkflowCapabilitySpec struct {
 	Input      json.RawMessage
 }
 
+type ApplicationCapabilitySpec struct {
+	Input json.RawMessage
+}
+
 // CapabilityInvocationSpec is a closed typed union. Exactly one Runtime
 // Feature payload must match the frozen descriptor ExecutionClass.
 type CapabilityInvocationSpec struct {
 	Team        *TeamCapabilitySpec
 	PlanExecute *PlanExecuteCapabilitySpec
 	Workflow    *WorkflowCapabilitySpec
+	Application *ApplicationCapabilitySpec
 }
 
 // CapabilityInvocationMaterializer is the single static host port that turns
@@ -110,7 +115,7 @@ func (handler *CapabilityInvocationToolHandler) Execute(
 		return tools.ExecutionResult{}, err
 	}
 	parentItemID := stableID("hit", turn.ID, request.Call.ID, string(ItemStarted))
-	if _, err = runner.startMaterializedCapability(ctx, turn.ID, parentItemID, request.Call.ID, input.Goal, spec); err != nil {
+	if _, err = runner.startMaterializedCapability(ctx, turn.ID, parentItemID, request.Call.ID, input.Goal, descriptor, spec); err != nil {
 		return tools.ExecutionResult{}, err
 	}
 	invocationID, err := InvocationID(turn.ID, parentItemID, descriptor.CapabilityKey, request.Call.ID)
@@ -216,6 +221,9 @@ func capabilityInvocationSpecClass(spec CapabilityInvocationSpec) (ExecutionClas
 	if spec.Workflow != nil {
 		classes = append(classes, ExecutionWorkflow)
 	}
+	if spec.Application != nil {
+		classes = append(classes, ExecutionApplication)
+	}
 	if len(classes) != 1 {
 		return "", ErrInvalidRequest
 	}
@@ -225,6 +233,7 @@ func capabilityInvocationSpecClass(spec CapabilityInvocationSpec) (ExecutionClas
 func (runner *Runner) startMaterializedCapability(
 	ctx context.Context,
 	turnID, parentItemID, requestID, goal string,
+	descriptor CommandDescriptor,
 	spec CapabilityInvocationSpec,
 ) (Snapshot, error) {
 	switch {
@@ -244,6 +253,12 @@ func (runner *Runner) startMaterializedCapability(
 			ParentItemID: parentItemID, RequestID: requestID, Goal: goal,
 			Definition: spec.Workflow.Definition, Input: append(json.RawMessage(nil), spec.Workflow.Input...),
 		})
+	case spec.Application != nil:
+		return runner.StartApplicationInvocation(ctx, turnID, ApplicationInvocationRequest{
+			ParentItemID: parentItemID, RequestID: requestID, Goal: goal,
+			CapabilityKey: descriptor.CapabilityKey, DefinitionVersion: descriptor.DefinitionVersion,
+			Input: append(json.RawMessage(nil), spec.Application.Input...),
+		})
 	default:
 		return Snapshot{}, ErrInvalidRequest
 	}
@@ -262,6 +277,10 @@ func (runner *Runner) capabilityToolResult(ctx context.Context, commandID, invoc
 	case InvocationAccepted, InvocationRunning, InvocationWaitingInput:
 		disposition = tools.ReceiptDispositionPending
 	case InvocationCompleted:
+		if invocation.ExecutionClass == ExecutionApplication {
+			payload["outputRefs"] = append([]HostRef(nil), invocation.OutputRefs...)
+			break
+		}
 		runtimeSnapshot, loadErr := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 		if loadErr != nil {
 			return tools.ExecutionResult{}, loadErr

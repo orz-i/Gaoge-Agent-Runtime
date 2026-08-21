@@ -92,11 +92,15 @@ type InteractionResponseContext struct {
 	Session     Session
 }
 
+type InteractionResponseResult struct {
+	OutputRefs []HostRef
+}
+
 // InteractionResponseHandler persists the application-owned meaning of one
 // resolved generic response. Implementations must be idempotent by Interaction
 // identity and response because crash recovery can invoke the handler again.
 type InteractionResponseHandler interface {
-	HandleInteractionResponse(context.Context, InteractionResponseContext) error
+	HandleInteractionResponse(context.Context, InteractionResponseContext) (InteractionResponseResult, error)
 }
 
 // InteractionResponseValidator optionally rejects an application response
@@ -288,10 +292,14 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err = runner.interactions.HandleInteractionResponse(ctx, InteractionResponseContext{
+	result, err := runner.interactions.HandleInteractionResponse(ctx, InteractionResponseContext{
 		Interaction: cloneInteraction(interaction), Invocation: cloneInvocation(invocation), Session: session,
-	}); err != nil {
+	})
+	if err != nil {
 		return Snapshot{}, err
+	}
+	if invocation.ExecutionClass == ExecutionApplication {
+		return runner.finishResolvedApplicationInteraction(ctx, turn, invocation, result)
 	}
 	turn, invocation, snapshot, handled, err = runner.prepareResolvedInteractionContinuation(ctx, interaction)
 	if err != nil || handled {

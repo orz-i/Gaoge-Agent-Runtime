@@ -513,15 +513,15 @@ func (handler *recordingInteractionResponseHandler) ValidateInteractionResponse(
 func (handler *recordingInteractionResponseHandler) HandleInteractionResponse(
 	_ context.Context,
 	response harness.InteractionResponseContext,
-) error {
+) (harness.InteractionResponseResult, error) {
 	handler.calls++
 	handler.interactionID = response.Interaction.ID
 	handler.actorID = response.Session.Actor.ActorID
 	if handler.failures > 0 {
 		handler.failures--
-		return errInteractionHandlerFixture
+		return harness.InteractionResponseResult{}, errInteractionHandlerFixture
 	}
-	return nil
+	return harness.InteractionResponseResult{}, nil
 }
 
 type recordingInteractionAgent struct {

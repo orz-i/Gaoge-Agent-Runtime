@@ -100,7 +100,7 @@ func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest
 		return Snapshot{}, err
 	}
 	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityTeam, ExecutionTeam, input, inputHash,
+		ctx, request.StartRequest, CapabilityTeam, RuntimeCapabilityVersion, ExecutionTeam, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -133,7 +133,7 @@ func (runner *Runner) StartPlanExecuteTurn(ctx context.Context, request PlanExec
 		return Snapshot{}, err
 	}
 	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityPlanExecute, ExecutionPlanExecute, input, inputHash,
+		ctx, request.StartRequest, CapabilityPlanExecute, RuntimeCapabilityVersion, ExecutionPlanExecute, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -165,7 +165,7 @@ func (runner *Runner) StartWorkflowTurn(ctx context.Context, request WorkflowTur
 		return Snapshot{}, err
 	}
 	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityWorkflow, ExecutionWorkflow, input, inputHash,
+		ctx, request.StartRequest, CapabilityWorkflow, RuntimeCapabilityVersion, ExecutionWorkflow, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -187,6 +187,7 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 	ctx context.Context,
 	request StartRequest,
 	capabilityKey string,
+	definitionVersion string,
 	executionClass ExecutionClass,
 	input json.RawMessage,
 	inputHash string,
@@ -196,7 +197,7 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 		return topLevelFeatureStart{}, err
 	}
 	invocation, err := runner.prepareTopLevelFeatureInvocation(
-		ctx, envelope, capabilityKey, executionClass, input, inputHash,
+		ctx, envelope, capabilityKey, definitionVersion, executionClass, input, inputHash,
 	)
 	if err != nil {
 		return topLevelFeatureStart{}, err
@@ -242,6 +243,7 @@ func (runner *Runner) prepareTopLevelFeatureInvocation(
 	ctx context.Context,
 	envelope topLevelFeatureEnvelope,
 	capabilityKey string,
+	definitionVersion string,
 	executionClass ExecutionClass,
 	input json.RawMessage,
 	inputHash string,
@@ -253,7 +255,7 @@ func (runner *Runner) prepareTopLevelFeatureInvocation(
 	}
 	invocation, fresh, err := runner.store.CreateInvocation(ctx, Invocation{
 		ID: invocationID, TurnID: envelope.turn.ID, CapabilityKey: capabilityKey,
-		DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: executionClass,
+		DefinitionVersion: strings.TrimSpace(definitionVersion), ExecutionClass: executionClass,
 		Input: append(json.RawMessage(nil), input...), InputHash: inputHash,
 		ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
 		Attempt: 1, OutputRefs: []HostRef{}, Revision: 1, CreatedAt: envelope.now, UpdatedAt: envelope.now,
@@ -409,7 +411,7 @@ func (runner *Runner) StartTeamInvocation(
 	}
 	invocation, child, replayed, err := runner.beginChildInvocation(
 		ctx, turnID, request.ParentItemID, request.RequestID,
-		CapabilityTeam, ExecutionTeam, input, inputHash,
+		CapabilityTeam, RuntimeCapabilityVersion, ExecutionTeam, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -446,7 +448,7 @@ func (runner *Runner) StartPlanExecuteInvocation(
 	}
 	invocation, child, replayed, err := runner.beginChildInvocation(
 		ctx, turnID, request.ParentItemID, request.RequestID,
-		CapabilityPlanExecute, ExecutionPlanExecute, input, inputHash,
+		CapabilityPlanExecute, RuntimeCapabilityVersion, ExecutionPlanExecute, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -482,7 +484,7 @@ func (runner *Runner) StartWorkflowInvocation(
 	}
 	invocation, child, replayed, err := runner.beginChildInvocation(
 		ctx, turnID, request.ParentItemID, request.RequestID,
-		CapabilityWorkflow, ExecutionWorkflow, input, inputHash,
+		CapabilityWorkflow, RuntimeCapabilityVersion, ExecutionWorkflow, input, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -502,6 +504,17 @@ func (runner *Runner) StartWorkflowInvocation(
 
 // RefreshInvocation reconciles one child Runtime execution into its durable Harness Invocation.
 func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string) (Snapshot, error) {
+	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if invocation.ExecutionClass == ExecutionApplication {
+		turn, loadErr := runner.store.GetTurn(ctx, invocation.TurnID)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		return runner.refreshApplicationInvocation(ctx, invocation, turn)
+	}
 	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
 	if err != nil {
 		return Snapshot{}, err
@@ -511,6 +524,17 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 
 // ResumeInvocation resumes a running child Feature through the exact typed adapter selected at creation.
 func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string) (Snapshot, error) {
+	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if invocation.ExecutionClass == ExecutionApplication {
+		turn, loadErr := runner.store.GetTurn(ctx, invocation.TurnID)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		return runner.refreshApplicationInvocation(ctx, invocation, turn)
+	}
 	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
 	if err != nil {
 		return Snapshot{}, err
@@ -576,6 +600,12 @@ func (runner *Runner) replayRetriedInvocation(
 	turn Turn,
 	invocation Invocation,
 ) (Snapshot, error) {
+	if invocation.ExecutionClass == ExecutionApplication {
+		if invocation.Status == InvocationAccepted || invocation.Status == InvocationRunning {
+			return runner.executeApplicationInvocation(ctx, turn, invocation)
+		}
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
 	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err == nil {
 		if strings.TrimSpace(invocation.ParentItemID) == "" {
@@ -597,6 +627,9 @@ func (runner *Runner) startRetriedInvocation(
 	turn Turn,
 	invocation Invocation,
 ) (Snapshot, error) {
+	if invocation.ExecutionClass == ExecutionApplication {
+		return runner.executeApplicationInvocation(ctx, turn, invocation)
+	}
 	if strings.TrimSpace(invocation.ParentItemID) == "" {
 		return runner.startRetriedTopLevelInvocation(ctx, turn, invocation)
 	}
@@ -757,6 +790,9 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if invocation.ExecutionClass == ExecutionApplication {
+		return runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
+	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
 	if err != nil {
 		return Snapshot{}, err
@@ -782,7 +818,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 
 func (runner *Runner) beginChildInvocation(
 	ctx context.Context,
-	turnID, parentItemID, requestID, capabilityKey string,
+	turnID, parentItemID, requestID, capabilityKey, definitionVersion string,
 	executionClass ExecutionClass,
 	input json.RawMessage,
 	inputHash string,
@@ -798,7 +834,7 @@ func (runner *Runner) beginChildInvocation(
 	now := runner.clock.Now().UTC()
 	value := Invocation{
 		ID: invocationID, TurnID: child.turn.ID, ParentItemID: strings.TrimSpace(parentItemID),
-		CapabilityKey: capabilityKey, DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: executionClass,
+		CapabilityKey: capabilityKey, DefinitionVersion: strings.TrimSpace(definitionVersion), ExecutionClass: executionClass,
 		Input: append(json.RawMessage(nil), input...), InputHash: inputHash,
 		ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
 		Attempt: 1, OutputRefs: []HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -810,7 +846,7 @@ func (runner *Runner) beginChildInvocation(
 	if err = runner.recordInvocationItem(ctx, created); err != nil {
 		return Invocation{}, childInvocationContext{}, false, err
 	}
-	if runner.relations != nil {
+	if runner.relations != nil && executionClass != ExecutionApplication {
 		if _, err = runner.relations.Ensure(ctx, runrelation.Draft{
 			ParentRunID: child.parentExecutionRefID, ChildRunID: created.ExecutionRefID,
 			Kind: runrelation.KindCapability, OwnerNodeID: invocationRelationOwnerID(created),
