@@ -357,8 +357,34 @@ func TestAssessModelRequestRequiresRealModelWindow(t *testing.T) {
 	}
 	// min(1000,900)*90%% - 100 = 710, then service ceiling 800 leaves 710.
 	if assessment.HardInputTokens != 710 || assessment.SoftInputTokens != 568 || assessment.RawTokenEstimate != 500 ||
-		assessment.AdjustedTokenEstimate != 500 || assessment.TokenCountSource != runtimectx.CountExact {
+		assessment.AdjustedTokenEstimate != 500 || assessment.HardTokenEstimate != 500 ||
+		assessment.TokenCountSource != runtimectx.CountExact {
 		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+}
+
+func TestAssessRequestUsesConservativeHardBoundWhenCounterIsUnavailable(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	assessment, err := manager.AssessRequest(
+		t.Context(),
+		struct {
+			Text string `json:"text"`
+		}{Text: strings.Repeat("界", 200)},
+		runtimectx.ModelWindow{ContextTokens: 1000},
+		runtimectx.Policy{MaxInputTokens: 300, SoftLimitPercent: 80},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.TokenCountSource != runtimectx.CountEstimated ||
+		assessment.HardTokenEstimate <= assessment.AdjustedTokenEstimate ||
+		assessment.AdjustedTokenEstimate > assessment.SoftInputTokens ||
+		assessment.HardTokenEstimate <= assessment.HardInputTokens {
+		t.Fatalf("estimated hard-bound assessment is not conservative: %#v", assessment)
+	}
+	if runtimectx.WithinHardBudget(assessment, runtimectx.Policy{}) {
+		t.Fatalf("heuristic soft estimate incorrectly authorized hard budget: %#v", assessment)
 	}
 }
 

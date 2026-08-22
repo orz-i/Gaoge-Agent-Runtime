@@ -266,6 +266,7 @@ type Assessment struct {
 	SoftInputTokens       int64       `json:"softInputTokens"`
 	RawTokenEstimate      int64       `json:"rawTokenEstimate"`
 	AdjustedTokenEstimate int64       `json:"adjustedTokenEstimate"`
+	HardTokenEstimate     int64       `json:"hardTokenEstimate"`
 	TokenCountSource      CountSource `json:"tokenCountSource"`
 	SerializedBytes       int64       `json:"serializedBytes"`
 }
@@ -701,12 +702,14 @@ func (manager *Manager) AssessRequest(
 		if count, countErr := manager.counter.Count(ctx, serialized); countErr == nil && count >= 0 {
 			assessment.RawTokenEstimate = count
 			assessment.AdjustedTokenEstimate = count
+			assessment.HardTokenEstimate = count
 			assessment.TokenCountSource = CountExact
 			return assessment, nil
 		}
 	}
 	assessment.RawTokenEstimate = estimatedTokens(serialized)
 	assessment.AdjustedTokenEstimate = applySafetyMargin(assessment.RawTokenEstimate, policy.EstimateSafetyPercent)
+	assessment.HardTokenEstimate = conservativeHardTokenEstimate(serialized, policy.EstimateSafetyPercent)
 	assessment.TokenCountSource = CountEstimated
 	return assessment, nil
 }
@@ -799,7 +802,8 @@ func EffectiveInputLimit(modelWindow ModelWindow, serviceCeiling int64) (int64, 
 
 func WithinHardBudget(assessment Assessment, policy Policy) bool {
 	policy = NormalizePolicy(policy)
-	return assessment.HardInputTokens > 0 && assessment.AdjustedTokenEstimate <= assessment.HardInputTokens &&
+	return assessment.HardInputTokens > 0 && assessment.HardTokenEstimate > 0 &&
+		assessment.HardTokenEstimate <= assessment.HardInputTokens &&
 		assessment.SerializedBytes <= policy.MaxSerializedBytes
 }
 
@@ -1236,6 +1240,25 @@ func estimatedTokens(serialized []byte) int64 {
 		return 0
 	}
 	return int64((len(serialized) + 3) / 4)
+}
+
+// conservativeHardTokenEstimate is deliberately stricter than the soft bytes/4 heuristic without
+// pretending to be an exact provider tokenizer. ASCII/JSON-heavy payloads use two bytes per token;
+// non-ASCII bytes are charged one token each so CJK and byte-fallback cases cannot inherit the
+// optimistic ASCII ratio. The configured estimate safety margin is applied once more to this hard
+// estimate. Hosts can replace this fallback entirely by supplying an exact TokenCounter.
+func conservativeHardTokenEstimate(serialized []byte, safetyPercent int) int64 {
+	var asciiBytes int64
+	var nonASCIIBytes int64
+	for _, value := range serialized {
+		if value < 0x80 {
+			asciiBytes++
+		} else {
+			nonASCIIBytes++
+		}
+	}
+	base := (asciiBytes+1)/2 + nonASCIIBytes
+	return applySafetyMargin(base, safetyPercent)
 }
 
 func applySafetyMargin(tokens int64, percent int) int64 {
