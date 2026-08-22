@@ -26,6 +26,36 @@ type Clock interface {
 	Now() time.Time
 }
 
+// ResolveContextSourceBoundaryForPath resolves the nearest reusable source-aligned checkpoint on
+// an explicit complete host ancestry identity path. Hosts use this for branch resets where the
+// current active head may belong to another descendant branch. SourcePath contains identities only;
+// message bodies remain owned and loaded by the host after this boundary is selected.
+func (runner *Runner) ResolveContextSourceBoundaryForPath(
+	ctx context.Context,
+	hostThread HostRef,
+	config ConfigSnapshot,
+	instructions string,
+	sourcePath []string,
+) (ContextSourceBoundary, error) {
+	if len(sourcePath) == 0 {
+		return ContextSourceBoundary{}, nil
+	}
+	scopeID, staticFingerprint, err := runner.contextSourceBoundaryKey(hostThread, config, instructions)
+	if err != nil {
+		return ContextSourceBoundary{}, err
+	}
+	checkpoint, _, err := runner.findContextPathBase(ctx, scopeID, staticFingerprint, sourcePath)
+	if errors.Is(err, ErrNotFound) {
+		return ContextSourceBoundary{}, nil
+	}
+	if err != nil {
+		return ContextSourceBoundary{}, err
+	}
+	return ContextSourceBoundary{
+		CheckpointID: checkpoint.ID, CoveredThroughSourceID: checkpoint.CoveredThroughSourceID,
+	}, nil
+}
+
 func invocationLifecycleItemID(invocation Invocation, status InvocationStatus, revision uint64) string {
 	return stableID("hivitem", invocation.ID, string(status), uintString(revision))
 }

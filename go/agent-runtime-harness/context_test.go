@@ -163,6 +163,15 @@ func TestHarnessFullBranchFallbackReusesNearestSourceAlignedCheckpoint(t *testin
 	root.Goal = "root"
 	root.Context = contextSeed("", contextEntry("m1", "turn-root", model.RoleUser, root.Goal, true))
 	rootSnapshot := startContextTurn(t, fixture.runner, root)
+	boundary, err := fixture.runner.ResolveContextSourceBoundaryForPath(
+		t.Context(), fixture.common.HostThread, fixture.common.Config, "", []string{"m1"},
+	)
+	if err != nil {
+		t.Fatalf("resolve Context boundary for branch path: %v", err)
+	}
+	if boundary.CheckpointID != rootSnapshot.Turn.ContextCheckpointID || boundary.CoveredThroughSourceID != "m1" {
+		t.Fatalf("branch path did not resolve the source-aligned root checkpoint: %#v", boundary)
+	}
 
 	branchB := fixture.common
 	branchB.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-branch-b"}
