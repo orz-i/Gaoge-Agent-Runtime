@@ -1082,7 +1082,8 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 }
 
 func missingRuntimeSnapshotAllowed(turn Turn, invocation Invocation) bool {
-	return invocation.ExecutionClass == ExecutionApplication ||
+	return turn.Status == TurnAccepted && invocation.Status == InvocationAccepted ||
+		invocation.ExecutionClass == ExecutionApplication ||
 		turn.Status == TurnFailed && invocation.Status == InvocationFailed ||
 		turn.Status == TurnCancelled && invocation.Status == InvocationCancelled
 }
