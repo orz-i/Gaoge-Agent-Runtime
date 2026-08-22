@@ -122,7 +122,7 @@ func (runner *Runner) resumeDirectAgentContext(
 	seed *ContextSeed,
 	config ConfigSnapshot,
 ) (Turn, context.Context, error) {
-	updated, runCtx, err := runner.restoreOrBuildContext(ctx, turn, invocation.ExecutionRefID, seed, config)
+	updated, runCtx, err := runner.restoreOrBuildContext(ctx, turn, seed, config)
 	if err == nil {
 		return updated, runCtx, nil
 	}
@@ -133,32 +133,31 @@ func (runner *Runner) resumeDirectAgentContext(
 func (runner *Runner) restoreOrBuildContext(
 	ctx context.Context,
 	turn Turn,
-	executionRefID string,
 	seed *ContextSeed,
 	config ConfigSnapshot,
 ) (Turn, context.Context, error) {
-	if snapshotID := strings.TrimSpace(turn.ContextSnapshotID); snapshotID != "" {
-		snapshot, err := runner.store.GetContextSnapshot(ctx, snapshotID)
+	if checkpointID := strings.TrimSpace(turn.ContextCheckpointID); checkpointID != "" {
+		checkpoint, err := runner.store.GetContextCheckpoint(ctx, checkpointID)
 		if err != nil {
 			return Turn{}, nil, err
 		}
-		ref := contextRef(snapshot)
-		if strings.TrimSpace(snapshot.RunID) != strings.TrimSpace(executionRefID) || ref.ID != snapshotID || ref != turn.ContextRef {
+		ref := contextCheckpointRef(checkpoint)
+		if strings.TrimSpace(checkpoint.ScopeID) != strings.TrimSpace(turn.SessionID) || ref.ID != checkpointID || ref != turn.ContextRef {
 			return Turn{}, nil, ErrConflict
 		}
 		if err = runner.recordContextItem(ctx, turn); err != nil {
 			return Turn{}, nil, err
 		}
-		return turn, withContextSnapshot(ctx, snapshot), nil
+		return turn, withContextCheckpoint(ctx, checkpoint), nil
 	}
 	if seed == nil {
 		return turn, ctx, nil
 	}
-	snapshot, err := runner.buildContext(ctx, executionRefID, config, seed)
+	checkpoint, err := runner.buildContext(ctx, turn.SessionID, config, seed)
 	if err != nil {
 		return Turn{}, nil, err
 	}
-	return runner.attachContextSnapshot(ctx, turn, snapshot)
+	return runner.attachContextCheckpoint(ctx, turn, checkpoint)
 }
 
 // ResolveApproval resolves the active Tool approval using the durable Harness Turn identity.
@@ -204,39 +203,41 @@ func (runner *Runner) ResolveApproval(
 
 func (runner *Runner) buildContext(
 	ctx context.Context,
-	runID string,
+	scopeID string,
 	config ConfigSnapshot,
 	seed *ContextSeed,
-) (runtimecontext.Snapshot, error) {
+) (runtimecontext.Checkpoint, error) {
 	if runner.context == nil {
-		return runtimecontext.Snapshot{}, ErrInvalidRequest
+		return runtimecontext.Checkpoint{}, ErrInvalidRequest
 	}
 	normalized, err := normalizeContextSeed(seed)
 	if err != nil || normalized == nil {
-		return runtimecontext.Snapshot{}, ErrInvalidRequest
+		return runtimecontext.Checkpoint{}, ErrInvalidRequest
 	}
-	definitions, err := buildContextTools(runner.catalog, config.ToolKeys)
+	staticFingerprint, err := contextStaticFingerprint(config, normalized, runner.catalog)
 	if err != nil {
-		return runtimecontext.Snapshot{}, err
+		return runtimecontext.Checkpoint{}, err
 	}
-	result, err := runner.context.Build(ctx, runtimecontext.BuildRequest{
-		RunID: runID, Revision: 1, ThreadPathHash: normalized.ThreadPathHash,
-		CurrentTurnID: normalized.CurrentTurnID,
-		Prompt: runtimecontext.Prompt{
-			Instructions: strings.TrimSpace(strings.Join([]string{config.Instructions, normalized.Instructions}, "\n\n")),
-			Items:        append([]runtimecontext.Item(nil), normalized.Items...),
-			Tools:        definitions, Options: defaultJSON(config.ModelOptions),
-		},
-		Budget: config.ContextBudget,
+	var previous *runtimecontext.Checkpoint
+	latest, latestErr := runner.store.GetLatestContextCheckpoint(ctx, strings.TrimSpace(scopeID))
+	if latestErr == nil {
+		previous = &latest
+	} else if !errors.Is(latestErr, ErrNotFound) {
+		return runtimecontext.Checkpoint{}, latestErr
+	}
+	checkpoint, err := runner.context.Open(ctx, runtimecontext.OpenRequest{
+		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: staticFingerprint,
+		SourcePath: append([]string(nil), normalized.SourcePath...), Entries: runtimecontext.CloneEntries(normalized.Entries),
+		Instructions: strings.TrimSpace(strings.Join([]string{config.Instructions, normalized.Instructions}, "\n\n")),
+		Previous:     previous,
 	})
 	if err != nil {
-		return runtimecontext.Snapshot{}, err
+		return runtimecontext.Checkpoint{}, err
 	}
-	if result.Snapshot.RunID != runID || result.Snapshot.Revision != 1 ||
-		result.Snapshot.ThreadPathHash != normalized.ThreadPathHash {
-		return runtimecontext.Snapshot{}, ErrConflict
+	if checkpoint.ScopeID != strings.TrimSpace(scopeID) || !validContextCheckpoint(checkpoint) {
+		return runtimecontext.Checkpoint{}, ErrConflict
 	}
-	return result.Snapshot, nil
+	return checkpoint, nil
 }
 
 // AgentStarter is the narrow direct Agent capability required by Harness.
@@ -259,7 +260,7 @@ type Dependencies struct {
 	Store        Store
 	Clock        Clock
 	TurnFeed     *TurnFeed
-	Context      *runtimecontext.Builder
+	Context      *runtimecontext.Manager
 	Catalog      tools.Catalog
 	Handoffs     HandoffStarter
 	Relations    runrelation.Recorder
@@ -282,7 +283,7 @@ type Runner struct {
 	store          Store
 	clock          Clock
 	turnFeed       *TurnFeed
-	context        *runtimecontext.Builder
+	context        *runtimecontext.Manager
 	catalog        tools.Catalog
 	handoffs       HandoffStarter
 	relations      runrelation.Recorder
@@ -373,12 +374,12 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	runner.publishTurnStatus(ctx, createdTurn, EventTurnStarted, false)
 	runCtx := ctx
 	if request.Context != nil {
-		contextSnapshot, buildErr := runner.buildContext(ctx, invocation.ExecutionRefID, config, request.Context)
+		contextCheckpoint, buildErr := runner.buildContext(ctx, createdTurn.SessionID, config, request.Context)
 		if buildErr != nil {
 			failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, buildErr)
 			return failed, errors.Join(buildErr, failErr)
 		}
-		createdTurn, runCtx, err = runner.attachContextSnapshot(ctx, createdTurn, contextSnapshot)
+		createdTurn, runCtx, err = runner.attachContextCheckpoint(ctx, createdTurn, contextCheckpoint)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -432,19 +433,19 @@ func (runner *Runner) persistStartEnvelope(
 	return runner.store.CreateTurn(ctx, turn)
 }
 
-func (runner *Runner) attachContextSnapshot(
+func (runner *Runner) attachContextCheckpoint(
 	ctx context.Context,
 	turn Turn,
-	snapshot runtimecontext.Snapshot,
+	checkpoint runtimecontext.Checkpoint,
 ) (Turn, context.Context, error) {
-	if !validContextSnapshot(snapshot) {
+	if !validContextCheckpoint(checkpoint) || checkpoint.ScopeID != turn.SessionID {
 		return Turn{}, nil, ErrInvalidRequest
 	}
-	if _, _, err := runner.store.PutContextSnapshot(ctx, snapshot); err != nil {
+	if _, _, err := runner.store.PutContextCheckpoint(ctx, checkpoint); err != nil {
 		return Turn{}, nil, err
 	}
-	turn.ContextSnapshotID = snapshot.ID
-	turn.ContextRef = contextRef(snapshot)
+	turn.ContextCheckpointID = checkpoint.ID
+	turn.ContextRef = contextCheckpointRef(checkpoint)
 	turn.UpdatedAt = runner.clock.Now().UTC()
 	updated, err := runner.store.UpdateTurn(ctx, turn, turn.Revision)
 	if err != nil {
@@ -453,7 +454,7 @@ func (runner *Runner) attachContextSnapshot(
 	if err = runner.recordContextItem(ctx, updated); err != nil {
 		return Turn{}, nil, err
 	}
-	return updated, withContextSnapshot(ctx, snapshot), nil
+	return updated, withContextCheckpoint(ctx, checkpoint), nil
 }
 
 // Load returns one durable Harness Turn and current root output without changing execution state.

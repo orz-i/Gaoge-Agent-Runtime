@@ -23,18 +23,18 @@ const (
 // Turn is the durable root of one Harness execution tree. Child execution
 // identities live in Capability Invocations rather than on the Turn itself.
 type Turn struct {
-	ID                string     `json:"id"`
-	SessionID         string     `json:"sessionID"`
-	HostTurn          HostRef    `json:"hostTurn"`
-	ConfigSnapshotID  string     `json:"configSnapshotID"`
-	ContextSnapshotID string     `json:"contextSnapshotID,omitempty"`
-	ContextRef        ContextRef `json:"contextRef,omitempty"`
-	Status            TurnStatus `json:"status"`
-	Revision          uint64     `json:"revision"`
-	ErrorCode         string     `json:"errorCode,omitempty"`
-	ErrorDetail       string     `json:"errorDetail,omitempty"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
+	ID                  string               `json:"id"`
+	SessionID           string               `json:"sessionID"`
+	HostTurn            HostRef              `json:"hostTurn"`
+	ConfigSnapshotID    string               `json:"configSnapshotID"`
+	ContextCheckpointID string               `json:"contextCheckpointID,omitempty"`
+	ContextRef          ContextCheckpointRef `json:"contextRef,omitempty"`
+	Status              TurnStatus           `json:"status"`
+	Revision            uint64               `json:"revision"`
+	ErrorCode           string               `json:"errorCode,omitempty"`
+	ErrorDetail         string               `json:"errorDetail,omitempty"`
+	CreatedAt           time.Time            `json:"createdAt"`
+	UpdatedAt           time.Time            `json:"updatedAt"`
 }
 
 // Output is the provider-neutral terminal result projection returned by Harness.

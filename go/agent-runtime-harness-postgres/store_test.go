@@ -13,6 +13,7 @@ import (
 	harnesspostgres "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness-postgres"
 	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -35,17 +36,15 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 		t.Fatalf("seal config: %v", err)
 	}
 	assertConfigLifecycle(t, store, config)
-	contextSnapshot := runtimecontext.Snapshot{
-		ID: "ctx_pg", RunID: testHarnessExecutionRefID, Revision: 1, ThreadPathHash: "path_pg",
-		Content: json.RawMessage(`{"instructions":"sealed"}`), ContentHash: "content_pg",
-	}
-	assertContextSnapshotLifecycle(t, store, contextSnapshot)
+	contextCheckpoint := newContextCheckpoint(t, session.ID)
+	assertContextCheckpointLifecycle(t, store, contextCheckpoint)
 	turn := harness.Turn{
 		ID: "ht_pg", SessionID: session.ID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "turn_pg"},
-		ConfigSnapshotID: config.ID, ContextSnapshotID: contextSnapshot.ID,
-		ContextRef: harness.ContextRef{
-			ID: contextSnapshot.ID, Revision: contextSnapshot.Revision,
-			ThreadPathHash: contextSnapshot.ThreadPathHash, ContentHash: contextSnapshot.ContentHash,
+		ConfigSnapshotID: config.ID, ContextCheckpointID: contextCheckpoint.ID,
+		ContextRef: harness.ContextCheckpointRef{
+			ID: contextCheckpoint.ID, Generation: contextCheckpoint.Generation, Revision: contextCheckpoint.Revision,
+			LineageHash: contextCheckpoint.LineageHash, CoveredThroughSourceID: contextCheckpoint.CoveredThroughSourceID,
+			ContentHash: contextCheckpoint.ContentHash,
 		},
 		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -56,6 +55,45 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	invocation := assertInvocationLifecycle(t, store, turn.ID, now)
 	assertInteractionLifecycle(t, store, turn.ID, invocation.ID, now)
 	assertItemLifecycle(t, store, turn.ID, invocation.ID, now)
+}
+
+func TestStoreContextCheckpointRequiresDurableArtifactsAndTracksLatest(t *testing.T) {
+	store := newStore(t)
+	base := newContextCheckpoint(t, "scope-artifacts")
+	if _, fresh, err := store.PutContextCheckpoint(t.Context(), base); err != nil || !fresh {
+		t.Fatalf("put base checkpoint fresh=%v err=%v", fresh, err)
+	}
+	artifact, err := runtimecontext.NewArtifact(
+		runtimecontext.ArtifactCompaction, base.ScopeID, base.Generation+1, base.CoveredThroughSourceID,
+		"compacted durable history", json.RawMessage(`{"strategy":"portable"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	rollover, err := manager.Rollover(t.Context(), runtimecontext.RolloverRequest{
+		Previous: base, Window: base.Window, Artifacts: []runtimecontext.Artifact{artifact}, Reason: "soft_limit",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.PutContextCheckpoint(t.Context(), rollover); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("checkpoint with missing artifact error = %v", err)
+	}
+	if _, fresh, err := store.PutContextArtifact(t.Context(), artifact); err != nil || !fresh {
+		t.Fatalf("put context artifact fresh=%v err=%v", fresh, err)
+	}
+	if _, fresh, err := store.PutContextCheckpoint(t.Context(), rollover); err != nil || !fresh {
+		t.Fatalf("put rollover fresh=%v err=%v", fresh, err)
+	}
+	latest, err := store.GetLatestContextCheckpoint(t.Context(), base.ScopeID)
+	if err != nil || latest.ID != rollover.ID || latest.Generation != base.Generation+1 {
+		t.Fatalf("latest checkpoint=%#v err=%v", latest, err)
+	}
+	loadedArtifact, err := store.GetContextArtifact(t.Context(), artifact.ID)
+	if err != nil || loadedArtifact.ContentHash != artifact.ContentHash {
+		t.Fatalf("loaded artifact=%#v err=%v", loadedArtifact, err)
+	}
 }
 
 func TestStoreRetriesInvocationWithAtomicAttemptRotation(t *testing.T) {
@@ -284,19 +322,40 @@ func assertConfigLifecycle(t *testing.T, store *harnesspostgres.Store, config ha
 	}
 }
 
-func assertContextSnapshotLifecycle(t *testing.T, store *harnesspostgres.Store, snapshot runtimecontext.Snapshot) {
+func newContextCheckpoint(t *testing.T, scopeID string) runtimecontext.Checkpoint {
 	t.Helper()
-	created, fresh, err := store.PutContextSnapshot(t.Context(), snapshot)
-	if err != nil || !fresh || created.ID != snapshot.ID {
-		t.Fatalf("put context snapshot: %#v fresh=%v err=%v", created, fresh, err)
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: scopeID, StaticFingerprint: runtimecontext.StaticFingerprint("sealed"),
+		SourcePath: []string{"message-pg"}, Instructions: "sealed",
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-pg-" + scopeID, SourceID: "message-pg", TurnID: "turn-pg",
+			Message: model.Message{Role: model.RoleUser, Content: "postgres context"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	replayed, fresh, err := store.PutContextSnapshot(t.Context(), snapshot)
-	if err != nil || fresh || replayed.ContentHash != snapshot.ContentHash {
-		t.Fatalf("replay context snapshot: %#v fresh=%v err=%v", replayed, fresh, err)
+	return checkpoint
+}
+
+func assertContextCheckpointLifecycle(t *testing.T, store *harnesspostgres.Store, checkpoint runtimecontext.Checkpoint) {
+	t.Helper()
+	created, fresh, err := store.PutContextCheckpoint(t.Context(), checkpoint)
+	if err != nil || !fresh || created.ID != checkpoint.ID {
+		t.Fatalf("put context checkpoint: %#v fresh=%v err=%v", created, fresh, err)
 	}
-	loaded, err := store.GetContextSnapshot(t.Context(), snapshot.ID)
-	if err != nil || loaded.RunID != snapshot.RunID || loaded.ContentHash != snapshot.ContentHash {
-		t.Fatalf("load context snapshot: %#v err=%v", loaded, err)
+	replayed, fresh, err := store.PutContextCheckpoint(t.Context(), checkpoint)
+	if err != nil || fresh || replayed.ContentHash != checkpoint.ContentHash {
+		t.Fatalf("replay context checkpoint: %#v fresh=%v err=%v", replayed, fresh, err)
+	}
+	loaded, err := store.GetContextCheckpoint(t.Context(), checkpoint.ID)
+	if err != nil || loaded.ScopeID != checkpoint.ScopeID || loaded.ContentHash != checkpoint.ContentHash {
+		t.Fatalf("load context checkpoint: %#v err=%v", loaded, err)
+	}
+	latest, err := store.GetLatestContextCheckpoint(t.Context(), checkpoint.ScopeID)
+	if err != nil || latest.ID != checkpoint.ID {
+		t.Fatalf("latest context checkpoint: %#v err=%v", latest, err)
 	}
 }
 
@@ -314,7 +373,7 @@ func assertTurnLifecycle(t *testing.T, store *harnesspostgres.Store, turn harnes
 	}
 	loaded, err := store.GetTurn(t.Context(), turn.ID)
 	if err != nil || loaded.Revision != 2 || loaded.Status != harness.TurnRunning ||
-		loaded.ContextSnapshotID != turn.ContextSnapshotID || loaded.ContextRef != turn.ContextRef {
+		loaded.ContextCheckpointID != turn.ContextCheckpointID || loaded.ContextRef != turn.ContextRef {
 		t.Fatalf("load turn: %#v err=%v", loaded, err)
 	}
 	return updated

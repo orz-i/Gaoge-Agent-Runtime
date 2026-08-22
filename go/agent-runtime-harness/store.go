@@ -27,8 +27,11 @@ type Store interface {
 	ListInteractions(context.Context, string) ([]Interaction, error)
 	PutConfigSnapshot(context.Context, ConfigSnapshot) (ConfigSnapshot, bool, error)
 	GetConfigSnapshot(context.Context, string) (ConfigSnapshot, error)
-	PutContextSnapshot(context.Context, runtimecontext.Snapshot) (runtimecontext.Snapshot, bool, error)
-	GetContextSnapshot(context.Context, string) (runtimecontext.Snapshot, error)
+	PutContextCheckpoint(context.Context, runtimecontext.Checkpoint) (runtimecontext.Checkpoint, bool, error)
+	GetContextCheckpoint(context.Context, string) (runtimecontext.Checkpoint, error)
+	GetLatestContextCheckpoint(context.Context, string) (runtimecontext.Checkpoint, error)
+	PutContextArtifact(context.Context, runtimecontext.Artifact) (runtimecontext.Artifact, bool, error)
+	GetContextArtifact(context.Context, string) (runtimecontext.Artifact, error)
 	AppendItem(context.Context, Item) (Item, bool, error)
 	ListItems(context.Context, string, uint64, int) ([]Item, error)
 }

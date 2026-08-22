@@ -23,7 +23,7 @@ const (
 	testCommittedDisposition = "committed"
 )
 
-func TestHarnessBuildsAndInjectsImmutableContextSnapshot(t *testing.T) {
+func TestHarnessBuildsAndInjectsContextCheckpoint(t *testing.T) {
 	t.Parallel()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -32,28 +32,25 @@ func TestHarnessBuildsAndInjectsImmutableContextSnapshot(t *testing.T) {
 	provider := &contextCaptureModel{}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: provider,
-		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextModelMiddleware()},
+		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	store := harness.NewMemoryStore()
 	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: agentRunner, Store: harness.NewMemoryStore(), Clock: contextHarnessClock{},
-		Context: runtimecontext.NewBuilder(runtimecontext.Dependencies{}),
+		Runtime: runtime, Agent: agentRunner, Store: store, Clock: contextHarnessClock{},
+		Context: runtimecontext.NewManager(runtimecontext.Dependencies{}),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed := &harness.ContextSeed{
-		ThreadPathHash: harness.ContextPathHash("message-1", "message-2", "turn-current"),
-		CurrentTurnID:  "turn-current",
-		Instructions:   "workspace instructions",
-		Items: []runtimecontext.Item{
-			{ID: "message-1", TurnID: "turn-old", Kind: runtimecontext.ItemMessage, Role: runtimecontext.RoleUser, Content: "earlier question"},
-			{ID: "message-2", TurnID: "turn-old", Kind: runtimecontext.ItemMessage, Role: runtimecontext.RoleAssistant, Content: "earlier answer"},
-			{ID: "message-current", TurnID: "turn-current", Kind: runtimecontext.ItemMessage, Role: runtimecontext.RoleUser, Content: testContextQuestion, Required: true},
-		},
-	}
+	seed := contextSeed(
+		"workspace instructions",
+		contextEntry("message-1", "turn-old", model.RoleUser, "earlier question", false),
+		contextEntry("message-2", "turn-old", model.RoleAssistant, "earlier answer", false),
+		contextEntry("message-current", "turn-current", model.RoleUser, testContextQuestion, true),
+	)
 	snapshot, err := runner.Start(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "thread-context"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-context"},
@@ -65,14 +62,74 @@ func TestHarnessBuildsAndInjectsImmutableContextSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start context harness: %v", err)
 	}
-	if snapshot.Turn.ContextSnapshotID == "" || snapshot.Turn.ContextRef.ContentHash == "" ||
-		snapshot.Turn.ContextSnapshotID != snapshot.Turn.ContextRef.ID {
-		t.Fatalf("context reference not frozen: %#v", snapshot.Turn.ContextRef)
+	if snapshot.Turn.ContextCheckpointID == "" || snapshot.Turn.ContextRef.ContentHash == "" ||
+		snapshot.Turn.ContextCheckpointID != snapshot.Turn.ContextRef.ID || snapshot.Turn.ContextRef.Generation != 1 {
+		t.Fatalf("context checkpoint reference not frozen: %#v", snapshot.Turn.ContextRef)
+	}
+	checkpoint, err := store.GetContextCheckpoint(t.Context(), snapshot.Turn.ContextCheckpointID)
+	if err != nil || checkpoint.ScopeID != snapshot.Turn.SessionID || checkpoint.CoveredThroughSourceID != "message-current" {
+		t.Fatalf("stored checkpoint = %#v err=%v", checkpoint, err)
 	}
 	assertContextMessages(t, provider.request.Messages)
 }
 
-func TestHarnessKeepsLiveToolResultsAfterFrozenContext(t *testing.T) {
+func TestHarnessAppendsConversationDeltaAcrossTurnsWithoutChangingGeneration(t *testing.T) {
+	t.Parallel()
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &multiContextCaptureModel{}
+	agentRunner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: provider,
+		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := harness.NewMemoryStore()
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: agentRunner, Store: store, Clock: contextHarnessClock{},
+		Context: runtimecontext.NewManager(runtimecontext.Dependencies{}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	common := harness.StartRequest{
+		HostThread: harness.HostRef{Kind: "conversation", ID: "thread-prefix"},
+		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "thread-prefix"}, Config: harness.ConfigSnapshot{},
+	}
+	first := common
+	first.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-1"}
+	first.Goal = "question one"
+	first.Context = contextSeed("", contextEntry("m1", "turn-1", model.RoleUser, first.Goal, true))
+	firstSnapshot, err := runner.Start(t.Context(), first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := common
+	second.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-2"}
+	second.Goal = "question two"
+	second.Context = contextSeed("",
+		contextEntry("m1", "turn-1", model.RoleUser, first.Goal, false),
+		contextEntry("a1", "turn-1", model.RoleAssistant, "answer", false),
+		contextEntry("m2", "turn-2", model.RoleUser, second.Goal, true),
+	)
+	secondSnapshot, err := runner.Start(t.Context(), second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstSnapshot.Turn.ContextRef.Generation != secondSnapshot.Turn.ContextRef.Generation ||
+		secondSnapshot.Turn.ContextRef.Revision <= firstSnapshot.Turn.ContextRef.Revision {
+		t.Fatalf("ordinary source append must stay in generation: first=%#v second=%#v", firstSnapshot.Turn.ContextRef, secondSnapshot.Turn.ContextRef)
+	}
+	if len(provider.requests) != 2 || !requestMessagePrefix(provider.requests[0].Messages, provider.requests[1].Messages) {
+		t.Fatalf("ordinary next Turn rewrote model prefix: %#v", provider.requests)
+	}
+}
+
+func TestHarnessKeepsLiveToolResultsAfterContextCheckpoint(t *testing.T) {
 	t.Parallel()
 	snapshot, provider := runToolResultContextHarness(t)
 	if snapshot.Turn.Status != harness.TurnCompleted || len(provider.requests) != 2 {
@@ -105,28 +162,24 @@ func runToolResultContextHarness(t *testing.T) (harness.Snapshot, *toolResultCap
 	provider := &toolResultCaptureModel{}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: provider, Catalog: registry, Executor: registry,
-		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextModelMiddleware()},
+		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runner, err := harness.NewRunner(harness.Dependencies{
 		Runtime: runtime, Agent: agentRunner, Store: harness.NewMemoryStore(), Clock: contextHarnessClock{},
-		Context: runtimecontext.NewBuilder(runtimecontext.Dependencies{}), Catalog: registry,
+		Context: runtimecontext.NewManager(runtimecontext.Dependencies{}), Catalog: registry,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	seed := &harness.ContextSeed{
-		ThreadPathHash: harness.ContextPathHash("message-question", "message-old", "turn-current"),
-		CurrentTurnID:  "turn-current",
-		Instructions:   "workspace instructions",
-		Items: []runtimecontext.Item{
-			{ID: "message-question", TurnID: "turn-old", Kind: runtimecontext.ItemMessage, Role: runtimecontext.RoleUser, Content: "earlier question"},
-			{ID: "message-old", TurnID: "turn-old", Kind: runtimecontext.ItemMessage, Role: runtimecontext.RoleAssistant, Content: "earlier answer"},
-			{ID: "message-current", TurnID: "turn-current", Kind: runtimecontext.ItemMessage, Role: runtimecontext.RoleUser, Content: testContextQuestion, Required: true},
-		},
-	}
+	seed := contextSeed(
+		"workspace instructions",
+		contextEntry("message-question", "turn-old", model.RoleUser, "earlier question", false),
+		contextEntry("message-old", "turn-old", model.RoleAssistant, "earlier answer", false),
+		contextEntry("message-current", "turn-current", model.RoleUser, testContextQuestion, true),
+	)
 	snapshot, err := runner.Start(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "thread-tool-context"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-tool-context"},
@@ -145,13 +198,42 @@ func runToolResultContextHarness(t *testing.T) (harness.Snapshot, *toolResultCap
 	return snapshot, provider
 }
 
+func contextSeed(instructions string, entries ...runtimecontext.Entry) *harness.ContextSeed {
+	path := make([]string, len(entries))
+	for index := range entries {
+		path[index] = entries[index].SourceID
+	}
+	return &harness.ContextSeed{SourcePath: path, Instructions: instructions, Entries: entries}
+}
+
+func contextEntry(id, turnID string, role model.Role, content string, required bool) runtimecontext.Entry {
+	return runtimecontext.Entry{
+		ID: "entry-" + id, SourceID: id, TurnID: turnID, Required: required,
+		Message: model.Message{Role: role, Content: content},
+	}
+}
+
+func requestMessagePrefix(prefix, complete []model.Message) bool {
+	if len(prefix) > len(complete) {
+		return false
+	}
+	for index := range prefix {
+		left, _ := json.Marshal(prefix[index])
+		right, _ := json.Marshal(complete[index])
+		if string(left) != string(right) {
+			return false
+		}
+	}
+	return true
+}
+
 func assertLiveToolTranscript(t *testing.T, messages []model.Message) {
 	t.Helper()
 	if len(messages) != 6 || messages[4].Role != model.RoleAssistant ||
 		len(messages[4].ToolCalls) != 1 || messages[5].Role != model.RoleTool ||
 		messages[5].ToolCallID != "call-list-units" ||
 		messages[5].Content != `{"items":[{"id":"unit_placeholder","revision":1}]}` {
-		t.Fatalf("live Tool transcript missing after frozen context: %#v", messages)
+		t.Fatalf("live Tool transcript missing after context checkpoint: %#v", messages)
 	}
 }
 
@@ -183,9 +265,14 @@ func (modelClient *contextCaptureModel) Generate(_ context.Context, request mode
 	return model.Response{Content: "context answer"}, nil
 }
 
-type toolResultCaptureModel struct {
-	requests []model.Request
+type multiContextCaptureModel struct{ requests []model.Request }
+
+func (modelClient *multiContextCaptureModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
+	modelClient.requests = append(modelClient.requests, model.CloneRequest(request))
+	return model.Response{Content: "answer"}, nil
 }
+
+type toolResultCaptureModel struct{ requests []model.Request }
 
 func (modelClient *toolResultCaptureModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	modelClient.requests = append(modelClient.requests, model.CloneRequest(request))

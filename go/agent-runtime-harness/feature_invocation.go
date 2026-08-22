@@ -204,7 +204,7 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 	}
 	if !envelope.created {
 		turn, runCtx, contextErr := runner.restoreOrBuildContext(
-			ctx, envelope.turn, invocation.ExecutionRefID, envelope.request.Context, envelope.config,
+			ctx, envelope.turn, envelope.request.Context, envelope.config,
 		)
 		if contextErr != nil {
 			_, failErr := runner.failTopLevelInvocationAndTurn(ctx, envelope.turn, invocation, contextErr)
@@ -284,7 +284,7 @@ func (runner *Runner) prepareTopLevelFeatureContext(
 	}
 	runner.publishTurnStatus(ctx, turn, EventTurnStarted, false)
 	updated, runCtx, err := runner.restoreOrBuildContext(
-		ctx, turn, invocation.ExecutionRefID, request.Context, envelope.config,
+		ctx, turn, request.Context, envelope.config,
 	)
 	if err != nil {
 		_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
@@ -693,18 +693,18 @@ func (runner *Runner) topLevelInvocationIdentity(
 }
 
 func (runner *Runner) topLevelRetryContext(ctx context.Context, turn Turn) (context.Context, error) {
-	snapshotID := strings.TrimSpace(turn.ContextSnapshotID)
-	if snapshotID == "" {
+	checkpointID := strings.TrimSpace(turn.ContextCheckpointID)
+	if checkpointID == "" {
 		return ctx, nil
 	}
-	snapshot, err := runner.store.GetContextSnapshot(ctx, snapshotID)
+	checkpoint, err := runner.store.GetContextCheckpoint(ctx, checkpointID)
 	if err != nil {
 		return nil, err
 	}
-	if contextRef(snapshot) != turn.ContextRef || snapshot.ID != snapshotID {
+	if checkpoint.ScopeID != turn.SessionID || !sameContextCheckpointRef(checkpoint, turn.ContextRef) || checkpoint.ID != checkpointID {
 		return nil, ErrConflict
 	}
-	return withContextSnapshot(ctx, snapshot), nil
+	return withContextCheckpoint(ctx, checkpoint), nil
 }
 
 func (runner *Runner) startInvocationAttempt(

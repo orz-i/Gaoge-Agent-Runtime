@@ -42,7 +42,7 @@ func (client *blockingDelegationModel) rootExecutionRef() string {
 	return client.rootRunID
 }
 
-func TestHarnessDelegationChildDoesNotInheritParentContextSnapshot(t *testing.T) {
+func TestHarnessDelegationChildDoesNotInheritParentContextCheckpoint(t *testing.T) {
 	t.Parallel()
 	capture := &delegationModel{}
 	runner, relations := newDelegationHarnessWithOptions(t, capture, 2, true)
@@ -59,11 +59,10 @@ func TestHarnessDelegationChildDoesNotInheritParentContextSnapshot(t *testing.T)
 			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
 		},
 		Context: &harness.ContextSeed{
-			ThreadPathHash: harness.ContextPathHash("message-delegation-context", delegationContextTurnID),
-			CurrentTurnID:  delegationContextTurnID,
-			Items: []runtimecontext.Item{{
-				ID: "message-delegation-context", TurnID: delegationContextTurnID,
-				Kind: runtimecontext.ItemMessage, Role: runtimecontext.RoleUser, Content: goal, Required: true,
+			SourcePath: []string{"message-delegation-context"},
+			Entries: []runtimecontext.Entry{{
+				ID: "entry-delegation-context", SourceID: "message-delegation-context", TurnID: delegationContextTurnID,
+				Message: model.Message{Role: model.RoleUser, Content: goal}, Required: true,
 			}},
 		},
 	})
@@ -460,7 +459,7 @@ func delegationAgentDependencies(
 		Limits:           agent.Limits{MaxLLMCalls: 4, MaxToolCalls: maxToolCalls},
 	}
 	if contextAware {
-		dependencies.ModelMiddleware = []plugin.ModelMiddleware{harness.NewContextModelMiddleware()}
+		dependencies.ModelMiddleware = []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()}
 	}
 	return dependencies
 }
@@ -479,7 +478,7 @@ func delegationHarnessDependencies(
 		Handoffs: handoffs, Relations: relations,
 	}
 	if contextAware {
-		dependencies.Context = runtimecontext.NewBuilder(runtimecontext.Dependencies{})
+		dependencies.Context = runtimecontext.NewManager(runtimecontext.Dependencies{})
 	}
 	return dependencies
 }

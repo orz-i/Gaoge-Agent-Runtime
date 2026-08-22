@@ -26,8 +26,9 @@ func TestMergeContextRuntimeMessagesDirectGoalDoesNotDuplicateCurrentTurn(t *tes
 		t.Fatalf("merge direct goal: %v", err)
 	}
 	want := []model.Message{
-		{Role: model.RoleSystem, Content: "frozen instructions\n\nruntime guidance"},
+		{Role: model.RoleSystem, Content: "frozen instructions"},
 		{Role: model.RoleUser, Content: parentGoal},
+		{Role: model.RoleSystem, Content: "runtime guidance"},
 		{Role: model.RoleAssistant, Content: "live continuation"},
 	}
 	assertRuntimeMessagesEqual(t, merged, want)
@@ -49,8 +50,9 @@ func TestMergeContextRuntimeMessagesNestedGoalKeepsParentContextAndChildGoal(t *
 		t.Fatalf("merge nested goal: %v", err)
 	}
 	want := []model.Message{
-		{Role: model.RoleSystem, Content: "frozen instructions\n\nexecute this bounded step"},
+		{Role: model.RoleSystem, Content: "frozen instructions"},
 		{Role: model.RoleUser, Content: "original conversation request"},
+		{Role: model.RoleSystem, Content: "execute this bounded step"},
 		{Role: model.RoleUser, Content: "child plan step goal"},
 	}
 	assertRuntimeMessagesEqual(t, merged, want)

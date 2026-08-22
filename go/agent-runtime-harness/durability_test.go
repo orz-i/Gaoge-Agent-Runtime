@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 )
 
 type durabilityTestClock struct{ now time.Time }
@@ -38,55 +39,46 @@ func TestListAllItemsAndParentValidationReadPastFirstPage(t *testing.T) {
 	}
 }
 
-func TestRestoreOrBuildContextReloadsDurableSnapshot(t *testing.T) {
+func TestRestoreOrBuildContextReloadsDurableCheckpoint(t *testing.T) {
 	now := time.Date(2026, 8, 20, 4, 0, 0, 0, time.UTC)
 	store := NewMemoryStore()
-	snapshot := runtimecontext.Snapshot{
-		ID: "ctx-replay", RunID: "run-replay", Revision: 1,
-		ThreadPathHash: "path-replay", Content: []byte(`{"instructions":"sealed"}`), ContentHash: "content-replay",
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "session-replay", StaticFingerprint: runtimecontext.StaticFingerprint("sealed"),
+		SourcePath: []string{"message-replay"}, Instructions: "sealed",
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-replay", SourceID: "message-replay", TurnID: "turn-replay",
+			Message: model.Message{Role: model.RoleUser, Content: "replay request"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	requireStoredContextSnapshot(t, store, snapshot)
-	invocation := requireReplayInvocation(t, store, snapshot, now)
-	turn := Turn{ID: invocation.TurnID, ContextSnapshotID: snapshot.ID, ContextRef: contextRef(snapshot)}
+	requireStoredContextCheckpoint(t, store, checkpoint)
+	turn := Turn{
+		ID: "turn-replay", SessionID: checkpoint.ScopeID, ContextCheckpointID: checkpoint.ID,
+		ContextRef: contextCheckpointRef(checkpoint),
+	}
 	runner := &Runner{store: store, clock: durabilityTestClock{now: now}}
-	_, runCtx, err := runner.restoreOrBuildContext(context.Background(), turn, snapshot.RunID, nil, ConfigSnapshot{})
+	_, runCtx, err := runner.restoreOrBuildContext(context.Background(), turn, nil, ConfigSnapshot{})
 	if err != nil {
 		t.Fatalf("restore context: %v", err)
 	}
-	assertRestoredContext(t, runCtx, snapshot)
+	assertRestoredContext(t, runCtx, checkpoint)
 	assertRecoveredContextItem(t, store, turn.ID)
 }
 
-func requireStoredContextSnapshot(t *testing.T, store *MemoryStore, snapshot runtimecontext.Snapshot) {
+func requireStoredContextCheckpoint(t *testing.T, store *MemoryStore, checkpoint runtimecontext.Checkpoint) {
 	t.Helper()
-	if _, fresh, err := store.PutContextSnapshot(t.Context(), snapshot); err != nil || !fresh {
-		t.Fatalf("put context snapshot fresh=%v err=%v", fresh, err)
+	if _, fresh, err := store.PutContextCheckpoint(t.Context(), checkpoint); err != nil || !fresh {
+		t.Fatalf("put context checkpoint fresh=%v err=%v", fresh, err)
 	}
 }
 
-func requireReplayInvocation(
-	t *testing.T,
-	store *MemoryStore,
-	snapshot runtimecontext.Snapshot,
-	now time.Time,
-) Invocation {
+func assertRestoredContext(t *testing.T, runCtx context.Context, checkpoint runtimecontext.Checkpoint) {
 	t.Helper()
-	invocation := Invocation{
-		ID: "inv-replay", TurnID: "turn-replay", CapabilityKey: CapabilityAgent,
-		DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: ExecutionAgent,
-		ExecutionRefID: snapshot.RunID, Status: InvocationAccepted, Attempt: 1, Revision: 1,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if _, _, err := store.CreateInvocation(t.Context(), invocation); err != nil {
-		t.Fatal(err)
-	}
-	return invocation
-}
-
-func assertRestoredContext(t *testing.T, runCtx context.Context, snapshot runtimecontext.Snapshot) {
-	t.Helper()
-	restored, ok := runCtx.Value(contextSnapshotKey{}).(runtimecontext.Snapshot)
-	if !ok || restored.ID != snapshot.ID || restored.ContentHash != snapshot.ContentHash {
+	restored, ok := runCtx.Value(contextCheckpointKey{}).(runtimecontext.Checkpoint)
+	if !ok || restored.ID != checkpoint.ID || restored.ContentHash != checkpoint.ContentHash {
 		t.Fatalf("restored=%#v ok=%v", restored, ok)
 	}
 }

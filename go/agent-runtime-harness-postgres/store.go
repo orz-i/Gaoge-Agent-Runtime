@@ -582,7 +582,10 @@ func createOrReplay[T any](
 
 // Models returns the complete Harness persistence model set.
 func Models() []any {
-	return []any{&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &interactionRecord{}, &configRecord{}, &contextSnapshotRecord{}, &itemRecord{}}
+	return []any{
+		&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &interactionRecord{}, &configRecord{},
+		&contextCheckpointRecord{}, &contextArtifactRecord{}, &itemRecord{},
+	}
 }
 
 // Migrate creates or updates only Harness-owned persistence tables.
@@ -637,10 +640,12 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 		Where("id = ? AND revision = ? AND session_id = ? AND host_turn_kind = ? AND host_turn_id = ? AND config_snapshot_id = ?",
 			value.ID, expectedRevision, value.SessionID, value.HostTurn.Kind, value.HostTurn.ID, value.ConfigSnapshotID).
 		Updates(map[string]any{
-			"context_snapshot_id": record.ContextSnapshotID, "context_ref_id": record.ContextRefID,
-			"context_ref_revision": record.ContextRefRevision, "context_path_hash": record.ContextPathHash,
-			"context_content_hash": record.ContextContentHash,
-			"status":               record.Status, "revision": record.Revision, "error_code": record.ErrorCode,
+			"context_checkpoint_id": record.ContextCheckpointID, "context_ref_id": record.ContextRefID,
+			"context_generation": record.ContextGeneration, "context_revision": record.ContextRevision,
+			"context_lineage_hash":              record.ContextLineageHash,
+			"context_covered_through_source_id": record.ContextCoveredThroughSourceID,
+			"context_content_hash":              record.ContextContentHash,
+			"status":                            record.Status, "revision": record.Revision, "error_code": record.ErrorCode,
 			"error_detail": record.ErrorDetail, "updated_at": record.UpdatedAt,
 		})
 	if result.Error != nil {
@@ -680,44 +685,130 @@ func (store *Store) GetConfigSnapshot(ctx context.Context, id string) (harness.C
 	return value, nil
 }
 
-func (store *Store) PutContextSnapshot(
+func (store *Store) PutContextCheckpoint(
 	ctx context.Context,
-	value runtimecontext.Snapshot,
-) (runtimecontext.Snapshot, bool, error) {
-	if !validContextSnapshot(value) {
-		return runtimecontext.Snapshot{}, false, harness.ErrInvalidRequest
+	value runtimecontext.Checkpoint,
+) (runtimecontext.Checkpoint, bool, error) {
+	if !runtimecontext.ValidCheckpoint(value) {
+		return runtimecontext.Checkpoint{}, false, harness.ErrInvalidRequest
 	}
 	payload, err := json.Marshal(value)
 	if err != nil {
-		return runtimecontext.Snapshot{}, false, err
+		return runtimecontext.Checkpoint{}, false, err
 	}
-	record := contextSnapshotRecord{ID: value.ID, RunID: value.RunID, PayloadJSON: string(payload)}
-	if err = store.db.WithContext(ctx).Create(&record).Error; err == nil {
-		return value, true, nil
+	record := contextCheckpointRecord{
+		ID: value.ID, ScopeID: value.ScopeID, Generation: value.Generation, Revision: value.Revision,
+		PayloadJSON: string(payload),
 	}
-	existing, loadErr := store.GetContextSnapshot(ctx, value.ID)
+	created := false
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if value.ParentCheckpointID != "" {
+			var parent contextCheckpointRecord
+			if parentErr := tx.Where("id = ? AND scope_id = ?", value.ParentCheckpointID, value.ScopeID).Take(&parent).Error; parentErr != nil {
+				return harness.ErrConflict
+			}
+		}
+		for _, artifactID := range value.ArtifactIDs {
+			var artifact contextArtifactRecord
+			if artifactErr := tx.Where("id = ? AND scope_id = ?", artifactID, value.ScopeID).Take(&artifact).Error; artifactErr != nil {
+				return harness.ErrConflict
+			}
+		}
+		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+		if result.Error != nil {
+			return result.Error
+		}
+		created = result.RowsAffected == 1
+		if created {
+			return nil
+		}
+		var existingRecord contextCheckpointRecord
+		if loadErr := tx.Where("id = ?", value.ID).Take(&existingRecord).Error; loadErr != nil {
+			return harness.ErrConflict
+		}
+		existing, loadErr := contextCheckpointFromRecord(existingRecord)
+		if loadErr != nil || !reflect.DeepEqual(existing, value) {
+			return harness.ErrConflict
+		}
+		return nil
+	})
+	if err != nil {
+		return runtimecontext.Checkpoint{}, false, err
+	}
+	return runtimecontext.CloneCheckpoint(value), created, nil
+}
+
+func (store *Store) GetContextCheckpoint(ctx context.Context, id string) (runtimecontext.Checkpoint, error) {
+	var record contextCheckpointRecord
+	if err := store.db.WithContext(ctx).Where("id = ?", strings.TrimSpace(id)).Take(&record).Error; err != nil {
+		return runtimecontext.Checkpoint{}, mapError(err)
+	}
+	return contextCheckpointFromRecord(record)
+}
+
+func (store *Store) GetLatestContextCheckpoint(ctx context.Context, scopeID string) (runtimecontext.Checkpoint, error) {
+	scopeID = strings.TrimSpace(scopeID)
+	if scopeID == "" {
+		return runtimecontext.Checkpoint{}, harness.ErrInvalidRequest
+	}
+	var record contextCheckpointRecord
+	if err := store.db.WithContext(ctx).Where("scope_id = ?", scopeID).
+		Order("generation DESC, revision DESC, id DESC").Take(&record).Error; err != nil {
+		return runtimecontext.Checkpoint{}, mapError(err)
+	}
+	return contextCheckpointFromRecord(record)
+}
+
+func contextCheckpointFromRecord(record contextCheckpointRecord) (runtimecontext.Checkpoint, error) {
+	var value runtimecontext.Checkpoint
+	if err := json.Unmarshal([]byte(record.PayloadJSON), &value); err != nil ||
+		value.ID != record.ID || value.ScopeID != record.ScopeID || value.Generation != record.Generation ||
+		value.Revision != record.Revision || !runtimecontext.ValidCheckpoint(value) {
+		return runtimecontext.Checkpoint{}, harness.ErrConflict
+	}
+	return runtimecontext.CloneCheckpoint(value), nil
+}
+
+func (store *Store) PutContextArtifact(
+	ctx context.Context,
+	value runtimecontext.Artifact,
+) (runtimecontext.Artifact, bool, error) {
+	if !runtimecontext.ValidArtifact(value) {
+		return runtimecontext.Artifact{}, false, harness.ErrInvalidRequest
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return runtimecontext.Artifact{}, false, err
+	}
+	record := contextArtifactRecord{
+		ID: value.ID, ScopeID: value.ScopeID, Generation: value.Generation, PayloadJSON: string(payload),
+	}
+	result := store.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+	if result.Error != nil {
+		return runtimecontext.Artifact{}, false, result.Error
+	}
+	if result.RowsAffected == 1 {
+		return runtimecontext.CloneArtifacts([]runtimecontext.Artifact{value})[0], true, nil
+	}
+	existing, loadErr := store.GetContextArtifact(ctx, value.ID)
 	if loadErr != nil || !reflect.DeepEqual(existing, value) {
-		return runtimecontext.Snapshot{}, false, harness.ErrConflict
+		return runtimecontext.Artifact{}, false, harness.ErrConflict
 	}
 	return existing, false, nil
 }
 
-func validContextSnapshot(value runtimecontext.Snapshot) bool {
-	return strings.TrimSpace(value.ID) != "" && strings.TrimSpace(value.RunID) != "" && value.Revision > 0 &&
-		strings.TrimSpace(value.ThreadPathHash) != "" && strings.TrimSpace(value.ContentHash) != "" &&
-		len(value.Content) > 0 && json.Valid(value.Content)
-}
-
-func (store *Store) GetContextSnapshot(ctx context.Context, id string) (runtimecontext.Snapshot, error) {
-	var record contextSnapshotRecord
+func (store *Store) GetContextArtifact(ctx context.Context, id string) (runtimecontext.Artifact, error) {
+	var record contextArtifactRecord
 	if err := store.db.WithContext(ctx).Where("id = ?", strings.TrimSpace(id)).Take(&record).Error; err != nil {
-		return runtimecontext.Snapshot{}, mapError(err)
+		return runtimecontext.Artifact{}, mapError(err)
 	}
-	var value runtimecontext.Snapshot
-	if err := json.Unmarshal([]byte(record.PayloadJSON), &value); err != nil || value.ID != record.ID || value.RunID != record.RunID {
-		return runtimecontext.Snapshot{}, harness.ErrConflict
+	var value runtimecontext.Artifact
+	if err := json.Unmarshal([]byte(record.PayloadJSON), &value); err != nil ||
+		value.ID != record.ID || value.ScopeID != record.ScopeID || value.Generation != record.Generation ||
+		!runtimecontext.ValidArtifact(value) {
+		return runtimecontext.Artifact{}, harness.ErrConflict
 	}
-	return value, nil
+	return runtimecontext.CloneArtifacts([]runtimecontext.Artifact{value})[0], nil
 }
 
 func (store *Store) AppendItem(ctx context.Context, value harness.Item) (harness.Item, bool, error) {
@@ -835,10 +926,11 @@ func sessionFromRecord(value sessionRecord) harness.Session {
 func turnToRecord(value harness.Turn) turnRecord {
 	return turnRecord{
 		ID: value.ID, SessionID: value.SessionID, HostTurnKind: value.HostTurn.Kind, HostTurnID: value.HostTurn.ID,
-		ConfigSnapshotID: value.ConfigSnapshotID, ContextSnapshotID: value.ContextSnapshotID,
-		ContextRefID: value.ContextRef.ID, ContextRefRevision: value.ContextRef.Revision,
-		ContextPathHash: value.ContextRef.ThreadPathHash, ContextContentHash: value.ContextRef.ContentHash,
-		Status: string(value.Status), Revision: value.Revision, ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail,
+		ConfigSnapshotID: value.ConfigSnapshotID, ContextCheckpointID: value.ContextCheckpointID,
+		ContextRefID: value.ContextRef.ID, ContextGeneration: value.ContextRef.Generation, ContextRevision: value.ContextRef.Revision,
+		ContextLineageHash: value.ContextRef.LineageHash, ContextCoveredThroughSourceID: value.ContextRef.CoveredThroughSourceID,
+		ContextContentHash: value.ContextRef.ContentHash,
+		Status:             string(value.Status), Revision: value.Revision, ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
 }
@@ -846,9 +938,12 @@ func turnToRecord(value harness.Turn) turnRecord {
 func turnFromRecord(value turnRecord) harness.Turn {
 	return harness.Turn{
 		ID: value.ID, SessionID: value.SessionID, HostTurn: harness.HostRef{Kind: value.HostTurnKind, ID: value.HostTurnID},
-		ConfigSnapshotID: value.ConfigSnapshotID, ContextSnapshotID: value.ContextSnapshotID,
-		ContextRef: harness.ContextRef{ID: value.ContextRefID, Revision: value.ContextRefRevision,
-			ThreadPathHash: value.ContextPathHash, ContentHash: value.ContextContentHash},
+		ConfigSnapshotID: value.ConfigSnapshotID, ContextCheckpointID: value.ContextCheckpointID,
+		ContextRef: harness.ContextCheckpointRef{
+			ID: value.ContextRefID, Generation: value.ContextGeneration, Revision: value.ContextRevision,
+			LineageHash: value.ContextLineageHash, CoveredThroughSourceID: value.ContextCoveredThroughSourceID,
+			ContentHash: value.ContextContentHash,
+		},
 		Status: harness.TurnStatus(value.Status), Revision: value.Revision, ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}

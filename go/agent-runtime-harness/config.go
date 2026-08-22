@@ -97,31 +97,6 @@ type SkillSnapshot struct {
 	ContentHash string `json:"contentHash"`
 }
 
-func normalizeContextBudget(value runtimecontext.Budget) runtimecontext.Budget {
-	if value.MaxInputTokens <= 0 && value.EffectiveModelTokens <= 0 {
-		value.MaxInputTokens = 32_768
-	}
-	if value.SoftLimitPercent <= 0 || value.SoftLimitPercent >= 100 {
-		value.SoftLimitPercent = 80
-	}
-	if value.EstimateSafetyPercent <= 0 {
-		value.EstimateSafetyPercent = 15
-	}
-	if value.MaxSerializedBytes <= 0 {
-		value.MaxSerializedBytes = 4 << 20
-	}
-	if value.PreserveRecentTurns <= 0 {
-		value.PreserveRecentTurns = 8
-	}
-	if value.MaxSummaryTokens <= 0 {
-		value.MaxSummaryTokens = 1024
-	}
-	if value.MaxToolResultBytes <= 0 {
-		value.MaxToolResultBytes = 2048
-	}
-	return value
-}
-
 // ConfigSnapshot is one immutable execution configuration. It intentionally excludes secrets and transport endpoints.
 type ConfigSnapshot struct {
 	ID                    string                `json:"id"`
@@ -135,7 +110,7 @@ type ConfigSnapshot struct {
 	Commands              []CommandDescriptor   `json:"commands"`
 	Skills                []SkillSnapshot       `json:"skills"`
 	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
-	ContextBudget         runtimecontext.Budget `json:"contextBudget"`
+	ContextPolicy         runtimecontext.Policy `json:"contextPolicy"`
 	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
 	Limits                agent.Limits          `json:"limits"`
 	ContentHash           string                `json:"contentHash"`
@@ -153,7 +128,7 @@ type configPayload struct {
 	Commands              []CommandDescriptor   `json:"commands"`
 	Skills                []SkillSnapshot       `json:"skills"`
 	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
-	ContextBudget         runtimecontext.Budget `json:"contextBudget"`
+	ContextPolicy         runtimecontext.Policy `json:"contextPolicy"`
 	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
 	Limits                agent.Limits          `json:"limits"`
 }
@@ -169,7 +144,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	value.Instructions = strings.TrimSpace(value.Instructions)
 	value.Model = strings.TrimSpace(value.Model)
 	value.MemoryPolicy = strings.TrimSpace(value.MemoryPolicy)
-	value.ContextBudget = normalizeContextBudget(value.ContextBudget)
+	value.ContextPolicy = runtimecontext.NormalizePolicy(value.ContextPolicy)
 	if (value.Environment.ID == "") != (value.Environment.Revision == 0) {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
@@ -196,7 +171,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
 		Model: value.Model, ModelOptions: value.ModelOptions, ToolKeys: value.ToolKeys,
 		ToolPolicies: value.ToolPolicies, Commands: value.Commands, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
-		ContextBudget: value.ContextBudget, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
+		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
