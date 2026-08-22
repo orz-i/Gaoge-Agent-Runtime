@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -66,6 +67,66 @@ func TestRestoreOrBuildContextReloadsDurableCheckpoint(t *testing.T) {
 	}
 	assertRestoredContext(t, runCtx, checkpoint)
 	assertRecoveredContextItem(t, store, turn.ID)
+}
+
+func TestMemoryStoreFailedContextCommitDoesNotAdvanceHead(t *testing.T) {
+	const baseSourceID = "message-base"
+	now := time.Date(2026, 8, 22, 9, 20, 0, 0, time.UTC)
+	store := NewMemoryStore()
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	base, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "session-context-cas", StaticFingerprint: runtimecontext.StaticFingerprint("sealed"),
+		SourcePath: []string{baseSourceID}, Instructions: "sealed",
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-base", SourceID: baseSourceID, TurnID: "turn-base",
+			Message: model.Message{Role: model.RoleUser, Content: "base"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, fresh, err := store.CreateTurn(t.Context(), Turn{
+		ID: "turn-context-cas", SessionID: base.ScopeID,
+		HostTurn: HostRef{Kind: "conversation_turn", ID: "context-cas"}, ConfigSnapshotID: "config-context-cas",
+		Status: TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil || !fresh {
+		t.Fatalf("create turn fresh=%v err=%v", fresh, err)
+	}
+	turn, err = store.CommitContextCheckpoint(t.Context(), ContextCheckpointCommit{
+		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision, Checkpoint: base, UpdatedAt: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("commit base: %v", err)
+	}
+	entries := runtimecontext.CloneEntries(base.Window.Entries)
+	entries = append(entries, runtimecontext.Entry{
+		ID: "entry-next", SourceID: "message-next", TurnID: "turn-next",
+		Message: model.Message{Role: model.RoleAssistant, Content: "next"},
+	})
+	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint,
+		SourcePath: []string{baseSourceID, "message-next"}, Instructions: base.Window.Instructions,
+		Entries: entries, Previous: &base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CommitContextCheckpoint(t.Context(), ContextCheckpointCommit{
+		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision + 1,
+		ExpectedTurnCheckpointID: base.ID, ExpectedHeadCheckpointID: base.ID,
+		Checkpoint: candidate, UpdatedAt: now.Add(2 * time.Second),
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale Context commit error=%v", err)
+	}
+	active, err := store.GetActiveContextCheckpoint(t.Context(), base.ScopeID)
+	if err != nil || active.ID != base.ID {
+		t.Fatalf("failed commit polluted active head=%#v err=%v", active, err)
+	}
+	if _, err = store.GetContextCheckpoint(t.Context(), candidate.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("failed commit left speculative checkpoint durable: %v", err)
+	}
 }
 
 func requireStoredContextCheckpoint(t *testing.T, store *MemoryStore, checkpoint runtimecontext.Checkpoint) {

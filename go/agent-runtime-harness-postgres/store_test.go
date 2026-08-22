@@ -18,7 +18,10 @@ import (
 	"gorm.io/gorm"
 )
 
-const testHarnessExecutionRefID = "hr_pg"
+const (
+	testHarnessExecutionRefID = "hr_pg"
+	testContextBaseSourceID   = "message-pg"
+)
 
 func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	store := newStore(t)
@@ -57,12 +60,78 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	assertItemLifecycle(t, store, turn.ID, invocation.ID, now)
 }
 
-func TestStoreContextCheckpointRequiresDurableArtifactsAndTracksLatest(t *testing.T) {
-	store := newStore(t)
-	base := newContextCheckpoint(t, "scope-artifacts")
-	if _, fresh, err := store.PutContextCheckpoint(t.Context(), base); err != nil || !fresh {
-		t.Fatalf("put base checkpoint fresh=%v err=%v", fresh, err)
+func requirePutContextCheckpoint(t *testing.T, store *harnesspostgres.Store, checkpoint runtimecontext.Checkpoint) {
+	t.Helper()
+	created, fresh, err := store.PutContextCheckpoint(t.Context(), checkpoint)
+	if err != nil || !fresh || created.ID != checkpoint.ID {
+		t.Fatalf("put context checkpoint=%#v fresh=%v err=%v", created, fresh, err)
 	}
+}
+
+func createContextCommitTurn(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	scopeID string,
+	suffix string,
+	now time.Time,
+) harness.Turn {
+	t.Helper()
+	turn, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
+		ID: "turn-" + suffix, SessionID: scopeID,
+		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: suffix}, ConfigSnapshotID: "config-" + suffix,
+		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil || !fresh {
+		t.Fatalf("create Context commit turn fresh=%v err=%v", fresh, err)
+	}
+	return turn
+}
+
+func requireCommitContextCheckpoint(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	turn harness.Turn,
+	expectedTurnCheckpointID string,
+	expectedHeadCheckpointID string,
+	checkpoint runtimecontext.Checkpoint,
+	updatedAt time.Time,
+) harness.Turn {
+	t.Helper()
+	updated, err := store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
+		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision,
+		ExpectedTurnCheckpointID: expectedTurnCheckpointID, ExpectedHeadCheckpointID: expectedHeadCheckpointID,
+		Checkpoint: checkpoint, UpdatedAt: updatedAt,
+	})
+	if err != nil || updated.ContextCheckpointID != checkpoint.ID {
+		t.Fatalf("commit Context checkpoint turn=%#v err=%v", updated, err)
+	}
+	return updated
+}
+
+func requireActiveContextCheckpoint(
+	t *testing.T,
+	store *harnesspostgres.Store,
+	scopeID string,
+	wantID string,
+	wantGeneration int,
+) {
+	t.Helper()
+	active, err := store.GetActiveContextCheckpoint(t.Context(), scopeID)
+	if err != nil || active.ID != wantID || active.Generation != wantGeneration {
+		t.Fatalf("active checkpoint=%#v want=%s/%d err=%v", active, wantID, wantGeneration, err)
+	}
+}
+
+func TestStoreContextCheckpointRequiresDurableArtifactsAndCommitsActiveHead(t *testing.T) {
+	store := newStore(t)
+	now := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+	base := newContextCheckpoint(t, "scope-artifacts")
+	requirePutContextCheckpoint(t, store, base)
+	if _, err := store.GetActiveContextCheckpoint(t.Context(), base.ScopeID); !errors.Is(err, harness.ErrNotFound) {
+		t.Fatalf("immutable PutContextCheckpoint advanced active head: %v", err)
+	}
+	turn := createContextCommitTurn(t, store, base.ScopeID, "context-head", now)
+	turn = requireCommitContextCheckpoint(t, store, turn, "", "", base, now.Add(time.Second))
 	artifact, err := runtimecontext.NewArtifact(
 		runtimecontext.ArtifactCompaction, base.ScopeID, base.Generation+1, base.CoveredThroughSourceID,
 		"compacted durable history", json.RawMessage(`{"strategy":"portable"}`),
@@ -83,16 +152,62 @@ func TestStoreContextCheckpointRequiresDurableArtifactsAndTracksLatest(t *testin
 	if _, fresh, err := store.PutContextArtifact(t.Context(), artifact); err != nil || !fresh {
 		t.Fatalf("put context artifact fresh=%v err=%v", fresh, err)
 	}
-	if _, fresh, err := store.PutContextCheckpoint(t.Context(), rollover); err != nil || !fresh {
-		t.Fatalf("put rollover fresh=%v err=%v", fresh, err)
-	}
-	latest, err := store.GetLatestContextCheckpoint(t.Context(), base.ScopeID)
-	if err != nil || latest.ID != rollover.ID || latest.Generation != base.Generation+1 {
-		t.Fatalf("latest checkpoint=%#v err=%v", latest, err)
-	}
+	requirePutContextCheckpoint(t, store, rollover)
+	requireActiveContextCheckpoint(t, store, base.ScopeID, base.ID, base.Generation)
+	requireCommitContextCheckpoint(t, store, turn, base.ID, base.ID, rollover, now.Add(2*time.Second))
+	requireActiveContextCheckpoint(t, store, base.ScopeID, rollover.ID, base.Generation+1)
 	loadedArtifact, err := store.GetContextArtifact(t.Context(), artifact.ID)
 	if err != nil || loadedArtifact.ContentHash != artifact.ContentHash {
 		t.Fatalf("loaded artifact=%#v err=%v", loadedArtifact, err)
+	}
+}
+
+func TestStoreFailedContextCommitDoesNotAdvanceHeadOrPersistCheckpoint(t *testing.T) {
+	store := newStore(t)
+	now := time.Date(2026, 8, 22, 9, 10, 0, 0, time.UTC)
+	base := newContextCheckpoint(t, "scope-context-cas")
+	turn, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
+		ID: "turn-context-cas", SessionID: base.ScopeID,
+		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-cas"}, ConfigSnapshotID: "config-context-cas",
+		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil || !fresh {
+		t.Fatalf("create turn fresh=%v err=%v", fresh, err)
+	}
+	turn, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
+		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision, Checkpoint: base, UpdatedAt: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatalf("commit base: %v", err)
+	}
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	entries := runtimecontext.CloneEntries(base.Window.Entries)
+	entries = append(entries, runtimecontext.Entry{
+		ID: "entry-context-cas-next", SourceID: "message-cas-next", TurnID: "turn-cas-next",
+		Message: model.Message{Role: model.RoleAssistant, Content: "next context"},
+	})
+	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint,
+		SourcePath: []string{testContextBaseSourceID, "message-cas-next"}, Instructions: base.Window.Instructions,
+		Entries: entries, Previous: &base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
+		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision + 1,
+		ExpectedTurnCheckpointID: base.ID, ExpectedHeadCheckpointID: base.ID,
+		Checkpoint: candidate, UpdatedAt: now.Add(2 * time.Second),
+	})
+	if !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("stale Context commit error=%v", err)
+	}
+	active, err := store.GetActiveContextCheckpoint(t.Context(), base.ScopeID)
+	if err != nil || active.ID != base.ID {
+		t.Fatalf("failed commit polluted active head=%#v err=%v", active, err)
+	}
+	if _, err = store.GetContextCheckpoint(t.Context(), candidate.ID); !errors.Is(err, harness.ErrNotFound) {
+		t.Fatalf("failed commit left speculative checkpoint durable: %v", err)
 	}
 }
 
@@ -327,9 +442,9 @@ func newContextCheckpoint(t *testing.T, scopeID string) runtimecontext.Checkpoin
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
 		ScopeID: scopeID, StaticFingerprint: runtimecontext.StaticFingerprint("sealed"),
-		SourcePath: []string{"message-pg"}, Instructions: "sealed",
+		SourcePath: []string{testContextBaseSourceID}, Instructions: "sealed",
 		Entries: []runtimecontext.Entry{{
-			ID: "entry-pg-" + scopeID, SourceID: "message-pg", TurnID: "turn-pg",
+			ID: "entry-pg-" + scopeID, SourceID: testContextBaseSourceID, TurnID: "turn-pg",
 			Message: model.Message{Role: model.RoleUser, Content: "postgres context"},
 		}},
 	})
@@ -353,9 +468,8 @@ func assertContextCheckpointLifecycle(t *testing.T, store *harnesspostgres.Store
 	if err != nil || loaded.ScopeID != checkpoint.ScopeID || loaded.ContentHash != checkpoint.ContentHash {
 		t.Fatalf("load context checkpoint: %#v err=%v", loaded, err)
 	}
-	latest, err := store.GetLatestContextCheckpoint(t.Context(), checkpoint.ScopeID)
-	if err != nil || latest.ID != checkpoint.ID {
-		t.Fatalf("latest context checkpoint: %#v err=%v", latest, err)
+	if active, err := store.GetActiveContextCheckpoint(t.Context(), checkpoint.ScopeID); !errors.Is(err, harness.ErrNotFound) || active.ID != "" {
+		t.Fatalf("immutable checkpoint became active without commit: %#v err=%v", active, err)
 	}
 }
 

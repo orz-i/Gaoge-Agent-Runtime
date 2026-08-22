@@ -584,7 +584,7 @@ func createOrReplay[T any](
 func Models() []any {
 	return []any{
 		&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &interactionRecord{}, &configRecord{},
-		&contextCheckpointRecord{}, &contextArtifactRecord{}, &itemRecord{},
+		&contextCheckpointRecord{}, &contextHeadRecord{}, &contextArtifactRecord{}, &itemRecord{},
 	}
 }
 
@@ -692,50 +692,76 @@ func (store *Store) PutContextCheckpoint(
 	if !runtimecontext.ValidCheckpoint(value) {
 		return runtimecontext.Checkpoint{}, false, harness.ErrInvalidRequest
 	}
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return runtimecontext.Checkpoint{}, false, err
-	}
-	record := contextCheckpointRecord{
-		ID: value.ID, ScopeID: value.ScopeID, Generation: value.Generation, Revision: value.Revision,
-		PayloadJSON: string(payload),
-	}
 	created := false
-	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if value.ParentCheckpointID != "" {
-			var parent contextCheckpointRecord
-			if parentErr := tx.Where("id = ? AND scope_id = ?", value.ParentCheckpointID, value.ScopeID).Take(&parent).Error; parentErr != nil {
-				return harness.ErrConflict
-			}
-		}
-		for _, artifactID := range value.ArtifactIDs {
-			var artifact contextArtifactRecord
-			if artifactErr := tx.Where("id = ? AND scope_id = ?", artifactID, value.ScopeID).Take(&artifact).Error; artifactErr != nil {
-				return harness.ErrConflict
-			}
-		}
-		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
-		if result.Error != nil {
-			return result.Error
-		}
-		created = result.RowsAffected == 1
-		if created {
-			return nil
-		}
-		var existingRecord contextCheckpointRecord
-		if loadErr := tx.Where("id = ?", value.ID).Take(&existingRecord).Error; loadErr != nil {
-			return harness.ErrConflict
-		}
-		existing, loadErr := contextCheckpointFromRecord(existingRecord)
-		if loadErr != nil || !reflect.DeepEqual(existing, value) {
-			return harness.ErrConflict
-		}
-		return nil
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var putErr error
+		created, putErr = putContextCheckpointTx(tx, value)
+		return putErr
 	})
 	if err != nil {
 		return runtimecontext.Checkpoint{}, false, err
 	}
 	return runtimecontext.CloneCheckpoint(value), created, nil
+}
+
+func putContextCheckpointTx(tx *gorm.DB, value runtimecontext.Checkpoint) (bool, error) {
+	if tx == nil || !runtimecontext.ValidCheckpoint(value) {
+		return false, harness.ErrInvalidRequest
+	}
+	if err := validateContextCheckpointReferencesTx(tx, value); err != nil {
+		return false, err
+	}
+	record, err := contextCheckpointToRecord(value)
+	if err != nil {
+		return false, err
+	}
+	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 1 {
+		return true, nil
+	}
+	return replayContextCheckpointTx(tx, value)
+}
+
+func validateContextCheckpointReferencesTx(tx *gorm.DB, value runtimecontext.Checkpoint) error {
+	if value.ParentCheckpointID != "" {
+		var parent contextCheckpointRecord
+		if err := tx.Where("id = ? AND scope_id = ?", value.ParentCheckpointID, value.ScopeID).Take(&parent).Error; err != nil {
+			return harness.ErrConflict
+		}
+	}
+	for _, artifactID := range value.ArtifactIDs {
+		var artifact contextArtifactRecord
+		if err := tx.Where("id = ? AND scope_id = ?", artifactID, value.ScopeID).Take(&artifact).Error; err != nil {
+			return harness.ErrConflict
+		}
+	}
+	return nil
+}
+
+func contextCheckpointToRecord(value runtimecontext.Checkpoint) (contextCheckpointRecord, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return contextCheckpointRecord{}, err
+	}
+	return contextCheckpointRecord{
+		ID: value.ID, ScopeID: value.ScopeID, Generation: value.Generation, Revision: value.Revision,
+		PayloadJSON: string(payload),
+	}, nil
+}
+
+func replayContextCheckpointTx(tx *gorm.DB, value runtimecontext.Checkpoint) (bool, error) {
+	var existingRecord contextCheckpointRecord
+	if loadErr := tx.Where("id = ?", value.ID).Take(&existingRecord).Error; loadErr != nil {
+		return false, harness.ErrConflict
+	}
+	existing, loadErr := contextCheckpointFromRecord(existingRecord)
+	if loadErr != nil || !reflect.DeepEqual(existing, value) {
+		return false, harness.ErrConflict
+	}
+	return false, nil
 }
 
 func (store *Store) GetContextCheckpoint(ctx context.Context, id string) (runtimecontext.Checkpoint, error) {
@@ -746,17 +772,154 @@ func (store *Store) GetContextCheckpoint(ctx context.Context, id string) (runtim
 	return contextCheckpointFromRecord(record)
 }
 
-func (store *Store) GetLatestContextCheckpoint(ctx context.Context, scopeID string) (runtimecontext.Checkpoint, error) {
+func (store *Store) GetActiveContextCheckpoint(ctx context.Context, scopeID string) (runtimecontext.Checkpoint, error) {
 	scopeID = strings.TrimSpace(scopeID)
 	if scopeID == "" {
 		return runtimecontext.Checkpoint{}, harness.ErrInvalidRequest
 	}
-	var record contextCheckpointRecord
-	if err := store.db.WithContext(ctx).Where("scope_id = ?", scopeID).
-		Order("generation DESC, revision DESC, id DESC").Take(&record).Error; err != nil {
+	var head contextHeadRecord
+	if err := store.db.WithContext(ctx).Where("scope_id = ?", scopeID).Take(&head).Error; err != nil {
 		return runtimecontext.Checkpoint{}, mapError(err)
 	}
-	return contextCheckpointFromRecord(record)
+	checkpoint, err := store.GetContextCheckpoint(ctx, head.CheckpointID)
+	if err != nil || checkpoint.ScopeID != scopeID {
+		return runtimecontext.Checkpoint{}, harness.ErrConflict
+	}
+	return checkpoint, nil
+}
+
+func (store *Store) CommitContextCheckpoint(
+	ctx context.Context,
+	request harness.ContextCheckpointCommit,
+) (harness.Turn, error) {
+	request.TurnID = strings.TrimSpace(request.TurnID)
+	request.ExpectedTurnCheckpointID = strings.TrimSpace(request.ExpectedTurnCheckpointID)
+	request.ExpectedHeadCheckpointID = strings.TrimSpace(request.ExpectedHeadCheckpointID)
+	checkpoint := runtimecontext.CloneCheckpoint(request.Checkpoint)
+	if request.TurnID == "" || request.ExpectedTurnRevision == 0 || request.UpdatedAt.IsZero() ||
+		!runtimecontext.ValidCheckpoint(checkpoint) {
+		return harness.Turn{}, harness.ErrInvalidRequest
+	}
+	var updated harness.Turn
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		turn, head, headExists, err := loadContextCommitStateTx(tx, request, checkpoint)
+		if err != nil {
+			return err
+		}
+		if _, err := putContextCheckpointTx(tx, checkpoint); err != nil {
+			return err
+		}
+		if err = commitContextHeadTx(tx, request, checkpoint, head, headExists); err != nil {
+			return err
+		}
+		updated, err = commitContextTurnTx(tx, request, checkpoint, turn)
+		return err
+	})
+	if err != nil {
+		return harness.Turn{}, err
+	}
+	return updated, nil
+}
+
+func loadContextCommitStateTx(
+	tx *gorm.DB,
+	request harness.ContextCheckpointCommit,
+	checkpoint runtimecontext.Checkpoint,
+) (harness.Turn, contextHeadRecord, bool, error) {
+	var turnRow turnRecord
+	if err := tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).
+		Where("id = ?", request.TurnID).Take(&turnRow).Error; err != nil {
+		return harness.Turn{}, contextHeadRecord{}, false, mapError(err)
+	}
+	turn := turnFromRecord(turnRow)
+	if turn.Revision != request.ExpectedTurnRevision || turn.SessionID != checkpoint.ScopeID ||
+		strings.TrimSpace(turn.ContextCheckpointID) != request.ExpectedTurnCheckpointID {
+		return harness.Turn{}, contextHeadRecord{}, false, harness.ErrConflict
+	}
+	head, exists, err := loadContextHeadForCommitTx(tx, checkpoint.ScopeID, request.ExpectedHeadCheckpointID)
+	return turn, head, exists, err
+}
+
+func loadContextHeadForCommitTx(tx *gorm.DB, scopeID string, expectedCheckpointID string) (contextHeadRecord, bool, error) {
+	var head contextHeadRecord
+	err := tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).Where("scope_id = ?", scopeID).Take(&head).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if expectedCheckpointID != "" {
+			return contextHeadRecord{}, false, harness.ErrConflict
+		}
+		return contextHeadRecord{}, false, nil
+	}
+	if err != nil {
+		return contextHeadRecord{}, false, err
+	}
+	if head.CheckpointID != expectedCheckpointID {
+		return contextHeadRecord{}, false, harness.ErrConflict
+	}
+	return head, true, nil
+}
+
+func commitContextHeadTx(
+	tx *gorm.DB,
+	request harness.ContextCheckpointCommit,
+	checkpoint runtimecontext.Checkpoint,
+	head contextHeadRecord,
+	exists bool,
+) error {
+	if !exists {
+		return tx.Create(&contextHeadRecord{
+			ScopeID: checkpoint.ScopeID, CheckpointID: checkpoint.ID, Revision: 1, UpdatedAt: request.UpdatedAt,
+		}).Error
+	}
+	if head.CheckpointID == checkpoint.ID {
+		return nil
+	}
+	result := tx.Model(&contextHeadRecord{}).
+		Where("scope_id = ? AND checkpoint_id = ? AND revision = ?", head.ScopeID, request.ExpectedHeadCheckpointID, head.Revision).
+		Updates(map[string]any{
+			"checkpoint_id": checkpoint.ID, "revision": head.Revision + 1, "updated_at": request.UpdatedAt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return harness.ErrConflict
+	}
+	return nil
+}
+
+func commitContextTurnTx(
+	tx *gorm.DB,
+	request harness.ContextCheckpointCommit,
+	checkpoint runtimecontext.Checkpoint,
+	turn harness.Turn,
+) (harness.Turn, error) {
+	turn.ContextCheckpointID = checkpoint.ID
+	turn.ContextRef = harness.ContextCheckpointRef{
+		ID: checkpoint.ID, Generation: checkpoint.Generation, Revision: checkpoint.Revision,
+		LineageHash: checkpoint.LineageHash, CoveredThroughSourceID: checkpoint.CoveredThroughSourceID,
+		ContentHash: checkpoint.ContentHash,
+	}
+	turn.UpdatedAt = request.UpdatedAt
+	record := turnToRecord(turn)
+	record.Revision = request.ExpectedTurnRevision + 1
+	result := tx.Model(&turnRecord{}).
+		Where("id = ? AND revision = ? AND context_checkpoint_id = ?", turn.ID, request.ExpectedTurnRevision, request.ExpectedTurnCheckpointID).
+		Updates(map[string]any{
+			"context_checkpoint_id": record.ContextCheckpointID, "context_ref_id": record.ContextRefID,
+			"context_generation": record.ContextGeneration, "context_revision": record.ContextRevision,
+			"context_lineage_hash":              record.ContextLineageHash,
+			"context_covered_through_source_id": record.ContextCoveredThroughSourceID,
+			"context_content_hash":              record.ContextContentHash,
+			"revision":                          record.Revision, "updated_at": record.UpdatedAt,
+		})
+	if result.Error != nil {
+		return harness.Turn{}, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return harness.Turn{}, harness.ErrConflict
+	}
+	turn.Revision = record.Revision
+	return turn, nil
 }
 
 func contextCheckpointFromRecord(record contextCheckpointRecord) (runtimecontext.Checkpoint, error) {

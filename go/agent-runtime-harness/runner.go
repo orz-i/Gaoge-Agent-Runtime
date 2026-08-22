@@ -153,11 +153,11 @@ func (runner *Runner) restoreOrBuildContext(
 	if seed == nil {
 		return turn, ctx, nil
 	}
-	checkpoint, err := runner.buildContext(ctx, turn.SessionID, config, seed)
+	built, err := runner.buildContext(ctx, turn.SessionID, config, seed)
 	if err != nil {
 		return Turn{}, nil, err
 	}
-	return runner.attachContextCheckpoint(ctx, turn, checkpoint)
+	return runner.attachContextCheckpoint(ctx, turn, built.checkpoint, built.expectedHeadID)
 }
 
 // ResolveApproval resolves the active Tool approval using the durable Harness Turn identity.
@@ -201,29 +201,34 @@ func (runner *Runner) ResolveApproval(
 	return snapshot, errors.Join(resolveErr, syncErr)
 }
 
+type contextBuildResult struct {
+	checkpoint     runtimecontext.Checkpoint
+	expectedHeadID string
+}
+
 func (runner *Runner) buildContext(
 	ctx context.Context,
 	scopeID string,
 	config ConfigSnapshot,
 	seed *ContextSeed,
-) (runtimecontext.Checkpoint, error) {
+) (contextBuildResult, error) {
 	if runner.context == nil {
-		return runtimecontext.Checkpoint{}, ErrInvalidRequest
+		return contextBuildResult{}, ErrInvalidRequest
 	}
 	normalized, err := normalizeContextSeed(seed)
 	if err != nil || normalized == nil {
-		return runtimecontext.Checkpoint{}, ErrInvalidRequest
+		return contextBuildResult{}, ErrInvalidRequest
 	}
 	staticFingerprint, err := contextStaticFingerprint(config, normalized, runner.catalog)
 	if err != nil {
-		return runtimecontext.Checkpoint{}, err
+		return contextBuildResult{}, err
 	}
 	var previous *runtimecontext.Checkpoint
-	latest, latestErr := runner.store.GetLatestContextCheckpoint(ctx, strings.TrimSpace(scopeID))
-	if latestErr == nil {
-		previous = &latest
-	} else if !errors.Is(latestErr, ErrNotFound) {
-		return runtimecontext.Checkpoint{}, latestErr
+	active, activeErr := runner.store.GetActiveContextCheckpoint(ctx, strings.TrimSpace(scopeID))
+	if activeErr == nil {
+		previous = &active
+	} else if !errors.Is(activeErr, ErrNotFound) {
+		return contextBuildResult{}, activeErr
 	}
 	checkpoint, err := runner.context.Open(ctx, runtimecontext.OpenRequest{
 		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: staticFingerprint,
@@ -233,12 +238,16 @@ func (runner *Runner) buildContext(
 		Previous:           previous,
 	})
 	if err != nil {
-		return runtimecontext.Checkpoint{}, err
+		return contextBuildResult{}, err
 	}
 	if checkpoint.ScopeID != strings.TrimSpace(scopeID) || !validContextCheckpoint(checkpoint) {
-		return runtimecontext.Checkpoint{}, ErrConflict
+		return contextBuildResult{}, ErrConflict
 	}
-	return checkpoint, nil
+	expectedHeadID := ""
+	if previous != nil {
+		expectedHeadID = previous.ID
+	}
+	return contextBuildResult{checkpoint: checkpoint, expectedHeadID: expectedHeadID}, nil
 }
 
 // AgentStarter is the narrow direct Agent capability required by Harness.
@@ -375,12 +384,14 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	runner.publishTurnStatus(ctx, createdTurn, EventTurnStarted, false)
 	runCtx := ctx
 	if request.Context != nil {
-		contextCheckpoint, buildErr := runner.buildContext(ctx, createdTurn.SessionID, config, request.Context)
+		builtContext, buildErr := runner.buildContext(ctx, createdTurn.SessionID, config, request.Context)
 		if buildErr != nil {
 			failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, buildErr)
 			return failed, errors.Join(buildErr, failErr)
 		}
-		createdTurn, runCtx, err = runner.attachContextCheckpoint(ctx, createdTurn, contextCheckpoint)
+		createdTurn, runCtx, err = runner.attachContextCheckpoint(
+			ctx, createdTurn, builtContext.checkpoint, builtContext.expectedHeadID,
+		)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -438,17 +449,17 @@ func (runner *Runner) attachContextCheckpoint(
 	ctx context.Context,
 	turn Turn,
 	checkpoint runtimecontext.Checkpoint,
+	expectedHeadID string,
 ) (Turn, context.Context, error) {
 	if !validContextCheckpoint(checkpoint) || checkpoint.ScopeID != turn.SessionID {
 		return Turn{}, nil, ErrInvalidRequest
 	}
-	if _, _, err := runner.store.PutContextCheckpoint(ctx, checkpoint); err != nil {
-		return Turn{}, nil, err
-	}
-	turn.ContextCheckpointID = checkpoint.ID
-	turn.ContextRef = contextCheckpointRef(checkpoint)
-	turn.UpdatedAt = runner.clock.Now().UTC()
-	updated, err := runner.store.UpdateTurn(ctx, turn, turn.Revision)
+	updated, err := runner.store.CommitContextCheckpoint(ctx, ContextCheckpointCommit{
+		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision,
+		ExpectedTurnCheckpointID: strings.TrimSpace(turn.ContextCheckpointID),
+		ExpectedHeadCheckpointID: strings.TrimSpace(expectedHeadID),
+		Checkpoint:               checkpoint, UpdatedAt: runner.clock.Now().UTC(),
+	})
 	if err != nil {
 		return Turn{}, nil, err
 	}

@@ -25,7 +25,7 @@ type MemoryStore struct {
 	interactions            map[string]Interaction
 	configs                 map[string]ConfigSnapshot
 	contextCheckpoints      map[string]runtimecontext.Checkpoint
-	contextLatest           map[string]string
+	contextHeads            map[string]string
 	contextArtifacts        map[string]runtimecontext.Artifact
 	items                   map[string][]Item
 	itemIDs                 map[string]Item
@@ -394,7 +394,7 @@ func NewMemoryStore() *MemoryStore {
 		sessions: map[string]Session{}, turns: map[string]Turn{}, configs: map[string]ConfigSnapshot{},
 		invocations: map[string]Invocation{}, invocationExecutionRefs: map[string]string{},
 		interactions: map[string]Interaction{}, contextCheckpoints: map[string]runtimecontext.Checkpoint{},
-		contextLatest: map[string]string{}, contextArtifacts: map[string]runtimecontext.Artifact{},
+		contextHeads: map[string]string{}, contextArtifacts: map[string]runtimecontext.Artifact{},
 		items: map[string][]Item{}, itemIDs: map[string]Item{},
 	}
 }
@@ -425,9 +425,6 @@ func (store *MemoryStore) PutContextCheckpoint(
 		}
 	}
 	store.contextCheckpoints[value.ID] = cloneContextCheckpoint(value)
-	if currentID := store.contextLatest[value.ScopeID]; currentID == "" || newerContextCheckpoint(value, store.contextCheckpoints[currentID]) {
-		store.contextLatest[value.ScopeID] = value.ID
-	}
 	return cloneContextCheckpoint(value), true, nil
 }
 
@@ -441,19 +438,83 @@ func (store *MemoryStore) GetContextCheckpoint(_ context.Context, id string) (ru
 	return cloneContextCheckpoint(value), nil
 }
 
-func (store *MemoryStore) GetLatestContextCheckpoint(_ context.Context, scopeID string) (runtimecontext.Checkpoint, error) {
+func (store *MemoryStore) GetActiveContextCheckpoint(_ context.Context, scopeID string) (runtimecontext.Checkpoint, error) {
 	scopeID = strings.TrimSpace(scopeID)
 	if store == nil || scopeID == "" {
 		return runtimecontext.Checkpoint{}, ErrInvalidRequest
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	id := store.contextLatest[scopeID]
+	id := store.contextHeads[scopeID]
 	value, ok := store.contextCheckpoints[id]
 	if !ok {
 		return runtimecontext.Checkpoint{}, ErrNotFound
 	}
 	return cloneContextCheckpoint(value), nil
+}
+
+func (store *MemoryStore) CommitContextCheckpoint(
+	_ context.Context,
+	request ContextCheckpointCommit,
+) (Turn, error) {
+	request.TurnID = strings.TrimSpace(request.TurnID)
+	request.ExpectedTurnCheckpointID = strings.TrimSpace(request.ExpectedTurnCheckpointID)
+	request.ExpectedHeadCheckpointID = strings.TrimSpace(request.ExpectedHeadCheckpointID)
+	checkpoint := cloneContextCheckpoint(request.Checkpoint)
+	if store == nil || request.TurnID == "" || request.ExpectedTurnRevision == 0 ||
+		request.UpdatedAt.IsZero() || !validContextCheckpoint(checkpoint) {
+		return Turn{}, ErrInvalidRequest
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	turn, err := store.validateContextCheckpointCommitLocked(request, checkpoint)
+	if err != nil {
+		return Turn{}, err
+	}
+	turn.ContextCheckpointID = checkpoint.ID
+	turn.ContextRef = contextCheckpointRef(checkpoint)
+	turn.UpdatedAt = request.UpdatedAt
+	turn.Revision = request.ExpectedTurnRevision + 1
+	store.contextCheckpoints[checkpoint.ID] = checkpoint
+	store.contextHeads[checkpoint.ScopeID] = checkpoint.ID
+	store.turns[turn.ID] = turn
+	return turn, nil
+}
+
+func (store *MemoryStore) validateContextCheckpointCommitLocked(
+	request ContextCheckpointCommit,
+	checkpoint runtimecontext.Checkpoint,
+) (Turn, error) {
+	turn, ok := store.turns[request.TurnID]
+	if !ok {
+		return Turn{}, ErrNotFound
+	}
+	if turn.Revision != request.ExpectedTurnRevision ||
+		strings.TrimSpace(turn.ContextCheckpointID) != request.ExpectedTurnCheckpointID ||
+		turn.SessionID != checkpoint.ScopeID || store.contextHeads[checkpoint.ScopeID] != request.ExpectedHeadCheckpointID {
+		return Turn{}, ErrConflict
+	}
+	if err := store.validateContextCheckpointDependenciesLocked(checkpoint); err != nil {
+		return Turn{}, err
+	}
+	if existing, exists := store.contextCheckpoints[checkpoint.ID]; exists && !reflect.DeepEqual(existing, checkpoint) {
+		return Turn{}, ErrConflict
+	}
+	return turn, nil
+}
+
+func (store *MemoryStore) validateContextCheckpointDependenciesLocked(checkpoint runtimecontext.Checkpoint) error {
+	if checkpoint.ParentCheckpointID != "" {
+		if _, ok := store.contextCheckpoints[checkpoint.ParentCheckpointID]; !ok {
+			return ErrConflict
+		}
+	}
+	for _, artifactID := range checkpoint.ArtifactIDs {
+		if _, ok := store.contextArtifacts[artifactID]; !ok {
+			return ErrConflict
+		}
+	}
+	return nil
 }
 
 func (store *MemoryStore) PutContextArtifact(_ context.Context, value runtimecontext.Artifact) (runtimecontext.Artifact, bool, error) {
@@ -481,13 +542,6 @@ func (store *MemoryStore) GetContextArtifact(_ context.Context, id string) (runt
 		return runtimecontext.Artifact{}, ErrNotFound
 	}
 	return runtimecontext.CloneArtifacts([]runtimecontext.Artifact{value})[0], nil
-}
-
-func newerContextCheckpoint(left, right runtimecontext.Checkpoint) bool {
-	if left.Generation != right.Generation {
-		return left.Generation > right.Generation
-	}
-	return left.Revision > right.Revision
 }
 
 func (store *MemoryStore) CreateSession(_ context.Context, value Session) (Session, bool, error) {

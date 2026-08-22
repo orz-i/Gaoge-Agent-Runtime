@@ -7,6 +7,19 @@ import (
 	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 )
 
+// ContextCheckpointCommit atomically installs one immutable Context checkpoint as the active
+// scope head and advances the owning Harness Turn reference. The two expected checkpoint IDs are
+// intentionally distinct: a newly-created Turn has no checkpoint yet while the Session may
+// already have an active head from an earlier Turn.
+type ContextCheckpointCommit struct {
+	TurnID                   string
+	ExpectedTurnRevision     uint64
+	ExpectedTurnCheckpointID string
+	ExpectedHeadCheckpointID string
+	Checkpoint               runtimecontext.Checkpoint
+	UpdatedAt                time.Time
+}
+
 // Store is the durable Harness state boundary. Implementations must clone values at every boundary.
 type Store interface {
 	CreateSession(context.Context, Session) (Session, bool, error)
@@ -29,7 +42,8 @@ type Store interface {
 	GetConfigSnapshot(context.Context, string) (ConfigSnapshot, error)
 	PutContextCheckpoint(context.Context, runtimecontext.Checkpoint) (runtimecontext.Checkpoint, bool, error)
 	GetContextCheckpoint(context.Context, string) (runtimecontext.Checkpoint, error)
-	GetLatestContextCheckpoint(context.Context, string) (runtimecontext.Checkpoint, error)
+	GetActiveContextCheckpoint(context.Context, string) (runtimecontext.Checkpoint, error)
+	CommitContextCheckpoint(context.Context, ContextCheckpointCommit) (Turn, error)
 	PutContextArtifact(context.Context, runtimecontext.Artifact) (runtimecontext.Artifact, bool, error)
 	GetContextArtifact(context.Context, string) (runtimecontext.Artifact, error)
 	AppendItem(context.Context, Item) (Item, bool, error)

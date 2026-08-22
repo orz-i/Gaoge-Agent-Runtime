@@ -100,6 +100,15 @@ type contextCheckpointRecord struct {
 
 func (contextCheckpointRecord) TableName() string { return "agent_harness_context_checkpoints" }
 
+type contextHeadRecord struct {
+	ScopeID      string    `gorm:"primaryKey;size:128"`
+	CheckpointID string    `gorm:"size:128;not null;index:idx_harness_context_head_checkpoint"`
+	Revision     uint64    `gorm:"not null"`
+	UpdatedAt    time.Time `gorm:"not null"`
+}
+
+func (contextHeadRecord) TableName() string { return "agent_harness_context_heads" }
+
 type contextArtifactRecord struct {
 	ID          string `gorm:"primaryKey;size:128"`
 	ScopeID     string `gorm:"size:128;not null;index:idx_harness_context_artifact_scope,priority:1"`
