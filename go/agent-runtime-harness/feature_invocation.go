@@ -210,6 +210,7 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 			_, failErr := runner.failTopLevelInvocationAndTurn(ctx, envelope.turn, invocation, contextErr)
 			return topLevelFeatureStart{}, errors.Join(contextErr, failErr)
 		}
+		runCtx = withContextWindowBinding(runCtx, turn.ID, ContextWindowReadOnly)
 		return topLevelFeatureStart{turn: turn, invocation: invocation, runContext: runCtx, replayed: true}, nil
 	}
 	turn, runCtx, err := runner.prepareTopLevelFeatureContext(ctx, envelope, invocation)
@@ -290,7 +291,7 @@ func (runner *Runner) prepareTopLevelFeatureContext(
 		_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
 		return Turn{}, nil, errors.Join(err, failErr)
 	}
-	return updated, runCtx, nil
+	return updated, withContextWindowBinding(runCtx, updated.ID, ContextWindowReadOnly), nil
 }
 
 func (runner *Runner) replayTopLevelFeatureStart(

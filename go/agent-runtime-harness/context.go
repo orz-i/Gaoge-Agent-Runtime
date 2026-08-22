@@ -33,7 +33,24 @@ type ContextCheckpointRef struct {
 	ContentHash            string `json:"contentHash"`
 }
 
+// ContextWindowAccess controls whether one execution may advance the durable Context Window.
+// Advanced capability sampling is read-only: it can consume the Conversation prefix without
+// projecting planner/child prompts back into the host transcript lineage.
+type ContextWindowAccess string
+
+const (
+	ContextWindowOwner    ContextWindowAccess = "owner"
+	ContextWindowReadOnly ContextWindowAccess = "read_only"
+)
+
+// ContextWindowBinding identifies the Harness Turn that owns the execution-scoped Context head.
+type ContextWindowBinding struct {
+	TurnID string
+	Access ContextWindowAccess
+}
+
 type contextCheckpointKey struct{}
+type contextWindowBindingKey struct{}
 
 type contextWindowState struct {
 	mu         sync.RWMutex
@@ -53,17 +70,29 @@ func (contextWindowMiddleware) Model(
 	emit model.StreamSink,
 	next plugin.ModelNext,
 ) (model.Response, error) {
+	materialized, err := MaterializeContextWindowRequest(ctx, request)
+	if err != nil {
+		return model.Response{}, err
+	}
+	return next(ctx, materialized, emit)
+}
+
+// MaterializeContextWindowRequest prepends the active Harness Context prefix to any provider-neutral
+// model request. Production callers invoke this at the universal sampling boundary; the middleware
+// remains a reusable Runtime composition primitive for hosts that do not own that boundary.
+func MaterializeContextWindowRequest(ctx context.Context, request model.Request) (model.Request, error) {
+	request = model.CloneRequest(request)
 	checkpoint, ok := CurrentContextCheckpoint(ctx)
 	if !ok || strings.TrimSpace(checkpoint.ID) == "" {
-		return next(ctx, request, emit)
+		return request, nil
 	}
 	messages := runtimecontext.Materialize(checkpoint.Window)
 	merged, err := mergeContextRuntimeMessagesForCheckpoint(checkpoint, messages, request.Messages)
 	if err != nil {
-		return model.Response{}, err
+		return model.Request{}, err
 	}
 	request.Messages = merged
-	return next(ctx, request, emit)
+	return request, nil
 }
 
 func mergeContextRuntimeMessages(contextMessages, runtimeMessages []model.Message) ([]model.Message, error) {
@@ -171,8 +200,25 @@ func withContextCheckpoint(ctx context.Context, checkpoint runtimecontext.Checkp
 	return context.WithValue(ctx, contextCheckpointKey{}, &contextWindowState{checkpoint: runtimecontext.CloneCheckpoint(checkpoint)})
 }
 
+func withContextWindowBinding(ctx context.Context, turnID string, access ContextWindowAccess) context.Context {
+	binding := ContextWindowBinding{TurnID: strings.TrimSpace(turnID), Access: access}
+	return context.WithValue(ctx, contextWindowBindingKey{}, binding)
+}
+
 func withoutContextCheckpoint(ctx context.Context) context.Context {
-	return context.WithValue(ctx, contextCheckpointKey{}, &contextWindowState{})
+	ctx = context.WithValue(ctx, contextCheckpointKey{}, &contextWindowState{})
+	return context.WithValue(ctx, contextWindowBindingKey{}, ContextWindowBinding{})
+}
+
+// CurrentContextWindowBinding returns the execution access contract for the active Context Window.
+func CurrentContextWindowBinding(ctx context.Context) (ContextWindowBinding, bool) {
+	binding, ok := ctx.Value(contextWindowBindingKey{}).(ContextWindowBinding)
+	if !ok || strings.TrimSpace(binding.TurnID) == "" ||
+		(binding.Access != ContextWindowOwner && binding.Access != ContextWindowReadOnly) {
+		return ContextWindowBinding{}, false
+	}
+	binding.TurnID = strings.TrimSpace(binding.TurnID)
+	return binding, true
 }
 
 // CurrentContextCheckpoint returns the execution-scoped active Context Window checkpoint.

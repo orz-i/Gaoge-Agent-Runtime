@@ -124,7 +124,7 @@ func (runner *Runner) resumeDirectAgentContext(
 ) (Turn, context.Context, error) {
 	updated, runCtx, err := runner.restoreOrBuildContext(ctx, turn, seed, config)
 	if err == nil {
-		return updated, runCtx, nil
+		return updated, withContextWindowBinding(runCtx, updated.ID, ContextWindowOwner), nil
 	}
 	_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
 	return Turn{}, nil, errors.Join(err, failErr)
@@ -395,6 +395,7 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		if err != nil {
 			return Snapshot{}, err
 		}
+		runCtx = withContextWindowBinding(runCtx, createdTurn.ID, ContextWindowOwner)
 	}
 	runtimeSnapshot, startErr := runner.agent.StartRun(runCtx, agent.StartRequest{
 		ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
