@@ -16,7 +16,9 @@ type HandoffStarter interface {
 }
 
 // DelegateRequest asks Harness to start one stable specialist Child Agent.
-// Child Tool access is intentionally empty in Phase A; delegation cannot widen the root Turn's permissions.
+// Business Tool access is intentionally empty; delegation cannot widen the root
+// Turn's product permissions. Harness may attach Context-owned read-only
+// infrastructure capabilities required to consume the inherited Context Window.
 type DelegateRequest struct {
 	MemberID string `json:"memberID"`
 	Goal     string `json:"goal"`
@@ -111,8 +113,21 @@ func (runner *Runner) prepareDelegation(
 	return handoff.Delegation{
 		ID: delegationID, MemberID: request.MemberID, ChildRunID: childRunID,
 		Goal: request.Goal, Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+		ToolKeys: contextDelegationToolKeys(turn, config),
 		Status: handoff.StatusQueued,
 	}, parent, nil
+}
+
+func contextDelegationToolKeys(turn Turn, config ConfigSnapshot) []string {
+	if strings.TrimSpace(turn.ContextCheckpointID) == "" {
+		return nil
+	}
+	for _, key := range config.ToolKeys {
+		if strings.TrimSpace(key) == ContextArtifactToolKey {
+			return []string{ContextArtifactToolKey}
+		}
+	}
+	return nil
 }
 
 func (runner *Runner) executeDelegation(
@@ -123,6 +138,9 @@ func (runner *Runner) executeDelegation(
 	delegation handoff.Delegation,
 	startedItemID string,
 ) (DelegationResult, error) {
+	if err := runner.ensureDelegationRelation(ctx, invocation.ExecutionRefID, delegation); err != nil {
+		return DelegationResult{}, err
+	}
 	delegation, delegateErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
 	status := delegationItemStatus(delegation.Status)
 	if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, status, startedItemID); itemErr != nil {

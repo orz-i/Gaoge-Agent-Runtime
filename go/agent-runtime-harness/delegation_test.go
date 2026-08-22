@@ -138,7 +138,7 @@ func TestHarnessDelegationPolicyPreparesActualChildGoal(t *testing.T) {
 	}
 }
 
-func TestHarnessDelegationRelationsWaitForRootTerminalState(t *testing.T) {
+func TestHarnessDelegationRelationsExistBeforeChildExecution(t *testing.T) {
 	t.Parallel()
 	client := &blockingDelegationModel{
 		secondChildStarted: make(chan struct{}),
@@ -149,12 +149,12 @@ func TestHarnessDelegationRelationsWaitForRootTerminalState(t *testing.T) {
 	hostTurn := harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-terminal"}
 	result := startBlockingDelegationHarness(t, runner, hostThread, hostTurn)
 	waitForSecondDelegation(t, client.secondChildStarted)
-	assertNoDelegationRelations(t, relations, client.rootExecutionRef())
+	assertDelegationOwnershipRelations(t, relations, client.rootExecutionRef(), 2)
 	close(client.releaseSecondChild)
 	assertTerminalDelegationRelations(t, relations, result)
 }
 
-func TestHarnessCancelCascadesToUnprojectedDelegation(t *testing.T) {
+func TestHarnessCancelCascadesThroughDurableDelegationOwnership(t *testing.T) {
 	t.Parallel()
 	client := &blockingDelegationModel{
 		secondChildStarted: make(chan struct{}),
@@ -167,7 +167,7 @@ func TestHarnessCancelCascadesToUnprojectedDelegation(t *testing.T) {
 	hostTurn := harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-cancel"}
 	result := startBlockingDelegationHarness(t, runner, hostThread, hostTurn)
 	waitForSecondDelegation(t, client.secondChildStarted)
-	assertNoDelegationRelations(t, relations, client.rootExecutionRef())
+	assertDelegationOwnershipRelations(t, relations, client.rootExecutionRef(), 2)
 
 	sessionID, err := harness.SessionID(hostThread)
 	if err != nil {
@@ -327,11 +327,11 @@ func waitForSecondDelegation(t *testing.T, started <-chan struct{}) {
 	}
 }
 
-func assertNoDelegationRelations(t *testing.T, relations *runrelation.Registry, rootRunID string) {
+func assertDelegationOwnershipRelations(t *testing.T, relations *runrelation.Registry, rootRunID string, want int) {
 	t.Helper()
 	children, err := relations.ListChildren(t.Context(), rootRunID)
-	if err != nil || len(children) != 0 {
-		t.Fatalf("relations were projected before root terminal state: %#v, err=%v", children, err)
+	if err != nil || len(children) != want {
+		t.Fatalf("durable delegation ownership relations=%#v want=%d err=%v", children, want, err)
 	}
 }
 

@@ -19,6 +19,12 @@ type VersionRef struct {
 	Revision uint64 `json:"revision"`
 }
 
+const (
+	harnessToolDefinitionVersion = "harness-v1"
+	toolRiskLevelLow             = "low"
+	toolIdempotencyRequestKey    = "request_key"
+)
+
 func normalizeToolPolicies(values []ToolPolicySnapshot) ([]ToolPolicySnapshot, error) {
 	result := make([]ToolPolicySnapshot, len(values))
 	seen := make(map[string]struct{}, len(values))

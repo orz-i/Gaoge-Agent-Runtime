@@ -116,8 +116,8 @@ func DelegationToolRegistration(handler *DelegationToolHandler) tools.Registrati
 
 func DelegationToolPolicySnapshot() ToolPolicySnapshot {
 	return ToolPolicySnapshot{
-		Key: DelegationToolKey, DefinitionVersion: "harness-v1",
-		ApprovalCapability: "per_call", ApprovalMode: "never",
-		RiskLevel: "low", SideEffectLevel: "compute", IdempotencyMode: "request_key",
+		Key: DelegationToolKey, DefinitionVersion: harnessToolDefinitionVersion,
+		ApprovalCapability: approvalCapabilityPerCall, ApprovalMode: approvalModeNever,
+		RiskLevel: toolRiskLevelLow, SideEffectLevel: "compute", IdempotencyMode: toolIdempotencyRequestKey,
 	}
 }

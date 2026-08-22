@@ -11,7 +11,10 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
-const parentGoal = "parent goal"
+const (
+	parentGoal                  = "parent goal"
+	contextFingerprintTestTurn = "turn-1"
+)
 
 func TestMergeContextRuntimeMessagesDirectGoalDoesNotDuplicateCurrentTurn(t *testing.T) {
 	t.Parallel()
@@ -36,6 +39,43 @@ func TestMergeContextRuntimeMessagesDirectGoalDoesNotDuplicateCurrentTurn(t *tes
 		{Role: model.RoleAssistant, Content: "live continuation"},
 	}
 	assertRuntimeMessagesEqual(t, merged, want)
+}
+
+func TestContextStaticFingerprintIgnoresSamplingOnlyModelOptions(t *testing.T) {
+	t.Parallel()
+	seed := &ContextSeed{
+		SourcePath: []string{"message-1"},
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-1", SourceID: "message-1", TurnID: contextFingerprintTestTurn,
+			Message: model.Message{Role: model.RoleUser, Content: "keep the immutable prefix stable"},
+		}},
+	}
+	base := ConfigSnapshot{
+		Environment: VersionRef{ID: "general", Revision: 7}, Instructions: "stable system instructions",
+		Model: "model-a", ModelOptions: json.RawMessage(`{"temperature":0.2,"reasoning":{"effort":"medium"}}`),
+	}
+	first, err := contextStaticFingerprint(base, seed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedOptions := base
+	changedOptions.ModelOptions = json.RawMessage(`{"temperature":0.9,"reasoning":{"effort":"high"},"max_output_tokens":2048}`)
+	second, err := contextStaticFingerprint(changedOptions, seed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("sampling-only ModelOptions reset Context fingerprint: %q -> %q", first, second)
+	}
+	changedModel := base
+	changedModel.Model = "model-b"
+	third, err := contextStaticFingerprint(changedModel, seed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third == first {
+		t.Fatalf("model identity change did not reset Context fingerprint: %q", third)
+	}
 }
 
 func TestMergeContextRuntimeMessagesNestedGoalKeepsParentContextAndChildGoal(t *testing.T) {

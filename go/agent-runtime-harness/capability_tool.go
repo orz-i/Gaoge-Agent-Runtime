@@ -316,9 +316,9 @@ func CapabilityInvocationToolRegistration(handler *CapabilityInvocationToolHandl
 
 func CapabilityInvocationToolPolicySnapshot() ToolPolicySnapshot {
 	return ToolPolicySnapshot{
-		Key: CapabilityInvocationToolKey, DefinitionVersion: "harness-v1",
-		ApprovalCapability: "per_call", ApprovalMode: "never",
-		RiskLevel: "low", SideEffectLevel: "compute", IdempotencyMode: "request_key",
+		Key: CapabilityInvocationToolKey, DefinitionVersion: harnessToolDefinitionVersion,
+		ApprovalCapability: approvalCapabilityPerCall, ApprovalMode: approvalModeNever,
+		RiskLevel: toolRiskLevelLow, SideEffectLevel: "compute", IdempotencyMode: toolIdempotencyRequestKey,
 	}
 }
 
