@@ -485,7 +485,11 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return runner.syncRuntimeSnapshot(ctx, turn, invocation, runtimeSnapshot)
+	// Refresh races naturally with Runtime continuation callbacks: a Team member,
+	// Plan step, or Workflow effect can advance the same root between the initial
+	// load and our Harness CAS. Treat that as a retryable observation race rather
+	// than surfacing a transient Harness conflict to the product projection.
+	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
 }
 
 // Cancel cancels the active top-level Invocation and persists the resulting

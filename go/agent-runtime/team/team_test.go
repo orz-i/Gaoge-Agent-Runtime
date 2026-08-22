@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,8 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
 )
 
+const reviewGoal = "review"
+
 func TestSequentialTeamCompletesAllMembers(t *testing.T) {
 	t.Parallel()
 	runner, children := newTeamRunner(t, childCompletes)
@@ -27,6 +30,44 @@ func TestSequentialTeamCompletesAllMembers(t *testing.T) {
 	assertCompletedTeam(t, completed, 2)
 	if children.startCount() != 2 {
 		t.Fatalf("expected two child starts, got %d", children.startCount())
+	}
+}
+
+func TestCompletedTeamResultDoesNotExposeDelegationOrChildRunIDs(t *testing.T) {
+	t.Parallel()
+	runner, _ := newTeamRunner(t, childCompletes)
+
+	snapshot, err := runner.StartRun(t.Context(), team.StartRequest{
+		ID: "team-public-result", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, RequestID: "request",
+		Goal: reviewGoal, Mode: team.ExecutionParallel,
+		Members: []team.Member{{ID: "a", Goal: "analysis"}, {ID: "b", Goal: reviewGoal}},
+		Join: handoff.Join{Mode: handoff.JoinAll, Quorum: 1, FailurePolicy: handoff.FailureCollect},
+	})
+	if err != nil {
+		t.Fatalf("StartRun() error = %v", err)
+	}
+	assertPublicTeamResult(t, snapshot)
+}
+
+func assertPublicTeamResult(t *testing.T, snapshot kernel.Snapshot) {
+	t.Helper()
+	if snapshot.Result == nil {
+		t.Fatal("expected team result")
+	}
+	var result team.Result
+	if err := json.Unmarshal(snapshot.Result.Content, &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.Kind != team.ResultKind || len(result.Members) != 2 ||
+		result.Members[0].Content != "analysis" || result.Members[1].Content != reviewGoal {
+		t.Fatalf("unexpected public result: %#v", result)
+	}
+	encoded := string(snapshot.Result.Content)
+	for _, forbidden := range []string{"delegation", "childRunID", "run_"} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("public result leaked internal identity %q: %s", forbidden, encoded)
+		}
 	}
 }
 

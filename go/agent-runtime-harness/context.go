@@ -68,12 +68,23 @@ func mergeContextRuntimeMessages(contextMessages, runtimeMessages []model.Messag
 		return nil, ErrInvalidRequest
 	}
 	goalIndex := runtimeGoalIndex(runtimeMessages)
-	contextGoal := contextMessages[len(contextMessages)-1]
-	if !sameCurrentGoal(contextGoal, runtimeMessages, goalIndex) {
+	if goalIndex >= len(runtimeMessages) || runtimeMessages[goalIndex].Role != model.RoleUser {
 		return nil, ErrInvalidRequest
 	}
+	contextGoal := contextMessages[len(contextMessages)-1]
 	merged := mergeRuntimeGuidance(contextMessages, runtimeMessages[:goalIndex])
-	return append(merged, model.CloneMessages(runtimeMessages[goalIndex+1:])...), nil
+	if sameCurrentGoal(contextGoal, runtimeMessages, goalIndex) {
+		// Direct Agent execution repeats the current Harness Turn goal as the
+		// Runtime request's first user message. Keep the frozen copy as the
+		// authority and append only the live transcript that follows it.
+		return append(merged, model.CloneMessages(runtimeMessages[goalIndex+1:])...), nil
+	}
+	// Feature-owned child Agents (Plan steps, Team members, Workflow effects)
+	// have an explicit child goal that intentionally differs from the parent
+	// Conversation Turn goal. Preserve the complete frozen parent context and
+	// append the child Runtime transcript instead of rejecting it as if it were
+	// a malformed direct-turn request.
+	return append(merged, model.CloneMessages(runtimeMessages[goalIndex:])...), nil
 }
 
 func runtimeGoalIndex(messages []model.Message) int {

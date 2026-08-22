@@ -40,6 +40,38 @@ func TestStartOrLoadReusesStableChildRun(t *testing.T) {
 	}
 }
 
+func TestResolveJoinAllCollectFailsWhenEveryDelegationFails(t *testing.T) {
+	t.Parallel()
+	delegations := []handoff.Delegation{
+		{ID: "a", MemberID: "a", ChildRunID: "ra", Goal: "a", Status: handoff.StatusFailed},
+		{ID: "b", MemberID: "b", ChildRunID: "rb", Goal: "b", Status: handoff.StatusCancelled},
+	}
+	join, err := handoff.ResolveJoin(handoff.Join{
+		Mode: handoff.JoinAll, Quorum: 1, FailurePolicy: handoff.FailureCollect,
+		Status: handoff.JoinPending,
+	}, delegations)
+	if !errors.Is(err, handoff.ErrJoinFailed) || join.Status != handoff.JoinFailed ||
+		join.ErrorCode != "handoff.no_success" || join.Completed != 0 || join.Failed != 1 || join.Cancelled != 1 {
+		t.Fatalf("unexpected all-failed collect join: %#v, %v", join, err)
+	}
+}
+
+func TestResolveJoinAllCollectAllowsPartialSuccessAfterAllMembersSettle(t *testing.T) {
+	t.Parallel()
+	delegations := []handoff.Delegation{
+		{ID: "a", MemberID: "a", ChildRunID: "ra", Goal: "a", Status: handoff.StatusCompleted},
+		{ID: "b", MemberID: "b", ChildRunID: "rb", Goal: "b", Status: handoff.StatusFailed},
+	}
+	join, err := handoff.ResolveJoin(handoff.Join{
+		Mode: handoff.JoinAll, Quorum: 1, FailurePolicy: handoff.FailureCollect,
+		Status: handoff.JoinPending,
+	}, delegations)
+	if err != nil || join.Status != handoff.JoinReady || join.Completed != 1 || join.Failed != 1 ||
+		len(join.ResultIDs) != 1 || join.ResultIDs[0] != "a" {
+		t.Fatalf("unexpected partial-success collect join: %#v, %v", join, err)
+	}
+}
+
 func TestResolveJoinPolicies(t *testing.T) {
 	t.Parallel()
 	delegations := []handoff.Delegation{

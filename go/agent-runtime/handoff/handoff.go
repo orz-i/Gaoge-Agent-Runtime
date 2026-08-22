@@ -209,10 +209,13 @@ func resolveJoinStatus(join Join) (JoinStatus, string, string) {
 }
 
 func resolveAllJoin(join Join) (JoinStatus, string, string) {
-	if join.Pending == 0 {
-		return JoinReady, "", ""
+	if join.Pending != 0 {
+		return JoinPending, "", ""
 	}
-	return JoinPending, "", ""
+	if join.Completed == 0 && join.Failed+join.Cancelled > 0 {
+		return JoinFailed, "handoff.no_success", "no delegated run completed successfully"
+	}
+	return JoinReady, "", ""
 }
 
 func resolveAnyJoin(join Join) (JoinStatus, string, string) {

@@ -16,6 +16,7 @@ import (
 const (
 	RunKind          kernel.RunKind    = "team"
 	CapabilityRunner kernel.Capability = "team.runner"
+	ResultKind                         = "team_result"
 )
 
 var (
@@ -35,9 +36,45 @@ const (
 
 // Member defines one specialist task in a Team.
 type Member struct {
-	ID       string   `json:"id"`
-	Goal     string   `json:"goal"`
-	ToolKeys []string `json:"toolKeys,omitempty"`
+	ID           string          `json:"id"`
+	Goal         string          `json:"goal"`
+	Model        string          `json:"model,omitempty"`
+	ModelOptions json.RawMessage `json:"modelOptions,omitempty"`
+	ToolKeys     []string        `json:"toolKeys,omitempty"`
+}
+
+func publicResult(state executionState) Result {
+	result := Result{
+		Kind: ResultKind, Mode: state.Mode,
+		Members: make([]MemberResult, 0, len(state.Members)),
+		Completed: state.Join.Completed, Failed: state.Join.Failed, Cancelled: state.Join.Cancelled,
+	}
+	for _, member := range state.Members {
+		item := MemberResult{
+			ID: member.Member.ID, Goal: member.Member.Goal,
+			Status: member.Delegation.Status, ErrorCode: strings.TrimSpace(member.Delegation.ErrorCode),
+		}
+		item.Content = delegatedResultContent(member.Delegation.Result)
+		result.Members = append(result.Members, item)
+	}
+	return result
+}
+
+func delegatedResultContent(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var envelope struct {
+		Content string `json:"content"`
+	}
+	if json.Unmarshal(raw, &envelope) == nil && strings.TrimSpace(envelope.Content) != "" {
+		return strings.TrimSpace(envelope.Content)
+	}
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return strings.TrimSpace(text)
+	}
+	return ""
 }
 
 // MemberState binds one member to its durable Handoff Delegation.
@@ -51,6 +88,26 @@ type View struct {
 	Mode    ExecutionMode `json:"mode"`
 	Members []MemberState `json:"members"`
 	Join    handoff.Join  `json:"join"`
+}
+
+// Result is the public terminal Team output. Durable topology and delegation
+// identities remain in View/State; the result intentionally exposes only
+// member-level outcomes that are safe for product projection.
+type Result struct {
+	Kind      string         `json:"kind"`
+	Mode      ExecutionMode  `json:"mode"`
+	Members   []MemberResult `json:"members"`
+	Completed int            `json:"completed"`
+	Failed    int            `json:"failed"`
+	Cancelled int            `json:"cancelled"`
+}
+
+type MemberResult struct {
+	ID        string         `json:"id"`
+	Goal      string         `json:"goal"`
+	Status    handoff.Status `json:"status"`
+	Content   string         `json:"content,omitempty"`
+	ErrorCode string         `json:"errorCode,omitempty"`
 }
 
 // StartRequest creates one explicit Team Run.
@@ -185,7 +242,9 @@ func (runner *Runner) materializeState(request StartRequest) (executionState, er
 			Member: member,
 			Delegation: handoff.Delegation{
 				ID: delegationID, MemberID: member.ID, ChildRunID: childRunID,
-				Goal: member.Goal, ToolKeys: append([]string(nil), member.ToolKeys...),
+				Goal: member.Goal, Model: strings.TrimSpace(member.Model),
+				ModelOptions: append(json.RawMessage(nil), member.ModelOptions...),
+				ToolKeys: append([]string(nil), member.ToolKeys...),
 				Status: handoff.StatusQueued,
 			},
 		})
@@ -372,7 +431,7 @@ func (runner *Runner) complete(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	result, err := json.Marshal(View(state))
+	result, err := json.Marshal(publicResult(state))
 	if err != nil {
 		return kernel.Snapshot{}, errors.Join(ErrInvalidRequest, err)
 	}
