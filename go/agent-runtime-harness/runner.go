@@ -206,6 +206,58 @@ type contextBuildResult struct {
 	expectedHeadID string
 }
 
+// ResolveContextSourceBoundary returns the active durable source boundary only when the current
+// immutable Harness configuration still hashes to the same static Context fingerprint.
+func (runner *Runner) ResolveContextSourceBoundary(
+	ctx context.Context,
+	hostThread HostRef,
+	config ConfigSnapshot,
+	instructions string,
+) (ContextSourceBoundary, error) {
+	scopeID, staticFingerprint, err := runner.contextSourceBoundaryKey(hostThread, config, instructions)
+	if err != nil {
+		return ContextSourceBoundary{}, err
+	}
+	active, err := runner.store.GetActiveContextCheckpoint(ctx, scopeID)
+	if errors.Is(err, ErrNotFound) {
+		return ContextSourceBoundary{}, nil
+	}
+	if err != nil {
+		return ContextSourceBoundary{}, err
+	}
+	if active.StaticFingerprint != staticFingerprint || !validContextCheckpoint(active) {
+		return ContextSourceBoundary{}, nil
+	}
+	return ContextSourceBoundary{
+		CheckpointID: active.ID, CoveredThroughSourceID: active.CoveredThroughSourceID,
+	}, nil
+}
+
+func (runner *Runner) contextSourceBoundaryKey(
+	hostThread HostRef,
+	config ConfigSnapshot,
+	instructions string,
+) (string, string, error) {
+	if runner == nil || runner.store == nil || runner.context == nil {
+		return "", "", ErrInvalidRequest
+	}
+	normalizedHost, err := normalizeHostRef(hostThread)
+	if err != nil {
+		return "", "", err
+	}
+	scopeID, err := SessionID(normalizedHost)
+	if err != nil {
+		return "", "", err
+	}
+	staticFingerprint, err := contextStaticFingerprint(
+		config, &ContextSeed{Instructions: strings.TrimSpace(instructions)}, runner.catalog,
+	)
+	if err != nil {
+		return "", "", err
+	}
+	return scopeID, staticFingerprint, nil
+}
+
 func (runner *Runner) buildContext(
 	ctx context.Context,
 	scopeID string,
@@ -223,31 +275,127 @@ func (runner *Runner) buildContext(
 	if err != nil {
 		return contextBuildResult{}, err
 	}
-	var previous *runtimecontext.Checkpoint
-	active, activeErr := runner.store.GetActiveContextCheckpoint(ctx, strings.TrimSpace(scopeID))
-	if activeErr == nil {
-		previous = &active
-	} else if !errors.Is(activeErr, ErrNotFound) {
-		return contextBuildResult{}, activeErr
+	active, expectedHeadID, err := runner.loadActiveContextHead(ctx, scopeID)
+	if err != nil {
+		return contextBuildResult{}, err
 	}
-	checkpoint, err := runner.context.Open(ctx, runtimecontext.OpenRequest{
-		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: staticFingerprint,
-		SourcePath: append([]string(nil), normalized.SourcePath...), Entries: runtimecontext.CloneEntries(normalized.Entries),
-		Instructions:       strings.TrimSpace(strings.Join([]string{config.Instructions, normalized.Instructions}, "\n\n")),
-		ResetCacheIdentity: normalized.ResetCacheIdentity,
-		Previous:           previous,
-	})
+	openRequest, err := runner.contextOpenRequest(ctx, scopeID, staticFingerprint, config, normalized, active)
+	if err != nil {
+		return contextBuildResult{}, err
+	}
+	checkpoint, err := runner.context.Open(ctx, openRequest)
 	if err != nil {
 		return contextBuildResult{}, err
 	}
 	if checkpoint.ScopeID != strings.TrimSpace(scopeID) || !validContextCheckpoint(checkpoint) {
 		return contextBuildResult{}, ErrConflict
 	}
-	expectedHeadID := ""
-	if previous != nil {
-		expectedHeadID = previous.ID
-	}
 	return contextBuildResult{checkpoint: checkpoint, expectedHeadID: expectedHeadID}, nil
+}
+
+func (runner *Runner) loadActiveContextHead(
+	ctx context.Context,
+	scopeID string,
+) (*runtimecontext.Checkpoint, string, error) {
+	active, err := runner.store.GetActiveContextCheckpoint(ctx, strings.TrimSpace(scopeID))
+	if errors.Is(err, ErrNotFound) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return &active, active.ID, nil
+}
+
+func (runner *Runner) contextOpenRequest(
+	ctx context.Context,
+	scopeID string,
+	staticFingerprint string,
+	config ConfigSnapshot,
+	seed *ContextSeed,
+	active *runtimecontext.Checkpoint,
+) (runtimecontext.OpenRequest, error) {
+	instructions := strings.TrimSpace(strings.Join([]string{config.Instructions, seed.Instructions}, "\n\n"))
+	if seed.SourceDelta {
+		base, err := runner.loadContextDeltaBase(ctx, scopeID, staticFingerprint, seed.BaseCheckpointID)
+		if err != nil {
+			return runtimecontext.OpenRequest{}, err
+		}
+		return contextDeltaOpenRequest(scopeID, staticFingerprint, instructions, seed, base), nil
+	}
+	base, index, err := runner.findContextPathBase(ctx, scopeID, staticFingerprint, seed.SourcePath)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return runtimecontext.OpenRequest{}, err
+	}
+	if err == nil {
+		delta := sliceContextSeedAfter(seed, index)
+		return contextDeltaOpenRequest(scopeID, staticFingerprint, instructions, delta, base), nil
+	}
+	return runtimecontext.OpenRequest{
+		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: staticFingerprint,
+		SourcePath: append([]string(nil), seed.SourcePath...), Entries: runtimecontext.CloneEntries(seed.Entries),
+		Instructions: instructions, ResetCacheIdentity: seed.ResetCacheIdentity, Previous: active,
+	}, nil
+}
+
+func (runner *Runner) loadContextDeltaBase(
+	ctx context.Context,
+	scopeID string,
+	staticFingerprint string,
+	checkpointID string,
+) (*runtimecontext.Checkpoint, error) {
+	base, err := runner.store.GetContextCheckpoint(ctx, strings.TrimSpace(checkpointID))
+	if err != nil {
+		return nil, err
+	}
+	if base.ScopeID != strings.TrimSpace(scopeID) || base.StaticFingerprint != strings.TrimSpace(staticFingerprint) ||
+		!validContextCheckpoint(base) {
+		return nil, ErrConflict
+	}
+	return &base, nil
+}
+
+func (runner *Runner) findContextPathBase(
+	ctx context.Context,
+	scopeID string,
+	staticFingerprint string,
+	sourcePath []string,
+) (*runtimecontext.Checkpoint, int, error) {
+	base, err := runner.store.FindContextCheckpointForPath(ctx, ContextCheckpointPathQuery{
+		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: strings.TrimSpace(staticFingerprint),
+		SourcePath: append([]string(nil), sourcePath...),
+	})
+	if err != nil {
+		return nil, -1, err
+	}
+	index := runtimecontext.CheckpointSourceIndex(base, sourcePath)
+	if index < 0 {
+		return nil, -1, ErrConflict
+	}
+	return &base, index, nil
+}
+
+func contextDeltaOpenRequest(
+	scopeID string,
+	staticFingerprint string,
+	instructions string,
+	seed *ContextSeed,
+	base *runtimecontext.Checkpoint,
+) runtimecontext.OpenRequest {
+	return runtimecontext.OpenRequest{
+		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: strings.TrimSpace(staticFingerprint),
+		SourcePath: append([]string(nil), seed.SourcePath...), Entries: runtimecontext.CloneEntries(seed.Entries),
+		Instructions: instructions, SourceDelta: true, ResetCacheIdentity: seed.ResetCacheIdentity, Previous: base,
+	}
+}
+
+func sliceContextSeedAfter(seed *ContextSeed, index int) *ContextSeed {
+	start := index + 1
+	return &ContextSeed{
+		SourcePath:   append([]string(nil), seed.SourcePath[start:]...),
+		Instructions: seed.Instructions, Entries: runtimecontext.CloneEntries(seed.Entries[start:]),
+		SourceDelta: true, ResetCacheIdentity: seed.ResetCacheIdentity,
+	}
 }
 
 // AgentStarter is the narrow direct Agent capability required by Harness.

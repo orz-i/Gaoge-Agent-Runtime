@@ -129,6 +129,181 @@ func TestHarnessAppendsConversationDeltaAcrossTurnsWithoutChangingGeneration(t *
 	}
 }
 
+func TestHarnessOpensExplicitSourceDeltaFromActiveBoundary(t *testing.T) {
+	t.Parallel()
+	fixture := newSourceDeltaHarnessFixture(t, "thread-explicit-delta")
+	first := fixture.common
+	first.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-delta-1"}
+	first.Goal = "question one"
+	first.Context = contextSeed("", contextEntry("m1", "turn-delta-1", model.RoleUser, first.Goal, true))
+	firstSnapshot := startContextTurn(t, fixture.runner, first)
+	boundary := requireContextSourceBoundary(t, fixture.runner, fixture.common, firstSnapshot, "m1")
+
+	second := fixture.common
+	second.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-delta-2"}
+	second.Goal = "question two"
+	second.Context = &harness.ContextSeed{
+		BaseCheckpointID: boundary.CheckpointID, SourceDelta: true,
+		SourcePath: []string{"a1", "m2"}, Entries: []runtimecontext.Entry{
+			contextEntry("a1", "turn-delta-1", model.RoleAssistant, "answer one", false),
+			contextEntry("m2", "turn-delta-2", model.RoleUser, second.Goal, true),
+		},
+	}
+	secondSnapshot := startContextTurn(t, fixture.runner, second)
+	secondCheckpoint := requireStoredContextCheckpoint(t, fixture.store, secondSnapshot.Turn.ContextCheckpointID)
+	assertExplicitSourceDelta(t, firstSnapshot, secondCheckpoint)
+	assertStableContextRequests(t, fixture.provider.requests, "explicit source delta")
+}
+
+func TestHarnessFullBranchFallbackReusesNearestSourceAlignedCheckpoint(t *testing.T) {
+	t.Parallel()
+	fixture := newSourceDeltaHarnessFixture(t, "thread-branch-reuse")
+	root := fixture.common
+	root.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-root"}
+	root.Goal = "root"
+	root.Context = contextSeed("", contextEntry("m1", "turn-root", model.RoleUser, root.Goal, true))
+	rootSnapshot := startContextTurn(t, fixture.runner, root)
+
+	branchB := fixture.common
+	branchB.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-branch-b"}
+	branchB.Goal = "branch b"
+	branchB.Context = contextSeed("",
+		contextEntry("m1", "turn-root", model.RoleUser, root.Goal, false),
+		contextEntry("b1", "turn-branch-b", model.RoleUser, branchB.Goal, true),
+	)
+	branchBSnapshot := startContextTurn(t, fixture.runner, branchB)
+
+	branchA := fixture.common
+	branchA.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-branch-a"}
+	branchA.Goal = "branch a"
+	branchA.Context = contextSeed("",
+		contextEntry("m1", "turn-root", model.RoleUser, root.Goal, false),
+		contextEntry("a1", "turn-branch-a", model.RoleUser, branchA.Goal, true),
+	)
+	branchASnapshot := startContextTurn(t, fixture.runner, branchA)
+	checkpointA := requireStoredContextCheckpoint(t, fixture.store, branchASnapshot.Turn.ContextCheckpointID)
+	assertBranchCheckpointReuse(t, rootSnapshot, branchBSnapshot, checkpointA)
+	assertActiveContextHead(t, fixture.store, branchASnapshot.Turn.SessionID, checkpointA.ID)
+}
+
+type sourceDeltaHarnessFixture struct {
+	runner   *harness.Runner
+	store    *harness.MemoryStore
+	provider *multiContextCaptureModel
+	common   harness.StartRequest
+}
+
+func newSourceDeltaHarnessFixture(t *testing.T, threadID string) sourceDeltaHarnessFixture {
+	t.Helper()
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &multiContextCaptureModel{}
+	agentRunner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: provider,
+		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := harness.NewMemoryStore()
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: agentRunner, Store: store, Clock: contextHarnessClock{},
+		Context: runtimecontext.NewManager(runtimecontext.Dependencies{}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sourceDeltaHarnessFixture{
+		runner: runner, store: store, provider: provider,
+		common: harness.StartRequest{
+			HostThread: harness.HostRef{Kind: "conversation", ID: threadID},
+			Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+			Thread:     kernel.ThreadRef{Kind: "conversation", ID: threadID}, Config: harness.ConfigSnapshot{},
+		},
+	}
+}
+
+func startContextTurn(t *testing.T, runner *harness.Runner, request harness.StartRequest) harness.Snapshot {
+	t.Helper()
+	snapshot, err := runner.Start(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
+}
+
+func requireContextSourceBoundary(
+	t *testing.T,
+	runner *harness.Runner,
+	common harness.StartRequest,
+	snapshot harness.Snapshot,
+	wantSourceID string,
+) harness.ContextSourceBoundary {
+	t.Helper()
+	boundary, err := runner.ResolveContextSourceBoundary(t.Context(), common.HostThread, common.Config, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boundary.CheckpointID != snapshot.Turn.ContextCheckpointID || boundary.CoveredThroughSourceID != wantSourceID {
+		t.Fatalf("active source boundary=%#v", boundary)
+	}
+	return boundary
+}
+
+func requireStoredContextCheckpoint(
+	t *testing.T,
+	store *harness.MemoryStore,
+	checkpointID string,
+) runtimecontext.Checkpoint {
+	t.Helper()
+	checkpoint, err := store.GetContextCheckpoint(t.Context(), checkpointID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return checkpoint
+}
+
+func assertExplicitSourceDelta(t *testing.T, first harness.Snapshot, second runtimecontext.Checkpoint) {
+	t.Helper()
+	if second.ParentCheckpointID != first.Turn.ContextCheckpointID ||
+		second.Generation != first.Turn.ContextRef.Generation || second.CoveredThroughSourceID != "m2" {
+		t.Fatalf("explicit source delta did not advance active checkpoint: %#v", second)
+	}
+}
+
+func assertStableContextRequests(t *testing.T, requests []model.Request, label string) {
+	t.Helper()
+	if len(requests) != 2 || !requestMessagePrefix(requests[0].Messages, requests[1].Messages) {
+		t.Fatalf("%s rewrote stable model prefix: %#v", label, requests)
+	}
+}
+
+func assertBranchCheckpointReuse(
+	t *testing.T,
+	root harness.Snapshot,
+	branchB harness.Snapshot,
+	branchA runtimecontext.Checkpoint,
+) {
+	t.Helper()
+	if branchA.ParentCheckpointID != root.Turn.ContextCheckpointID ||
+		branchA.ParentCheckpointID == branchB.Turn.ContextCheckpointID {
+		t.Fatalf("branch A did not reuse nearest valid ancestor checkpoint: %#v", branchA)
+	}
+}
+
+func assertActiveContextHead(t *testing.T, store *harness.MemoryStore, scopeID string, checkpointID string) {
+	t.Helper()
+	active, err := store.GetActiveContextCheckpoint(t.Context(), scopeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.ID != checkpointID {
+		t.Fatalf("branch fallback did not atomically install new active head: %#v", active)
+	}
+}
+
 func TestHarnessKeepsLiveToolResultsAfterContextCheckpoint(t *testing.T) {
 	t.Parallel()
 	snapshot, provider := runToolResultContextHarness(t)

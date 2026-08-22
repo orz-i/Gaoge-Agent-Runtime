@@ -220,7 +220,7 @@ func TestManagerResetsGenerationWhenBranchNoLongerContainsCheckpoint(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Generation != first.Generation+1 || second.Revision != 1 || second.ParentCheckpointID != "" || second.Trace.Reason != "lineage_reset" {
+	if second.Generation != first.Generation+1 || second.Revision != 1 || second.ParentCheckpointID != first.ID || second.Trace.Reason != "lineage_reset" {
 		t.Fatalf("branch must create an explicit generation reset: %#v", second)
 	}
 	if second.CacheIdentity == first.CacheIdentity {
@@ -235,15 +235,41 @@ func TestManagerExplicitCacheResetInvalidatesIdentityWithoutChangingSourceShape(
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := openRequest("m1", "m2", "m3")
+	request := openRequest("m1", "m2")
 	request.Previous = &first
 	request.ResetCacheIdentity = true
 	second, err := manager.Open(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Generation != first.Generation+1 || second.Trace.Reason != "lineage_reset" || second.CacheIdentity == first.CacheIdentity {
+	if second.Generation != first.Generation+1 || second.ParentCheckpointID != first.ID ||
+		second.Trace.Reason != "lineage_reset" || second.CacheIdentity == first.CacheIdentity {
 		t.Fatalf("explicit cache reset did not create a new identity: first=%#v second=%#v", first, second)
+	}
+}
+
+func TestManagerSourceDeltaMatchesCompleteAncestryOpen(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	base, err := manager.Open(t.Context(), openRequest("m1", "m2"))
+	requireNoError(t, err)
+
+	complete := openRequest("m1", "m2", "m3", "m4")
+	complete.Previous = &base
+	completeCheckpoint, err := manager.Open(t.Context(), complete)
+	requireNoError(t, err)
+
+	delta := openRequest("m3", "m4")
+	delta.Previous = &base
+	delta.SourceDelta = true
+	deltaCheckpoint, err := manager.Open(t.Context(), delta)
+	requireNoError(t, err)
+
+	requireEqual(t, deltaCheckpoint.ID, completeCheckpoint.ID, "delta/full checkpoint identity")
+	requireEqual(t, deltaCheckpoint.LineageHash, completeCheckpoint.LineageHash, "delta/full lineage hash")
+	requireEqual(t, deltaCheckpoint.CoveredPathHash, completeCheckpoint.CoveredPathHash, "delta/full covered path")
+	if !messagePrefix(runtimectx.Materialize(base.Window), runtimectx.Materialize(deltaCheckpoint.Window)) {
+		t.Fatalf("delta open rewrote base Context prefix: %#v", deltaCheckpoint.Window)
 	}
 }
 
@@ -267,6 +293,9 @@ func TestCaptureRejectsStablePrefixMutationAndAcceptsRuntimeTail(t *testing.T) {
 	}
 	if advanced.Generation != checkpoint.Generation || advanced.Revision != checkpoint.Revision+1 || advanced.Trace.AppendedEntryCount != 2 {
 		t.Fatalf("runtime tail was not captured: %#v", advanced)
+	}
+	if !runtimectx.SourceAlignedCheckpoint(checkpoint) || runtimectx.SourceAlignedCheckpoint(advanced) {
+		t.Fatalf("source alignment did not distinguish durable source boundary from runtime tail")
 	}
 	mutated := model.CloneMessages(messages)
 	mutated[1].Content = "rewritten"

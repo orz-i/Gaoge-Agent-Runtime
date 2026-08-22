@@ -20,6 +20,14 @@ type ContextCheckpointCommit struct {
 	UpdatedAt                time.Time
 }
 
+// ContextCheckpointPathQuery resolves the nearest reusable source-aligned checkpoint for one
+// complete host ancestry. SourcePath is a correctness path and has no semantic message-count cap.
+type ContextCheckpointPathQuery struct {
+	ScopeID           string
+	StaticFingerprint string
+	SourcePath        []string
+}
+
 // Store is the durable Harness state boundary. Implementations must clone values at every boundary.
 type Store interface {
 	CreateSession(context.Context, Session) (Session, bool, error)
@@ -43,6 +51,7 @@ type Store interface {
 	PutContextCheckpoint(context.Context, runtimecontext.Checkpoint) (runtimecontext.Checkpoint, bool, error)
 	GetContextCheckpoint(context.Context, string) (runtimecontext.Checkpoint, error)
 	GetActiveContextCheckpoint(context.Context, string) (runtimecontext.Checkpoint, error)
+	FindContextCheckpointForPath(context.Context, ContextCheckpointPathQuery) (runtimecontext.Checkpoint, error)
 	CommitContextCheckpoint(context.Context, ContextCheckpointCommit) (Turn, error)
 	PutContextArtifact(context.Context, runtimecontext.Artifact) (runtimecontext.Artifact, bool, error)
 	GetContextArtifact(context.Context, string) (runtimecontext.Artifact, error)

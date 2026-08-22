@@ -91,11 +91,15 @@ type configRecord struct {
 func (configRecord) TableName() string { return "agent_harness_config_snapshots" }
 
 type contextCheckpointRecord struct {
-	ID          string `gorm:"primaryKey;size:128"`
-	ScopeID     string `gorm:"size:128;not null;index:idx_harness_context_checkpoint_scope,priority:1"`
-	Generation  int    `gorm:"not null;index:idx_harness_context_checkpoint_scope,priority:2"`
-	Revision    int    `gorm:"not null;index:idx_harness_context_checkpoint_scope,priority:3"`
-	PayloadJSON string `gorm:"type:text;not null"`
+	ID                     string `gorm:"primaryKey;size:128"`
+	ScopeID                string `gorm:"size:128;not null;index:idx_harness_context_checkpoint_scope,priority:1;index:idx_harness_context_checkpoint_reuse,priority:1"`
+	Generation             int    `gorm:"not null;index:idx_harness_context_checkpoint_scope,priority:2"`
+	Revision               int    `gorm:"not null;index:idx_harness_context_checkpoint_scope,priority:3"`
+	StaticFingerprint      string `gorm:"size:64;not null;index:idx_harness_context_checkpoint_reuse,priority:2"`
+	CoveredThroughSourceID string `gorm:"size:128;not null;index:idx_harness_context_checkpoint_reuse,priority:4"`
+	CoveredPathHash        string `gorm:"size:64;not null"`
+	SourceAligned          bool   `gorm:"not null;index:idx_harness_context_checkpoint_reuse,priority:3"`
+	PayloadJSON            string `gorm:"type:text;not null"`
 }
 
 func (contextCheckpointRecord) TableName() string { return "agent_harness_context_checkpoints" }

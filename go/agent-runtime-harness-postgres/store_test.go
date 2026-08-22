@@ -211,6 +211,51 @@ func TestStoreFailedContextCommitDoesNotAdvanceHeadOrPersistCheckpoint(t *testin
 	}
 }
 
+func TestStoreFindContextCheckpointForPathChoosesNearestSourceAlignedAncestor(t *testing.T) {
+	store := newStore(t)
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	base := newContextCheckpoint(t, "scope-path-reuse")
+	requirePutContextCheckpoint(t, store, base)
+
+	branchA1, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
+		SourcePath: []string{"a1"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-a1", SourceID: "a1", TurnID: "turn-a1", Message: model.Message{Role: model.RoleAssistant, Content: "a1"},
+		}}, SourceDelta: true, Previous: &base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirePutContextCheckpoint(t, store, branchA1)
+	branchA2, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
+		SourcePath: []string{"a2"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-a2", SourceID: "a2", TurnID: "turn-a2", Message: model.Message{Role: model.RoleUser, Content: "a2"},
+		}}, SourceDelta: true, Previous: &branchA1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirePutContextCheckpoint(t, store, branchA2)
+
+	runtimeTail, err := manager.Capture(t.Context(), runtimecontext.CaptureRequest{
+		Previous: branchA2, StaticFingerprint: branchA2.StaticFingerprint, RunID: "run-a2",
+		Messages: append(runtimecontext.Materialize(branchA2.Window), model.Message{Role: model.RoleAssistant, Content: "runtime tail"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirePutContextCheckpoint(t, store, runtimeTail)
+
+	found, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{
+		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint,
+		SourcePath: []string{testContextBaseSourceID, "a1", "a2", "a3"},
+	})
+	if err != nil || found.ID != branchA2.ID {
+		t.Fatalf("nearest source-aligned checkpoint=%#v want=%s err=%v", found, branchA2.ID, err)
+	}
+}
+
 func TestStoreRetriesInvocationWithAtomicAttemptRotation(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 20, 4, 20, 0, 0, time.UTC)

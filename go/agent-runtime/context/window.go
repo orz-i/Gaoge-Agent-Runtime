@@ -322,6 +322,7 @@ type OpenRequest struct {
 	SourcePath         []string
 	Entries            []Entry
 	Instructions       string
+	SourceDelta        bool
 	ResetCacheIdentity bool
 	Previous           *Checkpoint
 }
@@ -423,15 +424,27 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 		return Checkpoint{}, err
 	}
 	if normalized.Previous == nil {
+		if normalized.SourceDelta {
+			return Checkpoint{}, ErrInvalidInput
+		}
 		return newCheckpoint(normalized, 1, 1, "", normalized.Entries, "open", 0), nil
 	}
 	previous := CloneCheckpoint(*normalized.Previous)
 	if !ValidCheckpoint(previous) {
 		return Checkpoint{}, ErrInvalidInput
 	}
+	if normalized.SourceDelta {
+		return openSourceDelta(previous, normalized)
+	}
 	delta, reusable := sourceDelta(previous, normalized)
 	if normalized.ResetCacheIdentity || !reusable {
-		return newCheckpoint(normalized, previous.Generation+1, 1, "", normalized.Entries, "lineage_reset", 0), nil
+		next := newCheckpoint(
+			normalized, previous.Generation+1, 1, previous.ID,
+			normalized.Entries, "lineage_reset", 0,
+		)
+		next.CacheIdentity = resetCacheIdentity(previous, next.LineageHash, next.Generation)
+		next.ID = checkpointID(next)
+		return next, nil
 	}
 	if len(delta) == 0 && normalized.Instructions == previous.Window.Instructions &&
 		normalized.StaticFingerprint == previous.StaticFingerprint &&
@@ -446,6 +459,48 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 	next.CacheIdentity = previous.CacheIdentity
 	next.ID = checkpointID(next)
 	return next, nil
+}
+
+func openSourceDelta(previous Checkpoint, request OpenRequest) (Checkpoint, error) {
+	if previous.ScopeID != request.ScopeID || previous.StaticFingerprint != request.StaticFingerprint ||
+		previous.Window.Instructions != request.Instructions {
+		return Checkpoint{}, ErrLineageConflict
+	}
+	if len(request.SourcePath) == 0 && !request.ResetCacheIdentity {
+		return previous, nil
+	}
+	lineageHash := ExtendLineageHash(previous.CoveredPathHash, request.SourcePath...)
+	entries := append(CloneEntries(previous.Window.Entries), CloneEntries(request.Entries)...)
+	next := previous
+	next.Revision++
+	next.ParentCheckpointID = previous.ID
+	next.LineageHash = lineageHash
+	next.CoveredPathHash = lineageHash
+	next.Window = normalizeWindow(Window{Instructions: request.Instructions, Entries: entries})
+	next.ContentHash = windowHash(next.Window)
+	next.Trace = Trace{
+		Reason: "append_source_delta", SourceEntryCount: previous.Trace.SourceEntryCount + len(request.SourcePath),
+		ActiveEntryCount: len(next.Window.Entries), AppendedEntryCount: len(request.SourcePath),
+		ArtifactCount: len(previous.ArtifactIDs), LastAssessment: cloneAssessment(previous.Trace.LastAssessment),
+	}
+	if len(request.SourcePath) != 0 {
+		next.CoveredThroughSourceID = request.SourcePath[len(request.SourcePath)-1]
+	}
+	if request.ResetCacheIdentity {
+		next.Generation = previous.Generation + 1
+		next.Revision = 1
+		next.Trace.Reason = "lineage_reset"
+		next.CacheIdentity = resetCacheIdentity(previous, lineageHash, next.Generation)
+	}
+	next.ID = checkpointID(next)
+	return next, nil
+}
+
+func resetCacheIdentity(previous Checkpoint, lineageHash string, generation int) string {
+	return stableID(
+		"ctxk", previous.ScopeID, previous.StaticFingerprint, strings.TrimSpace(lineageHash),
+		previous.CacheIdentity, strconv.Itoa(generation),
+	)
 }
 
 // Capture verifies the Codex-style stable-prefix invariant for one real model sampling request.
@@ -761,14 +816,50 @@ func Materialize(window Window) []model.Message {
 }
 
 func LineageHash(parts ...string) string {
-	normalized := make([]string, 0, len(parts))
+	return ExtendLineageHash("", parts...)
+}
+
+// ExtendLineageHash advances one ancestry hash without requiring the already-covered source IDs.
+// This makes checkpoint + source-delta loading equivalent to hashing the complete ancestry.
+func ExtendLineageHash(previous string, parts ...string) string {
+	current := strings.TrimSpace(previous)
 	for _, part := range parts {
 		part = strings.TrimSpace(part)
-		if part != "" {
-			normalized = append(normalized, part)
+		if part == "" {
+			continue
+		}
+		current = hashBytes([]byte(current + "\x00" + part))
+	}
+	return current
+}
+
+// SourceAlignedCheckpoint reports whether the active Window ends exactly at its durable host
+// source boundary. Such checkpoints are safe ancestry-reuse candidates across branch switches;
+// checkpoints with runtime-only Tool/assistant tail entries remain valid active heads but are not
+// used as historical branch anchors.
+func SourceAlignedCheckpoint(value Checkpoint) bool {
+	if !ValidCheckpoint(value) || len(value.Window.Entries) == 0 {
+		return false
+	}
+	last := value.Window.Entries[len(value.Window.Entries)-1]
+	return strings.TrimSpace(last.SourceID) == strings.TrimSpace(value.CoveredThroughSourceID)
+}
+
+// CheckpointSourceIndex returns the checkpoint's covered source position in one complete ancestry
+// only when both the source identity and incremental lineage hash match. It rejects checkpoints
+// from another branch even when a source ID happens to be reused by malformed external data.
+func CheckpointSourceIndex(value Checkpoint, sourcePath []string) int {
+	if !SourceAlignedCheckpoint(value) {
+		return -1
+	}
+	current := ""
+	for index, sourceID := range normalizeStrings(sourcePath) {
+		current = ExtendLineageHash(current, sourceID)
+		if sourceID == value.CoveredThroughSourceID && current == value.CoveredPathHash {
+			return index
 		}
 	}
-	return hashBytes([]byte(strings.Join(normalized, "\x00")))
+	return -1
 }
 
 func StaticFingerprint(values ...string) string {
@@ -860,7 +951,13 @@ func normalizeOpenRequest(request OpenRequest) (OpenRequest, error) {
 		clone := CloneCheckpoint(*request.Previous)
 		request.Previous = &clone
 	}
-	if request.ScopeID == "" || request.StaticFingerprint == "" || len(request.SourcePath) == 0 || len(request.Entries) == 0 {
+	if request.ScopeID == "" || request.StaticFingerprint == "" || len(request.SourcePath) != len(request.Entries) {
+		return OpenRequest{}, ErrInvalidInput
+	}
+	if !request.SourceDelta && (len(request.SourcePath) == 0 || len(request.Entries) == 0) {
+		return OpenRequest{}, ErrInvalidInput
+	}
+	if request.SourceDelta && request.Previous == nil {
 		return OpenRequest{}, ErrInvalidInput
 	}
 	if !validSourceEntries(request.SourcePath, request.Entries) {

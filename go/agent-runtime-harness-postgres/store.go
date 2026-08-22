@@ -748,6 +748,8 @@ func contextCheckpointToRecord(value runtimecontext.Checkpoint) (contextCheckpoi
 	}
 	return contextCheckpointRecord{
 		ID: value.ID, ScopeID: value.ScopeID, Generation: value.Generation, Revision: value.Revision,
+		StaticFingerprint: value.StaticFingerprint, CoveredThroughSourceID: value.CoveredThroughSourceID,
+		CoveredPathHash: value.CoveredPathHash, SourceAligned: runtimecontext.SourceAlignedCheckpoint(value),
 		PayloadJSON: string(payload),
 	}, nil
 }
@@ -786,6 +788,81 @@ func (store *Store) GetActiveContextCheckpoint(ctx context.Context, scopeID stri
 		return runtimecontext.Checkpoint{}, harness.ErrConflict
 	}
 	return checkpoint, nil
+}
+
+func (store *Store) FindContextCheckpointForPath(
+	ctx context.Context,
+	query harness.ContextCheckpointPathQuery,
+) (runtimecontext.Checkpoint, error) {
+	query, records, err := store.loadContextCheckpointPathCandidates(ctx, query)
+	if err != nil {
+		return runtimecontext.Checkpoint{}, err
+	}
+	bestIndex := -1
+	best := runtimecontext.Checkpoint{}
+	for _, record := range records {
+		candidate, err := contextCheckpointFromRecord(record)
+		if err != nil {
+			return runtimecontext.Checkpoint{}, err
+		}
+		index, ok := reusablePostgresContextCheckpointCandidate(query, candidate, best, bestIndex)
+		if !ok {
+			continue
+		}
+		bestIndex = index
+		best = candidate
+	}
+	if bestIndex < 0 {
+		return runtimecontext.Checkpoint{}, harness.ErrNotFound
+	}
+	return runtimecontext.CloneCheckpoint(best), nil
+}
+
+func (store *Store) loadContextCheckpointPathCandidates(
+	ctx context.Context,
+	query harness.ContextCheckpointPathQuery,
+) (harness.ContextCheckpointPathQuery, []contextCheckpointRecord, error) {
+	query.ScopeID = strings.TrimSpace(query.ScopeID)
+	query.StaticFingerprint = strings.TrimSpace(query.StaticFingerprint)
+	if store == nil || query.ScopeID == "" || query.StaticFingerprint == "" || len(query.SourcePath) == 0 {
+		return harness.ContextCheckpointPathQuery{}, nil, harness.ErrInvalidRequest
+	}
+	var records []contextCheckpointRecord
+	if err := store.db.WithContext(ctx).
+		Where(
+			"scope_id = ? AND static_fingerprint = ? AND source_aligned = ? AND covered_through_source_id IN ?",
+			query.ScopeID, query.StaticFingerprint, true, query.SourcePath,
+		).
+		Find(&records).Error; err != nil {
+		return harness.ContextCheckpointPathQuery{}, nil, mapError(err)
+	}
+	return query, records, nil
+}
+
+func reusablePostgresContextCheckpointCandidate(
+	query harness.ContextCheckpointPathQuery,
+	candidate runtimecontext.Checkpoint,
+	best runtimecontext.Checkpoint,
+	bestIndex int,
+) (int, bool) {
+	index := runtimecontext.CheckpointSourceIndex(candidate, query.SourcePath)
+	if index < 0 || index < bestIndex {
+		return -1, false
+	}
+	if index == bestIndex && !newerPostgresContextCheckpoint(candidate, best) {
+		return -1, false
+	}
+	return index, true
+}
+
+func newerPostgresContextCheckpoint(left, right runtimecontext.Checkpoint) bool {
+	if right.ID == "" || left.Generation != right.Generation {
+		return right.ID == "" || left.Generation > right.Generation
+	}
+	if left.Revision != right.Revision {
+		return left.Revision > right.Revision
+	}
+	return left.ID > right.ID
 }
 
 func (store *Store) CommitContextCheckpoint(
@@ -926,7 +1003,9 @@ func contextCheckpointFromRecord(record contextCheckpointRecord) (runtimecontext
 	var value runtimecontext.Checkpoint
 	if err := json.Unmarshal([]byte(record.PayloadJSON), &value); err != nil ||
 		value.ID != record.ID || value.ScopeID != record.ScopeID || value.Generation != record.Generation ||
-		value.Revision != record.Revision || !runtimecontext.ValidCheckpoint(value) {
+		value.Revision != record.Revision || value.StaticFingerprint != record.StaticFingerprint ||
+		value.CoveredThroughSourceID != record.CoveredThroughSourceID || value.CoveredPathHash != record.CoveredPathHash ||
+		runtimecontext.SourceAlignedCheckpoint(value) != record.SourceAligned || !runtimecontext.ValidCheckpoint(value) {
 		return runtimecontext.Checkpoint{}, harness.ErrConflict
 	}
 	return runtimecontext.CloneCheckpoint(value), nil

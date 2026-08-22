@@ -453,6 +453,73 @@ func (store *MemoryStore) GetActiveContextCheckpoint(_ context.Context, scopeID 
 	return cloneContextCheckpoint(value), nil
 }
 
+func (store *MemoryStore) FindContextCheckpointForPath(
+	_ context.Context,
+	query ContextCheckpointPathQuery,
+) (runtimecontext.Checkpoint, error) {
+	query, err := normalizeMemoryContextCheckpointPathQuery(store, query)
+	if err != nil {
+		return runtimecontext.Checkpoint{}, ErrInvalidRequest
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	bestIndex := -1
+	best := runtimecontext.Checkpoint{}
+	for _, candidate := range store.contextCheckpoints {
+		index, ok := reusableMemoryContextCheckpointCandidate(query, candidate, best, bestIndex)
+		if !ok {
+			continue
+		}
+		bestIndex = index
+		best = candidate
+	}
+	if bestIndex < 0 {
+		return runtimecontext.Checkpoint{}, ErrNotFound
+	}
+	return cloneContextCheckpoint(best), nil
+}
+
+func normalizeMemoryContextCheckpointPathQuery(
+	store *MemoryStore,
+	query ContextCheckpointPathQuery,
+) (ContextCheckpointPathQuery, error) {
+	query.ScopeID = strings.TrimSpace(query.ScopeID)
+	query.StaticFingerprint = strings.TrimSpace(query.StaticFingerprint)
+	if store == nil || query.ScopeID == "" || query.StaticFingerprint == "" || len(query.SourcePath) == 0 {
+		return ContextCheckpointPathQuery{}, ErrInvalidRequest
+	}
+	return query, nil
+}
+
+func reusableMemoryContextCheckpointCandidate(
+	query ContextCheckpointPathQuery,
+	candidate runtimecontext.Checkpoint,
+	best runtimecontext.Checkpoint,
+	bestIndex int,
+) (int, bool) {
+	if candidate.ScopeID != query.ScopeID || candidate.StaticFingerprint != query.StaticFingerprint {
+		return -1, false
+	}
+	index := runtimecontext.CheckpointSourceIndex(candidate, query.SourcePath)
+	if index < 0 || index < bestIndex {
+		return -1, false
+	}
+	if index == bestIndex && !newerContextCheckpoint(candidate, best) {
+		return -1, false
+	}
+	return index, true
+}
+
+func newerContextCheckpoint(left, right runtimecontext.Checkpoint) bool {
+	if right.ID == "" || left.Generation != right.Generation {
+		return right.ID == "" || left.Generation > right.Generation
+	}
+	if left.Revision != right.Revision {
+		return left.Revision > right.Revision
+	}
+	return left.ID > right.ID
+}
+
 func (store *MemoryStore) CommitContextCheckpoint(
 	_ context.Context,
 	request ContextCheckpointCommit,
