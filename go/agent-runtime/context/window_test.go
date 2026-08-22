@@ -388,6 +388,32 @@ func TestAssessRequestUsesConservativeHardBoundWhenCounterIsUnavailable(t *testi
 	}
 }
 
+func TestAssessRequestHardFallbackChargesHighEntropyASCIIByByte(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	assessment, err := manager.AssessRequest(
+		t.Context(),
+		struct {
+			Text string `json:"text"`
+		}{Text: strings.Repeat("A7_z-9/", 32)},
+		runtimectx.ModelWindow{ContextTokens: 220},
+		runtimectx.Policy{SoftLimitPercent: 80, EstimateSafetyPercent: 15},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.AdjustedTokenEstimate > assessment.SoftInputTokens {
+		t.Fatalf("fixture must pass the soft heuristic: %#v", assessment)
+	}
+	if assessment.HardTokenEstimate < assessment.SerializedBytes ||
+		assessment.HardTokenEstimate <= assessment.HardInputTokens {
+		t.Fatalf("ASCII hard fallback is not byte-safe: %#v", assessment)
+	}
+	if runtimectx.WithinHardBudget(assessment, runtimectx.Policy{}) {
+		t.Fatalf("unsafe ASCII request passed hard budget: %#v", assessment)
+	}
+}
+
 func openRequest(sourceIDs ...string) runtimectx.OpenRequest {
 	entries := make([]runtimectx.Entry, 0, len(sourceIDs))
 	for index, id := range sourceIDs {

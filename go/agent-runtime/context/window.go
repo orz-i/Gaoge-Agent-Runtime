@@ -709,7 +709,7 @@ func (manager *Manager) AssessRequest(
 	}
 	assessment.RawTokenEstimate = estimatedTokens(serialized)
 	assessment.AdjustedTokenEstimate = applySafetyMargin(assessment.RawTokenEstimate, policy.EstimateSafetyPercent)
-	assessment.HardTokenEstimate = conservativeHardTokenEstimate(serialized, policy.EstimateSafetyPercent)
+	assessment.HardTokenEstimate = hardTokenUpperBound(serialized, policy.EstimateSafetyPercent)
 	assessment.TokenCountSource = CountEstimated
 	return assessment, nil
 }
@@ -1242,23 +1242,17 @@ func estimatedTokens(serialized []byte) int64 {
 	return int64((len(serialized) + 3) / 4)
 }
 
-// conservativeHardTokenEstimate is deliberately stricter than the soft bytes/4 heuristic without
-// pretending to be an exact provider tokenizer. ASCII/JSON-heavy payloads use two bytes per token;
-// non-ASCII bytes are charged one token each so CJK and byte-fallback cases cannot inherit the
-// optimistic ASCII ratio. The configured estimate safety margin is applied once more to this hard
-// estimate. Hosts can replace this fallback entirely by supplying an exact TokenCounter.
-func conservativeHardTokenEstimate(serialized []byte, safetyPercent int) int64 {
-	var asciiBytes int64
-	var nonASCIIBytes int64
-	for _, value := range serialized {
-		if value < 0x80 {
-			asciiBytes++
-		} else {
-			nonASCIIBytes++
-		}
-	}
-	base := (asciiBytes+1)/2 + nonASCIIBytes
-	return applySafetyMargin(base, safetyPercent)
+// hardTokenUpperBound is the fail-safe fallback when no exact provider/model tokenizer is
+// available. A provider tokenizer cannot consume more non-empty prompt tokens than there are
+// bytes in the canonical provider-neutral request representation: every token must account for at
+// least one input byte. Charging one token per serialized byte therefore avoids treating a
+// language-specific bytes/token heuristic as a hard proof. The safety margin additionally covers
+// bounded provider framing differences between this canonical request and the final wire payload.
+//
+// This intentionally sacrifices usable window capacity until a host supplies an exact
+// TokenCounter; soft-limit decisions continue to use the less conservative bytes/4 estimate.
+func hardTokenUpperBound(serialized []byte, safetyPercent int) int64 {
+	return applySafetyMargin(int64(len(serialized)), safetyPercent)
 }
 
 func applySafetyMargin(tokens int64, percent int) int64 {
