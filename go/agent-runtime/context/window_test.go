@@ -12,6 +12,32 @@ import (
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
+const (
+	testLargeToolCallID = "call-large"
+	testLookupToolKey   = "lookup"
+)
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func requireEqual[T comparable](t *testing.T, got, want T, message string) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s: got=%v want=%v", message, got, want)
+	}
+}
+
+func requireTrue(t *testing.T, condition bool, message string) {
+	t.Helper()
+	if !condition {
+		t.Fatal(message)
+	}
+}
+
 func TestManagerAppendsSourceDeltaWithoutRewritingStablePrefix(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
@@ -47,8 +73,8 @@ func TestCaptureCarriesToolArtifactLineageWithStablePrefix(t *testing.T) {
 	}
 	messages := append(
 		runtimectx.Materialize(checkpoint.Window),
-		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-large", ToolKey: "lookup", Arguments: json.RawMessage(`{}`)}}},
-		model.Message{Role: model.RoleTool, ToolCallID: "call-large", Content: repeatedText("tool-payload-", 80)},
+		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: testLargeToolCallID, ToolKey: testLookupToolKey, Arguments: json.RawMessage(`{}`)}}},
+		model.Message{Role: model.RoleTool, ToolCallID: testLargeToolCallID, Content: repeatedText("tool-payload-", 80)},
 	)
 	compacted, err := manager.CompactToolResults(checkpoint.ScopeID, checkpoint.Generation, messages, 256)
 	if err != nil {
@@ -93,68 +119,51 @@ func TestCompactToolResultsSealsExactArtifactAndIsDeterministic(t *testing.T) {
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
 	content := repeatedText("large-tool-result-", 80)
 	messages := []model.Message{
-		{Role: model.RoleUser, Content: "lookup"},
-		{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-large", ToolKey: "lookup", Arguments: json.RawMessage(`{}`)}}},
-		{Role: model.RoleTool, ToolCallID: "call-large", Content: content},
+		{Role: model.RoleUser, Content: testLookupToolKey},
+		{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: testLargeToolCallID, ToolKey: testLookupToolKey, Arguments: json.RawMessage(`{}`)}}},
+		{Role: model.RoleTool, ToolCallID: testLargeToolCallID, Content: content},
 	}
 	first, err := manager.CompactToolResults("conversation:thread-1", 3, messages, 256)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	second, err := manager.CompactToolResults("conversation:thread-1", 3, messages, 256)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(first.Artifacts) != 1 || !runtimectx.ValidArtifact(first.Artifacts[0]) || first.Artifacts[0].Content != content {
-		t.Fatalf("invalid Tool artifact: %#v", first.Artifacts)
-	}
-	if len(second.Artifacts) != 1 || second.Artifacts[0].ID != first.Artifacts[0].ID ||
-		second.Messages[2].Content != first.Messages[2].Content {
-		t.Fatalf("Tool compaction is not deterministic: first=%#v second=%#v", first, second)
-	}
-	if first.Messages[2].Content == content ||
-		!containsAll(first.Messages[2].Content, first.Artifacts[0].ID, first.Artifacts[0].ContentHash, "<head>", "<tail>") {
-		t.Fatalf("Tool replacement did not carry durable identity: %q", first.Messages[2].Content)
-	}
+	requireNoError(t, err)
+	requireEqual(t, len(first.Artifacts), 1, "Tool artifact count")
+	requireTrue(t, runtimectx.ValidArtifact(first.Artifacts[0]), "Tool artifact is invalid")
+	requireEqual(t, first.Artifacts[0].Content, content, "Tool artifact exact content")
+	requireEqual(t, len(second.Artifacts), 1, "deterministic Tool artifact count")
+	requireEqual(t, second.Artifacts[0].ID, first.Artifacts[0].ID, "deterministic Tool artifact ID")
+	requireEqual(t, second.Messages[2].Content, first.Messages[2].Content, "deterministic Tool replacement")
+	requireTrue(t, first.Messages[2].Content != content, "Tool result was not compacted")
+	requireTrue(t, containsAll(first.Messages[2].Content, first.Artifacts[0].ID, first.Artifacts[0].ContentHash, "<head>", "<tail>"), "Tool replacement did not carry durable identity")
 	replayed, err := manager.CompactToolResults("conversation:thread-1", 3, first.Messages, 256)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(replayed.Artifacts) != 0 || replayed.Messages[2].Content != first.Messages[2].Content {
-		t.Fatalf("already compacted Tool result was compacted again: %#v", replayed)
-	}
+	requireNoError(t, err)
+	requireEqual(t, len(replayed.Artifacts), 0, "replayed Tool artifact count")
+	requireEqual(t, replayed.Messages[2].Content, first.Messages[2].Content, "replayed Tool replacement")
 }
 
 func TestCompactPortablePreservesRecentTurnsAndSealsRemovedTranscript(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
 	checkpoint, err := manager.Open(t.Context(), openRequest("u1", "a1", "u2", "a2", "u3"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	messages := runtimectx.Materialize(checkpoint.Window)
 	compacted, err := manager.CompactPortable(runtimectx.PortableCompactionRequest{
 		Previous: checkpoint, RunID: "run-portable", Messages: messages,
 		Policy: runtimectx.Policy{PreserveRecentTurns: 2, MaxCompactionTokens: 128},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if compacted.RemovedMessages != 2 || !runtimectx.ValidArtifact(compacted.Artifact) || len(compacted.Window.Entries) != 4 {
-		t.Fatalf("unexpected portable compaction: %#v", compacted)
-	}
+	requireNoError(t, err)
+	requireEqual(t, compacted.RemovedMessages, 2, "portable removed message count")
+	requireTrue(t, runtimectx.ValidArtifact(compacted.Artifact), "portable compaction artifact is invalid")
+	requireEqual(t, len(compacted.Window.Entries), 4, "portable active entry count")
 	var removed []model.Message
-	if err := json.Unmarshal(compacted.Artifact.ContentJSON, &removed); err != nil {
-		t.Fatalf("decode exact removed transcript: %v", err)
-	}
-	if len(removed) != 2 || removed[0].Content != "content-u1" || removed[1].Content != "content-a1" {
-		t.Fatalf("artifact did not preserve exact removed transcript: %#v", removed)
-	}
+	requireNoError(t, json.Unmarshal(compacted.Artifact.ContentJSON, &removed))
+	requireEqual(t, len(removed), 2, "portable artifact removed transcript count")
+	requireEqual(t, removed[0].Content, "content-u1", "portable artifact first removed message")
+	requireEqual(t, removed[1].Content, "content-a1", "portable artifact second removed message")
 	active := runtimectx.Materialize(compacted.Window)
-	if !containsAll(active[1].Content, compacted.Artifact.ID, compacted.Artifact.ContentHash) ||
-		active[len(active)-3].Content != "content-u2" || active[len(active)-1].Content != "content-u3" {
-		t.Fatalf("recent turns were not preserved: %#v", active)
-	}
+	requireTrue(t, containsAll(active[1].Content, compacted.Artifact.ID, compacted.Artifact.ContentHash), "portable checkpoint did not identify its durable artifact")
+	requireEqual(t, active[len(active)-3].Content, "content-u2", "portable preserved older recent user turn")
+	requireEqual(t, active[len(active)-1].Content, "content-u3", "portable preserved current user turn")
 }
 
 func TestCompactPortableRefusesToDropProtectedHistory(t *testing.T) {
@@ -177,31 +186,25 @@ func TestBindModelWindowCreatesRevisionThenGenerationOnChange(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
 	checkpoint, err := manager.Open(t.Context(), openRequest("m1", "m2"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireNoError(t, err)
 	firstFingerprint := runtimectx.ModelWindowFingerprint(runtimectx.ModelWindow{ContextTokens: 4096})
 	bound, err := manager.BindModelWindow(t.Context(), checkpoint, firstFingerprint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bound.Generation != checkpoint.Generation || bound.Revision != checkpoint.Revision+1 ||
-		bound.ParentCheckpointID != checkpoint.ID || bound.ModelWindowFingerprint != firstFingerprint {
-		t.Fatalf("initial model window binding must advance only revision: %#v", bound)
-	}
+	requireNoError(t, err)
+	requireEqual(t, bound.Generation, checkpoint.Generation, "initial model binding generation")
+	requireEqual(t, bound.Revision, checkpoint.Revision+1, "initial model binding revision")
+	requireEqual(t, bound.ParentCheckpointID, checkpoint.ID, "initial model binding parent")
+	requireEqual(t, bound.ModelWindowFingerprint, firstFingerprint, "initial model binding fingerprint")
 	replayed, err := manager.BindModelWindow(t.Context(), bound, firstFingerprint)
-	if err != nil || replayed.ID != bound.ID {
-		t.Fatalf("same model window must be idempotent: %#v err=%v", replayed, err)
-	}
+	requireNoError(t, err)
+	requireEqual(t, replayed.ID, bound.ID, "same model window idempotency")
 	secondFingerprint := runtimectx.ModelWindowFingerprint(runtimectx.ModelWindow{ContextTokens: 8192})
 	changed, err := manager.BindModelWindow(t.Context(), bound, secondFingerprint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed.Generation != bound.Generation+1 || changed.Revision != 1 || changed.ParentCheckpointID != bound.ID ||
-		changed.ModelWindowFingerprint != secondFingerprint || changed.Trace.Reason != "model_window_changed" {
-		t.Fatalf("changed model window must create explicit generation: %#v", changed)
-	}
+	requireNoError(t, err)
+	requireEqual(t, changed.Generation, bound.Generation+1, "changed model window generation")
+	requireEqual(t, changed.Revision, 1, "changed model window revision")
+	requireEqual(t, changed.ParentCheckpointID, bound.ID, "changed model window parent")
+	requireEqual(t, changed.ModelWindowFingerprint, secondFingerprint, "changed model window fingerprint")
+	requireEqual(t, changed.Trace.Reason, "model_window_changed", "changed model window reason")
 }
 
 func TestManagerResetsGenerationWhenBranchNoLongerContainsCheckpoint(t *testing.T) {
@@ -253,7 +256,7 @@ func TestCaptureRejectsStablePrefixMutationAndAcceptsRuntimeTail(t *testing.T) {
 	}
 	messages := runtimectx.Materialize(checkpoint.Window)
 	messages = append(messages,
-		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-1", ToolKey: "lookup", Arguments: json.RawMessage(`{"q":"x"}`)}}},
+		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-1", ToolKey: testLookupToolKey, Arguments: json.RawMessage(`{"q":"x"}`)}}},
 		model.Message{Role: model.RoleTool, ToolCallID: "call-1", Content: `{"ok":true}`},
 	)
 	advanced, err := manager.Capture(t.Context(), runtimectx.CaptureRequest{
