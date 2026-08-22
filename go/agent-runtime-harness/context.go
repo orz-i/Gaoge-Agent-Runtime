@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"sync"
 
 	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
@@ -16,9 +17,10 @@ import (
 // ContextSeed is the complete host transcript ancestry for one Harness Turn.
 // SourcePath has no semantic message-count limit; repository paging is an I/O concern only.
 type ContextSeed struct {
-	SourcePath   []string               `json:"sourcePath"`
-	Instructions string                 `json:"instructions,omitempty"`
-	Entries      []runtimecontext.Entry `json:"entries"`
+	SourcePath         []string               `json:"sourcePath"`
+	Instructions       string                 `json:"instructions,omitempty"`
+	Entries            []runtimecontext.Entry `json:"entries"`
+	ResetCacheIdentity bool                   `json:"resetCacheIdentity,omitempty"`
 }
 
 // ContextCheckpointRef is the content-free durable reference stored on a Harness Turn.
@@ -33,6 +35,11 @@ type ContextCheckpointRef struct {
 
 type contextCheckpointKey struct{}
 
+type contextWindowState struct {
+	mu         sync.RWMutex
+	checkpoint runtimecontext.Checkpoint
+}
+
 // NewContextWindowMiddleware injects the exact active Context Window carried by Harness execution.
 func NewContextWindowMiddleware() plugin.ModelMiddleware { return contextWindowMiddleware{} }
 
@@ -46,12 +53,12 @@ func (contextWindowMiddleware) Model(
 	emit model.StreamSink,
 	next plugin.ModelNext,
 ) (model.Response, error) {
-	checkpoint, ok := ctx.Value(contextCheckpointKey{}).(runtimecontext.Checkpoint)
+	checkpoint, ok := CurrentContextCheckpoint(ctx)
 	if !ok || strings.TrimSpace(checkpoint.ID) == "" {
 		return next(ctx, request, emit)
 	}
 	messages := runtimecontext.Materialize(checkpoint.Window)
-	merged, err := mergeContextRuntimeMessages(messages, request.Messages)
+	merged, err := mergeContextRuntimeMessagesForCheckpoint(checkpoint, messages, request.Messages)
 	if err != nil {
 		return model.Response{}, err
 	}
@@ -60,6 +67,13 @@ func (contextWindowMiddleware) Model(
 }
 
 func mergeContextRuntimeMessages(contextMessages, runtimeMessages []model.Message) ([]model.Message, error) {
+	return mergeContextRuntimeMessagesForCheckpoint(runtimecontext.Checkpoint{}, contextMessages, runtimeMessages)
+}
+
+func mergeContextRuntimeMessagesForCheckpoint(
+	checkpoint runtimecontext.Checkpoint,
+	contextMessages, runtimeMessages []model.Message,
+) ([]model.Message, error) {
 	if len(contextMessages) == 0 || len(runtimeMessages) == 0 {
 		return nil, ErrInvalidRequest
 	}
@@ -67,13 +81,10 @@ func mergeContextRuntimeMessages(contextMessages, runtimeMessages []model.Messag
 	if goalIndex >= len(runtimeMessages) || runtimeMessages[goalIndex].Role != model.RoleUser {
 		return nil, ErrInvalidRequest
 	}
-	contextGoal := contextMessages[len(contextMessages)-1]
 	merged := append(model.CloneMessages(contextMessages), runtimeGuidanceMessages(runtimeMessages[:goalIndex])...)
-	if sameCurrentGoal(contextGoal, runtimeMessages, goalIndex) {
-		return append(merged, model.CloneMessages(runtimeMessages[goalIndex+1:])...), nil
-	}
-	// Feature-owned child Agents have an explicit goal that differs from the parent Conversation Turn.
-	return append(merged, model.CloneMessages(runtimeMessages[goalIndex:])...), nil
+	body := model.CloneMessages(runtimeMessages[goalIndex:])
+	overlap := contextRuntimeOverlap(checkpoint, contextMessages, body)
+	return append(merged, body[overlap:]...), nil
 }
 
 func runtimeGoalIndex(messages []model.Message) int {
@@ -84,10 +95,64 @@ func runtimeGoalIndex(messages []model.Message) int {
 	return index
 }
 
-func sameCurrentGoal(contextGoal model.Message, runtimeMessages []model.Message, goalIndex int) bool {
-	return goalIndex < len(runtimeMessages) && runtimeMessages[goalIndex].Role == model.RoleUser &&
-		contextGoal.Role == model.RoleUser &&
-		strings.TrimSpace(runtimeMessages[goalIndex].Content) == strings.TrimSpace(contextGoal.Content)
+func contextRuntimeOverlap(
+	checkpoint runtimecontext.Checkpoint,
+	contextMessages, runtimeMessages []model.Message,
+) int {
+	limit := len(contextMessages)
+	if len(runtimeMessages) < limit {
+		limit = len(runtimeMessages)
+	}
+	for size := limit; size > 0; size-- {
+		start := len(contextMessages) - size
+		matched := true
+		for index := 0; index < size; index++ {
+			if !sameCheckpointModelMessage(checkpoint, contextMessages[start+index], runtimeMessages[index]) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return size
+		}
+	}
+	return 0
+}
+
+func sameCheckpointModelMessage(checkpoint runtimecontext.Checkpoint, left, right model.Message) bool {
+	if sameContextModelMessage(left, right) {
+		return true
+	}
+	if strings.TrimSpace(checkpoint.ScopeID) == "" || checkpoint.Generation <= 0 ||
+		left.Role != model.RoleTool || right.Role != model.RoleTool ||
+		strings.TrimSpace(left.ToolCallID) != strings.TrimSpace(right.ToolCallID) ||
+		!strings.HasPrefix(strings.TrimSpace(left.Content), "[tool_result_compacted ") {
+		return false
+	}
+	artifact, err := runtimecontext.NewArtifact(
+		runtimecontext.ArtifactToolResult,
+		checkpoint.ScopeID,
+		checkpoint.Generation,
+		strings.TrimSpace(right.ToolCallID),
+		right.Content,
+		nil,
+	)
+	return err == nil && strings.Contains(left.Content, "sha256="+artifact.ContentHash)
+}
+
+func sameContextModelMessage(left, right model.Message) bool {
+	left.ToolCalls = normalizeContextToolCalls(left.ToolCalls)
+	right.ToolCalls = normalizeContextToolCalls(right.ToolCalls)
+	leftJSON, leftErr := json.Marshal(left)
+	rightJSON, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
+}
+
+func normalizeContextToolCalls(values []tools.Call) []tools.Call {
+	if len(values) == 0 {
+		return nil
+	}
+	return values
 }
 
 // Runtime guidance is appended after the frozen Context prefix instead of mutating the first
@@ -103,11 +168,42 @@ func runtimeGuidanceMessages(messages []model.Message) []model.Message {
 }
 
 func withContextCheckpoint(ctx context.Context, checkpoint runtimecontext.Checkpoint) context.Context {
-	return context.WithValue(ctx, contextCheckpointKey{}, checkpoint)
+	return context.WithValue(ctx, contextCheckpointKey{}, &contextWindowState{checkpoint: runtimecontext.CloneCheckpoint(checkpoint)})
 }
 
 func withoutContextCheckpoint(ctx context.Context) context.Context {
-	return context.WithValue(ctx, contextCheckpointKey{}, runtimecontext.Checkpoint{})
+	return context.WithValue(ctx, contextCheckpointKey{}, &contextWindowState{})
+}
+
+// CurrentContextCheckpoint returns the execution-scoped active Context Window checkpoint.
+func CurrentContextCheckpoint(ctx context.Context) (runtimecontext.Checkpoint, bool) {
+	state, ok := ctx.Value(contextCheckpointKey{}).(*contextWindowState)
+	if !ok || state == nil {
+		return runtimecontext.Checkpoint{}, false
+	}
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	if strings.TrimSpace(state.checkpoint.ID) == "" {
+		return runtimecontext.Checkpoint{}, false
+	}
+	return runtimecontext.CloneCheckpoint(state.checkpoint), true
+}
+
+// ReplaceContextCheckpoint advances the execution-scoped active window after a durable rollover.
+// The expected checkpoint identity provides an in-memory CAS for parallel/continuation safety.
+func ReplaceContextCheckpoint(ctx context.Context, expectedCheckpointID string, next runtimecontext.Checkpoint) error {
+	state, ok := ctx.Value(contextCheckpointKey{}).(*contextWindowState)
+	if !ok || state == nil || !runtimecontext.ValidCheckpoint(next) {
+		return ErrInvalidRequest
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if strings.TrimSpace(state.checkpoint.ID) != strings.TrimSpace(expectedCheckpointID) ||
+		next.ParentCheckpointID != state.checkpoint.ID || next.ScopeID != state.checkpoint.ScopeID {
+		return ErrConflict
+	}
+	state.checkpoint = runtimecontext.CloneCheckpoint(next)
+	return nil
 }
 
 func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog tools.Catalog) (string, error) {
@@ -119,13 +215,20 @@ func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog 
 		return "", err
 	}
 	payload, err := json.Marshal(struct {
+		Environment  VersionRef               `json:"environment"`
 		Instructions string                   `json:"instructions"`
 		Model        string                   `json:"model"`
 		ModelOptions json.RawMessage          `json:"modelOptions"`
 		Tools        []contextToolFingerprint `json:"tools"`
+		Commands     []CommandDescriptor      `json:"commands"`
+		Skills       []SkillSnapshot          `json:"skills"`
+		MemoryPolicy string                   `json:"memoryPolicy,omitempty"`
 	}{
+		Environment:  config.Environment,
 		Instructions: strings.TrimSpace(strings.Join([]string{config.Instructions, seed.Instructions}, "\n\n")),
 		Model:        strings.TrimSpace(config.Model), ModelOptions: append(json.RawMessage(nil), config.ModelOptions...), Tools: definitions,
+		Commands: cloneCommandDescriptors(config.Commands), Skills: append([]SkillSnapshot(nil), config.Skills...),
+		MemoryPolicy: strings.TrimSpace(config.MemoryPolicy),
 	})
 	if err != nil {
 		return "", err
@@ -182,7 +285,7 @@ func normalizeContextSeed(seed *ContextSeed) (*ContextSeed, error) {
 	}
 	result := &ContextSeed{
 		SourcePath: append([]string(nil), seed.SourcePath...), Instructions: strings.TrimSpace(seed.Instructions),
-		Entries: runtimecontext.CloneEntries(seed.Entries),
+		Entries: runtimecontext.CloneEntries(seed.Entries), ResetCacheIdentity: seed.ResetCacheIdentity,
 	}
 	for index := range result.SourcePath {
 		result.SourcePath[index] = strings.TrimSpace(result.SourcePath[index])

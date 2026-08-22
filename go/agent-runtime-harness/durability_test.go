@@ -77,7 +77,7 @@ func requireStoredContextCheckpoint(t *testing.T, store *MemoryStore, checkpoint
 
 func assertRestoredContext(t *testing.T, runCtx context.Context, checkpoint runtimecontext.Checkpoint) {
 	t.Helper()
-	restored, ok := runCtx.Value(contextCheckpointKey{}).(runtimecontext.Checkpoint)
+	restored, ok := CurrentContextCheckpoint(runCtx)
 	if !ok || restored.ID != checkpoint.ID || restored.ContentHash != checkpoint.ContentHash {
 		t.Fatalf("restored=%#v ok=%v", restored, ok)
 	}

@@ -177,6 +177,7 @@ type Definition struct {
 type Call struct {
 	ID        string          `json:"id"`
 	ToolKey   string          `json:"toolKey"`
+	Name      string          `json:"name,omitempty"`
 	Arguments json.RawMessage `json:"arguments"`
 }
 

@@ -228,8 +228,9 @@ func (runner *Runner) buildContext(
 	checkpoint, err := runner.context.Open(ctx, runtimecontext.OpenRequest{
 		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: staticFingerprint,
 		SourcePath: append([]string(nil), normalized.SourcePath...), Entries: runtimecontext.CloneEntries(normalized.Entries),
-		Instructions: strings.TrimSpace(strings.Join([]string{config.Instructions, normalized.Instructions}, "\n\n")),
-		Previous:     previous,
+		Instructions:       strings.TrimSpace(strings.Join([]string{config.Instructions, normalized.Instructions}, "\n\n")),
+		ResetCacheIdentity: normalized.ResetCacheIdentity,
+		Previous:           previous,
 	})
 	if err != nil {
 		return runtimecontext.Checkpoint{}, err

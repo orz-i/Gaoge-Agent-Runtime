@@ -1,10 +1,14 @@
 package harness
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
+	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
 )
 
 const parentGoal = "parent goal"
@@ -66,6 +70,91 @@ func TestMergeContextRuntimeMessagesStillRejectsRuntimeWithoutUserGoal(t *testin
 	)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected invalid request, got %v", err)
+	}
+}
+
+func TestMergeContextRuntimeMessagesAfterRolloverDoesNotDuplicateToolTranscript(t *testing.T) {
+	t.Parallel()
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	call := tools.Call{ID: "call-1", ToolKey: "lookup", Arguments: json.RawMessage(`{"q":"x"}`)}
+	first, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "session-tool-overlap", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
+		SourcePath: []string{"m1"}, Instructions: "frozen instructions",
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-m1", SourceID: "m1", TurnID: "turn-1", Message: model.Message{Role: model.RoleUser, Content: parentGoal},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullToolResult := strings.Repeat(`{"result":"large"}`, 64)
+	modelVisible := append(runtimecontext.Materialize(first.Window),
+		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{call}},
+		model.Message{Role: model.RoleTool, ToolCallID: call.ID, Content: fullToolResult},
+	)
+	compacted, err := manager.CompactToolResults(first.ScopeID, first.Generation, modelVisible, 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := manager.Capture(t.Context(), runtimecontext.CaptureRequest{
+		Previous: first, StaticFingerprint: first.StaticFingerprint, RunID: "run-tool",
+		Messages: compacted.Messages, Artifacts: compacted.Artifacts,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextMessages := runtimecontext.Materialize(checkpoint.Window)
+	runtimeMessages := []model.Message{
+		{Role: model.RoleUser, Content: parentGoal},
+		{Role: model.RoleAssistant, ToolCalls: []tools.Call{call}},
+		{Role: model.RoleTool, ToolCallID: call.ID, Content: fullToolResult},
+		{Role: model.RoleAssistant, Content: "continue after Tool"},
+	}
+
+	merged, err := mergeContextRuntimeMessagesForCheckpoint(checkpoint, contextMessages, runtimeMessages)
+	if err != nil {
+		t.Fatalf("merge rollover Tool transcript: %v", err)
+	}
+	want := append(model.CloneMessages(contextMessages), model.Message{Role: model.RoleAssistant, Content: "continue after Tool"})
+	if len(merged) != len(want) {
+		t.Fatalf("rollover merge duplicated transcript: got=%#v want=%#v", merged, want)
+	}
+	for index := range want {
+		if !sameContextModelMessage(merged[index], want[index]) {
+			t.Fatalf("message[%d] = %#v want %#v", index, merged[index], want[index])
+		}
+	}
+}
+
+func TestReplaceContextCheckpointUsesExecutionScopedCAS(t *testing.T) {
+	t.Parallel()
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	first, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "session-cas", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
+		SourcePath: []string{"m1"},
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-m1", SourceID: "m1", TurnID: "turn-1", Message: model.Message{Role: model.RoleUser, Content: parentGoal},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := manager.Rollover(t.Context(), runtimecontext.RolloverRequest{
+		Previous: first, Window: first.Window, Reason: "test_rollover",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withContextCheckpoint(t.Context(), first)
+	if err = ReplaceContextCheckpoint(ctx, "stale-checkpoint", next); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale checkpoint CAS must fail, got %v", err)
+	}
+	if err = ReplaceContextCheckpoint(ctx, first.ID, next); err != nil {
+		t.Fatalf("replace checkpoint: %v", err)
+	}
+	current, ok := CurrentContextCheckpoint(ctx)
+	if !ok || current.ID != next.ID || current.Generation != next.Generation {
+		t.Fatalf("active checkpoint was not advanced: %#v ok=%v", current, ok)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
@@ -49,6 +50,187 @@ type Entry struct {
 	SourceID string        `json:"sourceID,omitempty"`
 	Required bool          `json:"required,omitempty"`
 	Message  model.Message `json:"message"`
+}
+
+// CompactToolResults compacts only Tool output messages that exceed the configured byte limit.
+// The replacement is deterministic, so re-evaluating the same transcript is idempotent.
+func (manager *Manager) CompactToolResults(
+	scopeID string,
+	generation int,
+	messages []model.Message,
+	maxBytes int,
+) (ToolCompactionResult, error) {
+	scopeID = strings.TrimSpace(scopeID)
+	if scopeID == "" || generation <= 0 || maxBytes < 256 {
+		return ToolCompactionResult{}, ErrInvalidInput
+	}
+	result := ToolCompactionResult{Messages: model.CloneMessages(messages)}
+	for index := range result.Messages {
+		message := &result.Messages[index]
+		if message.Role != model.RoleTool || len([]byte(message.Content)) <= maxBytes ||
+			isCompactedToolResultReference(message.Content) {
+			continue
+		}
+		artifact, err := NewArtifact(
+			ArtifactToolResult,
+			scopeID,
+			generation,
+			strings.TrimSpace(message.ToolCallID),
+			message.Content,
+			nil,
+		)
+		if err != nil {
+			return ToolCompactionResult{}, err
+		}
+		message.Content = compactedToolResultReference(artifact, maxBytes)
+		result.Artifacts = append(result.Artifacts, artifact)
+	}
+	return result, nil
+}
+
+func isCompactedToolResultReference(content string) bool {
+	return strings.HasPrefix(strings.TrimSpace(content), "[tool_result_compacted ")
+}
+
+func splitWindowInstructions(instructions string, messages []model.Message) (string, []model.Message) {
+	instructions = strings.TrimSpace(instructions)
+	if instructions != "" && len(messages) > 0 && messages[0].Role == model.RoleSystem &&
+		strings.TrimSpace(messages[0].Content) == instructions {
+		return instructions, model.CloneMessages(messages[1:])
+	}
+	return instructions, model.CloneMessages(messages)
+}
+
+func portableCompactionSplit(messages []model.Message, preserveRecentTurns int) int {
+	if len(messages) < 2 {
+		return 0
+	}
+	if preserveRecentTurns <= 0 {
+		preserveRecentTurns = 1
+	}
+	userTurns := 0
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role != model.RoleUser {
+			continue
+		}
+		userTurns++
+		if userTurns >= preserveRecentTurns {
+			return index
+		}
+	}
+	// Fewer than PreserveRecentTurns complete user turns means there is no safe old-turn boundary.
+	// Oversized current-turn Tool output is handled separately by CompactToolResults; an oversized
+	// user input therefore fails the hard budget instead of silently discarding protected history.
+	return 0
+}
+
+func portableCheckpointExtract(messages []model.Message, artifact Artifact, maxTokens int) string {
+	if len(messages) == 0 || maxTokens <= 0 {
+		return ""
+	}
+	header := fmt.Sprintf(
+		"<context_checkpoint artifact_id=%s sha256=%s removed_messages=%d>\n"+
+			"Earlier transcript was rolled over. The durable artifact is the exact source of truth. Extracted context follows:\n",
+		artifact.ID,
+		artifact.ContentHash,
+		len(messages),
+	)
+	footer := "\n</context_checkpoint>"
+	remainingTokens := maxTokens - int(estimatedTokens([]byte(header+footer)))
+	if remainingTokens < 16 {
+		return truncateSummary(header+footer, maxTokens)
+	}
+
+	// Allocate extractive space across the removed transcript while prioritizing user and assistant
+	// messages. Tool payloads are represented by bounded head/tail snippets and their call identity.
+	selected := make([]string, 0, len(messages))
+	perMessage := remainingTokens / maxInt(len(messages), 1)
+	if perMessage < 12 {
+		perMessage = 12
+	}
+	for _, message := range messages {
+		entry := portableMessageExtract(message)
+		entry = truncateSummary(entry, perMessage)
+		candidate := strings.Join(append(selected, entry), "\n")
+		if estimatedTokens([]byte(candidate)) > int64(remainingTokens) {
+			continue
+		}
+		selected = append(selected, entry)
+	}
+	return truncateSummary(header+strings.Join(selected, "\n")+footer, maxTokens)
+}
+
+func portableMessageExtract(message model.Message) string {
+	role := strings.TrimSpace(string(message.Role))
+	content := strings.TrimSpace(message.Content)
+	if message.Role == model.RoleAssistant && len(message.ToolCalls) > 0 {
+		calls := make([]string, 0, len(message.ToolCalls))
+		for _, call := range message.ToolCalls {
+			calls = append(calls, strings.TrimSpace(call.ToolKey)+"#"+strings.TrimSpace(call.ID))
+		}
+		return role + " tool_calls=" + strings.Join(calls, ",") + " " + content
+	}
+	if message.Role == model.RoleTool {
+		return role + " call_id=" + strings.TrimSpace(message.ToolCallID) + " " + content
+	}
+	return role + ": " + content
+}
+
+func truncateSummary(value string, maxTokens int) string {
+	value = strings.TrimSpace(value)
+	if maxTokens <= 0 || estimatedTokens([]byte(value)) <= int64(maxTokens) {
+		return value
+	}
+	maxBytes := maxTokens * 4
+	if maxBytes <= 1 {
+		return "…"
+	}
+	return validUTF8Prefix(value, maxBytes-1) + "…"
+}
+
+func compactedToolResultReference(artifact Artifact, maxBytes int) string {
+	headTail := maxBytes / 4
+	if headTail < 128 {
+		headTail = 128
+	}
+	head := validUTF8Prefix(artifact.Content, headTail)
+	tail := validUTF8Suffix(artifact.Content, headTail)
+	return fmt.Sprintf(
+		"[tool_result_compacted artifact_id=%s sha256=%s bytes=%d]\n<head>\n%s\n</head>\n<tail>\n%s\n</tail>",
+		artifact.ID,
+		artifact.ContentHash,
+		len([]byte(artifact.Content)),
+		head,
+		tail,
+	)
+}
+
+func validUTF8Prefix(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	end := maxBytes
+	for end > 0 && !utf8.ValidString(value[:end]) {
+		end--
+	}
+	return value[:end]
+}
+
+func validUTF8Suffix(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
+	if len(value) <= maxBytes {
+		return value
+	}
+	start := len(value) - maxBytes
+	for start < len(value) && !utf8.ValidString(value[start:]) {
+		start++
+	}
+	return value[start:]
 }
 
 // Window is the exact active model history for one checkpoint generation.
@@ -117,6 +299,7 @@ type Trace struct {
 type Checkpoint struct {
 	ID                     string   `json:"id"`
 	ScopeID                string   `json:"scopeID"`
+	CacheIdentity          string   `json:"cacheIdentity"`
 	Generation             int      `json:"generation"`
 	Revision               int      `json:"revision"`
 	ParentCheckpointID     string   `json:"parentCheckpointID,omitempty"`
@@ -134,12 +317,13 @@ type Checkpoint struct {
 // OpenRequest advances a durable host transcript onto the active Context Window.
 // SourcePath is the complete current branch ancestry identity path; it has no message-count cap.
 type OpenRequest struct {
-	ScopeID           string
-	StaticFingerprint string
-	SourcePath        []string
-	Entries           []Entry
-	Instructions      string
-	Previous          *Checkpoint
+	ScopeID            string
+	StaticFingerprint  string
+	SourcePath         []string
+	Entries            []Entry
+	Instructions       string
+	ResetCacheIdentity bool
+	Previous           *Checkpoint
 }
 
 // CaptureRequest seals one actual model request after verifying that it extends the current
@@ -149,6 +333,7 @@ type CaptureRequest struct {
 	StaticFingerprint string
 	RunID             string
 	Messages          []model.Message
+	Artifacts         []Artifact
 	Assessment        *Assessment
 }
 
@@ -160,6 +345,30 @@ type RolloverRequest struct {
 	Reason                 string
 	ModelWindowFingerprint string
 	Assessment             *Assessment
+}
+
+// PortableCompactionRequest creates a provider-neutral rollover candidate from the exact
+// model-visible transcript. It preserves complete recent user turns and seals the removed
+// transcript as a durable Artifact before replacing it with a bounded extractive checkpoint.
+type PortableCompactionRequest struct {
+	Previous Checkpoint
+	RunID    string
+	Messages []model.Message
+	Policy   Policy
+}
+
+// PortableCompaction is one compacted active window plus the exact removed transcript Artifact.
+type PortableCompaction struct {
+	Window          Window
+	Artifact        Artifact
+	RemovedMessages int
+}
+
+// ToolCompactionResult is the exact transcript after oversized Tool outputs were sealed as
+// durable Artifacts and replaced inline with bounded head/tail references.
+type ToolCompactionResult struct {
+	Messages  []model.Message
+	Artifacts []Artifact
 }
 
 // TokenCounter counts one complete canonical model request.
@@ -221,7 +430,7 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 		return Checkpoint{}, ErrInvalidInput
 	}
 	delta, reusable := sourceDelta(previous, normalized)
-	if !reusable {
+	if normalized.ResetCacheIdentity || !reusable {
 		return newCheckpoint(normalized, previous.Generation+1, 1, "", normalized.Entries, "lineage_reset", 0), nil
 	}
 	if len(delta) == 0 && normalized.Instructions == previous.Window.Instructions &&
@@ -230,10 +439,13 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 		return previous, nil
 	}
 	entries := append(CloneEntries(previous.Window.Entries), CloneEntries(delta)...)
-	return newCheckpoint(
+	next := newCheckpoint(
 		normalized, previous.Generation, previous.Revision+1, previous.ID,
 		entries, "append_source_delta", len(delta),
-	), nil
+	)
+	next.CacheIdentity = previous.CacheIdentity
+	next.ID = checkpointID(next)
+	return next, nil
 }
 
 // Capture verifies the Codex-style stable-prefix invariant for one real model sampling request.
@@ -249,10 +461,24 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 	if !messagesPrefix(current, incoming) {
 		return Checkpoint{}, ErrLineageConflict
 	}
+	artifactIDs, err := captureArtifactIDs(previous, request.Artifacts)
+	if err != nil {
+		return Checkpoint{}, err
+	}
 	if len(incoming) == len(current) {
-		result := previous
-		result.Trace.LastAssessment = cloneAssessment(request.Assessment)
-		return result, nil
+		if slicesEqualStrings(artifactIDs, previous.ArtifactIDs) {
+			return previous, nil
+		}
+		next := previous
+		next.Revision++
+		next.ParentCheckpointID = previous.ID
+		next.ArtifactIDs = artifactIDs
+		next.Trace = previous.Trace
+		next.Trace.Reason = "append_runtime_artifacts"
+		next.Trace.ArtifactCount = len(artifactIDs)
+		next.Trace.LastAssessment = cloneAssessment(request.Assessment)
+		next.ID = checkpointID(next)
+		return next, nil
 	}
 	entries := CloneEntries(previous.Window.Entries)
 	for index, message := range incoming[len(current):] {
@@ -262,14 +488,58 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 	next.Revision++
 	next.ParentCheckpointID = previous.ID
 	next.Window.Entries = entries
+	next.ArtifactIDs = artifactIDs
 	next.ContentHash = windowHash(next.Window)
 	next.Trace = Trace{
 		Reason: "append_runtime_tail", SourceEntryCount: previous.Trace.SourceEntryCount,
 		ActiveEntryCount: len(entries), AppendedEntryCount: len(incoming) - len(current),
-		ArtifactCount: len(next.ArtifactIDs), LastAssessment: cloneAssessment(request.Assessment),
+		ArtifactCount: len(artifactIDs), LastAssessment: cloneAssessment(request.Assessment),
 	}
 	next.ID = checkpointID(next)
 	return next, nil
+}
+
+func captureArtifactIDs(previous Checkpoint, artifacts []Artifact) ([]string, error) {
+	ids := append([]string(nil), previous.ArtifactIDs...)
+	for _, artifact := range CloneArtifacts(artifacts) {
+		if err := normalizeArtifact(&artifact, previous.ScopeID, previous.Generation); err != nil {
+			return nil, err
+		}
+		if artifact.ScopeID != previous.ScopeID || artifact.Generation != previous.Generation {
+			return nil, ErrLineageConflict
+		}
+		ids = append(ids, artifact.ID)
+	}
+	return sortedUniqueStrings(ids), nil
+}
+
+func sortedUniqueStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	result := append([]string(nil), values...)
+	sort.Strings(result)
+	write := 0
+	for _, value := range result {
+		if write > 0 && result[write-1] == value {
+			continue
+		}
+		result[write] = value
+		write++
+	}
+	return result[:write]
+}
+
+func slicesEqualStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 // Rollover creates the only legal stable-prefix rewrite boundary.
@@ -286,13 +556,13 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 			return Checkpoint{}, err
 		}
 	}
-	artifactIDs := make([]string, 0, len(artifacts))
+	artifactIDs := append([]string(nil), previous.ArtifactIDs...)
 	for _, artifact := range artifacts {
 		artifactIDs = append(artifactIDs, artifact.ID)
 	}
-	sort.Strings(artifactIDs)
+	artifactIDs = sortedUniqueStrings(artifactIDs)
 	next := Checkpoint{
-		ScopeID: previous.ScopeID, Generation: previous.Generation + 1, Revision: 1,
+		ScopeID: previous.ScopeID, CacheIdentity: previous.CacheIdentity, Generation: previous.Generation + 1, Revision: 1,
 		ParentCheckpointID: previous.ID, LineageHash: previous.LineageHash,
 		CoveredThroughSourceID: previous.CoveredThroughSourceID, CoveredPathHash: previous.CoveredPathHash,
 		StaticFingerprint: previous.StaticFingerprint, ModelWindowFingerprint: strings.TrimSpace(request.ModelWindowFingerprint),
@@ -308,10 +578,53 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 	return next, nil
 }
 
+// BindModelWindow records the routed model-window fingerprint without rewriting the active prompt.
+// The first binding advances the checkpoint revision; a changed non-empty fingerprint creates an
+// explicit new generation boundary because provider/model cache identity may no longer be valid.
+func (manager *Manager) BindModelWindow(
+	ctx stdcontext.Context,
+	previous Checkpoint,
+	fingerprint string,
+) (Checkpoint, error) {
+	previous = CloneCheckpoint(previous)
+	fingerprint = strings.TrimSpace(fingerprint)
+	if !ValidCheckpoint(previous) || fingerprint == "" {
+		return Checkpoint{}, ErrInvalidInput
+	}
+	if previous.ModelWindowFingerprint == fingerprint {
+		return previous, nil
+	}
+	if previous.ModelWindowFingerprint != "" {
+		return manager.Rollover(ctx, RolloverRequest{
+			Previous: previous, Window: previous.Window, Reason: "model_window_changed",
+			ModelWindowFingerprint: fingerprint,
+		})
+	}
+	next := previous
+	next.Revision++
+	next.ParentCheckpointID = previous.ID
+	next.ModelWindowFingerprint = fingerprint
+	next.Trace = previous.Trace
+	next.Trace.Reason = "model_window_bound"
+	next.ID = checkpointID(next)
+	return next, nil
+}
+
 // AssessModelRequest accounts the exact request at a model sampling boundary.
 func (manager *Manager) AssessModelRequest(
 	ctx stdcontext.Context,
 	request model.Request,
+	modelWindow ModelWindow,
+	policy Policy,
+) (Assessment, error) {
+	return manager.AssessRequest(ctx, model.CloneRequest(request), modelWindow, policy)
+}
+
+// AssessRequest accounts the canonical provider-neutral request that will actually be sent at a
+// sampling boundary. Hosts should call this after model option/tool/hosted-tool materialization.
+func (manager *Manager) AssessRequest(
+	ctx stdcontext.Context,
+	request any,
 	modelWindow ModelWindow,
 	policy Policy,
 ) (Assessment, error) {
@@ -320,7 +633,7 @@ func (manager *Manager) AssessModelRequest(
 	if err != nil {
 		return Assessment{}, err
 	}
-	serialized, err := canonicalJSON(model.CloneRequest(request))
+	serialized, err := canonicalJSON(request)
 	if err != nil {
 		return Assessment{}, err
 	}
@@ -341,6 +654,67 @@ func (manager *Manager) AssessModelRequest(
 	assessment.AdjustedTokenEstimate = applySafetyMargin(assessment.RawTokenEstimate, policy.EstimateSafetyPercent)
 	assessment.TokenCountSource = CountEstimated
 	return assessment, nil
+}
+
+// CompactPortable creates one explicit rollover candidate. Unlike the removed V1 deterministic
+// summary path, this method never claims that a truncated extract semantically covers the removed
+// transcript: the exact removed messages are sealed in the returned Artifact and the inline
+// checkpoint identifies that Artifact and hash explicitly.
+func (manager *Manager) CompactPortable(request PortableCompactionRequest) (PortableCompaction, error) {
+	previous := CloneCheckpoint(request.Previous)
+	policy := NormalizePolicy(request.Policy)
+	messages := model.CloneMessages(request.Messages)
+	runID := strings.TrimSpace(request.RunID)
+	if !ValidCheckpoint(previous) || runID == "" || len(messages) == 0 {
+		return PortableCompaction{}, ErrInvalidInput
+	}
+
+	instructions, body := splitWindowInstructions(previous.Window.Instructions, messages)
+	split := portableCompactionSplit(body, policy.PreserveRecentTurns)
+	if split <= 0 || split >= len(body) {
+		return PortableCompaction{}, ErrBudgetExceeded
+	}
+	removed := model.CloneMessages(body[:split])
+	retained := model.CloneMessages(body[split:])
+	removedJSON, err := canonicalJSON(removed)
+	if err != nil {
+		return PortableCompaction{}, err
+	}
+	artifact, err := NewArtifact(
+		ArtifactCompaction,
+		previous.ScopeID,
+		previous.Generation+1,
+		previous.CoveredThroughSourceID,
+		"",
+		json.RawMessage(removedJSON),
+	)
+	if err != nil {
+		return PortableCompaction{}, err
+	}
+	summary := portableCheckpointExtract(removed, artifact, policy.MaxCompactionTokens)
+	if strings.TrimSpace(summary) == "" {
+		return PortableCompaction{}, ErrBudgetExceeded
+	}
+	entries := make([]Entry, 0, len(retained)+1)
+	entries = append(entries, Entry{
+		ID:     stableID("ctxe", previous.ScopeID, strconv.Itoa(previous.Generation+1), artifact.ID),
+		TurnID: "context_rollover", Required: true,
+		Message: model.Message{Role: model.RoleSystem, Content: summary},
+	})
+	for index, message := range retained {
+		encoded, _ := canonicalJSON(message)
+		entries = append(entries, Entry{
+			ID: stableID(
+				"ctxe", previous.ScopeID, strconv.Itoa(previous.Generation+1), runID,
+				strconv.Itoa(index), hashBytes(encoded),
+			),
+			TurnID: runID, Message: cloneMessage(message),
+		})
+	}
+	return PortableCompaction{
+		Window:   Window{Instructions: instructions, Entries: entries},
+		Artifact: artifact, RemovedMessages: len(removed),
+	}, nil
 }
 
 func EffectiveInputLimit(modelWindow ModelWindow, serviceCeiling int64) (int64, error) {
@@ -434,7 +808,8 @@ func ValidArtifact(value Artifact) bool {
 }
 
 func ValidCheckpoint(value Checkpoint) bool {
-	if strings.TrimSpace(value.ID) == "" || strings.TrimSpace(value.ScopeID) == "" || value.Generation <= 0 || value.Revision <= 0 ||
+	if strings.TrimSpace(value.ID) == "" || strings.TrimSpace(value.ScopeID) == "" || strings.TrimSpace(value.CacheIdentity) == "" ||
+		value.Generation <= 0 || value.Revision <= 0 ||
 		strings.TrimSpace(value.LineageHash) == "" || strings.TrimSpace(value.CoveredThroughSourceID) == "" ||
 		strings.TrimSpace(value.CoveredPathHash) == "" || strings.TrimSpace(value.StaticFingerprint) == "" ||
 		strings.TrimSpace(value.ContentHash) == "" || len(value.Window.Entries) == 0 {
@@ -533,7 +908,9 @@ func newCheckpoint(request OpenRequest, generation int, revision int, parentID s
 	covered := request.SourcePath[len(request.SourcePath)-1]
 	window := normalizeWindow(Window{Instructions: request.Instructions, Entries: entries})
 	checkpoint := Checkpoint{
-		ScopeID: request.ScopeID, Generation: generation, Revision: revision, ParentCheckpointID: strings.TrimSpace(parentID),
+		ScopeID:       request.ScopeID,
+		CacheIdentity: stableID("ctxk", request.ScopeID, request.StaticFingerprint, LineageHash(request.SourcePath...)),
+		Generation:    generation, Revision: revision, ParentCheckpointID: strings.TrimSpace(parentID),
 		LineageHash: LineageHash(request.SourcePath...), CoveredThroughSourceID: covered,
 		CoveredPathHash: LineageHash(request.SourcePath...), StaticFingerprint: request.StaticFingerprint,
 		Window: window,
@@ -547,7 +924,7 @@ func newCheckpoint(request OpenRequest, generation int, revision int, parentID s
 func checkpointID(value Checkpoint) string {
 	return stableID(
 		"ctxc", value.ScopeID, strconv.Itoa(value.Generation), strconv.Itoa(value.Revision),
-		value.ParentCheckpointID, value.LineageHash, value.StaticFingerprint,
+		value.ParentCheckpointID, value.CacheIdentity, value.LineageHash, value.StaticFingerprint,
 		value.ModelWindowFingerprint, value.ContentHash, strings.Join(value.ArtifactIDs, ","),
 	)
 }
