@@ -64,6 +64,30 @@ func TestManagerAppendsSourceDeltaWithoutRewritingStablePrefix(t *testing.T) {
 	}
 }
 
+func TestCheckpointIdentitySealsAncestryCoverageMetadata(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	checkpoint, err := manager.Open(t.Context(), openRequest("m1", "m2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !runtimectx.ValidCheckpoint(checkpoint) {
+		t.Fatalf("manager produced invalid checkpoint: %#v", checkpoint)
+	}
+
+	tamperedSource := runtimectx.CloneCheckpoint(checkpoint)
+	tamperedSource.CoveredThroughSourceID = "m1"
+	if runtimectx.ValidCheckpoint(tamperedSource) {
+		t.Fatalf("checkpoint accepted tampered covered-through source: %#v", tamperedSource)
+	}
+
+	tamperedPath := runtimectx.CloneCheckpoint(checkpoint)
+	tamperedPath.CoveredPathHash = runtimectx.LineageHash("m1")
+	if runtimectx.ValidCheckpoint(tamperedPath) {
+		t.Fatalf("checkpoint accepted tampered covered path hash: %#v", tamperedPath)
+	}
+}
+
 func TestCaptureCarriesToolArtifactLineageWithStablePrefix(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})

@@ -1060,7 +1060,8 @@ func newCheckpoint(request OpenRequest, generation int, revision int, parentID s
 func checkpointID(value Checkpoint) string {
 	return stableID(
 		"ctxc", value.ScopeID, strconv.Itoa(value.Generation), strconv.Itoa(value.Revision),
-		value.ParentCheckpointID, value.CacheIdentity, value.LineageHash, value.StaticFingerprint,
+		value.ParentCheckpointID, value.CacheIdentity, value.LineageHash,
+		value.CoveredThroughSourceID, value.CoveredPathHash, value.StaticFingerprint,
 		value.ModelWindowFingerprint, value.ContentHash, strings.Join(value.ArtifactIDs, ","),
 	)
 }
