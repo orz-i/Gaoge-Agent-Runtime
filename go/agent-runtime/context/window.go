@@ -131,9 +131,13 @@ func portableCheckpointExtract(messages []model.Message, artifact Artifact, maxT
 		len(messages),
 	)
 	footer := "\n</context_checkpoint>"
-	remainingTokens := maxTokens - int(estimatedTokens([]byte(header+footer)))
+	markerTokens := int(estimatedTokens([]byte(header + footer)))
+	if maxTokens < markerTokens {
+		return ""
+	}
+	remainingTokens := maxTokens - markerTokens
 	if remainingTokens < 16 {
-		return truncateSummary(header+footer, maxTokens)
+		return header + footer
 	}
 
 	// Allocate extractive space across the removed transcript while prioritizing user and assistant

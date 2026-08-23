@@ -225,6 +225,21 @@ func TestCompactPortableRefusesToDropProtectedHistory(t *testing.T) {
 	}
 }
 
+func TestCompactPortableRejectsBudgetTooSmallForArtifactMarker(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	checkpoint, err := manager.Open(t.Context(), openRequest("u1", "a1", "u2", "a2", "u3"))
+	requireNoError(t, err)
+
+	_, err = manager.CompactPortable(runtimectx.PortableCompactionRequest{
+		Previous: checkpoint, RunID: "run-marker-budget", Messages: runtimectx.Materialize(checkpoint.Window),
+		Policy: runtimectx.Policy{PreserveRecentTurns: 2, MaxCompactionTokens: 1},
+	})
+	if !errors.Is(err, runtimectx.ErrBudgetExceeded) {
+		t.Fatalf("undersized artifact marker budget must fail closed, got %v", err)
+	}
+}
+
 func TestBindModelWindowCreatesRevisionThenGenerationOnChange(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
