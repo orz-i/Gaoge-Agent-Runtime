@@ -794,59 +794,93 @@ func (store *Store) FindContextCheckpointForPath(
 	ctx context.Context,
 	query harness.ContextCheckpointPathQuery,
 ) (runtimecontext.Checkpoint, error) {
-	query, records, err := store.loadContextCheckpointPathCandidates(ctx, query)
+	query, pathIndex, records, err := store.loadContextCheckpointPathCandidates(ctx, query)
 	if err != nil {
 		return runtimecontext.Checkpoint{}, err
 	}
 	bestIndex := -1
-	best := runtimecontext.Checkpoint{}
+	best := contextCheckpointRecord{}
 	for _, record := range records {
-		candidate, err := contextCheckpointFromRecord(record)
-		if err != nil {
-			return runtimecontext.Checkpoint{}, err
-		}
-		index, ok := reusablePostgresContextCheckpointCandidate(query, candidate, best, bestIndex)
+		index, ok := reusablePostgresContextCheckpointCandidate(pathIndex, record, best, bestIndex)
 		if !ok {
 			continue
 		}
 		bestIndex = index
-		best = candidate
+		best = record
 	}
 	if bestIndex < 0 {
 		return runtimecontext.Checkpoint{}, harness.ErrNotFound
 	}
-	return runtimecontext.CloneCheckpoint(best), nil
+	candidate, err := store.GetContextCheckpoint(ctx, best.ID)
+	if err != nil {
+		return runtimecontext.Checkpoint{}, err
+	}
+	if runtimecontext.CheckpointSourceIndex(candidate, query.SourcePath) != bestIndex {
+		return runtimecontext.Checkpoint{}, harness.ErrConflict
+	}
+	return runtimecontext.CloneCheckpoint(candidate), nil
 }
 
 func (store *Store) loadContextCheckpointPathCandidates(
 	ctx context.Context,
 	query harness.ContextCheckpointPathQuery,
-) (harness.ContextCheckpointPathQuery, []contextCheckpointRecord, error) {
+) (harness.ContextCheckpointPathQuery, contextCheckpointPathIndex, []contextCheckpointRecord, error) {
 	query.ScopeID = strings.TrimSpace(query.ScopeID)
 	query.StaticFingerprint = strings.TrimSpace(query.StaticFingerprint)
+	query.SourcePath = append([]string(nil), query.SourcePath...)
 	if store == nil || query.ScopeID == "" || query.StaticFingerprint == "" || len(query.SourcePath) == 0 {
-		return harness.ContextCheckpointPathQuery{}, nil, harness.ErrInvalidRequest
+		return harness.ContextCheckpointPathQuery{}, contextCheckpointPathIndex{}, nil, harness.ErrInvalidRequest
+	}
+	pathIndex, ok := newContextCheckpointPathIndex(query.SourcePath)
+	if !ok {
+		return harness.ContextCheckpointPathQuery{}, contextCheckpointPathIndex{}, nil, harness.ErrInvalidRequest
 	}
 	var records []contextCheckpointRecord
 	if err := store.db.WithContext(ctx).
-		Where(
-			"scope_id = ? AND static_fingerprint = ? AND source_aligned = ? AND covered_through_source_id IN ?",
-			query.ScopeID, query.StaticFingerprint, true, query.SourcePath,
+		Select(
+			"id", "scope_id", "generation", "revision", "static_fingerprint",
+			"covered_through_source_id", "covered_path_hash", "source_aligned",
 		).
+		Where("scope_id = ? AND static_fingerprint = ? AND source_aligned = ?", query.ScopeID, query.StaticFingerprint, true).
 		Find(&records).Error; err != nil {
-		return harness.ContextCheckpointPathQuery{}, nil, mapError(err)
+		return harness.ContextCheckpointPathQuery{}, contextCheckpointPathIndex{}, nil, mapError(err)
 	}
-	return query, records, nil
+	return query, pathIndex, records, nil
+}
+
+type contextCheckpointPathIndex struct {
+	positions map[string]int
+	hashes    []string
+}
+
+func newContextCheckpointPathIndex(sourcePath []string) (contextCheckpointPathIndex, bool) {
+	positions := make(map[string]int, len(sourcePath))
+	hashes := make([]string, len(sourcePath))
+	current := ""
+	for index, rawSourceID := range sourcePath {
+		sourceID := strings.TrimSpace(rawSourceID)
+		if sourceID == "" {
+			return contextCheckpointPathIndex{}, false
+		}
+		if _, duplicate := positions[sourceID]; duplicate {
+			return contextCheckpointPathIndex{}, false
+		}
+		current = runtimecontext.ExtendLineageHash(current, sourceID)
+		positions[sourceID] = index
+		hashes[index] = current
+		sourcePath[index] = sourceID
+	}
+	return contextCheckpointPathIndex{positions: positions, hashes: hashes}, true
 }
 
 func reusablePostgresContextCheckpointCandidate(
-	query harness.ContextCheckpointPathQuery,
-	candidate runtimecontext.Checkpoint,
-	best runtimecontext.Checkpoint,
+	pathIndex contextCheckpointPathIndex,
+	candidate contextCheckpointRecord,
+	best contextCheckpointRecord,
 	bestIndex int,
 ) (int, bool) {
-	index := runtimecontext.CheckpointSourceIndex(candidate, query.SourcePath)
-	if index < 0 || index < bestIndex {
+	index, ok := pathIndex.positions[strings.TrimSpace(candidate.CoveredThroughSourceID)]
+	if !ok || index < 0 || index >= len(pathIndex.hashes) || candidate.CoveredPathHash != pathIndex.hashes[index] || index < bestIndex {
 		return -1, false
 	}
 	if index == bestIndex && !newerPostgresContextCheckpoint(candidate, best) {
@@ -855,7 +889,7 @@ func reusablePostgresContextCheckpointCandidate(
 	return index, true
 }
 
-func newerPostgresContextCheckpoint(left, right runtimecontext.Checkpoint) bool {
+func newerPostgresContextCheckpoint(left, right contextCheckpointRecord) bool {
 	if right.ID == "" || left.Generation != right.Generation {
 		return right.ID == "" || left.Generation > right.Generation
 	}

@@ -256,6 +256,21 @@ func TestStoreFindContextCheckpointForPathChoosesNearestSourceAlignedAncestor(t 
 	}
 }
 
+func TestStoreFindContextCheckpointForPathDoesNotScaleSQLArgumentsWithAncestry(t *testing.T) {
+	store := newStore(t)
+	const ancestrySize = 40_000
+	path := make([]string, ancestrySize)
+	for index := range path {
+		path[index] = fmt.Sprintf("message-%05d", index)
+	}
+	_, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{
+		ScopeID: "scope-large-path-query", StaticFingerprint: runtimecontext.StaticFingerprint("large-path"), SourcePath: path,
+	})
+	if !errors.Is(err, harness.ErrNotFound) {
+		t.Fatalf("large ancestry lookup should execute without an ancestor-sized IN clause, got %v", err)
+	}
+}
+
 func TestStoreRetriesInvocationWithAtomicAttemptRotation(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 20, 4, 20, 0, 0, time.UTC)

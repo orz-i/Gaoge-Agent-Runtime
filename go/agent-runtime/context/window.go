@@ -254,10 +254,20 @@ type Policy struct {
 
 // ModelWindow is the routed model's provider-neutral context capability.
 type ModelWindow struct {
-	ContextTokens        int64 `json:"contextTokens"`
-	MaxContextTokens     int64 `json:"maxContextTokens,omitempty"`
-	EffectivePercent     int   `json:"effectivePercent,omitempty"`
-	ReservedOutputTokens int64 `json:"reservedOutputTokens,omitempty"`
+	ContextTokens        int64             `json:"contextTokens"`
+	MaxContextTokens     int64             `json:"maxContextTokens,omitempty"`
+	EffectivePercent     int               `json:"effectivePercent,omitempty"`
+	ReservedOutputTokens int64             `json:"reservedOutputTokens,omitempty"`
+	TokenCountContext    TokenCountContext `json:"-"`
+}
+
+// TokenCountContext identifies the provider/model tokenizer contract for one routed request.
+// It is deliberately excluded from the model-window fingerprint: route identity is tracked by
+// the host, while this metadata exists only to prevent an exact TokenCounter from guessing which
+// tokenizer or provider-native count endpoint should be used.
+type TokenCountContext struct {
+	Protocol string
+	Model    string
 }
 
 // Assessment is the budget result for one actual model sampling request.
@@ -373,9 +383,18 @@ type ToolCompactionResult struct {
 	Artifacts []Artifact
 }
 
-// TokenCounter counts one complete canonical model request.
+// TokenCountRequest carries both the canonical provider-visible request bytes and the routed
+// protocol/model identity. Implementations may report an exact count only when they understand
+// that concrete provider contract; otherwise they must return an error so the conservative hard
+// upper bound remains authoritative.
+type TokenCountRequest struct {
+	Context TokenCountContext
+	Payload []byte
+}
+
+// TokenCounter counts one complete routed model request with provider/model awareness.
 type TokenCounter interface {
-	Count(stdcontext.Context, []byte) (int64, error)
+	Count(stdcontext.Context, TokenCountRequest) (int64, error)
 }
 
 // Dependencies are optional Context Window capabilities.
@@ -698,8 +717,13 @@ func (manager *Manager) AssessRequest(
 		soft = 1
 	}
 	assessment := Assessment{HardInputTokens: hard, SoftInputTokens: soft, SerializedBytes: int64(len(serialized))}
-	if manager != nil && manager.counter != nil {
-		if count, countErr := manager.counter.Count(ctx, serialized); countErr == nil && count >= 0 {
+	countContext := normalizeTokenCountContext(modelWindow.TokenCountContext)
+	if manager != nil && manager.counter != nil && countContext.Protocol != "" && countContext.Model != "" {
+		countRequest := TokenCountRequest{
+			Context: countContext,
+			Payload: append([]byte(nil), serialized...),
+		}
+		if count, countErr := manager.counter.Count(ctx, countRequest); countErr == nil && count >= 0 {
 			assessment.RawTokenEstimate = count
 			assessment.AdjustedTokenEstimate = count
 			assessment.HardTokenEstimate = count
@@ -875,8 +899,15 @@ func StaticFingerprint(values ...string) string {
 }
 
 func ModelWindowFingerprint(value ModelWindow) string {
+	value.TokenCountContext = TokenCountContext{}
 	encoded, _ := canonicalJSON(value)
 	return hashBytes(encoded)
+}
+
+func normalizeTokenCountContext(value TokenCountContext) TokenCountContext {
+	value.Protocol = strings.TrimSpace(strings.ToLower(value.Protocol))
+	value.Model = strings.TrimSpace(value.Model)
+	return value
 }
 
 func NewArtifact(kind ArtifactKind, scopeID string, generation int, sourceID string, content string, contentJSON json.RawMessage) (Artifact, error) {

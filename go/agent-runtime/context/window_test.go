@@ -343,7 +343,8 @@ func TestRolloverCreatesNewGenerationWithDurableArtifactReference(t *testing.T) 
 
 func TestAssessModelRequestRequiresRealModelWindow(t *testing.T) {
 	t.Parallel()
-	manager := runtimectx.NewManager(runtimectx.Dependencies{Counter: exactCounter{tokens: 500}})
+	var counted runtimectx.TokenCountRequest
+	manager := runtimectx.NewManager(runtimectx.Dependencies{Counter: exactCounter{tokens: 500, seen: &counted}})
 	request := model.Request{RunID: "run", Model: "model", Messages: []model.Message{{Role: model.RoleUser, Content: "hello"}}}
 	_, err := manager.AssessModelRequest(t.Context(), request, runtimectx.ModelWindow{}, runtimectx.Policy{})
 	if !errors.Is(err, runtimectx.ErrModelWindowUnknown) {
@@ -351,6 +352,7 @@ func TestAssessModelRequestRequiresRealModelWindow(t *testing.T) {
 	}
 	assessment, err := manager.AssessModelRequest(t.Context(), request, runtimectx.ModelWindow{
 		ContextTokens: 1000, MaxContextTokens: 900, EffectivePercent: 90, ReservedOutputTokens: 100,
+		TokenCountContext: runtimectx.TokenCountContext{Protocol: "openai_responses", Model: "gpt-test"},
 	}, runtimectx.Policy{MaxInputTokens: 800})
 	if err != nil {
 		t.Fatal(err)
@@ -360,6 +362,41 @@ func TestAssessModelRequestRequiresRealModelWindow(t *testing.T) {
 		assessment.AdjustedTokenEstimate != 500 || assessment.HardTokenEstimate != 500 ||
 		assessment.TokenCountSource != runtimectx.CountExact {
 		t.Fatalf("unexpected assessment: %#v", assessment)
+	}
+	if counted.Context.Protocol != "openai_responses" || counted.Context.Model != "gpt-test" || len(counted.Payload) == 0 {
+		t.Fatalf("exact counter did not receive provider-aware request: %#v", counted)
+	}
+}
+
+func TestModelWindowFingerprintIgnoresTokenCounterRoutingMetadata(t *testing.T) {
+	t.Parallel()
+	base := runtimectx.ModelWindow{ContextTokens: 128000, EffectivePercent: 90, ReservedOutputTokens: 4096}
+	left := base
+	left.TokenCountContext = runtimectx.TokenCountContext{Protocol: "openai_responses", Model: "upstream-a"}
+	right := base
+	right.TokenCountContext = runtimectx.TokenCountContext{Protocol: "anthropic_messages", Model: "upstream-b"}
+	if runtimectx.ModelWindowFingerprint(left) != runtimectx.ModelWindowFingerprint(right) {
+		t.Fatal("token-counter routing metadata leaked into model-window fingerprint")
+	}
+}
+
+func TestAssessRequestDoesNotTrustExactCounterWithoutRouteIdentity(t *testing.T) {
+	t.Parallel()
+	var counted runtimectx.TokenCountRequest
+	manager := runtimectx.NewManager(runtimectx.Dependencies{Counter: exactCounter{tokens: 1, seen: &counted}})
+	assessment, err := manager.AssessRequest(
+		t.Context(),
+		struct {
+			Text string `json:"text"`
+		}{Text: "provider identity is required"},
+		runtimectx.ModelWindow{ContextTokens: 4096},
+		runtimectx.Policy{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assessment.TokenCountSource != runtimectx.CountEstimated || len(counted.Payload) != 0 {
+		t.Fatalf("counter without routed provider identity was trusted: assessment=%#v counted=%#v", assessment, counted)
 	}
 }
 
@@ -446,8 +483,14 @@ func messagePrefix(prefix, complete []model.Message) bool {
 	return true
 }
 
-type exactCounter struct{ tokens int64 }
+type exactCounter struct {
+	tokens int64
+	seen   *runtimectx.TokenCountRequest
+}
 
-func (counter exactCounter) Count(stdcontext.Context, []byte) (int64, error) {
+func (counter exactCounter) Count(_ stdcontext.Context, request runtimectx.TokenCountRequest) (int64, error) {
+	if counter.seen != nil {
+		*counter.seen = request
+	}
 	return counter.tokens, nil
 }
