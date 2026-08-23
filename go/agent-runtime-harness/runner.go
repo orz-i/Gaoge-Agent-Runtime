@@ -359,6 +359,13 @@ func (runner *Runner) contextOpenRequest(
 	}
 	if err == nil {
 		delta := sliceContextSeedAfter(seed, index)
+		if !delta.ResetCacheIdentity && active != nil && base.ID != active.ID {
+			diverged, divergenceErr := runner.contextBaseIsActiveAncestor(ctx, base, active)
+			if divergenceErr != nil {
+				return runtimecontext.OpenRequest{}, divergenceErr
+			}
+			delta.ResetCacheIdentity = diverged
+		}
 		return contextDeltaOpenRequest(scopeID, staticFingerprint, instructions, delta, base), nil
 	}
 	return runtimecontext.OpenRequest{
@@ -366,6 +373,47 @@ func (runner *Runner) contextOpenRequest(
 		SourcePath: append([]string(nil), seed.SourcePath...), Entries: runtimecontext.CloneEntries(seed.Entries),
 		Instructions: instructions, ResetCacheIdentity: seed.ResetCacheIdentity, Previous: active,
 	}, nil
+}
+
+// contextBaseIsActiveAncestor distinguishes a new branch from a return to an already-established
+// sibling branch. When the reusable base is an ancestor of the current active head, the requested
+// path is diverging backward from the active lineage and must establish a new CacheIdentity. A
+// sibling base already owns its branch identity and should keep it when that branch becomes active
+// again. Checkpoint ancestry is immutable, so this correctness walk has no semantic depth cap.
+func (runner *Runner) contextBaseIsActiveAncestor(
+	ctx context.Context,
+	base *runtimecontext.Checkpoint,
+	active *runtimecontext.Checkpoint,
+) (bool, error) {
+	if runner == nil || runner.store == nil || base == nil || active == nil ||
+		!validContextCheckpoint(*base) || !validContextCheckpoint(*active) || base.ScopeID != active.ScopeID {
+		return false, ErrInvalidRequest
+	}
+	wanted := strings.TrimSpace(base.ID)
+	current := runtimecontext.CloneCheckpoint(*active)
+	visited := make(map[string]struct{})
+	for {
+		currentID := strings.TrimSpace(current.ID)
+		if currentID == wanted {
+			return true, nil
+		}
+		if _, duplicate := visited[currentID]; duplicate {
+			return false, ErrConflict
+		}
+		visited[currentID] = struct{}{}
+		parentID := strings.TrimSpace(current.ParentCheckpointID)
+		if parentID == "" {
+			return false, nil
+		}
+		parent, err := runner.store.GetContextCheckpoint(ctx, parentID)
+		if err != nil {
+			return false, err
+		}
+		if !validContextCheckpoint(parent) || parent.ScopeID != base.ScopeID {
+			return false, ErrConflict
+		}
+		current = runtimecontext.CloneCheckpoint(parent)
+	}
 }
 
 func (runner *Runner) loadContextDeltaBase(

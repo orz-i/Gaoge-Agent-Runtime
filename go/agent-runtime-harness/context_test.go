@@ -181,6 +181,13 @@ func TestHarnessFullBranchFallbackReusesNearestSourceAlignedCheckpoint(t *testin
 		contextEntry("b1", "turn-branch-b", model.RoleUser, branchB.Goal, true),
 	)
 	branchBSnapshot := startContextTurn(t, fixture.runner, branchB)
+	branchBBoundary, err := fixture.runner.ResolveContextSourceBoundaryForPath(
+		t.Context(), fixture.common.HostThread, fixture.common.Config, "", []string{"m1", "b1"},
+	)
+	if err != nil {
+		t.Fatalf("resolve branch B boundary: %v", err)
+	}
+	checkpointB := requireStoredContextCheckpoint(t, fixture.store, branchBBoundary.CheckpointID)
 
 	branchA := fixture.common
 	branchA.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-branch-a"}
@@ -192,7 +199,24 @@ func TestHarnessFullBranchFallbackReusesNearestSourceAlignedCheckpoint(t *testin
 	branchASnapshot := startContextTurn(t, fixture.runner, branchA)
 	checkpointA := requireStoredContextCheckpoint(t, fixture.store, branchASnapshot.Turn.ContextCheckpointID)
 	assertBranchCheckpointReuse(t, rootSnapshot, branchBSnapshot, checkpointA)
+	if checkpointA.CacheIdentity == checkpointB.CacheIdentity {
+		t.Fatalf("new branch reused active-lineage cache identity: A=%q B=%q", checkpointA.CacheIdentity, checkpointB.CacheIdentity)
+	}
 	assertActiveContextHead(t, fixture.store, branchASnapshot.Turn.SessionID, checkpointA.ID)
+
+	branchB2 := fixture.common
+	branchB2.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-branch-b2"}
+	branchB2.Goal = "branch b continued"
+	branchB2.Context = contextSeed("",
+		contextEntry("m1", "turn-root", model.RoleUser, root.Goal, false),
+		contextEntry("b1", "turn-branch-b", model.RoleUser, branchB.Goal, false),
+		contextEntry("b2", "turn-branch-b2", model.RoleUser, branchB2.Goal, true),
+	)
+	branchB2Snapshot := startContextTurn(t, fixture.runner, branchB2)
+	checkpointB2 := requireStoredContextCheckpoint(t, fixture.store, branchB2Snapshot.Turn.ContextCheckpointID)
+	if checkpointB2.CacheIdentity != checkpointB.CacheIdentity {
+		t.Fatalf("returning to existing branch reset cache identity: %q -> %q", checkpointB.CacheIdentity, checkpointB2.CacheIdentity)
+	}
 }
 
 type sourceDeltaHarnessFixture struct {
