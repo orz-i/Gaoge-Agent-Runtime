@@ -7,10 +7,13 @@ import (
 	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
 )
 
-// ContextCheckpointCommit atomically installs one immutable Context checkpoint as the active
-// scope head and advances the owning Harness Turn reference. The two expected checkpoint IDs are
-// intentionally distinct: a newly-created Turn has no checkpoint yet while the Session may
-// already have an active head from an earlier Turn.
+// ContextCheckpointCommit atomically persists one immutable Context checkpoint and advances the
+// owning Harness Turn reference. The scope head is advanced only when it still equals
+// ExpectedHeadCheckpointID. If another top-level owner has already moved the head, the Turn is
+// committed as a detached branch instead of failing; branch-path lookup can still reuse its
+// source-aligned checkpoints later. The two expected checkpoint IDs are intentionally distinct:
+// a newly-created Turn has no checkpoint yet while the Session may already have an active head
+// from an earlier Turn.
 type ContextCheckpointCommit struct {
 	TurnID                   string
 	ExpectedTurnRevision     uint64

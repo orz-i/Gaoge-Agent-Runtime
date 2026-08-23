@@ -40,6 +40,92 @@ func TestListAllItemsAndParentValidationReadPastFirstPage(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreConcurrentContextOwnerCommitsDetachFromMovedHead(t *testing.T) {
+	now := time.Date(2026, 8, 23, 2, 10, 0, 0, time.UTC)
+	store := NewMemoryStore()
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	base, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "session-context-concurrent", StaticFingerprint: runtimecontext.StaticFingerprint("sealed"),
+		SourcePath: []string{"message-root"}, Instructions: "sealed",
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-root", SourceID: "message-root", TurnID: "turn-root",
+			Message: model.Message{Role: model.RoleUser, Content: "root"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootTurn, fresh, err := store.CreateTurn(t.Context(), Turn{
+		ID: "turn-root", SessionID: base.ScopeID, HostTurn: HostRef{Kind: "conversation_turn", ID: "root"},
+		ConfigSnapshotID: "config-root", Status: TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil || !fresh {
+		t.Fatalf("create root turn fresh=%v err=%v", fresh, err)
+	}
+	rootTurn, err = store.CommitContextCheckpoint(t.Context(), ContextCheckpointCommit{
+		TurnID: rootTurn.ID, ExpectedTurnRevision: rootTurn.Revision, Checkpoint: base, UpdatedAt: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	branch := func(turnID, sourceID, content string) runtimecontext.Checkpoint {
+		t.Helper()
+		checkpoint, openErr := manager.Open(t.Context(), runtimecontext.OpenRequest{
+			ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
+			SourcePath: []string{sourceID}, Entries: []runtimecontext.Entry{{
+				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: turnID,
+				Message: model.Message{Role: model.RoleUser, Content: content},
+			}}, SourceDelta: true, Previous: &base,
+		})
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		return checkpoint
+	}
+	branchA := branch("turn-a", "message-a", "branch a")
+	branchB := branch("turn-b", "message-b", "branch b")
+	turnA, _, err := store.CreateTurn(t.Context(), Turn{
+		ID: "turn-a", SessionID: base.ScopeID, HostTurn: HostRef{Kind: "conversation_turn", ID: "a"},
+		ConfigSnapshotID: "config-a", Status: TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnB, _, err := store.CreateTurn(t.Context(), Turn{
+		ID: "turn-b", SessionID: base.ScopeID, HostTurn: HostRef{Kind: "conversation_turn", ID: "b"},
+		ConfigSnapshotID: "config-b", Status: TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnA, err = store.CommitContextCheckpoint(t.Context(), ContextCheckpointCommit{
+		TurnID: turnA.ID, ExpectedTurnRevision: turnA.Revision, ExpectedHeadCheckpointID: base.ID,
+		Checkpoint: branchA, UpdatedAt: now.Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("advance branch A: %v", err)
+	}
+	turnB, err = store.CommitContextCheckpoint(t.Context(), ContextCheckpointCommit{
+		TurnID: turnB.ID, ExpectedTurnRevision: turnB.Revision, ExpectedHeadCheckpointID: base.ID,
+		Checkpoint: branchB, UpdatedAt: now.Add(3 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("detached branch B commit: %v", err)
+	}
+	if turnB.ContextCheckpointID != branchB.ID {
+		t.Fatalf("detached turn did not advance: %#v", turnB)
+	}
+	active, err := store.GetActiveContextCheckpoint(t.Context(), base.ScopeID)
+	if err != nil || active.ID != branchA.ID {
+		t.Fatalf("detached branch stole active head: %#v err=%v", active, err)
+	}
+	if _, err = store.GetContextCheckpoint(t.Context(), branchB.ID); err != nil {
+		t.Fatalf("detached branch checkpoint was not persisted: %v", err)
+	}
+	_ = turnA
+}
+
 func TestRestoreOrBuildContextReloadsDurableCheckpoint(t *testing.T) {
 	now := time.Date(2026, 8, 20, 4, 0, 0, 0, time.UTC)
 	store := NewMemoryStore()

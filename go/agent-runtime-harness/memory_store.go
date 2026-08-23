@@ -534,7 +534,7 @@ func (store *MemoryStore) CommitContextCheckpoint(
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	turn, err := store.validateContextCheckpointCommitLocked(request, checkpoint)
+	turn, advanceHead, err := store.validateContextCheckpointCommitLocked(request, checkpoint)
 	if err != nil {
 		return Turn{}, err
 	}
@@ -543,7 +543,9 @@ func (store *MemoryStore) CommitContextCheckpoint(
 	turn.UpdatedAt = request.UpdatedAt
 	turn.Revision = request.ExpectedTurnRevision + 1
 	store.contextCheckpoints[checkpoint.ID] = checkpoint
-	store.contextHeads[checkpoint.ScopeID] = checkpoint.ID
+	if advanceHead {
+		store.contextHeads[checkpoint.ScopeID] = checkpoint.ID
+	}
 	store.turns[turn.ID] = turn
 	return turn, nil
 }
@@ -551,23 +553,27 @@ func (store *MemoryStore) CommitContextCheckpoint(
 func (store *MemoryStore) validateContextCheckpointCommitLocked(
 	request ContextCheckpointCommit,
 	checkpoint runtimecontext.Checkpoint,
-) (Turn, error) {
+) (Turn, bool, error) {
 	turn, ok := store.turns[request.TurnID]
 	if !ok {
-		return Turn{}, ErrNotFound
+		return Turn{}, false, ErrNotFound
 	}
 	if turn.Revision != request.ExpectedTurnRevision ||
 		strings.TrimSpace(turn.ContextCheckpointID) != request.ExpectedTurnCheckpointID ||
-		turn.SessionID != checkpoint.ScopeID || store.contextHeads[checkpoint.ScopeID] != request.ExpectedHeadCheckpointID {
-		return Turn{}, ErrConflict
+		turn.SessionID != checkpoint.ScopeID {
+		return Turn{}, false, ErrConflict
 	}
 	if err := store.validateContextCheckpointDependenciesLocked(checkpoint); err != nil {
-		return Turn{}, err
+		return Turn{}, false, err
 	}
 	if existing, exists := store.contextCheckpoints[checkpoint.ID]; exists && !reflect.DeepEqual(existing, checkpoint) {
-		return Turn{}, ErrConflict
+		return Turn{}, false, ErrConflict
 	}
-	return turn, nil
+	currentHeadID := strings.TrimSpace(store.contextHeads[checkpoint.ScopeID])
+	if currentHeadID == "" && request.ExpectedHeadCheckpointID != "" {
+		return Turn{}, false, ErrConflict
+	}
+	return turn, currentHeadID == request.ExpectedHeadCheckpointID, nil
 }
 
 func (store *MemoryStore) validateContextCheckpointDependenciesLocked(checkpoint runtimecontext.Checkpoint) error {

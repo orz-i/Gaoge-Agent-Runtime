@@ -60,6 +60,81 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	assertItemLifecycle(t, store, turn.ID, invocation.ID, now)
 }
 
+func TestStoreConcurrentContextOwnerCommitPersistsDetachedBranch(t *testing.T) {
+	store := newStore(t)
+	now := time.Date(2026, 8, 23, 2, 15, 0, 0, time.UTC)
+	base := newContextCheckpoint(t, "scope-context-concurrent")
+	rootTurn, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
+		ID: "turn-context-root", SessionID: base.ScopeID,
+		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-root"}, ConfigSnapshotID: "config-context-root",
+		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil || !fresh {
+		t.Fatalf("create root turn fresh=%v err=%v", fresh, err)
+	}
+	rootTurn, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
+		TurnID: rootTurn.ID, ExpectedTurnRevision: rootTurn.Revision, Checkpoint: base, UpdatedAt: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	openBranch := func(turnID, sourceID, content string) runtimecontext.Checkpoint {
+		t.Helper()
+		checkpoint, openErr := manager.Open(t.Context(), runtimecontext.OpenRequest{
+			ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
+			SourcePath: []string{sourceID}, Entries: []runtimecontext.Entry{{
+				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: turnID,
+				Message: model.Message{Role: model.RoleUser, Content: content},
+			}}, SourceDelta: true, Previous: &base,
+		})
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		return checkpoint
+	}
+	branchA := openBranch("turn-context-a", "message-context-a", "branch a")
+	branchB := openBranch("turn-context-b", "message-context-b", "branch b")
+	turnA, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
+		ID: "turn-context-a", SessionID: base.ScopeID,
+		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-a"}, ConfigSnapshotID: "config-context-a",
+		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil || !fresh {
+		t.Fatalf("create branch A turn fresh=%v err=%v", fresh, err)
+	}
+	turnB, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
+		ID: "turn-context-b", SessionID: base.ScopeID,
+		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-b"}, ConfigSnapshotID: "config-context-b",
+		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil || !fresh {
+		t.Fatalf("create branch B turn fresh=%v err=%v", fresh, err)
+	}
+	turnA, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
+		TurnID: turnA.ID, ExpectedTurnRevision: turnA.Revision, ExpectedHeadCheckpointID: base.ID,
+		Checkpoint: branchA, UpdatedAt: now.Add(2 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("advance branch A: %v", err)
+	}
+	turnB, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
+		TurnID: turnB.ID, ExpectedTurnRevision: turnB.Revision, ExpectedHeadCheckpointID: base.ID,
+		Checkpoint: branchB, UpdatedAt: now.Add(3 * time.Second),
+	})
+	if err != nil {
+		t.Fatalf("detached branch B commit: %v", err)
+	}
+	if turnB.ContextCheckpointID != branchB.ID {
+		t.Fatalf("detached turn did not advance: %#v", turnB)
+	}
+	requireActiveContextCheckpoint(t, store, base.ScopeID, branchA.ID, branchA.Generation)
+	if _, err = store.GetContextCheckpoint(t.Context(), branchB.ID); err != nil {
+		t.Fatalf("detached branch checkpoint was not persisted: %v", err)
+	}
+	_ = turnA
+}
+
 func requirePutContextCheckpoint(t *testing.T, store *harnesspostgres.Store, checkpoint runtimecontext.Checkpoint) {
 	t.Helper()
 	created, fresh, err := store.PutContextCheckpoint(t.Context(), checkpoint)

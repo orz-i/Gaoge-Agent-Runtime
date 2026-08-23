@@ -963,9 +963,6 @@ func loadContextHeadForCommitTx(tx *gorm.DB, scopeID string, expectedCheckpointI
 	if err != nil {
 		return contextHeadRecord{}, false, err
 	}
-	if head.CheckpointID != expectedCheckpointID {
-		return contextHeadRecord{}, false, harness.ErrConflict
-	}
 	return head, true, nil
 }
 
@@ -977,9 +974,16 @@ func commitContextHeadTx(
 	exists bool,
 ) error {
 	if !exists {
-		return tx.Create(&contextHeadRecord{
+		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&contextHeadRecord{
 			ScopeID: checkpoint.ScopeID, CheckpointID: checkpoint.ID, Revision: 1, UpdatedAt: request.UpdatedAt,
-		}).Error
+		})
+		return result.Error
+	}
+	if head.CheckpointID != request.ExpectedHeadCheckpointID {
+		// Another top-level owner advanced the shared head after this Turn built its
+		// Context. Keep this Turn's checkpoint lineage durable but detached; future
+		// branch-path lookup can still reuse it without interrupting either owner.
+		return nil
 	}
 	if head.CheckpointID == checkpoint.ID {
 		return nil
