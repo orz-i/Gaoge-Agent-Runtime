@@ -479,6 +479,10 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 		entries, "append_source_delta", len(delta),
 	)
 	next.CacheIdentity = previous.CacheIdentity
+	next.ModelWindowFingerprint = previous.ModelWindowFingerprint
+	next.ArtifactIDs = append([]string(nil), previous.ArtifactIDs...)
+	next.Trace.ArtifactCount = len(next.ArtifactIDs)
+	next.Trace.LastAssessment = cloneAssessment(previous.Trace.LastAssessment)
 	next.ID = checkpointID(next)
 	return next, nil
 }

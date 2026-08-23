@@ -346,6 +346,56 @@ func TestManagerSourceDeltaMatchesCompleteAncestryOpen(t *testing.T) {
 	}
 }
 
+func TestManagerFullAncestryOpenPreservesReusableCheckpointState(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	base, err := manager.Open(t.Context(), openRequest("m1", "m2"))
+	requireNoError(t, err)
+
+	windowFingerprint := runtimectx.ModelWindowFingerprint(runtimectx.ModelWindow{ContextTokens: 8192})
+	bound, err := manager.BindModelWindow(t.Context(), base, windowFingerprint)
+	requireNoError(t, err)
+	artifact, err := runtimectx.NewArtifact(
+		runtimectx.ArtifactToolResult,
+		bound.ScopeID,
+		bound.Generation,
+		"call-state-parity",
+		`{"value":"durable"}`,
+		nil,
+	)
+	requireNoError(t, err)
+	assessment := runtimectx.Assessment{
+		HardInputTokens: 4096, SoftInputTokens: 3200, RawTokenEstimate: 512,
+		AdjustedTokenEstimate: 600, HardTokenEstimate: 700, TokenCountSource: runtimectx.CountEstimated,
+		SerializedBytes: 2048,
+	}
+	seeded, err := manager.Capture(t.Context(), runtimectx.CaptureRequest{
+		Previous: bound, StaticFingerprint: bound.StaticFingerprint, RunID: "run-state-parity",
+		Messages: runtimectx.Materialize(bound.Window), Artifacts: []runtimectx.Artifact{artifact}, Assessment: &assessment,
+	})
+	requireNoError(t, err)
+
+	complete := openRequest("m1", "m2", "m3", "m4")
+	complete.Previous = &seeded
+	completeCheckpoint, err := manager.Open(t.Context(), complete)
+	requireNoError(t, err)
+
+	delta := openRequest("m3", "m4")
+	delta.Previous = &seeded
+	delta.SourceDelta = true
+	deltaCheckpoint, err := manager.Open(t.Context(), delta)
+	requireNoError(t, err)
+
+	requireEqual(t, completeCheckpoint.ID, deltaCheckpoint.ID, "full/delta checkpoint identity")
+	requireEqual(t, completeCheckpoint.ModelWindowFingerprint, windowFingerprint, "full ancestry model-window fingerprint")
+	requireEqual(t, len(completeCheckpoint.ArtifactIDs), 1, "full ancestry artifact count")
+	requireEqual(t, completeCheckpoint.ArtifactIDs[0], artifact.ID, "full ancestry artifact identity")
+	requireEqual(t, completeCheckpoint.Trace.ArtifactCount, 1, "full ancestry trace artifact count")
+	if completeCheckpoint.Trace.LastAssessment == nil || *completeCheckpoint.Trace.LastAssessment != assessment {
+		t.Fatalf("full ancestry lost last assessment: %#v", completeCheckpoint.Trace.LastAssessment)
+	}
+}
+
 func TestCaptureRejectsStablePrefixMutationAndAcceptsRuntimeTail(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
