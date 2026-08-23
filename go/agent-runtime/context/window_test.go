@@ -24,6 +24,49 @@ func requireNoError(t *testing.T, err error) {
 	}
 }
 
+func TestCaptureRejectsMalformedToolTransactions(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	checkpoint, err := manager.Open(t.Context(), openRequest("m1", "m2"))
+	requireNoError(t, err)
+	prefix := runtimectx.Materialize(checkpoint.Window)
+	call := func(id string) tools.Call {
+		return tools.Call{ID: id, ToolKey: testLookupToolKey, Arguments: json.RawMessage(`{}`)}
+	}
+	cases := map[string][]model.Message{
+		"orphan_result": {
+			{Role: model.RoleTool, ToolCallID: "call-orphan", Content: `{"ok":true}`},
+		},
+		"duplicate_id_in_batch": {
+			{Role: model.RoleAssistant, ToolCalls: []tools.Call{call("call-dup"), call("call-dup")}},
+			{Role: model.RoleTool, ToolCallID: "call-dup", Content: `{"ok":true}`},
+		},
+		"interrupted_batch": {
+			{Role: model.RoleAssistant, ToolCalls: []tools.Call{call("call-pending")}},
+			{Role: model.RoleAssistant, Content: "continued before Tool result"},
+		},
+		"reused_completed_id": {
+			{Role: model.RoleAssistant, ToolCalls: []tools.Call{call("call-reused")}},
+			{Role: model.RoleTool, ToolCallID: "call-reused", Content: `{"ok":true}`},
+			{Role: model.RoleAssistant, ToolCalls: []tools.Call{call("call-reused")}},
+			{Role: model.RoleTool, ToolCallID: "call-reused", Content: `{"ok":true}`},
+		},
+	}
+	for name, tail := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			messages := append(model.CloneMessages(prefix), model.CloneMessages(tail)...)
+			_, captureErr := manager.Capture(t.Context(), runtimectx.CaptureRequest{
+				Previous: checkpoint, StaticFingerprint: checkpoint.StaticFingerprint,
+				RunID: "run-malformed-" + name, Messages: messages,
+			})
+			if !errors.Is(captureErr, runtimectx.ErrLineageConflict) {
+				t.Fatalf("malformed Tool transaction must fail closed, got %v", captureErr)
+			}
+		})
+	}
+}
+
 func requireEqual[T comparable](t *testing.T, got, want T, message string) {
 	t.Helper()
 	if got != want {

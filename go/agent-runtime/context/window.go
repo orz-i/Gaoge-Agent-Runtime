@@ -658,6 +658,14 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 	if !messagesPrefix(current, incoming) {
 		return Checkpoint{}, ErrLineageConflict
 	}
+	for _, message := range incoming {
+		if !validMessage(message) {
+			return Checkpoint{}, ErrLineageConflict
+		}
+	}
+	if !validToolTranscriptMessages(incoming) {
+		return Checkpoint{}, ErrLineageConflict
+	}
 	artifactIDs, err := captureArtifactIDs(previous, request.Artifacts)
 	if err != nil {
 		return Checkpoint{}, err
@@ -1234,7 +1242,15 @@ func validMessage(message model.Message) bool {
 	case model.RoleSystem, model.RoleUser:
 		return strings.TrimSpace(message.Content) != "" && len(message.ToolCalls) == 0 && message.ToolCallID == ""
 	case model.RoleAssistant:
-		return strings.TrimSpace(message.Content) != "" || len(message.ToolCalls) > 0
+		if message.ToolCallID != "" || (strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0) {
+			return false
+		}
+		for _, call := range message.ToolCalls {
+			if strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.ToolKey) == "" || !json.Valid(call.Arguments) {
+				return false
+			}
+		}
+		return true
 	case model.RoleTool:
 		return strings.TrimSpace(message.ToolCallID) != "" && strings.TrimSpace(message.Content) != "" && len(message.ToolCalls) == 0
 	default:
@@ -1244,24 +1260,36 @@ func validMessage(message model.Message) bool {
 
 func validToolTranscriptMessages(messages []model.Message) bool {
 	pending := make(map[string]struct{})
+	seenCallIDs := make(map[string]struct{})
 	for _, message := range messages {
 		if message.Role == model.RoleAssistant && len(message.ToolCalls) > 0 {
+			if len(pending) != 0 {
+				return false
+			}
 			for _, call := range message.ToolCalls {
 				id := strings.TrimSpace(call.ID)
 				if id == "" {
 					return false
 				}
+				if _, duplicate := seenCallIDs[id]; duplicate {
+					return false
+				}
+				seenCallIDs[id] = struct{}{}
 				pending[id] = struct{}{}
 			}
 			continue
 		}
+		if len(pending) != 0 && message.Role != model.RoleTool {
+			return false
+		}
 		if message.Role != model.RoleTool {
 			continue
 		}
-		if _, ok := pending[message.ToolCallID]; !ok {
+		toolCallID := strings.TrimSpace(message.ToolCallID)
+		if _, ok := pending[toolCallID]; !ok {
 			return false
 		}
-		delete(pending, message.ToolCallID)
+		delete(pending, toolCallID)
 	}
 	return len(pending) == 0
 }

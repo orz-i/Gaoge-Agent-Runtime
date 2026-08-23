@@ -928,15 +928,28 @@ func (runner *Runner) queueToolCalls(
 	calls []tools.Call,
 ) (kernel.Snapshot, error) {
 	preparedCalls := make([]tools.Call, len(calls))
+	seenCallIDs := make(map[string]struct{})
+	for _, message := range state.Messages {
+		for _, existing := range message.ToolCalls {
+			if id := strings.TrimSpace(existing.ID); id != "" {
+				seenCallIDs[id] = struct{}{}
+			}
+		}
+	}
 	for index, call := range calls {
 		call.ToolKey = strings.TrimSpace(call.ToolKey)
-		if strings.TrimSpace(call.ID) == "" {
+		call.ID = strings.TrimSpace(call.ID)
+		if call.ID == "" {
 			callID, err := runner.runtime.NewID("toolcall")
 			if err != nil {
 				return kernel.Snapshot{}, err
 			}
 			call.ID = callID
 		}
+		if _, duplicate := seenCallIDs[call.ID]; duplicate {
+			return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
+		}
+		seenCallIDs[call.ID] = struct{}{}
 		definition, ok := selectedDefinition(definitions, call.ToolKey)
 		if !ok || !json.Valid(call.Arguments) || definition.Terminal && index != len(calls)-1 {
 			return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)

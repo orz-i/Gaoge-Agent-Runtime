@@ -70,6 +70,37 @@ type perRunLimitModel struct {
 	calls int
 }
 
+type duplicateToolCallIDModel struct{}
+
+func (duplicateToolCallIDModel) Generate(_ context.Context, _ runtimemodel.Request) (runtimemodel.Response, error) {
+	return runtimemodel.Response{ToolCalls: []tools.Call{
+		{ID: callOne, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
+		{ID: callOne, ToolKey: manifestToolKey, Arguments: json.RawMessage(`{}`)},
+	}}, nil
+}
+
+func TestRunnerRejectsDuplicateToolCallIDsBeforeExecution(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	executions := 0
+	registry := mustRegistry(t, []tools.Registration{{
+		Definition: tools.Definition{Key: manifestToolKey, Name: manifestToolName, InputSchema: json.RawMessage(`{"type":"object"}`)},
+		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			executions++
+			return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`), Receipt: tools.Receipt{ExecutionID: "read", Disposition: committedDisposition}}, nil
+		}),
+	}})
+	runner := mustRunner(t, runtime, approvals, duplicateToolCallIDModel{}, registry)
+	snapshot, err := runner.StartRun(t.Context(), startRequest(
+		"run_duplicate_tool_ids", "request_duplicate_tool_ids", "read twice", manifestToolKey,
+	))
+	if err == nil || snapshot.Run.Status != kernel.RunStatusFailed {
+		t.Fatalf("duplicate Tool call IDs must fail the Agent run: run=%#v err=%v", snapshot.Run, err)
+	}
+	if executions != 0 {
+		t.Fatalf("duplicate Tool call IDs executed %d Tool calls", executions)
+	}
+}
+
 func (model *perRunLimitModel) Generate(_ context.Context, _ runtimemodel.Request) (runtimemodel.Response, error) {
 	model.calls++
 	if model.calls == 1 {
