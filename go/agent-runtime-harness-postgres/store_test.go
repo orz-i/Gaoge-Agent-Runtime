@@ -397,6 +397,52 @@ func TestStoreFailedContextCommitDoesNotAdvanceHeadOrPersistCheckpoint(t *testin
 	}
 }
 
+func TestStoreContextCommitRejectsCrossLineageParent(t *testing.T) {
+	store := newStore(t)
+	now := time.Date(2026, 8, 23, 8, 40, 0, 0, time.UTC)
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	base := newContextCheckpoint(t, "scope-cross-lineage-cas")
+	other, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
+		SourcePath: []string{"message-other-lineage"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-other-lineage", SourceID: "message-other-lineage", TurnID: "turn-other-lineage",
+			Message: model.Message{Role: model.RoleUser, Content: "other lineage"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirePutContextCheckpoint(t, store, other)
+	turn := createContextCommitTurn(t, store, base.ScopeID, "cross-lineage-cas", now)
+	turn = requireCommitContextCheckpoint(t, store, turn, "", "", base, now.Add(time.Second))
+	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
+		SourcePath: []string{"message-other-child"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-other-child", SourceID: "message-other-child", TurnID: "turn-other-child",
+			Message: model.Message{Role: model.RoleAssistant, Content: "other child"},
+		}}, SourceDelta: true, Previous: &other,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
+		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision,
+		ExpectedTurnCheckpointID: base.ID, ExpectedHeadCheckpointID: base.ID,
+		Checkpoint: candidate, UpdatedAt: now.Add(2 * time.Second),
+	})
+	if !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("cross-lineage Context commit error=%v", err)
+	}
+	requireActiveContextCheckpoint(t, store, base.ScopeID, base.ID, base.Generation)
+	if _, err = store.GetContextCheckpoint(t.Context(), candidate.ID); !errors.Is(err, harness.ErrNotFound) {
+		t.Fatalf("cross-lineage candidate became durable: %v", err)
+	}
+	storedTurn, err := store.GetTurn(t.Context(), turn.ID)
+	if err != nil || storedTurn.ContextCheckpointID != base.ID || storedTurn.Revision != turn.Revision {
+		t.Fatalf("cross-lineage commit changed owning Turn=%#v err=%v", storedTurn, err)
+	}
+}
+
 func TestStoreFindContextCheckpointForPathChoosesNearestSourceAlignedAncestor(t *testing.T) {
 	store := newStore(t)
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})

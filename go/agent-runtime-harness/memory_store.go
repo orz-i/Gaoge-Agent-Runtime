@@ -547,6 +547,10 @@ func (store *MemoryStore) validateContextCheckpointCommitLocked(
 		turn.SessionID != checkpoint.ScopeID {
 		return Turn{}, false, ErrConflict
 	}
+	if request.ExpectedTurnCheckpointID != "" &&
+		strings.TrimSpace(checkpoint.ParentCheckpointID) != request.ExpectedTurnCheckpointID {
+		return Turn{}, false, ErrConflict
+	}
 	if err := store.validateContextCheckpointDependenciesLocked(checkpoint); err != nil {
 		return Turn{}, false, err
 	}

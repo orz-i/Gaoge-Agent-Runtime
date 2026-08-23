@@ -947,6 +947,10 @@ func loadContextCommitStateTx(
 		strings.TrimSpace(turn.ContextCheckpointID) != request.ExpectedTurnCheckpointID {
 		return harness.Turn{}, contextHeadRecord{}, false, harness.ErrConflict
 	}
+	if request.ExpectedTurnCheckpointID != "" &&
+		strings.TrimSpace(checkpoint.ParentCheckpointID) != request.ExpectedTurnCheckpointID {
+		return harness.Turn{}, contextHeadRecord{}, false, harness.ErrConflict
+	}
 	head, exists, err := loadContextHeadForCommitTx(tx, checkpoint.ScopeID, request.ExpectedHeadCheckpointID)
 	return turn, head, exists, err
 }

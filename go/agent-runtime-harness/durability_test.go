@@ -300,6 +300,74 @@ func TestMemoryStoreFailedContextCommitDoesNotAdvanceHead(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreContextCommitRejectsCrossLineageParent(t *testing.T) {
+	now := time.Date(2026, 8, 23, 8, 30, 0, 0, time.UTC)
+	store := NewMemoryStore()
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	fingerprint := runtimecontext.StaticFingerprint("sealed-lineage")
+	open := func(sourceID, content string) runtimecontext.Checkpoint {
+		checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+			ScopeID: "session-context-lineage-cas", StaticFingerprint: fingerprint,
+			SourcePath: []string{sourceID}, Instructions: "sealed",
+			Entries: []runtimecontext.Entry{{
+				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: "turn-" + sourceID,
+				Message: model.Message{Role: model.RoleUser, Content: content},
+			}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return checkpoint
+	}
+	base := open("message-base-lineage", "base")
+	other := open("message-other-lineage", "other")
+	requireStoredContextCheckpoint(t, store, other)
+
+	turn, fresh, err := store.CreateTurn(t.Context(), Turn{
+		ID: "turn-context-lineage-cas", SessionID: base.ScopeID,
+		HostTurn: HostRef{Kind: "conversation_turn", ID: "context-lineage-cas"}, ConfigSnapshotID: "config-context-lineage-cas",
+		Status: TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil || !fresh {
+		t.Fatalf("create turn fresh=%v err=%v", fresh, err)
+	}
+	turn, err = store.CommitContextCheckpoint(t.Context(), ContextCheckpointCommit{
+		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision, Checkpoint: base, UpdatedAt: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: base.ScopeID, StaticFingerprint: fingerprint, Instructions: "sealed",
+		SourcePath: []string{"message-other-child"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-message-other-child", SourceID: "message-other-child", TurnID: "turn-other-child",
+			Message: model.Message{Role: model.RoleAssistant, Content: "other child"},
+		}}, SourceDelta: true, Previous: &other,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.CommitContextCheckpoint(t.Context(), ContextCheckpointCommit{
+		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision,
+		ExpectedTurnCheckpointID: base.ID, ExpectedHeadCheckpointID: base.ID,
+		Checkpoint: candidate, UpdatedAt: now.Add(2 * time.Second),
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("cross-lineage Context commit error=%v", err)
+	}
+	active, err := store.GetActiveContextCheckpoint(t.Context(), base.ScopeID)
+	if err != nil || active.ID != base.ID {
+		t.Fatalf("cross-lineage commit changed active head=%#v err=%v", active, err)
+	}
+	if _, err = store.GetContextCheckpoint(t.Context(), candidate.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-lineage candidate became durable: %v", err)
+	}
+	storedTurn, err := store.GetTurn(t.Context(), turn.ID)
+	if err != nil || storedTurn.ContextCheckpointID != base.ID || storedTurn.Revision != turn.Revision {
+		t.Fatalf("cross-lineage commit changed owning Turn=%#v err=%v", storedTurn, err)
+	}
+}
+
 func requireStoredContextCheckpoint(t *testing.T, store *MemoryStore, checkpoint runtimecontext.Checkpoint) {
 	t.Helper()
 	if _, fresh, err := store.PutContextCheckpoint(t.Context(), checkpoint); err != nil || !fresh {
