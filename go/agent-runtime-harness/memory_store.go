@@ -408,21 +408,14 @@ func (store *MemoryStore) PutContextCheckpoint(
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.validateContextCheckpointDependenciesLocked(value); err != nil {
+		return runtimecontext.Checkpoint{}, false, err
+	}
 	if existing, ok := store.contextCheckpoints[value.ID]; ok {
 		if !reflect.DeepEqual(existing, value) {
 			return runtimecontext.Checkpoint{}, false, ErrConflict
 		}
 		return cloneContextCheckpoint(existing), false, nil
-	}
-	if value.ParentCheckpointID != "" {
-		if _, ok := store.contextCheckpoints[value.ParentCheckpointID]; !ok {
-			return runtimecontext.Checkpoint{}, false, ErrConflict
-		}
-	}
-	for _, artifactID := range value.ArtifactIDs {
-		if _, ok := store.contextArtifacts[artifactID]; !ok {
-			return runtimecontext.Checkpoint{}, false, ErrConflict
-		}
 	}
 	store.contextCheckpoints[value.ID] = cloneContextCheckpoint(value)
 	return cloneContextCheckpoint(value), true, nil
@@ -457,8 +450,11 @@ func (store *MemoryStore) FindContextCheckpointForPath(
 	_ context.Context,
 	query ContextCheckpointPathQuery,
 ) (runtimecontext.Checkpoint, error) {
-	query, err := normalizeMemoryContextCheckpointPathQuery(store, query)
+	query, err := NormalizeContextCheckpointPathQuery(query)
 	if err != nil {
+		return runtimecontext.Checkpoint{}, ErrInvalidRequest
+	}
+	if store == nil {
 		return runtimecontext.Checkpoint{}, ErrInvalidRequest
 	}
 	store.mu.RLock()
@@ -477,18 +473,6 @@ func (store *MemoryStore) FindContextCheckpointForPath(
 		return runtimecontext.Checkpoint{}, ErrNotFound
 	}
 	return cloneContextCheckpoint(best), nil
-}
-
-func normalizeMemoryContextCheckpointPathQuery(
-	store *MemoryStore,
-	query ContextCheckpointPathQuery,
-) (ContextCheckpointPathQuery, error) {
-	query.ScopeID = strings.TrimSpace(query.ScopeID)
-	query.StaticFingerprint = strings.TrimSpace(query.StaticFingerprint)
-	if store == nil || query.ScopeID == "" || query.StaticFingerprint == "" || len(query.SourcePath) == 0 {
-		return ContextCheckpointPathQuery{}, ErrInvalidRequest
-	}
-	return query, nil
 }
 
 func reusableMemoryContextCheckpointCandidate(
@@ -578,12 +562,14 @@ func (store *MemoryStore) validateContextCheckpointCommitLocked(
 
 func (store *MemoryStore) validateContextCheckpointDependenciesLocked(checkpoint runtimecontext.Checkpoint) error {
 	if checkpoint.ParentCheckpointID != "" {
-		if _, ok := store.contextCheckpoints[checkpoint.ParentCheckpointID]; !ok {
+		parent, ok := store.contextCheckpoints[checkpoint.ParentCheckpointID]
+		if !ok || parent.ScopeID != checkpoint.ScopeID {
 			return ErrConflict
 		}
 	}
 	for _, artifactID := range checkpoint.ArtifactIDs {
-		if _, ok := store.contextArtifacts[artifactID]; !ok {
+		artifact, ok := store.contextArtifacts[artifactID]
+		if !ok || artifact.ScopeID != checkpoint.ScopeID {
 			return ErrConflict
 		}
 	}

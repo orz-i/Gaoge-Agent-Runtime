@@ -126,6 +126,91 @@ func TestMemoryStoreConcurrentContextOwnerCommitsDetachFromMovedHead(t *testing.
 	_ = turnA
 }
 
+func TestMemoryStoreRejectsMalformedContextCheckpointPathQuery(t *testing.T) {
+	t.Parallel()
+	store := NewMemoryStore()
+	for name, sourcePath := range map[string][]string{
+		"empty":     {"message-root", "   ", "message-leaf"},
+		"duplicate": {"message-root", "message-root"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := store.FindContextCheckpointForPath(t.Context(), ContextCheckpointPathQuery{
+				ScopeID: "scope-malformed-path", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
+				SourcePath: sourcePath,
+			})
+			if !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("malformed Context path error=%v", err)
+			}
+		})
+	}
+}
+
+func TestMemoryStoreRejectsCrossScopeContextDependencies(t *testing.T) {
+	t.Parallel()
+	store := NewMemoryStore()
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+
+	foreignParent, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "scope-foreign-parent", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
+		SourcePath: []string{"message-foreign-parent"}, Instructions: "stable",
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-foreign-parent", SourceID: "message-foreign-parent", TurnID: "turn-foreign-parent",
+			Message: model.Message{Role: model.RoleUser, Content: "foreign parent"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireStoredContextCheckpoint(t, store, foreignParent)
+	crossScopeParent, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "scope-local-parent", StaticFingerprint: foreignParent.StaticFingerprint,
+		SourcePath: []string{"message-local-parent"}, Instructions: foreignParent.Window.Instructions,
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-local-parent", SourceID: "message-local-parent", TurnID: "turn-local-parent",
+			Message: model.Message{Role: model.RoleUser, Content: "local child"},
+		}}, Previous: &foreignParent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.PutContextCheckpoint(t.Context(), crossScopeParent); !errors.Is(err, ErrConflict) {
+		t.Fatalf("cross-scope parent checkpoint error=%v", err)
+	}
+
+	localBase, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "scope-local-artifact", StaticFingerprint: runtimecontext.StaticFingerprint("stable-artifact"),
+		SourcePath: []string{"message-local-artifact"}, Instructions: "stable artifact",
+		Entries: []runtimecontext.Entry{{
+			ID: "entry-local-artifact", SourceID: "message-local-artifact", TurnID: "turn-local-artifact",
+			Message: model.Message{Role: model.RoleUser, Content: "local artifact base"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requireStoredContextCheckpoint(t, store, localBase)
+	foreignArtifact, err := runtimecontext.NewArtifact(
+		runtimecontext.ArtifactCompaction, "scope-foreign-artifact", localBase.Generation+1,
+		localBase.CoveredThroughSourceID, "foreign artifact", nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, fresh, putErr := store.PutContextArtifact(t.Context(), foreignArtifact); putErr != nil || !fresh {
+		t.Fatalf("put foreign artifact fresh=%v err=%v", fresh, putErr)
+	}
+	crossScopeArtifact, err := manager.Rollover(t.Context(), runtimecontext.RolloverRequest{
+		Previous: localBase, Window: localBase.Window, Artifacts: []runtimecontext.Artifact{foreignArtifact}, Reason: "soft_limit",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.PutContextCheckpoint(t.Context(), crossScopeArtifact); !errors.Is(err, ErrConflict) {
+		t.Fatalf("cross-scope artifact checkpoint error=%v", err)
+	}
+}
+
 func TestRestoreOrBuildContextReloadsDurableCheckpoint(t *testing.T) {
 	now := time.Date(2026, 8, 20, 4, 0, 0, 0, time.UTC)
 	store := NewMemoryStore()

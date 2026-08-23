@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
@@ -29,6 +30,31 @@ type ContextCheckpointPathQuery struct {
 	ScopeID           string
 	StaticFingerprint string
 	SourcePath        []string
+}
+
+// NormalizeContextCheckpointPathQuery enforces the Store-wide ancestry lookup contract before
+// persistence-specific selection begins. Source identities are immutable path components: empty
+// or duplicate identities are malformed rather than a request to silently rewrite the path.
+func NormalizeContextCheckpointPathQuery(value ContextCheckpointPathQuery) (ContextCheckpointPathQuery, error) {
+	value.ScopeID = strings.TrimSpace(value.ScopeID)
+	value.StaticFingerprint = strings.TrimSpace(value.StaticFingerprint)
+	value.SourcePath = append([]string(nil), value.SourcePath...)
+	if value.ScopeID == "" || value.StaticFingerprint == "" || len(value.SourcePath) == 0 {
+		return ContextCheckpointPathQuery{}, ErrInvalidRequest
+	}
+	seen := make(map[string]struct{}, len(value.SourcePath))
+	for index, sourceID := range value.SourcePath {
+		sourceID = strings.TrimSpace(sourceID)
+		if sourceID == "" {
+			return ContextCheckpointPathQuery{}, ErrInvalidRequest
+		}
+		if _, duplicate := seen[sourceID]; duplicate {
+			return ContextCheckpointPathQuery{}, ErrInvalidRequest
+		}
+		seen[sourceID] = struct{}{}
+		value.SourcePath[index] = sourceID
+	}
+	return value, nil
 }
 
 // Store is the durable Harness state boundary. Implementations must clone values at every boundary.

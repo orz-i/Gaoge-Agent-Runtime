@@ -346,6 +346,26 @@ func TestStoreFindContextCheckpointForPathDoesNotScaleSQLArgumentsWithAncestry(t
 	}
 }
 
+func TestStoreFindContextCheckpointForPathRejectsMalformedSourcePath(t *testing.T) {
+	t.Parallel()
+	store := newStore(t)
+	for name, sourcePath := range map[string][]string{
+		"empty":     {"message-root", "   ", "message-leaf"},
+		"duplicate": {"message-root", "message-root"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{
+				ScopeID: "scope-malformed-path", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
+				SourcePath: sourcePath,
+			})
+			if !errors.Is(err, harness.ErrInvalidRequest) {
+				t.Fatalf("malformed Context path error=%v", err)
+			}
+		})
+	}
+}
+
 func TestStoreRetriesInvocationWithAtomicAttemptRotation(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 20, 4, 20, 0, 0, time.UTC)

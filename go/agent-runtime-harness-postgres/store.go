@@ -825,16 +825,12 @@ func (store *Store) loadContextCheckpointPathCandidates(
 	ctx context.Context,
 	query harness.ContextCheckpointPathQuery,
 ) (harness.ContextCheckpointPathQuery, contextCheckpointPathIndex, []contextCheckpointRecord, error) {
-	query.ScopeID = strings.TrimSpace(query.ScopeID)
-	query.StaticFingerprint = strings.TrimSpace(query.StaticFingerprint)
-	query.SourcePath = append([]string(nil), query.SourcePath...)
-	if store == nil || query.ScopeID == "" || query.StaticFingerprint == "" || len(query.SourcePath) == 0 {
+	var err error
+	query, err = harness.NormalizeContextCheckpointPathQuery(query)
+	if err != nil || store == nil {
 		return harness.ContextCheckpointPathQuery{}, contextCheckpointPathIndex{}, nil, harness.ErrInvalidRequest
 	}
-	pathIndex, ok := newContextCheckpointPathIndex(query.SourcePath)
-	if !ok {
-		return harness.ContextCheckpointPathQuery{}, contextCheckpointPathIndex{}, nil, harness.ErrInvalidRequest
-	}
+	pathIndex := newContextCheckpointPathIndex(query.SourcePath)
 	var records []contextCheckpointRecord
 	if err := store.db.WithContext(ctx).
 		Select(
@@ -853,24 +849,16 @@ type contextCheckpointPathIndex struct {
 	hashes    []string
 }
 
-func newContextCheckpointPathIndex(sourcePath []string) (contextCheckpointPathIndex, bool) {
+func newContextCheckpointPathIndex(sourcePath []string) contextCheckpointPathIndex {
 	positions := make(map[string]int, len(sourcePath))
 	hashes := make([]string, len(sourcePath))
 	current := ""
-	for index, rawSourceID := range sourcePath {
-		sourceID := strings.TrimSpace(rawSourceID)
-		if sourceID == "" {
-			return contextCheckpointPathIndex{}, false
-		}
-		if _, duplicate := positions[sourceID]; duplicate {
-			return contextCheckpointPathIndex{}, false
-		}
+	for index, sourceID := range sourcePath {
 		current = runtimecontext.ExtendLineageHash(current, sourceID)
 		positions[sourceID] = index
 		hashes[index] = current
-		sourcePath[index] = sourceID
 	}
-	return contextCheckpointPathIndex{positions: positions, hashes: hashes}, true
+	return contextCheckpointPathIndex{positions: positions, hashes: hashes}
 }
 
 func reusablePostgresContextCheckpointCandidate(
