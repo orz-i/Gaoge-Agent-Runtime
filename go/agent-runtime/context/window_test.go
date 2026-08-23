@@ -24,6 +24,22 @@ func requireNoError(t *testing.T, err error) {
 	}
 }
 
+func TestContextArtifactPayloadHardLimitFailsClosed(t *testing.T) {
+	t.Parallel()
+	oversized := strings.Repeat("x", runtimectx.MaxArtifactPayloadBytes+1)
+	if _, err := runtimectx.NewArtifact(
+		runtimectx.ArtifactToolResult, "scope-hard-limit", 1, "call-hard-limit", oversized, nil,
+	); !errors.Is(err, runtimectx.ErrInvalidInput) {
+		t.Fatalf("oversized Tool artifact must fail closed, got %v", err)
+	}
+	oversizedJSON := json.RawMessage(`"` + strings.Repeat("x", runtimectx.MaxArtifactPayloadBytes) + `"`)
+	if _, err := runtimectx.NewArtifact(
+		runtimectx.ArtifactCompaction, "scope-hard-limit", 1, "source-hard-limit", "", oversizedJSON,
+	); !errors.Is(err, runtimectx.ErrInvalidInput) {
+		t.Fatalf("oversized JSON artifact must fail closed, got %v", err)
+	}
+}
+
 func TestCaptureRejectsMalformedToolTransactions(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})

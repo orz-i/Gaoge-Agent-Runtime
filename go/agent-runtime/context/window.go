@@ -19,6 +19,10 @@ import (
 
 const CapabilityWindow kernel.Capability = "context.window"
 
+// MaxArtifactPayloadBytes is the absolute durable payload ceiling for one Context Artifact.
+// Larger exact payloads require a host-owned blob/reference contract instead of inline Store data.
+const MaxArtifactPayloadBytes = 4 << 20
+
 var (
 	ErrInvalidInput       = errors.New("invalid context window input")
 	ErrLineageConflict    = errors.New("context window lineage conflict")
@@ -1345,6 +1349,9 @@ func normalizeArtifact(value *Artifact, scopeID string, generation int) error {
 		value.Generation = generation
 	}
 	if value.ScopeID == "" || value.Generation <= 0 || (value.Kind != ArtifactCompaction && value.Kind != ArtifactToolResult) {
+		return ErrInvalidInput
+	}
+	if len(value.Content) > MaxArtifactPayloadBytes || len(value.ContentJSON) > MaxArtifactPayloadBytes-len(value.Content) {
 		return ErrInvalidInput
 	}
 	value.ContentJSON = normalizeRawJSON(value.ContentJSON)

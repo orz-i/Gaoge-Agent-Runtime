@@ -12,6 +12,11 @@ import (
 const (
 	CapabilityCatalog  kernel.Capability = "tools.catalog"
 	CapabilityExecutor kernel.Capability = "tools.executor"
+
+	// MaxExecutionResultContentBytes is the absolute in-process safety ceiling for one exact Tool
+	// result payload. Larger payloads must be externalized by the Tool instead of entering Runtime
+	// state or Context artifacts as inline JSON.
+	MaxExecutionResultContentBytes = 4 << 20
 )
 
 var (
@@ -334,7 +339,7 @@ func validCall(call Call) bool {
 }
 
 func validExecutionResult(result ExecutionResult) bool {
-	return json.Valid(result.Content) && strings.TrimSpace(result.Receipt.ExecutionID) != "" &&
+	return len(result.Content) <= MaxExecutionResultContentBytes && json.Valid(result.Content) && strings.TrimSpace(result.Receipt.ExecutionID) != "" &&
 		strings.TrimSpace(result.Receipt.Disposition) != ""
 }
 
