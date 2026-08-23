@@ -355,6 +355,17 @@ func TestMemoryStoreContextCommitRejectsCrossLineageParent(t *testing.T) {
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("cross-lineage Context commit error=%v", err)
 	}
+	assertCrossLineageContextCommitDidNotMutateMemoryStore(t, store, base, candidate, turn)
+}
+
+func assertCrossLineageContextCommitDidNotMutateMemoryStore(
+	t *testing.T,
+	store *MemoryStore,
+	base runtimecontext.Checkpoint,
+	candidate runtimecontext.Checkpoint,
+	turn Turn,
+) {
+	t.Helper()
 	active, err := store.GetActiveContextCheckpoint(t.Context(), base.ScopeID)
 	if err != nil || active.ID != base.ID {
 		t.Fatalf("cross-lineage commit changed active head=%#v err=%v", active, err)
