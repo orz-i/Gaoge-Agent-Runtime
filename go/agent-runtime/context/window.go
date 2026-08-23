@@ -52,6 +52,77 @@ type Entry struct {
 	Message  model.Message `json:"message"`
 }
 
+// CompactToolPressure creates a next-generation rollover candidate without removing user or
+// assistant turns. Every Tool result whose durable marker is smaller than the inline payload is
+// sealed into an Artifact and replaced by that marker. This provides a safe pressure-relief path
+// for a first/early user turn where PreserveRecentTurns intentionally forbids prefix compaction.
+func (manager *Manager) CompactToolPressure(
+	previous Checkpoint,
+	runID string,
+	messages []model.Message,
+) (ToolPressureCompaction, error) {
+	previous = CloneCheckpoint(previous)
+	runID = strings.TrimSpace(runID)
+	messages = model.CloneMessages(messages)
+	if !ValidCheckpoint(previous) || runID == "" || len(messages) == 0 {
+		return ToolPressureCompaction{}, ErrInvalidInput
+	}
+	if !messagesPrefix(Materialize(previous.Window), messages) {
+		return ToolPressureCompaction{}, ErrLineageConflict
+	}
+
+	artifacts := make([]Artifact, 0)
+	for index := range messages {
+		message := &messages[index]
+		if message.Role != model.RoleTool || strings.TrimSpace(message.ToolCallID) == "" || message.Content == "" {
+			continue
+		}
+		artifact, err := NewArtifact(
+			ArtifactToolResult,
+			previous.ScopeID,
+			previous.Generation+1,
+			strings.TrimSpace(message.ToolCallID),
+			message.Content,
+			nil,
+		)
+		if err != nil {
+			return ToolPressureCompaction{}, err
+		}
+		marker := compactedToolResultMarker(artifact)
+		if len([]byte(marker)) >= len([]byte(message.Content)) {
+			continue
+		}
+		message.Content = marker
+		artifacts = append(artifacts, artifact)
+	}
+	if len(artifacts) == 0 {
+		return ToolPressureCompaction{}, ErrBudgetExceeded
+	}
+
+	instructions, body := splitWindowInstructions(previous.Window.Instructions, messages)
+	if !validToolTranscriptMessages(body) {
+		return ToolPressureCompaction{}, ErrLineageConflict
+	}
+	entries := make([]Entry, 0, len(body))
+	for index, message := range body {
+		if !validMessage(message) {
+			return ToolPressureCompaction{}, ErrLineageConflict
+		}
+		encoded, _ := canonicalJSON(message)
+		entries = append(entries, Entry{
+			ID: stableID(
+				"ctxe", previous.ScopeID, strconv.Itoa(previous.Generation+1), runID,
+				"tool_pressure", strconv.Itoa(index), hashBytes(encoded),
+			),
+			TurnID: runID, Message: cloneMessage(message),
+		})
+	}
+	return ToolPressureCompaction{
+		Window:    Window{Instructions: instructions, Entries: entries},
+		Artifacts: CloneArtifacts(artifacts), CompactedResults: len(artifacts),
+	}, nil
+}
+
 // CompactToolResults compacts only Tool output messages that exceed the configured byte limit.
 // The replacement is deterministic, so re-evaluating the same transcript is idempotent.
 func (manager *Manager) CompactToolResults(
@@ -213,12 +284,7 @@ func truncateSummary(value string, maxTokens int) string {
 }
 
 func compactedToolResultReference(artifact Artifact, maxBytes int) string {
-	header := fmt.Sprintf(
-		"[tool_result_compacted artifact_id=%s sha256=%s bytes=%d]\n",
-		artifact.ID,
-		artifact.ContentHash,
-		len([]byte(artifact.Content)),
-	)
+	header := compactedToolResultMarker(artifact)
 	const headOpen = "<head>\n"
 	const headCloseTailOpen = "\n</head>\n<tail>\n"
 	const tailClose = "\n</tail>"
@@ -232,6 +298,15 @@ func compactedToolResultReference(artifact Artifact, maxBytes int) string {
 	head := validUTF8Prefix(artifact.Content, headBytes)
 	tail := validUTF8Suffix(artifact.Content, tailBytes)
 	return header + headOpen + head + headCloseTailOpen + tail + tailClose
+}
+
+func compactedToolResultMarker(artifact Artifact) string {
+	return fmt.Sprintf(
+		"[tool_result_compacted artifact_id=%s sha256=%s bytes=%d]\n",
+		artifact.ID,
+		artifact.ContentHash,
+		len([]byte(artifact.Content)),
+	)
 }
 
 func validUTF8Prefix(value string, maxBytes int) string {
@@ -392,10 +467,11 @@ type RolloverRequest struct {
 // model-visible transcript. It preserves complete recent user turns and seals the removed
 // transcript as a durable Artifact before replacing it with a bounded extractive checkpoint.
 type PortableCompactionRequest struct {
-	Previous Checkpoint
-	RunID    string
-	Messages []model.Message
-	Policy   Policy
+	Previous    Checkpoint
+	RunID       string
+	Messages    []model.Message
+	Policy      Policy
+	OmitExtract bool
 }
 
 // PortableCompaction is one compacted active window plus the exact removed transcript Artifact.
@@ -410,6 +486,15 @@ type PortableCompaction struct {
 type ToolCompactionResult struct {
 	Messages  []model.Message
 	Artifacts []Artifact
+}
+
+// ToolPressureCompaction is an explicit rollover candidate used when the active transcript is
+// under window pressure but there is no safe old user-turn prefix to remove yet. It preserves the
+// complete message sequence and only replaces completed Tool result payloads with durable markers.
+type ToolPressureCompaction struct {
+	Window           Window
+	Artifacts        []Artifact
+	CompactedResults int
 }
 
 // TokenCountRequest carries both the canonical provider-visible request bytes and the routed
@@ -813,6 +898,9 @@ func (manager *Manager) CompactPortable(request PortableCompactionRequest) (Port
 	projection := portableCheckpointExtract(removed, artifact, policy.MaxCompactionTokens)
 	if strings.TrimSpace(projection.Marker) == "" {
 		return PortableCompaction{}, ErrBudgetExceeded
+	}
+	if request.OmitExtract {
+		projection.Extract = ""
 	}
 	entries := make([]Entry, 0, len(retained)+2)
 	entries = append(entries, Entry{

@@ -184,6 +184,48 @@ func TestCompactToolResultsDoesNotTrustForgedCompactionMarker(t *testing.T) {
 	requireTrue(t, len([]byte(compacted.Messages[2].Content)) <= 256, "forged marker replacement exceeded configured byte limit")
 }
 
+func TestCompactToolPressurePreservesEarlyTurnAndSealsCompletedResults(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	checkpoint, err := manager.Open(t.Context(), openRequest("current-user"))
+	requireNoError(t, err)
+	const (
+		callOne = "call-pressure-1"
+		callTwo = "call-pressure-2"
+	)
+	resultOne := `{"payload":"` + strings.Repeat("first-tool-result-", 40) + `"}`
+	resultTwo := `{"payload":"` + strings.Repeat("second-tool-result-", 40) + `"}`
+	messages := append(runtimectx.Materialize(checkpoint.Window),
+		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{
+			ID: callOne, ToolKey: testLookupToolKey, Name: "lookup", Arguments: json.RawMessage(`{}`),
+		}}},
+		model.Message{Role: model.RoleTool, ToolCallID: callOne, Content: resultOne},
+		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{
+			ID: callTwo, ToolKey: testLookupToolKey, Name: "lookup", Arguments: json.RawMessage(`{}`),
+		}}},
+		model.Message{Role: model.RoleTool, ToolCallID: callTwo, Content: resultTwo},
+	)
+
+	compacted, err := manager.CompactToolPressure(checkpoint, "run-pressure", messages)
+	requireNoError(t, err)
+	requireEqual(t, compacted.CompactedResults, 2, "pressure compacted result count")
+	requireEqual(t, len(compacted.Artifacts), 2, "pressure artifact count")
+	active := runtimectx.Materialize(compacted.Window)
+	requireEqual(t, len(active), len(messages), "pressure message count")
+	requireEqual(t, active[0].Role, model.RoleSystem, "pressure system instruction role")
+	requireEqual(t, active[1].Role, model.RoleUser, "pressure current user role")
+	requireEqual(t, active[1].Content, messages[1].Content, "pressure current user content")
+	requireEqual(t, active[2].ToolCalls[0].ID, callOne, "pressure first Tool call")
+	requireEqual(t, active[4].ToolCalls[0].ID, callTwo, "pressure second Tool call")
+	requireEqual(t, active[3].ToolCallID, callOne, "pressure first Tool result pairing")
+	requireEqual(t, active[5].ToolCallID, callTwo, "pressure second Tool result pairing")
+	requireTrue(t, strings.Contains(active[3].Content, "artifact_id="+compacted.Artifacts[0].ID), "pressure first artifact marker")
+	requireTrue(t, strings.Contains(active[5].Content, "artifact_id="+compacted.Artifacts[1].ID), "pressure second artifact marker")
+	requireEqual(t, compacted.Artifacts[0].Content, resultOne, "pressure first exact artifact")
+	requireEqual(t, compacted.Artifacts[1].Content, resultTwo, "pressure second exact artifact")
+	requireEqual(t, compacted.Artifacts[0].Generation, checkpoint.Generation+1, "pressure artifact generation")
+}
+
 func TestCompactPortablePreservesRecentTurnsAndSealsRemovedTranscript(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
