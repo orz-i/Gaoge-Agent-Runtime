@@ -1085,7 +1085,6 @@ func normalizeEntry(value Entry) Entry {
 	value.TurnID = strings.TrimSpace(value.TurnID)
 	value.SourceID = strings.TrimSpace(value.SourceID)
 	value.Message.Role = model.Role(strings.TrimSpace(string(value.Message.Role)))
-	value.Message.Content = strings.TrimSpace(value.Message.Content)
 	value.Message.ToolCallID = strings.TrimSpace(value.Message.ToolCallID)
 	value.Message.ToolCalls = cloneMessage(value.Message).ToolCalls
 	return value
@@ -1168,7 +1167,6 @@ func sameMessage(left, right model.Message) bool {
 func canonicalMessage(value model.Message) model.Message {
 	value = cloneMessage(value)
 	value.Role = model.Role(strings.TrimSpace(string(value.Role)))
-	value.Content = strings.TrimSpace(value.Content)
 	value.ToolCallID = strings.TrimSpace(value.ToolCallID)
 	if len(value.ToolCalls) == 0 {
 		value.ToolCalls = nil
