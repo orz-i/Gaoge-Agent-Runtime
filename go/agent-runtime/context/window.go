@@ -67,8 +67,7 @@ func (manager *Manager) CompactToolResults(
 	result := ToolCompactionResult{Messages: model.CloneMessages(messages)}
 	for index := range result.Messages {
 		message := &result.Messages[index]
-		if message.Role != model.RoleTool || len([]byte(message.Content)) <= maxBytes ||
-			isCompactedToolResultReference(message.Content) {
+		if message.Role != model.RoleTool || len([]byte(message.Content)) <= maxBytes {
 			continue
 		}
 		artifact, err := NewArtifact(
@@ -86,10 +85,6 @@ func (manager *Manager) CompactToolResults(
 		result.Artifacts = append(result.Artifacts, artifact)
 	}
 	return result, nil
-}
-
-func isCompactedToolResultReference(content string) bool {
-	return strings.HasPrefix(strings.TrimSpace(content), "[tool_result_compacted ")
 }
 
 func splitWindowInstructions(instructions string, messages []model.Message) (string, []model.Message) {
@@ -189,20 +184,25 @@ func truncateSummary(value string, maxTokens int) string {
 }
 
 func compactedToolResultReference(artifact Artifact, maxBytes int) string {
-	headTail := maxBytes / 4
-	if headTail < 128 {
-		headTail = 128
-	}
-	head := validUTF8Prefix(artifact.Content, headTail)
-	tail := validUTF8Suffix(artifact.Content, headTail)
-	return fmt.Sprintf(
-		"[tool_result_compacted artifact_id=%s sha256=%s bytes=%d]\n<head>\n%s\n</head>\n<tail>\n%s\n</tail>",
+	header := fmt.Sprintf(
+		"[tool_result_compacted artifact_id=%s sha256=%s bytes=%d]\n",
 		artifact.ID,
 		artifact.ContentHash,
 		len([]byte(artifact.Content)),
-		head,
-		tail,
 	)
+	const headOpen = "<head>\n"
+	const headCloseTailOpen = "\n</head>\n<tail>\n"
+	const tailClose = "\n</tail>"
+	overhead := len(header) + len(headOpen) + len(headCloseTailOpen) + len(tailClose)
+	if overhead > maxBytes {
+		return validUTF8Prefix(header, maxBytes)
+	}
+	remaining := maxBytes - overhead
+	headBytes := remaining / 2
+	tailBytes := remaining - headBytes
+	head := validUTF8Prefix(artifact.Content, headBytes)
+	tail := validUTF8Suffix(artifact.Content, tailBytes)
+	return header + headOpen + head + headCloseTailOpen + tail + tailClose
 }
 
 func validUTF8Prefix(value string, maxBytes int) string {
