@@ -248,6 +248,36 @@ func TestManagerExplicitCacheResetInvalidatesIdentityWithoutChangingSourceShape(
 	}
 }
 
+func TestManagerStaticFingerprintResetSeparatesSiblingCacheIdentities(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	first, err := manager.Open(t.Context(), openRequest("m1", "m2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	openSibling := func(staticFingerprint string) runtimectx.Checkpoint {
+		t.Helper()
+		request := openRequest("m1", "m2")
+		request.StaticFingerprint = runtimectx.StaticFingerprint(staticFingerprint)
+		request.Previous = &first
+		checkpoint, openErr := manager.Open(t.Context(), request)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		if checkpoint.Generation != first.Generation+1 || checkpoint.Trace.Reason != "lineage_reset" {
+			t.Fatalf("static reset did not create a new generation: %#v", checkpoint)
+		}
+		return checkpoint
+	}
+
+	left := openSibling("static-left")
+	right := openSibling("static-right")
+	if left.CacheIdentity == right.CacheIdentity {
+		t.Fatalf("distinct static prefixes shared cache identity: left=%q right=%q", left.CacheIdentity, right.CacheIdentity)
+	}
+}
+
 func TestManagerSourceDeltaMatchesCompleteAncestryOpen(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})

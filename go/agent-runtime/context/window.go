@@ -462,7 +462,9 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 			normalized, previous.Generation+1, 1, previous.ID,
 			normalized.Entries, "lineage_reset", 0,
 		)
-		next.CacheIdentity = resetCacheIdentity(previous, next.LineageHash, next.Generation)
+		next.CacheIdentity = resetCacheIdentity(
+			previous, next.StaticFingerprint, next.LineageHash, next.Generation,
+		)
 		next.ID = checkpointID(next)
 		return next, nil
 	}
@@ -510,15 +512,17 @@ func openSourceDelta(previous Checkpoint, request OpenRequest) (Checkpoint, erro
 		next.Generation = previous.Generation + 1
 		next.Revision = 1
 		next.Trace.Reason = "lineage_reset"
-		next.CacheIdentity = resetCacheIdentity(previous, lineageHash, next.Generation)
+		next.CacheIdentity = resetCacheIdentity(
+			previous, request.StaticFingerprint, lineageHash, next.Generation,
+		)
 	}
 	next.ID = checkpointID(next)
 	return next, nil
 }
 
-func resetCacheIdentity(previous Checkpoint, lineageHash string, generation int) string {
+func resetCacheIdentity(previous Checkpoint, staticFingerprint string, lineageHash string, generation int) string {
 	return stableID(
-		"ctxk", previous.ScopeID, previous.StaticFingerprint, strings.TrimSpace(lineageHash),
+		"ctxk", previous.ScopeID, strings.TrimSpace(staticFingerprint), strings.TrimSpace(lineageHash),
 		previous.CacheIdentity, strconv.Itoa(generation),
 	)
 }
