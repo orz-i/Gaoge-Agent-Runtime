@@ -144,6 +144,80 @@ func requirePutContextCheckpoint(t *testing.T, store *harnesspostgres.Store, che
 	}
 }
 
+func TestStoreFindContextCheckpointForPathUsesBoundedIndexedCandidates(t *testing.T) {
+	store, db := newStoreWithDB(t)
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	base := newContextCheckpoint(t, "scope-indexed-path-reuse")
+	requirePutContextCheckpoint(t, store, base)
+
+	const unrelatedCheckpointCount = 1024
+	for index := 0; index < unrelatedCheckpointCount; index++ {
+		sourceID := fmt.Sprintf("unrelated-%04d", index)
+		checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+			ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
+			SourcePath: []string{sourceID}, Entries: []runtimecontext.Entry{{
+				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: "turn-" + sourceID,
+				Message: model.Message{Role: model.RoleUser, Content: sourceID},
+			}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		requirePutContextCheckpoint(t, store, checkpoint)
+	}
+
+	branch, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
+		SourcePath: []string{"branch-child"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-branch-child", SourceID: "branch-child", TurnID: "turn-branch-child",
+			Message: model.Message{Role: model.RoleAssistant, Content: "branch child"},
+		}}, SourceDelta: true, Previous: &base,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requirePutContextCheckpoint(t, store, branch)
+
+	var candidateQueries int
+	var unboundedCandidateSQL string
+	maxCandidateVars := 0
+	callbackName := "test:observe_bounded_context_path_candidates"
+	if err = db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		sql := strings.ToLower(strings.NewReplacer("`", "", `"`, "").Replace(tx.Statement.SQL.String()))
+		if !strings.Contains(sql, "agent_harness_context_checkpoints") ||
+			!strings.Contains(sql, "covered_through_source_id") || !strings.Contains(sql, "source_aligned") {
+			return
+		}
+		candidateQueries++
+		if !strings.Contains(sql, "covered_path_hash in") {
+			unboundedCandidateSQL = sql
+		}
+		if len(tx.Statement.Vars) > maxCandidateVars {
+			maxCandidateVars = len(tx.Statement.Vars)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Callback().Query().Remove(callbackName) }()
+
+	path := []string{testContextBaseSourceID, "branch-child"}
+	for index := 0; index < 298; index++ {
+		path = append(path, fmt.Sprintf("future-child-%03d", index))
+	}
+	found, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{
+		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, SourcePath: path,
+	})
+	if err != nil || found.ID != branch.ID {
+		t.Fatalf("indexed path lookup=%#v want=%s err=%v", found, branch.ID, err)
+	}
+	if candidateQueries < 2 || unboundedCandidateSQL != "" {
+		t.Fatalf("checkpoint reuse did not use bounded path-hash candidates: queries=%d sql=%q", candidateQueries, unboundedCandidateSQL)
+	}
+	if maxCandidateVars > 300 {
+		t.Fatalf("checkpoint reuse query expanded ancestry-sized SQL args: vars=%d", maxCandidateVars)
+	}
+}
+
 func createContextCommitTurn(
 	t *testing.T,
 	store *harnesspostgres.Store,
@@ -827,6 +901,11 @@ func assertItemLifecycle(t *testing.T, store *harnesspostgres.Store, turnID, inv
 }
 
 func newStore(t *testing.T) *harnesspostgres.Store {
+	store, _ := newStoreWithDB(t)
+	return store
+}
+
+func newStoreWithDB(t *testing.T) (*harnesspostgres.Store, *gorm.DB) {
 	t.Helper()
 	dsn := fmt.Sprintf("file:harness-%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -840,5 +919,5 @@ func newStore(t *testing.T) *harnesspostgres.Store {
 	if err != nil {
 		t.Fatalf("create store: %v", err)
 	}
-	return store
+	return store, db
 }
