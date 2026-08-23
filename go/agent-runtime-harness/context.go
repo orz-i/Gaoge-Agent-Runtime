@@ -292,6 +292,7 @@ func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog 
 
 type contextToolFingerprint struct {
 	Key         string          `json:"key"`
+	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Schema      json.RawMessage `json:"schema"`
 }
@@ -310,8 +311,8 @@ func buildContextTools(catalog tools.Catalog, keys []string) ([]contextToolFinge
 	result := make([]contextToolFingerprint, len(definitions))
 	for index, definition := range definitions {
 		result[index] = contextToolFingerprint{
-			Key: strings.TrimSpace(definition.Key), Description: strings.TrimSpace(definition.Description),
-			Schema: canonicalContextJSON(definition.InputSchema),
+			Key: strings.TrimSpace(definition.Key), Name: strings.TrimSpace(definition.Name),
+			Description: strings.TrimSpace(definition.Description), Schema: canonicalContextJSON(definition.InputSchema),
 		}
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left].Key < result[right].Key })

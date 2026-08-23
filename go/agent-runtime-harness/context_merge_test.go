@@ -12,9 +12,30 @@ import (
 )
 
 const (
-	parentGoal                  = "parent goal"
+	parentGoal                 = "parent goal"
 	contextFingerprintTestTurn = "turn-1"
 )
+
+type contextFingerprintCatalog struct{ definition tools.Definition }
+
+func (catalog contextFingerprintCatalog) Resolve(key string) (tools.Definition, bool) {
+	if catalog.definition.Key != key {
+		return tools.Definition{}, false
+	}
+	return tools.CloneDefinition(catalog.definition), true
+}
+
+func (catalog contextFingerprintCatalog) List(keys []string) ([]tools.Definition, error) {
+	result := make([]tools.Definition, 0, len(keys))
+	for _, key := range keys {
+		definition, ok := catalog.Resolve(key)
+		if !ok {
+			return nil, tools.ErrToolNotFound
+		}
+		result = append(result, definition)
+	}
+	return result, nil
+}
 
 func TestMergeContextRuntimeMessagesDirectGoalDoesNotDuplicateCurrentTurn(t *testing.T) {
 	t.Parallel()
@@ -75,6 +96,32 @@ func TestContextStaticFingerprintIgnoresSamplingOnlyModelOptions(t *testing.T) {
 	}
 	if third == first {
 		t.Fatalf("model identity change did not reset Context fingerprint: %q", third)
+	}
+}
+
+func TestContextStaticFingerprintIncludesProviderVisibleToolName(t *testing.T) {
+	t.Parallel()
+	seed := &ContextSeed{
+		SourcePath: []string{"message-tool"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-tool", SourceID: "message-tool", TurnID: contextFingerprintTestTurn,
+			Message: model.Message{Role: model.RoleUser, Content: "use the configured tool"},
+		}},
+	}
+	config := ConfigSnapshot{Model: "model-a", ToolKeys: []string{"lookup"}}
+	definition := tools.Definition{
+		Key: "lookup", Name: "lookup_v1", Description: "lookup data", InputSchema: json.RawMessage(`{"type":"object"}`),
+	}
+	first, err := contextStaticFingerprint(config, seed, contextFingerprintCatalog{definition: definition})
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition.Name = "lookup_v2"
+	second, err := contextStaticFingerprint(config, seed, contextFingerprintCatalog{definition: definition})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("provider-visible Tool name change did not reset Context fingerprint: %q", first)
 	}
 }
 
