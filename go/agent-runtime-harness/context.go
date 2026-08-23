@@ -265,7 +265,7 @@ func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog 
 	if seed == nil {
 		return "", ErrInvalidRequest
 	}
-	definitions, err := buildContextTools(catalog, config.ToolKeys)
+	definitions, err := buildContextTools(catalog, config.ToolKeys, config.ToolPolicies)
 	if err != nil {
 		return "", err
 	}
@@ -291,32 +291,74 @@ func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog 
 }
 
 type contextToolFingerprint struct {
-	Key         string          `json:"key"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Schema      json.RawMessage `json:"schema"`
+	Key               string          `json:"key"`
+	DefinitionVersion string          `json:"definitionVersion,omitempty"`
+	Name              string          `json:"name,omitempty"`
+	Description       string          `json:"description,omitempty"`
+	Schema            json.RawMessage `json:"schema,omitempty"`
 }
 
-func buildContextTools(catalog tools.Catalog, keys []string) ([]contextToolFingerprint, error) {
+func buildContextTools(
+	catalog tools.Catalog,
+	keys []string,
+	policies []ToolPolicySnapshot,
+) ([]contextToolFingerprint, error) {
 	if len(keys) == 0 {
 		return nil, nil
 	}
-	if catalog == nil {
-		return nil, ErrInvalidRequest
-	}
-	definitions, err := catalog.List(keys)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]contextToolFingerprint, len(definitions))
-	for index, definition := range definitions {
-		result[index] = contextToolFingerprint{
-			Key: strings.TrimSpace(definition.Key), Name: strings.TrimSpace(definition.Name),
-			Description: strings.TrimSpace(definition.Description), Schema: canonicalContextJSON(definition.InputSchema),
+	versions := contextToolDefinitionVersions(policies)
+	result := make([]contextToolFingerprint, 0, len(keys))
+	for _, rawKey := range keys {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			return nil, ErrInvalidRequest
 		}
+		fingerprint, err := contextToolFingerprintForKey(catalog, key, versions[key])
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, fingerprint)
 	}
 	sort.Slice(result, func(left, right int) bool { return result[left].Key < result[right].Key })
 	return result, nil
+}
+
+func contextToolDefinitionVersions(policies []ToolPolicySnapshot) map[string]string {
+	versions := make(map[string]string, len(policies))
+	for _, policy := range policies {
+		key := strings.TrimSpace(policy.Key)
+		version := strings.TrimSpace(policy.DefinitionVersion)
+		if key != "" && version != "" {
+			versions[key] = version
+		}
+	}
+	return versions
+}
+
+func contextToolFingerprintForKey(
+	catalog tools.Catalog,
+	key string,
+	definitionVersion string,
+) (contextToolFingerprint, error) {
+	if catalog != nil {
+		if definition, ok := catalog.Resolve(key); ok {
+			return contextToolFingerprint{
+				Key: key, DefinitionVersion: definitionVersion,
+				Name: strings.TrimSpace(definition.Name), Description: strings.TrimSpace(definition.Description),
+				Schema: canonicalContextJSON(definition.InputSchema),
+			}, nil
+		}
+	}
+	// Provider-hosted Tools are intentionally absent from the local Tool Catalog.
+	// Their immutable provider-definition version is frozen in ConfigSnapshot and
+	// already seals the provider-visible hosted variants/payloads.
+	if definitionVersion != "" {
+		return contextToolFingerprint{Key: key, DefinitionVersion: definitionVersion}, nil
+	}
+	if catalog != nil {
+		return contextToolFingerprint{}, tools.ErrToolNotFound
+	}
+	return contextToolFingerprint{}, ErrInvalidRequest
 }
 
 func canonicalContextJSON(value json.RawMessage) json.RawMessage {

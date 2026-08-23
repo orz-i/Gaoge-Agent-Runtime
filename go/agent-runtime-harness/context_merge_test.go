@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	parentGoal                 = "parent goal"
-	contextFingerprintTestTurn = "turn-1"
+	parentGoal                      = "parent goal"
+	contextFingerprintTestTurn      = "turn-1"
+	hostedContextFingerprintToolKey = "provider.image_generation"
 )
 
 type contextFingerprintCatalog struct{ definition tools.Definition }
@@ -122,6 +123,55 @@ func TestContextStaticFingerprintIncludesProviderVisibleToolName(t *testing.T) {
 	}
 	if first == second {
 		t.Fatalf("provider-visible Tool name change did not reset Context fingerprint: %q", first)
+	}
+}
+
+func TestContextStaticFingerprintUsesFrozenDefinitionVersionForHostedTool(t *testing.T) {
+	t.Parallel()
+	seed := &ContextSeed{
+		SourcePath: []string{"message-hosted"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-hosted", SourceID: "message-hosted", TurnID: contextFingerprintTestTurn,
+			Message: model.Message{Role: model.RoleUser, Content: "use the hosted image tool"},
+		}},
+	}
+	base := ConfigSnapshot{
+		Model: "model-a", ToolKeys: []string{hostedContextFingerprintToolKey},
+		ToolPolicies: []ToolPolicySnapshot{{
+			Key: hostedContextFingerprintToolKey, DefinitionVersion: "hosted-definition-v1",
+		}},
+	}
+	first, err := contextStaticFingerprint(base, seed, contextFingerprintCatalog{})
+	if err != nil {
+		t.Fatalf("hosted Tool fingerprint required a local Tool registration: %v", err)
+	}
+	changed := base
+	changed.ToolPolicies = []ToolPolicySnapshot{{
+		Key: hostedContextFingerprintToolKey, DefinitionVersion: "hosted-definition-v2",
+	}}
+	second, err := contextStaticFingerprint(changed, seed, contextFingerprintCatalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatalf("hosted Tool provider-definition change did not reset Context fingerprint: %q", first)
+	}
+}
+
+func TestContextStaticFingerprintRejectsUnknownToolWithoutFrozenDefinition(t *testing.T) {
+	t.Parallel()
+	seed := &ContextSeed{
+		SourcePath: []string{"message-missing"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-missing", SourceID: "message-missing", TurnID: contextFingerprintTestTurn,
+			Message: model.Message{Role: model.RoleUser, Content: "use an unknown tool"},
+		}},
+	}
+	_, err := contextStaticFingerprint(
+		ConfigSnapshot{Model: "model-a", ToolKeys: []string{"missing.tool"}},
+		seed,
+		contextFingerprintCatalog{},
+	)
+	if !errors.Is(err, tools.ErrToolNotFound) {
+		t.Fatalf("unknown Tool without a frozen provider definition error=%v", err)
 	}
 }
 
