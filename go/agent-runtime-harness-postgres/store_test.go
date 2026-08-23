@@ -21,6 +21,7 @@ import (
 const (
 	testHarnessExecutionRefID = "hr_pg"
 	testContextBaseSourceID   = "message-pg"
+	testContextPathRootID     = "message-root"
 )
 
 func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
@@ -350,8 +351,8 @@ func TestStoreFindContextCheckpointForPathRejectsMalformedSourcePath(t *testing.
 	t.Parallel()
 	store := newStore(t)
 	for name, sourcePath := range map[string][]string{
-		"empty":     {"message-root", "   ", "message-leaf"},
-		"duplicate": {"message-root", "message-root"},
+		"empty":     {testContextPathRootID, "   ", "message-leaf"},
+		"duplicate": {testContextPathRootID, testContextPathRootID},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
