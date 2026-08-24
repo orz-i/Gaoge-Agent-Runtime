@@ -7,6 +7,7 @@ import (
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -120,6 +121,10 @@ func TestClientDiscoversA2A10HTTPJSONAndSendsMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertA2ATestDiscovery(t, discovery, card)
+	restored, err := RestoreDiscovery(discovery.CardJSON, discovery.Descriptor.PreferredURL)
+	if err != nil || !reflect.DeepEqual(restored.Descriptor, discovery.Descriptor) || len(restored.Skills) != len(discovery.Skills) {
+		t.Fatalf("restored=%#v err=%v", restored, err)
+	}
 	interaction, err := client.SendMessage(t.Context(), discovery, SendRequest{MessageID: testMessageID, Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
@@ -136,6 +141,41 @@ func TestClientDiscoversA2A10HTTPJSONAndSendsMessage(t *testing.T) {
 		eventMessage + ":started", eventMessage + ":completed",
 		eventTaskGet + ":started", eventTaskGet + ":completed",
 	})
+}
+
+func TestClientSendsRichContentAndListsTasks(t *testing.T) {
+	t.Parallel()
+	server, _ := newA2ATestServer(t, false)
+	client := newA2ATestClient(t, server.Client())
+	discovery, err := client.Discover(t.Context(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	historyLength := 10
+	interaction, err := client.SendMessage(t.Context(), discovery, SendRequest{
+		MessageID: testMessageID + "-rich",
+		Parts: []ContentPart{
+			{Kind: ContentPartText, Text: "analyze"},
+			{Kind: ContentPartData, Data: json.RawMessage(`{"priority":2}`), MediaType: "application/json"},
+			{Kind: ContentPartRaw, Raw: []byte("bytes"), Filename: "input.bin", MediaType: "application/octet-stream"},
+			{Kind: ContentPartURL, URL: "https://files.example/input.txt", Filename: "input.txt", MediaType: "text/plain"},
+		},
+		AcceptedOutputModes: []string{"text/plain", "application/json"}, HistoryLength: &historyLength,
+	})
+	if err != nil || interaction.Task == nil || len(interaction.Task.History) == 0 {
+		t.Fatalf("interaction=%#v err=%v", interaction, err)
+	}
+	message := interaction.Task.History[0]
+	if len(message.Parts) != 4 || message.Parts[1].Kind != ContentPartData ||
+		string(message.Parts[1].Data) != `{"priority":2}` || message.Parts[2].Filename != "input.bin" {
+		t.Fatalf("rich message projection = %#v", message)
+	}
+	page, err := client.ListTasks(t.Context(), discovery, ListTasksRequest{
+		PageSize: 10, HistoryLength: &historyLength, IncludeArtifacts: true,
+	})
+	if err != nil || len(page.Tasks) == 0 || page.TotalSize < 1 || page.Tasks[0].ID == "" || !json.Valid(page.Raw) {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
 }
 
 func TestClientCancelTaskUsesExactA2AVersion(t *testing.T) {
@@ -216,7 +256,10 @@ func newA2ATestClient(t *testing.T, httpClient *http.Client, observers ...plugin
 
 func newA2ATestServer(t *testing.T, requireInput bool) (*httptest.Server, *a2asdk.AgentCard) {
 	t.Helper()
-	requestHandler := a2asrv.NewHandler(testExecutor{requireInput: requireInput})
+	requestHandler := a2asrv.NewHandler(
+		testExecutor{requireInput: requireInput},
+		a2asrv.WithCallInterceptors(testAuthInterceptor{}),
+	)
 	mux := http.NewServeMux()
 	var card *a2asdk.AgentCard
 	mux.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewAgentCardHandler(a2asrv.AgentCardProducerFn(
@@ -234,8 +277,28 @@ func newA2ATestServer(t *testing.T, requireInput bool) (*httptest.Server, *a2asd
 			{URL: server.URL, ProtocolBinding: a2asdk.TransportProtocolHTTPJSON, ProtocolVersion: a2asdk.Version},
 		},
 		Skills: []a2asdk.AgentSkill{{ID: "echo", Name: "Echo", Description: "Echo a message", Tags: []string{"test"}}},
+		SecuritySchemes: a2asdk.NamedSecuritySchemes{
+			"bearer": a2asdk.HTTPAuthSecurityScheme{Scheme: "Bearer", BearerFormat: "JWT"},
+		},
+		SecurityRequirements: a2asdk.SecurityRequirementsOptions{
+			{a2asdk.SecuritySchemeName("bearer"): a2asdk.SecuritySchemeScopes{}},
+		},
+		Signatures: []a2asdk.AgentCardSignature{{Protected: "eyJhbGciOiJFZERTQSJ9", Signature: "fixture-signature"}},
 	}
 	return server, card
+}
+
+type testAuthInterceptor struct {
+	a2asrv.PassthroughCallInterceptor
+}
+
+func (testAuthInterceptor) Before(
+	ctx context.Context,
+	call *a2asrv.CallContext,
+	_ *a2asrv.Request,
+) (context.Context, any, error) {
+	call.User = a2asrv.NewAuthenticatedUser("fixture-user", nil)
+	return ctx, nil, nil
 }
 
 func requireA2AVersion(t *testing.T, next http.Handler) http.Handler {
@@ -261,7 +324,10 @@ func assertA2ATestDiscovery(t *testing.T, discovery Discovery, card *a2asdk.Agen
 		t.Fatalf("unexpected descriptor: %#v", discovery.Descriptor)
 	}
 	if len(discovery.Skills) != 1 || discovery.Skills[0].ID != "echo" ||
-		!strings.Contains(string(discovery.CapabilitiesJSON), `"streaming":true`) {
+		!strings.Contains(string(discovery.CapabilitiesJSON), `"streaming":true`) ||
+		len(discovery.SecuritySchemes) != 1 || discovery.SecuritySchemes[0].Name != "bearer" ||
+		discovery.SecuritySchemes[0].Type != "http" || len(discovery.Signatures) != 1 ||
+		!json.Valid(discovery.CardJSON) || !json.Valid(discovery.SecurityRequirementsJSON) {
 		t.Fatalf("unexpected discovery: %#v", discovery)
 	}
 }

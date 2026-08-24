@@ -3,9 +3,13 @@ package a2a
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
 )
 
 const (
@@ -23,7 +27,10 @@ func (agent *testHostedAgent) Execute(_ context.Context, request HostedRequest, 
 	if err := sink(HostedEvent{Kind: HostedEventArtifact, ArtifactID: "artifact-1", Text: "chunk-1", Name: "answer"}); err != nil {
 		return err
 	}
-	return sink(HostedEvent{Kind: HostedEventArtifact, ArtifactID: "artifact-1", Text: "chunk-2", Append: true, LastChunk: true})
+	return sink(HostedEvent{
+		Kind: HostedEventArtifact, ArtifactID: "artifact-1", Append: true, LastChunk: true,
+		Parts: []ContentPart{{Kind: ContentPartData, Data: json.RawMessage(`{"chunk":2}`), MediaType: "application/json"}},
+	})
 }
 
 func (agent *testHostedAgent) Cancel(_ context.Context, request HostedCancelRequest) error {
@@ -72,6 +79,11 @@ func assertHostedExecution(t *testing.T, interaction Interaction, err error, age
 	if len(agent.requests) != 1 || !json.Valid(agent.requests[0].Message) || agent.requests[0].TaskID == "" {
 		t.Fatalf("hosted requests = %#v", agent.requests)
 	}
+	if agent.requests[0].MessageView.ID == "" || len(agent.requests[0].MessageView.Parts) != 1 ||
+		interaction.Task == nil || len(interaction.Task.Artifacts) != 1 || len(interaction.Task.Artifacts[0].Parts) != 2 ||
+		interaction.Task.Artifacts[0].Parts[1].Kind != ContentPartData {
+		t.Fatalf("hosted rich projection request=%#v interaction=%#v", agent.requests[0], interaction)
+	}
 }
 
 func TestHostStreamsHostedAgentEvents(t *testing.T) {
@@ -102,6 +114,68 @@ func TestHostStreamsHostedAgentEvents(t *testing.T) {
 		t.Fatalf("stream events = %#v", events)
 	}
 }
+
+func TestHostedMessageBecomesTerminalTaskStatus(t *testing.T) {
+	t.Parallel()
+	execContext := &a2asrv.ExecutorContext{TaskID: "task-1", ContextID: "context-1"}
+	event, err := projectHostedMessage(execContext, HostedEvent{
+		Kind: HostedEventMessage, MessageID: "message-1",
+		Parts: []ContentPart{{Kind: ContentPartData, Data: json.RawMessage(`{"answer":42}`)}},
+	})
+	if err != nil || event.Status.State != a2asdk.TaskStateCompleted || event.Status.Message == nil ||
+		len(event.Status.Message.Parts) != 1 {
+		t.Fatalf("event=%#v err=%v", event, err)
+	}
+	authEvent, terminal, err := projectHostedStatus(execContext, HostedEvent{
+		Kind: HostedEventStatus, Status: HostedStatusAuthRequired,
+		MessageID: "auth-prompt", Text: "authenticate to continue",
+	})
+	status, ok := authEvent.(*a2asdk.TaskStatusUpdateEvent)
+	if err != nil || !terminal || !ok || status.Status.Message == nil || status.Status.Message.ID != "auth-prompt" {
+		t.Fatalf("auth event=%#v terminal=%v err=%v", authEvent, terminal, err)
+	}
+}
+
+func TestHostCanReturnDirectMessageWithoutCreatingTask(t *testing.T) {
+	t.Parallel()
+	agent := hostedAgentFunc(func(_ context.Context, _ HostedRequest, sink HostedSink) error {
+		return sink(HostedEvent{
+			Kind: HostedEventDirectMessage, MessageID: "direct-message", Text: "direct response",
+		})
+	})
+	host := newA2AHostedTestHost(t, agent)
+	server := httptest.NewServer(host.Handler())
+	t.Cleanup(server.Close)
+
+	client := newA2ATestClient(t, server.Client())
+	interaction, err := client.SendMessage(t.Context(), hostedTestDiscovery(server.URL), SendRequest{
+		MessageID: "direct-request", Text: "respond directly",
+	})
+	if err != nil || interaction.Message == nil || interaction.Task != nil || interaction.Message.ID != "direct-message" ||
+		len(interaction.Message.Parts) != 1 || interaction.Message.Parts[0].Text != "direct response" {
+		t.Fatalf("interaction=%#v err=%v", interaction, err)
+	}
+}
+
+func TestDirectMessageCannotFollowTaskEvents(t *testing.T) {
+	t.Parallel()
+	execContext := &a2asrv.ExecutorContext{TaskID: "task-1", ContextID: "context-1"}
+	execution := hostedExecution{taskStarted: true}
+	err := execution.captureDirectMessage(execContext, HostedEvent{
+		Kind: HostedEventDirectMessage, MessageID: "direct-message", Text: "invalid",
+	})
+	if !errors.Is(err, ErrInvalidHostedEvent) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+type hostedAgentFunc func(context.Context, HostedRequest, HostedSink) error
+
+func (function hostedAgentFunc) Execute(ctx context.Context, request HostedRequest, sink HostedSink) error {
+	return function(ctx, request, sink)
+}
+
+func (hostedAgentFunc) Cancel(context.Context, HostedCancelRequest) error { return nil }
 
 func newA2AHostedTestHost(t *testing.T, agent HostedAgent) *Host {
 	t.Helper()

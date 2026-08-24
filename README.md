@@ -5,7 +5,7 @@ agents. It separates the deterministic run state machine from optional agent,
 harness, HTTP, protocol, and persistence capabilities.
 
 This repository is the canonical public source. The current release line is
-`v0.1.0-beta.1` and should be treated as a Beta API.
+`v0.1.0-beta.2` and should be treated as a Beta API.
 
 ## Packages
 
@@ -18,15 +18,15 @@ This repository is the canonical public source. The current release line is
 | `go/agent-runtime-harness-postgres` | Harness and Context V2 store | Supported |
 | `go/agent-runtime-redis` | Durable continuation queue and run feed | Supported |
 | `go/agent-runtime-mcp` | MCP client, registry, and transport adapters | Supported |
-| `go/agent-runtime-a2a` | A2A transport and shadow-run integration | Experimental |
+| `go/agent-runtime-a2a` | Explicit A2A v1 plugin, client/server edge, and durable shadow runs | Supported in Beta.2 |
 | `ts/agent-runtime-client` | Dependency-free TypeScript HTTP v1 client | Supported |
 | `contracts/agent-runtime/v1` | OpenAPI and capability contracts | Supported |
 
 ## Install
 
 ```bash
-go get github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime@v0.1.0-beta.1
-pnpm add @orz-i/agent-runtime-client@0.1.0-beta.1
+go get github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime@v0.1.0-beta.2
+pnpm add @orz-i/agent-runtime-client@0.1.0-beta.2
 ```
 
 ## Minimal Go runtime
@@ -81,5 +81,6 @@ real-engine concurrency and recovery suites, and removes the containers.
 
 - [Beta support policy](SUPPORT.md)
 - [Security policy](SECURITY.md)
+- [A2A product integration and support matrix](docs/a2a.md)
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)

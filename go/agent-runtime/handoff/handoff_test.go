@@ -40,6 +40,61 @@ func TestStartOrLoadReusesStableChildRun(t *testing.T) {
 	}
 }
 
+func TestRoutedCoordinatorSelectsChildPerDelegation(t *testing.T) {
+	t.Parallel()
+	local := newFakeChildren()
+	remote := newFakeChildren()
+	coordinator, err := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(
+		_ context.Context,
+		delegation handoff.Delegation,
+	) (handoff.ChildRunner, error) {
+		if delegation.MemberID == "a2a:remote" {
+			return remote, nil
+		}
+		return local, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descriptor := coordinator.Descriptor(); len(descriptor.Requires) != 0 {
+		t.Fatalf("routed descriptor leaked concrete requirements: %#v", descriptor)
+	}
+	parent := kernel.Snapshot{Run: kernel.Run{
+		ID: "team_1", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},
+	}}
+	delegation := handoff.Delegation{
+		ID: "handoff_remote", MemberID: "a2a:remote", ChildRunID: "run_remote",
+		Goal: "research remotely", Status: handoff.StatusQueued,
+	}
+	projected, err := coordinator.StartOrLoad(t.Context(), parent, delegation)
+	if !errors.Is(err, handoff.ErrChildPending) || projected.Status != handoff.StatusRunning {
+		t.Fatalf("projected=%#v err=%v", projected, err)
+	}
+	if remote.starts != 1 || local.starts != 0 {
+		t.Fatalf("remote starts=%d local starts=%d", remote.starts, local.starts)
+	}
+}
+
+func TestRoutedCoordinatorFailsClosedWithoutChild(t *testing.T) {
+	t.Parallel()
+	coordinator, err := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(
+		context.Context,
+		handoff.Delegation,
+	) (handoff.ChildRunner, error) {
+		return nil, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = coordinator.Refresh(t.Context(), handoff.Delegation{
+		ID: "handoff", MemberID: "unknown", ChildRunID: "run", Goal: "goal", Status: handoff.StatusRunning,
+	})
+	if !errors.Is(err, handoff.ErrChildUnavailable) {
+		t.Fatalf("expected unavailable child, got %v", err)
+	}
+}
+
 func TestResolveJoinAllCollectFailsWhenEveryDelegationFails(t *testing.T) {
 	t.Parallel()
 	delegations := []handoff.Delegation{

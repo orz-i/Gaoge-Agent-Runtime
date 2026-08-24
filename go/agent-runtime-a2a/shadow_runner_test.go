@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -24,10 +25,14 @@ type shadowRemote struct {
 	sent     SendRequest
 	task     TaskSnapshot
 	canceled bool
+	sendErr  error
 }
 
 func (remote *shadowRemote) SendMessage(_ context.Context, _ Discovery, request SendRequest) (Interaction, error) {
 	remote.sent = request
+	if remote.sendErr != nil {
+		return Interaction{}, remote.sendErr
+	}
 	return Interaction{Task: cloneTaskSnapshot(&remote.task), Raw: append(json.RawMessage(nil), remote.task.Raw...)}, nil
 }
 
@@ -123,6 +128,99 @@ func TestShadowRunnerCancelProjectsRemoteTaskLocally(t *testing.T) {
 	}
 }
 
+func TestShadowRunnerMapsInputRequiredAndResumesRemoteTask(t *testing.T) {
+	t.Parallel()
+	runtime := newShadowRuntime(t)
+	remote := &shadowRemote{task: inputRequiredTask()}
+	runner := newShadowRunner(t, runtime, remote)
+	started, err := runner.StartRun(t.Context(), shadowStartRequest("a2a-child-input"))
+	if err != nil || started.Run.Status != kernel.RunStatusWaitingInput {
+		t.Fatalf("started=%#v err=%v", started.Run, err)
+	}
+	remote.task = completedTask()
+	completed, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("completed=%#v err=%v", completed.Run, err)
+	}
+	if remote.sent.MessageID != started.Run.ID+":message:2" || remote.sent.TaskID != "remote-1" ||
+		remote.sent.ContextID != "context-1" || remote.sent.Text != "approved" {
+		t.Fatalf("resume request=%#v", remote.sent)
+	}
+}
+
+func TestShadowRunnerRefreshesAuthRequiredRunAfterRemoteCompletion(t *testing.T) {
+	t.Parallel()
+	runtime := newShadowRuntime(t)
+	remote := &shadowRemote{task: authRequiredTask()}
+	runner := newShadowRunner(t, runtime, remote)
+	started, err := runner.StartRun(t.Context(), shadowStartRequest("a2a-child-auth"))
+	if err != nil || started.Run.Status != kernel.RunStatusWaitingInput {
+		t.Fatalf("started=%#v err=%v", started.Run, err)
+	}
+	remote.task = completedTask()
+	completed, err := runner.LoadRun(t.Context(), started.Run.ID)
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("completed=%#v err=%v", completed.Run, err)
+	}
+}
+
+func TestShadowRunnerRetriesResumeWithStableMessageIdentity(t *testing.T) {
+	t.Parallel()
+	runtime := newShadowRuntime(t)
+	remote := &shadowRemote{task: inputRequiredTask()}
+	runner := newShadowRunner(t, runtime, remote)
+	started, err := runner.StartRun(t.Context(), shadowStartRequest("a2a-child-resume-retry"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote.sendErr = errors.New("temporary network failure")
+	waiting, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
+	if err == nil || waiting.Run.Status != kernel.RunStatusWaitingInput {
+		t.Fatalf("waiting=%#v err=%v", waiting.Run, err)
+	}
+	messageID := remote.sent.MessageID
+	remote.sendErr = nil
+	remote.task = completedTask()
+	completed, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || remote.sent.MessageID != messageID {
+		t.Fatalf("completed=%#v messageID=%q err=%v", completed.Run, remote.sent.MessageID, err)
+	}
+}
+
+func TestShadowRunnerUpdatesOneRemoteWaitKindWithoutInvalidTransition(t *testing.T) {
+	t.Parallel()
+	runtime := newShadowRuntime(t)
+	remote := &shadowRemote{task: inputRequiredTask()}
+	runner := newShadowRunner(t, runtime, remote)
+	started, err := runner.StartRun(t.Context(), shadowStartRequest("a2a-child-wait-kind"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote.task = authRequiredTask()
+	updated, err := runner.LoadRun(t.Context(), started.Run.ID)
+	if err != nil || updated.Run.Status != kernel.RunStatusWaitingInput || updated.Checkpoint == nil ||
+		updated.Checkpoint.Kind != "a2a.auth" {
+		t.Fatalf("updated=%#v err=%v", updated, err)
+	}
+}
+
+func TestShadowRunnerDoesNotPersistTransportErrorDetails(t *testing.T) {
+	t.Parallel()
+	runtime := newShadowRuntime(t)
+	remote := &shadowRemote{
+		task: workingTask(), sendErr: errors.New("Bearer secret at https://private.example"),
+	}
+	runner := newShadowRunner(t, runtime, remote)
+	failed, err := runner.StartRun(t.Context(), shadowStartRequest("a2a-child-transport-error"))
+	if err == nil || failed.Run.Status != kernel.RunStatusFailed || failed.Run.ErrorDetail != ErrRemoteSendFailed.Error() {
+		t.Fatalf("failed=%#v err=%v", failed.Run, err)
+	}
+	raw, marshalErr := json.Marshal(failed)
+	if marshalErr != nil || strings.Contains(string(raw), "Bearer secret") || strings.Contains(string(raw), "private.example") {
+		t.Fatalf("persisted transport detail: %s, err=%v", raw, marshalErr)
+	}
+}
+
 func TestShadowRunnerFailsClosedWhenRemoteIdentityWasNeverPersisted(t *testing.T) {
 	t.Parallel()
 	runtime := newShadowRuntime(t)
@@ -204,6 +302,20 @@ func completedTask() TaskSnapshot {
 	return TaskSnapshot{
 		ID: "remote-1", ContextID: "context-1", State: "TASK_STATE_COMPLETED", Terminal: true,
 		Raw: json.RawMessage(`{"id":"remote-1","contextId":"context-1","status":{"state":"TASK_STATE_COMPLETED"}}`),
+	}
+}
+
+func inputRequiredTask() TaskSnapshot {
+	return TaskSnapshot{
+		ID: "remote-1", ContextID: "context-1", State: "TASK_STATE_INPUT_REQUIRED",
+		Raw: json.RawMessage(`{"id":"remote-1","contextId":"context-1","status":{"state":"TASK_STATE_INPUT_REQUIRED"}}`),
+	}
+}
+
+func authRequiredTask() TaskSnapshot {
+	return TaskSnapshot{
+		ID: "remote-1", ContextID: "context-1", State: "TASK_STATE_AUTH_REQUIRED",
+		Raw: json.RawMessage(`{"id":"remote-1","contextId":"context-1","status":{"state":"TASK_STATE_AUTH_REQUIRED"}}`),
 	}
 }
 
