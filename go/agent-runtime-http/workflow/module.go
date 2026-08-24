@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	runtimehttp "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
+	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 type Dependencies struct {

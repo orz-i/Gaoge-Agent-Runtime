@@ -6,15 +6,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	topologyadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/topology"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
+	topologyadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 const (

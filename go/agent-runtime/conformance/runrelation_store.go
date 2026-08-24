@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 // RunRelationStoreFactory creates one isolated relation store per test.

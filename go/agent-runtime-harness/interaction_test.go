@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 const interactionParentInvocationID = "hiv_parent"

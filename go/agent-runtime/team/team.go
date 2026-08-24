@@ -8,9 +8,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 const (
@@ -46,7 +46,7 @@ type Member struct {
 func publicResult(state executionState) Result {
 	result := Result{
 		Kind: ResultKind, Mode: state.Mode,
-		Members: make([]MemberResult, 0, len(state.Members)),
+		Members:   make([]MemberResult, 0, len(state.Members)),
 		Completed: state.Join.Completed, Failed: state.Join.Failed, Cancelled: state.Join.Cancelled,
 	}
 	for _, member := range state.Members {
@@ -244,8 +244,8 @@ func (runner *Runner) materializeState(request StartRequest) (executionState, er
 				ID: delegationID, MemberID: member.ID, ChildRunID: childRunID,
 				Goal: member.Goal, Model: strings.TrimSpace(member.Model),
 				ModelOptions: append(json.RawMessage(nil), member.ModelOptions...),
-				ToolKeys: append([]string(nil), member.ToolKeys...),
-				Status: handoff.StatusQueued,
+				ToolKeys:     append([]string(nil), member.ToolKeys...),
+				Status:       handoff.StatusQueued,
 			},
 		})
 	}
@@ -390,6 +390,12 @@ func (runner *Runner) resolve(
 		return runner.complete(ctx, snapshot, state)
 	case handoff.JoinFailed:
 		return runner.fail(ctx, snapshot, state, join.ErrorCode, errors.Join(ErrTeamFailed, joinErr))
+	case handoff.JoinPending:
+		pending, err := runner.persistRunning(ctx, snapshot, state)
+		if err != nil {
+			return pending, err
+		}
+		return pending, errors.Join(ErrMemberPending, joinErr)
 	default:
 		pending, err := runner.persistRunning(ctx, snapshot, state)
 		if err != nil {

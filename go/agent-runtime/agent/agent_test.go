@@ -4,20 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	runtimemodel "github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 	"strings"
 	"testing"
 	"time"
 
-	interactionadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/interaction"
-	runfeedadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/runfeed"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+
+	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
+	runfeedadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 const (

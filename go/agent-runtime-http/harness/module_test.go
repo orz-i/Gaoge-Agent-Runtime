@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 const (

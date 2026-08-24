@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	runtimehttp "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
+	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
 type Dependencies struct {

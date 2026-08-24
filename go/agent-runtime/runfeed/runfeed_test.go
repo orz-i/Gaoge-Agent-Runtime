@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 func TestFeedReplaysFollowsAndStopsAtTerminal(t *testing.T) {

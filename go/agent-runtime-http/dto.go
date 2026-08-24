@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 var errInvalidJSONBody = errors.New("invalid JSON request body")
@@ -23,10 +23,14 @@ type ThreadRequest struct {
 func NormalizeThread(request ThreadRequest) kernel.ThreadRef { return normalizeThread(request) }
 
 // BindStrictJSON decodes one request body and rejects unknown fields.
-func BindStrictJSON(context *gin.Context, target interface{}) error { return bindStrictJSON(context, target) }
+func BindStrictJSON(context *gin.Context, target interface{}) error {
+	return bindStrictJSON(context, target)
+}
 
 // SnapshotResponse projects one durable Kernel snapshot without Feature interpretation.
-func SnapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse { return snapshotResponse(snapshot) }
+func SnapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
+	return snapshotResponse(snapshot)
+}
 
 type TextInputRequest struct {
 	Content string `json:"content" binding:"required,max=200000"`

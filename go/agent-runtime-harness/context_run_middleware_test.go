@@ -5,19 +5,19 @@ import (
 	"testing"
 	"time"
 
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 type contextRunRelationFixture map[string]runrelation.Relation
 
 const (
 	contextRunHostTurnKind = "conversation_turn"
-	contextRunTestActorID   = "actor"
-	contextRunTestTenantID  = "tenant"
+	contextRunTestActorID  = "actor"
+	contextRunTestTenantID = "tenant"
 )
 
 func (fixture contextRunRelationFixture) GetByChild(_ context.Context, childRunID string) (runrelation.Relation, error) {

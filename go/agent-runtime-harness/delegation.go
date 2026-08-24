@@ -6,9 +6,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 type HandoffStarter interface {
@@ -114,7 +114,7 @@ func (runner *Runner) prepareDelegation(
 		ID: delegationID, MemberID: request.MemberID, ChildRunID: childRunID,
 		Goal: request.Goal, Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
 		ToolKeys: contextDelegationToolKeys(turn, config),
-		Status: handoff.StatusQueued,
+		Status:   handoff.StatusQueued,
 	}, parent, nil
 }
 
@@ -225,6 +225,8 @@ func delegationItemStatus(status handoff.Status) ItemStatus {
 		return ItemFailed
 	case handoff.StatusCancelled:
 		return ItemCancelled
+	case handoff.StatusQueued, handoff.StatusRunning:
+		return ItemStarted
 	default:
 		return ItemStarted
 	}

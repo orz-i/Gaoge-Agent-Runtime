@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
-	runtimehttp "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 type TurnResponse struct {
@@ -548,6 +548,8 @@ func terminalTurnSnapshotEvent(snapshot harness.Snapshot, seq int64) harness.Tur
 		eventType = harness.EventTurnCompleted
 	case harness.TurnCancelled:
 		eventType = harness.EventTurnCancelled
+	case harness.TurnAccepted, harness.TurnRunning, harness.TurnWaitingInput, harness.TurnFailed:
+		// The caller only synthesizes terminal snapshots; failed is the safe default.
 	}
 	return harness.TurnEvent{
 		Seq: seq, TurnID: snapshot.Turn.ID, Type: eventType,

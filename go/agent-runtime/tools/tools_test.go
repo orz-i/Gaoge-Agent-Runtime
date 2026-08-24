@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 const largeToolKey = "large"

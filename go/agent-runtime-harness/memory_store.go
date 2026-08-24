@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 )
 
 const maxListItems = 500

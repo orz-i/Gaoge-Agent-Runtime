@@ -5,8 +5,8 @@ import (
 	stdhttp "net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 func (handler *Handler) GetRun(context *gin.Context) {

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/conformance"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 type runFeedClock struct{ now time.Time }

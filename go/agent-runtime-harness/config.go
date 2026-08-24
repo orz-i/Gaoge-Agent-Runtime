@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 )
 
 // VersionRef freezes one host-owned configuration resource identity and revision.

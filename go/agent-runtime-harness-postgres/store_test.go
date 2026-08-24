@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
-	harnesspostgres "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness-postgres"
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

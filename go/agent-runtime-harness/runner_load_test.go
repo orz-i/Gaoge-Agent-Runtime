@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 )
 
 func TestLoadAcceptedTurnBeforeRuntimeRunExists(t *testing.T) {
@@ -31,10 +31,10 @@ func newAcceptedStartupGapRunner(t *testing.T) *Runner {
 	const sessionID = "hs_startup_gap"
 	const turnID = "ht_startup_gap"
 	if _, _, err = store.CreateSession(t.Context(), Session{
-		ID: sessionID,
+		ID:         sessionID,
 		HostThread: HostRef{Kind: "conversation", ID: "thread_startup_gap"},
-		Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
-		Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+		Revision:   1, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -47,9 +47,9 @@ func newAcceptedStartupGapRunner(t *testing.T) *Runner {
 	}
 	if _, _, err = store.CreateTurn(t.Context(), Turn{
 		ID: turnID, SessionID: sessionID,
-		HostTurn: HostRef{Kind: "conversation_turn", ID: "client_turn_startup_gap"},
+		HostTurn:         HostRef{Kind: "conversation_turn", ID: "client_turn_startup_gap"},
 		ConfigSnapshotID: config.ID,
-		Status: TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Status:           TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}

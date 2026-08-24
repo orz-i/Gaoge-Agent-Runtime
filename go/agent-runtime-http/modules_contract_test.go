@@ -6,11 +6,11 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	runtimehttp "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http"
-	agenthttp "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http/agent"
-	planhttp "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http/planexecute"
-	teamhttp "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http/team"
-	workflowhttp "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http/workflow"
+	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
+	agenthttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/agent"
+	planhttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/planexecute"
+	teamhttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/team"
+	workflowhttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/workflow"
 )
 
 func TestExplicitFeatureModulesComposePublishedRoutes(t *testing.T) {

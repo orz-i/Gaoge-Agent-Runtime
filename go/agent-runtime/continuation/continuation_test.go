@@ -8,16 +8,16 @@ import (
 	"testing"
 	"time"
 
-	continuationadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/continuation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/continuation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
-	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
+	continuationadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
+	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 func TestSchedulerEnqueuesOneOwningParentContinuation(t *testing.T) {
@@ -122,11 +122,11 @@ func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
 	resumers := map[kernel.RunKind]*recordingResumer{
-		agent.RunKind:       &recordingResumer{},
-		planexecute.RunKind: &recordingResumer{},
-		workflow.RunKind:    &recordingResumer{},
-		team.RunKind:        &recordingResumer{},
-		kernel.RunKind("echo"): &recordingResumer{},
+		agent.RunKind:          {},
+		planexecute.RunKind:    {},
+		workflow.RunKind:       {},
+		team.RunKind:           {},
+		kernel.RunKind("echo"): {},
 	}
 	registrations := make([]continuation.ResumerRegistration, 0, len(resumers))
 	for kind, resumer := range resumers {

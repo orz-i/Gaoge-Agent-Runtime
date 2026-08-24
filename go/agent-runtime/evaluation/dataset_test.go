@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/evaluation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation"
 )
 
 const (

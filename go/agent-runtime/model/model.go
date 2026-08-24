@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 // Role identifies one provider-neutral model message role.

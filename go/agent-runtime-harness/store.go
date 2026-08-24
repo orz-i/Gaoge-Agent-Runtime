@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 )
 
 // ContextCheckpointCommit atomically persists one immutable Context checkpoint and advances the

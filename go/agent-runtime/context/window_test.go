@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	runtimectx "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	runtimectx "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 const (

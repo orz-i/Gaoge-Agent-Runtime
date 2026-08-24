@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 // TeamFeature is the narrow Team Runtime capability consumed by Harness.
@@ -723,6 +723,8 @@ func (runner *Runner) startInvocationAttempt(
 		return runner.startRetriedPlanExecute(ctx, invocation, child, requestID)
 	case ExecutionWorkflow:
 		return runner.startRetriedWorkflow(ctx, invocation, child, requestID)
+	case ExecutionApplication:
+		return kernel.Snapshot{}, ErrInvalidRequest
 	default:
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
@@ -962,6 +964,8 @@ func expectedFeaturePendingError(executionClass ExecutionClass, err error) bool 
 	case ExecutionWorkflow:
 		return errors.Is(err, workflow.ErrEffectPending) || errors.Is(err, workflow.ErrWaitPending) ||
 			errors.Is(err, workflow.ErrSegmentYielded)
+	case ExecutionAgent, ExecutionApplication:
+		return false
 	default:
 		return false
 	}
@@ -1032,6 +1036,8 @@ func (runner *Runner) resumeFeature(
 			return kernel.Snapshot{}, ErrInvalidRequest
 		}
 		return runner.workflows.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+	case ExecutionAgent, ExecutionApplication:
+		return kernel.Snapshot{}, ErrInvalidRequest
 	default:
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}

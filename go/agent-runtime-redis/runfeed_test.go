@@ -7,8 +7,8 @@ import (
 
 	miniredis "github.com/alicebob/miniredis/v2"
 	goredis "github.com/go-redis/redis/v8"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/conformance"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 const testRunFeedDeltaType = "delta"

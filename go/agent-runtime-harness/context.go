@@ -3,15 +3,14 @@ package harness
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"sort"
 	"strings"
 	"sync"
 
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 // ContextSeed is the complete host transcript ancestry for one Harness Turn.
@@ -419,5 +418,3 @@ func validContextCheckpoint(value runtimecontext.Checkpoint) bool {
 func sameContextCheckpointRef(checkpoint runtimecontext.Checkpoint, ref ContextCheckpointRef) bool {
 	return contextCheckpointRef(checkpoint) == ref
 }
-
-var errContextLineage = errors.New("invalid context checkpoint lineage")

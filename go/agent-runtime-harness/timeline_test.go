@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 const (
@@ -296,6 +296,10 @@ func assertHostedToolDurableItems(t *testing.T, items []harness.Item, startedID 
 			started = item
 		case harness.ItemCompleted:
 			terminal = item
+		case harness.ItemWaiting, harness.ItemFailed, harness.ItemCancelled:
+			// This fixture expects a successful hosted Tool lifecycle.
+		default:
+			t.Fatalf("unexpected item status %q", item.Status)
 		}
 	}
 	if started == nil || terminal == nil || terminal.ParentItemID != started.ID || started.ID != startedID {

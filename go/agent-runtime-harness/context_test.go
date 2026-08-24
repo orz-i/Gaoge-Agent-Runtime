@@ -6,14 +6,14 @@ import (
 	"testing"
 	"time"
 
-	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 const (

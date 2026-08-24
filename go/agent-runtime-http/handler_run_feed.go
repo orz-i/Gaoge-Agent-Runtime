@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 // StreamRunFeed replays retained events and follows the Run without owning or cancelling its execution.
@@ -171,6 +171,8 @@ func terminalSnapshotFeedEvent(snapshot kernel.Snapshot, sequence int64) runfeed
 		eventType = runfeed.EventRunCompleted
 	case kernel.RunStatusCancelled:
 		eventType = runfeed.EventRunCancelled
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusFailed:
+		// The caller only synthesizes terminal snapshots; failed is the safe default.
 	}
 	return runfeed.Event{
 		Seq: sequence, RunID: snapshot.Run.ID, Type: eventType, Message: snapshot.Run.ErrorDetail,

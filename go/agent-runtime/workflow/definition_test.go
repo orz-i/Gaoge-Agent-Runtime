@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 const workflowReturnNodeID = "done"

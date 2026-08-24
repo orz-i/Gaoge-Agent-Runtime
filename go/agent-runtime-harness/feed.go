@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 const (
@@ -226,6 +226,8 @@ func turnEventTypeForItem(item Item) string {
 	switch item.Status {
 	case ItemCompleted, ItemFailed, ItemCancelled:
 		return EventItemCompleted
+	case ItemStarted, ItemWaiting:
+		return EventItemStarted
 	default:
 		return EventItemStarted
 	}

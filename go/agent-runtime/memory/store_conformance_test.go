@@ -3,9 +3,9 @@ package memory_test
 import (
 	"testing"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/conformance"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 )
 
 func TestKernelStoreConformance(t *testing.T) {

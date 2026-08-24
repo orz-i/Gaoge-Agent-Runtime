@@ -259,6 +259,8 @@ func validTransition(current, next RunStatus) bool {
 		return next == RunStatusRunning || next == RunStatusWaitingInput || terminalStatus(next)
 	case RunStatusWaitingInput:
 		return next == RunStatusRunning || terminalStatus(next)
+	case RunStatusCompleted, RunStatusFailed, RunStatusCancelled:
+		return false
 	default:
 		return false
 	}

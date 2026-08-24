@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // TurnStatus is the durable Harness execution status.

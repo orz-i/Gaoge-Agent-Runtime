@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 // RunRelationStore is the single-process immutable RunRelation adapter.

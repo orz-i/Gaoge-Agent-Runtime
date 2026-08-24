@@ -1,6 +1,6 @@
 # Agent Runtime HTTP Adapter
 
-`github.com/orz-i/Gaoge/sdk/go/agent-runtime-http` exposes HTTP v1 for Runtime
+`github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http` exposes HTTP v1 for Runtime
 Runs and Workbench resources. The first-party `harness` submodule exposes the
 Harness Turn snapshot, semantic feed and approval continuation resources on
 the same versioned wire surface without making Harness part of Runtime Core.

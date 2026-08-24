@@ -5,8 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres/models"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"gorm.io/gorm"
 )
 

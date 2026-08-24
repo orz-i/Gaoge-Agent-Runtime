@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 const CapabilityCoordinator kernel.Capability = "handoff.coordinator"
@@ -187,6 +187,8 @@ func countDelegation(join *Join, delegation Delegation) {
 		join.Failed++
 	case StatusCancelled:
 		join.Cancelled++
+	case StatusQueued, StatusRunning:
+		join.Pending++
 	default:
 		join.Pending++
 	}
@@ -253,6 +255,8 @@ func projectChild(delegation Delegation, child kernel.Snapshot) Delegation {
 		projected.Status = StatusFailed
 	case kernel.RunStatusCancelled:
 		projected.Status = StatusCancelled
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput:
+		projected.Status = StatusRunning
 	default:
 		projected.Status = StatusRunning
 	}
@@ -265,6 +269,8 @@ func childStateError(child kernel.Snapshot) error {
 		return nil
 	case kernel.RunStatusFailed, kernel.RunStatusCancelled:
 		return ErrChildFailed
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput:
+		return ErrChildPending
 	default:
 		return ErrChildPending
 	}
@@ -276,6 +282,8 @@ func joinStateError(join Join) error {
 		return nil
 	case JoinFailed:
 		return ErrJoinFailed
+	case JoinPending:
+		return ErrJoinPending
 	default:
 		return ErrJoinPending
 	}

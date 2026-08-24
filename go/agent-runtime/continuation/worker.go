@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 // WorkerOptions bound polling, lease consumption and error reporting.

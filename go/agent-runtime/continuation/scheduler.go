@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 // ErrorReporter receives non-transactional scheduling failures for host observability.
@@ -192,6 +192,8 @@ func triggerPriority(trigger Trigger) int {
 		return 20
 	case TriggerApprovalResolved, TriggerWaitResolved:
 		return 10
+	case TriggerSegmentYielded:
+		return 0
 	default:
 		return 0
 	}

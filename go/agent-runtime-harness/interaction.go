@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // InteractionKind describes a host-renderable input shape without embedding
@@ -424,7 +424,11 @@ func (runner *Runner) resumeRuntimeInteractionOwner(
 	if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
 		return Snapshot{}, ErrConflict
 	}
-	resumed, resumeErr := runner.resumeInvocationExecution(ctx, invocation, runtimeSnapshot.Run.Revision)
+	runCtx, err := runner.restoreInvocationContext(ctx, turn, invocation)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	resumed, resumeErr := runner.resumeInvocationExecution(runCtx, invocation, runtimeSnapshot.Run.Revision)
 	if resumed.Run.ID == "" {
 		return Snapshot{}, resumeErr
 	}

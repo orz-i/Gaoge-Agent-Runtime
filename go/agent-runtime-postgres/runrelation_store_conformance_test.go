@@ -3,8 +3,8 @@ package postgres
 import (
 	"testing"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/conformance"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 func TestRunRelationStoreConformance(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/compose"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 func TestApplicationValidatesCapabilitiesAndWorkerOrder(t *testing.T) {

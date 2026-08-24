@@ -1,6 +1,6 @@
 # Agent Runtime Redis Stream Adapter
 
-`github.com/orz-i/Gaoge/sdk/go/agent-runtime-redis` implements ephemeral run
+`github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis` implements ephemeral run
 notifications, replay, cancellation signals and leases. Durable Run, Output,
 Checkpoint and Queue facts remain in the Core Store.
 

@@ -11,7 +11,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	goredis "github.com/go-redis/redis/v8"
-	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
+	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 )
 
 const redisQueueName = "continuations"

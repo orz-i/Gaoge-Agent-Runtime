@@ -10,7 +10,7 @@ import (
 	"time"
 
 	goredis "github.com/go-redis/redis/v8"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
 // RunFeedOptions configures the Redis Run Feed adapter.

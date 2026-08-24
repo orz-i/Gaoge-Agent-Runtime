@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 const (
@@ -299,6 +299,8 @@ func invocationStatusFromTurn(status TurnStatus) InvocationStatus {
 		return InvocationFailed
 	case TurnCancelled:
 		return InvocationCancelled
+	case TurnAccepted:
+		return InvocationAccepted
 	default:
 		return InvocationAccepted
 	}

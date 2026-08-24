@@ -1,6 +1,6 @@
 # Agent Runtime PostgreSQL Adapter
 
-`github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres` owns migrations and the
+`github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres` owns migrations and the
 `agent_*` persistence model. Inject a `SessionProvider`; the adapter keeps
 transaction context private and implements the complete Core `Store` contract.
 

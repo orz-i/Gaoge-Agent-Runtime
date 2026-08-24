@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 const ContextArtifactToolKey = "harness.read_context_artifact"

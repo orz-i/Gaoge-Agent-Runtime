@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 const RunKind kernel.RunKind = "a2a.remote"

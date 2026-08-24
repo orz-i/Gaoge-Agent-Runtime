@@ -3,7 +3,7 @@ package harness_test
 import (
 	"testing"
 
-	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 )
 
 func TestFirstPartyCommandCatalogIsStaticAndDeterministic(t *testing.T) {

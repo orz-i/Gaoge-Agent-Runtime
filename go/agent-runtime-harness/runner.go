@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 const (
@@ -70,6 +70,8 @@ func invocationItemStatus(status InvocationStatus) ItemStatus {
 		return ItemFailed
 	case InvocationCancelled:
 		return ItemCancelled
+	case InvocationAccepted, InvocationRunning:
+		return ItemStarted
 	default:
 		return ItemStarted
 	}
@@ -217,8 +219,12 @@ func (runner *Runner) ResolveApproval(
 	if err != nil {
 		return Snapshot{}, err
 	}
+	runCtx, err := runner.restoreInvocationContext(ctx, turn, invocation)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	resolved, resolveErr := runner.agent.ResolveApproval(
-		ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
+		runCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
 		plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)},
 	)
 	if resolved.Run.ID == "" {
@@ -229,6 +235,25 @@ func (runner *Runner) ResolveApproval(
 	}
 	snapshot, syncErr := runner.syncRuntimeSnapshot(ctx, turn, invocation, resolved)
 	return snapshot, errors.Join(resolveErr, syncErr)
+}
+
+func (runner *Runner) restoreInvocationContext(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+) (context.Context, error) {
+	if strings.TrimSpace(turn.ContextCheckpointID) == "" {
+		return ctx, nil
+	}
+	updated, runCtx, err := runner.restoreOrBuildContext(ctx, turn, nil, ConfigSnapshot{})
+	if err != nil {
+		return nil, err
+	}
+	access := ContextWindowReadOnly
+	if invocation.ExecutionClass == ExecutionAgent {
+		access = ContextWindowOwner
+	}
+	return withContextWindowBinding(runCtx, updated.ID, access), nil
 }
 
 type contextBuildResult struct {
@@ -1035,6 +1060,8 @@ func (runner *Runner) recordTerminalAgentMessageItem(
 		status = ItemFailed
 	case TurnCancelled:
 		status = ItemCancelled
+	case TurnAccepted, TurnRunning, TurnWaitingInput, TurnCompleted:
+		// The caller only finalizes terminal turns; preserve the completed default.
 	}
 	payload := modelTimelinePayload{}
 	if snapshot.Result != nil {
@@ -1257,6 +1284,8 @@ func turnEventTypeForStatus(status TurnStatus) string {
 		return EventTurnFailed
 	case TurnCancelled:
 		return EventTurnCancelled
+	case TurnAccepted, TurnRunning:
+		return EventTurnStarted
 	default:
 		return EventTurnStarted
 	}
@@ -1348,6 +1377,8 @@ func itemStatusFromTurn(status TurnStatus) ItemStatus {
 		return ItemCancelled
 	case TurnWaitingInput:
 		return ItemWaiting
+	case TurnAccepted, TurnRunning:
+		return ItemStarted
 	default:
 		return ItemStarted
 	}

@@ -3,19 +3,20 @@ package compose_test
 import (
 	"context"
 	"encoding/json"
-	runtimemodel "github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
 	"strconv"
 	"testing"
 	"time"
 
-	interactionadapter "github.com/orz-i/Gaoge/sdk/go/agent-runtime/adapters/interaction"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/compose"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/interaction"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+
+	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 const minimalToolKey = "lookup"

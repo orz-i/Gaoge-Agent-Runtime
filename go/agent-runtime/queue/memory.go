@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // Dependencies are the only requirements of the in-memory Queue.

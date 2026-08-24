@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 var ErrInvalidTopologyProjection = errors.New("invalid A2A topology projection")

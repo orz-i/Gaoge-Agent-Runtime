@@ -8,8 +8,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	queuecore "github.com/orz-i/Gaoge/sdk/go/agent-runtime/queue"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 )
 
 const CapabilityDispatcher kernel.Capability = "continuation.dispatcher"

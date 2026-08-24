@@ -1,0 +1,16 @@
+go 1.26
+
+use (
+	./go/agent-runtime
+	./go/agent-runtime-a2a
+	./go/agent-runtime-harness
+	./go/agent-runtime-harness-postgres
+	./go/agent-runtime-http
+	./go/agent-runtime-mcp
+	./go/agent-runtime-postgres
+	./go/agent-runtime-redis
+)
+
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.1 => ./go/agent-runtime
+
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.1 => ./go/agent-runtime-harness

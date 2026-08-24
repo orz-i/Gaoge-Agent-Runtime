@@ -4,9 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres/models"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/conformance"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )

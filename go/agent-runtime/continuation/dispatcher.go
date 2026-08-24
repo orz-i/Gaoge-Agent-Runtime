@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // Dispatcher routes a valid Job to the feature that owns the parent Run.

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	runtimecontext "github.com/orz-i/Gaoge/sdk/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 func TestContextArtifactToolReadsExactPayloadByDurableRunOwnership(t *testing.T) {

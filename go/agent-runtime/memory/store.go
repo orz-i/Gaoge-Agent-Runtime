@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // Store is the single-process atomic Kernel adapter used by minimal hosts and tests.

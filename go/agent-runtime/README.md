@@ -1,6 +1,6 @@
 # Agent Runtime Core
 
-`github.com/orz-i/Gaoge/sdk/go/agent-runtime` is the host-neutral Agent Runtime
+`github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime` is the host-neutral Agent Runtime
 Core. The module is split into explicit capability packages such as `kernel`,
 `agent`, `tools`, `interaction`, `planexecute`, `workflow`, `team`, and
 `compose`. Hosts construct only the capabilities they need; there is no

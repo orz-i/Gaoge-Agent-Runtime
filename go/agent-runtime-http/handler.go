@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workbench"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 // PrincipalResolver maps the authenticated host principal to an opaque Kernel actor.
@@ -78,13 +78,6 @@ func (handler *Handler) actorRef(context *gin.Context) (kernel.ActorRef, error) 
 		return kernel.ActorRef{}, errPrincipalUnavailable
 	}
 	return handler.shared.ActorRef(context)
-}
-
-func (handler *Handler) requestID(context *gin.Context) string {
-	if handler == nil || handler.shared == nil {
-		return ""
-	}
-	return handler.shared.RequestID(context)
 }
 
 const requestIDContextKey = "agent-runtime.request-id"

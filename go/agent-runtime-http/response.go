@@ -13,7 +13,9 @@ type errorBody struct {
 }
 
 // WriteError writes the shared Runtime error envelope.
-func WriteError(c *gin.Context, status int, code, message string) { writeError(c, status, code, message) }
+func WriteError(c *gin.Context, status int, code, message string) {
+	writeError(c, status, code, message)
+}
 
 type apiError struct {
 	Code      string `json:"code"`
@@ -25,10 +27,6 @@ func writeSuccess(c *gin.Context, value interface{}) { c.JSON(stdhttp.StatusOK, 
 
 // WriteSuccess writes the shared Runtime success envelope.
 func WriteSuccess(c *gin.Context, value interface{}) { writeSuccess(c, value) }
-
-func writePage(c *gin.Context, total int64, results interface{}) {
-	c.JSON(stdhttp.StatusOK, gin.H{"total": total, "results": results})
-}
 
 func writeError(c *gin.Context, status int, code, message string) {
 	if strings.TrimSpace(code) == "" {

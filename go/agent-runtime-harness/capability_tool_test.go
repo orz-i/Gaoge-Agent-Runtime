@@ -7,15 +7,15 @@ import (
 	"testing"
 	"time"
 
-	harness "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	runtimemodel "github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 func TestRootAgentInvokesFrozenCapabilityAndResumesSameToolCall(t *testing.T) {
@@ -175,6 +175,10 @@ func rootAndWorkflowInvocations(t *testing.T, values []harness.Invocation) (harn
 			root = value
 		case harness.ExecutionWorkflow:
 			child = value
+		case harness.ExecutionTeam, harness.ExecutionPlanExecute, harness.ExecutionApplication:
+			// This fixture only starts an Agent root and one Workflow child.
+		default:
+			t.Fatalf("unexpected execution class %q", value.ExecutionClass)
 		}
 	}
 	if root.ID == "" || child.ID == "" || child.ParentItemID == "" {

@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
 const reviewGoal = "review"
@@ -42,7 +42,7 @@ func TestCompletedTeamResultDoesNotExposeDelegationOrChildRunIDs(t *testing.T) {
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, RequestID: "request",
 		Goal: reviewGoal, Mode: team.ExecutionParallel,
 		Members: []team.Member{{ID: "a", Goal: "analysis"}, {ID: "b", Goal: reviewGoal}},
-		Join: handoff.Join{Mode: handoff.JoinAll, Quorum: 1, FailurePolicy: handoff.FailureCollect},
+		Join:    handoff.Join{Mode: handoff.JoinAll, Quorum: 1, FailurePolicy: handoff.FailureCollect},
 	})
 	if err != nil {
 		t.Fatalf("StartRun() error = %v", err)

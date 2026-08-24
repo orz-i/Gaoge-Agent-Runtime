@@ -3,7 +3,7 @@ package postgres
 import (
 	"errors"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"gorm.io/gorm"
 )
 

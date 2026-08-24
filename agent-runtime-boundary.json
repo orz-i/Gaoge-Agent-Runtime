@@ -1,15 +1,15 @@
 {
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "goModules": [
-    "github.com/orz-i/Gaoge/sdk/go/agent-runtime",
-    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness",
-    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-harness-postgres",
-    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-mcp",
-    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-a2a",
-    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-postgres",
-    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-redis",
-    "github.com/orz-i/Gaoge/sdk/go/agent-runtime-http"
+    "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime",
+    "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness",
+    "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres",
+    "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp",
+    "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a",
+    "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres",
+    "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis",
+    "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
   ],
-  "typescriptPackage": "@gaoge/agent-runtime-client",
-  "openAPI": "sdk/contracts/agent-runtime/v1/openapi.yaml"
+  "typescriptPackage": "@orz-i/agent-runtime-client",
+  "openAPI": "contracts/agent-runtime/v1/openapi.yaml"
 }

@@ -7,13 +7,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/handoff"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/planexecute"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/tools"
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/workflow"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 const CapabilityInvocationToolKey = "harness.invoke_capability"
@@ -291,6 +291,8 @@ func (runner *Runner) capabilityToolResult(ctx context.Context, commandID, invoc
 				"content":     runtimeSnapshot.Result.Content,
 			}
 		}
+	case InvocationFailed, InvocationCancelled:
+		payload["error"] = map[string]string{"code": invocation.ErrorCode, "detail": invocation.ErrorDetail}
 	default:
 		payload["error"] = map[string]string{"code": invocation.ErrorCode, "detail": invocation.ErrorDetail}
 	}

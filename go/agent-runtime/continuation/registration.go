@@ -3,7 +3,7 @@ package continuation
 import (
 	"strings"
 
-	"github.com/orz-i/Gaoge/sdk/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // ResumerRegistration binds exactly one Runtime kind to its continuation surface.
