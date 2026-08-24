@@ -29,10 +29,19 @@ git push --atomic origin \
   go/agent-runtime-http/v0.1.0-beta.2
 ```
 
-The root tag starts the release workflow. It re-runs the Beta gate, verifies
-that every module tag points to the same commit, publishes the TypeScript
-package with npm provenance and the `beta` dist-tag, and creates a GitHub
-prerelease.
+GitHub does not create a push event when one push updates more than three tags.
+Because this repository deliberately pushes the complete tag set atomically,
+start the release workflow against the existing immutable root tag after the
+push:
+
+```bash
+gh workflow run release.yml --ref main -f release_tag=v0.1.0-beta.2
+```
+
+The workflow checks out the root tag, re-runs the Beta gate, verifies that every
+module tag points to the same commit, publishes the TypeScript package with npm
+provenance and the `beta` dist-tag, and creates a GitHub prerelease. A root-tag
+push event remains supported for release sets small enough to emit one.
 
 Never move a published tag. If a release fails after tags are public, fix the
 problem in a new prerelease version.
