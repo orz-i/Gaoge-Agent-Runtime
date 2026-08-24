@@ -1,41 +1,41 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    directory: /go/agent-runtime
+    directories:
+      - /go/agent-runtime
+      - /go/agent-runtime-harness
+      - /go/agent-runtime-harness-postgres
+      - /go/agent-runtime-http
+      - /go/agent-runtime-mcp
+      - /go/agent-runtime-a2a
+      - /go/agent-runtime-postgres
+      - /go/agent-runtime-redis
     schedule:
       interval: weekly
-  - package-ecosystem: gomod
-    directory: /go/agent-runtime-harness
-    schedule:
-      interval: weekly
-  - package-ecosystem: gomod
-    directory: /go/agent-runtime-harness-postgres
-    schedule:
-      interval: weekly
-  - package-ecosystem: gomod
-    directory: /go/agent-runtime-http
-    schedule:
-      interval: weekly
-  - package-ecosystem: gomod
-    directory: /go/agent-runtime-mcp
-    schedule:
-      interval: weekly
-  - package-ecosystem: gomod
-    directory: /go/agent-runtime-a2a
-    schedule:
-      interval: weekly
-  - package-ecosystem: gomod
-    directory: /go/agent-runtime-postgres
-    schedule:
-      interval: weekly
-  - package-ecosystem: gomod
-    directory: /go/agent-runtime-redis
-    schedule:
-      interval: weekly
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
+    groups:
+      go-dependencies:
+        group-by: dependency-name
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
+    groups:
+      node-toolchain:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
   - package-ecosystem: github-actions
     directory: /
     schedule:
