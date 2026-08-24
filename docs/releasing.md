@@ -15,18 +15,18 @@ tags for a release must point to the same accepted commit.
 ## Create and push tags
 
 ```bash
-node scripts/release-tags.mjs --version 0.1.0-beta.1
-node scripts/release-tags.mjs --version 0.1.0-beta.1 --create
+node scripts/release-tags.mjs --version 0.1.0-beta.2
+node scripts/release-tags.mjs --version 0.1.0-beta.2 --create
 git push --atomic origin \
-  v0.1.0-beta.1 \
-  go/agent-runtime/v0.1.0-beta.1 \
-  go/agent-runtime-harness/v0.1.0-beta.1 \
-  go/agent-runtime-harness-postgres/v0.1.0-beta.1 \
-  go/agent-runtime-mcp/v0.1.0-beta.1 \
-  go/agent-runtime-a2a/v0.1.0-beta.1 \
-  go/agent-runtime-postgres/v0.1.0-beta.1 \
-  go/agent-runtime-redis/v0.1.0-beta.1 \
-  go/agent-runtime-http/v0.1.0-beta.1
+  v0.1.0-beta.2 \
+  go/agent-runtime/v0.1.0-beta.2 \
+  go/agent-runtime-harness/v0.1.0-beta.2 \
+  go/agent-runtime-harness-postgres/v0.1.0-beta.2 \
+  go/agent-runtime-mcp/v0.1.0-beta.2 \
+  go/agent-runtime-a2a/v0.1.0-beta.2 \
+  go/agent-runtime-postgres/v0.1.0-beta.2 \
+  go/agent-runtime-redis/v0.1.0-beta.2 \
+  go/agent-runtime-http/v0.1.0-beta.2
 ```
 
 The root tag starts the release workflow. It re-runs the Beta gate, verifies
