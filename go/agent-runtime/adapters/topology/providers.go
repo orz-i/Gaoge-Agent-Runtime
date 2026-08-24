@@ -358,7 +358,7 @@ func workflowActivationFacts(
 }
 
 func workflowEffectFacts(effects []workflow.Effect, node workflow.Node) (string, string) {
-	if node.Type != workflow.NodeEffect {
+	if node.Type == workflow.NodeWait || node.Type == workflow.NodeIf || node.Type == workflow.NodeReturn {
 		return "", ""
 	}
 	runID, status := "", ""
@@ -388,8 +388,24 @@ func workflowNodeLabel(node workflow.Node) string {
 	switch node.Type {
 	case workflow.NodeEffect:
 		return topologyLabel(node.Effect.Kind, node.ID)
+	case workflow.NodeAgentTask:
+		return topologyLabel(node.AgentTask.AgentKey, node.ID)
+	case workflow.NodeApplicationEffect:
+		return topologyLabel(node.ApplicationEffect.CapabilityKey, node.ID)
+	case workflow.NodeMediaEffect:
+		return topologyLabel(node.MediaEffect.CapabilityKey, node.ID)
 	case workflow.NodeWait:
 		return topologyLabel(node.Wait.Kind, node.ID)
+	case workflow.NodeIf:
+		return topologyLabel(node.ID, "If")
+	case workflow.NodeParallel:
+		return topologyLabel(node.ID, "Parallel")
+	case workflow.NodeMap:
+		return topologyLabel(node.ID, "Map")
+	case workflow.NodeSubworkflow:
+		return topologyLabel(node.Subworkflow.Definition.ID, node.ID)
+	case workflow.NodeCompensation:
+		return topologyLabel(node.Compensation.Do.Kind, node.ID)
 	case workflow.NodeReturn:
 		return topologyLabel(node.ID, "Return")
 	default:

@@ -73,6 +73,7 @@ type Activation struct {
 	Status    ActivationStatus `json:"status"`
 	Attempt   int              `json:"attempt"`
 	EffectID  string           `json:"effectID,omitempty"`
+	EffectIDs []string         `json:"effectIDs,omitempty"`
 	WaitID    string           `json:"waitID,omitempty"`
 	Output    json.RawMessage  `json:"output,omitempty"`
 	ErrorCode string           `json:"errorCode,omitempty"`
@@ -81,17 +82,29 @@ type Activation struct {
 
 // Effect is one stable external dispatch intent and terminal receipt.
 type Effect struct {
-	ID           string          `json:"id"`
-	ActivationID string          `json:"activationID"`
-	NodeID       string          `json:"nodeID"`
-	Kind         string          `json:"kind"`
-	Input        json.RawMessage `json:"input"`
-	Status       EffectStatus    `json:"status"`
-	ChildRunID   string          `json:"childRunID,omitempty"`
-	ReceiptID    string          `json:"receiptID,omitempty"`
-	Output       json.RawMessage `json:"output,omitempty"`
-	ErrorCode    string          `json:"errorCode,omitempty"`
-	Error        string          `json:"error,omitempty"`
+	ID           string               `json:"id"`
+	ActivationID string               `json:"activationID"`
+	NodeID       string               `json:"nodeID"`
+	Class        EffectClass          `json:"class"`
+	Kind         string               `json:"kind"`
+	Revision     string               `json:"revision,omitempty"`
+	Definition   *DefinitionReference `json:"definition,omitempty"`
+	OutputKey    string               `json:"outputKey,omitempty"`
+	MapIndex     int                  `json:"mapIndex,omitempty"`
+	Mapped       bool                 `json:"mapped,omitempty"`
+	Compensation bool                 `json:"compensation,omitempty"`
+	Input        json.RawMessage      `json:"input"`
+	MaxCostUnits int64                `json:"maxCostUnits"`
+	CostUnits    int64                `json:"costUnits"`
+	NestedDepth  int                  `json:"nestedDepth"`
+	Attempt      int                  `json:"attempt"`
+	Retry        RetryPolicy          `json:"retry"`
+	Status       EffectStatus         `json:"status"`
+	ChildRunID   string               `json:"childRunID,omitempty"`
+	ReceiptID    string               `json:"receiptID,omitempty"`
+	Output       json.RawMessage      `json:"output,omitempty"`
+	ErrorCode    string               `json:"errorCode,omitempty"`
+	Error        string               `json:"error,omitempty"`
 }
 
 // Wait is one explicit host-resolved suspension point.
@@ -107,33 +120,69 @@ type Wait struct {
 
 // Budget is the durable execution ledger.
 type Budget struct {
-	NodeActivations int `json:"nodeActivations"`
-	Effects         int `json:"effects"`
-	Segments        int `json:"segments"`
-	StateBytes      int `json:"stateBytes"`
+	NodeActivations   int   `json:"nodeActivations"`
+	Effects           int   `json:"effects"`
+	Segments          int   `json:"segments"`
+	StateBytes        int   `json:"stateBytes"`
+	CostUnitsUsed     int64 `json:"costUnitsUsed"`
+	CostUnitsReserved int64 `json:"costUnitsReserved"`
+}
+
+// CompensationStatus is the durable lifecycle of one registered undo call.
+type CompensationStatus string
+
+const (
+	CompensationPending   CompensationStatus = "pending"
+	CompensationRunning   CompensationStatus = "running"
+	CompensationCompleted CompensationStatus = "completed"
+	CompensationFailed    CompensationStatus = "failed"
+)
+
+// Compensation is one undo call registered only after its do call succeeds.
+type Compensation struct {
+	ID        string             `json:"id"`
+	NodeID    string             `json:"nodeID"`
+	Call      EffectCall         `json:"call"`
+	Input     json.RawMessage    `json:"input"`
+	Status    CompensationStatus `json:"status"`
+	EffectID  string             `json:"effectID,omitempty"`
+	ReceiptID string             `json:"receiptID,omitempty"`
+	ErrorCode string             `json:"errorCode,omitempty"`
+	Error     string             `json:"error,omitempty"`
+}
+
+// FailureIntent preserves the original terminal request while compensations run.
+type FailureIntent struct {
+	Status kernel.RunStatus `json:"status"`
+	Code   string           `json:"code"`
+	Detail string           `json:"detail"`
 }
 
 // View is the public durable Workflow execution state.
 type View struct {
 	Definition    Definition      `json:"definition"`
 	Input         json.RawMessage `json:"input"`
+	NestedDepth   int             `json:"nestedDepth"`
 	CurrentNode   int             `json:"currentNode"`
 	Activations   []Activation    `json:"activations"`
 	Effects       []Effect        `json:"effects"`
 	Waits         []Wait          `json:"waits"`
 	CurrentWaitID string          `json:"currentWaitID,omitempty"`
+	Compensations []Compensation  `json:"compensations,omitempty"`
+	Failure       *FailureIntent  `json:"failure,omitempty"`
 	Budget        Budget          `json:"budget"`
 }
 
 // StartRequest starts one explicit Workflow Run from an exact compiled Definition.
 type StartRequest struct {
-	ID         string
-	Actor      kernel.ActorRef
-	Thread     kernel.ThreadRef
-	RequestID  string
-	Goal       string
-	Definition Definition
-	Input      json.RawMessage
+	ID          string
+	Actor       kernel.ActorRef
+	Thread      kernel.ThreadRef
+	RequestID   string
+	Goal        string
+	Definition  Definition
+	Input       json.RawMessage
+	NestedDepth int
 }
 
 // EffectRequest dispatches one already-persisted stable intent.
@@ -143,8 +192,18 @@ type EffectRequest struct {
 	DefinitionHash string
 	EffectID       string
 	NodeID         string
+	Class          EffectClass
 	Kind           string
+	Revision       string
+	Definition     *DefinitionReference
+	OutputKey      string
+	MapIndex       int
+	Compensation   bool
 	Input          json.RawMessage
+	MaxCostUnits   int64
+	NestedDepth    int
+	Attempt        int
+	MaxAttempts    int
 }
 
 // EffectResult is one executor observation. Completed results require a receipt.
@@ -155,6 +214,7 @@ type EffectResult struct {
 	Output      json.RawMessage
 	ErrorCode   string
 	ErrorDetail string
+	CostUnits   int64
 }
 
 // EffectExecutor consumes only stable intents that already exist in Kernel state.
@@ -228,6 +288,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	}
 	state := executionState{
 		Definition: cloneDefinition(request.Definition), Input: cloneJSON(request.Input),
+		NestedDepth: request.NestedDepth,
 		Activations: make([]Activation, 0), Effects: make([]Effect, 0), Waits: make([]Wait, 0),
 	}
 	encoded, err := encodeExecutionState(state)
@@ -338,6 +399,9 @@ func (runner *Runner) runSegment(ctx context.Context, snapshot kernel.Snapshot) 
 	state.Budget.Segments++
 	segment := segmentBudget{}
 	for snapshot.Run.Status == kernel.RunStatusRunning {
+		if state.Failure != nil {
+			return runner.runCompensations(ctx, snapshot, state, &segment)
+		}
 		next, done, stepErr := runner.advance(ctx, snapshot, state, &segment)
 		if stepErr != nil || done {
 			return next, stepErr
@@ -365,7 +429,10 @@ func (runner *Runner) advance(
 	if activationIndex(state, state.CurrentNode) < 0 {
 		return runner.activateNode(ctx, snapshot, state, node, segment)
 	}
-	return runner.advanceEffect(ctx, snapshot, state, node, segment)
+	if nodeHasEffects(node) {
+		return runner.advanceNodeEffects(ctx, snapshot, state, node, segment)
+	}
+	return snapshot, true, ErrInvalidExecution
 }
 
 func (runner *Runner) activateNode(
@@ -384,9 +451,9 @@ func (runner *Runner) activateNode(
 		return failed, true, err
 	}
 	segment.activations++
-	switch node.Type {
-	case NodeEffect:
-		prepared, err := runner.prepareEffect(ctx, snapshot, state, node)
+	switch {
+	case nodeHasEffects(node):
+		prepared, err := runner.prepareNodeEffects(ctx, snapshot, state, node)
 		if err != nil {
 			return prepared, true, err
 		}
@@ -394,120 +461,18 @@ func (runner *Runner) activateNode(
 		if err != nil {
 			return kernel.Snapshot{}, true, err
 		}
-		return runner.advanceEffect(ctx, prepared, preparedState, node, segment)
-	case NodeWait:
+		return runner.advanceNodeEffects(ctx, prepared, preparedState, node, segment)
+	case node.Type == NodeIf:
+		return runner.executeIf(ctx, snapshot, state, node)
+	case node.Type == NodeWait:
 		waiting, err := runner.prepareWait(ctx, snapshot, state, node)
 		return waiting, true, err
-	case NodeReturn:
+	case node.Type == NodeReturn:
 		completed, err := runner.complete(ctx, snapshot, state, node)
 		return completed, true, err
 	default:
 		failed, err := runner.fail(ctx, snapshot, state, "workflow.node_invalid", ErrInvalidExecution)
 		return failed, true, err
-	}
-}
-
-func (runner *Runner) advanceEffect(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state executionState,
-	node Node,
-	segment *segmentBudget,
-) (kernel.Snapshot, bool, error) {
-	if node.Type != NodeEffect {
-		return snapshot, true, ErrInvalidExecution
-	}
-	if segment.effects >= 1 {
-		yielded, err := runner.yield(ctx, snapshot, state, "effect_budget")
-		return yielded, true, err
-	}
-	segment.effects++
-	return runner.dispatchEffect(ctx, snapshot, state)
-}
-
-func (runner *Runner) prepareEffect(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state executionState,
-	node Node,
-) (kernel.Snapshot, error) {
-	if state.Budget.Effects >= state.Definition.Limits.MaxEffects {
-		return runner.fail(ctx, snapshot, state, "workflow.effect_budget", ErrBudgetExceeded)
-	}
-	activationID, err := runner.runtime.NewID("activation")
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	effectID, err := runner.runtime.NewID("effect")
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	state.Activations = append(state.Activations, Activation{
-		ID: activationID, NodeID: node.ID, NodeIndex: state.CurrentNode,
-		Status: ActivationRunning, Attempt: 1, EffectID: effectID,
-	})
-	effectInput := node.Effect.Input
-	if node.Effect.FromInput {
-		effectInput = state.Input
-	}
-	state.Effects = append(state.Effects, Effect{
-		ID: effectID, ActivationID: activationID, NodeID: node.ID,
-		Kind: node.Effect.Kind, Input: cloneJSON(effectInput), Status: EffectPending,
-	})
-	state.Budget.NodeActivations++
-	state.Budget.Effects++
-	encoded, err := encodeExecutionState(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "workflow.effect.intent_created", Message: effectID}},
-	})
-}
-
-func (runner *Runner) dispatchEffect(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state executionState,
-) (kernel.Snapshot, bool, error) {
-	activationIndex := activationIndex(state, state.CurrentNode)
-	if activationIndex < 0 {
-		return snapshot, true, ErrInvalidExecution
-	}
-	effectIndex := effectIndexByID(state, state.Activations[activationIndex].EffectID)
-	if effectIndex < 0 || state.Effects[effectIndex].Status != EffectPending {
-		return snapshot, true, ErrInvalidExecution
-	}
-	effect := state.Effects[effectIndex]
-	result, err := runner.effects.Execute(ctx, EffectRequest{
-		RunID: snapshot.Run.ID, DefinitionID: state.Definition.ID, DefinitionHash: state.Definition.Hash,
-		EffectID: effect.ID, NodeID: effect.NodeID, Kind: effect.Kind, Input: cloneJSON(effect.Input),
-	})
-	if err != nil {
-		failed, failErr := runner.failEffect(ctx, snapshot, state, activationIndex, effectIndex, "workflow.effect_dispatch", err)
-		return failed, true, failErr
-	}
-	state.Effects[effectIndex].ChildRunID = strings.TrimSpace(result.ChildRunID)
-	if err = runner.ensureEffectRelation(ctx, snapshot.Run.ID, state.Effects[effectIndex]); err != nil {
-		failed, failErr := runner.failEffect(
-			ctx, snapshot, state, activationIndex, effectIndex, "workflow.effect_relation", err,
-		)
-		return failed, true, failErr
-	}
-	switch result.Disposition {
-	case DispositionPending:
-		yielded, yieldErr := runner.yield(ctx, snapshot, state, "effect_pending")
-		return yielded, true, errors.Join(ErrEffectPending, yieldErr)
-	case DispositionCompleted:
-		completed, completeErr := runner.completeEffect(ctx, snapshot, state, activationIndex, effectIndex, result)
-		return completed, false, completeErr
-	case DispositionFailed:
-		failed, failErr := runner.failEffectResult(ctx, snapshot, state, activationIndex, effectIndex, result)
-		return failed, true, failErr
-	default:
-		failed, failErr := runner.failEffect(ctx, snapshot, state, activationIndex, effectIndex, "workflow.effect_result", ErrInvalidExecution)
-		return failed, true, failErr
 	}
 }
 
@@ -522,82 +487,20 @@ func (runner *Runner) ensureEffectRelation(ctx context.Context, parentRunID stri
 	return err
 }
 
-func (runner *Runner) completeEffect(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state executionState,
-	activationIndex int,
-	effectIndex int,
-	result EffectResult,
-) (kernel.Snapshot, error) {
-	if strings.TrimSpace(result.ReceiptID) == "" || !json.Valid(result.Output) {
-		return runner.failEffect(ctx, snapshot, state, activationIndex, effectIndex, "workflow.effect_receipt", ErrInvalidExecution)
-	}
-	state.Effects[effectIndex].Status = EffectCompleted
-	state.Effects[effectIndex].ReceiptID = strings.TrimSpace(result.ReceiptID)
-	state.Effects[effectIndex].Output = cloneJSON(result.Output)
-	state.Activations[activationIndex].Status = ActivationCompleted
-	state.Activations[activationIndex].Output = cloneJSON(result.Output)
-	state.CurrentNode++
-	encoded, err := encodeExecutionState(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "workflow.effect.completed", Message: state.Effects[effectIndex].ID}},
-	})
-}
-
-func (runner *Runner) failEffectResult(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state executionState,
-	activationIndex int,
-	effectIndex int,
-	result EffectResult,
-) (kernel.Snapshot, error) {
-	code := strings.TrimSpace(result.ErrorCode)
-	if code == "" {
-		code = "workflow.effect_failed"
-	}
-	detail := strings.TrimSpace(result.ErrorDetail)
-	if detail == "" {
-		detail = ErrEffectFailed.Error()
-	}
-	state.Effects[effectIndex].Status = EffectFailed
-	state.Effects[effectIndex].ErrorCode = code
-	state.Effects[effectIndex].Error = detail
-	state.Activations[activationIndex].Status = ActivationFailed
-	state.Activations[activationIndex].ErrorCode = code
-	state.Activations[activationIndex].Error = detail
-	return runner.fail(ctx, snapshot, state, code, ErrEffectFailed)
-}
-
-func (runner *Runner) failEffect(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state executionState,
-	activationIndex int,
-	effectIndex int,
-	code string,
-	cause error,
-) (kernel.Snapshot, error) {
-	state.Effects[effectIndex].Status = EffectFailed
-	state.Effects[effectIndex].ErrorCode = code
-	state.Effects[effectIndex].Error = errorText(cause)
-	state.Activations[activationIndex].Status = ActivationFailed
-	state.Activations[activationIndex].ErrorCode = code
-	state.Activations[activationIndex].Error = errorText(cause)
-	return runner.fail(ctx, snapshot, state, code, errors.Join(ErrEffectFailed, cause))
-}
-
 func (runner *Runner) prepareWait(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state executionState,
 	node Node,
 ) (kernel.Snapshot, error) {
+	payload := node.Wait.Payload
+	if node.Wait.Source != nil {
+		var err error
+		payload, err = resolveValueSource(state, *node.Wait.Source, nil, 0)
+		if err != nil {
+			return runner.fail(ctx, snapshot, state, "workflow.wait_payload", err)
+		}
+	}
 	activationID, err := runner.runtime.NewID("activation")
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -612,19 +515,19 @@ func (runner *Runner) prepareWait(
 	})
 	state.Waits = append(state.Waits, Wait{
 		ID: waitID, ActivationID: activationID, NodeID: node.ID, Kind: node.Wait.Kind,
-		Payload: cloneJSON(node.Wait.Payload), Status: WaitPending,
+		Payload: cloneJSON(payload), Status: WaitPending,
 	})
 	state.CurrentWaitID = waitID
 	state.Budget.NodeActivations++
-	payload, err := json.Marshal(WaitRequest{
-		WaitID: waitID, NodeID: node.ID, Kind: node.Wait.Kind, Payload: cloneJSON(node.Wait.Payload),
+	checkpointPayload, err := json.Marshal(WaitRequest{
+		WaitID: waitID, NodeID: node.ID, Kind: node.Wait.Kind, Payload: cloneJSON(payload),
 	})
 	if err != nil {
 		return kernel.Snapshot{}, errors.Join(ErrInvalidExecution, err)
 	}
 	checkpoint := &kernel.Checkpoint{
 		ID: waitID, Kind: workflowWaitCheckpointKind, Status: kernel.CheckpointPending,
-		Payload: payload, CreatedAt: runner.runtime.Now(),
+		Payload: checkpointPayload, CreatedAt: runner.runtime.Now(),
 	}
 	encoded, err := encodeExecutionState(state)
 	if err != nil {
@@ -668,6 +571,9 @@ func (runner *Runner) complete(
 }
 
 func workflowReturnValue(state executionState, node ReturnNode) (json.RawMessage, error) {
+	if node.Source != nil {
+		return resolveValueSource(state, *node.Source, nil, 0)
+	}
 	if strings.TrimSpace(node.FromNode) == "" {
 		if !json.Valid(node.Value) {
 			return nil, ErrInvalidExecution
@@ -707,16 +613,7 @@ func (runner *Runner) fail(
 	code string,
 	cause error,
 ) (kernel.Snapshot, error) {
-	encoded, err := encodeExecutionState(state)
-	if err != nil {
-		return kernel.Snapshot{}, errors.Join(cause, err)
-	}
-	failed, transitionErr := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusFailed, State: encoded, Checkpoint: snapshot.Checkpoint,
-		ErrorCode: strings.TrimSpace(code), ErrorDetail: errorText(cause),
-		Events: []kernel.EventDraft{{Type: "workflow.failed", Message: strings.TrimSpace(code)}},
-	})
-	return failed, errors.Join(cause, transitionErr)
+	return runner.beginFailure(ctx, snapshot, state, kernel.RunStatusFailed, code, cause)
 }
 
 func (runner *Runner) load(ctx context.Context, runID string) (kernel.Snapshot, executionState, error) {
@@ -755,7 +652,12 @@ func resolveWaitState(state *executionState, response json.RawMessage) error {
 	wait.Response = cloneJSON(response)
 	state.Activations[activationIndex].Status = ActivationCompleted
 	state.Activations[activationIndex].Output = cloneJSON(response)
-	state.CurrentNode++
+	node := state.Definition.Nodes[state.Activations[activationIndex].NodeIndex]
+	next, err := nextNodeIndex(*state, node)
+	if err != nil {
+		return err
+	}
+	state.CurrentNode = next
 	state.CurrentWaitID = ""
 	return nil
 }
@@ -783,7 +685,9 @@ func normalizeStartRequest(request StartRequest) StartRequest {
 }
 
 func validStartRequest(request StartRequest) bool {
-	return request.Goal != "" && json.Valid(request.Input) && ValidateDefinition(request.Definition) == nil
+	return request.Goal != "" && request.NestedDepth >= 0 &&
+		request.NestedDepth <= request.Definition.Limits.MaxNestedDepth &&
+		json.Valid(request.Input) && ValidateDefinition(request.Definition) == nil
 }
 
 func normalizeCeiling(ceiling Limits) Limits {
@@ -802,6 +706,18 @@ func normalizeCeiling(ceiling Limits) Limits {
 	if ceiling.MaxStateBytes <= 0 {
 		ceiling.MaxStateBytes = 8 << 20
 	}
+	if ceiling.MaxFanOut <= 0 {
+		ceiling.MaxFanOut = 1024
+	}
+	if ceiling.MaxConcurrency <= 0 {
+		ceiling.MaxConcurrency = 64
+	}
+	if ceiling.MaxNestedDepth <= 0 {
+		ceiling.MaxNestedDepth = 32
+	}
+	if ceiling.MaxAttemptsPerEffect <= 0 {
+		ceiling.MaxAttemptsPerEffect = 16
+	}
 	return ceiling
 }
 
@@ -809,7 +725,9 @@ func withinCeiling(limits Limits, ceiling Limits) bool {
 	return limits.MaxNodeActivations <= ceiling.MaxNodeActivations &&
 		limits.MaxEffects <= ceiling.MaxEffects && limits.MaxSegments <= ceiling.MaxSegments &&
 		limits.MaxActivationsPerSegment <= ceiling.MaxActivationsPerSegment &&
-		limits.MaxStateBytes <= ceiling.MaxStateBytes
+		limits.MaxStateBytes <= ceiling.MaxStateBytes && limits.MaxFanOut <= ceiling.MaxFanOut &&
+		limits.MaxConcurrency <= ceiling.MaxConcurrency && limits.MaxNestedDepth <= ceiling.MaxNestedDepth &&
+		limits.MaxAttemptsPerEffect <= ceiling.MaxAttemptsPerEffect
 }
 
 func encodeExecutionState(state executionState) (json.RawMessage, error) {
@@ -880,10 +798,13 @@ func cloneExecutionView(view View) View {
 	view.Input = cloneJSON(view.Input)
 	view.Activations = append([]Activation(nil), view.Activations...)
 	for index := range view.Activations {
+		view.Activations[index].EffectIDs = append([]string(nil), view.Activations[index].EffectIDs...)
 		view.Activations[index].Output = cloneJSON(view.Activations[index].Output)
 	}
 	view.Effects = append([]Effect(nil), view.Effects...)
 	for index := range view.Effects {
+		view.Effects[index].Definition = cloneDefinitionReference(view.Effects[index].Definition)
+		view.Effects[index].Retry = normalizeRetryPolicy(view.Effects[index].Retry)
 		view.Effects[index].Input = cloneJSON(view.Effects[index].Input)
 		view.Effects[index].Output = cloneJSON(view.Effects[index].Output)
 	}
@@ -891,6 +812,16 @@ func cloneExecutionView(view View) View {
 	for index := range view.Waits {
 		view.Waits[index].Payload = cloneJSON(view.Waits[index].Payload)
 		view.Waits[index].Response = cloneJSON(view.Waits[index].Response)
+	}
+	view.Compensations = append([]Compensation(nil), view.Compensations...)
+	for index := range view.Compensations {
+		view.Compensations[index].Call.Definition = cloneDefinitionReference(view.Compensations[index].Call.Definition)
+		view.Compensations[index].Call.Input.Value = cloneJSON(view.Compensations[index].Call.Input.Value)
+		view.Compensations[index].Input = cloneJSON(view.Compensations[index].Input)
+	}
+	if view.Failure != nil {
+		failure := *view.Failure
+		view.Failure = &failure
 	}
 	return view
 }

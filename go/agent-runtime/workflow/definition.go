@@ -15,13 +15,21 @@ var (
 	ErrDefinitionHash    = errors.New("workflow definition hash mismatch")
 )
 
-// NodeType is one member of the closed minimal Workflow node union.
+// NodeType is one member of the closed data-only Workflow node union.
 type NodeType string
 
 const (
-	NodeEffect NodeType = "effect"
-	NodeWait   NodeType = "wait"
-	NodeReturn NodeType = "return"
+	NodeEffect            NodeType = "effect"
+	NodeAgentTask         NodeType = "agent.task"
+	NodeApplicationEffect NodeType = "application.effect"
+	NodeMediaEffect       NodeType = "media.effect"
+	NodeWait              NodeType = "wait"
+	NodeIf                NodeType = "if"
+	NodeParallel          NodeType = "parallel"
+	NodeMap               NodeType = "map"
+	NodeSubworkflow       NodeType = "subworkflow"
+	NodeCompensation      NodeType = "compensation"
+	NodeReturn            NodeType = "return"
 )
 
 // CostClass is a provider-neutral maximum billing impact declared by a Definition.
@@ -60,34 +68,52 @@ type Limits struct {
 	MaxSegments              int `json:"maxSegments"`
 	MaxActivationsPerSegment int `json:"maxActivationsPerSegment"`
 	MaxStateBytes            int `json:"maxStateBytes"`
+	MaxFanOut                int `json:"maxFanOut"`
+	MaxConcurrency           int `json:"maxConcurrency"`
+	MaxNestedDepth           int `json:"maxNestedDepth"`
+	MaxAttemptsPerEffect     int `json:"maxAttemptsPerEffect"`
 }
 
 // EffectNode creates one durable external Effect intent.
 type EffectNode struct {
-	Kind      string          `json:"kind"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	FromInput bool            `json:"fromInput,omitempty"`
+	Kind         string          `json:"kind"`
+	Input        json.RawMessage `json:"input,omitempty"`
+	FromInput    bool            `json:"fromInput,omitempty"`
+	Source       *ValueSource    `json:"source,omitempty"`
+	MaxCostUnits int64           `json:"maxCostUnits"`
+	Retry        RetryPolicy     `json:"retry"`
 }
 
 // WaitNode creates one explicit host-resolved Wait checkpoint.
 type WaitNode struct {
 	Kind    string          `json:"kind"`
-	Payload json.RawMessage `json:"payload"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+	Source  *ValueSource    `json:"source,omitempty"`
 }
 
 // ReturnNode completes the Workflow with canonical JSON.
 type ReturnNode struct {
 	Value    json.RawMessage `json:"value,omitempty"`
 	FromNode string          `json:"fromNode,omitempty"`
+	Source   *ValueSource    `json:"source,omitempty"`
 }
 
 // Node is a strict data-only union. Exactly one payload must match Type.
 type Node struct {
-	ID     string      `json:"id"`
-	Type   NodeType    `json:"type"`
-	Effect *EffectNode `json:"effect,omitempty"`
-	Wait   *WaitNode   `json:"wait,omitempty"`
-	Return *ReturnNode `json:"return,omitempty"`
+	ID                string                 `json:"id"`
+	Type              NodeType               `json:"type"`
+	Next              string                 `json:"next,omitempty"`
+	Effect            *EffectNode            `json:"effect,omitempty"`
+	AgentTask         *AgentTaskNode         `json:"agentTask,omitempty"`
+	ApplicationEffect *ApplicationEffectNode `json:"applicationEffect,omitempty"`
+	MediaEffect       *MediaEffectNode       `json:"mediaEffect,omitempty"`
+	Wait              *WaitNode              `json:"wait,omitempty"`
+	If                *IfNode                `json:"if,omitempty"`
+	Parallel          *ParallelNode          `json:"parallel,omitempty"`
+	Map               *MapNode               `json:"map,omitempty"`
+	Subworkflow       *SubworkflowNode       `json:"subworkflow,omitempty"`
+	Compensation      *CompensationNode      `json:"compensation,omitempty"`
+	Return            *ReturnNode            `json:"return,omitempty"`
 }
 
 // DefinitionDraft is the mutable input accepted by CompileDefinition.
@@ -198,6 +224,18 @@ func normalizeDefinitionDraft(draft DefinitionDraft) DefinitionDraft {
 	if draft.Limits.MaxStateBytes <= 0 {
 		draft.Limits.MaxStateBytes = 1 << 20
 	}
+	if draft.Limits.MaxFanOut <= 0 {
+		draft.Limits.MaxFanOut = 64
+	}
+	if draft.Limits.MaxConcurrency <= 0 {
+		draft.Limits.MaxConcurrency = 8
+	}
+	if draft.Limits.MaxNestedDepth <= 0 {
+		draft.Limits.MaxNestedDepth = 8
+	}
+	if draft.Limits.MaxAttemptsPerEffect <= 0 {
+		draft.Limits.MaxAttemptsPerEffect = 3
+	}
 	draft.Nodes = cloneNodes(draft.Nodes)
 	for index := range draft.Nodes {
 		draft.Nodes[index] = normalizeNode(draft.Nodes[index])
@@ -208,32 +246,37 @@ func normalizeDefinitionDraft(draft DefinitionDraft) DefinitionDraft {
 
 func normalizeNode(node Node) Node {
 	node.ID = strings.TrimSpace(node.ID)
+	node.Next = strings.TrimSpace(node.Next)
 	if node.Effect != nil {
 		effect := *node.Effect
 		effect.Kind = strings.TrimSpace(effect.Kind)
 		effect.Input = normalizeJSON(effect.Input)
+		effect.Source = cloneValueSource(effect.Source)
+		effect.Retry = normalizeRetryPolicy(effect.Retry)
 		node.Effect = &effect
 	}
 	if node.Wait != nil {
 		wait := *node.Wait
 		wait.Kind = strings.TrimSpace(wait.Kind)
 		wait.Payload = normalizeJSON(wait.Payload)
+		wait.Source = cloneValueSource(wait.Source)
 		node.Wait = &wait
 	}
 	if node.Return != nil {
 		terminal := *node.Return
 		terminal.Value = normalizeJSON(terminal.Value)
 		terminal.FromNode = strings.TrimSpace(terminal.FromNode)
+		terminal.Source = cloneValueSource(terminal.Source)
 		node.Return = &terminal
 	}
-	return node
+	return normalizeAdvancedNode(node)
 }
 
 func validateDefinitionDraft(draft DefinitionDraft) error {
 	if !validDefinitionEnvelope(draft) {
 		return ErrInvalidDefinition
 	}
-	return validateDefinitionNodes(draft.Nodes)
+	return validateDefinitionNodes(draft.Nodes, draft.Limits)
 }
 
 func validDefinitionEnvelope(draft DefinitionDraft) bool {
@@ -242,62 +285,13 @@ func validDefinitionEnvelope(draft DefinitionDraft) bool {
 		len(draft.Nodes) > 0 && validLimits(draft.Limits) && validDefinitionPolicy(draft.Policy)
 }
 
-func validateDefinitionNodes(nodes []Node) error {
-	seen := make(map[string]struct{}, len(nodes))
-	for index, node := range nodes {
-		if !validNode(node, index == len(nodes)-1) {
-			return ErrInvalidDefinition
-		}
-		if _, duplicate := seen[node.ID]; duplicate {
-			return ErrInvalidDefinition
-		}
-		seen[node.ID] = struct{}{}
-	}
-	return nil
-}
-
 func validLimits(limits Limits) bool {
 	return limits.MaxNodeActivations > 0 && limits.MaxEffects > 0 && limits.MaxSegments > 0 &&
 		limits.MaxActivationsPerSegment > 0 &&
-		limits.MaxActivationsPerSegment <= limits.MaxNodeActivations && limits.MaxStateBytes >= 1024
-}
-
-func validNode(node Node, last bool) bool {
-	if node.ID == "" {
-		return false
-	}
-	switch node.Type {
-	case NodeEffect:
-		return validEffectNode(node, last)
-	case NodeWait:
-		return validWaitNode(node, last)
-	case NodeReturn:
-		return validReturnNode(node, last)
-	default:
-		return false
-	}
-}
-
-func validEffectNode(node Node, last bool) bool {
-	if last || node.Effect == nil || node.Wait != nil || node.Return != nil || node.Effect.Kind == "" {
-		return false
-	}
-	hasInput := len(node.Effect.Input) > 0 && json.Valid(node.Effect.Input)
-	return hasInput != node.Effect.FromInput
-}
-
-func validWaitNode(node Node, last bool) bool {
-	return !last && node.Effect == nil && node.Wait != nil && node.Return == nil &&
-		node.Wait.Kind != "" && json.Valid(node.Wait.Payload)
-}
-
-func validReturnNode(node Node, last bool) bool {
-	if !last || node.Effect != nil || node.Wait != nil || node.Return == nil {
-		return false
-	}
-	hasValue := len(node.Return.Value) > 0 && json.Valid(node.Return.Value)
-	hasSource := strings.TrimSpace(node.Return.FromNode) != ""
-	return hasValue != hasSource
+		limits.MaxActivationsPerSegment <= limits.MaxNodeActivations && limits.MaxStateBytes >= 1024 &&
+		limits.MaxFanOut > 0 && limits.MaxConcurrency > 0 &&
+		limits.MaxConcurrency <= limits.MaxFanOut && limits.MaxNestedDepth > 0 &&
+		limits.MaxAttemptsPerEffect > 0
 }
 
 func definitionHash(definition Definition) (string, error) {
