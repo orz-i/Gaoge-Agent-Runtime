@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"iter"
 	"net/http"
+	"sort"
 	"strings"
+	"time"
 
 	a2asdk "github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2aclient"
@@ -20,12 +22,20 @@ const (
 	maxAgentSkills     = 1024
 	maxAgentExtensions = 256
 	maxAgentSkillItems = 256
+	maxSecuritySchemes = 64
+	maxCardSignatures  = 64
+	maxContentParts    = 256
+	maxTaskHistory     = 2048
+	maxTaskArtifacts   = 1024
+	maxRawPartBytes    = 8 * 1024 * 1024
+	maxMetadataBytes   = 1024 * 1024
 	maxRemoteTextBytes = 16 * 1024
 	eventDiscovery     = "protocol.a2a.discovery"
 	eventMessage       = "protocol.a2a.message"
 	eventMessageStream = "protocol.a2a.message_stream"
 	eventTaskSubscribe = "protocol.a2a.task_subscribe"
 	eventTaskGet       = "protocol.a2a.task_get"
+	eventTaskList      = "protocol.a2a.task_list"
 	eventTaskCancel    = "protocol.a2a.task_cancel"
 )
 
@@ -49,17 +59,17 @@ func cloneStreamEvent(event StreamEvent) StreamEvent {
 	event.Raw = append(json.RawMessage(nil), event.Raw...)
 	if event.Task != nil {
 		task := *event.Task
-		task.Raw = append(json.RawMessage(nil), task.Raw...)
+		cloneTaskSnapshotValue(&task)
 		event.Task = &task
 	}
 	if event.Message != nil {
 		message := *event.Message
-		message.Raw = append(json.RawMessage(nil), message.Raw...)
+		message = cloneMessageSnapshot(message)
 		event.Message = &message
 	}
 	if event.Artifact != nil {
 		artifact := *event.Artifact
-		artifact.Raw = append(json.RawMessage(nil), artifact.Raw...)
+		cloneArtifactSnapshot(&artifact)
 		event.Artifact = &artifact
 	}
 	return event
@@ -132,15 +142,7 @@ func projectArtifactEvent(event *a2asdk.TaskArtifactUpdateEvent) (ArtifactSnapsh
 		strings.TrimSpace(string(event.TaskID)) == "" || strings.TrimSpace(event.ContextID) == "" {
 		return ArtifactSnapshot{}, ErrInvalidResult
 	}
-	raw, err := json.Marshal(event)
-	if err != nil {
-		return ArtifactSnapshot{}, err
-	}
-	return ArtifactSnapshot{
-		ID: strings.TrimSpace(string(event.Artifact.ID)), TaskID: strings.TrimSpace(string(event.TaskID)),
-		ContextID: strings.TrimSpace(event.ContextID), Name: strings.TrimSpace(event.Artifact.Name),
-		Append: event.Append, LastChunk: event.LastChunk, Raw: append(json.RawMessage(nil), raw...),
-	}, nil
+	return projectArtifact(event.Artifact, string(event.TaskID), event.ContextID, event.Append, event.LastChunk, event)
 }
 
 // StreamEventKind identifies one host-neutral A2A streaming event shape.
@@ -155,13 +157,39 @@ const (
 
 // ArtifactSnapshot is one isolated A2A artifact update projection.
 type ArtifactSnapshot struct {
-	ID        string
-	TaskID    string
-	ContextID string
-	Name      string
-	Append    bool
-	LastChunk bool
-	Raw       json.RawMessage
+	ID          string
+	TaskID      string
+	ContextID   string
+	Name        string
+	Description string
+	Append      bool
+	LastChunk   bool
+	Parts       []ContentPart
+	Metadata    json.RawMessage
+	Raw         json.RawMessage
+}
+
+// ContentPartKind is the protocol-neutral A2A content discriminator.
+type ContentPartKind string
+
+const (
+	ContentPartText ContentPartKind = "text"
+	ContentPartRaw  ContentPartKind = "raw"
+	ContentPartData ContentPartKind = "data"
+	ContentPartURL  ContentPartKind = "url"
+)
+
+// ContentPart preserves rich A2A content without exposing official SDK types.
+// Exactly one field selected by Kind is populated.
+type ContentPart struct {
+	Kind      ContentPartKind
+	Text      string
+	Raw       []byte
+	Data      json.RawMessage
+	URL       string
+	Filename  string
+	MediaType string
+	Metadata  json.RawMessage
 }
 
 // StreamEvent keeps official A2A streaming types inside the edge module while
@@ -191,40 +219,91 @@ type RemoteAgentSkill struct {
 	OutputModes []string
 }
 
+// RemoteSecurityScheme is a bounded host-neutral Agent Card security projection.
+type RemoteSecurityScheme struct {
+	Name        string
+	Type        string
+	DetailsJSON json.RawMessage
+}
+
+// RemoteAgentCardSignature exposes JWS material for a host-owned trust policy.
+// The A2A edge does not implicitly trust or verify a card.
+type RemoteAgentCardSignature struct {
+	Protected string
+	Signature string
+}
+
 // Discovery is one immutable Agent Card projection with an explicitly selected
 // A2A v1 HTTP+JSON interface.
 type Discovery struct {
-	Descriptor         RemoteAgentDescriptor
-	DefaultInputModes  []string
-	DefaultOutputModes []string
-	Skills             []RemoteAgentSkill
-	CapabilitiesJSON   json.RawMessage
+	Descriptor               RemoteAgentDescriptor
+	DefaultInputModes        []string
+	DefaultOutputModes       []string
+	Skills                   []RemoteAgentSkill
+	CapabilitiesJSON         json.RawMessage
+	SecuritySchemes          []RemoteSecurityScheme
+	SecurityRequirementsJSON json.RawMessage
+	Signatures               []RemoteAgentCardSignature
+	CardJSON                 json.RawMessage
 }
 
 // SendRequest carries the minimum host-neutral A2A message fields used by the
 // Runtime remote-agent adapter.
 type SendRequest struct {
-	MessageID string
-	ContextID string
-	TaskID    string
-	Text      string
+	MessageID           string
+	ContextID           string
+	TaskID              string
+	Text                string
+	Parts               []ContentPart
+	AcceptedOutputModes []string
+	ReturnImmediately   bool
+	HistoryLength       *int
 }
 
 // MessageSnapshot is one isolated remote A2A Message projection.
 type MessageSnapshot struct {
-	ID        string
-	ContextID string
-	TaskID    string
-	Raw       json.RawMessage
+	ID               string
+	ContextID        string
+	TaskID           string
+	Role             string
+	Parts            []ContentPart
+	Extensions       []string
+	ReferenceTaskIDs []string
+	Metadata         json.RawMessage
+	Raw              json.RawMessage
 }
 
 // TaskSnapshot is one isolated remote A2A Task projection.
 type TaskSnapshot struct {
-	ID        string
-	ContextID string
-	State     string
-	Terminal  bool
-	Raw       json.RawMessage
+	ID            string
+	ContextID     string
+	State         string
+	Terminal      bool
+	StatusMessage *MessageSnapshot
+	History       []MessageSnapshot
+	Artifacts     []ArtifactSnapshot
+	Metadata      json.RawMessage
+	Raw           json.RawMessage
+}
+
+// ListTasksRequest is the bounded host-neutral A2A tasks/list query.
+type ListTasksRequest struct {
+	ContextID            string
+	State                string
+	PageSize             int
+	PageToken            string
+	HistoryLength        *int
+	StatusTimestampAfter *time.Time
+	IncludeArtifacts     bool
+}
+
+// TaskPage is one isolated A2A tasks/list result page.
+type TaskPage struct {
+	Tasks         []TaskSnapshot
+	TotalSize     int
+	PageSize      int
+	NextPageToken string
+	Raw           json.RawMessage
 }
 
 // Interaction is the non-streaming SendMessage result, which is exactly one
@@ -284,7 +363,7 @@ func (client *Client) SendMessage(ctx context.Context, discovery Discovery, requ
 }
 
 func (client *Client) sendMessage(ctx context.Context, discovery Discovery, request SendRequest) (Interaction, error) {
-	message, err := newUserMessage(request)
+	protocolRequest, err := newSendMessageRequest(discovery, request)
 	if err != nil {
 		return Interaction{}, err
 	}
@@ -293,9 +372,7 @@ func (client *Client) sendMessage(ctx context.Context, discovery Discovery, requ
 		return Interaction{}, err
 	}
 	defer func() { _ = protocolClient.Destroy() }()
-	result, err := protocolClient.SendMessage(ctx, &a2asdk.SendMessageRequest{
-		Tenant: discovery.Descriptor.Tenant, Message: message,
-	})
+	result, err := protocolClient.SendMessage(ctx, protocolRequest)
 	if err != nil {
 		return Interaction{}, err
 	}
@@ -322,7 +399,7 @@ func (client *Client) streamMessage(
 	request SendRequest,
 	yield func(StreamEvent, error) bool,
 ) error {
-	message, err := newUserMessage(request)
+	protocolRequest, err := newSendMessageRequest(discovery, request)
 	if err != nil {
 		yield(StreamEvent{}, err)
 		return err
@@ -333,9 +410,7 @@ func (client *Client) streamMessage(
 		return err
 	}
 	defer func() { _ = protocolClient.Destroy() }()
-	for event, streamErr := range protocolClient.SendStreamingMessage(ctx, &a2asdk.SendMessageRequest{
-		Tenant: discovery.Descriptor.Tenant, Message: message,
-	}) {
+	for event, streamErr := range protocolClient.SendStreamingMessage(ctx, protocolRequest) {
 		if streamErr != nil {
 			yield(StreamEvent{}, streamErr)
 			return streamErr
@@ -403,15 +478,98 @@ func (client *Client) subscribeTask(
 
 func newUserMessage(request SendRequest) (*a2asdk.Message, error) {
 	messageID := strings.TrimSpace(request.MessageID)
-	text := strings.TrimSpace(request.Text)
-	if messageID == "" || text == "" {
+	if messageID == "" || len(request.Parts) > maxContentParts ||
+		(len(request.Parts) > 0 && strings.TrimSpace(request.Text) != "") {
 		return nil, ErrInvalidMessage
 	}
-	message := a2asdk.NewMessage(a2asdk.MessageRoleUser, a2asdk.NewTextPart(text))
+	parts := make([]*a2asdk.Part, 0, max(1, len(request.Parts)))
+	if len(request.Parts) == 0 {
+		text := strings.TrimSpace(request.Text)
+		if text == "" {
+			return nil, ErrInvalidMessage
+		}
+		parts = append(parts, a2asdk.NewTextPart(text))
+	} else {
+		for _, part := range request.Parts {
+			projected, err := toProtocolPart(part)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, projected)
+		}
+	}
+	message := a2asdk.NewMessage(a2asdk.MessageRoleUser, parts...)
 	message.ID = messageID
 	message.ContextID = strings.TrimSpace(request.ContextID)
 	message.TaskID = a2asdk.TaskID(strings.TrimSpace(request.TaskID))
 	return message, nil
+}
+
+func newSendMessageRequest(discovery Discovery, request SendRequest) (*a2asdk.SendMessageRequest, error) {
+	message, err := newUserMessage(request)
+	if err != nil || validateRemoteStrings(request.AcceptedOutputModes) != nil {
+		return nil, errors.Join(err, ErrInvalidMessage)
+	}
+	protocolRequest := &a2asdk.SendMessageRequest{Tenant: discovery.Descriptor.Tenant, Message: message}
+	if len(request.AcceptedOutputModes) > 0 || request.ReturnImmediately || request.HistoryLength != nil {
+		protocolRequest.Config = &a2asdk.SendMessageConfig{
+			AcceptedOutputModes: append([]string(nil), request.AcceptedOutputModes...),
+			ReturnImmediately:   request.ReturnImmediately,
+			HistoryLength:       cloneInt(request.HistoryLength),
+		}
+	}
+	return protocolRequest, nil
+}
+
+func toProtocolPart(part ContentPart) (*a2asdk.Part, error) {
+	var projected *a2asdk.Part
+	switch part.Kind {
+	case ContentPartText:
+		if !validRemoteText(part.Text, true) {
+			return nil, ErrInvalidMessage
+		}
+		projected = a2asdk.NewTextPart(part.Text)
+	case ContentPartRaw:
+		if len(part.Raw) == 0 || len(part.Raw) > maxRawPartBytes {
+			return nil, ErrInvalidMessage
+		}
+		projected = a2asdk.NewRawPart(append([]byte(nil), part.Raw...))
+	case ContentPartData:
+		if len(part.Data) == 0 || len(part.Data) > maxMetadataBytes || !json.Valid(part.Data) {
+			return nil, ErrInvalidMessage
+		}
+		var data any
+		if err := json.Unmarshal(part.Data, &data); err != nil {
+			return nil, ErrInvalidMessage
+		}
+		projected = a2asdk.NewDataPart(data)
+	case ContentPartURL:
+		if !validRemoteText(part.URL, true) {
+			return nil, ErrInvalidMessage
+		}
+		projected = a2asdk.NewFileURLPart(a2asdk.URL(strings.TrimSpace(part.URL)), strings.TrimSpace(part.MediaType))
+	default:
+		return nil, ErrInvalidMessage
+	}
+	if !validRemoteText(part.Filename, false) || !validRemoteText(part.MediaType, false) {
+		return nil, ErrInvalidMessage
+	}
+	metadata, err := decodeMetadata(part.Metadata)
+	if err != nil {
+		return nil, ErrInvalidMessage
+	}
+	projected.Filename = strings.TrimSpace(part.Filename)
+	projected.MediaType = strings.TrimSpace(part.MediaType)
+	projected.Metadata = metadata
+	return projected, nil
+}
+
+func cloneInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
 }
 
 // GetTask reads one remote task by stable identity.
@@ -428,6 +586,87 @@ func (client *Client) CancelTask(ctx context.Context, discovery Discovery, taskI
 	task, err := client.taskOperation(ctx, discovery, taskID, taskActionCancel)
 	client.observeOutcome(ctx, eventTaskCancel, err)
 	return task, err
+}
+
+// ListTasks returns one bounded tasks/list page for the selected tenant.
+func (client *Client) ListTasks(
+	ctx context.Context,
+	discovery Discovery,
+	request ListTasksRequest,
+) (TaskPage, error) {
+	client.observe(ctx, eventTaskList, "started", false)
+	page, err := client.listTasks(ctx, discovery, request)
+	client.observeOutcome(ctx, eventTaskList, err)
+	return page, err
+}
+
+func (client *Client) listTasks(
+	ctx context.Context,
+	discovery Discovery,
+	request ListTasksRequest,
+) (TaskPage, error) {
+	if request.PageSize < 0 || request.PageSize > 100 || !validRemoteText(request.ContextID, false) ||
+		!validRemoteText(request.PageToken, false) || !validTaskState(request.State) {
+		return TaskPage{}, ErrInvalidTask
+	}
+	protocolClient, err := client.newProtocolClient(ctx, discovery.Descriptor)
+	if err != nil {
+		return TaskPage{}, err
+	}
+	defer func() { _ = protocolClient.Destroy() }()
+	response, err := protocolClient.ListTasks(ctx, &a2asdk.ListTasksRequest{
+		Tenant: discovery.Descriptor.Tenant, ContextID: strings.TrimSpace(request.ContextID),
+		Status: a2asdk.TaskState(strings.TrimSpace(request.State)), PageSize: request.PageSize,
+		PageToken: strings.TrimSpace(request.PageToken), HistoryLength: cloneInt(request.HistoryLength),
+		StatusTimestampAfter: cloneTime(request.StatusTimestampAfter), IncludeArtifacts: request.IncludeArtifacts,
+	})
+	if err != nil {
+		return TaskPage{}, err
+	}
+	return projectTaskPage(response)
+}
+
+func validTaskState(state string) bool {
+	switch strings.TrimSpace(state) {
+	case "", string(a2asdk.TaskStateAuthRequired), string(a2asdk.TaskStateCanceled),
+		string(a2asdk.TaskStateCompleted), string(a2asdk.TaskStateFailed),
+		string(a2asdk.TaskStateInputRequired), string(a2asdk.TaskStateRejected),
+		string(a2asdk.TaskStateSubmitted), string(a2asdk.TaskStateWorking):
+		return true
+	default:
+		return false
+	}
+}
+
+func projectTaskPage(response *a2asdk.ListTasksResponse) (TaskPage, error) {
+	if response == nil || len(response.Tasks) > maxTaskHistory || response.TotalSize < 0 || response.PageSize < 0 {
+		return TaskPage{}, ErrInvalidTask
+	}
+	raw, err := json.Marshal(response)
+	if err != nil {
+		return TaskPage{}, err
+	}
+	page := TaskPage{
+		Tasks: make([]TaskSnapshot, 0, len(response.Tasks)), TotalSize: response.TotalSize,
+		PageSize: response.PageSize, NextPageToken: strings.TrimSpace(response.NextPageToken),
+		Raw: append(json.RawMessage(nil), raw...),
+	}
+	for _, task := range response.Tasks {
+		projected, projectErr := projectTask(task)
+		if projectErr != nil {
+			return TaskPage{}, projectErr
+		}
+		page.Tasks = append(page.Tasks, projected)
+	}
+	return cloneTaskPage(page), nil
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
 }
 
 type taskAction uint8
@@ -565,6 +804,14 @@ func projectDiscovery(card *a2asdk.AgentCard, selected *a2asdk.AgentInterface) (
 	if err != nil {
 		return Discovery{}, err
 	}
+	securityRequirementsJSON, err := marshalBounded(card.SecurityRequirements)
+	if err != nil {
+		return Discovery{}, err
+	}
+	cardJSON, err := marshalBounded(card)
+	if err != nil {
+		return Discovery{}, err
+	}
 	discovery := Discovery{
 		Descriptor: RemoteAgentDescriptor{
 			Name: strings.TrimSpace(card.Name), Description: strings.TrimSpace(card.Description),
@@ -572,10 +819,36 @@ func projectDiscovery(card *a2asdk.AgentCard, selected *a2asdk.AgentInterface) (
 			ProtocolVersion: string(selected.ProtocolVersion), ProtocolBinding: string(selected.ProtocolBinding),
 			Tenant: strings.TrimSpace(selected.Tenant), Capabilities: projectCapabilities(card.Capabilities),
 		},
-		DefaultInputModes:  append([]string(nil), card.DefaultInputModes...),
-		DefaultOutputModes: append([]string(nil), card.DefaultOutputModes...),
-		CapabilitiesJSON:   append(json.RawMessage(nil), capabilitiesJSON...),
-		Skills:             make([]RemoteAgentSkill, 0, len(card.Skills)),
+		DefaultInputModes:        append([]string(nil), card.DefaultInputModes...),
+		DefaultOutputModes:       append([]string(nil), card.DefaultOutputModes...),
+		CapabilitiesJSON:         append(json.RawMessage(nil), capabilitiesJSON...),
+		Skills:                   make([]RemoteAgentSkill, 0, len(card.Skills)),
+		SecuritySchemes:          make([]RemoteSecurityScheme, 0, len(card.SecuritySchemes)),
+		SecurityRequirementsJSON: append(json.RawMessage(nil), securityRequirementsJSON...),
+		Signatures:               make([]RemoteAgentCardSignature, 0, len(card.Signatures)),
+		CardJSON:                 append(json.RawMessage(nil), cardJSON...),
+	}
+	securityNames := make([]string, 0, len(card.SecuritySchemes))
+	for name := range card.SecuritySchemes {
+		securityNames = append(securityNames, string(name))
+	}
+	sort.Strings(securityNames)
+	for _, securityName := range securityNames {
+		name := a2asdk.SecuritySchemeName(securityName)
+		scheme := card.SecuritySchemes[name]
+		projected, projectErr := projectSecurityScheme(name, scheme)
+		if projectErr != nil {
+			return Discovery{}, projectErr
+		}
+		discovery.SecuritySchemes = append(discovery.SecuritySchemes, projected)
+	}
+	for _, signature := range card.Signatures {
+		if !validRemoteText(signature.Protected, true) || !validRemoteText(signature.Signature, true) {
+			return Discovery{}, ErrDiscoveryLimit
+		}
+		discovery.Signatures = append(discovery.Signatures, RemoteAgentCardSignature{
+			Protected: strings.TrimSpace(signature.Protected), Signature: strings.TrimSpace(signature.Signature),
+		})
 	}
 	for _, skill := range card.Skills {
 		projected, projectErr := projectSkill(skill)
@@ -588,7 +861,9 @@ func projectDiscovery(card *a2asdk.AgentCard, selected *a2asdk.AgentInterface) (
 }
 
 func validateAgentCardProjection(card *a2asdk.AgentCard, selected *a2asdk.AgentInterface) error {
-	if len(card.Skills) > maxAgentSkills || len(card.Capabilities.Extensions) > maxAgentExtensions {
+	if len(card.Skills) > maxAgentSkills || len(card.Capabilities.Extensions) > maxAgentExtensions ||
+		len(card.SecuritySchemes) > maxSecuritySchemes || len(card.SecurityRequirements) > maxSecuritySchemes ||
+		len(card.Signatures) > maxCardSignatures {
 		return ErrDiscoveryLimit
 	}
 	if !validAgentCardIdentity(card, selected) ||
@@ -602,6 +877,47 @@ func validateAgentCardProjection(card *a2asdk.AgentCard, selected *a2asdk.AgentI
 		}
 	}
 	return nil
+}
+
+func projectSecurityScheme(name a2asdk.SecuritySchemeName, scheme a2asdk.SecurityScheme) (RemoteSecurityScheme, error) {
+	projected := RemoteSecurityScheme{Name: strings.TrimSpace(string(name))}
+	if !validRemoteText(projected.Name, true) || scheme == nil {
+		return RemoteSecurityScheme{}, ErrDiscoveryLimit
+	}
+	switch scheme.(type) {
+	case a2asdk.APIKeySecurityScheme:
+		projected.Type = "api_key"
+	case a2asdk.HTTPAuthSecurityScheme:
+		projected.Type = "http"
+	case a2asdk.MutualTLSSecurityScheme:
+		projected.Type = "mutual_tls"
+	case a2asdk.OAuth2SecurityScheme:
+		projected.Type = "oauth2"
+	case a2asdk.OpenIDConnectSecurityScheme:
+		projected.Type = "open_id_connect"
+	default:
+		return RemoteSecurityScheme{}, ErrDiscoveryLimit
+	}
+	details, err := marshalBounded(scheme)
+	if err != nil {
+		return RemoteSecurityScheme{}, err
+	}
+	projected.DetailsJSON = details
+	return projected, nil
+}
+
+func marshalBounded(value any) (json.RawMessage, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > maxMetadataBytes {
+		return nil, ErrDiscoveryLimit
+	}
+	if string(raw) == "null" {
+		return nil, nil
+	}
+	return append(json.RawMessage(nil), raw...), nil
 }
 
 func validAgentCardIdentity(card *a2asdk.AgentCard, selected *a2asdk.AgentInterface) bool {
@@ -690,24 +1006,72 @@ func projectInteraction(result a2asdk.SendMessageResult) (Interaction, error) {
 }
 
 func projectMessage(message *a2asdk.Message) (MessageSnapshot, error) {
-	if message == nil || strings.TrimSpace(message.ID) == "" {
+	if message == nil || strings.TrimSpace(message.ID) == "" || len(message.Parts) == 0 ||
+		len(message.Parts) > maxContentParts || validateRemoteStrings(message.Extensions) != nil ||
+		len(message.ReferenceTasks) > maxTaskHistory {
 		return MessageSnapshot{}, ErrInvalidMessage
 	}
 	raw, err := json.Marshal(message)
 	if err != nil {
 		return MessageSnapshot{}, err
 	}
-	return MessageSnapshot{
+	metadata, err := marshalBounded(message.Metadata)
+	if err != nil {
+		return MessageSnapshot{}, err
+	}
+	projected := MessageSnapshot{
 		ID: strings.TrimSpace(message.ID), ContextID: strings.TrimSpace(message.ContextID),
-		TaskID: strings.TrimSpace(string(message.TaskID)), Raw: append(json.RawMessage(nil), raw...),
-	}, nil
+		TaskID: strings.TrimSpace(string(message.TaskID)), Role: string(message.Role),
+		Parts: make([]ContentPart, 0, len(message.Parts)), Extensions: append([]string(nil), message.Extensions...),
+		ReferenceTaskIDs: make([]string, 0, len(message.ReferenceTasks)), Metadata: metadata,
+		Raw: append(json.RawMessage(nil), raw...),
+	}
+	for _, part := range message.Parts {
+		content, projectErr := projectContentPart(part)
+		if projectErr != nil {
+			return MessageSnapshot{}, projectErr
+		}
+		projected.Parts = append(projected.Parts, content)
+	}
+	for _, taskID := range message.ReferenceTasks {
+		if id := strings.TrimSpace(string(taskID)); id != "" {
+			projected.ReferenceTaskIDs = append(projected.ReferenceTaskIDs, id)
+		}
+	}
+	return cloneMessageSnapshot(projected), nil
 }
 
 func projectTask(task *a2asdk.Task) (TaskSnapshot, error) {
-	if task == nil {
+	if task == nil || len(task.History) > maxTaskHistory || len(task.Artifacts) > maxTaskArtifacts {
 		return TaskSnapshot{}, ErrInvalidTask
 	}
-	return newTaskSnapshot(task.ID, task.ContextID, task.Status, task)
+	projected, err := newTaskSnapshot(task.ID, task.ContextID, task.Status, task)
+	if err != nil {
+		return TaskSnapshot{}, err
+	}
+	metadata, err := marshalBounded(task.Metadata)
+	if err != nil {
+		return TaskSnapshot{}, err
+	}
+	projected.Metadata = metadata
+	projected.History = make([]MessageSnapshot, 0, len(task.History))
+	for _, message := range task.History {
+		historyItem, projectErr := projectMessage(message)
+		if projectErr != nil {
+			return TaskSnapshot{}, projectErr
+		}
+		projected.History = append(projected.History, historyItem)
+	}
+	projected.Artifacts = make([]ArtifactSnapshot, 0, len(task.Artifacts))
+	for _, artifact := range task.Artifacts {
+		artifactItem, projectErr := projectArtifact(artifact, string(task.ID), task.ContextID, false, true, artifact)
+		if projectErr != nil {
+			return TaskSnapshot{}, projectErr
+		}
+		projected.Artifacts = append(projected.Artifacts, artifactItem)
+	}
+	cloneTaskSnapshotValue(&projected)
+	return projected, nil
 }
 
 func newTaskSnapshot(
@@ -725,10 +1089,95 @@ func newTaskSnapshot(
 	if err != nil {
 		return TaskSnapshot{}, err
 	}
-	return TaskSnapshot{
+	projected := TaskSnapshot{
 		ID: normalizedID, ContextID: normalizedContextID,
 		State: string(status.State), Terminal: status.State.Terminal(), Raw: append(json.RawMessage(nil), raw...),
-	}, nil
+	}
+	if status.Message != nil {
+		message, projectErr := projectMessage(status.Message)
+		if projectErr != nil {
+			return TaskSnapshot{}, projectErr
+		}
+		projected.StatusMessage = &message
+	}
+	return projected, nil
+}
+
+func projectArtifact(
+	artifact *a2asdk.Artifact,
+	taskID string,
+	contextID string,
+	appendContent bool,
+	lastChunk bool,
+	source any,
+) (ArtifactSnapshot, error) {
+	if artifact == nil || strings.TrimSpace(string(artifact.ID)) == "" || len(artifact.Parts) == 0 ||
+		len(artifact.Parts) > maxContentParts || validateRemoteStrings(artifact.Extensions) != nil {
+		return ArtifactSnapshot{}, ErrInvalidResult
+	}
+	raw, err := json.Marshal(source)
+	if err != nil {
+		return ArtifactSnapshot{}, err
+	}
+	metadata, err := marshalBounded(artifact.Metadata)
+	if err != nil {
+		return ArtifactSnapshot{}, err
+	}
+	projected := ArtifactSnapshot{
+		ID: strings.TrimSpace(string(artifact.ID)), TaskID: strings.TrimSpace(taskID),
+		ContextID: strings.TrimSpace(contextID), Name: strings.TrimSpace(artifact.Name),
+		Description: strings.TrimSpace(artifact.Description), Append: appendContent, LastChunk: lastChunk,
+		Parts: make([]ContentPart, 0, len(artifact.Parts)), Metadata: metadata,
+		Raw: append(json.RawMessage(nil), raw...),
+	}
+	for _, part := range artifact.Parts {
+		content, projectErr := projectContentPart(part)
+		if projectErr != nil {
+			return ArtifactSnapshot{}, projectErr
+		}
+		projected.Parts = append(projected.Parts, content)
+	}
+	cloneArtifactSnapshot(&projected)
+	return projected, nil
+}
+
+func projectContentPart(part *a2asdk.Part) (ContentPart, error) {
+	if part == nil || !validRemoteText(part.Filename, false) || !validRemoteText(part.MediaType, false) {
+		return ContentPart{}, ErrInvalidResult
+	}
+	metadata, err := marshalBounded(part.Metadata)
+	if err != nil {
+		return ContentPart{}, err
+	}
+	projected := ContentPart{
+		Filename: strings.TrimSpace(part.Filename), MediaType: strings.TrimSpace(part.MediaType), Metadata: metadata,
+	}
+	switch content := part.Content.(type) {
+	case a2asdk.Text:
+		if !validRemoteText(string(content), false) {
+			return ContentPart{}, ErrInvalidResult
+		}
+		projected.Kind, projected.Text = ContentPartText, string(content)
+	case a2asdk.Raw:
+		if len(content) > maxRawPartBytes {
+			return ContentPart{}, ErrInvalidResult
+		}
+		projected.Kind, projected.Raw = ContentPartRaw, append([]byte(nil), content...)
+	case a2asdk.Data:
+		data, marshalErr := marshalBounded(content.Value)
+		if marshalErr != nil {
+			return ContentPart{}, marshalErr
+		}
+		projected.Kind, projected.Data = ContentPartData, data
+	case a2asdk.URL:
+		if !validRemoteText(string(content), true) {
+			return ContentPart{}, ErrInvalidResult
+		}
+		projected.Kind, projected.URL = ContentPartURL, strings.TrimSpace(string(content))
+	default:
+		return ContentPart{}, ErrInvalidResult
+	}
+	return cloneContentPart(projected), nil
 }
 
 func cloneDiscovery(discovery Discovery) Discovery {
@@ -736,6 +1185,15 @@ func cloneDiscovery(discovery Discovery) Discovery {
 	discovery.DefaultInputModes = append([]string(nil), discovery.DefaultInputModes...)
 	discovery.DefaultOutputModes = append([]string(nil), discovery.DefaultOutputModes...)
 	discovery.CapabilitiesJSON = append(json.RawMessage(nil), discovery.CapabilitiesJSON...)
+	discovery.SecurityRequirementsJSON = append(json.RawMessage(nil), discovery.SecurityRequirementsJSON...)
+	discovery.CardJSON = append(json.RawMessage(nil), discovery.CardJSON...)
+	discovery.SecuritySchemes = append([]RemoteSecurityScheme(nil), discovery.SecuritySchemes...)
+	for index := range discovery.SecuritySchemes {
+		discovery.SecuritySchemes[index].DetailsJSON = append(
+			json.RawMessage(nil), discovery.SecuritySchemes[index].DetailsJSON...,
+		)
+	}
+	discovery.Signatures = append([]RemoteAgentCardSignature(nil), discovery.Signatures...)
 	discovery.Skills = append([]RemoteAgentSkill(nil), discovery.Skills...)
 	for index := range discovery.Skills {
 		discovery.Skills[index].Tags = append([]string(nil), discovery.Skills[index].Tags...)
@@ -749,16 +1207,89 @@ func cloneDiscovery(discovery Discovery) Discovery {
 func cloneInteraction(interaction Interaction) Interaction {
 	interaction.Raw = append(json.RawMessage(nil), interaction.Raw...)
 	if interaction.Message != nil {
-		message := *interaction.Message
-		message.Raw = append(json.RawMessage(nil), message.Raw...)
+		message := cloneMessageSnapshot(*interaction.Message)
 		interaction.Message = &message
 	}
 	if interaction.Task != nil {
 		task := *interaction.Task
-		task.Raw = append(json.RawMessage(nil), task.Raw...)
+		cloneTaskSnapshotValue(&task)
 		interaction.Task = &task
 	}
 	return interaction
+}
+
+func cloneMessageSnapshot(message MessageSnapshot) MessageSnapshot {
+	message.Raw = append(json.RawMessage(nil), message.Raw...)
+	message.Metadata = append(json.RawMessage(nil), message.Metadata...)
+	message.Extensions = append([]string(nil), message.Extensions...)
+	message.ReferenceTaskIDs = append([]string(nil), message.ReferenceTaskIDs...)
+	message.Parts = append([]ContentPart(nil), message.Parts...)
+	for index := range message.Parts {
+		message.Parts[index] = cloneContentPart(message.Parts[index])
+	}
+	return message
+}
+
+func cloneTaskSnapshotValue(task *TaskSnapshot) {
+	if task == nil {
+		return
+	}
+	task.Raw = append(json.RawMessage(nil), task.Raw...)
+	task.Metadata = append(json.RawMessage(nil), task.Metadata...)
+	if task.StatusMessage != nil {
+		message := cloneMessageSnapshot(*task.StatusMessage)
+		task.StatusMessage = &message
+	}
+	task.History = append([]MessageSnapshot(nil), task.History...)
+	for index := range task.History {
+		task.History[index] = cloneMessageSnapshot(task.History[index])
+	}
+	task.Artifacts = append([]ArtifactSnapshot(nil), task.Artifacts...)
+	for index := range task.Artifacts {
+		cloneArtifactSnapshot(&task.Artifacts[index])
+	}
+}
+
+func cloneArtifactSnapshot(artifact *ArtifactSnapshot) {
+	if artifact == nil {
+		return
+	}
+	artifact.Raw = append(json.RawMessage(nil), artifact.Raw...)
+	artifact.Metadata = append(json.RawMessage(nil), artifact.Metadata...)
+	artifact.Parts = append([]ContentPart(nil), artifact.Parts...)
+	for index := range artifact.Parts {
+		artifact.Parts[index] = cloneContentPart(artifact.Parts[index])
+	}
+}
+
+func cloneContentPart(part ContentPart) ContentPart {
+	part.Raw = append([]byte(nil), part.Raw...)
+	part.Data = append(json.RawMessage(nil), part.Data...)
+	part.Metadata = append(json.RawMessage(nil), part.Metadata...)
+	return part
+}
+
+func cloneTaskPage(page TaskPage) TaskPage {
+	page.Raw = append(json.RawMessage(nil), page.Raw...)
+	page.Tasks = append([]TaskSnapshot(nil), page.Tasks...)
+	for index := range page.Tasks {
+		cloneTaskSnapshotValue(&page.Tasks[index])
+	}
+	return page
+}
+
+func decodeMetadata(raw json.RawMessage) (map[string]any, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if len(raw) > maxMetadataBytes || !json.Valid(raw) {
+		return nil, ErrInvalidMessage
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal(raw, &metadata); err != nil || metadata == nil {
+		return nil, ErrInvalidMessage
+	}
+	return metadata, nil
 }
 
 func (client *Client) observe(ctx context.Context, eventType, status string, terminal bool) {
