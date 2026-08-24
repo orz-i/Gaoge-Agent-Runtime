@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata fmt-check tidy-check go-test go-race go-vet go-lint ts-lint ts-typecheck ts-test ts-build unit integration integration-test release-check check beta
+.PHONY: bootstrap metadata fmt-check tidy-check go-test go-race go-vet go-lint ts-lint ts-typecheck ts-test ts-build unit integration integration-test a2a-product-check a2a-tck release-check check beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -44,9 +44,15 @@ integration-test:
 integration:
 	node scripts/run-integration.mjs
 
+a2a-product-check:
+	node scripts/check-a2a-product.mjs
+
+a2a-tck:
+	node scripts/run-a2a-tck.mjs
+
 release-check:
 	node scripts/check-release.mjs
 
-check: metadata fmt-check tidy-check go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build release-check
+check: metadata fmt-check tidy-check go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build a2a-product-check release-check
 
 beta: check integration
