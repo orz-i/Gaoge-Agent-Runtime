@@ -1,4 +1,4 @@
-# @gaoge/agent-runtime-client
+# @orz-i/agent-runtime-client
 
 Framework-neutral TypeScript client for Agent Runtime HTTP v1. It owns the
 public Runtime contract for runs, event streams, interactions, outputs,
@@ -8,7 +8,7 @@ workbench inspection, and administrator recovery operations.
 ## Create a client
 
 ```ts
-import { RuntimeClient } from "@gaoge/agent-runtime-client";
+import { RuntimeClient } from "@orz-i/agent-runtime-client";
 
 const runtime = new RuntimeClient({
   baseURL: "https://gaoge.example.com/api/agentruntime/v1",
@@ -284,7 +284,7 @@ checkpoint until it resolves, fails, is cancelled, or times out.
 ## Error handling
 
 ```ts
-import { RuntimeAPIError } from "@gaoge/agent-runtime-client";
+import { RuntimeAPIError } from "@orz-i/agent-runtime-client";
 
 try {
   await runtime.runs.get(runID);
