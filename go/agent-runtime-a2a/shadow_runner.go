@@ -29,9 +29,11 @@ type RemoteClient interface {
 
 // ShadowDependencies bind one runner to one explicitly discovered remote Agent.
 type ShadowDependencies struct {
-	Runtime   *kernel.Runtime
-	Client    RemoteClient
-	Discovery Discovery
+	Runtime        *kernel.Runtime
+	Client         RemoteClient
+	Discovery      Discovery
+	TargetID       string
+	TargetRevision string
 }
 
 // ShadowRunner implements the existing Handoff ChildRunner shape without
@@ -40,10 +42,14 @@ type ShadowRunner struct {
 	runtime   *kernel.Runtime
 	client    RemoteClient
 	discovery Discovery
+	targetID  string
+	revision  string
 }
 
 type shadowState struct {
 	RemoteName      string `json:"remoteName"`
+	TargetID        string `json:"targetID,omitempty"`
+	TargetRevision  string `json:"targetRevision,omitempty"`
 	RemoteURL       string `json:"remoteURL"`
 	ProtocolVersion string `json:"protocolVersion"`
 	MessageID       string `json:"messageID"`
@@ -62,6 +68,7 @@ func NewShadowRunner(dependencies ShadowDependencies) (*ShadowRunner, error) {
 	}
 	return &ShadowRunner{
 		runtime: dependencies.Runtime, client: dependencies.Client, discovery: cloneDiscovery(dependencies.Discovery),
+		targetID: strings.TrimSpace(dependencies.TargetID), revision: strings.TrimSpace(dependencies.TargetRevision),
 	}, nil
 }
 
@@ -143,7 +150,7 @@ func (runner *ShadowRunner) initialState(runID string) shadowState {
 	descriptor := runner.discovery.Descriptor
 	return shadowState{
 		RemoteName: descriptor.Name, RemoteURL: descriptor.PreferredURL, ProtocolVersion: descriptor.ProtocolVersion,
-		MessageID: runID + ":message",
+		TargetID: runner.targetID, TargetRevision: runner.revision, MessageID: runID + ":message",
 	}
 }
 
@@ -154,7 +161,8 @@ func (runner *ShadowRunner) decodeState(snapshot kernel.Snapshot) (shadowState, 
 	}
 	descriptor := runner.discovery.Descriptor
 	if state.RemoteName != descriptor.Name || state.RemoteURL != descriptor.PreferredURL ||
-		state.ProtocolVersion != descriptor.ProtocolVersion {
+		state.ProtocolVersion != descriptor.ProtocolVersion || state.TargetID != runner.targetID ||
+		state.TargetRevision != runner.revision {
 		return shadowState{}, ErrRemoteBindingChanged
 	}
 	return state, nil

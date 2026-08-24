@@ -14,6 +14,7 @@ const CapabilityCoordinator kernel.Capability = "handoff.coordinator"
 
 var (
 	ErrInvalidDelegation = errors.New("invalid handoff delegation")
+	ErrChildUnavailable  = errors.New("handoff child runner is unavailable")
 	ErrInvalidJoin       = errors.New("invalid handoff join")
 	ErrChildPending      = errors.New("handoff child run is not terminal")
 	ErrChildFailed       = errors.New("handoff child run failed")
@@ -94,9 +95,40 @@ type ChildRunner interface {
 	LoadRun(context.Context, string) (kernel.Snapshot, error)
 }
 
+// ChildRunnerResolver selects one explicitly composed child capability for a
+// durable Delegation. It is a narrow routing port, not a service locator: the
+// host owns the finite routing policy and returns an already constructed
+// runner.
+type ChildRunnerResolver interface {
+	ResolveChild(context.Context, Delegation) (ChildRunner, error)
+}
+
+// ChildRunnerResolverFunc adapts one host-owned routing function.
+type ChildRunnerResolverFunc func(context.Context, Delegation) (ChildRunner, error)
+
+func (resolver ChildRunnerResolverFunc) ResolveChild(
+	ctx context.Context,
+	delegation Delegation,
+) (ChildRunner, error) {
+	if resolver == nil {
+		return nil, ErrChildUnavailable
+	}
+	return resolver(ctx, delegation)
+}
+
+type staticChildRunnerResolver struct{ children ChildRunner }
+
+func (resolver staticChildRunnerResolver) ResolveChild(context.Context, Delegation) (ChildRunner, error) {
+	if resolver.children == nil {
+		return nil, ErrChildUnavailable
+	}
+	return resolver.children, nil
+}
+
 // Coordinator starts or recovers stable delegated Child Agent Runs.
 type Coordinator struct {
-	children ChildRunner
+	resolver ChildRunnerResolver
+	requires []kernel.Capability
 }
 
 // New constructs the Handoff capability without owning a root Run.
@@ -104,14 +136,27 @@ func New(children ChildRunner) (*Coordinator, error) {
 	if children == nil {
 		return nil, ErrInvalidDelegation
 	}
-	return &Coordinator{children: children}, nil
+	return &Coordinator{
+		resolver: staticChildRunnerResolver{children: children},
+		requires: []kernel.Capability{agent.CapabilityRunner},
+	}, nil
+}
+
+// NewRouted constructs Handoff with a finite host-owned child routing policy.
+// Unlike New, the resolver's dependencies are already explicitly composed, so
+// the coordinator does not claim that every route requires agent.runner.
+func NewRouted(resolver ChildRunnerResolver) (*Coordinator, error) {
+	if resolver == nil {
+		return nil, ErrInvalidDelegation
+	}
+	return &Coordinator{resolver: resolver}, nil
 }
 
 // Descriptor declares the reusable Handoff capability.
 func (coordinator *Coordinator) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{
 		Name:     "handoff",
-		Requires: []kernel.Capability{agent.CapabilityRunner},
+		Requires: append([]kernel.Capability(nil), coordinator.requires...),
 		Provides: []kernel.Capability{CapabilityCoordinator},
 	}
 }
@@ -122,17 +167,21 @@ func (coordinator *Coordinator) StartOrLoad(
 	parent kernel.Snapshot,
 	delegation Delegation,
 ) (Delegation, error) {
-	if coordinator == nil || coordinator.children == nil || !validDelegation(delegation) || parent.Run.ID == "" {
+	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || parent.Run.ID == "" {
 		return Delegation{}, ErrInvalidDelegation
 	}
-	child, err := coordinator.children.LoadRun(ctx, delegation.ChildRunID)
+	children, err := coordinator.resolveChild(ctx, delegation)
+	if err != nil {
+		return Delegation{}, err
+	}
+	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err == nil {
 		return projectChild(delegation, child), childStateError(child)
 	}
 	if !errors.Is(err, kernel.ErrNotFound) {
 		return Delegation{}, err
 	}
-	child, err = coordinator.children.StartRun(ctx, agent.StartRequest{
+	child, err = children.StartRun(ctx, agent.StartRequest{
 		ID:           delegation.ChildRunID,
 		Actor:        parent.Run.Actor,
 		Thread:       parent.Run.Thread,
@@ -150,14 +199,29 @@ func (coordinator *Coordinator) StartOrLoad(
 
 // Refresh projects the current Child Run into one Delegation without starting it.
 func (coordinator *Coordinator) Refresh(ctx context.Context, delegation Delegation) (Delegation, error) {
-	if coordinator == nil || coordinator.children == nil || !validDelegation(delegation) {
+	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) {
 		return Delegation{}, ErrInvalidDelegation
 	}
-	child, err := coordinator.children.LoadRun(ctx, delegation.ChildRunID)
+	children, err := coordinator.resolveChild(ctx, delegation)
+	if err != nil {
+		return Delegation{}, err
+	}
+	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err != nil {
 		return Delegation{}, err
 	}
 	return projectChild(delegation, child), childStateError(child)
+}
+
+func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Delegation) (ChildRunner, error) {
+	children, err := coordinator.resolver.ResolveChild(ctx, cloneDelegation(delegation))
+	if err != nil {
+		return nil, errors.Join(ErrChildUnavailable, err)
+	}
+	if children == nil {
+		return nil, ErrChildUnavailable
+	}
+	return children, nil
 }
 
 // ResolveJoin deterministically projects Delegation status into a monotonic Join decision.
