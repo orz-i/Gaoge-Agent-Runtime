@@ -7,6 +7,7 @@ import (
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -120,6 +121,10 @@ func TestClientDiscoversA2A10HTTPJSONAndSendsMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertA2ATestDiscovery(t, discovery, card)
+	restored, err := RestoreDiscovery(discovery.CardJSON, discovery.Descriptor.PreferredURL)
+	if err != nil || !reflect.DeepEqual(restored.Descriptor, discovery.Descriptor) || len(restored.Skills) != len(discovery.Skills) {
+		t.Fatalf("restored=%#v err=%v", restored, err)
+	}
 	interaction, err := client.SendMessage(t.Context(), discovery, SendRequest{MessageID: testMessageID, Text: "hello"})
 	if err != nil {
 		t.Fatal(err)

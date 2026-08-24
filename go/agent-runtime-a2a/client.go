@@ -354,6 +354,28 @@ func (client *Client) discover(ctx context.Context, rawBaseURL string) (Discover
 	return projectDiscovery(card, selected)
 }
 
+// RestoreDiscovery rebuilds one validated immutable projection from a stored
+// public Agent Card and the exact interface URL frozen by the host. It performs
+// no network I/O and never accepts a different interface as an implicit fallback.
+func RestoreDiscovery(cardJSON json.RawMessage, preferredURL string) (Discovery, error) {
+	if len(cardJSON) == 0 || len(cardJSON) > maxMetadataBytes || !json.Valid(cardJSON) ||
+		!validRemoteText(preferredURL, true) {
+		return Discovery{}, ErrInvalidAgentCard
+	}
+	var card a2asdk.AgentCard
+	if err := json.Unmarshal(cardJSON, &card); err != nil {
+		return Discovery{}, ErrInvalidAgentCard
+	}
+	preferredURL = strings.TrimSpace(preferredURL)
+	for _, candidate := range card.SupportedInterfaces {
+		if candidate != nil && strings.TrimSpace(candidate.URL) == preferredURL &&
+			candidate.ProtocolVersion == a2asdk.Version && candidate.ProtocolBinding == a2asdk.TransportProtocolHTTPJSON {
+			return projectDiscovery(&card, candidate)
+		}
+	}
+	return Discovery{}, ErrUnsupportedProtocol
+}
+
 // SendMessage sends one user text message using only the selected v1 HTTP+JSON interface.
 func (client *Client) SendMessage(ctx context.Context, discovery Discovery, request SendRequest) (Interaction, error) {
 	client.observe(ctx, eventMessage, "started", false)
