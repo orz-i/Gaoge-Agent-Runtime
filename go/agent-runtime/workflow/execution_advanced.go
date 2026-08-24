@@ -344,15 +344,17 @@ func effectConcurrency(node Node) int {
 	}
 }
 
-func buildEffectRequest(runID string, definition Definition, effect Effect) EffectRequest {
+func buildEffectRequest(run kernel.Run, definition Definition, effect Effect) EffectRequest {
 	return EffectRequest{
-		RunID: runID, DefinitionID: definition.ID, DefinitionHash: definition.Hash,
+		RunID: run.ID, Actor: run.Actor, Thread: run.Thread,
+		DefinitionID: definition.ID, DefinitionHash: definition.Hash,
 		EffectID: effect.ID, NodeID: effect.NodeID, Class: effect.Class, Kind: effect.Kind,
 		Revision: effect.Revision, Definition: cloneDefinitionReference(effect.Definition),
 		OutputKey: effect.OutputKey, MapIndex: effect.MapIndex, Compensation: effect.Compensation,
 		Input: cloneJSON(effect.Input), MaxCostUnits: effect.MaxCostUnits,
 		NestedDepth: effect.NestedDepth,
 		Attempt:     effect.Attempt, MaxAttempts: effect.Retry.MaxAttempts,
+		Policy: cloneDefinitionPolicy(definition.Policy),
 	}
 }
 
@@ -377,7 +379,14 @@ func (runner *Runner) executeEffectBatch(
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 			effect := state.Effects[effectIndex]
-			result, err := runner.effects.Execute(ctx, buildEffectRequest(snapshot.Run.ID, state.Definition, effect))
+			request := buildEffectRequest(snapshot.Run, state.Definition, effect)
+			var result EffectResult
+			var err error
+			if effect.Class == EffectClassSubworkflow && runner.registry != nil {
+				result, err = runner.executeSubworkflowEffect(ctx, request)
+			} else {
+				result, err = runner.effects.Execute(ctx, request)
+			}
 			outcomes[position] = effectOutcome{EffectIndex: effectIndex, Result: result, Err: err}
 		}()
 	}
@@ -488,13 +497,14 @@ func (runner *Runner) applyEffectOutcomes(
 		}
 		effect := &state.Effects[outcome.EffectIndex]
 		if outcome.Err != nil {
-			if scheduleEffectRetry(effect, "workflow.effect_dispatch", outcome.Err) {
+			code := effectDispatchErrorCode(outcome.Err)
+			if scheduleEffectRetry(effect, code, outcome.Err) {
 				retryScheduled = true
 				continue
 			}
-			markEffectFailedState(&state, outcome.EffectIndex, "workflow.effect_dispatch", outcome.Err)
+			markEffectFailedState(&state, outcome.EffectIndex, code, outcome.Err)
 			if failureCause == nil {
-				failureCode, failureDetail, failureCause = "workflow.effect_dispatch", errorText(outcome.Err), outcome.Err
+				failureCode, failureDetail, failureCause = code, errorText(outcome.Err), outcome.Err
 			}
 			continue
 		}
@@ -596,6 +606,17 @@ func (runner *Runner) applyEffectOutcomes(
 		)
 	}
 	return runner.finishEffectActivation(ctx, snapshot, state, node, activationPosition, output)
+}
+
+func effectDispatchErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrEffectForbidden):
+		return "workflow.effect_forbidden"
+	case errors.Is(err, ErrEffectUnavailable):
+		return "workflow.effect_unavailable"
+	default:
+		return "workflow.effect_dispatch"
+	}
 }
 
 func scheduleEffectRetry(effect *Effect, code string, cause error) bool {

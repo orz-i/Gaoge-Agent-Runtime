@@ -180,7 +180,7 @@ func (runner *Runner) dispatchCompensation(
 	}
 	effect := &state.Effects[effectPosition]
 	result, err := runner.effects.Execute(
-		ctx, buildEffectRequest(snapshot.Run.ID, state.Definition, *effect),
+		ctx, buildEffectRequest(snapshot.Run, state.Definition, *effect),
 	)
 	if err != nil {
 		if scheduleEffectRetry(effect, "workflow.compensation_dispatch", err) {

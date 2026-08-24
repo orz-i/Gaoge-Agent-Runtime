@@ -1,7 +1,14 @@
 {
   "capability": "workflow",
   "operations": [
+    {"method": "get", "path": "/workflow-definitions", "operationId": "listWorkflowDefinitions"},
+    {"method": "get", "path": "/workflow-definitions/{definitionID}/revisions/{revision}", "operationId": "getWorkflowDefinitionRevision"},
+    {"method": "post", "path": "/workflow-definitions", "operationId": "publishWorkflowDefinition"},
+    {"method": "post", "path": "/workflow-definitions/compile", "operationId": "compileWorkflowDefinition"},
+    {"method": "post", "path": "/workflow-definitions/{definitionID}/activation", "operationId": "setWorkflowDefinitionActivation"},
     {"method": "post", "path": "/workflow-runs", "operationId": "createWorkflowRun"},
+    {"method": "get", "path": "/workflow-runs/{runID}/trace", "operationId": "getWorkflowTrace"},
+    {"method": "post", "path": "/workflow-runs/{runID}/cancel", "operationId": "cancelWorkflowRun"},
     {"method": "post", "path": "/workflow-runs/{runID}/wait", "operationId": "resolveWorkflowWait"}
   ]
 }

@@ -256,6 +256,43 @@ func (registry *DefinitionRegistry) ResolveForStart(
 	return DefinitionRevision{}, ErrDefinitionNotFound
 }
 
+// ResolveExact returns one already-bound visible revision even when its head was
+// later disabled. This preserves immutable parent Run semantics.
+func (registry *DefinitionRegistry) ResolveExact(
+	ctx context.Context,
+	visibility DefinitionScope,
+	reference DefinitionReference,
+) (DefinitionRevision, error) {
+	if registry == nil || registry.store == nil {
+		return DefinitionRevision{}, ErrInvalidDefinitionRegistry
+	}
+	reference.ID = strings.TrimSpace(reference.ID)
+	reference.Hash = strings.TrimSpace(reference.Hash)
+	if !validDefinitionReference(reference) {
+		return DefinitionRevision{}, ErrInvalidDefinitionRegistry
+	}
+	scopes, err := VisibleDefinitionScopes(visibility)
+	if err != nil {
+		return DefinitionRevision{}, err
+	}
+	for _, scope := range scopes {
+		published, loadErr := registry.store.GetRevision(
+			ctx, scope, reference.ID, reference.Revision,
+		)
+		if errors.Is(loadErr, ErrDefinitionNotFound) {
+			continue
+		}
+		if loadErr != nil {
+			return DefinitionRevision{}, loadErr
+		}
+		if published.Definition.Hash != reference.Hash {
+			return DefinitionRevision{}, ErrDefinitionHash
+		}
+		return published, nil
+	}
+	return DefinitionRevision{}, ErrDefinitionNotFound
+}
+
 // ListVisible returns one deterministic, most-specific head per Definition identity.
 func (registry *DefinitionRegistry) ListVisible(
 	ctx context.Context,

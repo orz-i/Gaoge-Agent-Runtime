@@ -82,6 +82,119 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/RunSnapshot'}
         default: {$ref: '#/components/responses/Error'}
+  /workflow-runs/{runID}/cancel:
+    post:
+      operationId: cancelWorkflowRun
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CancelRunRequest'}
+      responses:
+        '200':
+          description: Cancelled after feature-owned compensation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
+  /workflow-runs/{runID}/trace:
+    get:
+      operationId: getWorkflowTrace
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+      responses:
+        '200':
+          description: Redacted Workflow trace without input, output, prompt, token, or secret content
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkflowTrace'}
+        default: {$ref: '#/components/responses/Error'}
+  /workflow-definitions/compile:
+    post:
+      operationId: compileWorkflowDefinition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CompileWorkflowDefinitionRequest'}
+      responses:
+        '200':
+          description: Compiled proposal, structural diff, and policy impact
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkflowDefinitionProposalReport'}
+        default: {$ref: '#/components/responses/Error'}
+  /workflow-definitions:
+    get:
+      operationId: listWorkflowDefinitions
+      responses:
+        '200':
+          description: Most-specific visible immutable definition heads
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/WorkflowDefinitionHead'}
+        default: {$ref: '#/components/responses/Error'}
+    post:
+      operationId: publishWorkflowDefinition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PublishWorkflowDefinitionRequest'}
+      responses:
+        '201':
+          description: Published immutable revision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PublishWorkflowDefinitionResponse'}
+        default: {$ref: '#/components/responses/Error'}
+  /workflow-definitions/{definitionID}/revisions/{revision}:
+    get:
+      operationId: getWorkflowDefinitionRevision
+      parameters:
+        - name: definitionID
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+        - name: revision
+          in: path
+          required: true
+          schema: {type: integer, minimum: 1}
+        - name: scope
+          in: query
+          required: false
+          schema: {type: string, enum: [system, tenant, actor], default: actor}
+      responses:
+        '200':
+          description: Exact historical revision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkflowDefinitionRevision'}
+        default: {$ref: '#/components/responses/Error'}
+  /workflow-definitions/{definitionID}/activation:
+    post:
+      operationId: setWorkflowDefinitionActivation
+      parameters:
+        - name: definitionID
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 255}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SetWorkflowDefinitionActivationRequest'}
+      responses:
+        '200':
+          description: Updated CAS-controlled active pointer
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SetWorkflowDefinitionActivationResponse'}
+        default: {$ref: '#/components/responses/Error'}
   /team-runs:
     post:
       operationId: createTeamRun
@@ -370,12 +483,16 @@ components:
     StartWorkflowRunRequest:
       type: object
       additionalProperties: false
-      required: [thread, goal, definition, input]
+      required: [thread, goal, input]
+      oneOf:
+        - required: [definition]
+        - required: [definitionReference]
       properties:
         thread: {$ref: '#/components/schemas/ThreadRequest'}
         goal: {type: string, maxLength: 200000}
         clientRunID: {type: string, maxLength: 64}
-        definition: {type: object, additionalProperties: true}
+        definition: {$ref: '#/components/schemas/WorkflowDefinitionDraft'}
+        definitionReference: {$ref: '#/components/schemas/WorkflowDefinitionReference'}
         input: {}
     ResolveWorkflowWaitRequest:
       type: object
@@ -384,6 +501,88 @@ components:
       properties:
         expectedRevision: {type: integer, minimum: 1}
         response: {}
+    WorkflowDefinitionDraft:
+      type: object
+      additionalProperties: true
+      required: [id, revision, name, nodes]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 255}
+        revision: {type: integer, minimum: 0}
+        name: {type: string, minLength: 1, maxLength: 1000}
+        inputSchema: {}
+        outputSchema: {}
+        nodes: {type: array, minItems: 1, items: {type: object, additionalProperties: true}}
+        limits: {type: object, additionalProperties: true}
+        policy: {type: object, additionalProperties: true}
+    WorkflowDefinitionReference:
+      type: object
+      additionalProperties: false
+      required: [id]
+      properties:
+        id: {type: string, minLength: 1, maxLength: 255}
+        revision: {type: integer, minimum: 1}
+        hash: {type: string, minLength: 1}
+    WorkflowDefinitionScopeRequest:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [system, tenant, actor]}
+    CompileWorkflowDefinitionRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, draft]
+      properties:
+        scope: {$ref: '#/components/schemas/WorkflowDefinitionScopeRequest'}
+        baseRevision: {type: integer, minimum: 0}
+        draft: {$ref: '#/components/schemas/WorkflowDefinitionDraft'}
+    PublishWorkflowDefinitionRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, draft]
+      properties:
+        scope: {$ref: '#/components/schemas/WorkflowDefinitionScopeRequest'}
+        draft: {$ref: '#/components/schemas/WorkflowDefinitionDraft'}
+        expectedRevision: {type: integer, minimum: 0}
+        mode: {type: string, enum: [activate, stage]}
+        idempotencyKey: {type: string, minLength: 1, maxLength: 200}
+    SetWorkflowDefinitionActivationRequest:
+      type: object
+      additionalProperties: false
+      required: [scope, availability, expectedVersion]
+      properties:
+        scope: {$ref: '#/components/schemas/WorkflowDefinitionScopeRequest'}
+        targetRevision: {type: integer, minimum: 0}
+        availability: {type: string, enum: [active, disabled]}
+        expectedVersion: {type: integer, minimum: 1}
+    WorkflowDefinitionProposalReport:
+      type: object
+      additionalProperties: true
+    WorkflowDefinitionHead:
+      type: object
+      additionalProperties: true
+    WorkflowDefinitionRevision:
+      type: object
+      additionalProperties: true
+    PublishWorkflowDefinitionResponse:
+      type: object
+      additionalProperties: false
+      required: [revision, head, reused]
+      properties:
+        revision: {$ref: '#/components/schemas/WorkflowDefinitionRevision'}
+        head: {$ref: '#/components/schemas/WorkflowDefinitionHead'}
+        reused: {type: boolean}
+    SetWorkflowDefinitionActivationResponse:
+      type: object
+      additionalProperties: false
+      required: [head, reused]
+      properties:
+        head: {$ref: '#/components/schemas/WorkflowDefinitionHead'}
+        reused: {type: boolean}
+    WorkflowTrace:
+      type: object
+      additionalProperties: true
+      description: Redacted operational trace; content-bearing inputs and outputs are excluded.
     TeamMemberRequest:
       type: object
       additionalProperties: false

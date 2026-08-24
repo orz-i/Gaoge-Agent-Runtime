@@ -206,6 +206,66 @@ func TestSubworkflowDispatchCarriesExactImmutableReference(t *testing.T) {
 	}
 }
 
+func TestRegisteredSubworkflowRunsExactRevisionAfterHeadIsDisabled(t *testing.T) {
+	t.Parallel()
+	runtime := newWorkflowRuntime(t)
+	registry, err := workflow.NewDefinitionRegistry(workflow.NewMemoryDefinitionStore(), registryClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := workflow.DefinitionScope{
+		Kind: workflow.DefinitionScopeActor, TenantID: "tenant", ActorID: "actor",
+	}
+	published, head, _, err := registry.Publish(t.Context(), workflow.PublishDefinitionRequest{
+		Scope: scope, ExpectedRevision: 0, IdempotencyKey: "child-v1", PublishedBy: "actor",
+		Draft: workflow.DefinitionDraft{
+			ID: "child", Name: "Child",
+			Nodes: []workflow.Node{{
+				ID: "done", Type: workflow.NodeReturn,
+				Return: &workflow.ReturnNode{Source: &workflow.ValueSource{Kind: workflow.ValueWorkflowInput}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = registry.SetActivation(t.Context(), workflow.ActivateDefinitionRequest{
+		Scope: scope, DefinitionID: "child", Availability: workflow.DefinitionDisabled,
+		ExpectedVersion: head.Version,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	external := &requestExecutor{}
+	runner, err := workflow.NewRunner(workflow.Dependencies{
+		Runtime: runtime, Effects: external, Registry: registry,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := compileAdvancedWorkflow(t, []workflow.Node{
+		{
+			ID: "child", Type: workflow.NodeSubworkflow,
+			Subworkflow: &workflow.SubworkflowNode{
+				Definition: workflow.DefinitionReference{
+					ID: "child", Revision: published.Definition.Revision, Hash: published.Definition.Hash,
+				},
+				Input: workflow.ValueSource{Kind: workflow.ValueWorkflowInput},
+			},
+		},
+		{
+			ID: "done", Type: workflow.NodeReturn,
+			Return: &workflow.ReturnNode{Source: &workflow.ValueSource{Kind: workflow.ValueNodeOutput, NodeID: "child"}},
+		},
+	}, workflow.DefinitionPolicy{})
+	request := workflowRequest(parent)
+	request.Input = json.RawMessage(`{"snapshot":"immutable"}`)
+	completed, err := runner.StartRun(t.Context(), request)
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted ||
+		string(completed.Result.Content) != `{"snapshot":"immutable"}` || len(external.Requests()) != 0 {
+		t.Fatalf("status=%s result=%#v external=%#v err=%v", completed.Run.Status, completed.Result, external.Requests(), err)
+	}
+}
+
 func TestCostBudgetFailsBeforeAnyEffectDispatch(t *testing.T) {
 	t.Parallel()
 	runtime := newWorkflowRuntime(t)

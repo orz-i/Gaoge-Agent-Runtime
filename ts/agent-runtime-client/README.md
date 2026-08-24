@@ -55,19 +55,20 @@ probabilistic work.
 ```ts
 const limits = {
   maxNodeActivations: 100,
-  maxChildRuns: 8,
-  maxConcurrentRuns: 4,
-  maxTotalLLMCalls: 12,
-  maxTotalToolCalls: 20,
-  maxDurationSeconds: 3600,
-  maxLoopIterations: 10,
+	maxEffects: 20,
+	maxSegments: 100,
+	maxActivationsPerSegment: 16,
+	maxFanOut: 8,
+	maxConcurrency: 4,
   maxNestedDepth: 3,
+	maxAttemptsPerEffect: 3,
   maxStateBytes: 1_048_576,
 };
 
-const definition = await runtime.admin.workflowDefinitions.create({
+const draft = {
+	id: "release-decision",
+	revision: 0,
   name: "Release decision",
-  scope: "actor",
   inputSchema: {
     type: "object",
     required: ["changeID"],
@@ -78,33 +79,39 @@ const definition = await runtime.admin.workflowDefinitions.create({
     required: ["approved"],
     properties: { approved: { type: "boolean" } },
   },
-  root: {
-    id: "root",
-    type: "sequence",
-    children: [
-      {
-        id: "result",
-        type: "return",
-        value: {
-          op: "object",
-          fields: { approved: { op: "literal", value: true } },
-        },
-      },
-    ],
-  },
+	nodes: [
+		{id: "review", type: "wait", wait: {kind: "author.approval", source: {kind: "workflow_input"}}},
+		{id: "result", type: "return", return: {source: {kind: "wait_response", nodeID: "review"}}},
+	],
   limits,
+	policy: {costClass: "none", maxCostUnits: 0, sideEffectClass: "none"},
+} as const;
+
+const proposal = await runtime.workflows.definitions.compile({
+	scope: {kind: "actor"},
+	draft,
+});
+
+const published = await runtime.workflows.definitions.publish({
+	scope: {kind: "actor"},
+	draft,
+	expectedRevision: proposal.baseRevision,
+	idempotencyKey: crypto.randomUUID(),
 });
 
 const startedWorkflow = await runtime.workflows.start({
   clientRunID: crypto.randomUUID(),
   thread: { kind: "conversation", id: "conversation-42" },
-  definition: definition.ref,
+	goal: "Decide whether to release change-17",
+	definitionReference: {
+		id: published.revision.definition.id,
+		revision: published.revision.definition.revision,
+		hash: published.revision.definition.hash,
+	},
   input: { changeID: "change-17" },
 });
 
-const result = await runtime.runs.result<{ approved: boolean }>(
-  startedWorkflow.run.runID,
-);
+const result = await runtime.runs.get(startedWorkflow.run.id);
 ```
 
 Workflow Definition revisions are immutable and freeze exact Agent Manifest,

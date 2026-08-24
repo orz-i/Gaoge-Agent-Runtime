@@ -53,23 +53,26 @@ func (shared *Shared) RequestID(context *gin.Context) string {
 
 // Dependencies are the feature-neutral Runtime capabilities mounted by the core HTTP adapter.
 type Dependencies struct {
-	Runtime   *kernel.Runtime
-	Workbench *workbench.Query
-	Feed      *runfeed.Feed
-	Shared    *Shared
+	Runtime       *kernel.Runtime
+	Workbench     *workbench.Query
+	Feed          *runfeed.Feed
+	Cancellations *CancellationRouter
+	Shared        *Shared
 }
 
 type Handler struct {
-	runtime   *kernel.Runtime
-	workbench *workbench.Query
-	feed      *runfeed.Feed
-	shared    *Shared
+	runtime       *kernel.Runtime
+	workbench     *workbench.Query
+	feed          *runfeed.Feed
+	cancellations *CancellationRouter
+	shared        *Shared
 }
 
 func NewHandler(dependencies Dependencies) *Handler {
 	return &Handler{
 		runtime: dependencies.Runtime, workbench: dependencies.Workbench,
-		feed: dependencies.Feed, shared: dependencies.Shared,
+		feed: dependencies.Feed, cancellations: dependencies.Cancellations,
+		shared: dependencies.Shared,
 	}
 }
 

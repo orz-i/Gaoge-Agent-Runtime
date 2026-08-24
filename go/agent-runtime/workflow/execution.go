@@ -188,6 +188,8 @@ type StartRequest struct {
 // EffectRequest dispatches one already-persisted stable intent.
 type EffectRequest struct {
 	RunID          string
+	Actor          kernel.ActorRef
+	Thread         kernel.ThreadRef
 	DefinitionID   string
 	DefinitionHash string
 	EffectID       string
@@ -204,6 +206,7 @@ type EffectRequest struct {
 	NestedDepth    int
 	Attempt        int
 	MaxAttempts    int
+	Policy         DefinitionPolicy
 }
 
 // EffectResult is one executor observation. Completed results require a receipt.
@@ -226,6 +229,7 @@ type EffectExecutor interface {
 type Dependencies struct {
 	Runtime         *kernel.Runtime
 	Effects         EffectExecutor
+	Registry        *DefinitionRegistry
 	Relations       runrelation.Recorder
 	Ceiling         Limits
 	DeferResumption bool
@@ -238,6 +242,7 @@ type Runner struct {
 	relations   runrelation.Recorder
 	ceiling     Limits
 	deferResume bool
+	registry    *DefinitionRegistry
 }
 
 type executionState View
@@ -264,7 +269,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, effects: dependencies.Effects,
 		relations: dependencies.Relations, ceiling: ceiling,
-		deferResume: dependencies.DeferResumption,
+		deferResume: dependencies.DeferResumption, registry: dependencies.Registry,
 	}, nil
 }
 
