@@ -1,0 +1,7 @@
+packages:
+  - ts/agent-runtime-client
+
+allowBuilds:
+  esbuild: true
+
+nodeLinker: hoisted

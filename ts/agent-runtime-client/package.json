@@ -1,12 +1,30 @@
 {
-  "name": "@gaoge/agent-runtime-client",
-  "version": "0.1.0",
+  "name": "@orz-i/agent-runtime-client",
+  "version": "0.1.0-beta.1",
+  "description": "Framework-neutral TypeScript client for the Gaoge Agent Runtime HTTP v1 API.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/orz-i/Gaoge-Agent-Runtime.git",
+    "directory": "ts/agent-runtime-client"
+  },
+  "homepage": "https://github.com/orz-i/Gaoge-Agent-Runtime#readme",
+  "bugs": {
+    "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "LICENSE"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

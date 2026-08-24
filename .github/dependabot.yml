@@ -1,0 +1,42 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /go/agent-runtime
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /go/agent-runtime-harness
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /go/agent-runtime-harness-postgres
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /go/agent-runtime-http
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /go/agent-runtime-mcp
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /go/agent-runtime-a2a
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /go/agent-runtime-postgres
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /go/agent-runtime-redis
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

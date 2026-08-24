@@ -1,0 +1,94 @@
+name: Release Beta
+
+on:
+  push:
+    tags:
+      - "v*.*.*-beta.*"
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agent_runtime
+          POSTGRES_PASSWORD: agent_runtime
+          POSTGRES_DB: agent_runtime
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent_runtime -d agent_runtime"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_POSTGRES_DSN: postgres://agent_runtime:agent_runtime@127.0.0.1:5432/agent_runtime?sslmode=disable
+      TEST_REDIS_ADDR: 127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.work
+          cache-dependency-path: go/**/go.sum
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.22.0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsqlite3-dev
+          pnpm install --frozen-lockfile
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+
+      - name: Verify tag set
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          version="$(cat VERSION)"
+          test "$GITHUB_REF_NAME" = "v$version"
+          while IFS= read -r tag; do
+            test "$(git rev-list -n 1 "$tag")" = "$GITHUB_SHA"
+          done < <(node scripts/release-tags.mjs --version "$version" | grep '^go/')
+
+      - name: Run Beta gate
+        run: make check && make integration-test
+
+      - name: Pack TypeScript client
+        run: mkdir -p artifacts && npm pack --pack-destination artifacts ./ts/agent-runtime-client
+
+      - name: Publish TypeScript client
+        working-directory: ts/agent-runtime-client
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --tag beta --access public --provenance
+
+      - name: Create GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" artifacts/*.tgz --prerelease --verify-tag --generate-notes --title "Agent Runtime $GITHUB_REF_NAME"
