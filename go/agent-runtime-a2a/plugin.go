@@ -12,7 +12,7 @@ import (
 const (
 	// CapabilityPlugin is provided by one explicitly composed A2A edge plugin.
 	CapabilityPlugin kernel.Capability = "protocol.a2a"
-	TargetPrefix                       = "a2a:"
+	TargetPrefix     string            = "a2a:"
 )
 
 var (

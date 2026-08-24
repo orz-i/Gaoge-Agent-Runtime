@@ -94,40 +94,57 @@ func (interceptor hostAuthenticationInterceptor) Before(
 	callContext *a2asrv.CallContext,
 	_ *a2asrv.Request,
 ) (context.Context, any, error) {
-	if interceptor.authenticator == nil || callContext == nil {
+	if callContext == nil {
 		return ctx, nil, a2asdk.ErrUnauthenticated
 	}
 	call := HostedCall{
 		Method: callContext.Method(), Tenant: strings.TrimSpace(callContext.Tenant()),
 		Headers: hostedCallHeaders(callContext.ServiceParams()),
 	}
-	if interceptor.allowedTenant != "" && call.Tenant != interceptor.allowedTenant {
-		return ctx, nil, a2asdk.ErrUnauthorized
-	}
-	principal, err := interceptor.authenticator.Authenticate(ctx, call)
+	principal, err := authenticateHostedPrincipal(ctx, interceptor.authenticator, interceptor.allowedTenant, call)
 	if err != nil {
-		return ctx, nil, a2asdk.ErrUnauthenticated
-	}
-	principal = cloneHostedPrincipal(principal)
-	if !validPrincipalValue(principal.Subject) || !validOptionalPrincipalValue(principal.Tenant) {
-		return ctx, nil, a2asdk.ErrUnauthenticated
-	}
-	if len(principal.Attributes) > 0 {
-		if _, err = decodeMetadata(principal.Attributes); err != nil {
-			return ctx, nil, a2asdk.ErrUnauthenticated
-		}
-	}
-	if call.Tenant != "" && principal.Tenant != "" && call.Tenant != principal.Tenant {
-		return ctx, nil, a2asdk.ErrUnauthorized
-	}
-	if call.Tenant != "" {
-		principal.Tenant = call.Tenant
+		return ctx, nil, err
 	}
 	callContext.User = a2asrv.NewAuthenticatedUser(hostedOwnerKey(principal), map[string]any{
 		hostedPrincipalSubjectAttribute: principal.Subject,
 		hostedPrincipalTenantAttribute:  principal.Tenant,
 	})
 	return context.WithValue(ctx, hostedPrincipalContextKey{}, principal), nil, nil
+}
+
+func authenticateHostedPrincipal(
+	ctx context.Context,
+	authenticator HostedAuthenticator,
+	allowedTenant string,
+	call HostedCall,
+) (HostedPrincipal, error) {
+	call.Tenant = strings.TrimSpace(call.Tenant)
+	if authenticator == nil {
+		return HostedPrincipal{}, a2asdk.ErrUnauthenticated
+	}
+	if strings.TrimSpace(allowedTenant) != "" && call.Tenant != strings.TrimSpace(allowedTenant) {
+		return HostedPrincipal{}, a2asdk.ErrUnauthorized
+	}
+	principal, err := authenticator.Authenticate(ctx, call)
+	if err != nil {
+		return HostedPrincipal{}, a2asdk.ErrUnauthenticated
+	}
+	principal = cloneHostedPrincipal(principal)
+	if !validPrincipalValue(principal.Subject) || !validOptionalPrincipalValue(principal.Tenant) {
+		return HostedPrincipal{}, a2asdk.ErrUnauthenticated
+	}
+	if len(principal.Attributes) > 0 {
+		if _, err = decodeMetadata(principal.Attributes); err != nil {
+			return HostedPrincipal{}, a2asdk.ErrUnauthenticated
+		}
+	}
+	if call.Tenant != "" && principal.Tenant != "" && call.Tenant != principal.Tenant {
+		return HostedPrincipal{}, a2asdk.ErrUnauthorized
+	}
+	if call.Tenant != "" {
+		principal.Tenant = call.Tenant
+	}
+	return principal, nil
 }
 
 func (hostAuthenticationInterceptor) After(

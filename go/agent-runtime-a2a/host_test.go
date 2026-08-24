@@ -3,6 +3,7 @@ package a2a
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -125,11 +126,56 @@ func TestHostedMessageBecomesTerminalTaskStatus(t *testing.T) {
 		len(event.Status.Message.Parts) != 1 {
 		t.Fatalf("event=%#v err=%v", event, err)
 	}
-	authEvent, terminal, err := projectHostedStatus(execContext, HostedStatusAuthRequired)
-	if err != nil || !terminal {
+	authEvent, terminal, err := projectHostedStatus(execContext, HostedEvent{
+		Kind: HostedEventStatus, Status: HostedStatusAuthRequired,
+		MessageID: "auth-prompt", Text: "authenticate to continue",
+	})
+	status, ok := authEvent.(*a2asdk.TaskStatusUpdateEvent)
+	if err != nil || !terminal || !ok || status.Status.Message == nil || status.Status.Message.ID != "auth-prompt" {
 		t.Fatalf("auth event=%#v terminal=%v err=%v", authEvent, terminal, err)
 	}
 }
+
+func TestHostCanReturnDirectMessageWithoutCreatingTask(t *testing.T) {
+	t.Parallel()
+	agent := hostedAgentFunc(func(_ context.Context, _ HostedRequest, sink HostedSink) error {
+		return sink(HostedEvent{
+			Kind: HostedEventDirectMessage, MessageID: "direct-message", Text: "direct response",
+		})
+	})
+	host := newA2AHostedTestHost(t, agent)
+	server := httptest.NewServer(host.Handler())
+	t.Cleanup(server.Close)
+
+	client := newA2ATestClient(t, server.Client())
+	interaction, err := client.SendMessage(t.Context(), hostedTestDiscovery(server.URL), SendRequest{
+		MessageID: "direct-request", Text: "respond directly",
+	})
+	if err != nil || interaction.Message == nil || interaction.Task != nil || interaction.Message.ID != "direct-message" ||
+		len(interaction.Message.Parts) != 1 || interaction.Message.Parts[0].Text != "direct response" {
+		t.Fatalf("interaction=%#v err=%v", interaction, err)
+	}
+}
+
+func TestDirectMessageCannotFollowTaskEvents(t *testing.T) {
+	t.Parallel()
+	execContext := &a2asrv.ExecutorContext{TaskID: "task-1", ContextID: "context-1"}
+	execution := hostedExecution{taskStarted: true}
+	err := execution.captureDirectMessage(execContext, HostedEvent{
+		Kind: HostedEventDirectMessage, MessageID: "direct-message", Text: "invalid",
+	})
+	if !errors.Is(err, ErrInvalidHostedEvent) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+type hostedAgentFunc func(context.Context, HostedRequest, HostedSink) error
+
+func (function hostedAgentFunc) Execute(ctx context.Context, request HostedRequest, sink HostedSink) error {
+	return function(ctx, request, sink)
+}
+
+func (hostedAgentFunc) Cancel(context.Context, HostedCancelRequest) error { return nil }
 
 func newA2AHostedTestHost(t *testing.T, agent HostedAgent) *Host {
 	t.Helper()

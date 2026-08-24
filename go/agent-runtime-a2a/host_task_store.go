@@ -70,10 +70,13 @@ type HostedTaskStore interface {
 	List(context.Context, HostedTaskQuery) (HostedTaskPage, error)
 }
 
-type protocolTaskStore struct{ store HostedTaskStore }
+type protocolTaskStore struct {
+	store HostedTaskStore
+	hub   *hostedSubscriptionHub
+}
 
-func newProtocolTaskStore(store HostedTaskStore) taskstore.Store {
-	return &protocolTaskStore{store: store}
+func newProtocolTaskStore(store HostedTaskStore, hub *hostedSubscriptionHub) taskstore.Store {
+	return &protocolTaskStore{store: store, hub: hub}
 }
 
 func (store *protocolTaskStore) Create(ctx context.Context, task *a2asdk.Task) (taskstore.TaskVersion, error) {
@@ -125,6 +128,10 @@ func (store *protocolTaskStore) Update(
 	if err != nil {
 		return taskstore.TaskVersionMissing, err
 	}
+	subscriptionUpdate, err := newHostedSubscriptionUpdate(update.Event)
+	if err != nil {
+		return taskstore.TaskVersionMissing, err
+	}
 	version, err := store.store.Update(ctx, HostedTaskUpdate{
 		TaskID: strings.TrimSpace(string(update.Task.ID)), OwnerSubject: principal.Subject,
 		OwnerTenant: principal.Tenant, Task: taskRaw, Event: eventRaw, PreviousTask: previousRaw,
@@ -135,6 +142,13 @@ func (store *protocolTaskStore) Update(
 	}
 	if version <= int64(update.PrevVersion) {
 		return taskstore.TaskVersionMissing, ErrHostedTaskStore
+	}
+	if subscriptionUpdate != nil && store.hub != nil {
+		subscriptionUpdate.version = version
+		store.hub.publish(
+			hostedSubscriptionKey(principal, strings.TrimSpace(string(update.Task.ID))),
+			*subscriptionUpdate,
+		)
 	}
 	return taskstore.TaskVersion(version), nil
 }

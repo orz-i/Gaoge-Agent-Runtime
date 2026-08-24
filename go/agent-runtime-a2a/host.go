@@ -62,9 +62,10 @@ type HostedCancelRequest struct {
 type HostedEventKind string
 
 const (
-	HostedEventArtifact HostedEventKind = "artifact"
-	HostedEventMessage  HostedEventKind = "message"
-	HostedEventStatus   HostedEventKind = "status"
+	HostedEventArtifact      HostedEventKind = "artifact"
+	HostedEventMessage       HostedEventKind = "message"
+	HostedEventDirectMessage HostedEventKind = "direct_message"
+	HostedEventStatus        HostedEventKind = "status"
 )
 
 // HostedStatus is a host-neutral lifecycle request. The A2A edge owns the
@@ -136,14 +137,19 @@ func NewHost(dependencies HostDependencies) (*Host, error) {
 		return nil, err
 	}
 	executor := hostedExecutor{agent: dependencies.Agent}
-	options := []a2asrv.RequestHandlerOption{a2asrv.WithCapabilityChecks(&card.Capabilities)}
+	options := []a2asrv.RequestHandlerOption{
+		a2asrv.WithCapabilityChecks(&card.Capabilities),
+		a2asrv.WithCallInterceptors(hostResponseInterceptor{}),
+	}
 	if dependencies.Authenticator != nil {
 		options = append(options, a2asrv.WithCallInterceptors(hostAuthenticationInterceptor{
 			authenticator: dependencies.Authenticator, allowedTenant: strings.TrimSpace(dependencies.Card.Tenant),
 		}))
 	}
+	var subscriptionHub *hostedSubscriptionHub
 	if dependencies.TaskStore != nil {
-		options = append(options, a2asrv.WithTaskStore(newProtocolTaskStore(dependencies.TaskStore)))
+		subscriptionHub = newHostedSubscriptionHub()
+		options = append(options, a2asrv.WithTaskStore(newProtocolTaskStore(dependencies.TaskStore, subscriptionHub)))
 	}
 	if dependencies.Policy.AgentInactivityTimeout > 0 {
 		options = append(options, a2asrv.WithAgentInactivityTimeout(dependencies.Policy.AgentInactivityTimeout))
@@ -154,13 +160,17 @@ func NewHost(dependencies HostDependencies) (*Host, error) {
 		}))
 	}
 	requestHandler := a2asrv.NewHandler(executor, options...)
+	cardHandler, err := newHostedAgentCardHandler(card)
+	if err != nil {
+		return nil, ErrInvalidHost
+	}
 	mux := http.NewServeMux()
-	mux.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(card))
+	mux.Handle(a2asrv.WellKnownAgentCardPath, cardHandler)
 	protocolHandler := a2asrv.NewRESTHandler(requestHandler)
 	if strings.TrimSpace(dependencies.Card.Tenant) != "" {
 		protocolHandler = a2asrv.NewTenantRESTHandler("/{*}", requestHandler)
 	}
-	mux.Handle("/", protocolHandler)
+	mux.Handle("/", newHostedProtocolHTTPHandler(protocolHandler, dependencies, subscriptionHub))
 	return &Host{handler: mux}, nil
 }
 
@@ -170,7 +180,7 @@ func validHostPolicy(dependencies HostDependencies) bool {
 		return false
 	}
 	if !policy.Production {
-		return true
+		return dependencies.TaskStore == nil || dependencies.Authenticator != nil
 	}
 	publicURL, err := url.Parse(strings.TrimSpace(dependencies.Card.PublicURL))
 	return err == nil && publicURL.Scheme == "https" && publicURL.Host != "" &&
@@ -198,28 +208,52 @@ func (executor hostedExecutor) Execute(
 			yield(nil, err)
 			return
 		}
-		if !startHostedExecution(execCtx, yield) {
-			return
-		}
-		terminal, err := executor.executeHostedAgent(ctx, execCtx, request, yield)
+		execution, err := executor.executeHostedAgent(ctx, execCtx, request, yield)
 		if errors.Is(err, errHostedSinkClosed) {
 			return
 		}
-		if err != nil {
-			yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed, nil), nil)
+		if execution.directMessage != nil {
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			yield(execution.directMessage, nil)
 			return
 		}
-		if !terminal {
-			yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCompleted, nil), nil)
+		if !execution.taskStarted && !startHostedExecution(execCtx, yield) {
+			return
+		}
+		if err != nil {
+			yield(newHostedStatusUpdate(execCtx, a2asdk.TaskStateFailed, nil), nil)
+			return
+		}
+		if !execution.terminal {
+			yield(newHostedStatusUpdate(execCtx, a2asdk.TaskStateCompleted, nil), nil)
 		}
 	}
 }
 
 func startHostedExecution(execCtx *a2asrv.ExecutorContext, yield func(a2asdk.Event, error) bool) bool {
-	if execCtx.StoredTask == nil && !yield(a2asdk.NewSubmittedTask(execCtx, execCtx.Message), nil) {
-		return false
+	if execCtx.StoredTask == nil {
+		task := a2asdk.NewSubmittedTask(execCtx, execCtx.Message)
+		now := time.Now().UTC()
+		task.Status.Timestamp = &now
+		if !yield(task, nil) {
+			return false
+		}
 	}
-	return yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateWorking, nil), nil)
+	return yield(newHostedStatusUpdate(execCtx, a2asdk.TaskStateWorking, nil), nil)
+}
+
+func newHostedStatusUpdate(
+	info a2asdk.TaskInfoProvider,
+	state a2asdk.TaskState,
+	message *a2asdk.Message,
+) *a2asdk.TaskStatusUpdateEvent {
+	event := a2asdk.NewStatusUpdateEvent(info, state, message)
+	now := time.Now().UTC()
+	event.Status.Timestamp = &now
+	return event
 }
 
 func (executor hostedExecutor) executeHostedAgent(
@@ -227,20 +261,56 @@ func (executor hostedExecutor) executeHostedAgent(
 	execCtx *a2asrv.ExecutorContext,
 	request HostedRequest,
 	yield func(a2asdk.Event, error) bool,
-) (bool, error) {
-	terminal := false
+) (hostedExecution, error) {
+	execution := hostedExecution{}
 	sink := func(event HostedEvent) error {
+		if event.Kind == HostedEventDirectMessage {
+			return execution.captureDirectMessage(execCtx, event)
+		}
+		if execution.directMessage != nil {
+			return ErrInvalidHostedEvent
+		}
+		if !execution.taskStarted {
+			if !startHostedExecution(execCtx, yield) {
+				return errHostedSinkClosed
+			}
+			execution.taskStarted = true
+		}
 		protocolEvent, isTerminal, err := projectHostedOutput(execCtx, event)
 		if err != nil {
 			return err
 		}
-		terminal = terminal || isTerminal
+		execution.terminal = execution.terminal || isTerminal
 		if !yield(protocolEvent, nil) {
 			return errHostedSinkClosed
 		}
 		return nil
 	}
-	return terminal, executor.agent.Execute(ctx, request, sink)
+	err := executor.agent.Execute(ctx, request, sink)
+	return execution, err
+}
+
+type hostedExecution struct {
+	taskStarted   bool
+	terminal      bool
+	directMessage *a2asdk.Message
+}
+
+func (execution *hostedExecution) captureDirectMessage(
+	execCtx *a2asrv.ExecutorContext,
+	event HostedEvent,
+) error {
+	if execution == nil || execution.taskStarted || execution.directMessage != nil ||
+		execCtx == nil || execCtx.StoredTask != nil {
+		return ErrInvalidHostedEvent
+	}
+	message, err := projectHostedDirectMessage(execCtx, event)
+	if err != nil {
+		return err
+	}
+	execution.directMessage = message
+	execution.terminal = true
+	return nil
 }
 
 func (executor hostedExecutor) Cancel(
@@ -257,7 +327,7 @@ func (executor hostedExecutor) Cancel(
 			yield(nil, err)
 			return
 		}
-		yield(a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCanceled, nil), nil)
+		yield(newHostedStatusUpdate(execCtx, a2asdk.TaskStateCanceled, nil), nil)
 	}
 }
 
@@ -339,11 +409,34 @@ func projectHostedOutput(execCtx *a2asrv.ExecutorContext, event HostedEvent) (a2
 	case HostedEventMessage:
 		projected, err := projectHostedMessage(execCtx, event)
 		return projected, true, err
+	case HostedEventDirectMessage:
+		projected, err := projectHostedDirectMessage(execCtx, event)
+		return projected, true, err
 	case HostedEventStatus:
-		return projectHostedStatus(execCtx, event.Status)
+		return projectHostedStatus(execCtx, event)
 	default:
 		return nil, false, ErrInvalidHostedEvent
 	}
+}
+
+func projectHostedDirectMessage(execCtx *a2asrv.ExecutorContext, event HostedEvent) (*a2asdk.Message, error) {
+	messageID := strings.TrimSpace(event.MessageID)
+	if messageID == "" || execCtx == nil || execCtx.StoredTask != nil {
+		return nil, ErrInvalidHostedEvent
+	}
+	parts, err := projectHostedParts(event)
+	if err != nil {
+		return nil, err
+	}
+	metadata, err := decodeMetadata(event.Metadata)
+	if err != nil {
+		return nil, ErrInvalidHostedEvent
+	}
+	message := a2asdk.NewMessage(a2asdk.MessageRoleAgent, parts...)
+	message.ID = messageID
+	message.ContextID = execCtx.ContextID
+	message.Metadata = metadata
+	return message, nil
 }
 
 func projectHostedArtifact(execCtx *a2asrv.ExecutorContext, event HostedEvent) (*a2asdk.TaskArtifactUpdateEvent, error) {
@@ -377,6 +470,46 @@ func projectHostedArtifact(execCtx *a2asrv.ExecutorContext, event HostedEvent) (
 }
 
 func projectHostedMessage(execCtx *a2asrv.ExecutorContext, event HostedEvent) (*a2asdk.TaskStatusUpdateEvent, error) {
+	message, err := projectHostedAgentMessage(execCtx, event)
+	if err != nil {
+		return nil, err
+	}
+	return newHostedStatusUpdate(execCtx, a2asdk.TaskStateCompleted, message), nil
+}
+
+func projectHostedStatus(execCtx *a2asrv.ExecutorContext, event HostedEvent) (a2asdk.Event, bool, error) {
+	if execCtx == nil {
+		return nil, false, ErrInvalidHostedEvent
+	}
+	var message *a2asdk.Message
+	if strings.TrimSpace(event.MessageID) != "" || strings.TrimSpace(event.Text) != "" || len(event.Parts) > 0 {
+		var err error
+		message, err = projectHostedAgentMessage(execCtx, event)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	switch event.Status {
+	case HostedStatusWorking:
+		return newHostedStatusUpdate(execCtx, a2asdk.TaskStateWorking, message), false, nil
+	case HostedStatusInputRequired:
+		return newHostedStatusUpdate(execCtx, a2asdk.TaskStateInputRequired, message), true, nil
+	case HostedStatusAuthRequired:
+		return newHostedStatusUpdate(execCtx, a2asdk.TaskStateAuthRequired, message), true, nil
+	case HostedStatusCompleted:
+		return newHostedStatusUpdate(execCtx, a2asdk.TaskStateCompleted, message), true, nil
+	case HostedStatusFailed:
+		return newHostedStatusUpdate(execCtx, a2asdk.TaskStateFailed, message), true, nil
+	case HostedStatusRejected:
+		return newHostedStatusUpdate(execCtx, a2asdk.TaskStateRejected, message), true, nil
+	case HostedStatusCanceled:
+		return newHostedStatusUpdate(execCtx, a2asdk.TaskStateCanceled, message), true, nil
+	default:
+		return nil, false, ErrInvalidHostedEvent
+	}
+}
+
+func projectHostedAgentMessage(execCtx *a2asrv.ExecutorContext, event HostedEvent) (*a2asdk.Message, error) {
 	messageID := strings.TrimSpace(event.MessageID)
 	if messageID == "" || execCtx == nil {
 		return nil, ErrInvalidHostedEvent
@@ -385,40 +518,16 @@ func projectHostedMessage(execCtx *a2asrv.ExecutorContext, event HostedEvent) (*
 	if err != nil {
 		return nil, err
 	}
-	message := a2asdk.NewMessage(a2asdk.MessageRoleAgent, parts...)
 	metadata, err := decodeMetadata(event.Metadata)
 	if err != nil {
 		return nil, ErrInvalidHostedEvent
 	}
+	message := a2asdk.NewMessage(a2asdk.MessageRoleAgent, parts...)
 	message.Metadata = metadata
 	message.ID = messageID
 	message.TaskID = execCtx.TaskID
 	message.ContextID = execCtx.ContextID
-	return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCompleted, message), nil
-}
-
-func projectHostedStatus(execCtx *a2asrv.ExecutorContext, status HostedStatus) (a2asdk.Event, bool, error) {
-	if execCtx == nil {
-		return nil, false, ErrInvalidHostedEvent
-	}
-	switch status {
-	case HostedStatusWorking:
-		return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateWorking, nil), false, nil
-	case HostedStatusInputRequired:
-		return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateInputRequired, nil), true, nil
-	case HostedStatusAuthRequired:
-		return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateAuthRequired, nil), true, nil
-	case HostedStatusCompleted:
-		return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCompleted, nil), true, nil
-	case HostedStatusFailed:
-		return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateFailed, nil), true, nil
-	case HostedStatusRejected:
-		return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateRejected, nil), true, nil
-	case HostedStatusCanceled:
-		return a2asdk.NewStatusUpdateEvent(execCtx, a2asdk.TaskStateCanceled, nil), true, nil
-	default:
-		return nil, false, ErrInvalidHostedEvent
-	}
+	return message, nil
 }
 
 func projectHostedParts(event HostedEvent) ([]*a2asdk.Part, error) {
