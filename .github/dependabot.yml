@@ -12,14 +12,15 @@ updates:
       - /go/agent-runtime-redis
     schedule:
       interval: weekly
-    allow:
-      - dependency-name: "*"
-        update-types:
-          - version-update:semver-minor
-          - version-update:semver-patch
+    # The modules are released together and depend on sibling prerelease tags.
+    # Coordinate routine Go upgrades through the full workspace gate while
+    # retaining Dependabot security updates and vulnerability alerts.
+    open-pull-requests-limit: 0
     groups:
-      go-dependencies:
-        group-by: dependency-name
+      go-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
   - package-ecosystem: npm
     directory: /
     schedule:
