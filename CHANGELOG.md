@@ -3,6 +3,31 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## [0.1.0-beta.3] - 2026-08-25
+
+### Added
+
+- Immutable, scoped Dynamic Workflow Definition revisions with content hashes,
+  activation CAS, typed validation, and durable registry adapters.
+- Deterministic workflow execution for conditions, parallel branches,
+  subworkflows, interactions, retries, budgets, compensation, and effect
+  receipts.
+- HTTP, Go, and TypeScript contracts for definition lifecycle, exact revision
+  execution, cancellation, and trace inspection.
+
+### Changed
+
+- Harness can resolve and execute an exact Definition revision while retaining
+  immutable definition identity in checkpoints and traces.
+- Workflow effects fail closed through typed routers instead of evaluating
+  arbitrary expressions or mutating active definitions.
+
+### Verification
+
+- Go and TypeScript unit, integration, clean-consumer, persistence, and release
+  gates cover restart recovery, stale CAS rejection, idempotent retry, budget
+  exhaustion, compensation, and trace replay.
+
 ## [0.1.0-beta.2] - 2026-08-24
 
 ### Added

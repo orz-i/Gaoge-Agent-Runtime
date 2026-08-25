@@ -83,6 +83,7 @@ func (catalog *CommandCatalog) Resolve(id string) (CommandDescriptor, error) {
 // bootstrap composition in later phases.
 func FirstPartyCommandDescriptors() []CommandDescriptor {
 	const noArguments = `{"type":"object","additionalProperties":false}`
+	const workflowArguments = `{"type":"object","properties":{"definitionReference":{"type":"object","required":["id"],"properties":{"id":{"type":"string","minLength":1},"revision":{"type":"integer","minimum":1},"hash":{"type":"string","minLength":1}},"additionalProperties":false},"input":{}},"additionalProperties":false}`
 	return []CommandDescriptor{
 		{
 			ID: "plan", Trigger: "/plan", Title: "Plan", Description: "Create and execute a bounded plan",
@@ -97,7 +98,7 @@ func FirstPartyCommandDescriptors() []CommandDescriptor {
 		{
 			ID: "workflow", Trigger: "/workflow", Title: "Workflow", Description: "Run a bounded dynamic workflow",
 			CapabilityKey: CapabilityWorkflow, DefinitionVersion: RuntimeCapabilityVersion,
-			ExecutionClass: ExecutionWorkflow, Source: CommandSourceFirstParty, InputSchema: json.RawMessage(noArguments),
+			ExecutionClass: ExecutionWorkflow, Source: CommandSourceFirstParty, InputSchema: json.RawMessage(workflowArguments),
 		},
 	}
 }

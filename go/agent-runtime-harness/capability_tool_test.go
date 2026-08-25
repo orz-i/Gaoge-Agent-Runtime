@@ -48,7 +48,7 @@ func newCapabilityToolFixture(t *testing.T) capabilityToolFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	materializer := workflowOnlyMaterializer{}
+	materializer := workflowOnlyMaterializer{t: t}
 	toolHandler := harness.NewCapabilityInvocationToolHandler(materializer)
 	registry, err := tools.NewRegistry([]tools.Registration{harness.CapabilityInvocationToolRegistration(toolHandler)})
 	if err != nil {
@@ -202,14 +202,20 @@ func assertCapabilityRelation(
 	}
 }
 
-type workflowOnlyMaterializer struct{}
+type workflowOnlyMaterializer struct {
+	t *testing.T
+}
 
-func (workflowOnlyMaterializer) MaterializeCapability(
+func (materializer workflowOnlyMaterializer) MaterializeCapability(
 	_ context.Context,
 	request harness.CapabilityMaterializeRequest,
 ) (harness.CapabilityInvocationSpec, error) {
 	if request.Descriptor.ID != "workflow" {
 		return harness.CapabilityInvocationSpec{}, harness.ErrNotFound
+	}
+	if materializer.t != nil && (request.Actor != (kernel.ActorRef{TenantID: testTenant, ActorID: testActor}) ||
+		request.Thread != (kernel.ThreadRef{Kind: testThreadKind, ID: "capability-thread"})) {
+		materializer.t.Fatalf("capability materialization identity = actor:%#v thread:%#v", request.Actor, request.Thread)
 	}
 	return harness.CapabilityInvocationSpec{Workflow: &harness.WorkflowCapabilitySpec{
 		Definition: workflow.Definition{ID: "fixture-workflow", Revision: 1, Name: "Fixture workflow"},

@@ -44,6 +44,9 @@ func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 		"get /runs/{runID}",
 		"get /runs/{runID}/feed",
 		"get /runs/{runID}/workbench",
+		"get /workflow-definitions",
+		"get /workflow-definitions/{definitionID}/revisions/{revision}",
+		"get /workflow-runs/{runID}/trace",
 		"post /agent-runs",
 		"post /harness/turns/{turnID}/approval",
 		"post /harness/turns/{turnID}/interactions/{interactionID}",
@@ -52,7 +55,11 @@ func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 		"post /plan-runs/{runID}/approval",
 		"post /runs/{runID}/cancel",
 		"post /team-runs",
+		"post /workflow-definitions",
+		"post /workflow-definitions/compile",
+		"post /workflow-definitions/{definitionID}/activation",
 		"post /workflow-runs",
+		"post /workflow-runs/{runID}/cancel",
 		"post /workflow-runs/{runID}/wait",
 	}
 	if !reflect.DeepEqual(operations, expected) {

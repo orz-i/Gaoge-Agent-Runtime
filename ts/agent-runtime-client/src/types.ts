@@ -203,12 +203,115 @@ export type ResolvePlanApprovalRequest = {
   comment?: string;
 };
 
+export type WorkflowValueSource =
+  | { kind: "literal"; value: unknown; pointer?: string; nodeID?: never }
+  | { kind: "workflow_input"; pointer?: string; value?: never; nodeID?: never }
+  | { kind: "node_output" | "wait_response"; nodeID: string; pointer?: string; value?: never }
+  | { kind: "map_item" | "map_index"; pointer?: string; value?: never; nodeID?: never };
+
+export type WorkflowRetryPolicy = { maxAttempts?: number; retryableErrorCodes?: string[] };
+export type WorkflowEffectClass =
+  | "effect"
+  | "agent.task"
+  | "application.effect"
+  | "media.effect"
+  | "subworkflow"
+  | "compensation";
+export type WorkflowDefinitionReference = { id: string; revision?: number; hash?: string };
+export type ExactWorkflowDefinitionReference = { id: string; revision: number; hash: string };
+export type WorkflowEffectCall = {
+  class: WorkflowEffectClass;
+  kind: string;
+  revision?: string;
+  input: WorkflowValueSource;
+  definition?: ExactWorkflowDefinitionReference;
+  maxCostUnits?: number;
+  retry?: WorkflowRetryPolicy;
+};
+
+type WorkflowNodeBase = { id: string; next?: string };
 export type WorkflowNode =
-  | { id: string; type: "effect"; effect: { kind: string; input: unknown; fromInput?: never } }
-  | { id: string; type: "effect"; effect: { kind: string; fromInput: true; input?: never } }
-  | { id: string; type: "wait"; wait: { kind: string; payload: unknown } }
-  | { id: string; type: "return"; return: { value: unknown; fromNode?: never } }
-  | { id: string; type: "return"; return: { fromNode: string; value?: never } };
+  | (WorkflowNodeBase & {
+      type: "effect";
+      effect: {
+        kind: string;
+        input?: unknown;
+        fromInput?: boolean;
+        source?: WorkflowValueSource;
+        maxCostUnits?: number;
+        retry?: WorkflowRetryPolicy;
+      };
+    })
+  | (WorkflowNodeBase & {
+      type: "agent.task";
+      agentTask: {
+        agentKey: string;
+        revision: string;
+        input: WorkflowValueSource;
+        maxCostUnits?: number;
+        retry?: WorkflowRetryPolicy;
+      };
+    })
+  | (WorkflowNodeBase & {
+      type: "application.effect";
+      applicationEffect: {
+        capabilityKey: string;
+        revision: string;
+        input: WorkflowValueSource;
+        maxCostUnits?: number;
+        retry?: WorkflowRetryPolicy;
+      };
+    })
+  | (WorkflowNodeBase & {
+      type: "media.effect";
+      mediaEffect: {
+        capabilityKey: string;
+        revision: string;
+        input: WorkflowValueSource;
+        maxCostUnits?: number;
+        retry?: WorkflowRetryPolicy;
+      };
+    })
+  | (WorkflowNodeBase & {
+      type: "wait";
+      wait: { kind: string; payload?: unknown; source?: WorkflowValueSource };
+    })
+  | (WorkflowNodeBase & {
+      type: "if";
+      if: { condition: WorkflowValueSource; thenNodeID: string; elseNodeID: string };
+    })
+  | (WorkflowNodeBase & {
+      type: "parallel";
+      parallel: { branches: Array<{ id: string; call: WorkflowEffectCall }>; maxConcurrency: number };
+    })
+  | (WorkflowNodeBase & {
+      type: "map";
+      map: { items: WorkflowValueSource; call: WorkflowEffectCall; maxConcurrency: number };
+    })
+  | (WorkflowNodeBase & {
+      type: "subworkflow";
+      subworkflow: {
+        definition: ExactWorkflowDefinitionReference;
+        input: WorkflowValueSource;
+        maxCostUnits?: number;
+        retry?: WorkflowRetryPolicy;
+      };
+    })
+  | (WorkflowNodeBase & {
+      type: "compensation";
+      compensation: { do: WorkflowEffectCall; undo: WorkflowEffectCall };
+    })
+  | (WorkflowNodeBase & {
+      type: "return";
+      return: { value?: unknown; fromNode?: string; source?: WorkflowValueSource };
+    });
+
+export type WorkflowDefinitionPolicy = {
+  requiredPermissions?: string[];
+  costClass?: "none" | "low" | "medium" | "high" | "external_billing";
+  maxCostUnits?: number;
+  sideEffectClass?: "none" | "read" | "write" | "destructive";
+};
 
 export type WorkflowDefinitionDraft = {
   id: string;
@@ -223,18 +326,152 @@ export type WorkflowDefinitionDraft = {
     maxSegments?: number;
     maxActivationsPerSegment?: number;
     maxStateBytes?: number;
+	maxFanOut?: number;
+	maxConcurrency?: number;
+	maxNestedDepth?: number;
+	maxAttemptsPerEffect?: number;
   };
+	policy?: WorkflowDefinitionPolicy;
 };
+
+export type WorkflowDefinition = WorkflowDefinitionDraft & { hash: string };
+export type WorkflowDefinitionScopeKind = "system" | "tenant" | "actor";
+export type WorkflowDefinitionScope = {
+  kind: WorkflowDefinitionScopeKind;
+  tenantID?: string;
+  actorID?: string;
+};
+export type WorkflowDefinitionHead = {
+  scope: WorkflowDefinitionScope;
+  definitionID: string;
+  latestRevision: number;
+  activeRevision?: number;
+  availability: "active" | "disabled";
+  version: number;
+  updatedAt: string;
+};
+export type WorkflowDefinitionRevision = {
+  scope: WorkflowDefinitionScope;
+  definition: WorkflowDefinition;
+  publishedBy: string;
+  idempotencyKey: string;
+  requestFingerprint: string;
+  publishedAt: string;
+};
+export type WorkflowDefinitionDiff = {
+  addedNodeIDs?: string[];
+  removedNodeIDs?: string[];
+  changedNodeIDs?: string[];
+  inputSchemaChanged: boolean;
+  outputSchemaChanged: boolean;
+  limitsChanged: boolean;
+};
+export type WorkflowDefinitionPolicyImpact = {
+  permissionsAdded?: string[];
+  permissionsRemoved?: string[];
+  costClassFrom: NonNullable<WorkflowDefinitionPolicy["costClass"]>;
+  costClassTo: NonNullable<WorkflowDefinitionPolicy["costClass"]>;
+  maxCostUnitsDelta: number;
+  sideEffectFrom: NonNullable<WorkflowDefinitionPolicy["sideEffectClass"]>;
+  sideEffectTo: NonNullable<WorkflowDefinitionPolicy["sideEffectClass"]>;
+};
+export type WorkflowDefinitionProposalReport = {
+  definitionID: string;
+  baseRevision: number;
+  baseHash?: string;
+  candidate: WorkflowDefinition;
+  diff: WorkflowDefinitionDiff;
+  impact: WorkflowDefinitionPolicyImpact;
+};
+export type CompileWorkflowDefinitionRequest = {
+  scope: { kind: WorkflowDefinitionScopeKind };
+  baseRevision?: number;
+  draft: WorkflowDefinitionDraft;
+};
+export type PublishWorkflowDefinitionRequest = {
+  scope: { kind: WorkflowDefinitionScopeKind };
+  draft: WorkflowDefinitionDraft;
+  expectedRevision?: number;
+  mode?: "activate" | "stage";
+  idempotencyKey?: string;
+};
+export type PublishWorkflowDefinitionResponse = {
+  revision: WorkflowDefinitionRevision;
+  head: WorkflowDefinitionHead;
+  reused: boolean;
+};
+export type SetWorkflowDefinitionActivationRequest = {
+  scope: { kind: WorkflowDefinitionScopeKind };
+  targetRevision?: number;
+  availability: "active" | "disabled";
+  expectedVersion: number;
+};
+export type SetWorkflowDefinitionActivationResponse = { head: WorkflowDefinitionHead; reused: boolean };
 
 export type StartWorkflowRunRequest = {
   thread: ThreadRefDTO;
   input: unknown;
   clientRunID?: string;
   goal: string;
-  definition: WorkflowDefinitionDraft;
+	definition?: WorkflowDefinitionDraft;
+	definitionReference?: WorkflowDefinitionReference;
 };
 
 export type ResolveWorkflowWaitRequest = { expectedRevision: number; response: unknown };
+export type CancelWorkflowRunRequest = { expectedRevision: number; reason?: string };
+export type WorkflowTraceDTO = {
+  runID: string;
+  status: RunStatus;
+  revision: number;
+  definition: ExactWorkflowDefinitionReference;
+  currentNodeID?: string;
+  nestedDepth: number;
+  budget: {
+    nodeActivations: number;
+    effects: number;
+    segments: number;
+    stateBytes: number;
+    costUnitsUsed: number;
+    costUnitsReserved: number;
+  };
+  activations: Array<{
+    id: string;
+    nodeID: string;
+    nodeType: WorkflowNode["type"];
+    status: "running" | "waiting" | "completed" | "failed";
+    attempt: number;
+    effectIDs?: string[];
+    waitID?: string;
+    errorCode?: string;
+  }>;
+  effects: Array<{
+    id: string;
+    nodeID: string;
+    class: WorkflowEffectClass;
+    kind: string;
+    revision?: string;
+    status: "pending" | "completed" | "failed";
+    attempt: number;
+    maxAttempts: number;
+    childRunID?: string;
+    receiptID?: string;
+    costUnits: number;
+    maxCostUnits: number;
+    compensation?: boolean;
+    errorCode?: string;
+  }>;
+  waits: Array<{ id: string; nodeID: string; kind: string; status: "pending" | "resolved" }>;
+  compensations: Array<{
+    id: string;
+    nodeID: string;
+    kind: string;
+    status: "pending" | "running" | "completed" | "failed";
+    effectID?: string;
+    receiptID?: string;
+    errorCode?: string;
+  }>;
+  events: Array<{ seq: number; type: string; createdAt: string }>;
+};
 
 export type StartTeamRunRequest = {
   thread: ThreadRefDTO;

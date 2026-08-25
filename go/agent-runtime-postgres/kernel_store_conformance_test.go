@@ -4,7 +4,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/driver/sqlite"
@@ -33,9 +32,7 @@ func openKernelStoreTestDB(tb testing.TB) *gorm.DB {
 		tb.Fatalf("resolve kernel store sql db: %v", err)
 	}
 	tb.Cleanup(func() { _ = sqlDB.Close() })
-	if err = db.AutoMigrate(
-		&models.KernelRunRecord{}, &models.KernelEventRecord{}, &models.RunRelationRecord{},
-	); err != nil {
+	if err = db.AutoMigrate(Models()...); err != nil {
 		tb.Fatalf("migrate kernel store test db: %v", err)
 	}
 	return db

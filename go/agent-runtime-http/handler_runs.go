@@ -43,9 +43,19 @@ func (handler *Handler) CancelRun(context *gin.Context) {
 		invalidBody(context, err)
 		return
 	}
-	snapshot, err := handler.runtime.Cancel(
-		context.Request.Context(), runID, request.ExpectedRevision, request.Reason,
+	current, err := handler.runtime.Load(context.Request.Context(), runID)
+	if err != nil {
+		WriteKernelError(context, "run", err)
+		return
+	}
+	snapshot, routed, err := handler.cancellations.cancel(
+		context.Request.Context(), current, request.ExpectedRevision, request.Reason,
 	)
+	if !routed && err == nil {
+		snapshot, err = handler.runtime.Cancel(
+			context.Request.Context(), runID, request.ExpectedRevision, request.Reason,
+		)
+	}
 	if err != nil {
 		WriteKernelError(context, "run", err)
 		return
