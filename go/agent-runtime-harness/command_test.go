@@ -1,6 +1,7 @@
 package harness_test
 
 import (
+	"strings"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -20,6 +21,9 @@ func TestFirstPartyCommandCatalogIsStaticAndDeterministic(t *testing.T) {
 	if err != nil || workflow.Trigger != "/workflow" || workflow.CapabilityKey != harness.CapabilityWorkflow ||
 		workflow.ExecutionClass != harness.ExecutionWorkflow {
 		t.Fatalf("workflow=%#v err=%v", workflow, err)
+	}
+	if !strings.Contains(string(workflow.InputSchema), `"definitionReference"`) {
+		t.Fatalf("workflow command schema has no immutable Definition reference: %s", workflow.InputSchema)
 	}
 }
 

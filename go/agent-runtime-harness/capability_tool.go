@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
@@ -29,6 +30,8 @@ type CapabilityMaterializeRequest struct {
 	Goal       string
 	Arguments  json.RawMessage
 	Config     ConfigSnapshot
+	Actor      kernel.ActorRef
+	Thread     kernel.ThreadRef
 }
 
 type TeamCapabilitySpec struct {
@@ -106,11 +109,14 @@ func (handler *CapabilityInvocationToolHandler) Execute(
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	turn, config, err := capabilityToolContext(ctx, runner, request.RunID)
+	turn, session, config, err := capabilityToolContext(ctx, runner, request.RunID)
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	input, descriptor, spec, err := handler.materializeCapability(ctx, config, request.Call.Arguments)
+	input, descriptor, spec, err := handler.materializeCapability(
+		ctx, session.Actor, kernel.ThreadRef{Kind: session.HostThread.Kind, ID: session.HostThread.ID},
+		config, request.Call.Arguments,
+	)
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
@@ -125,19 +131,29 @@ func (handler *CapabilityInvocationToolHandler) Execute(
 	return runner.capabilityToolResult(ctx, descriptor.ID, invocationID)
 }
 
-func capabilityToolContext(ctx context.Context, runner *Runner, runID string) (Turn, ConfigSnapshot, error) {
+func capabilityToolContext(
+	ctx context.Context,
+	runner *Runner,
+	runID string,
+) (Turn, Session, ConfigSnapshot, error) {
 	turn, root, harnessRun, err := timelineTurn(ctx, runner.store, runID)
 	if err != nil || !harnessRun || root.ExecutionClass != ExecutionAgent || strings.TrimSpace(root.ParentItemID) != "" {
-		return Turn{}, ConfigSnapshot{}, tools.NewRecoverableCallError(
+		return Turn{}, Session{}, ConfigSnapshot{}, tools.NewRecoverableCallError(
 			"capability.invalid_parent", "capability invocation is available only to the root Harness agent", err,
 		)
 	}
+	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	if err != nil {
+		return Turn{}, Session{}, ConfigSnapshot{}, err
+	}
 	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
-	return turn, config, err
+	return turn, session, config, err
 }
 
 func (handler *CapabilityInvocationToolHandler) materializeCapability(
 	ctx context.Context,
+	actor kernel.ActorRef,
+	thread kernel.ThreadRef,
 	config ConfigSnapshot,
 	raw json.RawMessage,
 ) (capabilityInvocationToolInput, CommandDescriptor, CapabilityInvocationSpec, error) {
@@ -147,6 +163,7 @@ func (handler *CapabilityInvocationToolHandler) materializeCapability(
 	}
 	spec, err := handler.materializer.MaterializeCapability(ctx, CapabilityMaterializeRequest{
 		Descriptor: descriptor, Goal: input.Goal, Arguments: input.Arguments, Config: config,
+		Actor: actor, Thread: thread,
 	})
 	if err != nil {
 		return capabilityInvocationToolInput{}, CommandDescriptor{}, CapabilityInvocationSpec{}, err
