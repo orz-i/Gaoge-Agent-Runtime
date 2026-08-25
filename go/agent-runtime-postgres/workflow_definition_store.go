@@ -80,8 +80,9 @@ func (store *WorkflowDefinitionStore) Publish(
 				return createErr
 			}
 		} else {
-			result := tx.Model(&models.WorkflowDefinitionHeadRecord{}).
-				Where(workflowDefinitionHeadWhere(current.Scope, current.DefinitionID)).
+			result := whereWorkflowDefinitionHead(
+				tx.Model(&models.WorkflowDefinitionHeadRecord{}), current.Scope, current.DefinitionID,
+			).
 				Where("version = ?", current.Version-1).
 				Updates(map[string]any{
 					"latest_revision": current.LatestRevision,
@@ -125,8 +126,8 @@ func (store *WorkflowDefinitionStore) GetRevision(
 		return workflow.DefinitionRevision{}, workflow.ErrInvalidDefinitionRegistry
 	}
 	var record models.WorkflowDefinitionRevisionRecord
-	err = store.db.WithContext(ctx).Where(
-		workflowDefinitionRevisionWhere(normalized, definitionID, revision),
+	err = whereWorkflowDefinitionRevision(
+		store.db.WithContext(ctx), normalized, definitionID, revision,
 	).First(&record).Error
 	if err != nil {
 		return workflow.DefinitionRevision{}, translateWorkflowDefinitionError(err)
@@ -167,11 +168,12 @@ func (store *WorkflowDefinitionStore) ListHeads(
 		return nil, workflow.ErrInvalidDefinitionRegistry
 	}
 	var records []models.WorkflowDefinitionHeadRecord
-	err = store.db.WithContext(ctx).Where(map[string]any{
-		"scope_kind": string(normalized.Kind),
-		"tenant_id":  normalized.TenantID,
-		"actor_id":   normalized.ActorID,
-	}).Order("definition_id ASC").Find(&records).Error
+	err = store.db.WithContext(ctx).
+		Where(
+			"scope_kind = ? AND tenant_id = ? AND actor_id = ?",
+			string(normalized.Kind), normalized.TenantID, normalized.ActorID,
+		).
+		Order("definition_id ASC").Find(&records).Error
 	if err != nil {
 		return nil, err
 	}
@@ -213,10 +215,10 @@ func (store *WorkflowDefinitionStore) SetActivation(
 		}
 		if prepared.Availability == workflow.DefinitionActive {
 			var count int64
-			countErr := tx.Model(&models.WorkflowDefinitionRevisionRecord{}).
-				Where(workflowDefinitionRevisionWhere(
-					prepared.Scope, prepared.DefinitionID, prepared.TargetRevision,
-				)).Count(&count).Error
+			countErr := whereWorkflowDefinitionRevision(
+				tx.Model(&models.WorkflowDefinitionRevisionRecord{}),
+				prepared.Scope, prepared.DefinitionID, prepared.TargetRevision,
+			).Count(&count).Error
 			if countErr != nil {
 				return countErr
 			}
@@ -228,8 +230,9 @@ func (store *WorkflowDefinitionStore) SetActivation(
 		head.Availability = prepared.Availability
 		head.Version++
 		head.UpdatedAt = prepared.UpdatedAt
-		result := tx.Model(&models.WorkflowDefinitionHeadRecord{}).
-			Where(workflowDefinitionHeadWhere(head.Scope, head.DefinitionID)).
+		result := whereWorkflowDefinitionHead(
+			tx.Model(&models.WorkflowDefinitionHeadRecord{}), head.Scope, head.DefinitionID,
+		).
 			Where("version = ?", prepared.ExpectedVersion).
 			Updates(map[string]any{
 				"active_revision": head.ActiveRevision,
@@ -254,12 +257,13 @@ func (store *WorkflowDefinitionStore) findPublishReplay(
 	revision workflow.DefinitionRevision,
 ) (workflow.DefinitionRevision, workflow.DefinitionHead, bool, error) {
 	var record models.WorkflowDefinitionRevisionRecord
-	err := store.db.WithContext(ctx).Where(map[string]any{
-		"scope_kind":      string(revision.Scope.Kind),
-		"tenant_id":       revision.Scope.TenantID,
-		"actor_id":        revision.Scope.ActorID,
-		"idempotency_key": revision.IdempotencyKey,
-	}).First(&record).Error
+	err := store.db.WithContext(ctx).
+		Where(
+			"scope_kind = ? AND tenant_id = ? AND actor_id = ? AND idempotency_key = ?",
+			string(revision.Scope.Kind), revision.Scope.TenantID,
+			revision.Scope.ActorID, revision.IdempotencyKey,
+		).
+		First(&record).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return workflow.DefinitionRevision{}, workflow.DefinitionHead{}, false, nil
 	}
@@ -293,7 +297,7 @@ func loadWorkflowDefinitionHead(
 	definitionID string,
 	lock bool,
 ) (workflow.DefinitionHead, bool, error) {
-	query := db.Where(workflowDefinitionHeadWhere(scope, definitionID))
+	query := whereWorkflowDefinitionHead(db, scope, definitionID)
 	if lock {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
@@ -384,23 +388,24 @@ func workflowDefinitionHeadFromRecord(record models.WorkflowDefinitionHeadRecord
 	}
 }
 
-func workflowDefinitionHeadWhere(scope workflow.DefinitionScope, definitionID string) map[string]any {
-	return map[string]any{
-		"scope_kind":    string(scope.Kind),
-		"tenant_id":     scope.TenantID,
-		"actor_id":      scope.ActorID,
-		"definition_id": definitionID,
-	}
+func whereWorkflowDefinitionHead(
+	db *gorm.DB,
+	scope workflow.DefinitionScope,
+	definitionID string,
+) *gorm.DB {
+	return db.Where(
+		"scope_kind = ? AND tenant_id = ? AND actor_id = ? AND definition_id = ?",
+		string(scope.Kind), scope.TenantID, scope.ActorID, definitionID,
+	)
 }
 
-func workflowDefinitionRevisionWhere(
+func whereWorkflowDefinitionRevision(
+	db *gorm.DB,
 	scope workflow.DefinitionScope,
 	definitionID string,
 	revision int,
-) map[string]any {
-	where := workflowDefinitionHeadWhere(scope, definitionID)
-	where["revision"] = revision
-	return where
+) *gorm.DB {
+	return whereWorkflowDefinitionHead(db, scope, definitionID).Where("revision = ?", revision)
 }
 
 func translateWorkflowDefinitionError(err error) error {
