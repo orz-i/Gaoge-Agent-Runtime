@@ -174,6 +174,26 @@ func TestTopLevelFeatureReplayResumesPersistedRunningExecution(t *testing.T) {
 	assertRunningWorkflowResumed(t, replayed, feature, err)
 }
 
+func TestTopLevelFeatureReplayTreatsConcurrentResumeConflictAsProgress(t *testing.T) {
+	runner, feature := newConflictingResumeWorkflowHarness(t)
+	request := blockedWorkflowTurnRequest("concurrent-resume")
+	result := make(chan error, 1)
+	go func() {
+		_, startErr := runner.StartWorkflowTurn(t.Context(), request)
+		result <- startErr
+	}()
+	defer finishBlockedWorkflowStart(t, feature, result)
+	waitForBlockedWorkflowStart(t, feature)
+
+	replayed, err := runner.StartWorkflowTurn(t.Context(), request)
+	if err != nil || replayed.Turn.Status != harness.TurnRunning || feature.resumeCalls.Load() != 1 {
+		t.Fatalf(
+			"concurrent workflow replay was not observed as progress: turn=%#v resumeCalls=%d err=%v",
+			replayed.Turn, feature.resumeCalls.Load(), err,
+		)
+	}
+}
+
 func TestCancelAcceptedTopLevelInvocationWithoutRuntimeRunIsDurable(t *testing.T) {
 	runner, feature := newBlockedWorkflowHarness(t, false)
 	request := blockedWorkflowTurnRequest("cancel-before-run")
@@ -665,6 +685,27 @@ func newBlockedWorkflowHarness(t *testing.T, createRun bool) (*harness.Runner, *
 	runner, err := harness.NewRunner(harness.Dependencies{
 		Runtime: runtime, Agent: unusedFeatureAgent{}, Store: harness.NewMemoryStore(), Clock: featureInvocationClock{},
 		Workflows: feature,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return runner, feature
+}
+
+type conflictingResumeWorkflowFeature struct{ *blockedWorkflowFeature }
+
+func (feature conflictingResumeWorkflowFeature) Resume(context.Context, string, uint64) (kernel.Snapshot, error) {
+	feature.resumeCalls.Add(1)
+	return kernel.Snapshot{}, kernel.ErrConflict
+}
+
+func newConflictingResumeWorkflowHarness(t *testing.T) (*harness.Runner, *blockedWorkflowFeature) {
+	t.Helper()
+	runtime := newFeatureInvocationRuntime(t)
+	feature := newBlockedWorkflowFeature(runtime, true)
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: unusedFeatureAgent{}, Store: harness.NewMemoryStore(), Clock: featureInvocationClock{},
+		Workflows: conflictingResumeWorkflowFeature{feature},
 	})
 	if err != nil {
 		t.Fatal(err)
