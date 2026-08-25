@@ -311,6 +311,15 @@ func (runner *Runner) replayTopLevelFeatureStart(
 		resumed, resumeErr := runner.resumeFeature(
 			prepared.runContext, prepared.invocation, runtimeSnapshot.Run.Revision,
 		)
+		// A replay can race the execution owner that accepted the same durable
+		// invocation. The Runtime CAS then correctly rejects this second resume,
+		// but the Harness request is still an idempotent success: another worker
+		// has advanced (or is advancing) the exact same run. Refresh from the
+		// durable Runtime snapshot instead of failing the product projection.
+		if errors.Is(resumeErr, kernel.ErrConflict) {
+			snapshot, refreshErr := runner.Refresh(ctx, prepared.turn.ID)
+			return snapshot, true, refreshErr
+		}
 		if resumed.Run.ID == "" {
 			return Snapshot{}, true, resumeErr
 		}
