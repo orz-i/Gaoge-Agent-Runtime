@@ -1,9 +1,8 @@
 # @orz-i/agent-runtime-client
 
-Framework-neutral TypeScript client for Agent Runtime HTTP v1. It owns the
-public Runtime contract for runs, event streams, interactions, outputs,
-evidence, queues, Agent Manifests, delegated child runs, fan-in joins,
-workbench inspection, and administrator recovery operations.
+Framework-neutral TypeScript client for Agent Runtime HTTP v1. The client exposes
+feature-specific execution APIs, shared run inspection and feeds, and Harness
+interactions. Host application data and authorization remain owned by the host.
 
 ## Install a Beta
 
@@ -20,282 +19,91 @@ publication is reserved for stable versions.
 import { RuntimeClient } from "@orz-i/agent-runtime-client";
 
 const runtime = new RuntimeClient({
-  baseURL: "https://gaoge.example.com/api/agentruntime/v1",
-  headers: async () => ({
-    Authorization: `Bearer ${await getAccessToken()}`,
-  }),
+  baseURL: "https://runtime.example/api/v1",
+  headers: { Authorization: "Bearer <access-token>" },
 });
 ```
 
-`headers` may be static or asynchronous. Every API accepts an optional
-`AbortSignal` through its request options.
+Replace the URL and token with those of your configured host. `headers` may
+also be a synchronous or asynchronous function. Request options accept an
+`AbortSignal`; the client also accepts a custom `fetch` implementation.
 
-## Start and observe a run
+## Start and observe an Agent run
 
 ```ts
-const started = await runtime.runs.create({
+const started = await runtime.agent.start({
   clientRunID: crypto.randomUUID(),
   thread: { kind: "conversation", id: "conversation-42" },
-  input: { contentType: "text", content: "Prepare a release risk report." },
-  environment: { kind: "environment", id: "default" },
+  input: { content: "Prepare a release risk report." },
 });
 
 let lastSeq = 0;
-await runtime.events.stream(started.run.runID, lastSeq, (event) => {
+for await (const event of runtime.runs.feed(started.run.id, { afterSeq: lastSeq })) {
   lastSeq = event.seq;
-  renderEvent(event);
-});
+  console.log(event);
+}
 ```
 
-The event stream reconnects transient disconnects and skips already-seen
-sequence numbers. Persist the latest `seq` in the caller when a stream must
-survive a page reload.
+Run IDs are returned as `snapshot.run.id`. Start runs through their feature
+namespace, such as `agent.start`, not `runs.create`. Feeds are async iterables
+returned by `runs.feed`, not callback-based `events.stream`.
 
-Clean stream boundaries include `run.completed`, `run.failed`,
-`run.cancelled`, `run.waiting_input`, `run.waiting_handoff`, and
-`run.waiting_timer`, and `run.suspended`.
+The feed reconnects transient disconnects, skips already-seen sequence numbers,
+and ends after an event marked `terminal`. Persist `lastSeq` if the caller needs
+to reconnect after a reload. The optional `onCursorExpired` callback receives
+a replacement snapshot when the server reports an expired cursor.
 
-## Publish and start a Dynamic Workflow
+## Supported client surface
 
-Dynamic Workflow complements Agent Team: code owns explicit control flow,
-state, budgets, waits, and recovery, while Agent nodes own only bounded
-probabilistic work.
+| Namespace | Methods |
+| --- | --- |
+| `agent` | `start` |
+| `plans` | `start`, `approve` |
+| `teams` | `start` |
+| `workflows` | `start`, `resolveWait`, `cancel`, `trace` |
+| `workflows.definitions` | `compile`, `publish`, `list`, `get`, `setActivation` |
+| `runs` | `get`, `cancel`, `workbench`, `feed` |
+| `harness.commands` | `list` |
+| `harness.turns` | `get`, `feed`, `resolveApproval`, `resolveInteraction`, `retryInvocation` |
 
-```ts
-const limits = {
-  maxNodeActivations: 100,
-	maxEffects: 20,
-	maxSegments: 100,
-	maxActivationsPerSegment: 16,
-	maxFanOut: 8,
-	maxConcurrency: 4,
-  maxNestedDepth: 3,
-	maxAttemptsPerEffect: 3,
-  maxStateBytes: 1_048_576,
-};
+Use the exported request types for each feature. Having a client method does not
+grant permission: the host decides which routes and capabilities are available
+to a caller. Generic `admin`, `agents`, `events`, and `interactions` namespaces,
+and generic run delegation/resume methods, are not part of this client.
 
-const draft = {
-	id: "release-decision",
-	revision: 0,
-  name: "Release decision",
-  inputSchema: {
-    type: "object",
-    required: ["changeID"],
-    properties: { changeID: { type: "string" } },
-  },
-  outputSchema: {
-    type: "object",
-    required: ["approved"],
-    properties: { approved: { type: "boolean" } },
-  },
-	nodes: [
-		{id: "review", type: "wait", wait: {kind: "author.approval", source: {kind: "workflow_input"}}},
-		{id: "result", type: "return", return: {source: {kind: "wait_response", nodeID: "review"}}},
-	],
-  limits,
-	policy: {costClass: "none", maxCostUnits: 0, sideEffectClass: "none"},
-} as const;
+## Harness input and approval
 
-const proposal = await runtime.workflows.definitions.compile({
-	scope: {kind: "actor"},
-	draft,
-});
-
-const published = await runtime.workflows.definitions.publish({
-	scope: {kind: "actor"},
-	draft,
-	expectedRevision: proposal.baseRevision,
-	idempotencyKey: crypto.randomUUID(),
-});
-
-const startedWorkflow = await runtime.workflows.start({
-  clientRunID: crypto.randomUUID(),
-  thread: { kind: "conversation", id: "conversation-42" },
-	goal: "Decide whether to release change-17",
-	definitionReference: {
-		id: published.revision.definition.id,
-		revision: published.revision.definition.revision,
-		hash: published.revision.definition.hash,
-	},
-  input: { changeID: "change-17" },
-});
-
-const result = await runtime.runs.get(startedWorkflow.run.id);
-```
-
-Workflow Definition revisions are immutable and freeze exact Agent Manifest,
-nested Workflow, and Tool definition dependencies. Retry a publication with
-the same request identity; use `expectedRevision` when revising an existing
-definition.
-
-## Publish immutable Agent Manifests
-
-Administrator APIs append immutable revisions. A revision can only narrow the
-environment's model, tool, skill, delegation, and call limits. Zero or omitted
-call budgets inherit the environment ceiling.
+Use the Turn and interaction IDs returned by the host's Harness snapshot:
 
 ```ts
-const researchAgent = await runtime.admin.agentManifests.create({
-  name: "Research specialist",
-  description: "Collects bounded evidence and returns a concise summary.",
-  instructions: "Use approved sources and identify uncertainty.",
-  status: "active",
-  executionMode: "direct",
-  toolKeys: ["search", "files.read"],
-  skillKeys: ["research"],
-  maxChildRuns: 2,
-  maxDepth: 2,
-  maxLLMCalls: 4,
-  maxToolCalls: 8,
-});
+const turn = await runtime.harness.turns.get("turn-42");
+console.log(turn.interactions);
 
-const revised = await runtime.admin.agentManifests.revise(
-  researchAgent.manifestID,
-  {
-    expectedRevision: researchAgent.revision,
-    name: researchAgent.name,
-    description: researchAgent.description,
-    instructions: "Use approved sources, identify uncertainty, and cite output IDs.",
-    status: "active",
-    executionMode: "direct",
-    toolKeys: researchAgent.toolKeys,
-    skillKeys: researchAgent.skillKeys,
-    maxChildRuns: researchAgent.maxChildRuns,
-    maxDepth: researchAgent.maxDepth,
-    maxLLMCalls: researchAgent.maxLLMCalls,
-    maxToolCalls: researchAgent.maxToolCalls,
-    revisionNote: "Require output lineage in the summary.",
-  },
+await runtime.harness.turns.resolveInteraction(
+  "turn-42",
+  "interaction-7",
+  { answer: "Use the approved production brief." },
 );
 ```
 
-`expectedRevision` is an optimistic concurrency boundary. Reload the latest
-revision after a conflict rather than overwriting another administrator's
-change.
+The response shape is defined by the specific host interaction. Host policy may
+require `resolveApproval` instead; do not substitute a generic run resume for a
+Harness decision or a Workflow wait.
 
-Non-administrator callers can list active manifests:
+## Cancellation
 
-```ts
-const agents = await runtime.agents.list({ limit: 100, offset: 0 });
-```
-
-## Delegate an explicit child run
-
-Delegation freezes the selected Agent Manifest revision into the child run.
-Parent outputs and evidence are not inherited implicitly; send only the IDs the
-child task requires.
+Read the current snapshot and provide its revision when cancelling:
 
 ```ts
-const clientHandoffID = crypto.randomUUID();
-
-const delegated = await runtime.runs.delegate(parentRunID, {
-  clientHandoffID,
-  agentManifest: revised.ref,
-  goal: "Compare the rollout plans and identify unsupported assumptions.",
-  contentType: "markdown",
-  outputIDs: ["output-rollout-a", "output-rollout-b"],
+const latest = await runtime.runs.get(started.run.id);
+await runtime.runs.cancel(latest.run.id, {
+  expectedRevision: latest.run.revision,
+  reason: "Cancelled by the caller.",
 });
 ```
 
-Keep `clientHandoffID` stable when retrying an ambiguous network failure. A new
-ID represents a new child task; reusing an ID with a different request causes an
-idempotency conflict.
-
-Inspect the complete delegated task tree with one call:
-
-```ts
-const tree = await runtime.runs.taskTree(parentRunID);
-
-for (const task of tree.tasks) {
-  console.log(task.handoff.agentName, task.run.status);
-}
-```
-
-## Wait for delegated tasks with fan-in
-
-Create a durable fan-in contract after delegating one or more child runs:
-
-```ts
-const join = await runtime.runs.createHandoffJoin(parentRunID, {
-  clientJoinID: crypto.randomUUID(),
-  handoffIDs: tree.tasks.map((task) => task.handoff.handoffID),
-  mode: "quorum",
-  quorum: 2,
-  failurePolicy: "collect",
-  timeoutSeconds: 3_600,
-  timeoutPolicy: "cancel_pending",
-});
-```
-
-Modes:
-
-- `all`: resolve after every selected child is terminal.
-- `any`: resolve after the first successful child.
-- `quorum`: resolve after the configured number of successful children.
-
-Failure policies:
-
-- `collect`: keep waiting while the completion rule can still be reached.
-- `fail_fast`: fail after the first failed or cancelled child.
-
-Timeout policies:
-
-- `cancel_pending`: suspend the parent and cancel unfinished selected children.
-- `leave_running`: suspend the parent while unfinished children continue.
-
-A failed or timed-out join suspends the parent run and leaves an explicit resume
-checkpoint. It does not leave the parent waiting indefinitely.
-
-## Cancellation and recovery
-
-Cancelling a parent run also makes its pending fan-in joins terminal and
-propagates cancellation through unfinished delegated descendants:
-
-```ts
-await runtime.runs.cancel(parentRunID);
-```
-
-Late child results cannot resume a terminal parent.
-
-When a recoverable durable continuation reaches the dead-letter state, an
-administrator may inspect and requeue it with an audit reason:
-
-```ts
-const deadLetters = await runtime.admin.continuations.list({
-  status: "dead_letter",
-  limit: 50,
-  offset: 0,
-});
-
-for (const job of deadLetters.results.filter((item) => item.recoverable)) {
-  await runtime.admin.continuations.requeue(job.jobID, {
-    reason: "Provider connectivity has been restored.",
-  });
-}
-```
-
-## Interactions and explicit resume
-
-Resolve an input or approval interaction with a caller-owned idempotency key:
-
-```ts
-await runtime.interactions.resolve(runID, interactionID, {
-  clientResolveID: crypto.randomUUID(),
-  response: { approved: true },
-});
-```
-
-Resume a suspended run from its latest or selected checkpoint:
-
-```ts
-await runtime.runs.resume(runID, {
-  checkpointID,
-  clientResumeID: crypto.randomUUID(),
-});
-```
-
-Do not explicitly resume a run that is still `waiting_handoff`; fan-in owns that
-checkpoint until it resolves, fails, is cancelled, or times out.
+Use `workflows.cancel` for Workflow-specific cancellation and compensation.
+A revision conflict requires reloading current state before making a new decision.
 
 ## Error handling
 
@@ -303,13 +111,17 @@ checkpoint until it resolves, fails, is cancelled, or times out.
 import { RuntimeAPIError } from "@orz-i/agent-runtime-client";
 
 try {
-  await runtime.runs.get(runID);
+  await runtime.runs.get(started.run.id);
 } catch (error) {
   if (error instanceof RuntimeAPIError) {
     console.error(error.status, error.code, error.requestID, error.message);
+  } else {
+    throw error;
   }
 }
 ```
 
-Use `code` for stable program logic and retain `requestID` for operational
-diagnostics. Human-readable messages may change between releases.
+Use `code` for program logic and retain `requestID` for diagnostics. The release
+consumer gate type-checks all TypeScript examples above against the packed
+client. Examples require a configured host when executed; the gate does not
+make model or provider calls.
