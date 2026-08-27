@@ -87,6 +87,10 @@ function checkTypeScriptConsumer() {
   writeFileSync(path.join(consumer, "package.json"), JSON.stringify({ name: "runtime-ts-consumer", private: true, type: "module" }));
   writeFileSync(path.join(consumer, "index.mjs"), "const sdk = await import('@orz-i/agent-runtime-client');\nif (!sdk.RuntimeClient) throw new Error('RuntimeClient export missing');\n");
   writeFileSync(path.join(consumer, "index.ts"), `import { RuntimeClient, type RunSnapshotDTO, type StartAgentRunRequest } from "@orz-i/agent-runtime-client";\nconst client = new RuntimeClient({ baseURL: "https://runtime.example/api/v1" });\nconst request: StartAgentRunRequest = { thread: { kind: "conversation", id: "thread-1" }, input: { content: "hello" }, clientRunID: "client-run-1" };\nconst created: Promise<RunSnapshotDTO> = client.agent.start(request);\nvoid created;\nvoid client.runs.get("run-1");\nvoid client.runs.cancel("run-1", { expectedRevision: 1, reason: "consumer-check" });\n`);
+  const readme = readFileSync(path.join(packageRoot, "README.md"), "utf8");
+  const examples = [...readme.matchAll(/```ts\r?\n([\s\S]*?)```/gu)].map((match) => match[1]);
+  if (examples.length === 0) throw new Error("TypeScript README has no executable examples");
+  writeFileSync(path.join(consumer, "readme.ts"), examples.join("\n"));
   writeFileSync(path.join(consumer, "tsconfig.json"), JSON.stringify({
     compilerOptions: {
       strict: true,
@@ -96,7 +100,7 @@ function checkTypeScriptConsumer() {
       target: "ES2022",
       skipLibCheck: false,
     },
-    include: ["index.ts"],
+    include: ["index.ts", "readme.ts"],
   }, null, 2));
   run("pnpm", ["add", archivePath], consumer);
   const tsc = path.join(root, "node_modules", "typescript", "bin", "tsc");
