@@ -298,7 +298,8 @@ func lockInteractionOwners(
 ) error {
 	var turn turnRecord
 	err := tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).
-		Where("id = ? AND revision = ? AND status = ?", value.TurnID, expectedTurnRevision, string(harness.TurnRunning)).
+		Where("id = ? AND revision = ? AND status IN ?", value.TurnID, expectedTurnRevision,
+			[]string{string(harness.TurnRunning), string(harness.TurnWaitingInput)}).
 		Take(&turn).Error
 	if err = interactionOwnerLockError(err); err != nil {
 		return err
@@ -306,9 +307,18 @@ func lockInteractionOwners(
 	var invocation invocationRecord
 	err = tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).
 		Where("id = ? AND turn_id = ? AND revision = ? AND status IN ?", value.InvocationID, value.TurnID, expectedInvocationRevision,
-			[]string{string(harness.InvocationAccepted), string(harness.InvocationRunning)}).
+			[]string{string(harness.InvocationAccepted), string(harness.InvocationRunning), string(harness.InvocationWaitingInput)}).
 		Take(&invocation).Error
-	return interactionOwnerLockError(err)
+	if err = interactionOwnerLockError(err); err != nil {
+		return err
+	}
+	ownersRunning := turn.Status == string(harness.TurnRunning) &&
+		(invocation.Status == string(harness.InvocationAccepted) || invocation.Status == string(harness.InvocationRunning))
+	ownersWaiting := turn.Status == string(harness.TurnWaitingInput) && invocation.Status == string(harness.InvocationWaitingInput)
+	if !ownersRunning && !ownersWaiting {
+		return harness.ErrConflict
+	}
+	return nil
 }
 
 func interactionOwnerLockError(err error) error {

@@ -631,6 +631,15 @@ func (feature completedWorkflowFeature) Resume(ctx context.Context, runID string
 	return feature.runtime.Load(ctx, runID)
 }
 
+func (feature completedWorkflowFeature) ResolveWait(
+	ctx context.Context,
+	runID string,
+	_ uint64,
+	_ json.RawMessage,
+) (kernel.Snapshot, error) {
+	return feature.runtime.Load(ctx, runID)
+}
+
 var errRejectedTopLevelWorkflow = errors.New("rejected before runtime create")
 
 type rejectedWorkflowFeature struct{}
@@ -640,6 +649,15 @@ func (rejectedWorkflowFeature) StartRun(context.Context, workflow.StartRequest) 
 }
 
 func (rejectedWorkflowFeature) Resume(context.Context, string, uint64) (kernel.Snapshot, error) {
+	return kernel.Snapshot{}, kernel.ErrNotFound
+}
+
+func (rejectedWorkflowFeature) ResolveWait(
+	context.Context,
+	string,
+	uint64,
+	json.RawMessage,
+) (kernel.Snapshot, error) {
 	return kernel.Snapshot{}, kernel.ErrNotFound
 }
 
@@ -708,6 +726,15 @@ func (feature *blockedWorkflowFeature) Resume(
 	_ uint64,
 ) (kernel.Snapshot, error) {
 	feature.resumeCalls.Add(1)
+	return feature.runtime.Load(ctx, runID)
+}
+
+func (feature *blockedWorkflowFeature) ResolveWait(
+	ctx context.Context,
+	runID string,
+	_ uint64,
+	_ json.RawMessage,
+) (kernel.Snapshot, error) {
 	return feature.runtime.Load(ctx, runID)
 }
 
@@ -830,6 +857,15 @@ func (feature *retryTopLevelWorkflowFeature) StartRun(ctx context.Context, reque
 }
 
 func (feature *retryTopLevelWorkflowFeature) Resume(ctx context.Context, runID string, _ uint64) (kernel.Snapshot, error) {
+	return feature.runtime.Load(ctx, runID)
+}
+
+func (feature *retryTopLevelWorkflowFeature) ResolveWait(
+	ctx context.Context,
+	runID string,
+	_ uint64,
+	_ json.RawMessage,
+) (kernel.Snapshot, error) {
 	return feature.runtime.Load(ctx, runID)
 }
 

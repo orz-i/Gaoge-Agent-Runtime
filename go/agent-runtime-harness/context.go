@@ -243,6 +243,15 @@ func CurrentContextCheckpoint(ctx context.Context) (runtimecontext.Checkpoint, b
 	return runtimecontext.CloneCheckpoint(state.checkpoint), true
 }
 
+// WithoutContextWindow returns a child context that keeps cancellation,
+// tracing, and other host values while removing the active Harness transcript
+// checkpoint and its access binding. Hosts use it for internally prepared
+// Workflow Agent tasks whose complete, immutable evidence is carried by the
+// task input and must not be influenced by earlier conversational drafts.
+func WithoutContextWindow(ctx context.Context) context.Context {
+	return withoutContextCheckpoint(ctx)
+}
+
 // ReplaceContextCheckpoint advances the execution-scoped active window after a durable rollover.
 // The expected checkpoint identity provides an in-memory CAS for parallel/continuation safety.
 func ReplaceContextCheckpoint(ctx context.Context, expectedCheckpointID string, next runtimecontext.Checkpoint) error {

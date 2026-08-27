@@ -13,6 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 const (
@@ -880,6 +881,9 @@ func (runner *Runner) syncRuntimeSnapshot(
 	if err = runner.recordRuntimeSnapshotItems(ctx, turn, invocation, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
+	if err = runner.projectWorkflowWaitInteraction(ctx, turn, invocation, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
+	}
 	deferTerminalProjection, err := runner.hostOutputProjectionPending(ctx, turn)
 	if err != nil {
 		return Snapshot{}, err
@@ -890,6 +894,46 @@ func (runner *Runner) syncRuntimeSnapshot(
 		return Snapshot{}, err
 	}
 	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+}
+
+func (runner *Runner) projectWorkflowWaitInteraction(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+	runtimeSnapshot kernel.Snapshot,
+) error {
+	if invocation.ExecutionClass != ExecutionWorkflow || runtimeSnapshot.Run.Status != kernel.RunStatusWaitingInput {
+		return nil
+	}
+	projector, ok := runner.interactions.(WorkflowWaitInteractionProjector)
+	if !ok {
+		return nil
+	}
+	waitRequest, err := workflow.WaitRequestFromCheckpoint(runtimeSnapshot.Checkpoint)
+	if err != nil {
+		return err
+	}
+	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	if err != nil {
+		return err
+	}
+	projection, err := projector.ProjectWorkflowWaitInteraction(ctx, WorkflowWaitInteractionContext{
+		Wait: waitRequest, Invocation: cloneInvocation(invocation), Session: session,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = runner.RequestInteraction(ctx, turn.ID, RequestInteraction{
+		InvocationID:   invocation.ID,
+		ParentItemID:   invocationLifecycleItemID(invocation, invocation.Status, invocation.Revision),
+		ApplicationRef: projection.ApplicationRef,
+		ArtifactRefs:   append([]HostRef(nil), projection.ArtifactRefs...),
+		Key:            projection.Key,
+		Kind:           projection.Kind,
+		Schema:         append(json.RawMessage(nil), projection.Schema...),
+		Presentation:   append(json.RawMessage(nil), projection.Presentation...),
+	})
+	return err
 }
 
 func (runner *Runner) syncInvocationProjection(
