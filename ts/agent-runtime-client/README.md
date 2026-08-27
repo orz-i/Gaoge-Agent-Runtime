@@ -5,6 +5,15 @@ public Runtime contract for runs, event streams, interactions, outputs,
 evidence, queues, Agent Manifests, delegated child runs, fan-in joins,
 workbench inspection, and administrator recovery operations.
 
+## Install a Beta
+
+```bash
+pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.4/orz-i-agent-runtime-client-0.1.0-beta.4.tgz
+```
+
+Beta packages are GitHub Release archives, not npm registry releases. Registry
+publication is reserved for stable versions.
+
 ## Create a client
 
 ```ts

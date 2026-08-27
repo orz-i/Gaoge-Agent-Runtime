@@ -244,6 +244,15 @@ func (feature *pendingWorkflowFeature) Resume(ctx context.Context, runID string,
 	return feature.runtime.Load(ctx, runID)
 }
 
+func (feature *pendingWorkflowFeature) ResolveWait(
+	ctx context.Context,
+	runID string,
+	_ uint64,
+	_ json.RawMessage,
+) (kernel.Snapshot, error) {
+	return feature.runtime.Load(ctx, runID)
+}
+
 type capabilityToolModel struct {
 	t     *testing.T
 	calls int

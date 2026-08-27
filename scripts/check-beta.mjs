@@ -19,7 +19,7 @@ const expectedModules = [
 ];
 const violations = [];
 
-if (version !== "0.1.0-beta.3") violations.push(`unexpected VERSION ${version}`);
+if (version !== "0.1.0-beta.4") violations.push(`unexpected VERSION ${version}`);
 if (boundary.version !== version) violations.push("boundary version does not match VERSION");
 if (JSON.stringify(boundary.goModules) !== JSON.stringify(expectedModules)) {
   violations.push("boundary Go module list is not the canonical ordered list");
@@ -60,6 +60,7 @@ for (const required of [
   "SECURITY.md",
   "SUPPORT.md",
   "CONTRIBUTING.md",
+  `docs/releases/v${version}.md`,
   "contracts/agent-runtime/v1/openapi.yaml",
   "go/agent-runtime-postgres/real_postgres_test.go",
   "go/agent-runtime-harness-postgres/real_postgres_test.go",

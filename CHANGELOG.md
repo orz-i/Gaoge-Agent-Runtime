@@ -3,6 +3,39 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## [0.1.0-beta.4] - 2026-08-27
+
+### Added
+
+- Hosts can project durable Workflow waits into application-owned Harness
+  interactions with `WorkflowWaitInteractionProjector`.
+- `WithoutContextWindow` lets explicitly prepared tasks omit the active
+  conversation checkpoint while preserving cancellation, tracing, and other
+  host context values.
+
+### Fixed
+
+- Accepted interaction responses now resolve the exact waiting Workflow run
+  and return its durable result instead of leaving the turn waiting for input.
+- Recovery can project an interaction after both the turn and invocation have
+  already entered the waiting state; memory and PostgreSQL stores enforce the
+  same matching-owner state checks.
+- Concurrent replays of an accepted Workflow start refresh the durable run
+  after an optimistic-concurrency conflict instead of reporting a false failure.
+
+### Upgrade notes
+
+- Beta TypeScript packages are now distributed as GitHub Release archives;
+  npm registry publication is reserved for stable releases.
+- Source change: custom implementations of `harness.WorkflowFeature` must
+  implement `ResolveWait(context.Context, string, uint64, json.RawMessage)`.
+  The SDK Workflow runner already implements this method.
+- Hosts opting into wait projection implement `WorkflowWaitInteractionProjector`
+  on their existing interaction handler; projection must be deterministic for
+  the same immutable wait.
+- No HTTP v1 contract or persisted-record schema migration is introduced by
+  this release. Update the Go modules together to `v0.1.0-beta.4`.
+
 ## [0.1.0-beta.3] - 2026-08-25
 
 ### Added

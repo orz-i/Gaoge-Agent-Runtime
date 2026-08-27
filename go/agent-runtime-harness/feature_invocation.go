@@ -365,6 +365,7 @@ type PlanExecuteFeature interface {
 type WorkflowFeature interface {
 	StartRun(context.Context, workflow.StartRequest) (kernel.Snapshot, error)
 	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
+	ResolveWait(context.Context, string, uint64, json.RawMessage) (kernel.Snapshot, error)
 }
 
 // TeamInvocationRequest starts one exact first-party Team capability.
@@ -1085,6 +1086,13 @@ func (runner *Runner) syncChildInvocationSnapshot(
 		return Snapshot{}, err
 	}
 	if err = runner.projectChildInvocationOutcome(ctx, invocation, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.projectWorkflowWaitInteraction(ctx, turn, invocation, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
+	}
+	turn, err = runner.store.GetTurn(ctx, turn.ID)
+	if err != nil {
 		return Snapshot{}, err
 	}
 	return runner.loadSnapshot(ctx, turn, nil)

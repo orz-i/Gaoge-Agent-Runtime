@@ -295,6 +295,32 @@ func TestReplaceContextCheckpointUsesExecutionScopedCAS(t *testing.T) {
 	}
 }
 
+func TestWithoutContextWindowRemovesCheckpointAndBinding(t *testing.T) {
+	t.Parallel()
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "session-isolated", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
+		SourcePath: []string{"m1"}, Entries: []runtimecontext.Entry{{
+			ID: "entry-m1", SourceID: "m1", TurnID: "turn-1",
+			Message: model.Message{Role: model.RoleUser, Content: parentGoal},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := withContextWindowBinding(withContextCheckpoint(t.Context(), checkpoint), "turn-1", ContextWindowReadOnly)
+	isolated := WithoutContextWindow(ctx)
+	if _, ok := CurrentContextCheckpoint(isolated); ok {
+		t.Fatal("isolated context retained the Harness checkpoint")
+	}
+	if _, ok := CurrentContextWindowBinding(isolated); ok {
+		t.Fatal("isolated context retained the Harness access binding")
+	}
+	if _, ok := CurrentContextCheckpoint(ctx); !ok {
+		t.Fatal("source context checkpoint was mutated")
+	}
+}
+
 func assertRuntimeMessagesEqual(t *testing.T, got, want []model.Message) {
 	t.Helper()
 	if len(got) != len(want) {

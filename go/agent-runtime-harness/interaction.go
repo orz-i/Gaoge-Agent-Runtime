@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 // InteractionKind describes a host-renderable input shape without embedding
@@ -108,6 +109,33 @@ type InteractionResponseHandler interface {
 // invalid business choice from permanently consuming the only waiting input.
 type InteractionResponseValidator interface {
 	ValidateInteractionResponse(context.Context, InteractionResponseContext) error
+}
+
+// WorkflowWaitInteractionContext contains the immutable Workflow wait and its
+// durable Harness owners. Applications project the wait into business UI
+// semantics without teaching Harness about product-specific artifacts.
+type WorkflowWaitInteractionContext struct {
+	Wait       workflow.WaitRequest
+	Invocation Invocation
+	Session    Session
+}
+
+// WorkflowWaitInteractionProjection is the host-renderable business contract
+// for one explicit Workflow wait. Harness supplies the durable owner identity.
+type WorkflowWaitInteractionProjection struct {
+	ApplicationRef *HostRef
+	ArtifactRefs   []HostRef
+	Key            string
+	Kind           InteractionKind
+	Schema         json.RawMessage
+	Presentation   json.RawMessage
+}
+
+// WorkflowWaitInteractionProjector optionally maps a generic Workflow wait to
+// an application-owned interaction. Implementations must be deterministic for
+// the same immutable wait because recovery can project it repeatedly.
+type WorkflowWaitInteractionProjector interface {
+	ProjectWorkflowWaitInteraction(context.Context, WorkflowWaitInteractionContext) (WorkflowWaitInteractionProjection, error)
 }
 
 // ErrInteractionResponseHandlerUnavailable reports missing static application
@@ -305,7 +333,7 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 	if err != nil || handled {
 		return snapshot, err
 	}
-	return runner.resumeResolvedInteractionOwner(ctx, turn, invocation)
+	return runner.resumeResolvedInteractionOwner(ctx, turn, invocation, interaction.Response)
 }
 
 func (runner *Runner) prepareResolvedInteractionContinuation(
@@ -380,6 +408,7 @@ func (runner *Runner) resumeResolvedInteractionOwner(
 	ctx context.Context,
 	turn Turn,
 	invocation Invocation,
+	response json.RawMessage,
 ) (Snapshot, error) {
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.resumeApplicationInteractionOwner(ctx, turn, invocation)
@@ -388,7 +417,7 @@ func (runner *Runner) resumeResolvedInteractionOwner(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return runner.resumeRuntimeInteractionOwner(ctx, turn, invocation, runtimeSnapshot)
+	return runner.resumeRuntimeInteractionOwner(ctx, turn, invocation, runtimeSnapshot, response)
 }
 
 func (runner *Runner) resumeApplicationInteractionOwner(
@@ -414,9 +443,20 @@ func (runner *Runner) resumeRuntimeInteractionOwner(
 	turn Turn,
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
+	response json.RawMessage,
 ) (Snapshot, error) {
 	if runtimeSnapshot.Run.Status == kernel.RunStatusWaitingInput {
-		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+		if invocation.ExecutionClass != ExecutionWorkflow || runner.workflows == nil || len(response) == 0 {
+			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+		}
+		resolved, resolveErr := runner.workflows.ResolveWait(
+			ctx, invocation.ExecutionRefID, runtimeSnapshot.Run.Revision, append(json.RawMessage(nil), response...),
+		)
+		if resolved.Run.ID == "" {
+			return Snapshot{}, resolveErr
+		}
+		snapshot, syncErr := runner.finishResolvedInteractionOwner(ctx, turn, invocation, resolved)
+		return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, resolved, resolveErr, syncErr)
 	}
 	if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
 		return runner.finishResolvedInteractionOwner(ctx, turn, invocation, runtimeSnapshot)

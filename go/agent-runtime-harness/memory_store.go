@@ -228,8 +228,10 @@ func memoryInteractionOwnersCanWait(
 		invocation.Revision != expectedInvocationRevision {
 		return false
 	}
-	return turn.Status == TurnRunning && invocation.TurnID == turn.ID &&
-		invocation.Status != InvocationWaitingInput && !terminalInvocationStatus(invocation.Status)
+	ownersRunning := turn.Status == TurnRunning &&
+		(invocation.Status == InvocationAccepted || invocation.Status == InvocationRunning)
+	ownersWaiting := turn.Status == TurnWaitingInput && invocation.Status == InvocationWaitingInput
+	return invocation.TurnID == turn.ID && (ownersRunning || ownersWaiting)
 }
 
 func memoryHasWaitingInteraction(values map[string]Interaction, turnID string) bool {
