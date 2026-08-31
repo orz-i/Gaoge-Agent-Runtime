@@ -22,6 +22,11 @@ runtimehttp.NewModule(handler).RegisterRoutes(apiV1)
 Object authorization stays at the Host/HTTP edge. Explicit policy denials are
 rendered as not-found so a caller cannot probe another tenant's Run IDs.
 
+`GET /runs/:run_id` returns the current aggregate plus `eventHead`, not the full
+Kernel Event journal. Use `GET /runs/:run_id/events?afterSeq=...&limit=...` for
+bounded durable audit/event history. `/runs/:run_id/feed` remains the separate
+semantic Run Feed and is not used as a compatibility substitute for the journal.
+
 The unique wire contract is `sdk/contracts/agent-runtime/v1/openapi.yaml`,
 including the `harness` capability fragment and explicit cursor-expired
 recovery headers for both Run Feed and Harness Turn Feed.

@@ -62,6 +62,7 @@ type RunOperation string
 
 const (
 	RunOperationRead            RunOperation = "run.read"
+	RunOperationEventsRead      RunOperation = "run.events.read"
 	RunOperationCancel          RunOperation = "run.cancel"
 	RunOperationFeedRead        RunOperation = "run.feed.read"
 	RunOperationWorkbenchRead   RunOperation = "run.workbench.read"

@@ -111,7 +111,7 @@ type Snapshot struct {
 	State      json.RawMessage `json:"state"`
 	Checkpoint *Checkpoint     `json:"checkpoint,omitempty"`
 	Result     *Result         `json:"result,omitempty"`
-	Events     []Event         `json:"events"`
+	EventHead  int64           `json:"eventHead"`
 }
 
 // CreateRequest creates one explicit Runtime Kind with opaque feature state.

@@ -33,6 +33,12 @@ func TestRunObjectAuthorizationHidesCrossTenantResources(t *testing.T) {
 	if workbenchResponse.Code != stdhttp.StatusNotFound {
 		t.Fatalf("workbench status=%d body=%s", workbenchResponse.Code, workbenchResponse.Body.String())
 	}
+	eventsResponse := performAuthorizationRequest(
+		t, engine, stdhttp.MethodGet, "/api/v1/runs/private-run/events", nil,
+	)
+	if eventsResponse.Code != stdhttp.StatusNotFound {
+		t.Fatalf("events status=%d body=%s", eventsResponse.Code, eventsResponse.Body.String())
+	}
 
 	cancelResponse := performAuthorizationRequest(
 		t, engine, stdhttp.MethodPost, "/api/v1/runs/private-run/cancel",
@@ -44,6 +50,51 @@ func TestRunObjectAuthorizationHidesCrossTenantResources(t *testing.T) {
 	current, err := runtime.Load(t.Context(), "private-run")
 	if err != nil || current.Run.Status != kernel.RunStatusRunning || current.Run.Revision != 1 {
 		t.Fatalf("cross-tenant cancel mutated run: %#v err=%v", current.Run, err)
+	}
+}
+
+func TestRunEventJournalPagesAuthorizedHistory(t *testing.T) {
+	t.Parallel()
+	actor := kernel.ActorRef{TenantID: "tenant-a", ActorID: "owner"}
+	engine, runtime := newAuthorizationHTTPTest(t, actor, nil)
+	createAuthorizationRun(t, runtime, actor, "journal-run")
+	created, err := runtime.Load(t.Context(), "journal-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runtime.Apply(t.Context(), created.Run.ID, created.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: json.RawMessage(`{"step":1}`),
+		Events: []kernel.EventDraft{{Type: "step.one"}, {Type: "step.two"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := performAuthorizationRequest(
+		t, engine, stdhttp.MethodGet, "/api/v1/runs/journal-run/events?afterSeq=1&limit=1", nil,
+	)
+	if response.Code != stdhttp.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var page RunEventPageResponse
+	if err = json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if page.EventHead != 3 || len(page.Events) != 1 || page.Events[0].Seq != 2 || page.Events[0].Type != "step.one" {
+		t.Fatalf("page=%#v", page)
+	}
+
+	empty := performAuthorizationRequest(
+		t, engine, stdhttp.MethodGet, "/api/v1/runs/journal-run/events?afterSeq=3&limit=10", nil,
+	)
+	if empty.Code != stdhttp.StatusOK || empty.Body.String() != `{"events":[],"eventHead":3}` {
+		t.Fatalf("empty status=%d body=%s", empty.Code, empty.Body.String())
+	}
+	invalid := performAuthorizationRequest(
+		t, engine, stdhttp.MethodGet, "/api/v1/runs/journal-run/events?limit=1001", nil,
+	)
+	if invalid.Code != stdhttp.StatusBadRequest {
+		t.Fatalf("invalid status=%d body=%s", invalid.Code, invalid.Body.String())
 	}
 }
 
@@ -90,7 +141,7 @@ func newAuthorizationHTTPTest(
 	if err != nil {
 		t.Fatal(err)
 	}
-	query, err := workbench.NewQuery(runtime, nil)
+	query, err := workbench.NewQuery(runtime, runtime, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

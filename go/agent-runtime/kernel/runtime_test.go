@@ -31,8 +31,12 @@ func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if created.Run.Revision != 1 || created.Events[0].Type != "run.created" {
+	if created.Run.Revision != 1 || created.EventHead != 1 {
 		t.Fatalf("unexpected created snapshot: %#v", created)
+	}
+	createdEvents, err := runtime.ListEvents(context.Background(), created.Run.ID, 0, 10)
+	if err != nil || len(createdEvents) != 1 || createdEvents[0].Type != "run.created" {
+		t.Fatalf("unexpected created events: %#v, %v", createdEvents, err)
 	}
 
 	completed, err := runtime.Apply(context.Background(), created.Run.ID, created.Run.Revision, kernel.Mutation{
@@ -43,8 +47,12 @@ func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("complete run: %v", err)
 	}
-	if completed.Run.Revision != 2 || completed.Run.EndedAt == nil || completed.Result == nil || completed.Events[1].Seq != 2 {
+	if completed.Run.Revision != 2 || completed.Run.EndedAt == nil || completed.Result == nil || completed.EventHead != 2 {
 		t.Fatalf("unexpected completed snapshot: %#v", completed)
+	}
+	completedEvents, err := runtime.ListEvents(context.Background(), completed.Run.ID, 1, 10)
+	if err != nil || len(completedEvents) != 1 || completedEvents[0].Seq != 2 || completedEvents[0].Type != "run.completed" {
+		t.Fatalf("unexpected completed events: %#v, %v", completedEvents, err)
 	}
 	_, err = runtime.Apply(context.Background(), created.Run.ID, completed.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: json.RawMessage(`{"step":2}`),

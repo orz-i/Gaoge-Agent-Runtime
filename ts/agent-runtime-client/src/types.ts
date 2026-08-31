@@ -181,7 +181,12 @@ export type RunSnapshotDTO = {
   state: unknown;
   checkpoint?: CheckpointDTO | null;
   result?: ResultDTO | null;
+  eventHead: number;
+};
+
+export type RunEventPageDTO = {
   events: EventDTO[];
+  eventHead: number;
 };
 
 export type StartAgentRunRequest = {

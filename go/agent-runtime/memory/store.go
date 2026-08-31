@@ -16,6 +16,7 @@ import (
 type Store struct {
 	mu              sync.RWMutex
 	records         map[string]kernel.Snapshot
+	events          map[string][]kernel.Event
 	transitions     map[string]transitionState
 	transitionOrder []string
 }
@@ -43,7 +44,8 @@ func cloneRun(run kernel.Run) kernel.Run {
 // NewStore creates an empty in-memory Kernel Store.
 func NewStore() *Store {
 	return &Store{
-		records: make(map[string]kernel.Snapshot), transitions: make(map[string]transitionState),
+		records: make(map[string]kernel.Snapshot), events: make(map[string][]kernel.Event),
+		transitions: make(map[string]transitionState),
 	}
 }
 
@@ -55,10 +57,34 @@ func (store *Store) Create(_ context.Context, record kernel.Record, events []ker
 		return kernel.Snapshot{}, kernel.ErrAlreadyExists
 	}
 	snapshot := snapshotFromRecord(record)
-	snapshot.Events = appendEvents(nil, events, record.Run.UpdatedAt)
+	journal := appendEvents(nil, events, record.Run.UpdatedAt)
+	snapshot.EventHead = int64(len(journal))
 	store.records[record.Run.ID] = cloneSnapshot(snapshot)
+	store.events[record.Run.ID] = cloneEvents(journal)
 	store.appendCommittedTransition(record.Run, events)
 	return cloneSnapshot(snapshot), nil
+}
+
+// ListEvents returns one isolated page without reading or cloning the aggregate.
+func (store *Store) ListEvents(_ context.Context, runID string, afterSeq int64, limit int) ([]kernel.Event, error) {
+	if store == nil || strings.TrimSpace(runID) == "" || afterSeq < 0 || limit <= 0 || limit > 10_000 {
+		return nil, kernel.ErrInvalidInput
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	if _, exists := store.records[runID]; !exists {
+		return nil, kernel.ErrNotFound
+	}
+	journal := store.events[runID]
+	if afterSeq >= int64(len(journal)) {
+		return []kernel.Event{}, nil
+	}
+	start := int(afterSeq)
+	end := start + limit
+	if end > len(journal) {
+		end = len(journal)
+	}
+	return cloneEvents(journal[start:end]), nil
 }
 
 // Load returns one isolated snapshot copy.
@@ -84,8 +110,11 @@ func (store *Store) Apply(_ context.Context, runID string, expectedRevision uint
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
 	next := snapshotFromRecord(mutation.Record)
-	next.Events = appendEvents(current.Events, mutation.Events, mutation.Record.Run.UpdatedAt)
+	journal := store.events[runID]
+	nextEvents := appendEvents(journal, mutation.Events, mutation.Record.Run.UpdatedAt)
+	next.EventHead = int64(len(nextEvents))
 	store.records[runID] = cloneSnapshot(next)
+	store.events[runID] = nextEvents
 	store.appendCommittedTransition(mutation.Record.Run, mutation.Events)
 	return cloneSnapshot(next), nil
 }
@@ -217,12 +246,11 @@ func snapshotFromRecord(record kernel.Record) kernel.Snapshot {
 	return kernel.Snapshot{
 		Run: record.Run, State: cloneJSON(record.State),
 		Checkpoint: cloneCheckpoint(record.Checkpoint), Result: cloneResult(record.Result),
-		Events: make([]kernel.Event, 0),
 	}
 }
 
 func appendEvents(current []kernel.Event, drafts []kernel.EventDraft, createdAt time.Time) []kernel.Event {
-	result := append([]kernel.Event(nil), current...)
+	result := current
 	for _, draft := range drafts {
 		result = append(result, kernel.Event{
 			Seq: int64(len(result) + 1), Type: draft.Type, Message: draft.Message,
@@ -237,13 +265,16 @@ func cloneSnapshot(snapshot kernel.Snapshot) kernel.Snapshot {
 	snapshot.State = cloneJSON(snapshot.State)
 	snapshot.Checkpoint = cloneCheckpoint(snapshot.Checkpoint)
 	snapshot.Result = cloneResult(snapshot.Result)
-	events := make([]kernel.Event, len(snapshot.Events))
-	for index, event := range snapshot.Events {
-		events[index] = event
-		events[index].Data = cloneJSON(event.Data)
-	}
-	snapshot.Events = events
 	return snapshot
+}
+
+func cloneEvents(values []kernel.Event) []kernel.Event {
+	result := make([]kernel.Event, len(values))
+	for index, event := range values {
+		result[index] = event
+		result[index].Data = cloneJSON(event.Data)
+	}
+	return result
 }
 
 func cloneJSON(value json.RawMessage) json.RawMessage {

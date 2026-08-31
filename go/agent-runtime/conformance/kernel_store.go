@@ -30,7 +30,7 @@ func RunKernelStoreSuite(t *testing.T, factory KernelStoreFactory) {
 	t.Run("create-load-isolation", func(t *testing.T) { testCreateLoadIsolation(t, factory(t)) })
 	t.Run("duplicate-create", func(t *testing.T) { testDuplicateCreate(t, factory(t)) })
 	t.Run("checkpoint-result-isolation", func(t *testing.T) { testCheckpointResultIsolation(t, factory(t)) })
-	t.Run("cas-and-events", func(t *testing.T) { testCASAndEvents(t, factory(t)) })
+	t.Run("cas-and-event-journal", func(t *testing.T) { testCASAndEvents(t, factory(t)) })
 	t.Run("concurrent-cas", func(t *testing.T) { testConcurrentCAS(t, factory(t)) })
 	t.Run("transition-outbox", func(t *testing.T) { testTransitionOutbox(t, factory(t)) })
 }
@@ -71,12 +71,11 @@ func testCreateLoadIsolation(t *testing.T, store kernel.Store) {
 	record.State[1] = 'x'
 	*record.Run.DeadlineAt = record.Run.DeadlineAt.Add(time.Hour)
 	created.State[1] = 'y'
-	created.Events[0].Data = json.RawMessage(`{"mutated":true}`)
 	loaded, err := store.Load(context.Background(), record.Run.ID)
 	if err != nil {
 		t.Fatalf("load record: %v", err)
 	}
-	if string(loaded.State) != conformanceValueJSON || loaded.Run.DeadlineAt == nil ||
+	if string(loaded.State) != conformanceValueJSON || loaded.EventHead != 1 || loaded.Run.DeadlineAt == nil ||
 		!loaded.Run.DeadlineAt.Equal(time.Date(2026, 8, 6, 14, 0, 0, 0, time.UTC)) {
 		t.Fatalf("store did not isolate input/output: %#v", loaded)
 	}
@@ -116,13 +115,25 @@ func testCASAndEvents(t *testing.T, store kernel.Store) {
 		t.Fatalf("apply record: %v", err)
 	}
 	assertAppliedSnapshot(t, applied)
+	events, err := store.ListEvents(context.Background(), record.Run.ID, 0, 2)
+	if err != nil || len(events) != 2 || events[0].Seq != 1 || events[1].Seq != 2 {
+		t.Fatalf("first journal page = %#v, %v", events, err)
+	}
+	events[0].Data = json.RawMessage(`{"mutated":true}`)
+	last, err := store.ListEvents(context.Background(), record.Run.ID, events[1].Seq, 2)
+	if err != nil || len(last) != 1 || last[0].Seq != 3 || last[0].Type != "three" {
+		t.Fatalf("second journal page = %#v, %v", last, err)
+	}
+	again, err := store.ListEvents(context.Background(), record.Run.ID, 0, 1)
+	if err != nil || len(again) != 1 || len(again[0].Data) != 0 {
+		t.Fatalf("journal page leaked mutation = %#v, %v", again, err)
+	}
 	assertStaleApplyDoesNotMutate(t, store, record, next)
 }
 
 func assertAppliedSnapshot(t *testing.T, applied kernel.Snapshot) {
 	t.Helper()
-	if applied.Run.Revision != 2 || string(applied.State) != `{"value":2}` || len(applied.Events) != 3 ||
-		applied.Events[0].Seq != 1 || applied.Events[1].Seq != 2 || applied.Events[2].Seq != 3 {
+	if applied.Run.Revision != 2 || string(applied.State) != `{"value":2}` || applied.EventHead != 3 {
 		t.Fatalf("unexpected applied snapshot: %#v", applied)
 	}
 }

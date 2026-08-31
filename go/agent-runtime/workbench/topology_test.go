@@ -137,7 +137,7 @@ func TestQueryKeepsBaseDetailWhenTopologyProviderFails(t *testing.T) {
 func TestQueryRejectsDuplicateTopologyProviderNames(t *testing.T) {
 	t.Parallel()
 	snapshot := baseSnapshot()
-	_, err := workbench.NewQuery(fakeRunSource{snapshot: snapshot}, []workbench.Registration{
+	_, err := workbench.NewQuery(fakeRunSource{snapshot: snapshot}, fakeRunSource{snapshot: snapshot}, []workbench.Registration{
 		{Topology: staticTopologyProvider{name: "topology.same"}},
 		{Topology: staticTopologyProvider{name: " topology.same "}},
 	})

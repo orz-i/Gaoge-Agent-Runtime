@@ -239,6 +239,20 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/CancelRunResponse'}
         default: {$ref: '#/components/responses/Error'}
+  /runs/{runID}/events:
+    get:
+      operationId: listRunEvents
+      parameters:
+        - $ref: '#/components/parameters/RunID'
+        - $ref: '#/components/parameters/AfterSeq'
+        - $ref: '#/components/parameters/EventPageLimit'
+      responses:
+        '200':
+          description: Bounded page from the durable Kernel Event journal
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RunEventPage'}
+        default: {$ref: '#/components/responses/Error'}
   /runs/{runID}/feed:
     get:
       operationId: streamRunFeed
@@ -378,6 +392,11 @@ components:
       in: query
       required: false
       schema: {type: integer, minimum: 0, default: 0}
+    EventPageLimit:
+      name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
   responses:
     Error:
       description: Error
@@ -797,15 +816,28 @@ components:
     RunSnapshot:
       type: object
       additionalProperties: false
-      required: [run, state, events]
+      required: [run, state, eventHead]
       properties:
         run: {$ref: '#/components/schemas/Run'}
         state: {}
         checkpoint: {$ref: '#/components/schemas/Checkpoint'}
         result: {$ref: '#/components/schemas/Result'}
+        eventHead:
+          type: integer
+          format: int64
+          minimum: 0
+    RunEventPage:
+      type: object
+      additionalProperties: false
+      required: [events, eventHead]
+      properties:
         events:
           type: array
           items: {$ref: '#/components/schemas/Event'}
+        eventHead:
+          type: integer
+          format: int64
+          minimum: 0
     CancelRunResponse:
       type: object
       additionalProperties: false

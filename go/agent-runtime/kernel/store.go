@@ -98,6 +98,12 @@ type TransitionOutbox interface {
 	RetryTransition(context.Context, TransitionRetryRequest) error
 }
 
+// EventJournal reads the append-only Run event stream independently of the
+// hot aggregate Snapshot path. afterSeq is exclusive and limit is bounded.
+type EventJournal interface {
+	ListEvents(context.Context, string, int64, int) ([]Event, error)
+}
+
 // Store persists the minimal Run root, opaque feature state, Event journal, and
 // committed-transition outbox. The outbox append is part of Create/Apply's
 // transaction boundary; projector claim/ack is deliberately separate.
@@ -105,5 +111,6 @@ type Store interface {
 	Create(context.Context, Record, []EventDraft) (Snapshot, error)
 	Load(context.Context, string) (Snapshot, error)
 	Apply(context.Context, string, uint64, StoreMutation) (Snapshot, error)
+	EventJournal
 	TransitionOutbox
 }

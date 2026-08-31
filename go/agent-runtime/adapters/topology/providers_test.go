@@ -35,7 +35,7 @@ const (
 func TestFeatureTopologyProvidersProjectDurableFacts(t *testing.T) {
 	t.Parallel()
 	fixtures := topologyFixtures(t)
-	query, err := workbench.NewQuery(fixtures.runs, topologyRegistrations(fixtures.runs, fixtures.relations))
+	query, err := workbench.NewQuery(fixtures.runs, fixtures.runs, topologyRegistrations(fixtures.runs, fixtures.relations))
 	if err != nil {
 		t.Fatalf("create topology query: %v", err)
 	}
@@ -289,6 +289,13 @@ func (source topologyRunSource) Load(_ context.Context, runID string) (kernel.Sn
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
 	return snapshot, nil
+}
+
+func (source topologyRunSource) ListEvents(_ context.Context, runID string, _ int64, _ int) ([]kernel.Event, error) {
+	if _, exists := source.snapshots[runID]; !exists {
+		return nil, kernel.ErrNotFound
+	}
+	return nil, nil
 }
 
 type topologyRelationSource struct {

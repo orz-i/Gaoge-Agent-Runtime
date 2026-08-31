@@ -213,11 +213,13 @@ Snapshot no longer contains full event history. Event feed/audit/replay users
 must ask the journal explicitly. PostgreSQL and in-memory stores implement the
 same semantics. No dual-read compatibility field is retained.
 
-The PostgreSQL migration is a hard-cut schema migration for beta. Existing event
-rows remain the journal; aggregate reads stop joining/loading them. New indexes
-or outbox tables are introduced in the same migration generation used by the
-adapter. Performance regression coverage includes large event histories (at
-least a 10k-event executable case, with an optional 100k benchmark).
+No physical PostgreSQL DDL migration is required for this decision: beta.5
+already stores `agent_kernel_runs.last_event_seq` separately from
+`agent_kernel_events`. The hard cut is therefore the Store/API read contract:
+aggregate reads stop loading event rows, `last_event_seq` becomes the public
+`EventHead`, and journal consumers page `agent_kernel_events` explicitly. This
+avoids a needless table rewrite or dual-read bridge. Performance regression
+coverage includes both 10k- and 100k-event history benchmarks.
 
 ## Decision 6: Application lifecycle callbacks execute outside the mutex
 

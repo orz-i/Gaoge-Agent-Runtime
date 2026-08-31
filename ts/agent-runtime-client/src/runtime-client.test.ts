@@ -8,7 +8,7 @@ const snapshot = {
     thread: { kind: "conversation", id: "thread-1" }, goal: "Answer", status: "completed",
     revision: 2, createdAt: "2026-08-06T00:00:00Z", updatedAt: "2026-08-06T00:00:01Z",
   },
-  state: {}, events: [],
+  state: {}, eventHead: 0,
 };
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
@@ -35,6 +35,7 @@ describe("RuntimeClient target API", () => {
     await client.workflows.trace("workflow/1");
     await client.teams.start({ thread: { kind: "conversation", id: "thread-1" }, goal: "Team", mode: "parallel", members: [{ id: "one", goal: "One" }], join: { mode: "all" } });
     await client.runs.get("run/1");
+    await client.runs.events("run/1", { afterSeq: 4, limit: 25 });
     await client.runs.cancel("run/1", { expectedRevision: 2, reason: "stop" });
     await client.runs.workbench("run/1");
     for await (const event of client.runs.feed("run/1", { reconnectDelayMS: 0 })) {
@@ -50,6 +51,7 @@ describe("RuntimeClient target API", () => {
       "https://runtime.test/api/v1/workflow-runs/workflow%2F1/trace",
       "https://runtime.test/api/v1/team-runs",
       "https://runtime.test/api/v1/runs/run%2F1",
+      "https://runtime.test/api/v1/runs/run%2F1/events?afterSeq=4&limit=25",
       "https://runtime.test/api/v1/runs/run%2F1/cancel",
       "https://runtime.test/api/v1/runs/run%2F1/workbench",
       "https://runtime.test/api/v1/runs/run%2F1/feed?afterSeq=0",

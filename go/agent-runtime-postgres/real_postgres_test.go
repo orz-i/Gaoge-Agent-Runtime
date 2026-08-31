@@ -102,8 +102,12 @@ func TestRealPostgresKernelStoreConformanceAndRestart(t *testing.T) {
 	}
 
 	reconstructed, err := secondRuntime.Load(t.Context(), runID)
-	if err != nil || reconstructed.Run.Revision != 2 || string(reconstructed.State) != `{"step":2}` || len(reconstructed.Events) != 2 {
+	if err != nil || reconstructed.Run.Revision != 2 || string(reconstructed.State) != `{"step":2}` || reconstructed.EventHead != 2 {
 		t.Fatalf("reconstructed run = %#v, err=%v", reconstructed, err)
+	}
+	reconstructedEvents, err := secondRuntime.ListEvents(t.Context(), runID, 0, 10)
+	if err != nil || len(reconstructedEvents) != 2 || reconstructedEvents[1].Seq != 2 {
+		t.Fatalf("reconstructed events = %#v, err=%v", reconstructedEvents, err)
 	}
 	completed, err := secondRuntime.Apply(t.Context(), runID, reconstructed.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted,
@@ -125,8 +129,12 @@ func TestRealPostgresKernelStoreConformanceAndRestart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = thirdSQLDB.Close() })
 	terminal, err := NewKernelStore(thirdDB).Load(t.Context(), runID)
-	if err != nil || terminal.Run.Status != kernel.RunStatusCompleted || terminal.Result == nil || len(terminal.Events) != 3 {
+	if err != nil || terminal.Run.Status != kernel.RunStatusCompleted || terminal.Result == nil || terminal.EventHead != 3 {
 		t.Fatalf("terminal restart snapshot = %#v, err=%v", terminal, err)
+	}
+	terminalEvents, err := NewKernelStore(thirdDB).ListEvents(t.Context(), runID, 2, 10)
+	if err != nil || len(terminalEvents) != 1 || terminalEvents[0].Type != "run.completed" {
+		t.Fatalf("terminal restart events = %#v, err=%v", terminalEvents, err)
 	}
 }
 

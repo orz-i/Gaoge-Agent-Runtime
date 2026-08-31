@@ -120,7 +120,8 @@ func (store *KernelStore) Create(
 	return store.Load(ctx, record.Run.ID)
 }
 
-// Load returns one isolated Kernel Snapshot with monotonic Events.
+// Load returns only the current aggregate Snapshot. Event history is read via
+// ListEvents so the hot CAS/recovery path stays independent of journal size.
 func (store *KernelStore) Load(ctx context.Context, runID string) (kernel.Snapshot, error) {
 	if store == nil || store.db == nil {
 		return kernel.Snapshot{}, kernel.ErrNotFound
@@ -134,11 +135,36 @@ func (store *KernelStore) Load(ctx context.Context, runID string) (kernel.Snapsh
 	if err := db.Where("run_id = ?", runID).First(&runRecord).Error; err != nil {
 		return kernel.Snapshot{}, translateKernelError(err)
 	}
-	var eventRecords []models.KernelEventRecord
-	if err := db.Where("run_id = ?", runID).Order("seq ASC").Find(&eventRecords).Error; err != nil {
-		return kernel.Snapshot{}, translateKernelError(err)
+	return kernelSnapshotFrom(runRecord)
+}
+
+// ListEvents returns one monotonic journal page without loading aggregate state.
+func (store *KernelStore) ListEvents(
+	ctx context.Context,
+	runID string,
+	afterSeq int64,
+	limit int,
+) ([]kernel.Event, error) {
+	if store == nil || store.db == nil || strings.TrimSpace(runID) == "" || afterSeq < 0 || limit <= 0 || limit > 10_000 {
+		return nil, kernel.ErrInvalidInput
 	}
-	return kernelSnapshotFrom(runRecord, eventRecords)
+	runID = strings.TrimSpace(runID)
+	var records []models.KernelEventRecord
+	err := store.db.WithContext(ctx).Where("run_id = ? AND seq > ?", runID, afterSeq).
+		Order("seq ASC").Limit(limit).Find(&records).Error
+	if err != nil {
+		return nil, translateKernelError(err)
+	}
+	if len(records) == 0 {
+		var count int64
+		if err = store.db.WithContext(ctx).Model(&models.KernelRunRecord{}).Where("run_id = ?", runID).Count(&count).Error; err != nil {
+			return nil, translateKernelError(err)
+		}
+		if count == 0 {
+			return nil, kernel.ErrNotFound
+		}
+	}
+	return kernelEventsFrom(records)
 }
 
 // Apply atomically commits one revision-CAS transition and its Event append.
@@ -368,10 +394,7 @@ func validKernelTransitionLease(request kernel.TransitionLeaseRequest) bool {
 		strings.TrimSpace(request.WorkerID) != ""
 }
 
-func kernelSnapshotFrom(
-	runRecord models.KernelRunRecord,
-	eventRecords []models.KernelEventRecord,
-) (kernel.Snapshot, error) {
+func kernelSnapshotFrom(runRecord models.KernelRunRecord) (kernel.Snapshot, error) {
 	checkpoint, hasCheckpoint, err := unmarshalCheckpoint(runRecord.CheckpointJSON)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -384,20 +407,6 @@ func kernelSnapshotFrom(
 	if !json.Valid(state) {
 		return kernel.Snapshot{}, errPersistedKernelStateJSON
 	}
-	events := make([]kernel.Event, 0, len(eventRecords))
-	for _, record := range eventRecords {
-		data := json.RawMessage(nil)
-		if record.DataJSON != "" {
-			data = json.RawMessage(record.DataJSON)
-			if !json.Valid(data) {
-				return kernel.Snapshot{}, errPersistedKernelEventJSON
-			}
-		}
-		events = append(events, kernel.Event{
-			Seq: record.Seq, Type: record.Type, Message: record.Message,
-			Data: append(json.RawMessage(nil), data...), CreatedAt: record.CreatedAt.UTC(),
-		})
-	}
 	snapshot := kernel.Snapshot{
 		Run: kernel.Run{
 			ID: runRecord.RunID, Kind: kernel.RunKind(runRecord.Kind),
@@ -409,7 +418,7 @@ func kernelSnapshotFrom(
 			DeadlineAt: cloneTime(runRecord.DeadlineAt), EndedAt: cloneTime(runRecord.EndedAt),
 			CreatedAt: runRecord.CreatedAt.UTC(), UpdatedAt: runRecord.UpdatedAt.UTC(),
 		},
-		State: append(json.RawMessage(nil), state...), Events: events,
+		State: append(json.RawMessage(nil), state...), EventHead: runRecord.LastEventSeq,
 	}
 	if hasCheckpoint {
 		snapshot.Checkpoint = &checkpoint
@@ -418,6 +427,24 @@ func kernelSnapshotFrom(
 		snapshot.Result = &result
 	}
 	return snapshot, nil
+}
+
+func kernelEventsFrom(records []models.KernelEventRecord) ([]kernel.Event, error) {
+	events := make([]kernel.Event, 0, len(records))
+	for _, record := range records {
+		data := json.RawMessage(nil)
+		if record.DataJSON != "" {
+			data = json.RawMessage(record.DataJSON)
+			if !json.Valid(data) {
+				return nil, errPersistedKernelEventJSON
+			}
+		}
+		events = append(events, kernel.Event{
+			Seq: record.Seq, Type: record.Type, Message: record.Message,
+			Data: append(json.RawMessage(nil), data...), CreatedAt: record.CreatedAt.UTC(),
+		})
+	}
+	return events, nil
 }
 
 func marshalOptional(value interface{}) (string, error) {

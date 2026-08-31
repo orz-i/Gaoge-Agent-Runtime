@@ -50,14 +50,19 @@ type RunSnapshotResponse struct {
 	State      json.RawMessage    `json:"state"`
 	Checkpoint *kernel.Checkpoint `json:"checkpoint,omitempty"`
 	Result     *kernel.Result     `json:"result,omitempty"`
-	Events     []kernel.Event     `json:"events"`
+	EventHead  int64              `json:"eventHead"`
+}
+
+type RunEventPageResponse struct {
+	Events    []kernel.Event `json:"events"`
+	EventHead int64          `json:"eventHead"`
 }
 
 func snapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
 	return RunSnapshotResponse{
 		Run: snapshot.Run, State: append(json.RawMessage(nil), snapshot.State...),
 		Checkpoint: snapshot.Checkpoint, Result: snapshot.Result,
-		Events: append([]kernel.Event(nil), snapshot.Events...),
+		EventHead: snapshot.EventHead,
 	}
 }
 

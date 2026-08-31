@@ -385,7 +385,12 @@ func completionRepairRegistry(t *testing.T) *tools.Registry {
 	}})
 }
 
-func assertCorrectedCompletionSnapshot(t *testing.T, snapshot kernel.Snapshot, modelCalls int) {
+func assertCorrectedCompletionSnapshot(
+	t *testing.T,
+	runtime *kernel.Runtime,
+	snapshot kernel.Snapshot,
+	modelCalls int,
+) {
 	t.Helper()
 	if snapshot.Run.Status != kernel.RunStatusCompleted || modelCalls != 2 {
 		t.Fatalf("snapshot = %#v, model calls = %d", snapshot.Run, modelCalls)
@@ -393,12 +398,16 @@ func assertCorrectedCompletionSnapshot(t *testing.T, snapshot kernel.Snapshot, m
 	if snapshot.Result == nil || string(snapshot.Result.Content) != `"{\"ok\":true}"` {
 		t.Fatalf("terminal result = %#v", snapshot.Result)
 	}
-	for _, event := range snapshot.Events {
+	events, err := runtime.ListEvents(t.Context(), snapshot.Run.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
 		if event.Type == "agent.completion_corrected" && event.Message == "test.invalid_json" {
 			return
 		}
 	}
-	t.Fatalf("completion correction event missing: %#v", snapshot.Events)
+	t.Fatalf("completion correction event missing: %#v", events)
 }
 
 func TestRunnerCorrectsRejectedTerminalCompletionInSameRun(t *testing.T) {
@@ -419,7 +428,7 @@ func TestRunnerCorrectsRejectedTerminalCompletionInSameRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCorrectedCompletionSnapshot(t, snapshot, model.calls)
+	assertCorrectedCompletionSnapshot(t, runtime, snapshot, model.calls)
 }
 
 type repeatedReadModel struct {

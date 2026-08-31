@@ -108,6 +108,10 @@ func (runner *Runner) TraceForActor(
 	if err != nil || ValidateDefinition(state.Definition) != nil {
 		return Trace{}, errors.Join(ErrInvalidExecution, err)
 	}
+	events, err := runner.traceEvents(ctx, snapshot)
+	if err != nil {
+		return Trace{}, err
+	}
 	trace := Trace{
 		RunID: snapshot.Run.ID, Status: snapshot.Run.Status, Revision: snapshot.Run.Revision,
 		Definition: DefinitionReference{
@@ -118,7 +122,7 @@ func (runner *Runner) TraceForActor(
 		Effects:       make([]EffectTrace, 0, len(state.Effects)),
 		Waits:         make([]WaitTrace, 0, len(state.Waits)),
 		Compensations: make([]CompensationTrace, 0, len(state.Compensations)),
-		Events:        make([]TraceEvent, 0, len(snapshot.Events)),
+		Events:        make([]TraceEvent, 0, len(events)),
 	}
 	if state.CurrentNode >= 0 && state.CurrentNode < len(state.Definition.Nodes) {
 		trace.CurrentNodeID = state.Definition.Nodes[state.CurrentNode].ID
@@ -160,10 +164,30 @@ func (runner *Runner) TraceForActor(
 			ReceiptID: compensation.ReceiptID, ErrorCode: compensation.ErrorCode,
 		})
 	}
-	for _, event := range snapshot.Events {
+	for _, event := range events {
 		trace.Events = append(trace.Events, TraceEvent{
 			Seq: event.Seq, Type: event.Type, CreatedAt: event.CreatedAt,
 		})
 	}
 	return trace, nil
+}
+
+func (runner *Runner) traceEvents(ctx context.Context, snapshot kernel.Snapshot) ([]kernel.Event, error) {
+	if snapshot.EventHead == 0 {
+		return nil, nil
+	}
+	result := make([]kernel.Event, 0, snapshot.EventHead)
+	after := int64(0)
+	for after < snapshot.EventHead {
+		page, err := runner.runtime.ListEvents(ctx, snapshot.Run.ID, after, 1000)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			return nil, ErrInvalidExecution
+		}
+		result = append(result, page...)
+		after = page[len(page)-1].Seq
+	}
+	return result, nil
 }

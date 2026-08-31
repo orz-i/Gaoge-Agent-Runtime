@@ -92,7 +92,7 @@ func TestQueryKeepsBaseDetailWhenOptionalProvidersFail(t *testing.T) {
 func TestQueryRejectsDuplicateProviderNames(t *testing.T) {
 	t.Parallel()
 	snapshot := baseSnapshot()
-	_, err := workbench.NewQuery(fakeRunSource{snapshot: snapshot}, []workbench.Registration{
+	_, err := workbench.NewQuery(fakeRunSource{snapshot: snapshot}, fakeRunSource{snapshot: snapshot}, []workbench.Registration{
 		{Provider: staticProvider{name: providerWorkflow}},
 		{Provider: staticProvider{name: " " + providerWorkflow + " "}},
 	})
@@ -146,7 +146,7 @@ func mustQuery(
 	registrations []workbench.Registration,
 ) *workbench.Query {
 	t.Helper()
-	query, err := workbench.NewQuery(fakeRunSource{snapshot: snapshot}, registrations)
+	query, err := workbench.NewQuery(fakeRunSource{snapshot: snapshot}, fakeRunSource{snapshot: snapshot}, registrations)
 	if err != nil {
 		t.Fatalf("create workbench query: %v", err)
 	}
@@ -168,10 +168,7 @@ func baseSnapshot() kernel.Snapshot {
 			ID: "wait_1", Kind: "workflow_wait", Status: kernel.CheckpointPending,
 			Payload: json.RawMessage(`{"kind":"approval"}`), CreatedAt: createdAt.Add(2 * time.Second),
 		},
-		Events: []kernel.Event{
-			{Seq: 1, Type: "workflow.started", CreatedAt: createdAt},
-			{Seq: 2, Type: "workflow.wait.created", Message: "wait_1", CreatedAt: createdAt.Add(time.Second)},
-		},
+		EventHead: 2,
 	}
 }
 
@@ -184,6 +181,26 @@ func (source fakeRunSource) Load(_ context.Context, runID string) (kernel.Snapsh
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
 	return source.snapshot, nil
+}
+
+func (source fakeRunSource) ListEvents(_ context.Context, runID string, afterSeq int64, limit int) ([]kernel.Event, error) {
+	if runID != source.snapshot.Run.ID {
+		return nil, kernel.ErrNotFound
+	}
+	createdAt := source.snapshot.Run.CreatedAt
+	events := []kernel.Event{
+		{Seq: 1, Type: "workflow.started", CreatedAt: createdAt},
+		{Seq: 2, Type: "workflow.wait.created", Message: "wait_1", CreatedAt: createdAt.Add(time.Second)},
+	}
+	start := int(afterSeq)
+	if start > len(events) {
+		start = len(events)
+	}
+	end := start + limit
+	if end > len(events) {
+		end = len(events)
+	}
+	return append([]kernel.Event(nil), events[start:end]...), nil
 }
 
 type staticProvider struct {

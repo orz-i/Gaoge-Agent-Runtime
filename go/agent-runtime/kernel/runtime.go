@@ -146,6 +146,15 @@ func (runtime *Runtime) Load(ctx context.Context, runID string) (Snapshot, error
 	return runtime.store.Load(ctx, strings.TrimSpace(runID))
 }
 
+// ListEvents pages the append-only Event journal independently of aggregate
+// recovery. afterSeq is exclusive and limit must be positive and bounded.
+func (runtime *Runtime) ListEvents(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error) {
+	if runtime == nil || strings.TrimSpace(runID) == "" || afterSeq < 0 || limit <= 0 || limit > 10_000 {
+		return nil, ErrInvalidInput
+	}
+	return runtime.store.ListEvents(ctx, strings.TrimSpace(runID), afterSeq, limit)
+}
+
 // Apply validates and atomically commits one feature-owned state transition.
 func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevision uint64, mutation Mutation) (Snapshot, error) {
 	if runtime == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 {
