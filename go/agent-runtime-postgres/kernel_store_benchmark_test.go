@@ -11,7 +11,11 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-func BenchmarkKernelStoreLoadIndependentOfEventHistory(b *testing.B) {
+// BenchmarkKernelStoreLoadIndependentOfEventHistorySQLite is the fast local
+// adapter regression benchmark. Real PostgreSQL large-history evidence lives in
+// TestRealPostgresKernelStoreLoadIndependentOfLargeHistory so this benchmark is
+// not misrepresented as a PostgreSQL latency measurement.
+func BenchmarkKernelStoreLoadIndependentOfEventHistorySQLite(b *testing.B) {
 	for _, eventCount := range []int{10_000, 100_000} {
 		b.Run(fmt.Sprintf("events_%d", eventCount), func(b *testing.B) {
 			store := benchmarkKernelStoreWithEvents(b, eventCount)
