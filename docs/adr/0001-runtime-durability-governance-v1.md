@@ -98,6 +98,28 @@ registered feature events to self-trigger Jobs. Queue Job identity remains
 stable and duplicate enqueue conflicts are treated as already-delivered for
 logical purposes.
 
+Post-audit hardening makes `EventDraft.Wakeup` authoritative. Registered
+feature triggers may still replace the generic trigger name for priority and
+diagnostics, but an unknown/new event marked `Wakeup` is projected as the
+feature-neutral `run_ready` trigger. Correctness therefore does not depend on a
+second event-name allowlist being updated whenever a feature adds a new
+autonomous transition.
+
+The PostgreSQL outbox persists a dedicated transition-event representation that
+includes `Wakeup` and `WakeupAt`. Those fields remain absent from the public
+Event journal, while Memory and PostgreSQL Stores preserve identical
+projection metadata across restart.
+
+An autonomous committed-running transition is valid only when it leaves at
+least one durable continuation source: an explicit self-wakeup fact, a durable
+child `RunRelation` whose terminal transition wakes the parent, or an external
+wait/checkpoint whose resolution transaction emits a wakeup. Agent, Workflow,
+PlanExecute, and Team mark their autonomous commit boundaries accordingly.
+Wakeups are revision-frozen; if the original synchronous call stack advances
+the Run first, later delivery is a stale no-op. Tool and Workflow Effect
+physical execution remains at-least-once and reuses the existing stable,
+idempotent Tool Call / Effect intent identity.
+
 This replaces `TransitionSink` as the continuation reliability boundary. A
 best-effort observer may still exist for telemetry, but correctness must not
 depend on it.
@@ -111,6 +133,12 @@ Required crash/fault cases:
 - workflow segment-yield commit then crash;
 - queue claim then crash before ack;
 - projector retry and duplicate queue delivery.
+- Agent tool-batch commit before Tool execution and Tool receipt before the
+  next model step;
+- Workflow effect-intent commit before effect dispatch;
+- Plan step-start commit before relation/child creation and step-complete commit
+  before the next step;
+- Team topology commit before member relations/children exist.
 
 ## Decision 2: Durable Agent ModelInvocation
 
@@ -150,6 +178,27 @@ same logical invocation remains the only receipt that may advance Agent state.
 
 `model.ResponseID` is part of the durable receipt rather than a stream-only
 observation. Usage carried by the model layer is also copied into the receipt.
+
+### PlanExecute Planner invocation
+
+Provider-backed planning follows the same durability rule. PlanExecute owns a
+durable `PlannerInvocation` with a stable invocation ID, canonical request hash,
+execution attempt/lease, normalized `PlannerResponse`, response ID, and
+created/completed/consumed timestamps. Its order is:
+
+```text
+persist PlannerInvocation pending with Run creation
+-> CAS-claim execution lease
+-> call Planner with stable InvocationID
+-> persist completed Planner receipt
+-> consume receipt exactly once into the materialized Plan
+```
+
+Physical planning may repeat only after an ambiguous crash before receipt
+commit; logical Plan materialization consumes one durable receipt. Concurrent
+resumers cannot both acquire the same execution generation. Planner adapters
+may map `InvocationID` to provider idempotency/retrieval facilities, but Runtime
+correctness does not require them.
 
 ## Decision 3: JSON Schema is an executable contract
 
@@ -219,7 +268,10 @@ already stores `agent_kernel_runs.last_event_seq` separately from
 aggregate reads stop loading event rows, `last_event_seq` becomes the public
 `EventHead`, and journal consumers page `agent_kernel_events` explicitly. This
 avoids a needless table rewrite or dual-read bridge. Performance regression
-coverage includes both 10k- and 100k-event history benchmarks.
+coverage includes both 10k- and 100k-event history benchmarks. The fast local
+benchmark is explicitly SQLite adapter evidence; real PostgreSQL integration
+also creates a 100k-event history, repeatedly loads the aggregate, and verifies
+the PostgreSQL `EXPLAIN` plan does not touch `agent_kernel_events`.
 
 ## Decision 6: Application lifecycle callbacks execute outside the mutex
 
@@ -237,7 +289,11 @@ While `Start` or `Close` is already executing plugin code, nested or concurrent
 lifecycle requests fail fast with `ErrLifecycleTransition`. They never wait
 while a plugin callback is active, which prevents a reentrant plugin from
 self-deadlocking on the application lifecycle. A failed start returns the
-application to the new state after rollback so the host may retry explicitly;
+application to the new state only after rollback is proven successful so the
+host may retry explicitly. Rollback uses a bounded context detached from the
+possibly cancelled Start context. If rollback itself fails, worker liveness is
+unknown and the Application is poisoned closed instead of permitting a
+duplicate retry;
 once close begins, the application remains closed even if a worker close fails.
 
 Tests cover callback reentrancy, slow/blocking callbacks, start rollback,
