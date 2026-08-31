@@ -13,7 +13,18 @@ var (
 	ErrDuplicateCapability = errors.New("duplicate runtime capability")
 	ErrMissingCapability   = errors.New("missing runtime capability")
 	ErrAlreadyStarted      = errors.New("runtime application already started")
+	ErrLifecycleTransition = errors.New("runtime application lifecycle transition in progress")
 	ErrClosed              = errors.New("runtime application is closed")
+)
+
+type lifecycleState uint8
+
+const (
+	lifecycleNew lifecycleState = iota
+	lifecycleStarting
+	lifecycleStarted
+	lifecycleClosing
+	lifecycleClosed
 )
 
 // Application validates capabilities and owns only explicitly composed workers.
@@ -21,8 +32,7 @@ type Application struct {
 	features []kernel.Feature
 	workers  []kernel.WorkerFeature
 	mu       sync.Mutex
-	started  bool
-	closed   bool
+	state    lifecycleState
 }
 
 // New validates a fully constructed feature graph without locating services dynamically.
@@ -43,36 +53,70 @@ func New(features ...kernel.Feature) (*Application, error) {
 // Start starts only worker features supplied by the host.
 func (application *Application) Start(ctx context.Context) error {
 	application.mu.Lock()
-	defer application.mu.Unlock()
-	if application.closed {
+	switch application.state {
+	case lifecycleClosed, lifecycleClosing:
+		application.mu.Unlock()
 		return ErrClosed
-	}
-	if application.started {
+	case lifecycleStarting:
+		application.mu.Unlock()
+		return ErrLifecycleTransition
+	case lifecycleStarted:
+		application.mu.Unlock()
 		return ErrAlreadyStarted
+	case lifecycleNew:
+		application.state = lifecycleStarting
 	}
-	started := make([]kernel.WorkerFeature, 0, len(application.workers))
-	for _, worker := range application.workers {
+	workers := append([]kernel.WorkerFeature(nil), application.workers...)
+	application.mu.Unlock()
+
+	started := make([]kernel.WorkerFeature, 0, len(workers))
+	for _, worker := range workers {
 		if err := worker.Start(ctx); err != nil {
-			return errors.Join(err, closeWorkers(ctx, started))
+			rollbackErr := closeWorkers(ctx, started)
+			application.finishStart(false)
+			return errors.Join(err, rollbackErr)
 		}
 		started = append(started, worker)
 	}
-	application.started = true
+	application.finishStart(true)
 	return nil
 }
 
 // Close stops composed workers in reverse order.
 func (application *Application) Close(ctx context.Context) error {
 	application.mu.Lock()
+	switch application.state {
+	case lifecycleClosed:
+		application.mu.Unlock()
+		return nil
+	case lifecycleStarting, lifecycleClosing:
+		application.mu.Unlock()
+		return ErrLifecycleTransition
+	case lifecycleNew:
+		application.state = lifecycleClosed
+		application.mu.Unlock()
+		return nil
+	case lifecycleStarted:
+		application.state = lifecycleClosing
+	}
+	workers := append([]kernel.WorkerFeature(nil), application.workers...)
+	application.mu.Unlock()
+
+	err := closeWorkers(ctx, workers)
+	application.mu.Lock()
+	application.state = lifecycleClosed
+	application.mu.Unlock()
+	return err
+}
+
+func (application *Application) finishStart(succeeded bool) {
+	application.mu.Lock()
 	defer application.mu.Unlock()
-	if application.closed {
-		return nil
+	if succeeded {
+		application.state = lifecycleStarted
+		return
 	}
-	application.closed = true
-	if !application.started {
-		return nil
-	}
-	return closeWorkers(ctx, application.workers)
+	application.state = lifecycleNew
 }
 
 // Features returns the immutable composed feature descriptors.

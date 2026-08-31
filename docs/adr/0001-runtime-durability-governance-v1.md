@@ -233,6 +233,13 @@ calling third-party WorkerFeature callbacks. V1 uses a lifecycle state machine:
 4. rollback successfully started workers outside the mutex on start failure;
 5. close workers in reverse start order.
 
+While `Start` or `Close` is already executing plugin code, nested or concurrent
+lifecycle requests fail fast with `ErrLifecycleTransition`. They never wait
+while a plugin callback is active, which prevents a reentrant plugin from
+self-deadlocking on the application lifecycle. A failed start returns the
+application to the new state after rollback so the host may retry explicitly;
+once close begins, the application remains closed even if a worker close fails.
+
 Tests cover callback reentrancy, slow/blocking callbacks, start rollback,
 ordering, and concurrent Start/Close.
 
