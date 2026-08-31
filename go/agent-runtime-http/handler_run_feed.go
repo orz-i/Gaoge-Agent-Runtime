@@ -59,9 +59,9 @@ func (handler *Handler) prepareRunFeed(
 		writeError(context, http.StatusBadRequest, "runfeed.invalid_request", err.Error())
 		return nil, kernel.Snapshot{}, 0, false
 	}
-	snapshot, err := handler.authorizedRun(context, runID)
+	snapshot, err := handler.authorizedRun(context, runID, RunOperationFeedRead)
 	if err != nil {
-		WriteKernelError(context, "runfeed", err)
+		WriteRunAccessError(context, "runfeed", err)
 		return nil, kernel.Snapshot{}, 0, false
 	}
 	handler.releaseTerminalRunFeed(context, snapshot)
@@ -97,21 +97,6 @@ func followRunFeed(context *gin.Context, subscription *runfeed.Subscription) {
 			return
 		}
 	}
-}
-
-func (handler *Handler) authorizedRun(context *gin.Context, runID string) (kernel.Snapshot, error) {
-	snapshot, err := handler.runtime.Load(context.Request.Context(), runID)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	actor, err := handler.actorRef(context)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	if snapshot.Run.Actor != actor {
-		return kernel.Snapshot{}, kernel.ErrNotFound
-	}
-	return snapshot, nil
 }
 
 func runFeedAfterSeq(context *gin.Context) (int64, error) {

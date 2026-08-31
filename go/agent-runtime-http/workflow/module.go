@@ -127,8 +127,8 @@ func (handler *Handler) ResolveWait(context *gin.Context) {
 		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "workflow.invalid_request", err.Error())
 		return
 	}
-	if err = handler.authorizeRunOwner(context, runID); err != nil {
-		writeError(context, err)
+	if _, err = handler.shared.AuthorizedRun(context, runID, runtimehttp.RunOperationWaitResolve); err != nil {
+		runtimehttp.WriteRunAccessError(context, "workflow", err)
 		return
 	}
 	var request ResolveWaitRequest
@@ -154,8 +154,8 @@ func (handler *Handler) CancelRun(context *gin.Context) {
 		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "workflow.invalid_request", err.Error())
 		return
 	}
-	if err = handler.authorizeRunOwner(context, runID); err != nil {
-		writeError(context, err)
+	if _, err = handler.shared.AuthorizedRun(context, runID, runtimehttp.RunOperationCancel); err != nil {
+		runtimehttp.WriteRunAccessError(context, "workflow", err)
 		return
 	}
 	var request CancelRunRequest
@@ -183,32 +183,17 @@ func (handler *Handler) GetTrace(context *gin.Context) {
 		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "workflow.invalid_request", err.Error())
 		return
 	}
-	actor, err := handler.actor(context)
+	snapshot, err := handler.shared.AuthorizedRun(context, runID, runtimehttp.RunOperationTraceRead)
 	if err != nil {
-		writeError(context, err)
+		runtimehttp.WriteRunAccessError(context, "workflow", err)
 		return
 	}
-	trace, err := handler.runner.TraceForActor(context.Request.Context(), runID, actor)
+	trace, err := handler.runner.TraceForActor(context.Request.Context(), runID, snapshot.Run.Actor)
 	if err != nil {
 		writeError(context, err)
 		return
 	}
 	runtimehttp.WriteSuccess(context, trace)
-}
-
-func (handler *Handler) authorizeRunOwner(context *gin.Context, runID string) error {
-	actor, err := handler.actor(context)
-	if err != nil {
-		return err
-	}
-	snapshot, err := handler.runner.LoadRun(context.Request.Context(), runID)
-	if err != nil {
-		return err
-	}
-	if snapshot.Run.Actor != actor {
-		return ErrDefinitionForbidden
-	}
-	return nil
 }
 
 func isProgressError(err error) bool {

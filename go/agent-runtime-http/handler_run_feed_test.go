@@ -53,7 +53,10 @@ func TestGetRunReleasesFeedMetadataForAuthoritativeTerminalSnapshot(t *testing.T
 	}
 	publishHTTPTestEvent(t, feed, created.Run.ID, runfeed.Draft{Type: runfeed.EventRunStarted})
 	engine := gin.New()
-	NewModule(NewHandler(Dependencies{Runtime: runtime, Feed: feed})).RegisterRoutes(engine.Group("/api/v1"))
+	NewModule(NewHandler(Dependencies{
+		Runtime: runtime, Feed: feed,
+		Shared: NewShared(runFeedPrincipal{actor: actor}, nil, runtime, nil),
+	})).RegisterRoutes(engine.Group("/api/v1"))
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runs/run-terminal-release", nil)
 	recorder := httptest.NewRecorder()
@@ -160,7 +163,7 @@ func newRunFeedHTTPTest(t *testing.T) (*gin.Engine, *kernel.Runtime, *runfeed.Fe
 	actor := kernel.ActorRef{TenantID: testRunFeedTenantID, ActorID: "actor"}
 	engine := gin.New()
 	NewModule(NewHandler(Dependencies{
-		Runtime: runtime, Feed: feed, Shared: NewShared(runFeedPrincipal{actor: actor}, nil),
+		Runtime: runtime, Feed: feed, Shared: NewShared(runFeedPrincipal{actor: actor}, nil, runtime, nil),
 	})).RegisterRoutes(engine.Group("/api/v1"))
 	return engine, runtime, feed, actor
 }

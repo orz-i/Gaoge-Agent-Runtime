@@ -160,7 +160,7 @@ func newHTTPFixture(t *testing.T, authorize bool, executor workflow.EffectExecut
 	if authorize {
 		authorizer = allowDefinitionAuthorizer{}
 	}
-	shared := runtimehttp.NewShared(httpPrincipal{}, nil)
+	shared := runtimehttp.NewShared(httpPrincipal{}, nil, runtime, nil)
 	engine := gin.New()
 	workflowhttp.NewModule(workflowhttp.NewHandler(workflowhttp.Dependencies{
 		Runner: runner, Registry: registry, Authorizer: authorizer, Shared: shared,
