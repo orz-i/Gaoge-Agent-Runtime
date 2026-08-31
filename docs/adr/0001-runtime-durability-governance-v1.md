@@ -249,20 +249,49 @@ Kernel keeps only feature-neutral deadline/state mechanisms. Agent and Workflow
 use a shared budget vocabulary where the dimension is meaningful, without a
 global budget service locator.
 
-Candidate dimensions are deadline/wall time, model calls, tool calls,
-input/output/total tokens, cost, output/state bytes, child Runs, and model
-reasoning budget when providers expose it reliably. Features enforce the
-dimensions they consume; adapters may observe them.
+V1 adds a small `budget` vocabulary for the dimensions that can have identical
+meaning across Features: model calls, Tool calls, input/output/total tokens,
+terminal output bytes, state bytes, child Runs and cost units. Kernel's existing
+Run deadline remains the feature-neutral deadline mechanism instead of being
+duplicated in the budget package. Cache-token and reasoning-token usage can be
+recorded when a provider reports it, but reasoning does not become a portable
+hard ceiling in this pass.
 
-V1 will first add the seam/types needed by Agent and Workflow and avoid
-pretending cost/reasoning limits are enforceable when no stable usage signal is
-available.
+Agent durably accounts model/Tool calls and provider token usage exactly when a
+`ModelInvocation` receipt is logically consumed. If an input/output/total token
+ceiling is configured but the provider does not return usage, Agent fails closed
+instead of silently ignoring the ceiling. Agent also enforces serialized
+terminal output bytes. It rejects state-byte, child-Run and cost ceilings because Agent does not
+currently have stable ownership of those accounting signals.
+
+Token ceilings are receipt-accounted, not provider pre-reservations. A provider
+may therefore physically execute one call whose returned token usage crosses the
+remaining ceiling; after that receipt is durably observed, Agent does not
+logically consume the response or dispatch subsequent effects. Provider-native
+token limits may reduce physical overrun where available, but portable Runtime
+correctness does not depend on them.
+
+Workflow retains its richer feature-specific ledger for segments, node
+activations, effects, state bytes and reserved/used cost. `RuntimeBudget(view)`
+projects only common state-byte, child-Run and consumed-cost facts; it does not
+rename Workflow Effects to Tool calls or replace Workflow's execution rules.
 
 ## Decision 8: Observability is an adapter seam, not a Kernel dependency
 
-The runtime exposes enough lifecycle/invocation observations for a separately
-composed OpenTelemetry adapter. If implemented in this pass, it lives outside
-the Kernel module. Suggested span hierarchy is:
+The runtime exposes a content-safe `observability.Recorder` seam for separately
+composed telemetry adapters. The seam is best effort, statically injected into
+Features, and contains no OpenTelemetry dependency. Agent emits Run,
+ModelInvocation and ToolInvocation observations; Workflow emits Run and
+WorkflowEffect observations, including compensation/subworkflow effects.
+
+As of the 2026-08-31 governance review, OpenTelemetry's GenAI semantic
+conventions are evolving independently from the core semantic-conventions
+registry. Current guidance treats operation/model/provider/token facts as
+structural telemetry while input/output messages and Tool arguments/results are
+content-bearing opt-in data. V1 therefore does not freeze OTel attribute or
+metric names into Runtime or Kernel contracts. A future `agent-runtime-otel`
+adapter can map this neutral seam to the then-current conventions. The intended
+span hierarchy remains:
 
 ```text
 Harness Turn
@@ -274,10 +303,21 @@ Harness Turn
     A2AInvocation
 ```
 
-Prompt/completion text and Tool arguments/results are disabled by default and
-require explicit opt-in/redaction policy. Useful metrics include active Runs,
-Run duration, CAS conflicts, model/tool latency, tokens/cost, continuation and
-outbox lag, reconciliation, retries, compaction, and replay/recovery counts.
+Prompt/completion text, system instructions, Tool arguments/results, Workflow
+inputs/outputs and arbitrary attribute maps do not exist on the V1 observation
+event at all. Content capture therefore cannot be enabled accidentally by an
+OTel exporter; a future explicit content/redaction contract would be a separate
+reviewed extension. Structural observations expose duration, status, operation
+identity, provider/model names where already non-secret Runtime metadata, retry
+attempts, child Run IDs and the common budget usage ledger.
+
+The seam is intentionally narrower than the full desired metric list. CAS
+conflicts, continuation/outbox lag, reconciliation, compaction and
+replay/recovery metrics belong to their owning adapters/workers and can be
+added without changing Kernel correctness or this Feature-level event shape.
+Telemetry delivery is best effort and may repeat across crash/retry windows;
+stable Run/operation IDs are supplied for correlation, but no Runtime state
+transition, idempotency rule or recovery decision may depend on a recorder.
 
 ## Migration strategy
 
@@ -289,6 +329,8 @@ This repository is beta. The governance pass is a hard cut:
 - remove `Snapshot.Events` and migrate callers to `ListEvents`;
 - update Agent durable state format directly for `ModelInvocation` rather than
   keeping old/new state representations in parallel;
+- hard-cut Agent usage state to the common durable budget snapshot instead of
+  retaining the old `limits`/`llmCalls`/`toolCalls` fields in parallel;
 - compile schemas at registration and reject invalid definitions immediately;
 - route every HTTP Run-object operation through the common authorization seam;
 - update constructors and compositions to the new contracts in the same

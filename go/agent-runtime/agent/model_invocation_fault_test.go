@@ -53,6 +53,11 @@ func TestModelInvocationRecoversCrashAfterPendingCommitBeforeProviderCall(t *tes
 	}
 	view := mustModelInvocationView(t, completed)
 	assertConsumedInvocation(t, view, calls[0].InvocationID)
+	if view.Budget.Usage.LLMCalls != 1 || view.Budget.Usage.InputTokens != 7 ||
+		view.Budget.Usage.OutputTokens != 3 || view.Budget.Usage.TotalTokens != 10 ||
+		view.Budget.Usage.ReasoningTokens != 2 {
+		t.Fatalf("receipt usage was not consumed exactly once: %#v", view.Budget.Usage)
+	}
 }
 
 func TestModelInvocationRecoversCrashAfterExecutionClaimBeforeProviderCall(t *testing.T) {
@@ -121,6 +126,11 @@ func TestModelInvocationRecoversCrashAfterProviderResponseBeforeReceipt(t *testi
 	}
 	view := mustModelInvocationView(t, completed)
 	assertConsumedInvocation(t, view, calls[0].InvocationID)
+	if view.Budget.Usage.LLMCalls != 1 || view.Budget.Usage.InputTokens != 7 ||
+		view.Budget.Usage.OutputTokens != 3 || view.Budget.Usage.TotalTokens != 10 ||
+		view.Budget.Usage.ReasoningTokens != 2 {
+		t.Fatalf("receipt usage was not consumed exactly once: %#v", view.Budget.Usage)
+	}
 }
 
 func TestModelInvocationRecoversCrashAfterReceiptBeforeConsumption(t *testing.T) {
@@ -318,7 +328,10 @@ func (provider *invocationRecordingModel) Generate(
 	provider.mu.Lock()
 	provider.calls = append(provider.calls, runtimemodel.CloneRequest(request))
 	provider.mu.Unlock()
-	return runtimemodel.Response{Content: "done", ResponseID: "resp_unary_1"}, nil
+	return runtimemodel.Response{
+		Content: "done", ResponseID: "resp_unary_1",
+		Usage: &runtimemodel.Usage{InputTokens: 7, OutputTokens: 3, ReasoningTokens: 2},
+	}, nil
 }
 
 func (provider *invocationRecordingModel) callsCopy() []runtimemodel.Request {
@@ -470,7 +483,7 @@ func assertInvocationState(
 ) {
 	t.Helper()
 	view := mustModelInvocationView(t, snapshot)
-	if view.LLMCalls != llmCalls || len(view.ModelInvocations) != 1 ||
+	if view.Budget.Usage.LLMCalls != llmCalls || len(view.ModelInvocations) != 1 ||
 		view.ModelInvocations[0].Status != status || view.ModelInvocations[0].ID == "" ||
 		view.ModelInvocations[0].RequestHash == "" {
 		t.Fatalf("model invocation view = %#v", view)
@@ -479,7 +492,7 @@ func assertInvocationState(
 
 func assertConsumedInvocation(t *testing.T, view agent.View, invocationID string) {
 	t.Helper()
-	if view.LLMCalls != 1 || len(view.ModelInvocations) != 1 {
+	if view.Budget.Usage.LLMCalls != 1 || len(view.ModelInvocations) != 1 {
 		t.Fatalf("consumed invocation view = %#v", view)
 	}
 	invocation := view.ModelInvocations[0]

@@ -5,24 +5,26 @@ import (
 	"errors"
 	"time"
 
+	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // Trace is a redacted operational projection. It deliberately excludes all
 // workflow inputs, effect inputs/outputs, wait payloads/responses, and event data.
 type Trace struct {
-	RunID         string              `json:"runID"`
-	Status        kernel.RunStatus    `json:"status"`
-	Revision      uint64              `json:"revision"`
-	Definition    DefinitionReference `json:"definition"`
-	CurrentNodeID string              `json:"currentNodeID,omitempty"`
-	NestedDepth   int                 `json:"nestedDepth"`
-	Budget        Budget              `json:"budget"`
-	Activations   []ActivationTrace   `json:"activations"`
-	Effects       []EffectTrace       `json:"effects"`
-	Waits         []WaitTrace         `json:"waits"`
-	Compensations []CompensationTrace `json:"compensations"`
-	Events        []TraceEvent        `json:"events"`
+	RunID         string                 `json:"runID"`
+	Status        kernel.RunStatus       `json:"status"`
+	Revision      uint64                 `json:"revision"`
+	Definition    DefinitionReference    `json:"definition"`
+	CurrentNodeID string                 `json:"currentNodeID,omitempty"`
+	NestedDepth   int                    `json:"nestedDepth"`
+	Budget        Budget                 `json:"budget"`
+	RuntimeBudget runtimebudget.Snapshot `json:"runtimeBudget"`
+	Activations   []ActivationTrace      `json:"activations"`
+	Effects       []EffectTrace          `json:"effects"`
+	Waits         []WaitTrace            `json:"waits"`
+	Compensations []CompensationTrace    `json:"compensations"`
+	Events        []TraceEvent           `json:"events"`
 }
 
 type ActivationTrace struct {
@@ -117,7 +119,7 @@ func (runner *Runner) TraceForActor(
 		Definition: DefinitionReference{
 			ID: state.Definition.ID, Revision: state.Definition.Revision, Hash: state.Definition.Hash,
 		},
-		NestedDepth: state.NestedDepth, Budget: state.Budget,
+		NestedDepth: state.NestedDepth, Budget: state.Budget, RuntimeBudget: RuntimeBudget(View(state)),
 		Activations:   make([]ActivationTrace, 0, len(state.Activations)),
 		Effects:       make([]EffectTrace, 0, len(state.Effects)),
 		Waits:         make([]WaitTrace, 0, len(state.Waits)),

@@ -9,6 +9,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
@@ -234,6 +235,7 @@ type Dependencies struct {
 	Effects         EffectExecutor
 	Registry        *DefinitionRegistry
 	Relations       runrelation.Recorder
+	Telemetry       []observability.Recorder
 	Ceiling         Limits
 	DeferResumption bool
 }
@@ -243,6 +245,7 @@ type Runner struct {
 	runtime     *kernel.Runtime
 	effects     EffectExecutor
 	relations   runrelation.Recorder
+	telemetry   *observability.Set
 	ceiling     Limits
 	deferResume bool
 	registry    *DefinitionRegistry
@@ -268,10 +271,14 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Effects == nil {
 		return nil, ErrInvalidExecution
 	}
+	telemetry, err := observability.NewSet(dependencies.Telemetry...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidExecution, err)
+	}
 	ceiling := normalizeCeiling(dependencies.Ceiling)
 	return &Runner{
 		runtime: dependencies.Runtime, effects: dependencies.Effects,
-		relations: dependencies.Relations, ceiling: ceiling,
+		relations: dependencies.Relations, telemetry: telemetry, ceiling: ceiling,
 		deferResume: dependencies.DeferResumption, registry: dependencies.Registry,
 	}, nil
 }
@@ -314,6 +321,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	runner.recordRunTelemetry(ctx, snapshot, state, observability.PhaseStarted)
 	return runner.runSegment(ctx, snapshot)
 }
 
@@ -577,11 +585,15 @@ func (runner *Runner) complete(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Result: &kernel.Result{ContentType: "application/json", Content: cloneJSON(result)},
 		Events: []kernel.EventDraft{{Type: "workflow.completed", Message: state.Definition.Hash}},
 	})
+	if err == nil {
+		runner.recordRunTelemetry(ctx, completed, state, observability.PhaseCompleted)
+	}
+	return completed, err
 }
 
 func workflowReturnValue(state executionState, node ReturnNode) (json.RawMessage, error) {

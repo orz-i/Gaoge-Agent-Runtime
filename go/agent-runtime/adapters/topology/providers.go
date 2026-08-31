@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
@@ -90,11 +91,10 @@ func (agentTopologyProvider) Topology(
 		return workbench.TopologyV1{}, true, err
 	}
 	data, err := topologyData(struct {
-		Model     string   `json:"model,omitempty"`
-		ToolKeys  []string `json:"toolKeys"`
-		LLMCalls  int      `json:"llmCalls"`
-		ToolCalls int      `json:"toolCalls"`
-	}{view.Model, view.ToolKeys, view.LLMCalls, view.ToolCalls})
+		Model    string                 `json:"model,omitempty"`
+		ToolKeys []string               `json:"toolKeys"`
+		Budget   runtimebudget.Snapshot `json:"budget"`
+	}{view.Model, view.ToolKeys, view.Budget})
 	if err != nil {
 		return workbench.TopologyV1{}, true, err
 	}

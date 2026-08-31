@@ -383,9 +383,9 @@ func (runner *Runner) executeEffectBatch(
 			var result EffectResult
 			var err error
 			if effect.Class == EffectClassSubworkflow && runner.registry != nil {
-				result, err = runner.executeSubworkflowEffect(ctx, request)
+				result, err = runner.executeObservedEffectFunc(ctx, request, runner.executeSubworkflowEffect)
 			} else {
-				result, err = runner.effects.Execute(ctx, request)
+				result, err = runner.executeObservedEffect(ctx, request)
 			}
 			outcomes[position] = effectOutcome{EffectIndex: effectIndex, Result: result, Err: err}
 		}()

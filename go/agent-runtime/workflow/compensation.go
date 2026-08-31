@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
 )
 
 var errCancellationRequested = errors.New("workflow cancellation requested")
@@ -179,9 +180,7 @@ func (runner *Runner) dispatchCompensation(
 		return runner.terminalizeCompensationFailure(ctx, snapshot, state, *compensation)
 	}
 	effect := &state.Effects[effectPosition]
-	result, err := runner.effects.Execute(
-		ctx, buildEffectRequest(snapshot.Run, state.Definition, *effect),
-	)
+	result, err := runner.executeObservedEffect(ctx, buildEffectRequest(snapshot.Run, state.Definition, *effect))
 	if err != nil {
 		if scheduleEffectRetry(effect, "workflow.compensation_dispatch", err) {
 			return runner.persistCompensationRetry(ctx, snapshot, state, compensation.ID)
@@ -329,5 +328,12 @@ func (runner *Runner) terminalizeFailure(
 		Status: status, State: encoded, ErrorCode: state.Failure.Code, ErrorDetail: state.Failure.Detail,
 		Events: []kernel.EventDraft{{Type: eventType, Message: state.Failure.Code}},
 	})
+	if err == nil {
+		phase := observability.PhaseFailed
+		if status == kernel.RunStatusCancelled {
+			phase = observability.PhaseCancelled
+		}
+		runner.recordRunTelemetry(ctx, terminal, state, phase)
+	}
 	return terminal, errors.Join(cause, err)
 }

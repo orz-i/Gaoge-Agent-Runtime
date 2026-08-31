@@ -1449,7 +1449,7 @@ func TestRunnerPreservesAssistantToolCallBatchBeforeOrderedResults(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(view.Messages) != 5 || view.LLMCalls != 2 || view.ToolCalls != 2 {
+	if len(view.Messages) != 5 || view.Budget.Usage.LLMCalls != 2 || view.Budget.Usage.ToolCalls != 2 {
 		t.Fatalf("view = %#v", view)
 	}
 	if view.Messages[1].ToolCalls[0].ID != callOne || view.Messages[2].ToolCallID != callOne {

@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -48,6 +50,21 @@ type ModelInvocation struct {
 	CreatedAt           time.Time             `json:"createdAt"`
 	CompletedAt         *time.Time            `json:"completedAt,omitempty"`
 	ConsumedAt          *time.Time            `json:"consumedAt,omitempty"`
+}
+
+func telemetryModelUsage(value *model.Usage) runtimebudget.Usage {
+	if value == nil {
+		return runtimebudget.Usage{}
+	}
+	total := value.InputTokens + value.OutputTokens
+	if value.InputTokens < 0 || value.OutputTokens < 0 || total < 0 {
+		total = 0
+	}
+	return runtimebudget.Usage{
+		InputTokens: value.InputTokens, OutputTokens: value.OutputTokens, TotalTokens: total,
+		CacheReadTokens: value.CacheReadTokens, CacheWriteTokens: value.CacheWriteTokens,
+		ReasoningTokens: value.ReasoningTokens,
+	}
 }
 
 func newModelInvocation(
@@ -277,15 +294,41 @@ func (runner *Runner) executeModelInvocation(
 		!runner.clock.Now().UTC().Before(invocation.ExecutionLeaseUntil.UTC()) {
 		return snapshot, state, ErrModelInvocationBusy
 	}
+	startedAt := runner.clock.Now().UTC()
+	runner.recordTelemetry(ctx, observability.Event{
+		Scope: observability.ScopeModelInvocation, Phase: observability.PhaseStarted,
+		RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
+		Status: string(snapshot.Run.Status), OperationID: invocation.ID,
+		Operation: "generate", Provider: invocation.Provider, Model: invocation.Model,
+		Attempt: int(invocation.ExecutionAttempt), ObservedAt: startedAt,
+	})
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
 	response, err := runner.generateModel(ctx, model.CloneRequest(invocation.Request))
 	if err != nil {
+		endedAt := runner.clock.Now().UTC()
+		runner.recordTelemetry(ctx, observability.Event{
+			Scope: observability.ScopeModelInvocation, Phase: observability.PhaseFailed,
+			RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
+			Status: string(snapshot.Run.Status), OperationID: invocation.ID,
+			Operation: "generate", Provider: invocation.Provider, Model: invocation.Model,
+			Attempt: int(invocation.ExecutionAttempt), ErrorCode: "provider_error",
+			ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
+		})
 		return snapshot, state, errors.Join(ErrModelFailure, err)
 	}
 	response.Content = strings.TrimSpace(response.Content)
 	if !validModelResponse(response) {
+		endedAt := runner.clock.Now().UTC()
+		runner.recordTelemetry(ctx, observability.Event{
+			Scope: observability.ScopeModelInvocation, Phase: observability.PhaseFailed,
+			RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
+			Status: string(snapshot.Run.Status), OperationID: invocation.ID,
+			Operation: "generate", Provider: invocation.Provider, Model: invocation.Model,
+			Attempt: int(invocation.ExecutionAttempt), ErrorCode: "invalid_response",
+			ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
+		})
 		return snapshot, state, ErrInvalidModelResponse
 	}
 	completedAt := runner.clock.Now().UTC()
@@ -309,8 +352,26 @@ func (runner *Runner) executeModelInvocation(
 		}},
 	})
 	if err != nil {
+		endedAt := runner.clock.Now().UTC()
+		runner.recordTelemetry(ctx, observability.Event{
+			Scope: observability.ScopeModelInvocation, Phase: observability.PhaseFailed,
+			RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
+			Status: string(snapshot.Run.Status), OperationID: invocation.ID,
+			Operation: "generate", Provider: invocation.Provider, Model: invocation.Model,
+			ResponseID: response.ResponseID, Attempt: int(invocation.ExecutionAttempt), ErrorCode: "receipt_persist_failed",
+			ObservedAt: endedAt, Duration: endedAt.Sub(startedAt), Usage: telemetryModelUsage(response.Usage),
+		})
 		return snapshot, state, err
 	}
+	endedAt := runner.clock.Now().UTC()
+	runner.recordTelemetry(ctx, observability.Event{
+		Scope: observability.ScopeModelInvocation, Phase: observability.PhaseCompleted,
+		RunID: next.Run.ID, RunKind: RunKind, Revision: next.Run.Revision,
+		Status: string(next.Run.Status), OperationID: invocation.ID,
+		Operation: "generate", Provider: invocation.Provider, Model: invocation.Model,
+		ResponseID: response.ResponseID, Attempt: int(invocation.ExecutionAttempt), ObservedAt: endedAt,
+		Duration: endedAt.Sub(startedAt), Usage: telemetryModelUsage(response.Usage),
+	})
 	runner.publish(ctx, next.Run.ID, plugin.Event{
 		Type: EventModelCompleted, Revision: next.Run.Revision, Status: string(next.Run.Status),
 	})
