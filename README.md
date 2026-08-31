@@ -5,7 +5,7 @@ agents. It separates the deterministic run state machine from optional agent,
 harness, HTTP, protocol, and persistence capabilities.
 
 This repository is the canonical public source. The current release line is
-`v0.1.0-beta.4` and should be treated as a Beta API.
+`v0.1.0-beta.5` and should be treated as a Beta API.
 
 ## Packages
 
@@ -25,8 +25,8 @@ This repository is the canonical public source. The current release line is
 ## Install
 
 ```bash
-go get github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime@v0.1.0-beta.4
-pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.4/orz-i-agent-runtime-client-0.1.0-beta.4.tgz
+go get github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime@v0.1.0-beta.5
+pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.5/orz-i-agent-runtime-client-0.1.0-beta.5.tgz
 ```
 
 Prereleases are distributed through Go module tags and GitHub Release archives.

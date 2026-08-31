@@ -4,7 +4,7 @@ go 1.26
 
 require (
 	github.com/a2aproject/a2a-go/v2 v2.4.0
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.4
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.5
 )
 
 require (

@@ -3,7 +3,7 @@ module github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness
 go 1.26
 
 require (
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.4
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.5
 	github.com/stretchr/testify v1.12.1
 )
 
