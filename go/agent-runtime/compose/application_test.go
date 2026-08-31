@@ -36,6 +36,80 @@ func TestApplicationValidatesCapabilitiesAndWorkerOrder(t *testing.T) {
 	}
 }
 
+type contextAwareWorker struct {
+	name               string
+	startCalls         int
+	closeCalls         int
+	failCancelledStart bool
+	closeSawCancelled  bool
+}
+
+func (worker *contextAwareWorker) Descriptor() kernel.FeatureDescriptor {
+	return kernel.FeatureDescriptor{Name: worker.name}
+}
+
+func (worker *contextAwareWorker) Start(ctx context.Context) error {
+	worker.startCalls++
+	if worker.failCancelledStart && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return nil
+}
+
+func (worker *contextAwareWorker) Close(ctx context.Context) error {
+	worker.closeCalls++
+	worker.closeSawCancelled = ctx.Err() != nil
+	return ctx.Err()
+}
+
+func TestApplicationCancelledStartRollsBackWithDetachedContextAndCanRetry(t *testing.T) {
+	t.Parallel()
+	first := &contextAwareWorker{name: "first"}
+	second := &contextAwareWorker{name: "second", failCancelledStart: true}
+	application, err := compose.New(first, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err = application.Start(cancelled); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled start = %v", err)
+	}
+	if first.closeCalls != 1 || first.closeSawCancelled {
+		t.Fatalf("rollback close calls=%d sawCancelled=%v", first.closeCalls, first.closeSawCancelled)
+	}
+	if err = application.Start(context.Background()); err != nil {
+		t.Fatalf("retry after proven rollback: %v", err)
+	}
+	if first.startCalls != 2 || second.startCalls != 2 {
+		t.Fatalf("retry starts first=%d second=%d", first.startCalls, second.startCalls)
+	}
+	if err = application.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplicationFailedRollbackPoisonsApplicationClosed(t *testing.T) {
+	t.Parallel()
+	rollbackFailure := errors.New("rollback failed")
+	startFailure := errors.New("start failed")
+	first := &testWorker{name: "first", closeErr: rollbackFailure}
+	second := &testWorker{name: "second", startErr: startFailure, startFailures: 1}
+	application, err := compose.New(first, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = application.Start(context.Background()); !errors.Is(err, startFailure) || !errors.Is(err, rollbackFailure) {
+		t.Fatalf("failed start/rollback = %v", err)
+	}
+	if err = application.Start(context.Background()); !errors.Is(err, compose.ErrClosed) {
+		t.Fatalf("retry after uncertain rollback = %v", err)
+	}
+	if err = application.Close(context.Background()); err != nil {
+		t.Fatalf("close poisoned application = %v", err)
+	}
+}
+
 func TestApplicationStartFailureRollsBackAndCanRetry(t *testing.T) {
 	t.Parallel()
 	log := make([]string, 0)

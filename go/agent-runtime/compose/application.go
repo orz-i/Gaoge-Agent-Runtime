@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
+
+const lifecycleRollbackTimeout = 5 * time.Second
 
 var (
 	ErrInvalidFeature      = errors.New("invalid runtime feature")
@@ -72,8 +75,10 @@ func (application *Application) Start(ctx context.Context) error {
 	started := make([]kernel.WorkerFeature, 0, len(workers))
 	for _, worker := range workers {
 		if err := worker.Start(ctx); err != nil {
-			rollbackErr := closeWorkers(ctx, started)
-			application.finishStart(false)
+			rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lifecycleRollbackTimeout)
+			rollbackErr := closeWorkers(rollbackCtx, started)
+			cancel()
+			application.finishFailedStart(rollbackErr == nil)
 			return errors.Join(err, rollbackErr)
 		}
 		started = append(started, worker)
@@ -117,6 +122,19 @@ func (application *Application) finishStart(succeeded bool) {
 		return
 	}
 	application.state = lifecycleNew
+}
+
+// finishFailedStart publishes whether rollback proved that no worker remains
+// active. A failed rollback poisons the Application closed: retrying Start when
+// worker state is unknown could duplicate background workers or resources.
+func (application *Application) finishFailedStart(rollbackSucceeded bool) {
+	application.mu.Lock()
+	defer application.mu.Unlock()
+	if rollbackSucceeded {
+		application.state = lifecycleNew
+		return
+	}
+	application.state = lifecycleClosed
 }
 
 // Features returns the immutable composed feature descriptors.
