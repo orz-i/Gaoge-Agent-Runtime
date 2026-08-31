@@ -79,6 +79,14 @@ continuation projector
   acknowledge outbox record
 ```
 
+The outbox is not a second copy of every ordinary transition. Feature code sets
+the feature-neutral `EventDraft.Wakeup` transaction marker on facts that require
+future resumption, and terminal transitions are retained automatically because
+they may wake a durable parent relation. The marker is not persisted into the
+public Event journal. This keeps Kernel unaware of event semantics while
+avoiding unbounded irrelevant outbox state in hosts that do not compose
+continuation for a given Run kind.
+
 The Kernel Store persists the outbox record because atomicity is a
 feature-neutral durability requirement. The record contains committed Run
 identity/revision/status and the event drafts needed by projectors; it does not

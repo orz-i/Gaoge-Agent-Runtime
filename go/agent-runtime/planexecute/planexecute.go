@@ -419,7 +419,9 @@ func (runner *Runner) approvePlan(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: eventType, Message: message}},
+		Events: []kernel.EventDraft{{
+			Type: eventType, Message: message, Wakeup: eventType == "plan.approved",
+		}},
 	})
 }
 

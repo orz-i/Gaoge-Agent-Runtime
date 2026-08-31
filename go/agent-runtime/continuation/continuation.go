@@ -93,6 +93,13 @@ type Reconciler interface {
 	Reconcile(context.Context) error
 }
 
+// Projector drains feature-neutral committed transitions into durable
+// continuation Jobs. The Store outbox, not an in-memory callback, is the source
+// of truth for projection work.
+type Projector interface {
+	Project(context.Context) error
+}
+
 func normalizePayload(payload Payload) (Payload, error) {
 	payload.RunID = strings.TrimSpace(payload.RunID)
 	payload.SourceRunID = strings.TrimSpace(payload.SourceRunID)

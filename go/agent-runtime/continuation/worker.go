@@ -19,6 +19,7 @@ type WorkerOptions struct {
 	WorkerID          string
 	PollInterval      time.Duration
 	ClaimLimit        int
+	Projector         Projector
 	Reconciler        Reconciler
 	ReconcileInterval time.Duration
 	Report            ErrorReporter
@@ -116,6 +117,9 @@ func (worker *Worker) loop(ctx context.Context, done chan<- struct{}) {
 	defer ticker.Stop()
 	nextReconcile := time.Time{}
 	for {
+		if worker.options.Projector != nil {
+			worker.report(worker.options.Projector.Project(ctx))
+		}
 		if worker.options.Reconciler != nil && !time.Now().Before(nextReconcile) {
 			worker.report(worker.options.Reconciler.Reconcile(ctx))
 			nextReconcile = time.Now().Add(worker.options.ReconcileInterval)

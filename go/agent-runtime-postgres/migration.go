@@ -11,7 +11,8 @@ var ErrNilDatabase = errors.New("postgres kernel store database is nil")
 
 func Models() []interface{} {
 	return []interface{}{
-		&models.KernelRunRecord{}, &models.KernelEventRecord{}, &models.RunRelationRecord{},
+		&models.KernelRunRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
+		&models.RunRelationRecord{},
 		&models.WorkflowDefinitionRevisionRecord{}, &models.WorkflowDefinitionHeadRecord{},
 	}
 }

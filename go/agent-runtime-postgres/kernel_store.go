@@ -4,17 +4,30 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // KernelStore persists only the feature-neutral Kernel aggregate.
 type KernelStore struct {
 	db *gorm.DB
+}
+
+func (store *KernelStore) kernelTransitionMissingOrConflict(db *gorm.DB, transitionID string) error {
+	var count int64
+	if err := db.Model(&models.KernelTransitionOutboxRecord{}).Where("id = ?", transitionID).Count(&count).Error; err != nil {
+		return translateKernelError(err)
+	}
+	if count == 0 {
+		return kernel.ErrNotFound
+	}
+	return kernel.ErrConflict
 }
 
 func isKernelUniqueConstraint(err error) bool {
@@ -48,7 +61,10 @@ func (store *KernelStore) applyKernelMutation(
 		return translateKernelError(err)
 	}
 	firstSeq := persisted.LastEventSeq - int64(len(mutation.Events))
-	return createKernelEvents(db, runID, firstSeq, mutation.Record.Run.UpdatedAt, mutation.Events)
+	if err := createKernelEvents(db, runID, firstSeq, mutation.Record.Run.UpdatedAt, mutation.Events); err != nil {
+		return err
+	}
+	return createKernelTransition(db, mutation.Record.Run, mutation.Events)
 }
 
 const (
@@ -93,7 +109,10 @@ func (store *KernelStore) Create(
 		if createErr := tx.Create(&model).Error; createErr != nil {
 			return translateKernelError(createErr)
 		}
-		return createKernelEvents(tx, record.Run.ID, 0, record.Run.UpdatedAt, events)
+		if createErr := createKernelEvents(tx, record.Run.ID, 0, record.Run.UpdatedAt, events); createErr != nil {
+			return createErr
+		}
+		return createKernelTransition(tx, record.Run, events)
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -146,6 +165,97 @@ func (store *KernelStore) Apply(
 		return kernel.Snapshot{}, err
 	}
 	return store.Load(ctx, runID)
+}
+
+// ClaimTransitions leases committed transitions to one projector. PostgreSQL
+// uses row locks with SKIP LOCKED so multiple projector workers can drain the
+// same outbox without serializing unrelated rows; SQLite conformance tests use
+// the same transaction without the PostgreSQL-only locking clause.
+func (store *KernelStore) ClaimTransitions(
+	ctx context.Context,
+	request kernel.TransitionClaimRequest,
+) ([]kernel.TransitionClaim, error) {
+	if store == nil || store.db == nil || strings.TrimSpace(request.WorkerID) == "" || request.Limit <= 0 ||
+		request.LeaseDuration <= 0 || request.Now.IsZero() {
+		return nil, kernel.ErrInvalidInput
+	}
+	var claims []kernel.TransitionClaim
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Where("available_at <= ? AND (lease_until IS NULL OR lease_until <= ?)", request.Now.UTC(), request.Now.UTC()).
+			Order("available_at ASC, committed_at ASC, id ASC").Limit(request.Limit)
+		if tx.Name() == "postgres" {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+		}
+		var records []models.KernelTransitionOutboxRecord
+		if err := query.Find(&records).Error; err != nil {
+			return translateKernelError(err)
+		}
+		claims = make([]kernel.TransitionClaim, 0, len(records))
+		for _, record := range records {
+			record.Attempts++
+			record.WorkerID = strings.TrimSpace(request.WorkerID)
+			record.LeaseID = fmt.Sprintf("%s:%s:%d", record.WorkerID, record.ID, record.Attempts)
+			leaseUntil := request.Now.UTC().Add(request.LeaseDuration)
+			record.LeaseUntil = &leaseUntil
+			result := tx.Model(&models.KernelTransitionOutboxRecord{}).
+				Where("id = ? AND attempts = ?", record.ID, record.Attempts-1).
+				Updates(map[string]interface{}{
+					"attempts": record.Attempts, "worker_id": record.WorkerID,
+					"lease_id": record.LeaseID, "lease_until": leaseUntil,
+				})
+			if result.Error != nil {
+				return translateKernelApplyError(result.Error)
+			}
+			if result.RowsAffected != 1 {
+				return kernel.ErrConflict
+			}
+			transition, err := kernelTransitionFrom(record)
+			if err != nil {
+				return err
+			}
+			claims = append(claims, kernel.TransitionClaim{
+				Transition: transition, LeaseID: record.LeaseID, WorkerID: record.WorkerID, LeaseUntil: leaseUntil,
+			})
+		}
+		return nil
+	})
+	return claims, err
+}
+
+// AckTransition removes one successfully projected committed transition.
+func (store *KernelStore) AckTransition(ctx context.Context, request kernel.TransitionLeaseRequest) error {
+	if store == nil || store.db == nil || !validKernelTransitionLease(request) {
+		return kernel.ErrInvalidInput
+	}
+	result := store.db.WithContext(ctx).Where(
+		"id = ? AND lease_id = ? AND worker_id = ?", request.TransitionID, request.LeaseID, request.WorkerID,
+	).Delete(&models.KernelTransitionOutboxRecord{})
+	if result.Error != nil {
+		return translateKernelError(result.Error)
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	return store.kernelTransitionMissingOrConflict(store.db.WithContext(ctx), request.TransitionID)
+}
+
+// RetryTransition releases a failed projection for later retry.
+func (store *KernelStore) RetryTransition(ctx context.Context, request kernel.TransitionRetryRequest) error {
+	if store == nil || store.db == nil || !validKernelTransitionLease(request.TransitionLeaseRequest) {
+		return kernel.ErrInvalidInput
+	}
+	result := store.db.WithContext(ctx).Model(&models.KernelTransitionOutboxRecord{}).
+		Where("id = ? AND lease_id = ? AND worker_id = ?", request.TransitionID, request.LeaseID, request.WorkerID).
+		Updates(map[string]interface{}{
+			"available_at": request.AvailableAt.UTC(), "lease_id": "", "worker_id": "", "lease_until": nil,
+		})
+	if result.Error != nil {
+		return translateKernelError(result.Error)
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	return store.kernelTransitionMissingOrConflict(store.db.WithContext(ctx), request.TransitionID)
 }
 
 func (store *KernelStore) kernelMissingOrConflict(db *gorm.DB, runID string) error {
@@ -223,6 +333,39 @@ func createKernelEvents(
 		})
 	}
 	return translateKernelError(db.Create(&records).Error)
+}
+
+func createKernelTransition(db *gorm.DB, run kernel.Run, drafts []kernel.EventDraft) error {
+	if !kernel.NeedsTransitionProjection(run.Status, drafts) {
+		return nil
+	}
+	encoded, err := json.Marshal(drafts)
+	if err != nil {
+		return errKernelEventJSON
+	}
+	record := models.KernelTransitionOutboxRecord{
+		ID: fmt.Sprintf("%s:%d", run.ID, run.Revision), RunID: run.ID,
+		Kind: string(run.Kind), Status: string(run.Status), Revision: run.Revision,
+		EventsJSON: string(encoded), CommittedAt: run.UpdatedAt.UTC(), AvailableAt: run.UpdatedAt.UTC(),
+	}
+	return translateKernelError(db.Create(&record).Error)
+}
+
+func kernelTransitionFrom(record models.KernelTransitionOutboxRecord) (kernel.CommittedTransition, error) {
+	var drafts []kernel.EventDraft
+	if err := json.Unmarshal([]byte(record.EventsJSON), &drafts); err != nil {
+		return kernel.CommittedTransition{}, errPersistedKernelEventJSON
+	}
+	return kernel.CommittedTransition{
+		ID: record.ID, RunID: record.RunID, Kind: kernel.RunKind(record.Kind),
+		Status: kernel.RunStatus(record.Status), Revision: record.Revision,
+		Events: drafts, CommittedAt: record.CommittedAt.UTC(), Attempts: record.Attempts,
+	}, nil
+}
+
+func validKernelTransitionLease(request kernel.TransitionLeaseRequest) bool {
+	return strings.TrimSpace(request.TransitionID) != "" && strings.TrimSpace(request.LeaseID) != "" &&
+		strings.TrimSpace(request.WorkerID) != ""
 }
 
 func kernelSnapshotFrom(

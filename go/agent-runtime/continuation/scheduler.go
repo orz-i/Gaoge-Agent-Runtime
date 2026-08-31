@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -17,26 +18,30 @@ type ErrorReporter func(error)
 
 // Scheduler converts committed Kernel transitions into idempotent delivery Jobs.
 type Scheduler struct {
+	outbox    kernel.TransitionOutbox
 	queue     Enqueuer
 	relations interface {
 		GetByChild(context.Context, string) (runrelation.Relation, error)
 		ListAll(context.Context) ([]runrelation.Relation, error)
 	}
 	runs      SnapshotLoader
-	report    ErrorReporter
+	clock     kernel.Clock
+	workerID  string
 	jobPolicy queuecore.Policy
 	triggers  map[kernel.RunKind]SelfTriggerResolver
 }
 
 // SchedulerDependencies explicitly provide transition projection dependencies.
 type SchedulerDependencies struct {
+	Outbox    kernel.TransitionOutbox
 	Queue     Enqueuer
 	Relations interface {
 		GetByChild(context.Context, string) (runrelation.Relation, error)
 		ListAll(context.Context) ([]runrelation.Relation, error)
 	}
-	Runs   SnapshotLoader
-	Report ErrorReporter
+	Runs        SnapshotLoader
+	Clock       kernel.Clock
+	ProjectorID string
 }
 
 // Reconcile reprojects terminal children from durable relations. Existing queue
@@ -59,18 +64,54 @@ func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 			result = errors.Join(result, loadErr)
 			continue
 		}
-		scheduleErr := scheduler.scheduleRelation(ctx, relation, child)
-		if !errors.Is(scheduleErr, queuecore.ErrConflict) {
-			result = errors.Join(result, scheduleErr)
-		}
+		result = errors.Join(result, scheduler.scheduleRelation(ctx, relation, child.Run.ID, child.Run.Revision))
 	}
 	return result
 }
 
-// NewScheduler creates a committed-transition observer.
+// Project drains the durable committed-transition outbox. Queue identity makes
+// retry after enqueue-before-ack idempotent: a duplicate queue conflict is a
+// successful logical handoff and the outbox record can then be acknowledged.
+func (scheduler *Scheduler) Project(ctx context.Context) error {
+	if scheduler == nil || scheduler.outbox == nil {
+		return ErrInvalidInput
+	}
+	now := scheduler.clock.Now().UTC()
+	claims, err := scheduler.outbox.ClaimTransitions(ctx, kernel.TransitionClaimRequest{
+		WorkerID: scheduler.workerID, Limit: 32, LeaseDuration: 30 * time.Second, Now: now,
+	})
+	if err != nil {
+		return err
+	}
+	var result error
+	for _, claim := range claims {
+		projectErr := scheduler.projectTransition(ctx, claim.Transition)
+		lease := kernel.TransitionLeaseRequest{
+			TransitionID: claim.Transition.ID, LeaseID: claim.LeaseID, WorkerID: claim.WorkerID,
+		}
+		if projectErr == nil {
+			result = errors.Join(result, scheduler.outbox.AckTransition(ctx, lease))
+			continue
+		}
+		retryErr := scheduler.outbox.RetryTransition(ctx, kernel.TransitionRetryRequest{
+			TransitionLeaseRequest: lease,
+			AvailableAt:            now.Add(projectionBackoff(claim.Transition.Attempts)),
+		})
+		result = errors.Join(result, projectErr, retryErr)
+	}
+	return result
+}
+
+// NewScheduler creates a durable committed-transition projector.
 func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRegistration) (*Scheduler, error) {
-	if dependencies.Queue == nil || dependencies.Relations == nil || dependencies.Runs == nil {
+	if dependencies.Outbox == nil || dependencies.Queue == nil || dependencies.Relations == nil || dependencies.Runs == nil {
 		return nil, ErrInvalidInput
+	}
+	if dependencies.Clock == nil {
+		dependencies.Clock = schedulerClock{}
+	}
+	if strings.TrimSpace(dependencies.ProjectorID) == "" {
+		dependencies.ProjectorID = randomWorkerID() + "-projector"
 	}
 	triggers := make(map[kernel.RunKind]SelfTriggerResolver, len(registrations))
 	for _, registration := range registrations {
@@ -83,8 +124,8 @@ func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRe
 		triggers[registration.kind] = registration.resolver
 	}
 	return &Scheduler{
-		queue: dependencies.Queue, relations: dependencies.Relations, runs: dependencies.Runs,
-		report: dependencies.Report, triggers: triggers,
+		outbox: dependencies.Outbox, queue: dependencies.Queue, relations: dependencies.Relations, runs: dependencies.Runs,
+		clock: dependencies.Clock, workerID: strings.TrimSpace(dependencies.ProjectorID), triggers: triggers,
 		jobPolicy: queuecore.Policy{
 			MaxAttempts: 8, VisibilityTimeout: 2 * time.Minute,
 			InitialBackoff: 250 * time.Millisecond, MaxBackoff: 30 * time.Second, BackoffMultiplier: 2,
@@ -92,29 +133,23 @@ func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRe
 	}, nil
 }
 
-// ObserveTransition implements kernel.TransitionSink. Scheduling cannot roll back
-// the transition; failures are reported and callers may reconcile from durable facts.
-func (scheduler *Scheduler) ObserveTransition(ctx context.Context, transition kernel.Transition) {
-	if scheduler == nil {
-		return
-	}
-	deliveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-	defer cancel()
-	if terminal(transition.Current.Run.Status) {
-		scheduler.reportError(scheduler.scheduleOwningParent(deliveryCtx, transition.Current))
+func (scheduler *Scheduler) projectTransition(ctx context.Context, transition kernel.CommittedTransition) error {
+	var result error
+	if terminal(transition.Status) {
+		result = errors.Join(result, scheduler.scheduleOwningParent(ctx, transition))
 	}
 	for _, event := range transition.Events {
-		trigger, ok := scheduler.selfTrigger(transition.Current.Run.Kind, event)
+		trigger, ok := scheduler.selfTrigger(transition.Kind, event)
 		if !ok {
 			continue
 		}
-		payload := Payload{
-			SchemaVersion: SchemaVersion, RunID: transition.Current.Run.ID,
-			ExpectedRevision: transition.Current.Run.Revision, Trigger: trigger,
-			SourceRunID: transition.Current.Run.ID, SourceRevision: transition.Current.Run.Revision,
-		}
-		scheduler.reportError(scheduler.Schedule(deliveryCtx, payload))
+		result = errors.Join(result, scheduler.Schedule(ctx, Payload{
+			SchemaVersion: SchemaVersion, RunID: transition.RunID,
+			ExpectedRevision: transition.Revision, Trigger: trigger,
+			SourceRunID: transition.RunID, SourceRevision: transition.Revision,
+		}))
 	}
+	return result
 }
 
 // Schedule creates or reuses one immutable continuation Job.
@@ -133,26 +168,27 @@ func (scheduler *Scheduler) Schedule(ctx context.Context, payload Payload) error
 	_, err = scheduler.queue.Enqueue(ctx, queuecore.EnqueueRequest{
 		Queue: QueueName, ClientJobID: clientJobID(normalized), Kind: JobKind,
 		Payload: encoded, Priority: triggerPriority(normalized.Trigger),
-		AvailableAt: continuationAvailableAt(normalized.Trigger), Policy: scheduler.jobPolicy,
+		AvailableAt: scheduler.continuationAvailableAt(normalized.Trigger), Policy: scheduler.jobPolicy,
 	})
 	return err
 }
 
-func (scheduler *Scheduler) scheduleOwningParent(ctx context.Context, child kernel.Snapshot) error {
-	relation, err := scheduler.relations.GetByChild(ctx, child.Run.ID)
+func (scheduler *Scheduler) scheduleOwningParent(ctx context.Context, child kernel.CommittedTransition) error {
+	relation, err := scheduler.relations.GetByChild(ctx, child.RunID)
 	if errors.Is(err, runrelation.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return scheduler.scheduleRelation(ctx, relation, child)
+	return scheduler.scheduleRelation(ctx, relation, child.RunID, child.Revision)
 }
 
 func (scheduler *Scheduler) scheduleRelation(
 	ctx context.Context,
 	relation runrelation.Relation,
-	child kernel.Snapshot,
+	childRunID string,
+	childRevision uint64,
 ) error {
 	parent, err := scheduler.runs.Load(ctx, relation.ParentRunID)
 	if errors.Is(err, kernel.ErrNotFound) {
@@ -164,14 +200,8 @@ func (scheduler *Scheduler) scheduleRelation(
 	return scheduler.Schedule(ctx, Payload{
 		SchemaVersion: SchemaVersion, RunID: parent.Run.ID,
 		ExpectedRevision: parent.Run.Revision, Trigger: TriggerChildTerminal,
-		SourceRunID: child.Run.ID, SourceRevision: child.Run.Revision,
+		SourceRunID: childRunID, SourceRevision: childRevision,
 	})
-}
-
-func (scheduler *Scheduler) reportError(err error) {
-	if err != nil && scheduler.report != nil {
-		scheduler.report(err)
-	}
 }
 
 func (scheduler *Scheduler) selfTrigger(kind kernel.RunKind, event kernel.EventDraft) (Trigger, bool) {
@@ -199,12 +229,27 @@ func triggerPriority(trigger Trigger) int {
 	}
 }
 
-func continuationAvailableAt(trigger Trigger) time.Time {
+func (scheduler *Scheduler) continuationAvailableAt(trigger Trigger) time.Time {
 	if trigger == TriggerChildTerminal {
 		// A child may finish inside its parent's synchronous call stack. A short grace
 		// window lets that stack commit first; the frozen parent revision then makes
 		// the queued delivery a harmless stale no-op.
-		return time.Now().UTC().Add(250 * time.Millisecond)
+		return scheduler.clock.Now().UTC().Add(250 * time.Millisecond)
 	}
 	return time.Time{}
 }
+
+func projectionBackoff(attempt uint32) time.Duration {
+	backoff := 250 * time.Millisecond
+	for index := uint32(1); index < attempt && backoff < 30*time.Second; index++ {
+		backoff *= 2
+	}
+	if backoff > 30*time.Second {
+		return 30 * time.Second
+	}
+	return backoff
+}
+
+type schedulerClock struct{}
+
+func (schedulerClock) Now() time.Time { return time.Now() }

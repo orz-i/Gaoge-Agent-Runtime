@@ -32,6 +32,7 @@ func RunKernelStoreSuite(t *testing.T, factory KernelStoreFactory) {
 	t.Run("checkpoint-result-isolation", func(t *testing.T) { testCheckpointResultIsolation(t, factory(t)) })
 	t.Run("cas-and-events", func(t *testing.T) { testCASAndEvents(t, factory(t)) })
 	t.Run("concurrent-cas", func(t *testing.T) { testConcurrentCAS(t, factory(t)) })
+	t.Run("transition-outbox", func(t *testing.T) { testTransitionOutbox(t, factory(t)) })
 }
 
 func testCheckpointResultIsolation(t *testing.T, store kernel.Store) {
@@ -178,6 +179,75 @@ func testConcurrentCAS(t *testing.T, store kernel.Store) {
 	}
 	if winners != 1 || conflicts != workers-1 {
 		t.Fatalf("unexpected CAS outcomes: winners=%d conflicts=%d", winners, conflicts)
+	}
+}
+
+func testTransitionOutbox(t *testing.T, store kernel.Store) {
+	t.Helper()
+	ordinary := conformanceRecord("run_outbox_ordinary")
+	if _, err := store.Create(context.Background(), ordinary, []kernel.EventDraft{{Type: "run.observed"}}); err != nil {
+		t.Fatalf("create ordinary transition: %v", err)
+	}
+	if claims, err := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "ordinary-projector", Limit: 4, LeaseDuration: time.Minute, Now: ordinary.Run.UpdatedAt,
+	}); err != nil || len(claims) != 0 {
+		t.Fatalf("ordinary transition should not enter outbox: %#v, %v", claims, err)
+	}
+
+	record := conformanceRecord("run_outbox")
+	events := []kernel.EventDraft{{Type: "resume.ready", Data: json.RawMessage(`{"value":1}`), Wakeup: true}}
+	if _, err := store.Create(context.Background(), record, events); err != nil {
+		t.Fatalf("create outbox record: %v", err)
+	}
+	events[0].Data[1] = 'x'
+	now := record.Run.UpdatedAt
+	claims, err := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-1", Limit: 4, LeaseDuration: time.Minute, Now: now,
+	})
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim transition: %#v, %v", claims, err)
+	}
+	claim := claims[0]
+	if claim.Transition.ID != "run_outbox:1" || claim.Transition.RunID != record.Run.ID ||
+		claim.Transition.Revision != 1 || claim.Transition.Attempts != 1 || len(claim.Transition.Events) != 1 ||
+		string(claim.Transition.Events[0].Data) != conformanceValueJSON {
+		t.Fatalf("unexpected committed transition: %#v", claim)
+	}
+	if again, claimErr := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-2", Limit: 4, LeaseDuration: time.Minute, Now: now.Add(30 * time.Second),
+	}); claimErr != nil || len(again) != 0 {
+		t.Fatalf("active lease was claimed twice: %#v, %v", again, claimErr)
+	}
+	retryAt := now.Add(2 * time.Minute)
+	lease := kernel.TransitionLeaseRequest{
+		TransitionID: claim.Transition.ID, LeaseID: claim.LeaseID, WorkerID: claim.WorkerID,
+	}
+	if err = store.RetryTransition(context.Background(), kernel.TransitionRetryRequest{
+		TransitionLeaseRequest: lease, AvailableAt: retryAt,
+	}); err != nil {
+		t.Fatalf("retry transition: %v", err)
+	}
+	if early, claimErr := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-2", Limit: 4, LeaseDuration: time.Minute, Now: retryAt.Add(-time.Second),
+	}); claimErr != nil || len(early) != 0 {
+		t.Fatalf("transition became available early: %#v, %v", early, claimErr)
+	}
+	claims, err = store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-2", Limit: 4, LeaseDuration: time.Minute, Now: retryAt,
+	})
+	if err != nil || len(claims) != 1 || claims[0].Transition.Attempts != 2 {
+		t.Fatalf("reclaim transition: %#v, %v", claims, err)
+	}
+	claim = claims[0]
+	if err = store.AckTransition(context.Background(), kernel.TransitionLeaseRequest{
+		TransitionID: claim.Transition.ID, LeaseID: claim.LeaseID, WorkerID: claim.WorkerID,
+	}); err != nil {
+		t.Fatalf("ack transition: %v", err)
+	}
+	if afterAck, claimErr := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-3", Limit: 4, LeaseDuration: time.Minute, Now: retryAt.Add(2 * time.Minute),
+	}); claimErr != nil || len(afterAck) != 0 {
+		t.Fatalf("acknowledged transition was redelivered: %#v, %v", afterAck, claimErr)
 	}
 }
 

@@ -595,7 +595,9 @@ func (runner *Runner) applyEffectOutcomes(
 		}
 		yielded, applyErr := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-			Events: []kernel.EventDraft{{Type: "workflow.segment.yielded", Message: reason}},
+			Events: []kernel.EventDraft{{
+				Type: "workflow.segment.yielded", Message: reason, Wakeup: reason != "effect_pending",
+			}},
 		})
 		return yielded, true, errors.Join(ErrEffectPending, applyErr)
 	}

@@ -41,6 +41,26 @@ type KernelEventRecord struct {
 
 func (KernelEventRecord) TableName() string { return "agent_kernel_events" }
 
+// KernelTransitionOutboxRecord stores one feature-neutral committed Run
+// transition until all composed projectors have durably handed it off. V1 has
+// one continuation projector, so acknowledgement removes the row.
+type KernelTransitionOutboxRecord struct {
+	ID          string     `gorm:"size:160;primaryKey"`
+	RunID       string     `gorm:"size:64;not null;index:idx_agent_kernel_transition_run;uniqueIndex:idx_agent_kernel_transition_revision,priority:1"`
+	Kind        string     `gorm:"size:32;not null"`
+	Status      string     `gorm:"size:32;not null"`
+	Revision    uint64     `gorm:"not null;uniqueIndex:idx_agent_kernel_transition_revision,priority:2"`
+	EventsJSON  string     `gorm:"type:text;not null"`
+	CommittedAt time.Time  `gorm:"not null;index:idx_agent_kernel_transition_ready,priority:2"`
+	AvailableAt time.Time  `gorm:"not null;index:idx_agent_kernel_transition_ready,priority:1"`
+	Attempts    uint32     `gorm:"not null;default:0"`
+	LeaseID     string     `gorm:"size:256;not null;default:''"`
+	WorkerID    string     `gorm:"size:128;not null;default:''"`
+	LeaseUntil  *time.Time `gorm:"index:idx_agent_kernel_transition_lease"`
+}
+
+func (KernelTransitionOutboxRecord) TableName() string { return "agent_kernel_transition_outbox" }
+
 // RunRelationRecord stores immutable parent/child Run ownership.
 type RunRelationRecord struct {
 	ChildRunID  string    `gorm:"size:64;primaryKey"`

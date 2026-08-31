@@ -1243,7 +1243,7 @@ func (runner *Runner) resumeApproved(
 	}
 	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: "interaction.resolved", Message: "Tool call approved"}},
+		Events: []kernel.EventDraft{{Type: "interaction.resolved", Message: "Tool call approved", Wakeup: true}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -1275,7 +1275,7 @@ func (runner *Runner) resumeRejected(
 	}
 	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.rejected", Message: "Tool call rejected"}},
+		Events: []kernel.EventDraft{{Type: "tool.rejected", Message: "Tool call rejected", Wakeup: true}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err

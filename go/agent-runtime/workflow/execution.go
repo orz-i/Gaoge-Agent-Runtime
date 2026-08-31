@@ -360,7 +360,7 @@ func (runner *Runner) ResolveWait(
 	}
 	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: "workflow.wait.resolved", Message: waitID}},
+		Events: []kernel.EventDraft{{Type: "workflow.wait.resolved", Message: waitID, Wakeup: true}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -606,7 +606,7 @@ func (runner *Runner) yield(
 	}
 	yielded, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "workflow.segment.yielded", Message: reason}},
+		Events: []kernel.EventDraft{{Type: "workflow.segment.yielded", Message: reason, Wakeup: true}},
 	})
 	return yielded, errors.Join(ErrSegmentYielded, err)
 }
