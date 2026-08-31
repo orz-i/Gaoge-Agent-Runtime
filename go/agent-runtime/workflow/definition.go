@@ -8,6 +8,8 @@ import (
 	"errors"
 	"sort"
 	"strings"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 )
 
 var (
@@ -275,6 +277,12 @@ func normalizeNode(node Node) Node {
 func validateDefinitionDraft(draft DefinitionDraft) error {
 	if !validDefinitionEnvelope(draft) {
 		return ErrInvalidDefinition
+	}
+	if _, err := jsoncontract.Compile(draft.InputSchema); err != nil {
+		return errors.Join(ErrInvalidDefinition, err)
+	}
+	if _, err := jsoncontract.Compile(draft.OutputSchema); err != nil {
+		return errors.Join(ErrInvalidDefinition, err)
 	}
 	return validateDefinitionNodes(draft.Nodes, draft.Limits)
 }

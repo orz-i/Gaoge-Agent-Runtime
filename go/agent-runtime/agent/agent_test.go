@@ -54,6 +54,85 @@ func (policy requiredApprovalPolicy) Approval(
 	return plugin.ApprovalRequired, nil
 }
 
+func TestRunnerLetsModelCorrectToolSchemaViolationBeforeHandler(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	executions := 0
+	registry := mustRegistry(t, []tools.Registration{{
+		Definition: tools.Definition{
+			Key: publishToolKey, Name: publishToolName,
+			InputSchema: json.RawMessage(`{
+				"type":"object","additionalProperties":false,"required":["title"],
+				"properties":{"title":{"type":"string","minLength":1}}
+			}`),
+		},
+		Handler: tools.HandlerFunc(func(
+			_ context.Context,
+			request tools.ExecutionRequest,
+		) (tools.ExecutionResult, error) {
+			executions++
+			if request.Call.ID != callGood || string(request.Call.Arguments) != `{"title":"fixed"}` {
+				t.Fatalf("handler received unexpected call: %#v", request.Call)
+			}
+			return tools.ExecutionResult{
+				Content: json.RawMessage(`{"changeSetID":"change_1"}`),
+				Receipt: tools.Receipt{ExecutionID: "schema-receipt", Disposition: committedDisposition},
+			}, nil
+		}),
+	}})
+	model := &schemaCorrectionModel{t: t}
+	runner := mustRunner(t, runtime, approvals, model, registry)
+	completed, err := runner.StartRun(t.Context(), startRequest(
+		"run_schema_correction", "request_schema_correction", "publish a change set", publishToolKey,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Run.Status != kernel.RunStatusCompleted || model.calls != 3 || executions != 1 {
+		t.Fatalf("run=%#v modelCalls=%d handlerExecutions=%d", completed.Run, model.calls, executions)
+	}
+}
+
+type schemaCorrectionModel struct {
+	t     *testing.T
+	calls int
+}
+
+func (model *schemaCorrectionModel) Generate(
+	_ context.Context,
+	request runtimemodel.Request,
+) (runtimemodel.Response, error) {
+	model.calls++
+	switch model.calls {
+	case 1:
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
+			ID: "call_schema_bad", ToolKey: publishToolKey, Arguments: json.RawMessage(`{"unexpected":true}`),
+		}}}, nil
+	case 2:
+		if len(request.Messages) < 3 {
+			model.t.Fatalf("schema correction transcript = %#v", request.Messages)
+		}
+		last := request.Messages[len(request.Messages)-1]
+		var payload struct {
+			Retryable bool `json:"retryable"`
+			Error     struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if last.Role != runtimemodel.RoleTool || last.ToolCallID != "call_schema_bad" ||
+			json.Unmarshal([]byte(last.Content), &payload) != nil || !payload.Retryable || payload.Error.Code != "tool.arguments_schema" {
+			model.t.Fatalf("schema correction payload = %#v content=%q", last, last.Content)
+		}
+		return runtimemodel.Response{ToolCalls: []tools.Call{{
+			ID: callGood, ToolKey: publishToolKey, Arguments: json.RawMessage(`{"title":"fixed"}`),
+		}}}, nil
+	case 3:
+		return runtimemodel.Response{Content: "completed after schema correction"}, nil
+	default:
+		model.t.Fatalf("unexpected schema correction call %d", model.calls)
+		return runtimemodel.Response{}, nil
+	}
+}
+
 func newTestRuntimeAndApprovals(t *testing.T) (*kernel.Runtime, *interaction.Approvals) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})

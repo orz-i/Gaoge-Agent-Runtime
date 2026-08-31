@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
@@ -27,6 +28,8 @@ var (
 	ErrBudgetExceeded   = errors.New("workflow budget exceeded")
 	ErrStateTooLarge    = errors.New("workflow state exceeds limit")
 	ErrWorkflowTerminal = errors.New("workflow run is terminal")
+	ErrInputSchema      = errors.New("workflow input violates definition schema")
+	ErrOutputSchema     = errors.New("workflow output violates definition schema")
 )
 
 // ActivationStatus is the lifecycle of one deterministic node activation.
@@ -291,6 +294,9 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if !validStartRequest(request) || !withinCeiling(request.Definition.Limits, runner.ceiling) {
 		return kernel.Snapshot{}, ErrInvalidExecution
 	}
+	if err := validateWorkflowContract(request.Definition.InputSchema, request.Input, ErrInputSchema); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	state := executionState{
 		Definition: cloneDefinition(request.Definition), Input: cloneJSON(request.Input),
 		NestedDepth: request.NestedDepth,
@@ -554,6 +560,9 @@ func (runner *Runner) complete(
 	if err != nil {
 		return runner.fail(ctx, snapshot, state, "workflow.return_invalid", err)
 	}
+	if err = validateWorkflowContract(state.Definition.OutputSchema, result, ErrOutputSchema); err != nil {
+		return runner.fail(ctx, snapshot, state, "workflow.output_schema", err)
+	}
 	activationID, err := runner.runtime.NewID("activation")
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -693,6 +702,17 @@ func validStartRequest(request StartRequest) bool {
 	return request.Goal != "" && request.NestedDepth >= 0 &&
 		request.NestedDepth <= request.Definition.Limits.MaxNestedDepth &&
 		json.Valid(request.Input) && ValidateDefinition(request.Definition) == nil
+}
+
+func validateWorkflowContract(schema json.RawMessage, value json.RawMessage, contractErr error) error {
+	validator, err := jsoncontract.Compile(schema)
+	if err != nil {
+		return errors.Join(ErrInvalidExecution, err)
+	}
+	if err = validator.Validate(value); err != nil {
+		return errors.Join(ErrInvalidExecution, contractErr, err)
+	}
+	return nil
 }
 
 func normalizeCeiling(ceiling Limits) Limits {

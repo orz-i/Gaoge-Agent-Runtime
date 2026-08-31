@@ -28,6 +28,55 @@ func TestValidateExecutionResultEnforcesHardContentLimit(t *testing.T) {
 	}
 }
 
+func TestRegistryRejectsInvalidSchemaAtRegistration(t *testing.T) {
+	t.Parallel()
+	_, err := tools.NewRegistry([]tools.Registration{{
+		Definition: tools.Definition{
+			Key: "invalid-schema", Name: "invalid_schema",
+			InputSchema: json.RawMessage(`{"type":"not-a-real-type"}`),
+		},
+		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			return tools.ExecutionResult{}, nil
+		}),
+	}})
+	if !errors.Is(err, tools.ErrInvalidDefinition) {
+		t.Fatalf("invalid schema registration = %v", err)
+	}
+}
+
+func TestRegistryRejectsSchemaViolationBeforeHandler(t *testing.T) {
+	t.Parallel()
+	executions := 0
+	registry, err := tools.NewRegistry([]tools.Registration{{
+		Definition: tools.Definition{
+			Key: "publish", Name: "publish",
+			InputSchema: json.RawMessage(`{
+				"type":"object","additionalProperties":false,"required":["title"],
+				"properties":{"title":{"type":"string","minLength":1}}
+			}`),
+		},
+		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			executions++
+			return tools.ExecutionResult{
+				Content: json.RawMessage(`{"ok":true}`),
+				Receipt: tools.Receipt{ExecutionID: "execution", Disposition: "committed"},
+			}, nil
+		}),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = registry.Execute(t.Context(), tools.ExecutionRequest{
+		RunID: "run", Call: tools.Call{
+			ID: "call", ToolKey: "publish", Arguments: json.RawMessage(`{"unexpected":true}`),
+		},
+	})
+	code, message, recoverable := tools.RecoverableCallErrorInfo(err)
+	if !recoverable || code != "tool.arguments_schema" || !strings.Contains(message, "schema") || executions != 0 {
+		t.Fatalf("schema error = %v code=%q message=%q executions=%d", err, code, message, executions)
+	}
+}
+
 func TestRegistryRejectsOversizedExecutionResult(t *testing.T) {
 	t.Parallel()
 	registry, err := tools.NewRegistry([]tools.Registration{{

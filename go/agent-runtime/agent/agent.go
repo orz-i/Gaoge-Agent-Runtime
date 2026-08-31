@@ -475,7 +475,16 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			return failed, true, failErr
 		}
 		prepared, prepareErr := runner.preparePendingApproval(ctx, snapshot, state, definitions)
-		if prepareErr != nil || prepared.Run.Status != kernel.RunStatusRunning {
+		if prepareErr != nil {
+			if code, message, recoverable := tools.RecoverableCallErrorInfo(prepareErr); recoverable {
+				corrected, correctionErr := runner.recordRecoverableToolError(
+					ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(prepareErr),
+				)
+				return corrected, correctionErr != nil, correctionErr
+			}
+			return prepared, true, prepareErr
+		}
+		if prepared.Run.Status != kernel.RunStatusRunning {
 			return prepared, true, prepareErr
 		}
 		executed, yielded, executeErr := runner.executePending(ctx, prepared)
@@ -909,6 +918,9 @@ func (runner *Runner) resolveSelectedTool(
 ) (*tools.Definition, *model.HostedTool, error) {
 	if runner.catalog != nil {
 		if definition, ok := runner.catalog.Resolve(key); ok {
+			if err := tools.ValidateDefinition(definition); err != nil {
+				return nil, nil, err
+			}
 			return &definition, nil, nil
 		}
 	}
@@ -1002,6 +1014,9 @@ func (runner *Runner) preparePendingApproval(
 	if !ok {
 		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
 	}
+	if err := tools.ValidateCall(definition, call); err != nil {
+		return snapshot, err
+	}
 	invocation := plugin.ToolInvocation{
 		Run:        snapshot.Run,
 		Definition: tools.CloneDefinition(definition),
@@ -1044,6 +1059,9 @@ func (runner *Runner) preparePendingApproval(
 func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, bool, error) {
 	execution, failCode, err := runner.preparePendingToolExecution(snapshot)
 	if err != nil {
+		if _, _, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
+			return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, err)
+		}
 		failed, failErr := runner.fail(ctx, snapshot, execution.state, failCode, err)
 		return failed, false, failErr
 	}
@@ -1076,6 +1094,9 @@ func (runner *Runner) preparePendingToolExecution(snapshot kernel.Snapshot) (pen
 	definition, ok := runner.catalog.Resolve(call.ToolKey)
 	if !ok {
 		return pendingToolExecution{state: state}, "agent.tool_invalid", tools.ErrToolNotFound
+	}
+	if err := tools.ValidateCall(definition, call); err != nil {
+		return pendingToolExecution{state: state, call: call, definition: definition}, "agent.tool_invalid", err
 	}
 	if state.ToolCalls >= state.Limits.MaxToolCalls {
 		return pendingToolExecution{state: state}, "agent.tool_limit", ErrCallLimit

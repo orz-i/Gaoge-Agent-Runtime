@@ -9,6 +9,8 @@ require (
 
 require (
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 )
