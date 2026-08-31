@@ -3,6 +3,25 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## [0.1.0-beta.5] - 2026-08-31
+
+### Fixed
+
+- The TypeScript package guide now uses the supported `agent.start`,
+  `runs.feed`, and `snapshot.run.id` APIs instead of retired generic run and
+  event-stream examples.
+
+### Verification
+
+- The clean-consumer release gate compiles every fenced TypeScript example in
+  the packaged README, preventing stale public examples from passing a future
+  release.
+
+### Upgrade notes
+
+- No runtime API, HTTP v1 contract, or persisted schema changed. Update the Go
+  modules together to `v0.1.0-beta.5` and use the matching TypeScript archive.
+
 ## [0.1.0-beta.4] - 2026-08-27
 
 ### Added

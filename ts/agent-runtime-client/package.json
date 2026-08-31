@@ -1,6 +1,6 @@
 {
   "name": "@orz-i/agent-runtime-client",
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-beta.5",
   "description": "Framework-neutral TypeScript client for the Gaoge Agent Runtime HTTP v1 API.",
   "license": "Apache-2.0",
   "repository": {
