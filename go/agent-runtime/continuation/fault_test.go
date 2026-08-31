@@ -30,6 +30,10 @@ func TestProjectorRecoversCommittedSelfTriggersAfterCrashBeforeEnqueue(t *testin
 	}{
 		{name: "interaction resolved", kind: agent.RunKind, event: kernel.EventDraft{Type: "interaction.resolved", Wakeup: true}, trigger: continuation.TriggerApprovalResolved},
 		{name: "tool rejected", kind: agent.RunKind, event: kernel.EventDraft{Type: "tool.rejected", Wakeup: true}, trigger: continuation.TriggerApprovalResolved},
+		{name: "model invocation pending", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.pending", Wakeup: true}, trigger: continuation.TriggerModelReady},
+		{name: "model invocation claimed", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.claimed", Wakeup: true}, trigger: continuation.TriggerModelReady},
+		{name: "model invocation retryable", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.retryable", Wakeup: true}, trigger: continuation.TriggerModelReady},
+		{name: "model invocation completed", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.completed", Wakeup: true}, trigger: continuation.TriggerModelReady},
 		{name: "plan approved", kind: planexecute.RunKind, event: kernel.EventDraft{Type: "plan.approved", Wakeup: true}, trigger: continuation.TriggerApprovalResolved},
 		{name: "workflow wait resolved", kind: workflow.RunKind, event: kernel.EventDraft{Type: "workflow.wait.resolved", Wakeup: true}, trigger: continuation.TriggerWaitResolved},
 		{name: "workflow segment yielded", kind: workflow.RunKind, event: kernel.EventDraft{Type: "workflow.segment.yielded", Message: "activation_budget", Wakeup: true}, trigger: continuation.TriggerSegmentYielded},

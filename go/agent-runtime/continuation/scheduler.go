@@ -127,7 +127,7 @@ func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRe
 		outbox: dependencies.Outbox, queue: dependencies.Queue, relations: dependencies.Relations, runs: dependencies.Runs,
 		clock: dependencies.Clock, workerID: strings.TrimSpace(dependencies.ProjectorID), triggers: triggers,
 		jobPolicy: queuecore.Policy{
-			MaxAttempts: 8, VisibilityTimeout: 2 * time.Minute,
+			MaxAttempts: 12, VisibilityTimeout: 2 * time.Minute,
 			InitialBackoff: 250 * time.Millisecond, MaxBackoff: 30 * time.Second, BackoffMultiplier: 2,
 		},
 	}, nil
@@ -143,17 +143,21 @@ func (scheduler *Scheduler) projectTransition(ctx context.Context, transition ke
 		if !ok {
 			continue
 		}
-		result = errors.Join(result, scheduler.Schedule(ctx, Payload{
+		result = errors.Join(result, scheduler.schedule(ctx, Payload{
 			SchemaVersion: SchemaVersion, RunID: transition.RunID,
 			ExpectedRevision: transition.Revision, Trigger: trigger,
 			SourceRunID: transition.RunID, SourceRevision: transition.Revision,
-		}))
+		}, event.WakeupAt))
 	}
 	return result
 }
 
 // Schedule creates or reuses one immutable continuation Job.
 func (scheduler *Scheduler) Schedule(ctx context.Context, payload Payload) error {
+	return scheduler.schedule(ctx, payload, nil)
+}
+
+func (scheduler *Scheduler) schedule(ctx context.Context, payload Payload, wakeupAt *time.Time) error {
 	if scheduler == nil || scheduler.queue == nil {
 		return ErrInvalidInput
 	}
@@ -165,10 +169,14 @@ func (scheduler *Scheduler) Schedule(ctx context.Context, payload Payload) error
 	if err != nil {
 		return errors.Join(ErrInvalidInput, err)
 	}
+	availableAt := scheduler.continuationAvailableAt(normalized.Trigger)
+	if wakeupAt != nil && wakeupAt.After(availableAt) {
+		availableAt = wakeupAt.UTC()
+	}
 	_, err = scheduler.queue.Enqueue(ctx, queuecore.EnqueueRequest{
 		Queue: QueueName, ClientJobID: clientJobID(normalized), Kind: JobKind,
 		Payload: encoded, Priority: triggerPriority(normalized.Trigger),
-		AvailableAt: scheduler.continuationAvailableAt(normalized.Trigger), Policy: scheduler.jobPolicy,
+		AvailableAt: availableAt, Policy: scheduler.jobPolicy,
 	})
 	return err
 }
@@ -220,7 +228,7 @@ func triggerPriority(trigger Trigger) int {
 	switch trigger {
 	case TriggerChildTerminal:
 		return 20
-	case TriggerApprovalResolved, TriggerWaitResolved:
+	case TriggerApprovalResolved, TriggerModelReady, TriggerWaitResolved:
 		return 10
 	case TriggerSegmentYielded:
 		return 0

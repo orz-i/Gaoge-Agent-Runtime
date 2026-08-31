@@ -195,7 +195,10 @@ func testTransitionOutbox(t *testing.T, store kernel.Store) {
 	}
 
 	record := conformanceRecord("run_outbox")
-	events := []kernel.EventDraft{{Type: "resume.ready", Data: json.RawMessage(`{"value":1}`), Wakeup: true}}
+	wakeupAt := record.Run.UpdatedAt.Add(90 * time.Second)
+	events := []kernel.EventDraft{{
+		Type: "resume.ready", Data: json.RawMessage(`{"value":1}`), Wakeup: true, WakeupAt: &wakeupAt,
+	}}
 	if _, err := store.Create(context.Background(), record, events); err != nil {
 		t.Fatalf("create outbox record: %v", err)
 	}
@@ -210,7 +213,8 @@ func testTransitionOutbox(t *testing.T, store kernel.Store) {
 	claim := claims[0]
 	if claim.Transition.ID != "run_outbox:1" || claim.Transition.RunID != record.Run.ID ||
 		claim.Transition.Revision != 1 || claim.Transition.Attempts != 1 || len(claim.Transition.Events) != 1 ||
-		string(claim.Transition.Events[0].Data) != conformanceValueJSON {
+		string(claim.Transition.Events[0].Data) != conformanceValueJSON || claim.Transition.Events[0].WakeupAt == nil ||
+		!claim.Transition.Events[0].WakeupAt.Equal(wakeupAt) {
 		t.Fatalf("unexpected committed transition: %#v", claim)
 	}
 	if again, claimErr := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{

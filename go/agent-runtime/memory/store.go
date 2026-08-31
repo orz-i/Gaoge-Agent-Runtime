@@ -205,6 +205,10 @@ func cloneEventDrafts(values []kernel.EventDraft) []kernel.EventDraft {
 	for index, value := range values {
 		result[index] = value
 		result[index].Data = cloneJSON(value.Data)
+		if value.WakeupAt != nil {
+			wakeupAt := value.WakeupAt.UTC()
+			result[index].WakeupAt = &wakeupAt
+		}
 	}
 	return result
 }

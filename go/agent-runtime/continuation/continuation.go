@@ -33,6 +33,7 @@ type Trigger string
 const (
 	TriggerChildTerminal    Trigger = "child_terminal"
 	TriggerApprovalResolved Trigger = "approval_resolved"
+	TriggerModelReady       Trigger = "model_ready"
 	TriggerWaitResolved     Trigger = "wait_resolved"
 	TriggerSegmentYielded   Trigger = "segment_yielded"
 )
@@ -124,7 +125,7 @@ func decodePayload(encoded json.RawMessage) (Payload, error) {
 
 func validTrigger(trigger Trigger) bool {
 	return trigger == TriggerChildTerminal || trigger == TriggerApprovalResolved ||
-		trigger == TriggerWaitResolved || trigger == TriggerSegmentYielded
+		trigger == TriggerModelReady || trigger == TriggerWaitResolved || trigger == TriggerSegmentYielded
 }
 
 func terminal(status kernel.RunStatus) bool {

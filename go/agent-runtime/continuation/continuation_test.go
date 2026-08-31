@@ -131,6 +131,29 @@ func TestSchedulerProjectsOnlyActionableSelfTransitions(t *testing.T) {
 	queuedJobs(t, fixture.delivery, 1)
 }
 
+func TestSchedulerPreservesDurableWakeupAvailability(t *testing.T) {
+	t.Parallel()
+	fixture := newSchedulerFixture(t)
+	workflowRun := createRun(t, fixture.runtime, "workflow-delayed", workflow.RunKind)
+	wakeupAt := fixedClock{}.Now().Add(2 * time.Minute)
+	_, err := fixture.runtime.Apply(t.Context(), workflowRun.Run.ID, workflowRun.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
+		Events: []kernel.EventDraft{{
+			Type: "workflow.segment.yielded", Message: "activation_budget", Wakeup: true, WakeupAt: &wakeupAt,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = fixture.scheduler.Project(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	jobs := queuedJobs(t, fixture.delivery, 1)
+	if !jobs[0].AvailableAt.Equal(wakeupAt) {
+		t.Fatalf("availableAt = %s, want %s", jobs[0].AvailableAt, wakeupAt)
+	}
+}
+
 func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)

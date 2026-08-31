@@ -65,6 +65,10 @@ type EventDraft struct {
 	// Wakeup marks this committed fact as requiring durable future projection.
 	// It is transaction metadata, not part of the public Event journal shape.
 	Wakeup bool `json:"-"`
+	// WakeupAt delays the projected external wakeup until the specified instant.
+	// Stores persist it only inside the committed-transition outbox; the public
+	// Event journal remains unchanged.
+	WakeupAt *time.Time `json:"wakeupAt,omitempty"`
 }
 
 // Event is an append-only fact sequenced within one Run.

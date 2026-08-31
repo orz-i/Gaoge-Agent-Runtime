@@ -22,6 +22,7 @@ var (
 	ErrInvalidRequest       = errors.New("invalid agent run request")
 	ErrInvalidModelResponse = errors.New("invalid agent model response")
 	ErrModelFailure         = errors.New("agent model failure")
+	ErrModelInvocationBusy  = errors.New("agent model invocation execution is leased")
 	ErrToolFailure          = errors.New("agent tool failure")
 	ErrCallLimit            = errors.New("agent run call limit exceeded")
 	ErrApprovalRequired     = errors.New("agent run approval is required")
@@ -170,6 +171,7 @@ type Limits struct {
 type Dependencies struct {
 	Runtime            *kernel.Runtime
 	Model              model.Client
+	Clock              kernel.Clock
 	Catalog            tools.Catalog
 	Executor           tools.Executor
 	Approvals          plugin.ApprovalHandler
@@ -204,6 +206,7 @@ type StartRequest struct {
 type Runner struct {
 	runtime            *kernel.Runtime
 	model              model.Client
+	clock              kernel.Clock
 	catalog            tools.Catalog
 	executor           tools.Executor
 	approvals          plugin.ApprovalHandler
@@ -219,17 +222,18 @@ type Runner struct {
 }
 
 type runState struct {
-	Messages         []model.Message `json:"messages"`
-	Model            string          `json:"model,omitempty"`
-	ModelOptions     json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys         []string        `json:"toolKeys"`
-	RequiredToolKeys []string        `json:"requiredToolKeys,omitempty"`
-	BlockedToolKeys  []string        `json:"blockedToolKeys,omitempty"`
-	RequireToolCall  bool            `json:"requireToolCall,omitempty"`
-	Limits           Limits          `json:"limits"`
-	PendingCalls     []tools.Call    `json:"pendingCalls,omitempty"`
-	LLMCalls         int             `json:"llmCalls"`
-	ToolCalls        int             `json:"toolCalls"`
+	Messages         []model.Message   `json:"messages"`
+	Model            string            `json:"model,omitempty"`
+	ModelOptions     json.RawMessage   `json:"modelOptions,omitempty"`
+	ToolKeys         []string          `json:"toolKeys"`
+	RequiredToolKeys []string          `json:"requiredToolKeys,omitempty"`
+	BlockedToolKeys  []string          `json:"blockedToolKeys,omitempty"`
+	RequireToolCall  bool              `json:"requireToolCall,omitempty"`
+	Limits           Limits            `json:"limits"`
+	PendingCalls     []tools.Call      `json:"pendingCalls,omitempty"`
+	ModelInvocations []ModelInvocation `json:"modelInvocations,omitempty"`
+	LLMCalls         int               `json:"llmCalls"`
+	ToolCalls        int               `json:"toolCalls"`
 }
 
 // View is an isolated public projection of one persisted Agent Run. It exposes
@@ -242,6 +246,7 @@ type View struct {
 	ToolKeys         []string
 	RequiredToolKeys []string
 	Limits           Limits
+	ModelInvocations []ModelInvocation
 	LLMCalls         int
 	ToolCalls        int
 }
@@ -259,6 +264,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		ToolKeys:         append([]string(nil), state.ToolKeys...),
 		RequiredToolKeys: append([]string(nil), state.RequiredToolKeys...),
 		Limits:           state.Limits,
+		ModelInvocations: cloneModelInvocations(state.ModelInvocations),
 		LLMCalls:         state.LLMCalls,
 		ToolCalls:        state.ToolCalls,
 	}, nil
@@ -296,8 +302,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Limits.MaxToolCalls <= 0 {
 		dependencies.Limits.MaxToolCalls = 16
 	}
+	if dependencies.Clock == nil {
+		dependencies.Clock = agentClock{}
+	}
 	return &Runner{
-		runtime: dependencies.Runtime, model: dependencies.Model, catalog: dependencies.Catalog,
+		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		hostedTools: dependencies.HostedTools, observers: observers, approvalPolicies: approvalPolicies,
 		completionPolicies: compactCompletionPolicies(dependencies.CompletionPolicies),
@@ -476,11 +485,36 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.llm_limit", ErrCallLimit)
 		return failed, true, failErr
 	}
-	definitions, response, err := runner.callModel(ctx, snapshot, state)
+	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)
 	if err != nil {
-		failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_failed", err)
+		return snapshot, true, err
+	}
+	snapshot, state, invocation, err = runner.claimModelInvocationExecution(ctx, snapshot, state, invocation)
+	if err != nil {
+		return snapshot, true, err
+	}
+	snapshot, state, err = runner.executeModelInvocation(ctx, snapshot, state, invocation)
+	if err != nil {
+		if model.IsRetryableError(err) {
+			released, releaseErr := runner.releaseModelInvocationExecution(ctx, snapshot, state, invocation)
+			if releaseErr != nil {
+				return released, true, errors.Join(err, releaseErr)
+			}
+			return released, true, err
+		}
+		if errors.Is(err, ErrModelFailure) || errors.Is(err, ErrInvalidModelResponse) {
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_failed", err)
+			return failed, true, failErr
+		}
+		return snapshot, true, err
+	}
+	consumed, ok := consumeLastModelInvocation(&state, runner.clock.Now())
+	if !ok {
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_invocation_invalid", ErrInvalidRequest)
 		return failed, true, failErr
 	}
+	definitions := modelDefinitions(consumed)
+	response := model.CloneResponse(consumed.Response)
 	state.LLMCalls++
 	if len(response.ToolCalls) == 0 {
 		if missing := missingRequiredToolKeys(state); len(missing) != 0 {
@@ -515,51 +549,6 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return queued, true, err
 	}
 	return queued, false, nil
-}
-
-func (runner *Runner) callModel(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state runState,
-) ([]tools.Definition, model.Response, error) {
-	definitions, hostedTools, err := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model)
-	if err != nil {
-		return nil, model.Response{}, err
-	}
-	messages := model.CloneMessages(state.Messages)
-	if len(state.BlockedToolKeys) != 0 {
-		definitions = definitionsWithoutKeys(definitions, state.BlockedToolKeys)
-		hostedTools = hostedToolsWithoutKeys(hostedTools, state.BlockedToolKeys)
-		messages = withBlockedToolGuidance(messages, state.BlockedToolKeys)
-	}
-	if repeatedToolKeys := repeatedUnchangedToolKeys(messages); len(repeatedToolKeys) != 0 {
-		definitions = definitionsWithoutKeys(definitions, repeatedToolKeys)
-		hostedTools = hostedToolsWithoutKeys(hostedTools, repeatedToolKeys)
-		messages = withRepeatedToolGuidance(messages, repeatedToolKeys)
-	}
-	request := model.Request{
-		RunID: snapshot.Run.ID, Model: state.Model,
-		ModelOptions:    cloneRawJSON(state.ModelOptions),
-		Messages:        messages,
-		Tools:           definitions,
-		HostedTools:     model.CloneHostedTools(hostedTools),
-		RequireToolCall: state.RequireToolCall && (len(definitions) != 0 || len(hostedTools) != 0),
-	}
-	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
-		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
-	})
-	response, err := runner.generateModel(ctx, request)
-	if err != nil {
-		return nil, model.Response{}, errors.Join(ErrModelFailure, err)
-	}
-	response.Content = strings.TrimSpace(response.Content)
-	if !validModelResponse(response) {
-		return nil, model.Response{}, ErrInvalidModelResponse
-	}
-	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
-		Type: EventModelCompleted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
-	})
-	return definitions, response, nil
 }
 
 type completedToolCall struct {
@@ -857,12 +846,30 @@ func (runner *Runner) generateProviderModel(
 	if !ok {
 		return runner.model.Generate(ctx, request)
 	}
-	return streaming.GenerateStream(ctx, request, func(event model.StreamEvent) error {
+	var responseID string
+	var usage *model.Usage
+	response, err := streaming.GenerateStream(ctx, request, func(event model.StreamEvent) error {
+		if strings.TrimSpace(event.ResponseID) != "" {
+			responseID = strings.TrimSpace(event.ResponseID)
+		}
+		if event.Usage != nil {
+			usage = model.CloneUsage(event.Usage)
+		}
 		if emit == nil {
 			return nil
 		}
 		return emit(event)
 	})
+	if err != nil {
+		return model.Response{}, err
+	}
+	if strings.TrimSpace(response.ResponseID) == "" {
+		response.ResponseID = responseID
+	}
+	if response.Usage == nil {
+		response.Usage = usage
+	}
+	return response, nil
 }
 
 func (runner *Runner) resolveSelectedTools(
@@ -1472,7 +1479,8 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 		return runState{}, errors.Join(ErrInvalidRequest, err)
 	}
 	if state.Limits.MaxLLMCalls <= 0 || state.Limits.MaxToolCalls <= 0 ||
-		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) {
+		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) ||
+		!validModelInvocations(state.ModelInvocations) {
 		return runState{}, ErrInvalidRequest
 	}
 	return state, nil
