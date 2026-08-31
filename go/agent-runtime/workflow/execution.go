@@ -20,6 +20,8 @@ const (
 
 const workflowWaitCheckpointKind = "workflow_wait"
 
+const autonomousWakeupDelay = time.Second
+
 var (
 	ErrInvalidExecution = errors.New("invalid workflow execution")
 	ErrEffectPending    = errors.New("workflow effect is pending")
@@ -82,6 +84,11 @@ type Activation struct {
 	Output    json.RawMessage  `json:"output,omitempty"`
 	ErrorCode string           `json:"errorCode,omitempty"`
 	Error     string           `json:"error,omitempty"`
+}
+
+func workflowWakeupAt(now time.Time) *time.Time {
+	wakeupAt := now.UTC().Add(autonomousWakeupDelay)
+	return &wakeupAt
 }
 
 // Effect is one stable external dispatch intent and terminal receipt.
@@ -316,7 +323,10 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.started", Message: request.Definition.Hash}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.started", Message: request.Definition.Hash, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -625,9 +635,13 @@ func (runner *Runner) yield(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	event := kernel.EventDraft{Type: "workflow.segment.yielded", Message: reason, Wakeup: true}
+	if strings.Contains(reason, "pending") {
+		event.WakeupAt = workflowWakeupAt(runner.runtime.Now())
+	}
 	yielded, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "workflow.segment.yielded", Message: reason, Wakeup: true}},
+		Events: []kernel.EventDraft{event},
 	})
 	return yielded, errors.Join(ErrSegmentYielded, err)
 }

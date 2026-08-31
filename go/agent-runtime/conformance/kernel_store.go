@@ -224,7 +224,8 @@ func testTransitionOutbox(t *testing.T, store kernel.Store) {
 	claim := claims[0]
 	if claim.Transition.ID != "run_outbox:1" || claim.Transition.RunID != record.Run.ID ||
 		claim.Transition.Revision != 1 || claim.Transition.Attempts != 1 || len(claim.Transition.Events) != 1 ||
-		string(claim.Transition.Events[0].Data) != conformanceValueJSON || claim.Transition.Events[0].WakeupAt == nil ||
+		string(claim.Transition.Events[0].Data) != conformanceValueJSON || !claim.Transition.Events[0].Wakeup ||
+		claim.Transition.Events[0].WakeupAt == nil ||
 		!claim.Transition.Events[0].WakeupAt.Equal(wakeupAt) {
 		t.Fatalf("unexpected committed transition: %#v", claim)
 	}

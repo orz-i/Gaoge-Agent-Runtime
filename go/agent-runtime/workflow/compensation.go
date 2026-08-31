@@ -66,7 +66,10 @@ func (runner *Runner) beginFailure(
 	}
 	persisted, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.failure.intent_created", Message: state.Failure.Code}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.failure.intent_created", Message: state.Failure.Code, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, errors.Join(cause, err)
@@ -151,7 +154,10 @@ func (runner *Runner) prepareCompensation(
 	}
 	persisted, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.compensation.intent_created", Message: effectID}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.compensation.intent_created", Message: effectID, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -226,7 +232,10 @@ func (runner *Runner) dispatchCompensation(
 	}
 	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.compensation.completed", Message: compensation.ID}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.compensation.completed", Message: compensation.ID, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -253,7 +262,10 @@ func (runner *Runner) persistCompensationRetry(
 	}
 	yielded, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.compensation.retry_scheduled", Message: compensationID}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.compensation.retry_scheduled", Message: compensationID, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	return yielded, errors.Join(ErrEffectPending, err)
 }

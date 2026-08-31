@@ -20,6 +20,8 @@ import (
 const (
 	RunKind          kernel.RunKind    = "agent"
 	CapabilityRunner kernel.Capability = "agent.runner"
+
+	autonomousWakeupDelay = time.Second
 )
 
 var (
@@ -68,6 +70,11 @@ func (runner *Runner) completeWithToolResult(
 		runner.publishRunEvent(ctx, completed, EventRunCompleted, true)
 	}
 	return completed, err
+}
+
+func agentWakeupAt(now time.Time) *time.Time {
+	wakeupAt := now.UTC().Add(autonomousWakeupDelay)
+	return &wakeupAt
 }
 
 func (runner *Runner) validateCompletion(
@@ -123,7 +130,10 @@ func (runner *Runner) correctCompletion(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "agent.completion_corrected", Message: correction.Code}},
+		Events: []kernel.EventDraft{{
+			Type: "agent.completion_corrected", Message: correction.Code, Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 }
 
@@ -386,7 +396,10 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
-		Events: []kernel.EventDraft{{Type: "agent.started", Message: "Direct Agent loop started"}},
+		Events: []kernel.EventDraft{{
+			Type: "agent.started", Message: "Direct Agent loop started", Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -808,7 +821,10 @@ func (runner *Runner) correctRequiredToolCompletion(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "agent.completion_corrected", Message: strings.Join(missing, ",")}},
+		Events: []kernel.EventDraft{{
+			Type: "agent.completion_corrected", Message: strings.Join(missing, ","), Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 }
 
@@ -1014,7 +1030,10 @@ func (runner *Runner) queueToolCalls(
 	}
 	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.batch_requested", Message: "Tool call batch requested"}},
+		Events: []kernel.EventDraft{{
+			Type: "tool.batch_requested", Message: "Tool call batch requested", Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err == nil {
 		for _, call := range preparedCalls {
@@ -1209,7 +1228,10 @@ func (runner *Runner) persistPendingToolYield(
 	}
 	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: EventToolPending, Message: tools.ReceiptDispositionPending}},
+		Events: []kernel.EventDraft{{
+			Type: EventToolPending, Message: tools.ReceiptDispositionPending, Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err == nil {
 		runner.publishToolEvent(ctx, next, EventToolPending, result.Receipt)
@@ -1243,7 +1265,10 @@ func (runner *Runner) persistCompletedToolCall(
 	}
 	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.completed", Message: result.Receipt.Disposition}},
+		Events: []kernel.EventDraft{{
+			Type: "tool.completed", Message: result.Receipt.Disposition, Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err == nil {
 		runner.publishToolEvent(ctx, next, EventToolCompleted, result.Receipt)
@@ -1295,7 +1320,10 @@ func (runner *Runner) recordRecoverableToolError(
 	}
 	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.correction_requested", Message: strings.TrimSpace(code)}},
+		Events: []kernel.EventDraft{{
+			Type: "tool.correction_requested", Message: strings.TrimSpace(code), Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err == nil {
 		runner.publishValue(ctx, next.Run.ID, plugin.Event{

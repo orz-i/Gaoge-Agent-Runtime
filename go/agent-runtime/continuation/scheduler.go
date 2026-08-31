@@ -139,9 +139,12 @@ func (scheduler *Scheduler) projectTransition(ctx context.Context, transition ke
 		result = errors.Join(result, scheduler.scheduleOwningParent(ctx, transition))
 	}
 	for _, event := range transition.Events {
-		trigger, ok := scheduler.selfTrigger(transition.Kind, event)
-		if !ok {
+		if !event.Wakeup {
 			continue
+		}
+		trigger := TriggerRunReady
+		if registered, ok := scheduler.selfTrigger(transition.Kind, event); ok {
+			trigger = registered
 		}
 		result = errors.Join(result, scheduler.schedule(ctx, Payload{
 			SchemaVersion: SchemaVersion, RunID: transition.RunID,
@@ -230,7 +233,7 @@ func triggerPriority(trigger Trigger) int {
 		return 20
 	case TriggerApprovalResolved, TriggerModelReady, TriggerWaitResolved:
 		return 10
-	case TriggerSegmentYielded:
+	case TriggerSegmentYielded, TriggerRunReady:
 		return 0
 	default:
 		return 0

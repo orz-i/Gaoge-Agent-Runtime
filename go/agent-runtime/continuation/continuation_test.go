@@ -131,6 +131,31 @@ func TestSchedulerProjectsOnlyActionableSelfTransitions(t *testing.T) {
 	queuedJobs(t, fixture.delivery, 1)
 }
 
+func TestSchedulerProjectsUnknownWakeupAsGenericRunReady(t *testing.T) {
+	t.Parallel()
+	fixture := newSchedulerFixture(t)
+	run := createRun(t, fixture.runtime, "generic-ready", kernel.RunKind("custom_feature"))
+	committed, err := fixture.runtime.Apply(t.Context(), run.Run.ID, run.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
+		Events: []kernel.EventDraft{{Type: "custom.autonomous_progress", Wakeup: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = fixture.scheduler.Project(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	jobs := queuedJobs(t, fixture.delivery, 1)
+	var payload continuation.Payload
+	if err = json.Unmarshal(jobs[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.RunID != committed.Run.ID || payload.ExpectedRevision != committed.Run.Revision ||
+		payload.Trigger != continuation.TriggerRunReady || payload.SourceRevision != committed.Run.Revision {
+		t.Fatalf("generic wakeup payload = %#v", payload)
+	}
+}
+
 func TestSchedulerPreservesDurableWakeupAvailability(t *testing.T) {
 	t.Parallel()
 	fixture := newSchedulerFixture(t)

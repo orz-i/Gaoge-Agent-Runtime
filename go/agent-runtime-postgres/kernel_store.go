@@ -365,7 +365,7 @@ func createKernelTransition(db *gorm.DB, run kernel.Run, drafts []kernel.EventDr
 	if !kernel.NeedsTransitionProjection(run.Status, drafts) {
 		return nil
 	}
-	encoded, err := json.Marshal(drafts)
+	encoded, err := json.Marshal(persistedKernelTransitionEventsFrom(drafts))
 	if err != nil {
 		return errKernelEventJSON
 	}
@@ -378,15 +378,49 @@ func createKernelTransition(db *gorm.DB, run kernel.Run, drafts []kernel.EventDr
 }
 
 func kernelTransitionFrom(record models.KernelTransitionOutboxRecord) (kernel.CommittedTransition, error) {
-	var drafts []kernel.EventDraft
-	if err := json.Unmarshal([]byte(record.EventsJSON), &drafts); err != nil {
+	var persisted []persistedKernelTransitionEvent
+	if err := json.Unmarshal([]byte(record.EventsJSON), &persisted); err != nil {
 		return kernel.CommittedTransition{}, errPersistedKernelEventJSON
 	}
 	return kernel.CommittedTransition{
 		ID: record.ID, RunID: record.RunID, Kind: kernel.RunKind(record.Kind),
 		Status: kernel.RunStatus(record.Status), Revision: record.Revision,
-		Events: drafts, CommittedAt: record.CommittedAt.UTC(), Attempts: record.Attempts,
+		Events:      kernelEventDraftsFromPersistedTransitionEvents(persisted),
+		CommittedAt: record.CommittedAt.UTC(), Attempts: record.Attempts,
 	}, nil
+}
+
+// persistedKernelTransitionEvent is deliberately distinct from the public
+// Kernel Event journal shape. Wakeup/WakeupAt are transaction projection
+// metadata and must survive an outbox restart without leaking into ListEvents.
+type persistedKernelTransitionEvent struct {
+	Type     string          `json:"type"`
+	Message  string          `json:"message,omitempty"`
+	Data     json.RawMessage `json:"data,omitempty"`
+	Wakeup   bool            `json:"wakeup,omitempty"`
+	WakeupAt *time.Time      `json:"wakeupAt,omitempty"`
+}
+
+func persistedKernelTransitionEventsFrom(drafts []kernel.EventDraft) []persistedKernelTransitionEvent {
+	result := make([]persistedKernelTransitionEvent, len(drafts))
+	for index, draft := range drafts {
+		result[index] = persistedKernelTransitionEvent{
+			Type: draft.Type, Message: draft.Message, Data: append(json.RawMessage(nil), draft.Data...),
+			Wakeup: draft.Wakeup, WakeupAt: cloneTime(draft.WakeupAt),
+		}
+	}
+	return result
+}
+
+func kernelEventDraftsFromPersistedTransitionEvents(values []persistedKernelTransitionEvent) []kernel.EventDraft {
+	result := make([]kernel.EventDraft, len(values))
+	for index, value := range values {
+		result[index] = kernel.EventDraft{
+			Type: value.Type, Message: value.Message, Data: append(json.RawMessage(nil), value.Data...),
+			Wakeup: value.Wakeup, WakeupAt: cloneTime(value.WakeupAt),
+		}
+	}
+	return result
 }
 
 func validKernelTransitionLease(request kernel.TransitionLeaseRequest) bool {

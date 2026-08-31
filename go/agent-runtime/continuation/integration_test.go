@@ -278,11 +278,11 @@ type integrationPlanner struct{}
 func (integrationPlanner) GeneratePlan(
 	context.Context,
 	planexecute.PlannerRequest,
-) (planexecute.PlanDraft, error) {
-	return planexecute.PlanDraft{
+) (planexecute.PlannerResponse, error) {
+	return planexecute.PlannerResponse{Draft: planexecute.PlanDraft{
 		Summary: "Publish once",
 		Steps:   []planexecute.StepDraft{{Title: "Publish", Goal: "publish once", ToolKeys: []string{integrationToolKey}}},
-	}, nil
+	}, ResponseID: "integration-plan"}, nil
 }
 
 type approvalIntegrationModel struct {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -18,15 +19,18 @@ const (
 
 const planApprovalCheckpointKind = "plan_approval"
 
+const autonomousWakeupDelay = time.Second
+
 var (
-	ErrInvalidRequest      = errors.New("invalid planexecute request")
-	ErrInvalidPlan         = errors.New("invalid generated plan")
-	ErrPlannerFailure      = errors.New("plan generation failed")
-	ErrApprovalRequired    = errors.New("plan approval is required")
-	ErrInvalidApproval     = errors.New("invalid plan approval")
-	ErrStepPending         = errors.New("plan step is not terminal")
-	ErrStepFailure         = errors.New("plan step failed")
-	ErrPlanAlreadyTerminal = errors.New("planexecute run is terminal")
+	ErrInvalidRequest        = errors.New("invalid planexecute request")
+	ErrInvalidPlan           = errors.New("invalid generated plan")
+	ErrPlannerFailure        = errors.New("plan generation failed")
+	ErrPlannerInvocationBusy = errors.New("plan generation execution is leased")
+	ErrApprovalRequired      = errors.New("plan approval is required")
+	ErrInvalidApproval       = errors.New("invalid plan approval")
+	ErrStepPending           = errors.New("plan step is not terminal")
+	ErrStepFailure           = errors.New("plan step failed")
+	ErrPlanAlreadyTerminal   = errors.New("planexecute run is terminal")
 )
 
 // ApprovalPolicy controls only Plan approval and is not an Agent execution mode.
@@ -74,6 +78,11 @@ type StepDraft struct {
 	ToolKeys []string `json:"toolKeys,omitempty"`
 }
 
+func planWakeupAt(now time.Time) *time.Time {
+	wakeupAt := now.UTC().Add(autonomousWakeupDelay)
+	return &wakeupAt
+}
+
 // PlanDraft is the validated planner output before durable identity assignment.
 type PlanDraft struct {
 	Summary string      `json:"summary"`
@@ -82,16 +91,25 @@ type PlanDraft struct {
 
 // PlannerRequest is one provider-neutral planning request.
 type PlannerRequest struct {
-	RunID           string
-	Goal            string
-	Model           string
-	MaxSteps        int
-	AllowedToolKeys []string
+	InvocationID    string   `json:"invocationID"`
+	RunID           string   `json:"runID"`
+	Goal            string   `json:"goal"`
+	Model           string   `json:"model,omitempty"`
+	MaxSteps        int      `json:"maxSteps"`
+	AllowedToolKeys []string `json:"allowedToolKeys,omitempty"`
 }
 
-// Planner generates a bounded Plan without executing it.
+// PlannerResponse is the normalized receipt from one Planner invocation.
+type PlannerResponse struct {
+	Draft      PlanDraft `json:"draft"`
+	ResponseID string    `json:"responseID,omitempty"`
+}
+
+// Planner generates a bounded Plan without executing it. InvocationID is a
+// stable logical identity that provider-backed adapters may map to their own
+// idempotency or response-retrieval facility.
 type Planner interface {
-	GeneratePlan(context.Context, PlannerRequest) (PlanDraft, error)
+	GeneratePlan(context.Context, PlannerRequest) (PlannerResponse, error)
 }
 
 // AgentRunner is the narrow direct Agent capability consumed by PlanExecute.
@@ -123,9 +141,10 @@ type Plan struct {
 
 // View is the public PlanExecute state projected from Kernel opaque state.
 type View struct {
-	ApprovalPolicy ApprovalPolicy `json:"approvalPolicy"`
-	Plan           Plan           `json:"plan"`
-	NextStep       int            `json:"nextStep"`
+	ApprovalPolicy    ApprovalPolicy     `json:"approvalPolicy"`
+	PlannerInvocation *PlannerInvocation `json:"plannerInvocation,omitempty"`
+	Plan              Plan               `json:"plan"`
+	NextStep          int                `json:"nextStep"`
 }
 
 // StartRequest starts one explicit Plan-and-Execute Run.
@@ -168,11 +187,12 @@ type Runner struct {
 }
 
 type executionState struct {
-	Model           string         `json:"model,omitempty"`
-	ApprovalPolicy  ApprovalPolicy `json:"approvalPolicy"`
-	AllowedToolKeys []string       `json:"allowedToolKeys"`
-	Plan            Plan           `json:"plan"`
-	NextStep        int            `json:"nextStep"`
+	Model             string             `json:"model,omitempty"`
+	ApprovalPolicy    ApprovalPolicy     `json:"approvalPolicy"`
+	AllowedToolKeys   []string           `json:"allowedToolKeys"`
+	PlannerInvocation *PlannerInvocation `json:"plannerInvocation"`
+	Plan              Plan               `json:"plan"`
+	NextStep          int                `json:"nextStep"`
 }
 
 type approvalPayload struct {
@@ -214,9 +234,24 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if !validStartRequest(request) {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
+	if request.ID == "" {
+		var err error
+		request.ID, err = runner.runtime.NewID("run")
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
+	plannerRequest := PlannerRequest{
+		RunID: request.ID, Goal: request.Goal, Model: request.Model, MaxSteps: request.MaxSteps,
+		AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys),
+	}
+	invocation, err := newPlannerInvocation(plannerRequest, 1, runner.runtime.Now())
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
 	initial, err := encodeState(executionState{
 		Model: strings.TrimSpace(request.Model), ApprovalPolicy: request.ApprovalPolicy,
-		AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys),
+		AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys), PlannerInvocation: &invocation,
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -224,43 +259,15 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: initial,
-		Events: []kernel.EventDraft{{Type: "planexecute.started", Message: "Plan generation started"}},
+		Events: []kernel.EventDraft{{
+			Type: "planexecute.started", Message: "Plan generation started", Wakeup: true,
+			WakeupAt: planWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	draft, err := runner.planner.GeneratePlan(ctx, PlannerRequest{
-		RunID: snapshot.Run.ID, Goal: snapshot.Run.Goal,
-		Model: request.Model, MaxSteps: request.MaxSteps,
-		AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys),
-	})
-	if err != nil {
-		return runner.fail(ctx, snapshot, executionState{
-			Model: request.Model, ApprovalPolicy: request.ApprovalPolicy,
-			AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys),
-		}, "planexecute.planner_failed", errors.Join(ErrPlannerFailure, err))
-	}
-	state, err := runner.materializePlan(
-		draft, request.Model, request.ApprovalPolicy, request.MaxSteps, request.AllowedToolKeys,
-	)
-	if err != nil {
-		return runner.fail(ctx, snapshot, executionState{
-			Model: request.Model, ApprovalPolicy: request.ApprovalPolicy,
-			AllowedToolKeys: cloneOptionalStrings(request.AllowedToolKeys),
-		}, "planexecute.plan_invalid", err)
-	}
-	proposed, err := runner.persistPlan(ctx, snapshot, state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	if request.ApprovalPolicy == ApprovalRequired {
-		return runner.waitForApproval(ctx, proposed, state)
-	}
-	approved, err := runner.approvePlan(ctx, proposed, state, nil, "plan.auto_approved", "Plan auto-approved")
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return runner.execute(ctx, approved)
+	return runner.continueRun(ctx, snapshot)
 }
 
 // ResolveApproval resumes a PlanExecute Run after explicit Plan approval.
@@ -296,7 +303,7 @@ func (runner *Runner) ResolveApproval(
 	if runner.deferResume {
 		return approved, nil
 	}
-	return runner.execute(ctx, approved)
+	return runner.continueRun(ctx, approved)
 }
 
 // Resume continues one non-terminal PlanExecute Run after interruption or Child completion.
@@ -314,7 +321,59 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrPlanAlreadyTerminal
 	}
-	return runner.execute(ctx, snapshot)
+	return runner.continueRun(ctx, snapshot)
+}
+
+func (runner *Runner) continueRun(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, error) {
+	for snapshot.Run.Status == kernel.RunStatusRunning {
+		state, err := decodeState(snapshot.State)
+		if err != nil {
+			return runner.fail(ctx, snapshot, executionState{}, "planexecute.state_invalid", err)
+		}
+		if state.PlannerInvocation != nil && state.PlannerInvocation.Status != PlannerInvocationConsumed {
+			next, advanceErr := runner.advancePlannerInvocation(ctx, snapshot, state)
+			if errors.Is(advanceErr, kernel.ErrConflict) {
+				snapshot, err = runner.runtime.Load(ctx, snapshot.Run.ID)
+				if err != nil {
+					return kernel.Snapshot{}, err
+				}
+				continue
+			}
+			if advanceErr != nil {
+				return next, advanceErr
+			}
+			snapshot = next
+			continue
+		}
+		switch state.Plan.Status {
+		case PlanProposed:
+			if state.ApprovalPolicy == ApprovalRequired {
+				return runner.waitForApproval(ctx, snapshot, state)
+			}
+			approved, approveErr := runner.approvePlan(
+				ctx, snapshot, state, snapshot.Checkpoint, "plan.auto_approved", "Plan auto-approved",
+			)
+			if errors.Is(approveErr, kernel.ErrConflict) {
+				snapshot, err = runner.runtime.Load(ctx, snapshot.Run.ID)
+				if err != nil {
+					return kernel.Snapshot{}, err
+				}
+				continue
+			}
+			if approveErr != nil {
+				return approved, approveErr
+			}
+			snapshot = approved
+			continue
+		case PlanApproved, PlanRunning:
+			return runner.execute(ctx, snapshot)
+		case PlanRejected, PlanCompleted, PlanFailed:
+			return snapshot, ErrPlanAlreadyTerminal
+		default:
+			return runner.fail(ctx, snapshot, state, "planexecute.state_invalid", ErrInvalidPlan)
+		}
+	}
+	return snapshot, nil
 }
 
 // ViewState decodes an isolated public view from a Kernel snapshot.
@@ -323,7 +382,10 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
-	return View{ApprovalPolicy: state.ApprovalPolicy, Plan: clonePlan(state.Plan), NextStep: state.NextStep}, nil
+	return View{
+		ApprovalPolicy: state.ApprovalPolicy, PlannerInvocation: clonePlannerInvocation(state.PlannerInvocation),
+		Plan: clonePlan(state.Plan), NextStep: state.NextStep,
+	}, nil
 }
 
 func (runner *Runner) materializePlan(
@@ -381,7 +443,10 @@ func (runner *Runner) persistPlan(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "plan.created", Message: state.Plan.Summary}},
+		Events: []kernel.EventDraft{{
+			Type: "plan.created", Message: state.Plan.Summary, Wakeup: true,
+			WakeupAt: planWakeupAt(runner.runtime.Now()),
+		}},
 	})
 }
 
@@ -420,7 +485,8 @@ func (runner *Runner) approvePlan(
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
 		Events: []kernel.EventDraft{{
-			Type: eventType, Message: message, Wakeup: eventType == "plan.approved",
+			Type: eventType, Message: message, Wakeup: true,
+			WakeupAt: planWakeupAt(runner.runtime.Now()),
 		}},
 	})
 }
@@ -487,7 +553,10 @@ func (runner *Runner) prepareStep(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "plan.step_started", Message: step.Title}},
+		Events: []kernel.EventDraft{{
+			Type: "plan.step_started", Message: step.Title, Wakeup: true,
+			WakeupAt: planWakeupAt(runner.runtime.Now()),
+		}},
 	})
 }
 
@@ -513,11 +582,15 @@ func (runner *Runner) loadOrStartChild(
 	if !errors.Is(err, kernel.ErrNotFound) {
 		return kernel.Snapshot{}, err
 	}
-	return runner.agent.StartRun(ctx, agent.StartRequest{
+	child, startErr := runner.agent.StartRun(ctx, agent.StartRequest{
 		ID: step.ChildRunID, Actor: parent.Run.Actor, Thread: parent.Run.Thread,
 		RequestID: parent.Run.ID + ":" + step.ID, Goal: step.Goal,
 		Model: model, ToolKeys: step.ToolKeys,
 	})
+	if errors.Is(startErr, kernel.ErrAlreadyExists) {
+		return runner.agent.LoadRun(ctx, step.ChildRunID)
+	}
+	return child, startErr
 }
 
 func (runner *Runner) applyChildOutcome(
@@ -560,7 +633,10 @@ func (runner *Runner) completeStep(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "plan.step_completed", Message: step.Title}},
+		Events: []kernel.EventDraft{{
+			Type: "plan.step_completed", Message: step.Title, Wakeup: true,
+			WakeupAt: planWakeupAt(runner.runtime.Now()),
+		}},
 	})
 }
 
@@ -692,8 +768,10 @@ func (runner *Runner) load(ctx context.Context, runID string) (kernel.Snapshot, 
 }
 
 func normalizeStartRequest(request StartRequest, defaultMax int) StartRequest {
+	request.ID = strings.TrimSpace(request.ID)
 	request.Goal = strings.TrimSpace(request.Goal)
 	request.RequestID = strings.TrimSpace(request.RequestID)
+	request.Model = strings.TrimSpace(request.Model)
 	request.AllowedToolKeys = normalizedOptionalStrings(request.AllowedToolKeys)
 	if request.ApprovalPolicy == "" {
 		request.ApprovalPolicy = ApprovalRequired
@@ -721,6 +799,10 @@ func decodeState(encoded json.RawMessage) (executionState, error) {
 	var state executionState
 	if err := json.Unmarshal(encoded, &state); err != nil {
 		return executionState{}, errors.Join(ErrInvalidPlan, err)
+	}
+	if !validPlannerInvocation(state.PlannerInvocation) ||
+		state.PlannerInvocation.RunID == "" || state.PlannerInvocation.RunID != state.PlannerInvocation.Request.RunID {
+		return executionState{}, ErrInvalidPlan
 	}
 	return state, nil
 }

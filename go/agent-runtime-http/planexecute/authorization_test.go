@@ -66,8 +66,8 @@ func (principal authorizationPrincipal) ResolvePrincipal(*gin.Context) (kernel.A
 
 type authorizationPlanner struct{}
 
-func (authorizationPlanner) GeneratePlan(context.Context, planexecute.PlannerRequest) (planexecute.PlanDraft, error) {
-	return planexecute.PlanDraft{}, nil
+func (authorizationPlanner) GeneratePlan(context.Context, planexecute.PlannerRequest) (planexecute.PlannerResponse, error) {
+	return planexecute.PlannerResponse{}, nil
 }
 
 type authorizationAgent struct{}

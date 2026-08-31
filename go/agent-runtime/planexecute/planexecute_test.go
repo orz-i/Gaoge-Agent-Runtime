@@ -254,8 +254,8 @@ type staticPlanner struct {
 func (planner staticPlanner) GeneratePlan(
 	context.Context,
 	planexecute.PlannerRequest,
-) (planexecute.PlanDraft, error) {
-	return planner.draft, nil
+) (planexecute.PlannerResponse, error) {
+	return planexecute.PlannerResponse{Draft: planner.draft, ResponseID: "static-plan"}, nil
 }
 
 type childBehavior int

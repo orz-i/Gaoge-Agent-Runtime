@@ -36,6 +36,11 @@ const (
 	TriggerModelReady       Trigger = "model_ready"
 	TriggerWaitResolved     Trigger = "wait_resolved"
 	TriggerSegmentYielded   Trigger = "segment_yielded"
+	// TriggerRunReady is the feature-neutral fallback for any committed event
+	// explicitly marked Wakeup. Feature-specific trigger names remain useful for
+	// prioritization/diagnostics, but correctness must not depend on every new
+	// autonomous event type being duplicated in the continuation registry.
+	TriggerRunReady Trigger = "run_ready"
 )
 
 // Payload is the immutable continuation Job body. ExpectedRevision prevents a
@@ -125,7 +130,8 @@ func decodePayload(encoded json.RawMessage) (Payload, error) {
 
 func validTrigger(trigger Trigger) bool {
 	return trigger == TriggerChildTerminal || trigger == TriggerApprovalResolved ||
-		trigger == TriggerModelReady || trigger == TriggerWaitResolved || trigger == TriggerSegmentYielded
+		trigger == TriggerModelReady || trigger == TriggerWaitResolved || trigger == TriggerSegmentYielded ||
+		trigger == TriggerRunReady
 }
 
 func terminal(status kernel.RunStatus) bool {
