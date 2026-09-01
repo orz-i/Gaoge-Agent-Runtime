@@ -170,7 +170,8 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 	planSnapshot := topologySnapshot(
 		"plan-1", planexecute.RunKind, kernel.RunStatusRunning, 4,
 		mustStateJSON(t, planexecute.View{
-			ApprovalPolicy: planexecute.ApprovalAuto,
+			ApprovalPolicy:    planexecute.ApprovalAuto,
+			PlannerInvocation: consumedTopologyPlannerInvocation("plan-1"),
 			Plan: planexecute.Plan{ID: "plan-spec", Revision: 1, Status: planexecute.PlanRunning, Summary: "Delivery plan", Steps: []planexecute.Step{
 				{ID: "step-1", Title: "Research", Goal: "Research", Status: planexecute.StepCompleted, ChildRunID: testPlanChildOne},
 				{ID: "step-2", Title: testTopologyWriteGoal, Goal: testTopologyWriteGoal, Status: planexecute.StepRunning, ChildRunID: testPlanChildTwo},
@@ -221,6 +222,22 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 	return topologyFixtureSet{
 		runs: runs, relations: relations, agentRunID: agentSnapshot.Run.ID,
 		planRunID: planSnapshot.Run.ID, teamRunID: teamSnapshot.Run.ID, workflowRunID: workflowSnapshot.Run.ID,
+	}
+}
+
+func consumedTopologyPlannerInvocation(runID string) *planexecute.PlannerInvocation {
+	createdAt := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	completedAt := createdAt.Add(time.Second)
+	consumedAt := completedAt.Add(time.Second)
+	const invocationID = "plannerinv_topology_fixture"
+	return &planexecute.PlannerInvocation{
+		ID: invocationID, RunID: runID, SourceRevision: 1,
+		RequestHash: "0000000000000000000000000000000000000000000000000000000000000000",
+		Status:      planexecute.PlannerInvocationConsumed,
+		Request: planexecute.PlannerRequest{
+			InvocationID: invocationID, RunID: runID, Goal: "project topology", MaxSteps: 2,
+		},
+		CreatedAt: createdAt, CompletedAt: &completedAt, ConsumedAt: &consumedAt,
 	}
 }
 
