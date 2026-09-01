@@ -104,7 +104,8 @@ func (runner *Runner) prepareNodeEffects(
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
-			Type: "workflow.effect.intents_created", Message: strings.Join(activation.EffectIDs, ","),
+			Type: "workflow.effect.intents_created", Message: strings.Join(activation.EffectIDs, ","), Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
 		}},
 	})
 }
@@ -383,9 +384,9 @@ func (runner *Runner) executeEffectBatch(
 			var result EffectResult
 			var err error
 			if effect.Class == EffectClassSubworkflow && runner.registry != nil {
-				result, err = runner.executeSubworkflowEffect(ctx, request)
+				result, err = runner.executeObservedEffectFunc(ctx, request, runner.executeSubworkflowEffect)
 			} else {
-				result, err = runner.effects.Execute(ctx, request)
+				result, err = runner.executeObservedEffect(ctx, request)
 			}
 			outcomes[position] = effectOutcome{EffectIndex: effectIndex, Result: result, Err: err}
 		}()
@@ -593,9 +594,13 @@ func (runner *Runner) applyEffectOutcomes(
 		if retryScheduled {
 			reason = "effect_retry_scheduled"
 		}
+		event := kernel.EventDraft{Type: "workflow.segment.yielded", Message: reason, Wakeup: true}
+		if reason == "effect_pending" {
+			event.WakeupAt = workflowWakeupAt(runner.runtime.Now())
+		}
 		yielded, applyErr := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-			Events: []kernel.EventDraft{{Type: "workflow.segment.yielded", Message: reason}},
+			Events: []kernel.EventDraft{event},
 		})
 		return yielded, true, errors.Join(ErrEffectPending, applyErr)
 	}
@@ -684,7 +689,8 @@ func (runner *Runner) finishEffectActivation(
 	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
-			Type: "workflow.effect.completed", Message: state.Activations[activationPosition].ID,
+			Type: "workflow.effect.completed", Message: state.Activations[activationPosition].ID, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
 		}},
 	})
 	return completed, false, err
@@ -803,7 +809,10 @@ func (runner *Runner) executeIf(
 	}
 	advanced, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "workflow.branch.selected", Message: fmt.Sprintf("%s:%s", node.ID, target)}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.branch.selected", Message: fmt.Sprintf("%s:%s", node.ID, target), Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	return advanced, false, err
 }

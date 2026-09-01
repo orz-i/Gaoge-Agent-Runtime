@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -13,9 +14,59 @@ const testRegistryEndpoint = "https://mcp.example/rpc"
 type registryCaller struct {
 	endpoint string
 	request  CallRequest
+	calls    int
+}
+
+func TestRegistryRejectsInvalidDiscoveredSchema(t *testing.T) {
+	t.Parallel()
+	_, err := NewRegistry(&registryCaller{}, Discovery{
+		ProtocolVersion: ProtocolVersion,
+		Catalog:         CatalogSnapshot{Endpoint: testRegistryEndpoint},
+		Tools: []DiscoveredTool{{
+			Name: testLookupTool,
+			Definition: tools.Definition{
+				Key: testLookupTool, Name: testLookupTool,
+				InputSchema: json.RawMessage(`{"type":"not-a-real-type"}`),
+			},
+		}},
+	})
+	if !errors.Is(err, ErrInvalidRegistry) {
+		t.Fatalf("invalid MCP schema registration = %v", err)
+	}
+}
+
+func TestRegistryRejectsArgumentsBeforeRemoteCall(t *testing.T) {
+	t.Parallel()
+	caller := &registryCaller{}
+	registry, err := NewRegistry(caller, Discovery{
+		ProtocolVersion: ProtocolVersion,
+		Catalog:         CatalogSnapshot{Endpoint: testRegistryEndpoint},
+		Tools: []DiscoveredTool{{
+			Name: testLookupTool,
+			Definition: tools.Definition{
+				Key: testLookupTool, Name: testLookupTool,
+				InputSchema: json.RawMessage(`{
+					"type":"object","additionalProperties":false,"required":["id"],
+					"properties":{"id":{"type":"string","minLength":1}}
+				}`),
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = registry.Execute(t.Context(), tools.ExecutionRequest{
+		RunID: "run-invalid",
+		Call:  tools.Call{ID: "call-invalid", ToolKey: testLookupTool, Arguments: json.RawMessage(`{"bad":true}`)},
+	})
+	code, _, recoverable := tools.RecoverableCallErrorInfo(err)
+	if !recoverable || code != "tool.arguments_schema" || caller.calls != 0 {
+		t.Fatalf("MCP schema error=%v code=%q calls=%d", err, code, caller.calls)
+	}
 }
 
 func (caller *registryCaller) CallTool(_ context.Context, endpoint string, request CallRequest) (json.RawMessage, error) {
+	caller.calls++
 	caller.endpoint = endpoint
 	caller.request = request
 	return json.RawMessage(`{"content":[{"type":"text","text":"ok"}]}`), nil

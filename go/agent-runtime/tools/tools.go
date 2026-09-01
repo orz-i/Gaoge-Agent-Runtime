@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -36,6 +37,42 @@ type RecoverableCallError struct {
 	Message         string
 	Cause           error
 	BlockedToolKeys []string
+}
+
+// ValidateDefinition compiles the Tool input schema and proves that the
+// definition is safe to register or expose to an Agent. Compiled schemas are
+// cached by jsoncontract and reused by later call validation.
+func ValidateDefinition(definition Definition) error {
+	definition.Key = strings.TrimSpace(definition.Key)
+	definition.Name = strings.TrimSpace(definition.Name)
+	if definition.Key == "" || definition.Name == "" {
+		return ErrInvalidDefinition
+	}
+	if _, err := jsoncontract.Compile(definition.InputSchema); err != nil {
+		return errors.Join(ErrInvalidDefinition, err)
+	}
+	return nil
+}
+
+// ValidateCall enforces a Tool's JSON Schema contract before approval policy or
+// handler execution. Instance violations are model-correctable call errors;
+// invalid registered schemas remain fatal definition errors.
+func ValidateCall(definition Definition, call Call) error {
+	if !validCall(call) || strings.TrimSpace(call.ToolKey) != strings.TrimSpace(definition.Key) {
+		return ErrInvalidCall
+	}
+	validator, err := jsoncontract.Compile(definition.InputSchema)
+	if err != nil {
+		return errors.Join(ErrInvalidDefinition, err)
+	}
+	if err = validator.Validate(call.Arguments); err != nil {
+		return NewRecoverableCallError(
+			"tool.arguments_schema",
+			"Tool arguments do not match the declared input schema: "+err.Error(),
+			errors.Join(ErrInvalidCall, err),
+		)
+	}
+	return nil
 }
 
 // CloneDefinition returns an isolated Tool definition copy.
@@ -308,6 +345,13 @@ func (registry *Registry) Execute(ctx context.Context, request ExecutionRequest)
 	if registry == nil || !validCall(request.Call) || strings.TrimSpace(request.RunID) == "" {
 		return ExecutionResult{}, ErrInvalidCall
 	}
+	definition, ok := registry.definitions[request.Call.ToolKey]
+	if !ok {
+		return ExecutionResult{}, ErrToolNotFound
+	}
+	if err := ValidateCall(definition, request.Call); err != nil {
+		return ExecutionResult{}, err
+	}
 	handler, ok := registry.handlers[request.Call.ToolKey]
 	if !ok {
 		return ExecutionResult{}, ErrToolNotFound
@@ -328,7 +372,7 @@ func normalizeDefinition(definition Definition) (Definition, error) {
 	definition.Name = strings.TrimSpace(definition.Name)
 	definition.Description = strings.TrimSpace(definition.Description)
 	definition.InputSchema = cloneJSON(definition.InputSchema)
-	if definition.Key == "" || definition.Name == "" || !json.Valid(definition.InputSchema) {
+	if err := ValidateDefinition(definition); err != nil {
 		return Definition{}, ErrInvalidDefinition
 	}
 	return definition, nil

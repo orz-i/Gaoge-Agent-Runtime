@@ -24,9 +24,14 @@ var (
 	ErrUnavailable  = errors.New("workbench section unavailable")
 )
 
-// RunSource is the only required Workbench dependency.
+// RunSource reads the current aggregate without implying journal access.
 type RunSource interface {
 	Load(context.Context, string) (kernel.Snapshot, error)
+}
+
+// EventSource pages the append-only Run journal independently of aggregate reads.
+type EventSource interface {
+	ListEvents(context.Context, string, int64, int) ([]kernel.Event, error)
 }
 
 func cloneRun(run kernel.Run) kernel.Run {
@@ -100,20 +105,21 @@ type Detail struct {
 // Query composes one immutable set of narrow read providers.
 type Query struct {
 	runs              RunSource
+	events            EventSource
 	providers         []Provider
 	topologyProviders []TopologyProvider
 }
 
 // NewQuery freezes provider order by name and rejects duplicates.
-func NewQuery(runs RunSource, registrations []Registration) (*Query, error) {
-	if runs == nil {
+func NewQuery(runs RunSource, events EventSource, registrations []Registration) (*Query, error) {
+	if runs == nil || events == nil {
 		return nil, ErrInvalidInput
 	}
 	providers, topologyProviders, err := freezeRegistrations(registrations)
 	if err != nil {
 		return nil, err
 	}
-	return &Query{runs: runs, providers: providers, topologyProviders: topologyProviders}, nil
+	return &Query{runs: runs, events: events, providers: providers, topologyProviders: topologyProviders}, nil
 }
 
 // Descriptor declares the Workbench read capability.
@@ -131,8 +137,12 @@ func (query *Query) Get(ctx context.Context, runID string) (Detail, error) {
 	if err != nil {
 		return Detail{}, err
 	}
+	events, err := query.listEvents(ctx, snapshot)
+	if err != nil {
+		return Detail{}, err
+	}
 	sections, diagnostics := query.loadSections(ctx, snapshot)
-	timeline, timelineDiagnostics := query.loadTimeline(ctx, snapshot)
+	timeline, timelineDiagnostics := query.loadTimeline(ctx, snapshot, events)
 	diagnostics = append(diagnostics, timelineDiagnostics...)
 	topology, topologyDiagnostics := query.loadTopology(ctx, snapshot)
 	diagnostics = append(diagnostics, topologyDiagnostics...)
@@ -197,8 +207,28 @@ func overview(snapshot kernel.Snapshot) Overview {
 		RunID: snapshot.Run.ID, Kind: snapshot.Run.Kind, Goal: snapshot.Run.Goal,
 		Status: snapshot.Run.Status, Revision: snapshot.Run.Revision,
 		ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail,
-		EventCount: len(snapshot.Events), HasCheckpoint: snapshot.Checkpoint != nil, HasResult: snapshot.Result != nil,
+		EventCount: int(snapshot.EventHead), HasCheckpoint: snapshot.Checkpoint != nil, HasResult: snapshot.Result != nil,
 	}
+}
+
+func (query *Query) listEvents(ctx context.Context, snapshot kernel.Snapshot) ([]kernel.Event, error) {
+	if snapshot.EventHead == 0 {
+		return nil, nil
+	}
+	result := make([]kernel.Event, 0, snapshot.EventHead)
+	after := int64(0)
+	for after < snapshot.EventHead {
+		page, err := query.events.ListEvents(ctx, snapshot.Run.ID, after, 1000)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			return nil, ErrInvalidInput
+		}
+		result = append(result, page...)
+		after = page[len(page)-1].Seq
+	}
+	return result, nil
 }
 
 func detailHash(detail Detail) (string, error) {
@@ -262,10 +292,6 @@ func cloneSnapshot(snapshot kernel.Snapshot) kernel.Snapshot {
 	snapshot.State = append(json.RawMessage(nil), snapshot.State...)
 	snapshot.Checkpoint = cloneCheckpoint(snapshot.Checkpoint)
 	snapshot.Result = cloneResult(snapshot.Result)
-	snapshot.Events = append([]kernel.Event(nil), snapshot.Events...)
-	for index := range snapshot.Events {
-		snapshot.Events[index].Data = append(json.RawMessage(nil), snapshot.Events[index].Data...)
-	}
 	return snapshot
 }
 

@@ -75,18 +75,16 @@ type IDSource interface {
 
 // Dependencies are the only requirements of the minimal Kernel.
 type Dependencies struct {
-	Store       Store
-	Clock       Clock
-	IDs         IDSource
-	Transitions TransitionSink
+	Store Store
+	Clock Clock
+	IDs   IDSource
 }
 
 // Runtime owns feature-neutral Run transitions and no background workers.
 type Runtime struct {
-	store       Store
-	clock       Clock
-	ids         IDSource
-	transitions TransitionSink
+	store Store
+	clock Clock
+	ids   IDSource
 }
 
 // New creates a minimal Runtime with no optional feature dependencies.
@@ -101,8 +99,7 @@ func New(dependencies Dependencies) (*Runtime, error) {
 		dependencies.IDs = randomIDSource{}
 	}
 	return &Runtime{
-		store: dependencies.Store, clock: dependencies.Clock,
-		ids: dependencies.IDs, transitions: dependencies.Transitions,
+		store: dependencies.Store, clock: dependencies.Clock, ids: dependencies.IDs,
 	}, nil
 }
 
@@ -138,11 +135,7 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		State: cloneJSON(request.State),
 	}
 	events := append([]EventDraft{{Type: "run.created", Message: "Run created"}}, request.Events...)
-	snapshot, err := runtime.store.Create(ctx, record, events)
-	if err == nil {
-		runtime.observe(ctx, Transition{Current: snapshot, Events: events})
-	}
-	return snapshot, err
+	return runtime.store.Create(ctx, record, events)
 }
 
 // Load returns one atomic Run snapshot.
@@ -151,6 +144,15 @@ func (runtime *Runtime) Load(ctx context.Context, runID string) (Snapshot, error
 		return Snapshot{}, ErrInvalidInput
 	}
 	return runtime.store.Load(ctx, strings.TrimSpace(runID))
+}
+
+// ListEvents pages the append-only Event journal independently of aggregate
+// recovery. afterSeq is exclusive and limit must be positive and bounded.
+func (runtime *Runtime) ListEvents(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error) {
+	if runtime == nil || strings.TrimSpace(runID) == "" || afterSeq < 0 || limit <= 0 || limit > 10_000 {
+		return nil, ErrInvalidInput
+	}
+	return runtime.store.ListEvents(ctx, strings.TrimSpace(runID), afterSeq, limit)
 }
 
 // Apply validates and atomically commits one feature-owned state transition.
@@ -183,12 +185,7 @@ func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevisio
 		Run: next, State: cloneJSON(mutation.State),
 		Checkpoint: cloneCheckpoint(mutation.Checkpoint), Result: cloneResult(mutation.Result),
 	}
-	updated, err := runtime.store.Apply(ctx, runID, expectedRevision, StoreMutation{Record: record, Events: mutation.Events})
-	if err == nil {
-		previous := cloneSnapshot(current)
-		runtime.observe(ctx, Transition{Previous: &previous, Current: updated, Events: mutation.Events})
-	}
-	return updated, err
+	return runtime.store.Apply(ctx, runID, expectedRevision, StoreMutation{Record: record, Events: mutation.Events})
 }
 
 // NewID creates a public identifier through the configured entropy source.
@@ -205,19 +202,6 @@ func (runtime *Runtime) Now() time.Time {
 		return time.Time{}
 	}
 	return runtime.clock.Now().UTC()
-}
-
-func (runtime *Runtime) observe(ctx context.Context, transition Transition) {
-	if runtime == nil || runtime.transitions == nil {
-		return
-	}
-	transition.Current = cloneSnapshot(transition.Current)
-	if transition.Previous != nil {
-		previous := cloneSnapshot(*transition.Previous)
-		transition.Previous = &previous
-	}
-	transition.Events = cloneEventDrafts(transition.Events)
-	runtime.transitions.ObserveTransition(ctx, transition)
 }
 
 func validCreateRequest(request CreateRequest) bool {
@@ -343,25 +327,6 @@ func cloneResult(value *Result) *Result {
 	cloned := *value
 	cloned.Content = cloneJSON(value.Content)
 	return &cloned
-}
-
-func cloneSnapshot(value Snapshot) Snapshot {
-	value.State = cloneJSON(value.State)
-	value.Checkpoint = cloneCheckpoint(value.Checkpoint)
-	value.Result = cloneResult(value.Result)
-	value.Events = append([]Event(nil), value.Events...)
-	for index := range value.Events {
-		value.Events[index].Data = cloneJSON(value.Events[index].Data)
-	}
-	return value
-}
-
-func cloneEventDrafts(values []EventDraft) []EventDraft {
-	result := append([]EventDraft(nil), values...)
-	for index := range result {
-		result[index].Data = cloneJSON(result[index].Data)
-	}
-	return result
 }
 
 type systemClock struct{}

@@ -89,6 +89,10 @@ func (handler *Handler) ResolveApproval(context *gin.Context) {
 		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "planexecute.invalid_request", err.Error())
 		return
 	}
+	if _, err = handler.shared.AuthorizedRun(context, runID, runtimehttp.RunOperationApprovalResolve); err != nil {
+		runtimehttp.WriteRunAccessError(context, "planexecute", err)
+		return
+	}
 	var request ResolveApprovalRequest
 	if err = runtimehttp.BindStrictJSON(context, &request); err != nil {
 		runtimehttp.InvalidBody(context, err)

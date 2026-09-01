@@ -7,7 +7,7 @@ interactions. Host application data and authorization remain owned by the host.
 ## Install a Beta
 
 ```bash
-pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.5/orz-i-agent-runtime-client-0.1.0-beta.5.tgz
+pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.6/orz-i-agent-runtime-client-0.1.0-beta.6.tgz
 ```
 
 Beta packages are GitHub Release archives, not npm registry releases. Registry
@@ -45,8 +45,10 @@ for await (const event of runtime.runs.feed(started.run.id, { afterSeq: lastSeq 
 ```
 
 Run IDs are returned as `snapshot.run.id`. Start runs through their feature
-namespace, such as `agent.start`, not `runs.create`. Feeds are async iterables
-returned by `runs.feed`, not callback-based `events.stream`.
+namespace, such as `agent.start`, not `runs.create`. Snapshots expose only the
+current aggregate plus `eventHead`; durable Kernel event history is paged with
+`runs.events(runID, { afterSeq, limit })`. Semantic live/replay feeds are async
+iterables returned by `runs.feed`, not callback-based `events.stream`.
 
 The feed reconnects transient disconnects, skips already-seen sequence numbers,
 and ends after an event marked `terminal`. Persist `lastSeq` if the caller needs
@@ -62,7 +64,7 @@ a replacement snapshot when the server reports an expired cursor.
 | `teams` | `start` |
 | `workflows` | `start`, `resolveWait`, `cancel`, `trace` |
 | `workflows.definitions` | `compile`, `publish`, `list`, `get`, `setActivation` |
-| `runs` | `get`, `cancel`, `workbench`, `feed` |
+| `runs` | `get`, `events`, `cancel`, `workbench`, `feed` |
 | `harness.commands` | `list` |
 | `harness.turns` | `get`, `feed`, `resolveApproval`, `resolveInteraction`, `retryInvocation` |
 

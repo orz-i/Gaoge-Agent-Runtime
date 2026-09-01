@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"context"
 	"encoding/json"
 	"time"
 )
@@ -63,6 +62,13 @@ type EventDraft struct {
 	Type    string          `json:"type"`
 	Message string          `json:"message,omitempty"`
 	Data    json.RawMessage `json:"data,omitempty"`
+	// Wakeup marks this committed fact as requiring durable future projection.
+	// It is transaction metadata, not part of the public Event journal shape.
+	Wakeup bool `json:"-"`
+	// WakeupAt delays the projected external wakeup until the specified instant.
+	// Stores persist it only inside the committed-transition outbox; the public
+	// Event journal remains unchanged.
+	WakeupAt *time.Time `json:"wakeupAt,omitempty"`
 }
 
 // Event is an append-only fact sequenced within one Run.
@@ -105,21 +111,7 @@ type Snapshot struct {
 	State      json.RawMessage `json:"state"`
 	Checkpoint *Checkpoint     `json:"checkpoint,omitempty"`
 	Result     *Result         `json:"result,omitempty"`
-	Events     []Event         `json:"events"`
-}
-
-// Transition is one already-committed Kernel state change observed by optional host features.
-// Observers cannot participate in or roll back the owning Store transaction.
-type Transition struct {
-	Previous *Snapshot
-	Current  Snapshot
-	Events   []EventDraft
-}
-
-// TransitionSink observes committed transitions for best-effort host side effects such as
-// durable continuation delivery. Feature state remains authoritative when an observer fails.
-type TransitionSink interface {
-	ObserveTransition(context.Context, Transition)
+	EventHead  int64           `json:"eventHead"`
 }
 
 // CreateRequest creates one explicit Runtime Kind with opaque feature state.

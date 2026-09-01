@@ -22,6 +22,67 @@ type resumeResult struct {
 	err      error
 }
 
+func TestWorkflowRejectsInvalidDefinitionSchema(t *testing.T) {
+	t.Parallel()
+	_, err := workflow.CompileDefinition(workflow.DefinitionDraft{
+		ID: "invalid-schema", Revision: 1, Name: "Invalid schema",
+		InputSchema: json.RawMessage(`{"type":"not-a-real-type"}`),
+		Nodes:       []workflow.Node{returnNode(json.RawMessage(`null`))},
+	})
+	if !errors.Is(err, workflow.ErrInvalidDefinition) {
+		t.Fatalf("invalid definition schema = %v", err)
+	}
+}
+
+func TestWorkflowValidatesInputBeforeCreatingRun(t *testing.T) {
+	t.Parallel()
+	runtime := newWorkflowRuntime(t)
+	runner := newWorkflowRunner(t, runtime, &scriptedExecutor{runtime: runtime})
+	definition, err := workflow.CompileDefinition(workflow.DefinitionDraft{
+		ID: "input-contract", Revision: 1, Name: "Input contract",
+		InputSchema: json.RawMessage(`{
+			"type":"object","additionalProperties":false,"required":["storyID"],
+			"properties":{"storyID":{"type":"string","minLength":1}}
+		}`),
+		Nodes: []workflow.Node{returnNode(json.RawMessage(`{"ok":true}`))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := workflowRequest(definition)
+	request.ID = "invalid-workflow-input"
+	request.Input = json.RawMessage(`{"unexpected":true}`)
+	_, err = runner.StartRun(t.Context(), request)
+	if !errors.Is(err, workflow.ErrInputSchema) {
+		t.Fatalf("invalid workflow input = %v", err)
+	}
+	if _, loadErr := runtime.Load(t.Context(), request.ID); !errors.Is(loadErr, kernel.ErrNotFound) {
+		t.Fatalf("invalid input created a Run: %v", loadErr)
+	}
+}
+
+func TestWorkflowValidatesOutputBeforeSuccessfulCompletion(t *testing.T) {
+	t.Parallel()
+	runtime := newWorkflowRuntime(t)
+	runner := newWorkflowRunner(t, runtime, &scriptedExecutor{runtime: runtime})
+	definition, err := workflow.CompileDefinition(workflow.DefinitionDraft{
+		ID: "output-contract", Revision: 1, Name: "Output contract",
+		OutputSchema: json.RawMessage(`{
+			"type":"object","additionalProperties":false,"required":["status"],
+			"properties":{"status":{"const":"done"}}
+		}`),
+		Nodes: []workflow.Node{returnNode(json.RawMessage(`{"wrong":true}`))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := runner.StartRun(t.Context(), workflowRequest(definition))
+	if !errors.Is(err, workflow.ErrOutputSchema) || failed.Run.Status != kernel.RunStatusFailed || failed.Result != nil ||
+		failed.Run.ErrorCode != "workflow.output_schema" {
+		t.Fatalf("invalid output = %#v, %v", failed, err)
+	}
+}
+
 func TestEffectIntentIsPersistedBeforeDispatchAndReplayed(t *testing.T) {
 	t.Parallel()
 	runtime := newWorkflowRuntime(t)

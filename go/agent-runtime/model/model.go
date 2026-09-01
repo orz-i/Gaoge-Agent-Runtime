@@ -4,6 +4,7 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -28,15 +29,16 @@ type Message struct {
 
 // Request is one provider-neutral model call.
 type Request struct {
-	RunID        string
-	Model        string
-	ModelOptions json.RawMessage
-	Messages     []Message
-	Tools        []tools.Definition
-	HostedTools  []HostedTool
+	RunID        string             `json:"runID"`
+	InvocationID string             `json:"invocationID,omitempty"`
+	Model        string             `json:"model,omitempty"`
+	ModelOptions json.RawMessage    `json:"modelOptions,omitempty"`
+	Messages     []Message          `json:"messages"`
+	Tools        []tools.Definition `json:"tools,omitempty"`
+	HostedTools  []HostedTool       `json:"hostedTools,omitempty"`
 	// RequireToolCall asks the host model adapter to enforce a provider Tool call
 	// instead of accepting another text-only response.
-	RequireToolCall bool
+	RequireToolCall bool `json:"requireToolCall,omitempty"`
 }
 
 // HostedTool is one provider-hosted Tool activation resolved by the host.
@@ -68,11 +70,13 @@ type ArtifactRef struct {
 
 // Response returns final content, local Tool calls, provider-hosted Tool facts, and durable artifact refs.
 type Response struct {
-	Content         string
-	ToolCalls       []tools.Call
-	HostedToolCalls []HostedToolCall
-	Artifacts       []ArtifactRef
-	Citations       []string
+	Content         string           `json:"content,omitempty"`
+	ToolCalls       []tools.Call     `json:"toolCalls,omitempty"`
+	HostedToolCalls []HostedToolCall `json:"hostedToolCalls,omitempty"`
+	Artifacts       []ArtifactRef    `json:"artifacts,omitempty"`
+	Citations       []string         `json:"citations,omitempty"`
+	ResponseID      string           `json:"responseID,omitempty"`
+	Usage           *Usage           `json:"usage,omitempty"`
 }
 
 // ReasoningDelta is one provider-neutral reasoning progress observation.
@@ -120,6 +124,43 @@ type StreamingClient interface {
 	GenerateStream(context.Context, Request, func(StreamEvent) error) (Response, error)
 }
 
+// ProviderNamer optionally exposes a stable provider identifier for durable
+// invocation receipts. Runtime correctness does not require providers to
+// implement it.
+type ProviderNamer interface {
+	ProviderName() string
+}
+
+// RetryableError lets provider adapters distinguish transient invocation
+// failures without forcing Agent to fail the durable Run. The same logical
+// InvocationID is retried.
+type RetryableError interface {
+	error
+	Retryable() bool
+}
+
+type retryableError struct{ cause error }
+
+func (err retryableError) Error() string { return err.cause.Error() }
+func (err retryableError) Unwrap() error { return err.cause }
+func (retryableError) Retryable() bool   { return true }
+
+// NewRetryableError marks a provider error as safe to retry using the same
+// durable logical invocation identity.
+func NewRetryableError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return retryableError{cause: err}
+}
+
+// IsRetryableError reports whether a provider/middleware failure explicitly
+// opted into durable retry semantics.
+func IsRetryableError(err error) bool {
+	var retryable RetryableError
+	return errors.As(err, &retryable) && retryable.Retryable()
+}
+
 // CloneRequest returns an isolated request copy suitable for middleware boundaries.
 func CloneRequest(value Request) Request {
 	value.ModelOptions = cloneJSON(value.ModelOptions)
@@ -139,7 +180,17 @@ func CloneResponse(value Response) Response {
 	value.HostedToolCalls = CloneHostedToolCalls(value.HostedToolCalls)
 	value.Artifacts = CloneArtifactRefs(value.Artifacts)
 	value.Citations = append([]string(nil), value.Citations...)
+	value.Usage = CloneUsage(value.Usage)
 	return value
+}
+
+// CloneUsage returns an isolated usage observation.
+func CloneUsage(value *Usage) *Usage {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 // CloneMessages returns isolated message and Tool Call slices.

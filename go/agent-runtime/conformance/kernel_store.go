@@ -30,8 +30,9 @@ func RunKernelStoreSuite(t *testing.T, factory KernelStoreFactory) {
 	t.Run("create-load-isolation", func(t *testing.T) { testCreateLoadIsolation(t, factory(t)) })
 	t.Run("duplicate-create", func(t *testing.T) { testDuplicateCreate(t, factory(t)) })
 	t.Run("checkpoint-result-isolation", func(t *testing.T) { testCheckpointResultIsolation(t, factory(t)) })
-	t.Run("cas-and-events", func(t *testing.T) { testCASAndEvents(t, factory(t)) })
+	t.Run("cas-and-event-journal", func(t *testing.T) { testCASAndEvents(t, factory(t)) })
 	t.Run("concurrent-cas", func(t *testing.T) { testConcurrentCAS(t, factory(t)) })
+	t.Run("transition-outbox", func(t *testing.T) { testTransitionOutbox(t, factory(t)) })
 }
 
 func testCheckpointResultIsolation(t *testing.T, store kernel.Store) {
@@ -70,12 +71,11 @@ func testCreateLoadIsolation(t *testing.T, store kernel.Store) {
 	record.State[1] = 'x'
 	*record.Run.DeadlineAt = record.Run.DeadlineAt.Add(time.Hour)
 	created.State[1] = 'y'
-	created.Events[0].Data = json.RawMessage(`{"mutated":true}`)
 	loaded, err := store.Load(context.Background(), record.Run.ID)
 	if err != nil {
 		t.Fatalf("load record: %v", err)
 	}
-	if string(loaded.State) != conformanceValueJSON || loaded.Run.DeadlineAt == nil ||
+	if string(loaded.State) != conformanceValueJSON || loaded.EventHead != 1 || loaded.Run.DeadlineAt == nil ||
 		!loaded.Run.DeadlineAt.Equal(time.Date(2026, 8, 6, 14, 0, 0, 0, time.UTC)) {
 		t.Fatalf("store did not isolate input/output: %#v", loaded)
 	}
@@ -115,13 +115,25 @@ func testCASAndEvents(t *testing.T, store kernel.Store) {
 		t.Fatalf("apply record: %v", err)
 	}
 	assertAppliedSnapshot(t, applied)
+	events, err := store.ListEvents(context.Background(), record.Run.ID, 0, 2)
+	if err != nil || len(events) != 2 || events[0].Seq != 1 || events[1].Seq != 2 {
+		t.Fatalf("first journal page = %#v, %v", events, err)
+	}
+	events[0].Data = json.RawMessage(`{"mutated":true}`)
+	last, err := store.ListEvents(context.Background(), record.Run.ID, events[1].Seq, 2)
+	if err != nil || len(last) != 1 || last[0].Seq != 3 || last[0].Type != "three" {
+		t.Fatalf("second journal page = %#v, %v", last, err)
+	}
+	again, err := store.ListEvents(context.Background(), record.Run.ID, 0, 1)
+	if err != nil || len(again) != 1 || len(again[0].Data) != 0 {
+		t.Fatalf("journal page leaked mutation = %#v, %v", again, err)
+	}
 	assertStaleApplyDoesNotMutate(t, store, record, next)
 }
 
 func assertAppliedSnapshot(t *testing.T, applied kernel.Snapshot) {
 	t.Helper()
-	if applied.Run.Revision != 2 || string(applied.State) != `{"value":2}` || len(applied.Events) != 3 ||
-		applied.Events[0].Seq != 1 || applied.Events[1].Seq != 2 || applied.Events[2].Seq != 3 {
+	if applied.Run.Revision != 2 || string(applied.State) != `{"value":2}` || applied.EventHead != 3 {
 		t.Fatalf("unexpected applied snapshot: %#v", applied)
 	}
 }
@@ -178,6 +190,80 @@ func testConcurrentCAS(t *testing.T, store kernel.Store) {
 	}
 	if winners != 1 || conflicts != workers-1 {
 		t.Fatalf("unexpected CAS outcomes: winners=%d conflicts=%d", winners, conflicts)
+	}
+}
+
+func testTransitionOutbox(t *testing.T, store kernel.Store) {
+	t.Helper()
+	ordinary := conformanceRecord("run_outbox_ordinary")
+	if _, err := store.Create(context.Background(), ordinary, []kernel.EventDraft{{Type: "run.observed"}}); err != nil {
+		t.Fatalf("create ordinary transition: %v", err)
+	}
+	if claims, err := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "ordinary-projector", Limit: 4, LeaseDuration: time.Minute, Now: ordinary.Run.UpdatedAt,
+	}); err != nil || len(claims) != 0 {
+		t.Fatalf("ordinary transition should not enter outbox: %#v, %v", claims, err)
+	}
+
+	record := conformanceRecord("run_outbox")
+	wakeupAt := record.Run.UpdatedAt.Add(90 * time.Second)
+	events := []kernel.EventDraft{{
+		Type: "resume.ready", Data: json.RawMessage(`{"value":1}`), Wakeup: true, WakeupAt: &wakeupAt,
+	}}
+	if _, err := store.Create(context.Background(), record, events); err != nil {
+		t.Fatalf("create outbox record: %v", err)
+	}
+	events[0].Data[1] = 'x'
+	now := record.Run.UpdatedAt
+	claims, err := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-1", Limit: 4, LeaseDuration: time.Minute, Now: now,
+	})
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim transition: %#v, %v", claims, err)
+	}
+	claim := claims[0]
+	if claim.Transition.ID != "run_outbox:1" || claim.Transition.RunID != record.Run.ID ||
+		claim.Transition.Revision != 1 || claim.Transition.Attempts != 1 || len(claim.Transition.Events) != 1 ||
+		string(claim.Transition.Events[0].Data) != conformanceValueJSON || !claim.Transition.Events[0].Wakeup ||
+		claim.Transition.Events[0].WakeupAt == nil ||
+		!claim.Transition.Events[0].WakeupAt.Equal(wakeupAt) {
+		t.Fatalf("unexpected committed transition: %#v", claim)
+	}
+	if again, claimErr := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-2", Limit: 4, LeaseDuration: time.Minute, Now: now.Add(30 * time.Second),
+	}); claimErr != nil || len(again) != 0 {
+		t.Fatalf("active lease was claimed twice: %#v, %v", again, claimErr)
+	}
+	retryAt := now.Add(2 * time.Minute)
+	lease := kernel.TransitionLeaseRequest{
+		TransitionID: claim.Transition.ID, LeaseID: claim.LeaseID, WorkerID: claim.WorkerID,
+	}
+	if err = store.RetryTransition(context.Background(), kernel.TransitionRetryRequest{
+		TransitionLeaseRequest: lease, AvailableAt: retryAt,
+	}); err != nil {
+		t.Fatalf("retry transition: %v", err)
+	}
+	if early, claimErr := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-2", Limit: 4, LeaseDuration: time.Minute, Now: retryAt.Add(-time.Second),
+	}); claimErr != nil || len(early) != 0 {
+		t.Fatalf("transition became available early: %#v, %v", early, claimErr)
+	}
+	claims, err = store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-2", Limit: 4, LeaseDuration: time.Minute, Now: retryAt,
+	})
+	if err != nil || len(claims) != 1 || claims[0].Transition.Attempts != 2 {
+		t.Fatalf("reclaim transition: %#v, %v", claims, err)
+	}
+	claim = claims[0]
+	if err = store.AckTransition(context.Background(), kernel.TransitionLeaseRequest{
+		TransitionID: claim.Transition.ID, LeaseID: claim.LeaseID, WorkerID: claim.WorkerID,
+	}); err != nil {
+		t.Fatalf("ack transition: %v", err)
+	}
+	if afterAck, claimErr := store.ClaimTransitions(context.Background(), kernel.TransitionClaimRequest{
+		WorkerID: "projector-3", Limit: 4, LeaseDuration: time.Minute, Now: retryAt.Add(2 * time.Minute),
+	}); claimErr != nil || len(afterAck) != 0 {
+		t.Fatalf("acknowledged transition was redelivered: %#v, %v", afterAck, claimErr)
 	}
 }
 

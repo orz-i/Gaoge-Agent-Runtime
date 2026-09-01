@@ -77,19 +77,19 @@ func newIntegrationRuntime(
 		t.Fatal(err)
 	}
 	delivery := queuecore.NewMemory(queuecore.Dependencies{})
+	store := memory.NewStore()
 	var runtime *kernel.Runtime
 	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{
-		Queue: delivery, Relations: relations,
+		Outbox: store, Queue: delivery, Relations: relations,
 		Runs: continuation.LoaderFunc(func(ctx context.Context, runID string) (kernel.Snapshot, error) {
 			return runtime.Load(ctx, runID)
 		}),
+		ProjectorID: "integration-projector",
 	}, continuationadapter.Triggers()...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err = kernel.New(kernel.Dependencies{
-		Store: memory.NewStore(), IDs: &atomicIDs{}, Transitions: scheduler,
-	})
+	runtime, err = kernel.New(kernel.Dependencies{Store: store, IDs: &atomicIDs{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,6 +190,7 @@ func newIntegrationWorker(
 	}
 	worker, err := continuation.NewWorker(delivery, dispatcher, continuation.WorkerOptions{
 		WorkerID: "integration-worker", PollInterval: 5 * time.Millisecond,
+		Projector:  scheduler,
 		Reconciler: scheduler, ReconcileInterval: 20 * time.Millisecond,
 	})
 	if err != nil {
@@ -277,11 +278,11 @@ type integrationPlanner struct{}
 func (integrationPlanner) GeneratePlan(
 	context.Context,
 	planexecute.PlannerRequest,
-) (planexecute.PlanDraft, error) {
-	return planexecute.PlanDraft{
+) (planexecute.PlannerResponse, error) {
+	return planexecute.PlannerResponse{Draft: planexecute.PlanDraft{
 		Summary: "Publish once",
 		Steps:   []planexecute.StepDraft{{Title: "Publish", Goal: "publish once", ToolKeys: []string{integrationToolKey}}},
-	}, nil
+	}, ResponseID: "integration-plan"}, nil
 }
 
 type approvalIntegrationModel struct {

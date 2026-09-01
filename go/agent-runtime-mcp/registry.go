@@ -43,7 +43,7 @@ func NewRegistry(client ToolCaller, discovery Discovery) (*Registry, error) {
 		definition := tools.CloneDefinition(item.Definition)
 		key := strings.TrimSpace(definition.Key)
 		remoteName := strings.TrimSpace(item.Name)
-		if key == "" || remoteName == "" {
+		if key == "" || remoteName == "" || tools.ValidateDefinition(definition) != nil {
 			return nil, ErrInvalidRegistry
 		}
 		if _, duplicate := registry.definitions[key]; duplicate {
@@ -99,6 +99,13 @@ func (registry *Registry) Execute(ctx context.Context, request tools.ExecutionRe
 	remoteName, ok := registry.remoteNames[request.Call.ToolKey]
 	if !ok {
 		return tools.ExecutionResult{}, ErrToolNotFound
+	}
+	definition, ok := registry.definitions[request.Call.ToolKey]
+	if !ok {
+		return tools.ExecutionResult{}, ErrToolNotFound
+	}
+	if err := tools.ValidateCall(definition, request.Call); err != nil {
+		return tools.ExecutionResult{}, err
 	}
 	content, err := registry.client.CallTool(ctx, registry.endpoint, CallRequest{
 		Name: remoteName, Arguments: append(json.RawMessage(nil), request.Call.Arguments...),

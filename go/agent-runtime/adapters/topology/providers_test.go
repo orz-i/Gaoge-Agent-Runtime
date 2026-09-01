@@ -35,7 +35,7 @@ const (
 func TestFeatureTopologyProvidersProjectDurableFacts(t *testing.T) {
 	t.Parallel()
 	fixtures := topologyFixtures(t)
-	query, err := workbench.NewQuery(fixtures.runs, topologyRegistrations(fixtures.runs, fixtures.relations))
+	query, err := workbench.NewQuery(fixtures.runs, fixtures.runs, topologyRegistrations(fixtures.runs, fixtures.relations))
 	if err != nil {
 		t.Fatalf("create topology query: %v", err)
 	}
@@ -165,12 +165,13 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 	t.Helper()
 	agentSnapshot := topologySnapshot(
 		"agent-1", agent.RunKind, kernel.RunStatusCompleted, 2,
-		json.RawMessage(`{"messages":[{"role":"user","content":"draft"}],"model":"terra","toolKeys":[],"limits":{"maxLLMCalls":8,"maxToolCalls":16},"llmCalls":1,"toolCalls":0}`),
+		json.RawMessage(`{"messages":[{"role":"user","content":"draft"}],"model":"terra","toolKeys":[],"budget":{"limits":{"maxLLMCalls":8,"maxToolCalls":16},"usage":{"llmCalls":1}}}`),
 	)
 	planSnapshot := topologySnapshot(
 		"plan-1", planexecute.RunKind, kernel.RunStatusRunning, 4,
 		mustStateJSON(t, planexecute.View{
-			ApprovalPolicy: planexecute.ApprovalAuto,
+			ApprovalPolicy:    planexecute.ApprovalAuto,
+			PlannerInvocation: consumedTopologyPlannerInvocation("plan-1"),
 			Plan: planexecute.Plan{ID: "plan-spec", Revision: 1, Status: planexecute.PlanRunning, Summary: "Delivery plan", Steps: []planexecute.Step{
 				{ID: "step-1", Title: "Research", Goal: "Research", Status: planexecute.StepCompleted, ChildRunID: testPlanChildOne},
 				{ID: "step-2", Title: testTopologyWriteGoal, Goal: testTopologyWriteGoal, Status: planexecute.StepRunning, ChildRunID: testPlanChildTwo},
@@ -221,6 +222,22 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 	return topologyFixtureSet{
 		runs: runs, relations: relations, agentRunID: agentSnapshot.Run.ID,
 		planRunID: planSnapshot.Run.ID, teamRunID: teamSnapshot.Run.ID, workflowRunID: workflowSnapshot.Run.ID,
+	}
+}
+
+func consumedTopologyPlannerInvocation(runID string) *planexecute.PlannerInvocation {
+	createdAt := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	completedAt := createdAt.Add(time.Second)
+	consumedAt := completedAt.Add(time.Second)
+	const invocationID = "plannerinv_topology_fixture"
+	return &planexecute.PlannerInvocation{
+		ID: invocationID, RunID: runID, SourceRevision: 1,
+		RequestHash: "0000000000000000000000000000000000000000000000000000000000000000",
+		Status:      planexecute.PlannerInvocationConsumed,
+		Request: planexecute.PlannerRequest{
+			InvocationID: invocationID, RunID: runID, Goal: "project topology", MaxSteps: 2,
+		},
+		CreatedAt: createdAt, CompletedAt: &completedAt, ConsumedAt: &consumedAt,
 	}
 }
 
@@ -289,6 +306,13 @@ func (source topologyRunSource) Load(_ context.Context, runID string) (kernel.Sn
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
 	return snapshot, nil
+}
+
+func (source topologyRunSource) ListEvents(_ context.Context, runID string, _ int64, _ int) ([]kernel.Event, error) {
+	if _, exists := source.snapshots[runID]; !exists {
+		return nil, kernel.ErrNotFound
+	}
+	return nil, nil
 }
 
 type topologyRelationSource struct {

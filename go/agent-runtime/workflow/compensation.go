@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
 )
 
 var errCancellationRequested = errors.New("workflow cancellation requested")
@@ -65,7 +66,10 @@ func (runner *Runner) beginFailure(
 	}
 	persisted, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.failure.intent_created", Message: state.Failure.Code}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.failure.intent_created", Message: state.Failure.Code, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, errors.Join(cause, err)
@@ -150,7 +154,10 @@ func (runner *Runner) prepareCompensation(
 	}
 	persisted, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.compensation.intent_created", Message: effectID}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.compensation.intent_created", Message: effectID, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -179,9 +186,7 @@ func (runner *Runner) dispatchCompensation(
 		return runner.terminalizeCompensationFailure(ctx, snapshot, state, *compensation)
 	}
 	effect := &state.Effects[effectPosition]
-	result, err := runner.effects.Execute(
-		ctx, buildEffectRequest(snapshot.Run, state.Definition, *effect),
-	)
+	result, err := runner.executeObservedEffect(ctx, buildEffectRequest(snapshot.Run, state.Definition, *effect))
 	if err != nil {
 		if scheduleEffectRetry(effect, "workflow.compensation_dispatch", err) {
 			return runner.persistCompensationRetry(ctx, snapshot, state, compensation.ID)
@@ -227,7 +232,10 @@ func (runner *Runner) dispatchCompensation(
 	}
 	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.compensation.completed", Message: compensation.ID}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.compensation.completed", Message: compensation.ID, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -254,7 +262,10 @@ func (runner *Runner) persistCompensationRetry(
 	}
 	yielded, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.compensation.retry_scheduled", Message: compensationID}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.compensation.retry_scheduled", Message: compensationID, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	return yielded, errors.Join(ErrEffectPending, err)
 }
@@ -329,5 +340,12 @@ func (runner *Runner) terminalizeFailure(
 		Status: status, State: encoded, ErrorCode: state.Failure.Code, ErrorDetail: state.Failure.Detail,
 		Events: []kernel.EventDraft{{Type: eventType, Message: state.Failure.Code}},
 	})
+	if err == nil {
+		phase := observability.PhaseFailed
+		if status == kernel.RunStatusCancelled {
+			phase = observability.PhaseCancelled
+		}
+		runner.recordRunTelemetry(ctx, terminal, state, phase)
+	}
 	return terminal, errors.Join(cause, err)
 }

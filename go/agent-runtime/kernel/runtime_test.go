@@ -31,8 +31,12 @@ func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if created.Run.Revision != 1 || created.Events[0].Type != "run.created" {
+	if created.Run.Revision != 1 || created.EventHead != 1 {
 		t.Fatalf("unexpected created snapshot: %#v", created)
+	}
+	createdEvents, err := runtime.ListEvents(context.Background(), created.Run.ID, 0, 10)
+	if err != nil || len(createdEvents) != 1 || createdEvents[0].Type != "run.created" {
+		t.Fatalf("unexpected created events: %#v, %v", createdEvents, err)
 	}
 
 	completed, err := runtime.Apply(context.Background(), created.Run.ID, created.Run.Revision, kernel.Mutation{
@@ -43,8 +47,12 @@ func TestRuntimeAppliesCASAndTerminalRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("complete run: %v", err)
 	}
-	if completed.Run.Revision != 2 || completed.Run.EndedAt == nil || completed.Result == nil || completed.Events[1].Seq != 2 {
+	if completed.Run.Revision != 2 || completed.Run.EndedAt == nil || completed.Result == nil || completed.EventHead != 2 {
 		t.Fatalf("unexpected completed snapshot: %#v", completed)
+	}
+	completedEvents, err := runtime.ListEvents(context.Background(), completed.Run.ID, 1, 10)
+	if err != nil || len(completedEvents) != 1 || completedEvents[0].Seq != 2 || completedEvents[0].Type != "run.completed" {
+		t.Fatalf("unexpected completed events: %#v, %v", completedEvents, err)
 	}
 	_, err = runtime.Apply(context.Background(), created.Run.ID, completed.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: json.RawMessage(`{"step":2}`),
@@ -97,28 +105,13 @@ func TestRuntimeRejectsInvalidRunKindNames(t *testing.T) {
 	}
 }
 
-func TestRuntimeObservesCommittedTransitionsWithIsolatedSnapshots(t *testing.T) {
+func TestRuntimeCommitsDurableTransitionsWithRunState(t *testing.T) {
 	t.Parallel()
-	sink := &recordingTransitionSink{}
-	runtime := newObservedRuntime(t, sink)
-	created := createObservedRun(t, runtime)
-	assertCreateTransition(t, sink)
-	completeObservedRun(t, runtime, created)
-	assertApplyTransition(t, sink, created)
-	assertObservedState(t, runtime, created.Run.ID)
-}
-
-func newObservedRuntime(t *testing.T, sink kernel.TransitionSink) *kernel.Runtime {
-	t.Helper()
-	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Transitions: sink})
+	store := memory.NewStore()
+	runtime, err := kernel.New(kernel.Dependencies{Store: store})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return runtime
-}
-
-func createObservedRun(t *testing.T, runtime *kernel.Runtime) kernel.Snapshot {
-	t.Helper()
 	created, err := runtime.Create(t.Context(), kernel.CreateRequest{
 		ID: "observed", Kind: testRunKind,
 		Actor:  kernel.ActorRef{TenantID: testTenantID, ActorID: testActorID},
@@ -129,19 +122,7 @@ func createObservedRun(t *testing.T, runtime *kernel.Runtime) kernel.Snapshot {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return created
-}
-
-func assertCreateTransition(t *testing.T, sink *recordingTransitionSink) {
-	t.Helper()
-	if len(sink.transitions) != 1 || sink.transitions[0].Previous != nil {
-		t.Fatalf("create transitions = %#v", sink.transitions)
-	}
-}
-
-func completeObservedRun(t *testing.T, runtime *kernel.Runtime, created kernel.Snapshot) {
-	t.Helper()
-	_, err := runtime.Apply(t.Context(), created.Run.ID, created.Run.Revision, kernel.Mutation{
+	completed, err := runtime.Apply(t.Context(), created.Run.ID, created.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: json.RawMessage(`{"step":1}`),
 		Result: &kernel.Result{ContentType: "text", Content: json.RawMessage(`"done"`)},
 		Events: []kernel.EventDraft{{Type: "agent.completed"}},
@@ -149,32 +130,20 @@ func completeObservedRun(t *testing.T, runtime *kernel.Runtime, created kernel.S
 	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func assertApplyTransition(t *testing.T, sink *recordingTransitionSink, created kernel.Snapshot) {
-	t.Helper()
-	if len(sink.transitions) != 2 || sink.transitions[1].Previous == nil ||
-		sink.transitions[1].Previous.Run.Revision != created.Run.Revision ||
-		sink.transitions[1].Current.Run.Revision != created.Run.Revision+1 {
-		t.Fatalf("apply transitions = %#v", sink.transitions)
+	claims, err := store.ClaimTransitions(t.Context(), kernel.TransitionClaimRequest{
+		WorkerID: "runtime-test", Limit: 8, LeaseDuration: time.Minute, Now: time.Now().UTC().Add(time.Second),
+	})
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("committed transitions = %#v, %v", claims, err)
 	}
-}
-
-func assertObservedState(t *testing.T, runtime *kernel.Runtime, runID string) {
-	t.Helper()
-	loaded, err := runtime.Load(t.Context(), runID)
+	if claims[0].Transition.Revision != completed.Run.Revision || claims[0].Transition.Status != kernel.RunStatusCompleted ||
+		len(claims[0].Transition.Events) != 1 || claims[0].Transition.Events[0].Type != "agent.completed" {
+		t.Fatalf("unexpected durable transitions: %#v", claims)
+	}
+	loaded, err := runtime.Load(t.Context(), created.Run.ID)
 	if err != nil || string(loaded.State) != `{"step":1}` {
-		t.Fatalf("observer mutated durable snapshot: %s, %v", loaded.State, err)
+		t.Fatalf("durable transition changed Run state: %s, %v", loaded.State, err)
 	}
-}
-
-type recordingTransitionSink struct {
-	transitions []kernel.Transition
-}
-
-func (sink *recordingTransitionSink) ObserveTransition(_ context.Context, transition kernel.Transition) {
-	sink.transitions = append(sink.transitions, transition)
-	transition.Current.State = json.RawMessage(`{"mutated":true}`)
 }
 
 func createTestRun(t *testing.T, runtime *kernel.Runtime, deadline *time.Time) kernel.Snapshot {

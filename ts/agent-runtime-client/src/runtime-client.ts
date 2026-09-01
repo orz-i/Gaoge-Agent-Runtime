@@ -4,6 +4,7 @@ import type {
   HarnessTurnFeedEventDTO,
   HarnessTurnSnapshotDTO,
   HarnessCommandDTO,
+  RunEventPageDTO,
   RunSnapshotDTO,
   RunFeedEventDTO,
   WorkbenchDTO,
@@ -17,6 +18,7 @@ import { createWorkflowsCapability } from "./capabilities/workflows.js";
 export type RuntimeHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 export type RuntimeClientOptions = { baseURL: string; fetch?: typeof globalThis.fetch; headers?: RuntimeHeaders };
 export type RequestOptions = { signal?: AbortSignal };
+export type RunEventsOptions = RequestOptions & { afterSeq?: number; limit?: number };
 type FeedOptions = RequestOptions & {
   afterSeq?: number;
   reconnectDelayMS?: number;
@@ -144,6 +146,13 @@ export class RuntimeClient {
     this.runs = {
       get: (runID: string, request?: RequestOptions) =>
         this.request<RunSnapshotDTO>(`/runs/${pathPart(runID)}`, {}, request),
+      events: (runID: string, options: RunEventsOptions = {}) => {
+        const parameters = new URLSearchParams();
+        if (options.afterSeq !== undefined) parameters.set("afterSeq", String(options.afterSeq));
+        if (options.limit !== undefined) parameters.set("limit", String(options.limit));
+        const query = parameters.size > 0 ? `?${parameters.toString()}` : "";
+        return this.request<RunEventPageDTO>(`/runs/${pathPart(runID)}/events${query}`, {}, options);
+      },
       cancel: (runID: string, payload: CancelRunRequest, request?: RequestOptions) =>
         this.request<CancelRunResponse>(`/runs/${pathPart(runID)}/cancel`, { method: "POST", body: JSON.stringify(payload) }, request),
       workbench: (runID: string, request?: RequestOptions) =>

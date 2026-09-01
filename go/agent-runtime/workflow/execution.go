@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
@@ -18,6 +20,8 @@ const (
 
 const workflowWaitCheckpointKind = "workflow_wait"
 
+const autonomousWakeupDelay = time.Second
+
 var (
 	ErrInvalidExecution = errors.New("invalid workflow execution")
 	ErrEffectPending    = errors.New("workflow effect is pending")
@@ -27,6 +31,8 @@ var (
 	ErrBudgetExceeded   = errors.New("workflow budget exceeded")
 	ErrStateTooLarge    = errors.New("workflow state exceeds limit")
 	ErrWorkflowTerminal = errors.New("workflow run is terminal")
+	ErrInputSchema      = errors.New("workflow input violates definition schema")
+	ErrOutputSchema     = errors.New("workflow output violates definition schema")
 )
 
 // ActivationStatus is the lifecycle of one deterministic node activation.
@@ -78,6 +84,11 @@ type Activation struct {
 	Output    json.RawMessage  `json:"output,omitempty"`
 	ErrorCode string           `json:"errorCode,omitempty"`
 	Error     string           `json:"error,omitempty"`
+}
+
+func workflowWakeupAt(now time.Time) *time.Time {
+	wakeupAt := now.UTC().Add(autonomousWakeupDelay)
+	return &wakeupAt
 }
 
 // Effect is one stable external dispatch intent and terminal receipt.
@@ -231,6 +242,7 @@ type Dependencies struct {
 	Effects         EffectExecutor
 	Registry        *DefinitionRegistry
 	Relations       runrelation.Recorder
+	Telemetry       []observability.Recorder
 	Ceiling         Limits
 	DeferResumption bool
 }
@@ -240,6 +252,7 @@ type Runner struct {
 	runtime     *kernel.Runtime
 	effects     EffectExecutor
 	relations   runrelation.Recorder
+	telemetry   *observability.Set
 	ceiling     Limits
 	deferResume bool
 	registry    *DefinitionRegistry
@@ -265,10 +278,14 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Effects == nil {
 		return nil, ErrInvalidExecution
 	}
+	telemetry, err := observability.NewSet(dependencies.Telemetry...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidExecution, err)
+	}
 	ceiling := normalizeCeiling(dependencies.Ceiling)
 	return &Runner{
 		runtime: dependencies.Runtime, effects: dependencies.Effects,
-		relations: dependencies.Relations, ceiling: ceiling,
+		relations: dependencies.Relations, telemetry: telemetry, ceiling: ceiling,
 		deferResume: dependencies.DeferResumption, registry: dependencies.Registry,
 	}, nil
 }
@@ -291,6 +308,9 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if !validStartRequest(request) || !withinCeiling(request.Definition.Limits, runner.ceiling) {
 		return kernel.Snapshot{}, ErrInvalidExecution
 	}
+	if err := validateWorkflowContract(request.Definition.InputSchema, request.Input, ErrInputSchema); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	state := executionState{
 		Definition: cloneDefinition(request.Definition), Input: cloneJSON(request.Input),
 		NestedDepth: request.NestedDepth,
@@ -303,11 +323,15 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
-		Events: []kernel.EventDraft{{Type: "workflow.started", Message: request.Definition.Hash}},
+		Events: []kernel.EventDraft{{
+			Type: "workflow.started", Message: request.Definition.Hash, Wakeup: true,
+			WakeupAt: workflowWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	runner.recordRunTelemetry(ctx, snapshot, state, observability.PhaseStarted)
 	return runner.runSegment(ctx, snapshot)
 }
 
@@ -360,7 +384,7 @@ func (runner *Runner) ResolveWait(
 	}
 	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: "workflow.wait.resolved", Message: waitID}},
+		Events: []kernel.EventDraft{{Type: "workflow.wait.resolved", Message: waitID, Wakeup: true}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -554,6 +578,9 @@ func (runner *Runner) complete(
 	if err != nil {
 		return runner.fail(ctx, snapshot, state, "workflow.return_invalid", err)
 	}
+	if err = validateWorkflowContract(state.Definition.OutputSchema, result, ErrOutputSchema); err != nil {
+		return runner.fail(ctx, snapshot, state, "workflow.output_schema", err)
+	}
 	activationID, err := runner.runtime.NewID("activation")
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -568,11 +595,15 @@ func (runner *Runner) complete(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Result: &kernel.Result{ContentType: "application/json", Content: cloneJSON(result)},
 		Events: []kernel.EventDraft{{Type: "workflow.completed", Message: state.Definition.Hash}},
 	})
+	if err == nil {
+		runner.recordRunTelemetry(ctx, completed, state, observability.PhaseCompleted)
+	}
+	return completed, err
 }
 
 func workflowReturnValue(state executionState, node ReturnNode) (json.RawMessage, error) {
@@ -604,9 +635,13 @@ func (runner *Runner) yield(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	event := kernel.EventDraft{Type: "workflow.segment.yielded", Message: reason, Wakeup: true}
+	if strings.Contains(reason, "pending") {
+		event.WakeupAt = workflowWakeupAt(runner.runtime.Now())
+	}
 	yielded, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "workflow.segment.yielded", Message: reason}},
+		Events: []kernel.EventDraft{event},
 	})
 	return yielded, errors.Join(ErrSegmentYielded, err)
 }
@@ -693,6 +728,17 @@ func validStartRequest(request StartRequest) bool {
 	return request.Goal != "" && request.NestedDepth >= 0 &&
 		request.NestedDepth <= request.Definition.Limits.MaxNestedDepth &&
 		json.Valid(request.Input) && ValidateDefinition(request.Definition) == nil
+}
+
+func validateWorkflowContract(schema json.RawMessage, value json.RawMessage, contractErr error) error {
+	validator, err := jsoncontract.Compile(schema)
+	if err != nil {
+		return errors.Join(ErrInvalidExecution, err)
+	}
+	if err = validator.Validate(value); err != nil {
+		return errors.Join(ErrInvalidExecution, contractErr, err)
+	}
+	return nil
 }
 
 func normalizeCeiling(ceiling Limits) Limits {

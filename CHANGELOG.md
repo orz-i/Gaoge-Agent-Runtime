@@ -3,6 +3,33 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## [0.1.0-beta.6] - 2026-09-01
+
+### Added
+
+- Durable continuation projection from committed wakeups, including a generic `run_ready` fallback for feature-owned autonomous progress.
+- Durable model and planner invocation receipts with stable invocation identity, execution claims/leases, response IDs, and provider usage accounting.
+- Feature-owned budget vocabulary and an observability recorder seam that keep provider and telemetry SDKs outside the Kernel.
+
+### Changed
+
+- Kernel transition outbox storage is owned by the Store; snapshot loading and event-journal reads are separate contracts.
+- PlanExecute `Planner.GeneratePlan` now returns `PlannerResponse`, and `PlannerRequest` carries the stable `InvocationID`.
+- HTTP shared composition requires explicit Run loading and authorization dependencies for object-level access checks.
+- Agent budget state is projected through `View.Budget`; Run snapshots expose `eventHead` while events remain on the journal endpoint.
+
+### Fixed
+
+- Autonomous Agent, Workflow, PlanExecute, and Team progress now has durable recovery sources across crash windows.
+- Compose startup rollback uses a detached bounded cleanup context and poisons the application when rollback cannot prove a clean retry state.
+- PostgreSQL transition outbox persistence retains wakeup metadata and real PostgreSQL integration evidence covers large event histories.
+
+### Upgrade notes
+
+- This is a Beta hard cut: update all Go modules together to `v0.1.0-beta.6` and use the matching TypeScript GitHub Release archive. No compatibility bridge is provided for the replaced Planner, Shared HTTP, Workbench, transition-outbox, Agent budget, or snapshot/event contracts.
+- Hosts should carry Runtime `InvocationID` independently from host request identity and use it only with provider idempotency/retrieval mechanisms whose semantics are known.
+- Prereleases are not published to the npm registry. `npm pack` is used only to build the GitHub Release `.tgz` artifact; no npm publication token is required.
+
 ## [0.1.0-beta.5] - 2026-08-31
 
 ### Fixed

@@ -19,13 +19,26 @@ func (handler *Handler) GetRun(context *gin.Context) {
 		writeError(context, stdhttp.StatusBadRequest, "run.invalid_request", err.Error())
 		return
 	}
-	snapshot, err := handler.runtime.Load(context.Request.Context(), runID)
+	snapshot, err := handler.authorizedRun(context, runID, RunOperationRead)
 	if err != nil {
-		WriteKernelError(context, "run", err)
+		WriteRunAccessError(context, "run", err)
 		return
 	}
 	handler.releaseTerminalRunFeed(context, snapshot)
 	writeSuccess(context, snapshotResponse(snapshot))
+}
+
+// WriteRunAccessError preserves authentication failures while collapsing an
+// object-level denial to the same response as an absent Run.
+func WriteRunAccessError(context *gin.Context, capability string, err error) {
+	switch {
+	case errors.Is(err, errPrincipalUnavailable):
+		writeError(context, stdhttp.StatusUnauthorized, "auth.unauthorized", "runtime principal is unavailable")
+	case errors.Is(err, errRunAuthorizationUnavailable):
+		writeError(context, stdhttp.StatusServiceUnavailable, capability+".unavailable", "run authorization is unavailable")
+	default:
+		WriteKernelError(context, capability, err)
+	}
 }
 
 func (handler *Handler) CancelRun(context *gin.Context) {
@@ -38,14 +51,14 @@ func (handler *Handler) CancelRun(context *gin.Context) {
 		writeError(context, stdhttp.StatusBadRequest, "run.invalid_request", err.Error())
 		return
 	}
+	current, err := handler.authorizedRun(context, runID, RunOperationCancel)
+	if err != nil {
+		WriteRunAccessError(context, "run", err)
+		return
+	}
 	var request CancelRunRequest
 	if err = bindStrictJSON(context, &request); err != nil {
 		invalidBody(context, err)
-		return
-	}
-	current, err := handler.runtime.Load(context.Request.Context(), runID)
-	if err != nil {
-		WriteKernelError(context, "run", err)
 		return
 	}
 	snapshot, routed, err := handler.cancellations.cancel(
@@ -77,6 +90,10 @@ func (handler *Handler) GetWorkbench(context *gin.Context) {
 	runID, err := runIDParam(context)
 	if err != nil {
 		writeError(context, stdhttp.StatusBadRequest, "workbench.invalid_request", err.Error())
+		return
+	}
+	if _, err = handler.authorizedRun(context, runID, RunOperationWorkbenchRead); err != nil {
+		WriteRunAccessError(context, "workbench", err)
 		return
 	}
 	detail, err := handler.workbench.Get(context.Request.Context(), runID)

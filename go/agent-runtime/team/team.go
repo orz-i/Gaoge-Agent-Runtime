@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -17,6 +18,8 @@ const (
 	RunKind          kernel.RunKind    = "team"
 	CapabilityRunner kernel.Capability = "team.runner"
 	ResultKind                         = "team_result"
+
+	autonomousWakeupDelay = time.Second
 )
 
 var (
@@ -41,6 +44,11 @@ type Member struct {
 	Model        string          `json:"model,omitempty"`
 	ModelOptions json.RawMessage `json:"modelOptions,omitempty"`
 	ToolKeys     []string        `json:"toolKeys,omitempty"`
+}
+
+func teamWakeupAt(now time.Time) *time.Time {
+	wakeupAt := now.UTC().Add(autonomousWakeupDelay)
+	return &wakeupAt
 }
 
 func publicResult(state executionState) Result {
@@ -195,7 +203,10 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
-		Events: []kernel.EventDraft{{Type: "team.started", Message: "Team topology materialized"}},
+		Events: []kernel.EventDraft{{
+			Type: "team.started", Message: "Team topology materialized", Wakeup: true,
+			WakeupAt: teamWakeupAt(runner.runtime.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err

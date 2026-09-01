@@ -4,8 +4,8 @@ go 1.26
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.5
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.5
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.6
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.6
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -30,6 +30,7 @@ require (
 	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.1 // indirect
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.6.0 // indirect

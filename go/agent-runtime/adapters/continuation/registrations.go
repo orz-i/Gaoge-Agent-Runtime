@@ -40,6 +40,10 @@ func Triggers() []continuation.TriggerRegistration {
 
 func agentTrigger(event kernel.EventDraft) (continuation.Trigger, bool) {
 	eventType := strings.TrimSpace(event.Type)
+	if eventType == "agent.model_invocation.pending" || eventType == "agent.model_invocation.claimed" ||
+		eventType == "agent.model_invocation.retryable" || eventType == "agent.model_invocation.completed" {
+		return continuation.TriggerModelReady, true
+	}
 	return continuation.TriggerApprovalResolved,
 		eventType == "interaction.resolved" || eventType == "tool.rejected"
 }

@@ -33,8 +33,14 @@ type Trigger string
 const (
 	TriggerChildTerminal    Trigger = "child_terminal"
 	TriggerApprovalResolved Trigger = "approval_resolved"
+	TriggerModelReady       Trigger = "model_ready"
 	TriggerWaitResolved     Trigger = "wait_resolved"
 	TriggerSegmentYielded   Trigger = "segment_yielded"
+	// TriggerRunReady is the feature-neutral fallback for any committed event
+	// explicitly marked Wakeup. Feature-specific trigger names remain useful for
+	// prioritization/diagnostics, but correctness must not depend on every new
+	// autonomous event type being duplicated in the continuation registry.
+	TriggerRunReady Trigger = "run_ready"
 )
 
 // Payload is the immutable continuation Job body. ExpectedRevision prevents a
@@ -93,6 +99,13 @@ type Reconciler interface {
 	Reconcile(context.Context) error
 }
 
+// Projector drains feature-neutral committed transitions into durable
+// continuation Jobs. The Store outbox, not an in-memory callback, is the source
+// of truth for projection work.
+type Projector interface {
+	Project(context.Context) error
+}
+
 func normalizePayload(payload Payload) (Payload, error) {
 	payload.RunID = strings.TrimSpace(payload.RunID)
 	payload.SourceRunID = strings.TrimSpace(payload.SourceRunID)
@@ -117,7 +130,8 @@ func decodePayload(encoded json.RawMessage) (Payload, error) {
 
 func validTrigger(trigger Trigger) bool {
 	return trigger == TriggerChildTerminal || trigger == TriggerApprovalResolved ||
-		trigger == TriggerWaitResolved || trigger == TriggerSegmentYielded
+		trigger == TriggerModelReady || trigger == TriggerWaitResolved || trigger == TriggerSegmentYielded ||
+		trigger == TriggerRunReady
 }
 
 func terminal(status kernel.RunStatus) bool {

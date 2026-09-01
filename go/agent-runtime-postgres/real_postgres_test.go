@@ -9,14 +9,83 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+func TestRealPostgresKernelStoreLoadIndependentOfLargeHistory(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	db, _ := openIsolatedRealPostgres(t, dsn)
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	store := NewKernelStore(db)
+	now := kernelTestNow()
+	runID := "large_history_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	record := kernel.Record{
+		Run: kernel.Run{
+			ID: runID, Kind: kernel.RunKind("benchmark"),
+			Actor:  kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+			Thread: kernel.ThreadRef{Kind: "benchmark", ID: "thread"},
+			Goal:   "large history", Status: kernel.RunStatusRunning, Revision: 1,
+			CreatedAt: now, UpdatedAt: now,
+		},
+		State: json.RawMessage(`{"hot":true}`),
+	}
+	if _, err := store.Create(t.Context(), record, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	const eventCount = 100_000
+	events := make([]models.KernelEventRecord, eventCount)
+	for index := range events {
+		events[index] = models.KernelEventRecord{
+			RunID: runID, Seq: int64(index + 1), Type: "history.event", CreatedAt: now,
+		}
+	}
+	if err := db.CreateInBatches(events, 1_000).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&models.KernelRunRecord{}).Where("run_id = ?", runID).
+		Update("last_event_seq", eventCount).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	for range 25 {
+		snapshot, err := store.Load(t.Context(), runID)
+		if err != nil || snapshot.EventHead != eventCount || string(snapshot.State) != `{"hot":true}` {
+			t.Fatalf("large-history aggregate load = %#v, %v", snapshot, err)
+		}
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan string
+	err = sqlDB.QueryRowContext(t.Context(), `
+EXPLAIN (FORMAT JSON)
+SELECT run_id, revision, last_event_seq, state_json
+FROM agent_kernel_runs
+WHERE run_id = $1
+LIMIT 1`, runID).Scan(&plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plan, "agent_kernel_events") || !strings.Contains(plan, "agent_kernel_runs") {
+		t.Fatalf("aggregate Load query plan touched journal or missed run table: %s", plan)
+	}
+}
 
 func TestRealPostgresKernelStoreConformanceAndRestart(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
@@ -102,8 +171,12 @@ func TestRealPostgresKernelStoreConformanceAndRestart(t *testing.T) {
 	}
 
 	reconstructed, err := secondRuntime.Load(t.Context(), runID)
-	if err != nil || reconstructed.Run.Revision != 2 || string(reconstructed.State) != `{"step":2}` || len(reconstructed.Events) != 2 {
+	if err != nil || reconstructed.Run.Revision != 2 || string(reconstructed.State) != `{"step":2}` || reconstructed.EventHead != 2 {
 		t.Fatalf("reconstructed run = %#v, err=%v", reconstructed, err)
+	}
+	reconstructedEvents, err := secondRuntime.ListEvents(t.Context(), runID, 0, 10)
+	if err != nil || len(reconstructedEvents) != 2 || reconstructedEvents[1].Seq != 2 {
+		t.Fatalf("reconstructed events = %#v, err=%v", reconstructedEvents, err)
 	}
 	completed, err := secondRuntime.Apply(t.Context(), runID, reconstructed.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted,
@@ -125,8 +198,12 @@ func TestRealPostgresKernelStoreConformanceAndRestart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = thirdSQLDB.Close() })
 	terminal, err := NewKernelStore(thirdDB).Load(t.Context(), runID)
-	if err != nil || terminal.Run.Status != kernel.RunStatusCompleted || terminal.Result == nil || len(terminal.Events) != 3 {
+	if err != nil || terminal.Run.Status != kernel.RunStatusCompleted || terminal.Result == nil || terminal.EventHead != 3 {
 		t.Fatalf("terminal restart snapshot = %#v, err=%v", terminal, err)
+	}
+	terminalEvents, err := NewKernelStore(thirdDB).ListEvents(t.Context(), runID, 2, 10)
+	if err != nil || len(terminalEvents) != 1 || terminalEvents[0].Type != "run.completed" {
+		t.Fatalf("terminal restart events = %#v, err=%v", terminalEvents, err)
 	}
 }
 
@@ -170,4 +247,8 @@ func openIsolatedRealPostgres(tb testing.TB, dsn string) (*gorm.DB, string) {
 
 func realPostgresTestConfig() *gorm.Config {
 	return &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)}
+}
+
+func kernelTestNow() time.Time {
+	return time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
 }

@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"time"
 
+	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -16,14 +20,19 @@ import (
 const (
 	RunKind          kernel.RunKind    = "agent"
 	CapabilityRunner kernel.Capability = "agent.runner"
+
+	autonomousWakeupDelay = time.Second
 )
 
 var (
 	ErrInvalidRequest       = errors.New("invalid agent run request")
 	ErrInvalidModelResponse = errors.New("invalid agent model response")
 	ErrModelFailure         = errors.New("agent model failure")
+	ErrModelInvocationBusy  = errors.New("agent model invocation execution is leased")
 	ErrToolFailure          = errors.New("agent tool failure")
 	ErrCallLimit            = errors.New("agent run call limit exceeded")
+	ErrBudgetExceeded       = errors.New("agent run budget exceeded")
+	ErrUsageUnavailable     = errors.New("agent model usage unavailable for configured token budget")
 	ErrApprovalRequired     = errors.New("agent run approval is required")
 	ErrRunTerminal          = errors.New("agent run is terminal")
 )
@@ -34,6 +43,13 @@ func (runner *Runner) completeWithToolResult(
 	state runState,
 	result tools.ExecutionResult,
 ) (kernel.Snapshot, error) {
+	state.Budget.Usage.OutputBytes = len(result.Content)
+	if dimension := runtimebudget.Exceeded(state.Budget.Limits, state.Budget.Usage); dimension != "" {
+		return runner.fail(
+			ctx, snapshot, state, "agent."+string(dimension)+"_budget",
+			fmt.Errorf("%w: %s", ErrBudgetExceeded, dimension),
+		)
+	}
 	encodedState, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -54,6 +70,11 @@ func (runner *Runner) completeWithToolResult(
 		runner.publishRunEvent(ctx, completed, EventRunCompleted, true)
 	}
 	return completed, err
+}
+
+func agentWakeupAt(now time.Time) *time.Time {
+	wakeupAt := now.UTC().Add(autonomousWakeupDelay)
+	return &wakeupAt
 }
 
 func (runner *Runner) validateCompletion(
@@ -109,7 +130,10 @@ func (runner *Runner) correctCompletion(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "agent.completion_corrected", Message: correction.Code}},
+		Events: []kernel.EventDraft{{
+			Type: "agent.completion_corrected", Message: correction.Code, Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 }
 
@@ -160,22 +184,23 @@ type HostedToolCatalog interface {
 	Resolve(context.Context, string, string) (model.HostedTool, bool, error)
 }
 
-// Limits are hard ceilings for one direct Agent loop.
-type Limits struct {
-	MaxLLMCalls  int `json:"maxLLMCalls"`
-	MaxToolCalls int `json:"maxToolCalls"`
-}
+// Limits are the common hard ceilings configured for one direct Agent loop.
+// The alias keeps Agent composition concise while the vocabulary is shared by
+// other feature-owned budget projections.
+type Limits = runtimebudget.Limits
 
 // Dependencies explicitly provide the direct Agent loop capabilities.
 type Dependencies struct {
 	Runtime            *kernel.Runtime
 	Model              model.Client
+	Clock              kernel.Clock
 	Catalog            tools.Catalog
 	Executor           tools.Executor
 	Approvals          plugin.ApprovalHandler
 	ApprovalPolicies   []plugin.ApprovalPolicy
 	HostedTools        HostedToolCatalog
 	Observers          []plugin.Observer
+	Telemetry          []observability.Recorder
 	RunMiddleware      []plugin.RunMiddleware
 	ModelMiddleware    []plugin.ModelMiddleware
 	ToolMiddleware     []plugin.ToolMiddleware
@@ -204,12 +229,14 @@ type StartRequest struct {
 type Runner struct {
 	runtime            *kernel.Runtime
 	model              model.Client
+	clock              kernel.Clock
 	catalog            tools.Catalog
 	executor           tools.Executor
 	approvals          plugin.ApprovalHandler
 	approvalPolicies   *plugin.ApprovalPolicySet
 	hostedTools        HostedToolCatalog
 	observers          *plugin.ObserverSet
+	telemetry          *observability.Set
 	runChain           *plugin.RunChain
 	modelChain         *plugin.ModelChain
 	toolChain          *plugin.ToolChain
@@ -219,17 +246,16 @@ type Runner struct {
 }
 
 type runState struct {
-	Messages         []model.Message `json:"messages"`
-	Model            string          `json:"model,omitempty"`
-	ModelOptions     json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys         []string        `json:"toolKeys"`
-	RequiredToolKeys []string        `json:"requiredToolKeys,omitempty"`
-	BlockedToolKeys  []string        `json:"blockedToolKeys,omitempty"`
-	RequireToolCall  bool            `json:"requireToolCall,omitempty"`
-	Limits           Limits          `json:"limits"`
-	PendingCalls     []tools.Call    `json:"pendingCalls,omitempty"`
-	LLMCalls         int             `json:"llmCalls"`
-	ToolCalls        int             `json:"toolCalls"`
+	Messages         []model.Message        `json:"messages"`
+	Model            string                 `json:"model,omitempty"`
+	ModelOptions     json.RawMessage        `json:"modelOptions,omitempty"`
+	ToolKeys         []string               `json:"toolKeys"`
+	RequiredToolKeys []string               `json:"requiredToolKeys,omitempty"`
+	BlockedToolKeys  []string               `json:"blockedToolKeys,omitempty"`
+	RequireToolCall  bool                   `json:"requireToolCall,omitempty"`
+	Budget           runtimebudget.Snapshot `json:"budget"`
+	PendingCalls     []tools.Call           `json:"pendingCalls,omitempty"`
+	ModelInvocations []ModelInvocation      `json:"modelInvocations,omitempty"`
 }
 
 // View is an isolated public projection of one persisted Agent Run. It exposes
@@ -241,9 +267,8 @@ type View struct {
 	ModelOptions     json.RawMessage
 	ToolKeys         []string
 	RequiredToolKeys []string
-	Limits           Limits
-	LLMCalls         int
-	ToolCalls        int
+	Budget           runtimebudget.Snapshot
+	ModelInvocations []ModelInvocation
 }
 
 // ViewState decodes an isolated public view from a Kernel Agent snapshot.
@@ -258,9 +283,8 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		ModelOptions:     cloneRawJSON(state.ModelOptions),
 		ToolKeys:         append([]string(nil), state.ToolKeys...),
 		RequiredToolKeys: append([]string(nil), state.RequiredToolKeys...),
-		Limits:           state.Limits,
-		LLMCalls:         state.LLMCalls,
-		ToolCalls:        state.ToolCalls,
+		Budget:           state.Budget,
+		ModelInvocations: cloneModelInvocations(state.ModelInvocations),
 	}, nil
 }
 
@@ -286,20 +310,30 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if err != nil {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
+	telemetry, err := observability.NewSet(dependencies.Telemetry...)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidRequest, err)
+	}
 	approvalPolicies, err := plugin.NewApprovalPolicySet(dependencies.ApprovalPolicies...)
 	if err != nil {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
-	if dependencies.Limits.MaxLLMCalls <= 0 {
+	if !validAgentLimits(dependencies.Limits) {
+		return nil, ErrInvalidRequest
+	}
+	if dependencies.Limits.MaxLLMCalls == 0 {
 		dependencies.Limits.MaxLLMCalls = 8
 	}
-	if dependencies.Limits.MaxToolCalls <= 0 {
+	if dependencies.Limits.MaxToolCalls == 0 {
 		dependencies.Limits.MaxToolCalls = 16
 	}
+	if dependencies.Clock == nil {
+		dependencies.Clock = agentClock{}
+	}
 	return &Runner{
-		runtime: dependencies.Runtime, model: dependencies.Model, catalog: dependencies.Catalog,
+		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
-		hostedTools: dependencies.HostedTools, observers: observers, approvalPolicies: approvalPolicies,
+		hostedTools: dependencies.HostedTools, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies: compactCompletionPolicies(dependencies.CompletionPolicies),
 		limits:             dependencies.Limits,
 		runChain:           runChain, modelChain: modelChain, toolChain: toolChain,
@@ -353,7 +387,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 		ModelOptions:     cloneRawJSON(request.ModelOptions),
 		ToolKeys:         toolKeys,
 		RequiredToolKeys: requiredToolKeys,
-		Limits:           limits,
+		Budget:           runtimebudget.Snapshot{Limits: limits},
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
@@ -362,7 +396,10 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
-		Events: []kernel.EventDraft{{Type: "agent.started", Message: "Direct Agent loop started"}},
+		Events: []kernel.EventDraft{{
+			Type: "agent.started", Message: "Direct Agent loop started", Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -466,22 +503,67 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			return failed, true, failErr
 		}
 		prepared, prepareErr := runner.preparePendingApproval(ctx, snapshot, state, definitions)
-		if prepareErr != nil || prepared.Run.Status != kernel.RunStatusRunning {
+		if prepareErr != nil {
+			if code, message, recoverable := tools.RecoverableCallErrorInfo(prepareErr); recoverable {
+				corrected, correctionErr := runner.recordRecoverableToolError(
+					ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(prepareErr),
+				)
+				return corrected, correctionErr != nil, correctionErr
+			}
+			return prepared, true, prepareErr
+		}
+		if prepared.Run.Status != kernel.RunStatusRunning {
 			return prepared, true, prepareErr
 		}
 		executed, yielded, executeErr := runner.executePending(ctx, prepared)
 		return executed, yielded || executeErr != nil, executeErr
 	}
-	if state.LLMCalls >= state.Limits.MaxLLMCalls {
+	if state.Budget.Usage.LLMCalls >= state.Budget.Limits.MaxLLMCalls {
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.llm_limit", ErrCallLimit)
 		return failed, true, failErr
 	}
-	definitions, response, err := runner.callModel(ctx, snapshot, state)
+	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)
 	if err != nil {
-		failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_failed", err)
+		return snapshot, true, err
+	}
+	snapshot, state, invocation, err = runner.claimModelInvocationExecution(ctx, snapshot, state, invocation)
+	if err != nil {
+		return snapshot, true, err
+	}
+	snapshot, state, err = runner.executeModelInvocation(ctx, snapshot, state, invocation)
+	if err != nil {
+		if model.IsRetryableError(err) {
+			released, releaseErr := runner.releaseModelInvocationExecution(ctx, snapshot, state, invocation)
+			if releaseErr != nil {
+				return released, true, errors.Join(err, releaseErr)
+			}
+			return released, true, err
+		}
+		if errors.Is(err, ErrModelFailure) || errors.Is(err, ErrInvalidModelResponse) {
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_failed", err)
+			return failed, true, failErr
+		}
+		return snapshot, true, err
+	}
+	consumed, ok := consumeLastModelInvocation(&state, runner.clock.Now())
+	if !ok {
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_invocation_invalid", ErrInvalidRequest)
 		return failed, true, failErr
 	}
-	state.LLMCalls++
+	definitions := modelDefinitions(consumed)
+	response := model.CloneResponse(consumed.Response)
+	budgetDimension, budgetErr := chargeConsumedModelUsage(&state, consumed)
+	if budgetErr != nil {
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.usage_invalid", budgetErr)
+		return failed, true, failErr
+	}
+	if budgetDimension != "" {
+		failed, failErr := runner.fail(
+			ctx, snapshot, state, "agent."+string(budgetDimension)+"_budget",
+			fmt.Errorf("%w: %s", ErrBudgetExceeded, budgetDimension),
+		)
+		return failed, true, failErr
+	}
 	if len(response.ToolCalls) == 0 {
 		if missing := missingRequiredToolKeys(state); len(missing) != 0 {
 			corrected, correctionErr := runner.correctRequiredToolCompletion(ctx, snapshot, state, response, missing)
@@ -499,7 +581,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		completed, completeErr := runner.complete(ctx, snapshot, state, response)
 		return completed, true, completeErr
 	}
-	if state.ToolCalls+len(response.ToolCalls) > state.Limits.MaxToolCalls {
+	if state.Budget.Usage.ToolCalls+len(response.ToolCalls) > state.Budget.Limits.MaxToolCalls {
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_limit", ErrCallLimit)
 		return failed, true, failErr
 	}
@@ -515,51 +597,6 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return queued, true, err
 	}
 	return queued, false, nil
-}
-
-func (runner *Runner) callModel(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state runState,
-) ([]tools.Definition, model.Response, error) {
-	definitions, hostedTools, err := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model)
-	if err != nil {
-		return nil, model.Response{}, err
-	}
-	messages := model.CloneMessages(state.Messages)
-	if len(state.BlockedToolKeys) != 0 {
-		definitions = definitionsWithoutKeys(definitions, state.BlockedToolKeys)
-		hostedTools = hostedToolsWithoutKeys(hostedTools, state.BlockedToolKeys)
-		messages = withBlockedToolGuidance(messages, state.BlockedToolKeys)
-	}
-	if repeatedToolKeys := repeatedUnchangedToolKeys(messages); len(repeatedToolKeys) != 0 {
-		definitions = definitionsWithoutKeys(definitions, repeatedToolKeys)
-		hostedTools = hostedToolsWithoutKeys(hostedTools, repeatedToolKeys)
-		messages = withRepeatedToolGuidance(messages, repeatedToolKeys)
-	}
-	request := model.Request{
-		RunID: snapshot.Run.ID, Model: state.Model,
-		ModelOptions:    cloneRawJSON(state.ModelOptions),
-		Messages:        messages,
-		Tools:           definitions,
-		HostedTools:     model.CloneHostedTools(hostedTools),
-		RequireToolCall: state.RequireToolCall && (len(definitions) != 0 || len(hostedTools) != 0),
-	}
-	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
-		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
-	})
-	response, err := runner.generateModel(ctx, request)
-	if err != nil {
-		return nil, model.Response{}, errors.Join(ErrModelFailure, err)
-	}
-	response.Content = strings.TrimSpace(response.Content)
-	if !validModelResponse(response) {
-		return nil, model.Response{}, ErrInvalidModelResponse
-	}
-	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
-		Type: EventModelCompleted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
-	})
-	return definitions, response, nil
 }
 
 type completedToolCall struct {
@@ -784,7 +821,10 @@ func (runner *Runner) correctRequiredToolCompletion(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "agent.completion_corrected", Message: strings.Join(missing, ",")}},
+		Events: []kernel.EventDraft{{
+			Type: "agent.completion_corrected", Message: strings.Join(missing, ","), Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 }
 
@@ -857,12 +897,30 @@ func (runner *Runner) generateProviderModel(
 	if !ok {
 		return runner.model.Generate(ctx, request)
 	}
-	return streaming.GenerateStream(ctx, request, func(event model.StreamEvent) error {
+	var responseID string
+	var usage *model.Usage
+	response, err := streaming.GenerateStream(ctx, request, func(event model.StreamEvent) error {
+		if strings.TrimSpace(event.ResponseID) != "" {
+			responseID = strings.TrimSpace(event.ResponseID)
+		}
+		if event.Usage != nil {
+			usage = model.CloneUsage(event.Usage)
+		}
 		if emit == nil {
 			return nil
 		}
 		return emit(event)
 	})
+	if err != nil {
+		return model.Response{}, err
+	}
+	if strings.TrimSpace(response.ResponseID) == "" {
+		response.ResponseID = responseID
+	}
+	if response.Usage == nil {
+		response.Usage = usage
+	}
+	return response, nil
 }
 
 func (runner *Runner) resolveSelectedTools(
@@ -902,6 +960,9 @@ func (runner *Runner) resolveSelectedTool(
 ) (*tools.Definition, *model.HostedTool, error) {
 	if runner.catalog != nil {
 		if definition, ok := runner.catalog.Resolve(key); ok {
+			if err := tools.ValidateDefinition(definition); err != nil {
+				return nil, nil, err
+			}
 			return &definition, nil, nil
 		}
 	}
@@ -969,7 +1030,10 @@ func (runner *Runner) queueToolCalls(
 	}
 	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.batch_requested", Message: "Tool call batch requested"}},
+		Events: []kernel.EventDraft{{
+			Type: "tool.batch_requested", Message: "Tool call batch requested", Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err == nil {
 		for _, call := range preparedCalls {
@@ -994,6 +1058,9 @@ func (runner *Runner) preparePendingApproval(
 	definition, ok := selectedDefinition(definitions, call.ToolKey)
 	if !ok {
 		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
+	}
+	if err := tools.ValidateCall(definition, call); err != nil {
+		return snapshot, err
 	}
 	invocation := plugin.ToolInvocation{
 		Run:        snapshot.Run,
@@ -1037,6 +1104,9 @@ func (runner *Runner) preparePendingApproval(
 func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, bool, error) {
 	execution, failCode, err := runner.preparePendingToolExecution(snapshot)
 	if err != nil {
+		if _, _, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
+			return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, err)
+		}
 		failed, failErr := runner.fail(ctx, snapshot, execution.state, failCode, err)
 		return failed, false, failErr
 	}
@@ -1070,7 +1140,10 @@ func (runner *Runner) preparePendingToolExecution(snapshot kernel.Snapshot) (pen
 	if !ok {
 		return pendingToolExecution{state: state}, "agent.tool_invalid", tools.ErrToolNotFound
 	}
-	if state.ToolCalls >= state.Limits.MaxToolCalls {
+	if err := tools.ValidateCall(definition, call); err != nil {
+		return pendingToolExecution{state: state, call: call, definition: definition}, "agent.tool_invalid", err
+	}
+	if state.Budget.Usage.ToolCalls >= state.Budget.Limits.MaxToolCalls {
 		return pendingToolExecution{state: state}, "agent.tool_limit", ErrCallLimit
 	}
 	return pendingToolExecution{state: state, call: call, definition: definition}, "", nil
@@ -1082,6 +1155,13 @@ func (runner *Runner) invokePendingTool(
 	call tools.Call,
 	definition tools.Definition,
 ) (tools.ExecutionResult, error) {
+	startedAt := runner.clock.Now().UTC()
+	runner.recordTelemetry(ctx, observability.Event{
+		Scope: observability.ScopeToolInvocation, Phase: observability.PhaseStarted,
+		RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
+		Status: string(snapshot.Run.Status), OperationID: call.ID, Operation: definition.Key,
+		ObservedAt: startedAt,
+	})
 	runner.publishValue(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventToolStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	}, call)
@@ -1089,9 +1169,23 @@ func (runner *Runner) invokePendingTool(
 	invocation := plugin.ToolInvocation{
 		Run: snapshot.Run, Definition: tools.CloneDefinition(definition), Request: executionRequest,
 	}
-	return runner.toolChain.Invoke(ctx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
+	result, err := runner.toolChain.Invoke(ctx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
 		return runner.executor.Execute(nextCtx, executionRequest)
 	})
+	endedAt := runner.clock.Now().UTC()
+	phase := observability.PhaseCompleted
+	errorCode := ""
+	if err != nil {
+		phase = observability.PhaseFailed
+		errorCode = "tool_error"
+	}
+	runner.recordTelemetry(ctx, observability.Event{
+		Scope: observability.ScopeToolInvocation, Phase: phase,
+		RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
+		Status: string(snapshot.Run.Status), OperationID: call.ID, Operation: definition.Key,
+		ErrorCode: errorCode, ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
+	})
+	return result, err
 }
 
 func (runner *Runner) handlePendingToolExecutionError(
@@ -1134,7 +1228,10 @@ func (runner *Runner) persistPendingToolYield(
 	}
 	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: EventToolPending, Message: tools.ReceiptDispositionPending}},
+		Events: []kernel.EventDraft{{
+			Type: EventToolPending, Message: tools.ReceiptDispositionPending, Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err == nil {
 		runner.publishToolEvent(ctx, next, EventToolPending, result.Receipt)
@@ -1153,7 +1250,7 @@ func (runner *Runner) persistCompletedToolCall(
 		Role: model.RoleTool, Content: string(result.Content), ToolCallID: execution.call.ID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
-	state.ToolCalls++
+	state.Budget.Usage.ToolCalls++
 	if execution.definition.Terminal {
 		if len(state.PendingCalls) != 0 {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
@@ -1168,7 +1265,10 @@ func (runner *Runner) persistCompletedToolCall(
 	}
 	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.completed", Message: result.Receipt.Disposition}},
+		Events: []kernel.EventDraft{{
+			Type: "tool.completed", Message: result.Receipt.Disposition, Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err == nil {
 		runner.publishToolEvent(ctx, next, EventToolCompleted, result.Receipt)
@@ -1211,7 +1311,7 @@ func (runner *Runner) recordRecoverableToolError(
 		Role: model.RoleTool, Content: string(content), ToolCallID: callID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
-	state.ToolCalls++
+	state.Budget.Usage.ToolCalls++
 	state.BlockedToolKeys = normalizedToolKeys(append(state.BlockedToolKeys, blockedToolKeys...))
 	state.RequireToolCall = true
 	encoded, err := encodeState(state)
@@ -1220,7 +1320,10 @@ func (runner *Runner) recordRecoverableToolError(
 	}
 	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.correction_requested", Message: strings.TrimSpace(code)}},
+		Events: []kernel.EventDraft{{
+			Type: "tool.correction_requested", Message: strings.TrimSpace(code), Wakeup: true,
+			WakeupAt: agentWakeupAt(runner.clock.Now()),
+		}},
 	})
 	if err == nil {
 		runner.publishValue(ctx, next.Run.ID, plugin.Event{
@@ -1243,7 +1346,7 @@ func (runner *Runner) resumeApproved(
 	}
 	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: "interaction.resolved", Message: "Tool call approved"}},
+		Events: []kernel.EventDraft{{Type: "interaction.resolved", Message: "Tool call approved", Wakeup: true}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -1275,7 +1378,7 @@ func (runner *Runner) resumeRejected(
 	}
 	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.rejected", Message: "Tool call rejected"}},
+		Events: []kernel.EventDraft{{Type: "tool.rejected", Message: "Tool call rejected", Wakeup: true}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -1308,12 +1411,19 @@ func (runner *Runner) complete(
 	state runState,
 	response model.Response,
 ) (kernel.Snapshot, error) {
-	state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: response.Content})
-	encodedState, err := encodeState(state)
+	result, err := terminalResult(response)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	result, err := terminalResult(response)
+	state.Budget.Usage.OutputBytes = len(result.Content)
+	if dimension := runtimebudget.Exceeded(state.Budget.Limits, state.Budget.Usage); dimension != "" {
+		return runner.fail(
+			ctx, snapshot, state, "agent."+string(dimension)+"_budget",
+			fmt.Errorf("%w: %s", ErrBudgetExceeded, dimension),
+		)
+	}
+	state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: response.Content})
+	encodedState, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -1376,6 +1486,7 @@ func (runner *Runner) publishRunEvent(ctx context.Context, snapshot kernel.Snaps
 		Type: eventType, Message: snapshot.Run.ErrorDetail, Revision: snapshot.Run.Revision,
 		Status: string(snapshot.Run.Status), Terminal: terminal,
 	})
+	runner.recordRunTelemetry(ctx, snapshot, eventType)
 }
 
 func (runner *Runner) publishToolEvent(
@@ -1409,6 +1520,45 @@ func (runner *Runner) publish(ctx context.Context, runID string, event plugin.Ev
 	runner.observers.Observe(publishContext, event)
 }
 
+func (runner *Runner) recordRunTelemetry(ctx context.Context, snapshot kernel.Snapshot, eventType string) {
+	phase := observability.Phase("")
+	switch eventType {
+	case EventRunStarted:
+		phase = observability.PhaseStarted
+	case EventRunCompleted:
+		phase = observability.PhaseCompleted
+	case EventRunFailed:
+		phase = observability.PhaseFailed
+	default:
+		return
+	}
+	usage := runtimebudget.Usage{}
+	if view, err := ViewState(snapshot); err == nil {
+		usage = view.Budget.Usage
+	}
+	duration := time.Duration(0)
+	if phase != observability.PhaseStarted && !snapshot.Run.CreatedAt.IsZero() && !snapshot.Run.UpdatedAt.Before(snapshot.Run.CreatedAt) {
+		duration = snapshot.Run.UpdatedAt.Sub(snapshot.Run.CreatedAt)
+	}
+	runner.recordTelemetry(ctx, observability.Event{
+		Scope: observability.ScopeRun, Phase: phase, RunID: snapshot.Run.ID, RunKind: RunKind,
+		Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status), ErrorCode: snapshot.Run.ErrorCode,
+		ObservedAt: runner.clock.Now().UTC(), Duration: duration, Usage: usage,
+	})
+}
+
+func (runner *Runner) recordTelemetry(ctx context.Context, event observability.Event) {
+	if runner == nil || runner.telemetry == nil {
+		return
+	}
+	if event.ObservedAt.IsZero() {
+		event.ObservedAt = runner.clock.Now().UTC()
+	}
+	recordContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	runner.telemetry.Record(recordContext, event)
+}
+
 func (runner *Runner) loadState(ctx context.Context, runID string) (kernel.Snapshot, runState, error) {
 	snapshot, err := runner.runtime.Load(ctx, runID)
 	if err != nil {
@@ -1428,7 +1578,20 @@ func selectedDefinition(definitions []tools.Definition, key string) (tools.Defin
 }
 
 func validModelResponse(response model.Response) bool {
-	return len(response.ToolCalls) > 0 || response.Content != "" || len(response.HostedToolCalls) > 0 || len(response.Artifacts) > 0
+	return validModelUsage(response.Usage) &&
+		(len(response.ToolCalls) > 0 || response.Content != "" || len(response.HostedToolCalls) > 0 || len(response.Artifacts) > 0)
+}
+
+func validModelUsage(usage *model.Usage) bool {
+	if usage == nil {
+		return true
+	}
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadTokens < 0 ||
+		usage.CacheWriteTokens < 0 || usage.CacheWrite5mTokens < 0 || usage.CacheWrite1hTokens < 0 ||
+		usage.ReasoningTokens < 0 {
+		return false
+	}
+	return usage.InputTokens <= math.MaxInt64-usage.OutputTokens
 }
 
 func nextPendingCall(state runState) (tools.Call, bool) {
@@ -1471,28 +1634,63 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	if err := json.Unmarshal(encoded, &state); err != nil {
 		return runState{}, errors.Join(ErrInvalidRequest, err)
 	}
-	if state.Limits.MaxLLMCalls <= 0 || state.Limits.MaxToolCalls <= 0 ||
-		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) {
+	if state.Budget.Limits.MaxLLMCalls <= 0 || state.Budget.Limits.MaxToolCalls <= 0 ||
+		!validAgentLimits(state.Budget.Limits) || !validAgentUsage(state.Budget.Usage) ||
+		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) ||
+		!validModelInvocations(state.ModelInvocations) {
 		return runState{}, ErrInvalidRequest
 	}
 	return state, nil
 }
 
 func resolveRunLimits(defaults Limits, requested Limits) (Limits, error) {
-	if requested.MaxLLMCalls < 0 || requested.MaxToolCalls < 0 {
-		return Limits{}, ErrInvalidRequest
+	resolved, err := runtimebudget.ResolveLimits(defaults, requested)
+	if err != nil {
+		return Limits{}, errors.Join(ErrInvalidRequest, err)
 	}
-	resolved := requested
-	if resolved.MaxLLMCalls == 0 {
-		resolved.MaxLLMCalls = defaults.MaxLLMCalls
-	}
-	if resolved.MaxToolCalls == 0 {
-		resolved.MaxToolCalls = defaults.MaxToolCalls
-	}
-	if resolved.MaxLLMCalls <= 0 || resolved.MaxToolCalls <= 0 {
+	if resolved.MaxLLMCalls <= 0 || resolved.MaxToolCalls <= 0 || !validAgentLimits(resolved) {
 		return Limits{}, ErrInvalidRequest
 	}
 	return resolved, nil
+}
+
+func validAgentLimits(value Limits) bool {
+	return runtimebudget.ValidLimits(value) && value.MaxStateBytes == 0 &&
+		value.MaxChildRuns == 0 && value.MaxCostUnits == 0
+}
+
+func validAgentUsage(value runtimebudget.Usage) bool {
+	return runtimebudget.ValidUsage(value) && value.StateBytes == 0 &&
+		value.ChildRuns == 0 && value.CostUnits == 0
+}
+
+func chargeConsumedModelUsage(state *runState, invocation ModelInvocation) (runtimebudget.Dimension, error) {
+	if state == nil {
+		return "", ErrInvalidRequest
+	}
+	if runtimebudget.HasTokenLimits(state.Budget.Limits) && invocation.Usage == nil {
+		usage, err := runtimebudget.ChargeModelCall(state.Budget.Usage, nil)
+		if err != nil {
+			return "", errors.Join(ErrInvalidModelResponse, err)
+		}
+		state.Budget.Usage = usage
+		return "", ErrUsageUnavailable
+	}
+	var observed *runtimebudget.TokenUsage
+	if invocation.Usage != nil {
+		observed = &runtimebudget.TokenUsage{
+			InputTokens: invocation.Usage.InputTokens, OutputTokens: invocation.Usage.OutputTokens,
+			CacheReadTokens:  invocation.Usage.CacheReadTokens,
+			CacheWriteTokens: invocation.Usage.CacheWriteTokens,
+			ReasoningTokens:  invocation.Usage.ReasoningTokens,
+		}
+	}
+	usage, err := runtimebudget.ChargeModelCall(state.Budget.Usage, observed)
+	if err != nil {
+		return "", errors.Join(ErrInvalidModelResponse, err)
+	}
+	state.Budget.Usage = usage
+	return runtimebudget.Exceeded(state.Budget.Limits, usage), nil
 }
 
 func normalizedToolKeys(values []string) []string {

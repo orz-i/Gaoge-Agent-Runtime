@@ -7,6 +7,7 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 		return
 	}
 	routes.GET("/runs/:run_id", module.Handler.GetRun)
+	routes.GET("/runs/:run_id/events", module.Handler.GetRunEvents)
 	routes.GET("/runs/:run_id/feed", module.Handler.StreamRunFeed)
 	routes.POST("/runs/:run_id/cancel", module.Handler.CancelRun)
 	routes.GET("/runs/:run_id/workbench", module.Handler.GetWorkbench)

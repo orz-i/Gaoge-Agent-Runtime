@@ -30,8 +30,12 @@ type TimelineItem struct {
 	Data      json.RawMessage `json:"data,omitempty"`
 }
 
-func (query *Query) loadTimeline(ctx context.Context, snapshot kernel.Snapshot) ([]TimelineItem, []Diagnostic) {
-	items := baseTimeline(snapshot)
+func (query *Query) loadTimeline(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	events []kernel.Event,
+) ([]TimelineItem, []Diagnostic) {
+	items := baseTimeline(snapshot, events)
 	diagnostics := make([]Diagnostic, 0)
 	for _, provider := range query.providers {
 		name := strings.TrimSpace(provider.Name())
@@ -56,9 +60,9 @@ func (query *Query) loadTimeline(ctx context.Context, snapshot kernel.Snapshot) 
 	return normalized, diagnostics
 }
 
-func baseTimeline(snapshot kernel.Snapshot) []TimelineItem {
-	items := make([]TimelineItem, 0, len(snapshot.Events)+2)
-	for _, event := range snapshot.Events {
+func baseTimeline(snapshot kernel.Snapshot, events []kernel.Event) []TimelineItem {
+	items := make([]TimelineItem, 0, len(events)+2)
+	for _, event := range events {
 		items = append(items, TimelineItem{
 			ID: fmt.Sprintf("event:%d", event.Seq), Source: kernelSource, Kind: event.Type,
 			Title: event.Message, Seq: event.Seq, CreatedAt: event.CreatedAt,

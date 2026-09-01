@@ -42,9 +42,12 @@ func TestSchedulerEnqueuesOneOwningParentContinuation(t *testing.T) {
 				Kind: test.relationKind, OwnerNodeID: test.ownerNodeID,
 			})
 			completed := completeRun(t, fixture.runtime, child)
-			transition := kernel.Transition{Current: completed}
-			fixture.scheduler.ObserveTransition(t.Context(), transition)
-			fixture.scheduler.ObserveTransition(t.Context(), transition)
+			if err := fixture.scheduler.Project(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.scheduler.Project(t.Context()); err != nil {
+				t.Fatal(err)
+			}
 			jobs := queuedJobs(t, fixture.delivery, 1)
 			assertParentPayload(t, jobs[0], parent, completed)
 		})
@@ -67,7 +70,8 @@ func TestDispatcherRejectsDuplicateResumerRegistration(t *testing.T) {
 
 func TestSchedulerRejectsDuplicateTriggerRegistration(t *testing.T) {
 	t.Parallel()
-	runtime := newRuntime(t)
+	store := memory.NewStore()
+	runtime := newRuntimeWithStore(t, store)
 	relations, err := runrelation.New(memory.NewRunRelationStore(), fixedClock{})
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +81,10 @@ func TestSchedulerRejectsDuplicateTriggerRegistration(t *testing.T) {
 		return continuation.TriggerSegmentYielded, true
 	}
 	_, err = continuation.NewScheduler(
-		continuation.SchedulerDependencies{Queue: delivery, Relations: relations, Runs: runtime},
+		continuation.SchedulerDependencies{
+			Outbox: store, Queue: delivery, Relations: relations, Runs: runtime,
+			Clock: fixedClock{}, ProjectorID: "duplicate-trigger-test",
+		},
 		continuation.RegisterTriggers(kernel.RunKind("echo"), resolver),
 		continuation.RegisterTriggers(kernel.RunKind("echo"), resolver),
 	)
@@ -108,14 +115,68 @@ func TestSchedulerProjectsOnlyActionableSelfTransitions(t *testing.T) {
 	t.Parallel()
 	fixture := newSchedulerFixture(t)
 	workflowRun := createRun(t, fixture.runtime, "workflow", workflow.RunKind)
-	fixture.scheduler.ObserveTransition(t.Context(), kernel.Transition{
-		Current: workflowRun,
+	_, err := fixture.runtime.Apply(t.Context(), workflowRun.Run.ID, workflowRun.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
 		Events: []kernel.EventDraft{
 			{Type: "workflow.segment.yielded", Message: "effect_pending"},
-			{Type: "workflow.segment.yielded", Message: "activation_budget"},
+			{Type: "workflow.segment.yielded", Message: "activation_budget", Wakeup: true},
 		},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = fixture.scheduler.Project(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 	queuedJobs(t, fixture.delivery, 1)
+}
+
+func TestSchedulerProjectsUnknownWakeupAsGenericRunReady(t *testing.T) {
+	t.Parallel()
+	fixture := newSchedulerFixture(t)
+	run := createRun(t, fixture.runtime, "generic-ready", kernel.RunKind("custom_feature"))
+	committed, err := fixture.runtime.Apply(t.Context(), run.Run.ID, run.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
+		Events: []kernel.EventDraft{{Type: "custom.autonomous_progress", Wakeup: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = fixture.scheduler.Project(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	jobs := queuedJobs(t, fixture.delivery, 1)
+	var payload continuation.Payload
+	if err = json.Unmarshal(jobs[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.RunID != committed.Run.ID || payload.ExpectedRevision != committed.Run.Revision ||
+		payload.Trigger != continuation.TriggerRunReady || payload.SourceRevision != committed.Run.Revision {
+		t.Fatalf("generic wakeup payload = %#v", payload)
+	}
+}
+
+func TestSchedulerPreservesDurableWakeupAvailability(t *testing.T) {
+	t.Parallel()
+	fixture := newSchedulerFixture(t)
+	workflowRun := createRun(t, fixture.runtime, "workflow-delayed", workflow.RunKind)
+	wakeupAt := fixedClock{}.Now().Add(2 * time.Minute)
+	_, err := fixture.runtime.Apply(t.Context(), workflowRun.Run.ID, workflowRun.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
+		Events: []kernel.EventDraft{{
+			Type: "workflow.segment.yielded", Message: "activation_budget", Wakeup: true, WakeupAt: &wakeupAt,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = fixture.scheduler.Project(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	jobs := queuedJobs(t, fixture.delivery, 1)
+	if !jobs[0].AvailableAt.Equal(wakeupAt) {
+		t.Fatalf("availableAt = %s, want %s", jobs[0].AvailableAt, wakeupAt)
+	}
 }
 
 func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
@@ -201,6 +262,7 @@ func waitForCompletedJob(t *testing.T, delivery *queuecore.Memory, jobID string)
 
 type schedulerFixture struct {
 	runtime   *kernel.Runtime
+	store     *memory.Store
 	relations *runrelation.Registry
 	delivery  *queuecore.Memory
 	scheduler *continuation.Scheduler
@@ -208,19 +270,23 @@ type schedulerFixture struct {
 
 func newSchedulerFixture(t *testing.T) schedulerFixture {
 	t.Helper()
-	runtime := newRuntime(t)
+	store := memory.NewStore()
+	runtime := newRuntimeWithStore(t, store)
 	relations, err := runrelation.New(memory.NewRunRelationStore(), fixedClock{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	delivery := queuecore.NewMemory(queuecore.Dependencies{Clock: fixedClock{}})
 	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{
-		Queue: delivery, Relations: relations, Runs: runtime,
+		Outbox: store, Queue: delivery, Relations: relations, Runs: runtime,
+		Clock: fixedClock{}, ProjectorID: "scheduler-test",
 	}, continuationadapter.Triggers()...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return schedulerFixture{runtime: runtime, relations: relations, delivery: delivery, scheduler: scheduler}
+	return schedulerFixture{
+		runtime: runtime, store: store, relations: relations, delivery: delivery, scheduler: scheduler,
+	}
 }
 
 func ensureRelation(t *testing.T, relations *runrelation.Registry, draft runrelation.Draft) {
@@ -290,7 +356,12 @@ func newWorkerFixture(t *testing.T) workerFixture {
 
 func newRuntime(t *testing.T) *kernel.Runtime {
 	t.Helper()
-	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
+	return newRuntimeWithStore(t, memory.NewStore())
+}
+
+func newRuntimeWithStore(t *testing.T, store kernel.Store) *kernel.Runtime {
+	t.Helper()
+	runtime, err := kernel.New(kernel.Dependencies{Store: store, Clock: fixedClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
