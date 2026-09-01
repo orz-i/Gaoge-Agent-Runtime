@@ -1,5 +1,5 @@
 {
-  "version": "0.1.0-beta.5",
+  "version": "0.1.0-beta.6",
   "goModules": [
     "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime",
     "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness",

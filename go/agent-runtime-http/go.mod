@@ -4,8 +4,8 @@ go 1.26
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.5
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.5
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.6
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.6
 	gopkg.in/yaml.v3 v3.0.1
 )
 
