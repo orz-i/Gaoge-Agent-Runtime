@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,6 +77,9 @@ func (store *Store) ListEvents(_ context.Context, runID string, afterSeq int64, 
 		return nil, kernel.ErrNotFound
 	}
 	journal := store.events[runID]
+	if afterSeq > int64(math.MaxInt) {
+		return []kernel.Event{}, nil
+	}
 	if afterSeq >= int64(len(journal)) {
 		return []kernel.Event{}, nil
 	}
