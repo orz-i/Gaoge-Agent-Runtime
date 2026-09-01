@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -77,18 +76,14 @@ func (store *Store) ListEvents(_ context.Context, runID string, afterSeq int64, 
 		return nil, kernel.ErrNotFound
 	}
 	journal := store.events[runID]
-	if afterSeq > int64(math.MaxInt) {
-		return []kernel.Event{}, nil
-	}
 	if afterSeq >= int64(len(journal)) {
 		return []kernel.Event{}, nil
 	}
-	start := int(afterSeq)
-	end := start + limit
-	if end > len(journal) {
-		end = len(journal)
+	end := int64(len(journal))
+	if int64(limit) < end-afterSeq {
+		end = afterSeq + int64(limit)
 	}
-	return cloneEvents(journal[start:end]), nil
+	return cloneEvents(journal[afterSeq:end]), nil
 }
 
 // Load returns one isolated snapshot copy.
