@@ -169,6 +169,10 @@ func (runner *Runner) advancePlannerInvocation(
 		snapshot = claimed
 		response, generateErr := runner.planner.GeneratePlan(ctx, clonePlannerRequest(invocation.Request))
 		if generateErr != nil {
+			var retryable interface{ Retryable() bool }
+			if errors.As(generateErr, &retryable) && retryable.Retryable() {
+				return runner.releasePlannerInvocation(ctx, snapshot, state, generateErr)
+			}
 			return runner.fail(ctx, snapshot, state, "planexecute.planner_failed", errors.Join(ErrPlannerFailure, generateErr))
 		}
 		completedAt := runner.runtime.Now().UTC()
@@ -212,4 +216,17 @@ func (runner *Runner) advancePlannerInvocation(
 	}
 	materialized.PlannerInvocation = clonePlannerInvocation(invocation)
 	return runner.persistPlan(ctx, snapshot, materialized)
+}
+
+func (runner *Runner) releasePlannerInvocation(ctx context.Context, snapshot kernel.Snapshot, state executionState, cause error) (kernel.Snapshot, error) {
+	state.PlannerInvocation.ExecutionLeaseUntil = nil
+	encoded, err := encodeState(state)
+	if err != nil {
+		return snapshot, err
+	}
+	updated, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+		Events: []kernel.EventDraft{{Type: "planexecute.planner.waiting", Message: cause.Error(), Wakeup: true, WakeupAt: planWakeupAt(runner.runtime.Now())}},
+	})
+	return updated, errors.Join(ErrPlannerPending, err)
 }

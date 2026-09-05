@@ -365,6 +365,59 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
         default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/subtasks/{subtaskID}/cancel:
+    post:
+      operationId: cancelHarnessSubtask
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+        - name: subtaskID
+          in: path
+          required: true
+          schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason: {type: string}
+      responses:
+        '200':
+          description: Updated durable Turn with authoritative subtask and budget projections
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/subtasks/{subtaskID}/approval:
+    post:
+      operationId: resolveHarnessSubtaskApproval
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+        - name: subtaskID
+          in: path
+          required: true
+          schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [checkpointID, decision]
+              properties:
+                checkpointID: {type: string, minLength: 1}
+                decision: {type: string, enum: [approve, reject]}
+                comment: {type: string}
+      responses:
+        '200':
+          description: Updated durable Turn with authoritative subtask and budget projections
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
 components:
   parameters:
     RunID:
@@ -709,7 +762,7 @@ components:
         seq: {type: integer, minimum: 1}
         kind:
           type: string
-          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, interaction, artifact, context, diagnostic]
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, interaction, artifact, context, diagnostic, budget, subtask]
         status: {type: string, enum: [started, waiting, completed, failed, cancelled]}
         hostRef: {$ref: '#/components/schemas/HostRef'}
         invocationID: {type: string}
@@ -730,7 +783,7 @@ components:
         itemID: {type: string}
         itemKind:
           type: string
-          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, interaction, artifact, context, diagnostic]
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, interaction, artifact, context, diagnostic, budget, subtask]
         delta: {type: string}
         message: {type: string}
         data: {}
@@ -806,7 +859,90 @@ components:
         items:
           type: array
           items: {$ref: '#/components/schemas/HarnessItem'}
+        budget: {$ref: '#/components/schemas/HarnessBudget'}
+        subtasks:
+          type: array
+          items: {$ref: '#/components/schemas/HarnessSubtask'}
         output: {$ref: '#/components/schemas/Result'}
+    RuntimeBudgetLimits:
+      type: object
+      additionalProperties: false
+      properties:
+        maxLLMCalls: {type: integer, minimum: 0}
+        maxToolCalls: {type: integer, minimum: 0}
+        maxInputTokens: {type: integer, minimum: 0}
+        maxOutputTokens: {type: integer, minimum: 0}
+        maxTotalTokens: {type: integer, minimum: 0}
+        maxChildRuns: {type: integer, minimum: 0}
+        maxConcurrentRuns: {type: integer, minimum: 0}
+        maxOutputBytes: {type: integer, minimum: 0}
+        maxStateBytes: {type: integer, minimum: 0}
+        maxCostUnits: {type: integer, minimum: 0}
+    RuntimeBudgetUsage:
+      type: object
+      additionalProperties: false
+      properties:
+        llmCalls: {type: integer, minimum: 0}
+        toolCalls: {type: integer, minimum: 0}
+        inputTokens: {type: integer, minimum: 0}
+        outputTokens: {type: integer, minimum: 0}
+        totalTokens: {type: integer, minimum: 0}
+        cacheReadTokens: {type: integer, minimum: 0}
+        cacheWriteTokens: {type: integer, minimum: 0}
+        reasoningTokens: {type: integer, minimum: 0}
+        childRuns: {type: integer, minimum: 0}
+        outputBytes: {type: integer, minimum: 0}
+        stateBytes: {type: integer, minimum: 0}
+        costUnits: {type: integer, minimum: 0}
+    HarnessBudget:
+      type: object
+      additionalProperties: false
+      required: [scopeID, revision, limits, usage, reserved, remaining, activeRuns, waitingRuns]
+      properties:
+        scopeID: {type: string}
+        revision: {type: integer, minimum: 1}
+        limits: {$ref: '#/components/schemas/RuntimeBudgetLimits'}
+        usage: {$ref: '#/components/schemas/RuntimeBudgetUsage'}
+        reserved: {$ref: '#/components/schemas/RuntimeBudgetUsage'}
+        remaining: {$ref: '#/components/schemas/RuntimeBudgetUsage'}
+        activeRuns: {type: integer, minimum: 0}
+        waitingRuns: {type: integer, minimum: 0}
+        unknownUsage: {type: boolean}
+        cancelled: {type: boolean}
+    HarnessSubtask:
+      type: object
+      additionalProperties: false
+      required: [id, kind, goal, status, usageKnown]
+      properties:
+        id: {type: string}
+        parentID: {type: string}
+        kind: {type: string}
+        roleID: {type: string}
+        roleRevision: {type: integer, minimum: 1}
+        roleName: {type: string}
+        goal: {type: string}
+        model: {type: string}
+        status: {type: string, enum: [queued, created, running, waiting, waiting_input, waiting_budget, paused, completed, failed, cancelled]}
+        startedAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        endedAt: {type: string, format: date-time}
+        budget: {$ref: '#/components/schemas/HarnessBudget'}
+        usageKnown: {type: boolean}
+        result: {}
+        errorCode: {type: string}
+        errorDetail: {type: string}
+        cancelStatus: {type: string, enum: [requested, failed, confirmed]}
+        cancelError: {type: string}
+        cancelAttempt: {type: integer, minimum: 1}
+        approval:
+          type: object
+          required: [checkpointID, toolCallID, toolKey, toolName, arguments]
+          properties:
+            checkpointID: {type: string}
+            toolCallID: {type: string}
+            toolKey: {type: string}
+            toolName: {type: string}
+            arguments: {}
     Checkpoint:
       type: object
       additionalProperties: true

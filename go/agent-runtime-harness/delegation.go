@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
@@ -15,12 +16,11 @@ type HandoffStarter interface {
 	StartOrLoad(context.Context, kernel.Snapshot, handoff.Delegation) (handoff.Delegation, error)
 }
 
-// DelegateRequest asks Harness to start one stable specialist Child Agent.
-// Business Tool access is intentionally empty; delegation cannot widen the root
-// Turn's product permissions. Harness may attach Context-owned read-only
-// infrastructure capabilities required to consume the inherited Context Window.
+// DelegateRequest selects one frozen environment role for a specialist Child
+// Agent. MemberID remains readable for Turns stored before role configuration.
 type DelegateRequest struct {
-	MemberID string `json:"memberID"`
+	RoleID   string `json:"roleID,omitempty"`
+	MemberID string `json:"memberID,omitempty"`
 	Goal     string `json:"goal"`
 	callID   string
 }
@@ -31,18 +31,24 @@ type DelegationResult struct {
 }
 
 type delegationItemPayload struct {
-	DelegationID string          `json:"delegationID"`
-	MemberID     string          `json:"memberID"`
-	ChildRunID   string          `json:"childRunID"`
-	Goal         string          `json:"goal"`
-	Status       handoff.Status  `json:"status"`
-	Result       json.RawMessage `json:"result,omitempty"`
+	DelegationID string              `json:"delegationID"`
+	MemberID     string              `json:"memberID"`
+	ChildRunID   string              `json:"childRunID"`
+	Goal         string              `json:"goal"`
+	Status       handoff.Status      `json:"status"`
+	Result       json.RawMessage     `json:"result,omitempty"`
+	ParentRunID  string              `json:"parentRunID,omitempty"`
+	RoleID       string              `json:"roleID,omitempty"`
+	RoleRevision uint64              `json:"roleRevision,omitempty"`
+	RoleName     string              `json:"roleName,omitempty"`
+	Execution    *handoff.Delegation `json:"execution,omitempty"`
 }
 
 func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) {
 	request.MemberID = strings.TrimSpace(request.MemberID)
+	request.RoleID = strings.TrimSpace(request.RoleID)
 	request.Goal = strings.TrimSpace(request.Goal)
-	if request.MemberID == "" || request.Goal == "" || len(request.MemberID) > 64 || len(request.Goal) > 200_000 {
+	if (request.MemberID == "" && request.RoleID == "") || request.Goal == "" || len(request.MemberID) > 64 || len(request.RoleID) > 64 || len(request.Goal) > 200_000 {
 		return DelegateRequest{}, ErrInvalidRequest
 	}
 	return request, nil
@@ -109,17 +115,45 @@ func (runner *Runner) prepareDelegation(
 	if err != nil || terminalRuntimeStatus(parent.Run.Status) {
 		return handoff.Delegation{}, kernel.Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	delegationID := stableID("hd", turn.ID, request.MemberID, request.Goal)
+	delegationID := stableID("hd", turn.ID, firstNonEmpty(request.RoleID, request.MemberID), request.Goal)
 	if request.callID != "" {
 		delegationID = delegationToolID(invocation, request.callID)
 	}
 	childRunID := stableID("hchild", invocation.ExecutionRefID, delegationID)
-	return handoff.Delegation{
+	delegation := handoff.Delegation{
 		ID: delegationID, MemberID: request.MemberID, ChildRunID: childRunID,
 		Goal: request.Goal, Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
 		ToolKeys: contextDelegationToolKeys(turn, config),
 		Status:   handoff.StatusQueued,
-	}, parent, nil
+	}
+	if frozen, found, loadErr := runner.frozenDelegation(ctx, turn.ID, delegationID); found || loadErr != nil {
+		return frozen, parent, loadErr
+	}
+	if config.Roles == nil && config.SharedBudget == nil && request.RoleID == "" {
+		return delegation, parent, nil
+	}
+	role, found := findRole(config.Roles, request.RoleID)
+	if !found {
+		return handoff.Delegation{}, parent, toolsRoleUnavailable()
+	}
+	delegation.MemberID = role.ID
+	delegation.RoleID, delegation.RoleRevision, delegation.RoleName = role.ID, role.Revision, role.Name
+	if view, viewErr := agent.ViewState(parent); viewErr == nil {
+		delegation.Model = firstNonEmpty(role.Model, view.Model)
+		delegation.ModelOptions = append(json.RawMessage(nil), view.ModelOptions...)
+	} else {
+		return handoff.Delegation{}, parent, viewErr
+	}
+	if len(role.ModelOptions) != 0 {
+		delegation.ModelOptions = append(json.RawMessage(nil), role.ModelOptions...)
+	}
+	delegation.Instructions = roleInstructions(role)
+	delegation.ToolKeys = append(delegation.ToolKeys, role.ToolKeys...)
+	if view, viewErr := agent.ViewState(parent); viewErr == nil {
+		delegation.ToolKeys = intersectToolKeys(delegation.ToolKeys, view.ToolKeys)
+	}
+	delegation.Limits = roleAgentLimits(config.Limits, role.Limits)
+	return delegation, parent, nil
 }
 
 func contextDelegationToolKeys(turn Turn, config ConfigSnapshot) []string {
@@ -144,6 +178,11 @@ func (runner *Runner) executeDelegation(
 ) (DelegationResult, error) {
 	if err := runner.ensureDelegationRelation(ctx, invocation.ExecutionRefID, delegation); err != nil {
 		return DelegationResult{}, err
+	}
+	if delegation.RoleID != "" {
+		if err := runner.prepareRoleChild(ctx, turn, invocation, delegation, startedItemID); err != nil {
+			return DelegationResult{}, err
+		}
 	}
 	delegation, delegateErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
 	status := delegationItemStatus(delegation.Status)
@@ -180,7 +219,7 @@ func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn)
 		if _, exists := projected[payload.DelegationID]; exists {
 			continue
 		}
-		if err = runner.ensureDelegationRelation(ctx, invocation.ExecutionRefID, handoff.Delegation{
+		if err = runner.ensureDelegationRelation(ctx, firstNonEmpty(payload.ParentRunID, invocation.ExecutionRefID), handoff.Delegation{
 			ID: payload.DelegationID, ChildRunID: payload.ChildRunID,
 		}); err != nil {
 			return err
@@ -209,6 +248,8 @@ func (runner *Runner) recordDelegationItem(
 	payload, err := json.Marshal(delegationItemPayload{
 		DelegationID: delegation.ID, MemberID: delegation.MemberID, ChildRunID: delegation.ChildRunID,
 		Goal: delegation.Goal, Status: delegation.Status, Result: append(json.RawMessage(nil), delegation.Result...),
+		ParentRunID: invocation.ExecutionRefID, RoleID: delegation.RoleID, RoleRevision: delegation.RoleRevision, RoleName: delegation.RoleName,
+		Execution: frozenDelegationExecution(delegation),
 	})
 	if err != nil {
 		return "", err

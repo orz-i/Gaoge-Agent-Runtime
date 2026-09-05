@@ -26,6 +26,7 @@ var (
 	ErrInvalidPlan           = errors.New("invalid generated plan")
 	ErrPlannerFailure        = errors.New("plan generation failed")
 	ErrPlannerInvocationBusy = errors.New("plan generation execution is leased")
+	ErrPlannerPending        = errors.New("plan generation is waiting for admission")
 	ErrApprovalRequired      = errors.New("plan approval is required")
 	ErrInvalidApproval       = errors.New("invalid plan approval")
 	ErrStepPending           = errors.New("plan step is not terminal")

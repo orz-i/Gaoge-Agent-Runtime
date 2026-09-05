@@ -529,6 +529,7 @@ type Dependencies struct {
 	Cancellation RuntimeCanceller
 	Interactions InteractionResponseHandler
 	Applications ApplicationCapabilityExecutor
+	Budget       *BudgetMiddleware
 }
 
 type runRelationReader interface {
@@ -554,6 +555,7 @@ type Runner struct {
 	cancellation   RuntimeCanceller
 	interactions   InteractionResponseHandler
 	applications   ApplicationCapabilityExecutor
+	budgets        *BudgetMiddleware
 }
 
 // StartRequest starts or idempotently reloads one Harness Turn.
@@ -591,7 +593,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		turnFeed: dependencies.TurnFeed,
 		context:  dependencies.Context, catalog: dependencies.Catalog,
 		handoffs: dependencies.Handoffs, relations: dependencies.Relations,
-		interactions: dependencies.Interactions, applications: dependencies.Applications,
+		interactions: dependencies.Interactions, applications: dependencies.Applications, budgets: dependencies.Budget,
 	}
 	if reader, ok := dependencies.Relations.(runRelationReader); ok {
 		runner.relationReader = reader
@@ -686,6 +688,9 @@ func (runner *Runner) persistStartEnvelope(
 	config ConfigSnapshot,
 	now time.Time,
 ) (Turn, bool, error) {
+	if config.SharedBudget != nil && runner.budgets == nil {
+		return Turn{}, false, ErrInvalidRequest
+	}
 	session := Session{
 		ID: sessionID, HostThread: request.HostThread, Actor: request.Actor,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -700,7 +705,15 @@ func (runner *Runner) persistStartEnvelope(
 		ID: turnID, SessionID: sessionID, HostTurn: request.HostTurn,
 		ConfigSnapshotID: config.ID, Status: TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	return runner.store.CreateTurn(ctx, turn)
+	created, fresh, err := runner.store.CreateTurn(ctx, turn)
+	if err != nil || config.SharedBudget == nil {
+		return created, fresh, err
+	}
+	ledger, err := runner.budgets.coordinator().Ensure(ctx, turn.ID, *config.SharedBudget)
+	if err != nil {
+		return created, fresh, err
+	}
+	return created, fresh, runner.budgets.project(ctx, ledger)
 }
 
 func (runner *Runner) attachContextCheckpoint(
@@ -742,6 +755,9 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
+		return Snapshot{}, err
+	}
 	if terminalTurnStatus(turn.Status) {
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
@@ -773,6 +789,9 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	}
 	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
 		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
+		return Snapshot{}, err
 	}
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
@@ -1150,6 +1169,7 @@ func (runner *Runner) recordApprovalRequestItem(ctx context.Context, turn Turn, 
 	if err != nil || !ok {
 		return err
 	}
+	pending.Subtask = invocation.ParentItemID != ""
 	payload, err := json.Marshal(pending)
 	if err != nil {
 		return err
@@ -1171,6 +1191,7 @@ func (runner *Runner) recordApprovalDecisionItem(
 	request ResolveApprovalRequest,
 ) error {
 	payload, err := json.Marshal(approvalDecisionItemPayload{
+		Subtask:      invocation.ParentItemID != "",
 		CheckpointID: pending.CheckpointID, Decision: request.Decision, Comment: strings.TrimSpace(request.Comment),
 	})
 	if err != nil {
@@ -1380,6 +1401,18 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	result := Snapshot{
 		Session: session, Turn: turn, Config: config, Invocations: invocations,
 		Interactions: interactions, Items: items,
+	}
+	ledger, err := runner.loadTurnBudget(ctx, turn)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if ledger != nil {
+		view := ledger.View("")
+		result.Budget = &view
+	}
+	result.Subtasks, err = runner.loadSubtasks(ctx, turn, items, ledger)
+	if err != nil {
+		return Snapshot{}, err
 	}
 	runtimeSnapshot := provided
 	rootInvocation, hasRootInvocation := topLevelInvocation(invocations)

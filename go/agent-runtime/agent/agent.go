@@ -218,6 +218,7 @@ type StartRequest struct {
 	Thread           kernel.ThreadRef
 	RequestID        string
 	Goal             string
+	Instructions     string
 	Model            string
 	ModelOptions     json.RawMessage
 	ToolKeys         []string
@@ -388,6 +389,9 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 		ToolKeys:         toolKeys,
 		RequiredToolKeys: requiredToolKeys,
 		Budget:           runtimebudget.Snapshot{Limits: limits},
+	}
+	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
+		state.Messages = append([]model.Message{{Role: model.RoleSystem, Content: instructions}}, state.Messages...)
 	}
 	encoded, err := encodeState(state)
 	if err != nil {

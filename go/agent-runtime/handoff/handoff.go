@@ -63,6 +63,11 @@ const (
 type Delegation struct {
 	ID           string          `json:"id"`
 	MemberID     string          `json:"memberID"`
+	RoleID       string          `json:"roleID,omitempty"`
+	RoleRevision uint64          `json:"roleRevision,omitempty"`
+	RoleName     string          `json:"roleName,omitempty"`
+	Instructions string          `json:"instructions,omitempty"`
+	Limits       agent.Limits    `json:"limits,omitempty"`
 	ChildRunID   string          `json:"childRunID"`
 	Goal         string          `json:"goal"`
 	Model        string          `json:"model,omitempty"`
@@ -187,6 +192,8 @@ func (coordinator *Coordinator) StartOrLoad(
 		Thread:       parent.Run.Thread,
 		RequestID:    parent.Run.ID + ":" + delegation.ID,
 		Goal:         delegation.Goal,
+		Instructions: delegation.Instructions,
+		Limits:       delegation.Limits,
 		Model:        delegation.Model,
 		ModelOptions: append(json.RawMessage(nil), delegation.ModelOptions...),
 		ToolKeys:     append([]string(nil), delegation.ToolKeys...),

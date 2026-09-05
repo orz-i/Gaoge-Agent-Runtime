@@ -147,7 +147,7 @@ func (runner *Runner) preparedDelegationToolRequest(
 		if err = json.Unmarshal(item.Payload, &payload); err != nil {
 			return DelegateRequest{}, false, err
 		}
-		return DelegateRequest{MemberID: payload.MemberID, Goal: payload.Goal, callID: request.Call.ID}, true, nil
+		return DelegateRequest{RoleID: payload.RoleID, MemberID: payload.MemberID, Goal: payload.Goal, callID: request.Call.ID}, true, nil
 	}
 	return DelegateRequest{}, false, nil
 }
@@ -161,8 +161,8 @@ func DelegationToolRegistration(handler *DelegationToolHandler) tools.Registrati
 		Definition: tools.Definition{
 			Key:         DelegationToolKey,
 			Name:        "delegate_to_specialist_agent",
-			Description: "Delegate one focused subtask to a child agent. The child cannot inherit or widen parent Tool permissions.",
-			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["memberID","goal"],"properties":{"memberID":{"type":"string","minLength":1,"maxLength":64},"goal":{"type":"string","minLength":1,"maxLength":200000}}}`),
+			Description: "Delegate one focused subtask to an environment-authorized specialist role.",
+			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["goal"],"anyOf":[{"required":["roleID"]},{"required":["memberID"]}],"properties":{"roleID":{"type":"string","minLength":1,"maxLength":64},"memberID":{"type":"string","minLength":1,"maxLength":64},"goal":{"type":"string","minLength":1,"maxLength":200000}}}`),
 		},
 		Handler: handler,
 	}

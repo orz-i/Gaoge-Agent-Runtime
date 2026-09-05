@@ -36,6 +36,9 @@ type Request struct {
 	Messages     []Message          `json:"messages"`
 	Tools        []tools.Definition `json:"tools,omitempty"`
 	HostedTools  []HostedTool       `json:"hostedTools,omitempty"`
+	// MaxOutputTokens is an enforceable provider-neutral output ceiling. A host
+	// enabling token admission must translate it to the selected provider.
+	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
 	// RequireToolCall asks the host model adapter to enforce a provider Tool call
 	// instead of accepting another text-only response.
 	RequireToolCall bool `json:"requireToolCall,omitempty"`
@@ -117,6 +120,19 @@ type StreamSink func(StreamEvent) error
 // Client is the provider-neutral unary model capability.
 type Client interface {
 	Generate(context.Context, Request) (Response, error)
+}
+
+// TokenAdmission is computed over the final canonical provider request, including
+// system context, tool schemas, native tools and replay/cache materialization.
+type TokenAdmission struct {
+	InputUpperBound int64
+	MaxOutputTokens int64
+}
+
+// TokenAdmissionPlanner guarantees reliable usage receipts and an enforceable
+// output limit. Hosts without this capability cannot enable token ceilings.
+type TokenAdmissionPlanner interface {
+	PlanTokenAdmission(context.Context, Request) (TokenAdmission, error)
 }
 
 // StreamingClient optionally exposes real provider stream events while preserving the final Response contract.
