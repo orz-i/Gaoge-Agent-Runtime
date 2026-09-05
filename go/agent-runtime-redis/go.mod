@@ -6,7 +6,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.38.0
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/uuid v1.6.0
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.7
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.8
 )
 
 require (

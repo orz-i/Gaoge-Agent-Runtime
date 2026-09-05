@@ -7,7 +7,7 @@ interactions. Host application data and authorization remain owned by the host.
 ## Install a Beta
 
 ```bash
-pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.7/orz-i-agent-runtime-client-0.1.0-beta.7.tgz
+pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.8/orz-i-agent-runtime-client-0.1.0-beta.8.tgz
 ```
 
 Beta packages are GitHub Release archives, not npm registry releases. Registry
