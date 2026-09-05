@@ -61,7 +61,7 @@ func newTCKHost(publicURL string) (*a2a.Host, error) {
 			PublicURL:          publicURL,
 			Name:               "Gaoge Agent Runtime A2A TCK",
 			Description:        "Protocol conformance fixture for the product A2A plugin",
-			Version:            "0.1.0-beta.6",
+			Version:            "0.1.0-beta.7",
 			DefaultInputModes:  []string{"text/plain"},
 			DefaultOutputModes: []string{"text/plain"},
 			Skills: []a2a.RemoteAgentSkill{{
