@@ -19,7 +19,7 @@ const expectedModules = [
 ];
 const violations = [];
 
-if (version !== "0.1.0-beta.7") violations.push(`unexpected VERSION ${version}`);
+if (version !== "0.1.0-beta.8") violations.push(`unexpected VERSION ${version}`);
 if (boundary.version !== version) violations.push("boundary version does not match VERSION");
 if (JSON.stringify(boundary.goModules) !== JSON.stringify(expectedModules)) {
   violations.push("boundary Go module list is not the canonical ordered list");
