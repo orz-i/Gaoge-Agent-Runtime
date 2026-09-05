@@ -16,9 +16,10 @@ const (
 )
 
 var (
-	ErrInvalidPlugin  = errors.New("invalid A2A plugin")
-	ErrInvalidTarget  = errors.New("invalid A2A delegation target")
-	ErrBindingMissing = errors.New("A2A remote binding is unavailable")
+	ErrInvalidPlugin             = errors.New("invalid A2A plugin")
+	ErrInvalidTarget             = errors.New("invalid A2A delegation target")
+	ErrBindingMissing            = errors.New("A2A remote binding is unavailable")
+	ErrRemoteCancellationPending = errors.New("A2A remote cancellation is not terminal")
 )
 
 // Binding is one immutable, non-secret remote configuration revision. The
@@ -84,6 +85,10 @@ func (plugin *Plugin) ResolveChild(
 	ctx context.Context,
 	delegation handoff.Delegation,
 ) (handoff.ChildRunner, error) {
+	return plugin.resolveChild(ctx, delegation)
+}
+
+func (plugin *Plugin) resolveChild(ctx context.Context, delegation handoff.Delegation) (*ShadowRunner, error) {
 	if plugin == nil || plugin.runtime == nil || plugin.bindings == nil {
 		return nil, ErrInvalidPlugin
 	}
@@ -106,6 +111,47 @@ func (plugin *Plugin) ResolveChild(
 		Runtime: plugin.runtime, Client: binding.Client, Discovery: binding.Discovery,
 		TargetID: targetID, TargetRevision: binding.Revision,
 	})
+}
+
+// Cancel resolves the shadow's frozen binding and cancels the remote task.
+// A transport error or pending acknowledgement leaves the shadow retryable.
+func (plugin *Plugin) Cancel(
+	ctx context.Context,
+	runID string,
+	expectedRevision uint64,
+	_ string,
+) (kernel.Snapshot, error) {
+	if plugin == nil || plugin.runtime == nil {
+		return kernel.Snapshot{}, ErrInvalidPlugin
+	}
+	snapshot, err := plugin.runtime.Load(ctx, strings.TrimSpace(runID))
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if snapshot.Run.Kind != RunKind {
+		return kernel.Snapshot{}, ErrInvalidTarget
+	}
+	if snapshot.Run.Revision != expectedRevision {
+		return kernel.Snapshot{}, kernel.ErrConflict
+	}
+	if !shadowRunRefreshable(snapshot.Run.Status) {
+		return snapshot, nil
+	}
+	state, err := decodeTopologyState(snapshot.State)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	child, err := plugin.resolveChild(ctx, handoff.Delegation{
+		MemberID: TargetPrefix + state.TargetID, ChildRunID: snapshot.Run.ID,
+	})
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	cancelled, err := child.CancelRun(ctx, snapshot.Run.ID)
+	if err == nil && shadowRunRefreshable(cancelled.Run.Status) {
+		err = ErrRemoteCancellationPending
+	}
+	return cancelled, err
 }
 
 func (plugin *Plugin) frozenRevision(ctx context.Context, runID, targetID string) (string, error) {

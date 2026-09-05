@@ -826,6 +826,9 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if err = runner.syncInvocationRuns(ctx, turn, runs); err != nil {
 		return Snapshot{}, err
 	}
+	if err = runner.syncTerminalDelegations(ctx, turn, runs); err != nil {
+		return Snapshot{}, err
+	}
 	return runner.loadSnapshot(ctx, turn, nil)
 }
 

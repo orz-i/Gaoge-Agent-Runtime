@@ -22,10 +22,13 @@ const (
 )
 
 type shadowRemote struct {
-	sent     SendRequest
-	task     TaskSnapshot
-	canceled bool
-	sendErr  error
+	sent          SendRequest
+	task          TaskSnapshot
+	canceled      bool
+	sendErr       error
+	cancelErr     error
+	cancelCalls   int
+	cancelPending bool
 }
 
 func (remote *shadowRemote) SendMessage(_ context.Context, _ Discovery, request SendRequest) (Interaction, error) {
@@ -41,6 +44,13 @@ func (remote *shadowRemote) GetTask(context.Context, Discovery, string) (TaskSna
 }
 
 func (remote *shadowRemote) CancelTask(context.Context, Discovery, string) (TaskSnapshot, error) {
+	remote.cancelCalls++
+	if remote.cancelErr != nil {
+		return TaskSnapshot{}, remote.cancelErr
+	}
+	if remote.cancelPending {
+		return cloneTaskValue(remote.task), nil
+	}
 	remote.canceled = true
 	remote.task.State = "TASK_STATE_CANCELED"
 	remote.task.Terminal = true

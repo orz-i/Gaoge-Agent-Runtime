@@ -526,6 +526,7 @@ type Dependencies struct {
 	Catalog      tools.Catalog
 	Handoffs     HandoffStarter
 	Relations    runrelation.Recorder
+	Cancellation RuntimeCanceller
 	Interactions InteractionResponseHandler
 	Applications ApplicationCapabilityExecutor
 }
@@ -550,6 +551,7 @@ type Runner struct {
 	handoffs       HandoffStarter
 	relations      runrelation.Recorder
 	relationReader runRelationReader
+	cancellation   RuntimeCanceller
 	interactions   InteractionResponseHandler
 	applications   ApplicationCapabilityExecutor
 }
@@ -574,13 +576,16 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil || dependencies.Clock == nil {
 		return nil, ErrInvalidRequest
 	}
+	if dependencies.Cancellation == nil {
+		dependencies.Cancellation = dependencies.Runtime
+	}
 	if dependencies.Interactions != nil {
 		if _, ok := dependencies.Agent.(agentResumer); !ok {
 			return nil, ErrInvalidRequest
 		}
 	}
 	runner := &Runner{
-		runtime: dependencies.Runtime, agent: dependencies.Agent,
+		runtime: dependencies.Runtime, agent: dependencies.Agent, cancellation: dependencies.Cancellation,
 		plans: dependencies.Plans, teams: dependencies.Teams, workflows: dependencies.Workflows,
 		store: dependencies.Store, clock: dependencies.Clock,
 		turnFeed: dependencies.TurnFeed,
@@ -791,6 +796,9 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		return Snapshot{}, err
 	}
 	if err = runner.syncInvocationRuns(ctx, turn, descendants); err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.syncTerminalDelegations(ctx, turn, descendants); err != nil {
 		return Snapshot{}, err
 	}
 	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)

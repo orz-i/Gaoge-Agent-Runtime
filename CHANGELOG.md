@@ -3,6 +3,25 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## [0.1.0-beta.7] - 2026-09-05
+
+### Added
+
+- Hosts can supply `harness.Dependencies.Cancellation` for feature-owned cleanup. The A2A plugin now implements `Cancel` using the shadow Run's frozen remote binding.
+
+### Fixed
+
+- Asynchronous delegations keep the parent Tool call pending until the child reaches a terminal state, avoiding conflicting lifecycle Items and premature completion.
+- Pending polls and runner reconstruction reuse the same child identity and policy-prepared input without repeating delegation policy checks or consuming completed Tool-call budget.
+- Parent cancellation records the child's actual terminal outcome, including a result that arrived before cancellation.
+- Remote cancellation validates the caller's revision, preserves the frozen target configuration, and leaves an unconfirmed or failed cancellation retryable.
+
+### Upgrade notes
+
+- Update all Go modules together to `v0.1.0-beta.7` and use the matching TypeScript GitHub Release archive. No HTTP v1 or database schema migration is required.
+- Hosts must connect feature-aware Harness and HTTP cancellation routing to the A2A plugin. The default Harness cancellation remains the local Kernel implementation.
+- Hosts using background continuation must provide the Scheduler as the Worker's `Projector` so committed wakeups can resume pending Tool calls. Retry a failed or still-pending remote cancellation by submitting another cancellation request.
+
 ## [0.1.0-beta.6] - 2026-09-01
 
 ### Added
