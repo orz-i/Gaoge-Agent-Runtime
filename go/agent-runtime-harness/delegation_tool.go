@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -71,12 +72,9 @@ func (handler *DelegationToolHandler) Execute(
 	if err := json.Unmarshal(request.Call.Arguments, &input); err != nil {
 		return tools.ExecutionResult{}, tools.NewRecoverableCallError("delegation.invalid_input", "invalid delegation input", err)
 	}
-	for _, policy := range handler.policies {
-		prepared, err := policy.PrepareDelegation(ctx, tools.CloneExecutionRequest(request), input)
-		if err != nil {
-			return tools.ExecutionResult{}, err
-		}
-		input = prepared
+	input, err := handler.prepareRequest(ctx, runner, request, input)
+	if err != nil {
+		return tools.ExecutionResult{}, err
 	}
 	result, err := runner.DelegateByExecutionRefID(ctx, request.RunID, input)
 	if err != nil {
@@ -96,10 +94,66 @@ func (handler *DelegationToolHandler) Execute(
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
+	disposition := "committed"
+	if result.Delegation.Status == handoff.StatusQueued || result.Delegation.Status == handoff.StatusRunning {
+		disposition = tools.ReceiptDispositionPending
+	}
 	return tools.ExecutionResult{
 		Content: content,
-		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"},
+		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: disposition},
 	}, nil
+}
+
+func (handler *DelegationToolHandler) prepareRequest(
+	ctx context.Context,
+	runner *Runner,
+	request tools.ExecutionRequest,
+	input DelegateRequest,
+) (DelegateRequest, error) {
+	prepared, found, err := runner.preparedDelegationToolRequest(ctx, request)
+	if err != nil || found {
+		return prepared, err
+	}
+	for _, policy := range handler.policies {
+		input, err = policy.PrepareDelegation(ctx, tools.CloneExecutionRequest(request), input)
+		if err != nil {
+			return DelegateRequest{}, err
+		}
+	}
+	input.callID = request.Call.ID
+	return input, nil
+}
+
+// A pending Tool call reuses its durable, policy-prepared goal after a restart.
+// Polling must not consume product delegation budgets or rebuild frozen evidence.
+func (runner *Runner) preparedDelegationToolRequest(
+	ctx context.Context,
+	request tools.ExecutionRequest,
+) (DelegateRequest, bool, error) {
+	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, request.RunID)
+	if err != nil {
+		return DelegateRequest{}, false, err
+	}
+	items, err := listAllItems(ctx, runner.store, invocation.TurnID)
+	if err != nil {
+		return DelegateRequest{}, false, err
+	}
+	id := stableID("hid", invocation.TurnID, delegationToolID(invocation, request.Call.ID), string(ItemStarted))
+	for _, item := range items {
+		if item.ID != id || item.Kind != ItemDelegation || item.InvocationID != invocation.ID {
+			continue
+		}
+		var payload delegationItemPayload
+		if err = json.Unmarshal(item.Payload, &payload); err != nil {
+			return DelegateRequest{}, false, err
+		}
+		return DelegateRequest{MemberID: payload.MemberID, Goal: payload.Goal, callID: request.Call.ID}, true, nil
+	}
+	return DelegateRequest{}, false, nil
+}
+
+func delegationToolID(invocation Invocation, callID string) string {
+	return stableID("hd", invocation.TurnID, invocation.ID, callID)
 }
 
 func DelegationToolRegistration(handler *DelegationToolHandler) tools.Registration {

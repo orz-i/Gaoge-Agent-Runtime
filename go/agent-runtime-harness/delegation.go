@@ -22,6 +22,7 @@ type HandoffStarter interface {
 type DelegateRequest struct {
 	MemberID string `json:"memberID"`
 	Goal     string `json:"goal"`
+	callID   string
 }
 
 type DelegationResult struct {
@@ -109,6 +110,9 @@ func (runner *Runner) prepareDelegation(
 		return handoff.Delegation{}, kernel.Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	delegationID := stableID("hd", turn.ID, request.MemberID, request.Goal)
+	if request.callID != "" {
+		delegationID = delegationToolID(invocation, request.callID)
+	}
 	childRunID := stableID("hchild", invocation.ExecutionRefID, delegationID)
 	return handoff.Delegation{
 		ID: delegationID, MemberID: request.MemberID, ChildRunID: childRunID,
@@ -143,8 +147,10 @@ func (runner *Runner) executeDelegation(
 	}
 	delegation, delegateErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
 	status := delegationItemStatus(delegation.Status)
-	if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, status, startedItemID); itemErr != nil {
-		return DelegationResult{}, errors.Join(delegateErr, itemErr)
+	if status != ItemStarted {
+		if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, status, startedItemID); itemErr != nil {
+			return DelegationResult{}, errors.Join(delegateErr, itemErr)
+		}
 	}
 	snapshot, loadErr := runner.Load(ctx, turn.ID)
 	if errors.Is(delegateErr, handoff.ErrChildPending) {

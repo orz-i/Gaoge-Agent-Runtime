@@ -6,8 +6,15 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
+
+// RuntimeCanceller lets the host perform feature-owned cleanup, including
+// cancelling remote tasks, before projecting a Runtime Run as terminal.
+type RuntimeCanceller interface {
+	Cancel(context.Context, string, uint64, string) (kernel.Snapshot, error)
+}
 
 func (runner *Runner) cancelRuntimeRun(
 	ctx context.Context,
@@ -29,13 +36,49 @@ func (runner *Runner) cancelRuntimeRun(
 		if terminalRuntimeStatus(current.Run.Status) {
 			return current, true, nil
 		}
-		cancelled, err := runner.runtime.Cancel(ctx, runID, current.Run.Revision, strings.TrimSpace(reason))
+		cancelled, err := runner.cancellation.Cancel(ctx, runID, current.Run.Revision, strings.TrimSpace(reason))
 		if errors.Is(err, kernel.ErrConflict) {
 			continue
 		}
 		return cancelled, true, err
 	}
 	return kernel.Snapshot{}, false, ErrConflict
+}
+
+func (runner *Runner) syncTerminalDelegations(ctx context.Context, turn Turn, runs map[string]kernel.Snapshot) error {
+	items, err := listAllItems(ctx, runner.store, turn.ID)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.Kind != ItemDelegation || item.Status != ItemStarted {
+			continue
+		}
+		snapshot, found := runs[item.RunID]
+		if !found || !terminalRuntimeStatus(snapshot.Run.Status) {
+			continue
+		}
+		var payload delegationItemPayload
+		if err = json.Unmarshal(item.Payload, &payload); err != nil {
+			return err
+		}
+		invocation, loadErr := runner.store.GetInvocation(ctx, item.InvocationID)
+		if loadErr != nil {
+			return loadErr
+		}
+		delegation := handoff.Delegation{
+			ID: payload.DelegationID, MemberID: payload.MemberID, ChildRunID: payload.ChildRunID,
+			Goal: payload.Goal, Status: handoff.Status(snapshot.Run.Status),
+		}
+		if snapshot.Run.Status == kernel.RunStatusCompleted && snapshot.Result != nil {
+			delegation.Result = append(json.RawMessage(nil), snapshot.Result.Content...)
+		}
+		_, err = runner.recordDelegationItem(ctx, turn, invocation, delegation, delegationItemStatus(delegation.Status), item.ID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (runner *Runner) cancelTurnDescendants(
