@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 )
 
@@ -119,6 +120,8 @@ type ConfigSnapshot struct {
 	ContextPolicy         runtimecontext.Policy `json:"contextPolicy"`
 	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
 	Limits                agent.Limits          `json:"limits"`
+	SharedBudget          *budget.Limits        `json:"sharedBudget,omitempty"`
+	Roles                 []RoleSnapshot        `json:"roles,omitempty"`
 	ContentHash           string                `json:"contentHash"`
 	CreatedAt             time.Time             `json:"createdAt"`
 }
@@ -137,6 +140,8 @@ type configPayload struct {
 	ContextPolicy         runtimecontext.Policy `json:"contextPolicy"`
 	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
 	Limits                agent.Limits          `json:"limits"`
+	SharedBudget          *budget.Limits        `json:"sharedBudget,omitempty"`
+	Roles                 []RoleSnapshot        `json:"roles,omitempty"`
 }
 
 // SealConfigSnapshot normalizes, hashes and seals one immutable configuration for a Harness Turn.
@@ -173,11 +178,19 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
+	if value.SharedBudget != nil && !budget.ValidLimits(*value.SharedBudget) {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
+	value.Roles, err = normalizeRoleSnapshots(value.Roles, value.ToolKeys)
+	if err != nil {
+		return ConfigSnapshot{}, err
+	}
 	payload := configPayload{
 		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
 		Model: value.Model, ModelOptions: value.ModelOptions, ToolKeys: value.ToolKeys,
 		ToolPolicies: value.ToolPolicies, Commands: value.Commands, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
+		SharedBudget: value.SharedBudget, Roles: value.Roles,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -219,6 +232,11 @@ func normalizeStrings(values []string) []string {
 }
 
 func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
+	if value.SharedBudget != nil {
+		copied := *value.SharedBudget
+		value.SharedBudget = &copied
+	}
+	value.Roles = cloneRoleSnapshots(value.Roles)
 	value.ModelOptions = append(json.RawMessage(nil), value.ModelOptions...)
 	value.ToolKeys = append([]string(nil), value.ToolKeys...)
 	value.ToolPolicies = append([]ToolPolicySnapshot(nil), value.ToolPolicies...)

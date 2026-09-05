@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 )
 
@@ -17,6 +18,7 @@ const maxListItems = 500
 
 // MemoryStore is the reference Store implementation used by conformance and small embedded hosts.
 type MemoryStore struct {
+	*budget.MemoryLedgerStore
 	mu                      sync.RWMutex
 	sessions                map[string]Session
 	turns                   map[string]Turn
@@ -393,7 +395,8 @@ func listMemoryStoreValues[T any](
 // NewMemoryStore creates an empty isolated Harness Store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		sessions: map[string]Session{}, turns: map[string]Turn{}, configs: map[string]ConfigSnapshot{},
+		MemoryLedgerStore: budget.NewMemoryLedgerStore(),
+		sessions:          map[string]Session{}, turns: map[string]Turn{}, configs: map[string]ConfigSnapshot{},
 		invocations: map[string]Invocation{}, invocationExecutionRefs: map[string]string{},
 		interactions: map[string]Interaction{}, contextCheckpoints: map[string]runtimecontext.Checkpoint{},
 		contextHeads: map[string]string{}, contextArtifacts: map[string]runtimecontext.Artifact{},

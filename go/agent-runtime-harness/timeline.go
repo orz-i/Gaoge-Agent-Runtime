@@ -225,7 +225,7 @@ func (middleware *ModelTimelineMiddleware) Model(
 	if err != nil {
 		return model.Response{}, err
 	}
-	if !harnessRun {
+	if !harnessRun || invocation.ParentItemID != "" {
 		return next(ctx, request, emit)
 	}
 	messageItemID, hasMessageItem, err := activeAgentMessageItemID(ctx, middleware.store, turn)

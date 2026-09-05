@@ -13,15 +13,16 @@ var ErrInvalidUsage = errors.New("invalid runtime budget usage")
 type Dimension string
 
 const (
-	DimensionLLMCalls     Dimension = "llm_calls"
-	DimensionToolCalls    Dimension = "tool_calls"
-	DimensionInputTokens  Dimension = "input_tokens"
-	DimensionOutputTokens Dimension = "output_tokens"
-	DimensionTotalTokens  Dimension = "total_tokens"
-	DimensionOutputBytes  Dimension = "output_bytes"
-	DimensionStateBytes   Dimension = "state_bytes"
-	DimensionChildRuns    Dimension = "child_runs"
-	DimensionCostUnits    Dimension = "cost_units"
+	DimensionLLMCalls       Dimension = "llm_calls"
+	DimensionToolCalls      Dimension = "tool_calls"
+	DimensionInputTokens    Dimension = "input_tokens"
+	DimensionOutputTokens   Dimension = "output_tokens"
+	DimensionTotalTokens    Dimension = "total_tokens"
+	DimensionOutputBytes    Dimension = "output_bytes"
+	DimensionStateBytes     Dimension = "state_bytes"
+	DimensionChildRuns      Dimension = "child_runs"
+	DimensionCostUnits      Dimension = "cost_units"
+	DimensionConcurrentRuns Dimension = "concurrent_runs"
 )
 
 // Limits are optional ceilings shared only where features have identical
@@ -29,15 +30,16 @@ const (
 // Reasoning tokens are intentionally observation-only because providers do not
 // report them consistently enough for a portable hard limit.
 type Limits struct {
-	MaxLLMCalls     int   `json:"maxLLMCalls,omitempty"`
-	MaxToolCalls    int   `json:"maxToolCalls,omitempty"`
-	MaxInputTokens  int64 `json:"maxInputTokens,omitempty"`
-	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
-	MaxTotalTokens  int64 `json:"maxTotalTokens,omitempty"`
-	MaxOutputBytes  int   `json:"maxOutputBytes,omitempty"`
-	MaxStateBytes   int   `json:"maxStateBytes,omitempty"`
-	MaxChildRuns    int   `json:"maxChildRuns,omitempty"`
-	MaxCostUnits    int64 `json:"maxCostUnits,omitempty"`
+	MaxLLMCalls       int   `json:"maxLLMCalls,omitempty"`
+	MaxToolCalls      int   `json:"maxToolCalls,omitempty"`
+	MaxInputTokens    int64 `json:"maxInputTokens,omitempty"`
+	MaxOutputTokens   int64 `json:"maxOutputTokens,omitempty"`
+	MaxTotalTokens    int64 `json:"maxTotalTokens,omitempty"`
+	MaxOutputBytes    int   `json:"maxOutputBytes,omitempty"`
+	MaxStateBytes     int   `json:"maxStateBytes,omitempty"`
+	MaxChildRuns      int   `json:"maxChildRuns,omitempty"`
+	MaxCostUnits      int64 `json:"maxCostUnits,omitempty"`
+	MaxConcurrentRuns int   `json:"maxConcurrentRuns,omitempty"`
 }
 
 // ValidUsage validates a durable ledger, including the invariant that total
@@ -90,6 +92,9 @@ func ResolveLimits(defaults Limits, requested Limits) (Limits, error) {
 	if resolved.MaxCostUnits == 0 {
 		resolved.MaxCostUnits = defaults.MaxCostUnits
 	}
+	if resolved.MaxConcurrentRuns == 0 {
+		resolved.MaxConcurrentRuns = defaults.MaxConcurrentRuns
+	}
 	return resolved, nil
 }
 
@@ -130,7 +135,7 @@ type TokenUsage struct {
 func ValidLimits(value Limits) bool {
 	return value.MaxLLMCalls >= 0 && value.MaxToolCalls >= 0 &&
 		value.MaxInputTokens >= 0 && value.MaxOutputTokens >= 0 && value.MaxTotalTokens >= 0 &&
-		value.MaxOutputBytes >= 0 && value.MaxStateBytes >= 0 && value.MaxChildRuns >= 0 && value.MaxCostUnits >= 0
+		value.MaxOutputBytes >= 0 && value.MaxStateBytes >= 0 && value.MaxChildRuns >= 0 && value.MaxCostUnits >= 0 && value.MaxConcurrentRuns >= 0
 }
 
 // HasTokenLimits reports whether exact token observations are required to

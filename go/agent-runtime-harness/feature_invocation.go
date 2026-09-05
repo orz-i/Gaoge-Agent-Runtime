@@ -741,6 +741,10 @@ func (runner *Runner) startInvocationAttempt(
 }
 
 func (runner *Runner) startRetriedAgent(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
+	var delegated handoff.Delegation
+	if json.Unmarshal(invocation.Input, &delegated) == nil && delegated.RoleID != "" {
+		return runner.startRetriedRole(ctx, invocation, child, requestID, delegated)
+	}
 	var input agentInvocationInput
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
 		return kernel.Snapshot{}, ErrConflict
@@ -973,7 +977,7 @@ func expectedFeaturePendingError(executionClass ExecutionClass, err error) bool 
 	case ExecutionTeam:
 		return errors.Is(err, team.ErrMemberPending)
 	case ExecutionPlanExecute:
-		return errors.Is(err, planexecute.ErrApprovalRequired) || errors.Is(err, planexecute.ErrStepPending)
+		return errors.Is(err, planexecute.ErrApprovalRequired) || errors.Is(err, planexecute.ErrStepPending) || errors.Is(err, planexecute.ErrPlannerPending)
 	case ExecutionWorkflow:
 		return errors.Is(err, workflow.ErrEffectPending) || errors.Is(err, workflow.ErrWaitPending) ||
 			errors.Is(err, workflow.ErrSegmentYielded)
@@ -1091,7 +1095,15 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	if err = runner.projectChildInvocationOutcome(ctx, invocation, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
+	if invocation.ExecutionClass == ExecutionAgent {
+		if err = runner.recordApprovalRequestItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	if err = runner.projectWorkflowWaitInteraction(ctx, turn, invocation, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
 	turn, err = runner.store.GetTurn(ctx, turn.ID)

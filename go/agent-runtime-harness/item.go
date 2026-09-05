@@ -21,6 +21,8 @@ const (
 	ItemArtifact     ItemKind = "artifact"
 	ItemContext      ItemKind = "context"
 	ItemDiagnostic   ItemKind = "diagnostic"
+	ItemBudget       ItemKind = "budget"
+	ItemSubtask      ItemKind = "subtask"
 )
 
 // ItemStatus is one durable item lifecycle state.
@@ -64,7 +66,7 @@ func validItem(value Item) bool {
 
 func validItemKind(value ItemKind) bool {
 	switch value {
-	case ItemUserMessage, ItemAgentRun, ItemAgentMessage, ItemTool, ItemApproval, ItemDelegation, ItemInvocation, ItemInteraction, ItemArtifact, ItemContext, ItemDiagnostic:
+	case ItemUserMessage, ItemAgentRun, ItemAgentMessage, ItemTool, ItemApproval, ItemDelegation, ItemInvocation, ItemInteraction, ItemArtifact, ItemContext, ItemDiagnostic, ItemBudget, ItemSubtask:
 		return true
 	default:
 		return false

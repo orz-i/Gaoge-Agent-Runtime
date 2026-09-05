@@ -70,6 +70,10 @@ func (runner *Runner) syncTerminalDelegations(ctx context.Context, turn Turn, ru
 			ID: payload.DelegationID, MemberID: payload.MemberID, ChildRunID: payload.ChildRunID,
 			Goal: payload.Goal, Status: handoff.Status(snapshot.Run.Status),
 		}
+		if payload.Execution != nil {
+			delegation = *payload.Execution
+			delegation.Status = handoff.Status(snapshot.Run.Status)
+		}
 		if snapshot.Run.Status == kernel.RunStatusCompleted && snapshot.Result != nil {
 			delegation.Result = append(json.RawMessage(nil), snapshot.Result.Content...)
 		}

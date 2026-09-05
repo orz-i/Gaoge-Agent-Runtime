@@ -140,6 +140,7 @@ type ResolveApprovalRequest struct {
 }
 
 type approvalRequestItemPayload struct {
+	Subtask      bool            `json:"subtask,omitempty"`
 	CheckpointID string          `json:"checkpointID"`
 	ToolCallID   string          `json:"toolCallID"`
 	ToolKey      string          `json:"toolKey"`
@@ -148,6 +149,7 @@ type approvalRequestItemPayload struct {
 }
 
 type approvalDecisionItemPayload struct {
+	Subtask      bool             `json:"subtask,omitempty"`
 	CheckpointID string           `json:"checkpointID"`
 	Decision     ApprovalDecision `json:"decision"`
 	Comment      string           `json:"comment,omitempty"`

@@ -594,7 +594,7 @@ func createOrReplay[T any](
 func Models() []any {
 	return []any{
 		&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &interactionRecord{}, &configRecord{},
-		&contextCheckpointRecord{}, &contextHeadRecord{}, &contextArtifactRecord{}, &itemRecord{},
+		&contextCheckpointRecord{}, &contextHeadRecord{}, &contextArtifactRecord{}, &itemRecord{}, &budgetRecord{},
 	}
 }
 

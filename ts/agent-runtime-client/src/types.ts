@@ -12,6 +12,8 @@ export type HarnessItemKind =
   | "interaction"
   | "artifact"
   | "context"
+  | "budget"
+  | "subtask"
   | "diagnostic";
 export type HarnessItemStatus = "started" | "waiting" | "completed" | "failed" | "cancelled";
 
@@ -102,6 +104,79 @@ export type HarnessTurnSnapshotDTO = {
   interactions: HarnessInteractionDTO[];
   items: HarnessItemDTO[];
   output?: ResultDTO | null;
+  budget?: HarnessBudgetDTO;
+  subtasks?: HarnessSubtaskDTO[];
+};
+
+export type RuntimeBudgetLimitsDTO = {
+  maxLLMCalls?: number;
+  maxToolCalls?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  maxTotalTokens?: number;
+  maxChildRuns?: number;
+  maxConcurrentRuns?: number;
+  maxOutputBytes?: number;
+  maxStateBytes?: number;
+  maxCostUnits?: number;
+};
+
+export type RuntimeBudgetUsageDTO = {
+  llmCalls?: number;
+  toolCalls?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  childRuns?: number;
+  outputBytes?: number;
+  stateBytes?: number;
+  costUnits?: number;
+};
+
+export type HarnessBudgetDTO = {
+  scopeID: string;
+  revision: number;
+  limits: RuntimeBudgetLimitsDTO;
+  usage: RuntimeBudgetUsageDTO;
+  reserved: RuntimeBudgetUsageDTO;
+  remaining: RuntimeBudgetUsageDTO;
+  activeRuns: number;
+  waitingRuns: number;
+  unknownUsage?: boolean;
+  cancelled?: boolean;
+};
+
+export type HarnessSubtaskDTO = {
+  id: string;
+  parentID?: string;
+  kind: string;
+  roleID?: string;
+  roleRevision?: number;
+  roleName?: string;
+  goal: string;
+  model?: string;
+  status: RunStatus | "queued" | "waiting_budget";
+  startedAt?: string;
+  updatedAt?: string;
+  endedAt?: string;
+  budget?: HarnessBudgetDTO;
+  usageKnown: boolean;
+  result?: unknown;
+  errorCode?: string;
+  errorDetail?: string;
+  approval?: {
+    checkpointID: string;
+    toolCallID: string;
+    toolKey: string;
+    toolName: string;
+    arguments: unknown;
+  };
+  cancelStatus?: "requested" | "failed" | "confirmed";
+  cancelError?: string;
+  cancelAttempt?: number;
 };
 
 export type HarnessTurnFeedEventDTO = {

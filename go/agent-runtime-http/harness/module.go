@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
 
@@ -230,6 +231,7 @@ func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
 		Interactions: interactions,
 		Items:        items,
 		Output:       output,
+		Budget:       snapshot.Budget, Subtasks: snapshot.Subtasks,
 	}, nil
 }
 
@@ -271,6 +273,8 @@ func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.Raw
 	}
 	if kind == harness.ItemDelegation {
 		delete(value, "childRunID")
+		delete(value, "parentRunID")
+		delete(value, "execution")
 	}
 	if kind == harness.ItemInvocation {
 		delete(value, "executionRefID")
@@ -337,6 +341,8 @@ type SnapshotResponse struct {
 	Interactions []InteractionResponse `json:"interactions"`
 	Items        []ItemResponse        `json:"items"`
 	Output       *harness.Output       `json:"output,omitempty"`
+	Budget       *budget.LedgerView    `json:"budget,omitempty"`
+	Subtasks     []harness.Subtask     `json:"subtasks,omitempty"`
 }
 
 type ResolveApprovalRequest struct {
@@ -374,6 +380,8 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 	routes.POST("/harness/turns/:turn_id/approval", module.Handler.ResolveApproval)
 	routes.POST("/harness/turns/:turn_id/interactions/:interaction_id", module.Handler.ResolveInteraction)
 	routes.POST("/harness/turns/:turn_id/invocations/:invocation_id/retry", module.Handler.RetryInvocation)
+	routes.POST("/harness/turns/:turn_id/subtasks/:subtask_id/cancel", module.Handler.CancelSubtask)
+	routes.POST("/harness/turns/:turn_id/subtasks/:subtask_id/approval", module.Handler.ResolveSubtaskApproval)
 }
 
 func (handler *Handler) GetTurn(context *gin.Context) {
