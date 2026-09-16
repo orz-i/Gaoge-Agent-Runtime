@@ -1084,7 +1084,7 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) {
 		return Snapshot{}, ErrConflict
 	}
-	status, err := turnStatusFromRuntime(runtimeSnapshot.Run.Status)
+	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {
 		return Snapshot{}, err
 	}

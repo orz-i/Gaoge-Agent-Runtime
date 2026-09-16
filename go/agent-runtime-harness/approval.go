@@ -10,6 +10,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 const (
@@ -156,7 +157,7 @@ type approvalDecisionItemPayload struct {
 }
 
 func approvalRequestFromSnapshot(snapshot kernel.Snapshot) (approvalRequestItemPayload, bool, error) {
-	if snapshot.Run.Status != kernel.RunStatusWaitingInput || snapshot.Checkpoint == nil {
+	if snapshot.Run.Kind == workflow.RunKind || snapshot.Run.Status != kernel.RunStatusWaitingInput || snapshot.Checkpoint == nil {
 		return approvalRequestItemPayload{}, false, nil
 	}
 	request, err := interaction.Request(snapshot.Checkpoint)
