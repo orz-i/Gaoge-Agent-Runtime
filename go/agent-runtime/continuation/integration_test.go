@@ -35,19 +35,25 @@ func TestApprovedChildAutomaticallyContinuesOwningPlanOnce(t *testing.T) {
 	defer fixture.close(t)
 	parent := fixture.startPendingPlan(t)
 	child := fixture.waitingChild(t, parent)
+	// Establish the fixture before exercising asynchronous continuation. This
+	// test verifies approval wakeup, not concurrent inline parent startup.
+	if err := fixture.worker.Start(fixture.workerContext); err != nil {
+		t.Fatal(err)
+	}
 	fixture.approveChild(t, child)
 	fixture.waitForCompletedParent(t, parent.Run.ID)
 	fixture.assertSingleExecution(t)
 }
 
 type continuationIntegrationFixture struct {
-	runtime    *kernel.Runtime
-	agent      *agent.Runner
-	plans      *planexecute.Runner
-	worker     *continuation.Worker
-	cancel     context.CancelFunc
-	executions *atomic.Int32
-	model      *approvalIntegrationModel
+	runtime       *kernel.Runtime
+	agent         *agent.Runner
+	plans         *planexecute.Runner
+	worker        *continuation.Worker
+	workerContext context.Context
+	cancel        context.CancelFunc
+	executions    *atomic.Int32
+	model         *approvalIntegrationModel
 }
 
 func newContinuationIntegrationFixture(t *testing.T) continuationIntegrationFixture {
@@ -59,12 +65,9 @@ func newContinuationIntegrationFixture(t *testing.T) continuationIntegrationFixt
 	planRunner := newIntegrationPlan(t, runtime, relations, agentRunner)
 	worker := newIntegrationWorker(t, runtime, scheduler, delivery, agentRunner, planRunner)
 	workerCtx, cancel := context.WithCancel(context.Background())
-	if err := worker.Start(workerCtx); err != nil {
-		t.Fatal(err)
-	}
 	return continuationIntegrationFixture{
 		runtime: runtime, agent: agentRunner, plans: planRunner, worker: worker,
-		cancel: cancel, executions: executions, model: model,
+		cancel: cancel, workerContext: workerCtx, executions: executions, model: model,
 	}
 }
 

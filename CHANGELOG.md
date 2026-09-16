@@ -3,6 +3,13 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## 0.1.0-beta.9
+
+- Project nested workflow waits through the owning Harness invocation, preserving the single active interaction contract.
+- Resume the exact child wait and frozen execution; replaying a previous response cannot consume a later wait.
+- Record each parallel/map effect child separately so cancellation and continuation retain all descendants.
+- Preserve historical relation identities and distinguish workflow waits from tool approvals in subtask projections.
+
 ## [0.1.0-beta.8] - 2026-09-05
 
 ### Added

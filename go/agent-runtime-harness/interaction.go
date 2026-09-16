@@ -333,7 +333,7 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 	if err != nil || handled {
 		return snapshot, err
 	}
-	return runner.resumeResolvedInteractionOwner(ctx, turn, invocation, interaction.Response)
+	return runner.resumeResolvedInteractionOwner(ctx, turn, invocation, interaction)
 }
 
 func (runner *Runner) prepareResolvedInteractionContinuation(
@@ -352,7 +352,7 @@ func (runner *Runner) prepareResolvedInteractionContinuation(
 	if err != nil {
 		return Turn{}, Invocation{}, Snapshot{}, false, err
 	}
-	if waiting || interactionOwnersRunning(turn, invocation) {
+	if (waiting || interactionOwnersRunning(turn, invocation)) && !runner.projectsWorkflowWaits(invocation) {
 		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
 		return turn, invocation, snapshot, true, loadErr
 	}
@@ -408,7 +408,7 @@ func (runner *Runner) resumeResolvedInteractionOwner(
 	ctx context.Context,
 	turn Turn,
 	invocation Invocation,
-	response json.RawMessage,
+	interaction Interaction,
 ) (Snapshot, error) {
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.resumeApplicationInteractionOwner(ctx, turn, invocation)
@@ -417,7 +417,10 @@ func (runner *Runner) resumeResolvedInteractionOwner(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return runner.resumeRuntimeInteractionOwner(ctx, turn, invocation, runtimeSnapshot, response)
+	if runner.projectsWorkflowWaits(invocation) {
+		return runner.resumeWorkflowInteraction(ctx, turn, invocation, runtimeSnapshot, interaction)
+	}
+	return runner.resumeRuntimeInteractionOwner(ctx, turn, invocation, runtimeSnapshot, interaction.Response)
 }
 
 func (runner *Runner) resumeApplicationInteractionOwner(

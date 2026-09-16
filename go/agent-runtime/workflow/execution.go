@@ -509,9 +509,26 @@ func (runner *Runner) ensureEffectRelation(ctx context.Context, parentRunID stri
 	if runner.relations == nil || effect.ChildRunID == "" {
 		return nil
 	}
+	ownerID := effect.NodeID
+	if effect.OutputKey != "" || effect.Mapped {
+		// A fan-out activation owns several children, each with a stable effect
+		// identity. Keep existing historical relations when recovering a run.
+		ownerID = effect.ID
+		if reader, ok := runner.relations.(interface {
+			GetByChild(context.Context, string) (runrelation.Relation, error)
+		}); ok {
+			existing, err := reader.GetByChild(ctx, effect.ChildRunID)
+			if err == nil && existing.ParentRunID == parentRunID && existing.Kind == runrelation.KindWorkflowEffect && existing.OwnerNodeID == effect.NodeID {
+				ownerID = existing.OwnerNodeID
+			}
+			if err != nil && !errors.Is(err, runrelation.ErrNotFound) {
+				return err
+			}
+		}
+	}
 	_, err := runner.relations.Ensure(ctx, runrelation.Draft{
 		ParentRunID: parentRunID, ChildRunID: effect.ChildRunID,
-		Kind: runrelation.KindWorkflowEffect, OwnerNodeID: effect.NodeID,
+		Kind: runrelation.KindWorkflowEffect, OwnerNodeID: ownerID,
 	})
 	return err
 }
