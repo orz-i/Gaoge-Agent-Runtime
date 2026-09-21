@@ -3,6 +3,20 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## Unreleased
+
+- Add explicit Go consumer signatures for all eight modules, host Store/model/tool/worker ports, and a standalone Agent/HTTP composition check.
+- Share reviewed JSON fixtures between Go HTTP serialization, OpenAPI validation and the packed TypeScript consumer; check cancellation, errors and terminal SSE consumption through the published ESM entrypoint.
+- Document the existing Checkpoint and Result wire fields. Correct Run and Workbench kind schemas and TypeScript `RuntimeKind` to accept feature-owned strings, including A2A shadow runs and host extensions.
+- Correct PostgreSQL construction examples and document version alignment, migration ownership, CAS/retry handling and contract review requirements.
+- Verify current-version PostgreSQL migrations can be reapplied without losing the populated Kernel aggregate/journal/outbox or Harness Context checkpoint ownership.
+
+Upgrade note: no storage migration or Go constructor change is introduced here.
+Consumers that assumed `RuntimeKind` was a closed four-value union must handle
+other feature kinds already accepted by Kernel. Checkpoint/Result schemas now
+describe their existing emitted fields. Beta version alignment and forward-only
+migration policy remain in force; this does not establish cross-release or mixed-worker compatibility.
+
 ## 0.1.0-beta.9
 
 - Project nested workflow waits through the owning Harness invocation, preserving the single active interaction contract.

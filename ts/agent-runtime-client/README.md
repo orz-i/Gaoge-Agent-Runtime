@@ -13,6 +13,10 @@ pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-b
 Beta packages are GitHub Release archives, not npm registry releases. Registry
 publication is reserved for stable versions.
 
+The package declares Node.js >=20 for consumers. The contributor and release
+gate baseline is Node.js 24 LTS+; the package engine range is not a release-test
+matrix. Pin the client archive to the same release as the HTTP server.
+
 ## Create a client
 
 ```ts
@@ -66,12 +70,17 @@ a replacement snapshot when the server reports an expired cursor.
 | `workflows.definitions` | `compile`, `publish`, `list`, `get`, `setActivation` |
 | `runs` | `get`, `events`, `cancel`, `workbench`, `feed` |
 | `harness.commands` | `list` |
-| `harness.turns` | `get`, `feed`, `resolveApproval`, `resolveInteraction`, `retryInvocation` |
+| `harness.turns` | `get`, `feed`, `resolveApproval`, `resolveInteraction`, `retryInvocation`, `cancelSubtask`, `resolveSubtaskApproval` |
 
 Use the exported request types for each feature. Having a client method does not
 grant permission: the host decides which routes and capabilities are available
 to a caller. Generic `admin`, `agents`, `events`, and `interactions` namespaces,
 and generic run delegation/resume methods, are not part of this client.
+
+`RuntimeKind` is a feature-owned string. Handle unfamiliar kinds when reading
+Runs or Workbench snapshots; built-ins include `agent`, `plan_execute`,
+`workflow`, `team`, and `a2a.remote`. Feature-specific start methods remain
+explicit. JSON payloads typed as `unknown` require the host feature's own schema.
 
 ## Harness input and approval
 

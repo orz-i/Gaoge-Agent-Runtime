@@ -1,0 +1,46 @@
+[
+  {
+    "file": "snapshot-running.json",
+    "schema": "RunSnapshot",
+    "typescript": "RunSnapshotDTO"
+  },
+  {
+    "file": "snapshot-waiting.json",
+    "schema": "RunSnapshot",
+    "typescript": "RunSnapshotDTO"
+  },
+  {
+    "file": "snapshot-completed.json",
+    "schema": "RunSnapshot",
+    "typescript": "RunSnapshotDTO"
+  },
+  {
+    "file": "snapshot-extension.json",
+    "schema": "RunSnapshot",
+    "typescript": "RunSnapshotDTO"
+  },
+  {
+    "file": "events.json",
+    "schema": "RunEventPage",
+    "typescript": "RunEventPageDTO"
+  },
+  {
+    "file": "events-empty.json",
+    "schema": "RunEventPage",
+    "typescript": "RunEventPageDTO"
+  },
+  {
+    "file": "cancel.json",
+    "schema": "CancelRunResponse",
+    "typescript": "CancelRunResponse"
+  },
+  {
+    "file": "error.json",
+    "schema": "ErrorResponse"
+  },
+  {
+    "file": "feed-terminal.json",
+    "schema": "RunFeedEvent",
+    "typescript": "RunFeedEventDTO"
+  }
+]

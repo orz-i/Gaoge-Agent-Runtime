@@ -1,0 +1,32 @@
+{
+  "run": {
+    "id": "run-1",
+    "kind": "agent",
+    "actor": {
+      "tenantID": "tenant",
+      "actorID": "actor"
+    },
+    "thread": {
+      "kind": "conversation",
+      "id": "thread-1"
+    },
+    "goal": "Say hello",
+    "status": "waiting_input",
+    "revision": 2,
+    "createdAt": "2026-09-21T00:00:00Z",
+    "updatedAt": "2026-09-21T00:00:00Z"
+  },
+  "state": {
+    "step": 1
+  },
+  "checkpoint": {
+    "id": "checkpoint-1",
+    "kind": "approval",
+    "status": "pending",
+    "payload": {
+      "prompt": "Approve"
+    },
+    "createdAt": "2026-09-21T00:00:00Z"
+  },
+  "eventHead": 2
+}

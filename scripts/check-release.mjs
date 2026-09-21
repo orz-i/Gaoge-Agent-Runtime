@@ -17,26 +17,7 @@ const modules = [
   "agent-runtime-redis",
   "agent-runtime-http",
 ];
-const moduleImports = {
-  "agent-runtime": `"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"\n  "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"`,
-  "agent-runtime-harness": `harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"`,
-  "agent-runtime-harness-postgres": `harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"`,
-  "agent-runtime-mcp": `mcp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp"`,
-  "agent-runtime-a2a": `a2a "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a"`,
-  "agent-runtime-http": `runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"`,
-  "agent-runtime-postgres": `postgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"`,
-  "agent-runtime-redis": `redisruntime "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis"`,
-};
-const moduleAssertions = {
-  "agent-runtime": `var _ kernel.Store = memory.NewStore()\n  _ = kernel.Run{}`,
-  "agent-runtime-harness": "_ = harness.Session{}",
-  "agent-runtime-harness-postgres": "_ = harnesspostgres.New",
-  "agent-runtime-mcp": "_ = mcp.NewTransport",
-  "agent-runtime-a2a": "_ = a2a.NewTransport",
-  "agent-runtime-http": "_ = runtimehttp.NewHandler",
-  "agent-runtime-postgres": "_ = postgres.NewKernelStore",
-  "agent-runtime-redis": "_ = redisruntime.NewQueue",
-};
+const consumers = path.join(root, "contracts", "consumers");
 
 try {
   for (const name of modules) checkGoConsumer(name);
@@ -50,13 +31,13 @@ function checkGoConsumer(name) {
   const consumer = path.join(temporary, name);
   mkdirSync(consumer);
   const replacements = modules
-    .map((moduleName) => `replace github.com/orz-i/Gaoge-Agent-Runtime/go/${moduleName} => ${path.join(root, "go", moduleName).replaceAll("\\", "/")}`)
+    .map((moduleName) => `replace github.com/orz-i/Gaoge-Agent-Runtime/go/${moduleName} => ${JSON.stringify(path.join(root, "go", moduleName).replaceAll("\\", "/"))}`)
     .join("\n");
   writeFileSync(path.join(consumer, "go.mod"), `module example.com/${name}-consumer\n\ngo 1.26\n\nrequire github.com/orz-i/Gaoge-Agent-Runtime/go/${name} v${version}\n\n${replacements}\n`);
-  writeFileSync(path.join(consumer, "runtime_test.go"), `package consumer\n\nimport (\n  "testing"\n  ${moduleImports[name]}\n)\n\nfunc TestPublicModuleCompiles(t *testing.T) {\n  ${moduleAssertions[name]}\n}\n`);
+  writeFileSync(path.join(consumer, "runtime_test.go"), readFileSync(path.join(consumers, "go", `${name}_test.go`)));
   run("go", ["mod", "tidy"], consumer, { ...process.env, GOWORK: "off" });
   run("go", ["test", "./..."], consumer, { ...process.env, GOWORK: "off" });
-  const dependencies = run("go", ["list", "-deps", "./..."], consumer, { ...process.env, GOWORK: "off" }, true);
+  const dependencies = run("go", ["list", "-deps", "-test", "./..."], consumer, { ...process.env, GOWORK: "off" }, true);
   if (dependencies.includes("github.com/orz-i/Gaoge/backend")) {
     throw new Error(`${name} external consumer unexpectedly depends on the Gaoge host`);
   }
@@ -85,8 +66,24 @@ function checkTypeScriptConsumer() {
   const consumer = path.join(temporary, "ts-consumer");
   mkdirSync(consumer);
   writeFileSync(path.join(consumer, "package.json"), JSON.stringify({ name: "runtime-ts-consumer", private: true, type: "module" }));
-  writeFileSync(path.join(consumer, "index.mjs"), "const sdk = await import('@orz-i/agent-runtime-client');\nif (!sdk.RuntimeClient) throw new Error('RuntimeClient export missing');\n");
-  writeFileSync(path.join(consumer, "index.ts"), `import { RuntimeClient, type RunSnapshotDTO, type StartAgentRunRequest } from "@orz-i/agent-runtime-client";\nconst client = new RuntimeClient({ baseURL: "https://runtime.example/api/v1" });\nconst request: StartAgentRunRequest = { thread: { kind: "conversation", id: "thread-1" }, input: { content: "hello" }, clientRunID: "client-run-1" };\nconst created: Promise<RunSnapshotDTO> = client.agent.start(request);\nvoid created;\nvoid client.runs.get("run-1");\nvoid client.runs.cancel("run-1", { expectedRevision: 1, reason: "consumer-check" });\n`);
+  for (const name of ["index.mjs", "index.ts"]) {
+    writeFileSync(path.join(consumer, name), readFileSync(path.join(consumers, "typescript", name)));
+  }
+  const fixtureRoot = path.join(root, "contracts", "agent-runtime", "v1", "fixtures");
+  const fixtureCases = JSON.parse(readFileSync(path.join(fixtureRoot, "manifest.json"), "utf8"));
+  const fixtureTypes = [...new Set(fixtureCases.map((entry) => entry.typescript).filter(Boolean))];
+  const declarations = [`import type { ${fixtureTypes.join(", ")} } from "@orz-i/agent-runtime-client";`];
+  mkdirSync(path.join(consumer, "fixtures"));
+  for (const [index, fixture] of fixtureCases.entries()) {
+    const raw = readFileSync(path.join(fixtureRoot, fixture.file), "utf8");
+    // Emit JSON literals so tsc checks required fields and literal unions against
+    // the packed declarations. JSON.parse (any) would silently bypass this gate.
+    if (fixture.typescript) {
+      declarations.push(`export const fixture${index}: ${fixture.typescript} = ${JSON.stringify(JSON.parse(raw))};`);
+    }
+    writeFileSync(path.join(consumer, "fixtures", fixture.file), raw);
+  }
+  writeFileSync(path.join(consumer, "wire.ts"), declarations.join("\n"));
   const readme = readFileSync(path.join(packageRoot, "README.md"), "utf8");
   const examples = [...readme.matchAll(/```ts\r?\n([\s\S]*?)```/gu)].map((match) => match[1]);
   if (examples.length === 0) throw new Error("TypeScript README has no executable examples");
@@ -100,7 +97,7 @@ function checkTypeScriptConsumer() {
       target: "ES2022",
       skipLibCheck: false,
     },
-    include: ["index.ts", "readme.ts"],
+    include: ["index.ts", "readme.ts", "wire.ts"],
   }, null, 2));
   run("pnpm", ["add", archivePath], consumer);
   const tsc = path.join(root, "node_modules", "typescript", "bin", "tsc");

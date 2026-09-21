@@ -90,7 +90,7 @@ function read(relative) {
 function walk(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const absolute = path.join(directory, entry.name);
-    if (entry.isDirectory() && [".git", "dist", "node_modules"].includes(entry.name)) return [];
+    if (entry.isDirectory() && [".git", "artifacts", "dist", "node_modules"].includes(entry.name)) return [];
     return entry.isDirectory() ? walk(absolute) : [absolute];
   });
 }

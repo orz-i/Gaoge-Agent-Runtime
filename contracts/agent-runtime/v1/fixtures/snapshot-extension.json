@@ -1,0 +1,30 @@
+{
+  "run": {
+    "id": "run-1",
+    "kind": "a2a.remote",
+    "actor": {
+      "tenantID": "tenant",
+      "actorID": "actor"
+    },
+    "thread": {
+      "kind": "conversation",
+      "id": "thread-1"
+    },
+    "goal": "Say hello",
+    "status": "completed",
+    "revision": 2,
+    "createdAt": "2026-09-21T00:00:00Z",
+    "updatedAt": "2026-09-21T00:01:00Z",
+    "endedAt": "2026-09-21T00:01:00Z"
+  },
+  "state": {
+    "taskID": "remote-1"
+  },
+  "result": {
+    "contentType": "application/json",
+    "content": {
+      "remoteTaskID": "remote-1"
+    }
+  },
+  "eventHead": 2
+}

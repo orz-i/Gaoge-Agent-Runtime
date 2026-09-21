@@ -70,6 +70,15 @@ Beta releases may make source-incompatible changes between prereleases. The
 HTTP v1 contract and persisted record migrations will always receive an
 explicit changelog entry and upgrade note.
 
+The [integration contract](docs/integration-contract.md) defines module/client
+version alignment, persistence and host responsibilities, HTTP recovery rules,
+and the executable consumer checks. HTTP `v1` is a protocol namespace, not a
+claim that this Beta SDK has reached SemVer v1 stability.
+
+The TypeScript package declares Node.js >=20 for consumers. Node.js 24 LTS+
+above is the tested contributor/release baseline, not a test result for every
+version accepted by the package's engine range.
+
 ## Verify from source
 
 ```bash
@@ -79,7 +88,9 @@ make integration
 ```
 
 `make integration` starts isolated PostgreSQL and Redis containers, runs the
-real-engine concurrency and recovery suites, and removes the containers.
+real-engine concurrency and recovery suites with the Go race detector, and
+removes the containers. See the [reliability evidence map](docs/reliability.md)
+for failure boundaries, reproducible checks, and remaining coverage limits.
 
 ## Project policy
 

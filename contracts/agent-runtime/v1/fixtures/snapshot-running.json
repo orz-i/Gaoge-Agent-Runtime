@@ -1,0 +1,21 @@
+{
+  "run": {
+    "id": "run-1",
+    "kind": "agent",
+    "actor": {
+      "tenantID": "tenant",
+      "actorID": "actor"
+    },
+    "thread": {
+      "kind": "conversation",
+      "id": "thread-1"
+    },
+    "goal": "Say hello",
+    "status": "running",
+    "revision": 1,
+    "createdAt": "2026-09-21T00:00:00Z",
+    "updatedAt": "2026-09-21T00:00:00Z"
+  },
+  "state": {},
+  "eventHead": 0
+}
