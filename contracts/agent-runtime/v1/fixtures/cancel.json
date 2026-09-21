@@ -1,0 +1,22 @@
+{
+  "run": {
+    "id": "run-1",
+    "kind": "agent",
+    "actor": {
+      "tenantID": "tenant",
+      "actorID": "actor"
+    },
+    "thread": {
+      "kind": "conversation",
+      "id": "thread-1"
+    },
+    "goal": "Say hello",
+    "status": "cancelled",
+    "revision": 2,
+    "errorCode": "run.cancelled",
+    "errorDetail": "stop",
+    "createdAt": "2026-09-21T00:00:00Z",
+    "updatedAt": "2026-09-21T00:01:00Z",
+    "endedAt": "2026-09-21T00:01:00Z"
+  }
+}

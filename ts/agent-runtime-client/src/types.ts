@@ -1,4 +1,5 @@
-export type RuntimeKind = "agent" | "plan_execute" | "workflow" | "team";
+/** Feature-owned identifier, including agent, plan_execute, workflow, team and a2a.remote. */
+export type RuntimeKind = string;
 export type RunStatus = "running" | "waiting_input" | "completed" | "failed" | "cancelled";
 export type HarnessTurnStatus = "accepted" | RunStatus;
 export type HarnessItemKind =

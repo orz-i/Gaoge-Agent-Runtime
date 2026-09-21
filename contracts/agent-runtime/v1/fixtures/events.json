@@ -1,0 +1,19 @@
+{
+  "events": [
+    {
+      "seq": 1,
+      "type": "run.created",
+      "createdAt": "2026-09-21T00:00:00Z"
+    },
+    {
+      "seq": 2,
+      "type": "run.waiting",
+      "message": "Approval required",
+      "data": {
+        "checkpointID": "checkpoint-1"
+      },
+      "createdAt": "2026-09-21T00:00:00Z"
+    }
+  ],
+  "eventHead": 2
+}

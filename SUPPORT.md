@@ -20,6 +20,12 @@ outside the supported surface; prerelease APIs can change before `v1.0.0`.
   the matching GitHub Release archive. npm registry publication is reserved for
   stable releases.
 
+Use the [integration and upgrade contract](docs/integration-contract.md) for
+the supported composition, review gates, and migration procedure. Matching
+module and client versions are required; mixed-release workers and in-place
+downgrades are not a supported Beta deployment strategy. HTTP `v1` does not
+override the prerelease compatibility policy.
+
 ## Getting help
 
 Use GitHub Discussions for design and usage questions. Use GitHub Issues for a

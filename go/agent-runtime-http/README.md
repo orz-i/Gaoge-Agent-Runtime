@@ -27,6 +27,10 @@ Kernel Event journal. Use `GET /runs/:run_id/events?afterSeq=...&limit=...` for
 bounded durable audit/event history. `/runs/:run_id/feed` remains the separate
 semantic Run Feed and is not used as a compatibility substitute for the journal.
 
-The unique wire contract is `sdk/contracts/agent-runtime/v1/openapi.yaml`,
+The unique wire contract is [contracts/agent-runtime/v1/openapi.yaml](../../contracts/agent-runtime/v1/openapi.yaml),
 including the `harness` capability fragment and explicit cursor-expired
 recovery headers for both Run Feed and Harness Turn Feed.
+
+Run kinds are feature-owned strings, including `a2a.remote` and host extensions.
+HTTP `v1` names the protocol namespace; the SDK still follows the
+[Beta integration and upgrade contract](../../docs/integration-contract.md).

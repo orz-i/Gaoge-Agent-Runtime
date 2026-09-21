@@ -197,6 +197,11 @@ func TestRealPostgresKernelStoreConformanceAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = thirdSQLDB.Close() })
+	// Re-running the current migration on populated storage must preserve the
+	// durable aggregate and journal. This is not a cross-version upgrade test.
+	if err = Migrate(thirdDB); err != nil {
+		t.Fatalf("repeat migration on populated kernel store: %v", err)
+	}
 	terminal, err := NewKernelStore(thirdDB).Load(t.Context(), runID)
 	if err != nil || terminal.Run.Status != kernel.RunStatusCompleted || terminal.Result == nil || terminal.EventHead != 3 {
 		t.Fatalf("terminal restart snapshot = %#v, err=%v", terminal, err)
@@ -204,6 +209,13 @@ func TestRealPostgresKernelStoreConformanceAndRestart(t *testing.T) {
 	terminalEvents, err := NewKernelStore(thirdDB).ListEvents(t.Context(), runID, 2, 10)
 	if err != nil || len(terminalEvents) != 1 || terminalEvents[0].Type != "run.completed" {
 		t.Fatalf("terminal restart events = %#v, err=%v", terminalEvents, err)
+	}
+	transitions, err := NewKernelStore(thirdDB).ClaimTransitions(t.Context(), kernel.TransitionClaimRequest{
+		WorkerID: "migration-check", Limit: 10, LeaseDuration: time.Minute, Now: time.Now().UTC(),
+	})
+	if err != nil || len(transitions) != 1 || transitions[0].Transition.RunID != runID ||
+		transitions[0].Transition.Revision != completed.Run.Revision {
+		t.Fatalf("repeat migration lost terminal outbox: %#v, err=%v", transitions, err)
 	}
 }
 

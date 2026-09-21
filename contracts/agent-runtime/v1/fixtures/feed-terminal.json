@@ -1,0 +1,14 @@
+{
+  "seq": 3,
+  "runID": "run-1",
+  "type": "run.completed",
+  "delta": "done",
+  "message": "Run completed",
+  "data": {
+    "contentType": "text"
+  },
+  "revision": 3,
+  "status": "completed",
+  "terminal": true,
+  "createdAt": "2026-09-21T00:01:00Z"
+}

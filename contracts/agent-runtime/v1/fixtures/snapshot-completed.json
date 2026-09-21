@@ -1,0 +1,43 @@
+{
+  "run": {
+    "id": "run-1",
+    "kind": "agent",
+    "actor": {
+      "tenantID": "tenant",
+      "actorID": "actor"
+    },
+    "thread": {
+      "kind": "conversation",
+      "id": "thread-1"
+    },
+    "goal": "Say hello",
+    "status": "completed",
+    "revision": 3,
+    "createdAt": "2026-09-21T00:00:00Z",
+    "updatedAt": "2026-09-21T00:01:00Z",
+    "requestID": "request-1",
+    "deadlineAt": "2026-09-21T01:00:00Z",
+    "endedAt": "2026-09-21T00:01:00Z"
+  },
+  "state": {
+    "step": 2
+  },
+  "checkpoint": {
+    "id": "checkpoint-1",
+    "kind": "approval",
+    "status": "resolved",
+    "payload": {
+      "prompt": "Approve"
+    },
+    "createdAt": "2026-09-21T00:00:00Z",
+    "response": {
+      "approved": true
+    },
+    "resolvedAt": "2026-09-21T00:01:00Z"
+  },
+  "result": {
+    "contentType": "text",
+    "content": "done"
+  },
+  "eventHead": 3
+}

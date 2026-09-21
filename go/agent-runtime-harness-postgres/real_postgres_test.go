@@ -124,6 +124,11 @@ func TestRealPostgresHarnessContextCASAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = thirdSQLDB.Close() })
+	// Check the current migration against populated Context V2 storage; older
+	// release schemas require their own explicitly supported migration fixtures.
+	if err = harnesspostgres.Migrate(thirdDB); err != nil {
+		t.Fatalf("repeat migration on populated harness store: %v", err)
+	}
 	third, err := harnesspostgres.New(thirdDB)
 	if err != nil {
 		t.Fatal(err)

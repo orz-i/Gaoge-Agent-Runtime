@@ -14,6 +14,15 @@ tags for a release must point to the same accepted commit.
    are Go module tags and the TypeScript archive attached to GitHub Releases;
    no npm publication credentials are required.
 
+Review changes to `contracts/consumers` and the shared HTTP fixtures as public
+contract changes, not generated test churn. A changed constructor, required
+port method, wire field/type, status/error behavior, or persisted representation
+needs a compatibility assessment and a concrete upgrade note. Preserve existing
+fixtures unless an intentional change is documented. `make check` runs both
+the Go/OpenAPI wire tests and the clean Go/packed TypeScript consumer gate;
+`make integration` checks populated-store migration reapplication on real
+PostgreSQL. These checks do not establish compatibility with older releases.
+
 ## Create and push tags
 
 ```bash

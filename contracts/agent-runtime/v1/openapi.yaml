@@ -702,7 +702,9 @@ components:
       required: [id, kind, actor, thread, goal, status, revision, createdAt, updatedAt]
       properties:
         id: {type: string}
-        kind: {type: string, enum: [agent, plan_execute, workflow, team]}
+        kind:
+          type: string
+          description: Feature-owned Run kind. Built-ins include agent, plan_execute, workflow, team and a2a.remote; hosts may register additional kinds.
         actor: {$ref: '#/components/schemas/ActorRef'}
         thread: {$ref: '#/components/schemas/ThreadRef'}
         requestID: {type: string}
@@ -945,10 +947,23 @@ components:
             arguments: {}
     Checkpoint:
       type: object
-      additionalProperties: true
+      additionalProperties: false
+      required: [id, kind, status, payload, createdAt]
+      properties:
+        id: {type: string}
+        kind: {type: string}
+        status: {type: string, enum: [pending, resolved]}
+        payload: {}
+        response: {}
+        createdAt: {type: string, format: date-time}
+        resolvedAt: {type: string, format: date-time, nullable: true}
     Result:
       type: object
-      additionalProperties: true
+      additionalProperties: false
+      required: [contentType, content]
+      properties:
+        contentType: {type: string}
+        content: {}
     RunSnapshot:
       type: object
       additionalProperties: false
@@ -994,7 +1009,7 @@ components:
         - hasResult
       properties:
         runID: {type: string}
-        kind: {type: string, enum: [agent, plan_execute, workflow, team]}
+        kind: {type: string, description: 'Feature-owned Run kind, including host extensions.'}
         goal: {type: string}
         status: {type: string, enum: [running, waiting_input, completed, failed, cancelled]}
         revision: {type: integer, minimum: 1}

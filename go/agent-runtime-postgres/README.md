@@ -1,12 +1,21 @@
 # Agent Runtime PostgreSQL Adapter
 
 `github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres` owns migrations and the
-`agent_*` persistence model. Inject a `SessionProvider`; the adapter keeps
-transaction context private and implements the complete Core `Store` contract.
+`agent_*` persistence model. Supply a host-owned `*gorm.DB`; the adapter keeps
+transaction context private and implements the complete Kernel `Store` contract.
 
 ```go
 if err := postgres.Migrate(db); err != nil { return err }
-store := postgres.New(db, postgres.StaticSessions(db))
+store := postgres.NewKernelStore(db)
+relations := postgres.NewRunRelationStore(db)
+definitions := postgres.NewWorkflowDefinitionStore(db)
 ```
 
-Run the public Core conformance kit for custom database/session integrations.
+Run migrations explicitly before starting workers. Constructing a store does
+not migrate the schema. Harness persistence has its own
+`harnesspostgres.Migrate(db)` and `harnesspostgres.New(db)` in
+`go/agent-runtime-harness-postgres`.
+
+Run the public Core conformance kit for custom store integrations. Follow the
+[integration and upgrade contract](../../docs/integration-contract.md) when
+pinning modules, coordinating migrations, and recovering an interrupted upgrade.
