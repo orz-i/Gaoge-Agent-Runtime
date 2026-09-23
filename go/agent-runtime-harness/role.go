@@ -8,20 +8,23 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
 
-// RoleSnapshot freezes one environment-authorized local specialist. Host-owned
+// RoleSnapshot freezes one environment-authorized delegation target. Host-owned
 // IDs and revisions are opaque; credentials and mutable catalog lookups are not
-// part of delegation execution.
+// part of delegation execution. MemberID/MemberRevision optionally route the
+// role to an external child runner while keeping one roleID-based model contract.
 type RoleSnapshot struct {
-	ID           string          `json:"id"`
-	Revision     uint64          `json:"revision"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description,omitempty"`
-	Instructions string          `json:"instructions,omitempty"`
-	Model        string          `json:"model,omitempty"`
-	ModelOptions json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys     []string        `json:"toolKeys"`
-	Skills       []SkillSnapshot `json:"skills"`
-	Limits       budget.Limits   `json:"limits"`
+	ID             string          `json:"id"`
+	Revision       uint64          `json:"revision"`
+	Name           string          `json:"name"`
+	Description    string          `json:"description,omitempty"`
+	Instructions   string          `json:"instructions,omitempty"`
+	MemberID       string          `json:"memberID,omitempty"`
+	MemberRevision string          `json:"memberRevision,omitempty"`
+	Model          string          `json:"model,omitempty"`
+	ModelOptions   json.RawMessage `json:"modelOptions,omitempty"`
+	ToolKeys       []string        `json:"toolKeys"`
+	Skills         []SkillSnapshot `json:"skills"`
+	Limits         budget.Limits   `json:"limits"`
 }
 
 func normalizeRoleSnapshots(values []RoleSnapshot, parentTools []string) ([]RoleSnapshot, error) {
@@ -33,8 +36,10 @@ func normalizeRoleSnapshots(values []RoleSnapshot, parentTools []string) ([]Role
 	for index := range result {
 		value := &result[index]
 		value.ID, value.Name = strings.TrimSpace(value.ID), strings.TrimSpace(value.Name)
+		value.MemberID, value.MemberRevision = strings.TrimSpace(value.MemberID), strings.TrimSpace(value.MemberRevision)
 		value.Model = strings.TrimSpace(value.Model)
-		if value.ID == "" || len(value.ID) > 64 || value.Revision == 0 || value.Name == "" || seen[value.ID] || !budget.ValidLimits(value.Limits) {
+		if value.ID == "" || len(value.ID) > 160 || value.Revision == 0 || value.Name == "" || seen[value.ID] ||
+			len(value.MemberID) > 160 || len(value.MemberRevision) > 256 || value.MemberRevision != "" && value.MemberID == "" || !budget.ValidLimits(value.Limits) {
 			return nil, ErrInvalidRequest
 		}
 		seen[value.ID] = true

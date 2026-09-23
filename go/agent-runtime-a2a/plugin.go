@@ -100,6 +100,9 @@ func (plugin *Plugin) resolveChild(ctx context.Context, delegation handoff.Deleg
 	if err != nil {
 		return nil, err
 	}
+	if revision == "" {
+		revision = strings.TrimSpace(delegation.MemberRevision)
+	}
 	binding, err := plugin.bindings.ResolveBinding(ctx, targetID, revision)
 	if err != nil {
 		return nil, errors.Join(ErrBindingMissing, err)

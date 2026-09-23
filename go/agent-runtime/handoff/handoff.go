@@ -61,22 +61,23 @@ const (
 
 // Delegation is a durable parent-owned reference to one stable Child Agent Run.
 type Delegation struct {
-	ID           string          `json:"id"`
-	MemberID     string          `json:"memberID"`
-	RoleID       string          `json:"roleID,omitempty"`
-	RoleRevision uint64          `json:"roleRevision,omitempty"`
-	RoleName     string          `json:"roleName,omitempty"`
-	Instructions string          `json:"instructions,omitempty"`
-	Limits       agent.Limits    `json:"limits,omitempty"`
-	ChildRunID   string          `json:"childRunID"`
-	Goal         string          `json:"goal"`
-	Model        string          `json:"model,omitempty"`
-	ModelOptions json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys     []string        `json:"toolKeys,omitempty"`
-	Status       Status          `json:"status"`
-	Result       json.RawMessage `json:"result,omitempty"`
-	ErrorCode    string          `json:"errorCode,omitempty"`
-	Error        string          `json:"error,omitempty"`
+	ID             string          `json:"id"`
+	MemberID       string          `json:"memberID"`
+	MemberRevision string          `json:"memberRevision,omitempty"`
+	RoleID         string          `json:"roleID,omitempty"`
+	RoleRevision   uint64          `json:"roleRevision,omitempty"`
+	RoleName       string          `json:"roleName,omitempty"`
+	Instructions   string          `json:"instructions,omitempty"`
+	Limits         agent.Limits    `json:"limits,omitempty"`
+	ChildRunID     string          `json:"childRunID"`
+	Goal           string          `json:"goal"`
+	Model          string          `json:"model,omitempty"`
+	ModelOptions   json.RawMessage `json:"modelOptions,omitempty"`
+	ToolKeys       []string        `json:"toolKeys,omitempty"`
+	Status         Status          `json:"status"`
+	Result         json.RawMessage `json:"result,omitempty"`
+	ErrorCode      string          `json:"errorCode,omitempty"`
+	Error          string          `json:"error,omitempty"`
 }
 
 // Join describes a deterministic fan-in contract over stable Delegation IDs.
