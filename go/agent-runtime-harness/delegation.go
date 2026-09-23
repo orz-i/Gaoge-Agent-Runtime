@@ -31,24 +31,25 @@ type DelegationResult struct {
 }
 
 type delegationItemPayload struct {
-	DelegationID string              `json:"delegationID"`
-	MemberID     string              `json:"memberID"`
-	ChildRunID   string              `json:"childRunID"`
-	Goal         string              `json:"goal"`
-	Status       handoff.Status      `json:"status"`
-	Result       json.RawMessage     `json:"result,omitempty"`
-	ParentRunID  string              `json:"parentRunID,omitempty"`
-	RoleID       string              `json:"roleID,omitempty"`
-	RoleRevision uint64              `json:"roleRevision,omitempty"`
-	RoleName     string              `json:"roleName,omitempty"`
-	Execution    *handoff.Delegation `json:"execution,omitempty"`
+	DelegationID   string              `json:"delegationID"`
+	MemberID       string              `json:"memberID"`
+	MemberRevision string              `json:"memberRevision,omitempty"`
+	ChildRunID     string              `json:"childRunID"`
+	Goal           string              `json:"goal"`
+	Status         handoff.Status      `json:"status"`
+	Result         json.RawMessage     `json:"result,omitempty"`
+	ParentRunID    string              `json:"parentRunID,omitempty"`
+	RoleID         string              `json:"roleID,omitempty"`
+	RoleRevision   uint64              `json:"roleRevision,omitempty"`
+	RoleName       string              `json:"roleName,omitempty"`
+	Execution      *handoff.Delegation `json:"execution,omitempty"`
 }
 
 func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) {
 	request.MemberID = strings.TrimSpace(request.MemberID)
 	request.RoleID = strings.TrimSpace(request.RoleID)
 	request.Goal = strings.TrimSpace(request.Goal)
-	if (request.MemberID == "" && request.RoleID == "") || request.Goal == "" || len(request.MemberID) > 64 || len(request.RoleID) > 64 || len(request.Goal) > 200_000 {
+	if (request.MemberID == "" && request.RoleID == "") || request.Goal == "" || len(request.MemberID) > 160 || len(request.RoleID) > 160 || len(request.Goal) > 200_000 {
 		return DelegateRequest{}, ErrInvalidRequest
 	}
 	return request, nil
@@ -111,6 +112,9 @@ func (runner *Runner) prepareDelegation(
 	if err != nil {
 		return handoff.Delegation{}, kernel.Snapshot{}, err
 	}
+	if err = runner.enforceDelegationDepth(ctx, config, invocation); err != nil {
+		return handoff.Delegation{}, kernel.Snapshot{}, err
+	}
 	parent, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err != nil || terminalRuntimeStatus(parent.Run.Status) {
 		return handoff.Delegation{}, kernel.Snapshot{}, errors.Join(ErrConflict, err)
@@ -136,7 +140,8 @@ func (runner *Runner) prepareDelegation(
 	if !found {
 		return handoff.Delegation{}, parent, toolsRoleUnavailable()
 	}
-	delegation.MemberID = role.ID
+	delegation.MemberID = firstNonEmpty(role.MemberID, role.ID)
+	delegation.MemberRevision = role.MemberRevision
 	delegation.RoleID, delegation.RoleRevision, delegation.RoleName = role.ID, role.Revision, role.Name
 	if view, viewErr := agent.ViewState(parent); viewErr == nil {
 		delegation.Model = firstNonEmpty(role.Model, view.Model)
@@ -246,7 +251,7 @@ func (runner *Runner) recordDelegationItem(
 	parentItemID string,
 ) (string, error) {
 	payload, err := json.Marshal(delegationItemPayload{
-		DelegationID: delegation.ID, MemberID: delegation.MemberID, ChildRunID: delegation.ChildRunID,
+		DelegationID: delegation.ID, MemberID: delegation.MemberID, MemberRevision: delegation.MemberRevision, ChildRunID: delegation.ChildRunID,
 		Goal: delegation.Goal, Status: delegation.Status, Result: append(json.RawMessage(nil), delegation.Result...),
 		ParentRunID: invocation.ExecutionRefID, RoleID: delegation.RoleID, RoleRevision: delegation.RoleRevision, RoleName: delegation.RoleName,
 		Execution: frozenDelegationExecution(delegation),

@@ -104,44 +104,53 @@ type SkillSnapshot struct {
 	ContentHash string `json:"contentHash"`
 }
 
+// DelegationPolicySnapshot freezes the delegation boundary for one Harness Turn.
+// MaxDepth counts delegation edges below the root Agent. Zero preserves the
+// SDK's historical unbounded behavior for products that do not opt into a cap.
+type DelegationPolicySnapshot struct {
+	MaxDepth int `json:"maxDepth,omitempty"`
+}
+
 // ConfigSnapshot is one immutable execution configuration. It intentionally excludes secrets and transport endpoints.
 type ConfigSnapshot struct {
-	ID                    string                `json:"id"`
-	TurnID                string                `json:"turnID"`
-	Environment           VersionRef            `json:"environment"`
-	Instructions          string                `json:"instructions,omitempty"`
-	Model                 string                `json:"model,omitempty"`
-	ModelOptions          json.RawMessage       `json:"modelOptions,omitempty"`
-	ToolKeys              []string              `json:"toolKeys"`
-	ToolPolicies          []ToolPolicySnapshot  `json:"toolPolicies"`
-	Commands              []CommandDescriptor   `json:"commands"`
-	Skills                []SkillSnapshot       `json:"skills"`
-	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
-	ContextPolicy         runtimecontext.Policy `json:"contextPolicy"`
-	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
-	Limits                agent.Limits          `json:"limits"`
-	SharedBudget          *budget.Limits        `json:"sharedBudget,omitempty"`
-	Roles                 []RoleSnapshot        `json:"roles,omitempty"`
-	ContentHash           string                `json:"contentHash"`
-	CreatedAt             time.Time             `json:"createdAt"`
+	ID                    string                   `json:"id"`
+	TurnID                string                   `json:"turnID"`
+	Environment           VersionRef               `json:"environment"`
+	Instructions          string                   `json:"instructions,omitempty"`
+	Model                 string                   `json:"model,omitempty"`
+	ModelOptions          json.RawMessage          `json:"modelOptions,omitempty"`
+	ToolKeys              []string                 `json:"toolKeys"`
+	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
+	Commands              []CommandDescriptor      `json:"commands"`
+	Skills                []SkillSnapshot          `json:"skills"`
+	MemoryPolicy          string                   `json:"memoryPolicy,omitempty"`
+	ContextPolicy         runtimecontext.Policy    `json:"contextPolicy"`
+	ApprovalPolicyVersion uint64                   `json:"approvalPolicyVersion"`
+	Limits                agent.Limits             `json:"limits"`
+	SharedBudget          *budget.Limits           `json:"sharedBudget,omitempty"`
+	DelegationPolicy      DelegationPolicySnapshot `json:"delegationPolicy,omitempty"`
+	Roles                 []RoleSnapshot           `json:"roles,omitempty"`
+	ContentHash           string                   `json:"contentHash"`
+	CreatedAt             time.Time                `json:"createdAt"`
 }
 
 type configPayload struct {
-	TurnID                string                `json:"turnID"`
-	Environment           VersionRef            `json:"environment"`
-	Instructions          string                `json:"instructions,omitempty"`
-	Model                 string                `json:"model,omitempty"`
-	ModelOptions          json.RawMessage       `json:"modelOptions,omitempty"`
-	ToolKeys              []string              `json:"toolKeys"`
-	ToolPolicies          []ToolPolicySnapshot  `json:"toolPolicies"`
-	Commands              []CommandDescriptor   `json:"commands"`
-	Skills                []SkillSnapshot       `json:"skills"`
-	MemoryPolicy          string                `json:"memoryPolicy,omitempty"`
-	ContextPolicy         runtimecontext.Policy `json:"contextPolicy"`
-	ApprovalPolicyVersion uint64                `json:"approvalPolicyVersion"`
-	Limits                agent.Limits          `json:"limits"`
-	SharedBudget          *budget.Limits        `json:"sharedBudget,omitempty"`
-	Roles                 []RoleSnapshot        `json:"roles,omitempty"`
+	TurnID                string                   `json:"turnID"`
+	Environment           VersionRef               `json:"environment"`
+	Instructions          string                   `json:"instructions,omitempty"`
+	Model                 string                   `json:"model,omitempty"`
+	ModelOptions          json.RawMessage          `json:"modelOptions,omitempty"`
+	ToolKeys              []string                 `json:"toolKeys"`
+	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
+	Commands              []CommandDescriptor      `json:"commands"`
+	Skills                []SkillSnapshot          `json:"skills"`
+	MemoryPolicy          string                   `json:"memoryPolicy,omitempty"`
+	ContextPolicy         runtimecontext.Policy    `json:"contextPolicy"`
+	ApprovalPolicyVersion uint64                   `json:"approvalPolicyVersion"`
+	Limits                agent.Limits             `json:"limits"`
+	SharedBudget          *budget.Limits           `json:"sharedBudget,omitempty"`
+	DelegationPolicy      DelegationPolicySnapshot `json:"delegationPolicy,omitempty"`
+	Roles                 []RoleSnapshot           `json:"roles,omitempty"`
 }
 
 // SealConfigSnapshot normalizes, hashes and seals one immutable configuration for a Harness Turn.
@@ -181,6 +190,9 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if value.SharedBudget != nil && !budget.ValidLimits(*value.SharedBudget) {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
+	if value.DelegationPolicy.MaxDepth < 0 || value.DelegationPolicy.MaxDepth > 32 {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
 	value.Roles, err = normalizeRoleSnapshots(value.Roles, value.ToolKeys)
 	if err != nil {
 		return ConfigSnapshot{}, err
@@ -190,7 +202,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		Model: value.Model, ModelOptions: value.ModelOptions, ToolKeys: value.ToolKeys,
 		ToolPolicies: value.ToolPolicies, Commands: value.Commands, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
-		SharedBudget: value.SharedBudget, Roles: value.Roles,
+		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy, Roles: value.Roles,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {

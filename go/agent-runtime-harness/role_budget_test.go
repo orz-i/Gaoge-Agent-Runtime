@@ -78,12 +78,13 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	}
 	request := testStartRequest()
 	request.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 8, MaxToolCalls: 16, MaxTotalTokens: 5000, MaxChildRuns: 3, MaxConcurrentRuns: 1}
+	request.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
 	request.Config.ToolKeys = []string{harness.DelegationToolKey, roleEvidenceTool}
 	request.Config.ToolPolicies = []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot(), {
 		Key: roleEvidenceTool, DefinitionVersion: "v1", ApprovalCapability: "per_call", ApprovalMode: "always",
 	}}
 	request.Config.Roles = []harness.RoleSnapshot{{ID: "researcher", Revision: 3, Name: "Researcher", Model: "specialist-model", Instructions: "Use frozen evidence.",
-		ToolKeys: []string{roleEvidenceTool}, Limits: budget.Limits{MaxLLMCalls: 2},
+		ToolKeys: []string{harness.DelegationToolKey, roleEvidenceTool}, Limits: budget.Limits{MaxLLMCalls: 2},
 		Skills: []harness.SkillSnapshot{{ID: "skill-1", Revision: 2, Title: "Evidence", Markdown: "Quote the evidence."}},
 	}}
 	started, err := runner.Start(t.Context(), request)
@@ -96,6 +97,9 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	task := started.Subtasks[0]
 	if task.Model != "specialist-model" || task.RoleRevision != 3 || task.Status != "waiting_input" {
 		t.Fatalf("role=%+v", task)
+	}
+	if _, nestedErr := runner.DelegateByExecutionRefID(t.Context(), task.RunID, harness.DelegateRequest{RoleID: "researcher", Goal: "Nested analysis"}); !errors.Is(nestedErr, harness.ErrInvalidRequest) {
+		t.Fatalf("nested delegation bypassed depth policy: %v", nestedErr)
 	}
 	if started.Budget == nil || started.Budget.ActiveRuns != 0 || started.Budget.Usage.ChildRuns != 1 {
 		t.Fatalf("budget=%+v", started.Budget)

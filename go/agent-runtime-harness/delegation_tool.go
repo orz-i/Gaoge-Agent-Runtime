@@ -162,7 +162,7 @@ func DelegationToolRegistration(handler *DelegationToolHandler) tools.Registrati
 			Key:         DelegationToolKey,
 			Name:        "delegate_to_specialist_agent",
 			Description: "Delegate one focused subtask to an environment-authorized specialist role.",
-			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["goal"],"anyOf":[{"required":["roleID"]},{"required":["memberID"]}],"properties":{"roleID":{"type":"string","minLength":1,"maxLength":64},"memberID":{"type":"string","minLength":1,"maxLength":64},"goal":{"type":"string","minLength":1,"maxLength":200000}}}`),
+			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["goal"],"anyOf":[{"required":["roleID"]},{"required":["memberID"]}],"properties":{"roleID":{"type":"string","minLength":1,"maxLength":160},"memberID":{"type":"string","minLength":1,"maxLength":160},"goal":{"type":"string","minLength":1,"maxLength":200000}}}`),
 		},
 		Handler: handler,
 	}

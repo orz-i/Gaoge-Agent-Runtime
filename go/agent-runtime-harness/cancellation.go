@@ -67,7 +67,7 @@ func (runner *Runner) syncTerminalDelegations(ctx context.Context, turn Turn, ru
 			return loadErr
 		}
 		delegation := handoff.Delegation{
-			ID: payload.DelegationID, MemberID: payload.MemberID, ChildRunID: payload.ChildRunID,
+			ID: payload.DelegationID, MemberID: payload.MemberID, MemberRevision: payload.MemberRevision, ChildRunID: payload.ChildRunID,
 			Goal: payload.Goal, Status: handoff.Status(snapshot.Run.Status),
 		}
 		if payload.Execution != nil {

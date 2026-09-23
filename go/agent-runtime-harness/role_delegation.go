@@ -159,6 +159,10 @@ func (middleware roleModelMiddleware) Model(ctx context.Context, request model.R
 	if config.Roles == nil && config.SharedBudget == nil {
 		return next(ctx, request, emit)
 	}
+	allowed, err := delegationAllowed(ctx, middleware.store, config.DelegationPolicy, invocation)
+	if err != nil {
+		return model.Response{}, err
+	}
 	request = model.CloneRequest(request)
 	ids, descriptions := []string{}, []string{}
 	for _, role := range config.Roles {
@@ -168,7 +172,7 @@ func (middleware roleModelMiddleware) Model(ctx context.Context, request model.R
 	definitions := request.Tools[:0]
 	for _, definition := range request.Tools {
 		if definition.Key == DelegationToolKey {
-			if len(ids) == 0 {
+			if len(ids) == 0 || !allowed {
 				continue
 			}
 			definition.Description = "Delegate a focused subtask using one available role. Available roles:\n" + strings.Join(descriptions, "\n")
