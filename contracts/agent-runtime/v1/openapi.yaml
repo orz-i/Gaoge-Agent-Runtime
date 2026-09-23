@@ -365,6 +365,29 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
         default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/subtasks:
+    post:
+      operationId: createHarnessSubtask
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [roleID, goal]
+              properties:
+                roleID: {type: string, minLength: 1, maxLength: 160}
+                goal: {type: string, minLength: 1, maxLength: 200000}
+      responses:
+        '200':
+          description: Updated durable Turn with the manually spawned subtask
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
+        default: {$ref: '#/components/responses/Error'}
   /harness/turns/{turnID}/subtasks/{subtaskID}/cancel:
     post:
       operationId: cancelHarnessSubtask
@@ -862,6 +885,7 @@ components:
           type: array
           items: {$ref: '#/components/schemas/HarnessItem'}
         budget: {$ref: '#/components/schemas/HarnessBudget'}
+        delegation: {$ref: '#/components/schemas/HarnessDelegation'}
         subtasks:
           type: array
           items: {$ref: '#/components/schemas/HarnessSubtask'}
@@ -911,12 +935,32 @@ components:
         waitingRuns: {type: integer, minimum: 0}
         unknownUsage: {type: boolean}
         cancelled: {type: boolean}
+    HarnessDelegationRole:
+      type: object
+      additionalProperties: false
+      required: [id, revision, name]
+      properties:
+        id: {type: string}
+        revision: {type: integer, minimum: 1}
+        name: {type: string}
+        description: {type: string}
+    HarnessDelegation:
+      type: object
+      additionalProperties: false
+      required: [canSpawn, roles]
+      properties:
+        canSpawn: {type: boolean}
+        maxDepth: {type: integer, minimum: 0}
+        roles:
+          type: array
+          items: {$ref: '#/components/schemas/HarnessDelegationRole'}
     HarnessSubtask:
       type: object
       additionalProperties: false
       required: [id, kind, goal, status, usageKnown]
       properties:
         id: {type: string}
+        runID: {type: string}
         parentID: {type: string}
         kind: {type: string}
         roleID: {type: string}

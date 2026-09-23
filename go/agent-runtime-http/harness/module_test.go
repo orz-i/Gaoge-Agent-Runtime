@@ -129,6 +129,40 @@ func TestSnapshotResponseProjectsInvocationWithoutRuntimeExecutionIdentity(t *te
 	}
 }
 
+func TestSnapshotResponseProjectsManualDelegationMetadataAndChildRun(t *testing.T) {
+	now := time.Date(2026, time.September, 23, 12, 0, 0, 0, time.UTC)
+	snapshot := harness.Snapshot{
+		Turn: harness.Turn{
+			ID: testHarnessTurnID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "client-1"},
+			Status: harness.TurnRunning, Revision: 2, CreatedAt: now, UpdatedAt: now,
+		},
+		Config: harness.ConfigSnapshot{
+			DelegationPolicy: harness.DelegationPolicySnapshot{MaxDepth: 1},
+			Roles: []harness.RoleSnapshot{{
+				ID: "researcher", Revision: 3, Name: "Researcher", Description: "Inspect evidence",
+				Instructions: "private instructions", MemberID: "a2a:private", MemberRevision: "private-revision",
+			}},
+		},
+		Subtasks: []harness.Subtask{{ID: "delegation-1", RunID: "child-run-1", Kind: "delegation", Goal: "Inspect", Status: "running"}},
+	}
+	response, err := snapshotResponse(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Delegation == nil || !response.Delegation.CanSpawn || response.Delegation.MaxDepth != 1 ||
+		len(response.Delegation.Roles) != 1 || response.Delegation.Roles[0].ID != "researcher" ||
+		len(response.Subtasks) != 1 || response.Subtasks[0].RunID != "child-run-1" {
+		t.Fatalf("manual delegation projection = %#v", response)
+	}
+	raw, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "private instructions") || strings.Contains(string(raw), "private-revision") || strings.Contains(string(raw), "a2a:private") {
+		t.Fatalf("private delegation execution policy leaked: %s", raw)
+	}
+}
+
 func TestSnapshotContainsRetryableChildInvocationAllowsOnlyChildRetry(t *testing.T) {
 	snapshot := harness.Snapshot{Invocations: []harness.Invocation{
 		{ID: "hiv-root", TurnID: testHarnessTurnID},

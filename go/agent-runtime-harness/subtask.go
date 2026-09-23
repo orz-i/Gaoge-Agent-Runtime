@@ -18,7 +18,7 @@ import (
 // delegation identity. It is delivered with the Turn, not a separate Run feed.
 type Subtask struct {
 	ID            string             `json:"id"`
-	RunID         string             `json:"-"`
+	RunID         string             `json:"runID,omitempty"`
 	ParentRunID   string             `json:"-"`
 	ParentID      string             `json:"parentID,omitempty"`
 	Kind          string             `json:"kind"`

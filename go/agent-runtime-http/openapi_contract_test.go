@@ -52,6 +52,7 @@ func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 		"post /harness/turns/{turnID}/approval",
 		"post /harness/turns/{turnID}/interactions/{interactionID}",
 		"post /harness/turns/{turnID}/invocations/{invocationID}/retry",
+		"post /harness/turns/{turnID}/subtasks",
 		"post /harness/turns/{turnID}/subtasks/{subtaskID}/approval",
 		"post /harness/turns/{turnID}/subtasks/{subtaskID}/cancel",
 		"post /plan-runs",
