@@ -33,6 +33,11 @@
     },
     {
       "method": "post",
+      "path": "/harness/turns/{turnID}/subtasks",
+      "operationId": "createHarnessSubtask"
+    },
+    {
+      "method": "post",
       "path": "/harness/turns/{turnID}/subtasks/{subtaskID}/cancel",
       "operationId": "cancelHarnessSubtask"
     },

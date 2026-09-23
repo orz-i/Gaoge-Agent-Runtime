@@ -9,6 +9,33 @@ import (
 	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
 )
 
+func (handler *Handler) CreateSubtask(ctx *gin.Context) {
+	snapshot, ok := handler.authorizedTurn(ctx)
+	if !ok {
+		return
+	}
+	if snapshot.Turn.Status != harness.TurnRunning && snapshot.Turn.Status != harness.TurnWaitingInput {
+		writeHarnessError(ctx, harness.ErrConflict)
+		return
+	}
+	var request struct {
+		RoleID string `json:"roleID" binding:"required,min=1,max=160"`
+		Goal   string `json:"goal" binding:"required,min=1,max=200000"`
+	}
+	if ctx.ShouldBindJSON(&request) != nil {
+		runtimehttp.WriteError(ctx, http.StatusBadRequest, "harness.subtask_invalid_request", "invalid subtask request")
+		return
+	}
+	result, err := handler.runner.Delegate(ctx.Request.Context(), snapshot.Turn.ID, harness.DelegateRequest{
+		RoleID: strings.TrimSpace(request.RoleID), Goal: strings.TrimSpace(request.Goal),
+	})
+	if err != nil {
+		writeHarnessError(ctx, err)
+		return
+	}
+	handler.writeSubtaskSnapshot(ctx, result.Snapshot, nil)
+}
+
 func (handler *Handler) CancelSubtask(ctx *gin.Context) {
 	snapshot, ok := handler.authorizedTurn(ctx)
 	if !ok {

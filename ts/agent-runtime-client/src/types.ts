@@ -99,6 +99,19 @@ export type HarnessTurnDTO = {
   updatedAt: string;
 };
 
+export type HarnessDelegationRoleDTO = {
+  id: string;
+  revision: number;
+  name: string;
+  description?: string;
+};
+
+export type HarnessDelegationDTO = {
+  canSpawn: boolean;
+  maxDepth?: number;
+  roles: HarnessDelegationRoleDTO[];
+};
+
 export type HarnessTurnSnapshotDTO = {
   turn: HarnessTurnDTO;
   invocations: HarnessCapabilityInvocationDTO[];
@@ -106,6 +119,7 @@ export type HarnessTurnSnapshotDTO = {
   items: HarnessItemDTO[];
   output?: ResultDTO | null;
   budget?: HarnessBudgetDTO;
+  delegation?: HarnessDelegationDTO;
   subtasks?: HarnessSubtaskDTO[];
 };
 
@@ -152,6 +166,7 @@ export type HarnessBudgetDTO = {
 
 export type HarnessSubtaskDTO = {
   id: string;
+  runID?: string;
   parentID?: string;
   kind: string;
   roleID?: string;
