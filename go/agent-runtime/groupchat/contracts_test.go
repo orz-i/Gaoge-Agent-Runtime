@@ -66,10 +66,24 @@ func TestValidateStartRequestRejectsUnknownOrDuplicateSpeaker(t *testing.T) {
 	}
 }
 
-func TestValidateStartRequestDoesNotExposeFutureSpeakerPolicies(t *testing.T) {
+func TestValidateStartRequestAcceptsSelectorCandidates(t *testing.T) {
 	request := validRequest()
-	request.SpeakerPolicy = groupchat.SpeakerPolicy("selector")
+	request.SpeakerPolicy = groupchat.SpeakerSelector
+	request.DirectedSpeakerIDs = nil
+	request.CandidateSpeakerIDs = []string{"researcher", "reviewer"}
+	request.SelectorModel = "selector-model"
+	request.MaxUtterances = 4
+	if err := groupchat.ValidateStartRequest(request); err != nil {
+		t.Fatalf("validate selector group chat: %v", err)
+	}
+}
+
+func TestValidateStartRequestRejectsAmbiguousSelectorContract(t *testing.T) {
+	request := validRequest()
+	request.SpeakerPolicy = groupchat.SpeakerSelector
+	request.CandidateSpeakerIDs = []string{"researcher", "reviewer"}
+	request.SelectorModel = "selector-model"
 	if err := groupchat.ValidateStartRequest(request); !errors.Is(err, groupchat.ErrInvalidRequest) {
-		t.Fatalf("selector must remain unavailable in P0, got %v", err)
+		t.Fatalf("selector with directed speakers must be invalid, got %v", err)
 	}
 }

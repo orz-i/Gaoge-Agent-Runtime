@@ -3,6 +3,7 @@ package groupchat_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -70,6 +71,184 @@ func TestDirectedGroupChatExecutesVisibleSpeakersInOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectorGroupChatChoosesBoundedSpeakersAndCompletes(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{
+		Store: memory.NewStore(), Clock: groupChatClock{}, IDs: &groupChatIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegator := &recordingDelegator{}
+	selector := &recordingSelector{responses: []groupchat.SelectorResponse{
+		{SpeakerID: "participant-researcher", ResponseID: "selector-1"},
+		{SpeakerID: "participant-reviewer", ResponseID: "selector-2"},
+		{Complete: true, ResponseID: "selector-3"},
+	}}
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: delegator, Selector: selector,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), selectorRequest())
+	if err != nil {
+		t.Fatalf("start selector group chat: %v", err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("status = %q", snapshot.Run.Status)
+	}
+	if len(selector.requests) != 3 {
+		t.Fatalf("selector requests = %#v", selector.requests)
+	}
+	if got := selectorCandidateIDs(selector.requests[1]); len(got) != 1 || got[0] != "participant-reviewer" {
+		t.Fatalf("second selector candidates = %#v", got)
+	}
+	if !selector.requests[2].CanComplete || len(selector.requests[2].History) != 2 {
+		t.Fatalf("final selector request = %#v", selector.requests[2])
+	}
+	var result groupchat.Result
+	if err = json.Unmarshal(snapshot.Result.Content, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Utterances) != 2 ||
+		result.Utterances[0].SpeakerID != "participant-researcher" ||
+		result.Utterances[1].SpeakerID != "participant-reviewer" {
+		t.Fatalf("selector result = %#v", result)
+	}
+	view, err := groupchat.ViewState(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.SpeakerPolicy != groupchat.SpeakerSelector ||
+		view.TerminationReason != groupchat.TerminationSelectorCompleted ||
+		view.SelectorInvocation == nil ||
+		view.SelectorInvocation.Status != groupchat.SelectorInvocationConsumed {
+		t.Fatalf("selector view = %#v", view)
+	}
+}
+
+func TestSelectorGroupChatStopsAtHardUtteranceLimit(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{
+		Store: memory.NewStore(), Clock: groupChatClock{}, IDs: &groupChatIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := &recordingSelector{responses: []groupchat.SelectorResponse{
+		{SpeakerID: "participant-researcher"},
+		{SpeakerID: "participant-reviewer"},
+		{SpeakerID: "participant-researcher"},
+	}}
+	request := selectorRequest()
+	request.MaxUtterances = 2
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: &recordingDelegator{}, Selector: selector,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := groupchat.ViewState(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.TerminationReason != groupchat.TerminationMaxUtterances || len(view.SpeakerTurns) != 2 ||
+		len(selector.requests) != 2 {
+		t.Fatalf("limited selector view=%#v requests=%d", view, len(selector.requests))
+	}
+}
+
+func TestSelectorRetryReusesDurableInvocationIdentity(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{
+		Store: memory.NewStore(), Clock: groupChatClock{}, IDs: &groupChatIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := &recordingSelector{
+		failures: []error{retryableSelectorError{}},
+		responses: []groupchat.SelectorResponse{
+			{SpeakerID: "participant-researcher"},
+			{Complete: true},
+		},
+	}
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: &recordingDelegator{}, Selector: selector,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), selectorRequest())
+	if !errors.Is(err, groupchat.ErrSelectorPending) {
+		t.Fatalf("expected selector pending, got %v", err)
+	}
+	if len(selector.requests) != 1 {
+		t.Fatalf("selector requests = %d", len(selector.requests))
+	}
+	firstInvocationID := selector.requests[0].InvocationID
+	snapshot, err = runner.Resume(t.Context(), snapshot.Run.ID, snapshot.Run.Revision)
+	if err != nil {
+		t.Fatalf("resume selector: %v", err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted || len(selector.requests) != 3 {
+		t.Fatalf("resumed selector status=%q requests=%d", snapshot.Run.Status, len(selector.requests))
+	}
+	if selector.requests[1].InvocationID != firstInvocationID {
+		t.Fatalf("selector invocation changed across retry: %q != %q", selector.requests[1].InvocationID, firstInvocationID)
+	}
+}
+
+func selectorRequest() groupchat.StartRequest {
+	request := directedRequest()
+	request.ID = "groupchat-selector-1"
+	request.SpeakerPolicy = groupchat.SpeakerSelector
+	request.DirectedSpeakerIDs = nil
+	request.CandidateSpeakerIDs = []string{"participant-researcher", "participant-reviewer"}
+	request.SelectorModel = "selector-model"
+	request.MaxUtterances = 4
+	return request
+}
+
+func selectorCandidateIDs(request groupchat.SelectorRequest) []string {
+	result := make([]string, 0, len(request.Candidates))
+	for _, candidate := range request.Candidates {
+		result = append(result, candidate.ID)
+	}
+	return result
+}
+
+type recordingSelector struct {
+	requests  []groupchat.SelectorRequest
+	responses []groupchat.SelectorResponse
+	failures  []error
+}
+
+func (selector *recordingSelector) Select(
+	_ context.Context,
+	request groupchat.SelectorRequest,
+) (groupchat.SelectorResponse, error) {
+	selector.requests = append(selector.requests, request)
+	if len(selector.failures) > 0 {
+		err := selector.failures[0]
+		selector.failures = selector.failures[1:]
+		return groupchat.SelectorResponse{}, err
+	}
+	if len(selector.responses) == 0 {
+		return groupchat.SelectorResponse{}, fmt.Errorf("no selector response")
+	}
+	response := selector.responses[0]
+	selector.responses = selector.responses[1:]
+	return response, nil
+}
+
+type retryableSelectorError struct{}
+
+func (retryableSelectorError) Error() string   { return "selector temporarily unavailable" }
+func (retryableSelectorError) Retryable() bool { return true }
 
 func directedRequest() groupchat.StartRequest {
 	return groupchat.StartRequest{

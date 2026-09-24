@@ -46,6 +46,7 @@ type GroupChatSpeakerSelection struct {
 // GroupChatTurnRequest starts directed Group Chat as the top-level capability.
 type GroupChatTurnRequest struct {
 	StartRequest
+	SpeakerPolicy groupchat.SpeakerPolicy
 	Participants  []groupchat.Participant
 	Speakers      []GroupChatSpeakerSelection
 	MaxUtterances int
@@ -91,13 +92,17 @@ type teamInvocationInput struct {
 }
 
 type groupChatInvocationInput struct {
-	Goal               string                    `json:"goal"`
-	Actor              kernel.ActorRef           `json:"actor"`
-	Thread             kernel.ThreadRef          `json:"thread"`
-	Participants       []groupchat.Participant   `json:"participants"`
-	SpeakerConfigs     []groupchat.SpeakerConfig `json:"speakerConfigs"`
-	DirectedSpeakerIDs []string                  `json:"directedSpeakerIDs"`
-	MaxUtterances      int                       `json:"maxUtterances"`
+	Goal                 string                    `json:"goal"`
+	Actor                kernel.ActorRef           `json:"actor"`
+	Thread               kernel.ThreadRef          `json:"thread"`
+	SpeakerPolicy        groupchat.SpeakerPolicy   `json:"speakerPolicy"`
+	Participants         []groupchat.Participant   `json:"participants"`
+	SpeakerConfigs       []groupchat.SpeakerConfig `json:"speakerConfigs"`
+	DirectedSpeakerIDs   []string                  `json:"directedSpeakerIDs,omitempty"`
+	CandidateSpeakerIDs  []string                  `json:"candidateSpeakerIDs,omitempty"`
+	SelectorModel        string                    `json:"selectorModel,omitempty"`
+	SelectorModelOptions json.RawMessage           `json:"selectorModelOptions,omitempty"`
+	MaxUtterances        int                       `json:"maxUtterances"`
 }
 
 type planExecuteInvocationInput struct {
@@ -149,26 +154,25 @@ func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
 
-// StartGroupChatTurn starts directed Group Chat without creating a placeholder Agent root.
+// StartGroupChatTurn starts Group Chat without creating a placeholder Agent root.
 func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatTurnRequest) (Snapshot, error) {
 	if runner == nil || runner.groupChats == nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	speakerConfigs, directedSpeakerIDs, err := materializeGroupChatSpeakerConfigs(request.Config, request.Speakers)
+	speakerConfigs, speakerIDs, err := materializeGroupChatSpeakerConfigs(request.Config, request.Speakers)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	input, inputHash, err := marshalInvocationValue(groupChatInvocationInput{
-		Goal: strings.TrimSpace(request.Goal), Actor: request.Actor, Thread: request.Thread,
-		Participants:       append([]groupchat.Participant(nil), request.Participants...),
-		SpeakerConfigs:     speakerConfigs,
-		DirectedSpeakerIDs: directedSpeakerIDs, MaxUtterances: request.MaxUtterances,
-	})
+	runtimeRequest, input, err := materializeGroupChatPolicy(request, speakerConfigs, speakerIDs)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	encodedInput, inputHash, err := marshalInvocationValue(input)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityGroupChat, RuntimeCapabilityVersion, ExecutionGroupChat, input, inputHash,
+		ctx, request.StartRequest, CapabilityGroupChat, RuntimeCapabilityVersion, ExecutionGroupChat, encodedInput, inputHash,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -178,15 +182,47 @@ func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatT
 			return snapshot, replayErr
 		}
 	}
-	runtimeSnapshot, startErr := runner.groupChats.StartRun(prepared.runContext, groupchat.StartRequest{
-		ID: prepared.invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
-		SpeakerPolicy:      groupchat.SpeakerDirected,
-		Participants:       append([]groupchat.Participant(nil), request.Participants...),
-		SpeakerConfigs:     speakerConfigs,
-		DirectedSpeakerIDs: directedSpeakerIDs, MaxUtterances: request.MaxUtterances,
-	})
+	runtimeRequest.ID = prepared.invocation.ExecutionRefID
+	runtimeRequest.RequestID = firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID)
+	runtimeSnapshot, startErr := runner.groupChats.StartRun(prepared.runContext, runtimeRequest)
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+}
+
+func materializeGroupChatPolicy(
+	request GroupChatTurnRequest,
+	speakerConfigs []groupchat.SpeakerConfig,
+	speakerIDs []string,
+) (groupchat.StartRequest, groupChatInvocationInput, error) {
+	runtimeRequest := groupchat.StartRequest{
+		Actor: request.Actor, Thread: request.Thread, Goal: request.Goal,
+		SpeakerPolicy:  request.SpeakerPolicy,
+		Participants:   append([]groupchat.Participant(nil), request.Participants...),
+		SpeakerConfigs: speakerConfigs, MaxUtterances: request.MaxUtterances,
+	}
+	input := groupChatInvocationInput{
+		Goal: strings.TrimSpace(request.Goal), Actor: request.Actor, Thread: request.Thread,
+		SpeakerPolicy:  request.SpeakerPolicy,
+		Participants:   append([]groupchat.Participant(nil), request.Participants...),
+		SpeakerConfigs: speakerConfigs, MaxUtterances: request.MaxUtterances,
+	}
+	switch request.SpeakerPolicy {
+	case groupchat.SpeakerDirected:
+		runtimeRequest.DirectedSpeakerIDs = append([]string(nil), speakerIDs...)
+		input.DirectedSpeakerIDs = append([]string(nil), speakerIDs...)
+	case groupchat.SpeakerSelector:
+		if strings.TrimSpace(request.Config.Model) == "" {
+			return groupchat.StartRequest{}, groupChatInvocationInput{}, ErrInvalidRequest
+		}
+		runtimeRequest.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
+		runtimeRequest.SelectorModel = strings.TrimSpace(request.Config.Model)
+		runtimeRequest.SelectorModelOptions = append(json.RawMessage(nil), request.Config.ModelOptions...)
+		input.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
+		input.SelectorModel = runtimeRequest.SelectorModel
+		input.SelectorModelOptions = append(json.RawMessage(nil), runtimeRequest.SelectorModelOptions...)
+	default:
+		return groupchat.StartRequest{}, groupChatInvocationInput{}, ErrInvalidRequest
+	}
+	return runtimeRequest, input, nil
 }
 
 func materializeGroupChatSpeakerConfigs(
@@ -895,10 +931,14 @@ func (runner *Runner) startRetriedGroupChat(ctx context.Context, invocation Invo
 	}
 	return runner.groupChats.StartRun(ctx, groupchat.StartRequest{
 		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal,
-		SpeakerPolicy:      groupchat.SpeakerDirected,
-		Participants:       append([]groupchat.Participant(nil), input.Participants...),
-		SpeakerConfigs:     append([]groupchat.SpeakerConfig(nil), input.SpeakerConfigs...),
-		DirectedSpeakerIDs: append([]string(nil), input.DirectedSpeakerIDs...), MaxUtterances: input.MaxUtterances,
+		SpeakerPolicy:        input.SpeakerPolicy,
+		Participants:         append([]groupchat.Participant(nil), input.Participants...),
+		SpeakerConfigs:       append([]groupchat.SpeakerConfig(nil), input.SpeakerConfigs...),
+		DirectedSpeakerIDs:   append([]string(nil), input.DirectedSpeakerIDs...),
+		CandidateSpeakerIDs:  append([]string(nil), input.CandidateSpeakerIDs...),
+		SelectorModel:        input.SelectorModel,
+		SelectorModelOptions: append(json.RawMessage(nil), input.SelectorModelOptions...),
+		MaxUtterances:        input.MaxUtterances,
 	})
 }
 
@@ -1107,7 +1147,8 @@ func expectedFeaturePendingError(executionClass ExecutionClass, err error) bool 
 	case ExecutionTeam:
 		return errors.Is(err, team.ErrMemberPending)
 	case ExecutionGroupChat:
-		return errors.Is(err, groupchat.ErrSpeakerPending)
+		return errors.Is(err, groupchat.ErrSpeakerPending) || errors.Is(err, groupchat.ErrSelectorPending) ||
+			errors.Is(err, groupchat.ErrSelectorInvocationBusy)
 	case ExecutionPlanExecute:
 		return errors.Is(err, planexecute.ErrApprovalRequired) || errors.Is(err, planexecute.ErrStepPending) || errors.Is(err, planexecute.ErrPlannerPending)
 	case ExecutionWorkflow:

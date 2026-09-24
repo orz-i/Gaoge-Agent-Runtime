@@ -19,19 +19,23 @@ const (
 )
 
 var (
-	ErrInvalidRequest    = errors.New("invalid groupchat request")
-	ErrSpeakerPending    = errors.New("groupchat speaker run is not terminal")
-	ErrGroupChatFailed   = errors.New("groupchat execution failed")
-	ErrGroupChatTerminal = errors.New("groupchat run is terminal")
+	ErrInvalidRequest         = errors.New("invalid groupchat request")
+	ErrSpeakerPending         = errors.New("groupchat speaker run is not terminal")
+	ErrSelectorFailure        = errors.New("groupchat selector failed")
+	ErrSelectorPending        = errors.New("groupchat selector is waiting for retry")
+	ErrSelectorInvocationBusy = errors.New("groupchat selector invocation is leased")
+	ErrGroupChatFailed        = errors.New("groupchat execution failed")
+	ErrGroupChatTerminal      = errors.New("groupchat run is terminal")
 )
 
-// SpeakerPolicy controls how the next visible speaker is selected.
-// P1 intentionally exposes only Directed. Selector and handoff policies require
-// their own durable state transitions and are not compatibility aliases.
+// SpeakerPolicy controls how the next visible speaker is selected. Directed
+// consumes an ordered host decision. Selector asks the bounded Selector port to
+// choose one candidate at a time from Runtime-owned durable state.
 type SpeakerPolicy string
 
 const (
 	SpeakerDirected SpeakerPolicy = "directed"
+	SpeakerSelector SpeakerPolicy = "selector"
 )
 
 // Participant identifies one host-authorized visible speaker. Runtime keeps
@@ -104,78 +108,111 @@ type Result struct {
 type TerminationReason string
 
 const (
-	TerminationCompleted     TerminationReason = "completed"
-	TerminationMaxUtterances TerminationReason = "max_utterances"
-	TerminationCancelled     TerminationReason = "cancelled"
-	TerminationFailed        TerminationReason = "failed"
+	TerminationCompleted         TerminationReason = "completed"
+	TerminationSelectorCompleted TerminationReason = "selector_completed"
+	TerminationMaxUtterances     TerminationReason = "max_utterances"
+	TerminationNoEligibleSpeaker TerminationReason = "no_eligible_speaker"
+	TerminationCancelled         TerminationReason = "cancelled"
+	TerminationFailed            TerminationReason = "failed"
 )
 
 // View is the public durable Group Chat state.
 type View struct {
-	SpeakerPolicy      SpeakerPolicy     `json:"speakerPolicy"`
-	Participants       []Participant     `json:"participants"`
-	DirectedSpeakerIDs []string          `json:"directedSpeakerIDs,omitempty"`
-	SpeakerTurns       []SpeakerTurn     `json:"speakerTurns"`
-	NextSpeakerIndex   int               `json:"nextSpeakerIndex"`
-	TerminationReason  TerminationReason `json:"terminationReason,omitempty"`
+	SpeakerPolicy       SpeakerPolicy       `json:"speakerPolicy"`
+	Participants        []Participant       `json:"participants"`
+	DirectedSpeakerIDs  []string            `json:"directedSpeakerIDs,omitempty"`
+	CandidateSpeakerIDs []string            `json:"candidateSpeakerIDs,omitempty"`
+	SelectorInvocation  *SelectorInvocation `json:"selectorInvocation,omitempty"`
+	SpeakerTurns        []SpeakerTurn       `json:"speakerTurns"`
+	NextSpeakerIndex    int                 `json:"nextSpeakerIndex"`
+	TerminationReason   TerminationReason   `json:"terminationReason,omitempty"`
 }
 
 // StartRequest creates one explicit Group Chat Run.
 type StartRequest struct {
-	ID                 string
-	Actor              kernel.ActorRef
-	Thread             kernel.ThreadRef
-	RequestID          string
-	Goal               string
-	SpeakerPolicy      SpeakerPolicy
-	Participants       []Participant
-	SpeakerConfigs     []SpeakerConfig
-	DirectedSpeakerIDs []string
-	MaxUtterances      int
+	ID                   string
+	Actor                kernel.ActorRef
+	Thread               kernel.ThreadRef
+	RequestID            string
+	Goal                 string
+	SpeakerPolicy        SpeakerPolicy
+	Participants         []Participant
+	SpeakerConfigs       []SpeakerConfig
+	DirectedSpeakerIDs   []string
+	CandidateSpeakerIDs  []string
+	SelectorModel        string
+	SelectorModelOptions json.RawMessage
+	MaxUtterances        int
 }
 
 // ValidateStartRequest validates the stable host-visible selection contract.
-// Runner construction additionally requires one execution config per directed
-// participant.
 func ValidateStartRequest(request StartRequest) error {
-	if strings.TrimSpace(request.ID) == "" ||
-		strings.TrimSpace(request.Actor.TenantID) == "" ||
-		strings.TrimSpace(request.Actor.ActorID) == "" ||
-		strings.TrimSpace(request.Thread.Kind) == "" ||
-		strings.TrimSpace(request.Thread.ID) == "" ||
-		strings.TrimSpace(request.Goal) == "" ||
-		request.SpeakerPolicy != SpeakerDirected ||
-		request.MaxUtterances <= 0 ||
-		request.MaxUtterances > MaxUtteranceCount ||
-		len(request.Participants) == 0 ||
-		len(request.Participants) > MaxParticipantCount ||
-		len(request.DirectedSpeakerIDs) == 0 ||
-		len(request.DirectedSpeakerIDs) > request.MaxUtterances {
+	if !validStartRequestIdentity(request) {
 		return ErrInvalidRequest
 	}
-
-	participants := make(map[string]struct{}, len(request.Participants))
-	for _, participant := range request.Participants {
-		id := strings.TrimSpace(participant.ID)
-		if id == "" {
-			return ErrInvalidRequest
-		}
-		if _, duplicate := participants[id]; duplicate {
-			return ErrInvalidRequest
-		}
-		participants[id] = struct{}{}
+	participants, ok := participantIDSet(request.Participants)
+	if !ok {
+		return ErrInvalidRequest
 	}
-
-	directed := make(map[string]struct{}, len(request.DirectedSpeakerIDs))
-	for _, raw := range request.DirectedSpeakerIDs {
-		id := strings.TrimSpace(raw)
-		if _, exists := participants[id]; !exists {
+	switch request.SpeakerPolicy {
+	case SpeakerDirected:
+		if strings.TrimSpace(request.SelectorModel) != "" || len(request.CandidateSpeakerIDs) != 0 ||
+			!validSpeakerIDList(request.DirectedSpeakerIDs, participants, request.MaxUtterances) {
 			return ErrInvalidRequest
 		}
-		if _, duplicate := directed[id]; duplicate {
+	case SpeakerSelector:
+		if len(request.DirectedSpeakerIDs) != 0 || strings.TrimSpace(request.SelectorModel) == "" ||
+			!validSpeakerIDList(request.CandidateSpeakerIDs, participants, MaxParticipantCount) {
 			return ErrInvalidRequest
 		}
-		directed[id] = struct{}{}
+	default:
+		return ErrInvalidRequest
 	}
 	return nil
+}
+
+func validStartRequestIdentity(request StartRequest) bool {
+	return strings.TrimSpace(request.ID) != "" &&
+		strings.TrimSpace(request.Actor.TenantID) != "" &&
+		strings.TrimSpace(request.Actor.ActorID) != "" &&
+		strings.TrimSpace(request.Thread.Kind) != "" &&
+		strings.TrimSpace(request.Thread.ID) != "" &&
+		strings.TrimSpace(request.Goal) != "" &&
+		request.MaxUtterances > 0 &&
+		request.MaxUtterances <= MaxUtteranceCount &&
+		len(request.Participants) > 0 &&
+		len(request.Participants) <= MaxParticipantCount
+}
+
+func participantIDSet(participants []Participant) (map[string]struct{}, bool) {
+	result := make(map[string]struct{}, len(participants))
+	for _, participant := range participants {
+		id := strings.TrimSpace(participant.ID)
+		if id == "" {
+			return nil, false
+		}
+		if _, duplicate := result[id]; duplicate {
+			return nil, false
+		}
+		result[id] = struct{}{}
+	}
+	return result, true
+}
+
+func validSpeakerIDList(values []string, participants map[string]struct{}, max int) bool {
+	if len(values) == 0 || len(values) > max {
+		return false
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		id := strings.TrimSpace(raw)
+		if _, exists := participants[id]; !exists {
+			return false
+		}
+		if _, duplicate := seen[id]; duplicate {
+			return false
+		}
+		seen[id] = struct{}{}
+	}
+	return true
 }
