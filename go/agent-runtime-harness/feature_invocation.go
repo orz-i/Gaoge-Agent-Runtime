@@ -37,13 +37,18 @@ type TeamTurnRequest struct {
 	Join    handoff.Join
 }
 
+// GroupChatSpeakerSelection binds a host-owned visible participant to one frozen Role ID.
+type GroupChatSpeakerSelection struct {
+	ParticipantID string `json:"participantID"`
+	RoleID        string `json:"roleID"`
+}
+
 // GroupChatTurnRequest starts directed Group Chat as the top-level capability.
 type GroupChatTurnRequest struct {
 	StartRequest
-	Participants       []groupchat.Participant
-	SpeakerConfigs     []groupchat.SpeakerConfig
-	DirectedSpeakerIDs []string
-	MaxUtterances      int
+	Participants  []groupchat.Participant
+	Speakers      []GroupChatSpeakerSelection
+	MaxUtterances int
 }
 
 // PlanExecuteTurnRequest starts Plan-and-Execute as the top-level capability.
@@ -149,11 +154,15 @@ func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatT
 	if runner == nil || runner.groupChats == nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
+	speakerConfigs, directedSpeakerIDs, err := materializeGroupChatSpeakerConfigs(request.Config, request.Speakers)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	input, inputHash, err := marshalInvocationValue(groupChatInvocationInput{
 		Goal: strings.TrimSpace(request.Goal), Actor: request.Actor, Thread: request.Thread,
 		Participants:       append([]groupchat.Participant(nil), request.Participants...),
-		SpeakerConfigs:     append([]groupchat.SpeakerConfig(nil), request.SpeakerConfigs...),
-		DirectedSpeakerIDs: append([]string(nil), request.DirectedSpeakerIDs...), MaxUtterances: request.MaxUtterances,
+		SpeakerConfigs:     speakerConfigs,
+		DirectedSpeakerIDs: directedSpeakerIDs, MaxUtterances: request.MaxUtterances,
 	})
 	if err != nil {
 		return Snapshot{}, err
@@ -174,10 +183,50 @@ func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatT
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
 		SpeakerPolicy:      groupchat.SpeakerDirected,
 		Participants:       append([]groupchat.Participant(nil), request.Participants...),
-		SpeakerConfigs:     append([]groupchat.SpeakerConfig(nil), request.SpeakerConfigs...),
-		DirectedSpeakerIDs: append([]string(nil), request.DirectedSpeakerIDs...), MaxUtterances: request.MaxUtterances,
+		SpeakerConfigs:     speakerConfigs,
+		DirectedSpeakerIDs: directedSpeakerIDs, MaxUtterances: request.MaxUtterances,
 	})
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+}
+
+func materializeGroupChatSpeakerConfigs(
+	config ConfigSnapshot,
+	selections []GroupChatSpeakerSelection,
+) ([]groupchat.SpeakerConfig, []string, error) {
+	if len(selections) == 0 || len(selections) > groupchat.MaxParticipantCount {
+		return nil, nil, ErrInvalidRequest
+	}
+	configs := make([]groupchat.SpeakerConfig, 0, len(selections))
+	ids := make([]string, 0, len(selections))
+	seen := make(map[string]struct{}, len(selections))
+	for _, selection := range selections {
+		participantID := strings.TrimSpace(selection.ParticipantID)
+		roleID := strings.TrimSpace(selection.RoleID)
+		if participantID == "" || roleID == "" {
+			return nil, nil, ErrInvalidRequest
+		}
+		if _, duplicate := seen[participantID]; duplicate {
+			return nil, nil, ErrInvalidRequest
+		}
+		seen[participantID] = struct{}{}
+		role, found := findRole(config.Roles, roleID)
+		if !found {
+			return nil, nil, toolsRoleUnavailable()
+		}
+		modelName := firstNonEmpty(role.Model, config.Model)
+		modelOptions := append(json.RawMessage(nil), config.ModelOptions...)
+		if len(role.ModelOptions) != 0 {
+			modelOptions = append(json.RawMessage(nil), role.ModelOptions...)
+		}
+		configs = append(configs, groupchat.SpeakerConfig{
+			ParticipantID: participantID,
+			RoleID:        role.ID, RoleRevision: role.Revision, RoleName: role.Name,
+			Instructions: roleInstructions(role), Model: modelName, ModelOptions: modelOptions,
+			ToolKeys: append([]string(nil), role.ToolKeys...), Limits: roleAgentLimits(config.Limits, role.Limits),
+		})
+		ids = append(ids, participantID)
+	}
+	return configs, ids, nil
 }
 
 // StartPlanExecuteTurn starts Plan-and-Execute without a placeholder Agent root.

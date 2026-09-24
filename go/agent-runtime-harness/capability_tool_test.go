@@ -175,7 +175,7 @@ func rootAndWorkflowInvocations(t *testing.T, values []harness.Invocation) (harn
 			root = value
 		case harness.ExecutionWorkflow:
 			child = value
-		case harness.ExecutionTeam, harness.ExecutionPlanExecute, harness.ExecutionApplication:
+		case harness.ExecutionTeam, harness.ExecutionGroupChat, harness.ExecutionPlanExecute, harness.ExecutionApplication:
 			// This fixture only starts an Agent root and one Workflow child.
 		default:
 			t.Fatalf("unexpected execution class %q", value.ExecutionClass)
