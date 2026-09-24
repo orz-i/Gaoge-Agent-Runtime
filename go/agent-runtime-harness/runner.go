@@ -517,6 +517,7 @@ type Dependencies struct {
 	Agent        AgentStarter
 	Plans        PlanExecuteFeature
 	Teams        TeamFeature
+	GroupChats   GroupChatFeature
 	Workflows    WorkflowFeature
 	Store        Store
 	Clock        Clock
@@ -542,6 +543,7 @@ type Runner struct {
 	agent          AgentStarter
 	plans          PlanExecuteFeature
 	teams          TeamFeature
+	groupChats     GroupChatFeature
 	workflows      WorkflowFeature
 	store          Store
 	clock          Clock
@@ -587,7 +589,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}
 	runner := &Runner{
 		runtime: dependencies.Runtime, agent: dependencies.Agent, cancellation: dependencies.Cancellation,
-		plans: dependencies.Plans, teams: dependencies.Teams, workflows: dependencies.Workflows,
+		plans: dependencies.Plans, teams: dependencies.Teams, groupChats: dependencies.GroupChats, workflows: dependencies.Workflows,
 		store: dependencies.Store, clock: dependencies.Clock,
 		turnFeed: dependencies.TurnFeed,
 		context:  dependencies.Context, catalog: dependencies.Catalog,
