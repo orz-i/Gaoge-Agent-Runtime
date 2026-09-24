@@ -15,6 +15,7 @@ import (
 const (
 	CapabilityAgent          = "runtime.agent"
 	CapabilityTeam           = "runtime.team"
+	CapabilityGroupChat      = "runtime.group_chat"
 	CapabilityPlanExecute    = "runtime.plan_execute"
 	CapabilityWorkflow       = "runtime.workflow"
 	RuntimeCapabilityVersion = "v1"
@@ -28,6 +29,7 @@ type ExecutionClass string
 const (
 	ExecutionAgent       ExecutionClass = "agent"
 	ExecutionTeam        ExecutionClass = "team"
+	ExecutionGroupChat   ExecutionClass = "group_chat"
 	ExecutionPlanExecute ExecutionClass = "plan_execute"
 	ExecutionWorkflow    ExecutionClass = "workflow"
 	ExecutionApplication ExecutionClass = "application"
@@ -215,7 +217,7 @@ func InvocationID(turnID, parentItemID, capabilityKey, requestID string) (string
 
 func validExecutionClass(value ExecutionClass) bool {
 	switch value {
-	case ExecutionAgent, ExecutionTeam, ExecutionPlanExecute, ExecutionWorkflow, ExecutionApplication:
+	case ExecutionAgent, ExecutionTeam, ExecutionGroupChat, ExecutionPlanExecute, ExecutionWorkflow, ExecutionApplication:
 		return true
 	default:
 		return false

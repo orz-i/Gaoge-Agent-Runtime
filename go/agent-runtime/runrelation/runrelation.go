@@ -23,11 +23,12 @@ var (
 type Kind string
 
 const (
-	KindPlanStep       Kind = "plan_step"
-	KindTeamMember     Kind = "team_member"
-	KindWorkflowEffect Kind = "workflow_effect"
-	KindDelegation     Kind = "delegation"
-	KindCapability     Kind = "capability"
+	KindPlanStep         Kind = "plan_step"
+	KindTeamMember       Kind = "team_member"
+	KindGroupChatSpeaker Kind = "group_chat_speaker"
+	KindWorkflowEffect   Kind = "workflow_effect"
+	KindDelegation       Kind = "delegation"
+	KindCapability       Kind = "capability"
 )
 
 // Draft is one relation before its creation timestamp is assigned.
@@ -169,7 +170,7 @@ func Sort(items []Relation) {
 }
 
 func validKind(kind Kind) bool {
-	return kind == KindPlanStep || kind == KindTeamMember || kind == KindWorkflowEffect ||
+	return kind == KindPlanStep || kind == KindTeamMember || kind == KindGroupChatSpeaker || kind == KindWorkflowEffect ||
 		kind == KindDelegation || kind == KindCapability
 }
 

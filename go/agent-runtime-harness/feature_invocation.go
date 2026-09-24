@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
@@ -22,12 +23,27 @@ type TeamFeature interface {
 	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
 }
 
+// GroupChatFeature is the narrow Group Chat Runtime capability consumed by Harness.
+type GroupChatFeature interface {
+	StartRun(context.Context, groupchat.StartRequest) (kernel.Snapshot, error)
+	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
+}
+
 // TeamTurnRequest starts Team as the top-level capability of one Harness Turn.
 type TeamTurnRequest struct {
 	StartRequest
 	Mode    team.ExecutionMode
 	Members []team.Member
 	Join    handoff.Join
+}
+
+// GroupChatTurnRequest starts directed Group Chat as the top-level capability.
+type GroupChatTurnRequest struct {
+	StartRequest
+	Participants       []groupchat.Participant
+	SpeakerConfigs     []groupchat.SpeakerConfig
+	DirectedSpeakerIDs []string
+	MaxUtterances      int
 }
 
 // PlanExecuteTurnRequest starts Plan-and-Execute as the top-level capability.
@@ -67,6 +83,16 @@ type teamInvocationInput struct {
 	Mode    team.ExecutionMode `json:"mode"`
 	Members []team.Member      `json:"members"`
 	Join    handoff.Join       `json:"join"`
+}
+
+type groupChatInvocationInput struct {
+	Goal               string                    `json:"goal"`
+	Actor              kernel.ActorRef           `json:"actor"`
+	Thread             kernel.ThreadRef          `json:"thread"`
+	Participants       []groupchat.Participant   `json:"participants"`
+	SpeakerConfigs     []groupchat.SpeakerConfig `json:"speakerConfigs"`
+	DirectedSpeakerIDs []string                  `json:"directedSpeakerIDs"`
+	MaxUtterances      int                       `json:"maxUtterances"`
 }
 
 type planExecuteInvocationInput struct {
@@ -114,6 +140,42 @@ func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest
 		ID: prepared.invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
 		Mode: request.Mode, Members: append([]team.Member(nil), request.Members...), Join: request.Join,
+	})
+	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+}
+
+// StartGroupChatTurn starts directed Group Chat without creating a placeholder Agent root.
+func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatTurnRequest) (Snapshot, error) {
+	if runner == nil || runner.groupChats == nil {
+		return Snapshot{}, ErrInvalidRequest
+	}
+	input, inputHash, err := marshalInvocationValue(groupChatInvocationInput{
+		Goal: strings.TrimSpace(request.Goal), Actor: request.Actor, Thread: request.Thread,
+		Participants:       append([]groupchat.Participant(nil), request.Participants...),
+		SpeakerConfigs:     append([]groupchat.SpeakerConfig(nil), request.SpeakerConfigs...),
+		DirectedSpeakerIDs: append([]string(nil), request.DirectedSpeakerIDs...), MaxUtterances: request.MaxUtterances,
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	prepared, err := runner.prepareTopLevelFeatureStart(
+		ctx, request.StartRequest, CapabilityGroupChat, RuntimeCapabilityVersion, ExecutionGroupChat, input, inputHash,
+	)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if prepared.replayed {
+		if snapshot, handled, replayErr := runner.replayTopLevelFeatureStart(ctx, prepared); handled || replayErr != nil {
+			return snapshot, replayErr
+		}
+	}
+	runtimeSnapshot, startErr := runner.groupChats.StartRun(prepared.runContext, groupchat.StartRequest{
+		ID: prepared.invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
+		SpeakerPolicy:      groupchat.SpeakerDirected,
+		Participants:       append([]groupchat.Participant(nil), request.Participants...),
+		SpeakerConfigs:     append([]groupchat.SpeakerConfig(nil), request.SpeakerConfigs...),
+		DirectedSpeakerIDs: append([]string(nil), request.DirectedSpeakerIDs...), MaxUtterances: request.MaxUtterances,
 	})
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
@@ -729,6 +791,8 @@ func (runner *Runner) startInvocationAttempt(
 		return runner.startRetriedAgent(ctx, invocation, child, requestID)
 	case ExecutionTeam:
 		return runner.startRetriedTeam(ctx, invocation, child, requestID)
+	case ExecutionGroupChat:
+		return runner.startRetriedGroupChat(ctx, invocation, child, requestID)
 	case ExecutionPlanExecute:
 		return runner.startRetriedPlanExecute(ctx, invocation, child, requestID)
 	case ExecutionWorkflow:
@@ -770,6 +834,23 @@ func (runner *Runner) startRetriedTeam(ctx context.Context, invocation Invocatio
 		return kernel.Snapshot{}, ErrConflict
 	}
 	return runner.teams.StartRun(ctx, team.StartRequest{ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal, Mode: input.Mode, Members: append([]team.Member(nil), input.Members...), Join: input.Join})
+}
+
+func (runner *Runner) startRetriedGroupChat(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
+	if runner.groupChats == nil {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	var input groupChatInvocationInput
+	if err := json.Unmarshal(invocation.Input, &input); err != nil {
+		return kernel.Snapshot{}, ErrConflict
+	}
+	return runner.groupChats.StartRun(ctx, groupchat.StartRequest{
+		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal,
+		SpeakerPolicy:      groupchat.SpeakerDirected,
+		Participants:       append([]groupchat.Participant(nil), input.Participants...),
+		SpeakerConfigs:     append([]groupchat.SpeakerConfig(nil), input.SpeakerConfigs...),
+		DirectedSpeakerIDs: append([]string(nil), input.DirectedSpeakerIDs...), MaxUtterances: input.MaxUtterances,
+	})
 }
 
 func (runner *Runner) startRetriedPlanExecute(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
@@ -976,6 +1057,8 @@ func expectedFeaturePendingError(executionClass ExecutionClass, err error) bool 
 	switch executionClass {
 	case ExecutionTeam:
 		return errors.Is(err, team.ErrMemberPending)
+	case ExecutionGroupChat:
+		return errors.Is(err, groupchat.ErrSpeakerPending)
 	case ExecutionPlanExecute:
 		return errors.Is(err, planexecute.ErrApprovalRequired) || errors.Is(err, planexecute.ErrStepPending) || errors.Is(err, planexecute.ErrPlannerPending)
 	case ExecutionWorkflow:
@@ -1043,6 +1126,11 @@ func (runner *Runner) resumeFeature(
 			return kernel.Snapshot{}, ErrInvalidRequest
 		}
 		return runner.teams.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+	case ExecutionGroupChat:
+		if runner.groupChats == nil {
+			return kernel.Snapshot{}, ErrInvalidRequest
+		}
+		return runner.groupChats.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
 	case ExecutionPlanExecute:
 		if runner.plans == nil {
 			return kernel.Snapshot{}, ErrInvalidRequest

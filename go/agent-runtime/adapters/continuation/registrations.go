@@ -5,6 +5,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
@@ -19,12 +20,14 @@ func Resumers(
 	planResumer continuation.Resumer,
 	workflowResumer continuation.Resumer,
 	teamResumer continuation.Resumer,
+	groupChatResumer continuation.Resumer,
 ) []continuation.ResumerRegistration {
 	return []continuation.ResumerRegistration{
 		continuation.RegisterResumer(agent.RunKind, agentResumer),
 		continuation.RegisterResumer(planexecute.RunKind, planResumer),
 		continuation.RegisterResumer(workflow.RunKind, workflowResumer),
 		continuation.RegisterResumer(team.RunKind, teamResumer),
+		continuation.RegisterResumer(groupchat.RunKind, groupChatResumer),
 	}
 }
 
