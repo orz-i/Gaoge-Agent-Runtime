@@ -153,7 +153,7 @@ func (runner *Runner) prepareDelegation(
 		delegation.ModelOptions = append(json.RawMessage(nil), role.ModelOptions...)
 	}
 	delegation.Instructions = roleInstructions(role)
-	delegation.ToolKeys = append(delegation.ToolKeys, role.ToolKeys...)
+	delegation.ToolKeys = append(delegation.ToolKeys, roleToolKeys(role)...)
 	if view, viewErr := agent.ViewState(parent); viewErr == nil {
 		delegation.ToolKeys = intersectToolKeys(delegation.ToolKeys, view.ToolKeys)
 	}

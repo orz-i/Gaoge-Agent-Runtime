@@ -72,6 +72,134 @@ func TestDirectedGroupChatExecutesVisibleSpeakersInOrder(t *testing.T) {
 	}
 }
 
+func TestHandoffGroupChatFollowsExplicitVisibleSignalThenStops(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{
+		Store: memory.NewStore(), Clock: groupChatClock{}, IDs: &groupChatIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	relations, err := runrelation.New(memory.NewRunRelationStore(), groupChatClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signals := &recordingVisibleHandoffs{
+		signals: []groupchat.VisibleHandoffSignal{{TargetParticipantID: "participant-reviewer"}, {}},
+		found:   []bool{true, false},
+	}
+	delegator := &recordingDelegator{}
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: delegator, VisibleHandoffs: signals, Relations: relations,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), handoffRequest())
+	if err != nil {
+		t.Fatalf("start handoff group chat: %v", err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("status = %q", snapshot.Run.Status)
+	}
+	view, err := groupchat.ViewState(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.SpeakerPolicy != groupchat.SpeakerHandoff ||
+		view.TerminationReason != groupchat.TerminationHandoffCompleted ||
+		len(view.SpeakerTurns) != 2 ||
+		view.SpeakerTurns[0].SpeakerID != "participant-researcher" ||
+		view.SpeakerTurns[1].SpeakerID != "participant-reviewer" {
+		t.Fatalf("handoff view = %#v", view)
+	}
+	if len(signals.childRunIDs) != 2 || len(delegator.goals) != 2 {
+		t.Fatalf("signals=%#v goals=%#v", signals.childRunIDs, delegator.goals)
+	}
+	if !strings.Contains(delegator.goals[0], "visible handoff tool") ||
+		!strings.Contains(delegator.goals[0], "participant-reviewer: Reviewer") {
+		t.Fatalf("handoff instructions missing: %q", delegator.goals[0])
+	}
+}
+
+func TestHandoffAuthorityOnlyAcceptsCurrentSpeakerCandidate(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{
+		Store: memory.NewStore(), Clock: groupChatClock{}, IDs: &groupChatIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	relations, err := runrelation.New(memory.NewRunRelationStore(), groupChatClock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: pendingDelegator{}, VisibleHandoffs: &recordingVisibleHandoffs{}, Relations: relations,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), handoffRequest())
+	if !errors.Is(err, groupchat.ErrSpeakerPending) {
+		t.Fatalf("expected speaker pending, got %v", err)
+	}
+	view, viewErr := groupchat.ViewState(snapshot)
+	if viewErr != nil || len(view.SpeakerTurns) != 1 {
+		t.Fatalf("view=%#v err=%v", view, viewErr)
+	}
+	childRunID := view.SpeakerTurns[0].ChildRunID
+	if err = runner.ValidateVisibleHandoff(t.Context(), childRunID, "participant-reviewer"); err != nil {
+		t.Fatalf("valid handoff rejected: %v", err)
+	}
+	if err = runner.ValidateVisibleHandoff(t.Context(), childRunID, "participant-researcher"); !errors.Is(err, groupchat.ErrInvalidRequest) {
+		t.Fatalf("self handoff error = %v", err)
+	}
+	if err = runner.ValidateVisibleHandoff(t.Context(), childRunID, "participant-writer"); !errors.Is(err, groupchat.ErrInvalidRequest) {
+		t.Fatalf("unknown handoff error = %v", err)
+	}
+}
+
+func handoffRequest() groupchat.StartRequest {
+	request := directedRequest()
+	request.ID = "groupchat-handoff-1"
+	request.SpeakerPolicy = groupchat.SpeakerHandoff
+	request.DirectedSpeakerIDs = nil
+	request.CandidateSpeakerIDs = []string{"participant-researcher", "participant-reviewer"}
+	request.MaxUtterances = 4
+	return request
+}
+
+type recordingVisibleHandoffs struct {
+	signals     []groupchat.VisibleHandoffSignal
+	found       []bool
+	childRunIDs []string
+}
+
+func (resolver *recordingVisibleHandoffs) ResolveVisibleHandoff(
+	_ context.Context,
+	childRunID string,
+) (groupchat.VisibleHandoffSignal, bool, error) {
+	resolver.childRunIDs = append(resolver.childRunIDs, childRunID)
+	if len(resolver.signals) == 0 || len(resolver.found) == 0 {
+		return groupchat.VisibleHandoffSignal{}, false, nil
+	}
+	signal := resolver.signals[0]
+	found := resolver.found[0]
+	resolver.signals = resolver.signals[1:]
+	resolver.found = resolver.found[1:]
+	return signal, found, nil
+}
+
+type pendingDelegator struct{}
+
+func (pendingDelegator) StartOrLoad(
+	_ context.Context,
+	_ kernel.Snapshot,
+	delegation handoff.Delegation,
+) (handoff.Delegation, error) {
+	delegation.Status = handoff.StatusRunning
+	return delegation, handoff.ErrChildPending
+}
+
 func TestSelectorGroupChatChoosesBoundedSpeakersAndCompletes(t *testing.T) {
 	runtime, err := kernel.New(kernel.Dependencies{
 		Store: memory.NewStore(), Clock: groupChatClock{}, IDs: &groupChatIDs{},
