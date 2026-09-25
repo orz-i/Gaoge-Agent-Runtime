@@ -36,6 +36,7 @@ type SpeakerPolicy string
 const (
 	SpeakerDirected SpeakerPolicy = "directed"
 	SpeakerSelector SpeakerPolicy = "selector"
+	SpeakerHandoff  SpeakerPolicy = "handoff"
 )
 
 // Participant identifies one host-authorized visible speaker. Runtime keeps
@@ -110,6 +111,7 @@ type TerminationReason string
 const (
 	TerminationCompleted         TerminationReason = "completed"
 	TerminationSelectorCompleted TerminationReason = "selector_completed"
+	TerminationHandoffCompleted  TerminationReason = "handoff_completed"
 	TerminationMaxUtterances     TerminationReason = "max_utterances"
 	TerminationNoEligibleSpeaker TerminationReason = "no_eligible_speaker"
 	TerminationCancelled         TerminationReason = "cancelled"
@@ -162,6 +164,12 @@ func ValidateStartRequest(request StartRequest) error {
 		}
 	case SpeakerSelector:
 		if len(request.DirectedSpeakerIDs) != 0 || strings.TrimSpace(request.SelectorModel) == "" ||
+			!validSpeakerIDList(request.CandidateSpeakerIDs, participants, MaxParticipantCount) {
+			return ErrInvalidRequest
+		}
+	case SpeakerHandoff:
+		if len(request.DirectedSpeakerIDs) != 0 || strings.TrimSpace(request.SelectorModel) != "" ||
+			len(request.CandidateSpeakerIDs) < 2 ||
 			!validSpeakerIDList(request.CandidateSpeakerIDs, participants, MaxParticipantCount) {
 			return ErrInvalidRequest
 		}

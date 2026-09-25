@@ -78,6 +78,27 @@ func TestValidateStartRequestAcceptsSelectorCandidates(t *testing.T) {
 	}
 }
 
+func TestValidateStartRequestAcceptsHandoffCandidates(t *testing.T) {
+	request := validRequest()
+	request.SpeakerPolicy = groupchat.SpeakerHandoff
+	request.DirectedSpeakerIDs = nil
+	request.CandidateSpeakerIDs = []string{"researcher", "reviewer"}
+	request.MaxUtterances = 4
+	if err := groupchat.ValidateStartRequest(request); err != nil {
+		t.Fatalf("validate handoff group chat: %v", err)
+	}
+}
+
+func TestValidateStartRequestRejectsSingleHandoffCandidate(t *testing.T) {
+	request := validRequest()
+	request.SpeakerPolicy = groupchat.SpeakerHandoff
+	request.DirectedSpeakerIDs = nil
+	request.CandidateSpeakerIDs = []string{"researcher"}
+	if err := groupchat.ValidateStartRequest(request); !errors.Is(err, groupchat.ErrInvalidRequest) {
+		t.Fatalf("single-candidate handoff must be invalid, got %v", err)
+	}
+}
+
 func TestValidateStartRequestRejectsAmbiguousSelectorContract(t *testing.T) {
 	request := validRequest()
 	request.SpeakerPolicy = groupchat.SpeakerSelector

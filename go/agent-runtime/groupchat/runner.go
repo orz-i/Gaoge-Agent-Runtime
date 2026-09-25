@@ -23,12 +23,18 @@ type Delegator interface {
 	StartOrLoad(context.Context, kernel.Snapshot, handoff.Delegation) (handoff.Delegation, error)
 }
 
+type RelationRegistry interface {
+	runrelation.Recorder
+	GetByChild(context.Context, string) (runrelation.Relation, error)
+}
+
 // Dependencies are the only requirements of the Group Chat feature.
 type Dependencies struct {
 	Runtime         *kernel.Runtime
 	Handoffs        Delegator
 	Selector        Selector
-	Relations       runrelation.Recorder
+	VisibleHandoffs VisibleHandoffResolver
+	Relations       RelationRegistry
 	MaxParticipants int
 	MaxUtterances   int
 }
@@ -38,7 +44,8 @@ type Runner struct {
 	runtime         *kernel.Runtime
 	handoffs        Delegator
 	selector        Selector
-	relations       runrelation.Recorder
+	visibleHandoffs VisibleHandoffResolver
+	relations       RelationRegistry
 	maxParticipants int
 	maxUtterances   int
 }
@@ -81,7 +88,8 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		dependencies.MaxUtterances = MaxUtteranceCount
 	}
 	return &Runner{
-		runtime: dependencies.Runtime, handoffs: dependencies.Handoffs, selector: dependencies.Selector, relations: dependencies.Relations,
+		runtime: dependencies.Runtime, handoffs: dependencies.Handoffs, selector: dependencies.Selector,
+		visibleHandoffs: dependencies.VisibleHandoffs, relations: dependencies.Relations,
 		maxParticipants: dependencies.MaxParticipants, maxUtterances: dependencies.MaxUtterances,
 	}, nil
 }
@@ -175,10 +183,19 @@ func (runner *Runner) materializeState(request StartRequest) (executionState, er
 		MaxUtterances:        request.MaxUtterances,
 		Speakers:             []speakerExecution{},
 	}
+	configByParticipant := speakerConfigByParticipant(request.SpeakerConfigs)
+	if request.SpeakerPolicy == SpeakerHandoff {
+		initialID := request.CandidateSpeakerIDs[0]
+		speaker, err := runner.newSpeakerExecution(configByParticipant[initialID], initialID, 0)
+		if err != nil {
+			return executionState{}, err
+		}
+		state.Speakers = append(state.Speakers, speaker)
+		return state, nil
+	}
 	if request.SpeakerPolicy != SpeakerDirected {
 		return state, nil
 	}
-	configByParticipant := speakerConfigByParticipant(request.SpeakerConfigs)
 	for ordinal, participantID := range request.DirectedSpeakerIDs {
 		speaker, err := runner.newSpeakerExecution(configByParticipant[participantID], participantID, ordinal)
 		if err != nil {
@@ -230,6 +247,8 @@ func (runner *Runner) execute(ctx context.Context, snapshot kernel.Snapshot) (ke
 		return runner.executeDirected(ctx, snapshot, state)
 	case SpeakerSelector:
 		return runner.executeSelector(ctx, snapshot, state)
+	case SpeakerHandoff:
+		return runner.executeHandoff(ctx, snapshot, state)
 	default:
 		return runner.fail(ctx, snapshot, state, "groupchat.policy_invalid", ErrInvalidRequest)
 	}
@@ -411,6 +430,24 @@ func speakerGoal(state executionState, index int) string {
 	builder.WriteString("\n\nYou are the next visible speaker: ")
 	builder.WriteString(name)
 	builder.WriteString(". Respond with only the message you want to contribute to the shared conversation.")
+	if state.SpeakerPolicy == SpeakerHandoff {
+		builder.WriteString("\n\nThis Turn uses visible handoff routing. If another participant should speak next, call the visible handoff tool exactly once with one eligible participantID, then still finish your current visible message. If you do not call it, this group Turn ends after your message.")
+		builder.WriteString("\nEligible handoff targets:")
+		configs := speakerConfigByParticipant(state.SpeakerConfigs)
+		for _, participantID := range state.CandidateSpeakerIDs {
+			if participantID == current.SpeakerID {
+				continue
+			}
+			config, ok := configs[participantID]
+			if !ok {
+				continue
+			}
+			builder.WriteString("\n- ")
+			builder.WriteString(participantID)
+			builder.WriteString(": ")
+			builder.WriteString(config.RoleName)
+		}
+	}
 	return builder.String()
 }
 
@@ -468,7 +505,7 @@ func validSpeakerConfigs(request StartRequest, maxParticipants, maxUtterances in
 		}
 	}
 	ids := request.DirectedSpeakerIDs
-	if request.SpeakerPolicy == SpeakerSelector {
+	if request.SpeakerPolicy == SpeakerSelector || request.SpeakerPolicy == SpeakerHandoff {
 		ids = request.CandidateSpeakerIDs
 	}
 	for _, id := range ids {

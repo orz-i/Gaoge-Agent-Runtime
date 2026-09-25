@@ -219,6 +219,17 @@ func materializeGroupChatPolicy(
 		input.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
 		input.SelectorModel = runtimeRequest.SelectorModel
 		input.SelectorModelOptions = append(json.RawMessage(nil), runtimeRequest.SelectorModelOptions...)
+	case groupchat.SpeakerHandoff:
+		if len(speakerIDs) < 2 {
+			return groupchat.StartRequest{}, groupChatInvocationInput{}, ErrInvalidRequest
+		}
+		for index := range speakerConfigs {
+			speakerConfigs[index].ToolKeys = normalizeStrings(append(speakerConfigs[index].ToolKeys, GroupChatHandoffToolKey))
+		}
+		runtimeRequest.SpeakerConfigs = speakerConfigs
+		input.SpeakerConfigs = speakerConfigs
+		runtimeRequest.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
+		input.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
 	default:
 		return groupchat.StartRequest{}, groupChatInvocationInput{}, ErrInvalidRequest
 	}
@@ -258,7 +269,7 @@ func materializeGroupChatSpeakerConfigs(
 			ParticipantID: participantID,
 			RoleID:        role.ID, RoleRevision: role.Revision, RoleName: role.Name,
 			Instructions: roleInstructions(role), Model: modelName, ModelOptions: modelOptions,
-			ToolKeys: append([]string(nil), role.ToolKeys...), Limits: roleAgentLimits(config.Limits, role.Limits),
+			ToolKeys: roleToolKeys(role), Limits: roleAgentLimits(config.Limits, role.Limits),
 		})
 		ids = append(ids, participantID)
 	}
