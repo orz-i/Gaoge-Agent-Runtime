@@ -220,8 +220,7 @@ func (runner *Runner) newSpeakerExecution(
 		return speakerExecution{}, err
 	}
 	delegation := handoff.Delegation{
-		ID: delegationID, MemberID: participantID,
-		RoleID: config.RoleID, RoleRevision: config.RoleRevision, RoleName: config.RoleName,
+		ID: delegationID, MemberID: config.MemberID, MemberRevision: config.MemberRevision,
 		Instructions: config.Instructions, Limits: config.Limits,
 		ChildRunID: childRunID, Model: config.Model,
 		ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
@@ -230,7 +229,8 @@ func (runner *Runner) newSpeakerExecution(
 	return speakerExecution{
 		Turn: SpeakerTurn{
 			Ordinal: ordinal, SpeakerID: participantID,
-			RoleID: config.RoleID, RoleRevision: config.RoleRevision, RoleName: config.RoleName,
+			AuthorKind: config.AuthorKind, AuthorID: config.AuthorID,
+			AuthorRevision: config.AuthorRevision, AuthorName: config.AuthorName,
 			ChildRunID: childRunID, Status: SpeakerTurnQueued,
 		},
 		Delegation: delegation,
@@ -385,15 +385,11 @@ func publicResult(state executionState) Result {
 			continue
 		}
 		result.Utterances = append(result.Utterances, Utterance{
-			Ordinal:      speaker.Turn.Ordinal,
-			SpeakerID:    speaker.Turn.SpeakerID,
-			RoleID:       speaker.Turn.RoleID,
-			RoleRevision: speaker.Turn.RoleRevision,
-			RoleName:     speaker.Turn.RoleName,
-			RunID:        speaker.Turn.ChildRunID,
-			Status:       speaker.Turn.Status,
-			Content:      delegatedResultContent(speaker.Turn.Result),
-			ErrorCode:    speaker.Turn.ErrorCode,
+			Ordinal: speaker.Turn.Ordinal, SpeakerID: speaker.Turn.SpeakerID,
+			AuthorKind: speaker.Turn.AuthorKind, AuthorID: speaker.Turn.AuthorID,
+			AuthorRevision: speaker.Turn.AuthorRevision, AuthorName: speaker.Turn.AuthorName,
+			RunID: speaker.Turn.ChildRunID, Status: speaker.Turn.Status,
+			Content: delegatedResultContent(speaker.Turn.Result), ErrorCode: speaker.Turn.ErrorCode,
 		})
 	}
 	return result
@@ -411,7 +407,7 @@ func speakerGoal(state executionState, index int) string {
 			if content == "" {
 				continue
 			}
-			name := strings.TrimSpace(turn.RoleName)
+			name := strings.TrimSpace(turn.AuthorName)
 			if name == "" {
 				name = strings.TrimSpace(turn.SpeakerID)
 			}
@@ -423,7 +419,7 @@ func speakerGoal(state executionState, index int) string {
 		}
 	}
 	current := state.Speakers[index].Turn
-	name := strings.TrimSpace(current.RoleName)
+	name := strings.TrimSpace(current.AuthorName)
 	if name == "" {
 		name = strings.TrimSpace(current.SpeakerID)
 	}
@@ -445,7 +441,7 @@ func speakerGoal(state executionState, index int) string {
 			builder.WriteString("\n- ")
 			builder.WriteString(participantID)
 			builder.WriteString(": ")
-			builder.WriteString(config.RoleName)
+			builder.WriteString(config.AuthorName)
 		}
 	}
 	return builder.String()
@@ -470,9 +466,6 @@ func delegatedResultContent(raw json.RawMessage) string {
 
 func projectSpeakerTurn(turn SpeakerTurn, delegation handoff.Delegation) SpeakerTurn {
 	turn.ChildRunID = delegation.ChildRunID
-	turn.RoleID = delegation.RoleID
-	turn.RoleRevision = delegation.RoleRevision
-	turn.RoleName = delegation.RoleName
 	turn.Result = append(json.RawMessage(nil), delegation.Result...)
 	turn.ErrorCode = strings.TrimSpace(delegation.ErrorCode)
 	switch delegation.Status {
@@ -499,8 +492,9 @@ func validSpeakerConfigs(request StartRequest, maxParticipants, maxUtterances in
 		return false
 	}
 	for _, config := range request.SpeakerConfigs {
-		if strings.TrimSpace(config.ParticipantID) == "" || strings.TrimSpace(config.RoleID) == "" ||
-			config.RoleRevision == 0 || strings.TrimSpace(config.RoleName) == "" {
+		if strings.TrimSpace(config.ParticipantID) == "" || strings.TrimSpace(config.AuthorKind) == "" ||
+			strings.TrimSpace(config.AuthorID) == "" || strings.TrimSpace(config.AuthorRevision) == "" ||
+			strings.TrimSpace(config.AuthorName) == "" || strings.TrimSpace(config.MemberID) == "" {
 			return false
 		}
 	}
@@ -526,8 +520,12 @@ func normalizeStartRequest(request StartRequest) StartRequest {
 	}
 	for index := range request.SpeakerConfigs {
 		request.SpeakerConfigs[index].ParticipantID = strings.TrimSpace(request.SpeakerConfigs[index].ParticipantID)
-		request.SpeakerConfigs[index].RoleID = strings.TrimSpace(request.SpeakerConfigs[index].RoleID)
-		request.SpeakerConfigs[index].RoleName = strings.TrimSpace(request.SpeakerConfigs[index].RoleName)
+		request.SpeakerConfigs[index].AuthorKind = strings.TrimSpace(request.SpeakerConfigs[index].AuthorKind)
+		request.SpeakerConfigs[index].AuthorID = strings.TrimSpace(request.SpeakerConfigs[index].AuthorID)
+		request.SpeakerConfigs[index].AuthorRevision = strings.TrimSpace(request.SpeakerConfigs[index].AuthorRevision)
+		request.SpeakerConfigs[index].AuthorName = strings.TrimSpace(request.SpeakerConfigs[index].AuthorName)
+		request.SpeakerConfigs[index].MemberID = strings.TrimSpace(request.SpeakerConfigs[index].MemberID)
+		request.SpeakerConfigs[index].MemberRevision = strings.TrimSpace(request.SpeakerConfigs[index].MemberRevision)
 		request.SpeakerConfigs[index].Instructions = strings.TrimSpace(request.SpeakerConfigs[index].Instructions)
 		request.SpeakerConfigs[index].Model = strings.TrimSpace(request.SpeakerConfigs[index].Model)
 		request.SpeakerConfigs[index].ToolKeys = normalizedStrings(request.SpeakerConfigs[index].ToolKeys)

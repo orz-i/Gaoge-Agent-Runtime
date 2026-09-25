@@ -158,6 +158,39 @@ func TestShadowRunnerMapsInputRequiredAndResumesRemoteTask(t *testing.T) {
 	}
 }
 
+func TestShadowRunnerCheckpointProjectsOnlyBoundedStatusMessageText(t *testing.T) {
+	t.Parallel()
+	runtime := newShadowRuntime(t)
+	longText := strings.Repeat("x", 5000)
+	remote := &shadowRemote{task: TaskSnapshot{
+		ID: "remote-1", ContextID: "context-1", State: "TASK_STATE_INPUT_REQUIRED",
+		StatusMessage: &MessageSnapshot{Parts: []ContentPart{
+			{Kind: ContentPartText, Text: "Which quarter?"},
+			{Kind: ContentPartData, Data: json.RawMessage(`{"secret":"opaque"}`)},
+			{Kind: ContentPartURL, URL: "https://private.example"},
+			{Kind: ContentPartText, Text: longText},
+		}},
+		Raw: json.RawMessage(`{"id":"remote-1","contextId":"context-1","status":{"state":"TASK_STATE_INPUT_REQUIRED"}}`),
+	}}
+	runner := newShadowRunner(t, runtime, remote)
+	started, err := runner.StartRun(t.Context(), shadowStartRequest("a2a-child-input-prompt"))
+	if err != nil || started.Run.Status != kernel.RunStatusWaitingInput || started.Checkpoint == nil {
+		t.Fatalf("started=%#v err=%v", started.Run, err)
+	}
+	var payload struct {
+		Prompt string `json:"prompt"`
+	}
+	if err = json.Unmarshal(started.Checkpoint.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(payload.Prompt, "Which quarter?\n") || len(payload.Prompt) != 4000 {
+		t.Fatalf("prompt length=%d prefix=%q", len(payload.Prompt), payload.Prompt[:min(len(payload.Prompt), 40)])
+	}
+	if strings.Contains(payload.Prompt, "opaque") || strings.Contains(payload.Prompt, "private.example") {
+		t.Fatalf("checkpoint prompt leaked non-text A2A content: %q", payload.Prompt)
+	}
+}
+
 func TestShadowRunnerRefreshesAuthRequiredRunAfterRemoteCompletion(t *testing.T) {
 	t.Parallel()
 	runtime := newShadowRuntime(t)

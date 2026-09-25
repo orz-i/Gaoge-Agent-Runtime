@@ -37,10 +37,16 @@ type TeamTurnRequest struct {
 	Join    handoff.Join
 }
 
-// GroupChatSpeakerSelection binds a host-owned visible participant to one frozen Role ID.
+// GroupChatSpeakerSelection binds a host-owned visible participant identity to
+// one frozen executable Role snapshot. RoleID is only the Harness config lookup
+// key; Author* is the visible product identity projected by Group Chat.
 type GroupChatSpeakerSelection struct {
-	ParticipantID string `json:"participantID"`
-	RoleID        string `json:"roleID"`
+	ParticipantID  string `json:"participantID"`
+	RoleID         string `json:"roleID"`
+	AuthorKind     string `json:"authorKind"`
+	AuthorID       string `json:"authorID"`
+	AuthorRevision string `json:"authorRevision"`
+	AuthorName     string `json:"authorName"`
 }
 
 // GroupChatTurnRequest starts directed Group Chat as the top-level capability.
@@ -249,7 +255,12 @@ func materializeGroupChatSpeakerConfigs(
 	for _, selection := range selections {
 		participantID := strings.TrimSpace(selection.ParticipantID)
 		roleID := strings.TrimSpace(selection.RoleID)
-		if participantID == "" || roleID == "" {
+		authorKind := strings.TrimSpace(selection.AuthorKind)
+		authorID := strings.TrimSpace(selection.AuthorID)
+		authorRevision := strings.TrimSpace(selection.AuthorRevision)
+		authorName := strings.TrimSpace(selection.AuthorName)
+		if participantID == "" || roleID == "" || authorKind == "" || authorID == "" ||
+			authorRevision == "" || authorName == "" {
 			return nil, nil, ErrInvalidRequest
 		}
 		if _, duplicate := seen[participantID]; duplicate {
@@ -265,9 +276,14 @@ func materializeGroupChatSpeakerConfigs(
 		if len(role.ModelOptions) != 0 {
 			modelOptions = append(json.RawMessage(nil), role.ModelOptions...)
 		}
+		memberID := strings.TrimSpace(role.MemberID)
+		if memberID == "" {
+			memberID = participantID
+		}
 		configs = append(configs, groupchat.SpeakerConfig{
 			ParticipantID: participantID,
-			RoleID:        role.ID, RoleRevision: role.Revision, RoleName: role.Name,
+			AuthorKind:    authorKind, AuthorID: authorID, AuthorRevision: authorRevision, AuthorName: authorName,
+			MemberID: memberID, MemberRevision: strings.TrimSpace(role.MemberRevision),
 			Instructions: roleInstructions(role), Model: modelName, ModelOptions: modelOptions,
 			ToolKeys: roleToolKeys(role), Limits: roleAgentLimits(config.Limits, role.Limits),
 		})

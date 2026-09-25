@@ -292,7 +292,7 @@ func selectorCandidates(state executionState) []SelectorCandidate {
 		}
 		participant := participants[participantID]
 		result = append(result, SelectorCandidate{
-			ID: participantID, Name: config.RoleName, Description: participant.Description,
+			ID: participantID, Name: config.AuthorName, Description: participant.Description,
 		})
 	}
 	return result
@@ -309,7 +309,7 @@ func selectorHistory(state executionState) []SelectorHistoryItem {
 			continue
 		}
 		result = append(result, SelectorHistoryItem{
-			SpeakerID: speaker.Turn.SpeakerID, SpeakerName: speaker.Turn.RoleName, Content: content,
+			SpeakerID: speaker.Turn.SpeakerID, SpeakerName: speaker.Turn.AuthorName, Content: content,
 		})
 	}
 	return result

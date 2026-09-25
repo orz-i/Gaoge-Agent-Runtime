@@ -391,8 +391,8 @@ func directedRequest() groupchat.StartRequest {
 			{ID: "participant-reviewer", Description: "Review evidence."},
 		},
 		SpeakerConfigs: []groupchat.SpeakerConfig{
-			{ParticipantID: "participant-researcher", RoleID: "17", RoleRevision: 3, RoleName: "Researcher"},
-			{ParticipantID: "participant-reviewer", RoleID: "23", RoleRevision: 5, RoleName: "Reviewer"},
+			{ParticipantID: "participant-researcher", AuthorKind: "agent_role", AuthorID: "17", AuthorRevision: "3", AuthorName: "Researcher", MemberID: "participant-researcher"},
+			{ParticipantID: "participant-reviewer", AuthorKind: "agent_role", AuthorID: "23", AuthorRevision: "5", AuthorName: "Reviewer", MemberID: "participant-reviewer"},
 		},
 		DirectedSpeakerIDs: []string{"participant-researcher", "participant-reviewer"},
 		MaxUtterances:      2,

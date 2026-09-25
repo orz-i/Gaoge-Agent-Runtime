@@ -118,6 +118,45 @@ func (plugin *Plugin) resolveChild(ctx context.Context, delegation handoff.Deleg
 
 // Cancel resolves the shadow's frozen binding and cancels the remote task.
 // A transport error or pending acknowledgement leaves the shadow retryable.
+// ResumeRun continues one durable remote input/auth wait using the frozen
+// target binding recorded by the shadow Run. expectedRevision prevents a
+// response for an older wait from resuming a newer remote state.
+func (plugin *Plugin) ResumeRun(
+	ctx context.Context,
+	runID string,
+	expectedRevision uint64,
+	text string,
+) (kernel.Snapshot, error) {
+	if plugin == nil || plugin.runtime == nil || strings.TrimSpace(runID) == "" || strings.TrimSpace(text) == "" {
+		return kernel.Snapshot{}, ErrInvalidPlugin
+	}
+	snapshot, err := plugin.runtime.Load(ctx, strings.TrimSpace(runID))
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if snapshot.Run.Kind != RunKind {
+		return kernel.Snapshot{}, ErrInvalidTarget
+	}
+	if expectedRevision == 0 || snapshot.Run.Revision != expectedRevision {
+		return kernel.Snapshot{}, kernel.ErrConflict
+	}
+	if snapshot.Run.Status != kernel.RunStatusWaitingInput {
+		return snapshot, ErrRemoteInputRequired
+	}
+	state, err := decodeTopologyState(snapshot.State)
+	if err != nil || strings.TrimSpace(state.TargetID) == "" || strings.TrimSpace(state.TargetRevision) == "" {
+		return kernel.Snapshot{}, errors.Join(ErrRemoteIdentityLost, err)
+	}
+	child, err := plugin.resolveChild(ctx, handoff.Delegation{
+		MemberID: TargetPrefix + state.TargetID, MemberRevision: state.TargetRevision,
+		ChildRunID: snapshot.Run.ID,
+	})
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return child.ResumeRun(ctx, snapshot.Run.ID, strings.TrimSpace(text))
+}
+
 func (plugin *Plugin) Cancel(
 	ctx context.Context,
 	runID string,

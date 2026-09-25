@@ -67,7 +67,7 @@ export type HarnessInteractionDTO = {
   updatedAt: string;
 };
 
-export type HarnessExecutionClass = "agent" | "team" | "plan_execute" | "workflow" | "application";
+export type HarnessExecutionClass = "agent" | "team" | "group_chat" | "plan_execute" | "workflow" | "application";
 export type HarnessInvocationStatus = "accepted" | RunStatus;
 
 export type HarnessCapabilityInvocationDTO = {

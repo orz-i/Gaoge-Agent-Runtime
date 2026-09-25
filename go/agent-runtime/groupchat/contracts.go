@@ -50,15 +50,18 @@ type Participant struct {
 // Harness from an authorized Role snapshot. It is execution data, not product
 // ownership of the Assistant Role definition.
 type SpeakerConfig struct {
-	ParticipantID string          `json:"participantID"`
-	RoleID        string          `json:"roleID"`
-	RoleRevision  uint64          `json:"roleRevision"`
-	RoleName      string          `json:"roleName"`
-	Instructions  string          `json:"instructions,omitempty"`
-	Model         string          `json:"model,omitempty"`
-	ModelOptions  json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys      []string        `json:"toolKeys,omitempty"`
-	Limits        agent.Limits    `json:"limits,omitempty"`
+	ParticipantID  string          `json:"participantID"`
+	AuthorKind     string          `json:"authorKind"`
+	AuthorID       string          `json:"authorID"`
+	AuthorRevision string          `json:"authorRevision"`
+	AuthorName     string          `json:"authorName"`
+	MemberID       string          `json:"memberID"`
+	MemberRevision string          `json:"memberRevision,omitempty"`
+	Instructions   string          `json:"instructions,omitempty"`
+	Model          string          `json:"model,omitempty"`
+	ModelOptions   json.RawMessage `json:"modelOptions,omitempty"`
+	ToolKeys       []string        `json:"toolKeys,omitempty"`
+	Limits         agent.Limits    `json:"limits,omitempty"`
 }
 
 // SpeakerTurnStatus is the durable lifecycle of one visible speaker execution.
@@ -74,29 +77,31 @@ const (
 
 // SpeakerTurn binds one ordered visible utterance slot to its stable Child Run.
 type SpeakerTurn struct {
-	Ordinal      int               `json:"ordinal"`
-	SpeakerID    string            `json:"speakerID"`
-	RoleID       string            `json:"roleID"`
-	RoleRevision uint64            `json:"roleRevision"`
-	RoleName     string            `json:"roleName"`
-	ChildRunID   string            `json:"childRunID,omitempty"`
-	Status       SpeakerTurnStatus `json:"status"`
-	Result       json.RawMessage   `json:"result,omitempty"`
-	ErrorCode    string            `json:"errorCode,omitempty"`
+	Ordinal        int               `json:"ordinal"`
+	SpeakerID      string            `json:"speakerID"`
+	AuthorKind     string            `json:"authorKind"`
+	AuthorID       string            `json:"authorID"`
+	AuthorRevision string            `json:"authorRevision"`
+	AuthorName     string            `json:"authorName"`
+	ChildRunID     string            `json:"childRunID,omitempty"`
+	Status         SpeakerTurnStatus `json:"status"`
+	Result         json.RawMessage   `json:"result,omitempty"`
+	ErrorCode      string            `json:"errorCode,omitempty"`
 }
 
 // Utterance is the Runtime-safe terminal projection for one visible speaker.
 // Conversation maps it into its own Message/author facts.
 type Utterance struct {
-	Ordinal      int               `json:"ordinal"`
-	SpeakerID    string            `json:"speakerID"`
-	RoleID       string            `json:"roleID"`
-	RoleRevision uint64            `json:"roleRevision"`
-	RoleName     string            `json:"roleName"`
-	RunID        string            `json:"runID"`
-	Status       SpeakerTurnStatus `json:"status"`
-	Content      string            `json:"content,omitempty"`
-	ErrorCode    string            `json:"errorCode,omitempty"`
+	Ordinal        int               `json:"ordinal"`
+	SpeakerID      string            `json:"speakerID"`
+	AuthorKind     string            `json:"authorKind"`
+	AuthorID       string            `json:"authorID"`
+	AuthorRevision string            `json:"authorRevision"`
+	AuthorName     string            `json:"authorName"`
+	RunID          string            `json:"runID"`
+	Status         SpeakerTurnStatus `json:"status"`
+	Content        string            `json:"content,omitempty"`
+	ErrorCode      string            `json:"errorCode,omitempty"`
 }
 
 // Result is the terminal public Group Chat output.
