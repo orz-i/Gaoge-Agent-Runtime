@@ -59,6 +59,72 @@ func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemorySto
 	return store, shared, snapshot
 }
 
+func TestSharedBudgetBindsGroupChatSelectorModelCallToHarnessTurn(t *testing.T) {
+	client := &ledgerTestModel{}
+	store := harness.NewMemoryStore()
+	now := fixedClock{}.Now()
+	config, err := harness.SealConfigSnapshot("turn-groupchat-budget", harness.ConfigSnapshot{
+		Environment: harness.VersionRef{ID: "environment", Revision: 1},
+		Model:       "selector-model",
+		SharedBudget: &budget.Limits{
+			MaxTotalTokens: 1000, MaxLLMCalls: 4, MaxConcurrentRuns: 2, MaxChildRuns: 4,
+		},
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.PutConfigSnapshot(t.Context(), config); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.CreateTurn(t.Context(), harness.Turn{
+		ID: config.TurnID, SessionID: "session-groupchat-budget",
+		HostTurn:         harness.HostRef{Kind: "conversation_turn", ID: "host-groupchat-budget"},
+		ConfigSnapshotID: config.ID, Status: harness.TurnRunning, Revision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.CreateInvocation(t.Context(), harness.Invocation{
+		ID: "invocation-groupchat-budget", TurnID: config.TurnID,
+		CapabilityKey: harness.CapabilityGroupChat, DefinitionVersion: harness.RuntimeCapabilityVersion,
+		ExecutionClass: harness.ExecutionGroupChat, ExecutionRefID: "groupchat-run-budget",
+		Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{
+		Store: store, Clock: fixedClock{}, Meter: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := model.Request{
+		RunID: "groupchat-run-budget", InvocationID: "selectorinv-budget-1",
+		Model: "selector-model", Messages: []model.Message{{Role: model.RoleUser, Content: "select"}},
+	}
+	response, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		if bounded.MaxOutputTokens <= 0 {
+			t.Fatalf("selector call was not token-bounded: %#v", bounded)
+		}
+		return model.Response{
+			Content: `{"speakerID":"participant-reviewer"}`,
+			Usage:   &model.Usage{InputTokens: 20, OutputTokens: 10},
+		}, nil
+	})
+	if err != nil || response.Content == "" {
+		t.Fatalf("selector budget response=%#v err=%v", response, err)
+	}
+	ledger, err := store.LoadBudget(t.Context(), config.TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := ledger.View("groupchat-run-budget")
+	if view.Usage.LLMCalls != 1 || view.Usage.TotalTokens != 30 {
+		t.Fatalf("selector usage not charged to Harness Turn: %#v", view)
+	}
+}
+
 func TestSharedBudgetUnknownReceiptSurvivesRestartWithoutRedispatch(t *testing.T) {
 	client := &ledgerTestModel{missing: true}
 	store, _, snapshot := newLedgerHarness(t, client)

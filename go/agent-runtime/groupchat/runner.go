@@ -27,6 +27,7 @@ type Delegator interface {
 type Dependencies struct {
 	Runtime         *kernel.Runtime
 	Handoffs        Delegator
+	Selector        Selector
 	Relations       runrelation.Recorder
 	MaxParticipants int
 	MaxUtterances   int
@@ -36,6 +37,7 @@ type Dependencies struct {
 type Runner struct {
 	runtime         *kernel.Runtime
 	handoffs        Delegator
+	selector        Selector
 	relations       runrelation.Recorder
 	maxParticipants int
 	maxUtterances   int
@@ -47,14 +49,19 @@ type speakerExecution struct {
 }
 
 type executionState struct {
-	Goal               string             `json:"goal"`
-	SpeakerPolicy      SpeakerPolicy      `json:"speakerPolicy"`
-	Participants       []Participant      `json:"participants"`
-	SpeakerConfigs     []SpeakerConfig    `json:"speakerConfigs"`
-	DirectedSpeakerIDs []string           `json:"directedSpeakerIDs"`
-	Speakers           []speakerExecution `json:"speakers"`
-	NextSpeakerIndex   int                `json:"nextSpeakerIndex"`
-	TerminationReason  TerminationReason  `json:"terminationReason,omitempty"`
+	Goal                 string              `json:"goal"`
+	SpeakerPolicy        SpeakerPolicy       `json:"speakerPolicy"`
+	Participants         []Participant       `json:"participants"`
+	SpeakerConfigs       []SpeakerConfig     `json:"speakerConfigs"`
+	DirectedSpeakerIDs   []string            `json:"directedSpeakerIDs,omitempty"`
+	CandidateSpeakerIDs  []string            `json:"candidateSpeakerIDs,omitempty"`
+	SelectorModel        string              `json:"selectorModel,omitempty"`
+	SelectorModelOptions json.RawMessage     `json:"selectorModelOptions,omitempty"`
+	SelectorInvocation   *SelectorInvocation `json:"selectorInvocation,omitempty"`
+	MaxUtterances        int                 `json:"maxUtterances"`
+	Speakers             []speakerExecution  `json:"speakers"`
+	NextSpeakerIndex     int                 `json:"nextSpeakerIndex"`
+	TerminationReason    TerminationReason   `json:"terminationReason,omitempty"`
 }
 
 func groupChatWakeupAt(now time.Time) *time.Time {
@@ -74,7 +81,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		dependencies.MaxUtterances = MaxUtteranceCount
 	}
 	return &Runner{
-		runtime: dependencies.Runtime, handoffs: dependencies.Handoffs, relations: dependencies.Relations,
+		runtime: dependencies.Runtime, handoffs: dependencies.Handoffs, selector: dependencies.Selector, relations: dependencies.Relations,
 		maxParticipants: dependencies.MaxParticipants, maxUtterances: dependencies.MaxUtterances,
 	}, nil
 }
@@ -108,7 +115,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
 		Events: []kernel.EventDraft{{
-			Type: "groupchat.started", Message: "Directed Group Chat materialized", Wakeup: true,
+			Type: "groupchat.started", Message: "Group Chat materialized", Wakeup: true,
 			WakeupAt: groupChatWakeupAt(runner.runtime.Now()),
 		}},
 	})
@@ -144,56 +151,72 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		turns = append(turns, cloneSpeakerTurn(speaker.Turn))
 	}
 	return View{
-		SpeakerPolicy:      state.SpeakerPolicy,
-		Participants:       cloneParticipants(state.Participants),
-		DirectedSpeakerIDs: append([]string(nil), state.DirectedSpeakerIDs...),
-		SpeakerTurns:       turns,
-		NextSpeakerIndex:   state.NextSpeakerIndex,
-		TerminationReason:  state.TerminationReason,
+		SpeakerPolicy:       state.SpeakerPolicy,
+		Participants:        cloneParticipants(state.Participants),
+		DirectedSpeakerIDs:  append([]string(nil), state.DirectedSpeakerIDs...),
+		CandidateSpeakerIDs: append([]string(nil), state.CandidateSpeakerIDs...),
+		SelectorInvocation:  cloneSelectorInvocation(state.SelectorInvocation),
+		SpeakerTurns:        turns,
+		NextSpeakerIndex:    state.NextSpeakerIndex,
+		TerminationReason:   state.TerminationReason,
 	}, nil
 }
 
 func (runner *Runner) materializeState(request StartRequest) (executionState, error) {
-	configByParticipant := make(map[string]SpeakerConfig, len(request.SpeakerConfigs))
-	for _, config := range request.SpeakerConfigs {
-		configByParticipant[config.ParticipantID] = cloneSpeakerConfig(config)
+	state := executionState{
+		Goal:                 strings.TrimSpace(request.Goal),
+		SpeakerPolicy:        request.SpeakerPolicy,
+		Participants:         cloneParticipants(request.Participants),
+		SpeakerConfigs:       cloneSpeakerConfigs(request.SpeakerConfigs),
+		DirectedSpeakerIDs:   append([]string(nil), request.DirectedSpeakerIDs...),
+		CandidateSpeakerIDs:  append([]string(nil), request.CandidateSpeakerIDs...),
+		SelectorModel:        strings.TrimSpace(request.SelectorModel),
+		SelectorModelOptions: append(json.RawMessage(nil), request.SelectorModelOptions...),
+		MaxUtterances:        request.MaxUtterances,
+		Speakers:             []speakerExecution{},
 	}
-	speakers := make([]speakerExecution, 0, len(request.DirectedSpeakerIDs))
+	if request.SpeakerPolicy != SpeakerDirected {
+		return state, nil
+	}
+	configByParticipant := speakerConfigByParticipant(request.SpeakerConfigs)
 	for ordinal, participantID := range request.DirectedSpeakerIDs {
-		config := configByParticipant[participantID]
-		delegationID, err := runner.runtime.NewID("ghd")
+		speaker, err := runner.newSpeakerExecution(configByParticipant[participantID], participantID, ordinal)
 		if err != nil {
 			return executionState{}, err
 		}
-		childRunID, err := runner.runtime.NewID("run")
-		if err != nil {
-			return executionState{}, err
-		}
-		delegation := handoff.Delegation{
-			ID: delegationID, MemberID: participantID,
-			RoleID: config.RoleID, RoleRevision: config.RoleRevision, RoleName: config.RoleName,
-			Instructions: config.Instructions, Limits: config.Limits,
-			ChildRunID: childRunID, Model: config.Model,
-			ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-			ToolKeys:     append([]string(nil), config.ToolKeys...),
-			Status:       handoff.StatusQueued,
-		}
-		speakers = append(speakers, speakerExecution{
-			Turn: SpeakerTurn{
-				Ordinal: ordinal, SpeakerID: participantID,
-				RoleID: config.RoleID, RoleRevision: config.RoleRevision, RoleName: config.RoleName,
-				ChildRunID: childRunID, Status: SpeakerTurnQueued,
-			},
-			Delegation: delegation,
-		})
+		state.Speakers = append(state.Speakers, speaker)
 	}
-	return executionState{
-		Goal:               strings.TrimSpace(request.Goal),
-		SpeakerPolicy:      request.SpeakerPolicy,
-		Participants:       cloneParticipants(request.Participants),
-		SpeakerConfigs:     cloneSpeakerConfigs(request.SpeakerConfigs),
-		DirectedSpeakerIDs: append([]string(nil), request.DirectedSpeakerIDs...),
-		Speakers:           speakers,
+	return state, nil
+}
+
+func (runner *Runner) newSpeakerExecution(
+	config SpeakerConfig,
+	participantID string,
+	ordinal int,
+) (speakerExecution, error) {
+	delegationID, err := runner.runtime.NewID("ghd")
+	if err != nil {
+		return speakerExecution{}, err
+	}
+	childRunID, err := runner.runtime.NewID("run")
+	if err != nil {
+		return speakerExecution{}, err
+	}
+	delegation := handoff.Delegation{
+		ID: delegationID, MemberID: participantID,
+		RoleID: config.RoleID, RoleRevision: config.RoleRevision, RoleName: config.RoleName,
+		Instructions: config.Instructions, Limits: config.Limits,
+		ChildRunID: childRunID, Model: config.Model,
+		ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+		ToolKeys:     append([]string(nil), config.ToolKeys...), Status: handoff.StatusQueued,
+	}
+	return speakerExecution{
+		Turn: SpeakerTurn{
+			Ordinal: ordinal, SpeakerID: participantID,
+			RoleID: config.RoleID, RoleRevision: config.RoleRevision, RoleName: config.RoleName,
+			ChildRunID: childRunID, Status: SpeakerTurnQueued,
+		},
+		Delegation: delegation,
 	}, nil
 }
 
@@ -202,35 +225,66 @@ func (runner *Runner) execute(ctx context.Context, snapshot kernel.Snapshot) (ke
 	if err != nil {
 		return runner.fail(ctx, snapshot, executionState{}, "groupchat.state_invalid", err)
 	}
+	switch state.SpeakerPolicy {
+	case SpeakerDirected:
+		return runner.executeDirected(ctx, snapshot, state)
+	case SpeakerSelector:
+		return runner.executeSelector(ctx, snapshot, state)
+	default:
+		return runner.fail(ctx, snapshot, state, "groupchat.policy_invalid", ErrInvalidRequest)
+	}
+}
+
+func (runner *Runner) executeDirected(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state executionState,
+) (kernel.Snapshot, error) {
 	for state.NextSpeakerIndex < len(state.Speakers) {
-		index := state.NextSpeakerIndex
-		current := &state.Speakers[index]
-		if err = runner.ensureSpeakerRelation(ctx, snapshot, *current); err != nil {
-			return runner.fail(ctx, snapshot, state, "groupchat.relation_failed", err)
+		next, nextState, err := runner.executeCurrentSpeaker(ctx, snapshot, state)
+		if err != nil {
+			return next, err
 		}
-		current.Delegation.Goal = speakerGoal(state, index)
-		delegation, delegateErr := runner.handoffs.StartOrLoad(ctx, snapshot, current.Delegation)
-		if delegation.ID != "" {
-			current.Delegation = delegation
-			current.Turn = projectSpeakerTurn(current.Turn, delegation)
-		}
-		switch {
-		case errors.Is(delegateErr, handoff.ErrChildPending):
-			pending, persistErr := runner.persistRunning(ctx, snapshot, state)
-			return pending, errors.Join(ErrSpeakerPending, persistErr)
-		case errors.Is(delegateErr, handoff.ErrChildFailed):
-			return runner.fail(ctx, snapshot, state, "groupchat.speaker_failed", ErrGroupChatFailed)
-		case delegateErr != nil:
-			return runner.fail(ctx, snapshot, state, "groupchat.speaker_failed", delegateErr)
-		case delegation.Status == handoff.StatusCompleted:
-			state.NextSpeakerIndex++
-		default:
-			pending, persistErr := runner.persistRunning(ctx, snapshot, state)
-			return pending, errors.Join(ErrSpeakerPending, persistErr)
-		}
+		snapshot, state = next, nextState
 	}
 	state.TerminationReason = TerminationCompleted
 	return runner.complete(ctx, snapshot, state)
+}
+
+func (runner *Runner) executeCurrentSpeaker(
+	ctx context.Context,
+	snapshot kernel.Snapshot,
+	state executionState,
+) (kernel.Snapshot, executionState, error) {
+	index := state.NextSpeakerIndex
+	current := &state.Speakers[index]
+	if err := runner.ensureSpeakerRelation(ctx, snapshot, *current); err != nil {
+		failed, failErr := runner.fail(ctx, snapshot, state, "groupchat.relation_failed", err)
+		return failed, state, failErr
+	}
+	current.Delegation.Goal = speakerGoal(state, index)
+	delegation, delegateErr := runner.handoffs.StartOrLoad(ctx, snapshot, current.Delegation)
+	if delegation.ID != "" {
+		current.Delegation = delegation
+		current.Turn = projectSpeakerTurn(current.Turn, delegation)
+	}
+	switch {
+	case errors.Is(delegateErr, handoff.ErrChildPending):
+		pending, persistErr := runner.persistRunning(ctx, snapshot, state)
+		return pending, state, errors.Join(ErrSpeakerPending, persistErr)
+	case errors.Is(delegateErr, handoff.ErrChildFailed):
+		failed, failErr := runner.fail(ctx, snapshot, state, "groupchat.speaker_failed", ErrGroupChatFailed)
+		return failed, state, failErr
+	case delegateErr != nil:
+		failed, failErr := runner.fail(ctx, snapshot, state, "groupchat.speaker_failed", delegateErr)
+		return failed, state, failErr
+	case delegation.Status == handoff.StatusCompleted:
+		state.NextSpeakerIndex++
+		return snapshot, state, nil
+	default:
+		pending, persistErr := runner.persistRunning(ctx, snapshot, state)
+		return pending, state, errors.Join(ErrSpeakerPending, persistErr)
+	}
 }
 
 func (runner *Runner) ensureSpeakerRelation(
@@ -261,7 +315,7 @@ func (runner *Runner) persistRunning(
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "groupchat.progressed", Message: "Directed Group Chat progressed"}},
+		Events: []kernel.EventDraft{{Type: "groupchat.progressed", Message: "Group Chat progressed"}},
 	})
 }
 
@@ -281,7 +335,7 @@ func (runner *Runner) complete(
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encodedState,
 		Result: &kernel.Result{ContentType: "application/json", Content: result},
-		Events: []kernel.EventDraft{{Type: "groupchat.completed", Message: "Directed Group Chat completed"}},
+		Events: []kernel.EventDraft{{Type: "groupchat.completed", Message: "Group Chat completed"}},
 	})
 }
 
@@ -400,23 +454,24 @@ func projectSpeakerTurn(turn SpeakerTurn, delegation handoff.Delegation) Speaker
 }
 
 func validSpeakerConfigs(request StartRequest, maxParticipants, maxUtterances int) bool {
-	if len(request.Participants) > maxParticipants || len(request.DirectedSpeakerIDs) > maxUtterances {
+	if len(request.Participants) > maxParticipants || request.MaxUtterances > maxUtterances {
 		return false
 	}
-	configs := make(map[string]SpeakerConfig, len(request.SpeakerConfigs))
-	for _, config := range request.SpeakerConfigs {
-		config.ParticipantID = strings.TrimSpace(config.ParticipantID)
-		config.RoleID = strings.TrimSpace(config.RoleID)
-		config.RoleName = strings.TrimSpace(config.RoleName)
-		if config.ParticipantID == "" || config.RoleID == "" || config.RoleRevision == 0 || config.RoleName == "" {
-			return false
-		}
-		if _, duplicate := configs[config.ParticipantID]; duplicate {
-			return false
-		}
-		configs[config.ParticipantID] = config
+	configs := speakerConfigByParticipant(request.SpeakerConfigs)
+	if len(configs) != len(request.SpeakerConfigs) {
+		return false
 	}
-	for _, id := range request.DirectedSpeakerIDs {
+	for _, config := range request.SpeakerConfigs {
+		if strings.TrimSpace(config.ParticipantID) == "" || strings.TrimSpace(config.RoleID) == "" ||
+			config.RoleRevision == 0 || strings.TrimSpace(config.RoleName) == "" {
+			return false
+		}
+	}
+	ids := request.DirectedSpeakerIDs
+	if request.SpeakerPolicy == SpeakerSelector {
+		ids = request.CandidateSpeakerIDs
+	}
+	for _, id := range ids {
 		if _, found := configs[id]; !found {
 			return false
 		}
@@ -443,6 +498,11 @@ func normalizeStartRequest(request StartRequest) StartRequest {
 	for index := range request.DirectedSpeakerIDs {
 		request.DirectedSpeakerIDs[index] = strings.TrimSpace(request.DirectedSpeakerIDs[index])
 	}
+	for index := range request.CandidateSpeakerIDs {
+		request.CandidateSpeakerIDs[index] = strings.TrimSpace(request.CandidateSpeakerIDs[index])
+	}
+	request.SelectorModel = strings.TrimSpace(request.SelectorModel)
+	request.SelectorModelOptions = append(json.RawMessage(nil), request.SelectorModelOptions...)
 	return request
 }
 
@@ -458,6 +518,9 @@ func decodeState(encoded json.RawMessage) (executionState, error) {
 	var state executionState
 	if err := json.Unmarshal(encoded, &state); err != nil {
 		return executionState{}, errors.Join(ErrInvalidRequest, err)
+	}
+	if state.SelectorInvocation != nil && !validSelectorInvocation(state.SelectorInvocation) {
+		return executionState{}, ErrInvalidRequest
 	}
 	return state, nil
 }
@@ -483,6 +546,34 @@ func cloneSpeakerConfig(value SpeakerConfig) SpeakerConfig {
 func cloneSpeakerTurn(value SpeakerTurn) SpeakerTurn {
 	value.Result = append(json.RawMessage(nil), value.Result...)
 	return value
+}
+
+func speakerConfigByParticipant(values []SpeakerConfig) map[string]SpeakerConfig {
+	result := make(map[string]SpeakerConfig, len(values))
+	for _, value := range values {
+		id := strings.TrimSpace(value.ParticipantID)
+		if id == "" {
+			continue
+		}
+		if _, duplicate := result[id]; duplicate {
+			return map[string]SpeakerConfig{}
+		}
+		result[id] = cloneSpeakerConfig(value)
+	}
+	return result
+}
+
+func speakerConfigForID(values []SpeakerConfig, participantID string) (SpeakerConfig, bool) {
+	config, ok := speakerConfigByParticipant(values)[strings.TrimSpace(participantID)]
+	return config, ok
+}
+
+func participantByID(values []Participant) map[string]Participant {
+	result := make(map[string]Participant, len(values))
+	for _, value := range values {
+		result[strings.TrimSpace(value.ID)] = value
+	}
+	return result
 }
 
 func normalizedStrings(values []string) []string {
