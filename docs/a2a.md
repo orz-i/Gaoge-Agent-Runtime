@@ -15,6 +15,7 @@ product host
   ├─ finite child-route resolver
   │    ├─ local member -> local child runner
   │    └─ a2a:<public-id> -> A2A plugin -> durable shadow runner
+  ├─ optional Group Chat participant mapping (visible identity remains product-owned)
   └─ optional A2A server handler mounted on a host-owned router
 
 agent-runtime-a2a plugin
@@ -38,6 +39,12 @@ execution freezes the binding revision into the shadow Run. Recovery requests
 that exact revision, so an Agent Card update cannot silently change an existing
 durable run.
 
+A host may use the same `a2a:<public-id>` route for a visible Group Chat speaker.
+The Group Chat feature remains protocol-neutral: it receives a frozen execution
+member identity plus a separate visible author identity and does not import A2A
+protocol types. Conversation membership, user-facing author snapshots and remote
+allowlists remain product-owned.
+
 ## Beta.2 support matrix
 
 | Surface | Support | Notes |
@@ -52,7 +59,7 @@ durable run.
 | Get, Cancel and List Tasks | Supported | Owner/tenant scoped when hosted |
 | Subscribe to Task | Supported | Durable replay followed by bounded live SSE |
 | Text, data, file bytes and file URL parts | Supported | Size and count limits apply |
-| Input-required and auth-required | Supported | Persisted as resumable shadow waits |
+| Input-required and auth-required | Supported | Persisted as resumable shadow waits; `Plugin.ResumeRun` restores the frozen binding before sending user input |
 | Push notifications | Not in Beta.2 | Capability is not advertised |
 | Extended Agent Card | Not in Beta.2 | Capability is not advertised |
 
@@ -90,6 +97,13 @@ request time without changing a frozen public discovery revision.
   terminal tasks fail before an SSE success response is opened.
 - Remote errors persisted by the shadow runner are bounded generic summaries;
   transport bodies and secrets are not durable state.
+- For `input-required` / `auth-required`, the shadow checkpoint may retain a
+  bounded text-only prompt projected from the remote status Message. Data, raw
+  bytes, URLs and other rich parts are not promoted into that prompt.
+- `Plugin.ResumeRun(runID, expectedRevision, text)` resumes only a waiting A2A
+  shadow at the expected durable revision and resolves the immutable target
+  binding from the shadow state; hosts must not parse private shadow state or
+  substitute a newer Agent Card revision.
 
 ## Upgrade from Beta.1
 

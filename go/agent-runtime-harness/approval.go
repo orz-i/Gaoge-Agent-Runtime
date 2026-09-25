@@ -157,7 +157,8 @@ type approvalDecisionItemPayload struct {
 }
 
 func approvalRequestFromSnapshot(snapshot kernel.Snapshot) (approvalRequestItemPayload, bool, error) {
-	if snapshot.Run.Kind == workflow.RunKind || snapshot.Run.Status != kernel.RunStatusWaitingInput || snapshot.Checkpoint == nil {
+	if snapshot.Run.Kind == workflow.RunKind || snapshot.Run.Status != kernel.RunStatusWaitingInput ||
+		!interaction.IsApprovalCheckpoint(snapshot.Checkpoint) {
 		return approvalRequestItemPayload{}, false, nil
 	}
 	request, err := interaction.Request(snapshot.Checkpoint)

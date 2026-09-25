@@ -64,6 +64,7 @@ type shadowState struct {
 	RemoteTaskID     string `json:"remoteTaskID,omitempty"`
 	RemoteContextID  string `json:"remoteContextID,omitempty"`
 	RemoteState      string `json:"remoteState,omitempty"`
+	RemotePrompt     string `json:"remotePrompt,omitempty"`
 }
 
 // NewShadowRunner creates one A2A ChildRunner bound to one immutable discovery.
@@ -248,6 +249,10 @@ func (runner *ShadowRunner) applyTask(
 	state.RemoteTaskID = remote.ID
 	state.RemoteContextID = remote.ContextID
 	state.RemoteState = remote.State
+	state.RemotePrompt = ""
+	if remote.State == "TASK_STATE_INPUT_REQUIRED" || remote.State == "TASK_STATE_AUTH_REQUIRED" {
+		state.RemotePrompt = remoteStatusPrompt(remote.StatusMessage)
+	}
 	switch remote.State {
 	case "TASK_STATE_COMPLETED":
 		return runner.complete(ctx, snapshot, state, remote.Raw)
@@ -345,7 +350,7 @@ func (runner *ShadowRunner) resumeSendFailed(
 func (runner *ShadowRunner) remoteCheckpoint(runID string, state shadowState) (*kernel.Checkpoint, error) {
 	payload, err := json.Marshal(map[string]string{
 		"remoteTaskID": state.RemoteTaskID, "remoteContextID": state.RemoteContextID,
-		"remoteState": state.RemoteState,
+		"remoteState": state.RemoteState, "prompt": state.RemotePrompt,
 	})
 	if err != nil {
 		return nil, err
@@ -358,6 +363,34 @@ func (runner *ShadowRunner) remoteCheckpoint(runID string, state shadowState) (*
 		ID: runID + ":remote-input", Kind: kind, Status: kernel.CheckpointPending,
 		Payload: payload, CreatedAt: runner.runtime.Now(),
 	}, nil
+}
+
+func remoteStatusPrompt(message *MessageSnapshot) string {
+	if message == nil {
+		return ""
+	}
+	var builder strings.Builder
+	for _, part := range message.Parts {
+		if part.Kind != ContentPartText {
+			continue
+		}
+		text := strings.TrimSpace(part.Text)
+		if text == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(text)
+		if builder.Len() >= 4000 {
+			break
+		}
+	}
+	result := strings.TrimSpace(builder.String())
+	if len(result) > 4000 {
+		result = result[:4000]
+	}
+	return result
 }
 
 func (runner *ShadowRunner) keepRunning(ctx context.Context, snapshot kernel.Snapshot, state shadowState) (kernel.Snapshot, error) {

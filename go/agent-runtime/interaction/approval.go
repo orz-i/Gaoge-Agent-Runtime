@@ -109,6 +109,12 @@ func (service *Approvals) Resolve(checkpoint *kernel.Checkpoint, response Approv
 	return &resolved, nil
 }
 
+// IsApprovalCheckpoint reports whether one Kernel checkpoint belongs to the
+// tool approval feature. Other waiting-input features must not be decoded as approvals.
+func IsApprovalCheckpoint(checkpoint *kernel.Checkpoint) bool {
+	return checkpoint != nil && checkpoint.Kind == toolApprovalCheckpointKind
+}
+
 // Request decodes the feature-owned approval payload.
 func Request(checkpoint *kernel.Checkpoint) (ApprovalRequest, error) {
 	if checkpoint == nil || checkpoint.Kind != toolApprovalCheckpointKind || !json.Valid(checkpoint.Payload) {
