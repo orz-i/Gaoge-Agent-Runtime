@@ -54,6 +54,12 @@ type hostedToolStreamState struct {
 	Closed    bool
 }
 
+type hostedToolStreamEventPayload struct {
+	ID      string `json:"id,omitempty"`
+	ToolKey string `json:"toolKey"`
+	Status  string `json:"status,omitempty"`
+}
+
 type hostedToolStreamTracker struct {
 	turnID string
 	states []hostedToolStreamState
@@ -86,7 +92,9 @@ func (middleware *ModelTimelineMiddleware) recordHostedToolStreamEvent(
 		}
 	}
 	if middleware.feed != nil {
-		raw, err := json.Marshal(call)
+		raw, err := json.Marshal(hostedToolStreamEventPayload{
+			ID: strings.TrimSpace(call.ID), ToolKey: strings.TrimSpace(call.ToolKey), Status: strings.TrimSpace(call.Status),
+		})
 		if err != nil {
 			return err
 		}
