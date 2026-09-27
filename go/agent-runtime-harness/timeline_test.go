@@ -272,6 +272,18 @@ func advanceHostedToolFeedAssertion(
 		if startedID == "" || event.ItemID != startedID || !strings.Contains(string(event.Data), hostedTimelineTool) {
 			t.Fatalf("unstable hosted Tool delta: started=%q event=%#v", startedID, event)
 		}
+		var preview map[string]interface{}
+		if err := json.Unmarshal(event.Data, &preview); err != nil {
+			t.Fatalf("hosted Tool delta is not valid JSON: %v data=%s", err, event.Data)
+		}
+		for _, forbidden := range []string{"input", "output", "error"} {
+			if _, exists := preview[forbidden]; exists {
+				t.Fatalf("hosted Tool delta leaked %q body: %s", forbidden, event.Data)
+			}
+		}
+		if strings.Contains(string(event.Data), "sensitive hosted input") {
+			t.Fatalf("hosted Tool delta leaked provider input: %s", event.Data)
+		}
 		return startedID, deltaCount + 1, completed
 	case harness.EventItemCompleted:
 		if startedID == "" || event.ItemID != startedID {
