@@ -237,9 +237,17 @@ func TestTopLevelFeatureStartFailureWithoutRuntimeRunRemainsLoadable(t *testing.
 	if !errors.Is(startErr, errRejectedTopLevelWorkflow) || failed.Turn.Status != harness.TurnFailed {
 		t.Fatalf("failed start snapshot=%#v err=%v", failed, startErr)
 	}
+	if failed.Turn.ErrorDetail != errRejectedTopLevelWorkflow.Error() || len(failed.Invocations) != 1 ||
+		failed.Invocations[0].ErrorDetail != errRejectedTopLevelWorkflow.Error() {
+		t.Fatalf("start failure lost its cause: %#v", failed)
+	}
 	reloaded, err := runner.Load(t.Context(), failed.Turn.ID)
 	if err != nil || reloaded.Turn.Status != harness.TurnFailed {
 		t.Fatalf("reload failed start snapshot=%#v err=%v", reloaded, err)
+	}
+	if reloaded.Turn.ErrorDetail != errRejectedTopLevelWorkflow.Error() ||
+		reloaded.Invocations[0].ErrorDetail != errRejectedTopLevelWorkflow.Error() {
+		t.Fatalf("reloaded failure lost its cause: %#v", reloaded)
 	}
 }
 
