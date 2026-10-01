@@ -1208,6 +1208,8 @@ func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Tu
 	invocation.ErrorDetail = "capability execution did not start"
 	if cause == nil {
 		invocation.ErrorDetail = "capability returned no execution identity"
+	} else {
+		invocation.ErrorDetail = cause.Error()
 	}
 	invocation.UpdatedAt = runner.clock.Now().UTC()
 	if updatedInvocation, err := runner.store.UpdateInvocation(ctx, invocation, invocation.Revision); err == nil {
@@ -1223,6 +1225,8 @@ func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Tu
 	turn.ErrorDetail = "top-level capability execution did not start"
 	if cause == nil {
 		turn.ErrorDetail = "top-level capability returned no execution identity"
+	} else {
+		turn.ErrorDetail = cause.Error()
 	}
 	turn.UpdatedAt = runner.clock.Now().UTC()
 	updated, err := runner.store.UpdateTurn(ctx, turn, turn.Revision)

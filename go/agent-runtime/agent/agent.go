@@ -971,14 +971,14 @@ func (runner *Runner) resolveSelectedTool(
 		}
 	}
 	if runner.hostedTools == nil {
-		return nil, nil, tools.ErrToolNotFound
+		return nil, nil, fmt.Errorf("%w: %s", tools.ErrToolNotFound, key)
 	}
 	resolved, ok, err := runner.hostedTools.Resolve(ctx, key, strings.TrimSpace(modelName))
 	if err != nil {
 		return nil, nil, err
 	}
 	if !ok || strings.TrimSpace(resolved.Key) != key {
-		return nil, nil, tools.ErrToolNotFound
+		return nil, nil, fmt.Errorf("%w: %s", tools.ErrToolNotFound, key)
 	}
 	resolved.Target = cloneRawJSON(resolved.Target)
 	return nil, &resolved, nil
