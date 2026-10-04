@@ -3,7 +3,12 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
-## Unreleased
+## 0.1.0-beta.10
+
+- Add durable Group Chat directed, selector, and visible-speaker handoff routing, including frozen A2A speaker bindings and remote wait resumption.
+- Unify routed role delegation policy and add manual subtask spawning under the frozen role, depth, and shared-budget boundaries.
+- Redact hosted-tool stream feed bodies to lifecycle identity/status metadata.
+- Preserve top-level capability startup failure causes in failed Turn/Invocation state across reload; include the tool key when hosted-tool resolution fails.
 
 - Add explicit Go consumer signatures for all eight modules, host Store/model/tool/worker ports, and a standalone Agent/HTTP composition check.
 - Share reviewed JSON fixtures between Go HTTP serialization, OpenAPI validation and the packed TypeScript consumer; check cancellation, errors and terminal SSE consumption through the published ESM entrypoint.
@@ -11,7 +16,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 - Correct PostgreSQL construction examples and document version alignment, migration ownership, CAS/retry handling and contract review requirements.
 - Verify current-version PostgreSQL migrations can be reapplied without losing the populated Kernel aggregate/journal/outbox or Harness Context checkpoint ownership.
 
-Upgrade note: no storage migration or Go constructor change is introduced here.
+Upgrade note: update all modules and the TypeScript archive together. See
+[beta.10 upgrade notes](docs/releases/v0.1.0-beta.10.md) for Group Chat composition,
+new persisted execution data, feed redaction, and error behavior. No new SQL
+migration or change to existing Go constructor signatures is introduced.
 Consumers that assumed `RuntimeKind` was a closed four-value union must handle
 other feature kinds already accepted by Kernel. Checkpoint/Result schemas now
 describe their existing emitted fields. Beta version alignment and forward-only
