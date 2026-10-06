@@ -54,10 +54,10 @@ security: go-vuln
 	pnpm audit --audit-level high
 
 eval:
-	cd go/agent-runtime && go test ./evaluation -run '^TestRuntimeScenarioCorpus$$' -count=1 -v
+	cd go/agent-runtime && go test ./evaluation -run '^TestRuntime.*ScenarioCorpus$$' -count=1 -v
 
 eval-smoke:
-	cd go/agent-runtime && go test ./evaluation -run '^TestRuntimeScenarioCorpus$$' -count=1
+	cd go/agent-runtime && go test ./evaluation -run '^TestRuntime.*ScenarioCorpus$$' -count=1
 
 benchmark:
 	node scripts/run-benchmarks.mjs --output=coverage/benchmarks/latest.json

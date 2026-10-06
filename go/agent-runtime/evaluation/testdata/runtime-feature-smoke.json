@@ -1,0 +1,65 @@
+{
+  "id": "runtime-feature-smoke",
+  "revision": 1,
+  "name": "Runtime feature deterministic smoke",
+  "passThreshold": 1,
+  "scenarios": [
+    {
+      "id": "agent-tool-once",
+      "name": "Agent consumes one tool result and completes",
+      "input": {"operation": "agent_tool_once"},
+      "expected": {
+        "status": "completed",
+        "revision": 10,
+        "eventTypes": [
+          "run.created",
+          "agent.started",
+          "agent.model_invocation.pending",
+          "agent.model_invocation.claimed",
+          "agent.model_invocation.completed",
+          "tool.batch_requested",
+          "tool.completed",
+          "agent.model_invocation.pending",
+          "agent.model_invocation.claimed",
+          "agent.model_invocation.completed",
+          "agent.completed"
+        ],
+        "effects": [
+          {"key": "model_calls", "count": 2},
+          {"key": "tool_execution", "count": 1}
+        ]
+      }
+    },
+    {
+      "id": "team-child-once",
+      "name": "Team materializes one child relation and completes",
+      "input": {"operation": "team_child_once"},
+      "expected": {
+        "status": "completed",
+        "revision": 2,
+        "eventTypes": ["run.created", "team.started", "team.completed"],
+        "effects": [
+          {"key": "child_start", "count": 1},
+          {"key": "relation_count", "count": 1}
+        ]
+      }
+    },
+    {
+      "id": "workflow-wait-resume",
+      "name": "Workflow wait resolves once and reaches terminal return",
+      "input": {"operation": "workflow_wait_resume"},
+      "expected": {
+        "status": "completed",
+        "revision": 4,
+        "eventTypes": [
+          "run.created",
+          "workflow.started",
+          "workflow.wait.created",
+          "workflow.wait.resolved",
+          "workflow.completed"
+        ],
+        "effects": [{"key": "wait_resolution", "count": 1}]
+      }
+    }
+  ]
+}

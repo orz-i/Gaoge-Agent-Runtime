@@ -16,13 +16,13 @@ The framework intentionally does not persist prompts, completions, tool argument
 
 ## Smoke corpus
 
-The first corpus lives in `go/agent-runtime/evaluation/testdata/runtime-smoke.json`. It covers:
+The Kernel corpus lives in `go/agent-runtime/evaluation/testdata/runtime-smoke.json`. It covers:
 
 1. terminal state and journal recovery after reconstructing the Runtime over the same durable store;
 2. stale CAS fencing;
 3. at-least-once transition redelivery with one logical consumption after acknowledgement.
 
-The matching baseline is `runtime-smoke-baseline.json`. Any corpus edit changes the Dataset hash, so the baseline must be reviewed and intentionally updated.
+The feature corpus in `runtime-feature-smoke.json` adds deterministic Agent tool execution, Workflow wait/resume, and Team child/relation materialization. The matching baselines are `runtime-smoke-baseline.json` and `runtime-feature-smoke-baseline.json`. Any corpus edit changes the Dataset hash, so the baseline must be reviewed and intentionally updated.
 
 Run the visible report with:
 
