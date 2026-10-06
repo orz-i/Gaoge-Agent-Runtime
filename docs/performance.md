@@ -13,6 +13,9 @@ The first portable benchmark set covers the in-memory hot paths that are most us
 - RunRelation Ensure
 - RunRelation GetByChild
 - RunRelation ListChildren
+- continuation committed-transition projection into the durable queue
+- deterministic Agent loop with a fake model
+- deterministic Workflow return execution
 
 Every benchmark reports `ns/op`, `B/op`, and `allocs/op`. Existing large-history memory/PostgreSQL adapter benchmarks remain available in their packages and are intentionally not part of the fast PR smoke command because their fixture construction is heavier.
 
@@ -34,4 +37,4 @@ The comparison refuses to compare different GOOS/GOARCH/CPU environments. It is 
 
 ## Next expansion
 
-The same approach should next add stable benchmarks for continuation projection, deterministic Agent/Workflow loops, HTTP snapshot/event routes, and real PostgreSQL/Redis workloads. Integration workloads that need p50/p95 or database transaction/query characteristics should remain separate from microbenchmarks.
+The same approach should next add stable benchmarks for HTTP snapshot/event routes, Harness projection, and real PostgreSQL/Redis workloads. Integration workloads that need p50/p95 or database transaction/query characteristics should remain separate from microbenchmarks.
