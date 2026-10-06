@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke integration integration-test a2a-product-check a2a-tck release-check check beta
+.PHONY: bootstrap metadata fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-smoke benchmark-compare integration integration-test a2a-product-check a2a-tck release-check check beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -59,6 +59,16 @@ eval:
 eval-smoke:
 	cd go/agent-runtime && go test ./evaluation -run '^TestRuntimeScenarioCorpus$$' -count=1
 
+benchmark:
+	node scripts/run-benchmarks.mjs --output=benchmarks/baseline.json
+
+benchmark-smoke:
+	node scripts/run-benchmarks.mjs --smoke
+
+benchmark-compare:
+	node scripts/run-benchmarks.mjs --output=coverage/benchmarks/latest.json
+	node scripts/compare-benchmarks.mjs benchmarks/baseline.json coverage/benchmarks/latest.json
+
 integration-test:
 	node scripts/run-integration.mjs --external-services
 
@@ -74,6 +84,6 @@ a2a-tck:
 release-check:
 	node scripts/check-release.mjs
 
-check: metadata fmt-check tidy-check go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build eval-smoke a2a-product-check release-check
+check: metadata fmt-check tidy-check go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build eval-smoke benchmark-smoke a2a-product-check release-check
 
 beta: check coverage security integration
