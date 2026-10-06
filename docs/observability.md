@@ -69,7 +69,7 @@ specific client semantic contract than the Runtime can prove.
 
 `make integration-otel` starts a pinned local OpenTelemetry Collector, runs a host-owned OTLP emitter from `integration/otel-e2e`, and verifies that the Collector receives both Runtime trace spans and low-cardinality metrics. The emitter owns the SDK providers/exporters and shutdown lifecycle; `go/agent-runtime-otel` remains exporter- and Collector-neutral.
 
-For a separately provisioned Collector, set `TEST_OTEL_HTTP_ENDPOINT` and run `make integration-otel-test`. The existing PostgreSQL/Redis `make integration` path remains independent of the Collector image. The Collector debug exporter is only a test sink, and the gate checks structural signal names rather than content payloads.
+For a separately provisioned Collector, set `TEST_OTEL_HTTP_ENDPOINT` and run `make integration-otel-test`. The existing PostgreSQL/Redis `make integration` path remains independent of the Collector image. The local gate pre-pulls the Collector with bounded retries, starts Compose with implicit pulls disabled, waits for the OTLP/HTTP endpoint, and waits for all expected structural trace/metric markers in Collector output. Set `OTEL_COLLECTOR_IMAGE` to a preloaded mirror or digest-pinned image when GHCR is inaccessible; `OTEL_COLLECTOR_PULL_ATTEMPTS` controls the bounded pull retry count. The resolved RepoDigest is printed as release evidence. The Collector debug exporter is only a test sink, and the gate checks structural signal names rather than content payloads.
 
 ## Host setup
 

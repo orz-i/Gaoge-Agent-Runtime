@@ -8,7 +8,10 @@ tags for a release must point to the same accepted commit.
 1. Update `VERSION`, package metadata, internal Go requirements, and the
    changelog in one pull request.
 2. Run `pnpm install --frozen-lockfile`, `make beta`, and verify a clean
-   worktree.
+   worktree. `make beta` includes the real PostgreSQL/Redis suites and the
+   OpenTelemetry Collector trace/metric gate. If the default GHCR path is not
+   reachable, preload the pinned Collector or set `OTEL_COLLECTOR_IMAGE` to an
+   approved mirror/digest rather than skipping the gate.
 3. Merge the accepted commit to `main` and protect it from force pushes.
 4. Keep npm registry publication disabled for all prereleases. Beta artifacts
    are Go module tags and the TypeScript archive attached to GitHub Releases;
@@ -50,9 +53,11 @@ push:
 gh workflow run release.yml --ref main -f release_tag=v0.1.0-beta.11
 ```
 
-The workflow checks out the root tag, re-runs the Beta gate, verifies that every
-module tag points to the same commit, packs and checks the TypeScript package,
-and attaches it to a GitHub prerelease with the reviewed notes in
+The workflow checks out the root tag, re-runs the quality/coverage/security and
+real PostgreSQL/Redis gates, authenticates to GHCR, runs the OpenTelemetry
+Collector trace/metric gate, verifies that every module tag points to the same
+commit, packs and checks the TypeScript package, and attaches it to a GitHub
+prerelease with the reviewed notes in
 `docs/releases/<root-tag>.md`. It never publishes to the npm registry. npm
 publication remains reserved for a future stable-release workflow. A root-tag
 push event remains supported for release sets small enough to emit one.

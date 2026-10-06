@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -138,3 +139,31 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
       - name: Run real-engine suites
         run: make integration-test
+
+  observability:
+    name: OpenTelemetry Collector E2E
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.work
+          cache-dependency-path: |
+            integration/otel-e2e/go.sum
+            go/agent-runtime-otel/go.sum
+            go/agent-runtime/go.sum
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Authenticate to GHCR
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+      - name: Run Collector trace and metric gate
+        run: make integration-otel

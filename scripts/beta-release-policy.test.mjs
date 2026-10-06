@@ -16,11 +16,13 @@ test("Beta releases retain immutable tags, reviewed notes, and a TypeScript arch
   assert.match(workflow, /--notes-file "docs\/releases\/\$RELEASE_TAG\.md"/u);
 });
 
-test("Tag verification and the full Beta gate precede artifact publication", () => {
+test("Tag verification and the full Beta gates precede artifact publication", () => {
   const verify = workflow.indexOf("- name: Verify tag set");
   const gate = workflow.indexOf("- name: Run Beta gate");
+  const otel = workflow.indexOf("- name: Run OpenTelemetry Collector gate");
   const pack = workflow.indexOf("- name: Pack TypeScript client");
   const release = workflow.indexOf("- name: Create GitHub prerelease");
   assert.match(workflow, /run: make check && make coverage && make security && make integration-test/u);
-  assert.ok(verify >= 0 && verify < gate && gate < pack && pack < release);
+  assert.match(workflow, /run: make integration-otel/u);
+  assert.ok(verify >= 0 && verify < gate && gate < otel && otel < pack && pack < release);
 });
