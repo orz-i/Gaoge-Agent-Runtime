@@ -9,6 +9,7 @@ export const modules = [
   "go/agent-runtime-harness",
   "go/agent-runtime-harness-postgres",
   "go/agent-runtime-mcp",
+  "go/agent-runtime-otel",
   "go/agent-runtime-a2a",
   "go/agent-runtime-postgres",
   "go/agent-runtime-redis",

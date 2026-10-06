@@ -3,6 +3,11 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## Unreleased
+
+- Add a separate `go/agent-runtime-otel` development module that converts content-safe Runtime observations into OpenTelemetry spans while leaving SDK, exporter, sampling, resource, and shutdown ownership with the host.
+- Document the observability span/content policy and clarify that production container images belong to host applications because Agent Runtime is an SDK rather than a standalone server distribution.
+
 ## 0.1.0-beta.10
 
 - Add durable Group Chat directed, selector, and visible-speaker handoff routing, including frozen A2A speaker bindings and remote wait resumption.

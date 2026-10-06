@@ -1,4 +1,4 @@
-go 1.26
+go 1.26.0
 
 use (
 	./go/agent-runtime
@@ -7,6 +7,7 @@ use (
 	./go/agent-runtime-harness-postgres
 	./go/agent-runtime-http
 	./go/agent-runtime-mcp
+	./go/agent-runtime-otel
 	./go/agent-runtime-postgres
 	./go/agent-runtime-redis
 )
