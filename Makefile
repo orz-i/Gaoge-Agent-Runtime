@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata fmt-check tidy-check go-test go-race go-vet go-lint ts-lint ts-typecheck ts-test ts-build unit integration integration-test a2a-product-check a2a-tck release-check check beta
+.PHONY: bootstrap metadata fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security integration integration-test a2a-product-check a2a-tck release-check check beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -25,6 +25,12 @@ go-vet:
 go-lint:
 	node scripts/go-workspace.mjs lint
 
+go-coverage:
+	node scripts/go-workspace.mjs coverage
+
+go-vuln:
+	node scripts/go-workspace.mjs vuln
+
 ts-lint:
 	pnpm run lint
 
@@ -34,10 +40,18 @@ ts-typecheck:
 ts-test:
 	pnpm run test
 
+ts-coverage:
+	pnpm run coverage
+
 ts-build:
 	pnpm run build
 
 unit: go-test ts-test
+
+coverage: go-coverage ts-coverage
+
+security: go-vuln
+	pnpm audit --audit-level high
 
 integration-test:
 	node scripts/run-integration.mjs --external-services
@@ -56,4 +70,4 @@ release-check:
 
 check: metadata fmt-check tidy-check go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build a2a-product-check release-check
 
-beta: check integration
+beta: check coverage security integration

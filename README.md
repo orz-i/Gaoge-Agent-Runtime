@@ -84,13 +84,20 @@ version accepted by the package's engine range.
 ```bash
 pnpm install --frozen-lockfile
 make check
+make coverage
+make security
 make integration
 ```
 
-`make integration` starts isolated PostgreSQL and Redis containers, runs the
-real-engine concurrency and recovery suites with the Go race detector, and
-removes the containers. See the [reliability evidence map](docs/reliability.md)
-for failure boundaries, reproducible checks, and remaining coverage limits.
+`make coverage` enforces the repository coverage floors and writes Go and
+TypeScript coverage reports under the ignored `coverage/` directories.
+`make security` runs `govulncheck` across every Go module and fails on high or
+critical pnpm advisories; it requires network access to the Go vulnerability
+database and npm registry. `make integration` starts isolated PostgreSQL and
+Redis containers, runs the real-engine concurrency and recovery suites with the
+Go race detector, and removes the containers. See the
+[reliability evidence map](docs/reliability.md) for failure boundaries,
+reproducible checks, and remaining coverage limits.
 
 ## Project policy
 

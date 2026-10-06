@@ -18,8 +18,9 @@ test("Beta releases retain immutable tags, reviewed notes, and a TypeScript arch
 
 test("Tag verification and the full Beta gate precede artifact publication", () => {
   const verify = workflow.indexOf("- name: Verify tag set");
-  const gate = workflow.indexOf("make check && make integration-test");
+  const gate = workflow.indexOf("- name: Run Beta gate");
   const pack = workflow.indexOf("- name: Pack TypeScript client");
   const release = workflow.indexOf("- name: Create GitHub prerelease");
+  assert.match(workflow, /run: make check && make coverage && make security && make integration-test/u);
   assert.ok(verify >= 0 && verify < gate && gate < pack && pack < release);
 });

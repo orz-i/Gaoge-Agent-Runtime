@@ -89,7 +89,7 @@ jobs:
           done < <(node scripts/release-tags.mjs --version "$version" | grep '^go/')
 
       - name: Run Beta gate
-        run: make check && make integration-test
+        run: make check && make coverage && make security && make integration-test
 
       - name: Pack TypeScript client
         run: mkdir -p artifacts && npm pack --pack-destination artifacts ./ts/agent-runtime-client
