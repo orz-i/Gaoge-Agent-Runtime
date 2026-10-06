@@ -18,38 +18,6 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/RunSnapshot'}
         default: {$ref: '#/components/responses/Error'}
-  /plan-runs:
-    post:
-      operationId: createPlanRun
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/StartPlanRunRequest'}
-      responses:
-        '202':
-          description: Accepted
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/RunSnapshot'}
-        default: {$ref: '#/components/responses/Error'}
-  /plan-runs/{runID}/approval:
-    post:
-      operationId: resolvePlanApproval
-      parameters:
-        - $ref: '#/components/parameters/RunID'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: '#/components/schemas/ResolvePlanApprovalRequest'}
-      responses:
-        '200':
-          description: Resolved
-          content:
-            application/json:
-              schema: {$ref: '#/components/schemas/RunSnapshot'}
-        default: {$ref: '#/components/responses/Error'}
   /workflow-runs:
     post:
       operationId: createWorkflowRun
@@ -543,25 +511,6 @@ components:
           type: array
           maxItems: 128
           items: {type: string, maxLength: 255}
-    StartPlanRunRequest:
-      type: object
-      additionalProperties: false
-      required: [thread, input]
-      properties:
-        thread: {$ref: '#/components/schemas/ThreadRequest'}
-        input: {$ref: '#/components/schemas/TextInputRequest'}
-        clientRunID: {type: string, maxLength: 64}
-        model: {type: string, maxLength: 128}
-        approvalPolicy: {type: string, enum: [auto, required]}
-        maxSteps: {type: integer, minimum: 1, maximum: 32}
-    ResolvePlanApprovalRequest:
-      type: object
-      additionalProperties: false
-      required: [expectedRevision, decision]
-      properties:
-        expectedRevision: {type: integer, minimum: 1}
-        decision: {type: string, enum: [approve, reject]}
-        comment: {type: string, maxLength: 2000}
     ResolveHarnessApprovalRequest:
       type: object
       additionalProperties: false
@@ -727,7 +676,7 @@ components:
         id: {type: string}
         kind:
           type: string
-          description: Feature-owned Run kind. Built-ins include agent, plan_execute, workflow, team and a2a.remote; hosts may register additional kinds.
+          description: Feature-owned Run kind. Built-ins include agent, workflow, team and a2a.remote; hosts may register additional kinds.
         actor: {$ref: '#/components/schemas/ActorRef'}
         thread: {$ref: '#/components/schemas/ThreadRef'}
         requestID: {type: string}
@@ -825,7 +774,7 @@ components:
         parentItemID: {type: string}
         capabilityKey: {type: string}
         definitionVersion: {type: string}
-        executionClass: {type: string, enum: [agent, team, plan_execute, workflow, application]}
+        executionClass: {type: string, enum: [agent, team, workflow, application]}
         inputHash: {type: string}
         status: {type: string, enum: [accepted, running, waiting_input, completed, failed, cancelled]}
         attempt: {type: integer, minimum: 1}
@@ -866,7 +815,7 @@ components:
         description: {type: string}
         capabilityKey: {type: string}
         definitionVersion: {type: string}
-        executionClass: {type: string, enum: [agent, team, plan_execute, workflow, application]}
+        executionClass: {type: string, enum: [agent, team, workflow, application]}
         source: {type: string, enum: [first_party, application]}
         inputSchema: {}
     HarnessTurnSnapshot:

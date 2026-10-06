@@ -2,8 +2,7 @@
 
 `github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime` is the host-neutral Agent Runtime
 Core. The module is split into explicit capability packages such as `kernel`,
-`agent`, `tools`, `interaction`, `planexecute`, `workflow`, `team`, and
-`compose`. Hosts construct only the capabilities they need; there is no
+`agent`, `tools`, `interaction`, `workflow`, `team`, and `compose`. Hosts construct only the capabilities they need; there is no
 compatibility `Engine` facade or automatic Runtime-kind selector.
 
 For an in-process durable-contract implementation, use `memory`:
@@ -21,7 +20,6 @@ Redis or memory generation stream adapter.
 Agent Runtime exposes explicit Run kinds over the same durable Kernel primitives:
 
 - Agent Run is the direct model/Tool loop and is provided by `agent.Runner`.
-- Plan-and-Execute owns model-generated plans and executes steps through an injected Agent Runner.
 - Agent Team is coordinator-led, open-ended multi-agent collaboration.
 - Dynamic Workflow is a versioned, deterministic DSL with structured data,
   bounded concurrency, hard budgets, durable waits, cache policy, and

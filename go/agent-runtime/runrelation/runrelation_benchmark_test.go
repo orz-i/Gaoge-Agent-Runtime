@@ -13,7 +13,7 @@ import (
 func BenchmarkRunRelationEnsureMemory(b *testing.B) {
 	draft := runrelation.Draft{
 		ParentRunID: "parent", ChildRunID: "child",
-		Kind: runrelation.KindPlanStep, OwnerNodeID: "step",
+		Kind: runrelation.KindCapability, OwnerNodeID: "step",
 	}
 	b.ReportAllocs()
 	for range b.N {
@@ -30,7 +30,7 @@ func BenchmarkRunRelationGetByChildMemory(b *testing.B) {
 	registry := benchmarkRelationRegistry(b)
 	if _, err := registry.Ensure(context.Background(), runrelation.Draft{
 		ParentRunID: "parent", ChildRunID: "child",
-		Kind: runrelation.KindPlanStep, OwnerNodeID: "step",
+		Kind: runrelation.KindCapability, OwnerNodeID: "step",
 	}); err != nil {
 		b.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func BenchmarkRunRelationListChildrenMemory(b *testing.B) {
 	for index := range 100 {
 		if _, err := registry.Ensure(context.Background(), runrelation.Draft{
 			ParentRunID: "parent", ChildRunID: "child-" + strconv.Itoa(index),
-			Kind: runrelation.KindPlanStep, OwnerNodeID: "step-" + strconv.Itoa(index),
+			Kind: runrelation.KindCapability, OwnerNodeID: "step-" + strconv.Itoa(index),
 		}); err != nil {
 			b.Fatal(err)
 		}

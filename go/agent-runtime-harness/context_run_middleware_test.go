@@ -53,11 +53,11 @@ func TestContextRunMiddlewareRehydratesTopLevelAgentAsOwner(t *testing.T) {
 
 func TestContextRunMiddlewareRehydratesDescendantAgentReadOnly(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-	const childRunID = "agent-plan-step-child"
+	const childRunID = "agent-capability-child"
 	middleware, err := NewContextRunMiddleware(store, contextRunRelationFixture{
 		childRunID: {
 			ParentRunID: root.ExecutionRefID, ChildRunID: childRunID,
-			Kind: runrelation.KindPlanStep, OwnerNodeID: "step-1", CreatedAt: time.Now().UTC(),
+			Kind: runrelation.KindCapability, OwnerNodeID: "child-1", CreatedAt: time.Now().UTC(),
 		},
 	})
 	if err != nil {

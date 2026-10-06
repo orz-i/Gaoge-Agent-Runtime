@@ -13,7 +13,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
@@ -29,7 +28,7 @@ func TestSchedulerEnqueuesOneOwningParentContinuation(t *testing.T) {
 		relationKind runrelation.Kind
 		ownerNodeID  string
 	}{
-		{name: "plan step", parentKind: planexecute.RunKind, childKind: agent.RunKind, relationKind: runrelation.KindPlanStep, ownerNodeID: "step-1"},
+		{name: "team member", parentKind: team.RunKind, childKind: agent.RunKind, relationKind: runrelation.KindTeamMember, ownerNodeID: "member-1"},
 		{name: "harness capability", parentKind: agent.RunKind, childKind: workflow.RunKind, relationKind: runrelation.KindCapability, ownerNodeID: "invocation-1"},
 	}
 	for _, test := range tests {
@@ -184,7 +183,6 @@ func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
 	runtime := newRuntime(t)
 	resumers := map[kernel.RunKind]*recordingResumer{
 		agent.RunKind:          {},
-		planexecute.RunKind:    {},
 		workflow.RunKind:       {},
 		team.RunKind:           {},
 		kernel.RunKind("echo"): {},

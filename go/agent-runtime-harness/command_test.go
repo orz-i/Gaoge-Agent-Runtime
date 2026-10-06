@@ -14,7 +14,7 @@ func TestFirstPartyCommandCatalogIsStaticAndDeterministic(t *testing.T) {
 		t.Fatal(err)
 	}
 	values := catalog.List()
-	if len(values) != 3 || values[0].ID != "plan" || values[1].ID != "team" || values[2].ID != "workflow" {
+	if len(values) != 2 || values[0].ID != "team" || values[1].ID != "workflow" {
 		t.Fatalf("commands=%#v", values)
 	}
 	workflow, err := catalog.Resolve("workflow")

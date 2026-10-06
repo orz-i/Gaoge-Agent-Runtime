@@ -78,18 +78,13 @@ func (catalog *CommandCatalog) Resolve(id string) (CommandDescriptor, error) {
 	return CommandDescriptor{}, ErrNotFound
 }
 
-// FirstPartyCommandDescriptors declares only the three built-in executable
-// capability entries. Application contributions are appended explicitly by
-// bootstrap composition in later phases.
+// FirstPartyCommandDescriptors declares the built-in executable capability
+// entries. Application contributions are appended explicitly by bootstrap
+// composition in later phases.
 func FirstPartyCommandDescriptors() []CommandDescriptor {
 	const noArguments = `{"type":"object","additionalProperties":false}`
 	const workflowArguments = `{"type":"object","properties":{"definitionReference":{"type":"object","required":["id"],"properties":{"id":{"type":"string","minLength":1},"revision":{"type":"integer","minimum":1},"hash":{"type":"string","minLength":1}},"additionalProperties":false},"input":{}},"additionalProperties":false}`
 	return []CommandDescriptor{
-		{
-			ID: "plan", Trigger: "/plan", Title: "Plan", Description: "Create and execute a bounded plan",
-			CapabilityKey: CapabilityPlanExecute, DefinitionVersion: RuntimeCapabilityVersion,
-			ExecutionClass: ExecutionPlanExecute, Source: CommandSourceFirstParty, InputSchema: json.RawMessage(noArguments),
-		},
 		{
 			ID: "team", Trigger: "/team", Title: "Team", Description: "Run a small parallel specialist team",
 			CapabilityKey: CapabilityTeam, DefinitionVersion: RuntimeCapabilityVersion,

@@ -51,7 +51,7 @@ public client APIs.
 | Starting work | Use the feature-specific start API. Supply a stable `clientRunID` when the caller needs to recover a lost response. Before reissuing an ambiguous start, load that Run and reconcile its state; a repeated POST is not a universal replay-success contract. |
 | Revision CAS | Use the authoritative snapshot's `run.revision` for `expectedRevision`. A conflict requires reloading and making a new decision. A feed/journal sequence is not a revision. |
 | Snapshot | `run`, opaque `state`, and `eventHead` form the envelope. `checkpoint` and `result` are omitted when absent. Their payload/content values remain feature-owned JSON. |
-| Run kind | Treat `kind` as an extensible feature-owned string. Built-ins include `agent`, `plan_execute`, `workflow`, `team`, and `a2a.remote`; generic Run/Workbench reads may include host extensions. |
+| Run kind | Treat `kind` as an extensible feature-owned string. Built-ins include `agent`, `workflow`, `team`, and `a2a.remote`; generic Run/Workbench reads may include host extensions. |
 | Journal | Page `/runs/{runID}/events` with exclusive `afterSeq` and a bounded `limit`. Persist the last processed journal sequence independently of semantic feed cursors. |
 | Feed | Persist the last processed feed sequence, tolerate reconnect replay, and stop on `terminal`. On cursor expiry, restore an authoritative snapshot and use the returned feed head. Run and Harness feeds have separate cursors and recovery headers. |
 | Cancellation | Supply the current revision; the response contains `run`. Reload to obtain a full snapshot. Use Workflow cancellation for its compensation behavior. Cancellation cannot retract an external effect that already happened. |

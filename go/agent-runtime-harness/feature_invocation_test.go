@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
@@ -28,7 +27,6 @@ func TestTypedFeatureInvocationsShareHarnessTurnAndRecoverByTurnID(t *testing.T)
 	t.Parallel()
 	runner, turnID, parentItemID, relations, parentRunID, _, _ := newFeatureInvocationHarness(t)
 	assertStartedTeamInvocation(t, runner, turnID, parentItemID)
-	assertStartedPlanInvocation(t, runner, turnID, parentItemID)
 	assertStartedWorkflowInvocation(t, runner, turnID, parentItemID)
 	assertRecoveredFeatureInvocationTree(t, runner, turnID, relations, parentRunID)
 }
@@ -381,18 +379,6 @@ func assertStartedTeamInvocation(t *testing.T, runner *harness.Runner, turnID, p
 	assertChildInvocation(t, snapshot, harness.ExecutionTeam)
 }
 
-func assertStartedPlanInvocation(t *testing.T, runner *harness.Runner, turnID, parentItemID string) {
-	t.Helper()
-	snapshot, err := runner.StartPlanExecuteInvocation(t.Context(), turnID, harness.PlanExecuteInvocationRequest{
-		ParentItemID: parentItemID, RequestID: "plan-1", Goal: "plan work", Model: "fixture-model",
-		ApprovalPolicy: planexecute.ApprovalAuto, MaxSteps: 2,
-	})
-	if err != nil {
-		t.Fatalf("start PlanExecute invocation: %v", err)
-	}
-	assertChildInvocation(t, snapshot, harness.ExecutionPlanExecute)
-}
-
 func assertStartedWorkflowInvocation(t *testing.T, runner *harness.Runner, turnID, parentItemID string) {
 	t.Helper()
 	snapshot, err := runner.StartWorkflowInvocation(t.Context(), turnID, harness.WorkflowInvocationRequest{
@@ -423,12 +409,11 @@ func assertRecoveredFeatureInvocationTree(
 
 func assertRecoveredInvocationClasses(t *testing.T, reloaded harness.Snapshot) {
 	t.Helper()
-	if len(reloaded.Invocations) != 4 {
+	if len(reloaded.Invocations) != 3 {
 		t.Fatalf("durable invocations=%#v", reloaded.Invocations)
 	}
 	want := map[harness.ExecutionClass]bool{
-		harness.ExecutionAgent: false, harness.ExecutionTeam: false,
-		harness.ExecutionPlanExecute: false, harness.ExecutionWorkflow: false,
+		harness.ExecutionAgent: false, harness.ExecutionTeam: false, harness.ExecutionWorkflow: false,
 	}
 	for _, invocation := range reloaded.Invocations {
 		want[invocation.ExecutionClass] = true
@@ -442,7 +427,7 @@ func assertRecoveredInvocationClasses(t *testing.T, reloaded harness.Snapshot) {
 
 func assertRecoveredInvocationArtifacts(t *testing.T, reloaded harness.Snapshot) {
 	t.Helper()
-	if got := completedChildArtifactCount(reloaded.Items); got != 3 {
+	if got := completedChildArtifactCount(reloaded.Items); got != 2 {
 		t.Fatalf("completed child artifacts=%d items=%#v", got, reloaded.Items)
 	}
 }
@@ -450,7 +435,7 @@ func assertRecoveredInvocationArtifacts(t *testing.T, reloaded harness.Snapshot)
 func assertRecoveredCapabilityRelations(t *testing.T, relations *runrelation.Registry, parentRunID string) {
 	t.Helper()
 	children, err := relations.ListChildren(t.Context(), parentRunID)
-	if err != nil || len(children) != 3 {
+	if err != nil || len(children) != 2 {
 		t.Fatalf("capability relations=%#v err=%v", children, err)
 	}
 	for _, relation := range children {
@@ -490,7 +475,7 @@ func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string,
 	relations := newFeatureInvocationRelations(t)
 	runner, err := harness.NewRunner(harness.Dependencies{
 		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{},
-		Teams: completedTeamFeature{runtime}, Plans: completedPlanFeature{runtime}, Workflows: completedWorkflowFeature{runtime},
+		Teams: completedTeamFeature{runtime}, Workflows: completedWorkflowFeature{runtime},
 		Relations: relations, Interactions: noopInteractionResponseHandler{},
 	})
 	if err != nil {
@@ -636,16 +621,6 @@ func (feature completedTeamFeature) StartRun(ctx context.Context, request team.S
 }
 
 func (feature completedTeamFeature) Resume(ctx context.Context, runID string, _ uint64) (kernel.Snapshot, error) {
-	return feature.runtime.Load(ctx, runID)
-}
-
-type completedPlanFeature struct{ runtime *kernel.Runtime }
-
-func (feature completedPlanFeature) StartRun(ctx context.Context, request planexecute.StartRequest) (kernel.Snapshot, error) {
-	return completeFeatureRun(ctx, feature.runtime, request.ID, planexecute.RunKind, request.Actor, request.Thread, request.RequestID, request.Goal)
-}
-
-func (feature completedPlanFeature) Resume(ctx context.Context, runID string, _ uint64) (kernel.Snapshot, error) {
 	return feature.runtime.Load(ctx, runID)
 }
 

@@ -11,7 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
@@ -58,14 +57,6 @@ type GroupChatTurnRequest struct {
 	MaxUtterances int
 }
 
-// PlanExecuteTurnRequest starts Plan-and-Execute as the top-level capability.
-type PlanExecuteTurnRequest struct {
-	StartRequest
-	AllowedToolKeys []string
-	ApprovalPolicy  planexecute.ApprovalPolicy
-	MaxSteps        int
-}
-
 // WorkflowTurnRequest starts one compiled Dynamic Workflow as the top-level capability.
 type WorkflowTurnRequest struct {
 	StartRequest
@@ -109,16 +100,6 @@ type groupChatInvocationInput struct {
 	SelectorModel        string                    `json:"selectorModel,omitempty"`
 	SelectorModelOptions json.RawMessage           `json:"selectorModelOptions,omitempty"`
 	MaxUtterances        int                       `json:"maxUtterances"`
-}
-
-type planExecuteInvocationInput struct {
-	Goal            string                     `json:"goal"`
-	Model           string                     `json:"model"`
-	Actor           kernel.ActorRef            `json:"actor"`
-	Thread          kernel.ThreadRef           `json:"thread"`
-	AllowedToolKeys []string                   `json:"allowedToolKeys"`
-	ApprovalPolicy  planexecute.ApprovalPolicy `json:"approvalPolicy"`
-	MaxSteps        int                        `json:"maxSteps"`
 }
 
 type workflowInvocationInput struct {
@@ -290,40 +271,6 @@ func materializeGroupChatSpeakerConfigs(
 		ids = append(ids, participantID)
 	}
 	return configs, ids, nil
-}
-
-// StartPlanExecuteTurn starts Plan-and-Execute without a placeholder Agent root.
-func (runner *Runner) StartPlanExecuteTurn(ctx context.Context, request PlanExecuteTurnRequest) (Snapshot, error) {
-	if runner == nil || runner.plans == nil {
-		return Snapshot{}, ErrInvalidRequest
-	}
-	input, inputHash, err := marshalInvocationValue(planExecuteInvocationInput{
-		Goal: strings.TrimSpace(request.Goal), Model: strings.TrimSpace(request.Config.Model),
-		Actor: request.Actor, Thread: request.Thread,
-		AllowedToolKeys: append([]string{}, request.AllowedToolKeys...),
-		ApprovalPolicy:  request.ApprovalPolicy, MaxSteps: request.MaxSteps,
-	})
-	if err != nil {
-		return Snapshot{}, err
-	}
-	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityPlanExecute, RuntimeCapabilityVersion, ExecutionPlanExecute, input, inputHash,
-	)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if prepared.replayed {
-		if snapshot, handled, replayErr := runner.replayTopLevelFeatureStart(ctx, prepared); handled || replayErr != nil {
-			return snapshot, replayErr
-		}
-	}
-	runtimeSnapshot, startErr := runner.plans.StartRun(prepared.runContext, planexecute.StartRequest{
-		ID: prepared.invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
-		AllowedToolKeys: append([]string{}, request.AllowedToolKeys...),
-		Model:           request.Config.Model, ApprovalPolicy: request.ApprovalPolicy, MaxSteps: request.MaxSteps,
-	})
-	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
 
 // StartWorkflowTurn starts Workflow without a placeholder Agent root.
@@ -529,12 +476,6 @@ func (runner *Runner) finishTopLevelFeatureStart(
 	return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, runtimeSnapshot, startErr, syncErr)
 }
 
-// PlanExecuteFeature is the narrow Plan-and-Execute Runtime capability consumed by Harness.
-type PlanExecuteFeature interface {
-	StartRun(context.Context, planexecute.StartRequest) (kernel.Snapshot, error)
-	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
-}
-
 // WorkflowFeature is the narrow Dynamic Workflow Runtime capability consumed by Harness.
 type WorkflowFeature interface {
 	StartRun(context.Context, workflow.StartRequest) (kernel.Snapshot, error)
@@ -550,17 +491,6 @@ type TeamInvocationRequest struct {
 	Mode         team.ExecutionMode
 	Members      []team.Member
 	Join         handoff.Join
-}
-
-// PlanExecuteInvocationRequest starts one exact first-party Plan-and-Execute capability.
-type PlanExecuteInvocationRequest struct {
-	ParentItemID    string
-	RequestID       string
-	Goal            string
-	Model           string
-	AllowedToolKeys []string
-	ApprovalPolicy  planexecute.ApprovalPolicy
-	MaxSteps        int
 }
 
 // WorkflowInvocationRequest starts one exact first-party Dynamic Workflow capability.
@@ -610,44 +540,6 @@ func (runner *Runner) StartTeamInvocation(
 		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
 		RequestID: strings.TrimSpace(request.RequestID), Goal: strings.TrimSpace(request.Goal),
 		Mode: request.Mode, Members: append([]team.Member(nil), request.Members...), Join: request.Join,
-	})
-	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
-}
-
-// StartPlanExecuteInvocation starts Plan-and-Execute as one child Invocation.
-func (runner *Runner) StartPlanExecuteInvocation(
-	ctx context.Context,
-	turnID string,
-	request PlanExecuteInvocationRequest,
-) (Snapshot, error) {
-	if runner == nil || runner.plans == nil {
-		return Snapshot{}, ErrInvalidRequest
-	}
-	input, inputHash, err := marshalInvocationValue(planExecuteInvocationInput{
-		Goal: strings.TrimSpace(request.Goal), Model: strings.TrimSpace(request.Model),
-		AllowedToolKeys: append([]string{}, request.AllowedToolKeys...),
-		ApprovalPolicy:  request.ApprovalPolicy, MaxSteps: request.MaxSteps,
-	})
-	if err != nil {
-		return Snapshot{}, err
-	}
-	invocation, child, replayed, err := runner.beginChildInvocation(
-		ctx, turnID, request.ParentItemID, request.RequestID,
-		CapabilityPlanExecute, RuntimeCapabilityVersion, ExecutionPlanExecute, input, inputHash,
-	)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if replayed {
-		if snapshot, handled, replayErr := runner.replayChildInvocationStart(ctx, child.turn, invocation); handled || replayErr != nil {
-			return snapshot, replayErr
-		}
-	}
-	runtimeSnapshot, startErr := runner.plans.StartRun(ctx, planexecute.StartRequest{
-		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
-		RequestID: strings.TrimSpace(request.RequestID), Goal: strings.TrimSpace(request.Goal),
-		AllowedToolKeys: append([]string{}, request.AllowedToolKeys...),
-		Model:           strings.TrimSpace(request.Model), ApprovalPolicy: request.ApprovalPolicy, MaxSteps: request.MaxSteps,
 	})
 	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
 }
@@ -905,8 +797,6 @@ func (runner *Runner) startInvocationAttempt(
 		return runner.startRetriedTeam(ctx, invocation, child, requestID)
 	case ExecutionGroupChat:
 		return runner.startRetriedGroupChat(ctx, invocation, child, requestID)
-	case ExecutionPlanExecute:
-		return runner.startRetriedPlanExecute(ctx, invocation, child, requestID)
 	case ExecutionWorkflow:
 		return runner.startRetriedWorkflow(ctx, invocation, child, requestID)
 	case ExecutionApplication:
@@ -967,17 +857,6 @@ func (runner *Runner) startRetriedGroupChat(ctx context.Context, invocation Invo
 		SelectorModelOptions: append(json.RawMessage(nil), input.SelectorModelOptions...),
 		MaxUtterances:        input.MaxUtterances,
 	})
-}
-
-func (runner *Runner) startRetriedPlanExecute(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
-	if runner.plans == nil {
-		return kernel.Snapshot{}, ErrInvalidRequest
-	}
-	var input planExecuteInvocationInput
-	if err := json.Unmarshal(invocation.Input, &input); err != nil {
-		return kernel.Snapshot{}, ErrConflict
-	}
-	return runner.plans.StartRun(ctx, planexecute.StartRequest{ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal, Model: input.Model, AllowedToolKeys: append([]string{}, input.AllowedToolKeys...), ApprovalPolicy: input.ApprovalPolicy, MaxSteps: input.MaxSteps})
 }
 
 func (runner *Runner) startRetriedWorkflow(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
@@ -1176,8 +1055,6 @@ func expectedFeaturePendingError(executionClass ExecutionClass, err error) bool 
 	case ExecutionGroupChat:
 		return errors.Is(err, groupchat.ErrSpeakerPending) || errors.Is(err, groupchat.ErrSelectorPending) ||
 			errors.Is(err, groupchat.ErrSelectorInvocationBusy)
-	case ExecutionPlanExecute:
-		return errors.Is(err, planexecute.ErrApprovalRequired) || errors.Is(err, planexecute.ErrStepPending) || errors.Is(err, planexecute.ErrPlannerPending)
 	case ExecutionWorkflow:
 		return errors.Is(err, workflow.ErrEffectPending) || errors.Is(err, workflow.ErrWaitPending) ||
 			errors.Is(err, workflow.ErrSegmentYielded)
@@ -1248,11 +1125,6 @@ func (runner *Runner) resumeFeature(
 			return kernel.Snapshot{}, ErrInvalidRequest
 		}
 		return runner.groupChats.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
-	case ExecutionPlanExecute:
-		if runner.plans == nil {
-			return kernel.Snapshot{}, ErrInvalidRequest
-		}
-		return runner.plans.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
 	case ExecutionWorkflow:
 		if runner.workflows == nil {
 			return kernel.Snapshot{}, ErrInvalidRequest

@@ -27,8 +27,6 @@ describe("RuntimeClient target API", () => {
     ));
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
     await client.agent.start({ thread: { kind: "conversation", id: "thread-1" }, input: { content: "Answer" } });
-    await client.plans.start({ thread: { kind: "conversation", id: "thread-1" }, input: { content: "Plan" } });
-    await client.plans.approve("plan/1", { expectedRevision: 2, decision: "approve" });
     await client.workflows.start({ thread: { kind: "conversation", id: "thread-1" }, input: {}, goal: "Flow", definition: { id: "flow", revision: 1, name: "Flow", nodes: [{ id: "return", type: "return", return: { value: {} } }] } });
     await client.workflows.resolveWait("workflow/1", { expectedRevision: 2, response: {} });
     await client.workflows.cancel("workflow/1", { expectedRevision: 3, reason: "stop and compensate" });
@@ -43,8 +41,6 @@ describe("RuntimeClient target API", () => {
     }
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
       "https://runtime.test/api/v1/agent-runs",
-      "https://runtime.test/api/v1/plan-runs",
-      "https://runtime.test/api/v1/plan-runs/plan%2F1/approval",
       "https://runtime.test/api/v1/workflow-runs",
       "https://runtime.test/api/v1/workflow-runs/workflow%2F1/wait",
       "https://runtime.test/api/v1/workflow-runs/workflow%2F1/cancel",

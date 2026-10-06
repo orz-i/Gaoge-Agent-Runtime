@@ -23,7 +23,7 @@ func TestRegistryEnsuresStableRelation(t *testing.T) {
 	}
 	draft := runrelation.Draft{
 		ParentRunID: "parent", ChildRunID: "child",
-		Kind: runrelation.KindPlanStep, OwnerNodeID: "step",
+		Kind: runrelation.KindCapability, OwnerNodeID: "step",
 	}
 	first, err := registry.Ensure(t.Context(), draft)
 	if err != nil {
@@ -43,9 +43,9 @@ func TestRegistryQueriesRelationsInDeterministicOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	drafts := []runrelation.Draft{
-		{ParentRunID: "parent", ChildRunID: "child-b", Kind: runrelation.KindPlanStep, OwnerNodeID: "step-b"},
+		{ParentRunID: "parent", ChildRunID: "child-b", Kind: runrelation.KindCapability, OwnerNodeID: "step-b"},
 		{ParentRunID: "other", ChildRunID: "child-other", Kind: runrelation.KindTeamMember, OwnerNodeID: "member"},
-		{ParentRunID: "parent", ChildRunID: "child-a", Kind: runrelation.KindPlanStep, OwnerNodeID: "step-a"},
+		{ParentRunID: "parent", ChildRunID: "child-a", Kind: runrelation.KindCapability, OwnerNodeID: "step-a"},
 	}
 	for _, draft := range drafts {
 		if _, err = registry.Ensure(t.Context(), draft); err != nil {
@@ -85,7 +85,7 @@ func TestRegistryRejectsUnavailableAndInvalidInputs(t *testing.T) {
 	}
 	if _, err = registry.Ensure(t.Context(), runrelation.Draft{
 		ParentRunID: "parent", ChildRunID: "child",
-		Kind: runrelation.KindPlanStep, OwnerNodeID: "step",
+		Kind: runrelation.KindCapability, OwnerNodeID: "step",
 	}); err != nil {
 		t.Fatalf("default clock ensure: %v", err)
 	}
@@ -113,14 +113,14 @@ func TestPrepareRejectsInvalidRelationContracts(t *testing.T) {
 	now := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
 	valid := runrelation.Relation{
 		ParentRunID: "parent", ChildRunID: "child",
-		Kind: runrelation.KindPlanStep, OwnerNodeID: "step", CreatedAt: now,
+		Kind: runrelation.KindCapability, OwnerNodeID: "step", CreatedAt: now,
 	}
 	cases := []runrelation.Relation{
 		{},
-		{ParentRunID: "same", ChildRunID: "same", Kind: runrelation.KindPlanStep, OwnerNodeID: "step", CreatedAt: now},
+		{ParentRunID: "same", ChildRunID: "same", Kind: runrelation.KindCapability, OwnerNodeID: "step", CreatedAt: now},
 		{ParentRunID: "parent", ChildRunID: "child", Kind: runrelation.Kind("unknown"), OwnerNodeID: "step", CreatedAt: now},
-		{ParentRunID: "parent", ChildRunID: "child", Kind: runrelation.KindPlanStep, CreatedAt: now},
-		{ParentRunID: "parent", ChildRunID: "child", Kind: runrelation.KindPlanStep, OwnerNodeID: "step"},
+		{ParentRunID: "parent", ChildRunID: "child", Kind: runrelation.KindCapability, CreatedAt: now},
+		{ParentRunID: "parent", ChildRunID: "child", Kind: runrelation.KindCapability, OwnerNodeID: "step"},
 	}
 	for _, relation := range cases {
 		if _, err := runrelation.Prepare(relation); !errors.Is(err, runrelation.ErrInvalidInput) {
@@ -129,7 +129,7 @@ func TestPrepareRejectsInvalidRelationContracts(t *testing.T) {
 	}
 	prepared, err := runrelation.Prepare(runrelation.Relation{
 		ParentRunID: " parent ", ChildRunID: " child ",
-		Kind: runrelation.Kind(" plan_step "), OwnerNodeID: " step ", CreatedAt: now.In(time.FixedZone("test", 3600)),
+		Kind: runrelation.Kind(" capability "), OwnerNodeID: " step ", CreatedAt: now.In(time.FixedZone("test", 3600)),
 	})
 	if err != nil || prepared.ParentRunID != valid.ParentRunID || prepared.ChildRunID != valid.ChildRunID ||
 		prepared.Kind != valid.Kind || prepared.OwnerNodeID != valid.OwnerNodeID || !prepared.CreatedAt.Equal(now) {
@@ -141,11 +141,11 @@ func TestSortUsesTimestampKindOwnerAndChildTieBreakers(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
 	items := []runrelation.Relation{
-		{ChildRunID: "z", Kind: runrelation.KindPlanStep, OwnerNodeID: "same", CreatedAt: now},
-		{ChildRunID: "later", Kind: runrelation.KindPlanStep, OwnerNodeID: "a", CreatedAt: now.Add(time.Second)},
+		{ChildRunID: "z", Kind: runrelation.KindCapability, OwnerNodeID: "same", CreatedAt: now},
+		{ChildRunID: "later", Kind: runrelation.KindCapability, OwnerNodeID: "a", CreatedAt: now.Add(time.Second)},
 		{ChildRunID: "kind", Kind: runrelation.KindTeamMember, OwnerNodeID: "a", CreatedAt: now},
-		{ChildRunID: "owner", Kind: runrelation.KindPlanStep, OwnerNodeID: "b", CreatedAt: now},
-		{ChildRunID: "a", Kind: runrelation.KindPlanStep, OwnerNodeID: "same", CreatedAt: now},
+		{ChildRunID: "owner", Kind: runrelation.KindCapability, OwnerNodeID: "b", CreatedAt: now},
+		{ChildRunID: "a", Kind: runrelation.KindCapability, OwnerNodeID: "same", CreatedAt: now},
 	}
 	runrelation.Sort(items)
 	got := []string{items[0].ChildRunID, items[1].ChildRunID, items[2].ChildRunID, items[3].ChildRunID, items[4].ChildRunID}

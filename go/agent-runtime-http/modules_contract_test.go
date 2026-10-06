@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
 	agenthttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/agent"
-	planhttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/planexecute"
 	teamhttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/team"
 	workflowhttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/workflow"
 )
@@ -20,7 +19,6 @@ func TestExplicitFeatureModulesComposePublishedRoutes(t *testing.T) {
 	runtimehttp.NewModule(
 		runtimehttp.NewHandler(runtimehttp.Dependencies{}),
 		agenthttp.NewModule(agenthttp.NewHandler(agenthttp.Dependencies{})),
-		planhttp.NewModule(planhttp.NewHandler(planhttp.Dependencies{})),
 		workflowhttp.NewModule(workflowhttp.NewHandler(workflowhttp.Dependencies{})),
 		teamhttp.NewModule(teamhttp.NewHandler(teamhttp.Dependencies{})),
 	).RegisterRoutes(engine.Group("/api/v1"))
@@ -39,8 +37,6 @@ func TestExplicitFeatureModulesComposePublishedRoutes(t *testing.T) {
 		"GET /api/v1/workflow-definitions/:definition_id/revisions/:revision",
 		"GET /api/v1/workflow-runs/:run_id/trace",
 		"POST /api/v1/agent-runs",
-		"POST /api/v1/plan-runs",
-		"POST /api/v1/plan-runs/:run_id/approval",
 		"POST /api/v1/runs/:run_id/cancel",
 		"POST /api/v1/team-runs",
 		"POST /api/v1/workflow-definitions",

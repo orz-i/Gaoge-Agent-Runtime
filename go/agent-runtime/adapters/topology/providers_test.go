@@ -10,7 +10,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
@@ -19,8 +18,6 @@ import (
 
 const (
 	testTopologyAgentKind    = "agent"
-	testPlanChildOne         = "child-plan-1"
-	testPlanChildTwo         = "child-plan-2"
 	testTeamWriterID         = "writer"
 	testTeamEditorID         = "editor"
 	testTeamWriterChild      = "child-team-writer"
@@ -44,10 +41,6 @@ func TestFeatureTopologyProvidersProjectDurableFacts(t *testing.T) {
 		assertAgentTopology(t, getTopologyDetail(t, query, fixtures.agentRunID).Topology)
 	})
 
-	t.Run("plan", func(t *testing.T) {
-		assertPlanTopology(t, getTopologyDetail(t, query, fixtures.planRunID).Topology)
-	})
-
 	t.Run("team", func(t *testing.T) {
 		assertTeamTopology(t, getTopologyDetail(t, query, fixtures.teamRunID).Topology)
 	})
@@ -62,17 +55,6 @@ func assertAgentTopology(t *testing.T, topology *workbench.TopologyV1) {
 	if len(topology.Nodes) != 1 || len(topology.Edges) != 0 || topology.Nodes[0].Kind != testTopologyAgentKind {
 		t.Fatalf("agent topology invented non-durable nodes: %#v", topology)
 	}
-}
-
-func assertPlanTopology(t *testing.T, topology *workbench.TopologyV1) {
-	t.Helper()
-	assertTopologyShape(t, topology, 3, 2)
-	step := topologyNodeByID(t, topology, "plan-step:step-1")
-	if step.RunID != testPlanChildOne || step.Status != string(kernel.RunStatusCompleted) {
-		t.Fatalf("plan child facts not projected: %#v", step)
-	}
-	assertEdge(t, topology, "run:plan-1", "plan-step:step-1", workbench.EdgeSequence)
-	assertEdge(t, topology, "plan-step:step-1", "plan-step:step-2", workbench.EdgeSequence)
 }
 
 func assertTeamTopology(t *testing.T, topology *workbench.TopologyV1) {
@@ -106,7 +88,6 @@ func assertLinearWorkflowTopology(t *testing.T, topology *workbench.TopologyV1) 
 func topologyRegistrations(runs workbench.RunSource, relations topologyadapter.RelationSource) []workbench.Registration {
 	return []workbench.Registration{
 		{Topology: topologyadapter.NewAgentTopologyProvider()},
-		{Topology: topologyadapter.NewPlanTopologyProvider(runs, relations)},
 		{Topology: topologyadapter.NewTeamTopologyProvider(runs, relations)},
 		{Topology: topologyadapter.NewWorkflowTopologyProvider(runs, relations)},
 	}
@@ -156,7 +137,6 @@ type topologyFixtureSet struct {
 	runs          topologyRunSource
 	relations     topologyRelationSource
 	agentRunID    string
-	planRunID     string
 	teamRunID     string
 	workflowRunID string
 }
@@ -166,18 +146,6 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 	agentSnapshot := topologySnapshot(
 		"agent-1", agent.RunKind, kernel.RunStatusCompleted, 2,
 		json.RawMessage(`{"messages":[{"role":"user","content":"draft"}],"model":"terra","toolKeys":[],"budget":{"limits":{"maxLLMCalls":8,"maxToolCalls":16},"usage":{"llmCalls":1}}}`),
-	)
-	planSnapshot := topologySnapshot(
-		"plan-1", planexecute.RunKind, kernel.RunStatusRunning, 4,
-		mustStateJSON(t, planexecute.View{
-			ApprovalPolicy:    planexecute.ApprovalAuto,
-			PlannerInvocation: consumedTopologyPlannerInvocation("plan-1"),
-			Plan: planexecute.Plan{ID: "plan-spec", Revision: 1, Status: planexecute.PlanRunning, Summary: "Delivery plan", Steps: []planexecute.Step{
-				{ID: "step-1", Title: "Research", Goal: "Research", Status: planexecute.StepCompleted, ChildRunID: testPlanChildOne},
-				{ID: "step-2", Title: testTopologyWriteGoal, Goal: testTopologyWriteGoal, Status: planexecute.StepRunning, ChildRunID: testPlanChildTwo},
-			}},
-			NextStep: 1,
-		}),
 	)
 	teamSnapshot := topologySnapshot(
 		"team-1", team.RunKind, kernel.RunStatusRunning, 3,
@@ -197,20 +165,13 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 	workflowSnapshot := topologyWorkflowSnapshot(t)
 	runs := topologyRunSource{snapshots: map[string]kernel.Snapshot{
 		agentSnapshot.Run.ID:    agentSnapshot,
-		planSnapshot.Run.ID:     planSnapshot,
 		teamSnapshot.Run.ID:     teamSnapshot,
 		workflowSnapshot.Run.ID: workflowSnapshot,
-		testPlanChildOne:        topologySnapshot(testPlanChildOne, agent.RunKind, kernel.RunStatusCompleted, 2, agentSnapshot.State),
-		testPlanChildTwo:        topologySnapshot(testPlanChildTwo, agent.RunKind, kernel.RunStatusRunning, 1, agentSnapshot.State),
 		testTeamWriterChild:     topologySnapshot(testTeamWriterChild, agent.RunKind, kernel.RunStatusRunning, 1, agentSnapshot.State),
 		testTeamEditorChild:     topologySnapshot(testTeamEditorChild, agent.RunKind, kernel.RunStatusRunning, 1, agentSnapshot.State),
 		testWorkflowDraftChild:  topologySnapshot(testWorkflowDraftChild, agent.RunKind, kernel.RunStatusRunning, 1, agentSnapshot.State),
 	}}
 	relations := topologyRelationSource{children: map[string][]runrelation.Relation{
-		planSnapshot.Run.ID: {
-			{ParentRunID: planSnapshot.Run.ID, ChildRunID: testPlanChildOne, Kind: runrelation.KindPlanStep, OwnerNodeID: "step-1"},
-			{ParentRunID: planSnapshot.Run.ID, ChildRunID: testPlanChildTwo, Kind: runrelation.KindPlanStep, OwnerNodeID: "step-2"},
-		},
 		teamSnapshot.Run.ID: {
 			{ParentRunID: teamSnapshot.Run.ID, ChildRunID: testTeamWriterChild, Kind: runrelation.KindTeamMember, OwnerNodeID: testTeamWriterID},
 			{ParentRunID: teamSnapshot.Run.ID, ChildRunID: testTeamEditorChild, Kind: runrelation.KindTeamMember, OwnerNodeID: testTeamEditorID},
@@ -221,23 +182,7 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 	}}
 	return topologyFixtureSet{
 		runs: runs, relations: relations, agentRunID: agentSnapshot.Run.ID,
-		planRunID: planSnapshot.Run.ID, teamRunID: teamSnapshot.Run.ID, workflowRunID: workflowSnapshot.Run.ID,
-	}
-}
-
-func consumedTopologyPlannerInvocation(runID string) *planexecute.PlannerInvocation {
-	createdAt := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
-	completedAt := createdAt.Add(time.Second)
-	consumedAt := completedAt.Add(time.Second)
-	const invocationID = "plannerinv_topology_fixture"
-	return &planexecute.PlannerInvocation{
-		ID: invocationID, RunID: runID, SourceRevision: 1,
-		RequestHash: "0000000000000000000000000000000000000000000000000000000000000000",
-		Status:      planexecute.PlannerInvocationConsumed,
-		Request: planexecute.PlannerRequest{
-			InvocationID: invocationID, RunID: runID, Goal: "project topology", MaxSteps: 2,
-		},
-		CreatedAt: createdAt, CompletedAt: &completedAt, ConsumedAt: &consumedAt,
+		teamRunID: teamSnapshot.Run.ID, workflowRunID: workflowSnapshot.Run.ID,
 	}
 }
 

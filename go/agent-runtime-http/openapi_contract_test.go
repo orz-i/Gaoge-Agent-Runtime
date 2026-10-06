@@ -55,8 +55,6 @@ func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 		"post /harness/turns/{turnID}/subtasks",
 		"post /harness/turns/{turnID}/subtasks/{subtaskID}/approval",
 		"post /harness/turns/{turnID}/subtasks/{subtaskID}/cancel",
-		"post /plan-runs",
-		"post /plan-runs/{runID}/approval",
 		"post /runs/{runID}/cancel",
 		"post /team-runs",
 		"post /workflow-definitions",
@@ -98,7 +96,7 @@ type capabilityFragment struct {
 func assertCapabilityFragments(t *testing.T, paths openAPIPaths) {
 	t.Helper()
 	fragmentFS := os.DirFS(filepath.Join("..", "..", "contracts", "agent-runtime", "v1", "capabilities"))
-	fragmentNames := []string{"core.json", "agent.json", "planexecute.json", "workflow.json", "team.json", "harness.json"}
+	fragmentNames := []string{"core.json", "agent.json", "workflow.json", "team.json", "harness.json"}
 	actual := make([]string, 0)
 	seenCapabilities := map[string]struct{}{}
 	for _, fragmentName := range fragmentNames {

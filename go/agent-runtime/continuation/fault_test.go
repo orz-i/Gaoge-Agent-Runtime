@@ -12,9 +12,9 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
@@ -34,7 +34,6 @@ func TestProjectorRecoversCommittedSelfTriggersAfterCrashBeforeEnqueue(t *testin
 		{name: "model invocation claimed", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.claimed", Wakeup: true}, trigger: continuation.TriggerModelReady},
 		{name: "model invocation retryable", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.retryable", Wakeup: true}, trigger: continuation.TriggerModelReady},
 		{name: "model invocation completed", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.completed", Wakeup: true}, trigger: continuation.TriggerModelReady},
-		{name: "plan approved", kind: planexecute.RunKind, event: kernel.EventDraft{Type: "plan.approved", Wakeup: true}, trigger: continuation.TriggerApprovalResolved},
 		{name: "workflow wait resolved", kind: workflow.RunKind, event: kernel.EventDraft{Type: "workflow.wait.resolved", Wakeup: true}, trigger: continuation.TriggerWaitResolved},
 		{name: "workflow segment yielded", kind: workflow.RunKind, event: kernel.EventDraft{Type: "workflow.segment.yielded", Message: "activation_budget", Wakeup: true}, trigger: continuation.TriggerSegmentYielded},
 	}
@@ -138,7 +137,7 @@ func TestProjectorRetryAfterEnqueueBeforeOutboxAckDoesNotDuplicateJob(t *testing
 func TestRelationReconciliationRecoversLateChildOwnershipWithoutDuplicateDelivery(t *testing.T) {
 	t.Parallel()
 	fixture := newSchedulerFixture(t)
-	parent := createRun(t, fixture.runtime, "late-parent", planexecute.RunKind)
+	parent := createRun(t, fixture.runtime, "late-parent", team.RunKind)
 	child := createRun(t, fixture.runtime, "late-child", agent.RunKind)
 	completed := completeRun(t, fixture.runtime, child)
 
@@ -153,7 +152,7 @@ func TestRelationReconciliationRecoversLateChildOwnershipWithoutDuplicateDeliver
 
 	ensureRelation(t, fixture.relations, runrelation.Draft{
 		ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-		Kind: runrelation.KindPlanStep, OwnerNodeID: "late-step",
+		Kind: runrelation.KindTeamMember, OwnerNodeID: "late-member",
 	})
 	if err := fixture.scheduler.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)

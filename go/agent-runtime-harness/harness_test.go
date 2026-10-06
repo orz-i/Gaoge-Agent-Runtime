@@ -344,7 +344,7 @@ func TestConfigSnapshotIsDeterministicAndIsolated(t *testing.T) {
 		t.Fatalf("reseal config: %v", err)
 	}
 	if first.ID != second.ID || first.ContentHash != second.ContentHash || len(first.ToolKeys) != 2 ||
-		len(first.Commands) != 3 || first.Commands[0].ID != "plan" || first.Skills[0].ID != "analysis" {
+		len(first.Commands) != 2 || first.Commands[0].ID != "team" || first.Skills[0].ID != "analysis" {
 		t.Fatalf("config is not deterministic: first=%#v second=%#v", first, second)
 	}
 	input.Commands[0].Title = "mutated"

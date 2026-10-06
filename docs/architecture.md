@@ -14,7 +14,6 @@ Host application
   +-- Harness and feature runners
   |     +-- Agent
   |     +-- Workflow
-  |     +-- PlanExecute
   |     +-- Team / Group Chat
   |
   +-- Continuation projector + workers
@@ -37,7 +36,6 @@ modules adapt contracts at the edge and are assembled by the host.
 | Run identity, revision CAS, event journal, committed-transition outbox | Kernel | Model/tool/provider semantics |
 | Model/tool loop and durable model receipts | Agent | HTTP or provider SDK configuration |
 | Definitions, waits, effects, compensation | Workflow | Generic Kernel policy |
-| Planning and child execution | PlanExecute | Host authorization |
 | Multi-member execution and speaker routing | Team / Group Chat | Persistence implementation details |
 | Turns, commands, interactions, delegation | Harness | Provider-specific execution |
 | Wakeup projection and retry delivery | Continuation | Feature state transitions |
