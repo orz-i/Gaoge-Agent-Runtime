@@ -104,6 +104,7 @@ reproducible checks, and remaining coverage limits.
 
 ## Project policy
 
+- [Architecture](docs/architecture.md)
 - [Beta support policy](SUPPORT.md)
 - [Security policy](SECURITY.md)
 - [A2A product integration and support matrix](docs/a2a.md)
