@@ -77,6 +77,10 @@ func (runtimeFeatureScenarioExecutor) Execute(
 		return executeTeamChildScenario(ctx)
 	case "groupchat_directed_once":
 		return executeGroupChatScenario(ctx)
+	case "groupchat_selector_retry":
+		return executeGroupChatSelectorRetryScenario(ctx)
+	case "groupchat_handoff_chain":
+		return executeGroupChatHandoffScenario(ctx)
 	default:
 		return evaluation.ScenarioObservation{}, errors.New("unsupported runtime feature scenario")
 	}
@@ -235,19 +239,7 @@ func executeGroupChatScenario(ctx context.Context) (evaluation.ScenarioObservati
 	if err != nil {
 		return evaluation.ScenarioObservation{}, err
 	}
-	snapshot, err := runner.StartRun(ctx, groupchat.StartRequest{
-		ID: "eval-groupchat-feature", Actor: featureScenarioActor(), Thread: featureScenarioThread(),
-		Goal: "compare evidence", SpeakerPolicy: groupchat.SpeakerDirected,
-		Participants: []groupchat.Participant{
-			{ID: "researcher", Description: "find evidence"},
-			{ID: "reviewer", Description: "review evidence"},
-		},
-		SpeakerConfigs: []groupchat.SpeakerConfig{
-			{ParticipantID: "researcher", AuthorKind: "agent_role", AuthorID: "researcher", AuthorRevision: "1", AuthorName: "Researcher", MemberID: "researcher"},
-			{ParticipantID: "reviewer", AuthorKind: "agent_role", AuthorID: "reviewer", AuthorRevision: "1", AuthorName: "Reviewer", MemberID: "reviewer"},
-		},
-		DirectedSpeakerIDs: []string{"researcher", "reviewer"}, MaxUtterances: 2,
-	})
+	snapshot, err := runner.StartRun(ctx, featureScenarioGroupChatRequest())
 	if err != nil {
 		return evaluation.ScenarioObservation{}, err
 	}
@@ -264,6 +256,155 @@ func executeGroupChatScenario(ctx context.Context) (evaluation.ScenarioObservati
 		{Key: "speaker_relation", Count: len(items)},
 		{Key: "visible_utterance", Count: len(view.SpeakerTurns)},
 	})
+}
+
+func executeGroupChatSelectorRetryScenario(ctx context.Context) (evaluation.ScenarioObservation, error) {
+	runtime, err := newFeatureScenarioRuntime()
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	relations, err := runrelation.New(memory.NewRunRelationStore(), scenarioClock{})
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	delegator := &featureScenarioGroupChatDelegator{}
+	selector := &featureScenarioSelector{
+		failFirst: true,
+		responses: []groupchat.SelectorResponse{{SpeakerID: "researcher"}, {Complete: true}},
+	}
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: delegator, Selector: selector, Relations: relations,
+	})
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	request := featureScenarioGroupChatRequest()
+	request.ID = "eval-groupchat-selector"
+	request.SpeakerPolicy = groupchat.SpeakerSelector
+	request.DirectedSpeakerIDs = nil
+	request.CandidateSpeakerIDs = []string{"researcher", "reviewer"}
+	request.SelectorModel = "selector-fixture"
+	request.MaxUtterances = 4
+	pending, startErr := runner.StartRun(ctx, request)
+	if !errors.Is(startErr, groupchat.ErrSelectorPending) {
+		return evaluation.ScenarioObservation{}, errors.New("groupchat selector did not yield retry")
+	}
+	completed, err := runner.Resume(ctx, pending.Run.ID, pending.Run.Revision)
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	if len(selector.invocationIDs) != 3 || selector.invocationIDs[0] != selector.invocationIDs[1] {
+		return evaluation.ScenarioObservation{}, errors.New("selector invocation identity was not reused")
+	}
+	return observeScenario(ctx, runtime, completed, []evaluation.EffectCount{
+		{Key: "selector_call", Count: len(selector.invocationIDs)},
+		{Key: "selector_retry_identity_reused", Count: 1},
+		{Key: "speaker_execution", Count: int(delegator.starts.Load())},
+	})
+}
+
+func executeGroupChatHandoffScenario(ctx context.Context) (evaluation.ScenarioObservation, error) {
+	runtime, err := newFeatureScenarioRuntime()
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	relations, err := runrelation.New(memory.NewRunRelationStore(), scenarioClock{})
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	delegator := &featureScenarioGroupChatDelegator{}
+	handoffs := &featureScenarioVisibleHandoffs{
+		signals: []groupchat.VisibleHandoffSignal{{TargetParticipantID: "reviewer"}, {}},
+		found:   []bool{true, false},
+	}
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: delegator, VisibleHandoffs: handoffs, Relations: relations,
+	})
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	request := featureScenarioGroupChatRequest()
+	request.ID = "eval-groupchat-handoff"
+	request.SpeakerPolicy = groupchat.SpeakerHandoff
+	request.DirectedSpeakerIDs = nil
+	request.CandidateSpeakerIDs = []string{"researcher", "reviewer"}
+	request.MaxUtterances = 4
+	completed, err := runner.StartRun(ctx, request)
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	items, err := relations.ListChildren(ctx, completed.Run.ID)
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	return observeScenario(ctx, runtime, completed, []evaluation.EffectCount{
+		{Key: "handoff_signal_read", Count: handoffs.reads},
+		{Key: "speaker_execution", Count: int(delegator.starts.Load())},
+		{Key: "speaker_relation", Count: len(items)},
+	})
+}
+
+func featureScenarioGroupChatRequest() groupchat.StartRequest {
+	return groupchat.StartRequest{
+		ID: "eval-groupchat-feature", Actor: featureScenarioActor(), Thread: featureScenarioThread(),
+		Goal: "compare evidence", SpeakerPolicy: groupchat.SpeakerDirected,
+		Participants: []groupchat.Participant{
+			{ID: "researcher", Description: "find evidence"},
+			{ID: "reviewer", Description: "review evidence"},
+		},
+		SpeakerConfigs: []groupchat.SpeakerConfig{
+			{ParticipantID: "researcher", AuthorKind: "agent_role", AuthorID: "researcher", AuthorRevision: "1", AuthorName: "Researcher", MemberID: "researcher"},
+			{ParticipantID: "reviewer", AuthorKind: "agent_role", AuthorID: "reviewer", AuthorRevision: "1", AuthorName: "Reviewer", MemberID: "reviewer"},
+		},
+		DirectedSpeakerIDs: []string{"researcher", "reviewer"}, MaxUtterances: 2,
+	}
+}
+
+type featureScenarioSelector struct {
+	failFirst     bool
+	invocationIDs []string
+	responses     []groupchat.SelectorResponse
+}
+
+func (selector *featureScenarioSelector) Select(
+	_ context.Context,
+	request groupchat.SelectorRequest,
+) (groupchat.SelectorResponse, error) {
+	selector.invocationIDs = append(selector.invocationIDs, request.InvocationID)
+	if selector.failFirst {
+		selector.failFirst = false
+		return groupchat.SelectorResponse{}, featureScenarioRetryableError{}
+	}
+	if len(selector.responses) == 0 {
+		return groupchat.SelectorResponse{}, errors.New("selector response exhausted")
+	}
+	response := selector.responses[0]
+	selector.responses = selector.responses[1:]
+	return response, nil
+}
+
+type featureScenarioRetryableError struct{}
+
+func (featureScenarioRetryableError) Error() string   { return "retry selector" }
+func (featureScenarioRetryableError) Retryable() bool { return true }
+
+type featureScenarioVisibleHandoffs struct {
+	signals []groupchat.VisibleHandoffSignal
+	found   []bool
+	reads   int
+}
+
+func (resolver *featureScenarioVisibleHandoffs) ResolveVisibleHandoff(
+	_ context.Context,
+	_ string,
+) (groupchat.VisibleHandoffSignal, bool, error) {
+	resolver.reads++
+	if len(resolver.signals) == 0 || len(resolver.found) == 0 {
+		return groupchat.VisibleHandoffSignal{}, false, nil
+	}
+	signal, found := resolver.signals[0], resolver.found[0]
+	resolver.signals, resolver.found = resolver.signals[1:], resolver.found[1:]
+	return signal, found, nil
 }
 
 type featureScenarioGroupChatDelegator struct {

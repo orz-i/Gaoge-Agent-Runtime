@@ -22,6 +22,36 @@
           {"key": "tool_call", "count": 1}
         ]
       }
+    },
+    {
+      "id": "invalid-arguments-fenced",
+      "name": "Invalid arguments are rejected before remote MCP execution",
+      "input": {"operation": "invalid_arguments_fenced"},
+      "expected": {
+        "status": "completed",
+        "revision": 1,
+        "errorCode": "tool.arguments_schema",
+        "effects": [
+          {"key": "recoverable_schema_error", "count": 1},
+          {"key": "remote_call", "count": 0}
+        ]
+      }
+    },
+    {
+      "id": "legacy-fallback-blocked",
+      "name": "Legacy MCP initialize fallback is blocked after one request",
+      "input": {"operation": "legacy_fallback_blocked"},
+      "expected": {
+        "status": "completed",
+        "revision": 1,
+        "eventTypes": [
+          "protocol.mcp.discovery:started",
+          "protocol.mcp.discovery:failed"
+        ],
+        "effects": [
+          {"key": "network_request", "count": 1}
+        ]
+      }
     }
   ]
 }

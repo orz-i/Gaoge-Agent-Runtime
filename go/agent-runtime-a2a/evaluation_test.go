@@ -63,6 +63,12 @@ func (executor a2aScenarioExecutor) Execute(
 	switch input.Operation {
 	case "discover_send_terminal":
 		return executor.discoverSendTerminal(ctx)
+	case "stream_terminal":
+		return executor.streamTerminal(ctx)
+	case "input_required_cancel":
+		return executor.inputRequiredCancel(ctx)
+	case "shadow_resume_retry":
+		return executor.shadowResumeRetry(ctx)
 	default:
 		return evaluation.ScenarioObservation{}, errors.New("unsupported A2A evaluation scenario")
 	}
@@ -96,6 +102,108 @@ func (executor a2aScenarioExecutor) discoverSendTerminal(
 		Effects: []evaluation.EffectCount{
 			{Key: "discovered_skill", Count: len(discovery.Skills)},
 			{Key: "terminal_task", Count: 1},
+		},
+	}, nil
+}
+
+func (executor a2aScenarioExecutor) streamTerminal(ctx context.Context) (evaluation.ScenarioObservation, error) {
+	server, _ := newA2ATestServer(executor.t, false)
+	observer := &testA2AObserver{name: "a2a-stream-eval-observer"}
+	client := newA2ATestClient(executor.t, server.Client(), observer)
+	discovery, err := client.Discover(ctx, server.URL)
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	count := 0
+	terminal := 0
+	for event, streamErr := range client.SendStreamingMessage(ctx, discovery, SendRequest{
+		MessageID: "a2a-eval-stream", Text: "stream deterministically",
+	}) {
+		if streamErr != nil {
+			return evaluation.ScenarioObservation{}, streamErr
+		}
+		count++
+		if event.Task != nil && event.Task.Terminal {
+			terminal++
+		}
+	}
+	events := make([]string, 0, len(observer.events))
+	for _, event := range observer.events {
+		events = append(events, event.Type+":"+event.Status)
+	}
+	return evaluation.ScenarioObservation{
+		Status: kernel.RunStatusCompleted, Revision: 1, EventTypes: events,
+		Effects: []evaluation.EffectCount{
+			{Key: "stream_event", Count: count},
+			{Key: "terminal_task", Count: terminal},
+		},
+	}, nil
+}
+
+func (executor a2aScenarioExecutor) inputRequiredCancel(ctx context.Context) (evaluation.ScenarioObservation, error) {
+	server, _ := newA2ATestServer(executor.t, true)
+	observer := &testA2AObserver{name: "a2a-cancel-eval-observer"}
+	client := newA2ATestClient(executor.t, server.Client(), observer)
+	discovery, err := client.Discover(ctx, server.URL)
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	interaction, err := client.SendMessage(ctx, discovery, SendRequest{
+		MessageID: "a2a-eval-cancel", Text: "request input",
+	})
+	if err != nil || interaction.Task == nil || interaction.Task.State != string(a2asdk.TaskStateInputRequired) {
+		return evaluation.ScenarioObservation{}, errors.New("A2A task did not enter input-required")
+	}
+	cancelled, err := client.CancelTask(ctx, discovery, interaction.Task.ID)
+	if err != nil || cancelled.State != string(a2asdk.TaskStateCanceled) || !cancelled.Terminal {
+		return evaluation.ScenarioObservation{}, errors.New("A2A task cancellation did not become terminal")
+	}
+	events := make([]string, 0, len(observer.events))
+	for _, event := range observer.events {
+		events = append(events, event.Type+":"+event.Status)
+	}
+	return evaluation.ScenarioObservation{
+		Status: kernel.RunStatusCancelled, Revision: 1, EventTypes: events,
+		Effects: []evaluation.EffectCount{
+			{Key: "cancel_call", Count: 1},
+			{Key: "input_required", Count: 1},
+		},
+	}, nil
+}
+
+func (executor a2aScenarioExecutor) shadowResumeRetry(ctx context.Context) (evaluation.ScenarioObservation, error) {
+	runtime := newShadowRuntime(executor.t)
+	remote := &shadowRemote{task: inputRequiredTask()}
+	runner := newShadowRunner(executor.t, runtime, remote)
+	started, err := runner.StartRun(ctx, shadowStartRequest("a2a-eval-shadow-retry"))
+	if err != nil || started.Run.Status != kernel.RunStatusWaitingInput {
+		return evaluation.ScenarioObservation{}, errors.New("A2A shadow did not enter waiting input")
+	}
+	remote.sendErr = errors.New("temporary network failure")
+	waiting, err := runner.ResumeRun(ctx, started.Run.ID, "approved")
+	if err == nil || waiting.Run.Status != kernel.RunStatusWaitingInput {
+		return evaluation.ScenarioObservation{}, errors.New("A2A shadow retry did not preserve wait")
+	}
+	messageID := remote.sent.MessageID
+	remote.sendErr = nil
+	remote.task = completedTask()
+	completed, err := runner.ResumeRun(ctx, started.Run.ID, "approved")
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || remote.sent.MessageID != messageID {
+		return evaluation.ScenarioObservation{}, errors.New("A2A shadow retry changed message identity")
+	}
+	events, err := runtime.ListEvents(ctx, completed.Run.ID, 0, 100)
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	eventTypes := make([]string, len(events))
+	for index, event := range events {
+		eventTypes[index] = event.Type
+	}
+	return evaluation.ScenarioObservation{
+		Status: completed.Run.Status, Revision: completed.Run.Revision, EventTypes: eventTypes,
+		Effects: []evaluation.EffectCount{
+			{Key: "resume_retry", Count: 1},
+			{Key: "stable_message_identity", Count: 1},
 		},
 	}, nil
 }

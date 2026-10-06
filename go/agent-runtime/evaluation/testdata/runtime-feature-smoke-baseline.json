@@ -1,8 +1,8 @@
 {
   "datasetID": "runtime-feature-smoke",
-  "datasetHash": "406a5b10263748cbc667a7762e2faa4c15a5c2623ef4e07acdf56ba554a5d9ed",
+  "datasetHash": "929cddbeb7bec016078f0d301c0fb9da87697c077b06aba22f5df7738707834e",
   "minimumOverallScore": 1,
-  "minimumPassedCases": 4,
+  "minimumPassedCases": 6,
   "maximumFailedCases": 0,
   "requireReportPass": true
 }

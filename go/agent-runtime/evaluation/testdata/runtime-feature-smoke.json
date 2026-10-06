@@ -46,6 +46,50 @@
       }
     },
     {
+      "id": "groupchat-handoff-chain",
+      "name": "Group Chat follows an explicit visible handoff chain",
+      "input": {"operation": "groupchat_handoff_chain"},
+      "expected": {
+        "status": "completed",
+        "revision": 3,
+        "eventTypes": ["run.created", "groupchat.started", "groupchat.progressed", "groupchat.completed"],
+        "effects": [
+          {"key": "handoff_signal_read", "count": 2},
+          {"key": "speaker_execution", "count": 2},
+          {"key": "speaker_relation", "count": 2}
+        ]
+      }
+    },
+    {
+      "id": "groupchat-selector-retry",
+      "name": "Group Chat selector retry reuses one durable invocation",
+      "input": {"operation": "groupchat_selector_retry"},
+      "expected": {
+        "status": "completed",
+        "revision": 12,
+        "eventTypes": [
+          "run.created",
+          "groupchat.started",
+          "groupchat.selector.created",
+          "groupchat.selector.claimed",
+          "groupchat.selector.retry",
+          "groupchat.selector.claimed",
+          "groupchat.selector.completed",
+          "groupchat.selector.consumed",
+          "groupchat.progressed",
+          "groupchat.selector.created",
+          "groupchat.selector.claimed",
+          "groupchat.selector.completed",
+          "groupchat.completed"
+        ],
+        "effects": [
+          {"key": "selector_call", "count": 3},
+          {"key": "selector_retry_identity_reused", "count": 1},
+          {"key": "speaker_execution", "count": 1}
+        ]
+      }
+    },
+    {
       "id": "team-child-once",
       "name": "Team materializes one child relation and completes",
       "input": {"operation": "team_child_once"},

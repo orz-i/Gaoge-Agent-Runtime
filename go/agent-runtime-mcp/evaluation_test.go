@@ -13,6 +13,7 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 func TestMCPDeterministicScenarioCorpus(t *testing.T) {
@@ -66,6 +67,10 @@ func (executor mcpScenarioExecutor) Execute(
 	switch input.Operation {
 	case "discover_call_tool":
 		return executor.discoverCallTool(ctx)
+	case "invalid_arguments_fenced":
+		return executor.invalidArgumentsFenced(ctx)
+	case "legacy_fallback_blocked":
+		return executor.legacyFallbackBlocked(ctx)
 	default:
 		return evaluation.ScenarioObservation{}, errors.New("unsupported MCP evaluation scenario")
 	}
@@ -110,6 +115,62 @@ func (executor mcpScenarioExecutor) discoverCallTool(
 			{Key: "discovered_tool", Count: len(discovery.Tools)},
 			{Key: "tool_call", Count: 1},
 		},
+	}, nil
+}
+
+func (executor mcpScenarioExecutor) invalidArgumentsFenced(ctx context.Context) (evaluation.ScenarioObservation, error) {
+	caller := &registryCaller{}
+	registry, err := NewRegistry(caller, Discovery{
+		ProtocolVersion: ProtocolVersion,
+		Catalog:         CatalogSnapshot{Endpoint: testRegistryEndpoint},
+		Tools: []DiscoveredTool{{
+			Name: testLookupTool,
+			Definition: tools.Definition{
+				Key: testLookupTool, Name: testLookupTool,
+				InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1}}}`),
+			},
+		}},
+	})
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	_, err = registry.Execute(ctx, tools.ExecutionRequest{
+		RunID: "mcp-eval-invalid",
+		Call:  tools.Call{ID: "mcp-eval-call", ToolKey: testLookupTool, Arguments: json.RawMessage(`{"bad":true}`)},
+	})
+	code, _, recoverable := tools.RecoverableCallErrorInfo(err)
+	if !recoverable || code != "tool.arguments_schema" || caller.calls != 0 {
+		return evaluation.ScenarioObservation{}, errors.New("MCP invalid arguments were not fenced before remote execution")
+	}
+	return evaluation.ScenarioObservation{
+		Status: kernel.RunStatusCompleted, Revision: 1, ErrorCode: code,
+		Effects: []evaluation.EffectCount{
+			{Key: "recoverable_schema_error", Count: 1},
+			{Key: "remote_call", Count: caller.calls},
+		},
+	}, nil
+}
+
+func (executor mcpScenarioExecutor) legacyFallbackBlocked(ctx context.Context) (evaluation.ScenarioObservation, error) {
+	requests := 0
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		requests++
+		http.Error(writer, "modern discovery unavailable", http.StatusNotFound)
+	}))
+	executor.t.Cleanup(httpServer.Close)
+	observer := &testProtocolObserver{name: "mcp-legacy-eval-observer"}
+	client := newTestClient(executor.t, httpServer.Client(), observer)
+	_, err := client.DiscoverTools(ctx, httpServer.URL)
+	if !errors.Is(err, ErrLegacyProtocol) || requests != 1 {
+		return evaluation.ScenarioObservation{}, errors.New("MCP legacy fallback was not blocked at one network request")
+	}
+	events := make([]string, 0, len(observer.events))
+	for _, event := range observer.events {
+		events = append(events, event.Type+":"+event.Status)
+	}
+	return evaluation.ScenarioObservation{
+		Status: kernel.RunStatusCompleted, Revision: 1, EventTypes: events,
+		Effects: []evaluation.EffectCount{{Key: "network_request", Count: requests}},
 	}, nil
 }
 
