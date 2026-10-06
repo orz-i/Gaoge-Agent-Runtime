@@ -22,7 +22,7 @@ The Kernel corpus lives in `go/agent-runtime/evaluation/testdata/runtime-smoke.j
 2. stale CAS fencing;
 3. at-least-once transition redelivery with one logical consumption after acknowledgement.
 
-The feature corpus in `runtime-feature-smoke.json` adds deterministic Agent tool execution, Workflow wait/resume, and Team child/relation materialization. The matching baselines are `runtime-smoke-baseline.json` and `runtime-feature-smoke-baseline.json`. Any corpus edit changes the Dataset hash, so the baseline must be reviewed and intentionally updated.
+The feature corpus in `runtime-feature-smoke.json` adds deterministic Agent tool execution, Workflow wait/resume, Team child/relation materialization, and directed Group Chat speaker sequencing. The A2A and MCP modules each carry their own protocol-local deterministic corpus under `go/agent-runtime-a2a/testdata` and `go/agent-runtime-mcp/testdata`; those tests reuse the same evaluation Dataset/Runner/Baseline contracts while keeping protocol dependencies out of Core. All matching baselines pin exact Dataset hashes. Any corpus edit changes the Dataset hash, so the baseline must be reviewed and intentionally updated.
 
 Run the visible report with:
 

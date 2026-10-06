@@ -1,0 +1,27 @@
+{
+  "id": "a2a-deterministic-smoke",
+  "revision": 1,
+  "name": "A2A deterministic smoke",
+  "passThreshold": 1,
+  "scenarios": [
+    {
+      "id": "discover-send-terminal",
+      "name": "Discover a local A2A peer and complete one task",
+      "input": {"operation": "discover_send_terminal"},
+      "expected": {
+        "status": "completed",
+        "revision": 1,
+        "eventTypes": [
+          "protocol.a2a.discovery:started",
+          "protocol.a2a.discovery:completed",
+          "protocol.a2a.message:started",
+          "protocol.a2a.message:completed"
+        ],
+        "effects": [
+          {"key": "discovered_skill", "count": 1},
+          {"key": "terminal_task", "count": 1}
+        ]
+      }
+    }
+  ]
+}

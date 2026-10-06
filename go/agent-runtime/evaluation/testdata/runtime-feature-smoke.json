@@ -31,6 +31,21 @@
       }
     },
     {
+      "id": "groupchat-directed-once",
+      "name": "Group Chat executes two visible speakers exactly once",
+      "input": {"operation": "groupchat_directed_once"},
+      "expected": {
+        "status": "completed",
+        "revision": 2,
+        "eventTypes": ["run.created", "groupchat.started", "groupchat.completed"],
+        "effects": [
+          {"key": "speaker_execution", "count": 2},
+          {"key": "speaker_relation", "count": 2},
+          {"key": "visible_utterance", "count": 2}
+        ]
+      }
+    },
+    {
       "id": "team-child-once",
       "name": "Team materializes one child relation and completes",
       "input": {"operation": "team_child_once"},

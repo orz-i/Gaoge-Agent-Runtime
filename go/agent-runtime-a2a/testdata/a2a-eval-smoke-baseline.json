@@ -1,0 +1,8 @@
+{
+  "datasetID": "a2a-deterministic-smoke",
+  "datasetHash": "3d14895ad3877ca650d3d090c8e50a84b3ee5331794c9d5e27d490a7fb17c4ee",
+  "minimumOverallScore": 1,
+  "minimumPassedCases": 1,
+  "maximumFailedCases": 0,
+  "requireReportPass": true
+}

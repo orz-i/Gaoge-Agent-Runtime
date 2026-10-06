@@ -11,6 +11,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -74,6 +75,8 @@ func (runtimeFeatureScenarioExecutor) Execute(
 		return executeWorkflowWaitScenario(ctx)
 	case "team_child_once":
 		return executeTeamChildScenario(ctx)
+	case "groupchat_directed_once":
+		return executeGroupChatScenario(ctx)
 	default:
 		return evaluation.ScenarioObservation{}, errors.New("unsupported runtime feature scenario")
 	}
@@ -214,6 +217,72 @@ func executeTeamChildScenario(ctx context.Context) (evaluation.ScenarioObservati
 		{Key: "child_start", Count: int(children.starts.Load())},
 		{Key: "relation_count", Count: len(items)},
 	})
+}
+
+func executeGroupChatScenario(ctx context.Context) (evaluation.ScenarioObservation, error) {
+	runtime, err := newFeatureScenarioRuntime()
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	relations, err := runrelation.New(memory.NewRunRelationStore(), scenarioClock{})
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	delegator := &featureScenarioGroupChatDelegator{}
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: delegator, Relations: relations,
+	})
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	snapshot, err := runner.StartRun(ctx, groupchat.StartRequest{
+		ID: "eval-groupchat-feature", Actor: featureScenarioActor(), Thread: featureScenarioThread(),
+		Goal: "compare evidence", SpeakerPolicy: groupchat.SpeakerDirected,
+		Participants: []groupchat.Participant{
+			{ID: "researcher", Description: "find evidence"},
+			{ID: "reviewer", Description: "review evidence"},
+		},
+		SpeakerConfigs: []groupchat.SpeakerConfig{
+			{ParticipantID: "researcher", AuthorKind: "agent_role", AuthorID: "researcher", AuthorRevision: "1", AuthorName: "Researcher", MemberID: "researcher"},
+			{ParticipantID: "reviewer", AuthorKind: "agent_role", AuthorID: "reviewer", AuthorRevision: "1", AuthorName: "Reviewer", MemberID: "reviewer"},
+		},
+		DirectedSpeakerIDs: []string{"researcher", "reviewer"}, MaxUtterances: 2,
+	})
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	view, err := groupchat.ViewState(snapshot)
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	items, err := relations.ListChildren(ctx, snapshot.Run.ID)
+	if err != nil {
+		return evaluation.ScenarioObservation{}, err
+	}
+	return observeScenario(ctx, runtime, snapshot, []evaluation.EffectCount{
+		{Key: "speaker_execution", Count: int(delegator.starts.Load())},
+		{Key: "speaker_relation", Count: len(items)},
+		{Key: "visible_utterance", Count: len(view.SpeakerTurns)},
+	})
+}
+
+type featureScenarioGroupChatDelegator struct {
+	starts atomic.Int32
+}
+
+func (delegator *featureScenarioGroupChatDelegator) StartOrLoad(
+	_ context.Context,
+	_ kernel.Snapshot,
+	delegation handoff.Delegation,
+) (handoff.Delegation, error) {
+	delegator.starts.Add(1)
+	delegation.Status = handoff.StatusCompleted
+	content, err := json.Marshal(map[string]string{"content": "answer-" + delegation.MemberID})
+	if err != nil {
+		return handoff.Delegation{}, err
+	}
+	delegation.Result = content
+	return delegation, nil
 }
 
 type featureScenarioChildren struct {

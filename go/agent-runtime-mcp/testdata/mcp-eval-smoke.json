@@ -1,0 +1,27 @@
+{
+  "id": "mcp-deterministic-smoke",
+  "revision": 1,
+  "name": "MCP deterministic smoke",
+  "passThreshold": 1,
+  "scenarios": [
+    {
+      "id": "discover-call-tool",
+      "name": "Discover one MCP tool and execute it once",
+      "input": {"operation": "discover_call_tool"},
+      "expected": {
+        "status": "completed",
+        "revision": 1,
+        "eventTypes": [
+          "protocol.mcp.discovery:started",
+          "protocol.mcp.discovery:completed",
+          "protocol.mcp.tool_call:started",
+          "protocol.mcp.tool_call:completed"
+        ],
+        "effects": [
+          {"key": "discovered_tool", "count": 1},
+          {"key": "tool_call", "count": 1}
+        ]
+      }
+    }
+  ]
+}

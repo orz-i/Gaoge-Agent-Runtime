@@ -1,0 +1,8 @@
+{
+  "datasetID": "mcp-deterministic-smoke",
+  "datasetHash": "c7e353790255f1adc65fdf881502f293eaad018deeb115efc44b1b5453dfeaf2",
+  "minimumOverallScore": 1,
+  "minimumPassedCases": 1,
+  "maximumFailedCases": 0,
+  "requireReportPass": true
+}
