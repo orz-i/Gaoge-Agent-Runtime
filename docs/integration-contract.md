@@ -32,7 +32,7 @@ Node version has been exercised.
 | HTTP and protocol edges | The host resolves principals and object authorization and supplies provider credentials, outbound HTTP clients and endpoint policy. MCP/A2A protocol support is adapter-specific. |
 
 The checked external consumers live in [contracts/consumers/go](../contracts/consumers/go).
-They pin constructor signatures for all eight modules in the current Beta.10 release cohort and explicitly spell
+They pin constructor signatures for all nine Go modules in the current Beta.11 release cohort and explicitly spell
 out the Kernel Store, Harness Store, model, tool, worker and Run-authorizer
 interfaces. Required port methods cannot be added silently behind an embedded
 SDK interface. The core consumer also runs a complete Agent with a local model

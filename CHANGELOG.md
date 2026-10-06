@@ -3,10 +3,13 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
-## Unreleased
+## 0.1.0-beta.11
 
-- Add a separate `go/agent-runtime-otel` development module that converts content-safe Runtime observations into OpenTelemetry spans while leaving SDK, exporter, sampling, resource, and shutdown ownership with the host.
-- Document the observability span/content policy and clarify that production container images belong to host applications because Agent Runtime is an SDK rather than a standalone server distribution.
+- Add the supported `go/agent-runtime-otel` module for content-safe OpenTelemetry spans and low-cardinality runtime metrics while leaving SDK, exporter, sampling, resource, and shutdown ownership with the host.
+- Add repository coverage and vulnerability gates to CI and Beta release verification; refresh TypeScript quality dependencies to patched versions.
+- Add HTTP edge-guard coverage for Agent, Team, Harness, and PlanExecute handlers and document the observability and production deployment boundaries.
+
+Upgrade note: update all nine Go modules and the TypeScript archive together. The new OpenTelemetry module is optional and does not change Kernel persistence or HTTP v1. Hosts that enable it must supply their own OpenTelemetry providers and exporter lifecycle. See [beta.11 upgrade notes](docs/releases/v0.1.0-beta.11.md).
 
 ## 0.1.0-beta.10
 

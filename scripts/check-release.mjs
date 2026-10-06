@@ -12,6 +12,7 @@ const modules = [
   "agent-runtime-harness",
   "agent-runtime-harness-postgres",
   "agent-runtime-mcp",
+  "agent-runtime-otel",
   "agent-runtime-a2a",
   "agent-runtime-postgres",
   "agent-runtime-redis",

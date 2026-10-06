@@ -12,6 +12,7 @@ const expectedModules = [
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp",
+  "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis",
@@ -19,7 +20,7 @@ const expectedModules = [
 ];
 const violations = [];
 
-if (version !== "0.1.0-beta.10") violations.push(`unexpected VERSION ${version}`);
+if (version !== "0.1.0-beta.11") violations.push(`unexpected VERSION ${version}`);
 if (boundary.version !== version) violations.push("boundary version does not match VERSION");
 if (JSON.stringify(boundary.goModules) !== JSON.stringify(expectedModules)) {
   violations.push("boundary Go module list is not the canonical ordered list");
