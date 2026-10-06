@@ -7,9 +7,10 @@ argument/result, workflow payload, message, or arbitrary attribute field.
 
 ## OpenTelemetry adapter
 
-The optional `go/agent-runtime-otel` module converts those events into spans.
-It accepts a host-owned `trace.TracerProvider`; it does not create an SDK,
-select an exporter, register globals, or own shutdown.
+The optional `go/agent-runtime-otel` module converts those events into spans
+and metrics. It accepts host-owned `trace.TracerProvider` and
+`metric.MeterProvider` implementations; it does not create an SDK, select an
+exporter, register globals, or own shutdown.
 
 This preserves three boundaries:
 
@@ -49,10 +50,25 @@ a synthetic span whose start time is `observedAt - duration`. This preserves
 latency/error evidence without pretending that an unavailable parent context
 survived the restart.
 
+### Metrics model
+
+The metrics recorder emits `agent.runtime.operation.count`,
+`agent.runtime.operation.duration`, and `agent.runtime.model.token.usage`.
+Operation metrics use only lifecycle dimensions such as scope, phase, run kind,
+status, compensation, and error type. They deliberately exclude Run IDs,
+operation IDs, and response IDs. Model token histograms may include the
+OpenTelemetry GenAI provider/model and `gen_ai.token.type` dimensions.
+
+The Runtime-specific metric namespace is intentional. Current OpenTelemetry
+GenAI conventions define client duration and token metrics, but the Runtime's
+provider-neutral `model.Client.Generate` boundary does not reliably identify a
+standard GenAI operation name. The adapter therefore avoids claiming a more
+specific client semantic contract than the Runtime can prove.
+
 ## Host setup
 
 Production hosts should configure an OpenTelemetry SDK and pass its
-`TracerProvider` to the adapter. Prefer batched export and an OpenTelemetry
+`TracerProvider` and/or `MeterProvider` to the adapter. Prefer batched export and an OpenTelemetry
 Collector/OTLP pipeline rather than synchronous network export on Runtime
 execution paths. Configure service/resource identity, sampling, exporter
 endpoints, authentication, redaction, retention, and provider shutdown in the
@@ -62,10 +78,7 @@ The adapter intentionally does not set a global provider. This keeps it
 compatible with hosts that already instrument HTTP/database clients and avoids
 overriding zero-code/eBPF provider choices.
 
-## Metrics and logs
+## Logs
 
-The first adapter surface is tracing. Runtime events already carry the
-structural duration and usage facts needed for a later metrics adapter without
-changing Kernel state. Logs remain a host concern; correlate host logs with the
-active OpenTelemetry context rather than adding arbitrary log payloads to the
-Runtime event contract.
+Logs remain a host concern; correlate host logs with the active OpenTelemetry
+context rather than adding arbitrary log payloads to the Runtime event contract.
