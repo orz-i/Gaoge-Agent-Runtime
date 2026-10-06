@@ -22,13 +22,13 @@ Run one iteration of each selected benchmark with:
 make benchmark-smoke
 ```
 
-Capture a multi-sample local report with:
+Capture a multi-sample candidate report under `coverage/benchmarks/latest.json` with:
 
 ```bash
 make benchmark
 ```
 
-The committed `benchmarks/baseline.json` records the current reference environment and median measurements. `make benchmark-compare` captures a candidate under `coverage/benchmarks/latest.json` and compares it with intentionally wide initial thresholds: 50% for latency, 25% for bytes, and 10% for allocations.
+The committed `benchmarks/baseline.json` records the current reference environment and median measurements. Refreshing that reviewed reference is deliberately explicit via `make benchmark-baseline`. `make benchmark-compare` captures a fresh candidate and compares it with intentionally wide initial thresholds: 50% for latency, 25% for bytes, and 10% for allocations.
 
 The comparison refuses to compare different GOOS/GOARCH/CPU environments. It is therefore not part of ordinary PR CI. A nightly or release runner should establish a baseline on its own stable environment before turning this into a performance gate.
 
