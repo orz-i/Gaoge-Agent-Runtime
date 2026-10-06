@@ -96,9 +96,7 @@ make integration
 TypeScript coverage reports under the ignored `coverage/` directories.
 `make security` runs `govulncheck` across every Go module and fails on high or
 critical pnpm advisories; it requires network access to the Go vulnerability
-database and npm registry. `make integration` starts isolated PostgreSQL and
-Redis containers, runs the real-engine concurrency and recovery suites with the
-Go race detector, and removes the containers. See the
+database and npm registry. `make integration` starts isolated PostgreSQL and Redis containers and runs the real-engine concurrency/recovery suites. `make integration-otel` separately runs the pinned OpenTelemetry Collector trace/metric gate so telemetry infrastructure cannot mask store/queue recovery evidence. See the
 [reliability evidence map](docs/reliability.md) for failure boundaries,
 reproducible checks, and remaining coverage limits.
 

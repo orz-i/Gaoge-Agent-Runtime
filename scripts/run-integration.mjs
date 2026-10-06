@@ -11,7 +11,7 @@ if (externalServices) {
   runSuites(process.env);
 } else {
   try {
-    run("docker", [...compose, "up", "-d", "--wait", "--wait-timeout", "120"], root);
+    run("docker", [...compose, "up", "-d", "--wait", "--wait-timeout", "120", "postgres", "redis"], root);
     runSuites({
       ...process.env,
       TEST_POSTGRES_DSN: "postgres://agent_runtime:agent_runtime@127.0.0.1:55432/agent_runtime?sslmode=disable",

@@ -65,6 +65,12 @@ provider-neutral `model.Client.Generate` boundary does not reliably identify a
 standard GenAI operation name. The adapter therefore avoids claiming a more
 specific client semantic contract than the Runtime can prove.
 
+## Collector integration gate
+
+`make integration-otel` starts a pinned local OpenTelemetry Collector, runs a host-owned OTLP emitter from `integration/otel-e2e`, and verifies that the Collector receives both Runtime trace spans and low-cardinality metrics. The emitter owns the SDK providers/exporters and shutdown lifecycle; `go/agent-runtime-otel` remains exporter- and Collector-neutral.
+
+For a separately provisioned Collector, set `TEST_OTEL_HTTP_ENDPOINT` and run `make integration-otel-test`. The existing PostgreSQL/Redis `make integration` path remains independent of the Collector image. The Collector debug exporter is only a test sink, and the gate checks structural signal names rather than content payloads.
+
 ## Host setup
 
 Production hosts should configure an OpenTelemetry SDK and pass its

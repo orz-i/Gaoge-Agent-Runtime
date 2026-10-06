@@ -60,14 +60,11 @@ make go-race
 make integration
 ```
 
-`make integration` provisions the isolated PostgreSQL 16 and Redis 8 services
-from `docker-compose.test.yml`, runs all `TestRealPostgres*` and `TestRealRedis*`
-tests with `-race -count=1 -v`, and removes those test containers afterward.
-The same suites run in the existing CI integration job.
+`make integration` provisions isolated PostgreSQL 16 and Redis 8 from `docker-compose.test.yml`, runs all `TestRealPostgres*` and `TestRealRedis*` tests with `-race -count=1 -v`, and removes those containers afterward. `make integration-otel` is a separate heavy gate: it provisions the pinned OpenTelemetry Collector, emits host-owned OTLP traces/metrics through the Runtime adapter, verifies the Collector debug sink observed the structural signal names, and tears it down. Keeping the Collector gate separate prevents telemetry infrastructure availability from hiding database/queue recovery evidence.
 
 For services provisioned separately, set `TEST_POSTGRES_DSN` and
 `TEST_REDIS_ADDR`, then run `make integration-test` (or
-`node scripts/run-integration.mjs --external-services`). PostgreSQL tests create
+`node scripts/run-integration.mjs --external-services`). Run `make integration-otel-test` with `TEST_OTEL_HTTP_ENDPOINT` to exercise a separately provisioned Collector. PostgreSQL tests create
 and remove a unique schema per fixture; Redis tests use unique key prefixes.
 Use dedicated test services, not production instances.
 
