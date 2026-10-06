@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "environment": {
+    "goos": "darwin",
+    "goarch": "arm64",
+    "cpu": "Apple M4"
+  },
+  "thresholds": {
+    "nsPerOpPercent": 75,
+    "bytesPerOpPercent": 25,
+    "allocsPerOpPercent": 10
+  },
+  "benchmarks": {
+    "BenchmarkRealPostgresKernelApplyCAS": {
+      "samples": 3,
+      "nsPerOp": 869543,
+      "bytesPerOp": 47016,
+      "allocsPerOp": 586
+    },
+    "BenchmarkRealPostgresKernelLoad10KHistory": {
+      "samples": 3,
+      "nsPerOp": 165663,
+      "bytesPerOp": 10368,
+      "allocsPerOp": 151
+    },
+    "BenchmarkRealRedisQueueRoundTrip": {
+      "samples": 3,
+      "nsPerOp": 1132860,
+      "bytesPerOp": 16008,
+      "allocsPerOp": 312
+    },
+    "BenchmarkRealRedisRunFeedAppend": {
+      "samples": 3,
+      "nsPerOp": 100835,
+      "bytesPerOp": 1799,
+      "allocsPerOp": 23
+    }
+  },
+  "services": {
+    "postgres": "postgres:16-alpine",
+    "redis": "redis:8-alpine"
+  }
+}

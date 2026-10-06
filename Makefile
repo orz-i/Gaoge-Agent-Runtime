@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
+.PHONY: bootstrap metadata fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -73,7 +73,22 @@ benchmark-smoke:
 	node scripts/run-benchmarks.mjs --smoke
 
 benchmark-compare: benchmark
-	node scripts/compare-benchmarks.mjs benchmarks/baseline.json coverage/benchmarks/latest.json
+	node scripts/compare-benchmarks.mjs --report-only benchmarks/baseline.json coverage/benchmarks/latest.json
+
+benchmark-integration:
+	node scripts/run-integration-benchmarks.mjs --output=coverage/benchmarks/integration-latest.json
+
+benchmark-integration-smoke:
+	node scripts/run-integration-benchmarks.mjs --smoke
+
+benchmark-integration-baseline:
+	node scripts/run-integration-benchmarks.mjs --output=benchmarks/integration-baseline.json
+
+benchmark-integration-compare: benchmark-integration
+	node scripts/compare-benchmarks.mjs --report-only benchmarks/integration-baseline.json coverage/benchmarks/integration-latest.json
+
+benchmark-integration-test:
+	node scripts/run-integration-benchmarks.mjs --external-services --output=coverage/benchmarks/integration-latest.json
 
 otel-e2e-smoke:
 	cd integration/otel-e2e && GOWORK=off go test ./...

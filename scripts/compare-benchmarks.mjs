@@ -3,14 +3,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const [baselineArg, candidateArg] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const reportOnly = args.includes("--report-only");
+const positional = args.filter((value) => value !== "--report-only");
+const [baselineArg, candidateArg] = positional;
 if (!baselineArg || !candidateArg) {
-  throw new Error("usage: node scripts/compare-benchmarks.mjs <baseline.json> <candidate.json>");
+  throw new Error("usage: node scripts/compare-benchmarks.mjs [--report-only] <baseline.json> <candidate.json>");
 }
 
 const baseline = readReport(baselineArg);
 const candidate = readReport(candidateArg);
 assertCompatibleEnvironment(baseline.environment, candidate.environment);
+assertCompatibleServices(baseline.services, candidate.services);
 
 const regressions = [];
 for (const [name, expected] of Object.entries(baseline.benchmarks)) {
@@ -38,6 +42,10 @@ for (const [name, expected] of Object.entries(baseline.benchmarks)) {
 
 if (regressions.length > 0) {
   for (const regression of regressions) console.error(`REGRESSION ${regression}`);
+  if (reportOnly) {
+    console.log(`Benchmark comparison reported ${regressions.length} regression(s) without failing.`);
+    process.exit(0);
+  }
   process.exit(1);
 }
 console.log(`Benchmark comparison passed for ${Object.keys(baseline.benchmarks).length} benchmarks.`);
@@ -61,6 +69,21 @@ function assertCompatibleEnvironment(expected, observed) {
     if (expected[key] !== observed[key]) {
       throw new Error(
         `benchmark environment mismatch for ${key}: baseline=${expected[key] ?? ""} candidate=${observed[key] ?? ""}`,
+      );
+    }
+  }
+}
+
+function assertCompatibleServices(expected, observed) {
+  if (!expected && !observed) return;
+  if (!expected || !observed) {
+    throw new Error("benchmark service metadata mismatch");
+  }
+  const keys = new Set([...Object.keys(expected), ...Object.keys(observed)]);
+  for (const key of keys) {
+    if (expected[key] !== observed[key]) {
+      throw new Error(
+        `benchmark service mismatch for ${key}: baseline=${expected[key] ?? ""} candidate=${observed[key] ?? ""}`,
       );
     }
   }

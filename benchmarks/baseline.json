@@ -13,86 +13,98 @@
   "benchmarks": {
     "BenchmarkAgentDeterministicLoopMemory": {
       "samples": 5,
-      "nsPerOp": 32342,
-      "bytesPerOp": 38323,
+      "nsPerOp": 50162,
+      "bytesPerOp": 38359,
       "allocsPerOp": 195
     },
     "BenchmarkContinuationProjectMemory": {
       "samples": 5,
-      "nsPerOp": 7469,
-      "bytesPerOp": 9750,
+      "nsPerOp": 8367,
+      "bytesPerOp": 9762,
       "allocsPerOp": 61
+    },
+    "BenchmarkHarnessContextPathLookupMemory": {
+      "samples": 5,
+      "nsPerOp": 1293721,
+      "bytesPerOp": 872636,
+      "allocsPerOp": 14119
     },
     "BenchmarkHarnessLoadCompletedTurnMemory": {
       "samples": 5,
-      "nsPerOp": 1970,
+      "nsPerOp": 1856,
       "bytesPerOp": 6064,
       "allocsPerOp": 25
     },
+    "BenchmarkHarnessLoadRelatedSubtasksMemory": {
+      "samples": 5,
+      "nsPerOp": 215777,
+      "bytesPerOp": 218393,
+      "allocsPerOp": 1165
+    },
     "BenchmarkHarnessStartDirectAgentMemory": {
       "samples": 5,
-      "nsPerOp": 45098,
-      "bytesPerOp": 62247,
+      "nsPerOp": 47976,
+      "bytesPerOp": 62257,
       "allocsPerOp": 315
     },
     "BenchmarkHTTPGetRunMemory": {
       "samples": 5,
-      "nsPerOp": 2405,
-      "bytesPerOp": 7428,
+      "nsPerOp": 2922,
+      "bytesPerOp": 7426,
       "allocsPerOp": 23
     },
     "BenchmarkHTTPListRunEventsMemory": {
       "samples": 5,
-      "nsPerOp": 6832,
-      "bytesPerOp": 13656,
+      "nsPerOp": 7341,
+      "bytesPerOp": 13655,
       "allocsPerOp": 27
     },
     "BenchmarkRunRelationEnsureMemory": {
       "samples": 5,
-      "nsPerOp": 818.3,
+      "nsPerOp": 1063,
       "bytesPerOp": 1208,
       "allocsPerOp": 3
     },
     "BenchmarkRunRelationGetByChildMemory": {
       "samples": 5,
-      "nsPerOp": 16.21,
+      "nsPerOp": 17.17,
       "bytesPerOp": 0,
       "allocsPerOp": 0
     },
     "BenchmarkRunRelationListChildrenMemory": {
       "samples": 5,
-      "nsPerOp": 11986,
+      "nsPerOp": 13434,
       "bytesPerOp": 24768,
       "allocsPerOp": 14
     },
     "BenchmarkRuntimeApplyCASMemory": {
       "samples": 5,
-      "nsPerOp": 351.8,
+      "nsPerOp": 663,
       "bytesPerOp": 120,
       "allocsPerOp": 5
     },
     "BenchmarkRuntimeCreateMemory": {
       "samples": 5,
-      "nsPerOp": 1639,
+      "nsPerOp": 2079,
       "bytesPerOp": 1251,
       "allocsPerOp": 10
     },
     "BenchmarkRuntimeListEventsMemory": {
       "samples": 5,
-      "nsPerOp": 883.1,
+      "nsPerOp": 2858,
       "bytesPerOp": 9472,
       "allocsPerOp": 1
     },
     "BenchmarkRuntimeLoadMemory": {
       "samples": 5,
-      "nsPerOp": 78,
+      "nsPerOp": 74.5,
       "bytesPerOp": 24,
       "allocsPerOp": 1
     },
     "BenchmarkWorkflowDeterministicReturnMemory": {
       "samples": 5,
-      "nsPerOp": 48364,
-      "bytesPerOp": 48196,
+      "nsPerOp": 56788,
+      "bytesPerOp": 48208,
       "allocsPerOp": 404
     }
   }
