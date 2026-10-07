@@ -37,7 +37,7 @@ modules adapt contracts at the edge and are assembled by the host.
 | Model/tool loop and durable model receipts | Agent | HTTP or provider SDK configuration |
 | Definitions, waits, effects, compensation | Workflow | Generic Kernel policy |
 | Multi-member execution and speaker routing | Team / Group Chat | Persistence implementation details |
-| Turns, commands, interactions, delegation | Harness | Provider-specific execution |
+| Turns, commands, interactions, delegation, shared execution policy | Harness | Provider-specific execution |
 | Wakeup projection and retry delivery | Continuation | Feature state transitions |
 | Object authorization and principal resolution | Host / HTTP edge | Kernel RBAC |
 | SQL, Redis, protocol, telemetry integration | Adapters | Feature correctness |
@@ -140,6 +140,7 @@ A production-facing change should have evidence at the layer it affects:
 - release: `make check`, `make coverage`, `make security`, and integration.
 
 See the [durability ADR](adr/0001-runtime-durability-governance-v1.md),
+[runtime-owned execution policy ADR](adr/0002-runtime-owned-execution-policy-v1.md),
 [integration contract](integration-contract.md),
 [reliability evidence map](reliability.md), and
 [observability guidance](observability.md) for the detailed contracts.
