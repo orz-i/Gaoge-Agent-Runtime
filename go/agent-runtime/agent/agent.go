@@ -206,6 +206,7 @@ type Dependencies struct {
 	ToolMiddleware     []plugin.ToolMiddleware
 	CompletionPolicies []CompletionPolicy
 	Limits             Limits
+	Execution          ExecutionPolicy
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
 	DeferResumption bool
@@ -223,6 +224,7 @@ type StartRequest struct {
 	ModelOptions     json.RawMessage
 	ToolKeys         []string
 	RequiredToolKeys []string
+	DeadlineAt       *time.Time
 	Limits           Limits
 }
 
@@ -243,6 +245,9 @@ type Runner struct {
 	toolChain          *plugin.ToolChain
 	completionPolicies []CompletionPolicy
 	limits             Limits
+	execution          ExecutionPolicy
+	modelLimiter       *callLimiter
+	toolLimiter        *callLimiter
 	deferResume        bool
 }
 
@@ -331,12 +336,19 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Clock == nil {
 		dependencies.Clock = agentClock{}
 	}
+	execution, err := dependencies.Execution.Resolve()
+	if err != nil {
+		return nil, errors.Join(ErrInvalidRequest, err)
+	}
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		hostedTools: dependencies.HostedTools, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies: compactCompletionPolicies(dependencies.CompletionPolicies),
 		limits:             dependencies.Limits,
+		execution:          execution,
+		modelLimiter:       newCallLimiter(execution.Model.MaxConcurrency),
+		toolLimiter:        newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:           runChain, modelChain: modelChain, toolChain: toolChain,
 		deferResume: dependencies.DeferResumption,
 	}, nil
@@ -370,7 +382,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 }
 
 func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
-	if _, _, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model); err != nil {
+	if _, _, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model, request.DeadlineAt); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	limits, err := resolveRunLimits(runner.limits, request.Limits)
@@ -399,7 +411,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	}
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
-		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
+		RequestID: request.RequestID, Goal: request.Goal, DeadlineAt: request.DeadlineAt, State: encoded,
 		Events: []kernel.EventDraft{{
 			Type: "agent.started", Message: "Direct Agent loop started", Wakeup: true,
 			WakeupAt: agentWakeupAt(runner.clock.Now()),
@@ -501,7 +513,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return failed, true, failErr
 	}
 	if len(state.PendingCalls) > 0 {
-		definitions, _, catalogErr := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model)
+		definitions, _, catalogErr := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model, snapshot.Run.DeadlineAt)
 		if catalogErr != nil {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_invalid", catalogErr)
 			return failed, true, failErr
@@ -536,7 +548,23 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	snapshot, state, err = runner.executeModelInvocation(ctx, snapshot, state, invocation)
 	if err != nil {
+		if errors.Is(err, runtimebudget.ErrExhausted) {
+			failed, failErr := runner.fail(ctx, snapshot, state, sharedBudgetErrorCode(err), err)
+			return failed, true, failErr
+		}
+		if errors.Is(err, kernel.ErrDeadline) {
+			failed, failErr := runner.fail(
+				ctx, snapshot, state, "agent.deadline_exceeded", errors.Join(kernel.ErrDeadline, err),
+			)
+			return failed, true, failErr
+		}
 		if model.IsRetryableError(err) {
+			if int(invocation.ExecutionAttempt) >= runner.execution.Model.MaxAttempts {
+				failed, failErr := runner.fail(
+					ctx, snapshot, state, "agent.model_retry_exhausted", errors.Join(ErrModelFailure, err),
+				)
+				return failed, true, failErr
+			}
 			released, releaseErr := runner.releaseModelInvocationExecution(ctx, snapshot, state, invocation)
 			if releaseErr != nil {
 				return released, true, errors.Join(err, releaseErr)
@@ -931,6 +959,7 @@ func (runner *Runner) resolveSelectedTools(
 	ctx context.Context,
 	keys []string,
 	modelName string,
+	deadlineAt *time.Time,
 ) ([]tools.Definition, []model.HostedTool, error) {
 	local := make([]tools.Definition, 0, len(keys))
 	hosted := make([]model.HostedTool, 0, len(keys))
@@ -944,7 +973,7 @@ func (runner *Runner) resolveSelectedTools(
 			continue
 		}
 		seen[key] = struct{}{}
-		definition, hostedTool, err := runner.resolveSelectedTool(ctx, key, modelName)
+		definition, hostedTool, err := runner.resolveSelectedTool(ctx, key, modelName, deadlineAt)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -961,6 +990,7 @@ func (runner *Runner) resolveSelectedTool(
 	ctx context.Context,
 	key string,
 	modelName string,
+	deadlineAt *time.Time,
 ) (*tools.Definition, *model.HostedTool, error) {
 	if runner.catalog != nil {
 		if definition, ok := runner.catalog.Resolve(key); ok {
@@ -973,7 +1003,7 @@ func (runner *Runner) resolveSelectedTool(
 	if runner.hostedTools == nil {
 		return nil, nil, fmt.Errorf("%w: %s", tools.ErrToolNotFound, key)
 	}
-	resolved, ok, err := runner.hostedTools.Resolve(ctx, key, strings.TrimSpace(modelName))
+	resolved, ok, err := runner.resolveHostedToolWithPolicy(ctx, key, strings.TrimSpace(modelName), deadlineAt)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1116,6 +1146,9 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	}
 	result, err := runner.invokePendingTool(ctx, snapshot, execution.call, execution.definition)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return snapshot, true, ctxErr
+		}
 		return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, err)
 	}
 	if err = tools.ValidateExecutionResult(result); err != nil {
@@ -1173,8 +1206,10 @@ func (runner *Runner) invokePendingTool(
 	invocation := plugin.ToolInvocation{
 		Run: snapshot.Run, Definition: tools.CloneDefinition(definition), Request: executionRequest,
 	}
-	result, err := runner.toolChain.Invoke(ctx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
-		return runner.executor.Execute(nextCtx, executionRequest)
+	result, attempt, err := runner.executeToolWithPolicy(ctx, call.ID, snapshot.Run.DeadlineAt, func(callCtx context.Context) (tools.ExecutionResult, error) {
+		return runner.toolChain.Invoke(callCtx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
+			return runner.executor.Execute(nextCtx, executionRequest)
+		})
 	})
 	endedAt := runner.clock.Now().UTC()
 	phase := observability.PhaseCompleted
@@ -1182,12 +1217,23 @@ func (runner *Runner) invokePendingTool(
 	if err != nil {
 		phase = observability.PhaseFailed
 		errorCode = "tool_error"
+		switch {
+		case ctx.Err() != nil:
+			phase = observability.PhaseCancelled
+			errorCode = "cancelled"
+		case errors.Is(err, ErrToolTimeout):
+			errorCode = "timeout"
+		case errors.Is(err, ErrToolPanic):
+			errorCode = "panic"
+		case errors.Is(err, kernel.ErrDeadline):
+			errorCode = "deadline"
+		}
 	}
 	runner.recordTelemetry(ctx, observability.Event{
 		Scope: observability.ScopeToolInvocation, Phase: phase,
 		RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
 		Status: string(snapshot.Run.Status), OperationID: call.ID, Operation: definition.Key,
-		ErrorCode: errorCode, ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
+		Attempt: attempt, ErrorCode: errorCode, ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
 	})
 	return result, err
 }
@@ -1203,6 +1249,14 @@ func (runner *Runner) handlePendingToolExecutionError(
 			ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(err),
 		)
 		return corrected, false, correctionErr
+	}
+	if errors.Is(err, runtimebudget.ErrExhausted) {
+		failed, failErr := runner.fail(ctx, snapshot, state, sharedBudgetErrorCode(err), err)
+		return failed, false, failErr
+	}
+	if errors.Is(err, kernel.ErrDeadline) {
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.deadline_exceeded", errors.Join(kernel.ErrDeadline, err))
+		return failed, false, failErr
 	}
 	failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
 	return failed, false, failErr
@@ -1648,7 +1702,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 }
 
 func resolveRunLimits(defaults Limits, requested Limits) (Limits, error) {
-	resolved, err := runtimebudget.ResolveLimits(defaults, requested)
+	resolved, err := runtimebudget.TightenLimits(defaults, requested)
 	if err != nil {
 		return Limits{}, errors.Join(ErrInvalidRequest, err)
 	}
@@ -1656,6 +1710,13 @@ func resolveRunLimits(defaults Limits, requested Limits) (Limits, error) {
 		return Limits{}, ErrInvalidRequest
 	}
 	return resolved, nil
+}
+
+func sharedBudgetErrorCode(err error) string {
+	if dimension, ok := runtimebudget.DeniedDimension(err); ok {
+		return "agent.shared_" + string(dimension) + "_budget"
+	}
+	return "agent.shared_budget_exhausted"
 }
 
 func validAgentLimits(value Limits) bool {

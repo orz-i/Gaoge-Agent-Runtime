@@ -3,8 +3,8 @@ module example.com/agent-runtime-otel-e2e
 go 1.26.6
 
 require (
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.11
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel v0.1.0-beta.11
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.12
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel v0.1.0-beta.12
 	go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp v1.47.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0

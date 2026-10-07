@@ -529,6 +529,7 @@ type Dependencies struct {
 	Interactions InteractionResponseHandler
 	Applications ApplicationCapabilityExecutor
 	Budget       *BudgetMiddleware
+	Execution    ExecutionPolicy
 }
 
 type runRelationReader interface {
@@ -555,6 +556,7 @@ type Runner struct {
 	interactions   InteractionResponseHandler
 	applications   ApplicationCapabilityExecutor
 	budgets        *BudgetMiddleware
+	execution      ExecutionPolicy
 }
 
 // StartRequest starts or idempotently reloads one Harness Turn.
@@ -585,6 +587,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 			return nil, ErrInvalidRequest
 		}
 	}
+	execution, err := dependencies.Execution.Resolve()
+	if err != nil {
+		return nil, err
+	}
 	runner := &Runner{
 		runtime: dependencies.Runtime, agent: dependencies.Agent, cancellation: dependencies.Cancellation,
 		teams: dependencies.Teams, groupChats: dependencies.GroupChats, workflows: dependencies.Workflows,
@@ -593,6 +599,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		context:  dependencies.Context, catalog: dependencies.Catalog,
 		handoffs: dependencies.Handoffs, relations: dependencies.Relations,
 		interactions: dependencies.Interactions, applications: dependencies.Applications, budgets: dependencies.Budget,
+		execution: execution,
 	}
 	if reader, ok := dependencies.Relations.(runRelationReader); ok {
 		runner.relationReader = reader
@@ -608,7 +615,11 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		return Snapshot{}, err
 	}
 	now := runner.clock.Now().UTC()
-	config, err := SealConfigSnapshot(turnID, request.Config, now)
+	resolvedConfig, err := runner.resolveConfigExecutionPolicy(request.Config)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
 	if err != nil {
 		return Snapshot{}, err
 	}

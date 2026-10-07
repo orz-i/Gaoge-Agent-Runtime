@@ -192,7 +192,7 @@ func (model *perRunLimitModel) Generate(_ context.Context, _ runtimemodel.Reques
 	return runtimemodel.Response{Content: "done"}, nil
 }
 
-func TestRunnerFreezesPerRunLimits(t *testing.T) {
+func TestRunnerClampsPerRunLimitsToDeploymentCeilings(t *testing.T) {
 	runtime, approvals := newTestRuntimeAndApprovals(t)
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{
@@ -218,14 +218,14 @@ func TestRunnerFreezesPerRunLimits(t *testing.T) {
 	request := startRequest("run_per_limits", "request_per_limits", "read twice", manifestToolKey)
 	request.Limits = agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 2}
 	snapshot, err := runner.StartRun(t.Context(), request)
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, agent.ErrCallLimit) {
+		t.Fatalf("expected deployment Tool ceiling, got snapshot=%#v err=%v", snapshot.Run, err)
 	}
-	if snapshot.Run.Status != kernel.RunStatusCompleted || model.calls != 2 {
+	if snapshot.Run.Status != kernel.RunStatusFailed || snapshot.Run.ErrorCode != "agent.tool_limit" || model.calls != 1 {
 		t.Fatalf("snapshot = %#v, model calls = %d", snapshot.Run, model.calls)
 	}
-	if !strings.Contains(string(snapshot.State), `"limits":{"maxLLMCalls":2,"maxToolCalls":2}`) {
-		t.Fatalf("per-run limits were not frozen in state: %s", snapshot.State)
+	if !strings.Contains(string(snapshot.State), `"limits":{"maxLLMCalls":1,"maxToolCalls":1}`) {
+		t.Fatalf("deployment ceilings were not frozen in state: %s", snapshot.State)
 	}
 }
 

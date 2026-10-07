@@ -30,24 +30,27 @@ type RelationRegistry interface {
 
 // Dependencies are the only requirements of the Group Chat feature.
 type Dependencies struct {
-	Runtime         *kernel.Runtime
-	Handoffs        Delegator
-	Selector        Selector
-	VisibleHandoffs VisibleHandoffResolver
-	Relations       RelationRegistry
-	MaxParticipants int
-	MaxUtterances   int
+	Runtime           *kernel.Runtime
+	Handoffs          Delegator
+	Selector          Selector
+	VisibleHandoffs   VisibleHandoffResolver
+	Relations         RelationRegistry
+	SelectorExecution SelectorExecutionPolicy
+	MaxParticipants   int
+	MaxUtterances     int
 }
 
 // Runner owns directed speaker sequencing and durable child ownership.
 type Runner struct {
-	runtime         *kernel.Runtime
-	handoffs        Delegator
-	selector        Selector
-	visibleHandoffs VisibleHandoffResolver
-	relations       RelationRegistry
-	maxParticipants int
-	maxUtterances   int
+	runtime           *kernel.Runtime
+	handoffs          Delegator
+	selector          Selector
+	visibleHandoffs   VisibleHandoffResolver
+	relations         RelationRegistry
+	selectorExecution SelectorExecutionPolicy
+	selectorLimiter   *selectorCallLimiter
+	maxParticipants   int
+	maxUtterances     int
 }
 
 type speakerExecution struct {
@@ -81,6 +84,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Handoffs == nil {
 		return nil, ErrInvalidRequest
 	}
+	selectorExecution, err := dependencies.SelectorExecution.Resolve()
+	if err != nil {
+		return nil, err
+	}
 	if dependencies.MaxParticipants <= 0 || dependencies.MaxParticipants > MaxParticipantCount {
 		dependencies.MaxParticipants = MaxParticipantCount
 	}
@@ -90,6 +97,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, handoffs: dependencies.Handoffs, selector: dependencies.Selector,
 		visibleHandoffs: dependencies.VisibleHandoffs, relations: dependencies.Relations,
+		selectorExecution: selectorExecution, selectorLimiter: newSelectorCallLimiter(selectorExecution.MaxConcurrency),
 		maxParticipants: dependencies.MaxParticipants, maxUtterances: dependencies.MaxUtterances,
 	}, nil
 }

@@ -98,6 +98,51 @@ func ResolveLimits(defaults Limits, requested Limits) (Limits, error) {
 	return resolved, nil
 }
 
+// TightenLimits resolves a subordinate request against an already-resolved hard
+// policy. A zero request inherits the hard ceiling, a zero hard ceiling remains
+// unbounded unless the request opts into a tighter bound, and two nonzero
+// ceilings resolve to the smaller value. Subordinate policy can therefore never
+// widen a deployment/runtime guardrail.
+func TightenLimits(hard Limits, requested Limits) (Limits, error) {
+	if !ValidLimits(hard) || !ValidLimits(requested) {
+		return Limits{}, ErrInvalidUsage
+	}
+	return Limits{
+		MaxLLMCalls:       tightenInt(hard.MaxLLMCalls, requested.MaxLLMCalls),
+		MaxToolCalls:      tightenInt(hard.MaxToolCalls, requested.MaxToolCalls),
+		MaxInputTokens:    tightenInt64(hard.MaxInputTokens, requested.MaxInputTokens),
+		MaxOutputTokens:   tightenInt64(hard.MaxOutputTokens, requested.MaxOutputTokens),
+		MaxTotalTokens:    tightenInt64(hard.MaxTotalTokens, requested.MaxTotalTokens),
+		MaxOutputBytes:    tightenInt(hard.MaxOutputBytes, requested.MaxOutputBytes),
+		MaxStateBytes:     tightenInt(hard.MaxStateBytes, requested.MaxStateBytes),
+		MaxChildRuns:      tightenInt(hard.MaxChildRuns, requested.MaxChildRuns),
+		MaxCostUnits:      tightenInt64(hard.MaxCostUnits, requested.MaxCostUnits),
+		MaxConcurrentRuns: tightenInt(hard.MaxConcurrentRuns, requested.MaxConcurrentRuns),
+	}, nil
+}
+
+func tightenInt(hard, requested int) int {
+	switch {
+	case requested == 0:
+		return hard
+	case hard == 0:
+		return requested
+	default:
+		return min(hard, requested)
+	}
+}
+
+func tightenInt64(hard, requested int64) int64 {
+	switch {
+	case requested == 0:
+		return hard
+	case hard == 0:
+		return requested
+	default:
+		return min(hard, requested)
+	}
+}
+
 // Usage is one durable, logically consumed usage ledger. Token cache and
 // reasoning observations are retained for telemetry but are not independently
 // limited by this common vocabulary.

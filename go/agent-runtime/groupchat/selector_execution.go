@@ -112,8 +112,11 @@ func (runner *Runner) advanceSelectorInvocation(
 		}
 		snapshot, state = claimed, nextState
 		invocation = cloneSelectorInvocation(state.SelectorInvocation)
-		response, selectErr := runner.selector.Select(ctx, cloneSelectorRequest(invocation.Request))
+		response, selectErr := runner.selectWithPolicy(ctx, cloneSelectorRequest(invocation.Request))
 		if selectErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return snapshot, ctxErr
+			}
 			return runner.handleSelectorFailure(ctx, snapshot, state, selectErr)
 		}
 		if !validSelectorResponse(response, invocation.Request) {
@@ -146,7 +149,7 @@ func (runner *Runner) claimSelectorInvocation(
 	if invocation.ExecutionLeaseUntil != nil && now.Before(invocation.ExecutionLeaseUntil.UTC()) {
 		return snapshot, state, ErrSelectorInvocationBusy
 	}
-	leaseUntil := now.Add(selectorInvocationLeaseDuration)
+	leaseUntil := now.Add(runner.selectorLeaseDuration())
 	invocation.ExecutionAttempt++
 	invocation.ExecutionLeaseUntil = &leaseUntil
 	state.SelectorInvocation = cloneSelectorInvocation(invocation)
@@ -243,17 +246,28 @@ func (runner *Runner) handleSelectorFailure(
 		if invocation == nil {
 			return snapshot, ErrSelectorPending
 		}
+		if int(invocation.ExecutionAttempt) >= runner.selectorExecution.MaxAttempts {
+			return runner.fail(
+				ctx,
+				snapshot,
+				state,
+				"groupchat.selector_retry_exhausted",
+				errors.Join(ErrSelectorFailure, ErrSelectorRetryExhausted, cause),
+			)
+		}
 		invocation.ExecutionLeaseUntil = nil
 		state.SelectorInvocation = invocation
 		encoded, err := encodeState(state)
 		if err != nil {
 			return snapshot, err
 		}
+		delay := selectorRetryDelay(runner.selectorExecution, int(invocation.ExecutionAttempt), invocation.ID)
+		wakeupAt := runner.runtime.Now().UTC().Add(delay)
 		released, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: encoded,
 			Events: []kernel.EventDraft{{
 				Type: "groupchat.selector.retry", Message: invocation.ID, Wakeup: true,
-				WakeupAt: groupChatWakeupAt(runner.runtime.Now()),
+				WakeupAt: &wakeupAt,
 			}},
 		})
 		return released, errors.Join(ErrSelectorPending, err)

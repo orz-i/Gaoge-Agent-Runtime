@@ -27,8 +27,6 @@ const (
 	ModelInvocationPending   ModelInvocationStatus = "pending"
 	ModelInvocationCompleted ModelInvocationStatus = "completed"
 	ModelInvocationConsumed  ModelInvocationStatus = "consumed"
-
-	modelInvocationLeaseDuration = 2 * time.Minute
 )
 
 // ModelInvocation is the Agent-owned durable intent/receipt for one logical
@@ -256,7 +254,7 @@ func (runner *Runner) buildModelRequest(
 	snapshot kernel.Snapshot,
 	state runState,
 ) (model.Request, error) {
-	definitions, hostedTools, err := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model)
+	definitions, hostedTools, err := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model, snapshot.Run.DeadlineAt)
 	if err != nil {
 		return model.Request{}, err
 	}
@@ -305,15 +303,38 @@ func (runner *Runner) executeModelInvocation(
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
-	response, err := runner.generateModel(ctx, model.CloneRequest(invocation.Request))
+	response, err := runner.generateModelWithPolicy(ctx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt)
 	if err != nil {
 		endedAt := runner.clock.Now().UTC()
+		phase := observability.PhaseFailed
+		errorCode := "provider_error"
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			phase = observability.PhaseCancelled
+			errorCode = "cancelled"
+			runner.recordTelemetry(ctx, observability.Event{
+				Scope: observability.ScopeModelInvocation, Phase: phase,
+				RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
+				Status: string(snapshot.Run.Status), OperationID: invocation.ID,
+				Operation: "generate", Provider: invocation.Provider, Model: invocation.Model,
+				Attempt: int(invocation.ExecutionAttempt), ErrorCode: errorCode,
+				ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
+			})
+			return snapshot, state, ctxErr
+		}
+		switch {
+		case errors.Is(err, ErrModelTimeout):
+			errorCode = "timeout"
+		case errors.Is(err, ErrModelPanic):
+			errorCode = "panic"
+		case errors.Is(err, kernel.ErrDeadline):
+			errorCode = "deadline"
+		}
 		runner.recordTelemetry(ctx, observability.Event{
-			Scope: observability.ScopeModelInvocation, Phase: observability.PhaseFailed,
+			Scope: observability.ScopeModelInvocation, Phase: phase,
 			RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
 			Status: string(snapshot.Run.Status), OperationID: invocation.ID,
 			Operation: "generate", Provider: invocation.Provider, Model: invocation.Model,
-			Attempt: int(invocation.ExecutionAttempt), ErrorCode: "provider_error",
+			Attempt: int(invocation.ExecutionAttempt), ErrorCode: errorCode,
 			ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
 		})
 		return snapshot, state, errors.Join(ErrModelFailure, err)
@@ -394,7 +415,7 @@ func (runner *Runner) claimModelInvocationExecution(
 	if invocation.ExecutionLeaseUntil != nil && now.Before(invocation.ExecutionLeaseUntil.UTC()) {
 		return snapshot, state, invocation, ErrModelInvocationBusy
 	}
-	leaseUntil := now.Add(modelInvocationLeaseDuration)
+	leaseUntil := now.Add(runner.modelLeaseDuration())
 	invocation.ExecutionAttempt++
 	invocation.ExecutionLeaseUntil = &leaseUntil
 	if !replaceLastModelInvocation(&state, invocation) {
@@ -434,10 +455,12 @@ func (runner *Runner) releaseModelInvocationExecution(
 	if err != nil {
 		return snapshot, err
 	}
+	delay := retryDelay(runner.execution.Model, int(invocation.ExecutionAttempt), invocation.ID)
+	wakeupAt := runner.clock.Now().UTC().Add(delay)
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
-			Type: "agent.model_invocation.retryable", Message: invocation.ID, Wakeup: true,
+			Type: "agent.model_invocation.retryable", Message: invocation.ID, Wakeup: true, WakeupAt: &wakeupAt,
 		}},
 	})
 }

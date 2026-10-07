@@ -37,7 +37,7 @@ modules adapt contracts at the edge and are assembled by the host.
 | Model/tool loop and durable model receipts | Agent | HTTP or provider SDK configuration |
 | Definitions, waits, effects, compensation | Workflow | Generic Kernel policy |
 | Multi-member execution and speaker routing | Team / Group Chat | Persistence implementation details |
-| Turns, commands, interactions, delegation | Harness | Provider-specific execution |
+| Turns, commands, interactions, delegation, shared execution policy | Harness | Provider-specific execution |
 | Wakeup projection and retry delivery | Continuation | Feature state transitions |
 | Object authorization and principal resolution | Host / HTTP edge | Kernel RBAC |
 | SQL, Redis, protocol, telemetry integration | Adapters | Feature correctness |
@@ -79,10 +79,18 @@ adapter constructors validate their required ports. `compose.Application`
 provides ordered startup/rollback for modules that participate in application
 lifecycle.
 
+`bootstrap` is an optional host-startup layer for configuration-driven assembly.
+It loads versioned YAML/JSON with Koanf, then resolves only factories that the
+host explicitly registered in Go. The registry exists only while assembling the
+object graph; it is not a runtime service locator, is not persisted, and cannot
+load arbitrary Go plugins. Direct constructors such as `kernel.New` remain the
+lowest-level API and are not routed through configuration.
+
 Do not introduce global service locators, runtime dependency bags, dynamic Go
 plugin loading, or hidden background workers. A host should be able to see
-which stores, workers, providers, policies, and telemetry adapters are active
-from its construction code.
+which stores, workers, providers, policies, and telemetry adapters are allowed
+from its registration/construction code and which configured providers became
+active after startup validation.
 
 ## Protocol and security boundary
 
@@ -132,6 +140,7 @@ A production-facing change should have evidence at the layer it affects:
 - release: `make check`, `make coverage`, `make security`, and integration.
 
 See the [durability ADR](adr/0001-runtime-durability-governance-v1.md),
+[runtime-owned execution policy ADR](adr/0002-runtime-owned-execution-policy-v1.md),
 [integration contract](integration-contract.md),
 [reliability evidence map](reliability.md), and
 [observability guidance](observability.md) for the detailed contracts.

@@ -11,8 +11,6 @@ import (
 	"time"
 )
 
-const selectorInvocationLeaseDuration = 2 * time.Minute
-
 // SelectorCandidate is one Runtime-authorized speaker option visible to the Selector.
 type SelectorCandidate struct {
 	ID          string `json:"id"`
@@ -48,6 +46,8 @@ type SelectorResponse struct {
 }
 
 // Selector chooses the next visible speaker from the supplied candidates.
+// Implementations must honor ctx cancellation and deadlines and return promptly
+// when ctx is done.
 type Selector interface {
 	Select(context.Context, SelectorRequest) (SelectorResponse, error)
 }

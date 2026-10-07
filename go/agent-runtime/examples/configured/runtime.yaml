@@ -1,0 +1,24 @@
+version: v1
+
+kernel:
+  store:
+    provider: memory
+
+agent:
+  enabled: true
+  model:
+    provider: demo
+
+  execution:
+    model:
+      timeout: 45s
+      max_attempts: 3
+      initial_backoff: 500ms
+      max_backoff: 30s
+      max_concurrency: 8
+    tool:
+      timeout: 30s
+      max_attempts: 2
+      initial_backoff: 250ms
+      max_backoff: 5s
+      max_concurrency: 32

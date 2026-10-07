@@ -70,6 +70,24 @@ func TestValidLimitsAndTokenRequirement(t *testing.T) {
 	}
 }
 
+func TestTightenLimitsCannotWidenHardCeilings(t *testing.T) {
+	t.Parallel()
+	resolved, err := budget.TightenLimits(
+		budget.Limits{MaxLLMCalls: 8, MaxToolCalls: 16, MaxChildRuns: 32, MaxConcurrentRuns: 8},
+		budget.Limits{MaxLLMCalls: 20, MaxToolCalls: 4, MaxTotalTokens: 1000, MaxChildRuns: 3},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.MaxLLMCalls != 8 || resolved.MaxToolCalls != 4 || resolved.MaxTotalTokens != 1000 ||
+		resolved.MaxChildRuns != 3 || resolved.MaxConcurrentRuns != 8 {
+		t.Fatalf("tightened = %#v", resolved)
+	}
+	if _, err = budget.TightenLimits(budget.Limits{}, budget.Limits{MaxToolCalls: -1}); !errors.Is(err, budget.ErrInvalidUsage) {
+		t.Fatalf("negative limits err = %v", err)
+	}
+}
+
 func TestResolveLimitsUsesDefaultsOnlyForZeroDimensions(t *testing.T) {
 	t.Parallel()
 	resolved, err := budget.ResolveLimits(

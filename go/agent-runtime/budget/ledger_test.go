@@ -84,6 +84,8 @@ func TestSharedBudgetConcurrentAdmissionAndSettlement(t *testing.T) {
 	}
 	if _, err = c.Reserve(t.Context(), "turn", reservation("too-large", 80, 20), true); !errors.Is(err, budget.ErrExhausted) {
 		t.Fatalf("err=%v", err)
+	} else if dimension, ok := budget.DeniedDimension(err); !ok || dimension != budget.DimensionTotalTokens {
+		t.Fatalf("denied dimension=%q ok=%v err=%v", dimension, ok, err)
 	}
 }
 
@@ -131,6 +133,8 @@ func TestSharedBudgetChildAndRoleLimitsCannotWidenTurn(t *testing.T) {
 	}
 	if _, err := c.Reserve(t.Context(), "turn", reservation("root-call", 0, 0), true); !errors.Is(err, budget.ErrWaiting) {
 		t.Fatalf("concurrency=%v", err)
+	} else if dimension, ok := budget.DeniedDimension(err); !ok || dimension != budget.DimensionConcurrentRuns {
+		t.Fatalf("concurrency dimension=%q ok=%v err=%v", dimension, ok, err)
 	}
 	if _, err := c.Settle(t.Context(), "turn", call.ID, call.Requested, []byte(`{}`)); err != nil {
 		t.Fatal(err)
