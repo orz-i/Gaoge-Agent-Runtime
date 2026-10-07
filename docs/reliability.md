@@ -36,6 +36,32 @@ Sources: [PostgreSQL agent recovery](../go/agent-runtime-postgres/agent_recovery
 [PostgreSQL atomicity](../go/agent-runtime-postgres/atomicity_real_test.go),
 [Redis lease recovery](../go/agent-runtime-redis/recovery_real_test.go).
 
+## External call execution policy
+
+`agent.ExecutionPolicy` bounds model and Tool calls independently with a
+per-call timeout, maximum attempts, exponential backoff with deterministic
+jitter, and a per-Runner concurrency semaphore. Waiting for a concurrency slot
+honors the caller context, so overload creates backpressure instead of an
+unbounded goroutine/queue inside the Agent runner.
+
+Model retries preserve the already durable invocation ID. Retryable failures,
+including the runner's own model-call timeout, release the execution lease and
+schedule a durable wakeup with backoff. The default maximum is three attempts;
+exhaustion fails the Run instead of retrying forever. The execution lease is
+always longer than the configured model-call timeout. Caller cancellation is
+not converted into a model failure and does not terminally mutate the Run.
+
+Tool retries are deliberately stricter. The default maximum is one attempt, and
+additional attempts occur only when an executor returns
+`tools.NewRetryableExecutionError`, explicitly asserting that replaying the same
+stable Tool call ID is safe. A Tool timeout is ambiguous with respect to an
+external side effect and is therefore not retried automatically. Hosts should
+prefer downstream idempotency keys or reconciliation before opting a Tool into
+retries.
+
+Unit evidence is in `agent/execution_policy_test.go`; real-provider rate limits,
+provider-side idempotency and distributed fairness remain host/adapter concerns.
+
 ## Existing complementary coverage
 
 | Guarantee | Tests and evidence level |

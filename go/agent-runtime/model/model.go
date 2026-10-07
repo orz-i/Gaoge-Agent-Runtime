@@ -117,7 +117,9 @@ type StreamEvent struct {
 // StreamSink receives one provider-neutral model stream event.
 type StreamSink func(StreamEvent) error
 
-// Client is the provider-neutral unary model capability.
+// Client is the provider-neutral unary model capability. Implementations must
+// honor ctx cancellation and deadlines and return promptly when ctx is done;
+// Runtime does not detach uncooperative provider calls into leak-prone goroutines.
 type Client interface {
 	Generate(context.Context, Request) (Response, error)
 }

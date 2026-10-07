@@ -39,6 +39,43 @@ type RecoverableCallError struct {
 	BlockedToolKeys []string
 }
 
+// RetryableExecutionError marks a transient executor failure that is safe to
+// retry with the same stable ExecutionRequest.Call.ID. Executors must only use
+// it when repeating the call cannot duplicate an externally visible effect.
+type RetryableExecutionError struct {
+	Cause error
+}
+
+func (err *RetryableExecutionError) Error() string {
+	if err == nil || err.Cause == nil {
+		return "retryable tool execution error"
+	}
+	return err.Cause.Error()
+}
+
+func (err *RetryableExecutionError) Unwrap() error {
+	if err == nil {
+		return nil
+	}
+	return err.Cause
+}
+
+// NewRetryableExecutionError explicitly opts one transient Tool failure into
+// bounded retries. A nil error remains nil.
+func NewRetryableExecutionError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &RetryableExecutionError{Cause: err}
+}
+
+// IsRetryableExecutionError reports whether an executor explicitly declared
+// that replaying the same stable Tool call is safe.
+func IsRetryableExecutionError(err error) bool {
+	var retryable *RetryableExecutionError
+	return errors.As(err, &retryable)
+}
+
 // ValidateDefinition compiles the Tool input schema and proves that the
 // definition is safe to register or expose to an Agent. Compiled schemas are
 // cached by jsoncontract and reused by later call validation.
@@ -252,12 +289,14 @@ type Catalog interface {
 	List([]string) ([]Definition, error)
 }
 
-// Executor executes one stable Tool intent.
+// Executor executes one stable Tool intent. Implementations must honor ctx
+// cancellation and deadlines and return promptly when ctx is done.
 type Executor interface {
 	Execute(context.Context, ExecutionRequest) (ExecutionResult, error)
 }
 
-// Handler executes one registered Tool.
+// Handler executes one registered Tool and follows the same context contract as
+// Executor.
 type Handler interface {
 	Execute(context.Context, ExecutionRequest) (ExecutionResult, error)
 }
