@@ -1,4 +1,4 @@
-/** Feature-owned identifier, including agent, plan_execute, workflow, team and a2a.remote. */
+/** Feature-owned identifier, including agent, workflow, team and a2a.remote. */
 export type RuntimeKind = string;
 export type RunStatus = "running" | "waiting_input" | "completed" | "failed" | "cancelled";
 export type HarnessTurnStatus = "accepted" | RunStatus;
@@ -67,7 +67,7 @@ export type HarnessInteractionDTO = {
   updatedAt: string;
 };
 
-export type HarnessExecutionClass = "agent" | "team" | "group_chat" | "plan_execute" | "workflow" | "application";
+export type HarnessExecutionClass = "agent" | "team" | "group_chat" | "workflow" | "application";
 export type HarnessInvocationStatus = "accepted" | RunStatus;
 
 export type HarnessCapabilityInvocationDTO = {
@@ -286,17 +286,6 @@ export type StartAgentRunRequest = {
   clientRunID?: string;
   model?: string;
   toolKeys?: string[];
-};
-
-export type StartPlanRunRequest = StartAgentRunRequest & {
-  approvalPolicy?: "auto" | "required";
-  maxSteps?: number;
-};
-
-export type ResolvePlanApprovalRequest = {
-  expectedRevision: number;
-  decision: "approve" | "reject";
-  comment?: string;
 };
 
 export type WorkflowValueSource =

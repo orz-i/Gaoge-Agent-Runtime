@@ -1,0 +1,57 @@
+{
+  "id": "mcp-deterministic-smoke",
+  "revision": 1,
+  "name": "MCP deterministic smoke",
+  "passThreshold": 1,
+  "scenarios": [
+    {
+      "id": "discover-call-tool",
+      "name": "Discover one MCP tool and execute it once",
+      "input": {"operation": "discover_call_tool"},
+      "expected": {
+        "status": "completed",
+        "revision": 1,
+        "eventTypes": [
+          "protocol.mcp.discovery:started",
+          "protocol.mcp.discovery:completed",
+          "protocol.mcp.tool_call:started",
+          "protocol.mcp.tool_call:completed"
+        ],
+        "effects": [
+          {"key": "discovered_tool", "count": 1},
+          {"key": "tool_call", "count": 1}
+        ]
+      }
+    },
+    {
+      "id": "invalid-arguments-fenced",
+      "name": "Invalid arguments are rejected before remote MCP execution",
+      "input": {"operation": "invalid_arguments_fenced"},
+      "expected": {
+        "status": "completed",
+        "revision": 1,
+        "errorCode": "tool.arguments_schema",
+        "effects": [
+          {"key": "recoverable_schema_error", "count": 1},
+          {"key": "remote_call", "count": 0}
+        ]
+      }
+    },
+    {
+      "id": "legacy-fallback-blocked",
+      "name": "Legacy MCP initialize fallback is blocked after one request",
+      "input": {"operation": "legacy_fallback_blocked"},
+      "expected": {
+        "status": "completed",
+        "revision": 1,
+        "eventTypes": [
+          "protocol.mcp.discovery:started",
+          "protocol.mcp.discovery:failed"
+        ],
+        "effects": [
+          {"key": "network_request", "count": 1}
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "id": "a2a-deterministic-smoke",
+  "revision": 1,
+  "name": "A2A deterministic smoke",
+  "passThreshold": 1,
+  "scenarios": [
+    {
+      "id": "discover-send-terminal",
+      "name": "Discover a local A2A peer and complete one task",
+      "input": {"operation": "discover_send_terminal"},
+      "expected": {
+        "status": "completed",
+        "revision": 1,
+        "eventTypes": [
+          "protocol.a2a.discovery:started",
+          "protocol.a2a.discovery:completed",
+          "protocol.a2a.message:started",
+          "protocol.a2a.message:completed"
+        ],
+        "effects": [
+          {"key": "discovered_skill", "count": 1},
+          {"key": "terminal_task", "count": 1}
+        ]
+      }
+    },
+    {
+      "id": "input-required-cancel",
+      "name": "Input-required task cancels to a terminal remote state",
+      "input": {"operation": "input_required_cancel"},
+      "expected": {
+        "status": "cancelled",
+        "revision": 1,
+        "eventTypes": [
+          "protocol.a2a.discovery:started",
+          "protocol.a2a.discovery:completed",
+          "protocol.a2a.message:started",
+          "protocol.a2a.message:completed",
+          "protocol.a2a.task_cancel:started",
+          "protocol.a2a.task_cancel:completed"
+        ],
+        "effects": [
+          {"key": "cancel_call", "count": 1},
+          {"key": "input_required", "count": 1}
+        ]
+      }
+    },
+    {
+      "id": "shadow-resume-retry",
+      "name": "Shadow resume retry preserves the durable message identity",
+      "input": {"operation": "shadow_resume_retry"},
+      "expected": {
+        "status": "completed",
+        "revision": 5,
+        "eventTypes": [
+          "run.created",
+          "a2a.remote_started",
+          "a2a.remote_input_required",
+          "a2a.remote_resume_requested",
+          "a2a.remote_resume_deferred",
+          "a2a.remote_completed"
+        ],
+        "effects": [
+          {"key": "resume_retry", "count": 1},
+          {"key": "stable_message_identity", "count": 1}
+        ]
+      }
+    },
+    {
+      "id": "stream-terminal",
+      "name": "Streaming message emits deterministic protocol lifecycle and terminal task",
+      "input": {"operation": "stream_terminal"},
+      "expected": {
+        "status": "completed",
+        "revision": 1,
+        "eventTypes": [
+          "protocol.a2a.discovery:started",
+          "protocol.a2a.discovery:completed",
+          "protocol.a2a.message_stream:started",
+          "protocol.a2a.message_stream:completed"
+        ],
+        "effects": [
+          {"key": "stream_event", "count": 2},
+          {"key": "terminal_task", "count": 1}
+        ]
+      }
+    }
+  ]
+}

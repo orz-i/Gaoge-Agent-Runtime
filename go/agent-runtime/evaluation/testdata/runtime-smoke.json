@@ -1,0 +1,44 @@
+{
+  "id": "runtime-deterministic-smoke",
+  "revision": 1,
+  "name": "Runtime deterministic smoke",
+  "passThreshold": 1,
+  "scenarios": [
+    {
+      "id": "crash-recovery-terminal",
+      "name": "Terminal state survives runtime reconstruction",
+      "input": {"operation": "crash_recovery_terminal"},
+      "expected": {
+        "status": "completed",
+        "revision": 2,
+        "eventTypes": ["run.created", "scenario.completed"],
+        "effects": [{"key": "recovered_load", "count": 1}]
+      }
+    },
+    {
+      "id": "duplicate-delivery-logical-once",
+      "name": "Transition retry remains logically once",
+      "input": {"operation": "duplicate_delivery_logical_once"},
+      "expected": {
+        "status": "completed",
+        "revision": 2,
+        "eventTypes": ["run.created", "scenario.completed"],
+        "effects": [
+          {"key": "logical_consumption", "count": 1},
+          {"key": "physical_delivery", "count": 2}
+        ]
+      }
+    },
+    {
+      "id": "stale-cas-fenced",
+      "name": "Stale revision cannot advance state",
+      "input": {"operation": "stale_cas_fenced"},
+      "expected": {
+        "status": "completed",
+        "revision": 3,
+        "eventTypes": ["run.created", "scenario.first", "scenario.completed"],
+        "effects": [{"key": "stale_cas_rejected", "count": 1}]
+      }
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "datasetID": "runtime-deterministic-smoke",
+  "datasetHash": "8847327944de2c1fc528f8cea5a2bf0d6c7b63ec9f403e7827ec29a7137b22bd",
+  "minimumOverallScore": 1,
+  "minimumPassedCases": 3,
+  "maximumFailedCases": 0,
+  "requireReportPass": true
+}

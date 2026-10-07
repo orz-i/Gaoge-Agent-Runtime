@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
@@ -20,7 +18,6 @@ import (
 
 const (
 	AgentTopologyProviderName    = "topology.agent"
-	PlanTopologyProviderName     = "topology.planexecute"
 	TeamTopologyProviderName     = "topology.team"
 	WorkflowTopologyProviderName = "topology.workflow"
 )
@@ -43,17 +40,6 @@ type RelationSource interface {
 // NewAgentTopologyProvider projects the direct Agent root without inventing
 // Tool or sub-agent nodes that are not durable topology facts.
 func NewAgentTopologyProvider() workbench.TopologyProvider { return agentTopologyProvider{} }
-
-// NewPlanTopologyProvider projects Plan steps and their related Child Runs.
-func NewPlanTopologyProvider(
-	runs workbench.RunSource,
-	relations RelationSource,
-) workbench.TopologyProvider {
-	return childTopologyProvider{
-		name: PlanTopologyProviderName, kind: planexecute.RunKind,
-		runs: runs, relations: relations, project: projectPlanTopology,
-	}
-}
 
 // NewTeamTopologyProvider projects fixed members, delegations and the Join.
 func NewTeamTopologyProvider(
@@ -116,69 +102,6 @@ func (provider childTopologyProvider) Topology(
 	}
 	topology, err := provider.project(ctx, provider, snapshot)
 	return topology, true, err
-}
-
-func projectPlanTopology(
-	ctx context.Context,
-	provider childTopologyProvider,
-	snapshot kernel.Snapshot,
-) (workbench.TopologyV1, error) {
-	view, err := planexecute.ViewState(snapshot)
-	if err != nil {
-		return workbench.TopologyV1{}, err
-	}
-	relations, err := provider.relationsByOwner(ctx, snapshot.Run.ID, runrelation.KindPlanStep)
-	if err != nil {
-		return workbench.TopologyV1{}, err
-	}
-	rootData, err := topologyData(struct {
-		PlanID         string                     `json:"planID,omitempty"`
-		PlanStatus     planexecute.PlanStatus     `json:"planStatus,omitempty"`
-		ApprovalPolicy planexecute.ApprovalPolicy `json:"approvalPolicy"`
-		NextStep       int                        `json:"nextStep"`
-	}{view.Plan.ID, view.Plan.Status, view.ApprovalPolicy, view.NextStep})
-	if err != nil {
-		return workbench.TopologyV1{}, err
-	}
-	root := topologyRunNode(snapshot, "plan_execute", topologyLabel(view.Plan.Summary, "Plan & Execute"), rootData)
-	nodes := []workbench.TopologyNode{root}
-	edges := make([]workbench.TopologyEdge, 0, len(view.Plan.Steps))
-	previousID := root.ID
-	for index, step := range view.Plan.Steps {
-		node, nodeErr := provider.planStepNode(ctx, step, index, view.Plan.ID, relations[step.ID])
-		if nodeErr != nil {
-			return workbench.TopologyV1{}, nodeErr
-		}
-		nodes = append(nodes, node)
-		edges = append(edges, topologyEdge(workbench.EdgeSequence, previousID, node.ID, node.Status))
-		previousID = node.ID
-	}
-	return topologyEnvelope(snapshot, root, nodes, edges), nil
-}
-
-func (provider childTopologyProvider) planStepNode(
-	ctx context.Context,
-	step planexecute.Step,
-	index int,
-	planID string,
-	relation runrelation.Relation,
-) (workbench.TopologyNode, error) {
-	runID, status, err := provider.childRunFacts(ctx, relation, step.ChildRunID, string(step.Status))
-	if err != nil {
-		return workbench.TopologyNode{}, err
-	}
-	data, err := topologyData(struct {
-		Index int    `json:"index"`
-		Goal  string `json:"goal"`
-	}{index, step.Goal})
-	if err != nil {
-		return workbench.TopologyNode{}, err
-	}
-	return workbench.TopologyNode{
-		ID: topologyNodeID("plan-step", step.ID), Kind: "plan_step",
-		Label: topologyLabel(step.Title, fmt.Sprintf("Step %d", index+1)), Status: status,
-		RunID: runID, GroupID: planID, Data: data,
-	}, nil
 }
 
 func projectTeamTopology(

@@ -5,7 +5,7 @@ agents. It separates the deterministic run state machine from optional agent,
 harness, HTTP, protocol, and persistence capabilities.
 
 This repository is the canonical public source. The current release line is
-`v0.1.0-beta.10` and should be treated as a Beta API.
+`v0.1.0-beta.11` and should be treated as a Beta API.
 
 ## Packages
 
@@ -18,6 +18,7 @@ This repository is the canonical public source. The current release line is
 | `go/agent-runtime-harness-postgres` | Harness and Context V2 store | Supported |
 | `go/agent-runtime-redis` | Durable continuation queue and run feed | Supported |
 | `go/agent-runtime-mcp` | MCP client, registry, and transport adapters | Supported |
+| `go/agent-runtime-otel` | Content-safe OpenTelemetry tracing and metrics adapter | Supported |
 | `go/agent-runtime-a2a` | Explicit A2A v1 plugin, client/server edge, and durable shadow runs | Supported in Beta.2 |
 | `ts/agent-runtime-client` | Dependency-free TypeScript HTTP v1 client | Supported |
 | `contracts/agent-runtime/v1` | OpenAPI and capability contracts | Supported |
@@ -25,8 +26,8 @@ This repository is the canonical public source. The current release line is
 ## Install
 
 ```bash
-go get github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime@v0.1.0-beta.10
-pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.10/orz-i-agent-runtime-client-0.1.0-beta.10.tgz
+go get github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime@v0.1.0-beta.11
+pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.11/orz-i-agent-runtime-client-0.1.0-beta.11.tgz
 ```
 
 Prereleases are distributed through Go module tags and GitHub Release archives.
@@ -51,15 +52,17 @@ snapshot, err := runtime.Create(context.Background(), kernel.CreateRequest{
 })
 ```
 
-See [the Go quickstart](go/agent-runtime/examples/quickstart/main.go) and the
-[TypeScript client guide](ts/agent-runtime-client/README.md) for runnable
-examples.
+See [the Go quickstart](go/agent-runtime/examples/quickstart/main.go), the
+[TypeScript client guide](ts/agent-runtime-client/README.md),
+[observability guidance](docs/observability.md), and the
+[deployment boundary](docs/deployment.md) for runnable examples and host
+integration guidance.
 
 ## Compatibility
 
 | Dependency | Tested baseline |
 | --- | --- |
-| Go | 1.26 |
+| Go | 1.26.6+ |
 | Node.js | 24 LTS or newer |
 | pnpm | 11.22 |
 | PostgreSQL | 16 |
@@ -84,16 +87,22 @@ version accepted by the package's engine range.
 ```bash
 pnpm install --frozen-lockfile
 make check
+make coverage
+make security
 make integration
 ```
 
-`make integration` starts isolated PostgreSQL and Redis containers, runs the
-real-engine concurrency and recovery suites with the Go race detector, and
-removes the containers. See the [reliability evidence map](docs/reliability.md)
-for failure boundaries, reproducible checks, and remaining coverage limits.
+`make coverage` enforces the repository coverage floors and writes Go and
+TypeScript coverage reports under the ignored `coverage/` directories.
+`make security` runs `govulncheck` across every Go module and fails on high or
+critical pnpm advisories; it requires network access to the Go vulnerability
+database and npm registry. `make integration` starts isolated PostgreSQL and Redis containers and runs the real-engine concurrency/recovery suites. `make integration-otel` separately runs the pinned OpenTelemetry Collector trace/metric gate so telemetry infrastructure cannot mask store/queue recovery evidence. See the
+[reliability evidence map](docs/reliability.md) for failure boundaries,
+reproducible checks, and remaining coverage limits.
 
 ## Project policy
 
+- [Architecture](docs/architecture.md)
 - [Beta support policy](SUPPORT.md)
 - [Security policy](SECURITY.md)
 - [A2A product integration and support matrix](docs/a2a.md)

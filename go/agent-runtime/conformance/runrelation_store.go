@@ -25,7 +25,7 @@ func RunRunRelationStoreSuite(t *testing.T, factory RunRelationStoreFactory) {
 
 func testRunRelationIdempotentOwner(t *testing.T, store runrelation.Store) {
 	t.Helper()
-	relation := testRunRelation("parent-1", "child-1", runrelation.KindPlanStep, "step-1", 0)
+	relation := testRunRelation("parent-1", "child-1", runrelation.KindCapability, "step-1", 0)
 	created, reused, err := store.Put(context.Background(), relation)
 	if err != nil || reused || !runrelation.EqualIdentity(created, relation) {
 		t.Fatalf("create = %#v, reused=%t, err=%v", created, reused, err)
@@ -56,8 +56,8 @@ func testRunRelationConflicts(t *testing.T, store runrelation.Store) {
 
 func testRunRelationQueries(t *testing.T, store runrelation.Store) {
 	t.Helper()
-	second := testRunRelation("parent-list", "child-2", runrelation.KindPlanStep, "step-2", 2)
-	first := testRunRelation("parent-list", "child-1", runrelation.KindPlanStep, "step-1", 1)
+	second := testRunRelation("parent-list", "child-2", runrelation.KindCapability, "step-2", 2)
+	first := testRunRelation("parent-list", "child-1", runrelation.KindCapability, "step-1", 1)
 	other := testRunRelation("parent-other", "child-3", runrelation.KindTeamMember, "member-1", 0)
 	for _, relation := range []runrelation.Relation{second, other, first} {
 		if _, _, err := store.Put(context.Background(), relation); err != nil {

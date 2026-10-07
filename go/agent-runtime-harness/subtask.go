@@ -347,7 +347,7 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	}
 	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, task.RunID)
 	if errors.Is(err, ErrNotFound) {
-		// Team, PlanExecute and Workflow retain their own child state machines;
+		// Team and Workflow retain their own child state machines;
 		// not every child Agent is a separate Harness capability invocation.
 		if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 			return Snapshot{}, err

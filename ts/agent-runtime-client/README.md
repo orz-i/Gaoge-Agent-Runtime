@@ -7,7 +7,7 @@ interactions. Host application data and authorization remain owned by the host.
 ## Install a Beta
 
 ```bash
-pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.10/orz-i-agent-runtime-client-0.1.0-beta.10.tgz
+pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.11/orz-i-agent-runtime-client-0.1.0-beta.11.tgz
 ```
 
 Beta packages are GitHub Release archives, not npm registry releases. Registry
@@ -78,7 +78,7 @@ to a caller. Generic `admin`, `agents`, `events`, and `interactions` namespaces,
 and generic run delegation/resume methods, are not part of this client.
 
 `RuntimeKind` is a feature-owned string. Handle unfamiliar kinds when reading
-Runs or Workbench snapshots; built-ins include `agent`, `plan_execute`,
+Runs or Workbench snapshots; built-ins include `agent`,
 `workflow`, `team`, and `a2a.remote`. Feature-specific start methods remain
 explicit. JSON payloads typed as `unknown` require the host feature's own schema.
 

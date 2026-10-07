@@ -1,7 +1,7 @@
 {
   "name": "@orz-i/agent-runtime-workspace",
   "private": true,
-  "version": "0.1.0-beta.10",
+  "version": "0.1.0-beta.11",
   "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=24"
@@ -10,6 +10,7 @@
     "lint": "pnpm --filter @orz-i/agent-runtime-client lint",
     "typecheck": "pnpm --filter @orz-i/agent-runtime-client typecheck",
     "test": "pnpm --filter @orz-i/agent-runtime-client test",
+    "coverage": "pnpm --filter @orz-i/agent-runtime-client coverage",
     "build": "pnpm --filter @orz-i/agent-runtime-client build"
   }
 }

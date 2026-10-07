@@ -1,0 +1,124 @@
+{
+  "id": "runtime-feature-smoke",
+  "revision": 1,
+  "name": "Runtime feature deterministic smoke",
+  "passThreshold": 1,
+  "scenarios": [
+    {
+      "id": "agent-tool-once",
+      "name": "Agent consumes one tool result and completes",
+      "input": {"operation": "agent_tool_once"},
+      "expected": {
+        "status": "completed",
+        "revision": 10,
+        "eventTypes": [
+          "run.created",
+          "agent.started",
+          "agent.model_invocation.pending",
+          "agent.model_invocation.claimed",
+          "agent.model_invocation.completed",
+          "tool.batch_requested",
+          "tool.completed",
+          "agent.model_invocation.pending",
+          "agent.model_invocation.claimed",
+          "agent.model_invocation.completed",
+          "agent.completed"
+        ],
+        "effects": [
+          {"key": "model_calls", "count": 2},
+          {"key": "tool_execution", "count": 1}
+        ]
+      }
+    },
+    {
+      "id": "groupchat-directed-once",
+      "name": "Group Chat executes two visible speakers exactly once",
+      "input": {"operation": "groupchat_directed_once"},
+      "expected": {
+        "status": "completed",
+        "revision": 2,
+        "eventTypes": ["run.created", "groupchat.started", "groupchat.completed"],
+        "effects": [
+          {"key": "speaker_execution", "count": 2},
+          {"key": "speaker_relation", "count": 2},
+          {"key": "visible_utterance", "count": 2}
+        ]
+      }
+    },
+    {
+      "id": "groupchat-handoff-chain",
+      "name": "Group Chat follows an explicit visible handoff chain",
+      "input": {"operation": "groupchat_handoff_chain"},
+      "expected": {
+        "status": "completed",
+        "revision": 3,
+        "eventTypes": ["run.created", "groupchat.started", "groupchat.progressed", "groupchat.completed"],
+        "effects": [
+          {"key": "handoff_signal_read", "count": 2},
+          {"key": "speaker_execution", "count": 2},
+          {"key": "speaker_relation", "count": 2}
+        ]
+      }
+    },
+    {
+      "id": "groupchat-selector-retry",
+      "name": "Group Chat selector retry reuses one durable invocation",
+      "input": {"operation": "groupchat_selector_retry"},
+      "expected": {
+        "status": "completed",
+        "revision": 12,
+        "eventTypes": [
+          "run.created",
+          "groupchat.started",
+          "groupchat.selector.created",
+          "groupchat.selector.claimed",
+          "groupchat.selector.retry",
+          "groupchat.selector.claimed",
+          "groupchat.selector.completed",
+          "groupchat.selector.consumed",
+          "groupchat.progressed",
+          "groupchat.selector.created",
+          "groupchat.selector.claimed",
+          "groupchat.selector.completed",
+          "groupchat.completed"
+        ],
+        "effects": [
+          {"key": "selector_call", "count": 3},
+          {"key": "selector_retry_identity_reused", "count": 1},
+          {"key": "speaker_execution", "count": 1}
+        ]
+      }
+    },
+    {
+      "id": "team-child-once",
+      "name": "Team materializes one child relation and completes",
+      "input": {"operation": "team_child_once"},
+      "expected": {
+        "status": "completed",
+        "revision": 2,
+        "eventTypes": ["run.created", "team.started", "team.completed"],
+        "effects": [
+          {"key": "child_start", "count": 1},
+          {"key": "relation_count", "count": 1}
+        ]
+      }
+    },
+    {
+      "id": "workflow-wait-resume",
+      "name": "Workflow wait resolves once and reaches terminal return",
+      "input": {"operation": "workflow_wait_resume"},
+      "expected": {
+        "status": "completed",
+        "revision": 4,
+        "eventTypes": [
+          "run.created",
+          "workflow.started",
+          "workflow.wait.created",
+          "workflow.wait.resolved",
+          "workflow.completed"
+        ],
+        "effects": [{"key": "wait_resolution", "count": 1}]
+      }
+    }
+  ]
+}

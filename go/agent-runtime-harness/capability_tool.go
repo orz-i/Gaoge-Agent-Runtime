@@ -10,7 +10,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -40,13 +39,6 @@ type TeamCapabilitySpec struct {
 	Join    handoff.Join
 }
 
-type PlanExecuteCapabilitySpec struct {
-	Model           string
-	AllowedToolKeys []string
-	ApprovalPolicy  planexecute.ApprovalPolicy
-	MaxSteps        int
-}
-
 type WorkflowCapabilitySpec struct {
 	Definition workflow.Definition
 	Input      json.RawMessage
@@ -60,7 +52,6 @@ type ApplicationCapabilitySpec struct {
 // Feature payload must match the frozen descriptor ExecutionClass.
 type CapabilityInvocationSpec struct {
 	Team        *TeamCapabilitySpec
-	PlanExecute *PlanExecuteCapabilitySpec
 	Workflow    *WorkflowCapabilitySpec
 	Application *ApplicationCapabilitySpec
 }
@@ -232,9 +223,6 @@ func capabilityInvocationSpecClass(spec CapabilityInvocationSpec) (ExecutionClas
 	if spec.Team != nil {
 		classes = append(classes, ExecutionTeam)
 	}
-	if spec.PlanExecute != nil {
-		classes = append(classes, ExecutionPlanExecute)
-	}
 	if spec.Workflow != nil {
 		classes = append(classes, ExecutionWorkflow)
 	}
@@ -258,12 +246,6 @@ func (runner *Runner) startMaterializedCapability(
 		return runner.StartTeamInvocation(ctx, turnID, TeamInvocationRequest{
 			ParentItemID: parentItemID, RequestID: requestID, Goal: goal,
 			Mode: spec.Team.Mode, Members: append([]team.Member(nil), spec.Team.Members...), Join: spec.Team.Join,
-		})
-	case spec.PlanExecute != nil:
-		return runner.StartPlanExecuteInvocation(ctx, turnID, PlanExecuteInvocationRequest{
-			ParentItemID: parentItemID, RequestID: requestID, Goal: goal,
-			AllowedToolKeys: append([]string{}, spec.PlanExecute.AllowedToolKeys...),
-			Model:           spec.PlanExecute.Model, ApprovalPolicy: spec.PlanExecute.ApprovalPolicy, MaxSteps: spec.PlanExecute.MaxSteps,
 		})
 	case spec.Workflow != nil:
 		return runner.StartWorkflowInvocation(ctx, turnID, WorkflowInvocationRequest{

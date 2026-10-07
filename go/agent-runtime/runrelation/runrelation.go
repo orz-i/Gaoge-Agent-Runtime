@@ -23,7 +23,6 @@ var (
 type Kind string
 
 const (
-	KindPlanStep         Kind = "plan_step"
 	KindTeamMember       Kind = "team_member"
 	KindGroupChatSpeaker Kind = "group_chat_speaker"
 	KindWorkflowEffect   Kind = "workflow_effect"
@@ -170,7 +169,7 @@ func Sort(items []Relation) {
 }
 
 func validKind(kind Kind) bool {
-	return kind == KindPlanStep || kind == KindTeamMember || kind == KindGroupChatSpeaker || kind == KindWorkflowEffect ||
+	return kind == KindTeamMember || kind == KindGroupChatSpeaker || kind == KindWorkflowEffect ||
 		kind == KindDelegation || kind == KindCapability
 }
 

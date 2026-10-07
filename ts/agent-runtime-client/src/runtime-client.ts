@@ -10,7 +10,6 @@ import type {
   WorkbenchDTO,
 } from "./types.js";
 import { createAgentCapability } from "./capabilities/agent.js";
-import { createPlansCapability } from "./capabilities/plans.js";
 import { pathPart } from "./capabilities/shared.js";
 import { createTeamsCapability } from "./capabilities/teams.js";
 import { createWorkflowsCapability } from "./capabilities/workflows.js";
@@ -92,7 +91,6 @@ type ErrorResponse = { error?: { code?: string; message?: string; requestID?: st
 
 export class RuntimeClient {
   readonly agent: ReturnType<typeof createAgentCapability>;
-  readonly plans: ReturnType<typeof createPlansCapability>;
   readonly workflows: ReturnType<typeof createWorkflowsCapability>;
   readonly teams: ReturnType<typeof createTeamsCapability>;
   readonly harness;
@@ -104,7 +102,6 @@ export class RuntimeClient {
     const capabilityRequest = <T>(path: string, init: RequestInit = {}, request?: RequestOptions) =>
       this.request<T>(path, init, request);
     this.agent = createAgentCapability(capabilityRequest);
-    this.plans = createPlansCapability(capabilityRequest);
     this.workflows = createWorkflowsCapability(capabilityRequest);
     this.teams = createTeamsCapability(capabilityRequest);
     this.harness = {

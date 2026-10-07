@@ -75,25 +75,25 @@ func TestFrozenApprovalPolicyFollowsChildRunRelations(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	input := json.RawMessage(`{"goal":"plan"}`)
+	input := json.RawMessage(`{"goal":"team"}`)
 	inputHash := sha256.Sum256(input)
 	if _, _, err = store.CreateInvocation(t.Context(), harness.Invocation{
 		ID: "invocation-descendant-approval", TurnID: config.TurnID,
-		CapabilityKey: harness.CapabilityPlanExecute, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionPlanExecute, Input: input, InputHash: fmt.Sprintf("%x", inputHash),
-		ExecutionRefID: "plan-run", Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
+		CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
+		ExecutionClass: harness.ExecutionTeam, Input: input, InputHash: fmt.Sprintf("%x", inputHash),
+		ExecutionRefID: "team-run", Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = relations.Ensure(t.Context(), runrelation.Draft{
-		ParentRunID: "plan-run", ChildRunID: "step-agent-run",
-		Kind: runrelation.KindPlanStep, OwnerNodeID: "step-1",
+		ParentRunID: "team-run", ChildRunID: "member-agent-run",
+		Kind: runrelation.KindTeamMember, OwnerNodeID: "member-1",
 	}); err != nil {
 		t.Fatal(err)
 	}
 	requirement, err := policy.Approval(t.Context(), plugin.ToolInvocation{
-		Run:        kernel.Run{ID: "step-agent-run"},
+		Run:        kernel.Run{ID: "member-agent-run"},
 		Definition: tools.Definition{Key: approvalTestToolKey},
 	})
 	if err != nil || requirement != plugin.ApprovalRequired {

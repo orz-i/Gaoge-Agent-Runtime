@@ -12,14 +12,30 @@ const expectedModules = [
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp",
+  "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http",
 ];
 const violations = [];
+const historicalPlanPaths = new Set([
+  "CHANGELOG.md",
+  "docs/releases/v0.1.0-beta.6.md",
+  "docs/releases/v0.1.0-beta.8.md",
+  `docs/releases/v${version}.md`,
+]);
+const retiredPlanMarkers = [
+  ["Plan", "Execute"].join(""),
+  ["plan", "execute"].join("_"),
+  ["plan", "-runs"].join(""),
+  ["Kind", "Plan", "Step"].join(""),
+  ["runtime", "plan_execute"].join("."),
+  ["Execution", "Plan", "Execute"].join(""),
+  ["Capability", "Plan", "Execute"].join(""),
+];
 
-if (version !== "0.1.0-beta.10") violations.push(`unexpected VERSION ${version}`);
+if (version !== "0.1.0-beta.11") violations.push(`unexpected VERSION ${version}`);
 if (boundary.version !== version) violations.push("boundary version does not match VERSION");
 if (JSON.stringify(boundary.goModules) !== JSON.stringify(expectedModules)) {
   violations.push("boundary Go module list is not the canonical ordered list");
@@ -75,6 +91,24 @@ for (const file of walk(root)) {
   const source = readFileSync(file, "utf8");
   if (source.includes("github.com/orz-i/Gaoge/sdk/go/")) violations.push(`${relative} contains retired Go module identity`);
   if (source.includes("@gaoge/agent-runtime-client")) violations.push(`${relative} contains retired TypeScript package identity`);
+  if (!historicalPlanPaths.has(relative)) {
+    const lower = source.toLowerCase();
+    for (const marker of retiredPlanMarkers) {
+      if (lower.includes(marker.toLowerCase())) {
+        violations.push(`${relative} reintroduces retired PlanExecute surface via ${marker}`);
+        break;
+      }
+    }
+  }
+}
+
+for (const retiredPath of [
+  "go/agent-runtime/planexecute",
+  "go/agent-runtime-http/planexecute",
+  "contracts/agent-runtime/v1/capabilities/planexecute.json",
+  "ts/agent-runtime-client/src/capabilities/plans.ts",
+]) {
+  if (existsSync(path.join(root, retiredPath))) violations.push(`retired PlanExecute path returned: ${retiredPath}`);
 }
 
 if (violations.length > 0) {

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ export const modules = [
   "go/agent-runtime-harness",
   "go/agent-runtime-harness-postgres",
   "go/agent-runtime-mcp",
+  "go/agent-runtime-otel",
   "go/agent-runtime-a2a",
   "go/agent-runtime-postgres",
   "go/agent-runtime-redis",
@@ -16,9 +17,26 @@ export const modules = [
 ];
 
 const mode = process.argv[2];
-const supported = new Set(["fmt-check", "tidy-check", "build", "test", "race", "vet", "lint"]);
+const supported = new Set([
+  "fmt-check",
+  "tidy-check",
+  "build",
+  "test",
+  "race",
+  "vet",
+  "lint",
+  "coverage",
+  "vuln",
+]);
 if (!supported.has(mode)) {
   throw new Error(`usage: node scripts/go-workspace.mjs <${[...supported].join("|")}>`);
+}
+
+const coverageDirectory = path.join(root, "coverage", "go");
+const coverageProfiles = [];
+if (mode === "coverage") {
+  rmSync(coverageDirectory, { recursive: true, force: true });
+  mkdirSync(coverageDirectory, { recursive: true });
 }
 
 for (const modulePath of modules) {
@@ -31,7 +49,17 @@ for (const modulePath of modules) {
   if (mode === "race") run("go", ["test", "-race", "./...", "-count=1"], cwd);
   if (mode === "vet") run("go", ["vet", "./..."], cwd);
   if (mode === "lint") run("golangci-lint", ["run", "./..."], cwd);
+  if (mode === "coverage") {
+    const profile = path.join(coverageDirectory, `${path.basename(modulePath)}.out`);
+    run("go", ["test", "./...", "-count=1", "-covermode=atomic", `-coverprofile=${profile}`], cwd);
+    coverageProfiles.push(profile);
+  }
+  if (mode === "vuln") {
+    run("go", ["run", "golang.org/x/vuln/cmd/govulncheck@v1.8.0", "./..."], cwd);
+  }
 }
+
+if (mode === "coverage") writeCoverageSummary(coverageProfiles);
 
 function checkFormatting(cwd) {
   const files = walk(cwd).filter((file) => file.endsWith(".go"));
@@ -80,6 +108,40 @@ function walk(directory) {
     const absolute = path.join(directory, entry.name);
     return entry.isDirectory() ? walk(absolute) : [absolute];
   });
+}
+
+function writeCoverageSummary(profiles) {
+  let coveredStatements = 0;
+  let totalStatements = 0;
+  for (const profile of profiles) {
+    const lines = readFileSync(profile, "utf8").trim().split("\n").slice(1);
+    for (const line of lines) {
+      const [, statementCountText, executionCountText] = line.trim().split(/\s+/);
+      const statementCount = Number(statementCountText);
+      const executionCount = Number(executionCountText);
+      if (!Number.isFinite(statementCount) || !Number.isFinite(executionCount)) continue;
+      totalStatements += statementCount;
+      if (executionCount > 0) coveredStatements += statementCount;
+    }
+  }
+
+  const percent = totalStatements === 0 ? 100 : (coveredStatements / totalStatements) * 100;
+  const minimum = Number(process.env.GO_COVERAGE_MIN ?? "70");
+  if (!Number.isFinite(minimum) || minimum < 0 || minimum > 100) {
+    throw new Error(`invalid GO_COVERAGE_MIN: ${process.env.GO_COVERAGE_MIN}`);
+  }
+
+  const summary = {
+    coveredStatements,
+    totalStatements,
+    percent: Number(percent.toFixed(2)),
+    minimum,
+  };
+  writeFileSync(path.join(coverageDirectory, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
+  console.log(`Go statement coverage: ${percent.toFixed(2)}% (minimum ${minimum.toFixed(2)}%)`);
+  if (percent < minimum) {
+    throw new Error(`Go statement coverage ${percent.toFixed(2)}% is below ${minimum.toFixed(2)}%`);
+  }
 }
 
 function run(command, args, cwd, capture = false) {

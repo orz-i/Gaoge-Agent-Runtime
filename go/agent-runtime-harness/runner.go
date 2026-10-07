@@ -515,7 +515,6 @@ type agentResumer interface {
 type Dependencies struct {
 	Runtime      *kernel.Runtime
 	Agent        AgentStarter
-	Plans        PlanExecuteFeature
 	Teams        TeamFeature
 	GroupChats   GroupChatFeature
 	Workflows    WorkflowFeature
@@ -541,7 +540,6 @@ type runRelationReader interface {
 type Runner struct {
 	runtime        *kernel.Runtime
 	agent          AgentStarter
-	plans          PlanExecuteFeature
 	teams          TeamFeature
 	groupChats     GroupChatFeature
 	workflows      WorkflowFeature
@@ -589,7 +587,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}
 	runner := &Runner{
 		runtime: dependencies.Runtime, agent: dependencies.Agent, cancellation: dependencies.Cancellation,
-		plans: dependencies.Plans, teams: dependencies.Teams, groupChats: dependencies.GroupChats, workflows: dependencies.Workflows,
+		teams: dependencies.Teams, groupChats: dependencies.GroupChats, workflows: dependencies.Workflows,
 		store: dependencies.Store, clock: dependencies.Clock,
 		turnFeed: dependencies.TurnFeed,
 		context:  dependencies.Context, catalog: dependencies.Catalog,

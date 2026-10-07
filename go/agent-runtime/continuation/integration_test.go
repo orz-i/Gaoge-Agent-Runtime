@@ -16,13 +16,14 @@ import (
 	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/planexecute"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -30,13 +31,14 @@ const integrationToolKey = "test.publish"
 
 var errUnexpectedResumer = errors.New("unexpected resumer")
 
-func TestApprovedChildAutomaticallyContinuesOwningPlanOnce(t *testing.T) {
+func TestApprovedChildAutomaticallyContinuesOwningTeamOnce(t *testing.T) {
 	fixture := newContinuationIntegrationFixture(t)
 	defer fixture.close(t)
-	parent := fixture.startPendingPlan(t)
+	parent := fixture.startPendingTeam(t)
 	child := fixture.waitingChild(t, parent)
 	// Establish the fixture before exercising asynchronous continuation. This
-	// test verifies approval wakeup, not concurrent inline parent startup.
+	// test verifies approval wakeup and child-terminal propagation, not
+	// concurrent inline parent startup.
 	if err := fixture.worker.Start(fixture.workerContext); err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +50,7 @@ func TestApprovedChildAutomaticallyContinuesOwningPlanOnce(t *testing.T) {
 type continuationIntegrationFixture struct {
 	runtime       *kernel.Runtime
 	agent         *agent.Runner
-	plans         *planexecute.Runner
+	teams         *team.Runner
 	worker        *continuation.Worker
 	workerContext context.Context
 	cancel        context.CancelFunc
@@ -62,11 +64,11 @@ func newContinuationIntegrationFixture(t *testing.T) continuationIntegrationFixt
 	executions := &atomic.Int32{}
 	registry := newIntegrationToolRegistry(t, executions)
 	agentRunner, model := newIntegrationAgent(t, runtime, registry)
-	planRunner := newIntegrationPlan(t, runtime, relations, agentRunner)
-	worker := newIntegrationWorker(t, runtime, scheduler, delivery, agentRunner, planRunner)
+	teamRunner := newIntegrationTeam(t, runtime, relations, agentRunner)
+	worker := newIntegrationWorker(t, runtime, scheduler, delivery, agentRunner, teamRunner)
 	workerCtx, cancel := context.WithCancel(context.Background())
 	return continuationIntegrationFixture{
-		runtime: runtime, agent: agentRunner, plans: planRunner, worker: worker,
+		runtime: runtime, agent: agentRunner, teams: teamRunner, worker: worker,
 		cancel: cancel, workerContext: workerCtx, executions: executions, model: model,
 	}
 }
@@ -154,21 +156,24 @@ func (integrationApprovalPolicy) Approval(
 	return plugin.ApprovalRequired, nil
 }
 
-func newIntegrationPlan(
+func newIntegrationTeam(
 	t *testing.T,
 	runtime *kernel.Runtime,
 	relations *runrelation.Registry,
 	agentRunner *agent.Runner,
-) *planexecute.Runner {
+) *team.Runner {
 	t.Helper()
-	planRunner, err := planexecute.NewRunner(planexecute.Dependencies{
-		Runtime: runtime, Planner: integrationPlanner{}, Agent: agentRunner,
-		Relations: relations, MaxSteps: 4, DeferResumption: true,
+	coordinator, err := handoff.New(agentRunner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamRunner, err := team.NewRunner(team.Dependencies{
+		Runtime: runtime, Handoffs: coordinator, Relations: relations, MaxMembers: 4,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return planRunner
+	return teamRunner
 }
 
 func newIntegrationWorker(
@@ -177,16 +182,15 @@ func newIntegrationWorker(
 	scheduler *continuation.Scheduler,
 	delivery *queuecore.Memory,
 	agentRunner *agent.Runner,
-	planRunner *planexecute.Runner,
+	teamRunner *team.Runner,
 ) *continuation.Worker {
 	t.Helper()
 	unused := unusedResumer{}
 	dispatcher, err := continuation.NewDispatcher(
 		runtime,
 		continuation.RegisterResumer(agent.RunKind, agentRunner),
-		continuation.RegisterResumer(planexecute.RunKind, planRunner),
+		continuation.RegisterResumer(team.RunKind, teamRunner),
 		continuation.RegisterResumer(kernel.RunKind("unused_workflow"), unused),
-		continuation.RegisterResumer(kernel.RunKind("unused_team"), unused),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -202,14 +206,18 @@ func newIntegrationWorker(
 	return worker
 }
 
-func (fixture continuationIntegrationFixture) startPendingPlan(t *testing.T) kernel.Snapshot {
+func (fixture continuationIntegrationFixture) startPendingTeam(t *testing.T) kernel.Snapshot {
 	t.Helper()
-	parent, err := fixture.plans.StartRun(t.Context(), planexecute.StartRequest{
-		ID: "parent-plan", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+	parent, err := fixture.teams.StartRun(t.Context(), team.StartRequest{
+		ID: "parent-team", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "publish",
-		ApprovalPolicy: planexecute.ApprovalAuto,
+		Mode: team.ExecutionSequential,
+		Members: []team.Member{{
+			ID: "publisher", Goal: "publish once", ToolKeys: []string{integrationToolKey},
+		}},
+		Join: handoff.Join{Mode: handoff.JoinAll, Quorum: 1, FailurePolicy: handoff.FailureCollect},
 	})
-	if !errors.Is(err, planexecute.ErrStepPending) {
+	if !errors.Is(err, team.ErrMemberPending) {
 		t.Fatalf("start parent: %#v, %v", parent.Run, err)
 	}
 	return parent
@@ -220,11 +228,11 @@ func (fixture continuationIntegrationFixture) waitingChild(
 	parent kernel.Snapshot,
 ) kernel.Snapshot {
 	t.Helper()
-	view, err := planexecute.ViewState(parent)
+	view, err := team.ViewState(parent)
 	if err != nil {
 		t.Fatal(err)
 	}
-	childID := view.Plan.Steps[0].ChildRunID
+	childID := view.Members[0].Delegation.ChildRunID
 	child, err := fixture.runtime.Load(t.Context(), childID)
 	if err != nil || child.Run.Status != kernel.RunStatusWaitingInput {
 		t.Fatalf("child=%#v err=%v", child.Run, err)
@@ -274,18 +282,6 @@ func (fixture continuationIntegrationFixture) close(t *testing.T) {
 	if err := fixture.worker.Close(closeCtx); err != nil {
 		t.Errorf("close worker: %v", err)
 	}
-}
-
-type integrationPlanner struct{}
-
-func (integrationPlanner) GeneratePlan(
-	context.Context,
-	planexecute.PlannerRequest,
-) (planexecute.PlannerResponse, error) {
-	return planexecute.PlannerResponse{Draft: planexecute.PlanDraft{
-		Summary: "Publish once",
-		Steps:   []planexecute.StepDraft{{Title: "Publish", Goal: "publish once", ToolKeys: []string{integrationToolKey}}},
-	}, ResponseID: "integration-plan"}, nil
 }
 
 type approvalIntegrationModel struct {

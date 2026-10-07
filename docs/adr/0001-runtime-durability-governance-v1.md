@@ -113,8 +113,7 @@ projection metadata across restart.
 An autonomous committed-running transition is valid only when it leaves at
 least one durable continuation source: an explicit self-wakeup fact, a durable
 child `RunRelation` whose terminal transition wakes the parent, or an external
-wait/checkpoint whose resolution transaction emits a wakeup. Agent, Workflow,
-PlanExecute, and Team mark their autonomous commit boundaries accordingly.
+wait/checkpoint whose resolution transaction emits a wakeup. Agent, Workflow, and Team mark their autonomous commit boundaries accordingly.
 Wakeups are revision-frozen; if the original synchronous call stack advances
 the Run first, later delivery is a stale no-op. Tool and Workflow Effect
 physical execution remains at-least-once and reuses the existing stable,
@@ -136,8 +135,6 @@ Required crash/fault cases:
 - Agent tool-batch commit before Tool execution and Tool receipt before the
   next model step;
 - Workflow effect-intent commit before effect dispatch;
-- Plan step-start commit before relation/child creation and step-complete commit
-  before the next step;
 - Team topology commit before member relations/children exist.
 
 ## Decision 2: Durable Agent ModelInvocation
@@ -178,27 +175,6 @@ same logical invocation remains the only receipt that may advance Agent state.
 
 `model.ResponseID` is part of the durable receipt rather than a stream-only
 observation. Usage carried by the model layer is also copied into the receipt.
-
-### PlanExecute Planner invocation
-
-Provider-backed planning follows the same durability rule. PlanExecute owns a
-durable `PlannerInvocation` with a stable invocation ID, canonical request hash,
-execution attempt/lease, normalized `PlannerResponse`, response ID, and
-created/completed/consumed timestamps. Its order is:
-
-```text
-persist PlannerInvocation pending with Run creation
--> CAS-claim execution lease
--> call Planner with stable InvocationID
--> persist completed Planner receipt
--> consume receipt exactly once into the materialized Plan
-```
-
-Physical planning may repeat only after an ambiguous crash before receipt
-commit; logical Plan materialization consumes one durable receipt. Concurrent
-resumers cannot both acquire the same execution generation. Planner adapters
-may map `InvocationID` to provider idempotency/retrieval facilities, but Runtime
-correctness does not require them.
 
 ## Decision 3: JSON Schema is an executable contract
 
