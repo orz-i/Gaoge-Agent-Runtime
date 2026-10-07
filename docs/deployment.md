@@ -15,7 +15,18 @@ A production host is responsible for composing and deploying:
 - Redis queue/feed clients and continuation workers when those capabilities are
   enabled;
 - OpenTelemetry SDK/exporter/Collector configuration;
-- process shutdown, health/readiness, secrets, autoscaling, and rollout policy.
+- process shutdown, health/readiness, secrets, autoscaling, and rollout policy;
+- deployment-owned Agent/Harness execution policy. Agent constructor limits and
+  `harness.Dependencies.Execution` are hard ceilings for new executions;
+  per-Run, frozen Role, or Turn-level values may tighten but not widen them.
+
+The Runtime defaults are intentionally safe without requiring product resources
+to carry execution budgets. Direct Agent defaults bound model/Tool loops; a
+Harness composed with shared Budget middleware defaults to 32 descendant Runs,
+8 active execution slots, and delegation depth 4 while leaving shared
+model/Tool/token ceilings unset. Hosts may replace those deployment defaults at
+composition time. Do not expose the low-level limits as a generic user/Admin
+settings panel unless a separate product policy owns and enforces that surface.
 
 The repository's `docker-compose.test.yml` is test infrastructure only. It
 starts PostgreSQL and Redis for real-engine verification and is not a production

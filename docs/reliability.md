@@ -36,6 +36,33 @@ Sources: [PostgreSQL agent recovery](../go/agent-runtime-postgres/agent_recovery
 [PostgreSQL atomicity](../go/agent-runtime-postgres/atomicity_real_test.go),
 [Redis lease recovery](../go/agent-runtime-redis/recovery_real_test.go).
 
+## Runtime-owned execution policy
+
+Execution safety is owned by Runtime composition rather than product Role or
+Environment resources. Agent constructor limits are deployment hard ceilings;
+per-Run and frozen Role limits can only tighten them. The zero-config direct
+Agent defaults remain 8 model calls and 16 local Tool calls.
+
+Harness resolves a deployment-owned execution policy for every new Turn. When a
+Budget middleware is composed, the zero-config shared ledger uses broad topology
+fuses of 32 descendant Runs and 8 concurrently active execution slots. Shared
+model/Tool/token ceilings remain unset by default, so the ledger observes those
+dimensions without recreating a product-facing fixed budget. New Turns also
+freeze a delegation depth of 4 unless the deployment or Turn requests a smaller
+bound. Existing persisted Turns are loaded as stored and are never rewritten to
+new defaults during recovery.
+
+Subordinate limits cannot widen deployment policy. Budget admission failures
+carry a structured denied dimension; Agent terminal errors preserve dimensions
+such as `agent.shared_llm_calls_budget`. Exhausting the child-Run ceiling through
+the delegation Tool instead becomes a recoverable model-visible Tool error and
+removes further delegation from the current Agent Run, allowing the model to
+finish from already collected information without bypassing the hard guard.
+
+Hosts inject Harness policy through `harness.Dependencies.Execution`; it is a
+composition/deployment concern, not a global Admin control plane. See
+[ADR 0002](adr/0002-runtime-owned-execution-policy-v1.md).
+
 ## External call execution policy
 
 `agent.ExecutionPolicy` bounds model and Tool calls independently with a
