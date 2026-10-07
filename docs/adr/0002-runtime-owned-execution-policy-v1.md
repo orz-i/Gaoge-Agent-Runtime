@@ -1,6 +1,6 @@
 # ADR 0002: Runtime-Owned Execution Policy V1
 
-- Status: Accepted for implementation
+- Status: Implemented / beta.12 release candidate
 - Date: 2026-10-07
 - Baseline: `main@327b8adf06a29300edffc645cef697cc56b9b64c`
 - Branch: `feat/runtime-owned-execution-policy-p1`
@@ -165,3 +165,6 @@ enforced by the actual billing/admission owner if introduced.
 - existing shared-ledger restart/concurrency tests;
 - full `make check`, race, coverage/security, PostgreSQL/Redis integration, and
   OpenTelemetry integration before release tagging.
+
+The focused Core/Harness suites and `make check` pass on the beta.12 release
+candidate. Release tagging still requires the complete `make beta` gate.

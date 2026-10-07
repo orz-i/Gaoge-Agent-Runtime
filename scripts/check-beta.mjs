@@ -19,12 +19,8 @@ const expectedModules = [
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http",
 ];
 const violations = [];
-const historicalPlanPaths = new Set([
-  "CHANGELOG.md",
-  "docs/releases/v0.1.0-beta.6.md",
-  "docs/releases/v0.1.0-beta.8.md",
-  `docs/releases/v${version}.md`,
-]);
+const historicalPlanPath = (relative) =>
+  relative === "CHANGELOG.md" || relative.startsWith("docs/releases/");
 const retiredPlanMarkers = [
   ["Plan", "Execute"].join(""),
   ["plan", "execute"].join("_"),
@@ -35,7 +31,7 @@ const retiredPlanMarkers = [
   ["Capability", "Plan", "Execute"].join(""),
 ];
 
-if (version !== "0.1.0-beta.11") violations.push(`unexpected VERSION ${version}`);
+if (version !== "0.1.0-beta.12") violations.push(`unexpected VERSION ${version}`);
 if (boundary.version !== version) violations.push("boundary version does not match VERSION");
 if (JSON.stringify(boundary.goModules) !== JSON.stringify(expectedModules)) {
   violations.push("boundary Go module list is not the canonical ordered list");
@@ -91,7 +87,7 @@ for (const file of walk(root)) {
   const source = readFileSync(file, "utf8");
   if (source.includes("github.com/orz-i/Gaoge/sdk/go/")) violations.push(`${relative} contains retired Go module identity`);
   if (source.includes("@gaoge/agent-runtime-client")) violations.push(`${relative} contains retired TypeScript package identity`);
-  if (!historicalPlanPaths.has(relative)) {
+  if (!historicalPlanPath(relative)) {
     const lower = source.toLowerCase();
     for (const marker of retiredPlanMarkers) {
       if (lower.includes(marker.toLowerCase())) {
