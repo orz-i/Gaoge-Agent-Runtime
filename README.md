@@ -62,7 +62,7 @@ integration guidance.
 
 | Dependency | Tested baseline |
 | --- | --- |
-| Go | 1.26 |
+| Go | 1.26.6+ |
 | Node.js | 24 LTS or newer |
 | pnpm | 11.22 |
 | PostgreSQL | 16 |

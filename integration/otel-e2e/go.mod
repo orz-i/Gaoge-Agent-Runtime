@@ -1,6 +1,6 @@
 module example.com/agent-runtime-otel-e2e
 
-go 1.26.0
+go 1.26.6
 
 require (
 	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.11
