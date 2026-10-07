@@ -58,6 +58,35 @@ See [the Go quickstart](go/agent-runtime/examples/quickstart/main.go), the
 [deployment boundary](docs/deployment.md) for runnable examples and host
 integration guidance.
 
+### Configuration-driven bootstrap
+
+Hosts that prefer configuration-driven assembly can use the optional
+`bootstrap` package. It uses Koanf for YAML/JSON plus environment overrides,
+but keeps DI manual: the host explicitly registers allowed store, optional
+Kernel feature (for example queue/run-feed adapters), model, Tool, and telemetry
+factories in Go, and configuration can only select those
+factories. `kernel.New` remains supported and the Kernel does not import Koanf
+or provider SDKs.
+
+```go
+cfg, err := bootstrap.Load("runtime.yaml", bootstrap.LoadOptions{})
+registry := bootstrap.NewDefaultRegistry()
+_ = registry.RegisterModel("my-model", newModelFromConfig)
+host, err := bootstrap.Build(ctx, cfg, registry, bootstrap.EnvSecretResolver{})
+if err != nil {
+    log.Fatal(err)
+}
+if err = host.Start(ctx); err != nil {
+    log.Fatal(err)
+}
+defer host.Close(context.Background())
+```
+
+Environment overrides use `GAOGE_` by default and `__` for nesting, for example
+`GAOGE_AGENT__EXECUTION__MODEL__TIMEOUT=45s`. Secret values are not stored in
+the config document; component `secret_refs` are resolved only during startup.
+See [the configured example](go/agent-runtime/examples/configured/main.go).
+
 ## Compatibility
 
 | Dependency | Tested baseline |
