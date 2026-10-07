@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -78,6 +79,14 @@ func (handler *DelegationToolHandler) Execute(
 	}
 	result, err := runner.DelegateByExecutionRefID(ctx, request.RunID, input)
 	if err != nil {
+		if dimension, ok := budget.DeniedDimension(err); ok && dimension == budget.DimensionChildRuns {
+			return tools.ExecutionResult{}, tools.NewRecoverableCallErrorWithBlockedTools(
+				"delegation.child_runs_exhausted",
+				"No more child runs are available for this task. Continue with the information already collected and finish without further delegation.",
+				err,
+				DelegationToolKey,
+			)
+		}
 		return tools.ExecutionResult{}, err
 	}
 	content, err := json.Marshal(struct {

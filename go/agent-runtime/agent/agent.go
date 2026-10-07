@@ -548,6 +548,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	snapshot, state, err = runner.executeModelInvocation(ctx, snapshot, state, invocation)
 	if err != nil {
+		if errors.Is(err, runtimebudget.ErrExhausted) {
+			failed, failErr := runner.fail(ctx, snapshot, state, sharedBudgetErrorCode(err), err)
+			return failed, true, failErr
+		}
 		if errors.Is(err, kernel.ErrDeadline) {
 			failed, failErr := runner.fail(
 				ctx, snapshot, state, "agent.deadline_exceeded", errors.Join(kernel.ErrDeadline, err),
@@ -1240,15 +1244,19 @@ func (runner *Runner) handlePendingToolExecutionError(
 	state runState,
 	err error,
 ) (kernel.Snapshot, bool, error) {
-	if errors.Is(err, kernel.ErrDeadline) {
-		failed, failErr := runner.fail(ctx, snapshot, state, "agent.deadline_exceeded", errors.Join(kernel.ErrDeadline, err))
-		return failed, false, failErr
-	}
 	if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
 		corrected, correctionErr := runner.recordRecoverableToolError(
 			ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(err),
 		)
 		return corrected, false, correctionErr
+	}
+	if errors.Is(err, runtimebudget.ErrExhausted) {
+		failed, failErr := runner.fail(ctx, snapshot, state, sharedBudgetErrorCode(err), err)
+		return failed, false, failErr
+	}
+	if errors.Is(err, kernel.ErrDeadline) {
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.deadline_exceeded", errors.Join(kernel.ErrDeadline, err))
+		return failed, false, failErr
 	}
 	failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
 	return failed, false, failErr
@@ -1694,7 +1702,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 }
 
 func resolveRunLimits(defaults Limits, requested Limits) (Limits, error) {
-	resolved, err := runtimebudget.ResolveLimits(defaults, requested)
+	resolved, err := runtimebudget.TightenLimits(defaults, requested)
 	if err != nil {
 		return Limits{}, errors.Join(ErrInvalidRequest, err)
 	}
@@ -1702,6 +1710,13 @@ func resolveRunLimits(defaults Limits, requested Limits) (Limits, error) {
 		return Limits{}, ErrInvalidRequest
 	}
 	return resolved, nil
+}
+
+func sharedBudgetErrorCode(err error) string {
+	if dimension, ok := runtimebudget.DeniedDimension(err); ok {
+		return "agent.shared_" + string(dimension) + "_budget"
+	}
+	return "agent.shared_budget_exhausted"
 }
 
 func validAgentLimits(value Limits) bool {

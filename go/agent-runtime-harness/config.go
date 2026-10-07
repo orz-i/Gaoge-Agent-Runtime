@@ -105,8 +105,9 @@ type SkillSnapshot struct {
 }
 
 // DelegationPolicySnapshot freezes the delegation boundary for one Harness Turn.
-// MaxDepth counts delegation edges below the root Agent. Zero preserves the
-// SDK's historical unbounded behavior for products that do not opt into a cap.
+// MaxDepth counts delegation edges below the root Agent. New Turns resolve zero
+// from Runner execution policy; zero remains readable only for persisted legacy
+// Turns created before runtime-owned delegation defaults.
 type DelegationPolicySnapshot struct {
 	MaxDepth int `json:"maxDepth,omitempty"`
 }

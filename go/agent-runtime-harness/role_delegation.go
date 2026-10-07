@@ -63,7 +63,7 @@ func roleAgentLimits(parent agent.Limits, role budget.Limits) agent.Limits {
 	// Feature still receives its ordinary local call/token limits.
 	role.MaxChildRuns, role.MaxConcurrentRuns, role.MaxCostUnits, role.MaxStateBytes = 0, 0, 0, 0
 	parent.MaxChildRuns, parent.MaxConcurrentRuns, parent.MaxCostUnits, parent.MaxStateBytes = 0, 0, 0, 0
-	resolved, _ := budget.ResolveLimits(parent, role)
+	resolved, _ := budget.TightenLimits(parent, role)
 	return resolved
 }
 
@@ -95,7 +95,35 @@ func (runner *Runner) frozenDelegation(ctx context.Context, turnID, id string) (
 	return handoff.Delegation{}, false, nil
 }
 
-func (runner *Runner) prepareRoleChild(ctx context.Context, turn Turn, parent Invocation, delegation handoff.Delegation, parentItemID string) error {
+func (runner *Runner) admitRoleChild(ctx context.Context, turn Turn, parent Invocation, delegation handoff.Delegation) error {
+	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	if err != nil || config.SharedBudget == nil {
+		return err
+	}
+	role, found := findRole(config.Roles, delegation.RoleID)
+	if !found {
+		return ErrConflict
+	}
+	if runner.budgets == nil {
+		return ErrInvalidRequest
+	}
+	coordinator := runner.budgets.coordinator()
+	if _, err = runner.budgets.bindRun(ctx, parent.ExecutionRefID); err != nil {
+		return err
+	}
+	// Admission happens before child topology facts are appended so a hard
+	// descendant ceiling cannot leave a phantom relation or child Invocation.
+	ledger, err := coordinator.RegisterRun(ctx, turn.ID, delegation.ChildRunID, budget.RunBudget{
+		ParentRunID: parent.ExecutionRefID,
+		Limits:      role.Limits,
+	})
+	if err != nil {
+		return err
+	}
+	return projectBudgetItem(ctx, runner.store, runner.turnFeed, runner.clock, ledger)
+}
+
+func (runner *Runner) prepareRoleChild(ctx context.Context, turn Turn, _ Invocation, delegation handoff.Delegation, parentItemID string) error {
 	input, inputHash, err := marshalInvocationValue(delegation)
 	if err != nil {
 		return err
@@ -113,30 +141,7 @@ func (runner *Runner) prepareRoleChild(ctx context.Context, turn Turn, parent In
 	if err != nil {
 		return err
 	}
-	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
-		return err
-	}
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
-	if err != nil || config.SharedBudget == nil {
-		return err
-	}
-	role, found := findRole(config.Roles, delegation.RoleID)
-	if !found {
-		return ErrConflict
-	}
-	if runner.budgets == nil {
-		return ErrInvalidRequest
-	}
-	coordinator := runner.budgets.coordinator()
-	if _, err = runner.budgets.bindRun(ctx, parent.ExecutionRefID); err != nil {
-		return err
-	}
-	// Parent registration is performed at the public Agent start boundary.
-	ledger, err := coordinator.RegisterRun(ctx, turn.ID, delegation.ChildRunID, budget.RunBudget{ParentRunID: parent.ExecutionRefID, Limits: role.Limits})
-	if err != nil {
-		return err
-	}
-	return projectBudgetItem(ctx, runner.store, runner.turnFeed, runner.clock, ledger)
+	return runner.recordInvocationItem(ctx, invocation)
 }
 
 // NewRoleModelMiddleware exposes only role IDs frozen for the current Turn.

@@ -350,7 +350,11 @@ func (runner *Runner) prepareTopLevelFeatureEnvelope(
 		return topLevelFeatureEnvelope{}, err
 	}
 	now := runner.clock.Now().UTC()
-	config, err := SealConfigSnapshot(turnID, request.Config, now)
+	resolvedConfig, err := runner.resolveConfigExecutionPolicy(request.Config)
+	if err != nil {
+		return topLevelFeatureEnvelope{}, err
+	}
+	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
 	if err != nil {
 		return topLevelFeatureEnvelope{}, err
 	}

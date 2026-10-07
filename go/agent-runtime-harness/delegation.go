@@ -90,6 +90,11 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 	if err != nil {
 		return DelegationResult{}, err
 	}
+	if delegation.RoleID != "" {
+		if err = runner.admitRoleChild(ctx, turn, invocation, delegation); err != nil {
+			return DelegationResult{}, err
+		}
+	}
 	startedItemID, err := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemStarted, "")
 	if err != nil {
 		return DelegationResult{}, err

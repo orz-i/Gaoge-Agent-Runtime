@@ -17,6 +17,35 @@ var (
 	ErrUnmetered      = errors.New("model cannot enforce token admission")
 )
 
+type deniedError struct {
+	cause     error
+	dimension Dimension
+}
+
+func (err deniedError) Error() string {
+	if err.dimension == "" {
+		return err.cause.Error()
+	}
+	return fmt.Sprintf("%s: %s", err.cause, err.dimension)
+}
+
+func (err deniedError) Unwrap() error { return err.cause }
+
+// DeniedDimension returns the budget dimension responsible for a structured
+// admission denial. Callers must not parse Error() text to diagnose exhaustion
+// or contention.
+func DeniedDimension(err error) (Dimension, bool) {
+	var denied deniedError
+	if !errors.As(err, &denied) || denied.dimension == "" {
+		return "", false
+	}
+	return denied.dimension, true
+}
+
+func deny(cause error, dimension Dimension) error {
+	return deniedError{cause: cause, dimension: dimension}
+}
+
 // LedgerStore atomically compares the entire Turn ledger. Creation uses revision
 // zero; successful writes increment the revision exactly once. It must never
 // expose partially written reservations or release uncertain dispatched work.
@@ -343,17 +372,17 @@ func (ledger Ledger) admit(runID string, requested Usage, active bool) (Dimensio
 			return "", err
 		}
 		if dimension := Exceeded(view.Limits, used); dimension != "" {
-			return dimension, fmt.Errorf("%w: %s", ErrExhausted, dimension)
+			return dimension, deny(ErrExhausted, dimension)
 		}
 		occupied, err := AddUsage(used, view.Reserved)
 		if err != nil {
 			return "", err
 		}
 		if dimension := Exceeded(view.Limits, occupied); dimension != "" {
-			return dimension, fmt.Errorf("%w: %s", ErrWaiting, dimension)
+			return dimension, deny(ErrWaiting, dimension)
 		}
 		if active && view.Limits.MaxConcurrentRuns > 0 && !ledger.active(runID, current) && view.ActiveRuns >= view.Limits.MaxConcurrentRuns {
-			return DimensionConcurrentRuns, ErrWaiting
+			return DimensionConcurrentRuns, deny(ErrWaiting, DimensionConcurrentRuns)
 		}
 		if current == "" {
 			return "", nil
