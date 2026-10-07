@@ -18,7 +18,7 @@ agent:
       max_concurrency: 8
     tool:
       timeout: 30s
-      max_attempts: 1
+      max_attempts: 2
       initial_backoff: 250ms
       max_backoff: 5s
       max_concurrency: 32

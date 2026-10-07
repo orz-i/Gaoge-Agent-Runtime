@@ -290,6 +290,65 @@ func TestSelectorGroupChatStopsAtHardUtteranceLimit(t *testing.T) {
 	}
 }
 
+func TestSelectorTimeoutRetriesAndStopsAtBound(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{
+		Store: memory.NewStore(), Clock: groupChatClock{}, IDs: &groupChatIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := &timeoutSelector{}
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: &recordingDelegator{}, Selector: selector,
+		SelectorExecution: groupchat.SelectorExecutionPolicy{
+			Timeout:        10 * time.Millisecond,
+			MaxAttempts:    2,
+			InitialBackoff: time.Millisecond,
+			MaxBackoff:     time.Millisecond,
+			MaxConcurrency: 1,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), selectorRequest())
+	if !errors.Is(err, groupchat.ErrSelectorPending) || snapshot.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("first selector attempt status=%q err=%v", snapshot.Run.Status, err)
+	}
+	snapshot, err = runner.Resume(t.Context(), snapshot.Run.ID, snapshot.Run.Revision)
+	if !errors.Is(err, groupchat.ErrSelectorRetryExhausted) {
+		t.Fatalf("selector retry exhaustion error = %v", err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusFailed || snapshot.Run.ErrorCode != "groupchat.selector_retry_exhausted" {
+		t.Fatalf("selector retry exhaustion snapshot = %#v", snapshot.Run)
+	}
+	if selector.calls != 2 {
+		t.Fatalf("selector calls = %d, want 2", selector.calls)
+	}
+}
+
+func TestSelectorPanicIsContained(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{
+		Store: memory.NewStore(), Clock: groupChatClock{}, IDs: &groupChatIDs{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := groupchat.NewRunner(groupchat.Dependencies{
+		Runtime: runtime, Handoffs: &recordingDelegator{}, Selector: panicSelector{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := runner.StartRun(t.Context(), selectorRequest())
+	if !errors.Is(err, groupchat.ErrSelectorPanic) {
+		t.Fatalf("selector panic error = %v", err)
+	}
+	if snapshot.Run.Status != kernel.RunStatusFailed {
+		t.Fatalf("selector panic status = %q", snapshot.Run.Status)
+	}
+}
+
 func TestSelectorRetryReusesDurableInvocationIdentity(t *testing.T) {
 	runtime, err := kernel.New(kernel.Dependencies{
 		Store: memory.NewStore(), Clock: groupChatClock{}, IDs: &groupChatIDs{},
@@ -377,6 +436,25 @@ type retryableSelectorError struct{}
 
 func (retryableSelectorError) Error() string   { return "selector temporarily unavailable" }
 func (retryableSelectorError) Retryable() bool { return true }
+
+type timeoutSelector struct {
+	calls int
+}
+
+func (selector *timeoutSelector) Select(
+	ctx context.Context,
+	_ groupchat.SelectorRequest,
+) (groupchat.SelectorResponse, error) {
+	selector.calls++
+	<-ctx.Done()
+	return groupchat.SelectorResponse{}, ctx.Err()
+}
+
+type panicSelector struct{}
+
+func (panicSelector) Select(context.Context, groupchat.SelectorRequest) (groupchat.SelectorResponse, error) {
+	panic("boom")
+}
 
 func directedRequest() groupchat.StartRequest {
 	return groupchat.StartRequest{

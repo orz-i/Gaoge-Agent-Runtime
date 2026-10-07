@@ -193,6 +193,7 @@ func (coordinator *Coordinator) StartOrLoad(
 		Thread:       parent.Run.Thread,
 		RequestID:    parent.Run.ID + ":" + delegation.ID,
 		Goal:         delegation.Goal,
+		DeadlineAt:   parent.Run.DeadlineAt,
 		Instructions: delegation.Instructions,
 		Limits:       delegation.Limits,
 		Model:        delegation.Model,

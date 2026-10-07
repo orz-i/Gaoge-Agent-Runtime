@@ -42,7 +42,10 @@ Sources: [PostgreSQL agent recovery](../go/agent-runtime-postgres/agent_recovery
 per-call timeout, maximum attempts, exponential backoff with deterministic
 jitter, and a per-Runner concurrency semaphore. Waiting for a concurrency slot
 honors the caller context, so overload creates backpressure instead of an
-unbounded goroutine/queue inside the Agent runner.
+unbounded goroutine/queue inside the Agent runner. When a Run has `DeadlineAt`,
+each model/Tool call is additionally bounded by the remaining Run lifetime.
+Model/Tool/selector panics are contained at the external-call boundary and
+converted to structural Runtime errors rather than crashing the process.
 
 Model retries preserve the already durable invocation ID. Retryable failures,
 including the runner's own model-call timeout, release the execution lease and
@@ -51,16 +54,29 @@ exhaustion fails the Run instead of retrying forever. The execution lease is
 always longer than the configured model-call timeout. Caller cancellation is
 not converted into a model failure and does not terminally mutate the Run.
 
-Tool retries are deliberately stricter. The default maximum is one attempt, and
-additional attempts occur only when an executor returns
+Tool retries are deliberately stricter. The default maximum is two attempts, but
+the second attempt occurs only when an executor returns
 `tools.NewRetryableExecutionError`, explicitly asserting that replaying the same
 stable Tool call ID is safe. A Tool timeout is ambiguous with respect to an
 external side effect and is therefore not retried automatically. Hosts should
 prefer downstream idempotency keys or reconciliation before opting a Tool into
-retries.
+retries. Provider-hosted Tool resolution is read-only, so its timeout is safely
+retried within the same bounded Tool policy.
+
+Timeout enforcement is cooperative: model clients, Tool executors, hosted-Tool
+resolvers and selectors must honor `context.Context` cancellation/deadlines.
+Runtime intentionally does not detach an uncooperative call into an orphaned
+goroutine merely to return early, because that would leak work and could allow
+unknown side effects to continue after the Run moved on.
 
 Unit evidence is in `agent/execution_policy_test.go`; real-provider rate limits,
 provider-side idempotency and distributed fairness remain host/adapter concerns.
+
+Group Chat selector calls use the same bounded-external-call principles:
+per-call timeout, three durable attempts by default, exponential backoff with
+jitter, execution leases longer than the call timeout, panic containment, and a
+per-Runner concurrency semaphore. Selector timeout is retryable; retry
+exhaustion fails the Group Chat Run instead of scheduling wakeups forever.
 
 ## Existing complementary coverage
 

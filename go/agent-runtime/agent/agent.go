@@ -224,6 +224,7 @@ type StartRequest struct {
 	ModelOptions     json.RawMessage
 	ToolKeys         []string
 	RequiredToolKeys []string
+	DeadlineAt       *time.Time
 	Limits           Limits
 }
 
@@ -381,7 +382,7 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 }
 
 func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
-	if _, _, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model); err != nil {
+	if _, _, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model, request.DeadlineAt); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	limits, err := resolveRunLimits(runner.limits, request.Limits)
@@ -410,7 +411,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	}
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
-		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
+		RequestID: request.RequestID, Goal: request.Goal, DeadlineAt: request.DeadlineAt, State: encoded,
 		Events: []kernel.EventDraft{{
 			Type: "agent.started", Message: "Direct Agent loop started", Wakeup: true,
 			WakeupAt: agentWakeupAt(runner.clock.Now()),
@@ -512,7 +513,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return failed, true, failErr
 	}
 	if len(state.PendingCalls) > 0 {
-		definitions, _, catalogErr := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model)
+		definitions, _, catalogErr := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model, snapshot.Run.DeadlineAt)
 		if catalogErr != nil {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_invalid", catalogErr)
 			return failed, true, failErr
@@ -547,6 +548,12 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	snapshot, state, err = runner.executeModelInvocation(ctx, snapshot, state, invocation)
 	if err != nil {
+		if errors.Is(err, kernel.ErrDeadline) {
+			failed, failErr := runner.fail(
+				ctx, snapshot, state, "agent.deadline_exceeded", errors.Join(kernel.ErrDeadline, err),
+			)
+			return failed, true, failErr
+		}
 		if model.IsRetryableError(err) {
 			if int(invocation.ExecutionAttempt) >= runner.execution.Model.MaxAttempts {
 				failed, failErr := runner.fail(
@@ -948,6 +955,7 @@ func (runner *Runner) resolveSelectedTools(
 	ctx context.Context,
 	keys []string,
 	modelName string,
+	deadlineAt *time.Time,
 ) ([]tools.Definition, []model.HostedTool, error) {
 	local := make([]tools.Definition, 0, len(keys))
 	hosted := make([]model.HostedTool, 0, len(keys))
@@ -961,7 +969,7 @@ func (runner *Runner) resolveSelectedTools(
 			continue
 		}
 		seen[key] = struct{}{}
-		definition, hostedTool, err := runner.resolveSelectedTool(ctx, key, modelName)
+		definition, hostedTool, err := runner.resolveSelectedTool(ctx, key, modelName, deadlineAt)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -978,6 +986,7 @@ func (runner *Runner) resolveSelectedTool(
 	ctx context.Context,
 	key string,
 	modelName string,
+	deadlineAt *time.Time,
 ) (*tools.Definition, *model.HostedTool, error) {
 	if runner.catalog != nil {
 		if definition, ok := runner.catalog.Resolve(key); ok {
@@ -990,7 +999,7 @@ func (runner *Runner) resolveSelectedTool(
 	if runner.hostedTools == nil {
 		return nil, nil, fmt.Errorf("%w: %s", tools.ErrToolNotFound, key)
 	}
-	resolved, ok, err := runner.hostedTools.Resolve(ctx, key, strings.TrimSpace(modelName))
+	resolved, ok, err := runner.resolveHostedToolWithPolicy(ctx, key, strings.TrimSpace(modelName), deadlineAt)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1193,7 +1202,7 @@ func (runner *Runner) invokePendingTool(
 	invocation := plugin.ToolInvocation{
 		Run: snapshot.Run, Definition: tools.CloneDefinition(definition), Request: executionRequest,
 	}
-	result, attempt, err := runner.executeToolWithPolicy(ctx, call.ID, func(callCtx context.Context) (tools.ExecutionResult, error) {
+	result, attempt, err := runner.executeToolWithPolicy(ctx, call.ID, snapshot.Run.DeadlineAt, func(callCtx context.Context) (tools.ExecutionResult, error) {
 		return runner.toolChain.Invoke(callCtx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
 			return runner.executor.Execute(nextCtx, executionRequest)
 		})
@@ -1204,8 +1213,16 @@ func (runner *Runner) invokePendingTool(
 	if err != nil {
 		phase = observability.PhaseFailed
 		errorCode = "tool_error"
-		if errors.Is(err, ErrToolTimeout) {
+		switch {
+		case ctx.Err() != nil:
+			phase = observability.PhaseCancelled
+			errorCode = "cancelled"
+		case errors.Is(err, ErrToolTimeout):
 			errorCode = "timeout"
+		case errors.Is(err, ErrToolPanic):
+			errorCode = "panic"
+		case errors.Is(err, kernel.ErrDeadline):
+			errorCode = "deadline"
 		}
 	}
 	runner.recordTelemetry(ctx, observability.Event{
@@ -1223,6 +1240,10 @@ func (runner *Runner) handlePendingToolExecutionError(
 	state runState,
 	err error,
 ) (kernel.Snapshot, bool, error) {
+	if errors.Is(err, kernel.ErrDeadline) {
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.deadline_exceeded", errors.Join(kernel.ErrDeadline, err))
+		return failed, false, failErr
+	}
 	if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
 		corrected, correctionErr := runner.recordRecoverableToolError(
 			ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(err),

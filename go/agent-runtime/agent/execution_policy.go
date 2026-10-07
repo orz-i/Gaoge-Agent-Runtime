@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	"golang.org/x/sync/semaphore"
@@ -17,6 +18,8 @@ import (
 var (
 	ErrModelTimeout = errors.New("agent model invocation timeout")
 	ErrToolTimeout  = errors.New("agent tool invocation timeout")
+	ErrModelPanic   = errors.New("agent model invocation panic")
+	ErrToolPanic    = errors.New("agent tool invocation panic")
 )
 
 // CallPolicy bounds one class of external calls. MaxAttempts applies only to
@@ -46,7 +49,7 @@ var defaultExecutionPolicy = ExecutionPolicy{
 	},
 	Tool: CallPolicy{
 		Timeout:        30 * time.Second,
-		MaxAttempts:    1,
+		MaxAttempts:    2,
 		InitialBackoff: 250 * time.Millisecond,
 		MaxBackoff:     5 * time.Second,
 		MaxConcurrency: 32,
@@ -129,6 +132,58 @@ func callContext(parent context.Context, timeout time.Duration) (context.Context
 	return context.WithTimeout(parent, timeout)
 }
 
+func (runner *Runner) boundedCallTimeout(deadlineAt *time.Time, timeout time.Duration) (time.Duration, bool) {
+	if deadlineAt == nil {
+		return timeout, false
+	}
+	remaining := deadlineAt.UTC().Sub(runner.clock.Now().UTC())
+	if remaining <= 0 {
+		return 0, true
+	}
+	if timeout <= 0 || remaining < timeout {
+		return remaining, true
+	}
+	return timeout, false
+}
+
+func safeModelCall(call func() (model.Response, error)) (response model.Response, err error) {
+	defer func() {
+		if recover() != nil {
+			response = model.Response{}
+			err = ErrModelPanic
+		}
+	}()
+	return call()
+}
+
+func safeToolCall(call func() (tools.ExecutionResult, error)) (result tools.ExecutionResult, err error) {
+	defer func() {
+		if recover() != nil {
+			result = tools.ExecutionResult{}
+			err = ErrToolPanic
+		}
+	}()
+	return call()
+}
+
+func safeHostedToolResolve(
+	call func() (model.HostedTool, bool, error),
+) (resolved model.HostedTool, ok bool, err error) {
+	defer func() {
+		if recover() != nil {
+			resolved = model.HostedTool{}
+			ok = false
+			err = ErrToolPanic
+		}
+	}()
+	return call()
+}
+
+func retryableBoundaryError(err error) bool {
+	var retryable interface{ Retryable() bool }
+	return errors.As(err, &retryable) && retryable.Retryable()
+}
+
 // retryDelay uses exponential backoff with deterministic +/-20% jitter. Stable
 // jitter avoids a thundering herd while keeping recovery tests reproducible.
 func retryDelay(policy CallPolicy, attempt int, identity string) time.Duration {
@@ -185,6 +240,7 @@ func (runner *Runner) modelLeaseDuration() time.Duration {
 func (runner *Runner) generateModelWithPolicy(
 	ctx context.Context,
 	request model.Request,
+	deadlineAt *time.Time,
 ) (model.Response, error) {
 	release, err := runner.modelLimiter.acquire(ctx)
 	if err != nil {
@@ -192,8 +248,14 @@ func (runner *Runner) generateModelWithPolicy(
 	}
 	defer release()
 
-	callCtx, cancel := callContext(ctx, runner.execution.Model.Timeout)
-	response, callErr := runner.generateModel(callCtx, request)
+	timeout, runBound := runner.boundedCallTimeout(deadlineAt, runner.execution.Model.Timeout)
+	if runBound && timeout <= 0 {
+		return model.Response{}, kernel.ErrDeadline
+	}
+	callCtx, cancel := callContext(ctx, timeout)
+	response, callErr := safeModelCall(func() (model.Response, error) {
+		return runner.generateModel(callCtx, request)
+	})
 	callContextErr := callCtx.Err()
 	cancel()
 
@@ -204,14 +266,67 @@ func (runner *Runner) generateModelWithPolicy(
 		return model.Response{}, parentErr
 	}
 	if errors.Is(callContextErr, context.DeadlineExceeded) || errors.Is(callErr, context.DeadlineExceeded) {
+		if runBound {
+			return model.Response{}, errors.Join(kernel.ErrDeadline, context.DeadlineExceeded)
+		}
 		return model.Response{}, model.NewRetryableError(errors.Join(ErrModelTimeout, context.DeadlineExceeded))
 	}
 	return model.Response{}, callErr
 }
 
+func (runner *Runner) resolveHostedToolWithPolicy(
+	ctx context.Context,
+	key string,
+	modelName string,
+	deadlineAt *time.Time,
+) (model.HostedTool, bool, error) {
+	policy := runner.execution.Tool
+	identity := "hosted-tool:" + key + ":" + modelName
+	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
+		release, err := runner.toolLimiter.acquire(ctx)
+		if err != nil {
+			return model.HostedTool{}, false, err
+		}
+		timeout, runBound := runner.boundedCallTimeout(deadlineAt, policy.Timeout)
+		if runBound && timeout <= 0 {
+			release()
+			return model.HostedTool{}, false, kernel.ErrDeadline
+		}
+		callCtx, cancel := callContext(ctx, timeout)
+		resolved, ok, callErr := safeHostedToolResolve(func() (model.HostedTool, bool, error) {
+			return runner.hostedTools.Resolve(callCtx, key, modelName)
+		})
+		callContextErr := callCtx.Err()
+		cancel()
+		release()
+
+		if callErr == nil {
+			return resolved, ok, nil
+		}
+		if parentErr := ctx.Err(); parentErr != nil {
+			return model.HostedTool{}, false, parentErr
+		}
+		if errors.Is(callContextErr, context.DeadlineExceeded) || errors.Is(callErr, context.DeadlineExceeded) {
+			if runBound {
+				return model.HostedTool{}, false, errors.Join(kernel.ErrDeadline, context.DeadlineExceeded)
+			}
+			callErr = errors.Join(ErrToolTimeout, context.DeadlineExceeded)
+		}
+		if attempt >= policy.MaxAttempts ||
+			(!errors.Is(callErr, ErrToolTimeout) && !retryableBoundaryError(callErr)) {
+			return model.HostedTool{}, false, callErr
+		}
+		if err = waitRetry(ctx, retryDelay(policy, attempt, identity)); err != nil {
+			return model.HostedTool{}, false, err
+		}
+	}
+	return model.HostedTool{}, false, ErrToolTimeout
+}
+
 func (runner *Runner) executeToolWithPolicy(
 	ctx context.Context,
 	identity string,
+	deadlineAt *time.Time,
 	call func(context.Context) (tools.ExecutionResult, error),
 ) (tools.ExecutionResult, int, error) {
 	policy := runner.execution.Tool
@@ -220,8 +335,14 @@ func (runner *Runner) executeToolWithPolicy(
 		if err != nil {
 			return tools.ExecutionResult{}, attempt, err
 		}
-		callCtx, cancel := callContext(ctx, policy.Timeout)
-		result, callErr := call(callCtx)
+		timeout, runBound := runner.boundedCallTimeout(deadlineAt, policy.Timeout)
+		if runBound && timeout <= 0 {
+			return tools.ExecutionResult{}, attempt, kernel.ErrDeadline
+		}
+		callCtx, cancel := callContext(ctx, timeout)
+		result, callErr := safeToolCall(func() (tools.ExecutionResult, error) {
+			return call(callCtx)
+		})
 		callContextErr := callCtx.Err()
 		cancel()
 		release()
@@ -233,6 +354,9 @@ func (runner *Runner) executeToolWithPolicy(
 			return tools.ExecutionResult{}, attempt, parentErr
 		}
 		if errors.Is(callContextErr, context.DeadlineExceeded) || errors.Is(callErr, context.DeadlineExceeded) {
+			if runBound {
+				return tools.ExecutionResult{}, attempt, errors.Join(kernel.ErrDeadline, context.DeadlineExceeded)
+			}
 			return tools.ExecutionResult{}, attempt, errors.Join(ErrToolTimeout, context.DeadlineExceeded)
 		}
 		if !tools.IsRetryableExecutionError(callErr) || attempt >= policy.MaxAttempts {
