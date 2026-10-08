@@ -93,3 +93,44 @@ func TestRuntimeToolDiscoveryRejectsUnselectedInitialTool(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeToolDiscoverySortsUnorderedInitialGrants(t *testing.T) {
+	t.Parallel()
+	runtime, _ := newTestRuntimeAndApprovals(t)
+	executions := 0
+	registry, keys := discoveryTestRegistry(t, 32, &executions)
+	// The Host first-party controls are not guaranteed to be supplied in
+	// lexical order; SDK must normalize its durable loaded snapshot.
+	unordered := []string{keys[17], keys[2], keys[11], keys[1]}
+	expected := slices.Clone(unordered)
+	slices.Sort(expected)
+	modelClient := &initialToolsModel{t: t, keys: unordered}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: modelClient, Catalog: registry, Executor: registry,
+		ToolDiscovery: agent.LexicalToolDiscovery{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := startRequest("unordered_initial_run", "unordered_initial_request", "Answer simply", keys...)
+	request.InitialToolKeys = unordered
+	snapshot, err := runner.StartRun(t.Context(), request)
+	if err != nil || snapshot.Run.Status != kernel.RunStatusCompleted || modelClient.calls != 1 || executions != 0 {
+		t.Fatalf("valid unordered initial Tool grants rejected: status=%s code=%s err=%v calls=%d",
+			snapshot.Run.Status, snapshot.Run.ErrorCode, err, modelClient.calls)
+	}
+	var persisted struct {
+		Discovery struct {
+			InitialToolKeys []string `json:"initialToolKeys"`
+			LoadedKeys      []string `json:"loadedKeys"`
+		} `json:"discovery"`
+	}
+	if err = json.Unmarshal(snapshot.State, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(persisted.Discovery.InitialToolKeys, expected) ||
+		!slices.Equal(persisted.Discovery.LoadedKeys, expected) {
+		t.Fatalf("unordered grants not canonicalized: initial=%v loaded=%v expected=%v",
+			persisted.Discovery.InitialToolKeys, persisted.Discovery.LoadedKeys, expected)
+	}
+}
