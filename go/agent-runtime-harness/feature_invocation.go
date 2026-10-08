@@ -827,7 +827,8 @@ func (runner *Runner) startRetriedAgent(ctx context.Context, invocation Invocati
 		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
 		RequestID: requestID, Goal: input.Goal, Model: config.Model,
 		ModelOptions: append(json.RawMessage(nil), config.ModelOptions...), ToolKeys: append([]string(nil), config.ToolKeys...),
-		RequiredToolKeys: append([]string(nil), input.RequiredToolKeys...), Limits: config.Limits,
+		RequiredToolKeys: append([]string(nil), input.RequiredToolKeys...),
+		InitialToolKeys:  append([]string(nil), input.InitialToolKeys...), Limits: config.Limits,
 	})
 }
 
