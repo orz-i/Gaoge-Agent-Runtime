@@ -9,7 +9,7 @@
 - Audited upstream main: `c60c2a5b0e969172d71abc9a2c09932bf5e1ec13` (`fix(mcp): 恢复官方 SDK 协议协商 #33`), confirmed over GitHub HTTPS on 2026-10-08.
 - Branch: `feat/tool-discovery-p31-runtime`, rebased cleanly on this upstream; 8 original P3.1 commits preserved.
 - Canonical contract: [ADR 0003](adr/0003-agent-owned-tool-discovery.md); blocker and remediation record: [ADR 0004](adr/0004-tool-discovery-final-merge-audit-remediation.md).
-- Host remains on its own `feat/tool-discovery-p31-host` branch and **still pins `7c6804ff` (beta.12)**. No automatic Host merge or SDK pin bump.
+- The separate Gaoge **P3.1 Host feature branch** still pins `7c6804ff` (beta.12). Its `master` independently advanced to `45bab87` and pins SDK `c60c2a5`; the main Host worktree's checked-out SDK submodule remains at `7c6804ff`, so that unrelated worktree currently shows `M sdk`. This audit did **not** change or clean it. The Host feature branch must be reconciled with its updated master before a later Host merge. No automatic Host merge or SDK pin bump.
 
 ## Merge-blocker remediation
 
