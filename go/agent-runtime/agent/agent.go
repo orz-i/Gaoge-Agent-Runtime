@@ -400,6 +400,13 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 			return kernel.Snapshot{}, ErrToolDiscoveryInvalid
 		}
 	}
+	for _, native := range hosted {
+		if native.Key == ToolDiscoveryKey {
+			// The reserved SDK control must never be shadowed by a provider
+			// Hosted Tool, including an Eager Run with fewer than 16 locals.
+			return kernel.Snapshot{}, ErrToolDiscoveryInvalid
+		}
+	}
 	grants, err := normalizedHostedToolGrants(request.HostedToolGrants)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -420,7 +427,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	if !toolKeysContainAll(normalizedToolKeys(localKeys), normalizedToolKeys(request.InitialToolKeys)) {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	discovery, err := runner.freezeToolDiscovery(request, local, hosted)
+	discovery, err := runner.freezeToolDiscovery(request, local)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}

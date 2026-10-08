@@ -22,6 +22,10 @@ The Host-side contract requires an explicit Role model for its Hosted Tool grant
 
 **Must fix:** Seal must reject a Role Hosted grant without a pinned Role Model. Do not permit a child to acquire an implicit Model inherited from a parent, even if a Provider happens to support it. Keep parent/child/sibling isolation and exact DefinitionVersion validation.
 
+## Audit risk C: Reserved SDK search control identity
+
+The SDK first-party `agent.search_tools` Key is reserved. A local definition with that Key is rejected even in Eager mode, but the Hosted identity check was initially located after the 16-local-candidate threshold gate. A Host-supplied Hosted Tool with the reserved Key could therefore be projected in a small Eager Run, creating ambiguous SDK-control ownership. Enforce the reserved Key on both local and Hosted declarations during Agent Start, regardless of whether Discovery is composed or activated. Add a small-set negative fixture.
+
 ## Hard constraints
 
 - No compatibility bridge, no new end-user controls, no SDK pin update, no release/merge/push without explicit user authorization.

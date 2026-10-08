@@ -78,3 +78,40 @@ func TestRuntimeToolDiscoveryRejectsHostedToolAsInitiallyLoaded(t *testing.T) {
 		t.Fatalf("initial local tools accepted a hosted activation: run=%+v err=%v", snapshot.Run, err)
 	}
 }
+
+func TestReservedSDKDiscoveryKeyCannotBeHostedInSmallRuns(t *testing.T) {
+	t.Parallel()
+	for _, composed := range []bool{false, true} {
+		name := "without_sdk_search"
+		if composed {
+			name = "with_sdk_search"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runtime, _ := newTestRuntimeAndApprovals(t)
+			registry := mustRegistry(t, nil)
+			deps := agent.Dependencies{
+				Runtime: runtime, Model: simpleTextModel{t: t, wantTools: 0},
+				Catalog: registry, Executor: registry,
+				HostedTools: hostedCatalog{tool: model.HostedTool{
+					Key:               agent.ToolDiscoveryKey,
+					DefinitionVersion: "bad-provider-hosted-control-v1",
+					Target:            json.RawMessage(`{"type":"web_search"}`),
+				}},
+			}
+			if composed {
+				deps.ToolDiscovery = agent.LexicalToolDiscovery{}
+			}
+			runner, err := agent.NewRunner(deps)
+			if err != nil {
+				t.Fatal(err)
+			}
+			start := startRequest("reserved_sdk_hosted", "reserved_sdk_hosted_request", "Answer", agent.ToolDiscoveryKey)
+			snapshot, err := runner.StartRun(t.Context(), start)
+			if err == nil || snapshot.Run.ID != "" {
+				t.Fatalf("Hosted Tool shadowed SDK search control without 16 local candidates: run=%+v err=%v",
+					snapshot.Run, err)
+			}
+		})
+	}
+}
