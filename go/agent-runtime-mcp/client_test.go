@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 type lookupInput struct {
@@ -104,11 +104,7 @@ func (observer *testProtocolObserver) Observe(_ context.Context, event plugin.Ev
 
 func TestClientUses20260728StatelessDiscoveryAndToolCall(t *testing.T) {
 	t.Parallel()
-	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: testServerName, Version: "1.0.0"}, nil)
-	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: testLookupTool, Title: "Lookup", Description: "Find a value"},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, input lookupInput) (*mcpsdk.CallToolResult, lookupOutput, error) {
-			return nil, lookupOutput{Value: "value:" + input.ID}, nil
-		})
+	server := newTestLookupServer()
 	handler := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{
 		Stateless: true, JSONResponse: true, PropagateRequestCancellation: true,
 	})
@@ -138,27 +134,94 @@ func TestClientUses20260728StatelessDiscoveryAndToolCall(t *testing.T) {
 	})
 }
 
-func TestClientBlocksOfficialSDKLegacyInitializeFallbackBeforeNetwork(t *testing.T) {
+func TestClientNegotiatesLegacyStreamableHTTP(t *testing.T) {
 	t.Parallel()
-	var requests atomic.Int32
-	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		requests.Add(1)
-		http.Error(writer, "modern discovery unavailable", http.StatusNotFound)
-	}))
-	defer httpServer.Close()
+	for _, test := range []struct {
+		name      string
+		stateless bool
+	}{
+		{name: "stateless", stateless: true},
+		{name: "stateful", stateless: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			httpServer := newLegacyTestServer(t, test.stateless)
+			observer := &testProtocolObserver{name: "mcp-legacy-observer"}
+			client := newTestClient(t, httpServer.Client(), observer)
+			client.transport.headers = HeaderProviderFunc(func(context.Context) (http.Header, error) {
+				return http.Header{
+					"Authorization":        []string{"Bearer mcp-observer-secret"},
+					"Mcp-Session-Id":       []string{"host-stale-session"},
+					"Mcp-Protocol-Version": []string{"host-stale-version"},
+				}, nil
+			})
+			discovery, err := client.DiscoverTools(t.Context(), httpServer.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if discovery.ProtocolVersion != "2025-11-25" || len(discovery.Tools) != 1 {
+				t.Fatalf("legacy discovery = %#v", discovery)
+			}
+			registry, err := NewRegistry(client, discovery)
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := registry.Execute(t.Context(), tools.ExecutionRequest{
+				RunID: "run-legacy",
+				Call:  tools.Call{ID: "call-legacy", ToolKey: testLookupTool, Arguments: json.RawMessage(`{"id":"42"}`)},
+			})
+			if err != nil || !strings.Contains(string(result.Content), `"value":"value:42"`) {
+				t.Fatalf("legacy tool result = %s, error = %v", result.Content, err)
+			}
+			assertProtocolObserverSafe(t, observer, httpServer.URL, "mcp-observer-secret", []string{
+				eventDiscovery + ":started", eventDiscovery + ":completed",
+				eventToolCall + ":started", eventToolCall + ":completed",
+			})
+		})
+	}
+}
 
-	observer := &testProtocolObserver{name: "mcp-failure-observer"}
-	client := newTestClient(t, httpServer.Client(), observer)
-	_, err := client.DiscoverTools(t.Context(), httpServer.URL)
-	if !errors.Is(err, ErrLegacyProtocol) {
-		t.Fatalf("legacy fallback error = %v", err)
-	}
-	if requests.Load() != 1 {
-		t.Fatalf("network requests = %d, want only server/discover", requests.Load())
-	}
-	assertProtocolObserverSafe(t, observer, httpServer.URL, "mcp-observer-secret", []string{
-		eventDiscovery + ":started", eventDiscovery + ":failed",
+func newTestLookupServer() *mcpsdk.Server {
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: testServerName, Version: "1.0.0"}, nil)
+	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: testLookupTool, Title: "Lookup", Description: "Find a value"},
+		func(_ context.Context, _ *mcpsdk.CallToolRequest, input lookupInput) (*mcpsdk.CallToolResult, lookupOutput, error) {
+			return nil, lookupOutput{Value: "value:" + input.ID}, nil
+		})
+	return server
+}
+
+func newLegacyTestServer(t *testing.T, stateless bool) *httptest.Server {
+	t.Helper()
+	server := newTestLookupServer()
+	handler := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{
+		Stateless: stateless, JSONResponse: true, PropagateRequestCancellation: true,
 	})
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Header.Get("Authorization") != "Bearer mcp-observer-secret" ||
+			request.Header.Get("Mcp-Session-Id") == "host-stale-session" ||
+			request.Header.Get("MCP-Protocol-Version") == "host-stale-version" {
+			http.Error(writer, "invalid host headers", http.StatusBadRequest)
+			return
+		}
+		if request.Header.Get("MCP-Protocol-Version") == ProtocolVersion {
+			var envelope struct {
+				ID json.RawMessage `json:"id"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&envelope); err != nil {
+				http.Error(writer, "invalid discovery request", http.StatusBadRequest)
+				return
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(writer).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": envelope.ID,
+				"error": map[string]any{"code": -32601, "message": "Method server/discover not found"},
+			})
+			return
+		}
+		handler.ServeHTTP(writer, request)
+	}))
+	t.Cleanup(httpServer.Close)
+	return httpServer
 }
 
 func TestClientRejectsNonObjectArgumentsBeforeNetwork(t *testing.T) {
@@ -169,6 +232,32 @@ func TestClientRejectsNonObjectArgumentsBeforeNetwork(t *testing.T) {
 	})
 	if !errors.Is(err, ErrInvalidArguments) {
 		t.Fatalf("argument error = %v", err)
+	}
+}
+
+func TestClientPropagatesConnectionFailure(t *testing.T) {
+	t.Parallel()
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		http.Error(writer, "fixture unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(httpServer.Close)
+	observer := &testProtocolObserver{name: "mcp-failure-observer"}
+	client := newTestClient(t, httpServer.Client(), observer)
+	if _, err := client.DiscoverTools(t.Context(), httpServer.URL); err == nil {
+		t.Fatal("unavailable endpoint unexpectedly succeeded")
+	}
+	assertProtocolObserverSafe(t, observer, httpServer.URL, "mcp-observer-secret", []string{
+		eventDiscovery + ":started", eventDiscovery + ":failed",
+	})
+}
+
+func TestClientPreservesCanceledContext(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	client := newTestClient(t, &http.Client{})
+	if _, err := client.DiscoverTools(ctx, "https://mcp.example/rpc"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled discovery error = %v", err)
 	}
 }
 

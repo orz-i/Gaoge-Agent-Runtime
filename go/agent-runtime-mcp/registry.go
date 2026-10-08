@@ -31,7 +31,7 @@ type Registry struct {
 // NewRegistry freezes one discovered MCP Tool catalog for explicit host composition.
 func NewRegistry(client ToolCaller, discovery Discovery) (*Registry, error) {
 	endpoint := strings.TrimSpace(discovery.Catalog.Endpoint)
-	if client == nil || endpoint == "" || discovery.ProtocolVersion != ProtocolVersion || len(discovery.Tools) == 0 {
+	if client == nil || endpoint == "" || strings.TrimSpace(discovery.ProtocolVersion) == "" || len(discovery.Tools) == 0 {
 		return nil, ErrInvalidRegistry
 	}
 	registry := &Registry{
