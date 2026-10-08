@@ -143,6 +143,7 @@ See the [durability ADR](adr/0001-runtime-durability-governance-v1.md),
 [runtime-owned execution policy ADR](adr/0002-runtime-owned-execution-policy-v1.md),
 [Agent-owned Tool Discovery ADR](adr/0003-agent-owned-tool-discovery.md),
 [P3.1 final merge-audit remediation](adr/0004-tool-discovery-final-merge-audit-remediation.md),
+[P3.1 final merge-audit GO report](tool-discovery-p31-final-merge-audit.md),
 [integration contract](integration-contract.md),
 [reliability evidence map](reliability.md), and
 [observability guidance](observability.md) for the detailed contracts.

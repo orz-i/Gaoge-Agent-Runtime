@@ -1,9 +1,9 @@
 # P3.1 Tool Discovery — Final Merge Audit Remediation
 
-- Audit status: **NO-GO pending code and contract remediation**, then full re-audit.
+- Audit status: **RESOLVED — SDK source merge GO after full re-audit**. Initial audit was NO-GO; regression tests reproduced the blockers before remediation. SDK publication and Host Pin adoption remain separately gated.
 - Date: 2026-10-08
 - Original P3.1 baseline: `7c6804ff`; new upstream main: `c60c2a5` (`fix(mcp): 恢复官方 SDK 协议协商 #33`).
-- Working branch: `feat/tool-discovery-p31-runtime` (rebased on `c60c2a5` with 8 retained commits).
+- Working branch: `feat/tool-discovery-p31-runtime` (rebased on `c60c2a5` with all 8 original commits retained, followed by independent audit-remediation commits).
 - Source contract: [ADR-0003](./0003-agent-owned-tool-discovery.md).
 
 ## Audit risk A: Durable pending ModelInvocation after administrative revocation
