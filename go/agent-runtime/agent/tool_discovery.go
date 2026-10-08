@@ -256,6 +256,30 @@ func validateDiscoveryCatalog(d *discoveryState, definitions []tools.Definition)
 	return nil
 }
 
+// validateLoadedDiscoveryExecution closes the gap between a model response
+// (which may have queued an approved Tool call) and the actual Executor call.
+// An authorized candidate is not executable until it is loaded, and even a
+// loaded candidate must still match its frozen definition fingerprint.
+func validateLoadedDiscoveryExecution(d *discoveryState, key string, current tools.Definition) error {
+	if d == nil {
+		return nil
+	}
+	if !slices.Contains(d.LoadedKeys, key) || current.Key != key {
+		return ErrToolDiscoveryDenied
+	}
+	for _, candidate := range d.Candidates {
+		if candidate.Key != key {
+			continue
+		}
+		fingerprint, err := definitionFingerprint(current)
+		if err != nil || fingerprint != candidate.Fingerprint {
+			return ErrToolDiscoveryDenied
+		}
+		return nil
+	}
+	return ErrToolDiscoveryDenied
+}
+
 func filterLoadedDiscoveryTools(definitions []tools.Definition, d *discoveryState) []tools.Definition {
 	if d == nil {
 		return definitions
