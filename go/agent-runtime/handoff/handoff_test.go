@@ -193,3 +193,54 @@ func (children *fakeChildren) complete(runID string) {
 	snapshot.Result = &kernel.Result{ContentType: "text", Content: json.RawMessage(`"done"`)}
 	children.runs[runID] = snapshot
 }
+
+type captureInitialChildRunner struct {
+	*fakeChildren
+	lastRequest agent.StartRequest
+}
+
+func (child *captureInitialChildRunner) StartRun(
+	ctx context.Context, request agent.StartRequest,
+) (kernel.Snapshot, error) {
+	child.lastRequest = request
+	return child.fakeChildren.StartRun(ctx, request)
+}
+
+func TestHandoffForwardsOnlyAuthorizedChildInitialToolKeys(t *testing.T) {
+	t.Parallel()
+	children := &captureInitialChildRunner{fakeChildren: newFakeChildren()}
+	coordinator, err := handoff.New(children)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := kernel.Snapshot{Run: kernel.Run{
+		ID: "parent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},
+	}}
+	const contextReadKey = "harness.read_context_artifact"
+	delegation := handoff.Delegation{
+		ID: "handoff_context_read", MemberID: "researcher",
+		ChildRunID: "child_context_read", Goal: "Summarize evidence",
+		Status:          handoff.StatusQueued,
+		ToolKeys:        []string{contextReadKey, "mcp.search_docs"},
+		InitialToolKeys: []string{contextReadKey},
+	}
+	result, err := coordinator.StartOrLoad(t.Context(), parent, delegation)
+	if !errors.Is(err, handoff.ErrChildPending) || result.Status != handoff.StatusRunning {
+		t.Fatalf("child not started: result=%+v err=%v", result, err)
+	}
+	if len(children.lastRequest.InitialToolKeys) != 1 ||
+		children.lastRequest.InitialToolKeys[0] != contextReadKey ||
+		len(children.lastRequest.RequiredToolKeys) != 0 ||
+		len(children.lastRequest.ToolKeys) != 2 {
+		t.Fatalf("context read was not initially visible or changed grant limits: %+v", children.lastRequest)
+	}
+
+	// An ungranted initial key may not reach any Agent Start or Executor.
+	delegation.ID, delegation.ChildRunID = "illegal_context_grant", "child_illegal"
+	delegation.InitialToolKeys = []string{"mcp.not_authorized"}
+	_, err = coordinator.StartOrLoad(t.Context(), parent, delegation)
+	if !errors.Is(err, handoff.ErrInvalidDelegation) || children.starts != 1 {
+		t.Fatalf("child initial set expanded beyond authorized tools: starts=%d err=%v", children.starts, err)
+	}
+}
