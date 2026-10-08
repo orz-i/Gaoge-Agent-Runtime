@@ -197,4 +197,15 @@ func TestRoleHostedGrantSealedWithoutParentToolKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("unversioned role Hosted grant accepted")
 	}
+
+	_, err = harness.SealConfigSnapshot("turn-unpinned-role-model", harness.ConfigSnapshot{
+		Model: "root-model", ToolKeys: []string{harness.DelegationToolKey},
+		Roles: []harness.RoleSnapshot{{
+			ID: "researcher", Revision: 1, Name: "Researcher",
+			HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "v1"}},
+		}},
+	}, time.Now())
+	if err == nil {
+		t.Fatal("Hosted role grant without a pinned role model accepted")
+	}
 }

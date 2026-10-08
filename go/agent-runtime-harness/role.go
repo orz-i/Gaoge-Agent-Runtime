@@ -56,7 +56,10 @@ func normalizeRoleSnapshots(values []RoleSnapshot, parentTools []string) ([]Role
 		}
 		value.ToolKeys = normalizeStrings(value.ToolKeys)
 		value.HostedToolGrants, err = agent.NormalizeHostedToolGrantsForRole(value.HostedToolGrants)
-		if err != nil {
+		if err != nil || (len(value.HostedToolGrants) != 0 && value.Model == "") {
+			// Hosted child grants require an explicit role model. Inheriting the
+			// parent model here would turn an unpinned role declaration into a
+			// new provider tool authorization on a mutable model route.
 			return nil, ErrInvalidRequest
 		}
 		for _, grant := range value.HostedToolGrants {
