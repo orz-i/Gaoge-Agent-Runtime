@@ -225,6 +225,10 @@ type StartRequest struct {
 	ModelOptions     json.RawMessage
 	ToolKeys         []string
 	RequiredToolKeys []string
+	// InitialToolKeys are already authorized local tools shown on the first
+	// model request when discovery is active. Unlike RequiredToolKeys, they
+	// do NOT impose a mandatory invocation before completion.
+	InitialToolKeys  []string
 	HostedToolGrants []HostedToolGrant
 	DeadlineAt       *time.Time
 	Limits           Limits
@@ -405,6 +409,16 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	}
 	if err = verifyHostedGrantVersions(grants, hosted); err != nil {
 		return kernel.Snapshot{}, err
+	}
+	// Initial tools must be actual authorized local definitions, not opaque
+	// Hosted grants or names supplied by the model/search adapter. Enforce
+	// this for both Eager and Discovery sized runs.
+	localKeys := make([]string, 0, len(local))
+	for _, definition := range local {
+		localKeys = append(localKeys, definition.Key)
+	}
+	if !toolKeysContainAll(normalizedToolKeys(localKeys), normalizedToolKeys(request.InitialToolKeys)) {
+		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	discovery, err := runner.freezeToolDiscovery(request, local, hosted)
 	if err != nil {

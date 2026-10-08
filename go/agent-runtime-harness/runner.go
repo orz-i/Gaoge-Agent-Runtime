@@ -118,7 +118,8 @@ func (runner *Runner) resumeDirectAgentStart(
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turn.ID), Goal: request.Goal,
 		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
 		ToolKeys: append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-		Limits: config.Limits,
+		InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
+		Limits:          config.Limits,
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
@@ -570,6 +571,7 @@ type StartRequest struct {
 	RequestID        string
 	Goal             string
 	RequiredToolKeys []string
+	InitialToolKeys  []string
 	Config           ConfigSnapshot
 	Context          *ContextSeed
 }
@@ -629,7 +631,7 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	}
 	invocation, err := newDirectAgentInvocation(
 		turnID, firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), request.Goal,
-		request.Actor, request.Thread, request.RequiredToolKeys, now,
+		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys, now,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -671,7 +673,8 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
 		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
 		ToolKeys:         append([]string(nil), config.ToolKeys...),
-		RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...), Limits: config.Limits,
+		RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
+		InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		if errors.Is(startErr, kernel.ErrConflict) {

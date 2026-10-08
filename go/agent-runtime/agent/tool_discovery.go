@@ -21,7 +21,9 @@ const (
 	discoveryToolName      = "agent_search_tools"
 	discoveryMinCandidates = 16
 	discoveryMaxResults    = 5
-	discoveryMaxCandidates = 128
+	// At most 128 configured local/MCP tools plus SDK/Host first-party
+	// controls. Total candidate size remains explicitly bounded.
+	discoveryMaxCandidates = 256
 )
 
 var (
@@ -68,12 +70,13 @@ type discoveryReceipt struct {
 }
 
 type discoveryState struct {
-	RunID        string                   `json:"runID"`
-	Model        string                   `json:"model"`
-	SnapshotHash string                   `json:"snapshotHash"`
-	Candidates   []ToolDiscoveryCandidate `json:"candidates"`
-	LoadedKeys   []string                 `json:"loadedKeys,omitempty"`
-	Receipts     []discoveryReceipt       `json:"receipts,omitempty"`
+	RunID           string                   `json:"runID"`
+	Model           string                   `json:"model"`
+	SnapshotHash    string                   `json:"snapshotHash"`
+	Candidates      []ToolDiscoveryCandidate `json:"candidates"`
+	InitialToolKeys []string                 `json:"initialToolKeys,omitempty"`
+	LoadedKeys      []string                 `json:"loadedKeys,omitempty"`
+	Receipts        []discoveryReceipt       `json:"receipts,omitempty"`
 }
 
 var discoveryToolDefinition = tools.Definition{
@@ -139,17 +142,23 @@ func (runner *Runner) freezeToolDiscovery(request StartRequest, local []tools.De
 	if err != nil {
 		return nil, err
 	}
-	loaded := make([]string, 0, len(request.RequiredToolKeys))
+	initial := normalizedToolKeys(request.InitialToolKeys)
+	for _, key := range initial {
+		if _, exists := seen[key]; !exists {
+			return nil, ErrToolDiscoveryInvalid
+		}
+	}
+	loaded := append([]string(nil), initial...)
 	for _, key := range request.RequiredToolKeys {
 		if _, exists := seen[key]; exists {
 			loaded = append(loaded, key)
 		}
 	}
-	slices.Sort(loaded)
+	loaded = normalizedToolKeys(loaded)
 	return &discoveryState{
 		RunID: request.ID, Model: strings.TrimSpace(request.Model),
 		SnapshotHash: hash, Candidates: candidates,
-		LoadedKeys: slices.Compact(loaded),
+		InitialToolKeys: initial, LoadedKeys: loaded,
 	}, nil
 }
 
@@ -175,8 +184,14 @@ func validDiscoveryState(state runState) bool {
 	if err != nil || hash != d.SnapshotHash {
 		return false
 	}
-	if !validLoadedDiscoveryKeys(d.LoadedKeys, allowed) {
+	if !validLoadedDiscoveryKeys(d.InitialToolKeys, allowed) ||
+		!validLoadedDiscoveryKeys(d.LoadedKeys, allowed) {
 		return false
+	}
+	for _, initial := range d.InitialToolKeys {
+		if !slices.Contains(d.LoadedKeys, initial) {
+			return false
+		}
 	}
 	for _, required := range state.RequiredToolKeys {
 		if _, exists := allowed[required]; exists && !slices.Contains(d.LoadedKeys, required) {

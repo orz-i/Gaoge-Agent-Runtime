@@ -146,13 +146,14 @@ type agentInvocationInput struct {
 	Actor            kernel.ActorRef  `json:"actor"`
 	Thread           kernel.ThreadRef `json:"thread"`
 	RequiredToolKeys []string         `json:"requiredToolKeys,omitempty"`
+	InitialToolKeys  []string         `json:"initialToolKeys,omitempty"`
 }
 
 func newDirectAgentInvocation(
 	turnID, requestID, goal string,
 	actor kernel.ActorRef,
 	thread kernel.ThreadRef,
-	requiredToolKeys []string,
+	requiredToolKeys, initialToolKeys []string,
 	now time.Time,
 ) (Invocation, error) {
 	id, err := AgentInvocationID(turnID, requestID)
@@ -162,6 +163,7 @@ func newDirectAgentInvocation(
 	input, inputHash, err := marshalInvocationValue(agentInvocationInput{
 		Goal: strings.TrimSpace(goal), Actor: actor, Thread: thread,
 		RequiredToolKeys: normalizeStrings(requiredToolKeys),
+		InitialToolKeys:  normalizeStrings(initialToolKeys),
 	})
 	if err != nil {
 		return Invocation{}, err

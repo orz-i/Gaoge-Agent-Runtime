@@ -144,7 +144,7 @@ func contextRunMiddlewareFixture(t *testing.T) (*MemoryStore, Turn, runtimeconte
 	root, err := newDirectAgentInvocation(
 		turn.ID, "context-resume-request", "resume root",
 		kernel.ActorRef{TenantID: contextRunTestTenantID, ActorID: contextRunTestActorID},
-		kernel.ThreadRef{Kind: "conversation", ID: "thread"}, nil, now.Add(2*time.Second),
+		kernel.ThreadRef{Kind: "conversation", ID: "thread"}, nil, nil, now.Add(2*time.Second),
 	)
 	if err != nil {
 		t.Fatal(err)

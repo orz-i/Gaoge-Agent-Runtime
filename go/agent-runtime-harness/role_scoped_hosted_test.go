@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ func (roleScopedHostedCatalog) Resolve(_ context.Context, key, modelName string)
 type roleScopedHostedModel struct {
 	rootCalls  int
 	childCalls int
+	discovery  bool
 	t          *testing.T
 }
 
@@ -48,6 +50,13 @@ func (capture *roleScopedHostedModel) Generate(_ context.Context, request model.
 		return model.Response{Content: "found evidence", Usage: &model.Usage{InputTokens: 10, OutputTokens: 2}}, nil
 	case "root-model":
 		capture.rootCalls++
+		if capture.discovery {
+			if len(request.Tools) != 2 ||
+				request.Tools[0].Key != harness.DelegationToolKey ||
+				request.Tools[1].Key != agent.ToolDiscoveryKey {
+				capture.t.Fatalf("first-party delegation invisible with discovery: %+v", request.Tools)
+			}
+		}
 		if len(request.HostedTools) != 0 {
 			capture.t.Fatalf("role hosted Tool leaked into root: %+v", request.HostedTools)
 		}
@@ -65,6 +74,15 @@ func (capture *roleScopedHostedModel) Generate(_ context.Context, request model.
 }
 
 func TestRoleScopedHostedToolWithoutParentActivation(t *testing.T) {
+	runRoleScopedHostedTool(t, false)
+}
+
+func TestRoleScopedHostedToolWith128ScaleSearchInitial(t *testing.T) {
+	runRoleScopedHostedTool(t, true)
+}
+
+func runRoleScopedHostedTool(t *testing.T, discovery bool) {
+	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
@@ -75,13 +93,34 @@ func TestRoleScopedHostedToolWithoutParentActivation(t *testing.T) {
 		t.Fatal(err)
 	}
 	delegation := harness.NewDelegationToolHandler()
-	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegation)})
+	registrations := []tools.Registration{harness.DelegationToolRegistration(delegation)}
+	keys := []string{harness.DelegationToolKey}
+	policies := []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}
+	if discovery {
+		// Model-owned Search must not conceal delegation when a user has
+		// all 128 MCP tools configured in addition to this first-party tool.
+		for i := range 128 {
+			key := fmt.Sprintf("mcp.synthetic_%03d", i)
+			keys = append(keys, key)
+			registrations = append(registrations, tools.Registration{
+				Definition: tools.Definition{
+					Key: key, Name: fmt.Sprintf("synthetic_tool_%03d", i),
+					InputSchema: json.RawMessage(`{"type":"object"}`),
+				}, Handler: roleEvidenceHandler{},
+			})
+			policies = append(policies, harness.ToolPolicySnapshot{Key: key, DefinitionVersion: "fixture-v1"})
+		}
+	}
+	registry, err := tools.NewRegistry(registrations)
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture := &roleScopedHostedModel{t: t}
+	capture := &roleScopedHostedModel{t: t, discovery: discovery}
 	dependencies := delegationAgentDependencies(runtime, capture, registry, policy, 8, false)
 	dependencies.HostedTools = roleScopedHostedCatalog{}
+	if discovery {
+		dependencies.ToolDiscovery = agent.LexicalToolDiscovery{}
+	}
 	direct, err := agent.NewRunner(dependencies)
 	if err != nil {
 		t.Fatal(err)
@@ -101,16 +140,21 @@ func TestRoleScopedHostedToolWithoutParentActivation(t *testing.T) {
 	if err = delegation.Bind(runner); err != nil {
 		t.Fatal(err)
 	}
+	initial := []string(nil)
+	if discovery {
+		initial = []string{harness.DelegationToolKey}
+	}
 	started, err := runner.Start(t.Context(), harness.StartRequest{
-		HostThread: harness.HostRef{Kind: "conversation", ID: "thread-scoped-hosted"},
-		HostTurn:   harness.HostRef{Kind: "conversation", ID: "turn-scoped-hosted"},
-		Actor:      kernel.ActorRef{TenantID: "test", ActorID: "actor"},
-		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "thread-scoped-hosted"},
-		Goal:       "delegate research then summarize",
+		InitialToolKeys: initial,
+		HostThread:      harness.HostRef{Kind: "conversation", ID: "thread-scoped-hosted"},
+		HostTurn:        harness.HostRef{Kind: "conversation", ID: "turn-scoped-hosted"},
+		Actor:           kernel.ActorRef{TenantID: "test", ActorID: "actor"},
+		Thread:          kernel.ThreadRef{Kind: "conversation", ID: "thread-scoped-hosted"},
+		Goal:            "delegate research then summarize",
 		Config: harness.ConfigSnapshot{
 			Model:        "root-model",
-			ToolKeys:     []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+			ToolKeys:     keys,
+			ToolPolicies: policies,
 			Roles: []harness.RoleSnapshot{{
 				ID: "researcher", Revision: 1, Name: "Researcher",
 				Model: "specialist-model",
