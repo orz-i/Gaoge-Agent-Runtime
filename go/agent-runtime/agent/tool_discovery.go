@@ -137,6 +137,9 @@ func (runner *Runner) freezeToolDiscovery(request StartRequest, local []tools.De
 		return nil, err
 	}
 	initial := normalizedToolKeys(request.InitialToolKeys)
+	// Durable discovery state requires canonical order; ordinary ToolKeys
+	// deliberately preserve user selection order outside this snapshot.
+	slices.Sort(initial)
 	for _, key := range initial {
 		if _, exists := seen[key]; !exists {
 			return nil, ErrToolDiscoveryInvalid
@@ -149,6 +152,7 @@ func (runner *Runner) freezeToolDiscovery(request StartRequest, local []tools.De
 		}
 	}
 	loaded = normalizedToolKeys(loaded)
+	slices.Sort(loaded)
 	return &discoveryState{
 		RunID: request.ID, Model: strings.TrimSpace(request.Model),
 		SnapshotHash: hash, Candidates: candidates,
@@ -278,7 +282,9 @@ func filterLoadedDiscoveryTools(definitions []tools.Definition, d *discoveryStat
 	if d == nil {
 		return definitions
 	}
-	loaded := make([]tools.Definition, 0, len(d.LoadedKeys)+1)
+	// The resolved local declaration count bounds this buffer. Avoid adding
+	// data-derived lengths when computing allocation capacities.
+	loaded := make([]tools.Definition, 0, len(definitions))
 	for _, definition := range definitions {
 		if slices.Contains(d.LoadedKeys, definition.Key) {
 			loaded = append(loaded, definition)
@@ -371,7 +377,9 @@ func (runner *Runner) searchPendingTool(
 	}
 	// Persist the discovered loaded set, sanitized receipt and ordinary Tool
 	// result in one Kernel CAS; retry can never widen the frozen candidates.
-	seen := make(map[string]struct{}, len(state.Discovery.LoadedKeys)+len(output.ToolKeys))
+	// Candidate cardinality is the frozen upper bound (<=256); never sum
+	// persisted and model-returned lengths to size an allocation.
+	seen := make(map[string]struct{}, len(state.Discovery.Candidates))
 	for _, key := range state.Discovery.LoadedKeys {
 		seen[key] = struct{}{}
 	}

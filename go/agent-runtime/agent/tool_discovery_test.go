@@ -422,3 +422,85 @@ func TestRuntimeToolSearchShrinksInitialGatewayToolDeclarationProjection(t *test
 	}
 	t.Logf("synthetic Gateway Tool declaration bytes: eager=%d initial-search=%d (not Provider tokens)", base.bytes, searchModel.initialDefinitionBytes)
 }
+
+type maximumDiscoveryUnionModel struct {
+	t          *testing.T
+	total      int
+	initial    int
+	modelCalls int
+}
+
+func (stub *maximumDiscoveryUnionModel) Generate(_ context.Context, input model.Request) (model.Response, error) {
+	stub.modelCalls++
+	switch stub.modelCalls {
+	case 1:
+		if len(input.Tools) != stub.initial+1 {
+			stub.t.Fatalf("initial Tool Search projection size=%d, expected %d", len(input.Tools), stub.initial+1)
+		}
+		return model.Response{ToolCalls: []tools.Call{{
+			ID: "max-candidate-search", ToolKey: agent.ToolDiscoveryKey,
+			Arguments: json.RawMessage(`{"query":"look up documents"}`),
+		}}}, nil
+	case 2:
+		if len(input.Tools) != stub.total+1 {
+			stub.t.Fatalf("Tool search failed to merge five authorized results: size=%d want=%d",
+				len(input.Tools), stub.total+1)
+		}
+		return model.Response{Content: "all authorized tools are now loaded"}, nil
+	default:
+		stub.t.Fatalf("unexpected invocation after bounded search: %d", stub.modelCalls)
+		return model.Response{}, nil
+	}
+}
+
+// CodeQL's two high-severity findings concerned overflow-prone allocation
+// capacities derived from LoadedKeys+1 and LoadedKeys+model results. Exercise
+// both allocations at the exact 256-authorized-tool ceiling, with the maximum
+// five new search results, without increasing the candidate authorization.
+func TestRuntimeToolSearchMaximumCandidateUnion(t *testing.T) {
+	t.Parallel()
+	const totalCandidates = 256
+	const newResults = 5
+	runtime, _ := newTestRuntimeAndApprovals(t)
+	executions := 0
+	registry, keys := discoveryTestRegistry(t, totalCandidates, &executions)
+	initial := append([]string(nil), keys[:totalCandidates-newResults]...)
+	remaining := append([]string(nil), keys[totalCandidates-newResults:]...)
+	search := &testToolDiscovery{returned: remaining}
+	capture := &maximumDiscoveryUnionModel{
+		t: t, total: totalCandidates, initial: len(initial),
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: capture, Catalog: registry, Executor: registry,
+		ToolDiscovery: search,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := startRequest("max_union_run", "max_union_request", "Find documents", keys...)
+	request.InitialToolKeys = initial
+	snapshot, err := runner.StartRun(t.Context(), request)
+	if err != nil || snapshot.Run.Status != kernel.RunStatusCompleted ||
+		search.calls != 1 || search.candidateCount != totalCandidates ||
+		capture.modelCalls != 2 || executions != 0 {
+		t.Fatalf("max Tool Search union failed: status=%s code=%s stateBytes=%d err=%v searches=%d candidates=%d calls=%d exec=%d",
+			snapshot.Run.Status, snapshot.Run.ErrorCode, len(snapshot.State), err, search.calls, search.candidateCount, capture.modelCalls, executions)
+	}
+	var persisted struct {
+		Discovery struct {
+			LoadedKeys []string `json:"loadedKeys"`
+			Receipts   []struct {
+				CallID string `json:"callID"`
+			} `json:"receipts"`
+		} `json:"discovery"`
+	}
+	if err := json.Unmarshal(snapshot.State, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Discovery.LoadedKeys) != totalCandidates ||
+		len(persisted.Discovery.Receipts) != 1 ||
+		persisted.Discovery.Receipts[0].CallID != "max-candidate-search" {
+		t.Fatalf("max candidate result was not persisted: loaded=%d receipts=%v",
+			len(persisted.Discovery.LoadedKeys), persisted.Discovery.Receipts)
+	}
+}
