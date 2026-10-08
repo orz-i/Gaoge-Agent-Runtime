@@ -36,6 +36,10 @@ The protected-branch PR reports two **high-severity** CodeQL findings in `go/age
 
 **Remediation**: Avoid dynamic length addition in allocation capacities entirely. Size the local definition buffer from the already-resolved bounded definition collection, and size the discovered key map from the sealed authorized candidate collection (`<=256`), then use ordinary append for the SDK control Tool. Add a deterministic max-candidate-count test that loads near the maximum and appends exactly five discovered tools. The PR must be rechecked until CodeQL reports zero new high-severity findings; do not dismiss the alerts or bypass branch protection.
 
+## Audit risk F: Unsorted initial/loaded Tool keys fail durable Run-state validation
+
+The 256-candidate regression exposed an independent real bug: `normalizedToolKeys` deduplicates but intentionally preserves insertion order; `freezeToolDiscovery` used this output unchanged for `InitialToolKeys` and `LoadedKeys`, yet `validDiscoveryState` requires both lists to be strictly sorted. An otherwise valid Role/Environment first-party order can therefore yield `agent.state_invalid` at the initial Run load when Tool Search is active. Sort only the frozen Discovery `InitialToolKeys` and `LoadedKeys` at the creation boundary (do not globally change ordinary ToolKey order), and test deliberately unsorted inputs and the maximum 256-candidate union. Required Tool semantics and authorization must remain unchanged.
+
 ## Hard constraints
 
 - No compatibility bridge, no new end-user controls, no SDK pin update, no release/merge/push without explicit user authorization.
