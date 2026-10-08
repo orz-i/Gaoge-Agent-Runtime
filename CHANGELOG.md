@@ -3,6 +3,10 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## Unreleased
+
+- Restore official Go SDK protocol negotiation for MCP Streamable HTTP endpoints, including legacy initialization and connection-scoped sessions. Discovery and Tool Registry preserve the negotiated protocol version; host endpoint validation, authentication, timeouts and cancellation remain in effect.
+
 ## 0.1.0-beta.12
 
 - Add bounded model/Tool/selector execution with deployment-owned timeout, retry/backoff, concurrency, deadline handling, and panic containment.

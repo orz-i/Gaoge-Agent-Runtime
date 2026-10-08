@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -17,6 +16,7 @@ import (
 )
 
 const (
+	// ProtocolVersion is the preferred revision; Discovery reports the negotiated revision.
 	ProtocolVersion          = "2026-07-28"
 	maxToolListPages         = 100
 	maxDiscoveredTools       = 2048
@@ -31,7 +31,8 @@ const (
 )
 
 var (
-	ErrInvalidClient       = errors.New("invalid MCP client")
+	ErrInvalidClient = errors.New("invalid MCP client")
+	// Deprecated: the official SDK now negotiates legacy protocols when needed.
 	ErrLegacyProtocol      = errors.New("legacy MCP protocol is forbidden")
 	ErrUnsupportedProtocol = errors.New("unsupported MCP protocol version")
 	ErrToolsUnavailable    = errors.New("MCP tools capability is unavailable")
@@ -112,7 +113,7 @@ type CallRequest struct {
 	Arguments json.RawMessage
 }
 
-// NewClient creates one MCP 2026-07-28-only adapter.
+// NewClient creates an MCP adapter using the official SDK's protocol negotiation.
 func NewClient(dependencies ClientDependencies) (*Client, error) {
 	name := strings.TrimSpace(dependencies.ImplementationName)
 	version := strings.TrimSpace(dependencies.ImplementationVersion)
@@ -167,7 +168,7 @@ func projectToolSchema(schema any) (json.RawMessage, error) {
 }
 
 // DiscoverTools returns the complete deterministic Tool catalog exposed by one
-// modern stateless MCP endpoint.
+// Streamable HTTP MCP endpoint.
 func (client *Client) DiscoverTools(ctx context.Context, rawEndpoint string) (Discovery, error) {
 	client.observe(ctx, eventDiscovery, "started", false)
 	discovery, err := client.discoverTools(ctx, rawEndpoint)
@@ -216,7 +217,7 @@ func newDiscovery(initialize *mcpsdk.InitializeResult, endpoint string) (Discove
 		return Discovery{}, err
 	}
 	discovery := Discovery{
-		ProtocolVersion: ProtocolVersion, CapabilitiesJSON: append(json.RawMessage(nil), capabilitiesJSON...),
+		ProtocolVersion: strings.TrimSpace(initialize.ProtocolVersion), CapabilitiesJSON: append(json.RawMessage(nil), capabilitiesJSON...),
 		ToolsListChanged: initialize.Capabilities.Tools.ListChanged, Catalog: CatalogSnapshot{Endpoint: endpoint},
 	}
 	extensions, err := projectExtensions(initialize.Capabilities.Extensions)
@@ -372,6 +373,9 @@ func (client *Client) connect(ctx context.Context, rawEndpoint string) (*mcpsdk.
 	if client == nil || client.transport == nil {
 		return nil, "", ErrInvalidClient
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	endpoint, headers, err := client.transport.prepare(ctx, rawEndpoint)
 	if err != nil {
 		return nil, "", err
@@ -384,7 +388,7 @@ func (client *Client) connect(ctx context.Context, rawEndpoint string) (*mcpsdk.
 	if base == nil {
 		base = http.DefaultTransport
 	}
-	httpClient.Transport = &modernOnlyRoundTripper{next: base, headers: headers}
+	httpClient.Transport = &headerRoundTripper{next: base, headers: headers}
 	transport := &mcpsdk.StreamableClientTransport{
 		Endpoint:             endpoint,
 		HTTPClient:           &httpClient,
@@ -400,81 +404,31 @@ func (client *Client) connect(ctx context.Context, rawEndpoint string) (*mcpsdk.
 		return nil, "", err
 	}
 	initialize := session.InitializeResult()
-	if initialize == nil || strings.TrimSpace(initialize.ProtocolVersion) != ProtocolVersion {
+	if initialize == nil || strings.TrimSpace(initialize.ProtocolVersion) == "" {
 		_ = session.Close()
 		return nil, "", ErrUnsupportedProtocol
 	}
 	return session, endpoint, nil
 }
 
-type modernOnlyRoundTripper struct {
+type headerRoundTripper struct {
 	next    http.RoundTripper
 	headers http.Header
 }
 
-func (roundTripper *modernOnlyRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
-	if err := validateModernRequest(request, roundTripper); err != nil {
-		return nil, err
-	}
-	clone, err := cloneRequest(request, roundTripper.headers)
-	if err != nil {
-		return nil, err
-	}
-	if legacyPayload(clone) {
-		return nil, ErrLegacyProtocol
-	}
-	return roundTripper.next.RoundTrip(clone)
-}
-
-func validateModernRequest(request *http.Request, roundTripper *modernOnlyRoundTripper) error {
+func (roundTripper *headerRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request == nil || roundTripper == nil || roundTripper.next == nil {
-		return ErrInvalidTransport
+		return nil, ErrInvalidTransport
 	}
-	if strings.TrimSpace(request.Header.Get("Mcp-Session-Id")) != "" {
-		return ErrLegacyProtocol
-	}
-	return nil
-}
-
-func cloneRequest(request *http.Request, headers http.Header) (*http.Request, error) {
 	clone := request.Clone(request.Context())
 	clone.Header = request.Header.Clone()
-	for key, values := range headers {
+	for key, values := range roundTripper.headers {
 		clone.Header.Del(key)
 		for _, value := range values {
 			clone.Header.Add(key, value)
 		}
 	}
-	if clone.Body == nil {
-		return clone, nil
-	}
-	payload, err := io.ReadAll(clone.Body)
-	if err != nil {
-		return nil, err
-	}
-	_ = clone.Body.Close()
-	clone.Body = io.NopCloser(bytes.NewReader(payload))
-	return clone, nil
-}
-
-func legacyPayload(request *http.Request) bool {
-	if request == nil || request.Body == nil {
-		return false
-	}
-	payload, err := io.ReadAll(request.Body)
-	if err != nil {
-		return false
-	}
-	_ = request.Body.Close()
-	request.Body = io.NopCloser(bytes.NewReader(payload))
-	var envelope struct {
-		Method string `json:"method"`
-	}
-	if json.Unmarshal(payload, &envelope) != nil {
-		return false
-	}
-	method := strings.TrimSpace(envelope.Method)
-	return method == "initialize" || method == "notifications/initialized"
+	return roundTripper.next.RoundTrip(clone)
 }
 
 func projectTool(item *mcpsdk.Tool) (DiscoveredTool, error) {

@@ -66,35 +66,39 @@ func (executor mcpScenarioExecutor) Execute(
 	}
 	switch input.Operation {
 	case "discover_call_tool":
-		return executor.discoverCallTool(ctx)
+		return executor.discoverCallTool(ctx, false)
 	case "invalid_arguments_fenced":
 		return executor.invalidArgumentsFenced(ctx)
-	case "legacy_fallback_blocked":
-		return executor.legacyFallbackBlocked(ctx)
+	case "legacy_negotiation":
+		return executor.discoverCallTool(ctx, true)
 	default:
 		return evaluation.ScenarioObservation{}, errors.New("unsupported MCP evaluation scenario")
 	}
 }
 
 func (executor mcpScenarioExecutor) discoverCallTool(
-	ctx context.Context,
+	ctx context.Context, legacy bool,
 ) (evaluation.ScenarioObservation, error) {
-	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: testServerName, Version: "1.0.0"}, nil)
-	mcpsdk.AddTool(server, &mcpsdk.Tool{Name: testLookupTool, Title: "Lookup", Description: "Find a value"},
-		func(_ context.Context, _ *mcpsdk.CallToolRequest, input lookupInput) (*mcpsdk.CallToolResult, lookupOutput, error) {
-			return nil, lookupOutput{Value: "value:" + input.ID}, nil
+	var httpServer *httptest.Server
+	if legacy {
+		httpServer = newLegacyTestServer(executor.t, true)
+	} else {
+		server := newTestLookupServer()
+		handler := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{
+			Stateless: true, JSONResponse: true, PropagateRequestCancellation: true,
 		})
-	handler := mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, &mcpsdk.StreamableHTTPOptions{
-		Stateless: true, JSONResponse: true, PropagateRequestCancellation: true,
-	})
-	httpServer := httptest.NewServer(handler)
-	executor.t.Cleanup(httpServer.Close)
+		httpServer = httptest.NewServer(handler)
+		executor.t.Cleanup(httpServer.Close)
+	}
 
 	observer := &testProtocolObserver{name: "mcp-eval-observer"}
 	client := newTestClient(executor.t, httpServer.Client(), observer)
 	discovery, err := client.DiscoverTools(ctx, httpServer.URL)
 	if err != nil {
 		return evaluation.ScenarioObservation{}, err
+	}
+	if legacy && discovery.ProtocolVersion != "2025-11-25" {
+		return evaluation.ScenarioObservation{}, errors.New("MCP legacy version was not negotiated")
 	}
 	result, err := client.CallTool(ctx, httpServer.URL, CallRequest{
 		Name: testLookupTool, Arguments: json.RawMessage(`{"id":"42"}`),
@@ -148,29 +152,6 @@ func (executor mcpScenarioExecutor) invalidArgumentsFenced(ctx context.Context) 
 			{Key: "recoverable_schema_error", Count: 1},
 			{Key: "remote_call", Count: caller.calls},
 		},
-	}, nil
-}
-
-func (executor mcpScenarioExecutor) legacyFallbackBlocked(ctx context.Context) (evaluation.ScenarioObservation, error) {
-	requests := 0
-	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
-		requests++
-		http.Error(writer, "modern discovery unavailable", http.StatusNotFound)
-	}))
-	executor.t.Cleanup(httpServer.Close)
-	observer := &testProtocolObserver{name: "mcp-legacy-eval-observer"}
-	client := newTestClient(executor.t, httpServer.Client(), observer)
-	_, err := client.DiscoverTools(ctx, httpServer.URL)
-	if !errors.Is(err, ErrLegacyProtocol) || requests != 1 {
-		return evaluation.ScenarioObservation{}, errors.New("MCP legacy fallback was not blocked at one network request")
-	}
-	events := make([]string, 0, len(observer.events))
-	for _, event := range observer.events {
-		events = append(events, event.Type+":"+event.Status)
-	}
-	return evaluation.ScenarioObservation{
-		Status: kernel.RunStatusCompleted, Revision: 1, EventTypes: events,
-		Effects: []evaluation.EffectCount{{Key: "network_request", Count: requests}},
 	}, nil
 }
 

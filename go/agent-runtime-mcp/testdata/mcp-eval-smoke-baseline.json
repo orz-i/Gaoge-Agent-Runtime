@@ -1,6 +1,6 @@
 {
   "datasetID": "mcp-deterministic-smoke",
-  "datasetHash": "ebc98201af612a0f7fe67d52d9cef6eb100a3526a7ba568c7539bc033e0fdf50",
+  "datasetHash": "d0d04c0a5985640dd913d3e90ec71848c7ad34923e1ac3bdd81191f93c2e1a11",
   "minimumOverallScore": 1,
   "minimumPassedCases": 3,
   "maximumFailedCases": 0,

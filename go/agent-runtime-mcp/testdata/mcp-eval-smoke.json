@@ -1,6 +1,6 @@
 {
   "id": "mcp-deterministic-smoke",
-  "revision": 1,
+  "revision": 2,
   "name": "MCP deterministic smoke",
   "passThreshold": 1,
   "scenarios": [
@@ -38,18 +38,21 @@
       }
     },
     {
-      "id": "legacy-fallback-blocked",
-      "name": "Legacy MCP initialize fallback is blocked after one request",
-      "input": {"operation": "legacy_fallback_blocked"},
+      "id": "legacy-negotiation",
+      "name": "Negotiate legacy MCP and execute one discovered tool",
+      "input": {"operation": "legacy_negotiation"},
       "expected": {
         "status": "completed",
         "revision": 1,
         "eventTypes": [
           "protocol.mcp.discovery:started",
-          "protocol.mcp.discovery:failed"
+          "protocol.mcp.discovery:completed",
+          "protocol.mcp.tool_call:started",
+          "protocol.mcp.tool_call:completed"
         ],
         "effects": [
-          {"key": "network_request", "count": 1}
+          {"key": "discovered_tool", "count": 1},
+          {"key": "tool_call", "count": 1}
         ]
       }
     }
