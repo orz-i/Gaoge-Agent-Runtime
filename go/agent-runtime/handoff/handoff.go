@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -74,6 +75,7 @@ type Delegation struct {
 	Model            string                  `json:"model,omitempty"`
 	ModelOptions     json.RawMessage         `json:"modelOptions,omitempty"`
 	ToolKeys         []string                `json:"toolKeys,omitempty"`
+	InitialToolKeys  []string                `json:"initialToolKeys,omitempty"`
 	HostedToolGrants []agent.HostedToolGrant `json:"hostedToolGrants,omitempty"`
 	Status           Status                  `json:"status"`
 	Result           json.RawMessage         `json:"result,omitempty"`
@@ -200,6 +202,7 @@ func (coordinator *Coordinator) StartOrLoad(
 		Model:            delegation.Model,
 		ModelOptions:     append(json.RawMessage(nil), delegation.ModelOptions...),
 		ToolKeys:         append([]string(nil), delegation.ToolKeys...),
+		InitialToolKeys:  append([]string(nil), delegation.InitialToolKeys...),
 		HostedToolGrants: append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...),
 	})
 	if child.Run.ID == "" {
@@ -365,10 +368,18 @@ func joinStateError(join Join) error {
 }
 
 func validDelegation(delegation Delegation) bool {
-	return strings.TrimSpace(delegation.ID) != "" && strings.TrimSpace(delegation.MemberID) != "" &&
-		strings.TrimSpace(delegation.ChildRunID) != "" && strings.TrimSpace(delegation.Goal) != "" &&
-		(delegation.Status == StatusQueued || delegation.Status == StatusRunning || delegation.Status == StatusCompleted ||
-			delegation.Status == StatusFailed || delegation.Status == StatusCancelled)
+	validStatus := delegation.Status == StatusQueued || delegation.Status == StatusRunning ||
+		delegation.Status == StatusCompleted || delegation.Status == StatusFailed || delegation.Status == StatusCancelled
+	if strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
+		strings.TrimSpace(delegation.ChildRunID) == "" || strings.TrimSpace(delegation.Goal) == "" || !validStatus {
+		return false
+	}
+	for _, key := range delegation.InitialToolKeys {
+		if key == "" || !slices.Contains(delegation.ToolKeys, key) {
+			return false
+		}
+	}
+	return true
 }
 
 func validJoin(join Join, delegations []Delegation) bool {
@@ -389,6 +400,7 @@ func validJoin(join Join, delegations []Delegation) bool {
 func cloneDelegation(delegation Delegation) Delegation {
 	delegation.ModelOptions = append(json.RawMessage(nil), delegation.ModelOptions...)
 	delegation.ToolKeys = append([]string(nil), delegation.ToolKeys...)
+	delegation.InitialToolKeys = append([]string(nil), delegation.InitialToolKeys...)
 	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...)
 	delegation.Result = append(json.RawMessage(nil), delegation.Result...)
 	return delegation

@@ -39,3 +39,23 @@ func TestDirectAgentInvocationFreezesInitialToolsForRetry(t *testing.T) {
 		t.Fatalf("Invocation integrity fields missing: %+v", invocation)
 	}
 }
+
+func TestContextDelegationInitialToolsRequireFrozenContextGrant(t *testing.T) {
+	t.Parallel()
+	const contextKey = ContextArtifactToolKey
+	allowed := ConfigSnapshot{ToolKeys: []string{
+		contextKey, "mcp.unrelated_docs", DelegationToolKey,
+	}}
+	turn := Turn{ContextCheckpointID: "checkpoint-1"}
+	if actual := contextDelegationToolKeys(turn, allowed); !slices.Equal(actual, []string{contextKey}) {
+		t.Fatalf("context read not isolated to the inherited first-party key: %+v", actual)
+	}
+	if actual := contextDelegationToolKeys(Turn{}, allowed); len(actual) != 0 {
+		t.Fatalf("child inherited contextual Tool without context checkpoint: %+v", actual)
+	}
+	if actual := contextDelegationToolKeys(turn, ConfigSnapshot{
+		ToolKeys: []string{"mcp.unrelated_docs", DelegationToolKey},
+	}); len(actual) != 0 {
+		t.Fatalf("child gained context read without parent authorization: %+v", actual)
+	}
+}

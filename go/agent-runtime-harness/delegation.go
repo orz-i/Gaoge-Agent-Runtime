@@ -129,11 +129,13 @@ func (runner *Runner) prepareDelegation(
 		delegationID = delegationToolID(invocation, request.callID)
 	}
 	childRunID := stableID("hchild", invocation.ExecutionRefID, delegationID)
+	contextKeys := contextDelegationToolKeys(turn, config)
 	delegation := handoff.Delegation{
 		ID: delegationID, MemberID: request.MemberID, ChildRunID: childRunID,
 		Goal: request.Goal, Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-		ToolKeys: contextDelegationToolKeys(turn, config),
-		Status:   handoff.StatusQueued,
+		ToolKeys:        append([]string(nil), contextKeys...),
+		InitialToolKeys: append([]string(nil), contextKeys...),
+		Status:          handoff.StatusQueued,
 	}
 	if frozen, found, loadErr := runner.frozenDelegation(ctx, turn.ID, delegationID); found || loadErr != nil {
 		return frozen, parent, loadErr
@@ -169,6 +171,10 @@ func (runner *Runner) prepareDelegation(
 		delegation.ToolKeys = append(delegation.ToolKeys, grant.Key)
 	}
 	delegation.ToolKeys = normalizeStrings(delegation.ToolKeys)
+	// Only the previously scoped context-artifact read capability is eager
+	// in a large child Tool Search catalog. Never turn other Role/MCP keys
+	// or Hosted grants into an implicit loaded Tool.
+	delegation.InitialToolKeys = intersectToolKeys(delegation.InitialToolKeys, delegation.ToolKeys)
 	delegation.Limits = roleAgentLimits(config.Limits, role.Limits)
 	return delegation, parent, nil
 }
