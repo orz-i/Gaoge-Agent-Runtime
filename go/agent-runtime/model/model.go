@@ -47,8 +47,9 @@ type Request struct {
 // HostedTool is one provider-hosted Tool activation resolved by the host.
 // Target is opaque host metadata; Agent Runtime does not interpret provider protocols or payloads.
 type HostedTool struct {
-	Key    string          `json:"key"`
-	Target json.RawMessage `json:"target,omitempty"`
+	Key               string          `json:"key"`
+	DefinitionVersion string          `json:"definitionVersion,omitempty"`
+	Target            json.RawMessage `json:"target,omitempty"`
 }
 
 // HostedToolCall records one provider-executed Tool fact. It never enters the local Tool executor.

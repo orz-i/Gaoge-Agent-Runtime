@@ -162,6 +162,13 @@ func (runner *Runner) prepareDelegation(
 	if view, viewErr := agent.ViewState(parent); viewErr == nil {
 		delegation.ToolKeys = intersectToolKeys(delegation.ToolKeys, view.ToolKeys)
 	}
+	// This grant is frozen specifically for the selected role. It does not
+	// change the parent Agent's ToolKeys, or become available to sibling Runs.
+	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), role.HostedToolGrants...)
+	for _, grant := range delegation.HostedToolGrants {
+		delegation.ToolKeys = append(delegation.ToolKeys, grant.Key)
+	}
+	delegation.ToolKeys = normalizeStrings(delegation.ToolKeys)
 	delegation.Limits = roleAgentLimits(config.Limits, role.Limits)
 	return delegation, parent, nil
 }

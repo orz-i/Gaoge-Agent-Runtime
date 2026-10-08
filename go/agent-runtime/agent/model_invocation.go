@@ -258,6 +258,9 @@ func (runner *Runner) buildModelRequest(
 	if err != nil {
 		return model.Request{}, err
 	}
+	if err = verifyHostedGrantVersions(state.HostedToolGrants, hostedTools); err != nil {
+		return model.Request{}, err
+	}
 	messages := model.CloneMessages(state.Messages)
 	if len(state.BlockedToolKeys) != 0 {
 		definitions = definitionsWithoutKeys(definitions, state.BlockedToolKeys)
