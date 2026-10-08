@@ -563,7 +563,11 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			catalogErr = validateDiscoveryCatalog(state.Discovery, definitions)
 		}
 		if catalogErr != nil {
-			failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_invalid", catalogErr)
+			code := "agent.tool_invalid"
+			if state.Discovery != nil {
+				code = "agent.discovery_invalid"
+			}
+			failed, failErr := runner.fail(ctx, snapshot, state, code, catalogErr)
 			return failed, true, failErr
 		}
 		prepared, prepareErr := runner.preparePendingApproval(ctx, snapshot, state, definitions)
@@ -1240,7 +1244,18 @@ func (runner *Runner) preparePendingToolExecution(snapshot kernel.Snapshot) (pen
 		definition, ok = tools.CloneDefinition(discoveryToolDefinition), true
 	}
 	if !ok {
+		if state.Discovery != nil {
+			return pendingToolExecution{state: state}, "agent.discovery_invalid", ErrToolDiscoveryDenied
+		}
 		return pendingToolExecution{state: state}, "agent.tool_invalid", tools.ErrToolNotFound
+	}
+	if state.Discovery != nil && call.ToolKey != ToolDiscoveryKey {
+		if state.Discovery.RunID != snapshot.Run.ID {
+			return pendingToolExecution{state: state}, "agent.discovery_invalid", ErrToolDiscoveryInvalid
+		}
+		if err := validateLoadedDiscoveryExecution(state.Discovery, call.ToolKey, definition); err != nil {
+			return pendingToolExecution{state: state}, "agent.discovery_invalid", err
+		}
 	}
 	if err := tools.ValidateCall(definition, call); err != nil {
 		return pendingToolExecution{state: state, call: call, definition: definition}, "agent.tool_invalid", err
