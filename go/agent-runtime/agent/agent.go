@@ -199,6 +199,7 @@ type Dependencies struct {
 	Approvals          plugin.ApprovalHandler
 	ApprovalPolicies   []plugin.ApprovalPolicy
 	HostedTools        HostedToolCatalog
+	ToolDiscovery      ToolDiscovery
 	Observers          []plugin.Observer
 	Telemetry          []observability.Recorder
 	RunMiddleware      []plugin.RunMiddleware
@@ -239,6 +240,7 @@ type Runner struct {
 	approvals          plugin.ApprovalHandler
 	approvalPolicies   *plugin.ApprovalPolicySet
 	hostedTools        HostedToolCatalog
+	discovery          ToolDiscovery
 	observers          *plugin.ObserverSet
 	telemetry          *observability.Set
 	runChain           *plugin.RunChain
@@ -259,6 +261,7 @@ type runState struct {
 	ToolKeys         []string               `json:"toolKeys"`
 	RequiredToolKeys []string               `json:"requiredToolKeys,omitempty"`
 	HostedToolGrants []HostedToolGrant      `json:"hostedToolGrants,omitempty"`
+	Discovery        *discoveryState        `json:"discovery,omitempty"`
 	BlockedToolKeys  []string               `json:"blockedToolKeys,omitempty"`
 	RequireToolCall  bool                   `json:"requireToolCall,omitempty"`
 	Budget           runtimebudget.Snapshot `json:"budget"`
@@ -345,7 +348,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
-		hostedTools: dependencies.HostedTools, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
+		hostedTools: dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies: compactCompletionPolicies(dependencies.CompletionPolicies),
 		limits:             dependencies.Limits,
 		execution:          execution,
@@ -384,9 +387,14 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 }
 
 func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
-	_, hosted, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model, request.DeadlineAt)
+	local, hosted, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model, request.DeadlineAt)
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	for _, definition := range local {
+		if definition.Key == ToolDiscoveryKey || definition.Name == discoveryToolName {
+			return kernel.Snapshot{}, ErrToolDiscoveryInvalid
+		}
 	}
 	grants, err := normalizedHostedToolGrants(request.HostedToolGrants)
 	if err != nil {
@@ -396,6 +404,10 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	if err = verifyHostedGrantVersions(grants, hosted); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	discovery, err := runner.freezeToolDiscovery(request, local, hosted)
+	if err != nil {
 		return kernel.Snapshot{}, err
 	}
 	limits, err := resolveRunLimits(runner.limits, request.Limits)
@@ -414,6 +426,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 		ToolKeys:         toolKeys,
 		RequiredToolKeys: requiredToolKeys,
 		HostedToolGrants: grants,
+		Discovery:        discovery,
 		Budget:           runtimebudget.Snapshot{Limits: limits},
 	}
 	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
@@ -527,7 +540,14 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return failed, true, failErr
 	}
 	if len(state.PendingCalls) > 0 {
+		if state.Discovery != nil && state.Discovery.RunID != snapshot.Run.ID {
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", ErrToolDiscoveryInvalid)
+			return failed, true, failErr
+		}
 		definitions, _, catalogErr := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model, snapshot.Run.DeadlineAt)
+		if catalogErr == nil {
+			catalogErr = validateDiscoveryCatalog(state.Discovery, definitions)
+		}
 		if catalogErr != nil {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_invalid", catalogErr)
 			return failed, true, failErr
@@ -554,6 +574,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)
 	if err != nil {
+		if errors.Is(err, ErrToolDiscoveryDenied) || errors.Is(err, ErrToolDiscoveryInvalid) {
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", err)
+			return failed, true, failErr
+		}
 		return snapshot, true, err
 	}
 	snapshot, state, invocation, err = runner.claimModelInvocationExecution(ctx, snapshot, state, invocation)
@@ -1060,7 +1084,8 @@ func (runner *Runner) queueToolCalls(
 		}
 		seenCallIDs[call.ID] = struct{}{}
 		definition, ok := selectedDefinition(definitions, call.ToolKey)
-		if !ok || !json.Valid(call.Arguments) || definition.Terminal && index != len(calls)-1 {
+		if !ok || !json.Valid(call.Arguments) || definition.Terminal && index != len(calls)-1 ||
+			call.ToolKey == ToolDiscoveryKey && len(calls) != 1 {
 			return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
 		}
 		preparedCalls[index] = call
@@ -1104,11 +1129,17 @@ func (runner *Runner) preparePendingApproval(
 		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 	}
 	definition, ok := selectedDefinition(definitions, call.ToolKey)
+	if !ok && call.ToolKey == ToolDiscoveryKey && state.Discovery != nil {
+		definition, ok = tools.CloneDefinition(discoveryToolDefinition), true
+	}
 	if !ok {
 		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
 	}
 	if err := tools.ValidateCall(definition, call); err != nil {
 		return snapshot, err
+	}
+	if call.ToolKey == ToolDiscoveryKey {
+		return snapshot, nil // SDK control Tool is read-only, never needs business approval
 	}
 	invocation := plugin.ToolInvocation{
 		Run:        snapshot.Run,
@@ -1158,6 +1189,9 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		failed, failErr := runner.fail(ctx, snapshot, execution.state, failCode, err)
 		return failed, false, failErr
 	}
+	if execution.call.ToolKey == ToolDiscoveryKey {
+		return runner.searchPendingTool(ctx, snapshot, execution)
+	}
 	result, err := runner.invokePendingTool(ctx, snapshot, execution.call, execution.definition)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -1188,6 +1222,9 @@ func (runner *Runner) preparePendingToolExecution(snapshot kernel.Snapshot) (pen
 		return pendingToolExecution{state: state}, "agent.tool_unavailable", ErrToolFailure
 	}
 	definition, ok := runner.catalog.Resolve(call.ToolKey)
+	if call.ToolKey == ToolDiscoveryKey && state.Discovery != nil {
+		definition, ok = tools.CloneDefinition(discoveryToolDefinition), true
+	}
 	if !ok {
 		return pendingToolExecution{state: state}, "agent.tool_invalid", tools.ErrToolNotFound
 	}
@@ -1710,6 +1747,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 		!validAgentLimits(state.Budget.Limits) || !validAgentUsage(state.Budget.Usage) ||
 		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) ||
 		!validHostedGrantSnapshot(state.HostedToolGrants, state.ToolKeys) ||
+		!validDiscoveryState(state) ||
 		!validModelInvocations(state.ModelInvocations) {
 		return runState{}, ErrInvalidRequest
 	}
