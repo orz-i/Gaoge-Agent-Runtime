@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -108,7 +107,7 @@ func candidateSnapshotHash(runID, modelName string, candidates []ToolDiscoveryCa
 	return hex.EncodeToString(hash[:]), nil
 }
 
-func (runner *Runner) freezeToolDiscovery(request StartRequest, local []tools.Definition, hosted []model.HostedTool) (*discoveryState, error) {
+func (runner *Runner) freezeToolDiscovery(request StartRequest, local []tools.Definition) (*discoveryState, error) {
 	if runner.discovery == nil || len(local) < discoveryMinCandidates {
 		return nil, nil
 	}
@@ -131,11 +130,6 @@ func (runner *Runner) freezeToolDiscovery(request StartRequest, local []tools.De
 			return nil, err
 		}
 		candidates = append(candidates, ToolDiscoveryCandidate{Key: definition.Key, Fingerprint: fingerprint})
-	}
-	for _, native := range hosted {
-		if native.Key == ToolDiscoveryKey {
-			return nil, ErrToolDiscoveryInvalid
-		}
 	}
 	slices.SortFunc(candidates, func(a, b ToolDiscoveryCandidate) int { return strings.Compare(a.Key, b.Key) })
 	hash, err := candidateSnapshotHash(request.ID, strings.TrimSpace(request.Model), candidates)
