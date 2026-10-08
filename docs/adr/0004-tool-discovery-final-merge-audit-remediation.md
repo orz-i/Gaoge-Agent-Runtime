@@ -30,6 +30,12 @@ The SDK first-party `agent.search_tools` Key is reserved. A local definition wit
 
 Host root Agent Run now freezes first-party control Tools into `InitialToolKeys` so Tool Search does not hide delegation/context actions. But Handoff starts a **child** Agent without projecting its context-artifact read key into `InitialToolKeys`. A child with at least 16 authorized local Tools receives only the SDK Search control by default, even when Harness already scoped its context-artifact read capability. The child must be able to access its allowed Context artifact without a search round-trip. Project only the Harness-context-inherited and explicitly authorized `harness.read_context_artifact` key into the child initial set; no other MCP or Hosted keys, no mandatory `RequiredToolKeys`, no parent/sibling authorization expansion. Carry the field through the immutable Handoff delegation record to the child `StartRequest`. Exercise pure Handoff forwarding, strict subset validation and context eligibility.
 
+## Audit risk E: GitHub CodeQL integer-overflow allocation warnings (PR #34)
+
+The protected-branch PR reports two **high-severity** CodeQL findings in `go/agent-runtime/agent/tool_discovery.go`, at the preallocation `len(d.LoadedKeys)+1` and `len(state.Discovery.LoadedKeys)+len(output.ToolKeys)`. Size arithmetic on data-derived lengths can overflow before `make` even when the intended Tool candidate policy is bounded.
+
+**Remediation**: Avoid dynamic length addition in allocation capacities entirely. Size the local definition buffer from the already-resolved bounded definition collection, and size the discovered key map from the sealed authorized candidate collection (`<=256`), then use ordinary append for the SDK control Tool. Add a deterministic max-candidate-count test that loads near the maximum and appends exactly five discovered tools. The PR must be rechecked until CodeQL reports zero new high-severity findings; do not dismiss the alerts or bypass branch protection.
+
 ## Hard constraints
 
 - No compatibility bridge, no new end-user controls, no SDK pin update, no release/merge/push without explicit user authorization.
