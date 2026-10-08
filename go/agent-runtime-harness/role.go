@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
 
@@ -13,18 +14,19 @@ import (
 // part of delegation execution. MemberID/MemberRevision optionally route the
 // role to an external child runner while keeping one roleID-based model contract.
 type RoleSnapshot struct {
-	ID             string          `json:"id"`
-	Revision       uint64          `json:"revision"`
-	Name           string          `json:"name"`
-	Description    string          `json:"description,omitempty"`
-	Instructions   string          `json:"instructions,omitempty"`
-	MemberID       string          `json:"memberID,omitempty"`
-	MemberRevision string          `json:"memberRevision,omitempty"`
-	Model          string          `json:"model,omitempty"`
-	ModelOptions   json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys       []string        `json:"toolKeys"`
-	Skills         []SkillSnapshot `json:"skills"`
-	Limits         budget.Limits   `json:"limits"`
+	ID               string                  `json:"id"`
+	Revision         uint64                  `json:"revision"`
+	Name             string                  `json:"name"`
+	Description      string                  `json:"description,omitempty"`
+	Instructions     string                  `json:"instructions,omitempty"`
+	MemberID         string                  `json:"memberID,omitempty"`
+	MemberRevision   string                  `json:"memberRevision,omitempty"`
+	Model            string                  `json:"model,omitempty"`
+	ModelOptions     json.RawMessage         `json:"modelOptions,omitempty"`
+	ToolKeys         []string                `json:"toolKeys"`
+	HostedToolGrants []agent.HostedToolGrant `json:"hostedToolGrants,omitempty"`
+	Skills           []SkillSnapshot         `json:"skills"`
+	Limits           budget.Limits           `json:"limits"`
 }
 
 func normalizeRoleSnapshots(values []RoleSnapshot, parentTools []string) ([]RoleSnapshot, error) {
@@ -53,6 +55,15 @@ func normalizeRoleSnapshots(values []RoleSnapshot, parentTools []string) ([]Role
 			return nil, err
 		}
 		value.ToolKeys = normalizeStrings(value.ToolKeys)
+		value.HostedToolGrants, err = agent.NormalizeHostedToolGrantsForRole(value.HostedToolGrants)
+		if err != nil {
+			return nil, ErrInvalidRequest
+		}
+		for _, grant := range value.HostedToolGrants {
+			if slices.Contains(value.ToolKeys, grant.Key) {
+				return nil, ErrInvalidRequest
+			}
+		}
 		for _, key := range value.ToolKeys {
 			if !slices.Contains(parentTools, key) {
 				return nil, ErrInvalidRequest
@@ -71,6 +82,7 @@ func cloneRoleSnapshots(values []RoleSnapshot) []RoleSnapshot {
 	for index := range result {
 		result[index].ModelOptions = append(json.RawMessage(nil), result[index].ModelOptions...)
 		result[index].ToolKeys = append([]string{}, result[index].ToolKeys...)
+		result[index].HostedToolGrants = append([]agent.HostedToolGrant(nil), result[index].HostedToolGrants...)
 		result[index].Skills = append([]SkillSnapshot{}, result[index].Skills...)
 	}
 	return result

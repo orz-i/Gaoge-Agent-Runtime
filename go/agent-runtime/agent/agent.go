@@ -224,6 +224,7 @@ type StartRequest struct {
 	ModelOptions     json.RawMessage
 	ToolKeys         []string
 	RequiredToolKeys []string
+	HostedToolGrants []HostedToolGrant
 	DeadlineAt       *time.Time
 	Limits           Limits
 }
@@ -257,6 +258,7 @@ type runState struct {
 	ModelOptions     json.RawMessage        `json:"modelOptions,omitempty"`
 	ToolKeys         []string               `json:"toolKeys"`
 	RequiredToolKeys []string               `json:"requiredToolKeys,omitempty"`
+	HostedToolGrants []HostedToolGrant      `json:"hostedToolGrants,omitempty"`
 	BlockedToolKeys  []string               `json:"blockedToolKeys,omitempty"`
 	RequireToolCall  bool                   `json:"requireToolCall,omitempty"`
 	Budget           runtimebudget.Snapshot `json:"budget"`
@@ -382,7 +384,18 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 }
 
 func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
-	if _, _, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model, request.DeadlineAt); err != nil {
+	_, hosted, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model, request.DeadlineAt)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	grants, err := normalizedHostedToolGrants(request.HostedToolGrants)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if !validHostedGrantSnapshot(grants, normalizedToolKeys(request.ToolKeys)) {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	if err = verifyHostedGrantVersions(grants, hosted); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	limits, err := resolveRunLimits(runner.limits, request.Limits)
@@ -400,6 +413,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 		ModelOptions:     cloneRawJSON(request.ModelOptions),
 		ToolKeys:         toolKeys,
 		RequiredToolKeys: requiredToolKeys,
+		HostedToolGrants: grants,
 		Budget:           runtimebudget.Snapshot{Limits: limits},
 	}
 	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
@@ -1695,6 +1709,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	if state.Budget.Limits.MaxLLMCalls <= 0 || state.Budget.Limits.MaxToolCalls <= 0 ||
 		!validAgentLimits(state.Budget.Limits) || !validAgentUsage(state.Budget.Usage) ||
 		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) ||
+		!validHostedGrantSnapshot(state.HostedToolGrants, state.ToolKeys) ||
 		!validModelInvocations(state.ModelInvocations) {
 		return runState{}, ErrInvalidRequest
 	}

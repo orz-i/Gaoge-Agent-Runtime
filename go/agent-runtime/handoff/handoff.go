@@ -61,23 +61,24 @@ const (
 
 // Delegation is a durable parent-owned reference to one stable Child Agent Run.
 type Delegation struct {
-	ID             string          `json:"id"`
-	MemberID       string          `json:"memberID"`
-	MemberRevision string          `json:"memberRevision,omitempty"`
-	RoleID         string          `json:"roleID,omitempty"`
-	RoleRevision   uint64          `json:"roleRevision,omitempty"`
-	RoleName       string          `json:"roleName,omitempty"`
-	Instructions   string          `json:"instructions,omitempty"`
-	Limits         agent.Limits    `json:"limits,omitempty"`
-	ChildRunID     string          `json:"childRunID"`
-	Goal           string          `json:"goal"`
-	Model          string          `json:"model,omitempty"`
-	ModelOptions   json.RawMessage `json:"modelOptions,omitempty"`
-	ToolKeys       []string        `json:"toolKeys,omitempty"`
-	Status         Status          `json:"status"`
-	Result         json.RawMessage `json:"result,omitempty"`
-	ErrorCode      string          `json:"errorCode,omitempty"`
-	Error          string          `json:"error,omitempty"`
+	ID               string                  `json:"id"`
+	MemberID         string                  `json:"memberID"`
+	MemberRevision   string                  `json:"memberRevision,omitempty"`
+	RoleID           string                  `json:"roleID,omitempty"`
+	RoleRevision     uint64                  `json:"roleRevision,omitempty"`
+	RoleName         string                  `json:"roleName,omitempty"`
+	Instructions     string                  `json:"instructions,omitempty"`
+	Limits           agent.Limits            `json:"limits,omitempty"`
+	ChildRunID       string                  `json:"childRunID"`
+	Goal             string                  `json:"goal"`
+	Model            string                  `json:"model,omitempty"`
+	ModelOptions     json.RawMessage         `json:"modelOptions,omitempty"`
+	ToolKeys         []string                `json:"toolKeys,omitempty"`
+	HostedToolGrants []agent.HostedToolGrant `json:"hostedToolGrants,omitempty"`
+	Status           Status                  `json:"status"`
+	Result           json.RawMessage         `json:"result,omitempty"`
+	ErrorCode        string                  `json:"errorCode,omitempty"`
+	Error            string                  `json:"error,omitempty"`
 }
 
 // Join describes a deterministic fan-in contract over stable Delegation IDs.
@@ -188,17 +189,18 @@ func (coordinator *Coordinator) StartOrLoad(
 		return Delegation{}, err
 	}
 	child, err = children.StartRun(ctx, agent.StartRequest{
-		ID:           delegation.ChildRunID,
-		Actor:        parent.Run.Actor,
-		Thread:       parent.Run.Thread,
-		RequestID:    parent.Run.ID + ":" + delegation.ID,
-		Goal:         delegation.Goal,
-		DeadlineAt:   parent.Run.DeadlineAt,
-		Instructions: delegation.Instructions,
-		Limits:       delegation.Limits,
-		Model:        delegation.Model,
-		ModelOptions: append(json.RawMessage(nil), delegation.ModelOptions...),
-		ToolKeys:     append([]string(nil), delegation.ToolKeys...),
+		ID:               delegation.ChildRunID,
+		Actor:            parent.Run.Actor,
+		Thread:           parent.Run.Thread,
+		RequestID:        parent.Run.ID + ":" + delegation.ID,
+		Goal:             delegation.Goal,
+		DeadlineAt:       parent.Run.DeadlineAt,
+		Instructions:     delegation.Instructions,
+		Limits:           delegation.Limits,
+		Model:            delegation.Model,
+		ModelOptions:     append(json.RawMessage(nil), delegation.ModelOptions...),
+		ToolKeys:         append([]string(nil), delegation.ToolKeys...),
+		HostedToolGrants: append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...),
 	})
 	if child.Run.ID == "" {
 		return Delegation{}, err
@@ -387,6 +389,7 @@ func validJoin(join Join, delegations []Delegation) bool {
 func cloneDelegation(delegation Delegation) Delegation {
 	delegation.ModelOptions = append(json.RawMessage(nil), delegation.ModelOptions...)
 	delegation.ToolKeys = append([]string(nil), delegation.ToolKeys...)
+	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...)
 	delegation.Result = append(json.RawMessage(nil), delegation.Result...)
 	return delegation
 }
