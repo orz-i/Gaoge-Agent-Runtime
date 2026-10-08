@@ -226,7 +226,10 @@ func (runner *Runner) ensureModelInvocation(
 	}
 	request, err := runner.buildModelRequest(ctx, snapshot, state)
 	if err != nil {
-		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
+		// Caller needs the original committed aggregate to fail a stale
+		// discovery grant through Kernel CAS. Returning a zero snapshot here
+		// obscures policy revocation as invalid Kernel input.
+		return snapshot, state, ModelInvocation{}, err
 	}
 	invocation, err := newModelInvocation(snapshot.Run, request, providerName(runner.model), runner.clock.Now())
 	if err != nil {
@@ -261,6 +264,13 @@ func (runner *Runner) buildModelRequest(
 	if err = verifyHostedGrantVersions(state.HostedToolGrants, hostedTools); err != nil {
 		return model.Request{}, err
 	}
+	if err = validateDiscoveryCatalog(state.Discovery, definitions); err != nil {
+		return model.Request{}, err
+	}
+	if state.Discovery != nil && state.Discovery.RunID != snapshot.Run.ID {
+		return model.Request{}, ErrToolDiscoveryInvalid
+	}
+	definitions = filterLoadedDiscoveryTools(definitions, state.Discovery)
 	messages := model.CloneMessages(state.Messages)
 	if len(state.BlockedToolKeys) != 0 {
 		definitions = definitionsWithoutKeys(definitions, state.BlockedToolKeys)
