@@ -26,6 +26,10 @@ The Host-side contract requires an explicit Role model for its Hosted Tool grant
 
 The SDK first-party `agent.search_tools` Key is reserved. A local definition with that Key is rejected even in Eager mode, but the Hosted identity check was initially located after the 16-local-candidate threshold gate. A Host-supplied Hosted Tool with the reserved Key could therefore be projected in a small Eager Run, creating ambiguous SDK-control ownership. Enforce the reserved Key on both local and Hosted declarations during Agent Start, regardless of whether Discovery is composed or activated. Add a small-set negative fixture.
 
+## Audit risk D: Delegated child with high local Tool cardinality
+
+Host root Agent Run now freezes first-party control Tools into `InitialToolKeys` so Tool Search does not hide delegation/context actions. But Handoff starts a **child** Agent without projecting its context-artifact read key into `InitialToolKeys`. A child with at least 16 authorized local Tools receives only the SDK Search control by default, even when Harness already scoped its context-artifact read capability. The child must be able to access its allowed Context artifact without a search round-trip. Project only the Harness-context-inherited and explicitly authorized `harness.read_context_artifact` key into the child initial set; no other MCP or Hosted keys, no mandatory `RequiredToolKeys`, no parent/sibling authorization expansion. Carry the field through the immutable Handoff delegation record to the child `StartRequest`. Exercise pure Handoff forwarding, strict subset validation and context eligibility.
+
 ## Hard constraints
 
 - No compatibility bridge, no new end-user controls, no SDK pin update, no release/merge/push without explicit user authorization.
