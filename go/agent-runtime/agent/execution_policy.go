@@ -242,6 +242,18 @@ func (runner *Runner) generateModelWithPolicy(
 	request model.Request,
 	deadlineAt *time.Time,
 ) (model.Response, error) {
+	return runner.generateModelWithPolicyGuarded(ctx, request, deadlineAt, nil)
+}
+
+// A durable Agent request may wait for the model limiter after the Run has
+// already validated it. Execute the optional permission check again inside
+// the acquired, deadline-bounded call immediately before provider dispatch.
+func (runner *Runner) generateModelWithPolicyGuarded(
+	ctx context.Context,
+	request model.Request,
+	deadlineAt *time.Time,
+	beforeDispatch func(context.Context) error,
+) (model.Response, error) {
 	release, err := runner.modelLimiter.acquire(ctx)
 	if err != nil {
 		return model.Response{}, err
@@ -254,6 +266,11 @@ func (runner *Runner) generateModelWithPolicy(
 	}
 	callCtx, cancel := callContext(ctx, timeout)
 	response, callErr := safeModelCall(func() (model.Response, error) {
+		if beforeDispatch != nil {
+			if err := beforeDispatch(callCtx); err != nil {
+				return model.Response{}, err
+			}
+		}
 		return runner.generateModel(callCtx, request)
 	})
 	callContextErr := callCtx.Err()

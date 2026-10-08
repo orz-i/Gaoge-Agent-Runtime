@@ -604,6 +604,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	snapshot, state, err = runner.executeModelInvocation(ctx, snapshot, state, invocation)
 	if err != nil {
+		if errors.Is(err, ErrToolDiscoveryDenied) || errors.Is(err, ErrToolDiscoveryInvalid) {
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", err)
+			return failed, true, failErr
+		}
 		if errors.Is(err, runtimebudget.ErrExhausted) {
 			failed, failErr := runner.fail(ctx, snapshot, state, sharedBudgetErrorCode(err), err)
 			return failed, true, failErr

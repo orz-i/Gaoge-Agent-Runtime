@@ -305,6 +305,9 @@ func (runner *Runner) executeModelInvocation(
 		!runner.clock.Now().UTC().Before(invocation.ExecutionLeaseUntil.UTC()) {
 		return snapshot, state, ErrModelInvocationBusy
 	}
+	if err := runner.validatePendingModelToolDeclarations(ctx, snapshot, state, invocation.Request); err != nil {
+		return snapshot, state, err
+	}
 	startedAt := runner.clock.Now().UTC()
 	runner.recordTelemetry(ctx, observability.Event{
 		Scope: observability.ScopeModelInvocation, Phase: observability.PhaseStarted,
@@ -316,7 +319,11 @@ func (runner *Runner) executeModelInvocation(
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
-	response, err := runner.generateModelWithPolicy(ctx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt)
+	response, err := runner.generateModelWithPolicyGuarded(ctx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
+		func(dispatchCtx context.Context) error {
+			return runner.validatePendingModelToolDeclarations(dispatchCtx, snapshot, state, invocation.Request)
+		},
+	)
 	if err != nil {
 		endedAt := runner.clock.Now().UTC()
 		phase := observability.PhaseFailed
