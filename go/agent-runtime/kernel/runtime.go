@@ -240,8 +240,10 @@ func validMutationResult(mutation Mutation) bool {
 func validTransition(current, next RunStatus) bool {
 	switch current {
 	case RunStatusRunning:
-		return next == RunStatusRunning || next == RunStatusWaitingInput || terminalStatus(next)
+		return next == RunStatusRunning || next == RunStatusWaitingInput || next == RunStatusPausedBudget || terminalStatus(next)
 	case RunStatusWaitingInput:
+		return next == RunStatusRunning || terminalStatus(next)
+	case RunStatusPausedBudget:
 		return next == RunStatusRunning || terminalStatus(next)
 	case RunStatusCompleted, RunStatusFailed, RunStatusCancelled:
 		return false

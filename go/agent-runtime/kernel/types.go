@@ -22,6 +22,7 @@ type RunStatus string
 const (
 	RunStatusRunning      RunStatus = "running"
 	RunStatusWaitingInput RunStatus = "waiting_input"
+	RunStatusPausedBudget RunStatus = "paused_budget"
 	RunStatusCompleted    RunStatus = "completed"
 	RunStatusFailed       RunStatus = "failed"
 	RunStatusCancelled    RunStatus = "cancelled"
