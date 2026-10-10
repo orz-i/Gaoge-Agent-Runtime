@@ -59,6 +59,7 @@ type ContextWindowBinding struct {
 
 type contextCheckpointKey struct{}
 type contextWindowBindingKey struct{}
+type contextWindowExcludedKey struct{}
 
 type contextWindowState struct {
 	mu         sync.RWMutex
@@ -249,7 +250,7 @@ func CurrentContextCheckpoint(ctx context.Context) (runtimecontext.Checkpoint, b
 // Workflow Agent tasks whose complete, immutable evidence is carried by the
 // task input and must not be influenced by earlier conversational drafts.
 func WithoutContextWindow(ctx context.Context) context.Context {
-	return withoutContextCheckpoint(ctx)
+	return context.WithValue(withoutContextCheckpoint(ctx), contextWindowExcludedKey{}, true)
 }
 
 // ReplaceContextCheckpoint advances the execution-scoped active window after a durable rollover.

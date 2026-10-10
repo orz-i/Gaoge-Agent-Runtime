@@ -3,7 +3,7 @@ module github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel
 go 1.26.6
 
 require (
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.15
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.16
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/metric v1.47.0
 	go.opentelemetry.io/otel/sdk v1.47.0

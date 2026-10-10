@@ -51,6 +51,10 @@ avoid vague summaries and unrelated promotion.
    are Go module tags and the TypeScript archive attached to GitHub Releases;
    no npm publication credentials are required.
 
+On Windows, add an existing POSIX shell (for example Git's `bin` directory) to
+`PATH` and run `make SHELL=sh beta`; the Makefile includes POSIX environment
+assignments.
+
 Review changes to `contracts/consumers` and the shared HTTP fixtures as public
 contract changes, not generated test churn. A changed constructor, required
 port method, wire field/type, status/error behavior, or persisted representation
@@ -63,19 +67,19 @@ PostgreSQL. These checks do not establish compatibility with older releases.
 ## Create and push tags
 
 ```bash
-node scripts/release-tags.mjs --version 0.1.0-beta.15
-node scripts/release-tags.mjs --version 0.1.0-beta.15 --create
+node scripts/release-tags.mjs --version 0.1.0-beta.16
+node scripts/release-tags.mjs --version 0.1.0-beta.16 --create
 git push --atomic origin \
-  v0.1.0-beta.15 \
-  go/agent-runtime/v0.1.0-beta.15 \
-  go/agent-runtime-harness/v0.1.0-beta.15 \
-  go/agent-runtime-harness-postgres/v0.1.0-beta.15 \
-  go/agent-runtime-mcp/v0.1.0-beta.15 \
-  go/agent-runtime-otel/v0.1.0-beta.15 \
-  go/agent-runtime-a2a/v0.1.0-beta.15 \
-  go/agent-runtime-postgres/v0.1.0-beta.15 \
-  go/agent-runtime-redis/v0.1.0-beta.15 \
-  go/agent-runtime-http/v0.1.0-beta.15
+  v0.1.0-beta.16 \
+  go/agent-runtime/v0.1.0-beta.16 \
+  go/agent-runtime-harness/v0.1.0-beta.16 \
+  go/agent-runtime-harness-postgres/v0.1.0-beta.16 \
+  go/agent-runtime-mcp/v0.1.0-beta.16 \
+  go/agent-runtime-otel/v0.1.0-beta.16 \
+  go/agent-runtime-a2a/v0.1.0-beta.16 \
+  go/agent-runtime-postgres/v0.1.0-beta.16 \
+  go/agent-runtime-redis/v0.1.0-beta.16 \
+  go/agent-runtime-http/v0.1.0-beta.16
 ```
 
 GitHub does not create a push event when one push updates more than three tags.
@@ -84,7 +88,7 @@ start the release workflow against the existing immutable root tag after the
 push:
 
 ```bash
-gh workflow run release.yml --ref main -f release_tag=v0.1.0-beta.15
+gh workflow run release.yml --ref main -f release_tag=v0.1.0-beta.16
 ```
 
 The workflow checks out the root tag, re-runs the quality/coverage/security and

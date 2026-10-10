@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+## 0.1.0-beta.16
+
+- Clarify that an automatic execution segment is a renewable soft allowance, distinct from immutable hard call limits and the model Context Window; only an actual Runtime pause or denial warrants a budget-stop claim.
+- Add the stable `workflow.EffectRequest.OwnerNodeID` so hosts can register child ownership before synchronous startup resolves parent Harness policy, including retry and fan-out owners.
+- Honor `harness.WithoutContextWindow` during context hydration so isolated child tasks remain isolated across start, approval and recovery.
+- Use the Windows null device for Collector readiness probes and document the POSIX shell needed by the release Makefile.
+
+Upgrade note: upgrade all nine Go modules and the TypeScript archive together. Hosts starting Workflow children must register the supplied owner before starting the child. No HTTP contract or SQL migration changes. See [Beta.16 upgrade notes](docs/releases/v0.1.0-beta.16.md).
+
 ## 0.1.0-beta.15
 
 - Add optional, frozen-per-direct-Agent Run automatic model/Tool execution segment policy while retaining the immutable hard ceiling and Beta.14 manual continuation.

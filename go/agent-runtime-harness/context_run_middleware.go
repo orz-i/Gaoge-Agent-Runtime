@@ -50,6 +50,9 @@ func (middleware contextRunMiddleware) Run(
 }
 
 func (middleware contextRunMiddleware) hydrate(ctx context.Context, runID string) (context.Context, error) {
+	if excluded, _ := ctx.Value(contextWindowExcludedKey{}).(bool); excluded {
+		return ctx, nil
+	}
 	if binding, ok := CurrentContextWindowBinding(ctx); ok {
 		return middleware.hydrateExistingBinding(ctx, binding)
 	}
