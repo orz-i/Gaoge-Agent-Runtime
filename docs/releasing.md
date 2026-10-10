@@ -19,6 +19,24 @@ The PR template and `scripts/check-pr-body-format.mjs` provide automated
 format validation on PR creation, edits and subsequent commits. A PR must not
 merge while this check fails.
 
+Content quality is a **human merge-review requirement** and cannot be replaced
+by a Markdown syntax check. Before approving the PR description, verify:
+
+- **Problem and outcome:** a concrete before/after behavior, affected users or
+  runtime behavior, and why the change is necessary.
+- **Design and invariants:** what actually changed, who owns the state, where
+  authorization and hard safety boundaries are enforced, and notable negative
+  cases. A commit-message dump is not a substitute for an explanation.
+- **Evidence:** exact local test commands with outcomes, remaining CI checks,
+  and important untested scenarios; never report pending checks as passed.
+- **Compatibility and release:** public contracts, state upgrades, rollback
+  constraints, and any dependent release/host adoption. Clearly distinguish
+  shipped functionality from follow-up work.
+
+Delete placeholder instructions before requesting review. Prefer a concise
+before/after and only the details needed for the reviewer to evaluate risks;
+avoid vague summaries and unrelated promotion.
+
 ## Preconditions
 
 1. Update `VERSION`, package metadata, internal Go requirements, and the
