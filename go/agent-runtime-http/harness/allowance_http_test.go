@@ -125,6 +125,7 @@ func TestBudgetGrantHTTPAuthorizesOwningTurnAndEnforcesCAS(t *testing.T) {
 	for _, bad := range []string{
 		`{"expectedTurnRevision":1,"modelCalls":0}`,
 		fmt.Sprintf(`{"expectedTurnRevision":%d,"modelCalls":-1}`, paused.Turn.Revision),
+		fmt.Sprintf(`{"expectedTurnRevision":%d,"modelCalls":1,"absoluteMaxCalls":999}`, paused.Turn.Revision),
 		fmt.Sprintf(`{"expectedTurnRevision":%d,"modelCalls":0,"toolCalls":1}`, paused.Turn.Revision),
 	} {
 		rejected := allowanceHTTPRequest(t, owner, paused.Turn.ID, bad)
