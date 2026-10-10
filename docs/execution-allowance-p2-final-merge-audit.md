@@ -4,7 +4,7 @@
 - Baseline: `main@73197d3` (immutable Beta.14)
 - Reviewed feature implementation: `feat/durable-auto-allowance-p2@0e14d7a`
 - Release candidate: `0.1.0-beta.15`; exact final SHA to be recorded after version preparation
-- Decision: **GO for protected PR after version parity and revalidation; NO-GO for tag until PR CI is green**
+- Decision: **GO for protected PR review; tag remains NO-GO until required GitHub CI and merge are complete**
 - Design: [ADR 0006](./adr/0006-runtime-owned-auto-allowance-segments.md) / [implementation audit](./execution-allowance-p2-implementation-audit.md)
 
 ## Merge-blocker review
@@ -30,3 +30,13 @@ Gaoge P2 documentation lives on `feat/agent-execution-continuity-p2-host@c2fa4dc
 ## Final release gate record
 
 Pending: create Beta.15 versioned metadata, validate full `make beta`, open protected PR, receive green CI, merge and tag/publish. Do not present this audit as evidence that those steps were already done.
+
+
+## Versioned candidate gate (2026-10-10)
+
+- Beta.15 metadata and nine Go module requirements, TypeScript version and OTel independent consumer aligned by atomic release-preparation commit `8e33ca8`.
+- `GOTOOLCHAIN=go1.27.2 make beta` on the version-aligned candidate: **PASS, exit 0** (`artifacts/p2-beta15-full.exit`). This re-ran fmt/tidy/vet, all Go unit/race/lint/coverage, TypeScript build/quality/packed clean consumers, official Go vulnerability audit (0 reachable vulnerabilities), `pnpm audit` (no known vulnerabilities), actual PostgreSQL/Redis tests and pinned OpenTelemetry Collector E2E with trace/metric verification. The owned Docker resources were removed.
+- `node scripts/check-beta.mjs`, `make tidy-check`, independent OTel consumer and ten-tag manifest: PASS.
+- Changes do **not** widen the deployed hard ceiling, add an HTTP route, silently expand Team/GroupChat/Workflow child budgets, or make P2 automatic without explicit host opt-in.
+
+**Next release gate:** submit the exact immutable P2 candidate to the protected PR checks, confirm all required statuses green, then merge according to repository rules. Only after merge create and atomically push the coordinated Beta.15 tags, run tagged Release Beta CI and verify the GitHub release/archive. Host adoption is separately gated.
