@@ -232,6 +232,8 @@ type StartRequest struct {
 	HostedToolGrants []HostedToolGrant
 	DeadlineAt       *time.Time
 	Limits           Limits
+	// CallAllowance is a renewable segment allowance, never the absolute hard ceiling.
+	CallAllowance *CallAllowance
 }
 
 // Runner owns only the direct Agent model and Tool loop.
@@ -269,6 +271,7 @@ type runState struct {
 	BlockedToolKeys  []string               `json:"blockedToolKeys,omitempty"`
 	RequireToolCall  bool                   `json:"requireToolCall,omitempty"`
 	Budget           runtimebudget.Snapshot `json:"budget"`
+	CallAllowance    *CallAllowance         `json:"callAllowance,omitempty"`
 	PendingCalls     []tools.Call           `json:"pendingCalls,omitempty"`
 	ModelInvocations []ModelInvocation      `json:"modelInvocations,omitempty"`
 }
@@ -283,6 +286,7 @@ type View struct {
 	ToolKeys         []string
 	RequiredToolKeys []string
 	Budget           runtimebudget.Snapshot
+	CallAllowance    *CallAllowance
 	ModelInvocations []ModelInvocation
 }
 
@@ -299,6 +303,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		ToolKeys:         append([]string(nil), state.ToolKeys...),
 		RequiredToolKeys: append([]string(nil), state.RequiredToolKeys...),
 		Budget:           state.Budget,
+		CallAllowance:    cloneCallAllowance(state.CallAllowance),
 		ModelInvocations: cloneModelInvocations(state.ModelInvocations),
 	}, nil
 }
@@ -435,6 +440,10 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	allowance, err := resolvedCallAllowance(request.CallAllowance, limits)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
 	toolKeys := normalizedToolKeys(request.ToolKeys)
 	requiredToolKeys := normalizedToolKeys(request.RequiredToolKeys)
 	if !toolKeysContainAll(toolKeys, requiredToolKeys) {
@@ -449,6 +458,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 		HostedToolGrants: grants,
 		Discovery:        discovery,
 		Budget:           runtimebudget.Snapshot{Limits: limits},
+		CallAllowance:    allowance,
 	}
 	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
 		state.Messages = append([]model.Message{{Role: model.RoleSystem, Content: instructions}}, state.Messages...)
@@ -596,6 +606,12 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	if state.Budget.Usage.LLMCalls >= state.Budget.Limits.MaxLLMCalls {
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.llm_limit", ErrCallLimit)
 		return failed, true, failErr
+	}
+	// Never pause in the middle of a committed logical invocation: a replay
+	// must first reconcile its durable receipt without reissuing the request.
+	if _, active := activeModelInvocation(state); !active && allowanceExhausted(state, "model") {
+		paused, pauseErr := runner.pauseCallAllowance(ctx, snapshot, state, "model")
+		return paused, true, pauseErr
 	}
 	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)
 	if err != nil {
@@ -1218,6 +1234,10 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		failed, failErr := runner.fail(ctx, snapshot, execution.state, failCode, err)
 		return failed, false, failErr
 	}
+	if allowanceExhausted(execution.state, "tool") {
+		paused, pauseErr := runner.pauseCallAllowance(ctx, snapshot, execution.state, "tool")
+		return paused, true, pauseErr
+	}
 	if execution.call.ToolKey == ToolDiscoveryKey {
 		return runner.searchPendingTool(ctx, snapshot, execution)
 	}
@@ -1785,6 +1805,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	}
 	if state.Budget.Limits.MaxLLMCalls <= 0 || state.Budget.Limits.MaxToolCalls <= 0 ||
 		!validAgentLimits(state.Budget.Limits) || !validAgentUsage(state.Budget.Usage) ||
+		!validCallAllowance(state.CallAllowance, state.Budget.Limits) ||
 		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) ||
 		!validHostedGrantSnapshot(state.HostedToolGrants, state.ToolKeys) ||
 		!validDiscoveryState(state) ||
