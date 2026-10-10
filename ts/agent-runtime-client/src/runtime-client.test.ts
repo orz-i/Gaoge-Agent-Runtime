@@ -196,6 +196,7 @@ describe("RuntimeClient target API", () => {
       ))
       .mockResolvedValueOnce(json(harnessSnapshot))
       .mockResolvedValueOnce(json(harnessSnapshot))
+      .mockResolvedValueOnce(json(harnessSnapshot))
       .mockResolvedValueOnce(json(harnessSnapshot));
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
 
@@ -206,6 +207,7 @@ describe("RuntimeClient target API", () => {
     await client.harness.turns.resolveApproval("ht/1", "approve", "continue");
     await client.harness.turns.resolveInteraction("ht/1", "interaction/1", { candidateID: "candidate-2" });
     await client.harness.turns.retryInvocation("ht/1", "invocation/1");
+    await client.harness.turns.grantCallAllowance("ht/1", 7, { modelCalls: 2 });
 
     expect(events.map((event) => [event.seq, event.type, event.itemID])).toEqual([
       [1, "item.delta", "message-1"],
@@ -218,7 +220,11 @@ describe("RuntimeClient target API", () => {
       "https://runtime.test/api/v1/harness/turns/ht%2F1/approval",
       "https://runtime.test/api/v1/harness/turns/ht%2F1/interactions/interaction%2F1",
       "https://runtime.test/api/v1/harness/turns/ht%2F1/invocations/invocation%2F1/retry",
+      "https://runtime.test/api/v1/harness/turns/ht%2F1/allowance",
     ]);
+    expect(JSON.parse(String(fetcher.mock.calls[6]?.[1]?.body))).toEqual({
+      expectedTurnRevision: 7, modelCalls: 2,
+    });
     expect(fetcher.mock.calls.some((call) => String(call[0]).includes("/runs/"))).toBe(false);
   });
 

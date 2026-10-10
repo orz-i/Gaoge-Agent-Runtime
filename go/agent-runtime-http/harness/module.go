@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
@@ -59,6 +60,40 @@ type CommandResponse struct {
 	ExecutionClass    harness.ExecutionClass `json:"executionClass"`
 	Source            string                 `json:"source"`
 	InputSchema       json.RawMessage        `json:"inputSchema"`
+}
+
+// GrantCallAllowanceRequest supplies only bounded logical call increments,
+// never the Run ID or an absolute hard policy. The authenticated Turn owns it.
+type GrantCallAllowanceRequest struct {
+	ExpectedTurnRevision uint64 `json:"expectedTurnRevision" binding:"required"`
+	ModelCalls           int    `json:"modelCalls"`
+	ToolCalls            int    `json:"toolCalls"`
+}
+
+func (handler *Handler) GrantCallAllowance(context *gin.Context) {
+	snapshot, ok := handler.authorizedTurn(context)
+	if !ok {
+		return
+	}
+	var request GrantCallAllowanceRequest
+	if err := context.ShouldBindJSON(&request); err != nil || request.ExpectedTurnRevision == 0 ||
+		request.ModelCalls < 0 || request.ToolCalls < 0 ||
+		request.ModelCalls == 0 && request.ToolCalls == 0 {
+		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "harness.allowance_invalid", "invalid execution allowance grant")
+		return
+	}
+	updated, err := handler.runner.GrantCallAllowance(context.Request.Context(), snapshot.Turn.ID, request.ExpectedTurnRevision,
+		agent.CallAllowance{LLMCalls: request.ModelCalls, ToolCalls: request.ToolCalls})
+	if err != nil {
+		writeHarnessError(context, err)
+		return
+	}
+	result, err := snapshotResponse(updated)
+	if err != nil {
+		writeHarnessError(context, err)
+		return
+	}
+	context.JSON(stdhttp.StatusOK, result)
 }
 
 type ResolveInteractionRequest struct {
@@ -410,6 +445,7 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 	routes.GET("/harness/turns/:turn_id", module.Handler.GetTurn)
 	routes.GET("/harness/turns/:turn_id/feed", module.Handler.StreamTurnFeed)
 	routes.POST("/harness/turns/:turn_id/approval", module.Handler.ResolveApproval)
+	routes.POST("/harness/turns/:turn_id/allowance", module.Handler.GrantCallAllowance)
 	routes.POST("/harness/turns/:turn_id/interactions/:interaction_id", module.Handler.ResolveInteraction)
 	routes.POST("/harness/turns/:turn_id/invocations/:invocation_id/retry", module.Handler.RetryInvocation)
 	routes.POST("/harness/turns/:turn_id/subtasks", module.Handler.CreateSubtask)
@@ -589,7 +625,7 @@ func terminalTurnSnapshotEvent(snapshot harness.Snapshot, seq int64) harness.Tur
 		eventType = harness.EventTurnCompleted
 	case harness.TurnCancelled:
 		eventType = harness.EventTurnCancelled
-	case harness.TurnAccepted, harness.TurnRunning, harness.TurnWaitingInput, harness.TurnFailed:
+	case harness.TurnAccepted, harness.TurnRunning, harness.TurnWaitingInput, harness.TurnPausedBudget, harness.TurnFailed:
 		// The caller only synthesizes terminal snapshots; failed is the safe default.
 	}
 	return harness.TurnEvent{
