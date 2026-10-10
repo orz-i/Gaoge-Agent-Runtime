@@ -4,7 +4,7 @@ bootstrap:
 	pnpm install --frozen-lockfile
 
 metadata:
-	node --test scripts/beta-release-policy.test.mjs
+	node --test scripts/beta-release-policy.test.mjs scripts/check-pr-body-format.test.mjs
 	node scripts/check-beta.mjs
 
 fmt-check:
