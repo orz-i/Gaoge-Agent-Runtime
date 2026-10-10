@@ -21,3 +21,19 @@
 ## Host adoption boundary
 
 Only after an immutable new SDK release should Gaoge pin it. The host must set an initial bounded allowance, expose authorized continuation from paused Turn only, preserve absolute ceilings/Context Window/Tool approval, and prove no side effects duplicated. P2 auto-renewal/P3 richer UX remain separate.
+
+## Security gate remediation (2026-10-09)
+
+- Official Go Vulnerability Database first exposed 8 reachable standard-library
+  weaknesses on local Go 1.27.1. All 8 are fixed by Go 1.27.2; SDK
+  `go.work` now selects Go 1.27.2 for local builds and GitHub setup-go jobs.
+  No exceptions or exclusions are applied to the scanner.
+- Under the patched standard library, the next scan identified four reachable
+  `golang.org/x/net v0.55.0` HTTP/2 vulnerabilities in the HTTP module.
+  Upgrade to `x/net v0.60.0` (the upstream fixed version) and refresh all
+  consistent transitive crypto/sys/text constraints in the HTTP/Redis modules.
+- Ran `GOTOOLCHAIN=go1.27.2 make security`: PASS, `govulncheck` on all nine
+  modules reported zero reachable vulnerabilities, and `pnpm audit` reported
+  no known high-level vulnerabilities. `make tidy-check` also passed.
+- The full Beta gate (including external PostgreSQL/Redis and OTEL collector)
+  must run again on the resulting exact commit before final GO/publishing.
