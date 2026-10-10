@@ -31,7 +31,7 @@ const retiredPlanMarkers = [
   ["Capability", "Plan", "Execute"].join(""),
 ];
 
-if (version !== "0.1.0-beta.13") violations.push(`unexpected VERSION ${version}`);
+if (version !== "0.1.0-beta.14") violations.push(`unexpected VERSION ${version}`);
 if (boundary.version !== version) violations.push("boundary version does not match VERSION");
 if (JSON.stringify(boundary.goModules) !== JSON.stringify(expectedModules)) {
   violations.push("boundary Go module list is not the canonical ordered list");
