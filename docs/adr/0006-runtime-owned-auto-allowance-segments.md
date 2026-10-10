@@ -1,6 +1,6 @@
 # ADR 0006: Runtime-Owned Bounded Automatic Allowance Segments (P2)
 
-- Status: Accepted design; P2 implementation and verification underway, **not released**
+- Status: Accepted; P2 SDK candidate implemented and beta-quality validation passed; **not merged or released**
 - Date: 2026-10-10
 - Baseline: `main@73197d3` (published `v0.1.0-beta.14`)
 - Related: [ADR 0002](./0002-runtime-owned-execution-policy-v1.md), [ADR 0005](./0005-durable-agent-execution-allowances.md), Gaoge ADR-0107/0108
