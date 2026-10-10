@@ -1071,7 +1071,7 @@ func expectedFeaturePendingError(executionClass ExecutionClass, err error) bool 
 }
 
 func pendingRuntimeStatus(status kernel.RunStatus) bool {
-	return status == kernel.RunStatusRunning || status == kernel.RunStatusWaitingInput
+	return status == kernel.RunStatusRunning || status == kernel.RunStatusWaitingInput || status == kernel.RunStatusPausedBudget
 }
 
 func (runner *Runner) failChildInvocation(

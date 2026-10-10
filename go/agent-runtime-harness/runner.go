@@ -62,7 +62,7 @@ func invocationLifecycleItemID(invocation Invocation, status InvocationStatus, r
 
 func invocationItemStatus(status InvocationStatus) ItemStatus {
 	switch status {
-	case InvocationWaitingInput:
+	case InvocationWaitingInput, InvocationPausedBudget:
 		return ItemWaiting
 	case InvocationCompleted:
 		return ItemCompleted
@@ -120,6 +120,7 @@ func (runner *Runner) resumeDirectAgentStart(
 		ToolKeys: append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
 		InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
 		Limits:          config.Limits,
+		CallAllowance:   request.CallAllowance,
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
@@ -574,6 +575,8 @@ type StartRequest struct {
 	InitialToolKeys  []string
 	Config           ConfigSnapshot
 	Context          *ContextSeed
+	// Only the direct Agent Run may request a renewable, hard-bounded allowance.
+	CallAllowance *agent.CallAllowance
 }
 
 // NewRunner constructs a minimal first-party Harness composition layer.
@@ -675,6 +678,7 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		ToolKeys:         append([]string(nil), config.ToolKeys...),
 		RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
 		InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
+		CallAllowance: request.CallAllowance,
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		if errors.Is(startErr, kernel.ErrConflict) {
@@ -1108,7 +1112,7 @@ func (runner *Runner) recordTerminalAgentMessageItem(
 		status = ItemFailed
 	case TurnCancelled:
 		status = ItemCancelled
-	case TurnAccepted, TurnRunning, TurnWaitingInput, TurnCompleted:
+	case TurnAccepted, TurnRunning, TurnWaitingInput, TurnPausedBudget, TurnCompleted:
 		// The caller only finalizes terminal turns; preserve the completed default.
 	}
 	payload := modelTimelinePayload{}
@@ -1332,6 +1336,8 @@ func turnEventTypeForStatus(status TurnStatus) string {
 	switch status {
 	case TurnWaitingInput:
 		return EventTurnWaitingInput
+	case TurnPausedBudget:
+		return EventTurnPausedBudget
 	case TurnCompleted:
 		return EventTurnCompleted
 	case TurnFailed:
@@ -1441,7 +1447,7 @@ func itemStatusFromTurn(status TurnStatus) ItemStatus {
 		return ItemFailed
 	case TurnCancelled:
 		return ItemCancelled
-	case TurnWaitingInput:
+	case TurnWaitingInput, TurnPausedBudget:
 		return ItemWaiting
 	case TurnAccepted, TurnRunning:
 		return ItemStarted

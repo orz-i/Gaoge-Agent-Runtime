@@ -13,6 +13,7 @@ import (
 const (
 	EventTurnStarted      = "turn.started"
 	EventTurnWaitingInput = "turn.waiting_input"
+	EventTurnPausedBudget = "turn.paused_budget"
 	EventTurnCompleted    = "turn.completed"
 	EventTurnFailed       = "turn.failed"
 	EventTurnCancelled    = "turn.cancelled"
@@ -213,7 +214,7 @@ func turnEventFromRunFeed(event runfeed.Event) (TurnEvent, error) {
 
 func validTurnEventDraft(draft TurnEventDraft) bool {
 	switch draft.Type {
-	case EventTurnStarted, EventTurnWaitingInput, EventTurnCompleted, EventTurnFailed, EventTurnCancelled:
+	case EventTurnStarted, EventTurnWaitingInput, EventTurnPausedBudget, EventTurnCompleted, EventTurnFailed, EventTurnCancelled:
 		return draft.ItemID == "" && draft.ItemKind == ""
 	case EventItemStarted, EventItemDelta, EventItemCompleted:
 		return draft.ItemID != "" && validItemKind(draft.ItemKind)
