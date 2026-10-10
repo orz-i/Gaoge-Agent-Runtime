@@ -302,6 +302,31 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
         default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/allowance:
+    post:
+      operationId: grantHarnessCallAllowance
+      description: >-
+        Authenticated owning Turn only. Grants one positive logical call
+        increment within frozen Agent Run hard ceilings. Uses the public
+        Turn revision; the private Agent Run identity and revision never
+        appear in this request. Does not dispatch Tool or model calls.
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GrantHarnessCallAllowanceRequest'}
+      responses:
+        '200':
+          description: Paused Turn has returned to running with a durable wakeup
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        default: {$ref: '#/components/responses/Error'}
   /harness/turns/{turnID}/interactions/{interactionID}:
     post:
       operationId: resolveHarnessInteraction
@@ -518,6 +543,19 @@ components:
       properties:
         decision: {type: string, enum: [approve, reject]}
         comment: {type: string}
+    GrantHarnessCallAllowanceRequest:
+      type: object
+      additionalProperties: false
+      required: [expectedTurnRevision]
+      anyOf:
+        - required: [modelCalls]
+          properties: {modelCalls: {type: integer, minimum: 1}}
+        - required: [toolCalls]
+          properties: {toolCalls: {type: integer, minimum: 1}}
+      properties:
+        expectedTurnRevision: {type: integer, minimum: 1}
+        modelCalls: {type: integer, minimum: 0}
+        toolCalls: {type: integer, minimum: 0}
     ResolveHarnessInteractionRequest:
       type: object
       additionalProperties: false
@@ -681,7 +719,7 @@ components:
         thread: {$ref: '#/components/schemas/ThreadRef'}
         requestID: {type: string}
         goal: {type: string}
-        status: {type: string, enum: [running, waiting_input, completed, failed, cancelled]}
+        status: {type: string, enum: [running, waiting_input, paused_budget, completed, failed, cancelled]}
         revision: {type: integer, minimum: 1}
         errorCode: {type: string}
         errorDetail: {type: string}
@@ -720,7 +758,7 @@ components:
       properties:
         id: {type: string}
         hostTurn: {$ref: '#/components/schemas/HostRef'}
-        status: {type: string, enum: [accepted, running, waiting_input, completed, failed, cancelled]}
+        status: {type: string, enum: [accepted, running, waiting_input, paused_budget, completed, failed, cancelled]}
         revision: {type: integer, minimum: 1}
         errorCode: {type: string}
         errorDetail: {type: string}
@@ -753,7 +791,7 @@ components:
         turnID: {type: string}
         type:
           type: string
-          enum: [turn.started, turn.waiting_input, turn.completed, turn.failed, turn.cancelled, item.started, item.delta, item.completed]
+          enum: [turn.started, turn.waiting_input, turn.paused_budget, turn.completed, turn.failed, turn.cancelled, item.started, item.delta, item.completed]
         itemID: {type: string}
         itemKind:
           type: string
@@ -774,9 +812,9 @@ components:
         parentItemID: {type: string}
         capabilityKey: {type: string}
         definitionVersion: {type: string}
-        executionClass: {type: string, enum: [agent, team, workflow, application]}
+        executionClass: {type: string, enum: [agent, team, group_chat, workflow, application]}
         inputHash: {type: string}
-        status: {type: string, enum: [accepted, running, waiting_input, completed, failed, cancelled]}
+        status: {type: string, enum: [accepted, running, waiting_input, paused_budget, completed, failed, cancelled]}
         attempt: {type: integer, minimum: 1}
         outputRefs:
           type: array
@@ -815,7 +853,7 @@ components:
         description: {type: string}
         capabilityKey: {type: string}
         definitionVersion: {type: string}
-        executionClass: {type: string, enum: [agent, team, workflow, application]}
+        executionClass: {type: string, enum: [agent, team, group_chat, workflow, application]}
         source: {type: string, enum: [first_party, application]}
         inputSchema: {}
     HarnessTurnSnapshot:
@@ -1004,7 +1042,7 @@ components:
         runID: {type: string}
         kind: {type: string, description: 'Feature-owned Run kind, including host extensions.'}
         goal: {type: string}
-        status: {type: string, enum: [running, waiting_input, completed, failed, cancelled]}
+        status: {type: string, enum: [running, waiting_input, paused_budget, completed, failed, cancelled]}
         revision: {type: integer, minimum: 1}
         errorCode: {type: string}
         errorDetail: {type: string}
