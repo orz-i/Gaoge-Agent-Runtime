@@ -63,3 +63,14 @@ Only after an immutable new SDK release should Gaoge pin it. The host must set a
 DO NOT declare the SDK published until the GitHub release workflow passes,
 the prerelease exists and the TypeScript archive can be retrieved. Separate
 Gaoge host branch/pin adoption must pass its own validation.
+
+## CI merge-blocker correction (2026-10-10)
+
+PR #36 initially failed the GitHub Actions quality job: the checkout selected
+Go 1.27.2 correctly, but `.github/workflows/ci.yml` installed
+`golangci-lint v2.12.2`, which cannot decode Go 1.27 export-data format
+(version 5 vs maximum 4). This is a mismatched lint toolchain, not an
+application/kernel test failure. Official golangci-lint support for Go 1.27
+starts at v2.13.0; this branch adopts the locally validated v2.14.0 in
+**both** CI and immutable release workflows. No linter is disabled and the
+quality gate must re-run on GitHub to completion before merging this PR.
