@@ -1,6 +1,6 @@
 # P2 Runtime-Owned Adaptive Execution — Implementation and Merge Gates
 
-> Date: 2026-10-10; source [ADR 0006](./adr/0006-runtime-owned-auto-allowance-segments.md), P1 SDK `v0.1.0-beta.14@73197d3`. Current branch: `feat/durable-auto-allowance-p2`. **Do not merge/push/tag or update Gaoge SDK pin automatically.**
+> Date: 2026-10-10; source [ADR 0006](./adr/0006-runtime-owned-auto-allowance-segments.md), P1 SDK `v0.1.0-beta.14@73197d3`. Current branch: `feat/durable-auto-allowance-p2`. **SDK candidate locally implemented and full Beta gate passed; not released/adopted. Do not merge/push/tag or update Gaoge SDK pin automatically.** The evidence and remaining blockers are tracked in the [P2 implementation audit](./execution-allowance-p2-implementation-audit.md).
 
 ## Scope and commits
 
