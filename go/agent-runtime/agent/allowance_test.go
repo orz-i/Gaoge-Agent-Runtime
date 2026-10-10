@@ -16,12 +16,14 @@ import (
 )
 
 type allowanceModel struct {
-	calls   int
-	batches [][]tools.Call
+	calls    int
+	batches  [][]tools.Call
+	requests []runtimemodel.Request
 }
 
-func (m *allowanceModel) Generate(context.Context, runtimemodel.Request) (runtimemodel.Response, error) {
+func (m *allowanceModel) Generate(_ context.Context, request runtimemodel.Request) (runtimemodel.Response, error) {
 	m.calls++
+	m.requests = append(m.requests, request)
 	if m.calls <= len(m.batches) {
 		return runtimemodel.Response{ToolCalls: m.batches[m.calls-1]}, nil
 	}

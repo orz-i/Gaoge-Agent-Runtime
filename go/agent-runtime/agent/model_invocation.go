@@ -282,6 +282,9 @@ func (runner *Runner) buildModelRequest(
 		hostedTools = hostedToolsWithoutKeys(hostedTools, repeatedToolKeys)
 		messages = withRepeatedToolGuidance(messages, repeatedToolKeys)
 	}
+	if hint := automaticAllowanceHint(state); hint != "" {
+		messages = withSystemGuidance(messages, hint)
+	}
 	return model.Request{
 		RunID: snapshot.Run.ID, Model: state.Model, ModelOptions: cloneRawJSON(state.ModelOptions),
 		Messages: messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
