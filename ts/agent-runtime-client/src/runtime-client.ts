@@ -112,6 +112,16 @@ export class RuntimeClient {
         get: (turnID: string, request?: RequestOptions) =>
           this.request<HarnessTurnSnapshotDTO>(`/harness/turns/${pathPart(turnID)}`, {}, request),
         feed: (turnID: string, request?: HarnessTurnFeedOptions) => this.streamHarnessTurnFeed(turnID, request),
+        grantCallAllowance: (
+          turnID: string,
+          expectedTurnRevision: number,
+          increment: { modelCalls?: number; toolCalls?: number },
+          request?: RequestOptions,
+        ) => this.request<HarnessTurnSnapshotDTO>(
+          `/harness/turns/${pathPart(turnID)}/allowance`,
+          { method: "POST", body: JSON.stringify({ expectedTurnRevision, ...increment }) },
+          request,
+        ),
         resolveApproval: (
           turnID: string,
           decision: "approve" | "reject",

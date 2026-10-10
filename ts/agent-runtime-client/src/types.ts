@@ -1,6 +1,6 @@
 /** Feature-owned identifier, including agent, workflow, team and a2a.remote. */
 export type RuntimeKind = string;
-export type RunStatus = "running" | "waiting_input" | "completed" | "failed" | "cancelled";
+export type RunStatus = "running" | "waiting_input" | "paused_budget" | "completed" | "failed" | "cancelled";
 export type HarnessTurnStatus = "accepted" | RunStatus;
 export type HarnessItemKind =
   | "user_message"
@@ -201,6 +201,7 @@ export type HarnessTurnFeedEventDTO = {
   type:
     | "turn.started"
     | "turn.waiting_input"
+    | "turn.paused_budget"
     | "turn.completed"
     | "turn.failed"
     | "turn.cancelled"

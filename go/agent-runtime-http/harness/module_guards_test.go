@@ -27,7 +27,7 @@ func TestRegisterRoutesAndNilComposition(t *testing.T) {
 	NewModule(handler).RegisterRoutes(group)
 
 	routes := engine.Routes()
-	if len(routes) != 9 {
+	if len(routes) != 10 {
 		t.Fatalf("route count = %d, routes = %#v", len(routes), routes)
 	}
 }

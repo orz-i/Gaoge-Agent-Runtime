@@ -156,7 +156,7 @@ func terminalSnapshotFeedEvent(snapshot kernel.Snapshot, sequence int64) runfeed
 		eventType = runfeed.EventRunCompleted
 	case kernel.RunStatusCancelled:
 		eventType = runfeed.EventRunCancelled
-	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusFailed:
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget, kernel.RunStatusFailed:
 		// The caller only synthesizes terminal snapshots; failed is the safe default.
 	}
 	return runfeed.Event{
