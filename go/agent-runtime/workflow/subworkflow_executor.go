@@ -84,7 +84,7 @@ func subworkflowEffectResult(snapshot kernel.Snapshot) (EffectResult, error) {
 		result.ErrorCode = snapshot.Run.ErrorCode
 		result.ErrorDetail = snapshot.Run.ErrorDetail
 		return result, nil
-	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput:
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
 		result.Disposition = DispositionPending
 		return result, nil
 	default:
