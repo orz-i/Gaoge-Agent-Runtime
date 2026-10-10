@@ -3,7 +3,7 @@
 - Date: 2026-10-09
 - Candidate: `feat/durable-execution-allowance-p1@135f153`
 - Baseline: `v0.1.0-beta.13@af144a3`
-- Initial release decision: **NO-GO** pending public-contract and versioned-release fixes.
+- Initial release decision: **NO-GO**; all documented blockers remediated. **Final SDK merge and tag decision: GO**, subject to GitHub release workflow verification.
 
 ## Findings
 
@@ -37,3 +37,29 @@ Only after an immutable new SDK release should Gaoge pin it. The host must set a
   no known high-level vulnerabilities. `make tidy-check` also passed.
 - The full Beta gate (including external PostgreSQL/Redis and OTEL collector)
   must run again on the resulting exact commit before final GO/publishing.
+
+## Final SDK gate evidence / merge decision
+
+- Accepted SDK candidate before this audit-only commit: `37588d6`.
+- `GOTOOLCHAIN=go1.27.2 make beta`: **PASS, exit 0**.
+- Full quality: metadata, fmt/tidy, Go vet/test/race/lint, TypeScript
+  lint/typecheck/test/build, deterministic evaluation, benchmarks, coverage
+  and clean consumer gate passed.
+- All nine `govulncheck` modules: **zero reachable vulnerabilities** on
+  patched Go 1.27.2 and x/net 0.60.0. `pnpm audit` found no known
+  vulnerabilities meeting the security gate.
+- External database integration: true PostgreSQL and Redis Docker integration
+  tests passed and test-owned containers/networks were removed.
+- OpenTelemetry Collector image pinned at digest
+  `sha256:0fba96233274f6d665ac8831ad99dfe6479a9a20459f6e2719c0d20945773b46`.
+  End-to-end traces and metrics were emitted and confirmed, and the
+  Collector test container/network was removed.
+- OpenAPI Beta.14 allowance endpoint, status enums and strict schema tests
+  passed. Version and release notes across nine modules, TypeScript and
+  integration module are aligned. The release workflow will re-run tests at
+  the immutable root tag before attaching its prerelease archive.
+
+**GO for SDK fast-forward merge + coordinated immutable beta.14 tag push.**
+DO NOT declare the SDK published until the GitHub release workflow passes,
+the prerelease exists and the TypeScript archive can be retrieved. Separate
+Gaoge host branch/pin adoption must pass its own validation.
