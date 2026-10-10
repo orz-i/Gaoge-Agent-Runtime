@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+## 0.1.0-beta.15
+
+- Add optional, frozen-per-direct-Agent Run automatic model/Tool execution segment policy while retaining the immutable hard ceiling and Beta.14 manual continuation.
+- Persist bounded automatic renewal with Kernel CAS and durable Continuation wakeup; hosted worker yields so tasks can finish across requests without replaying completed model or Tool receipts.
+- Fall back to owner-authorized manual pause when renewals or conservative no-progress thresholds are exhausted; preserve approval, cancellation, Context Window and existing shared-budget ownership.
+- Cover worker restart, pending Tool batches, SQL reload, Harness lifecycle, false-stall fingerprint cases and real PostgreSQL/Redis and OTel integration gates.
+
+Upgrade note: upgrade all nine Go modules and the TypeScript archive together. No host automatically enables this Go-only opt-in; no new public HTTP endpoint or OpenAPI shape. Do not run mixed Beta.14/Beta.15 workers against newly persisted P2 Runs. See [Beta.15 upgrade notes](docs/releases/v0.1.0-beta.15.md).
+
 ## 0.1.0-beta.14
 
 - Add opt-in, durable, nonterminal `paused_budget` and explicit cumulative model/Tool call allowances for direct Agent Runs; maintain immutable deployment hard ceilings and existing default limits.
