@@ -116,7 +116,10 @@ func (runner *Runner) advanceCallAllowance(
 	ctx context.Context, snapshot kernel.Snapshot, state runState, dimension string,
 ) (kernel.Snapshot, bool, error) {
 	if next, renewed, err := runner.autoRenewCallAllowance(ctx, snapshot, state, dimension); renewed || err != nil {
-		return next, !renewed, err
+		// Hosted workers must yield at each durable segment handoff so a
+		// request does not hold the whole long-running loop. The scheduler
+		// resumes from this same CAS revision and the stored wakeup.
+		return next, !renewed || runner.deferResume, err
 	}
 	paused, err := runner.pauseCallAllowance(ctx, snapshot, state, dimension)
 	return paused, true, err
@@ -211,10 +214,10 @@ func lastSettledWorkFingerprint(messages []model.Message) string {
 		message := messages[i]
 		if message.Role == model.RoleTool {
 			identity := struct {
-				Key     string          `json:"key"`
-				Args    json.RawMessage `json:"args,omitempty"`
-				Content string          `json:"content"`
-			}{Content: strings.Join(strings.Fields(message.Content), " ")}
+				Key     string `json:"key"`
+				Args    string `json:"args,omitempty"`
+				Content string `json:"content"`
+			}{Content: strings.TrimSpace(message.Content)}
 			for j := i - 1; j >= 0; j-- {
 				if messages[j].Role != model.RoleAssistant {
 					continue
@@ -222,7 +225,7 @@ func lastSettledWorkFingerprint(messages []model.Message) string {
 				for _, call := range messages[j].ToolCalls {
 					if call.ID == message.ToolCallID {
 						identity.Key = call.ToolKey
-						identity.Args = call.Arguments
+						identity.Args = canonicalToolArguments(call.Arguments)
 						break
 					}
 				}
@@ -238,15 +241,15 @@ func lastSettledWorkFingerprint(messages []model.Message) string {
 			value := struct {
 				Content string `json:"content"`
 				Calls   []struct {
-					Key  string          `json:"key"`
-					Args json.RawMessage `json:"args,omitempty"`
+					Key  string `json:"key"`
+					Args string `json:"args,omitempty"`
 				} `json:"calls,omitempty"`
-			}{Content: strings.Join(strings.Fields(message.Content), " ")}
+			}{Content: strings.TrimSpace(message.Content)}
 			for _, call := range message.ToolCalls {
 				value.Calls = append(value.Calls, struct {
-					Key  string          `json:"key"`
-					Args json.RawMessage `json:"args,omitempty"`
-				}{Key: call.ToolKey, Args: call.Arguments})
+					Key  string `json:"key"`
+					Args string `json:"args,omitempty"`
+				}{Key: call.ToolKey, Args: canonicalToolArguments(call.Arguments)})
 			}
 			raw, _ := json.Marshal(value)
 			sum := sha256.Sum256(raw)
@@ -257,6 +260,21 @@ func lastSettledWorkFingerprint(messages []model.Message) string {
 	// fingerprint means successive auto renewals eventually pause.
 	sum := sha256.Sum256([]byte("no-settled-work"))
 	return hex.EncodeToString(sum[:])
+}
+
+func canonicalToolArguments(arguments json.RawMessage) string {
+	if len(arguments) == 0 {
+		return ""
+	}
+	var value any
+	if err := json.Unmarshal(arguments, &value); err != nil {
+		return strings.TrimSpace(string(arguments))
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return strings.TrimSpace(string(arguments))
+	}
+	return string(encoded)
 }
 
 // automaticAllowanceHint only guides model output. It cannot alter Tool
