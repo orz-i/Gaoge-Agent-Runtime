@@ -1,6 +1,6 @@
 module github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.38.0
@@ -15,7 +15,7 @@ require (
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
-	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
-	golang.org/x/text v0.39.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 )
