@@ -273,7 +273,7 @@ func (runner *Runner) capabilityToolResult(ctx context.Context, commandID, invoc
 		capabilityCommandIDField: commandID, "invocationID": invocation.ID, "status": invocation.Status,
 	}
 	switch invocation.Status {
-	case InvocationAccepted, InvocationRunning, InvocationWaitingInput:
+	case InvocationAccepted, InvocationRunning, InvocationWaitingInput, InvocationPausedBudget:
 		disposition = tools.ReceiptDispositionPending
 	case InvocationCompleted:
 		if invocation.ExecutionClass == ExecutionApplication {

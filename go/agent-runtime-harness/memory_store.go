@@ -765,7 +765,7 @@ func validTurn(value Turn) bool {
 }
 
 func validTurnStatus(value TurnStatus) bool {
-	return slices.Contains([]TurnStatus{TurnAccepted, TurnRunning, TurnWaitingInput, TurnCompleted, TurnFailed, TurnCancelled}, value)
+	return slices.Contains([]TurnStatus{TurnAccepted, TurnRunning, TurnWaitingInput, TurnPausedBudget, TurnCompleted, TurnFailed, TurnCancelled}, value)
 }
 
 func validConfigSnapshot(value ConfigSnapshot) bool {

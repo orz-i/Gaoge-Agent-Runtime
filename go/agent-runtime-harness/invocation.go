@@ -40,6 +40,7 @@ const (
 	InvocationAccepted     InvocationStatus = "accepted"
 	InvocationRunning      InvocationStatus = "running"
 	InvocationWaitingInput InvocationStatus = "waiting_input"
+	InvocationPausedBudget InvocationStatus = "paused_budget"
 	InvocationCompleted    InvocationStatus = "completed"
 	InvocationFailed       InvocationStatus = "failed"
 	InvocationCancelled    InvocationStatus = "cancelled"
@@ -226,7 +227,7 @@ func validExecutionClass(value ExecutionClass) bool {
 
 func validInvocationStatus(value InvocationStatus) bool {
 	switch value {
-	case InvocationAccepted, InvocationRunning, InvocationWaitingInput, InvocationCompleted, InvocationFailed, InvocationCancelled:
+	case InvocationAccepted, InvocationRunning, InvocationWaitingInput, InvocationPausedBudget, InvocationCompleted, InvocationFailed, InvocationCancelled:
 		return true
 	default:
 		return false
@@ -295,6 +296,8 @@ func invocationStatusFromTurn(status TurnStatus) InvocationStatus {
 		return InvocationRunning
 	case TurnWaitingInput:
 		return InvocationWaitingInput
+	case TurnPausedBudget:
+		return InvocationPausedBudget
 	case TurnCompleted:
 		return InvocationCompleted
 	case TurnFailed:

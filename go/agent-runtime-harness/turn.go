@@ -16,6 +16,7 @@ const (
 	TurnAccepted     TurnStatus = "accepted"
 	TurnRunning      TurnStatus = "running"
 	TurnWaitingInput TurnStatus = "waiting_input"
+	TurnPausedBudget TurnStatus = "paused_budget"
 	TurnCompleted    TurnStatus = "completed"
 	TurnFailed       TurnStatus = "failed"
 	TurnCancelled    TurnStatus = "cancelled"
@@ -73,6 +74,8 @@ func turnStatusFromRuntime(status kernel.RunStatus) (TurnStatus, error) {
 		return TurnRunning, nil
 	case kernel.RunStatusWaitingInput:
 		return TurnWaitingInput, nil
+	case kernel.RunStatusPausedBudget:
+		return TurnPausedBudget, nil
 	case kernel.RunStatusCompleted:
 		return TurnCompleted, nil
 	case kernel.RunStatusFailed:
