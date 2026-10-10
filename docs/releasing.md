@@ -3,6 +3,22 @@
 The repository uses one root release tag plus one Go module tag per module. All
 tags for a release must point to the same accepted commit.
 
+## Pull request description quality
+
+Author pull requests using real Markdown line breaks, paragraphs, headings and
+lists. Do not paste literal escaped newline sequences such as the two characters
+backslash and `n` in place of Markdown line breaks. The recommended CLI workflow
+is to prepare a UTF-8 Markdown body file, validate it, and pass it with
+`gh pr create --body-file path/to/body.md` (or `gh pr edit --body-file`).
+Never use a shell-quoted `--body` string containing escaped line separators.
+Inspect the actual PR body on GitHub immediately after creation/editing; a
+successful CLI exit status is not sufficient evidence that Markdown rendered
+correctly.
+
+The PR template and `scripts/check-pr-body-format.mjs` provide automated
+format validation on PR creation, edits and subsequent commits. A PR must not
+merge while this check fails.
+
 ## Preconditions
 
 1. Update `VERSION`, package metadata, internal Go requirements, and the
