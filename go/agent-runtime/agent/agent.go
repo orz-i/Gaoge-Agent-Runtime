@@ -652,8 +652,12 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		}
 		if model.IsRetryableError(err) {
 			if int(invocation.ExecutionAttempt) >= runner.execution.Model.MaxAttempts {
+				code := model.ClassifiedErrorCode(err)
+				if code == "" {
+					code = "agent.model_retry_exhausted"
+				}
 				failed, failErr := runner.fail(
-					ctx, snapshot, state, "agent.model_retry_exhausted", errors.Join(ErrModelFailure, err),
+					ctx, snapshot, state, code, errors.Join(ErrModelFailure, err),
 				)
 				return failed, true, failErr
 			}
@@ -664,7 +668,11 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			return released, true, err
 		}
 		if errors.Is(err, ErrModelFailure) || errors.Is(err, ErrInvalidModelResponse) {
-			failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_failed", err)
+			code := model.ClassifiedErrorCode(err)
+			if code == "" {
+				code = "agent.model_failed"
+			}
+			failed, failErr := runner.fail(ctx, snapshot, state, code, err)
 			return failed, true, failErr
 		}
 		return snapshot, true, err
