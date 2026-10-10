@@ -234,6 +234,8 @@ type StartRequest struct {
 	Limits           Limits
 	// CallAllowance is a renewable segment allowance, never the absolute hard ceiling.
 	CallAllowance *CallAllowance
+	// AutoAllowance is an opt-in bounded P2 policy, frozen with the Agent Run.
+	AutoAllowance *AutoAllowancePolicy
 }
 
 // Runner owns only the direct Agent model and Tool loop.
@@ -272,6 +274,7 @@ type runState struct {
 	RequireToolCall  bool                   `json:"requireToolCall,omitempty"`
 	Budget           runtimebudget.Snapshot `json:"budget"`
 	CallAllowance    *CallAllowance         `json:"callAllowance,omitempty"`
+	AutoAllowance    *autoAllowanceState    `json:"autoAllowance,omitempty"`
 	PendingCalls     []tools.Call           `json:"pendingCalls,omitempty"`
 	ModelInvocations []ModelInvocation      `json:"modelInvocations,omitempty"`
 }
@@ -287,6 +290,7 @@ type View struct {
 	RequiredToolKeys []string
 	Budget           runtimebudget.Snapshot
 	CallAllowance    *CallAllowance
+	AutoAllowance    *AutoAllowanceProgress
 	ModelInvocations []ModelInvocation
 }
 
@@ -304,6 +308,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		RequiredToolKeys: append([]string(nil), state.RequiredToolKeys...),
 		Budget:           state.Budget,
 		CallAllowance:    cloneCallAllowance(state.CallAllowance),
+		AutoAllowance:    autoAllowanceProgress(state.AutoAllowance),
 		ModelInvocations: cloneModelInvocations(state.ModelInvocations),
 	}, nil
 }
@@ -444,6 +449,10 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	automaticAllowance, err := initialAutoAllowance(request.AutoAllowance, allowance, limits)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
 	toolKeys := normalizedToolKeys(request.ToolKeys)
 	requiredToolKeys := normalizedToolKeys(request.RequiredToolKeys)
 	if !toolKeysContainAll(toolKeys, requiredToolKeys) {
@@ -459,6 +468,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 		Discovery:        discovery,
 		Budget:           runtimebudget.Snapshot{Limits: limits},
 		CallAllowance:    allowance,
+		AutoAllowance:    automaticAllowance,
 	}
 	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
 		state.Messages = append([]model.Message{{Role: model.RoleSystem, Content: instructions}}, state.Messages...)
@@ -610,8 +620,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	// Never pause in the middle of a committed logical invocation: a replay
 	// must first reconcile its durable receipt without reissuing the request.
 	if _, active := activeModelInvocation(state); !active && allowanceExhausted(state, "model") {
-		paused, pauseErr := runner.pauseCallAllowance(ctx, snapshot, state, "model")
-		return paused, true, pauseErr
+		return runner.advanceCallAllowance(ctx, snapshot, state, "model")
 	}
 	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)
 	if err != nil {
@@ -1235,8 +1244,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		return failed, false, failErr
 	}
 	if allowanceExhausted(execution.state, "tool") {
-		paused, pauseErr := runner.pauseCallAllowance(ctx, snapshot, execution.state, "tool")
-		return paused, true, pauseErr
+		return runner.advanceCallAllowance(ctx, snapshot, execution.state, "tool")
 	}
 	if execution.call.ToolKey == ToolDiscoveryKey {
 		return runner.searchPendingTool(ctx, snapshot, execution)
@@ -1806,6 +1814,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	if state.Budget.Limits.MaxLLMCalls <= 0 || state.Budget.Limits.MaxToolCalls <= 0 ||
 		!validAgentLimits(state.Budget.Limits) || !validAgentUsage(state.Budget.Usage) ||
 		!validCallAllowance(state.CallAllowance, state.Budget.Limits) ||
+		!validAutoAllowanceState(state.AutoAllowance, state.CallAllowance, state.Budget.Limits) ||
 		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) ||
 		!validHostedGrantSnapshot(state.HostedToolGrants, state.ToolKeys) ||
 		!validDiscoveryState(state) ||
