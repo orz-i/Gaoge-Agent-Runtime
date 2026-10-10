@@ -23,6 +23,11 @@
     },
     {
       "method": "post",
+      "path": "/harness/turns/{turnID}/allowance",
+      "operationId": "grantHarnessCallAllowance"
+    },
+    {
+      "method": "post",
       "path": "/harness/turns/{turnID}/interactions/{interactionID}",
       "operationId": "resolveHarnessInteraction"
     },
