@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -142,5 +143,55 @@ func TestAllowanceRejectsUnsafeInitialOrTerminalGrants(t *testing.T) {
 	}
 	if _, err = runner.GrantCallAllowance(t.Context(), finished.Run.ID, finished.Run.Revision, agent.CallAllowance{LLMCalls: 1}); !errors.Is(err, agent.ErrRunNotBudgetPaused) {
 		t.Fatalf("terminal resurrection: %v", err)
+	}
+}
+
+func TestAllowanceConcurrentGrantsUseOneRevision(t *testing.T) {
+	runtime, approvals := newTestRuntimeAndApprovals(t)
+	model := &allowanceModel{batches: [][]tools.Call{{allowanceTool("one")}}}
+	var executed []string
+	runner := allowanceRunner(t, runtime, approvals, model, &executed)
+	request := startRequest("budget-concurrent", "budget-concurrent-request", "read and then finish", manifestToolKey)
+	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
+	paused, err := runner.StartRun(t.Context(), request)
+	if err != nil || paused.Run.Status != kernel.RunStatusPausedBudget {
+		t.Fatalf("pause=%#v err=%v", paused.Run, err)
+	}
+	const attempts = 2
+	outcomes := make(chan error, attempts)
+	var wg sync.WaitGroup
+	for range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, grantErr := runner.GrantCallAllowance(t.Context(), paused.Run.ID, paused.Run.Revision, agent.CallAllowance{LLMCalls: 1})
+			outcomes <- grantErr
+		}()
+	}
+	wg.Wait()
+	close(outcomes)
+	succeeded, conflicted := 0, 0
+	for outcome := range outcomes {
+		switch {
+		case outcome == nil:
+			succeeded++
+		case errors.Is(outcome, kernel.ErrConflict):
+			conflicted++
+		default:
+			t.Fatalf("unexpected grant error: %v", outcome)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("concurrent grants succeeded=%d conflicted=%d", succeeded, conflicted)
+	}
+	loaded, err := runtime.Load(t.Context(), paused.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := agent.ViewState(loaded)
+	if err != nil || loaded.Run.Status != kernel.RunStatusRunning ||
+		view.CallAllowance == nil || view.CallAllowance.LLMCalls != 2 ||
+		model.calls != 1 || len(executed) != 1 {
+		t.Fatalf("duplicate physical call or extra grant: run=%#v view=%#v err=%v", loaded.Run, view, err)
 	}
 }
