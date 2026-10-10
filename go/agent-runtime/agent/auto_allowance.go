@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -217,7 +218,7 @@ func lastSettledWorkFingerprint(messages []model.Message) string {
 				Key     string `json:"key"`
 				Args    string `json:"args,omitempty"`
 				Content string `json:"content"`
-			}{Content: strings.TrimSpace(message.Content)}
+			}{Content: message.Content}
 			for j := i - 1; j >= 0; j-- {
 				if messages[j].Role != model.RoleAssistant {
 					continue
@@ -244,7 +245,7 @@ func lastSettledWorkFingerprint(messages []model.Message) string {
 					Key  string `json:"key"`
 					Args string `json:"args,omitempty"`
 				} `json:"calls,omitempty"`
-			}{Content: strings.TrimSpace(message.Content)}
+			}{Content: message.Content}
 			for _, call := range message.ToolCalls {
 				value.Calls = append(value.Calls, struct {
 					Key  string `json:"key"`
@@ -266,8 +267,15 @@ func canonicalToolArguments(arguments json.RawMessage) string {
 	if len(arguments) == 0 {
 		return ""
 	}
+	// Unmarshal's default float64 decoding loses precision above 2^53;
+	// a false no-progress match must not collapse distinct Tool parameters.
+	if !json.Valid(arguments) {
+		return strings.TrimSpace(string(arguments))
+	}
+	decoder := json.NewDecoder(bytes.NewReader(arguments))
+	decoder.UseNumber()
 	var value any
-	if err := json.Unmarshal(arguments, &value); err != nil {
+	if err := decoder.Decode(&value); err != nil {
 		return strings.TrimSpace(string(arguments))
 	}
 	encoded, err := json.Marshal(value)
