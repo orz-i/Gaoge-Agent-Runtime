@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -205,19 +206,22 @@ type EffectRequest struct {
 	DefinitionHash string
 	EffectID       string
 	NodeID         string
-	Class          EffectClass
-	Kind           string
-	Revision       string
-	Definition     *DefinitionReference
-	OutputKey      string
-	MapIndex       int
-	Compensation   bool
-	Input          json.RawMessage
-	MaxCostUnits   int64
-	NestedDepth    int
-	Attempt        int
-	MaxAttempts    int
-	Policy         DefinitionPolicy
+	// OwnerNodeID is the stable relation owner for this effect attempt. Executors
+	// must register child ownership before starting a child that resolves parent policy.
+	OwnerNodeID  string
+	Class        EffectClass
+	Kind         string
+	Revision     string
+	Definition   *DefinitionReference
+	OutputKey    string
+	MapIndex     int
+	Compensation bool
+	Input        json.RawMessage
+	MaxCostUnits int64
+	NestedDepth  int
+	Attempt      int
+	MaxAttempts  int
+	Policy       DefinitionPolicy
 }
 
 // EffectResult is one executor observation. Completed results require a receipt.
@@ -509,11 +513,10 @@ func (runner *Runner) ensureEffectRelation(ctx context.Context, parentRunID stri
 	if runner.relations == nil || effect.ChildRunID == "" {
 		return nil
 	}
-	ownerID := effect.NodeID
+	ownerID := effectRelationOwnerID(effect)
 	if effect.OutputKey != "" || effect.Mapped {
 		// A fan-out activation owns several children, each with a stable effect
 		// identity. Keep existing historical relations when recovering a run.
-		ownerID = effect.ID
 		if reader, ok := runner.relations.(interface {
 			GetByChild(context.Context, string) (runrelation.Relation, error)
 		}); ok {
@@ -531,6 +534,16 @@ func (runner *Runner) ensureEffectRelation(ctx context.Context, parentRunID stri
 		Kind: runrelation.KindWorkflowEffect, OwnerNodeID: ownerID,
 	})
 	return err
+}
+
+func effectRelationOwnerID(effect Effect) string {
+	if effect.Attempt > 1 {
+		return fmt.Sprintf("%s_attempt_%d", effect.ID, effect.Attempt)
+	}
+	if effect.OutputKey != "" || effect.Mapped {
+		return effect.ID
+	}
+	return effect.NodeID
 }
 
 func (runner *Runner) prepareWait(

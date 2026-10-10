@@ -296,8 +296,11 @@ func automaticAllowanceHint(state runState) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"Runtime execution window: %d model call(s) remain before a bounded segment boundary. "+
-			"Keep progress clear and avoid repeating unchanged Tool work; do not assume new permissions or extra hard-limit capacity.",
+		"Runtime renewable soft allowance: %d model call(s) remain in the current segment. "+
+			"This segment boundary is not the task's hard call limit or the model's context limit. "+
+			"Continue unfinished work with the next authorized Tool call; Runtime checks progress and may renew the allowance automatically. "+
+			"Only report a budget stop or request manual continuation after Runtime actually pauses or denies execution. "+
+			"Keep progress clear, avoid repeating unchanged Tool work, and do not assume new permissions or extra hard-limit capacity.",
 		modelLeft,
 	)
 }
