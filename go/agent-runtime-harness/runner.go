@@ -121,6 +121,7 @@ func (runner *Runner) resumeDirectAgentStart(
 		InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
 		Limits:          config.Limits,
 		CallAllowance:   request.CallAllowance,
+		AutoAllowance:   request.AutoAllowance,
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
@@ -577,6 +578,9 @@ type StartRequest struct {
 	Context          *ContextSeed
 	// Only the direct Agent Run may request a renewable, hard-bounded allowance.
 	CallAllowance *agent.CallAllowance
+	// AutoAllowance opts the direct Run into bounded P2 renewals; the SDK
+	// Agent owns its frozen policy, ledger and no-progress decisions.
+	AutoAllowance *agent.AutoAllowancePolicy
 }
 
 // NewRunner constructs a minimal first-party Harness composition layer.
@@ -678,7 +682,7 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		ToolKeys:         append([]string(nil), config.ToolKeys...),
 		RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
 		InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
-		CallAllowance: request.CallAllowance,
+		CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		if errors.Is(startErr, kernel.ErrConflict) {
