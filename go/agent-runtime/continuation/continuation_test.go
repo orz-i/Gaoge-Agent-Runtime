@@ -213,6 +213,51 @@ func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
 	}
 }
 
+func TestDispatcherSkipsPausedBudgetUntilExplicitGrantWakeup(t *testing.T) {
+	t.Parallel()
+	runtime := newRuntime(t)
+	initial := createRun(t, runtime, "pause-then-grant", agent.RunKind)
+	paused, err := runtime.Apply(t.Context(), initial.Run.ID, initial.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusPausedBudget, State: json.RawMessage(`{"allowance":1}`),
+		ErrorCode: "agent.model_allowance_exhausted",
+		Events:    []kernel.EventDraft{{Type: "agent.budget_paused"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumer := &recordingResumer{snapshot: paused}
+	dispatcher, err := continuation.NewDispatcher(runtime, continuation.RegisterResumer(agent.RunKind, resumer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := continuation.Payload{
+		RunID: paused.Run.ID, ExpectedRevision: paused.Run.Revision, Trigger: continuation.TriggerRunReady,
+		SourceRunID: paused.Run.ID, SourceRevision: paused.Run.Revision,
+	}
+	if err = dispatcher.Dispatch(t.Context(), payload); err != nil || resumer.calls != 0 {
+		t.Fatalf("paused Run wakeup improperly dispatched: %d %v", resumer.calls, err)
+	}
+	renewed, err := runtime.Apply(t.Context(), paused.Run.ID, paused.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: json.RawMessage(`{"allowance":2}`),
+		Events: []kernel.EventDraft{{Type: "agent.allowance_granted", Wakeup: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload.ExpectedRevision = renewed.Run.Revision
+	payload.SourceRevision = renewed.Run.Revision
+	resumer.snapshot = renewed
+	if err = dispatcher.Dispatch(t.Context(), payload); err != nil || resumer.calls != 1 {
+		t.Fatalf("granted Run did not dispatch: %d %v", resumer.calls, err)
+	}
+	if err = dispatcher.Dispatch(t.Context(), continuation.Payload{
+		RunID: renewed.Run.ID, ExpectedRevision: paused.Run.Revision, Trigger: continuation.TriggerRunReady,
+		SourceRunID: renewed.Run.ID, SourceRevision: paused.Run.Revision,
+	}); err != nil || resumer.calls != 1 {
+		t.Fatalf("stale pause replayed: %d %v", resumer.calls, err)
+	}
+}
+
 func TestWorkerClaimsDispatchesAndAcknowledges(t *testing.T) {
 	t.Parallel()
 	fixture := newWorkerFixture(t)

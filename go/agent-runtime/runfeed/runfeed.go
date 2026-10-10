@@ -18,6 +18,8 @@ const (
 
 	EventRunStarted          = "run.started"
 	EventRunWaitingInput     = "run.waiting_input"
+	EventRunPausedBudget     = "run.paused_budget"
+	EventRunResumed          = "run.resumed"
 	EventRunCompleted        = "run.completed"
 	EventRunFailed           = "run.failed"
 	EventRunCancelled        = "run.cancelled"
