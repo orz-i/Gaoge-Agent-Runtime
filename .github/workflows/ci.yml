@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
   push:
     branches: [main]
 
@@ -36,6 +37,10 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+
+      - name: Validate pull request Markdown description
+        if: github.event_name == 'pull_request'
+        run: node scripts/check-pr-body-format.mjs
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
