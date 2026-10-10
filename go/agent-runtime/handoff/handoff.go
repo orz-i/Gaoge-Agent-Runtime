@@ -333,7 +333,7 @@ func projectChild(delegation Delegation, child kernel.Snapshot) Delegation {
 		projected.Status = StatusFailed
 	case kernel.RunStatusCancelled:
 		projected.Status = StatusCancelled
-	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput:
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
 		projected.Status = StatusRunning
 	default:
 		projected.Status = StatusRunning
@@ -347,7 +347,7 @@ func childStateError(child kernel.Snapshot) error {
 		return nil
 	case kernel.RunStatusFailed, kernel.RunStatusCancelled:
 		return ErrChildFailed
-	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput:
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
 		return ErrChildPending
 	default:
 		return ErrChildPending
