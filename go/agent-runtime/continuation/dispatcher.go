@@ -63,8 +63,9 @@ func (dispatcher *Dispatcher) eligibleSnapshot(
 	if err != nil {
 		return kernel.Snapshot{}, false, err
 	}
-	eligible := snapshot.Run.Revision == payload.ExpectedRevision && !terminal(snapshot.Run.Status) &&
-		snapshot.Run.Status != kernel.RunStatusWaitingInput
+	// A renewable allowance must be granted explicitly by the owning host.
+	// A stale wakeup cannot dispatch new work while the Run is paused.
+	eligible := snapshot.Run.Revision == payload.ExpectedRevision && snapshot.Run.Status == kernel.RunStatusRunning
 	return snapshot, eligible, nil
 }
 
