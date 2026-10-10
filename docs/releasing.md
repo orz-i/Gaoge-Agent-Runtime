@@ -51,6 +51,10 @@ avoid vague summaries and unrelated promotion.
    are Go module tags and the TypeScript archive attached to GitHub Releases;
    no npm publication credentials are required.
 
+On Windows, add an existing POSIX shell (for example Git's `bin` directory) to
+`PATH` and run `make SHELL=sh beta`; the Makefile includes POSIX environment
+assignments.
+
 Review changes to `contracts/consumers` and the shared HTTP fixtures as public
 contract changes, not generated test churn. A changed constructor, required
 port method, wire field/type, status/error behavior, or persisted representation

@@ -76,11 +76,12 @@ function printCollectorDigest() {
 }
 
 function waitForEndpoint(url) {
+  const nullDevice = process.platform === "win32" ? "NUL" : "/dev/null";
   for (let attempt = 1; attempt <= 30; attempt++) {
     if (
       commandSucceeded(
         "curl",
-        ["--silent", "--show-error", "--max-time", "2", "--output", "/dev/null", url],
+        ["--silent", "--show-error", "--max-time", "2", "--output", nullDevice, url],
         root,
         composeEnv,
       )
