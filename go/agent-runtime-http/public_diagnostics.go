@@ -104,7 +104,7 @@ func PublicDiagnosticPayload(value json.RawMessage) json.RawMessage {
 	if err := json.Unmarshal(value, &decoded); err != nil {
 		return nil
 	}
-	stripDiagnosticFields(decoded)
+	stripDiagnosticFields(decoded, false)
 	result, err := json.Marshal(decoded)
 	if err != nil {
 		return nil
@@ -112,27 +112,72 @@ func PublicDiagnosticPayload(value json.RawMessage) json.RawMessage {
 	return result
 }
 
-func stripDiagnosticFields(value any) {
+// The feature-owned state is opaque. Generic root-level "error"/"failure"
+// objects are SDK diagnostic state and are not exported to ordinary owners.
+// Under explicit business payload keys, preserve ordinary tool/model outcomes
+// while still dropping known diagnostic sub-fields.
+func stripDiagnosticFields(value any, businessContent bool) {
 	switch item := value.(type) {
 	case []any:
 		for _, entry := range item {
-			stripDiagnosticFields(entry)
+			stripDiagnosticFields(entry, businessContent)
 		}
 	case map[string]any:
 		for key, child := range item {
 			normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key))
 			switch normalized {
+			case "error", "errors":
+				if !businessContent {
+					delete(item, key)
+					continue
+				}
+			case "failure":
+				if !businessContent {
+					if fact, ok := child.(map[string]any); ok {
+						for field, raw := range fact {
+							switch strings.ToLower(field) {
+							case "detail", "message", "error":
+								delete(fact, field)
+							case "code":
+								if code, valid := raw.(string); valid {
+									fact[field] = PublicFailureCode(code)
+								} else {
+									delete(fact, field)
+								}
+							}
+						}
+						stripDiagnosticFields(fact, false)
+					} else {
+						delete(item, key)
+					}
+					continue
+				}
+			case "errorcode":
+				if !businessContent {
+					if code, ok := child.(string); ok {
+						item[key] = PublicFailureCode(code)
+					} else {
+						delete(item, key)
+					}
+					continue
+				}
 			case "errordetail", "errormessage", "errorpreview", "cancelerror",
-				"error", "errors", "failure", "diagnostic", "diagnostics",
-				"upstreamdebug", "providererror", "providerresponse", "providerrequest",
+				"diagnostic", "diagnostics", "privatedebug", "upstreamdebug",
+				"providererror", "providerresponse", "providerrequest",
 				"requestbody", "responsebody", "rawerror", "stacktrace",
 				"traceback", "debug", "exception", "headers", "requestheaders",
 				"responseheaders", "authorization", "apikey", "accesstoken",
 				"secret", "credentials":
 				delete(item, key)
-			default:
-				stripDiagnosticFields(child)
+				continue
 			}
+			nextBusiness := businessContent
+			switch normalized {
+			case "result", "results", "output", "outputs", "items", "content",
+				"toolresult", "toolresults", "userdata", "input":
+				nextBusiness = true
+			}
+			stripDiagnosticFields(child, nextBusiness)
 		}
 	}
 }
@@ -210,5 +255,5 @@ func publicWorkbench(detail workbench.Detail) workbench.Detail {
 		}
 		detail.Topology = &topology
 	}
-	return detail
+	return workbench.RehashProjection(detail)
 }
