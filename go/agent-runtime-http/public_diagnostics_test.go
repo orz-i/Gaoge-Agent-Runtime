@@ -83,6 +83,15 @@ func TestPublicSDKWorkbenchAndFeedExcludeNestedProviderErrors(t *testing.T) {
 	}
 }
 
+func TestPublicSDKStructuredDiagnosticsDoNotForwardNestedHeadersOrGenericErrorObjects(t *testing.T) {
+	t.Parallel()
+	payload := json.RawMessage(`{"valid":{"answer":"42"},"providerHeaders":{"authorization":"Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"},"error":{"message":"Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"},"diagnostics":[{"headers":{"x-key":"Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"}}]}`)
+	projected := PublicDiagnosticPayload(payload)
+	if strings.Contains(string(projected), privateDiagnosticFixture) || !strings.Contains(string(projected), "42") {
+		t.Fatalf("nested diagnostic fields leaked or normal results were removed: %s", projected)
+	}
+}
+
 func TestPublicSDKErrorJournalFailsClosedOnMalformedDiagnostics(t *testing.T) {
 	t.Parallel()
 	events := []kernel.Event{{

@@ -123,9 +123,12 @@ func stripDiagnosticFields(value any) {
 			normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key))
 			switch normalized {
 			case "errordetail", "errormessage", "errorpreview", "cancelerror",
+				"error", "errors", "failure", "diagnostic", "diagnostics",
 				"upstreamdebug", "providererror", "providerresponse", "providerrequest",
 				"requestbody", "responsebody", "rawerror", "stacktrace",
-				"traceback", "debug", "exception":
+				"traceback", "debug", "exception", "headers", "requestheaders",
+				"responseheaders", "authorization", "apikey", "accesstoken",
+				"secret", "credentials":
 				delete(item, key)
 			default:
 				stripDiagnosticFields(child)
