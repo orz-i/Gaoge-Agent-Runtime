@@ -5,9 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+## 0.1.0-beta.17
+
 - Add opt-in provider-neutral typed model failure codes, preserving bounded durable Agent terminal reasons without changing physical retry, usage accounting or persisted schema.
 - Restrict ordinary owner Run/Workbench/Harness/Invocation/Subtask/feed/journal HTTP diagnostic projections to bounded public codes and safe details. Internal durable error details remain unchanged for separately authorized diagnostics.
 - Change the reviewed `cancel.json` HTTP fixture from the user-supplied cancellation reason to the invariant safe summary; the response shape and owner authorization are unchanged. This is a prerelease public-message behavior change requiring a coordinated Beta cohort.
+- Preserve legitimate business `error`/`failure` content inside user-owned input/results, project Workflow failure status and bounded code without raw details, and rehash Workbench, Sections and Topology to the visible sanitized payload.
+- Bound Workflow Trace error codes and nested SDK diagnostic-only request/header fields without mutating original persisted execution facts.
+
+Upgrade note: upgrade all nine Go modules and the GitHub TypeScript archive together. Safe Run/Harness/Workbench/Feed error text is now intentional public behavior; do not parse raw `errorDetail` to recover provider causes. Hosts supply only trusted classified model codes; no new SQL schema or automatic retry is introduced. See [Beta.17 upgrade notes](docs/releases/v0.1.0-beta.17.md).
 
 ## 0.1.0-beta.16
 

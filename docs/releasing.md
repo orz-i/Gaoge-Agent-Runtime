@@ -67,19 +67,19 @@ PostgreSQL. These checks do not establish compatibility with older releases.
 ## Create and push tags
 
 ```bash
-node scripts/release-tags.mjs --version 0.1.0-beta.16
-node scripts/release-tags.mjs --version 0.1.0-beta.16 --create
+node scripts/release-tags.mjs --version 0.1.0-beta.17
+node scripts/release-tags.mjs --version 0.1.0-beta.17 --create
 git push --atomic origin \
-  v0.1.0-beta.16 \
-  go/agent-runtime/v0.1.0-beta.16 \
-  go/agent-runtime-harness/v0.1.0-beta.16 \
-  go/agent-runtime-harness-postgres/v0.1.0-beta.16 \
-  go/agent-runtime-mcp/v0.1.0-beta.16 \
-  go/agent-runtime-otel/v0.1.0-beta.16 \
-  go/agent-runtime-a2a/v0.1.0-beta.16 \
-  go/agent-runtime-postgres/v0.1.0-beta.16 \
-  go/agent-runtime-redis/v0.1.0-beta.16 \
-  go/agent-runtime-http/v0.1.0-beta.16
+  v0.1.0-beta.17 \
+  go/agent-runtime/v0.1.0-beta.17 \
+  go/agent-runtime-harness/v0.1.0-beta.17 \
+  go/agent-runtime-harness-postgres/v0.1.0-beta.17 \
+  go/agent-runtime-mcp/v0.1.0-beta.17 \
+  go/agent-runtime-otel/v0.1.0-beta.17 \
+  go/agent-runtime-a2a/v0.1.0-beta.17 \
+  go/agent-runtime-postgres/v0.1.0-beta.17 \
+  go/agent-runtime-redis/v0.1.0-beta.17 \
+  go/agent-runtime-http/v0.1.0-beta.17
 ```
 
 GitHub does not create a push event when one push updates more than three tags.
@@ -88,7 +88,7 @@ start the release workflow against the existing immutable root tag after the
 push:
 
 ```bash
-gh workflow run release.yml --ref main -f release_tag=v0.1.0-beta.16
+gh workflow run release.yml --ref main -f release_tag=v0.1.0-beta.17
 ```
 
 The workflow checks out the root tag, re-runs the quality/coverage/security and
