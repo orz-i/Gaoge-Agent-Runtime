@@ -115,6 +115,8 @@ type contextArtifactReadResult struct {
 	NextOffset int                         `json:"nextOffset"`
 	Done       bool                        `json:"done"`
 	Content    string                      `json:"content"`
+	TotalRunes int                         `json:"totalRunes"`
+	Found      *bool                       `json:"found"`
 }
 
 func executeContextArtifactRead(
@@ -126,11 +128,25 @@ func executeContextArtifactRead(
 	limit int,
 ) contextArtifactReadResult {
 	t.Helper()
+	return executeContextArtifactReadInput(t, handler, runID, contextArtifactReadInput{ArtifactID: artifactID, Offset: offset, Limit: limit})
+}
+
+func executeContextArtifactReadInput(
+	t *testing.T,
+	handler *ContextArtifactToolHandler,
+	runID string,
+	input contextArtifactReadInput,
+) contextArtifactReadResult {
+	t.Helper()
+	arguments, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
 	result, err := handler.Execute(t.Context(), tools.ExecutionRequest{
 		RunID: runID,
 		Call: tools.Call{
 			ID: "artifact-read", ToolKey: ContextArtifactToolKey,
-			Arguments: mustContextArtifactArguments(t, artifactID, offset, limit),
+			Arguments: arguments,
 		},
 	})
 	if err != nil {
