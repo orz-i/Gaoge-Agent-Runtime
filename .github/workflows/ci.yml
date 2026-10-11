@@ -54,6 +54,20 @@ jobs:
       - name: Run release-quality gate
         run: make check
 
+  release-commands-windows:
+    name: Windows release command safety
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.22.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Validate shell-free release commands
+        run: node --test scripts/release-command.test.mjs
+
   coverage:
     name: Coverage gates
     runs-on: ubuntu-latest

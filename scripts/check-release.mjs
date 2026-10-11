@@ -1,8 +1,8 @@
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { run } from "./release-command.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const version = readFileSync(path.join(root, "VERSION"), "utf8").trim();
@@ -104,22 +104,4 @@ function checkTypeScriptConsumer() {
   const tsc = path.join(root, "node_modules", "typescript", "bin", "tsc");
   run(process.execPath, [tsc, "--project", path.join(consumer, "tsconfig.json")], root);
   run(process.execPath, ["index.mjs"], consumer);
-}
-
-function run(command, args, cwd, env = process.env, capture = false) {
-  const usesCommandShim = process.platform === "win32" && ["npm", "pnpm"].includes(command);
-  const executable = usesCommandShim ? (process.env.ComSpec ?? "cmd.exe") : command;
-  const executableArgs = usesCommandShim ? ["/d", "/s", "/c", command, ...args] : args;
-  const result = spawnSync(executable, executableArgs, {
-    cwd,
-    env,
-    encoding: "utf8",
-    shell: false,
-    stdio: capture ? "pipe" : "inherit",
-    maxBuffer: 100 * 1024 * 1024,
-  });
-  if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}\n${result.stdout ?? ""}\n${result.stderr ?? ""}`);
-  }
-  return capture ? (result.stdout ?? "").trim() : "";
 }
