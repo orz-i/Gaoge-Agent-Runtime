@@ -72,7 +72,9 @@ func knownModelFailureCode(code string) bool {
 		"model.upstream_safety_rejected",
 		"model_route_not_configured",
 		"model.access_denied",
-		"model.entitlement_denied":
+		"model.entitlement_denied",
+		"context.artifact_payload_too_large",
+		"context.input_budget_exceeded":
 		return true
 	default:
 		return false

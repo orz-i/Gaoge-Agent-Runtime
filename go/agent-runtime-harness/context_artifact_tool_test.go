@@ -87,6 +87,27 @@ func TestContextArtifactToolRejectsCrossScopeArtifact(t *testing.T) {
 	}
 }
 
+func TestContextArtifactToolMissingIDIsCorrectableWithoutWeakeningOwnership(t *testing.T) {
+	t.Parallel()
+	store, _, _, root := contextRunMiddlewareFixture(t)
+	handler := NewContextArtifactToolHandler(store, nil)
+	request := tools.ExecutionRequest{
+		RunID: root.ExecutionRefID,
+		Call: tools.Call{ID: "artifact-typo", ToolKey: ContextArtifactToolKey,
+			Arguments: mustContextArtifactArguments(t, "ctxa_typo", 0, 100)},
+	}
+	_, err := handler.Execute(t.Context(), request)
+	code, message, correctable := tools.RecoverableCallErrorInfo(err)
+	if !correctable || code != "context_artifact.not_found" || message == "" || !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing artifact must be model-correctable: code=%q message=%q error=%v", code, message, err)
+	}
+	request.RunID = "unowned-run"
+	_, err = handler.Execute(t.Context(), request)
+	if _, _, correctable = tools.RecoverableCallErrorInfo(err); correctable || !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing durable ownership must remain a runtime failure: %v", err)
+	}
+}
+
 type contextArtifactReadResult struct {
 	ArtifactID string                      `json:"artifactID"`
 	Kind       runtimecontext.ArtifactKind `json:"kind"`

@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+## 0.1.0-beta.18
+
+- Return a correctable `context_artifact.not_found` Tool result for a missing artifact ID after durable caller ownership has been verified. Cross-scope reads and ownership/store failures remain denied.
+- Expose typed `ArtifactPayloadLimitError` size facts and `ErrArtifactPayloadTooLarge`, retaining `errors.Is(ErrInvalidInput)` compatibility and the 4 MiB archive ceiling.
+- Register bounded `context.artifact_payload_too_large` and `context.input_budget_exceeded` terminal codes with static HTTP recovery messages, preserving the P2 diagnostic boundary.
+- Fall back to conservative accounting when a native counter returns zero for a complete non-empty sampling request.
+- Include the post-Beta.17 Windows release-command security fix and accepted Node toolchain dependency updates from main.
+
+Upgrade all nine Go modules and the GitHub TypeScript archive together. Hosts must classify typed Context errors and enable their existing native tokenizer for pure text as well as attachments. No persistence schema, HTTP shape, automatic retry policy or archive ceiling changes. See [Beta.18 upgrade notes](docs/releases/v0.1.0-beta.18.md).
 ## 0.1.0-beta.17
 
 - Add opt-in provider-neutral typed model failure codes, preserving bounded durable Agent terminal reasons without changing physical retry, usage accounting or persisted schema.

@@ -35,7 +35,8 @@ func PublicFailureCode(code string) string {
 		"model.upstream_context_exceeded", "model.upstream_request_invalid",
 		"model.upstream_request_rejected", "model.upstream_model_unavailable",
 		"model.upstream_safety_rejected", "model_route_not_configured",
-		"model.access_denied", "model.entitlement_denied", publicUnknownFailureCode:
+		"model.access_denied", "model.entitlement_denied",
+		"context.artifact_payload_too_large", "context.input_budget_exceeded", publicUnknownFailureCode:
 		return code
 	}
 	if strings.HasPrefix(code, "agent.shared_") && strings.HasSuffix(code, "_budget") {
@@ -78,6 +79,10 @@ func PublicFailureDetail(code, detail string) string {
 		return "model execution route is unavailable"
 	case "agent.tool_failed":
 		return "tool execution failed"
+	case "context.artifact_payload_too_large":
+		return "context archive exceeds the 4 MiB storage limit; shorten the input or start a new conversation"
+	case "context.input_budget_exceeded":
+		return "context request exceeds its token or serialized size limit; shorten the input or start a new conversation"
 	default:
 		return "execution could not be completed"
 	}

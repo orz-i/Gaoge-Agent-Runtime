@@ -857,7 +857,9 @@ func (manager *Manager) AssessRequest(
 			Context: countContext,
 			Payload: append([]byte(nil), serialized...),
 		}
-		if count, countErr := manager.counter.Count(ctx, countRequest); countErr == nil && count >= 0 {
+		// A complete sampling request has non-empty framing. A zero response cannot
+		// prove its input budget and must use the same fail-safe path as an unavailable counter.
+		if count, countErr := manager.counter.Count(ctx, countRequest); countErr == nil && count > 0 {
 			assessment.RawTokenEstimate = count
 			assessment.AdjustedTokenEstimate = count
 			assessment.HardTokenEstimate = count
@@ -1352,7 +1354,10 @@ func normalizeArtifact(value *Artifact, scopeID string, generation int) error {
 		return ErrInvalidInput
 	}
 	if len(value.Content) > MaxArtifactPayloadBytes || len(value.ContentJSON) > MaxArtifactPayloadBytes-len(value.Content) {
-		return ErrInvalidInput
+		return &ArtifactPayloadLimitError{
+			PayloadBytes: int64(len(value.Content)) + int64(len(value.ContentJSON)),
+			LimitBytes:   MaxArtifactPayloadBytes,
+		}
 	}
 	value.ContentJSON = normalizeRawJSON(value.ContentJSON)
 	payload, err := canonicalJSON(struct {
