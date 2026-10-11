@@ -231,6 +231,37 @@ func (query *Query) listEvents(ctx context.Context, snapshot kernel.Snapshot) ([
 	return result, nil
 }
 
+// RehashProjection restores the canonical Section, Topology and Workbench
+// content hashes after an HTTP adapter has projected away sensitive fields.
+// The input is already a copy of the internal Detail; the exported API never
+// mutates the caller's data. A malformed projection has no truthful hash.
+func RehashProjection(detail Detail) Detail {
+	detail = cloneDetail(detail)
+	for index := range detail.Sections {
+		if len(detail.Sections[index].Content) > 0 {
+			detail.Sections[index].Hash = hashBytes(detail.Sections[index].Content)
+		} else {
+			detail.Sections[index].Hash = ""
+		}
+	}
+	if detail.Topology != nil {
+		topology := *detail.Topology
+		topology.Hash = ""
+		encoded, err := json.Marshal(topology)
+		if err == nil {
+			topology.Hash = hashBytes(encoded)
+		}
+		detail.Topology = &topology
+	}
+	hash, err := detailHash(detail)
+	if err == nil {
+		detail.Hash = hash
+	} else {
+		detail.Hash = ""
+	}
+	return detail
+}
+
 func detailHash(detail Detail) (string, error) {
 	material := detail
 	material.Hash = ""
