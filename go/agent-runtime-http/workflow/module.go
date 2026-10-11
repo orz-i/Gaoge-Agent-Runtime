@@ -193,7 +193,7 @@ func (handler *Handler) GetTrace(context *gin.Context) {
 		writeError(context, err)
 		return
 	}
-	runtimehttp.WriteSuccess(context, trace)
+	runtimehttp.WriteSuccess(context, publicWorkflowTrace(trace))
 }
 
 func isProgressError(err error) bool {
