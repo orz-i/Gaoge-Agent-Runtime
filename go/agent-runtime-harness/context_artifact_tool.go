@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -21,6 +22,7 @@ type contextArtifactReadInput struct {
 	ArtifactID string `json:"artifactID"`
 	Offset     int    `json:"offset,omitempty"`
 	Limit      int    `json:"limit,omitempty"`
+	Query      string `json:"query,omitempty"`
 }
 
 type contextArtifactPage struct {
@@ -28,6 +30,8 @@ type contextArtifactPage struct {
 	nextOffset int
 	done       bool
 	content    string
+	totalRunes int
+	found      *bool
 }
 
 // ContextArtifactToolHandler reads exact payloads removed from the inline Context
@@ -70,7 +74,7 @@ func (handler *ContextArtifactToolHandler) parseReadInput(request tools.Executio
 		return contextArtifactReadInput{}, tools.NewRecoverableCallError("context_artifact.invalid_input", "invalid Context artifact read input", err)
 	}
 	input.ArtifactID = strings.TrimSpace(input.ArtifactID)
-	if input.ArtifactID == "" || input.Offset < 0 || input.Limit < 0 {
+	if input.ArtifactID == "" || input.Offset < 0 || input.Limit < 0 || utf8.RuneCountInString(input.Query) > 256 {
 		return contextArtifactReadInput{}, tools.NewRecoverableCallError("context_artifact.invalid_input", "invalid Context artifact read range", tools.ErrInvalidCall)
 	}
 	return input, nil
@@ -97,9 +101,13 @@ func (handler *ContextArtifactToolHandler) resolveReadableArtifact(
 	artifact, err := handler.store.GetContextArtifact(ctx, artifactID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
+			message, checkpointErr := handler.artifactNotFoundGuidance(ctx, turn)
+			if checkpointErr != nil {
+				return runtimecontext.Artifact{}, checkpointErr
+			}
 			return runtimecontext.Artifact{}, tools.NewRecoverableCallError(
 				"context_artifact.not_found",
-				"Context artifact was not found. Copy the exact artifact_id from the context checkpoint or compacted tool result, then retry. Do not guess IDs.",
+				message,
 				err,
 			)
 		}
@@ -109,6 +117,29 @@ func (handler *ContextArtifactToolHandler) resolveReadableArtifact(
 		return runtimecontext.Artifact{}, ErrConflict
 	}
 	return artifact, nil
+}
+
+func (handler *ContextArtifactToolHandler) artifactNotFoundGuidance(ctx context.Context, turn Turn) (string, error) {
+	const guidance = "Context artifact was not found. Copy the exact artifact_id from the context checkpoint or compacted tool result, then retry. Do not guess IDs."
+	if strings.TrimSpace(turn.ContextCheckpointID) == "" {
+		return guidance, nil
+	}
+	checkpoint, err := handler.store.GetContextCheckpoint(ctx, turn.ContextCheckpointID)
+	if err != nil {
+		return "", err
+	}
+	if checkpoint.ScopeID != turn.SessionID || checkpoint.ID != turn.ContextCheckpointID ||
+		!runtimecontext.ValidCheckpoint(checkpoint) || !sameContextCheckpointRef(checkpoint, turn.ContextRef) {
+		return "", ErrConflict
+	}
+	ids := checkpoint.ArtifactIDs
+	if len(ids) > 16 {
+		ids = ids[:16]
+	}
+	if len(ids) != 0 {
+		return guidance + " Exact IDs from the current checkpoint: " + strings.Join(ids, ", ") + ".", nil
+	}
+	return guidance, nil
 }
 
 func buildContextArtifactPage(
@@ -126,12 +157,23 @@ func buildContextArtifactPage(
 	if input.Offset > len(runes) {
 		return contextArtifactPage{}, tools.NewRecoverableCallError("context_artifact.invalid_range", "Context artifact offset is past the end", tools.ErrInvalidCall)
 	}
+	var found *bool
+	if input.Query != "" {
+		match := strings.Index(string(runes[input.Offset:]), input.Query)
+		matched := match >= 0
+		found = &matched
+		if !matched {
+			return contextArtifactPage{offset: input.Offset, nextOffset: len(runes), totalRunes: len(runes), done: true, found: found}, nil
+		}
+		input.Offset += utf8.RuneCountInString(string(runes[input.Offset:])[:match])
+	}
 	end := input.Offset + limit
 	if end > len(runes) {
 		end = len(runes)
 	}
 	return contextArtifactPage{
 		offset: input.Offset, nextOffset: end, done: end == len(runes), content: string(runes[input.Offset:end]),
+		totalRunes: len(runes), found: found,
 	}, nil
 }
 
@@ -148,9 +190,12 @@ func contextArtifactExecutionResult(
 		NextOffset  int                         `json:"nextOffset"`
 		Done        bool                        `json:"done"`
 		Content     string                      `json:"content"`
+		TotalRunes  int                         `json:"totalRunes"`
+		Found       *bool                       `json:"found,omitempty"`
 	}{
 		ArtifactID: artifact.ID, Kind: artifact.Kind, ContentHash: artifact.ContentHash,
 		Offset: page.offset, NextOffset: page.nextOffset, Done: page.done, Content: page.content,
+		TotalRunes: page.totalRunes, Found: page.found,
 	})
 	if err != nil {
 		return tools.ExecutionResult{}, err
@@ -173,8 +218,8 @@ func ContextArtifactToolRegistration(handler *ContextArtifactToolHandler) tools.
 		Definition: tools.Definition{
 			Key:         ContextArtifactToolKey,
 			Name:        "read_context_artifact",
-			Description: "Read an exact bounded chunk from a Context artifact referenced by a compacted conversation or Tool result. Continue with nextOffset until done.",
-			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["artifactID"],"properties":{"artifactID":{"type":"string","minLength":1,"maxLength":128},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":8000}}}`),
+			Description: "Read exact bounded text from a Context artifact. To recover a known key or phrase, set query for literal search instead of scanning every page. Search starts at offset and returns found plus an excerpt starting at the match. Offsets and totalRunes count Unicode characters, not bytes. Copy an exact referenced artifact ID. Continue with nextOffset until done; a missing match applies only to that artifact.",
+			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["artifactID"],"properties":{"artifactID":{"type":"string","minLength":1,"maxLength":128},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":8000},"query":{"type":"string","minLength":1,"maxLength":256}}}`),
 		},
 		Handler: handler,
 	}

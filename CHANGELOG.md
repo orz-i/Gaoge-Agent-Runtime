@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+## 0.1.0-beta.19
+
+- Archive removed transcript messages across ordered, lossless Context artifacts, each within the existing 4 MiB durable ceiling. Replace `PortableCompaction.Artifact` with `Artifacts`; retained entries keep their source and turn identities for attachment replay.
+- Distinguish the preferred recent-turn tail from a frozen `MinimumRecentTurns` floor. Hosts can relieve hard input pressure while preserving the complete current turn and any explicitly larger minimum.
+- Add bounded literal `query` lookup and Unicode `totalRunes` to `harness.read_context_artifact`, allowing retrieval of fields deep in large archives without scanning every page.
+- Include exact artifact references from the caller's durable Turn checkpoint in correctable missing-ID results. Cross-scope access, missing ownership and checkpoint/store failures remain denied.
+
+Upgrade all nine Go modules and the GitHub TypeScript archive together. Hosts must consume `Artifacts`, persist every part before committing the rollover and reassess the compacted request before sampling. No SQL migration or per-artifact ceiling increase is required. See [Beta.19 upgrade notes](docs/releases/v0.1.0-beta.19.md).
+
 ## 0.1.0-beta.18
 
 - Return a correctable `context_artifact.not_found` Tool result for a missing artifact ID after durable caller ownership has been verified. Cross-scope reads and ownership/store failures remain denied.
