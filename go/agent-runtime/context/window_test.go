@@ -31,12 +31,28 @@ func TestContextArtifactPayloadHardLimitFailsClosed(t *testing.T) {
 		runtimectx.ArtifactToolResult, "scope-hard-limit", 1, "call-hard-limit", oversized, nil,
 	); !errors.Is(err, runtimectx.ErrInvalidInput) {
 		t.Fatalf("oversized Tool artifact must fail closed, got %v", err)
+	} else if !strings.Contains(err.Error(), "4194304") {
+		t.Fatalf("artifact limit must identify the durable byte ceiling: %v", err)
+	} else {
+		assertArtifactLimitError(t, err, int64(len(oversized)))
 	}
 	oversizedJSON := json.RawMessage(`"` + strings.Repeat("x", runtimectx.MaxArtifactPayloadBytes) + `"`)
 	if _, err := runtimectx.NewArtifact(
 		runtimectx.ArtifactCompaction, "scope-hard-limit", 1, "source-hard-limit", "", oversizedJSON,
 	); !errors.Is(err, runtimectx.ErrInvalidInput) {
 		t.Fatalf("oversized JSON artifact must fail closed, got %v", err)
+	} else {
+		assertArtifactLimitError(t, err, int64(len(oversizedJSON)))
+	}
+}
+
+func assertArtifactLimitError(t *testing.T, err error, bytes int64) {
+	t.Helper()
+	var limit *runtimectx.ArtifactPayloadLimitError
+	if !errors.Is(err, runtimectx.ErrArtifactPayloadTooLarge) || !errors.As(err, &limit) ||
+		limit.PayloadBytes != bytes || limit.LimitBytes != runtimectx.MaxArtifactPayloadBytes ||
+		strings.Contains(err.Error(), strings.Repeat("x", 50)) {
+		t.Fatalf("archive limit must retain typed content-free facts: %v", err)
 	}
 }
 
@@ -710,6 +726,19 @@ func TestAssessRequestUsesConservativeHardBoundWhenCounterIsUnavailable(t *testi
 	}
 	if runtimectx.WithinHardBudget(assessment, runtimectx.Policy{}) {
 		t.Fatalf("heuristic soft estimate incorrectly authorized hard budget: %#v", assessment)
+	}
+}
+
+func TestAssessRequestZeroCounterFallsBackRatherThanClaimingExactCount(t *testing.T) {
+	t.Parallel()
+	manager := runtimectx.NewManager(runtimectx.Dependencies{Counter: exactCounter{tokens: 0}})
+	assessment, err := manager.AssessRequest(t.Context(), strings.Repeat("🌱", 200), runtimectx.ModelWindow{
+		ContextTokens: 300, TokenCountContext: runtimectx.TokenCountContext{Protocol: "openai_responses", Model: "MiniMax-M3.1-Flash-Preview"},
+	}, runtimectx.Policy{})
+	requireNoError(t, err)
+	if assessment.TokenCountSource != runtimectx.CountEstimated || assessment.HardTokenEstimate < assessment.SerializedBytes ||
+		runtimectx.WithinHardBudget(assessment, runtimectx.Policy{}) {
+		t.Fatalf("zero count authorized or misrepresented a non-empty request: %#v", assessment)
 	}
 }
 

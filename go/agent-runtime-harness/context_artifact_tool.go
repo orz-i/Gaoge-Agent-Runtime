@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
@@ -95,6 +96,13 @@ func (handler *ContextArtifactToolHandler) resolveReadableArtifact(
 	}
 	artifact, err := handler.store.GetContextArtifact(ctx, artifactID)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return runtimecontext.Artifact{}, tools.NewRecoverableCallError(
+				"context_artifact.not_found",
+				"Context artifact was not found. Copy the exact artifact_id from the context checkpoint or compacted tool result, then retry. Do not guess IDs.",
+				err,
+			)
+		}
 		return runtimecontext.Artifact{}, err
 	}
 	if strings.TrimSpace(artifact.ScopeID) == "" || artifact.ScopeID != turn.SessionID {

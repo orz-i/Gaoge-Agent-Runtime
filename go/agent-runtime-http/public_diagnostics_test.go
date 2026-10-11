@@ -13,6 +13,17 @@ import (
 
 const privateDiagnosticFixture = "Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"
 
+func TestPublicContextLimitFailuresExplainRecoveryWithoutDiagnosticBytes(t *testing.T) {
+	t.Parallel()
+	for _, code := range []string{"context.artifact_payload_too_large", "context.input_budget_exceeded"} {
+		public := PublicRun(kernel.Run{ErrorCode: code, ErrorDetail: privateDiagnosticFixture})
+		if public.ErrorCode != code || strings.Contains(public.ErrorDetail, privateDiagnosticFixture) ||
+			!strings.Contains(public.ErrorDetail, "start a new conversation") {
+			t.Fatalf("unsafe or unclear context failure projection: %#v", public)
+		}
+	}
+}
+
 func TestPublicSDKFailureProjectionKeepsCodesWithoutDiagnosticBytes(t *testing.T) {
 	t.Parallel()
 	internal := kernel.Run{

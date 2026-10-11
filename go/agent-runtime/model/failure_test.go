@@ -21,6 +21,8 @@ func TestClassifiedModelErrorsPreserveCauseAndIndependentRetryPolicy(t *testing.
 		{"rate-limit", "model.upstream_rate_limited"},
 		{"gateway-permission", "model.access_denied"},
 		{"gateway-entitlement", "model.entitlement_denied"},
+		{"context-archive-limit", "context.artifact_payload_too_large"},
+		{"context-input-limit", "context.input_budget_exceeded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			wrapped := fmt.Errorf("gateway: %w", model.NewClassifiedError(secret, tc.code))
