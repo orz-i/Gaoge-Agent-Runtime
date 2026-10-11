@@ -2,8 +2,8 @@
 
 - Date: 2026-10-11
 - Branch: `feat/error-governance-p2-sdk`; base `origin/main@1669ffdc` (published Beta.16)
-- Initial P2 candidate: `5227886`; merge-review fix commit: to be filled after commit
-- Outcome: **merge blockers fixed; release-quality checks still required**. No merge, tag or GitHub prerelease has been created as of this review's initial preparation.
+- Initial P2 candidate: `5227886`; merge-review fix: `e3dd5bf`; Beta.17 full-cohort preparation: `516bdd1`
+- Outcome: **LOCAL GO for protected PR merge**; full `make beta` PASS, GitHub PR #40 required checks must still pass. No merge, tag or GitHub prerelease has been created as of this update.
 - References: [ADR-0007](adr/0007-classified-failures-and-error-diagnostics.md) and [implementation candidate](error-governance-p2-sdk-candidate-audit.md)
 
 ## Scope and changes
@@ -29,10 +29,10 @@ An authoritative Run still has an opaque, feature-owned state object; P2 retains
 ## Release gate
 
 Publish only a new coherent Beta cohort (root tag + all nine Go module tags + GitHub TypeScript archive) after:
-1. exact-code `make check`, unit and race verification and the reviewed JSON fixture/client contract gates;
-2. release preparation updating `VERSION`, all modules, TS/metadata/lockfile, changelog, README and release notes;
-3. `pnpm install --frozen-lockfile` and full `make beta`, including real PostgreSQL/Redis and OTel Collector;
-4. protected-branch PR approval/checks and confirmed merged GitHub SHA;
-5. atomic tag push, release workflow success, checked artifact availability.
+1. **PASS** `make beta` at code/release HEAD `516bdd1` (Exit 0), covering complete `make check`, Race, Go coverage 72.52% (minimum 70%), TypeScript coverage 79.16%, Go vulnerability report with 0 affected vulnerabilities, npm audit, reviewed JSON fixtures and packed client contract;
+2. **PASS** the coordinated Beta.17 `VERSION`, all nine Go module requirements, TS metadata, release boundary, README, changelog, release notes and frozen lockfile. `pnpm install --frozen-lockfile` and Go module tidy-check passed;
+3. **PASS** real PostgreSQL/Redis race-backed integration and OpenTelemetry Collector Trace/Metric E2E during local `make beta`; evidence `.cache/error-p2-beta17-gate.log` and `.exit`, matching `HEAD=516bdd1`;
+4. **PENDING** protected-branch [PR #40](https://github.com/orz-i/Gaoge-Agent-Runtime/pull/40) checks and confirmed merged GitHub SHA;
+5. **PENDING** atomic tag push, release workflow success, checked artifact availability.
 
 If any gate fails: **NO-GO**, do not create or repoint tags. Gaoge must not import an unpublished SDK candidate. After publication, Gaoge independently upgrades its committed pin and runs end-to-end Text Agent classification, HTTP security and desktop/tablet/mobile regressions.
