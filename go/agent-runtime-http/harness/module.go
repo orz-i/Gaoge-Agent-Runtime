@@ -259,14 +259,15 @@ func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
 	return SnapshotResponse{
 		Turn: TurnResponse{
 			ID: snapshot.Turn.ID, HostTurn: snapshot.Turn.HostTurn, Status: status,
-			Revision: snapshot.Turn.Revision, ErrorCode: errorCode, ErrorDetail: errorDetail,
-			CreatedAt: snapshot.Turn.CreatedAt, UpdatedAt: snapshot.Turn.UpdatedAt,
+			Revision: snapshot.Turn.Revision, ErrorCode: runtimehttp.PublicFailureCode(errorCode),
+			ErrorDetail: runtimehttp.PublicFailureDetail(errorCode, errorDetail),
+			CreatedAt:   snapshot.Turn.CreatedAt, UpdatedAt: snapshot.Turn.UpdatedAt,
 		},
 		Invocations:  invocations,
 		Interactions: interactions,
 		Items:        items,
 		Output:       output,
-		Budget:       snapshot.Budget, Subtasks: snapshot.Subtasks,
+		Budget:       snapshot.Budget, Subtasks: publicSubtasks(snapshot.Subtasks),
 		Delegation: delegationResponse(snapshot),
 	}, nil
 }
@@ -277,9 +278,27 @@ func invocationResponse(value harness.Invocation) InvocationResponse {
 		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
 		ExecutionClass: value.ExecutionClass, InputHash: value.InputHash, Status: value.Status,
 		Attempt: value.Attempt, OutputRefs: append([]harness.HostRef(nil), value.OutputRefs...),
-		ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail, Revision: value.Revision,
+		ErrorCode:   runtimehttp.PublicFailureCode(value.ErrorCode),
+		ErrorDetail: runtimehttp.PublicFailureDetail(value.ErrorCode, value.ErrorDetail), Revision: value.Revision,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
+}
+
+func publicSubtasks(items []harness.Subtask) []harness.Subtask {
+	if len(items) == 0 {
+		return nil
+	}
+	projected := make([]harness.Subtask, len(items))
+	for index, item := range items {
+		code := item.ErrorCode
+		item.ErrorCode = runtimehttp.PublicFailureCode(code)
+		item.ErrorDetail = runtimehttp.PublicFailureDetail(code, item.ErrorDetail)
+		if item.CancelError != "" {
+			item.CancelError = "subtask cancellation could not be completed"
+		}
+		projected[index] = item
+	}
+	return projected
 }
 
 func itemResponse(item harness.Item) (ItemResponse, error) {
@@ -300,8 +319,11 @@ func itemResponse(item harness.Item) (ItemResponse, error) {
 }
 
 func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.RawMessage, error) {
-	if len(payload) == 0 || kind != harness.ItemDelegation && kind != harness.ItemInvocation {
-		return append(json.RawMessage(nil), payload...), nil
+	if len(payload) == 0 {
+		return nil, nil
+	}
+	if kind != harness.ItemDelegation && kind != harness.ItemInvocation {
+		return runtimehttp.PublicDiagnosticPayload(payload), nil
 	}
 	var value map[string]any
 	if err := json.Unmarshal(payload, &value); err != nil {
@@ -315,12 +337,17 @@ func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.Raw
 	if kind == harness.ItemInvocation {
 		delete(value, "executionRefID")
 	}
-	return json.Marshal(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	return runtimehttp.PublicDiagnosticPayload(encoded), nil
 }
 
 func turnEventResponse(event harness.TurnEvent) (harness.TurnEvent, error) {
 	result := event
-	result.Data = append(json.RawMessage(nil), event.Data...)
+	result.Message = runtimehttp.PublicEventMessage(event.Type, event.Status, event.Message)
+	result.Data = runtimehttp.PublicDiagnosticPayload(event.Data)
 	if event.Type != harness.EventItemStarted && event.Type != harness.EventItemCompleted || len(event.Data) == 0 {
 		return result, nil
 	}
@@ -630,7 +657,8 @@ func terminalTurnSnapshotEvent(snapshot harness.Snapshot, seq int64) harness.Tur
 	}
 	return harness.TurnEvent{
 		Seq: seq, TurnID: snapshot.Turn.ID, Type: eventType,
-		Message: snapshot.Turn.ErrorDetail, Status: string(snapshot.Turn.Status), Terminal: true,
+		Message: runtimehttp.PublicFailureDetail(snapshot.Turn.ErrorCode, snapshot.Turn.ErrorDetail),
+		Status:  string(snapshot.Turn.Status), Terminal: true,
 		CreatedAt: snapshot.Turn.UpdatedAt,
 	}
 }

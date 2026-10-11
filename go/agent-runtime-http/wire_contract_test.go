@@ -156,7 +156,7 @@ func wireFixtureBodies(t *testing.T) map[string]any {
 			{Seq: 2, Type: "run.waiting", Message: "Approval required", Data: json.RawMessage(`{"checkpointID":"checkpoint-1"}`), CreatedAt: created},
 		}, EventHead: 2},
 		"events-empty.json": RunEventPageResponse{Events: []kernel.Event{}},
-		"cancel.json":       CancelRunResponse{Run: cancelled},
+		"cancel.json":       CancelRunResponse{Run: PublicRun(cancelled)},
 		"error.json":        json.RawMessage(errorRecorder.Body.Bytes()),
 		"feed-terminal.json": runfeed.Event{
 			Seq: 3, RunID: "run-1", Type: "run.completed", Delta: "done", Message: "Run completed",

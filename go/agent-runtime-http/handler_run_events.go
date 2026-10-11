@@ -47,7 +47,7 @@ func (handler *Handler) GetRunEvents(context *gin.Context) {
 	if events == nil {
 		events = []kernel.Event{}
 	}
-	writeSuccess(context, RunEventPageResponse{Events: events, EventHead: snapshot.EventHead})
+	writeSuccess(context, RunEventPageResponse{Events: publicKernelEvents(events), EventHead: snapshot.EventHead})
 }
 
 func runEventPage(context *gin.Context) (int64, int, error) {

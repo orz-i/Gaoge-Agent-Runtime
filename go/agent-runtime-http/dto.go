@@ -60,13 +60,13 @@ type RunEventPageResponse struct {
 
 func snapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
 	return RunSnapshotResponse{
-		Run: snapshot.Run, State: append(json.RawMessage(nil), snapshot.State...),
+		Run: PublicRun(snapshot.Run), State: PublicDiagnosticPayload(snapshot.State),
 		Checkpoint: snapshot.Checkpoint, Result: snapshot.Result,
 		EventHead: snapshot.EventHead,
 	}
 }
 
-func workbenchResponse(detail workbench.Detail) workbench.Detail { return detail }
+func workbenchResponse(detail workbench.Detail) workbench.Detail { return publicWorkbench(detail) }
 
 func bindStrictJSON(context *gin.Context, target interface{}) error {
 	if context == nil || context.Request == nil || context.Request.Body == nil {
