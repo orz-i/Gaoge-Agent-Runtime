@@ -79,7 +79,7 @@ func (handler *Handler) CancelRun(context *gin.Context) {
 			Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status), Terminal: true,
 		})
 	}
-	writeSuccess(context, CancelRunResponse{Run: snapshot.Run})
+	writeSuccess(context, CancelRunResponse{Run: PublicRun(snapshot.Run)})
 }
 
 func (handler *Handler) GetWorkbench(context *gin.Context) {

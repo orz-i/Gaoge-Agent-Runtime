@@ -138,7 +138,7 @@ func writeRunFeedReplay(context *gin.Context, replay []runfeed.Event, afterSeq i
 }
 
 func writeRunFeedEvent(context *gin.Context, event runfeed.Event) error {
-	encoded, err := json.Marshal(event)
+	encoded, err := json.Marshal(publicRunFeedEvent(event))
 	if err != nil {
 		return err
 	}
