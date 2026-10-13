@@ -19,7 +19,7 @@ Identical signals are idempotent, including after consumption. Conflicting ident
 
 ## Recovery and execution trees
 
-Wait generations are independent of Run revisions. Deadline and readiness deliveries validate their wait generation and use the current CAS. Obsolete generations are no-ops. The deadline is projected once from durable registration; normal waiting does not call the executor/model or requeue once per second.
+Wait generations are independent of Run revisions. Deadline and readiness deliveries validate their wait generation and use the current CAS. If an unrelated revision lands between the continuation's load and its generation-guarded resume, the dispatcher retries against the latest Run within a bounded budget. Continued CAS contention returns a retryable error to the leased Worker for NACK/redelivery; it must never be interpreted as a completed wakeup. Obsolete generations and terminal Runs are no-ops. The deadline is projected once from durable registration; normal waiting does not call the executor/model or requeue once per second.
 
 Use the SDK transition outbox, continuation dispatcher and first-party Agent resumer. ResumeToolWait supplies generation validation. If a host wraps the Agent resumer, its wrapper must preserve the ToolWaitResumer contract. Child-terminal deliveries resolve the current parent revision; relation reconciliation can reproject a child fact consumed before its parent committed waiting.
 

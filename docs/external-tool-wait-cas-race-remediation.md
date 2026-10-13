@@ -1,6 +1,6 @@
 # External Tool Wait · Generation-aware CAS Race Remediation
 
-Date: 2026-10-13. Status: accepted remediation scope, SDK follow-up to published beta.21; review blocker for Gaoge PR #32.
+Date: 2026-10-13. Status: SDK source fix locally verified; **not yet released or adopted by Gaoge**. This is a follow-up to published beta.21 and addresses the SDK-side review blocker for Gaoge PR #32.
 
 ## Incident and failure invariant
 
@@ -27,3 +27,17 @@ The original regression was reproduced deterministically with a real Agent Runne
 ## Release and host ownership
 
 beta.21 is already published and remains immutable. Prepare this source fix on an independent SDK branch with atomic documentation, regression and implementation commits. Only after a new SDK cohort is formally released may Gaoge PR #32 advance its SDK gitlink, nine Go modules, TypeScript package, workspace lockfile and governance pins together. No GitHub Quality CI is to be introduced into Gaoge. Do not push, merge or publish without separate authorization.
+
+## Local acceptance evidence (2026-10-13)
+
+Baseline `origin/main@3992311`, candidate branch `fix/external-wait-generation-cas-retry@66e8a6b` prior to this evidence-only documentation commit.
+
+- The new deterministic red tests first reproduced the beta.21 defect: the deadline and result-ready jobs were wrongly ACKed while the Run stayed `running`; persistent conflicts also returned `nil`. With the fix, all regressions pass, including stale/terminal generations and a real in-memory leased Worker NACK -> redelivery -> ACK with exactly two claims.
+- `pnpm install --frozen-lockfile --prefer-offline`: passed from the locked local content-addressable store.
+- `go test -race -count=25 ./go/agent-runtime/continuation -run 'TestExternalWait.*CASConflict|TestExternalResultReadySurvivesCASConflictDuringDispatch|TestExternalWaitWrongGenerationDoesNotResume'`: passed.
+- `make SHELL=sh check`: passed (nine Go modules' test/race/vet/lint/format/tidy, TS lint/types/tests/build, evaluation, benchmarks, OTel smoke, protocol/release checks and clean consumers).
+- `make SHELL=sh coverage security integration integration-otel`: passed. Go statement coverage **72.70%** (floor 70%); TS statements **79.16%**. All nine `govulncheck` scans found no reachable vulnerabilities; the scanner reported one required-module vulnerability not reached by code, and `pnpm audit --audit-level high` reported no known vulnerabilities.
+- Actual Docker-backed PostgreSQL 16 and Redis 8 suites: **23 real-service cases passed, zero skips** under `-race`. Collector 0.149.0 OTLP trace/metric gate passed, digest `sha256:0fba96233274f6d665ac8831ad99dfe6479a9a20459f6e2719c0d20945773b46`; isolated Compose projects were removed afterwards.
+- Gaoge current `master@9df6ab5a` + PR #32 head `74228c98` + this SDK candidate source: isolated synthetic-merge `go test ./backend/internal/...` passed. This is a local committed-tree compatibility test, not a published SDK cohort or production deployment E2E.
+
+These gates validate the local SDK source repair. No release, host SDK pin update, PR push/merge, or production browser execution acceptance is implied.
