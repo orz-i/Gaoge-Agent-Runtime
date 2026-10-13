@@ -5,6 +5,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+## 0.1.0-beta.21
+
+- Restore feature-neutral HTTP core projection by moving Agent wait interpretation to `agenthttp.PendingTool` and the Agent start response. Add optional explicit `Dependencies.PendingToolProjector`, called after object authorization, and a neutral `PendingToolResponse` transport DTO.
+- Keep HTTP v1 wait fixtures unchanged and lock the optional projector in the clean Go consumer. Add a core import-boundary regression and authorized/denied real HTTP projection tests.
+
+Adopt this cohort for P1 external waits. Upgrade all nine Go modules and the TypeScript archive together; bind `PendingToolProjector: agenthttp.PendingTool` for the shared Run endpoint. No persisted-state or SQL migration change from beta.20. Published beta.20 tags remain immutable. See [Beta.21 upgrade notes](docs/releases/v0.1.0-beta.21.md).
+
 ## 0.1.0-beta.20
 
 - Add durable `external_result` and `child_terminal` Tool waits, typed wait queries and identity-checked, idempotent receipt-ready notifications. Normal waiting no longer resubmits the Tool or advances model/Tool usage.

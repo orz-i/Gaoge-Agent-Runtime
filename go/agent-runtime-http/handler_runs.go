@@ -25,7 +25,11 @@ func (handler *Handler) GetRun(context *gin.Context) {
 		return
 	}
 	handler.releaseTerminalRunFeed(context, snapshot)
-	writeSuccess(context, snapshotResponse(snapshot))
+	response := snapshotResponse(snapshot)
+	if handler.pendingToolProjector != nil {
+		response.PendingTool = handler.pendingToolProjector(snapshot)
+	}
+	writeSuccess(context, response)
 }
 
 // WriteRunAccessError preserves authentication failures while collapsing an

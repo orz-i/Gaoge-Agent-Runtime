@@ -1,12 +1,16 @@
-package http
+package agenthttp
 
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -57,4 +61,47 @@ func TestPendingToolSnapshotPublicProjectionHasNoHostCorrelation(t *testing.T) {
 			t.Fatalf("correlation %q leaked: %s", private, data)
 		}
 	}
+	if runtimehttp.SnapshotResponse(snapshot).PendingTool != nil {
+		t.Fatal("core utility interpreted Agent-owned state")
+	}
+	for _, authorized := range []bool{true, false} {
+		actor := snapshot.Run.Actor
+		if !authorized {
+			actor.ActorID = "other-actor"
+		}
+		projections := 0
+		shared := runtimehttp.NewShared(waitProjectionPrincipal{actor: actor}, nil, runtime, nil)
+		handler := runtimehttp.NewHandler(runtimehttp.Dependencies{
+			Runtime: runtime, Shared: shared,
+			PendingToolProjector: func(value kernel.Snapshot) *runtimehttp.PendingToolResponse {
+				projections++
+				return PendingTool(value)
+			},
+		})
+		router := gin.New()
+		runtimehttp.NewModule(handler).RegisterRoutes(router.Group("/v1"))
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/runs/http-wait", nil))
+		if !authorized {
+			if recorder.Code != http.StatusNotFound || projections != 0 {
+				t.Fatalf("denied projection=%d status=%d", projections, recorder.Code)
+			}
+			continue
+		}
+		var actual runtimehttp.RunSnapshotResponse
+		if err = json.Unmarshal(recorder.Body.Bytes(), &actual); err != nil || recorder.Code != http.StatusOK || projections != 1 || actual.PendingTool == nil {
+			t.Fatalf("authorized projection=%d response=%s err=%v", projections, recorder.Body, err)
+		}
+		for _, private := range []string{"private-host-operation", strings.Repeat("b", 64), "externalSignals", "toolWait"} {
+			if strings.Contains(recorder.Body.String(), private) {
+				t.Fatalf("HTTP correlation %q leaked: %s", private, recorder.Body)
+			}
+		}
+	}
+}
+
+type waitProjectionPrincipal struct{ actor kernel.ActorRef }
+
+func (principal waitProjectionPrincipal) ResolvePrincipal(*gin.Context) (kernel.ActorRef, error) {
+	return principal.actor, nil
 }

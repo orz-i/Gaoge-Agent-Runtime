@@ -1,6 +1,6 @@
 # Durable external Tool waits
 
-Available in the coordinated 0.1.0-beta.20 release cohort. See [upgrade notes](releases/v0.1.0-beta.20.md).
+Introduced in 0.1.0-beta.20; adopt the coordinated 0.1.0-beta.21 cohort with feature-neutral HTTP projection. See [upgrade notes](releases/v0.1.0-beta.21.md).
 
 An executor may return an ExecutionResult with a pending receipt and PendingExecution. Omitted Pending and scheduled preserve the existing delayed retry behavior. external_result suspends the call until a trusted host reports that its durable receipt is available. child_terminal suspends the parent until its owned child reaches a terminal state.
 
@@ -26,6 +26,13 @@ Use the SDK transition outbox, continuation dispatcher and first-party Agent res
 Harness local SDK Agent delegation and SDK feature capabilities use child-terminal waits. Custom/remote delegation retains its existing observation mechanism. Team refreshes with unchanged child state do not persist another revision. Code running under a custom child feature must provide an explicit durable terminal contract before its owner can stop observing it.
 
 Run lifecycle remains running during external/child waiting. PendingToolView / HTTP pendingTool expose only kind, callID, toolKey, deadline and readiness. Internal operation correlation, digest, signal cache and opaque waiting representation are not public HTTP fields.
+
+The HTTP core does not interpret Agent-owned state. At explicit composition,
+set `runtimehttp.Dependencies.PendingToolProjector` to `agenthttp.PendingTool`.
+The shared Run endpoint invokes that feature projector only after object
+authorization; the Agent start endpoint supplies it through its own adapter.
+The core `SnapshotResponse` utility keeps its generic behavior. Hosts use the
+typed SDK view through the adapter rather than parsing private `Run.State`.
 
 ## Verification and adoption
 
