@@ -5,6 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+## 0.1.0-beta.22
+
+- Fix a loss-of-wakeup race in the external-result and child-terminal wait continuation: after an unrelated Run revision changes between dispatch and resume, retry the current generation instead of falsely ACKing an unresolved deadline or result-ready delivery.
+- Preserve persisted wait generations and idempotency; after eight CAS retries, NACK to the existing durable queue for bounded redelivery. Do not change scheduled and non-generation continuation behavior.
+- Add deterministic race regression coverage for deadlines, ready receipts, conflict exhaustion, stale/terminal generations and real in-memory queue NACK/reclaim/ACK.
+
+Upgrade all nine Go modules and the GitHub TypeScript client archive together. No wire, SQL or persisted-state migration change from beta.21; typed waits can upgrade forward, but older cohorts cannot resume them. See [Beta.22 upgrade notes](docs/releases/v0.1.0-beta.22.md).
+
 ## 0.1.0-beta.21
 
 - Restore feature-neutral HTTP core projection by moving Agent wait interpretation to `agenthttp.PendingTool` and the Agent start response. Add optional explicit `Dependencies.PendingToolProjector`, called after object authorization, and a neutral `PendingToolResponse` transport DTO.
