@@ -394,11 +394,12 @@ func kernelTransitionFrom(record models.KernelTransitionOutboxRecord) (kernel.Co
 // Kernel Event journal shape. Wakeup/WakeupAt are transaction projection
 // metadata and must survive an outbox restart without leaking into ListEvents.
 type persistedKernelTransitionEvent struct {
-	Type     string          `json:"type"`
-	Message  string          `json:"message,omitempty"`
-	Data     json.RawMessage `json:"data,omitempty"`
-	Wakeup   bool            `json:"wakeup,omitempty"`
-	WakeupAt *time.Time      `json:"wakeupAt,omitempty"`
+	Type             string          `json:"type"`
+	Message          string          `json:"message,omitempty"`
+	Data             json.RawMessage `json:"data,omitempty"`
+	Wakeup           bool            `json:"wakeup,omitempty"`
+	WakeupAt         *time.Time      `json:"wakeupAt,omitempty"`
+	WakeupGeneration uint64          `json:"wakeupGeneration,omitempty"`
 }
 
 func persistedKernelTransitionEventsFrom(drafts []kernel.EventDraft) []persistedKernelTransitionEvent {
@@ -406,7 +407,7 @@ func persistedKernelTransitionEventsFrom(drafts []kernel.EventDraft) []persisted
 	for index, draft := range drafts {
 		result[index] = persistedKernelTransitionEvent{
 			Type: draft.Type, Message: draft.Message, Data: append(json.RawMessage(nil), draft.Data...),
-			Wakeup: draft.Wakeup, WakeupAt: cloneTime(draft.WakeupAt),
+			Wakeup: draft.Wakeup, WakeupAt: cloneTime(draft.WakeupAt), WakeupGeneration: draft.WakeupGeneration,
 		}
 	}
 	return result
@@ -417,7 +418,7 @@ func kernelEventDraftsFromPersistedTransitionEvents(values []persistedKernelTran
 	for index, value := range values {
 		result[index] = kernel.EventDraft{
 			Type: value.Type, Message: value.Message, Data: append(json.RawMessage(nil), value.Data...),
-			Wakeup: value.Wakeup, WakeupAt: cloneTime(value.WakeupAt),
+			Wakeup: value.Wakeup, WakeupAt: cloneTime(value.WakeupAt), WakeupGeneration: value.WakeupGeneration,
 		}
 	}
 	return result

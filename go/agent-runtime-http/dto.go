@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
@@ -27,7 +28,7 @@ func BindStrictJSON(context *gin.Context, target interface{}) error {
 	return bindStrictJSON(context, target)
 }
 
-// SnapshotResponse projects one durable Kernel snapshot without Feature interpretation.
+// SnapshotResponse projects one durable snapshot with safe optional Agent wait facts.
 func SnapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
 	return snapshotResponse(snapshot)
 }
@@ -46,11 +47,12 @@ type CancelRunResponse struct {
 }
 
 type RunSnapshotResponse struct {
-	Run        kernel.Run         `json:"run"`
-	State      json.RawMessage    `json:"state"`
-	Checkpoint *kernel.Checkpoint `json:"checkpoint,omitempty"`
-	Result     *kernel.Result     `json:"result,omitempty"`
-	EventHead  int64              `json:"eventHead"`
+	Run         kernel.Run             `json:"run"`
+	State       json.RawMessage        `json:"state"`
+	Checkpoint  *kernel.Checkpoint     `json:"checkpoint,omitempty"`
+	Result      *kernel.Result         `json:"result,omitempty"`
+	EventHead   int64                  `json:"eventHead"`
+	PendingTool *agent.PendingToolView `json:"pendingTool,omitempty"`
 }
 
 type RunEventPageResponse struct {
@@ -59,11 +61,17 @@ type RunEventPageResponse struct {
 }
 
 func snapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
-	return RunSnapshotResponse{
+	response := RunSnapshotResponse{
 		Run: PublicRun(snapshot.Run), State: PublicDiagnosticPayload(snapshot.State),
 		Checkpoint: snapshot.Checkpoint, Result: snapshot.Result,
 		EventHead: snapshot.EventHead,
 	}
+	if snapshot.Run.Kind == agent.RunKind {
+		if view, err := agent.ViewState(snapshot); err == nil {
+			response.PendingTool = view.PendingTool
+		}
+	}
+	return response
 }
 
 func workbenchResponse(detail workbench.Detail) workbench.Detail { return publicWorkbench(detail) }

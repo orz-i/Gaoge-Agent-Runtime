@@ -299,8 +299,15 @@ func (runner *Runner) capabilityToolResult(ctx context.Context, commandID, invoc
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
+	var pending *tools.PendingExecution
+	if disposition == tools.ReceiptDispositionPending && invocation.ExecutionClass != ExecutionApplication {
+		pending = &tools.PendingExecution{
+			Kind: tools.PendingChildTerminal, OperationID: invocation.ID, ChildRunID: invocation.ExecutionRefID,
+		}
+	}
 	return tools.ExecutionResult{
 		Content: content, Receipt: tools.Receipt{ExecutionID: invocation.ID, Disposition: disposition},
+		Pending: pending,
 	}, nil
 }
 

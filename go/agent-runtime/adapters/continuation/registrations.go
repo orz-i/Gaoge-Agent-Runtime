@@ -39,6 +39,12 @@ func Triggers() []continuation.TriggerRegistration {
 
 func agentTrigger(event kernel.EventDraft) (continuation.Trigger, bool) {
 	eventType := strings.TrimSpace(event.Type)
+	if eventType == agent.EventToolWaitDeadline {
+		return continuation.TriggerToolWaitDeadline, true
+	}
+	if eventType == agent.EventExternalToolResultReady {
+		return continuation.TriggerToolResultReady, true
+	}
 	if eventType == "agent.model_invocation.pending" || eventType == "agent.model_invocation.claimed" ||
 		eventType == "agent.model_invocation.retryable" || eventType == "agent.model_invocation.completed" {
 		return continuation.TriggerModelReady, true

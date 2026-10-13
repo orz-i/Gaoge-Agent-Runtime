@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { RuntimeClient, RuntimeAPIError } from "@orz-i/agent-runtime-client";
+import { RuntimeClient, RuntimeAPIError, toolWaitPhase } from "@orz-i/agent-runtime-client";
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
 const snapshot = fixture("snapshot-completed");
@@ -9,6 +9,8 @@ const cancelled = fixture("cancel");
 const feedEvent = fixture("feed-terminal");
 const error = fixture("error");
 const extension = fixture("snapshot-extension");
+const externalWait = fixture("snapshot-external-wait");
+const childWait = fixture("snapshot-child-wait");
 const calls = [];
 
 // Exercise the published ESM entrypoint with the same JSON verified by Go and
@@ -26,6 +28,10 @@ const client = new RuntimeClient({
         return Response.json(snapshot);
       case "GET /api/v1/runs/extension":
         return Response.json(extension);
+      case "GET /api/v1/runs/external-wait":
+        return Response.json(externalWait);
+      case "GET /api/v1/runs/child-wait":
+        return Response.json(childWait);
       case "GET /api/v1/runs/run-1/events?afterSeq=1&limit=10":
         return Response.json(events);
       case "POST /api/v1/runs/run-1/cancel":
@@ -45,6 +51,8 @@ const client = new RuntimeClient({
 
 assert.deepEqual(await client.runs.get("run-1"), snapshot);
 assert.deepEqual(await client.runs.get("extension"), extension);
+assert.equal(toolWaitPhase(await client.runs.get("external-wait")), "waiting_external_result");
+assert.equal(toolWaitPhase(await client.runs.get("child-wait")), "waiting_child");
 assert.deepEqual(await client.runs.events("run-1", { afterSeq: 1, limit: 10 }), events);
 assert.deepEqual(await client.runs.cancel("run-1", { expectedRevision: 1, reason: "stop" }), cancelled);
 const received = [];
@@ -58,4 +66,4 @@ await assert.rejects(client.runs.get("conflict"), (failure) => {
   assert.equal(failure.requestID, error.error.requestID);
   return true;
 });
-assert.equal(calls.length, 6);
+assert.equal(calls.length, 8);

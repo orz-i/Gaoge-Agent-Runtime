@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -58,7 +59,15 @@ var (
 	_ func(kernel.Dependencies) (*kernel.Runtime, error)  = kernel.New
 	_ func(agent.Dependencies) (*agent.Runner, error)     = agent.NewRunner
 	_ func([]tools.Registration) (*tools.Registry, error) = tools.NewRegistry
+	_ continuation.ToolWaitResumer                        = (*agent.Runner)(nil)
 )
+
+type externalWaitContract interface {
+	QueryPendingTool(context.Context, string, string) (*agent.PendingTool, error)
+	NotifyExternalToolResultReady(context.Context, agent.ExternalToolResultSignal) (kernel.Snapshot, error)
+}
+
+var _ externalWaitContract = (*agent.Runner)(nil)
 
 type hostModel struct {
 	t     *testing.T

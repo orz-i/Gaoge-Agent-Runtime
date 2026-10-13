@@ -7,8 +7,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -107,9 +109,35 @@ func (handler *DelegationToolHandler) Execute(
 	if result.Delegation.Status == handoff.StatusQueued || result.Delegation.Status == handoff.StatusRunning {
 		disposition = tools.ReceiptDispositionPending
 	}
+	var pending *tools.PendingExecution
+	if disposition == tools.ReceiptDispositionPending {
+		pending, err = runner.localDelegationWait(ctx, result.Delegation)
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+	}
 	return tools.ExecutionResult{
 		Content: content,
 		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: disposition},
+		Pending: pending,
+	}, nil
+}
+
+// Only the local SDK Agent has an autonomous committed-transition contract.
+// Custom/remote runners retain their existing scheduled observation behavior.
+func (runner *Runner) localDelegationWait(ctx context.Context, delegation handoff.Delegation) (*tools.PendingExecution, error) {
+	child, err := runner.runtime.Load(ctx, delegation.ChildRunID)
+	if errors.Is(err, kernel.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if child.Run.Kind != agent.RunKind {
+		return nil, nil
+	}
+	return &tools.PendingExecution{
+		Kind: tools.PendingChildTerminal, OperationID: delegation.ID, ChildRunID: delegation.ChildRunID,
 	}, nil
 }
 

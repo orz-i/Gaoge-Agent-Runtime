@@ -150,6 +150,7 @@ func (scheduler *Scheduler) projectTransition(ctx context.Context, transition ke
 			SchemaVersion: SchemaVersion, RunID: transition.RunID,
 			ExpectedRevision: transition.Revision, Trigger: trigger,
 			SourceRunID: transition.RunID, SourceRevision: transition.Revision,
+			WaitGeneration: event.WakeupGeneration,
 		}, event.WakeupAt))
 	}
 	return result
@@ -224,6 +225,9 @@ func (scheduler *Scheduler) selfTrigger(kind kernel.RunKind, event kernel.EventD
 }
 
 func clientJobID(payload Payload) string {
+	if payload.Trigger == TriggerChildTerminal {
+		return fmt.Sprintf("%s:%s:%s:%d:%d", payload.Trigger, payload.RunID, payload.SourceRunID, payload.SourceRevision, payload.ExpectedRevision)
+	}
 	return fmt.Sprintf("%s:%s:%s:%d", payload.Trigger, payload.RunID, payload.SourceRunID, payload.SourceRevision)
 }
 
@@ -231,7 +235,7 @@ func triggerPriority(trigger Trigger) int {
 	switch trigger {
 	case TriggerChildTerminal:
 		return 20
-	case TriggerApprovalResolved, TriggerModelReady, TriggerWaitResolved:
+	case TriggerApprovalResolved, TriggerModelReady, TriggerWaitResolved, TriggerToolWaitDeadline, TriggerToolResultReady:
 		return 10
 	case TriggerSegmentYielded, TriggerRunReady:
 		return 0

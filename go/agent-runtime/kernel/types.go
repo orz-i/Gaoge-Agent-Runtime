@@ -70,6 +70,9 @@ type EventDraft struct {
 	// Stores persist it only inside the committed-transition outbox; the public
 	// Event journal remains unchanged.
 	WakeupAt *time.Time `json:"wakeupAt,omitempty"`
+	// WakeupGeneration identifies a durable feature-owned wait independently of
+	// unrelated Run revisions. It is persisted only in transition projection.
+	WakeupGeneration uint64 `json:"wakeupGeneration,omitempty"`
 }
 
 // Event is an append-only fact sequenced within one Run.

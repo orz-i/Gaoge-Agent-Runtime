@@ -49,6 +49,17 @@ func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) err
 	if err != nil {
 		return err
 	}
+	if normalized.WaitGeneration != 0 {
+		waitResumer, ok := resumer.(ToolWaitResumer)
+		if !ok {
+			return ErrUnsupportedRunKind
+		}
+		resumed, resumeErr := waitResumer.ResumeToolWait(ctx, snapshot.Run.ID, snapshot.Run.Revision, normalized.WaitGeneration)
+		if resumed.Run.ID != "" || nonRetryableResumeError(resumeErr) {
+			return nil
+		}
+		return resumeErr
+	}
 	return resumeOnce(ctx, resumer, snapshot)
 }
 
@@ -65,7 +76,8 @@ func (dispatcher *Dispatcher) eligibleSnapshot(
 	}
 	// A renewable allowance must be granted explicitly by the owning host.
 	// A stale wakeup cannot dispatch new work while the Run is paused.
-	eligible := snapshot.Run.Revision == payload.ExpectedRevision && snapshot.Run.Status == kernel.RunStatusRunning
+	stableFact := payload.Trigger == TriggerChildTerminal || payload.WaitGeneration != 0
+	eligible := (snapshot.Run.Revision == payload.ExpectedRevision || stableFact) && snapshot.Run.Status == kernel.RunStatusRunning
 	return snapshot, eligible, nil
 }
 
