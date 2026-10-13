@@ -263,20 +263,22 @@ type Runner struct {
 }
 
 type runState struct {
-	Messages         []model.Message        `json:"messages"`
-	Model            string                 `json:"model,omitempty"`
-	ModelOptions     json.RawMessage        `json:"modelOptions,omitempty"`
-	ToolKeys         []string               `json:"toolKeys"`
-	RequiredToolKeys []string               `json:"requiredToolKeys,omitempty"`
-	HostedToolGrants []HostedToolGrant      `json:"hostedToolGrants,omitempty"`
-	Discovery        *discoveryState        `json:"discovery,omitempty"`
-	BlockedToolKeys  []string               `json:"blockedToolKeys,omitempty"`
-	RequireToolCall  bool                   `json:"requireToolCall,omitempty"`
-	Budget           runtimebudget.Snapshot `json:"budget"`
-	CallAllowance    *CallAllowance         `json:"callAllowance,omitempty"`
-	AutoAllowance    *autoAllowanceState    `json:"autoAllowance,omitempty"`
-	PendingCalls     []tools.Call           `json:"pendingCalls,omitempty"`
-	ModelInvocations []ModelInvocation      `json:"modelInvocations,omitempty"`
+	Messages         []model.Message            `json:"messages"`
+	Model            string                     `json:"model,omitempty"`
+	ModelOptions     json.RawMessage            `json:"modelOptions,omitempty"`
+	ToolKeys         []string                   `json:"toolKeys"`
+	RequiredToolKeys []string                   `json:"requiredToolKeys,omitempty"`
+	HostedToolGrants []HostedToolGrant          `json:"hostedToolGrants,omitempty"`
+	Discovery        *discoveryState            `json:"discovery,omitempty"`
+	BlockedToolKeys  []string                   `json:"blockedToolKeys,omitempty"`
+	RequireToolCall  bool                       `json:"requireToolCall,omitempty"`
+	Budget           runtimebudget.Snapshot     `json:"budget"`
+	CallAllowance    *CallAllowance             `json:"callAllowance,omitempty"`
+	AutoAllowance    *autoAllowanceState        `json:"autoAllowance,omitempty"`
+	PendingCalls     []tools.Call               `json:"pendingCalls,omitempty"`
+	ToolWait         *PendingTool               `json:"toolWait,omitempty"`
+	ExternalSignals  []ExternalToolResultSignal `json:"externalSignals,omitempty"`
+	ModelInvocations []ModelInvocation          `json:"modelInvocations,omitempty"`
 }
 
 // View is an isolated public projection of one persisted Agent Run. It exposes
@@ -292,6 +294,7 @@ type View struct {
 	CallAllowance    *CallAllowance
 	AutoAllowance    *AutoAllowanceProgress
 	ModelInvocations []ModelInvocation
+	PendingTool      *PendingToolView
 }
 
 // ViewState decodes an isolated public view from a Kernel Agent snapshot.
@@ -310,6 +313,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		CallAllowance:    cloneCallAllowance(state.CallAllowance),
 		AutoAllowance:    autoAllowanceProgress(state.AutoAllowance),
 		ModelInvocations: cloneModelInvocations(state.ModelInvocations),
+		PendingTool:      publicPendingTool(snapshot, state.ToolWait),
 	}, nil
 }
 
@@ -581,6 +585,12 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return failed, true, failErr
 	}
 	if len(state.PendingCalls) > 0 {
+		if state.ToolWait != nil {
+			waitSnapshot, ready, waitErr := runner.toolWaitReady(ctx, snapshot, state)
+			if waitErr != nil || !ready {
+				return waitSnapshot, true, waitErr
+			}
+		}
 		if state.Discovery != nil && state.Discovery.RunID != snapshot.Run.ID {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", ErrToolDiscoveryInvalid)
 			return failed, true, failErr
@@ -1407,6 +1417,9 @@ func (runner *Runner) persistPendingToolYield(
 	state runState,
 	result tools.ExecutionResult,
 ) (kernel.Snapshot, bool, error) {
+	if result.Pending != nil && result.Pending.Kind != tools.PendingScheduled {
+		return runner.persistToolWait(ctx, snapshot, state, result.Pending)
+	}
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, false, err
@@ -1431,6 +1444,7 @@ func (runner *Runner) persistCompletedToolCall(
 	result tools.ExecutionResult,
 ) (kernel.Snapshot, bool, error) {
 	state := execution.state
+	state.ToolWait = nil
 	state.Messages = append(state.Messages, model.Message{
 		Role: model.RoleTool, Content: string(result.Content), ToolCallID: execution.call.ID,
 	})
@@ -1826,6 +1840,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) ||
 		!validHostedGrantSnapshot(state.HostedToolGrants, state.ToolKeys) ||
 		!validDiscoveryState(state) ||
+		!validToolWaitState(state) ||
 		!validModelInvocations(state.ModelInvocations) {
 		return runState{}, ErrInvalidRequest
 	}

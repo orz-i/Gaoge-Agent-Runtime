@@ -36,6 +36,8 @@ const (
 	TriggerModelReady       Trigger = "model_ready"
 	TriggerWaitResolved     Trigger = "wait_resolved"
 	TriggerSegmentYielded   Trigger = "segment_yielded"
+	TriggerToolWaitDeadline Trigger = "tool_wait_deadline"
+	TriggerToolResultReady  Trigger = "tool_result_ready"
 	// TriggerRunReady is the feature-neutral fallback for any committed event
 	// explicitly marked Wakeup. Feature-specific trigger names remain useful for
 	// prioritization/diagnostics, but correctness must not depend on every new
@@ -52,6 +54,7 @@ type Payload struct {
 	Trigger          Trigger `json:"trigger"`
 	SourceRunID      string  `json:"sourceRunID"`
 	SourceRevision   uint64  `json:"sourceRevision"`
+	WaitGeneration   uint64  `json:"waitGeneration,omitempty"`
 }
 
 // Enqueuer is the narrow durable delivery capability consumed by Scheduler.
@@ -89,6 +92,11 @@ type Resumer interface {
 	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
 }
 
+// ToolWaitResumer validates a wait generation before resuming its current CAS.
+type ToolWaitResumer interface {
+	ResumeToolWait(context.Context, string, uint64, uint64) (kernel.Snapshot, error)
+}
+
 // Handler consumes one decoded continuation payload.
 type Handler interface {
 	Dispatch(context.Context, Payload) error
@@ -117,6 +125,9 @@ func normalizePayload(payload Payload) (Payload, error) {
 		payload.ExpectedRevision == 0 || payload.SourceRevision == 0 || !validTrigger(payload.Trigger) {
 		return Payload{}, ErrInvalidInput
 	}
+	if (payload.Trigger == TriggerToolWaitDeadline || payload.Trigger == TriggerToolResultReady) && payload.WaitGeneration == 0 {
+		return Payload{}, ErrInvalidInput
+	}
 	return payload, nil
 }
 
@@ -131,7 +142,7 @@ func decodePayload(encoded json.RawMessage) (Payload, error) {
 func validTrigger(trigger Trigger) bool {
 	return trigger == TriggerChildTerminal || trigger == TriggerApprovalResolved ||
 		trigger == TriggerModelReady || trigger == TriggerWaitResolved || trigger == TriggerSegmentYielded ||
-		trigger == TriggerRunReady
+		trigger == TriggerRunReady || trigger == TriggerToolWaitDeadline || trigger == TriggerToolResultReady
 }
 
 func terminal(status kernel.RunStatus) bool {

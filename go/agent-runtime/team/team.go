@@ -1,6 +1,7 @@
 package team
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -432,6 +433,9 @@ func (runner *Runner) persistRunning(
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	if bytes.Equal(snapshot.State, encoded) {
+		return snapshot, nil
 	}
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded,

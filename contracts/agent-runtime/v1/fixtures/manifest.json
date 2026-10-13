@@ -5,6 +5,16 @@
     "typescript": "RunSnapshotDTO"
   },
   {
+    "file": "snapshot-external-wait.json",
+    "schema": "RunSnapshot",
+    "typescript": "RunSnapshotDTO"
+  },
+  {
+    "file": "snapshot-child-wait.json",
+    "schema": "RunSnapshot",
+    "typescript": "RunSnapshotDTO"
+  },
+  {
     "file": "snapshot-waiting.json",
     "schema": "RunSnapshot",
     "typescript": "RunSnapshotDTO"

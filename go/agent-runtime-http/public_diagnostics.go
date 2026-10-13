@@ -22,6 +22,7 @@ func PublicFailureCode(code string) string {
 	case "run.cancelled", "run.deadline_exceeded",
 		"agent.model_failed", "agent.model_retry_exhausted",
 		"agent.tool_failed", "agent.tool_invalid", "agent.discovery_invalid",
+		"agent.tool_deadline_exceeded", "agent.tool_wait_invalid",
 		"agent.deadline_exceeded", "agent.llm_limit", "agent.tool_limit",
 		"agent.shared_budget_exhausted", "agent.model_allowance_exhausted",
 		"agent.tool_allowance_exhausted", "agent.total_tokens_budget",
@@ -79,6 +80,8 @@ func PublicFailureDetail(code, detail string) string {
 		return "model execution route is unavailable"
 	case "agent.tool_failed":
 		return "tool execution failed"
+	case "agent.tool_deadline_exceeded":
+		return "external tool result did not arrive before its deadline"
 	case "context.artifact_payload_too_large":
 		return "context archive exceeds the 4 MiB storage limit; shorten the input or start a new conversation"
 	case "context.input_budget_exceeded":
@@ -164,6 +167,11 @@ func stripDiagnosticFields(value any, businessContent bool) {
 					} else {
 						delete(item, key)
 					}
+					continue
+				}
+			case "toolwait", "externalsignals":
+				if !businessContent {
+					delete(item, key)
 					continue
 				}
 			case "errordetail", "errormessage", "errorpreview", "cancelerror",

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -133,6 +134,7 @@ func CloneExecutionRequest(request ExecutionRequest) ExecutionRequest {
 // CloneExecutionResult returns an isolated Tool execution result copy.
 func CloneExecutionResult(result ExecutionResult) ExecutionResult {
 	result.Content = cloneJSON(result.Content)
+	result.Pending = ClonePending(result.Pending)
 	return result
 }
 
@@ -279,8 +281,9 @@ const ReceiptDispositionPending = "pending"
 
 // ExecutionResult is the JSON Tool output and its durable receipt.
 type ExecutionResult struct {
-	Content json.RawMessage `json:"content"`
-	Receipt Receipt         `json:"receipt"`
+	Content json.RawMessage   `json:"content"`
+	Receipt Receipt           `json:"receipt"`
+	Pending *PendingExecution `json:"pending,omitempty"`
 }
 
 // Catalog resolves immutable Tool definitions.
@@ -402,8 +405,7 @@ func (registry *Registry) Execute(ctx context.Context, request ExecutionRequest)
 	if !validExecutionResult(result) {
 		return ExecutionResult{}, ErrInvalidCall
 	}
-	result.Content = cloneJSON(result.Content)
-	return result, nil
+	return CloneExecutionResult(result), nil
 }
 
 func normalizeDefinition(definition Definition) (Definition, error) {
@@ -423,7 +425,72 @@ func validCall(call Call) bool {
 
 func validExecutionResult(result ExecutionResult) bool {
 	return len(result.Content) <= MaxExecutionResultContentBytes && json.Valid(result.Content) && strings.TrimSpace(result.Receipt.ExecutionID) != "" &&
-		strings.TrimSpace(result.Receipt.Disposition) != ""
+		strings.TrimSpace(result.Receipt.Disposition) != "" && ValidPending(result.Pending) &&
+		(result.Pending == nil || result.Receipt.Disposition == ReceiptDispositionPending)
+}
+
+// PendingKind distinguishes scheduled retries from durable external/child waits.
+type PendingKind string
+
+const (
+	PendingScheduled      PendingKind = "scheduled"
+	PendingExternalResult PendingKind = "external_result"
+	PendingChildTerminal  PendingKind = "child_terminal"
+)
+
+// PendingExecution contains only neutral execution identities. Host credentials,
+// delivery leases and executor-specific inputs must remain outside Runtime.
+type PendingExecution struct {
+	Kind        PendingKind `json:"kind"`
+	OperationID string      `json:"operationID,omitempty"`
+	InputDigest string      `json:"inputDigest,omitempty"`
+	DeadlineAt  *time.Time  `json:"deadlineAt,omitempty"`
+	ChildRunID  string      `json:"childRunID,omitempty"`
+}
+
+// ClonePending isolates a pending descriptor and its deadline.
+func ClonePending(value *PendingExecution) *PendingExecution {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	if value.DeadlineAt != nil {
+		deadline := value.DeadlineAt.UTC()
+		cloned.DeadlineAt = &deadline
+	}
+	return &cloned
+}
+
+// ValidPending validates the typed wait boundary. An omitted descriptor retains
+// the existing pending receipt's scheduled behavior.
+func ValidPending(value *PendingExecution) bool {
+	if value == nil {
+		return true
+	}
+	switch value.Kind {
+	case PendingScheduled:
+		return value.ChildRunID == ""
+	case PendingExternalResult:
+		return strings.TrimSpace(value.OperationID) != "" && len(value.OperationID) <= 128 &&
+			validDigest(value.InputDigest) && value.DeadlineAt != nil && !value.DeadlineAt.IsZero() && value.ChildRunID == ""
+	case PendingChildTerminal:
+		return strings.TrimSpace(value.OperationID) != "" && len(value.OperationID) <= 128 &&
+			strings.TrimSpace(value.ChildRunID) != "" && len(value.ChildRunID) <= 128
+	default:
+		return false
+	}
+}
+
+func validDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, character := range value {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func cloneDefinition(definition Definition) Definition {

@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	"gopkg.in/yaml.v3"
 )
 
@@ -140,6 +142,14 @@ func wireFixtureBodies(t *testing.T) map[string]any {
 	}
 	return map[string]any{
 		"snapshot-running.json": SnapshotResponse(kernel.Snapshot{Run: run, State: json.RawMessage(`{}`)}),
+		"snapshot-external-wait.json": RunSnapshotResponse{
+			Run: run, State: json.RawMessage(`{}`),
+			PendingTool: &agent.PendingToolView{Kind: tools.PendingExternalResult, CallID: "call-1", ToolKey: "test.external", DeadlineAt: &deadline},
+		},
+		"snapshot-child-wait.json": RunSnapshotResponse{
+			Run: run, State: json.RawMessage(`{}`),
+			PendingTool: &agent.PendingToolView{Kind: tools.PendingChildTerminal, CallID: "call-2", ToolKey: "harness.delegate"},
+		},
 		"snapshot-waiting.json": SnapshotResponse(kernel.Snapshot{
 			Run: waiting, State: json.RawMessage(`{"step":1}`), Checkpoint: &checkpoint, EventHead: 2,
 		}),

@@ -1008,6 +1008,17 @@ components:
           type: integer
           format: int64
           minimum: 0
+        pendingTool: {$ref: '#/components/schemas/PendingTool'}
+    PendingTool:
+      type: object
+      additionalProperties: false
+      required: [kind, callID, toolKey, ready]
+      properties:
+        kind: {type: string, enum: [external_result, child_terminal]}
+        callID: {type: string}
+        toolKey: {type: string}
+        deadlineAt: {type: string, format: date-time}
+        ready: {type: boolean}
     RunEventPage:
       type: object
       additionalProperties: false

@@ -274,7 +274,24 @@ export type RunSnapshotDTO = {
   checkpoint?: CheckpointDTO | null;
   result?: ResultDTO | null;
   eventHead: number;
+  pendingTool?: PendingToolDTO | null;
 };
+
+export type PendingToolDTO = {
+  kind: "external_result" | "child_terminal";
+  callID: string;
+  toolKey: string;
+  deadlineAt?: string | null;
+  ready: boolean;
+};
+
+// External/child waits retain the running lifecycle and never impersonate
+// interaction or call-allowance pauses.
+export function toolWaitPhase(snapshot: RunSnapshotDTO): "waiting_external_result" | "waiting_child" | "result_ready" | undefined {
+  if (snapshot.run.status !== "running" || !snapshot.pendingTool) return undefined;
+  if (snapshot.pendingTool.ready) return "result_ready";
+  return snapshot.pendingTool.kind === "external_result" ? "waiting_external_result" : "waiting_child";
+}
 
 export type RunEventPageDTO = {
   events: EventDTO[];

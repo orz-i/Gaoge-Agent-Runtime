@@ -23,6 +23,24 @@ func TestRootAgentInvokesFrozenCapabilityAndResumesSameToolCall(t *testing.T) {
 	started := startCapabilityToolHarness(t, fixture)
 	root, child := rootAndWorkflowInvocations(t, started.Invocations)
 	assertPendingCapabilityHarness(t, started, fixture, root, child)
+	pendingRoot, err := fixture.runtime.Load(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 60 {
+		unchanged, resumeErr := fixture.agentRunner.Resume(t.Context(), root.ExecutionRefID, pendingRoot.Run.Revision)
+		if resumeErr != nil || unchanged.Run.Revision != pendingRoot.Run.Revision {
+			t.Fatalf("parent polled child: %#v, %v", unchanged.Run, resumeErr)
+		}
+	}
+	view, err := agent.ViewState(pendingRoot)
+	if err != nil || view.PendingTool == nil || view.PendingTool.Kind != tools.PendingChildTerminal || view.Budget.Usage.ToolCalls != 0 {
+		t.Fatalf("pending view=%#v, %v", view, err)
+	}
+	wait, err := fixture.agentRunner.QueryPendingTool(t.Context(), root.ExecutionRefID, view.PendingTool.CallID)
+	if err != nil || wait.Kind != tools.PendingChildTerminal || wait.ChildRunID != child.ExecutionRefID {
+		t.Fatalf("wrong wait: %#v, %v", wait, err)
+	}
 	completeCapabilityChild(t, fixture.runtime, child)
 	resumeCapabilityRoot(t, fixture, root)
 	assertCompletedCapabilityHarness(t, fixture.runner, started.Turn.ID)
