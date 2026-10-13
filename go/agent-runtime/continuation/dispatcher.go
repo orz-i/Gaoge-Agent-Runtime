@@ -31,12 +31,15 @@ func NewDispatcher(runs SnapshotLoader, registrations ...ResumerRegistration) (*
 	return &Dispatcher{runs: runs, resumers: resumers}, nil
 }
 
-// Dispatch performs at most one revision-guarded feature resumption. Stale and
-// already-terminal deliveries are successful no-ops.
+// Dispatch performs at most one successful revision-guarded feature resumption.
+// Stale and already-terminal deliveries are successful no-ops.
 func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) error {
 	normalized, err := normalizePayload(payload)
 	if err != nil {
 		return err
+	}
+	if normalized.WaitGeneration != 0 {
+		return dispatcher.dispatchToolWait(ctx, normalized)
 	}
 	snapshot, eligible, err := dispatcher.eligibleSnapshot(ctx, normalized)
 	if err != nil {
@@ -49,18 +52,42 @@ func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) err
 	if err != nil {
 		return err
 	}
-	if normalized.WaitGeneration != 0 {
+	return resumeOnce(ctx, resumer, snapshot)
+}
+
+const maxToolWaitCASRetries = 8
+
+// A waiting generation outlives ordinary Run revisions. A concurrent mutation
+// can land between the Dispatch load and ResumeToolWait's CAS; that conflict is
+// not a consumed wait. Re-read the current Run before each bounded attempt and
+// let the durable queue NACK/redeliver if contention persists.
+func (dispatcher *Dispatcher) dispatchToolWait(ctx context.Context, payload Payload) error {
+	for attempt := 0; attempt < maxToolWaitCASRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		snapshot, eligible, err := dispatcher.eligibleSnapshot(ctx, payload)
+		if err != nil || !eligible {
+			return err
+		}
+		resumer, err := dispatcher.resumer(snapshot.Run.Kind)
+		if err != nil {
+			return err
+		}
 		waitResumer, ok := resumer.(ToolWaitResumer)
 		if !ok {
 			return ErrUnsupportedRunKind
 		}
-		resumed, resumeErr := waitResumer.ResumeToolWait(ctx, snapshot.Run.ID, snapshot.Run.Revision, normalized.WaitGeneration)
+		resumed, resumeErr := waitResumer.ResumeToolWait(ctx, snapshot.Run.ID, snapshot.Run.Revision, payload.WaitGeneration)
+		if errors.Is(resumeErr, kernel.ErrConflict) {
+			continue
+		}
 		if resumed.Run.ID != "" || nonRetryableResumeError(resumeErr) {
 			return nil
 		}
 		return resumeErr
 	}
-	return resumeOnce(ctx, resumer, snapshot)
+	return kernel.ErrConflict
 }
 
 func (dispatcher *Dispatcher) eligibleSnapshot(
