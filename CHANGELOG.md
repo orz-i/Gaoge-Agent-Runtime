@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+## 0.1.0-beta.20
+
+- Add durable `external_result` and `child_terminal` Tool waits, typed wait queries and identity-checked, idempotent receipt-ready notifications. Normal waiting no longer resubmits the Tool or advances model/Tool usage.
+- Persist a wait generation in the transition outbox and continuation payload. Deadline/readiness wakeups survive unrelated Run revisions and reject obsolete waits; committed waits and signals recover after instance restart.
+- Suspend native local Agent delegation and feature capability parents until their child terminates. Keep scheduled execution and custom/remote delegation behavior; avoid unchanged Team revisions and reconcile early child-terminal delivery.
+- Add optional bounded `pendingTool` HTTP/TypeScript projection and `toolWaitPhase`. Internal operation IDs, input digests and signal caches remain private. Extend reviewed wire fixtures and clean Go/packed TypeScript consumer contracts.
+- Verify durable waits on real PostgreSQL 16 and Redis 8, alongside duplicate notifications, cancellation/deadline races and parent/child recovery.
+
+Upgrade all nine Go modules and the GitHub TypeScript archive together. Hosts must persist receipts plus a retryable notification outbox, gate claimability on `QueryPendingTool`, and preserve `ToolWaitResumer` when wrapping the Agent. No SQL migration or server execution sandbox is introduced. Once typed waits exist, older cohorts cannot resume their persisted state safely; use a forward upgrade. See [Beta.20 upgrade notes](docs/releases/v0.1.0-beta.20.md).
+
 ## 0.1.0-beta.19
 
 - Archive removed transcript messages across ordered, lossless Context artifacts, each within the existing 4 MiB durable ceiling. Replace `PortableCompaction.Artifact` with `Artifacts`; retained entries keep their source and turn identities for attachment replay.
