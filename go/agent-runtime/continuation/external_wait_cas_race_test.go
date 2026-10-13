@@ -2,6 +2,7 @@ package continuation_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 )
 
 // interleavingWaitLoader simulates an unrelated persisted revision between
@@ -158,6 +160,72 @@ func TestExternalWaitCASConflictExhaustionMustNackAndRetry(t *testing.T) {
 	completed, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
 	if err != nil || completed.Run.Status != kernel.RunStatusFailed || completed.Run.ErrorCode != "agent.tool_deadline_exceeded" {
 		t.Fatalf("redelivered deadline was lost: %#v, %v", completed.Run, err)
+	}
+}
+
+// Exercise the real queue consumer: unresolved CAS contention must NACK its
+// leased Job, after which the identical generation can be reclaimed and ACKed.
+func TestExternalWaitCASConflictNacksRealQueueBeforeRecovery(t *testing.T) {
+	fixture := newDurableWaitFixture(t)
+	waiting, generation := startInterleavedWait(t, fixture)
+	fixture.clock.now = fixture.clock.now.Add(2 * time.Minute)
+	loader := &interleavingWaitLoader{runtime: fixture.runtime, bumps: 64}
+	dispatcher := newInterleavedDispatcher(t, fixture, loader)
+	payload := interleavedWaitPayload(waiting, generation, continuation.TriggerToolWaitDeadline)
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := queuecore.NewMemory(queuecore.Dependencies{Clock: fixture.clock})
+	enqueued, err := delivery.Enqueue(t.Context(), queuecore.EnqueueRequest{
+		Queue: continuation.QueueName, ClientJobID: "cas-retry", Kind: continuation.JobKind,
+		Payload: encoded, Policy: queuecore.Policy{MaxAttempts: 12, VisibilityTimeout: time.Second},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reportedConflicts := 0
+	worker, err := continuation.NewWorker(delivery, dispatcher, continuation.WorkerOptions{
+		WorkerID: "cas-race-worker", PollInterval: time.Millisecond,
+		Report: func(err error) {
+			if errors.Is(err, kernel.ErrConflict) {
+				reportedConflicts++
+				loader.bumps = 0 // Same consumer resumes on the next leased attempt.
+			}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = worker.Close(context.Background()) }()
+	deadline := time.After(3 * time.Second)
+	for {
+		job, err := delivery.Get(t.Context(), enqueued.Job.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.Status == queuecore.StatusCompleted {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("continuation not redelivered after CAS NACK: status=%s attempts=%d", job.Status, job.Attempt)
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
+	if err := worker.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	job, err := delivery.Get(t.Context(), enqueued.Job.ID)
+	if err != nil || job.Attempt != 2 || reportedConflicts != 1 {
+		t.Fatalf("queue must NACK then ACK: %#v, reports=%d, err=%v", job, reportedConflicts, err)
+	}
+	actual, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
+	if err != nil || actual.Run.Status != kernel.RunStatusFailed || actual.Run.ErrorCode != "agent.tool_deadline_exceeded" {
+		t.Fatalf("redelivery did not terminate Run: %#v, %v", actual.Run, err)
 	}
 }
 
