@@ -1,6 +1,6 @@
 # Durable external Tool waits
 
-Introduced in 0.1.0-beta.20; adopt the coordinated 0.1.0-beta.21 cohort with feature-neutral HTTP projection. See [upgrade notes](releases/v0.1.0-beta.21.md).
+Introduced in 0.1.0-beta.20; adopt the coordinated 0.1.0-beta.22 cohort with feature-neutral HTTP projection. See [upgrade notes](releases/v0.1.0-beta.22.md).
 
 An executor may return an ExecutionResult with a pending receipt and PendingExecution. Omitted Pending and scheduled preserve the existing delayed retry behavior. external_result suspends the call until a trusted host reports that its durable receipt is available. child_terminal suspends the parent until its owned child reaches a terminal state.
 
