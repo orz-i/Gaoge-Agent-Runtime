@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	runtimehttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http"
+	agenthttp "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 )
@@ -29,6 +30,7 @@ var (
 	_ func(runtimehttp.Dependencies) *runtimehttp.Handler                                                                                            = runtimehttp.NewHandler
 	_ func(runtimehttp.PrincipalResolver, runtimehttp.RequestMetadataResolver, runtimehttp.RunLoader, runtimehttp.RunAuthorizer) *runtimehttp.Shared = runtimehttp.NewShared
 	_ func(*runtimehttp.Handler, ...runtimehttp.RouteModule) *runtimehttp.Module                                                                     = runtimehttp.NewModule
+	_ runtimehttp.PendingToolProjector                                                                                                               = agenthttp.PendingTool
 )
 
 func TestHostMountsHTTP(t *testing.T) {
