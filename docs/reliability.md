@@ -17,7 +17,8 @@ See [ADR 0001](adr/0001-runtime-durability-governance-v1.md).
 | Receipt committed, before consumption | Reuse the receipt without another provider call; append one answer and account usage once | `TestRealPostgresAgentRecoveryAcrossProcessCrash/receipt_committed` |
 | Cancellation commits while a model response is in flight | The late response cannot advance the cancelled revision, append a receipt, or cause a later redispatch | `TestRealPostgresAgentCancellationFencesLateModelReceipt` |
 | Journal or outbox INSERT fails after the Run update | Roll back the aggregate, journal, and wakeup together; retry using the original revision | `TestRealPostgresRunJournalOutboxRollbackTogether` |
-| Queue worker disappears without acknowledgement | Preserve the job and payload; redeliver after lease expiry; reject the old lease's Ack/Renew/Nack | `TestRealRedisExpiredLeaseRecoveryFencesStaleWorker` |
+| Queue worker disappears without acknowledgement | Preserve the job and payload; a replacement Claim reclaims expired leases without a dead-worker Ack or explicit Reap; reject stale Ack/Renew/Nack | `TestRedisQueueClaimRecoversAbandonedLease`, `TestRealRedisExpiredLeaseRecoveryFencesStaleWorker` |
+| A healthy continuation handler outlives queue visibility timeout | Keep its lease renewed and do not pre-lease jobs queued behind it; cancel cooperative dispatch and report lease renewal failure | `TestWorkerRenewsSlowDeliveryAndClaimsJustInTime`, `TestWorkerCancelsExecutionAndReportsRenewalFailure`, `TestRealRedisWorkerRenewsSlowDelivery` |
 
 The PostgreSQL agent tests execute the test binary as a child process and use
 `os.Exit` at the selected commit boundary, bypassing runner cleanup and Go
@@ -31,6 +32,30 @@ The atomicity tests inject PostgreSQL CHECK-constraint failures into real INSERT
 and inspect the outcome through another connection. The Redis test uses real
 Lua transactions and fresh clients, with an injected clock to cross the lease
 deadline deterministically. Closing a Redis client is not a Redis server restart.
+
+### Continuation queue lease recovery
+
+The Redis `Claim` transaction sweeps **at most 128 expired leases** before selecting
+ready work. Repeated claims drain larger expiry backlogs, applying the existing
+retry backoff or dead-letter limit and fencing the old lease generation. A
+replacement worker therefore needs neither a separate Reaper nor a call from the
+crashed worker. Explicit `Reap` remains available for operational recovery.
+
+The continuation Worker claims one job at a time (up to `ClaimLimit` per poll)
+rather than leasing a batch before serial dispatch. While dispatch is active,
+it renews the lease through the optional `Renew` queue capability, at an
+interval of `min(visibilityTimeout/3, 30s)` (with a 1ms lower bound). Both built-in
+Memory and Redis queues implement `Renew`. On renewal failure the Worker cancels
+the dispatch context, reports the lease error, and avoids treating the lost
+lease as a successful acknowledgement. A handler must honor context cancellation;
+this does not turn an external side effect into exactly-once execution.
+
+The `DeliveryQueue` interface remains compatible with host-defined queues that
+do not implement `Renew`. For such queues, the host must ensure dispatch finishes
+within the configured visibility timeout, or provide an equivalent lease
+extension mechanism. Redis ready-queue priority selection and historical Job
+retention are **not** bounded by this change; large backlogs and retention
+policy remain separate scaling work.
 
 Sources: [PostgreSQL agent recovery](../go/agent-runtime-postgres/agent_recovery_real_test.go),
 [PostgreSQL atomicity](../go/agent-runtime-postgres/atomicity_real_test.go),

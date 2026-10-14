@@ -16,8 +16,10 @@ import (
 
 // WorkerOptions bound polling, lease consumption and error reporting.
 type WorkerOptions struct {
-	WorkerID          string
-	PollInterval      time.Duration
+	WorkerID     string
+	PollInterval time.Duration
+	// ClaimLimit bounds the number of just-in-time deliveries per poll. A
+	// worker never pre-leases jobs that are waiting behind a slow handler.
 	ClaimLimit        int
 	Projector         Projector
 	Reconciler        Reconciler
@@ -134,31 +136,71 @@ func (worker *Worker) loop(ctx context.Context, done chan<- struct{}) {
 }
 
 func (worker *Worker) consume(ctx context.Context) {
-	deliveries, err := worker.queue.Claim(ctx, queuecore.ClaimRequest{
-		Queue: QueueName, WorkerID: worker.options.WorkerID, Limit: worker.options.ClaimLimit,
-	})
-	if err != nil {
-		worker.report(err)
-		return
-	}
-	for _, delivery := range deliveries {
-		if ctx.Err() != nil {
+	for processed := 0; processed < worker.options.ClaimLimit && ctx.Err() == nil; processed++ {
+		// Dispatch is synchronous: leasing a whole batch up front would allow
+		// later jobs to expire before their handlers even begin.
+		deliveries, err := worker.queue.Claim(ctx, queuecore.ClaimRequest{
+			Queue: QueueName, WorkerID: worker.options.WorkerID, Limit: 1,
+		})
+		if err != nil {
+			worker.report(err)
 			return
 		}
-		worker.consumeDelivery(ctx, delivery)
+		if len(deliveries) == 0 {
+			return
+		}
+		for _, delivery := range deliveries {
+			if ctx.Err() != nil {
+				return
+			}
+			worker.consumeDelivery(ctx, delivery)
+		}
 	}
 }
 
+// leaseRenewer is optional for host-defined queues, preserving the existing
+// DeliveryQueue contract. Both built-in Memory and Redis queues implement it.
+// A host queue without Renew must bound its handler below visibility timeout.
+type leaseRenewer interface {
+	Renew(context.Context, queuecore.LeaseRequest) (queuecore.Delivery, error)
+}
+
 func (worker *Worker) consumeDelivery(ctx context.Context, delivery queuecore.Delivery) {
+	request := queuecore.LeaseRequest{
+		JobID: delivery.Job.ID, LeaseID: delivery.Lease.ID, WorkerID: worker.options.WorkerID,
+	}
+	dispatchCtx, cancel := context.WithCancel(ctx)
+	var leaseDone <-chan error
+	if renewer, ok := worker.queue.(leaseRenewer); ok {
+		done := make(chan error, 1)
+		leaseDone = done
+		go func() {
+			done <- keepDeliveryLease(dispatchCtx, cancel, renewer, request, delivery.Job.Policy.VisibilityTimeout)
+		}()
+	}
 	payload, err := decodePayload(delivery.Job.Payload)
 	if err == nil && delivery.Job.Kind != JobKind {
 		err = ErrInvalidInput
 	}
 	if err == nil {
-		err = worker.handler.Dispatch(ctx, payload)
+		err = worker.handler.Dispatch(dispatchCtx, payload)
 	}
-	request := queuecore.LeaseRequest{
-		JobID: delivery.Job.ID, LeaseID: delivery.Lease.ID, WorkerID: worker.options.WorkerID,
+	cancel()
+	if leaseDone != nil {
+		if leaseErr := <-leaseDone; leaseErr != nil {
+			// The handler may return context.Canceled after losing its lease;
+			// report the actual renewal failure rather than hiding it.
+			if worker.options.Report != nil {
+				worker.options.Report(leaseErr)
+			}
+			err = errors.Join(err, leaseErr)
+		}
+	}
+	if ctx.Err() != nil {
+		// Shutdown leaves the lease for durable expiry recovery rather than
+		// attempting an Ack/Nack using a cancelled worker context.
+		worker.report(err)
+		return
 	}
 	if err == nil {
 		_, err = worker.queue.Ack(ctx, request)
@@ -169,6 +211,40 @@ func (worker *Worker) consumeDelivery(ctx context.Context, delivery queuecore.De
 		err = errors.Join(err, nackErr)
 	}
 	worker.report(err)
+}
+
+func keepDeliveryLease(
+	ctx context.Context,
+	cancel context.CancelFunc,
+	renewer leaseRenewer,
+	request queuecore.LeaseRequest,
+	visibilityTimeout time.Duration,
+) error {
+	interval := visibilityTimeout / 3
+	if interval <= 0 {
+		interval = time.Millisecond
+	}
+	if interval > 30*time.Second {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			if _, err := renewer.Renew(ctx, request); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				// Stop cooperative execution when the lease can no longer be
+				// proven current; the queue will fence stale Ack/Nack.
+				cancel()
+				return err
+			}
+		}
+	}
 }
 
 func (worker *Worker) report(err error) {

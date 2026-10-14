@@ -15,7 +15,10 @@ import (
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 )
 
-const defaultKeyPrefix = "agentruntime:"
+const (
+	defaultKeyPrefix         = "agentruntime:"
+	maxExpiredLeasesPerClaim = 128
+)
 
 // QueueOptions configures the Redis delivery adapter.
 type QueueOptions struct {
@@ -93,7 +96,7 @@ func (queue *DeliveryQueue) Claim(
 	}
 	result, err := claimQueueScript.Run(ctx, queue.client, []string{
 		queue.readyKey(request.Queue), queue.leasedKey(request.Queue),
-	}, queue.now().UnixMilli(), request.Limit, request.WorkerID, queue.jobPrefix()).Result()
+	}, queue.now().UnixMilli(), request.Limit, request.WorkerID, queue.jobPrefix(), maxExpiredLeasesPerClaim).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -499,7 +502,20 @@ redis.call('SADD', KEYS[4], redis.call('HGET', KEYS[1], 'id'))
 return 0
 `)
 
-var claimQueueScript = goredis.NewScript(`
+// Claim performs a bounded, atomic expiry sweep before leasing ready work.
+// A crashed worker never needs to call Ack/Nack/Renew or rely on a host Reaper.
+// Batching the sweep prevents one Claim from scanning every expired lease.
+var claimQueueScript = goredis.NewScript(releaseLua + `
+local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1], 'LIMIT', 0, tonumber(ARGV[5]))
+for _, id in ipairs(expired) do
+  local job = ARGV[4] .. id
+  local expires = tonumber(redis.call('HGET', job, 'expires_ms'))
+  if redis.call('HGET', job, 'status') == 'leased' and expires and expires <= tonumber(ARGV[1]) then
+    release(job, KEYS[1], KEYS[2], id, tonumber(ARGV[1]))
+  else
+    redis.call('ZREM', KEYS[2], id)
+  end
+end
 local due = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
 local candidates = {}
 for _, id in ipairs(due) do

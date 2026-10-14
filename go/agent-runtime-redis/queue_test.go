@@ -105,6 +105,109 @@ func TestRedisQueueExpiredLeaseCannotAffectNewGeneration(t *testing.T) {
 	}
 }
 
+// A replacement worker must recover an abandoned lease without a Reaper or
+// a request from the crashed worker. In-memory Claim already does this.
+func TestRedisQueueClaimRecoversAbandonedLease(t *testing.T) {
+	t.Parallel()
+	queue, clock := newRedisQueueTest(t)
+	job := enqueueRedisJob(t, queue, "abandoned", queuecore.Policy{
+		MaxAttempts: 3, VisibilityTimeout: 5 * time.Second,
+	})
+	old := claimRedisOne(t, queue, "crashed-worker")
+	clock.Advance(5 * time.Second)
+	current := claimRedisOne(t, queue, "replacement-worker")
+	if current.Job.ID != job.ID || current.Lease.Attempt != 2 || current.Lease.Generation != 2 ||
+		current.Lease.ID == old.Lease.ID {
+		t.Fatalf("abandoned lease was not recovered: old=%#v current=%#v", old, current)
+	}
+	for name, operation := range map[string]func() error{
+		"ack": func() error {
+			_, err := queue.Ack(t.Context(), redisLeaseRequest(old))
+			return err
+		},
+		"renew": func() error {
+			_, err := queue.Renew(t.Context(), redisLeaseRequest(old))
+			return err
+		},
+		"nack": func() error {
+			_, err := queue.Nack(t.Context(), queuecore.NackRequest{LeaseRequest: redisLeaseRequest(old)})
+			return err
+		},
+	} {
+		if err := operation(); !errors.Is(err, queuecore.ErrLeaseLost) {
+			t.Fatalf("stale worker %s: %v", name, err)
+		}
+	}
+	if _, err := queue.Ack(t.Context(), redisLeaseRequest(current)); err != nil {
+		t.Fatalf("replacement ack: %v", err)
+	}
+}
+
+func TestRedisQueueClaimExpirySweepIsBoundedAndMakesProgress(t *testing.T) {
+	t.Parallel()
+	queue, clock := newRedisQueueTest(t)
+	const extra = 2
+	for index := 0; index < maxExpiredLeasesPerClaim+extra; index++ {
+		enqueueRedisJob(t, queue, fmt.Sprintf("bounded-%03d", index), queuecore.Policy{
+			MaxAttempts: 3, VisibilityTimeout: 5 * time.Second,
+		})
+	}
+	for remaining := maxExpiredLeasesPerClaim + extra; remaining > 0; {
+		limit := remaining
+		if limit > 100 {
+			limit = 100
+		}
+		claimed, err := queue.Claim(t.Context(), queuecore.ClaimRequest{
+			Queue: redisQueueName, WorkerID: "lost-worker", Limit: limit,
+		})
+		if err != nil || len(claimed) != limit {
+			t.Fatalf("preclaim %d: got %d, %v", limit, len(claimed), err)
+		}
+		remaining -= len(claimed)
+	}
+	clock.Advance(5 * time.Second)
+	claimRedisOne(t, queue, "first-replacement")
+	leased, err := queue.List(t.Context(), redisQueueName, queuecore.StatusLeased)
+	if err != nil || len(leased) != extra+1 {
+		t.Fatalf("first claim must sweep at most %d expired leases: leased=%d, %v", maxExpiredLeasesPerClaim, len(leased), err)
+	}
+	claimRedisOne(t, queue, "second-replacement")
+	leased, err = queue.List(t.Context(), redisQueueName, queuecore.StatusLeased)
+	if err != nil || len(leased) != 2 {
+		t.Fatalf("later claim did not sweep remaining expired leases: leased=%d, %v", len(leased), err)
+	}
+	for _, job := range leased {
+		if job.Lease == nil || !job.Lease.ExpiresAt.After(clock.Now()) {
+			t.Fatalf("an expired lease remains stranded: %#v", job)
+		}
+	}
+}
+
+func TestRedisQueueClaimExpiredLeaseHonorsBackoffAndDeadLetter(t *testing.T) {
+	t.Parallel()
+	queue, clock := newRedisQueueTest(t)
+	job := enqueueRedisJob(t, queue, "expiry-backoff", queuecore.Policy{
+		MaxAttempts: 2, VisibilityTimeout: 5 * time.Second,
+		InitialBackoff: 10 * time.Second, MaxBackoff: 10 * time.Second,
+	})
+	claimRedisOne(t, queue, "crashed-worker")
+	clock.Advance(5 * time.Second)
+	assertRedisNoClaim(t, queue, "too-early")
+	retrying, err := queue.Get(t.Context(), job.ID)
+	if err != nil || retrying.Status != queuecore.StatusQueued ||
+		!retrying.AvailableAt.Equal(clock.Now().Add(10*time.Second)) {
+		t.Fatalf("expired lease did not schedule backoff: %#v, %v", retrying, err)
+	}
+	clock.Advance(10 * time.Second)
+	claimRedisOne(t, queue, "replacement-worker")
+	clock.Advance(5 * time.Second)
+	assertRedisNoClaim(t, queue, "after-attempt-exhaustion")
+	dead, err := queue.Get(t.Context(), job.ID)
+	if err != nil || dead.Status != queuecore.StatusDeadLetter || dead.DeadLetterAt == nil || dead.Attempt != 2 {
+		t.Fatalf("expired last attempt did not dead-letter: %#v, %v", dead, err)
+	}
+}
+
 func TestRedisQueueRetryDeadLetterAndRequeue(t *testing.T) {
 	t.Parallel()
 	queue, clock := newRedisQueueTest(t)
