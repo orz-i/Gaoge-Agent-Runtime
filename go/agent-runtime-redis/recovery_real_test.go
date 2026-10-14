@@ -51,9 +51,8 @@ func TestRealRedisExpiredLeaseRecoveryFencesStaleWorker(t *testing.T) {
 	}
 	assertRedisNoClaim(t, replacement, "early-worker")
 	clock.Advance(5 * time.Second)
-	if _, err = replacement.Ack(t.Context(), redisLeaseRequest(old)); !errors.Is(err, queuecore.ErrLeaseExpired) {
-		t.Fatalf("expired worker acknowledgement = %v", err)
-	}
+	// No Ack/Nack/Renew from the dead worker and no explicit Reap: Claim must
+	// recover the abandoned lease from Redis after reconstructing the adapter.
 	current := claimRedisOne(t, replacement, "replacement-worker")
 	if current.Job.ID != enqueued.Job.ID || current.Lease.Generation != 2 || current.Lease.Attempt != 2 ||
 		current.Lease.ID == old.Lease.ID || string(current.Job.Payload) != string(enqueued.Job.Payload) {

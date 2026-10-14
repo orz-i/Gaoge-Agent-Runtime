@@ -5,6 +5,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Recover abandoned Redis continuation leases during `Claim` with a bounded expiry sweep; no crashed-worker Ack or separately deployed Reaper is required. Preserve retry backoff, dead-letter policy, and stale-lease fencing.
+- Have the continuation Worker claim deliveries just in time and renew an active delivery while its handler runs. Cancel cooperative dispatch on renewal failure. The optional renewal capability preserves existing custom Queue interfaces; custom queues without `Renew` must bound execution below their visibility timeout.
+- Add deterministic queue/Worker regression tests and real-Redis restart evidence for recovery without an explicit Reap.
+
 ## 0.1.0-beta.22
 
 - Fix a loss-of-wakeup race in the external-result and child-terminal wait continuation: after an unrelated Run revision changes between dispatch and resume, retry the current generation instead of falsely ACKing an unresolved deadline or result-ready delivery.

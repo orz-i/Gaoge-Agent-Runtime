@@ -13,7 +13,10 @@ A production host is responsible for composing and deploying:
 - PostgreSQL migrations and connection lifecycle when durable SQL storage is
   used;
 - Redis queue/feed clients and continuation workers when those capabilities are
-  enabled;
+  enabled; built-in Redis Claim now reclaims abandoned leases without a separate
+  Reaper, and the Worker renews active leases. Custom queue adapters lacking
+  `Renew` must keep handler execution shorter than the lease visibility timeout;
+  monitor dead letters and lease-recovery errors;
 - OpenTelemetry SDK/exporter/Collector configuration;
 - process shutdown, health/readiness, secrets, autoscaling, and rollout policy;
 - deployment-owned Agent/Harness execution policy. Agent constructor limits and
