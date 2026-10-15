@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"sync/atomic"
 	"testing"
@@ -90,7 +91,12 @@ func testKernelStoreCreateOwnSnapshot(t *testing.T, db *gorm.DB) {
 	aboutToRead := make(chan struct{})
 	releaseRead := make(chan struct{})
 	if err := db.Callback().Query().Before("gorm:query").Register("test:create-own-snapshot-read", func(tx *gorm.DB) {
-		if tx.Statement.Context.Value(ownSnapshotQueryKey{}) == true {
+		if tx.Statement.Context.Value(ownSnapshotQueryKey{}) != true {
+			return
+		}
+		// Queries within Create's transaction are safe: other workers cannot
+		// update the row before commit. Block only an unsafe post-commit Load.
+		if _, withinTransaction := tx.Statement.ConnPool.(*sql.Tx); !withinTransaction {
 			close(aboutToRead)
 			<-releaseRead
 		}

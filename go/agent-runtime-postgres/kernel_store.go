@@ -121,10 +121,16 @@ func (store *KernelStore) Create(
 		if createErr := createKernelTransition(tx, record.Run, events); createErr != nil {
 			return createErr
 		}
-		// Create must likewise return its own initial revision, not another
-		// worker's first transition committed just after this transaction.
+		// Read the actual persisted row within this transaction. PostgreSQL
+		// timestamps have microsecond precision, and the in-memory record can
+		// contain nanoseconds. A post-commit Load could instead see another
+		// worker's subsequent revision.
+		var persisted models.KernelRunRecord
+		if readErr := tx.Where("run_id = ?", record.Run.ID).First(&persisted).Error; readErr != nil {
+			return translateKernelError(readErr)
+		}
 		var snapshotErr error
-		snapshot, snapshotErr = kernelSnapshotFrom(model)
+		snapshot, snapshotErr = kernelSnapshotFrom(persisted)
 		return snapshotErr
 	})
 	if err != nil {
