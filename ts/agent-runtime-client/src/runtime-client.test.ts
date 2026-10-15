@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events";
 import { createServer } from "node:http";
 
 import { describe, expect, it, vi } from "vitest";
@@ -525,5 +526,85 @@ describe.each(["run", "harness"] as const)("%s feed real HTTP shutdown", (kind) 
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe.each(["run", "harness"] as const)("%s feed lazy abort listener lifecycle", (kind) => {
+  const listeners = (signal: AbortSignal) => getEventListeners(signal, "abort").length;
+
+  it("does not attach listeners or fetch for unconsumed feeds, even when many share a signal", async () => {
+    const abort = new AbortController();
+    const fetcher = vi.fn().mockResolvedValue(new Response(sseFrame(kind, 1, true)));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterators = Array.from({ length: 100 }, () => feedFor(client, kind, { signal: abort.signal }));
+
+    const beforeClose = listeners(abort.signal);
+    await Promise.all(iterators.map((iterator) => iterator.return(undefined)));
+    expect(beforeClose).toBe(0);
+    expect(listeners(abort.signal)).toBe(0);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("subscribes exactly once on the first next and cleans up on early return", async () => {
+    const abort = new AbortController();
+    const fetcher = vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(sseFrame(kind, 1))); },
+    })));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { signal: abort.signal });
+    expect(listeners(abort.signal)).toBe(0);
+
+    const first = iterator.next();
+    expect(listeners(abort.signal)).toBe(1);
+    expect((await first).value?.seq).toBe(1);
+    const pending = iterator.next();
+    expect(listeners(abort.signal)).toBe(1);
+    expect(await settlePromptly(iterator.return(undefined))).toEqual({ done: true, value: undefined });
+    expect(await settlePromptly(pending)).toEqual({ done: true, value: undefined });
+    expect(listeners(abort.signal)).toBe(0);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans up after terminal completion and after malformed stream errors", async () => {
+    for (const payload of [sseFrame(kind, 1, true), "data: {malformed-json}\n\n"]) {
+      const abort = new AbortController();
+      const fetcher = vi.fn().mockResolvedValue(new Response(payload));
+      const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+      const iterator = feedFor(client, kind, { signal: abort.signal, reconnectDelayMS: 0 });
+      expect(listeners(abort.signal)).toBe(0);
+      if (payload.includes("malformed-json")) {
+        await expect(iterator.next()).rejects.toBeInstanceOf(SyntaxError);
+      } else {
+        expect((await iterator.next()).value?.terminal).toBe(true);
+        expect((await iterator.next()).done).toBe(true);
+      }
+      expect(listeners(abort.signal)).toBe(0);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("does not subscribe or fetch when already aborted before the first next", async () => {
+    const abort = new AbortController();
+    const fetcher = vi.fn().mockResolvedValue(new Response(sseFrame(kind, 1)));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { signal: abort.signal });
+    abort.abort();
+    expect(await iterator.next()).toEqual({ done: true, value: undefined });
+    expect(listeners(abort.signal)).toBe(0);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("removes the active listener immediately when aborted", async () => {
+    const abort = new AbortController();
+    const fetcher = vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(sseFrame(kind, 1))); },
+    })));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { signal: abort.signal });
+    expect((await iterator.next()).value?.seq).toBe(1);
+    expect(listeners(abort.signal)).toBe(1);
+    abort.abort();
+    expect(listeners(abort.signal)).toBe(0);
+    expect((await iterator.next()).done).toBe(true);
   });
 });

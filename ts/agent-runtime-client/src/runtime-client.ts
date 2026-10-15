@@ -63,6 +63,7 @@ function interruptibleFeed<T>(
   const controller = new AbortController();
   const source = factory(controller.signal);
   let closed = false;
+  let started = false;
   const stopped = new Promise<IteratorResult<T>>((resolve) => {
     controller.signal.addEventListener("abort", () => resolve({ done: true, value: undefined }), { once: true });
   });
@@ -81,11 +82,17 @@ function interruptibleFeed<T>(
   };
   function onExternalAbort() { shutdown(); }
 
-  externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
-  if (externalSignal?.aborted) shutdown();
-
   return {
     async next(...args: [] | [unknown]) {
+      if (closed) return { done: true, value: undefined };
+      if (!started) {
+        started = true;
+        // Merely creating a feed must not retain a long-lived caller signal.
+        // Subscribe only when the first next() actually starts consuming it.
+        externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+        // Covers a signal aborted before next(), including the subscription edge.
+        if (externalSignal?.aborted) shutdown();
+      }
       if (closed) return { done: true, value: undefined };
       try {
         const result = await Promise.race([source.next(...args), stopped]);
