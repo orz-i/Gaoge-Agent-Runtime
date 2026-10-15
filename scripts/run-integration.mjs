@@ -32,6 +32,7 @@ function runSuites(env) {
   run("go", ["test", "-race", "./...", "-run", "^TestRealPostgres", "-count=1", "-v"], path.join(root, "go/agent-runtime-postgres"), false, env);
   run("go", ["test", "-race", "./...", "-run", "^TestRealPostgres", "-count=1", "-v"], path.join(root, "go/agent-runtime-harness-postgres"), false, env);
   run("go", ["test", "-race", "./...", "-run", "^TestRealRedis", "-count=1", "-v"], path.join(root, "go/agent-runtime-redis"), false, env);
+  run("go", ["test", "-race", "./...", "-run", "^TestRealPostgresRedis", "-count=1", "-v"], path.join(root, "integration/continuation-e2e"), false, { ...env, GOWORK: "off" });
 }
 
 function run(command, args, cwd, allowFailure = false, env = process.env) {

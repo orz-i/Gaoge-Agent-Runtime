@@ -32,6 +32,9 @@ func NewMemory(dependencies Dependencies) *Memory {
 	return &Memory{clock: clock, jobs: make(map[string]Job)}
 }
 
+// DurableQueue reports that this reference adapter loses Jobs on restart.
+func (queue *Memory) DurableQueue() bool { return false }
+
 // Descriptor declares the Queue delivery capability.
 func (queue *Memory) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{Name: "queue", Provides: []kernel.Capability{CapabilityQueue}}

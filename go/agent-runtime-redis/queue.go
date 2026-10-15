@@ -49,6 +49,12 @@ func NewQueue(client goredis.UniversalClient, options QueueOptions) *DeliveryQue
 	return &DeliveryQueue{client: client, base: prefix + "{agent-runtime}:queue:", clock: clock}
 }
 
+// DurableQueue declares that delivery is backed by external Redis state.
+// Hosts must still configure Redis persistence and retention for durability.
+func (queue *DeliveryQueue) DurableQueue() bool {
+	return queue != nil && queue.client != nil
+}
+
 // Descriptor declares the Queue delivery capability.
 func (queue *DeliveryQueue) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{Name: "redis-queue", Provides: []kernel.Capability{queuecore.CapabilityQueue}}

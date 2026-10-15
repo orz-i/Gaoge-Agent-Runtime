@@ -43,6 +43,30 @@ module to the same release cohort, run migrations from a host-controlled
 migration job, and keep old/new workers from processing the same durable work
 unless that mixed-version topology has explicit compatibility evidence.
 
+### Stage-two reconciliation migration
+
+Before deploying workers with bounded child-terminal reconciliation, run the
+host-owned PostgreSQL migration (`postgres.Migrate(db)` or equivalent) to add
+`last_parent_revision` and `last_child_revision` to `agent_run_relations` as
+non-null columns defaulting to zero. Existing immutable parent/child identities
+are unchanged. The new scheduler uses the optional `runrelation.ReconciliationPager`
+capability to scan at most 128 indexed relation IDs per tick before joining
+parent/child status; custom Store adapters without it retain the legacy
+unbounded `ListAll` fallback.
+
+Existing relations begin with zero handoff watermarks, so an upgraded worker may
+re-enqueue historical terminal-child facts for parents that are still running.
+Keep queue idempotency, downstream effect fencing and dead-letter monitoring in
+place, and avoid mixing old/new workers without an explicit compatibility check.
+A rollback can ignore the extra SQL columns but restores the old full-scan
+behavior. Production hosts should set `SchedulerDependencies.RequireDurableQueue`
+to reject volatile queues and configure Redis persistence and retention.
+To suppress already-consumed first-party child facts, explicitly set
+`SchedulerDependencies.ReconcileGuard = continuationadapter.ReconcileGuard`.
+Unknown/custom kinds remain conservatively eligible; queue-epoch recovery and
+an indexed dirty-relation feed are not provided by this patch. See
+[stage-two governance evidence](audits/2026-10-14-stage2-reconciliation.md).
+
 For telemetry, inject the host's OpenTelemetry provider into
 `go/agent-runtime-otel` and export to an OTLP endpoint/Collector. For state and
 recovery requirements, follow the

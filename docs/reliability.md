@@ -19,6 +19,8 @@ See [ADR 0001](adr/0001-runtime-durability-governance-v1.md).
 | Journal or outbox INSERT fails after the Run update | Roll back the aggregate, journal, and wakeup together; retry using the original revision | `TestRealPostgresRunJournalOutboxRollbackTogether` |
 | Queue worker disappears without acknowledgement | Preserve the job and payload; a replacement Claim reclaims expired leases without a dead-worker Ack or explicit Reap; reject stale Ack/Renew/Nack | `TestRedisQueueClaimRecoversAbandonedLease`, `TestRealRedisExpiredLeaseRecoveryFencesStaleWorker` |
 | A healthy continuation handler outlives queue visibility timeout | Keep its lease renewed and do not pre-lease jobs queued behind it; cancel cooperative dispatch and report lease renewal failure | `TestWorkerRenewsSlowDeliveryAndClaimsJustInTime`, `TestWorkerCancelsExecutionAndReportsRenewalFailure`, `TestRealRedisWorkerRenewsSlowDelivery` |
+| Child terminal fact enqueued, then worker crashes before recording recovery progress | Enqueue first, then advance monotonic durable relation watermark; retry the same queue identity without replaying an unchanged fact after restart | `TestSchedulerReconcileRetriesAfterEnqueueBeforeWatermarkFailure`, `TestRealPostgresSchedulerReconcileSurvivesRestartAndLateParentWait` |
+| Child finishes before parent commits its wait | A later parent revision makes the relation eligible for bounded reconciliation again; preserve the late-parent wakeup | `TestSchedulerReconcileReschedulesAfterParentWaitCommitButNotUnchanged`, `TestRealPostgresSchedulerReconcileSurvivesRestartAndLateParentWait` |
 
 The PostgreSQL agent tests execute the test binary as a child process and use
 `os.Exit` at the selected commit boundary, bypassing runner cleanup and Go
@@ -56,6 +58,29 @@ within the configured visibility timeout, or provide an equivalent lease
 extension mechanism. Redis ready-queue priority selection and historical Job
 retention are **not** bounded by this change; large backlogs and retention
 policy remain separate scaling work.
+
+### Bounded child-terminal reconciliation
+
+The optional `runrelation.ReconciliationPager` lets built-in Memory and PostgreSQL
+adapters scan at most 128 indexed ChildRunIDs per `Scheduler.Reconcile` tick.
+PostgreSQL joins only the scanned IDs to current Run statuses. `MarkEnqueued`
+advances monotonic revisions **after** queue acceptance; optional first-party
+consumption guards use `MarkObserved` only after verifying the parent has
+already consumed the child in durable feature state. The cursor is
+in-memory and disposable, while PostgreSQL handoff progress survives restart.
+A later parent Revision reopens the relation, preserving the early-child,
+late-parent wait race repair. Existing custom Stores without the optional pager
+retain the legacy full-scan fallback.
+
+**Host migration prerequisite:** add `last_parent_revision` and
+`last_child_revision` to `agent_run_relations` through `postgres.Migrate` before
+starting upgraded workers. For production set `RequireDurableQueue` and use a
+persistent Redis queue; set `ReconcileGuard` to the first-party adapter when
+appropriate. The new SQL query scans a bounded index page, but an entire
+historical relation cycle still takes multiple ticks. A durable dirty-relation
+feed, queue-epoch recovery, and strict production recovery-latency SLO remain
+separate scaling work. See
+[stage-two evidence](audits/2026-10-14-stage2-reconciliation.md).
 
 Sources: [PostgreSQL agent recovery](../go/agent-runtime-postgres/agent_recovery_real_test.go),
 [PostgreSQL atomicity](../go/agent-runtime-postgres/atomicity_real_test.go),

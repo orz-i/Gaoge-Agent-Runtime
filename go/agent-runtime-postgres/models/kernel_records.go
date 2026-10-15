@@ -68,6 +68,10 @@ type RunRelationRecord struct {
 	Kind        string    `gorm:"size:32;not null;uniqueIndex:idx_agent_run_relations_owner,priority:2"`
 	OwnerNodeID string    `gorm:"size:128;not null;uniqueIndex:idx_agent_run_relations_owner,priority:3"`
 	CreatedAt   time.Time `gorm:"not null;index:idx_agent_run_relations_created"`
+	// These monotonic handoff watermarks are mutable recovery metadata, not
+	// part of the immutable parent/child ownership identity.
+	LastParentRevision uint64 `gorm:"not null;default:0"`
+	LastChildRevision  uint64 `gorm:"not null;default:0"`
 }
 
 func (RunRelationRecord) TableName() string { return "agent_run_relations" }
