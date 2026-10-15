@@ -1,3 +1,5 @@
+import { createServer } from "node:http";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { RuntimeAPIError, RuntimeClient } from "./runtime-client";
@@ -284,5 +286,244 @@ describe("RuntimeClient target API", () => {
       status: 409,
       code: "harness.feed_cursor_expired",
     }));
+  });
+});
+
+type FeedKind = "run" | "harness";
+const sseFrame = (kind: FeedKind, seq: number, terminal = false) => `data: ${JSON.stringify({
+  seq, ...(kind === "run" ? { runID: "run-1" } : { turnID: "ht-1" }),
+  type: terminal ? "completed" : "delta", terminal,
+})}\n\n`;
+
+function feedFor(client: RuntimeClient, kind: FeedKind, options: {
+  signal?: AbortSignal; reconnectDelayMS?: number; maxReconnects?: number;
+} = {}) {
+  return kind === "run"
+    ? client.runs.feed("run-1", options)
+    : client.harness.turns.feed("ht-1", options);
+}
+
+describe.each(["run", "harness"] as const)("%s feed resilience", (kind) => {
+  it("recovers from a body read failure at the last delivered cursor without duplicates", async () => {
+    let firstController!: ReadableStreamDefaultController<Uint8Array>;
+    const firstBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        firstController = controller;
+        controller.enqueue(new TextEncoder().encode(sseFrame(kind, 1)));
+      },
+    });
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(firstBody))
+      .mockResolvedValueOnce(new Response(sseFrame(kind, 1) + sseFrame(kind, 2, true)));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { reconnectDelayMS: 0, maxReconnects: 2 });
+
+    const first = await iterator.next();
+    expect(first.value?.seq).toBe(1);
+    firstController.error(new Error("connection reset during reader.read"));
+    const second = await iterator.next();
+    expect(second.value?.seq).toBe(2);
+    expect(second.value?.terminal).toBe(true);
+    expect((await iterator.next()).done).toBe(true);
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      expect.stringContaining("feed?afterSeq=0"),
+      expect.stringContaining("feed?afterSeq=1"),
+    ]);
+  });
+
+  it("limits retries for repeated body read failures", async () => {
+    const fetcher = vi.fn().mockImplementation(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.error(new Error("reset on read")); },
+    })));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { reconnectDelayMS: 0, maxReconnects: 2 });
+
+    await expect(iterator.next()).rejects.toThrow("reset on read");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("honors a zero reconnect budget after a nonterminal EOF", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(sseFrame(kind, 1)));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { reconnectDelayMS: 0, maxReconnects: 0 });
+
+    expect((await iterator.next()).value?.seq).toBe(1);
+    await expect(iterator.next()).rejects.toEqual(expect.objectContaining<Partial<RuntimeAPIError>>({
+      status: 0,
+      code: kind === "run" ? "runfeed.disconnected" : "harness.feed_disconnected",
+    }));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a malformed SSE payload as a network failure", async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response("data: {invalid-json}\n\n"));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+
+    await expect(feedFor(client, kind, { reconnectDelayMS: 0, maxReconnects: 2 }).next())
+      .rejects.toBeInstanceOf(SyntaxError);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the reader and active fetch when the caller returns early", async () => {
+    const cancelled = vi.fn();
+    let fetchSignal: AbortSignal | undefined;
+    const fetcher = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode(sseFrame(kind, 1))); },
+        cancel: cancelled,
+      }));
+    });
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { reconnectDelayMS: 0 });
+
+    expect((await iterator.next()).value?.seq).toBe(1);
+    await iterator.return(undefined);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(fetchSignal?.aborted).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops cleanly without reconnecting when the caller aborts during a read", async () => {
+    const abortController = new AbortController();
+    let fetchSignal: AbortSignal | undefined;
+    const fetcher = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(sseFrame(kind, 1)));
+          fetchSignal?.addEventListener("abort", () => controller.error(new DOMException("aborted", "AbortError")), { once: true });
+        },
+      }));
+    });
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { signal: abortController.signal, reconnectDelayMS: 0 });
+
+    expect((await iterator.next()).value?.seq).toBe(1);
+    abortController.abort();
+    expect((await iterator.next()).done).toBe(true);
+    expect(fetchSignal?.aborted).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A stalled network reader or cancel hook must not prevent explicit iterator shutdown.
+async function settlePromptly(promise: Promise<unknown>, timeoutMS = 350): Promise<unknown> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("SSE iterator did not settle promptly")), timeoutMS);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+describe.each(["run", "harness"] as const)("%s feed shutdown audit regressions", (kind) => {
+  it("return interrupts a pending next/read and closes the fetch without an external signal", async () => {
+    const cancelled = vi.fn();
+    let fetchSignal: AbortSignal | undefined;
+    const fetcher = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode(sseFrame(kind, 1))); },
+        cancel: cancelled,
+      }));
+    });
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { reconnectDelayMS: 0 });
+    expect((await iterator.next()).value?.seq).toBe(1);
+
+    const pendingNext = iterator.next();
+    await Promise.resolve();
+    expect(await settlePromptly(iterator.return(undefined))).toEqual({ done: true, value: undefined });
+    expect(await settlePromptly(pendingNext)).toEqual({ done: true, value: undefined });
+    expect(fetchSignal?.aborted).toBe(true);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not wait indefinitely when the stream cancel hook never completes", async () => {
+    const cancelled = vi.fn(() => new Promise<void>(() => {}));
+    let fetchSignal: AbortSignal | undefined;
+    const fetcher = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      fetchSignal = init?.signal ?? undefined;
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode(sseFrame(kind, 1))); },
+        cancel: cancelled,
+      }));
+    });
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { reconnectDelayMS: 0 });
+    expect((await iterator.next()).value?.seq).toBe(1);
+
+    expect(await settlePromptly(iterator.return(undefined))).toEqual({ done: true, value: undefined });
+    expect(fetchSignal?.aborted).toBe(true);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not leak rejected cancel hooks into an unhandled rejection", async () => {
+    const cancelled = vi.fn(() => Promise.reject(new Error("cancel failed")));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: async () => new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode(sseFrame(kind, 1))); },
+        cancel: cancelled,
+      }),
+    ) });
+    const iterator = feedFor(client, kind);
+    expect((await iterator.next()).value?.seq).toBe(1);
+    expect(await settlePromptly(iterator.return(undefined))).toEqual({ done: true, value: undefined });
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it("never delivers already buffered events after external abort", async () => {
+    const abort = new AbortController();
+    const fetcher = vi.fn().mockResolvedValue(new Response(sseFrame(kind, 1) + sseFrame(kind, 2, true)));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test", fetch: fetcher });
+    const iterator = feedFor(client, kind, { signal: abort.signal, reconnectDelayMS: 0 });
+    expect((await iterator.next()).value?.seq).toBe(1);
+    abort.abort();
+    expect(await settlePromptly(iterator.next())).toEqual({ done: true, value: undefined });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe.each(["run", "harness"] as const)("%s feed real HTTP shutdown", (kind) => {
+  it("closes an idle HTTP SSE connection when return interrupts next", async () => {
+    let signal: AbortSignal | undefined;
+    let markClosed!: () => void;
+    const responseClosed = new Promise<void>((resolve) => { markClosed = resolve; });
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(sseFrame(kind, 1));
+      response.on("close", markClosed);
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("invalid test server address");
+      const client = new RuntimeClient({
+        baseURL: `http://127.0.0.1:${address.port}`,
+        fetch: async (url, init) => {
+          signal = init?.signal ?? undefined;
+          return fetch(url, init);
+        },
+      });
+      const iterator = feedFor(client, kind, { reconnectDelayMS: 0 });
+      expect((await iterator.next()).value?.seq).toBe(1);
+
+      const pendingNext = iterator.next();
+      await Promise.resolve();
+      expect(await settlePromptly(iterator.return(undefined), 1000)).toEqual({ done: true, value: undefined });
+      expect(await settlePromptly(pendingNext, 1000)).toEqual({ done: true, value: undefined });
+      await settlePromptly(responseClosed, 1000);
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

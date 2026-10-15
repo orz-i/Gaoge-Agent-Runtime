@@ -30,6 +30,22 @@ export type HarnessTurnFeedOptions = FeedOptions & {
   onCursorExpired?: (snapshot: HarnessTurnSnapshotDTO) => void | Promise<void>;
 };
 
+type FeedProtocol = {
+  feedPath: string;
+  snapshotPath: string;
+  cursorExpiredCode: string;
+  cursorHeadHeader: string;
+  invalidResponseCode: string;
+  disconnectedCode: string;
+  feedName: string;
+};
+
+class FeedReadError extends Error {
+  constructor(readonly source: unknown) {
+    super("SSE stream read failed");
+  }
+}
+
 export class RuntimeAPIError extends Error {
   constructor(message: string, public readonly status: number, public readonly code: string, public readonly requestID: string) {
     super(message);
@@ -37,8 +53,69 @@ export class RuntimeAPIError extends Error {
   }
 }
 
-async function* decodeHarnessTurnFeed(body: ReadableStream<Uint8Array>): AsyncGenerator<HarnessTurnFeedEventDTO> {
-  for await (const data of decodeSSEData(body)) {
+// AsyncGenerator.return() normally waits for any pending next() to finish.
+// Expose a separate close path so callers can interrupt a suspended SSE read
+// (and fetch) before the generator gets a chance to run its own finally block.
+function interruptibleFeed<T>(
+  factory: (signal: AbortSignal) => AsyncGenerator<T>,
+  externalSignal?: AbortSignal,
+): AsyncGenerator<T> {
+  const controller = new AbortController();
+  const source = factory(controller.signal);
+  let closed = false;
+  const stopped = new Promise<IteratorResult<T>>((resolve) => {
+    controller.signal.addEventListener("abort", () => resolve({ done: true, value: undefined }), { once: true });
+  });
+  const stop = () => {
+    if (closed) return;
+    closed = true;
+    externalSignal?.removeEventListener("abort", onExternalAbort);
+    controller.abort();
+  };
+  const shutdown = (value?: unknown) => {
+    if (closed) return;
+    stop();
+    // The underlying generator may still be inside next(). Do not wait for a
+    // non-cooperative fetch or ReadableStream cancellation to finish.
+    void source.return(value).catch(() => {});
+  };
+  function onExternalAbort() { shutdown(); }
+
+  externalSignal?.addEventListener("abort", onExternalAbort, { once: true });
+  if (externalSignal?.aborted) shutdown();
+
+  return {
+    async next(...args: [] | [unknown]) {
+      if (closed) return { done: true, value: undefined };
+      try {
+        const result = await Promise.race([source.next(...args), stopped]);
+        if (closed) return { done: true, value: undefined };
+        if (result.done) stop();
+        return result;
+      } catch (error) {
+        if (closed) return { done: true, value: undefined };
+        stop();
+        throw error;
+      }
+    },
+    return(value) {
+      shutdown(value);
+      return Promise.resolve({ done: true, value });
+    },
+    throw(error) {
+      shutdown();
+      return Promise.reject(error);
+    },
+    [Symbol.asyncIterator]() { return this; },
+    [Symbol.asyncDispose]() {
+      shutdown();
+      return Promise.resolve();
+    },
+  };
+}
+
+async function* decodeHarnessTurnFeed(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<HarnessTurnFeedEventDTO> {
+  for await (const data of decodeSSEData(body, signal)) {
     const event = JSON.parse(data) as HarnessTurnFeedEventDTO;
     if (
       Number.isSafeInteger(event.seq) &&
@@ -51,29 +128,59 @@ async function* decodeHarnessTurnFeed(body: ReadableStream<Uint8Array>): AsyncGe
   }
 }
 
-async function* decodeSSEData(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+async function* decodeSSEData(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let reachedEOF = false;
+  let cancelRequested = false;
+  const cancelReader = () => {
+    if (reachedEOF || cancelRequested) return;
+    cancelRequested = true;
+    try {
+      // reader.cancel() resolves pending read()s, but its own promise depends on
+      // the stream's cancel hook, which may never settle. Observe errors without
+      // awaiting that hook during shutdown.
+      void reader.cancel().catch(() => {});
+    } catch {
+      // The stream can already be errored or have released its reader.
+    }
+  };
+  signal?.addEventListener("abort", cancelReader, { once: true });
+  if (signal?.aborted) cancelReader();
   try {
-    while (true) {
-      const { done, value } = await reader.read();
+    while (!signal?.aborted) {
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        if (signal?.aborted) return;
+        // Only transport read failures are retryable, not JSON parsing errors.
+        throw new FeedReadError(error);
+      }
+      if (signal?.aborted) return;
+      const { done, value } = chunk;
       buffer += decoder.decode(value, { stream: !done });
       buffer = buffer.replaceAll("\r\n", "\n");
       let boundary = buffer.indexOf("\n\n");
       while (boundary >= 0) {
+        if (signal?.aborted) return;
         const data = sseData(buffer.slice(0, boundary));
         buffer = buffer.slice(boundary + 2);
         if (data) yield data;
         boundary = buffer.indexOf("\n\n");
       }
       if (done) {
+        reachedEOF = true;
+        if (signal?.aborted) return;
         const data = sseData(buffer);
         if (data) yield data;
         return;
       }
     }
   } finally {
+    signal?.removeEventListener("abort", cancelReader);
+    cancelReader();
     reader.releaseLock();
   }
 }
@@ -207,134 +314,129 @@ export class RuntimeClient {
     return response.json() as Promise<T>;
   }
 
-  private async *streamHarnessTurnFeed(
+  private streamHarnessTurnFeed(
     turnID: string,
     request: HarnessTurnFeedOptions = {},
   ): AsyncGenerator<HarnessTurnFeedEventDTO> {
-    let afterSeq = Math.max(0, Math.trunc(request.afterSeq ?? 0));
-    const reconnectDelayMS = Math.max(0, Math.trunc(request.reconnectDelayMS ?? 250));
-    const maxReconnects = Math.max(0, Math.trunc(request.maxReconnects ?? 20));
-    let reconnects = 0;
-    while (!request.signal?.aborted) {
-      let response: Response;
-      try {
-        const headers = await this.headers();
-        headers.set("Accept", "text/event-stream");
-        response = await this.fetcher(
-          this.url(`/harness/turns/${pathPart(turnID)}/feed?afterSeq=${afterSeq}`),
-          { headers, signal: request.signal },
-        );
-      } catch (error) {
-        if (request.signal?.aborted) return;
-        if (reconnects >= maxReconnects) throw error;
-        reconnects += 1;
-        await reconnectDelay(reconnectDelayMS, request.signal);
-        continue;
-      }
-      if (!response.ok) {
-        if (response.status === 404 && reconnects < maxReconnects) {
-          reconnects += 1;
-          await reconnectDelay(reconnectDelayMS, request.signal);
-          continue;
-        }
-        const apiError = await runtimeAPIError(response);
-        if (apiError.code === "harness.feed_cursor_expired") {
-          const headSeq = Number.parseInt(response.headers.get("x-harness-feed-head") ?? "", 10);
-          if (!request.onCursorExpired || !Number.isSafeInteger(headSeq) || headSeq <= afterSeq) throw apiError;
-          const snapshot = await this.request<HarnessTurnSnapshotDTO>(
-            `/harness/turns/${pathPart(turnID)}`,
-            {},
-            { signal: request.signal },
-          );
-          await request.onCursorExpired(snapshot);
-          afterSeq = headSeq;
-          reconnects = 0;
-          continue;
-        }
-        throw apiError;
-      }
-      if (!response.body) {
-        throw new RuntimeAPIError("Harness Turn feed response has no body", response.status, "harness.feed_invalid_response", "");
-      }
-      let received = false;
-      for await (const event of decodeHarnessTurnFeed(response.body)) {
-        if (event.seq <= afterSeq) continue;
-        received = true;
-        reconnects = 0;
-        afterSeq = event.seq;
-        yield event;
-        if (event.terminal) return;
-      }
-      if (request.signal?.aborted) return;
-      if (!received) reconnects += 1;
-      if (reconnects > maxReconnects) {
-        throw new RuntimeAPIError("Harness Turn feed disconnected", 0, "harness.feed_disconnected", "");
-      }
-      await reconnectDelay(reconnectDelayMS, request.signal);
-    }
+    const path = "/harness/turns/" + pathPart(turnID);
+    return interruptibleFeed((signal) => this.streamFeed<HarnessTurnFeedEventDTO, HarnessTurnSnapshotDTO>({
+      feedPath: path + "/feed",
+      snapshotPath: path,
+      cursorExpiredCode: "harness.feed_cursor_expired",
+      cursorHeadHeader: "x-harness-feed-head",
+      invalidResponseCode: "harness.feed_invalid_response",
+      disconnectedCode: "harness.feed_disconnected",
+      feedName: "Harness Turn",
+    }, decodeHarnessTurnFeed, { ...request, signal }), request.signal);
   }
 
-  private async *streamRunFeed(runID: string, request: RunFeedOptions = {}): AsyncGenerator<RunFeedEventDTO> {
+  private streamRunFeed(runID: string, request: RunFeedOptions = {}): AsyncGenerator<RunFeedEventDTO> {
+    const path = "/runs/" + pathPart(runID);
+    return interruptibleFeed((signal) => this.streamFeed<RunFeedEventDTO, RunSnapshotDTO>({
+      feedPath: path + "/feed",
+      snapshotPath: path,
+      cursorExpiredCode: "runfeed.cursor_expired",
+      cursorHeadHeader: "x-run-feed-head",
+      invalidResponseCode: "runfeed.invalid_response",
+      disconnectedCode: "runfeed.disconnected",
+      feedName: "runtime",
+    }, decodeRunFeed, { ...request, signal }), request.signal);
+  }
+
+  private async *streamFeed<TEvent extends { seq: number; terminal?: boolean }, TSnapshot>(
+    protocol: FeedProtocol,
+    decode: (body: ReadableStream<Uint8Array>, signal?: AbortSignal) => AsyncGenerator<TEvent>,
+    request: FeedOptions & { onCursorExpired?: (snapshot: TSnapshot) => void | Promise<void> },
+  ): AsyncGenerator<TEvent> {
     let afterSeq = Math.max(0, Math.trunc(request.afterSeq ?? 0));
     const reconnectDelayMS = Math.max(0, Math.trunc(request.reconnectDelayMS ?? 250));
     const maxReconnects = Math.max(0, Math.trunc(request.maxReconnects ?? 20));
     let reconnects = 0;
+
     while (!request.signal?.aborted) {
-      let response: Response;
+      // Each connection owns its own abort controller, including when the
+      // consumer closes an iterator suspended at a yield.
+      const controller = new AbortController();
+      const onAbort = () => controller.abort(request.signal?.reason);
+      request.signal?.addEventListener("abort", onAbort, { once: true });
+      if (request.signal?.aborted) onAbort();
+      let retryDelay = false;
       try {
-        const headers = await this.headers();
-        headers.set("Accept", "text/event-stream");
-        response = await this.fetcher(
-          this.url(`/runs/${pathPart(runID)}/feed?afterSeq=${afterSeq}`),
-          { headers, signal: request.signal },
-        );
-      } catch (error) {
-        if (request.signal?.aborted) return;
-        if (reconnects >= maxReconnects) throw error;
-        reconnects += 1;
-        await reconnectDelay(reconnectDelayMS, request.signal);
-        continue;
-      }
-      if (!response.ok) {
-        if (response.status === 404 && reconnects < maxReconnects) {
-          reconnects += 1;
-          await reconnectDelay(reconnectDelayMS, request.signal);
-          continue;
-        }
-        const apiError = await runtimeAPIError(response);
-        if (apiError.code === "runfeed.cursor_expired") {
-          const headSeq = Number.parseInt(response.headers.get("x-run-feed-head") ?? "", 10);
-          if (!request.onCursorExpired || !Number.isSafeInteger(headSeq) || headSeq <= afterSeq) throw apiError;
-          const snapshot = await this.request<RunSnapshotDTO>(
-            `/runs/${pathPart(runID)}`,
-            {},
-            { signal: request.signal },
+        let response: Response | undefined;
+        try {
+          const headers = await this.headers();
+          headers.set("Accept", "text/event-stream");
+          if (controller.signal.aborted) return;
+          response = await this.fetcher(
+            this.url(protocol.feedPath + "?afterSeq=" + afterSeq),
+            { headers, signal: controller.signal },
           );
-          await request.onCursorExpired(snapshot);
-          afterSeq = headSeq;
-          reconnects = 0;
-          continue;
+        } catch (error) {
+          if (request.signal?.aborted) return;
+          if (reconnects >= maxReconnects) throw error;
+          reconnects += 1;
+          retryDelay = true;
         }
-        throw apiError;
+
+        if (response) {
+          if (!response.ok) {
+            if (response.status === 404 && reconnects < maxReconnects) {
+              reconnects += 1;
+              retryDelay = true;
+            } else {
+              const apiError = await runtimeAPIError(response);
+              if (apiError.code !== protocol.cursorExpiredCode) throw apiError;
+              const headSeq = Number.parseInt(response.headers.get(protocol.cursorHeadHeader) ?? "", 10);
+              if (!request.onCursorExpired || !Number.isSafeInteger(headSeq) || headSeq <= afterSeq) throw apiError;
+              const snapshot = await this.request<TSnapshot>(
+                protocol.snapshotPath, {}, { signal: request.signal },
+              );
+              await request.onCursorExpired(snapshot);
+              afterSeq = headSeq;
+              reconnects = 0;
+            }
+          } else if (!response.body) {
+            throw new RuntimeAPIError(
+              protocol.feedName + " feed response has no body", response.status, protocol.invalidResponseCode, "",
+            );
+          } else {
+            try {
+              for await (const event of decode(response.body, request.signal)) {
+                if (request.signal?.aborted) return;
+                if (event.seq <= afterSeq) continue;
+                reconnects = 0;
+                afterSeq = event.seq;
+                yield event;
+                if (event.terminal) return;
+              }
+            } catch (error) {
+              if (request.signal?.aborted) return;
+              if (!(error instanceof FeedReadError)) throw error;
+              if (reconnects >= maxReconnects) throw error.source;
+              reconnects += 1;
+              retryDelay = true;
+            }
+            if (!retryDelay) {
+              if (request.signal?.aborted) return;
+              if (reconnects >= maxReconnects) {
+                throw new RuntimeAPIError(
+                  protocol.feedName + " feed disconnected", 0, protocol.disconnectedCode, "",
+                );
+              }
+              // EOF without a terminal event is a reconnect, even if the
+              // connection delivered data. Only new sequences reset the budget.
+              reconnects += 1;
+              retryDelay = true;
+            }
+          }
+        }
+      } finally {
+        // Abort before any backoff and remove the external listener. Returning
+        // early or throwing from a consumer closes this connection as well.
+        controller.abort();
+        request.signal?.removeEventListener("abort", onAbort);
       }
-      if (!response.body) {
-        throw new RuntimeAPIError("runtime feed response has no body", response.status, "runfeed.invalid_response", "");
-      }
-      let received = false;
-      for await (const event of decodeRunFeed(response.body)) {
-        if (event.seq <= afterSeq) continue;
-        received = true;
-        reconnects = 0;
-        afterSeq = event.seq;
-        yield event;
-        if (event.terminal) return;
-      }
-      if (request.signal?.aborted) return;
-      if (!received) reconnects += 1;
-      if (reconnects > maxReconnects) {
-        throw new RuntimeAPIError("runtime feed disconnected", 0, "runfeed.disconnected", "");
-      }
-      await reconnectDelay(reconnectDelayMS, request.signal);
+      if (retryDelay) await reconnectDelay(reconnectDelayMS, request.signal);
     }
   }
 }
@@ -354,42 +456,14 @@ async function runtimeAPIError(response: Response): Promise<RuntimeAPIError> {
   );
 }
 
-async function* decodeRunFeed(body: ReadableStream<Uint8Array>): AsyncGenerator<RunFeedEventDTO> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value, { stream: !done });
-      buffer = buffer.replaceAll("\r\n", "\n");
-      let boundary = buffer.indexOf("\n\n");
-      while (boundary >= 0) {
-        const block = buffer.slice(0, boundary);
-        buffer = buffer.slice(boundary + 2);
-        const event = parseRunFeedBlock(block);
-        if (event) yield event;
-        boundary = buffer.indexOf("\n\n");
-      }
-      if (done) {
-        const event = parseRunFeedBlock(buffer);
-        if (event) yield event;
-        return;
-      }
-    }
-  } finally {
-    reader.releaseLock();
+async function* decodeRunFeed(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<RunFeedEventDTO> {
+  for await (const data of decodeSSEData(body, signal)) {
+    const event = parseRunFeedData(data);
+    if (event) yield event;
   }
 }
 
-function parseRunFeedBlock(block: string): RunFeedEventDTO | null {
-  const data = block
-    .split("\n")
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice(5).trimStart())
-    .join("\n")
-    .trim();
-  if (!data) return null;
+function parseRunFeedData(data: string): RunFeedEventDTO | null {
   const event = JSON.parse(data) as RunFeedEventDTO;
   return Number.isSafeInteger(event.seq) && event.seq > 0 && typeof event.runID === "string" && typeof event.type === "string"
     ? event
