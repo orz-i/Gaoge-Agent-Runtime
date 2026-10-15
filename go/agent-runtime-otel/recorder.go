@@ -57,7 +57,12 @@ func New(provider trace.TracerProvider) (*Recorder, error) {
 func (*Recorder) Name() string { return recorderName }
 
 func (recorder *Recorder) Record(ctx context.Context, event observability.Event) {
-	if recorder == nil || ctx == nil || ctx.Err() != nil || strings.TrimSpace(event.RunID) == "" {
+	if recorder == nil || ctx == nil || strings.TrimSpace(event.RunID) == "" {
+		return
+	}
+	// A cancelled execution still needs to close spans started before cancellation.
+	// Only new spans are suppressed when the recording context has ended.
+	if ctx.Err() != nil && event.Phase == observability.PhaseStarted {
 		return
 	}
 	switch event.Phase {
@@ -97,6 +102,12 @@ func (recorder *Recorder) finish(ctx context.Context, event observability.Event)
 	if exists {
 		delete(recorder.spans, key)
 	} else {
+		// A terminal may close an existing span after the recording context is
+		// cancelled, but it must not synthesize a span whose start was skipped.
+		if ctx.Err() != nil {
+			recorder.mu.Unlock()
+			return
+		}
 		parent := recorder.parentContextLocked(ctx, event)
 		startedAt := event.ObservedAt
 		if event.Duration > 0 {
@@ -133,9 +144,16 @@ func (recorder *Recorder) parentContextLocked(ctx context.Context, event observa
 }
 
 func keyFor(event observability.Event) spanKey {
+	attempt := event.Attempt
+	if event.Scope == observability.ScopeToolInvocation {
+		// A tool span covers the logical invocation including executor retries.
+		// Its start reports attempt 0, while its terminal reports the final
+		// attempt count. Preserve that count as a span attribute, not identity.
+		attempt = 0
+	}
 	return spanKey{
 		scope: event.Scope, runID: event.RunID, operationID: event.OperationID,
-		attempt: event.Attempt, compensation: event.Compensation,
+		attempt: attempt, compensation: event.Compensation,
 	}
 }
 

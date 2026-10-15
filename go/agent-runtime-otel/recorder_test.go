@@ -126,6 +126,121 @@ func TestRecorderIgnoresDuplicateStarts(t *testing.T) {
 	}
 }
 
+// A tool call may require multiple executor attempts. The started observation
+// describes the logical call (attempt 0), while its terminal observation
+// reports the final attempt. Both must close the same span.
+func TestRecorderToolSpanLifecycleAcrossAttempts(t *testing.T) {
+	t.Parallel()
+	recorder, spans := newRecorder(t)
+	base := time.Date(2026, time.October, 15, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		id      string
+		attempt int
+		phase   observability.Phase
+	}{
+		{id: "success", attempt: 1, phase: observability.PhaseCompleted},
+		{id: "retry", attempt: 3, phase: observability.PhaseCompleted},
+		{id: "failure", attempt: 2, phase: observability.PhaseFailed},
+		{id: "cancelled", attempt: 1, phase: observability.PhaseCancelled},
+	}
+	for _, tc := range cases {
+		recorder.Record(t.Context(), observability.Event{
+			Scope: observability.ScopeToolInvocation, Phase: observability.PhaseStarted,
+			RunID: "run-tools", OperationID: tc.id, Operation: "story.publish",
+			ObservedAt: base,
+		})
+		recorder.Record(t.Context(), observability.Event{
+			Scope: observability.ScopeToolInvocation, Phase: tc.phase,
+			RunID: "run-tools", OperationID: tc.id, Operation: "story.publish",
+			Attempt: tc.attempt, ObservedAt: base.Add(time.Second), Duration: time.Second,
+		})
+	}
+	if started, ended := len(spans.Started()), len(spans.Ended()); started != len(cases) || ended != len(cases) {
+		t.Fatalf("started=%d ended=%d, want %d paired spans", started, ended, len(cases))
+	}
+	for _, span := range spans.Ended() {
+		attrs := attributeMap(span.Attributes())
+		id := attrs["agent.runtime.operation.id"].AsString()
+		for _, tc := range cases {
+			if tc.id == id && attrs["agent.runtime.attempt"].AsInt64() != int64(tc.attempt) {
+				t.Fatalf("tool %s attempt = %d, want %d", id, attrs["agent.runtime.attempt"].AsInt64(), tc.attempt)
+			}
+		}
+		if !span.EndTime().Equal(base.Add(time.Second)) {
+			t.Fatalf("tool %s span ended at %s", id, span.EndTime())
+		}
+	}
+}
+
+func TestRecorderKeepsSeparateWorkflowAttemptsAndCompensations(t *testing.T) {
+	t.Parallel()
+	recorder, spans := newRecorder(t)
+	for _, tc := range []struct {
+		attempt      int
+		compensation bool
+	}{
+		{attempt: 1},
+		{attempt: 2},
+		{attempt: 1, compensation: true},
+	} {
+		event := observability.Event{
+			Scope: observability.ScopeWorkflowEffect, RunID: "run-effects",
+			OperationID: "effect-1", Attempt: tc.attempt, Compensation: tc.compensation,
+			ObservedAt: time.Now().UTC(),
+		}
+		event.Phase = observability.PhaseStarted
+		recorder.Record(t.Context(), event)
+		event.Phase = observability.PhaseCompleted
+		recorder.Record(t.Context(), event)
+	}
+	if started, ended := len(spans.Started()), len(spans.Ended()); started != 3 || ended != 3 {
+		t.Fatalf("workflow started=%d ended=%d, want 3 distinct paired spans", started, ended)
+	}
+}
+
+func TestRecorderFinishesOnCancelledContext(t *testing.T) {
+	t.Parallel()
+	recorder, spans := newRecorder(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	started := time.Now().UTC()
+	recorder.Record(ctx, observability.Event{
+		Scope: observability.ScopeToolInvocation, Phase: observability.PhaseStarted,
+		RunID: "run-cancel", OperationID: "tool-1", ObservedAt: started,
+	})
+	cancel()
+	recorder.Record(ctx, observability.Event{
+		Scope: observability.ScopeToolInvocation, Phase: observability.PhaseCancelled,
+		RunID: "run-cancel", OperationID: "tool-1", Attempt: 1,
+		ObservedAt: started.Add(time.Second),
+	})
+	if got := len(spans.Started()); got != 1 {
+		t.Fatalf("started spans = %d, want 1", got)
+	}
+	if got := len(spans.Ended()); got != 1 {
+		t.Fatalf("ended spans on cancelled context = %d, want 1", got)
+	}
+}
+
+func TestRecorderDoesNotSynthesizeTerminalsAfterCancellation(t *testing.T) {
+	t.Parallel()
+	recorder, spans := newRecorder(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	recorder.Record(ctx, observability.Event{
+		Scope: observability.ScopeToolInvocation, Phase: observability.PhaseStarted,
+		RunID: "cancelled-before-start", OperationID: "tool-1", ObservedAt: time.Now().UTC(),
+	})
+	recorder.Record(ctx, observability.Event{
+		Scope: observability.ScopeToolInvocation, Phase: observability.PhaseCancelled,
+		RunID: "cancelled-before-start", OperationID: "tool-1", Attempt: 1,
+		ObservedAt: time.Now().UTC(), Duration: time.Second,
+	})
+	if started, ended := len(spans.Started()), len(spans.Ended()); started != 0 || ended != 0 {
+		t.Fatalf("cancelled context should not synthesize spans: started=%d ended=%d", started, ended)
+	}
+}
+
 func newRecorder(t *testing.T) (*runtimeotel.Recorder, *tracetest.SpanRecorder) {
 	t.Helper()
 	spans := tracetest.NewSpanRecorder()
