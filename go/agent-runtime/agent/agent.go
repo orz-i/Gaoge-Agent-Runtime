@@ -276,6 +276,7 @@ type runState struct {
 	CallAllowance    *CallAllowance             `json:"callAllowance,omitempty"`
 	AutoAllowance    *autoAllowanceState        `json:"autoAllowance,omitempty"`
 	PendingCalls     []tools.Call               `json:"pendingCalls,omitempty"`
+	PendingApproval  *pendingToolApproval       `json:"pendingApproval,omitempty"`
 	ToolWait         *PendingTool               `json:"toolWait,omitempty"`
 	ExternalSignals  []ExternalToolResultSignal `json:"externalSignals,omitempty"`
 	ModelInvocations []ModelInvocation          `json:"modelInvocations,omitempty"`
@@ -528,12 +529,20 @@ func (runner *Runner) resolveApproval(
 	state runState,
 	response plugin.ApprovalResponse,
 ) (kernel.Snapshot, error) {
+	binding, ok := approvalForPendingCall(snapshot, state)
+	if !ok || snapshot.Checkpoint.Status != kernel.CheckpointPending {
+		return kernel.Snapshot{}, ErrApprovalRequired
+	}
+	state.PendingApproval = binding
 	resolved, err := runner.approvals.ResolveToolApproval(snapshot.Checkpoint, response)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	if !validResolvedApproval(snapshot.Checkpoint, resolved, response.Decision) {
+		return kernel.Snapshot{}, ErrApprovalRequired
+	}
 	if response.Decision == plugin.ApprovalReject {
-		return runner.resumeRejected(ctx, snapshot, state, resolved, response)
+		return runner.resumeRejected(ctx, snapshot, state, response)
 	}
 	return runner.resumeApproved(ctx, snapshot, state, resolved)
 }
@@ -605,6 +614,14 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 				code = "agent.discovery_invalid"
 			}
 			failed, failErr := runner.fail(ctx, snapshot, state, code, catalogErr)
+			return failed, true, failErr
+		}
+		if approvedPendingCall(snapshot, state) {
+			executed, yielded, executeErr := runner.executePending(ctx, snapshot)
+			return executed, yielded || executeErr != nil, executeErr
+		}
+		if state.PendingApproval != nil {
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.approval_invalid", ErrApprovalRequired)
 			return failed, true, failErr
 		}
 		prepared, prepareErr := runner.preparePendingApproval(ctx, snapshot, state, definitions)
@@ -1235,6 +1252,11 @@ func (runner *Runner) preparePendingApproval(
 	if err != nil {
 		return runner.fail(ctx, snapshot, state, "agent.approval_invalid", err)
 	}
+	binding, err := newPendingToolApproval(checkpoint, call)
+	if err != nil || checkpoint.Status != kernel.CheckpointPending {
+		return runner.fail(ctx, snapshot, state, "agent.approval_invalid", ErrApprovalRequired)
+	}
+	state.PendingApproval = binding
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -1449,6 +1471,8 @@ func (runner *Runner) persistCompletedToolCall(
 		Role: model.RoleTool, Content: string(result.Content), ToolCallID: execution.call.ID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
+	state.PendingApproval = nil
+	snapshot.Checkpoint = nil // Consumed approval cannot authorize a later call.
 	state.Budget.Usage.ToolCalls++
 	if execution.definition.Terminal {
 		if len(state.PendingCalls) != 0 {
@@ -1510,6 +1534,8 @@ func (runner *Runner) recordRecoverableToolError(
 		Role: model.RoleTool, Content: string(content), ToolCallID: callID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
+	state.PendingApproval = nil
+	snapshot.Checkpoint = nil
 	state.Budget.Usage.ToolCalls++
 	state.BlockedToolKeys = normalizedToolKeys(append(state.BlockedToolKeys, blockedToolKeys...))
 	state.RequireToolCall = true
@@ -1560,7 +1586,6 @@ func (runner *Runner) resumeRejected(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state runState,
-	checkpoint *kernel.Checkpoint,
 	response plugin.ApprovalResponse,
 ) (kernel.Snapshot, error) {
 	call, ok := nextPendingCall(state)
@@ -1571,12 +1596,13 @@ func (runner *Runner) resumeRejected(
 		Role: model.RoleTool, Content: rejectedToolContent(response.Comment), ToolCallID: call.ID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
+	state.PendingApproval = nil
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
 	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
+		Status: kernel.RunStatusRunning, State: encoded,
 		Events: []kernel.EventDraft{{Type: "tool.rejected", Message: "Tool call rejected", Wakeup: true}},
 	})
 	if err != nil {
@@ -1588,19 +1614,9 @@ func (runner *Runner) resumeRejected(
 	return runner.drive(ctx, running)
 }
 
-func (runner *Runner) resumeRunning(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state runState,
-) (kernel.Snapshot, error) {
-	if len(state.PendingCalls) > 0 && snapshot.Checkpoint != nil &&
-		snapshot.Checkpoint.Status == kernel.CheckpointResolved {
-		executed, yielded, err := runner.executePending(ctx, snapshot)
-		if err != nil || yielded {
-			return executed, err
-		}
-		return runner.drive(ctx, executed)
-	}
+func (runner *Runner) resumeRunning(ctx context.Context, snapshot kernel.Snapshot, _ runState) (kernel.Snapshot, error) {
+	// An approval is consumed only by its own pending Tool call. The normal
+	// drive validates the decision and binding before every Tool execution.
 	return runner.drive(ctx, snapshot)
 }
 
