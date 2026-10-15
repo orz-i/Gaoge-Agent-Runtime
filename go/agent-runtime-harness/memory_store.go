@@ -712,6 +712,9 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 	if store == nil || !validItem(value) {
 		return Item{}, false, ErrInvalidRequest
 	}
+	// Match durable Store replay identity: whitespace at the JSON boundary
+	// is ignored and an absent payload is persisted and returned as {}.
+	value.Payload = normalizedItemPayload(value.Payload)
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if existing, ok := store.itemIDs[value.ID]; ok {
@@ -787,7 +790,11 @@ func sameTurnIdentity(left, right Turn) bool {
 func sameItemIdentity(left, right Item) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.Kind == right.Kind && left.Status == right.Status &&
 		left.RunID == right.RunID && left.InvocationID == right.InvocationID && left.ParentItemID == right.ParentItemID &&
-		string(left.Payload) == string(right.Payload) && sameHostRef(left.HostRef, right.HostRef)
+		bytes.Equal(normalizedItemPayload(left.Payload), normalizedItemPayload(right.Payload)) && sameHostRef(left.HostRef, right.HostRef)
+}
+
+func normalizedItemPayload(value json.RawMessage) json.RawMessage {
+	return bytes.TrimSpace(defaultJSON(value))
 }
 
 func sameHostRef(left, right *HostRef) bool {

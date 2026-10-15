@@ -18,6 +18,56 @@ type openAPIMethod struct {
 
 type openAPIPaths map[string]map[string]openAPIMethod
 
+func TestOpenAPIStrictJSONBodyLimitsAnd413Responses(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "contracts", "agent-runtime", "v1", "openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Paths map[string]map[string]struct {
+			OperationID string `yaml:"operationId"`
+			RequestBody struct {
+				MaxBytes int `yaml:"x-max-request-body-bytes"`
+			} `yaml:"requestBody"`
+			Responses map[string]any `yaml:"responses"`
+		} `yaml:"paths"`
+		Components struct {
+			Responses map[string]any `yaml:"responses"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := document.Components.Responses["RequestBodyTooLarge"]; !exists {
+		t.Fatal("missing reusable HTTP 413 contract response")
+	}
+	operations := map[string]bool{}
+	for _, methods := range document.Paths {
+		for _, method := range methods {
+			if method.RequestBody.MaxBytes == 0 {
+				continue
+			}
+			if method.RequestBody.MaxBytes != 8<<20 || method.Responses["413"] == nil {
+				t.Errorf("invalid strict JSON contract: operation=%s maxBytes=%d responses=%v",
+					method.OperationID, method.RequestBody.MaxBytes, method.Responses)
+			}
+			operations[method.OperationID] = true
+		}
+	}
+	for _, operation := range []string{
+		"createAgentRun", "createWorkflowRun", "resolveWorkflowWait", "cancelWorkflowRun",
+		"compileWorkflowDefinition", "publishWorkflowDefinition", "setWorkflowDefinitionActivation",
+		"createTeamRun", "cancelRun", "grantHarnessCallAllowance",
+	} {
+		if !operations[operation] {
+			t.Errorf("strict JSON operation missing body size/413 contract: %s", operation)
+		}
+	}
+	if len(operations) != 10 {
+		t.Fatalf("unexpected bounded request operations: %v", operations)
+	}
+}
+
 func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "contracts", "agent-runtime", "v1", "openapi.yaml"))
