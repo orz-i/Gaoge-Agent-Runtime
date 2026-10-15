@@ -46,25 +46,30 @@ func (store *KernelStore) applyKernelMutation(
 	expectedRevision uint64,
 	updatedModel models.KernelRunRecord,
 	mutation kernel.StoreMutation,
-) error {
+) (kernel.Snapshot, error) {
 	result := db.Model(&models.KernelRunRecord{}).
 		Where("run_id = ? AND revision = ?", runID, expectedRevision).
 		Updates(kernelRunUpdates(updatedModel, len(mutation.Events)))
 	if result.Error != nil {
-		return translateKernelApplyError(result.Error)
+		return kernel.Snapshot{}, translateKernelApplyError(result.Error)
 	}
 	if result.RowsAffected != 1 {
-		return store.kernelMissingOrConflict(db, runID)
+		return kernel.Snapshot{}, store.kernelMissingOrConflict(db, runID)
 	}
 	var persisted models.KernelRunRecord
 	if err := db.Where("run_id = ?", runID).First(&persisted).Error; err != nil {
-		return translateKernelError(err)
+		return kernel.Snapshot{}, translateKernelError(err)
 	}
 	firstSeq := persisted.LastEventSeq - int64(len(mutation.Events))
 	if err := createKernelEvents(db, runID, firstSeq, mutation.Record.Run.UpdatedAt, mutation.Events); err != nil {
-		return err
+		return kernel.Snapshot{}, err
 	}
-	return createKernelTransition(db, mutation.Record.Run, mutation.Events)
+	if err := createKernelTransition(db, mutation.Record.Run, mutation.Events); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	// The row was read under the successful CAS transaction. Never load again
+	// after commit: a different worker may already have advanced the revision.
+	return kernelSnapshotFrom(persisted)
 }
 
 const (
@@ -105,6 +110,7 @@ func (store *KernelStore) Create(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if createErr := tx.Create(&model).Error; createErr != nil {
 			return translateKernelError(createErr)
@@ -112,12 +118,25 @@ func (store *KernelStore) Create(
 		if createErr := createKernelEvents(tx, record.Run.ID, 0, record.Run.UpdatedAt, events); createErr != nil {
 			return createErr
 		}
-		return createKernelTransition(tx, record.Run, events)
+		if createErr := createKernelTransition(tx, record.Run, events); createErr != nil {
+			return createErr
+		}
+		// Read the actual persisted row within this transaction. PostgreSQL
+		// timestamps have microsecond precision, and the in-memory record can
+		// contain nanoseconds. A post-commit Load could instead see another
+		// worker's subsequent revision.
+		var persisted models.KernelRunRecord
+		if readErr := tx.Where("run_id = ?", record.Run.ID).First(&persisted).Error; readErr != nil {
+			return translateKernelError(readErr)
+		}
+		var snapshotErr error
+		snapshot, snapshotErr = kernelSnapshotFrom(persisted)
+		return snapshotErr
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return store.Load(ctx, record.Run.ID)
+	return snapshot, nil
 }
 
 // Load returns only the current aggregate Snapshot. Event history is read via
@@ -184,13 +203,16 @@ func (store *KernelStore) Apply(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation)
+		var applyErr error
+		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation)
+		return applyErr
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return store.Load(ctx, runID)
+	return snapshot, nil
 }
 
 // ClaimTransitions leases committed transitions to one projector. PostgreSQL
