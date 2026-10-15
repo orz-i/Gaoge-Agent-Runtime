@@ -76,8 +76,11 @@ func (handler *Handler) GrantCallAllowance(context *gin.Context) {
 		return
 	}
 	var request GrantCallAllowanceRequest
-	if err := runtimehttp.BindStrictJSON(context, &request); err != nil || request.ExpectedTurnRevision == 0 ||
-		request.ModelCalls < 0 || request.ToolCalls < 0 ||
+	if err := runtimehttp.BindStrictJSON(context, &request); err != nil {
+		runtimehttp.InvalidBody(context, err)
+		return
+	}
+	if request.ExpectedTurnRevision == 0 || request.ModelCalls < 0 || request.ToolCalls < 0 ||
 		request.ModelCalls == 0 && request.ToolCalls == 0 {
 		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "harness.allowance_invalid", "invalid execution allowance grant")
 		return

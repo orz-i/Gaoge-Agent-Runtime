@@ -3,11 +3,68 @@ package harnesspostgres_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 )
+
+func TestStoresAgreeOnItemPayloadReplayIdentity(t *testing.T) {
+	now := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	for _, implementation := range []struct {
+		name  string
+		build func(*testing.T) harness.Store
+	}{
+		{"memory", func(_ *testing.T) harness.Store { return harness.NewMemoryStore() }},
+		{"postgres-compatible", func(t *testing.T) harness.Store { return newStore(t) }},
+	} {
+		t.Run(implementation.name, func(t *testing.T) {
+			store := implementation.build(t)
+			for _, turnID := range []string{"payload-turn-a", "payload-turn-b"} {
+				if _, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
+					ID: turnID, SessionID: "payload-session", HostTurn: harness.HostRef{Kind: "conversation_turn", ID: turnID},
+					ConfigSnapshotID: "config", Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
+				}); err != nil || !fresh {
+					t.Fatalf("create turn: fresh=%v err=%v", fresh, err)
+				}
+			}
+			for index, pair := range []struct {
+				original json.RawMessage
+				replay   json.RawMessage
+				expected string
+			}{
+				{nil, json.RawMessage(`{}`), `{}`},
+				{json.RawMessage(" \n\t "), nil, `{}`},
+				{json.RawMessage("  {\"ok\":true}  "), json.RawMessage(`{"ok":true}`), `{"ok":true}`},
+			} {
+				item := harness.Item{
+					ID: fmt.Sprintf("payload-item-%d", index), TurnID: "payload-turn-a",
+					Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
+					Payload: pair.original, CreatedAt: now, UpdatedAt: now,
+				}
+				first, created, err := store.AppendItem(t.Context(), item)
+				if err != nil || !created || string(first.Payload) != pair.expected {
+					t.Fatalf("first item=%#v created=%v err=%v", first, created, err)
+				}
+				item.Payload = pair.replay
+				replayed, created, err := store.AppendItem(t.Context(), item)
+				if err != nil || created || replayed.Seq != first.Seq || string(replayed.Payload) != pair.expected {
+					t.Fatalf("replay item=%#v created=%v err=%v", replayed, created, err)
+				}
+				item.Payload = json.RawMessage(`{"different":true}`)
+				if _, _, err := store.AppendItem(t.Context(), item); !errors.Is(err, harness.ErrConflict) {
+					t.Fatalf("different payload accepted: %v", err)
+				}
+				item.Payload = pair.replay
+				item.TurnID = "payload-turn-b"
+				if _, _, err := store.AppendItem(t.Context(), item); !errors.Is(err, harness.ErrConflict) {
+					t.Fatalf("cross-turn ID collision accepted: %v", err)
+				}
+			}
+		})
+	}
+}
 
 func TestStoreAppendItemReplaysAndRejectsIdentityCollisions(t *testing.T) {
 	store := newStore(t)

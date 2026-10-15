@@ -1122,12 +1122,26 @@ type itemAppendOutcome struct {
 }
 
 func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) error {
-	// Take the Turn lock before the ID lookup, so a waiting replay sees the
-	// winning append without adding a second lookup to every fresh Item.
-	if err := lockTurn(tx, value.TurnID); err != nil {
+	// A committed ID can be replayed without taking the parent Turn lock.
+	// New IDs must still serialize sequence allocation under that lock.
+	existing, found, err := findItem(tx, value.ID)
+	if err != nil {
 		return err
 	}
-	existing, found, err := findItem(tx, value.ID)
+	if found {
+		if !sameItem(existing, value) {
+			return harness.ErrConflict
+		}
+		outcome.item = existing
+		return nil
+	}
+	if err = lockTurn(tx, value.TurnID); err != nil {
+		return err
+	}
+	// The first lookup happened before the Turn lock. A competing append
+	// may have committed while we waited; inspect the ID again before
+	// reserving a new sequence number.
+	existing, found, err = findItem(tx, value.ID)
 	if err != nil {
 		return err
 	}

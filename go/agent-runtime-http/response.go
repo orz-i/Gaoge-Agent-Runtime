@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"fmt"
 	stdhttp "net/http"
 	"strings"
@@ -69,6 +70,10 @@ func publicMessage(status int, message string) string {
 }
 
 func invalidBody(c *gin.Context, err error) {
+	if errors.Is(err, errJSONBodyTooLarge) {
+		writeError(c, stdhttp.StatusRequestEntityTooLarge, "request.body_too_large", err.Error())
+		return
+	}
 	writeError(c, stdhttp.StatusBadRequest, "request.invalid_json", fmt.Sprintf("invalid request body: %v", err))
 }
 

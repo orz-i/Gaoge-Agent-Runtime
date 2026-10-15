@@ -71,8 +71,46 @@ func TestBindStrictJSONRejectsOversizedBody(t *testing.T) {
 	body := `{"blob":"` + strings.Repeat("a", int(maxStrictJSONBodyBytes)) + `"}`
 	context, _ := gin.CreateTestContext(httptest.NewRecorder())
 	context.Request = httptest.NewRequest(stdhttp.MethodPost, "/", strings.NewReader(body))
-	if err := BindStrictJSON(context, &input{}); !errors.Is(err, errInvalidJSONBody) {
-		t.Fatalf("oversized JSON body accepted: %v", err)
+	if err := BindStrictJSON(context, &input{}); !errors.Is(err, errJSONBodyTooLarge) {
+		t.Fatalf("oversized JSON body accepted or misclassified: %v", err)
+	}
+}
+
+func TestBindStrictJSONAcceptsExactEightMiBBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	type input struct {
+		Blob string `json:"blob"`
+	}
+	prefix, suffix := `{"blob":"`, `"}`
+	blobSize := int(maxStrictJSONBodyBytes) - len(prefix) - len(suffix)
+	body := prefix + strings.Repeat("x", blobSize) + suffix
+	if len(body) != int(maxStrictJSONBodyBytes) {
+		t.Fatalf("test input has %d bytes, expected %d", len(body), maxStrictJSONBodyBytes)
+	}
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = httptest.NewRequest(stdhttp.MethodPost, "/", strings.NewReader(body))
+	var value input
+	if err := BindStrictJSON(context, &value); err != nil || len(value.Blob) != blobSize {
+		t.Fatalf("boundary-size JSON failed: blob=%d want=%d err=%v", len(value.Blob), blobSize, err)
+	}
+}
+
+func TestOversizedStrictJSONReturnsHTTP413(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	type input struct {
+		Blob string `json:"blob"`
+	}
+	body := `{"blob":"` + strings.Repeat("x", int(maxStrictJSONBodyBytes)) + `"}`
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(stdhttp.MethodPost, "/", strings.NewReader(body))
+	err := BindStrictJSON(context, &input{})
+	if err == nil {
+		t.Fatal("oversized body accepted")
+	}
+	InvalidBody(context, err)
+	if recorder.Code != stdhttp.StatusRequestEntityTooLarge || !bytes.Contains(recorder.Body.Bytes(), []byte("request.body_too_large")) {
+		t.Fatalf("oversized body response: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

@@ -5,6 +5,35 @@ import (
 	"testing"
 )
 
+func TestWorkflowDraftOpenAPIRejectsUnsupportedTopLevelExtensions(t *testing.T) {
+	validator := wireSchema(t, "WorkflowDefinitionDraft")
+	base := `{"id":"example","revision":0,"name":"Example","nodes":[{"id":"done","type":"return","return":{"value":true}}]}`
+	if err := validator.Validate([]byte(base)); err != nil {
+		t.Fatalf("valid Workflow draft rejected by OpenAPI: %v", err)
+	}
+	unsupported := `{"id":"example","revision":0,"name":"Example","nodes":[{"id":"done","type":"return","return":{"value":true}}],"unrecognizedExtension":true}`
+	if err := validator.Validate([]byte(unsupported)); err == nil {
+		t.Fatal("OpenAPI advertises unsupported top-level Workflow draft extension")
+	}
+}
+
+func TestOpenAPIRejectsEmptyRequiredRequestStrings(t *testing.T) {
+	for _, testCase := range []struct {
+		schema, body string
+	}{
+		{"ThreadRequest", `{"kind":"","id":"thread"}`},
+		{"ThreadRequest", `{"kind":"conversation","id":""}`},
+		{"TextInputRequest", `{"content":""}`},
+		{"StartWorkflowRunRequest", `{"thread":{"kind":"conversation","id":"thread"},"input":{},"goal":"","definitionReference":{"id":"valid"}}`},
+		{"TeamMemberRequest", `{"id":"","goal":"hi"}`},
+		{"StartTeamRunRequest", `{"thread":{"kind":"conversation","id":"thread"},"goal":"","mode":"parallel","members":[{"id":"member","goal":"hi"}],"join":{"mode":"all"}}`},
+	} {
+		if err := wireSchema(t, testCase.schema).Validate([]byte(testCase.body)); err == nil {
+			t.Errorf("OpenAPI %s unexpectedly allows empty required string in %s", testCase.schema, testCase.body)
+		}
+	}
+}
+
 func TestOpenAPIAllowanceGrantAndPausedStatuses(t *testing.T) {
 	validate := wireSchema(t, "GrantHarnessCallAllowanceRequest")
 	for _, value := range []string{

@@ -15,7 +15,17 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
-var errInvalidJSONBody = errors.New("invalid JSON request body")
+var (
+	errInvalidJSONBody  = errors.New("invalid JSON request body")
+	errJSONBodyTooLarge = errors.New("JSON request body exceeds the 8 MiB limit")
+)
+
+// strictJSONBodyValidator is an optional feature-owned validation hook for
+// constraints that cannot be expressed by Go binding tags, such as the
+// presence of a non-pointer nested struct's required JSON members.
+type strictJSONBodyValidator interface {
+	ValidateStrictJSONBody([]byte) error
+}
 
 // Bound memory use for nested/raw JSON request fields that have no size tag.
 const maxStrictJSONBodyBytes int64 = 8 << 20
@@ -94,7 +104,13 @@ func bindStrictJSON(context *gin.Context, target interface{}) error {
 		return errInvalidJSONBody
 	}
 	raw, err := io.ReadAll(io.LimitReader(context.Request.Body, maxStrictJSONBodyBytes+1))
-	if err != nil || len(raw) > int(maxStrictJSONBodyBytes) || len(bytes.TrimSpace(raw)) == 0 {
+	if err != nil {
+		return errInvalidJSONBody
+	}
+	if len(raw) > int(maxStrictJSONBodyBytes) {
+		return errJSONBodyTooLarge
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
 		return errInvalidJSONBody
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -110,6 +126,11 @@ func bindStrictJSON(context *gin.Context, target interface{}) error {
 	}
 	if err = binding.Validator.ValidateStruct(target); err != nil {
 		return errInvalidJSONBody
+	}
+	if validator, ok := target.(strictJSONBodyValidator); ok {
+		if err = validator.ValidateStrictJSONBody(raw); err != nil {
+			return errInvalidJSONBody
+		}
 	}
 	context.Request.Body = io.NopCloser(bytes.NewReader(raw))
 	return nil

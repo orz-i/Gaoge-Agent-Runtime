@@ -2,16 +2,22 @@ openapi: 3.0.3
 info:
   title: Agent Runtime API
   version: 1.0.0
+  description: >-
+    Endpoints using the strict JSON request decoder accept at most 8 MiB
+    (8388608 bytes) of request body. A larger body returns HTTP 413 with
+    error code request.body_too_large; malformed or invalid JSON returns 400.
 paths:
   /agent-runs:
     post:
       operationId: createAgentRun
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/StartAgentRunRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '202':
           description: Accepted
           content:
@@ -22,11 +28,13 @@ paths:
     post:
       operationId: createWorkflowRun
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/StartWorkflowRunRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '202':
           description: Accepted
           content:
@@ -39,11 +47,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RunID'
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/ResolveWorkflowWaitRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '200':
           description: Resolved
           content:
@@ -56,11 +66,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RunID'
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/CancelRunRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '200':
           description: Cancelled after feature-owned compensation
           content:
@@ -83,11 +95,13 @@ paths:
     post:
       operationId: compileWorkflowDefinition
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/CompileWorkflowDefinitionRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '200':
           description: Compiled proposal, structural diff, and policy impact
           content:
@@ -109,11 +123,13 @@ paths:
     post:
       operationId: publishWorkflowDefinition
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/PublishWorkflowDefinitionRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '201':
           description: Published immutable revision
           content:
@@ -152,11 +168,13 @@ paths:
           required: true
           schema: {type: string, minLength: 1, maxLength: 255}
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/SetWorkflowDefinitionActivationRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '200':
           description: Updated CAS-controlled active pointer
           content:
@@ -167,11 +185,13 @@ paths:
     post:
       operationId: createTeamRun
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/StartTeamRunRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '202':
           description: Accepted
           content:
@@ -196,11 +216,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RunID'
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/CancelRunRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '200':
           description: Cancelled
           content:
@@ -313,11 +335,13 @@ paths:
       parameters:
         - $ref: '#/components/parameters/HarnessTurnID'
       requestBody:
+        x-max-request-body-bytes: 8388608
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/GrantHarnessCallAllowanceRequest'}
       responses:
+        '413': {$ref: '#/components/responses/RequestBodyTooLarge'}
         '200':
           description: Paused Turn has returned to running with a durable wakeup
           content:
@@ -472,6 +496,11 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/ErrorResponse'}
+    RequestBodyTooLarge:
+      description: HTTP 413. Strict JSON body exceeds 8 MiB (8388608 bytes); error code request.body_too_large.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/ErrorResponse'}
     RunFeedCursorExpired:
       description: Error code `runfeed.cursor_expired`. Restore the durable Run snapshot before continuing from the returned high-water mark.
       headers:
@@ -515,14 +544,14 @@ components:
       additionalProperties: false
       required: [kind, id]
       properties:
-        kind: {type: string, maxLength: 64}
-        id: {type: string, maxLength: 128}
+        kind: {type: string, minLength: 1, maxLength: 64}
+        id: {type: string, minLength: 1, maxLength: 128}
     TextInputRequest:
       type: object
       additionalProperties: false
       required: [content]
       properties:
-        content: {type: string, maxLength: 200000}
+        content: {type: string, minLength: 1, maxLength: 200000}
     StartAgentRunRequest:
       type: object
       additionalProperties: false
@@ -571,7 +600,7 @@ components:
         - required: [definitionReference]
       properties:
         thread: {$ref: '#/components/schemas/ThreadRequest'}
-        goal: {type: string, maxLength: 200000}
+        goal: {type: string, minLength: 1, maxLength: 200000}
         clientRunID: {type: string, maxLength: 64}
         definition: {$ref: '#/components/schemas/WorkflowDefinitionDraft'}
         definitionReference: {$ref: '#/components/schemas/WorkflowDefinitionReference'}
@@ -585,7 +614,10 @@ components:
         response: {}
     WorkflowDefinitionDraft:
       type: object
-      additionalProperties: true
+      additionalProperties: false
+      description: >-
+        Only named top-level draft fields are supported. Arbitrary inputSchema
+        and outputSchema JSON remains allowed; unknown draft fields are rejected.
       required: [id, revision, name, nodes]
       properties:
         id: {type: string, minLength: 1, maxLength: 255}
@@ -670,8 +702,8 @@ components:
       additionalProperties: false
       required: [id, goal]
       properties:
-        id: {type: string, maxLength: 128}
-        goal: {type: string, maxLength: 200000}
+        id: {type: string, minLength: 1, maxLength: 128}
+        goal: {type: string, minLength: 1, maxLength: 200000}
         toolKeys:
           type: array
           maxItems: 128
@@ -690,7 +722,7 @@ components:
       required: [thread, goal, mode, members, join]
       properties:
         thread: {$ref: '#/components/schemas/ThreadRequest'}
-        goal: {type: string, maxLength: 200000}
+        goal: {type: string, minLength: 1, maxLength: 200000}
         clientRunID: {type: string, maxLength: 64}
         mode: {type: string, enum: [sequential, parallel]}
         members:

@@ -22,10 +22,14 @@ runtimehttp.NewModule(handler).RegisterRoutes(apiV1)
 Object authorization stays at the Host/HTTP edge. Explicit policy denials are
 rendered as not-found so a caller cannot probe another tenant's Run IDs.
 
-Handlers using `BindStrictJSON` accept one complete JSON document up to 8 MiB,
-reject unknown fields and trailing JSON, and enforce `binding` field rules
-(including nested DTOs) before invoking runtime operations. Invalid bodies
-return HTTP 400 without applying the requested mutation.
+Handlers using `BindStrictJSON` accept one complete JSON document up to 8 MiB
+(8388608 bytes), reject unknown fields and trailing JSON, and enforce `binding`
+field rules (including nested DTOs) before invoking runtime operations. Invalid
+JSON or fields return HTTP 400; oversized bodies return HTTP 413 with
+`request.body_too_large`. Workflow definition requests also verify the required
+`draft` members, including the presence of a zero-valued `revision` property.
+Both errors leave runtime state unchanged. Workflow drafts accept only their
+named top-level fields; nested `inputSchema`/`outputSchema` are opaque JSON.
 
 `GET /runs/:run_id` returns the current aggregate plus `eventHead`, not the full
 Kernel Event journal. Use `GET /runs/:run_id/events?afterSeq=...&limit=...` for
