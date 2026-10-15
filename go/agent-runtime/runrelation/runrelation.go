@@ -55,6 +55,44 @@ type Store interface {
 	ListAll(context.Context) ([]Relation, error)
 }
 
+// MaxReconcilePageSize caps each durable relation recovery scan.
+const MaxReconcilePageSize = 128
+
+// ReconciliationCandidate is an immutable relation plus its last settled
+// child-terminal revisions. Progress records queue acceptance or a verified
+// feature-owned consumed fact; it is not an external side-effect receipt.
+type ReconciliationCandidate struct {
+	Relation           Relation
+	LastParentRevision uint64
+	LastChildRevision  uint64
+}
+
+// ReconciliationPage describes one bounded *scanned* range, not just matches.
+// NextCursor is the last scanned ChildRunID even when Candidates is empty.
+// This allows a SQL adapter to inspect at most limit indexed relation IDs
+// without starving matches behind nonterminal or already-processed relations.
+type ReconciliationPage struct {
+	Candidates []ReconciliationCandidate
+	NextCursor string
+	HasMore    bool
+}
+
+// ReconciliationPager is an optional recovery capability. Adapters may
+// prefilter to terminal children with changed parent/child revisions; results
+// must be ordered by ChildRunID and strictly after the supplied cursor.
+// MarkEnqueued follows queue acceptance; MarkObserved follows a feature-owned
+// guard proving the child was already consumed in the durable parent state.
+type ReconciliationPager interface {
+	ListReconcilePage(context.Context, string, int) (ReconciliationPage, error)
+	MarkEnqueued(context.Context, string, uint64, uint64) error
+	MarkObserved(context.Context, string, uint64, uint64) error
+}
+
+// ReconciliationProvider exposes the optional pager without widening Store.
+type ReconciliationProvider interface {
+	ReconciliationPager() (ReconciliationPager, bool)
+}
+
 // Recorder is the narrow capability consumed by parent Runtime features.
 type Recorder interface {
 	Ensure(context.Context, Draft) (Relation, error)
@@ -96,6 +134,16 @@ func (registry *Registry) Ensure(ctx context.Context, draft Draft) (Relation, er
 	}
 	persisted, _, err := registry.store.Put(ctx, relation)
 	return persisted, err
+}
+
+// ReconciliationPager exposes bounded recovery when the backing adapter
+// implements it. Existing host-defined Store implementations remain valid.
+func (registry *Registry) ReconciliationPager() (ReconciliationPager, bool) {
+	if registry == nil || registry.store == nil {
+		return nil, false
+	}
+	pager, ok := registry.store.(ReconciliationPager)
+	return pager, ok
 }
 
 // GetByChild resolves the owning parent for one Child Run.

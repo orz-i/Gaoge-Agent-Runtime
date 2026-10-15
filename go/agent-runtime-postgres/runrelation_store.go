@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"gorm.io/gorm"
 )
@@ -118,6 +119,102 @@ func (store *RunRelationStore) ListAll(ctx context.Context) ([]runrelation.Relat
 		result = append(result, runRelationFromRecord(record))
 	}
 	return result, nil
+}
+
+// ListReconcilePage scans a bounded, primary-key-indexed relation ID page
+// before joining current Run statuses. Filtering after the keyset page avoids
+// a full-history SQL join when no eligible terminal children remain.
+func (store *RunRelationStore) ListReconcilePage(
+	ctx context.Context, afterChildRunID string, limit int,
+) (runrelation.ReconciliationPage, error) {
+	if store == nil || store.db == nil || limit <= 0 || limit > runrelation.MaxReconcilePageSize {
+		return runrelation.ReconciliationPage{}, runrelation.ErrInvalidInput
+	}
+	var ids []string
+	err := store.db.WithContext(ctx).Model(&models.RunRelationRecord{}).
+		Where("child_run_id > ?", afterChildRunID).
+		Order("child_run_id ASC").Limit(limit).Pluck("child_run_id", &ids).Error
+	if err != nil {
+		return runrelation.ReconciliationPage{}, err
+	}
+	page := runrelation.ReconciliationPage{
+		NextCursor: afterChildRunID,
+		HasMore:    len(ids) == limit,
+	}
+	if len(ids) == 0 {
+		return page, nil
+	}
+	page.NextCursor = ids[len(ids)-1]
+	var records []models.RunRelationRecord
+	err = store.db.WithContext(ctx).Table("agent_run_relations AS relation").
+		Select("relation.*").
+		Joins("JOIN agent_kernel_runs AS child ON child.run_id = relation.child_run_id").
+		Joins("JOIN agent_kernel_runs AS parent ON parent.run_id = relation.parent_run_id").
+		Where("relation.child_run_id IN ?", ids).
+		Where("child.status IN ?", []string{
+			string(kernel.RunStatusCompleted), string(kernel.RunStatusFailed), string(kernel.RunStatusCancelled),
+		}).
+		Where("parent.status = ?", string(kernel.RunStatusRunning)).
+		Where("(relation.last_parent_revision < parent.revision OR relation.last_child_revision < child.revision)").
+		Order("relation.child_run_id ASC").Scan(&records).Error
+	if err != nil {
+		return runrelation.ReconciliationPage{}, err
+	}
+	page.Candidates = make([]runrelation.ReconciliationCandidate, 0, len(records))
+	for _, record := range records {
+		page.Candidates = append(page.Candidates, runrelation.ReconciliationCandidate{
+			Relation:           runRelationFromRecord(record),
+			LastParentRevision: record.LastParentRevision, LastChildRevision: record.LastChildRevision,
+		})
+	}
+	return page, nil
+}
+
+// ListReconcileCandidates preserves the previous convenience surface. Use
+// ListReconcilePage for bounded scans with correct cursor advancement.
+func (store *RunRelationStore) ListReconcileCandidates(
+	ctx context.Context, afterChildRunID string, limit int,
+) ([]runrelation.ReconciliationCandidate, error) {
+	page, err := store.ListReconcilePage(ctx, afterChildRunID, limit)
+	return page.Candidates, err
+}
+
+// MarkObserved records a feature-verified consumed child without enqueuing
+// another Job. The monotonic revision update is shared with MarkEnqueued.
+func (store *RunRelationStore) MarkObserved(
+	ctx context.Context, childRunID string, parentRevision, childRevision uint64,
+) error {
+	return store.MarkEnqueued(ctx, childRunID, parentRevision, childRevision)
+}
+
+// MarkEnqueued advances only the reconciliation watermarks, never the immutable
+// ownership identity. CASE makes concurrent/out-of-order writers monotonic on
+// both PostgreSQL and SQLite. Enqueue must succeed before calling this method.
+func (store *RunRelationStore) MarkEnqueued(
+	ctx context.Context, childRunID string, parentRevision, childRevision uint64,
+) error {
+	childRunID = strings.TrimSpace(childRunID)
+	if store == nil || store.db == nil || childRunID == "" || parentRevision == 0 || childRevision == 0 {
+		return runrelation.ErrInvalidInput
+	}
+	result := store.db.WithContext(ctx).Model(&models.RunRelationRecord{}).
+		Where("child_run_id = ?", childRunID).Updates(map[string]interface{}{
+		"last_parent_revision": gorm.Expr(
+			"CASE WHEN last_parent_revision < ? THEN ? ELSE last_parent_revision END",
+			parentRevision, parentRevision,
+		),
+		"last_child_revision": gorm.Expr(
+			"CASE WHEN last_child_revision < ? THEN ? ELSE last_child_revision END",
+			childRevision, childRevision,
+		),
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return runrelation.ErrNotFound
+	}
+	return nil
 }
 
 func runRelationRecordFrom(relation runrelation.Relation) models.RunRelationRecord {

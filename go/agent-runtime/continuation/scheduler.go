@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -15,6 +16,12 @@ import (
 
 // ErrorReporter receives non-transactional scheduling failures for host observability.
 type ErrorReporter func(error)
+
+// ReconcileGuard is an optional feature-owned predicate for a terminal child.
+// Returning false means the parent has already consumed this child in its
+// durable state, so a new parent Revision must not re-enqueue that old fact.
+// Unknown feature kinds should return true to preserve recovery safety.
+type ReconcileGuard func(context.Context, kernel.Snapshot, runrelation.Relation) (bool, error)
 
 // Scheduler converts committed Kernel transitions into idempotent delivery Jobs.
 type Scheduler struct {
@@ -29,6 +36,15 @@ type Scheduler struct {
 	workerID  string
 	jobPolicy queuecore.Policy
 	triggers  map[kernel.RunKind]SelfTriggerResolver
+	guard     ReconcileGuard
+
+	// The optional pager bounds recovery work per tick. Cursor state is local
+	// and disposable; durable per-relation handoff watermarks live in the Store.
+	reconcilePager    runrelation.ReconciliationPager
+	reconcileMu       sync.Mutex
+	reconcileCursor   string
+	reconcileFailures map[string]runrelation.ReconciliationCandidate
+	reconcileRetryIDs []string
 }
 
 // SchedulerDependencies explicitly provide transition projection dependencies.
@@ -39,17 +55,155 @@ type SchedulerDependencies struct {
 		GetByChild(context.Context, string) (runrelation.Relation, error)
 		ListAll(context.Context) ([]runrelation.Relation, error)
 	}
-	Runs        SnapshotLoader
-	Clock       kernel.Clock
-	ProjectorID string
+	Runs           SnapshotLoader
+	Clock          kernel.Clock
+	ProjectorID    string
+	ReconcileGuard ReconcileGuard
+	// RequireDurableQueue rejects volatile queues for production reconciliation.
+	// Redis persistence and retention still need host-side configuration.
+	RequireDurableQueue bool
 }
 
-// Reconcile reprojects terminal children from durable relations. Existing queue
-// identity conflicts mean that source revision was already delivered or dead-lettered.
+const (
+	maxReconcileRetryBacklog   = 128
+	maxReconcileRetriesPerTick = 16
+)
+
+var errReconcileRetryBacklogFull = errors.New("continuation reconciliation retry backlog is full")
+
+// Reconcile repairs terminal child handoffs. Built-in adapters use bounded
+// keyset pages. Progress advances after queue acceptance or feature-verified
+// consumption; unknown kinds are conservatively enqueued.
+// Legacy host-defined relation adapters without a pager retain ListAll fallback.
 func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 	if scheduler == nil {
 		return ErrInvalidInput
 	}
+	if scheduler.reconcilePager == nil {
+		return scheduler.reconcileLegacy(ctx)
+	}
+	scheduler.reconcileMu.Lock()
+	defer scheduler.reconcileMu.Unlock()
+	result := scheduler.retryReconcileFailures(ctx)
+	if err := ctx.Err(); err != nil {
+		return errors.Join(result, err)
+	}
+	page, err := scheduler.reconcilePager.ListReconcilePage(
+		ctx, scheduler.reconcileCursor, runrelation.MaxReconcilePageSize,
+	)
+	if err != nil {
+		return errors.Join(result, err)
+	}
+	lastProcessed := scheduler.reconcileCursor
+	for _, candidate := range page.Candidates {
+		if err = ctx.Err(); err != nil {
+			scheduler.reconcileCursor = lastProcessed
+			return errors.Join(result, err)
+		}
+		id := candidate.Relation.ChildRunID
+		if _, pending := scheduler.reconcileFailures[id]; pending {
+			lastProcessed = id
+			continue
+		}
+		candidateErr := scheduler.reconcileCandidate(ctx, candidate)
+		if err = ctx.Err(); err != nil {
+			// An interrupted candidate must be retried on the next tick.
+			scheduler.reconcileCursor = lastProcessed
+			return errors.Join(result, candidateErr, err)
+		}
+		if candidateErr != nil {
+			if len(scheduler.reconcileFailures) >= maxReconcileRetryBacklog {
+				scheduler.reconcileCursor = lastProcessed
+				return errors.Join(result, candidateErr, errReconcileRetryBacklogFull)
+			}
+			if scheduler.reconcileFailures == nil {
+				scheduler.reconcileFailures = make(map[string]runrelation.ReconciliationCandidate)
+			}
+			scheduler.reconcileFailures[id] = candidate
+			scheduler.reconcileRetryIDs = append(scheduler.reconcileRetryIDs, id)
+			result = errors.Join(result, candidateErr)
+		}
+		lastProcessed = id
+	}
+	if page.HasMore {
+		scheduler.reconcileCursor = page.NextCursor
+	} else {
+		scheduler.reconcileCursor = ""
+	}
+	return result
+}
+
+// retryReconcileFailures rotates a bounded, in-memory retry queue so a single
+// failing relation does not block all later pages. Missing watermarks remain
+// durable; on process restart the cursor resets and old failures are rescanned.
+func (scheduler *Scheduler) retryReconcileFailures(ctx context.Context) error {
+	var result error
+	count := min(maxReconcileRetriesPerTick, len(scheduler.reconcileRetryIDs))
+	for index := 0; index < count; index++ {
+		if err := ctx.Err(); err != nil {
+			return errors.Join(result, err)
+		}
+		id := scheduler.reconcileRetryIDs[0]
+		scheduler.reconcileRetryIDs = scheduler.reconcileRetryIDs[1:]
+		candidate := scheduler.reconcileFailures[id]
+		err := scheduler.reconcileCandidate(ctx, candidate)
+		if err != nil {
+			scheduler.reconcileRetryIDs = append(scheduler.reconcileRetryIDs, id)
+			result = errors.Join(result, err)
+		} else {
+			delete(scheduler.reconcileFailures, id)
+		}
+	}
+	return result
+}
+
+func (scheduler *Scheduler) reconcileCandidate(
+	ctx context.Context, candidate runrelation.ReconciliationCandidate,
+) error {
+	child, err := scheduler.runs.Load(ctx, candidate.Relation.ChildRunID)
+	if errors.Is(err, kernel.ErrNotFound) || (err == nil && !terminal(child.Run.Status)) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	parent, err := scheduler.runs.Load(ctx, candidate.Relation.ParentRunID)
+	if errors.Is(err, kernel.ErrNotFound) || (err == nil && parent.Run.Status != kernel.RunStatusRunning) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if candidate.LastParentRevision >= parent.Run.Revision &&
+		candidate.LastChildRevision >= child.Run.Revision {
+		return nil
+	}
+	if scheduler.guard != nil {
+		needed, guardErr := scheduler.guard(ctx, parent, candidate.Relation)
+		if guardErr != nil {
+			return guardErr
+		}
+		if !needed {
+			// A feature-verified consumed child is a settled fact, not a new
+			// delivery. Advance the observed revisions to suppress replay.
+			return scheduler.reconcilePager.MarkObserved(
+				ctx, child.Run.ID, parent.Run.Revision, child.Run.Revision,
+			)
+		}
+	}
+	if err = scheduler.Schedule(ctx, Payload{
+		SchemaVersion: SchemaVersion, RunID: parent.Run.ID,
+		ExpectedRevision: parent.Run.Revision, Trigger: TriggerChildTerminal,
+		SourceRunID: child.Run.ID, SourceRevision: child.Run.Revision,
+	}); err != nil {
+		return err
+	}
+	return scheduler.reconcilePager.MarkEnqueued(
+		ctx, child.Run.ID, parent.Run.Revision, child.Run.Revision,
+	)
+}
+
+func (scheduler *Scheduler) reconcileLegacy(ctx context.Context) error {
 	relations, err := scheduler.relations.ListAll(ctx)
 	if err != nil {
 		return err
@@ -107,6 +261,12 @@ func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRe
 	if dependencies.Outbox == nil || dependencies.Queue == nil || dependencies.Relations == nil || dependencies.Runs == nil {
 		return nil, ErrInvalidInput
 	}
+	if dependencies.RequireDurableQueue {
+		durable, ok := dependencies.Queue.(interface{ DurableQueue() bool })
+		if !ok || !durable.DurableQueue() {
+			return nil, ErrDurableQueueRequired
+		}
+	}
 	if dependencies.Clock == nil {
 		dependencies.Clock = schedulerClock{}
 	}
@@ -123,9 +283,15 @@ func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRe
 		}
 		triggers[registration.kind] = registration.resolver
 	}
+	var pager runrelation.ReconciliationPager
+	if provider, ok := dependencies.Relations.(runrelation.ReconciliationProvider); ok {
+		pager, _ = provider.ReconciliationPager()
+	}
 	return &Scheduler{
 		outbox: dependencies.Outbox, queue: dependencies.Queue, relations: dependencies.Relations, runs: dependencies.Runs,
 		clock: dependencies.Clock, workerID: strings.TrimSpace(dependencies.ProjectorID), triggers: triggers,
+		guard:          dependencies.ReconcileGuard,
+		reconcilePager: pager,
 		jobPolicy: queuecore.Policy{
 			MaxAttempts: 12, VisibilityTimeout: 2 * time.Minute,
 			InitialBackoff: 250 * time.Millisecond, MaxBackoff: 30 * time.Second, BackoffMultiplier: 2,
