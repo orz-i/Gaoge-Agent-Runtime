@@ -1122,6 +1122,11 @@ type itemAppendOutcome struct {
 }
 
 func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) error {
+	// Take the Turn lock before the ID lookup, so a waiting replay sees the
+	// winning append without adding a second lookup to every fresh Item.
+	if err := lockTurn(tx, value.TurnID); err != nil {
+		return err
+	}
 	existing, found, err := findItem(tx, value.ID)
 	if err != nil {
 		return err
@@ -1133,9 +1138,6 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 		outcome.item = existing
 		return nil
 	}
-	if err = lockTurn(tx, value.TurnID); err != nil {
-		return err
-	}
 	seq, err := nextItemSeq(tx, value.TurnID)
 	if err != nil {
 		return err
@@ -1145,9 +1147,29 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	if err != nil {
 		return err
 	}
-	if err = tx.Create(&record).Error; err != nil {
-		return err
+	// Distinct Turns have distinct row locks but Item IDs are globally
+	// unique. Let the winning INSERT commit, then compare the stored Item
+	// rather than leaking a PostgreSQL unique-constraint error on replay.
+	result := tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "id"}}, DoNothing: true,
+	}).Create(&record)
+	if result.Error != nil {
+		return result.Error
 	}
+	if result.RowsAffected == 0 {
+		existing, found, err = findItem(tx, value.ID)
+		if err != nil {
+			return err
+		}
+		if !found || !sameItem(existing, value) {
+			return harness.ErrConflict
+		}
+		outcome.item = existing
+		return nil
+	}
+	// Return the persisted JSON representation on both initial creation and
+	// replay (an empty payload is stored as {}).
+	value.Payload = json.RawMessage(record.PayloadJSON)
 	outcome.item, outcome.created = value, true
 	return nil
 }
@@ -1262,10 +1284,7 @@ func itemToRecord(value harness.Item) (itemRecord, error) {
 	if value.HostRef != nil {
 		hostKind, hostID = value.HostRef.Kind, value.HostRef.ID
 	}
-	payload := strings.TrimSpace(string(value.Payload))
-	if payload == "" {
-		payload = `{}`
-	}
+	payload := itemPayloadJSON(value.Payload)
 	if !json.Valid([]byte(payload)) {
 		return itemRecord{}, harness.ErrInvalidRequest
 	}
@@ -1301,8 +1320,17 @@ func sameTurn(left, right harness.Turn) bool {
 
 func sameItem(left, right harness.Item) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.Kind == right.Kind && left.Status == right.Status &&
-		left.RunID == right.RunID && left.InvocationID == right.InvocationID && left.ParentItemID == right.ParentItemID && string(left.Payload) == string(right.Payload) &&
+		left.RunID == right.RunID && left.InvocationID == right.InvocationID && left.ParentItemID == right.ParentItemID &&
+		itemPayloadJSON(left.Payload) == itemPayloadJSON(right.Payload) &&
 		sameItemHostRef(left.HostRef, right.HostRef)
+}
+
+func itemPayloadJSON(payload json.RawMessage) string {
+	value := strings.TrimSpace(string(payload))
+	if value == "" {
+		return `{}`
+	}
+	return value
 }
 
 func sameItemHostRef(left, right *harness.HostRef) bool {

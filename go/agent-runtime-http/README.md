@@ -22,6 +22,11 @@ runtimehttp.NewModule(handler).RegisterRoutes(apiV1)
 Object authorization stays at the Host/HTTP edge. Explicit policy denials are
 rendered as not-found so a caller cannot probe another tenant's Run IDs.
 
+Handlers using `BindStrictJSON` accept one complete JSON document up to 8 MiB,
+reject unknown fields and trailing JSON, and enforce `binding` field rules
+(including nested DTOs) before invoking runtime operations. Invalid bodies
+return HTTP 400 without applying the requested mutation.
+
 `GET /runs/:run_id` returns the current aggregate plus `eventHead`, not the full
 Kernel Event journal. Use `GET /runs/:run_id/events?afterSeq=...&limit=...` for
 bounded durable audit/event history. `/runs/:run_id/feed` remains the separate

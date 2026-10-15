@@ -9,12 +9,16 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 var errInvalidJSONBody = errors.New("invalid JSON request body")
+
+// Bound memory use for nested/raw JSON request fields that have no size tag.
+const maxStrictJSONBodyBytes int64 = 8 << 20
 
 type ThreadRequest struct {
 	Kind string `json:"kind" binding:"required,max=64"`
@@ -24,7 +28,8 @@ type ThreadRequest struct {
 // NormalizeThread converts the shared HTTP thread contract to a Kernel reference.
 func NormalizeThread(request ThreadRequest) kernel.ThreadRef { return normalizeThread(request) }
 
-// BindStrictJSON decodes one request body and rejects unknown fields.
+// BindStrictJSON decodes exactly one JSON value, rejects unknown fields,
+// and applies the declared binding validation rules.
 func BindStrictJSON(context *gin.Context, target interface{}) error {
 	return bindStrictJSON(context, target)
 }
@@ -88,8 +93,8 @@ func bindStrictJSON(context *gin.Context, target interface{}) error {
 	if context == nil || context.Request == nil || context.Request.Body == nil {
 		return errInvalidJSONBody
 	}
-	raw, err := io.ReadAll(context.Request.Body)
-	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
+	raw, err := io.ReadAll(io.LimitReader(context.Request.Body, maxStrictJSONBodyBytes+1))
+	if err != nil || len(raw) > int(maxStrictJSONBodyBytes) || len(bytes.TrimSpace(raw)) == 0 {
 		return errInvalidJSONBody
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -97,7 +102,13 @@ func bindStrictJSON(context *gin.Context, target interface{}) error {
 	if err = decoder.Decode(target); err != nil {
 		return errInvalidJSONBody
 	}
-	if decoder.More() {
+	// More only checks elements within an array/object; a second decode
+	// must reach EOF to reject trailing delimiters or another JSON value.
+	var trailing json.RawMessage
+	if err = decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return errInvalidJSONBody
+	}
+	if err = binding.Validator.ValidateStruct(target); err != nil {
 		return errInvalidJSONBody
 	}
 	context.Request.Body = io.NopCloser(bytes.NewReader(raw))
