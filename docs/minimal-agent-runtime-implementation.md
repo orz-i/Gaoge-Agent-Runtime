@@ -1,6 +1,6 @@
 # Minimal Agent Runtime — implementation and conformance contract
 
-- **Status:** Normative implementation/conformance gates for [accepted ADR 0008](adr/0008-minimal-agent-runtime-architecture.md); Stage 1 SQLite six-state prototype verified; future target APIs unimplemented
+- **Status:** Normative implementation/conformance gates for [accepted ADR 0008](adr/0008-minimal-agent-runtime-architecture.md); Stage 1 SQLite proof and opt-in Stage 2 Phase 1 execution-epoch Store port implemented; full ProgressPlan/control/Hosted release gates pending
 - **Date:** 2026-10-15
 - **Baseline:** `main@44785f85d3117e9629c34ed48c7a6b458dbfbfab`
 - **Scope:** Normative gates for staged implementation; driver and ReadyWork V1 choices are in the [Stage 0 decision record](audits/2026-10-15-minimal-runtime-stage0-decisions.md)

@@ -3,9 +3,11 @@
 An opt-in local SQLite adapter for the current
 [Gaoge Agent Runtime](../agent-runtime) **six-state** Kernel API.
 
-**Status:** Stage 1 single-executor desktop prototype. **Not a supported
-concurrent/multi-worker or mobile durable runtime.** No production release
-is implied by adding the module to `go.work`.
+**Status:** Stage 1 single-executor desktop prototype with an **opt-in
+Stage 2 Phase 1 Store execution fence**. **Not a supported autonomous
+multi-worker Agent or mobile durable runtime.** The new fenced Kernel
+interfaces are internal development only until the coordinated Core
+release; no production release is implied by `go.work`.
 
 ## Minimal desktop example
 
@@ -135,6 +137,32 @@ explicit first-create retry after cancellation, and **real subprocess
 restarts** after initial Run creation, model receipt commit and Tool
 receipt commit. The latter assert that settled model/tool calls are **not
 re-executed** during these tested crash windows.
+
+## Stage 2 Phase 1 — opt-in execution fencing (development only)
+
+`ExecutionStore` is now implemented by this adapter. A host can acquire
+an owner/epoch/lease for an **already-running** Run, bind that lease via
+`kernel.Runtime.WithExecution(lease)` and make several Run `Apply`
+commits using that same segment. SQLite engine time and the exact
+execution epoch, lease identity, expiry and Run revision are all checked
+in the same write transaction; plain `Apply` is permanently fenced off
+for that Run after the first claim. A fresh process can safely claim
+an expired segment under a higher epoch without changing Run Revision.
+
+**Do not enable fenced full Agent loops with approvals, budgets, pending
+signals, or autonomous Pump workers yet.** Stage 2 Phase 2 must provide
+Store-authorized Control mutations and unified ProgressPlan eligibility;
+otherwise a waiting Run would fail closed, not be resumable by an
+unfenced approval call. Execution fencing does not prevent a stale
+in-flight Tool from performing an external physical effect.
+
+The execution columns are part of the still-**unreleased Schema v1**;
+no automatic migration or version bump is implied. The local adapter
+currently imports experimental Kernel interfaces absent from the
+older published `agent-runtime v0.1.0-beta.22`: standalone
+`GOWORK=off` consumer builds are **not release-ready** until those
+cross-module API versions are coordinated. See
+[Stage 2 Phase 1 evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md).
 
 ### Deliberate Stage 1 limits
 

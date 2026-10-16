@@ -12,7 +12,19 @@ definitions := postgres.NewWorkflowDefinitionStore(db)
 ```
 
 Run migrations explicitly before starting workers. Constructing a store does
-not migrate the schema. Harness persistence has its own
+not migrate the schema. The experimental Stage 2 Phase 1 branch adds
+**sticky Store execution fencing columns** to the Kernel Run record; an
+explicit migration is required before trying these APIs on PostgreSQL.
+The new `ExecutionStore` port uses PostgreSQL row locking and
+`clock_timestamp()` for authoritative epoch/expiry CAS. A real PostgreSQL
+16 test is available via `TEST_POSTGRES_DSN`, while ordinary GORM SQLite
+unit tests do **not** certify PostgreSQL fencing. Do not enable the new
+port for Agents that may enter an approval/budget wait until authorized
+Control mutations and ProgressPlan are implemented. The branch's
+unreleased Kernel APIs require a coordinated Core/adapter release; see
+[Stage 2 Phase 1 evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md).
+
+Harness persistence has its own
 `harnesspostgres.Migrate(db)` and `harnesspostgres.New(db)` in
 `go/agent-runtime-harness-postgres`.
 
