@@ -50,11 +50,11 @@ func (store *KernelStore) applyKernelMutation(
 ) (kernel.Snapshot, error) {
 	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ?", runID, expectedRevision)
 	if lease == nil {
-		query = query.Where("execution_fenced = ?", false)
+		query = query.Where("execution_epoch = ?", 0)
 	} else {
-		query = query.Where(`execution_fenced = ? AND execution_epoch = ? AND execution_owner = ? AND
-            execution_lease_id = ? AND execution_expires_at = ?`, true, lease.Epoch, lease.OwnerID,
-			lease.LeaseID, lease.ExpiresAt.UTC())
+		query = query.Where(`execution_epoch = ? AND execution_owner = ? AND
+            execution_lease_id = ?`, lease.Epoch, lease.OwnerID,
+			lease.LeaseID)
 		if db.Name() == "postgres" {
 			query = query.Where("execution_expires_at > clock_timestamp()")
 		} else {

@@ -17,7 +17,6 @@ type KernelRunRecord struct {
 	Revision   uint64 `gorm:"not null"`
 	// Stage 2 execution authority lives in the same Run row as Revision CAS.
 	// The fence bit is sticky once claimed: legacy Apply cannot bypass it.
-	ExecutionFenced    bool       `gorm:"not null;default:false"`
 	ExecutionEpoch     uint64     `gorm:"not null;default:0"`
 	ExecutionOwner     string     `gorm:"size:128;not null;default:''"`
 	ExecutionLeaseID   string     `gorm:"size:128;not null;default:''"`

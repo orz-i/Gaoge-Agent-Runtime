@@ -73,9 +73,9 @@ func lockKernelRun(tx *gorm.DB, runID string) (models.KernelRunRecord, error) {
 	return record, nil
 }
 func pgLeaseMatches(current models.KernelRunRecord, lease kernel.ExecutionLease, now time.Time) bool {
-	return current.ExecutionFenced && current.ExecutionEpoch == lease.Epoch &&
+	return current.ExecutionEpoch > 0 && current.ExecutionEpoch == lease.Epoch &&
 		current.ExecutionOwner == lease.OwnerID && current.ExecutionLeaseID == lease.LeaseID &&
-		current.ExecutionExpiresAt != nil && current.ExecutionExpiresAt.Equal(lease.ExpiresAt) &&
+		current.ExecutionExpiresAt != nil &&
 		now.Before(*current.ExecutionExpiresAt)
 }
 
@@ -113,7 +113,7 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		expiration := now.Add(request.LeaseDuration).UTC()
 		res := tx.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND execution_epoch = ?",
 			request.RunID, current.Revision, current.ExecutionEpoch).Updates(map[string]any{
-			"execution_fenced": true, "execution_epoch": current.ExecutionEpoch + 1,
+			"execution_epoch": current.ExecutionEpoch + 1,
 			"execution_owner": strings.TrimSpace(request.OwnerID), "execution_lease_id": id,
 			"execution_expires_at": expiration,
 		})
@@ -157,8 +157,8 @@ func (store *KernelStore) RenewExecution(ctx context.Context, req kernel.Executi
 			return kernel.ErrExecutionConflict
 		}
 		query := tx.Model(&models.KernelRunRecord{}).
-			Where("run_id = ? AND execution_fenced = ? AND execution_epoch = ? AND execution_owner = ? AND execution_lease_id = ? AND execution_expires_at = ?",
-				lease.RunID, true, lease.Epoch, lease.OwnerID, lease.LeaseID, lease.ExpiresAt.UTC())
+			Where("run_id = ? AND execution_epoch = ? AND execution_owner = ? AND execution_lease_id = ?",
+				lease.RunID, lease.Epoch, lease.OwnerID, lease.LeaseID)
 		if tx.Name() == "postgres" {
 			query = query.Where("execution_expires_at > clock_timestamp()")
 		} else {
@@ -203,8 +203,8 @@ func (store *KernelStore) ReleaseExecution(ctx context.Context, lease kernel.Exe
 			return kernel.ErrExecutionConflict
 		}
 		query := tx.Model(&models.KernelRunRecord{}).
-			Where("run_id = ? AND execution_fenced = ? AND execution_epoch = ? AND execution_owner = ? AND execution_lease_id = ? AND execution_expires_at = ?",
-				lease.RunID, true, lease.Epoch, lease.OwnerID, lease.LeaseID, lease.ExpiresAt.UTC())
+			Where("run_id = ? AND execution_epoch = ? AND execution_owner = ? AND execution_lease_id = ?",
+				lease.RunID, lease.Epoch, lease.OwnerID, lease.LeaseID)
 		if tx.Name() == "postgres" {
 			query = query.Where("execution_expires_at > clock_timestamp()")
 		} else {
@@ -237,7 +237,7 @@ func (store *KernelStore) executionCommitConflict(tx *gorm.DB, runID string, lea
 		return err
 	}
 	if lease == nil {
-		if current.ExecutionFenced {
+		if current.ExecutionEpoch > 0 {
 			return kernel.ErrExecutionRequired
 		}
 		return kernel.ErrConflict
