@@ -82,7 +82,10 @@ func (dispatcher *Dispatcher) dispatchToolWait(ctx context.Context, payload Payl
 		if errors.Is(resumeErr, kernel.ErrConflict) {
 			continue
 		}
-		if resumed.Run.ID != "" || nonRetryableResumeError(resumeErr) {
+		// A non-empty Snapshot can accompany a still-unresolved native Tool
+		// receipt. An unresolved dispatch MUST NACK; ACK is reserved for
+		// successful or explicitly non-retryable/obsolete deliveries.
+		if nonRetryableResumeError(resumeErr) || terminalSnapshotAfterResume(resumed) {
 			return nil
 		}
 		return resumeErr
@@ -110,10 +113,26 @@ func (dispatcher *Dispatcher) eligibleSnapshot(
 
 func resumeOnce(ctx context.Context, resumer Resumer, snapshot kernel.Snapshot) error {
 	resumed, err := resumer.Resume(ctx, snapshot.Run.ID, snapshot.Run.Revision)
-	if resumed.Run.ID != "" || nonRetryableResumeError(err) {
+	// Never convert a Feature's unresolved external work into a successful
+	// ACK merely because its last durable Snapshot was returned.
+	if nonRetryableResumeError(err) || terminalSnapshotAfterResume(resumed) {
 		return nil
 	}
 	return err
+}
+
+// A committed terminal Run is settled even when its Feature reports the
+// deadline/failure that caused the terminal transition. An unresolved running
+// Snapshot is NOT proof of delivery completion.
+func terminalSnapshotAfterResume(snapshot kernel.Snapshot) bool {
+	switch snapshot.Run.Status {
+	case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
+		return snapshot.Run.ID != ""
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
+		return false
+	default:
+		return false
+	}
 }
 
 func nonRetryableResumeError(err error) bool {

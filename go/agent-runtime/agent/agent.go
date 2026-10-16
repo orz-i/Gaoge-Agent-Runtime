@@ -33,7 +33,11 @@ var (
 	ErrToolFailure          = errors.New("agent tool failure")
 	// ErrToolOutcomeUnknown indicates an external dispatch intent was
 	// committed but its terminal receipt is absent. Do not replay.
-	ErrToolOutcomeUnknown       = errors.New("agent external tool result is uncertain")
+	ErrToolOutcomeUnknown = errors.New("agent external tool result is uncertain")
+	// The deadline of an externally pending native Tool has elapsed, while
+	// its physical result remains unknown. The Run is intentionally blocked
+	// for provider-verified or authorized manual reconciliation.
+	ErrToolOutcomeOverdue       = errors.New("agent external Tool wait deadline expired with unknown result")
 	ErrToolReceiptMismatch      = errors.New("agent tool receipt identity or disposition mismatch")
 	ErrToolVerificationRequired = errors.New("agent trusted tool outcome verifier is not configured")
 	ErrToolLateResult           = errors.New("agent Tool completed after configured timeout")
@@ -615,8 +619,13 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 		return snapshot, ErrRunTerminal
 	}
 	if runner.runExecution != nil && state.ToolDispatchID != "" {
-		// An unresolved physical Tool outcome is NOT runnable work, so
-		// avoid claiming an epoch just to discover it is unsafe to retry.
+		// Do not acquire/execute an unresolved physical Tool under a new
+		// Epoch. Distinguish an overdue provider wait without erasing its
+		// persisted identity or asserting a physical COMMIT.
+		if state.ToolWait != nil && state.ToolWait.DeadlineAt != nil &&
+			!runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
+			return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue)
+		}
 		return snapshot, ErrToolOutcomeUnknown
 	}
 	// Claim an execution segment BEFORE Run middleware and any Model/Tool

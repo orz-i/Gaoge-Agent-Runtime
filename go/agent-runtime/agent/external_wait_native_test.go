@@ -85,7 +85,7 @@ func TestNativeExternalResultSignalIsGuardedAndIdempotent(t *testing.T) {
 	}
 	confirmed = true
 	done, err := runner.ReconcileToolOutcome(t.Context(), ready.Run.ID, ready.Run.Revision, "external-call")
-	if err != nil || done.Run.Status != kernel.RunStatusCompleted || effects != 1 || lookups != 1 {
+	if err != nil || done.Run.Status != kernel.RunStatusCompleted || effects != 1 || lookups != 2 {
 		t.Fatalf("verified external ready receipt did not complete: %+v effects=%d lookups=%d err=%v", done.Run, effects, lookups, err)
 	}
 }

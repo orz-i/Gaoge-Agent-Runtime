@@ -268,5 +268,26 @@ func (runner *Runner) ResumeToolWait(ctx context.Context, runID string, expected
 	if snapshot.Run.Status != kernel.RunStatusRunning || state.ToolWait == nil || state.ToolWait.Generation != generation {
 		return snapshot, nil
 	}
+	if runner.runExecution != nil && state.ToolDispatchID != "" {
+		// A pending native Tool is already physically dispatched. For an
+		// exact ready signal, use the trusted read-only Provider verifier.
+		// NEVER call its non-idempotent Tool Handler from a queue delivery.
+		if state.ToolWait.Kind == tools.PendingExternalResult && state.ToolWait.SignalID != "" {
+			verified, verifyErr := runner.ReconcileToolOutcome(ctx, runID, expectedRevision, state.ToolDispatchID)
+			if verifyErr == nil {
+				return verified, nil
+			}
+			if state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
+				return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue, verifyErr)
+			}
+			return snapshot, errors.Join(ErrToolOutcomeUnknown, verifyErr)
+		}
+		// A deadline without a verified provider COMMIT must not discard its
+		// durable operation ID and must not authorize physical Tool replay.
+		if state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
+			return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue)
+		}
+		return snapshot, ErrToolOutcomeUnknown
+	}
 	return runner.Resume(ctx, runID, expectedRevision)
 }

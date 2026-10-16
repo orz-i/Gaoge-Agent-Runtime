@@ -79,18 +79,21 @@ func TestNativeExternalSignalChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier := agent.ToolOutcomeVerifierFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
-		data, e := os.ReadFile(marker)
-		if e != nil {
-			return tools.ExecutionResult{}, e
-		}
-		if req.RunID != "native-external" || req.Call.ID != "lookup-call" ||
-			strings.Count(string(data), "tool:lookup-call") != 1 {
-			return tools.ExecutionResult{}, errors.New("provider has no committed receipt")
-		}
-		return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`),
-			Receipt: tools.Receipt{ExecutionID: req.Call.ID, Disposition: "committed"}}, nil
-	})
+	var verifier agent.ToolOutcomeVerifier
+	if phase == "reconcile" {
+		verifier = agent.ToolOutcomeVerifierFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			data, e := os.ReadFile(marker)
+			if e != nil {
+				return tools.ExecutionResult{}, e
+			}
+			if req.RunID != "native-external" || req.Call.ID != "lookup-call" ||
+				strings.Count(string(data), "tool:lookup-call") != 1 {
+				return tools.ExecutionResult{}, errors.New("provider has no committed receipt")
+			}
+			return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`),
+				Receipt: tools.Receipt{ExecutionID: req.Call.ID, Disposition: "committed"}}, nil
+		})
+	}
 	runner, err = agent.NewRunner(agent.Dependencies{
 		Runtime: rt, Model: controlBudgetModel{path: marker}, Catalog: catalog, Executor: catalog,
 		RunExecution:        &agent.RunExecution{OwnerID: "signal-" + phase, LeaseDuration: 2 * time.Minute},
@@ -240,10 +243,9 @@ func TestNativeExternalSignalChild(t *testing.T) {
 		if e != nil || pending.SignalID != "ready-1" {
 			t.Fatalf("signal lost after process exit: %+v %v", pending, e)
 		}
-		if _, e = runner.ResumeToolWait(ctx, snap.Run.ID, snap.Run.Revision, pending.Generation); !errors.Is(e, agent.ErrToolOutcomeUnknown) {
-			t.Fatalf("signal replayed external handler: %v", e)
-		}
-		done, e := runner.ReconcileToolOutcome(ctx, snap.Run.ID, snap.Run.Revision, "lookup-call")
+		// The durable queue's eligible native wakeup now drives the trusted
+		// provider lookup. No second Tool.Execute is ever invoked.
+		done, e := runner.ResumeToolWait(ctx, snap.Run.ID, snap.Run.Revision, pending.Generation)
 		if e != nil || done.Run.Status != kernel.RunStatusCompleted {
 			t.Fatalf("verified external result didn't complete: %+v %v", done.Run, e)
 		}

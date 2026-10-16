@@ -260,3 +260,160 @@ func TestTeamExternalWaitSixtySecondsNoPollingThenDurableChildWakeup(t *testing.
 		t.Fatalf("duplicate work: %d/%d", fixture.executions, fixture.model.calls)
 	}
 }
+
+func TestNativeToolWaitDispatchRequiresVerifiedProviderReceipt(t *testing.T) {
+	ctx := t.Context()
+	store := memory.NewStore()
+	runtime, err := kernel.New(kernel.Dependencies{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toolExecutions, verifierCalls := 0, 0
+	providerCommitted := false
+	registry, err := tools.NewRegistry([]tools.Registration{{
+		Definition: tools.Definition{Key: "test.durable_wait", Name: "Durable", Terminal: true, InputSchema: json.RawMessage(`{"type":"object"}`)},
+		Handler: tools.HandlerFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			toolExecutions++
+			expires := time.Now().UTC().Add(time.Minute)
+			return tools.ExecutionResult{Content: json.RawMessage(`null`),
+				Receipt: tools.Receipt{ExecutionID: r.Call.ID, Disposition: tools.ReceiptDispositionPending},
+				Pending: &tools.PendingExecution{Kind: tools.PendingExternalResult,
+					OperationID: "provider-native", InputDigest: strings.Repeat("a", 64), DeadlineAt: &expires}}, nil
+		}),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelClient := &durableWaitModel{}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: modelClient, Catalog: registry, Executor: registry,
+		RunExecution: &agent.RunExecution{OwnerID: "native-owner", LeaseDuration: 2 * time.Minute},
+		ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			verifierCalls++
+			if !providerCommitted {
+				return tools.ExecutionResult{}, errors.New("provider receipt is not available")
+			}
+			return tools.ExecutionResult{Content: json.RawMessage(`{"committed":true}`),
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := runner.StartRun(ctx, agent.StartRequest{
+		ID: "audit-native-wakeup-ack", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "native wait", ToolKeys: []string{"test.durable_wait"},
+	})
+	if err != nil || pending.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("pending Run not created: %+v %v", pending.Run, err)
+	}
+	wait, err := runner.QueryPendingTool(ctx, pending.Run.ID, "wait-call")
+	if err != nil {
+		t.Fatal(err)
+	}
+	signaled, err := runner.NotifyExternalToolResultReady(ctx, agent.ExternalToolResultSignal{
+		RunID: pending.Run.ID, CallID: "wait-call", OperationID: "provider-native",
+		InputDigest: strings.Repeat("a", 64), SignalID: "ready",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := continuation.NewDispatcher(runtime, continuation.RegisterResumer(agent.RunKind, runner))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := continuation.Payload{SchemaVersion: continuation.SchemaVersion,
+		RunID: signaled.Run.ID, ExpectedRevision: signaled.Run.Revision,
+		Trigger:     continuation.TriggerToolResultReady,
+		SourceRunID: signaled.Run.ID, SourceRevision: signaled.Run.Revision,
+		WaitGeneration: wait.Generation}
+	dispatchErr := dispatcher.Dispatch(ctx, payload)
+	stored, err := runtime.Load(ctx, signaled.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := agent.ViewState(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("AUDIT Native Tool result ready: Dispatcher.Dispatch error=%v (nil means worker ACKs), persistedStatus=%s pendingTool=%t providerVerifierCalls=%d physicalToolExecs=%d",
+		dispatchErr, stored.Run.Status, view.PendingTool != nil, verifierCalls, toolExecutions)
+	if !errors.Is(dispatchErr, agent.ErrToolOutcomeUnknown) || view.PendingTool == nil ||
+		verifierCalls != 1 || toolExecutions != 1 {
+		t.Fatalf("unverified native Tool incorrectly ACKed: error=%v pending=%t verifier=%d Tool=%d",
+			dispatchErr, view.PendingTool != nil, verifierCalls, toolExecutions)
+	}
+	// The host's provider journal now confirms the same immutable Call ID.
+	providerCommitted = true
+	if err = dispatcher.Dispatch(ctx, payload); err != nil {
+		t.Fatalf("verified provider result didn't finish the native Run: %v", err)
+	}
+	completed, err := runtime.Load(ctx, signaled.Run.ID)
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted ||
+		verifierCalls != 2 || toolExecutions != 1 {
+		t.Fatalf("native Tool resumed without a valid COMMIT: status=%s verifier=%d tool=%d err=%v",
+			completed.Run.Status, verifierCalls, toolExecutions, err)
+	}
+
+}
+
+func TestNativeUnknownExternalOutcomeAfterDeadlineIsDiagnosable(t *testing.T) {
+	ctx := t.Context()
+	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effects := 0
+	registry, err := tools.NewRegistry([]tools.Registration{{
+		Definition: tools.Definition{Key: "test.durable_wait", Name: "Durable", Terminal: true, InputSchema: json.RawMessage(`{"type":"object"}`)},
+		Handler: tools.HandlerFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			effects++
+			deadline := time.Now().UTC().Add(60 * time.Millisecond)
+			return tools.ExecutionResult{Content: json.RawMessage(`null`),
+				Receipt: tools.Receipt{ExecutionID: r.Call.ID, Disposition: tools.ReceiptDispositionPending},
+				Pending: &tools.PendingExecution{Kind: tools.PendingExternalResult,
+					OperationID: "provider-timeout", InputDigest: strings.Repeat("b", 64), DeadlineAt: &deadline}}, nil
+		}),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: rt, Model: &durableWaitModel{}, Catalog: registry, Executor: registry,
+		RunExecution: &agent.RunExecution{OwnerID: "native-owner", LeaseDuration: 2 * time.Minute},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := runner.StartRun(ctx, agent.StartRequest{
+		ID: "native-wait-timeout", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "timeout native wait",
+		ToolKeys: []string{"test.durable_wait"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait, err := runner.QueryPendingTool(ctx, waiting.Run.ID, "wait-call")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(110 * time.Millisecond)
+	resumed, resumeErr := runner.ResumeToolWait(ctx, waiting.Run.ID, waiting.Run.Revision, wait.Generation)
+	actual, err := rt.Load(ctx, waiting.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("AUDIT Native provider wait deadline already past: ResumeToolWait err=%v returned=%s persisted=%s revision=%d ToolExecCount=%d",
+		resumeErr, resumed.Run.Status, actual.Run.Status, actual.Run.Revision, effects)
+	if !errors.Is(resumeErr, agent.ErrToolOutcomeUnknown) ||
+		!errors.Is(resumeErr, agent.ErrToolOutcomeOverdue) ||
+		actual.Run.Status != kernel.RunStatusRunning || effects != 1 {
+		t.Fatalf("native overdue unknown outcome wasn't reported: %v status=%s effects=%d",
+			resumeErr, actual.Run.Status, effects)
+	}
+	_, directErr := runner.Resume(ctx, waiting.Run.ID, waiting.Run.Revision)
+	if !errors.Is(directErr, agent.ErrToolOutcomeUnknown) ||
+		!errors.Is(directErr, agent.ErrToolOutcomeOverdue) || effects != 1 {
+		t.Fatalf("direct native Resume lost overdue diagnosis or replayed Tool: %v effects=%d", directErr, effects)
+	}
+}
