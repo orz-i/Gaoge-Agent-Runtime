@@ -1569,14 +1569,18 @@ func (runner *Runner) resumeApproved(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: "interaction.resolved", Message: "Tool call approved", Wakeup: true}},
-	})
+	running, revoked, err := runner.runtime.ApplyControl(ctx, snapshot.Run.ID, snapshot.Run.Revision,
+		kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: snapshot.Checkpoint.ID}, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
+			Events: []kernel.EventDraft{{Type: "interaction.resolved", Message: "Tool call approved", Wakeup: true}},
+		})
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if runner.deferResume {
+	// A fenced control revoked the former executor. Never dispatch an
+	// external Model/Tool from this unbound Runner, regardless of whether
+	// legacy DeferResumption was enabled; a new owner must be acquired.
+	if runner.deferResume || revoked {
 		return running, nil
 	}
 	return runner.resumeRunning(ctx, running, state)
@@ -1601,14 +1605,18 @@ func (runner *Runner) resumeRejected(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded,
-		Events: []kernel.EventDraft{{Type: "tool.rejected", Message: "Tool call rejected", Wakeup: true}},
-	})
+	running, revoked, err := runner.runtime.ApplyControl(ctx, snapshot.Run.ID, snapshot.Run.Revision,
+		kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: snapshot.Checkpoint.ID}, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: encoded,
+			Events: []kernel.EventDraft{{Type: "tool.rejected", Message: "Tool call rejected", Wakeup: true}},
+		})
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if runner.deferResume {
+	// A fenced control revoked the former executor. Never dispatch an
+	// external Model/Tool from this unbound Runner, regardless of whether
+	// legacy DeferResumption was enabled; a new owner must be acquired.
+	if runner.deferResume || revoked {
 		return running, nil
 	}
 	return runner.drive(ctx, running)
