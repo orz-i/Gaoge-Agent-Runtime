@@ -314,15 +314,15 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(mutation.Events),
 		runID, expectedRevision}
 	if lease == nil {
-		updateSQL += ` AND execution_fenced=0`
+		updateSQL += ` AND execution_epoch=0`
 	} else {
 		nowMS, clockErr := sqliteExecutionNow(ctx, tx)
 		if clockErr != nil {
 			return kernel.Snapshot{}, clockErr
 		}
-		updateSQL += ` AND execution_fenced=1 AND execution_epoch=? AND execution_owner=?
-          AND execution_lease_id=? AND execution_expiry_ms=? AND execution_expiry_ms>?`
-		args = append(args, lease.Epoch, lease.OwnerID, lease.LeaseID, lease.ExpiresAt.UTC().UnixMilli(), nowMS)
+		updateSQL += ` AND execution_epoch=? AND execution_owner=?
+          AND execution_lease_id=? AND execution_expiry_ms>?`
+		args = append(args, lease.Epoch, lease.OwnerID, lease.LeaseID, nowMS)
 	}
 	updated, err := tx.ExecContext(ctx, updateSQL, args...)
 	if err != nil {
@@ -334,9 +334,9 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 	}
 	if affected != 1 {
 		var actualRevision int64
-		var fenced int
+		var authorityEpoch int64
 		err = tx.QueryRowContext(ctx,
-			`SELECT revision,execution_fenced FROM runtime_runs WHERE run_id=?`, runID).Scan(&actualRevision, &fenced)
+			`SELECT revision,execution_epoch FROM runtime_runs WHERE run_id=?`, runID).Scan(&actualRevision, &authorityEpoch)
 		if errors.Is(err, sql.ErrNoRows) {
 			return kernel.Snapshot{}, kernel.ErrNotFound
 		}
@@ -345,7 +345,7 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		}
 		// Never turn a stale execution token into a plain revision conflict.
 		// This matters when a replacement owner has not changed revision.
-		if lease == nil && fenced != 0 {
+		if lease == nil && authorityEpoch != 0 {
 			return kernel.Snapshot{}, kernel.ErrExecutionRequired
 		}
 		if lease != nil {
@@ -362,7 +362,7 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 			if clockErr != nil {
 				return kernel.Snapshot{}, clockErr
 			}
-			if epoch != int64(lease.Epoch) || owner != lease.OwnerID || id != lease.LeaseID || expiry != lease.ExpiresAt.UnixMilli() || expiry <= nowMS {
+			if epoch != int64(lease.Epoch) || owner != lease.OwnerID || id != lease.LeaseID || expiry <= nowMS {
 				return kernel.Snapshot{}, kernel.ErrExecutionConflict
 			}
 		}

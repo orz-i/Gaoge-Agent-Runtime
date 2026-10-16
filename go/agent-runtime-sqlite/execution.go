@@ -76,8 +76,7 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 		return kernel.ExecutionLease{}, err
 	}
 	until := now + ttl
-	result, err := tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_fenced=1,
-  execution_epoch=?,execution_owner=?,execution_lease_id=?,execution_expiry_ms=?
+	result, err := tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_epoch=?,execution_owner=?,execution_lease_id=?,execution_expiry_ms=?
   WHERE run_id=? AND execution_epoch=?`, epoch+1, strings.TrimSpace(req.OwnerID), id, until, req.RunID, epoch)
 	if err != nil {
 		return kernel.ExecutionLease{}, conflictOrDatabaseError(err)
@@ -111,10 +110,10 @@ func (s *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRenewReq
 	until := now + ttl
 	lease := req.Lease
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_expiry_ms=?
-  WHERE run_id=? AND execution_fenced=1 AND execution_epoch=? AND execution_owner=?
-  AND execution_lease_id=? AND execution_expiry_ms=? AND execution_expiry_ms>?
+  WHERE run_id=? AND execution_epoch=? AND execution_owner=?
+  AND execution_lease_id=? AND execution_expiry_ms>?
       AND execution_expiry_ms>CAST(unixepoch('subsec')*1000 AS INTEGER)`,
-		until, lease.RunID, lease.Epoch, lease.OwnerID, lease.LeaseID, lease.ExpiresAt.UnixMilli(), now)
+		until, lease.RunID, lease.Epoch, lease.OwnerID, lease.LeaseID, now)
 	if err != nil {
 		return kernel.ExecutionLease{}, conflictOrDatabaseError(err)
 	}
@@ -145,10 +144,10 @@ func (s *Store) ReleaseExecution(ctx context.Context, lease kernel.ExecutionLeas
 		return err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_owner='',execution_lease_id='',execution_expiry_ms=0
-  WHERE run_id=? AND execution_fenced=1 AND execution_epoch=? AND execution_owner=?
-  AND execution_lease_id=? AND execution_expiry_ms=? AND execution_expiry_ms>?
+  WHERE run_id=? AND execution_epoch=? AND execution_owner=?
+  AND execution_lease_id=? AND execution_expiry_ms>?
       AND execution_expiry_ms>CAST(unixepoch('subsec')*1000 AS INTEGER)`,
-		lease.RunID, lease.Epoch, lease.OwnerID, lease.LeaseID, lease.ExpiresAt.UnixMilli(), now)
+		lease.RunID, lease.Epoch, lease.OwnerID, lease.LeaseID, now)
 	if err != nil {
 		return conflictOrDatabaseError(err)
 	}
