@@ -25,6 +25,9 @@ owners rather than being hidden behind a generic agent framework.
 > Store execution leases. The [Stage 2B security fixes](audits/2026-10-16-stage2-phase2b-code-review-remediation.md)
 > add atomic native-mode reservation, post-acquire Revision checks,
 > durable Tool dispatch identities and verified-receipt reconciliation.
+> The [second Stage 2B review](audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md)
+> requires trusted provider lookups, retains Pending intent and releases
+> idle leases after failed pre-dispatch validation.
 > Autonomous Pump and provider-specific physical exactly-once guarantees
 > remain incomplete.
 

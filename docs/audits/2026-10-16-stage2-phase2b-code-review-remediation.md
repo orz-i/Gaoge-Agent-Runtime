@@ -4,6 +4,7 @@
 - **Date:** 2026-10-16
 - **Baseline:** `governance/kernel-runtime@2c8cbd3`
 - **Predecessor:** [Stage 2B native Run integration](2026-10-16-stage2-phase2b-native-run-execution.md)
+- **Follow-up:** [Second code review remediation](2026-10-16-stage2-phase2b-second-code-review-remediation.md) adds early Lease cleanup, exact native receipt checks, trusted Provider verification and fail-closed native Pending handling. This report is the historical initial Stage 2B repair checkpoint.
 - **Architecture:** [accepted ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) and [proposed minimality ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md)
 - **Scope:** single Run Store, existing six statuses, existing epoch column and Feature state; no new tables, queue or Workflow interpreter
 

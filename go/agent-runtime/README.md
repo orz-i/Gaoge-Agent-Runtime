@@ -37,17 +37,25 @@ The lease must cover the configured Tool retry/backoff window, though
 external calls may still ignore Context deadlines.
 
 A native Tool writes a durable dispatch intent containing the stable
-Call ID **before** executing. If the receipt is not committed, `Resume`
-returns `ErrToolOutcomeUnknown` rather than replaying the effect.
-After the host verifies the external provider's committed result using
-that identity, `ReconcileToolOutcome` can persist the exact receipt
-without re-executing the Tool. Late known Model/Tool success is
-persisted and reported via `ErrModelLateResult` / `ErrToolLateResult`.
+Call ID **before** executing. The returned native receipt must match
+that ID exactly. Pending or unknown outcomes retain this marker,
+so `Resume` cannot blindly re-execute the Handler.
+
+For a confirmed external COMMIT, configure a trusted provider-side
+read-only lookup through `agent.Dependencies.ToolOutcomeVerifier` and
+invoke `runner.ReconcileToolOutcome(ctx, runID, revision, callID)`.
+The Runner invokes this verifier with the immutable Tool request and
+persists the matching receipt without calling `Tool.Execute`.
+Without a verifier the Run remains blocked; callers cannot pass an
+arbitrary `ExecutionResult` as evidence of a COMMIT. Host-side caller
+authorization and actual external provider verification remain required.
+Late known Model/Tool success is persisted and reported via
+`ErrModelLateResult` / `ErrToolLateResult`.
 
 A clean pause releases the claim; after a trusted approval/budget
 control, invoke `Resume` to acquire a new Epoch. None of this proves
 physical exactly-once effects across a lost lease. See the
-[Stage 2B security remediation](../../docs/audits/2026-10-16-stage2-phase2b-code-review-remediation.md).
+[Stage 2B second safety review](../../docs/audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md).
 
 ## Runtime kinds
 

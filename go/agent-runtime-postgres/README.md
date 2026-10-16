@@ -33,9 +33,11 @@ segments, with a separate real PostgreSQL 16 native approval/resume
 test. [Stage 2B code-review fixes](../../docs/audits/2026-10-16-stage2-phase2b-code-review-remediation.md)
 reserve Epoch 1 in the same PostgreSQL Create transaction and refuse
 native takeover of Epoch-0 Legacy Runs. Late/ambiguous Tool receipts
-use persisted stable identities; trusted host reconciliation can record
-known committed results without replay. This still **does not certify
-physical exactly-once effects or production multi-worker execution**.
+use persisted stable identities. The [second Stage 2B audit fix](../../docs/audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md)
+requires trusted Provider verification for external COMMIT, exact native
+receipt IDs and Pending no-auto-replay; pre-dispatch failures release
+newly acquired idle leases. This still **does not certify physical
+exactly-once effects or production multi-worker execution**.
 The branch's unpublished Core APIs require a coordinated module
 release. See [Phase 1 execution evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md)
 and [Phase 2A control evidence](../../docs/audits/2026-10-16-stage2-phase2a-guarded-control.md).

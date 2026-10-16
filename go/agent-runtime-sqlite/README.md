@@ -175,10 +175,13 @@ completion/pause. **The native mode is reserved in the original Create
 transaction using existing Epoch 1.** Legacy Runs (Epoch 0) cannot be
 silently upgraded or stolen by a native executor. Before dispatching
 an external Tool, native Agents persist a stable Call-ID intent; an
-uncertain receipt blocks automatic replay until a trusted host provides
-an independently verified result through `ReconcileToolOutcome`.
+uncertain receipt blocks automatic replay. A trusted host must configure
+`ToolOutcomeVerifier` to query the provider by exact Run/Call ID; the
+`ReconcileToolOutcome` method no longer accepts an arbitrary result.
+Pending native Tool receipts also block direct Handler reentry, and
+wrong native receipt IDs cannot clear the dispatch marker.
 See the [Stage 2B native implementation](../../docs/audits/2026-10-16-stage2-phase2b-native-run-execution.md)
-and [code-review fixes](../../docs/audits/2026-10-16-stage2-phase2b-code-review-remediation.md).
+and [second code-review fixes](../../docs/audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md).
 
 **Do not enable unattended production multi-worker Agent/Pump execution
 yet.** In-flight external Model/Tool effects are not physically fenced,
