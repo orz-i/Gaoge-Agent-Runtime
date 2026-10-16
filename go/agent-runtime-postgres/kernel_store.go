@@ -46,15 +46,29 @@ func (store *KernelStore) applyKernelMutation(
 	expectedRevision uint64,
 	updatedModel models.KernelRunRecord,
 	mutation kernel.StoreMutation,
+	lease *kernel.ExecutionLease,
 ) (kernel.Snapshot, error) {
-	result := db.Model(&models.KernelRunRecord{}).
-		Where("run_id = ? AND revision = ?", runID, expectedRevision).
-		Updates(kernelRunUpdates(updatedModel, len(mutation.Events)))
+	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ?", runID, expectedRevision)
+	if lease == nil {
+		query = query.Where("execution_fenced = ?", false)
+	} else {
+		query = query.Where(`execution_fenced = ? AND execution_epoch = ? AND execution_owner = ? AND
+            execution_lease_id = ? AND execution_expires_at = ?`, true, lease.Epoch, lease.OwnerID,
+			lease.LeaseID, lease.ExpiresAt.UTC())
+		if db.Name() == "postgres" {
+			query = query.Where("execution_expires_at > clock_timestamp()")
+		} else {
+			// SQLite GORM is only a conformance fixture; the authoritative
+			// production PostgreSQL path uses DB clock_timestamp() above.
+			query = query.Where("execution_expires_at > ?", time.Now().UTC())
+		}
+	}
+	result := query.Updates(kernelRunUpdates(updatedModel, len(mutation.Events)))
 	if result.Error != nil {
 		return kernel.Snapshot{}, translateKernelApplyError(result.Error)
 	}
 	if result.RowsAffected != 1 {
-		return kernel.Snapshot{}, store.kernelMissingOrConflict(db, runID)
+		return kernel.Snapshot{}, store.executionCommitConflict(db, runID, lease)
 	}
 	var persisted models.KernelRunRecord
 	if err := db.Where("run_id = ?", runID).First(&persisted).Error; err != nil {
@@ -193,6 +207,11 @@ func (store *KernelStore) Apply(
 	expectedRevision uint64,
 	mutation kernel.StoreMutation,
 ) (kernel.Snapshot, error) {
+	return store.applyWithExecution(ctx, nil, runID, expectedRevision, mutation)
+}
+
+func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.ExecutionLease,
+	runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	if store == nil || store.db == nil || strings.TrimSpace(runID) == "" {
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
@@ -206,7 +225,7 @@ func (store *KernelStore) Apply(
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var applyErr error
-		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation)
+		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, lease)
 		return applyErr
 	})
 	if err != nil {
@@ -304,17 +323,6 @@ func (store *KernelStore) RetryTransition(ctx context.Context, request kernel.Tr
 		return nil
 	}
 	return store.kernelTransitionMissingOrConflict(store.db.WithContext(ctx), request.TransitionID)
-}
-
-func (store *KernelStore) kernelMissingOrConflict(db *gorm.DB, runID string) error {
-	var count int64
-	if err := db.Model(&models.KernelRunRecord{}).Where("run_id = ?", runID).Count(&count).Error; err != nil {
-		return translateKernelError(err)
-	}
-	if count == 0 {
-		return kernel.ErrNotFound
-	}
-	return kernel.ErrConflict
 }
 
 func kernelRunRecordFrom(record kernel.Record, lastEventSeq int64) (models.KernelRunRecord, error) {
