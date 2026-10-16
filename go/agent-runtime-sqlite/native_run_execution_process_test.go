@@ -320,6 +320,17 @@ func TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool(t *testing.T) {
 	if effects != 0 || !errors.Is(err, kernel.ErrConflict) {
 		t.Fatalf("stale snapshot executed external Tool: physical=%d err=%v", effects, err)
 	}
+	// A failed pre-dispatch revision check must release the newly claimed
+	// segment, rather than blocking a valid recovery for the full TTL.
+	recovered, claimErr := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+		RunID: ready.Run.ID, OwnerID: "replacement", LeaseDuration: time.Second,
+	})
+	if claimErr != nil {
+		t.Fatalf("stale Snapshot retained idle execution lease: %v", claimErr)
+	}
+	if err = rt.ReleaseExecution(ctx, recovered); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLegacyRunCannotJoinNativeExecutionDuringTool(t *testing.T) {

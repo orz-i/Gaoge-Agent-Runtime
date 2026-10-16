@@ -71,9 +71,22 @@ func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRe
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	// Before execute is called there are NO Model/Tool effects from this
+	// newly claimed segment. Always relinquish it on preflight failure,
+	// including a cancelled caller context, so the next recovery is not
+	// blocked for a full TTL by a stale Revision.
+	abortBeforeDispatch := func(snapshot kernel.Snapshot, cause error) (kernel.Snapshot, error) {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		releaseErr := runner.runtime.ReleaseExecution(cleanupCtx, lease)
+		if releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
+			return snapshot, errors.Join(cause, releaseErr)
+		}
+		return snapshot, cause
+	}
 	bound, err := runner.runtime.WithExecution(lease)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return abortBeforeDispatch(kernel.Snapshot{}, err)
 	}
 	// The pre-claim snapshot is not a grant. A concurrent valid control
 	// can commit before we acquire, or a Store implementation can
@@ -81,16 +94,16 @@ func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRe
 	// BEFORE any middleware/Model/Tool sees this snapshot.
 	persisted, err := bound.Load(ctx, runID)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return abortBeforeDispatch(kernel.Snapshot{}, err)
 	}
 	if persisted.Run.Revision != expectedRevision {
-		return persisted, kernel.ErrConflict
+		return abortBeforeDispatch(persisted, kernel.ErrConflict)
 	}
 	if persisted.Run.Status != kernel.RunStatusRunning {
-		return persisted, kernel.ErrExecutionRequired
+		return abortBeforeDispatch(persisted, kernel.ErrExecutionRequired)
 	}
 	if err = bound.RequireExecution(ctx, runID); err != nil {
-		return persisted, err
+		return abortBeforeDispatch(persisted, err)
 	}
 	scoped := *runner
 	scoped.runtime = bound
