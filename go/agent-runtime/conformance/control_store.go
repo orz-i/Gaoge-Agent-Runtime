@@ -199,14 +199,16 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 		}
 	})
 	t.Run("deadline-checks-store-time", func(t *testing.T) {
-		future := time.Now().UTC().Add(150 * time.Millisecond)
+		// Real PostgreSQL migration and row-lock setup can consume more than
+		// a 150ms deadline under -race. Keep ample scheduling margin.
+		future := time.Now().UTC().Add(750 * time.Millisecond)
 		rt, created := create(t, "deadline", &future)
 		_, bound := acquire(t, rt)
 		early, expired, err := rt.Expire(t.Context(), created.Run.ID, created.Run.Revision)
 		if err != nil || expired || early.Run.Status != kernel.RunStatusRunning {
 			t.Fatalf("premature expiration: %+v %v %v", early.Run, expired, err)
 		}
-		time.Sleep(190 * time.Millisecond)
+		time.Sleep(850 * time.Millisecond)
 		failed, expired, err := rt.Expire(t.Context(), created.Run.ID, created.Run.Revision)
 		if err != nil || !expired || failed.Run.Status != kernel.RunStatusFailed {
 			t.Fatalf("deadline failed: %+v expired=%v err=%v", failed.Run, expired, err)
@@ -231,7 +233,7 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 	t.Run("Store-deadline-gates-approval-and-allowance", func(t *testing.T) {
 		for _, gate := range []kernel.ControlKind{kernel.ControlApproval, kernel.ControlAllowance} {
 			t.Run(string(gate), func(t *testing.T) {
-				deadline := time.Now().UTC().Add(180 * time.Millisecond)
+				deadline := time.Now().UTC().Add(750 * time.Millisecond)
 				rt, created := create(t, "deadline before control", &deadline)
 				_, bound := acquire(t, rt)
 				pending := kernel.Mutation{Status: kernel.RunStatusWaitingInput, State: created.State}
@@ -248,7 +250,7 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				time.Sleep(215 * time.Millisecond)
+				time.Sleep(850 * time.Millisecond)
 				guard := kernel.ControlGuard{Kind: gate}
 				next := kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{"grant":1}`)}
 				source := ""
