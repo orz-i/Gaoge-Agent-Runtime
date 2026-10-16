@@ -209,6 +209,9 @@ type Dependencies struct {
 	CompletionPolicies []CompletionPolicy
 	Limits             Limits
 	Execution          ExecutionPolicy
+	// RunExecution opts the direct Agent StartRun/Resume path into the existing
+	// authoritative Store epoch/lease. Nil retains the legacy behavior.
+	RunExecution *RunExecution
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
 	DeferResumption bool
@@ -258,6 +261,8 @@ type Runner struct {
 	completionPolicies []CompletionPolicy
 	limits             Limits
 	execution          ExecutionPolicy
+	runExecution       *RunExecution
+	activeRunLease     *kernel.ExecutionLease
 	modelLimiter       *callLimiter
 	toolLimiter        *callLimiter
 	deferResume        bool
@@ -365,6 +370,17 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if err != nil {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
+	var runExecution *RunExecution
+	if dependencies.RunExecution != nil {
+		if !dependencies.Runtime.SupportsExecution() {
+			return nil, ErrInvalidRequest
+		}
+		if !validRunExecution(*dependencies.RunExecution, execution) {
+			return nil, ErrInvalidRequest
+		}
+		copied := *dependencies.RunExecution
+		runExecution = &copied
+	}
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
@@ -372,6 +388,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		completionPolicies: compactCompletionPolicies(dependencies.CompletionPolicies),
 		limits:             dependencies.Limits,
 		execution:          execution,
+		runExecution:       runExecution,
 		modelLimiter:       newCallLimiter(execution.Model.MaxConcurrency),
 		toolLimiter:        newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:           runChain, modelChain: modelChain, toolChain: toolChain,
@@ -494,8 +511,17 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	runner.publishRunEvent(ctx, snapshot, EventRunStarted, false)
-	return runner.drive(ctx, snapshot)
+	// Claim the Run before publishing the started event or dispatching any
+	// Model/Tool. If acquisition fails, preserve the created Run for safe
+	// recovery rather than running unfenced.
+	driven, driveErr := runner.withRunOwner(ctx, snapshot.Run.ID, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
+		scoped.publishRunEvent(driveCtx, snapshot, EventRunStarted, false)
+		return scoped.drive(driveCtx, snapshot)
+	})
+	if driveErr != nil && driven.Run.ID == "" {
+		return snapshot, driveErr
+	}
+	return driven, driveErr
 }
 
 // ResolveApproval resumes one waiting Agent Run with an explicit decision.
@@ -572,22 +598,28 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrRunTerminal
 	}
-	// Fail before the Run middleware or Tool/model loop if another worker
-	// has ever fenced this Run. Persisting a receipt after a physical side
-	// effect is too late to prevent a duplicate Tool invocation.
-	if err := runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
-		return snapshot, err
-	}
-	invocation := runInvocation(plugin.RunResume, snapshot)
-	return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-		return runner.resumeRunning(nextCtx, snapshot, state)
+	// Claim an execution segment BEFORE Run middleware and any Model/Tool
+	// side effect. A runner without RunExecution still follows the original
+	// pre-dispatch Store guard and will be rejected on fenced Runs.
+	resumed, resumeErr := runner.withRunOwner(ctx, snapshot.Run.ID, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
+		invocation := runInvocation(plugin.RunResume, snapshot)
+		return scoped.runChain.Invoke(driveCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+			return scoped.resumeRunning(nextCtx, snapshot, state)
+		})
 	})
+	if resumeErr != nil && resumed.Run.ID == "" {
+		return snapshot, resumeErr
+	}
+	return resumed, resumeErr
 }
 
 func (runner *Runner) drive(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, error) {
 	for snapshot.Run.Status == kernel.RunStatusRunning {
 		// A bound lease can expire or be replaced between successive steps.
 		if err := runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
+			return snapshot, err
+		}
+		if err := runner.keepRunLeaseAlive(ctx); err != nil {
 			return snapshot, err
 		}
 		next, done, err := runner.driveStep(ctx, snapshot)

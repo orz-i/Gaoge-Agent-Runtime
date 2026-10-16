@@ -82,6 +82,17 @@ func (runtime *Runtime) WithExecution(lease ExecutionLease) (*Runtime, error) {
 	return &bound, nil
 }
 
+// SupportsExecution reports whether the current Store can fence a direct
+// Run. A Runner opting into automatic execution must check this BEFORE
+// creating a Run to avoid leaving an unrecoverable orphan on a legacy Store.
+func (runtime *Runtime) SupportsExecution() bool {
+	if runtime == nil {
+		return false
+	}
+	_, ok := runtime.store.(ExecutionStore)
+	return ok
+}
+
 // AcquireExecution obtains a fenced execution segment using Store time.
 func (runtime *Runtime) AcquireExecution(ctx context.Context, request ExecutionAcquireRequest) (ExecutionLease, error) {
 	if runtime == nil || !validExecutionAcquireRequest(request) {
