@@ -77,14 +77,18 @@ function checkTidy(cwd, modulePath) {
   try {
     const core = "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime";
     const harness = "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness";
-    if (modulePath !== "go/agent-runtime") {
+    // The experimental SQLite module only uses the published Core API.
+    // Tidy it against its pinned standalone dependency so go.sum also
+    // contains the hashes needed by a GOWORK=off read-only consumer.
+    const replaceCore = modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-sqlite";
+    if (replaceCore) {
       run("go", ["mod", "edit", `-replace=${core}=../agent-runtime`], cwd);
     }
     if (["go/agent-runtime-harness-postgres", "go/agent-runtime-http"].includes(modulePath)) {
       run("go", ["mod", "edit", `-replace=${harness}=../agent-runtime-harness`], cwd);
     }
     run("go", ["mod", "tidy"], cwd);
-    if (modulePath !== "go/agent-runtime") run("go", ["mod", "edit", `-dropreplace=${core}`], cwd);
+    if (replaceCore) run("go", ["mod", "edit", `-dropreplace=${core}`], cwd);
     if (["go/agent-runtime-harness-postgres", "go/agent-runtime-http"].includes(modulePath)) {
       run("go", ["mod", "edit", `-dropreplace=${harness}`], cwd);
     }

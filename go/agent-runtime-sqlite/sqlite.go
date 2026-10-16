@@ -255,6 +255,14 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 	if !create && version != schemaVersion {
 		return fmt.Errorf("%w: existing database has version %d", ErrUnsupportedSchema, version)
 	}
+	// Reject incompatible existing DDL before switching journal modes:
+	// PRAGMA journal_mode=WAL changes persistent SQLite metadata, even if
+	// subsequent schema validation fails.
+	if !create {
+		if err := s.validateSchema(ctx); err != nil {
+			return err
+		}
+	}
 	if create {
 		var existing int
 		err := s.db.QueryRowContext(ctx,
@@ -267,8 +275,8 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 			return fmt.Errorf("%w: unversioned nonempty database", ErrUnsupportedSchema)
 		}
 	}
-	// Only switch to WAL after rejecting unknown versions/nonempty foreign
-	// databases. URI options must not mutate another app's database first.
+	// Only switch to WAL after validating existing Schema shape (or after
+	// proving this is an unpublished empty staging database).
 	var mode string
 	if err := s.db.QueryRowContext(ctx, "PRAGMA journal_mode=WAL").Scan(&mode); err != nil {
 		return err
@@ -293,8 +301,9 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 		if err = tx.Commit(); err != nil {
 			return err
 		}
+		return s.validateSchema(ctx)
 	}
-	return s.validateSchema(ctx)
+	return nil
 }
 
 var schemaDDL = []string{

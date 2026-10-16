@@ -116,8 +116,13 @@ of turning a far-future task into an immediately due negative timestamp.
 cd go/agent-runtime-sqlite
 go test -count=1 -race ./...
 go test -count=1 ./... -run TestAgentCrashAndResumeInNewProcess -v
+# Run outside the monorepo workspace to verify published Core-module sums:
+GOWORK=off GOFLAGS=-mod=readonly go test -count=1 ./...
 ```
 
+For an existing database, `OpenExisting` first validates the full
+version-1 Schema **before** attempting to enable WAL; malformed
+experimental files are rejected without changing their journal mode.
 The shared `conformance.RunKernelStoreSuite` covers CAS, event history,
 event metadata isolation, Checkpoint/Result deep-copy, transition
 claim/retry/ACK, and concurrent revision updates.

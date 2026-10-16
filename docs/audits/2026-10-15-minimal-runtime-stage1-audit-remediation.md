@@ -89,5 +89,36 @@ semantics across competing runners. Mobile VFS/file protection,
 power-loss evidence, full Stage 2 progress gating and Hosted parity
 are separate acceptance requirements.
 
-No commit, push, PR, migration or release is authorized by this
-remediation record.
+## 2026-10-16 — Merge-preparation P2 closure and branch cleanup
+
+The previous Stage 0/1 working-tree artifacts have been organized on
+`governance/minimal-kernel-sqlite-stage1-20261016`, without discarding
+any historical research or changing `main`. The user separately
+requested **segmented local commits**, not a remote push or release.
+
+- **`92aed38` — Architecture/Stage 0:** ADR 0008, implementation contract,
+  driver selection, baseline evidence and reproducible reference fixtures.
+- **`f094aac` — Stage 1 prototype:** experimental SQLite Store, regression
+  and subprocess recovery tests, documentation, and workspace integration.
+- **Follow-up P2 patch:** validate the **entire existing v1 Schema before**
+  calling `PRAGMA journal_mode=WAL`, so rejecting malformed development
+  files cannot change their persistent journal mode. Add
+  `TestIncompatibleV1SchemaRejectedWithoutChangingJournal` and
+  `TestCompatibleV1SchemaMaySwitchBackToWAL` as opposing negative/positive
+  tests. The still-unreleased Schema stays **v1**.
+- **Standalone module P2:** add the published Core module's
+  `v0.1.0-beta.22` checksums to `go/agent-runtime-sqlite/go.sum`.
+  Keep this adapter **without a temporary Core `replace`** during the
+  workspace `tidy-check`, and verify with
+  `GOWORK=off GOFLAGS=-mod=readonly go test -count=1 ./...`.
+
+**Final local checks:** `make check` PASS; the independent read-only
+SQLite module test with `-race` PASS; `govulncheck v1.9.0` reports
+no known reachable vulnerabilities; doc/link checks and
+`git diff --check` PASS. The adapter remains an **experimental,
+single-executor desktop prototype**, not a production mobile Store,
+concurrent Run execution engine or an approved SDK release.
+
+This audit record does not authorize a push, PR merge, public release,
+or persisted-schema migration. Local commits were explicitly requested
+for this governance branch.
