@@ -21,6 +21,9 @@ var (
 // ExecutionLease represents an exclusive, Store-authoritative execution
 // segment. Epoch advances on takeover even when Run.Revision is unchanged.
 // The opaque LeaseID is a separate claim identity, not a queue lease.
+// ExpiresAt is informational. Store-owned time and persisted expiry determine
+// whether the stable (RunID, Epoch, OwnerID, LeaseID) token remains valid;
+// renewing it does not require rebinding a Runtime/Agent loop.
 type ExecutionLease struct {
 	RunID     string
 	OwnerID   string
@@ -38,8 +41,8 @@ type ExecutionAcquireRequest struct {
 	LeaseDuration time.Duration
 }
 
-// ExecutionRenewRequest keeps the same epoch and lease identity, extending
-// the expiration if and only if the segment remains active.
+// ExecutionRenewRequest extends the Store expiry of the existing stable
+// execution identity without rotating the owner's token.
 type ExecutionRenewRequest struct {
 	Lease         ExecutionLease
 	LeaseDuration time.Duration
@@ -87,7 +90,7 @@ func (runtime *Runtime) AcquireExecution(ctx context.Context, request ExecutionA
 	return store.AcquireExecution(ctx, request)
 }
 
-// RenewExecution never changes epoch. Expired segments cannot be revived.
+// RenewExecution keeps the bearer token stable. Expired segments cannot be revived.
 func (runtime *Runtime) RenewExecution(ctx context.Context, request ExecutionRenewRequest) (ExecutionLease, error) {
 	if runtime == nil || !validExecutionLease(request.Lease) || !validExecutionDuration(request.LeaseDuration) {
 		return ExecutionLease{}, ErrInvalidInput

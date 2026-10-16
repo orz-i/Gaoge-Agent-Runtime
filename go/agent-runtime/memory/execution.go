@@ -12,9 +12,8 @@ import (
 )
 
 type memoryExecutionState struct {
-	fenced bool
-	epoch  uint64
-	lease  kernel.ExecutionLease
+	epoch uint64
+	lease kernel.ExecutionLease
 }
 
 var _ kernel.ExecutionStore = (*Store)(nil)
@@ -49,9 +48,9 @@ func validMemoryLease(l kernel.ExecutionLease) bool {
 	return l.RunID != "" && l.OwnerID != "" && l.LeaseID != "" && l.Epoch != 0 && !l.ExpiresAt.IsZero()
 }
 func activeMemoryLease(state memoryExecutionState, claimed kernel.ExecutionLease, now time.Time) bool {
-	return state.fenced && state.lease.RunID == claimed.RunID &&
+	return state.epoch > 0 && state.lease.RunID == claimed.RunID &&
 		state.lease.OwnerID == claimed.OwnerID && state.lease.LeaseID == claimed.LeaseID &&
-		state.lease.Epoch == claimed.Epoch && state.lease.ExpiresAt.Equal(claimed.ExpiresAt) &&
+		state.lease.Epoch == claimed.Epoch &&
 		now.Before(state.lease.ExpiresAt)
 }
 func (store *Store) AcquireExecution(ctx context.Context, request kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
@@ -94,7 +93,7 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 		RunID: request.RunID, OwnerID: strings.TrimSpace(request.OwnerID), LeaseID: id,
 		Epoch: state.epoch + 1, ExpiresAt: now.Add(request.LeaseDuration),
 	}
-	store.execution[request.RunID] = memoryExecutionState{fenced: true, epoch: lease.Epoch, lease: lease}
+	store.execution[request.RunID] = memoryExecutionState{epoch: lease.Epoch, lease: lease}
 	return lease, nil
 }
 func (store *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
@@ -128,7 +127,7 @@ func (store *Store) ReleaseExecution(ctx context.Context, lease kernel.Execution
 	if !activeMemoryLease(state, lease, store.currentExecutionTime()) {
 		return kernel.ErrExecutionConflict
 	}
-	state.lease = kernel.ExecutionLease{} // Preserve epoch and sticky fence.
+	state.lease = kernel.ExecutionLease{} // Preserve epoch; old token stays fenced.
 	store.execution[lease.RunID] = state
 	return nil
 }

@@ -105,7 +105,7 @@ func (store *Store) Load(_ context.Context, runID string) (kernel.Snapshot, erro
 func (store *Store) Apply(_ context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if store.execution[runID].fenced {
+	if store.execution[runID].epoch > 0 {
 		return kernel.Snapshot{}, kernel.ErrExecutionRequired
 	}
 	return store.applyLocked(runID, expectedRevision, mutation)

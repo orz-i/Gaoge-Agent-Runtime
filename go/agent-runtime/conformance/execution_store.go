@@ -73,20 +73,16 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil || renewed.Epoch != first.Epoch || renewed.ExpiresAt.Equal(first.ExpiresAt) {
 			t.Fatalf("renewed segment epoch/expiry error: %+v %v", renewed, err)
 		}
-		if _, err = bound.Apply(ctx, created.Run.ID, current.Run.Revision, mutation(current, "stale-renew-token")); !errors.Is(err, kernel.ErrExecutionConflict) {
-			t.Fatalf("old expiry token committed after renewal: %v", err)
-		}
-		rebound, err := runtime.WithExecution(renewed)
-		if err != nil {
-			t.Fatal(err)
-		}
-		current, err = rebound.Apply(ctx, created.Run.ID, current.Run.Revision, mutation(current, "renewed"))
+		// Renew keeps the same owner/epoch/lease token; a long-running
+		// Agent need not rebuild its Runner or Runtime on every heartbeat.
+		current, err = bound.Apply(ctx, created.Run.ID, current.Run.Revision,
+			mutation(current, "renewed-with-stable-token"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		// Expired A cannot write even before B reclaims the lease.
 		time.Sleep(90 * time.Millisecond)
-		if _, err = rebound.Apply(ctx, created.Run.ID, current.Run.Revision, mutation(current, "expired")); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if _, err = bound.Apply(ctx, created.Run.ID, current.Run.Revision, mutation(current, "expired")); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("expired owner without B committed: %v", err)
 		}
 		revisionAtTakeover := current.Run.Revision
@@ -101,7 +97,7 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if stored.Run.Revision != revisionAtTakeover {
 			t.Fatalf("takeover unexpectedly advanced Run revision: %d vs %d", stored.Run.Revision, revisionAtTakeover)
 		}
-		if _, err = rebound.Apply(ctx, created.Run.ID, revisionAtTakeover, mutation(current, "old-epoch")); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if _, err = bound.Apply(ctx, created.Run.ID, revisionAtTakeover, mutation(current, "old-epoch")); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("A committed unchanged Run revision after B takeover: %v", err)
 		}
 		if err = runtime.ReleaseExecution(ctx, renewed); !errors.Is(err, kernel.ErrExecutionConflict) {
@@ -154,6 +150,43 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 			t.Fatalf("unexpected intermediate wakeup jobs %#v %v", claims, err)
 		}
 	})
+	t.Run("client-expiry-is-not-an-authority", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		runtime, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		created, err := runtime.Create(ctx, kernel.CreateRequest{
+			ID: "forged-expiry", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "server clock", State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease, err := runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: created.Run.ID, OwnerID: "owner", LeaseDuration: 50 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The immutable authority is RunID+Owner+LeaseID+Epoch and actual
+		// Store expiry. Rewriting the informational ExpiresAt is powerless.
+		forged := lease
+		forged.ExpiresAt = time.Now().UTC().Truncate(time.Millisecond).Add(24 * time.Hour)
+		time.Sleep(90 * time.Millisecond)
+		bound, err := runtime.WithExecution(forged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = bound.Apply(ctx, created.Run.ID, created.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: json.RawMessage(`{"forged":true}`),
+		})
+		if !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("caller expiry spoof bypassed Store expiry: %v", err)
+		}
+	})
+
 	t.Run("pending-gates-cannot-acquire", func(t *testing.T) {
 		ctx := t.Context()
 		store := factory(t)
