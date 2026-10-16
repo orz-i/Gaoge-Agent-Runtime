@@ -10,6 +10,12 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestKernelControlStoreConformance(t *testing.T) {
+	conformance.RunKernelControlSuite(t, func(child *testing.T) kernel.Store {
+		return NewKernelStore(openKernelStoreTestDB(child))
+	})
+}
+
 func TestKernelExecutionStoreConformance(t *testing.T) {
 	conformance.RunKernelExecutionSuite(t, func(child *testing.T) kernel.Store {
 		return NewKernelStore(openKernelStoreTestDB(child))

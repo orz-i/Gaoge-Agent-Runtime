@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -47,13 +48,17 @@ func (store *KernelStore) applyKernelMutation(
 	updatedModel models.KernelRunRecord,
 	mutation kernel.StoreMutation,
 	lease *kernel.ExecutionLease,
+	control bool,
 ) (kernel.Snapshot, error) {
 	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ?", runID, expectedRevision)
-	if lease == nil {
+	if control {
+		// Guarded controls are independently validated under a row lock by
+		// applyWithExecution. Do NOT enforce active execution-lease identity.
+	} else if lease == nil {
 		query = query.Where("execution_epoch = ?", 0)
 	} else {
-		query = query.Where(`execution_epoch = ? AND execution_owner = ? AND
-            execution_lease_id = ?`, lease.Epoch, lease.OwnerID,
+		query = query.Where(`status = ? AND execution_epoch = ? AND execution_owner = ? AND
+            execution_lease_id = ?`, string(kernel.RunStatusRunning), lease.Epoch, lease.OwnerID,
 			lease.LeaseID)
 		if db.Name() == "postgres" {
 			query = query.Where("execution_expires_at > clock_timestamp()")
@@ -63,11 +68,23 @@ func (store *KernelStore) applyKernelMutation(
 			query = query.Where("execution_expires_at > ?", time.Now().UTC())
 		}
 	}
-	result := query.Updates(kernelRunUpdates(updatedModel, len(mutation.Events)))
+	updates := kernelRunUpdates(updatedModel, len(mutation.Events))
+	if control {
+		// One CAS revokes the old owner before any new worker can commit.
+		// Never reset a claimed Run's epoch to zero.
+		updates["execution_epoch"] = gorm.Expr("CASE WHEN execution_epoch > 0 THEN execution_epoch + 1 ELSE 0 END")
+		updates["execution_owner"] = ""
+		updates["execution_lease_id"] = ""
+		updates["execution_expires_at"] = nil
+	}
+	result := query.Updates(updates)
 	if result.Error != nil {
 		return kernel.Snapshot{}, translateKernelApplyError(result.Error)
 	}
 	if result.RowsAffected != 1 {
+		if control {
+			return kernel.Snapshot{}, kernel.ErrConflict
+		}
 		return kernel.Snapshot{}, store.executionCommitConflict(db, runID, lease)
 	}
 	var persisted models.KernelRunRecord
@@ -207,10 +224,10 @@ func (store *KernelStore) Apply(
 	expectedRevision uint64,
 	mutation kernel.StoreMutation,
 ) (kernel.Snapshot, error) {
-	return store.applyWithExecution(ctx, nil, runID, expectedRevision, mutation)
+	return store.applyWithExecution(ctx, nil, nil, nil, runID, expectedRevision, mutation)
 }
 
-func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.ExecutionLease,
+func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.ExecutionLease, guard *kernel.ControlGuard, revoked *bool,
 	runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	if store == nil || store.db == nil || strings.TrimSpace(runID) == "" {
 		return kernel.Snapshot{}, kernel.ErrNotFound
@@ -224,8 +241,34 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 	}
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if guard != nil {
+			persisted, lockErr := lockKernelRun(tx, runID)
+			if lockErr != nil {
+				return lockErr
+			}
+			if persisted.Revision != expectedRevision {
+				return kernel.ErrConflict
+			}
+			current, decodeErr := kernelSnapshotFrom(persisted)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			now, timeErr := pgStoreNow(tx)
+			if timeErr != nil {
+				return timeErr
+			}
+			if validationErr := kernel.ValidateControl(current, *guard, mutation, now); validationErr != nil {
+				return validationErr
+			}
+			if persisted.ExecutionEpoch == math.MaxInt64 {
+				return kernel.ErrExecutionConflict
+			}
+			if revoked != nil {
+				*revoked = persisted.ExecutionEpoch > 0
+			}
+		}
 		var applyErr error
-		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, lease)
+		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, lease, guard != nil)
 		return applyErr
 	})
 	if err != nil {

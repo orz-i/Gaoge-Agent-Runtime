@@ -228,7 +228,7 @@ func (store *KernelStore) ApplyExecution(ctx context.Context, lease kernel.Execu
 	if !pgExecutionLeaseValid(lease) || mutation.Record.Run.ID != lease.RunID || expectedRevision == 0 {
 		return kernel.Snapshot{}, kernel.ErrInvalidInput
 	}
-	return store.applyWithExecution(ctx, &lease, lease.RunID, expectedRevision, mutation)
+	return store.applyWithExecution(ctx, &lease, nil, nil, lease.RunID, expectedRevision, mutation)
 }
 
 func (store *KernelStore) executionCommitConflict(tx *gorm.DB, runID string, lease *kernel.ExecutionLease) error {
@@ -245,6 +245,9 @@ func (store *KernelStore) executionCommitConflict(tx *gorm.DB, runID string, lea
 	now, err := pgStoreNow(tx)
 	if err != nil {
 		return err
+	}
+	if current.Status != string(kernel.RunStatusRunning) {
+		return kernel.ErrExecutionRequired
 	}
 	if !pgLeaseMatches(current, *lease, now) {
 		return kernel.ErrExecutionConflict
