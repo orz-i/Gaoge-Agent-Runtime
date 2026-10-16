@@ -82,7 +82,10 @@ type TransitionClaim struct {
 	LeaseUntil time.Time
 }
 
-// TransitionLeaseRequest identifies the exact active lease being acknowledged.
+// TransitionLeaseRequest identifies the exact current delivery lease. The
+// projector may ACK after the lease's nominal deadline if NO newer claim
+// replaced its lease identity; this is a delivery acknowledgment, NOT Run
+// execution authority. Superseded Worker IDs/lease IDs must fail closed.
 type TransitionLeaseRequest struct {
 	TransitionID string
 	LeaseID      string
