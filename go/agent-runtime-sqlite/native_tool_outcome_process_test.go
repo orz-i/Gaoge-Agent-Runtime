@@ -68,9 +68,28 @@ func TestNativeUnknownToolChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The caller cannot supply a synthetic success. Only a trusted host
+	// verifier with access to the external provider journal is configured
+	// for the reconciliation process.
+	var verifier agent.ToolOutcomeVerifier
+	if phase == "reconcile" {
+		verifier = agent.ToolOutcomeVerifierFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			data, e := os.ReadFile(marker)
+			if e != nil {
+				return tools.ExecutionResult{}, e
+			}
+			if req.RunID != "native-unknown" || req.Call.ID != "lookup-call" ||
+				strings.Count(string(data), "tool:lookup-call") != 1 {
+				return tools.ExecutionResult{}, errors.New("no matching provider COMMIT receipt")
+			}
+			return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`),
+				Receipt: tools.Receipt{ExecutionID: req.Call.ID, Disposition: "committed"}}, nil
+		})
+	}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: rt, Model: controlBudgetModel{path: marker}, Catalog: registry, Executor: registry,
-		RunExecution: &agent.RunExecution{OwnerID: "owner-" + phase, LeaseDuration: 2 * time.Minute},
+		RunExecution:        &agent.RunExecution{OwnerID: "owner-" + phase, LeaseDuration: 2 * time.Minute},
+		ToolOutcomeVerifier: verifier,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -99,14 +118,12 @@ func TestNativeUnknownToolChild(t *testing.T) {
 		if loadErr != nil {
 			t.Fatal(loadErr)
 		}
-		result := tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`),
-			Receipt: tools.Receipt{ExecutionID: "lookup-call", Disposition: "committed"}}
 		if _, invalid := runner.ReconcileToolOutcome(ctx, current.Run.ID, current.Run.Revision,
-			"not-this-call", result); !errors.Is(invalid, agent.ErrInvalidRequest) {
-			t.Fatalf("provider receipt not bound to exact stable Call: %v", invalid)
+			"not-this-call"); !errors.Is(invalid, agent.ErrToolOutcomeUnknown) {
+			t.Fatalf("mismatched Call identity should never reach provider: %v", invalid)
 		}
 		recorded, recordErr := runner.ReconcileToolOutcome(ctx, current.Run.ID, current.Run.Revision,
-			"lookup-call", result)
+			"lookup-call")
 		if recordErr != nil || recorded.Run.Revision != current.Run.Revision+1 {
 			t.Fatalf("known external receipt could not be persisted: %+v %v", recorded.Run, recordErr)
 		}

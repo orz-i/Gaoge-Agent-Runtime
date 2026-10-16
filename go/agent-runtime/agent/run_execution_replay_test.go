@@ -59,7 +59,15 @@ func TestNativeToolUnknownOutcomeBlocksReplayAfterExpiry(t *testing.T) {
 			Runtime: rt, Model: auditRetryThenEffectModel{}, Catalog: catalog, Executor: catalog,
 			Clock:        clock,
 			RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Minute},
-			Execution:    agent.ExecutionPolicy{Tool: agent.CallPolicy{MaxAttempts: 2, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}},
+			ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				// Simulate the provider-owned receipt lookup, NOT user input.
+				if req.RunID != "tool-retry-expiry" || req.Call.ID != "effect-tool" || physicalEffects != 1 {
+					return tools.ExecutionResult{}, errors.New("provider does not confirm this COMMIT")
+				}
+				return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`),
+					Receipt: tools.Receipt{ExecutionID: req.Call.ID, Disposition: "committed"}}, nil
+			}),
+			Execution: agent.ExecutionPolicy{Tool: agent.CallPolicy{MaxAttempts: 2, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -91,14 +99,12 @@ func TestNativeToolUnknownOutcomeBlocksReplayAfterExpiry(t *testing.T) {
 	if !errors.Is(resumeErr, agent.ErrToolOutcomeUnknown) || physicalEffects != 1 {
 		t.Fatalf("ambiguous physical Tool was replayed: effects=%d err=%v", physicalEffects, resumeErr)
 	}
-	known := tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`),
-		Receipt: tools.Receipt{ExecutionID: "effect-tool", Disposition: "committed"}}
 	if _, err := next.ReconcileToolOutcome(t.Context(), run.Run.ID,
-		resumeCandidate.Run.Revision, "wrong-call", known); !errors.Is(err, agent.ErrInvalidRequest) {
-		t.Fatalf("mismatched provider identity accepted: %v", err)
+		resumeCandidate.Run.Revision, "wrong-call"); !errors.Is(err, agent.ErrToolOutcomeUnknown) {
+		t.Fatalf("wrong CallID reached provider verifier: %v", err)
 	}
 	reconciled, err := next.ReconcileToolOutcome(t.Context(), run.Run.ID,
-		resumeCandidate.Run.Revision, "effect-tool", known)
+		resumeCandidate.Run.Revision, "effect-tool")
 	if err != nil || reconciled.Run.Revision != resumeCandidate.Run.Revision+1 {
 		t.Fatalf("known Tool receipt could not be reconciled: %+v %v", reconciled.Run, err)
 	}

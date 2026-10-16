@@ -33,14 +33,16 @@ var (
 	ErrToolFailure          = errors.New("agent tool failure")
 	// ErrToolOutcomeUnknown indicates an external dispatch intent was
 	// committed but its terminal receipt is absent. Do not replay.
-	ErrToolOutcomeUnknown = errors.New("agent external tool result is uncertain")
-	ErrToolLateResult     = errors.New("agent Tool completed after configured timeout")
-	ErrModelLateResult    = errors.New("agent Model completed after configured timeout")
-	ErrCallLimit          = errors.New("agent run call limit exceeded")
-	ErrBudgetExceeded     = errors.New("agent run budget exceeded")
-	ErrUsageUnavailable   = errors.New("agent model usage unavailable for configured token budget")
-	ErrApprovalRequired   = errors.New("agent run approval is required")
-	ErrRunTerminal        = errors.New("agent run is terminal")
+	ErrToolOutcomeUnknown       = errors.New("agent external tool result is uncertain")
+	ErrToolReceiptMismatch      = errors.New("agent tool receipt identity or disposition mismatch")
+	ErrToolVerificationRequired = errors.New("agent trusted tool outcome verifier is not configured")
+	ErrToolLateResult           = errors.New("agent Tool completed after configured timeout")
+	ErrModelLateResult          = errors.New("agent Model completed after configured timeout")
+	ErrCallLimit                = errors.New("agent run call limit exceeded")
+	ErrBudgetExceeded           = errors.New("agent run budget exceeded")
+	ErrUsageUnavailable         = errors.New("agent model usage unavailable for configured token budget")
+	ErrApprovalRequired         = errors.New("agent run approval is required")
+	ErrRunTerminal              = errors.New("agent run is terminal")
 )
 
 func (runner *Runner) completeWithToolResult(
@@ -217,6 +219,9 @@ type Dependencies struct {
 	// RunExecution opts the direct Agent StartRun/Resume path into the existing
 	// authoritative Store epoch/lease. Nil retains the legacy behavior.
 	RunExecution *RunExecution
+	// ToolOutcomeVerifier is a trusted provider-side lookup, used only
+	// for reconciling an uncertain native Tool dispatch. It does NOT retry.
+	ToolOutcomeVerifier ToolOutcomeVerifier
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
 	DeferResumption bool
@@ -249,28 +254,29 @@ type StartRequest struct {
 
 // Runner owns only the direct Agent model and Tool loop.
 type Runner struct {
-	runtime            *kernel.Runtime
-	model              model.Client
-	clock              kernel.Clock
-	catalog            tools.Catalog
-	executor           tools.Executor
-	approvals          plugin.ApprovalHandler
-	approvalPolicies   *plugin.ApprovalPolicySet
-	hostedTools        HostedToolCatalog
-	discovery          ToolDiscovery
-	observers          *plugin.ObserverSet
-	telemetry          *observability.Set
-	runChain           *plugin.RunChain
-	modelChain         *plugin.ModelChain
-	toolChain          *plugin.ToolChain
-	completionPolicies []CompletionPolicy
-	limits             Limits
-	execution          ExecutionPolicy
-	runExecution       *RunExecution
-	activeRunLease     *kernel.ExecutionLease
-	modelLimiter       *callLimiter
-	toolLimiter        *callLimiter
-	deferResume        bool
+	runtime             *kernel.Runtime
+	model               model.Client
+	clock               kernel.Clock
+	catalog             tools.Catalog
+	executor            tools.Executor
+	approvals           plugin.ApprovalHandler
+	approvalPolicies    *plugin.ApprovalPolicySet
+	hostedTools         HostedToolCatalog
+	discovery           ToolDiscovery
+	observers           *plugin.ObserverSet
+	telemetry           *observability.Set
+	runChain            *plugin.RunChain
+	modelChain          *plugin.ModelChain
+	toolChain           *plugin.ToolChain
+	completionPolicies  []CompletionPolicy
+	limits              Limits
+	execution           ExecutionPolicy
+	runExecution        *RunExecution
+	activeRunLease      *kernel.ExecutionLease
+	toolOutcomeVerifier ToolOutcomeVerifier
+	modelLimiter        *callLimiter
+	toolLimiter         *callLimiter
+	deferResume         bool
 }
 
 type runState struct {
@@ -393,13 +399,14 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		hostedTools: dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
-		completionPolicies: compactCompletionPolicies(dependencies.CompletionPolicies),
-		limits:             dependencies.Limits,
-		execution:          execution,
-		runExecution:       runExecution,
-		modelLimiter:       newCallLimiter(execution.Model.MaxConcurrency),
-		toolLimiter:        newCallLimiter(execution.Tool.MaxConcurrency),
-		runChain:           runChain, modelChain: modelChain, toolChain: toolChain,
+		completionPolicies:  compactCompletionPolicies(dependencies.CompletionPolicies),
+		limits:              dependencies.Limits,
+		execution:           execution,
+		runExecution:        runExecution,
+		toolOutcomeVerifier: dependencies.ToolOutcomeVerifier,
+		modelLimiter:        newCallLimiter(execution.Model.MaxConcurrency),
+		toolLimiter:         newCallLimiter(execution.Tool.MaxConcurrency),
+		runChain:            runChain, modelChain: modelChain, toolChain: toolChain,
 		deferResume: dependencies.DeferResumption,
 	}, nil
 }
@@ -1383,8 +1390,17 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, err)
 	}
 	if err = tools.ValidateExecutionResult(result); err != nil {
+		if runner.runExecution != nil {
+			// The external handler may already have committed. Never
+			// terminalize/clear its durable dispatch marker on invalid
+			// receipts from the external system.
+			return snapshot, true, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch, err)
+		}
 		failed, failErr := runner.fail(ctx, snapshot, execution.state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
 		return failed, false, failErr
+	}
+	if runner.runExecution != nil && result.Receipt.ExecutionID != execution.call.ID {
+		return snapshot, true, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch)
 	}
 	persisted, yielded, persistErr := runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(result))
 	if persistErr != nil {
@@ -1525,11 +1541,18 @@ func (runner *Runner) handlePendingToolExecutionError(
 func (runner *Runner) persistPendingToolResult(
 	ctx context.Context, snapshot kernel.Snapshot, execution pendingToolExecution,
 	result tools.ExecutionResult) (kernel.Snapshot, bool, error) {
-	// Receipt and dispatch-marker removal share one Run CAS.
-	execution.state.ToolDispatchID = ""
 	if strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
+		// A Pending result is not a terminal external receipt. A native
+		// executor MUST preserve the durable dispatch marker: no later
+		// Resume may call the non-idempotent Handler again without a trusted
+		// provider lookup. Legacy unleased behavior remains unchanged.
+		if runner.runExecution == nil {
+			execution.state.ToolDispatchID = ""
+		}
 		return runner.persistPendingToolYield(ctx, snapshot, execution.state, result)
 	}
+	// A terminal receipt and marker removal share the SAME revision CAS.
+	execution.state.ToolDispatchID = ""
 	return runner.persistCompletedToolCall(ctx, snapshot, execution, result)
 }
 

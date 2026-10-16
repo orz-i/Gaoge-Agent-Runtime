@@ -2,29 +2,43 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// ReconcileToolOutcome commits a VERIFIED external receipt for an ambiguous
-// native Tool dispatch. The host must independently query the provider by
-// the stable RunID/CallID and authenticate the operator; the Kernel cannot
-// infer an external COMMIT from a missing receipt. It never calls Execute.
-// A missing/unverified response must leave ErrToolOutcomeUnknown blocking
-// automatic replay, not clear the dispatch marker.
+// ToolOutcomeVerifier is a trusted host/provider lookup, NOT an executor.
+// It must verify the durable external disposition for the exact RunID/CallID
+// using a provider-owned idempotency record or receipt. It must never
+// dispatch/retry the Tool or derive "committed" from untrusted user input.
+// Register it with the Runner at construction; no arbitrary result supplied
+// to ReconcileToolOutcome can bypass this provider verification.
+type ToolOutcomeVerifier interface {
+	VerifyCommittedTool(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error)
+}
+
+// ToolOutcomeVerifierFunc adapts one trusted provider lookup function.
+type ToolOutcomeVerifierFunc func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error)
+
+func (fn ToolOutcomeVerifierFunc) VerifyCommittedTool(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+	return fn(ctx, request)
+}
+
+// ReconcileToolOutcome persists a provider-verified external COMMIT without
+// invoking Executor.Execute. The host authenticates the caller and supplies
+// a trusted ToolOutcomeVerifier in Runner dependencies; this method does
+// not accept an arbitrary result or "committed" flag from a client.
 func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
-	expectedRevision uint64, callID string, result tools.ExecutionResult) (kernel.Snapshot, error) {
+	expectedRevision uint64, callID string) (kernel.Snapshot, error) {
 	if runner == nil || runner.runExecution == nil || ctx == nil ||
-		strings.TrimSpace(callID) == "" || expectedRevision == 0 ||
-		result.Receipt.ExecutionID != callID ||
-		result.Receipt.Disposition != "committed" ||
-		result.Pending != nil {
+		strings.TrimSpace(callID) == "" || expectedRevision == 0 {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	if err := tools.ValidateExecutionResult(result); err != nil {
-		return kernel.Snapshot{}, err
+	if runner.toolOutcomeVerifier == nil {
+		return kernel.Snapshot{}, ErrToolVerificationRequired
 	}
 	snapshot, state, err := runner.loadState(ctx, runID)
 	if err != nil {
@@ -39,8 +53,21 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 		return snapshot, ErrToolOutcomeUnknown
 	}
 	return runner.withRunOwner(ctx, runID, expectedRevision,
-		func(nextCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-			// withRunOwner reloaded Revision under the Store-owned lease.
+		func(nextCtx context.Context, scoped *Runner) (out kernel.Snapshot, callbackErr error) {
+			// This callback makes a trusted READ-ONLY provider lookup and a
+			// Store receipt CAS, never an external Tool dispatch. Therefore a
+			// failed lookup must not retain an idle execution lease for TTL.
+			defer func() {
+				if callbackErr == nil {
+					return
+				}
+				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(nextCtx), 2*time.Second)
+				defer cancel()
+				releaseErr := scoped.runtime.ReleaseExecution(cleanupCtx, *scoped.activeRunLease)
+				if releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
+					callbackErr = errors.Join(callbackErr, releaseErr)
+				}
+			}()
 			fresh, freshState, loadErr := scoped.loadState(nextCtx, runID)
 			if loadErr != nil {
 				return kernel.Snapshot{}, loadErr
@@ -56,10 +83,20 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 			if prepareErr != nil {
 				return fresh, prepareErr
 			}
-			// Reuse normal receipt, budget and Tool completion persistence.
-			// No provider call occurs in this reconciliation transaction.
+			// The trusted callback queries the external system by the stable
+			// identity. A missing/failed lookup keeps the intent unresolved.
+			verified, verifyErr := scoped.toolOutcomeVerifier.VerifyCommittedTool(nextCtx,
+				tools.ExecutionRequest{RunID: runID, Call: tools.CloneCall(bound)})
+			if verifyErr != nil {
+				return fresh, errors.Join(ErrToolOutcomeUnknown, verifyErr)
+			}
+			if tools.ValidateExecutionResult(verified) != nil ||
+				verified.Receipt.ExecutionID != callID ||
+				verified.Receipt.Disposition != "committed" || verified.Pending != nil {
+				return fresh, ErrToolReceiptMismatch
+			}
 			persisted, _, applyErr := scoped.persistPendingToolResult(nextCtx, fresh, execution,
-				tools.CloneExecutionResult(result))
+				tools.CloneExecutionResult(verified))
 			return persisted, applyErr
 		})
 }
