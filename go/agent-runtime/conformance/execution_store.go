@@ -310,9 +310,15 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Stage 2 next phase must add a separately authorized control port.
-		// Until then, fail CLOSED rather than letting plain Apply silently
-		// bypass the Store epoch guard to "approve" or cancel a Run.
+		// Both plain/unbound AND incumbent-bound execution updates must
+		// fail closed at a persisted manual approval gate.
+		_, err = bound.Apply(ctx, created.Run.ID, gated.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: gated.State,
+		})
+		if !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("incumbent owner bypassed manual gate: %v", err)
+		}
+		// A separately validated control CAS is required to release the gate.
 		_, err = runtime.Apply(ctx, created.Run.ID, gated.Run.Revision, kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
 		})

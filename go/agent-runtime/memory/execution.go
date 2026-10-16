@@ -143,5 +143,14 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 	if !activeMemoryLease(store.execution[lease.RunID], lease, store.currentExecutionTime()) {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
+	current, ok := store.records[lease.RunID]
+	if !ok {
+		return kernel.Snapshot{}, kernel.ErrNotFound
+	}
+	if current.Run.Status != kernel.RunStatusRunning {
+		// Even the incumbent owner cannot lift a manual approval/budget gate.
+		// Only a Feature-validated ApplyControl can release it.
+		return kernel.Snapshot{}, kernel.ErrExecutionRequired
+	}
 	return store.applyLocked(lease.RunID, expectedRevision, mutation)
 }

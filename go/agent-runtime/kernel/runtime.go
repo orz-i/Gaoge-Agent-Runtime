@@ -37,11 +37,12 @@ func (runtime *Runtime) Cancel(
 	if current.Run.Revision != expectedRevision {
 		return Snapshot{}, ErrConflict
 	}
-	return runtime.Apply(ctx, runID, expectedRevision, Mutation{
+	cancelled, _, err := runtime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlCancel}, Mutation{
 		Status: RunStatusCancelled, State: current.State,
 		ErrorCode: "run.cancelled", ErrorDetail: strings.TrimSpace(reason),
 		Events: []EventDraft{{Type: "run.cancelled", Message: strings.TrimSpace(reason)}},
 	})
+	return cancelled, err
 }
 
 // Expire fails one Run only when its frozen DeadlineAt is due.
@@ -60,7 +61,7 @@ func (runtime *Runtime) Expire(
 	if current.Run.DeadlineAt == nil || current.Run.DeadlineAt.After(runtime.Now()) {
 		return current, false, nil
 	}
-	expired, err := runtime.Apply(ctx, runID, expectedRevision, Mutation{
+	expired, _, err := runtime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlDeadline}, Mutation{
 		Status: RunStatusFailed, State: current.State,
 		ErrorCode: "run.deadline_exceeded", ErrorDetail: ErrDeadline.Error(),
 		Events: []EventDraft{{Type: "run.deadline_exceeded", Message: ErrDeadline.Error()}},
@@ -176,6 +177,20 @@ func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevisio
 	if err = validateMutation(current, mutation); err != nil {
 		return Snapshot{}, err
 	}
+	proposed := runtime.makeStoreMutation(current, mutation)
+	if runtime.execution != nil {
+		store, ok := runtime.store.(ExecutionStore)
+		if !ok {
+			return Snapshot{}, ErrExecutionRequired
+		}
+		return store.ApplyExecution(ctx, *runtime.execution, expectedRevision, proposed)
+	}
+	return runtime.store.Apply(ctx, runID, expectedRevision, proposed)
+}
+
+// makeStoreMutation is the common validated replacement builder used by
+// normal execution and Feature-owned guarded control transitions.
+func (runtime *Runtime) makeStoreMutation(current Snapshot, mutation Mutation) StoreMutation {
 	next := current.Run
 	next.Status = mutation.Status
 	next.Revision++
@@ -191,15 +206,7 @@ func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevisio
 		Run: next, State: cloneJSON(mutation.State),
 		Checkpoint: cloneCheckpoint(mutation.Checkpoint), Result: cloneResult(mutation.Result),
 	}
-	mutationRecord := StoreMutation{Record: record, Events: mutation.Events}
-	if runtime.execution != nil {
-		store, ok := runtime.store.(ExecutionStore)
-		if !ok {
-			return Snapshot{}, ErrExecutionRequired
-		}
-		return store.ApplyExecution(ctx, *runtime.execution, expectedRevision, mutationRecord)
-	}
-	return runtime.store.Apply(ctx, runID, expectedRevision, mutationRecord)
+	return StoreMutation{Record: record, Events: mutation.Events}
 }
 
 // NewID creates a public identifier through the configured entropy source.
