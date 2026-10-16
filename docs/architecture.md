@@ -4,6 +4,16 @@ Gaoge Agent Runtime is a statically composed Go SDK for durable agent workloads.
 The central design rule is that durability and feature semantics have explicit
 owners rather than being hidden behind a generic agent framework.
 
+> **Accepted target (partially implemented):** [ADR 0008 — Minimal Agent Runtime
+> Architecture](adr/0008-minimal-agent-runtime-architecture.md) describes an
+> embedded-first target with SQLite-backed local recovery and optional hosted
+> orchestration. [Stage 0 choices](audits/2026-10-15-minimal-runtime-stage0-decisions.md)
+> record the driver/ReadyWork decisions. The [Stage 1 SQLite Store prototype](../go/agent-runtime-sqlite/README.md)
+> implements the **existing six-state Kernel Store** for a single executor;
+> its tests do not certify concurrent Run execution, mobile runtime, or the
+> future five-state/ProgressPlan contract. Other sections describe the
+> existing checked-in stable architecture.
+
 ## Layer map
 
 ```text

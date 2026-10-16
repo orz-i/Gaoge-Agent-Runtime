@@ -132,6 +132,8 @@ reproducible checks, and remaining coverage limits.
 ## Project policy
 
 - [Architecture](docs/architecture.md)
+- [Accepted Minimal Agent Runtime architecture (ADR 0008; staged implementation)](docs/adr/0008-minimal-agent-runtime-architecture.md)
+- [Experimental local SQLite Kernel Store (Stage 1, single executor)](go/agent-runtime-sqlite/README.md)
 - [Durable external Tool waits (P1 local candidate)](docs/external-tool-wait.md)
 - [Beta support policy](SUPPORT.md)
 - [Security policy](SECURITY.md)

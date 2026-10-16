@@ -12,6 +12,7 @@ export const modules = [
   "go/agent-runtime-otel",
   "go/agent-runtime-a2a",
   "go/agent-runtime-postgres",
+  "go/agent-runtime-sqlite",
   "go/agent-runtime-redis",
   "go/agent-runtime-http",
 ];
