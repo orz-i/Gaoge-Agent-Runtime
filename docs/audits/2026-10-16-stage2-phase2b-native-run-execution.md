@@ -5,6 +5,7 @@
 - **Branch:** `governance/kernel-runtime`
 - **Architecture:** [Accepted ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) and [proposed simplification ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md)
 - **Predecessor:** [Phase 2A code-review remediation](2026-10-16-stage2-phase2a-code-review-remediation.md)
+- **Follow-up:** [Stage 2B code-review remediation](2026-10-16-stage2-phase2b-code-review-remediation.md) corrects stale post-acquire snapshots, Legacy/Native mixing, ambiguous external Tool results and late provider completions. This document remains the initial prototype baseline.
 
 ## Implemented: one existing execution lease, no new scheduler
 

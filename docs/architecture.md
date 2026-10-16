@@ -22,8 +22,11 @@ owners rather than being hidden behind a generic agent framework.
 > seals trusted Feature controls and checks execution ownership before
 > external Model/Tool dispatch. The [Stage 2B native Agent slice](audits/2026-10-16-stage2-phase2b-native-run-execution.md)
 > now lets explicitly configured `StartRun`/`Resume` claim and renew
-> Store execution leases; autonomous Pump and reconciliation of physical
-> external effects remain incomplete.
+> Store execution leases. The [Stage 2B security fixes](audits/2026-10-16-stage2-phase2b-code-review-remediation.md)
+> add atomic native-mode reservation, post-acquire Revision checks,
+> durable Tool dispatch identities and verified-receipt reconciliation.
+> Autonomous Pump and provider-specific physical exactly-once guarantees
+> remain incomplete.
 
 ## Layer map
 

@@ -3,7 +3,7 @@
 - **Status:** **Proposed** — complexity reassessment requiring architecture acceptance; does **not** automatically supersede accepted [ADR 0008](0008-minimal-agent-runtime-architecture.md)
 - **Date:** 2026-10-16
 - **Scope:** Agent Runtime Kernel, optional Embedded SQLite and Hosted PostgreSQL execution safety
-- **Evidence:** [Stage 2 complexity audit](../audits/2026-10-16-stage2-kernel-complexity-audit.md), [Stage 2 Phase 1 execution fence](../audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md), [Stage 2 Phase 2A guarded control prototype](../audits/2026-10-16-stage2-phase2a-guarded-control.md), [Stage 2B native Direct Agent opt-in](../audits/2026-10-16-stage2-phase2b-native-run-execution.md)
+- **Evidence:** [Stage 2 complexity audit](../audits/2026-10-16-stage2-kernel-complexity-audit.md), [Stage 2 Phase 1 execution fence](../audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md), [Stage 2 Phase 2A guarded control prototype](../audits/2026-10-16-stage2-phase2a-guarded-control.md), [Stage 2B native Direct Agent opt-in](../audits/2026-10-16-stage2-phase2b-native-run-execution.md), [Stage 2B code-review remediation](../audits/2026-10-16-stage2-phase2b-code-review-remediation.md)
 - **Goal:** A Pi-style small imperative Agent loop **plus** minimal crash-safe atomic state/intent/receipt storage; **not** another Temporal/Cadence-style workflow interpreter
 
 ## 1. Problem

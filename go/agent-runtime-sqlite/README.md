@@ -171,9 +171,14 @@ and atomic rollback after injected ReadyWork failures.
 LeaseDuration: ...}`. `StartRun`/`Resume` then claim Store execution
 ownership themselves, carry that same epoch through the Agent loop,
 renew near bounded provider-call windows and release after clean
-completion/pause. Real fresh-process SQLite tests cover independent
-Tool approvals, rejection, allowance recovery and competing owners.
-See the [Stage 2B implementation audit](../../docs/audits/2026-10-16-stage2-phase2b-native-run-execution.md).
+completion/pause. **The native mode is reserved in the original Create
+transaction using existing Epoch 1.** Legacy Runs (Epoch 0) cannot be
+silently upgraded or stolen by a native executor. Before dispatching
+an external Tool, native Agents persist a stable Call-ID intent; an
+uncertain receipt blocks automatic replay until a trusted host provides
+an independently verified result through `ReconcileToolOutcome`.
+See the [Stage 2B native implementation](../../docs/audits/2026-10-16-stage2-phase2b-native-run-execution.md)
+and [code-review fixes](../../docs/audits/2026-10-16-stage2-phase2b-code-review-remediation.md).
 
 **Do not enable unattended production multi-worker Agent/Pump execution
 yet.** In-flight external Model/Tool effects are not physically fenced,

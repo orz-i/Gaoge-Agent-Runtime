@@ -6,7 +6,7 @@
 - **Scope:** Normative gates for staged implementation; driver and ReadyWork V1 choices are in the [Stage 0 decision record](audits/2026-10-15-minimal-runtime-stage0-decisions.md)
 - **Pending simplification review:** [Proposed ADR 0009](adr/0009-minimal-kernel-complexity-reassessment.md) questions mandatory additional ProgressPlan state and forced five-state migration; current accepted contract remains in force until the proposal is approved
 - **Phase 2A implementation evidence:** [Exact guarded approval/budget/terminal CAS](audits/2026-10-16-stage2-phase2a-guarded-control.md) and [code-review remediation](audits/2026-10-16-stage2-phase2a-code-review-remediation.md), not full Agent concurrency or Hosted release authorization
-- **Phase 2B implementation evidence:** [Opt-in native Direct Agent execution leasing](audits/2026-10-16-stage2-phase2b-native-run-execution.md); this is not a Pump/unknown-COMMIT or external exactly-once acceptance
+- **Phase 2B implementation evidence:** [Opt-in native Direct Agent execution leasing](audits/2026-10-16-stage2-phase2b-native-run-execution.md) and [code-review fixes](audits/2026-10-16-stage2-phase2b-code-review-remediation.md); includes fail-closed unknown-Tool receipts but is **not** a generic Pump, automatic unknown-COMMIT resolution or external exactly-once acceptance
 
 This document is a **test and migration contract** for the future
 `ProgressPlan`, `ReadyWorkSource`, Run-execution epoch and five-state

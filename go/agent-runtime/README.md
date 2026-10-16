@@ -30,12 +30,24 @@ RunExecution: &agent.RunExecution{
 ```
 
 The Store must implement `kernel.ExecutionStore`; otherwise Runner
-construction fails. The TTL must exceed the configured single
-Model/Tool call timeouts. A clean pause releases the claim; after a
-trusted approval/budget control, invoke `Resume` to acquire a new
-Epoch. Do not assume a physical Tool effect is exactly-once if a
-lease expires during an external call. See the
-[Stage 2B native execution evidence](../../docs/audits/2026-10-16-stage2-phase2b-native-run-execution.md).
+construction fails. Native creation **atomically reserves Epoch 1**;
+Legacy Runs at Epoch 0 cannot be upgraded to native execution while
+old executors may still be running. The first native owner claims Epoch 2.
+The lease must cover the configured Tool retry/backoff window, though
+external calls may still ignore Context deadlines.
+
+A native Tool writes a durable dispatch intent containing the stable
+Call ID **before** executing. If the receipt is not committed, `Resume`
+returns `ErrToolOutcomeUnknown` rather than replaying the effect.
+After the host verifies the external provider's committed result using
+that identity, `ReconcileToolOutcome` can persist the exact receipt
+without re-executing the Tool. Late known Model/Tool success is
+persisted and reported via `ErrModelLateResult` / `ErrToolLateResult`.
+
+A clean pause releases the claim; after a trusted approval/budget
+control, invoke `Resume` to acquire a new Epoch. None of this proves
+physical exactly-once effects across a lost lease. See the
+[Stage 2B security remediation](../../docs/audits/2026-10-16-stage2-phase2b-code-review-remediation.md).
 
 ## Runtime kinds
 
