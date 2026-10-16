@@ -33,7 +33,11 @@ func (m controlBudgetModel) Generate(_ context.Context, r model.Request) (model.
 		Usage: &model.Usage{InputTokens: 2, OutputTokens: 1}}, nil
 }
 
-func controlBudgetRunner(rt *kernel.Runtime, markerFile string) (*agent.Runner, error) {
+func controlBudgetRunner(rt *kernel.Runtime, markerFile string, lease ...*agent.RunExecution) (*agent.Runner, error) {
+	var runExecution *agent.RunExecution
+	if len(lease) > 0 {
+		runExecution = lease[0]
+	}
 	registry, err := tools.NewRegistry([]tools.Registration{{
 		Definition: tools.Definition{Key: "lookup", Name: "Lookup", InputSchema: json.RawMessage(`{"type":"object"}`)},
 		Handler: tools.HandlerFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -48,7 +52,7 @@ func controlBudgetRunner(rt *kernel.Runtime, markerFile string) (*agent.Runner, 
 		return nil, err
 	}
 	return agent.NewRunner(agent.Dependencies{Runtime: rt, Model: controlBudgetModel{path: markerFile},
-		Catalog: registry, Executor: registry})
+		Catalog: registry, Executor: registry, RunExecution: runExecution})
 }
 
 func TestFencedAllowanceProcessChild(t *testing.T) {
