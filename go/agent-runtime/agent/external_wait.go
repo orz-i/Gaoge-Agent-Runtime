@@ -20,6 +20,11 @@ const (
 var (
 	ErrToolNotPending     = errors.New("tool call is not waiting for an external result")
 	ErrToolSignalConflict = errors.New("external tool result signal conflicts with its durable wait")
+	// ErrToolSignalNotReady means the matching native Tool was durably
+	// dispatched, but its wait identity is not yet committed. The host must
+	// RETAIN the signal in its own durable delivery source and retry later;
+	// this is neither an ACK nor proof of the external Tool's COMMIT.
+	ErrToolSignalNotReady = errors.New("external result signal arrived before its durable Tool wait")
 )
 
 // PendingTool is the typed host query contract for one durable pending call.
@@ -104,6 +109,14 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 			return snapshot, ErrToolNotPending
 		}
 		wait := state.ToolWait
+		if wait == nil && runner.runExecution != nil && state.ToolDispatchID == signal.CallID {
+			// An external provider can emit a ready signal synchronously from
+			// Tool.Execute, before its Pending descriptor has been committed.
+			// The existing ToolDispatchID proves the call was prepared but
+			// cannot validate the operation ID/digest yet. Do not persist or
+			// ACK the early signal; let the host retry its durable delivery.
+			return snapshot, ErrToolSignalNotReady
+		}
 		if !matchesToolSignal(wait, signal) {
 			return snapshot, ErrToolSignalConflict
 		}
