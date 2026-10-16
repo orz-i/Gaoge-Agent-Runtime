@@ -25,6 +25,12 @@ func openStore(t *testing.T) *sqlite.Store {
 	return s
 }
 
+func TestKernelExecutionStoreConformance(t *testing.T) {
+	conformance.RunKernelExecutionSuite(t, func(child *testing.T) kernel.Store {
+		return openStore(child)
+	})
+}
+
 func TestKernelStoreConformance(t *testing.T) {
 	conformance.RunKernelStoreSuite(t, func(tb testing.TB) kernel.Store {
 		tb.Helper()

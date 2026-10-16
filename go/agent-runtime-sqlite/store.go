@@ -278,6 +278,12 @@ func (s *Store) Load(ctx context.Context, runID string) (kernel.Snapshot, error)
 // Apply performs one single-Run CAS; it never does a post-commit Load which
 // might instead observe a different worker's next revision.
 func (s *Store) Apply(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+	return s.applyWithExecution(ctx, nil, runID, expectedRevision, mutation)
+}
+
+// applyWithExecution atomically combines Run CAS and Store-owned execution
+// authority with the same short transaction as journal/ReadyWork/proof.
+func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionLease, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	if s == nil || s.db == nil || ctx == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 {
 		return kernel.Snapshot{}, kernel.ErrInvalidInput
 	}
@@ -297,14 +303,28 @@ func (s *Store) Apply(ctx context.Context, runID string, expectedRevision uint64
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	updated, err := tx.ExecContext(ctx,
-		`UPDATE runtime_runs SET scope_id=?,kind=?,status=?,revision=?,run_json=?,state_json=?,
-		   checkpoint_json=?,result_json=?,event_head=event_head+?
-		   WHERE run_id=? AND revision=?`,
-		mutation.Record.Run.Actor.TenantID, string(mutation.Record.Run.Kind),
+	// The entire predicate is evaluated by SQLite while holding the same
+	// writer transaction, so a takeover cannot race between lease verification
+	// and the revision update. Claims/renewals also hold this DB writer lock.
+	updateSQL := `UPDATE runtime_runs SET scope_id=?,kind=?,status=?,revision=?,run_json=?,state_json=?,
+      checkpoint_json=?,result_json=?,event_head=event_head+?
+      WHERE run_id=? AND revision=?`
+	args := []any{mutation.Record.Run.Actor.TenantID, string(mutation.Record.Run.Kind),
 		string(mutation.Record.Run.Status), mutation.Record.Run.Revision,
 		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(mutation.Events),
-		runID, expectedRevision)
+		runID, expectedRevision}
+	if lease == nil {
+		updateSQL += ` AND execution_fenced=0`
+	} else {
+		nowMS, clockErr := sqliteExecutionNow(ctx, tx)
+		if clockErr != nil {
+			return kernel.Snapshot{}, clockErr
+		}
+		updateSQL += ` AND execution_fenced=1 AND execution_epoch=? AND execution_owner=?
+          AND execution_lease_id=? AND execution_expiry_ms=? AND execution_expiry_ms>?`
+		args = append(args, lease.Epoch, lease.OwnerID, lease.LeaseID, lease.ExpiresAt.UTC().UnixMilli(), nowMS)
+	}
+	updated, err := tx.ExecContext(ctx, updateSQL, args...)
 	if err != nil {
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
 	}
@@ -313,13 +333,38 @@ func (s *Store) Apply(ctx context.Context, runID string, expectedRevision uint64
 		return kernel.Snapshot{}, err
 	}
 	if affected != 1 {
-		var present int
-		err := tx.QueryRowContext(ctx, `SELECT count(*) FROM runtime_runs WHERE run_id=?`, runID).Scan(&present)
+		var actualRevision int64
+		var fenced int
+		err = tx.QueryRowContext(ctx,
+			`SELECT revision,execution_fenced FROM runtime_runs WHERE run_id=?`, runID).Scan(&actualRevision, &fenced)
+		if errors.Is(err, sql.ErrNoRows) {
+			return kernel.Snapshot{}, kernel.ErrNotFound
+		}
 		if err != nil {
 			return kernel.Snapshot{}, err
 		}
-		if present == 0 {
-			return kernel.Snapshot{}, kernel.ErrNotFound
+		// Never turn a stale execution token into a plain revision conflict.
+		// This matters when a replacement owner has not changed revision.
+		if lease == nil && fenced != 0 {
+			return kernel.Snapshot{}, kernel.ErrExecutionRequired
+		}
+		if lease != nil {
+			// A different revision can be a legitimate same-owner CAS race,
+			// but checking the token first preserves lease-fencing semantics.
+			var epoch int64
+			var owner, id string
+			var expiry int64
+			err = tx.QueryRowContext(ctx, `SELECT execution_epoch,execution_owner,execution_lease_id,execution_expiry_ms FROM runtime_runs WHERE run_id=?`, runID).Scan(&epoch, &owner, &id, &expiry)
+			if err != nil {
+				return kernel.Snapshot{}, err
+			}
+			nowMS, clockErr := sqliteExecutionNow(ctx, tx)
+			if clockErr != nil {
+				return kernel.Snapshot{}, clockErr
+			}
+			if epoch != int64(lease.Epoch) || owner != lease.OwnerID || id != lease.LeaseID || expiry != lease.ExpiresAt.UnixMilli() || expiry <= nowMS {
+				return kernel.Snapshot{}, kernel.ErrExecutionConflict
+			}
 		}
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}

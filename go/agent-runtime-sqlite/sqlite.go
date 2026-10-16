@@ -318,8 +318,13 @@ var schemaDDL = []string{
 		checkpoint_json BLOB,
 		result_json BLOB,
 		event_head INTEGER NOT NULL DEFAULT 0,
-		progress_kind TEXT NOT NULL DEFAULT 'legacy_six_state'
-	)`,
+        progress_kind TEXT NOT NULL DEFAULT 'legacy_six_state',
+        execution_fenced INTEGER NOT NULL DEFAULT 0,
+        execution_epoch INTEGER NOT NULL DEFAULT 0,
+        execution_owner TEXT NOT NULL DEFAULT '',
+        execution_lease_id TEXT NOT NULL DEFAULT '',
+        execution_expiry_ms INTEGER NOT NULL DEFAULT 0
+    )`,
 	`CREATE TABLE runtime_events (
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		seq INTEGER NOT NULL,
