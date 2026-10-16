@@ -48,6 +48,50 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 		}
 		return lease, bound
 	}
+	t.Run("native-external-signal-guarded-cas", func(t *testing.T) {
+		ctx := t.Context()
+		rt, created := create(t, "native signal", nil)
+		lease, bound := acquire(t, rt)
+		waitID := "call-1:1:provider-op"
+		future := time.Now().UTC().Add(5 * time.Second)
+		guard := kernel.ControlGuard{Kind: kernel.ControlExternalSignal, WaitID: waitID,
+			WaitDeadlineAt: &future}
+		mutation := kernel.Mutation{Status: kernel.RunStatusRunning,
+			State:  json.RawMessage(`{"step":1,"signal":"receipt-ready"}`),
+			Events: []kernel.EventDraft{{Type: "tool.external_result_ready", Wakeup: true, WakeupGeneration: 1}}}
+		if _, _, err := rt.ApplyControl(ctx, created.Run.ID, created.Run.Revision, guard, mutation, nil); !errors.Is(err, kernel.ErrInvalidInput) {
+			t.Fatalf("unsealed native signal bypassed Feature validation: %v", err)
+		}
+		source := featurecontrol.Seal(created.Run.ID, created.Run.Revision,
+			string(kernel.ControlExternalSignal), waitID, mutation.State, mutation.Checkpoint)
+		wrongGuard := guard
+		wrongGuard.WaitID = "call-other:2:provider-op"
+		if _, _, err := rt.ApplyControl(ctx, created.Run.ID, created.Run.Revision, wrongGuard, mutation, source); !errors.Is(err, kernel.ErrInvalidInput) {
+			t.Fatalf("wrong wait generation bypassed sealed identity: %v", err)
+		}
+		expiredGuard := guard
+		past := time.Now().UTC().Add(-time.Second)
+		expiredGuard.WaitDeadlineAt = &past
+		if _, _, err := rt.ApplyControl(ctx, created.Run.ID, created.Run.Revision, expiredGuard, mutation, source); !errors.Is(err, kernel.ErrDeadline) {
+			t.Fatalf("expired external wait signaled with Store time: %v", err)
+		}
+		applied, revoked, err := rt.ApplyControl(ctx, created.Run.ID, created.Run.Revision, guard, mutation, source)
+		if err != nil || !revoked || applied.Run.Revision != created.Run.Revision+1 {
+			t.Fatalf("native signal did not atomically revoke old epoch: %+v %v", applied.Run, err)
+		}
+		if err = bound.RequireExecution(ctx, created.Run.ID); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("signaled Run retained stale external executor: %v", err)
+		}
+		if _, _, err = rt.ApplyControl(ctx, created.Run.ID, created.Run.Revision, guard, mutation, source); !errors.Is(err, kernel.ErrConflict) {
+			t.Fatalf("old revision replayed external signal: %v", err)
+		}
+		newLease, err := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: created.Run.ID, OwnerID: "new-owner", LeaseDuration: time.Second,
+		})
+		if err != nil || newLease.Epoch <= lease.Epoch+1 {
+			t.Fatalf("owner not rotated after signal: %+v %v", newLease, err)
+		}
+	})
 	t.Run("approval-exact-checkpoint-and-revocation", func(t *testing.T) {
 		rt, created := create(t, "approval", nil)
 		old, bound := acquire(t, rt)

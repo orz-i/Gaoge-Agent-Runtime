@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -115,12 +117,31 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 		if encodeErr != nil {
 			return kernel.Snapshot{}, encodeErr
 		}
-		next, applyErr := runner.runtime.Apply(ctx, signal.RunID, snapshot.Run.Revision, kernel.Mutation{
+		mutation := kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+			ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail,
 			Events: []kernel.EventDraft{{
 				Type: EventExternalToolResultReady, Wakeup: true, WakeupGeneration: wait.Generation,
 			}},
-		})
+		}
+		var next kernel.Snapshot
+		var applyErr error
+		if runner.runExecution != nil {
+			// A waiting native Run may have a live/expired owner. This is a
+			// Feature-validated CONTROL, not permission to execute a Tool.
+			// Seal the exact wait identity/next state and recheck inside the
+			// authoritative Store transaction.
+			waitID := fmt.Sprintf("%d:%s:%d:%s:%s", len(wait.CallID), wait.CallID,
+				wait.Generation, wait.OperationID, wait.InputDigest)
+			permit := featurecontrol.Seal(signal.RunID, snapshot.Run.Revision,
+				string(kernel.ControlExternalSignal), waitID, encoded, snapshot.Checkpoint)
+			guard := kernel.ControlGuard{Kind: kernel.ControlExternalSignal,
+				WaitID: waitID, WaitDeadlineAt: wait.DeadlineAt}
+			next, _, applyErr = runner.runtime.ApplyControl(ctx, signal.RunID, snapshot.Run.Revision,
+				guard, mutation, permit)
+		} else {
+			next, applyErr = runner.runtime.Apply(ctx, signal.RunID, snapshot.Run.Revision, mutation)
+		}
 		if errors.Is(applyErr, kernel.ErrConflict) {
 			continue
 		}

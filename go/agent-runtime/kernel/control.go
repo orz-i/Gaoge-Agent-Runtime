@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"time"
 
@@ -19,15 +20,20 @@ const (
 	ControlAllowance ControlKind = "allowance"
 	ControlCancel    ControlKind = "cancel"
 	ControlDeadline  ControlKind = "deadline"
+	// ControlExternalSignal atomically records Feature-validated readiness
+	// for an already-persisted wait; it is NOT an inbox or Tool receipt.
+	ControlExternalSignal ControlKind = "external_signal"
 )
 
 // ControlGuard identifies the exact persisted gate whose validated control
 // transition is being committed. A host MUST authenticate the caller and
 // Feature MUST validate the Tool approval / allowance before invoking it.
 type ControlGuard struct {
-	Kind         ControlKind
-	CheckpointID string
-	BlockedCode  string
+	Kind           ControlKind
+	CheckpointID   string
+	BlockedCode    string
+	WaitID         string     // Stable Feature wait identity including generation.
+	WaitDeadlineAt *time.Time // Store-time limit from the persisted wait.
 	// Unexported and minted only by first-party Feature validators; custom SDK
 	// consumers and independent Store adapters cannot forge a guarded resume.
 	verified *featurecontrol.Proof
@@ -74,14 +80,17 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 	}
 	// The Store clock controls whether a suspended Run is still eligible
 	// to return to running. A client clock cannot extend the deadline.
-	if (guard.Kind == ControlApproval || guard.Kind == ControlAllowance) &&
+	if (guard.Kind == ControlApproval || guard.Kind == ControlAllowance || guard.Kind == ControlExternalSignal) &&
 		current.Run.DeadlineAt != nil && !current.Run.DeadlineAt.After(storeNow) {
 		return ErrDeadline
 	}
-	if guard.Kind == ControlApproval || guard.Kind == ControlAllowance {
+	if guard.Kind == ControlApproval || guard.Kind == ControlAllowance || guard.Kind == ControlExternalSignal {
 		source := guard.CheckpointID
 		if guard.Kind == ControlAllowance {
 			source = guard.BlockedCode
+		}
+		if guard.Kind == ControlExternalSignal {
+			source = guard.WaitID
 		}
 		// Trust boundary: arbitrary SDK calls cannot change Feature State
 		// without a proof issued by a first-party Feature after validation.
@@ -92,6 +101,9 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 	}
 	switch guard.Kind {
 	case ControlApproval:
+		if guard.WaitID != "" || guard.WaitDeadlineAt != nil {
+			return ErrInvalidInput
+		}
 		if strings.TrimSpace(guard.CheckpointID) == "" || guard.BlockedCode != "" ||
 			current.Run.Status != RunStatusWaitingInput || current.Checkpoint == nil ||
 			current.Checkpoint.ID != guard.CheckpointID || current.Checkpoint.Status != CheckpointPending ||
@@ -115,6 +127,9 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 			return ErrInvalidInput
 		}
 	case ControlAllowance:
+		if guard.WaitID != "" || guard.WaitDeadlineAt != nil {
+			return ErrInvalidInput
+		}
 		if guard.CheckpointID != "" || strings.TrimSpace(guard.BlockedCode) == "" ||
 			current.Run.Status != RunStatusPausedBudget || current.Run.ErrorCode != guard.BlockedCode ||
 			next.Run.Status != RunStatusRunning || bytes.Equal(next.State, current.State) {
@@ -122,12 +137,36 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 			// The Agent validator remains responsible for hard ceilings.
 			return ErrInvalidInput
 		}
+	case ControlExternalSignal:
+		// The Feature sealed an exact wait and signal after checking the
+		// persisted ToolWait generation. The Store checks time and revision
+		// and revokes old owners under the SAME CAS as the wakeup outbox.
+		if guard.CheckpointID != "" || guard.BlockedCode != "" ||
+			strings.TrimSpace(guard.WaitID) == "" ||
+			guard.WaitDeadlineAt == nil || storeNow.IsZero() ||
+			!guard.WaitDeadlineAt.After(storeNow) ||
+			current.Run.Status != RunStatusRunning || next.Run.Status != RunStatusRunning ||
+			bytes.Equal(next.State, current.State) ||
+			!reflect.DeepEqual(next.Checkpoint, current.Checkpoint) ||
+			next.Run.ErrorCode != current.Run.ErrorCode ||
+			next.Run.ErrorDetail != current.Run.ErrorDetail {
+			if guard.WaitDeadlineAt != nil && !guard.WaitDeadlineAt.After(storeNow) {
+				return ErrDeadline
+			}
+			return ErrInvalidInput
+		}
 	case ControlCancel:
+		if guard.WaitID != "" || guard.WaitDeadlineAt != nil {
+			return ErrInvalidInput
+		}
 		if guard.CheckpointID != "" || guard.BlockedCode != "" || next.Run.Status != RunStatusCancelled ||
 			next.Run.ErrorCode != "run.cancelled" || !bytes.Equal(next.State, current.State) {
 			return ErrInvalidInput
 		}
 	case ControlDeadline:
+		if guard.WaitID != "" || guard.WaitDeadlineAt != nil {
+			return ErrInvalidInput
+		}
 		if guard.CheckpointID != "" || guard.BlockedCode != "" || next.Run.Status != RunStatusFailed ||
 			next.Run.ErrorCode != "run.deadline_exceeded" || !bytes.Equal(next.State, current.State) ||
 			current.Run.DeadlineAt == nil || storeNow.IsZero() || current.Run.DeadlineAt.After(storeNow) {
