@@ -12,7 +12,10 @@ owners rather than being hidden behind a generic agent framework.
 > implements the **existing six-state Kernel Store** for a single executor;
 > its tests do not certify concurrent Run execution, mobile runtime, or the
 > future five-state/ProgressPlan contract. Other sections describe the
-> existing checked-in stable architecture.
+> existing checked-in stable architecture. A [proposed minimality
+> reassessment (ADR 0009)](adr/0009-minimal-kernel-complexity-reassessment.md)
+> recommends avoiding duplicate recovery state and an unproven
+> five-state migration; it does not supersede ADR 0008 until accepted.
 
 ## Layer map
 

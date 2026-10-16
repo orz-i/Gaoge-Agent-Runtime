@@ -144,15 +144,18 @@ re-executed** during these tested crash windows.
 an owner/epoch/lease for an **already-running** Run, bind that lease via
 `kernel.Runtime.WithExecution(lease)` and make several Run `Apply`
 commits using that same segment. SQLite engine time and the exact
-execution epoch, lease identity, expiry and Run revision are all checked
-in the same write transaction; plain `Apply` is permanently fenced off
+execution epoch, owner, opaque lease ID, Store-owned expiry and Run
+revision are all checked in the same write transaction. `Epoch > 0`
+retains the fence without a separate `execution_fenced` column;
+renewal does not rotate the token, so a bound Runtime keeps working
+across heartbeats. Plain `Apply` is permanently fenced off
 for that Run after the first claim. A fresh process can safely claim
 an expired segment under a higher epoch without changing Run Revision.
 
 **Do not enable fenced full Agent loops with approvals, budgets, pending
 signals, or autonomous Pump workers yet.** Stage 2 Phase 2 must provide
-Store-authorized Control mutations and unified ProgressPlan eligibility;
-otherwise a waiting Run would fail closed, not be resumable by an
+a small Feature-validated protected Control CAS and unified recovery
+eligibility; otherwise a waiting Run would fail closed, not be resumable by an
 unfenced approval call. Execution fencing does not prevent a stale
 in-flight Tool from performing an external physical effect.
 

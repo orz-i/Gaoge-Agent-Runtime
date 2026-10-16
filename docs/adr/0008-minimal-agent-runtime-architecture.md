@@ -7,6 +7,7 @@
 - **Acceptance decision record:** [Stage 0 SQLite and ReadyWork choices](../audits/2026-10-15-minimal-runtime-stage0-decisions.md)
 - **Implementation evidence:** [Stage 1 single-executor SQLite Store audit](../audits/2026-10-15-minimal-runtime-stage1-prototype.md); [Stage 2 Phase 1 execution-fence evidence](../audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md)
 - **Normative test and migration annex:** [Minimal Agent Runtime — implementation and conformance contract](../minimal-agent-runtime-implementation.md)
+- **Reassessment under review:** [Proposed ADR 0009 — Minimal Kernel complexity reduction](0009-minimal-kernel-complexity-reassessment.md); this proposal does **not** change ADR 0008's accepted status until a separate acceptance decision
 - **Related:** [Current architecture](../architecture.md), [ADR 0001](./0001-runtime-durability-governance-v1.md), [ADR 0005](./0005-durable-agent-execution-allowances.md), [ADR 0006](./0006-runtime-owned-auto-allowance-segments.md), [Reliability evidence](../reliability.md)
 
 ## Context and decision

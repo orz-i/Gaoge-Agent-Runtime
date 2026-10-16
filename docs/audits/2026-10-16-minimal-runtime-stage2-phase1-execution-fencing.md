@@ -22,15 +22,18 @@
    is waiting is rejected.
 3. A bound Runtime uses `ExecutionStore.ApplyExecution`. Every
    execution CAS checks Run Revision **and** current epoch,
-   owner, exact lease ID/expiry and nonexpired Store time in **one
-   transaction**. Legacy/unfenced `Store.Apply` fails closed
+   owner, exact lease ID and nonexpired **Store-owned** expiry in
+   **one transaction**. Legacy/unfenced `Store.Apply` fails closed
    after the first acquisition even after expiry/release.
    An execution segment may contain **multiple normal CAS steps**
    without generating a new Queue/ReadyWork task at every step.
-4. `RenewExecution` preserves Epoch and lease ID while rotating the
-   expiry token. Old tokens are invalid. A lapsed lease cannot be
-   renewed or perform a commit even if no replacement Owner has
-   acquired it. Explicit Release preserves sticky Run fencing;
+4. `RenewExecution` extends Store-authoritative expiry without
+   changing `(RunID, OwnerID, LeaseID, Epoch)`; the **original bound
+   Runtime** remains usable until that current Store lease expires.
+   The returned `ExpiresAt` is informational and cannot extend
+   execution rights. An expired lease cannot be revived even without
+   a replacement Owner. `Epoch > 0` preserves the sticky fence after
+   Release without a second `execution_fenced` boolean;
    subsequent acquisition increments Epoch.
 5. Memory Store implements this opt-in port with a Store-owned
    clock (default system clock, injectable test Clock).
@@ -58,7 +61,8 @@ three Store implementations:
 | Owner claim + three CAS under the same Epoch | PASS | PASS | PASS | PASS |
 | Unfenced Apply blocked after acquisition and Release | PASS | PASS | PASS | PASS |
 | Second owner denied while first lease active | PASS | PASS | PASS | PASS |
-| Renew rotates expiry; old lease fails | PASS | PASS | PASS | PASS |
+| Renew preserves stable execution identity and bound Runtime | PASS | PASS | PASS | PASS |
+| Forged future client expiry cannot extend Store authority | PASS | PASS | PASS | PASS |
 | Expired owner denied even before takeover | PASS | PASS | PASS | PASS |
 | Owner B acquires E+1 **without advancing Run Revision** | PASS | PASS | PASS | PASS |
 | Owner A's stale unchanged-revision Apply fails | PASS | PASS | PASS | PASS |
@@ -130,8 +134,16 @@ three Store implementations:
 
 ## Next implementation increment
 
-**Phase 2A:** design and implement an authorized **ControlCommand**
-port that is checked by Store alongside exact Run Revision/Epoch,
+**Design-reassessment note (2026-10-16):**
+[Proposed ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md)
+and the [complexity audit](2026-10-16-stage2-kernel-complexity-audit.md)
+recommend *narrow Feature-validated guarded CAS* rather than adding
+an independent ControlCommand framework, a second ProgressPlan
+truth store or an ActiveSegment enum. The existing accepted ADR 0008
+remains normative until its proposed revision is accepted.
+
+**Phase 2A:** design and implement a minimal trusted validated-control
+CAS path that is checked by Store alongside exact Run Revision/Epoch,
 so approval resolution, budget grants, cancellation and signal
 commands cannot bypass ownership or become deadlocked while a
 Run is suspended. Preserve the six-state published API pending
