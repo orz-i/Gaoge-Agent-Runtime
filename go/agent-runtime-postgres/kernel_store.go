@@ -294,8 +294,11 @@ func (store *KernelStore) ClaimTransitions(
 	}
 	var claims []kernel.TransitionClaim
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Where("available_at <= ? AND (lease_until IS NULL OR lease_until <= ?)", request.Now.UTC(), request.Now.UTC()).
-			Order("available_at ASC, committed_at ASC, id ASC").Limit(request.Limit)
+		// Overfetch a small bounded page so one poisoned head row cannot
+		// starve a healthy different Run even when request.Limit == 1.
+		query := tx.Where("quarantine_code = ? AND available_at <= ? AND (lease_until IS NULL OR lease_until <= ?)",
+			"", request.Now.UTC(), request.Now.UTC()).
+			Order("available_at ASC, committed_at ASC, id ASC").Limit(max(request.Limit, 32))
 		if tx.Name() == "postgres" {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
 		}
@@ -303,15 +306,44 @@ func (store *KernelStore) ClaimTransitions(
 		if err := query.Find(&records).Error; err != nil {
 			return translateKernelError(err)
 		}
-		claims = make([]kernel.TransitionClaim, 0, len(records))
+		claims = make([]kernel.TransitionClaim, 0, min(len(records), request.Limit))
 		for _, record := range records {
+			if len(claims) >= request.Limit {
+				break
+			}
+			transition, decodeErr := kernelTransitionFrom(record)
+			failure := ""
+			if decodeErr != nil {
+				failure = "invalid_events"
+			} else if record.Revision == 0 ||
+				record.ID != fmt.Sprintf("%s:%d", record.RunID, record.Revision) ||
+				!kernel.NeedsTransitionProjection(kernel.RunStatus(record.Status), transition.Events) {
+				failure = "invalid_projection"
+			}
+			if failure != "" {
+				// This row is already locked. Quarantine only delivery metadata
+				// in the SAME claim transaction; preserve immutable events.
+				result := tx.Model(&models.KernelTransitionOutboxRecord{}).
+					Where("id = ? AND quarantine_code = ?", record.ID, "").
+					Updates(map[string]interface{}{
+						"quarantine_code": failure, "quarantined_at": request.Now.UTC(),
+						"lease_id": "", "worker_id": "", "lease_until": nil,
+					})
+				if result.Error != nil {
+					return translateKernelApplyError(result.Error)
+				}
+				if result.RowsAffected != 1 {
+					return kernel.ErrConflict
+				}
+				continue
+			}
 			record.Attempts++
 			record.WorkerID = strings.TrimSpace(request.WorkerID)
 			record.LeaseID = fmt.Sprintf("%s:%s:%d", record.WorkerID, record.ID, record.Attempts)
 			leaseUntil := request.Now.UTC().Add(request.LeaseDuration)
 			record.LeaseUntil = &leaseUntil
 			result := tx.Model(&models.KernelTransitionOutboxRecord{}).
-				Where("id = ? AND attempts = ?", record.ID, record.Attempts-1).
+				Where("id = ? AND attempts = ? AND quarantine_code = ?", record.ID, record.Attempts-1, "").
 				Updates(map[string]interface{}{
 					"attempts": record.Attempts, "worker_id": record.WorkerID,
 					"lease_id": record.LeaseID, "lease_until": leaseUntil,
@@ -322,10 +354,7 @@ func (store *KernelStore) ClaimTransitions(
 			if result.RowsAffected != 1 {
 				return kernel.ErrConflict
 			}
-			transition, err := kernelTransitionFrom(record)
-			if err != nil {
-				return err
-			}
+			transition.Attempts = record.Attempts
 			claims = append(claims, kernel.TransitionClaim{
 				Transition: transition, LeaseID: record.LeaseID, WorkerID: record.WorkerID, LeaseUntil: leaseUntil,
 			})
@@ -341,7 +370,7 @@ func (store *KernelStore) AckTransition(ctx context.Context, request kernel.Tran
 		return kernel.ErrInvalidInput
 	}
 	result := store.db.WithContext(ctx).Where(
-		"id = ? AND lease_id = ? AND worker_id = ?", request.TransitionID, request.LeaseID, request.WorkerID,
+		"id = ? AND lease_id = ? AND worker_id = ? AND quarantine_code = ?", request.TransitionID, request.LeaseID, request.WorkerID, "",
 	).Delete(&models.KernelTransitionOutboxRecord{})
 	if result.Error != nil {
 		return translateKernelError(result.Error)

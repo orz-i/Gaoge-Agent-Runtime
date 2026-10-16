@@ -63,6 +63,10 @@ type KernelTransitionOutboxRecord struct {
 	LeaseID     string     `gorm:"size:256;not null;default:''"`
 	WorkerID    string     `gorm:"size:128;not null;default:''"`
 	LeaseUntil  *time.Time `gorm:"index:idx_agent_kernel_transition_lease"`
+	// Transport-only poison isolation; keep the original corrupt payload for
+	// diagnosis. This is not Run-level execution quarantine.
+	QuarantineCode string `gorm:"size:64;not null;default:''"`
+	QuarantinedAt  *time.Time
 }
 
 func (KernelTransitionOutboxRecord) TableName() string { return "agent_kernel_transition_outbox" }
