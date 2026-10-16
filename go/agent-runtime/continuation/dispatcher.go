@@ -55,7 +55,7 @@ func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) err
 	if err != nil {
 		return err
 	}
-	return resumeOnce(ctx, resumer, snapshot)
+	return dispatcher.resumeOnce(ctx, resumer, snapshot)
 }
 
 const maxToolWaitCASRetries = 8
@@ -81,10 +81,7 @@ func (dispatcher *Dispatcher) dispatchChildTerminal(ctx context.Context, payload
 		if errors.Is(resumeErr, kernel.ErrConflict) {
 			continue
 		}
-		if nonRetryableResumeError(resumeErr) || terminalSnapshotAfterResume(resumed) {
-			return nil
-		}
-		return resumeErr
+		return dispatcher.resumeResult(ctx, snapshot.Run.ID, resumed, resumeErr)
 	}
 	return kernel.ErrConflict
 }
@@ -114,13 +111,9 @@ func (dispatcher *Dispatcher) dispatchToolWait(ctx context.Context, payload Payl
 		if errors.Is(resumeErr, kernel.ErrConflict) {
 			continue
 		}
-		// A non-empty Snapshot can accompany a still-unresolved native Tool
-		// receipt. An unresolved dispatch MUST NACK; ACK is reserved for
-		// successful or explicitly non-retryable/obsolete deliveries.
-		if nonRetryableResumeError(resumeErr) || terminalSnapshotAfterResume(resumed) {
-			return nil
-		}
-		return resumeErr
+		// An unresolved native Tool MUST NACK, irrespective of a non-empty
+		// Snapshot; a terminal-looking result with an error needs Store proof.
+		return dispatcher.resumeResult(ctx, snapshot.Run.ID, resumed, resumeErr)
 	}
 	return kernel.ErrConflict
 }
@@ -143,19 +136,53 @@ func (dispatcher *Dispatcher) eligibleSnapshot(
 	return snapshot, eligible, nil
 }
 
-func resumeOnce(ctx context.Context, resumer Resumer, snapshot kernel.Snapshot) error {
+func (dispatcher *Dispatcher) resumeOnce(ctx context.Context, resumer Resumer, snapshot kernel.Snapshot) error {
 	resumed, err := resumer.Resume(ctx, snapshot.Run.ID, snapshot.Run.Revision)
-	// Never convert a Feature's unresolved external work into a successful
-	// ACK merely because its last durable Snapshot was returned.
-	if nonRetryableResumeError(err) || terminalSnapshotAfterResume(resumed) {
-		return nil
+	if errors.Is(err, kernel.ErrConflict) {
+		// For a revision-bound wakeup, conflict is obsolete only once the
+		// authoritative revision has moved (or the Run is already settled).
+		current, loadErr := dispatcher.runs.Load(ctx, snapshot.Run.ID)
+		if errors.Is(loadErr, kernel.ErrNotFound) {
+			return nil
+		}
+		if loadErr != nil {
+			return errors.Join(err, loadErr)
+		}
+		if current.Run.Revision != snapshot.Run.Revision || terminalSnapshotAfterResume(current) {
+			return nil
+		}
+		return err
 	}
-	return err
+	return dispatcher.resumeResult(ctx, snapshot.Run.ID, resumed, err)
 }
 
-// A committed terminal Run is settled even when its Feature reports the
-// deadline/failure that caused the terminal transition. An unresolved running
-// Snapshot is NOT proof of delivery completion.
+// An error accompanied by a terminal-looking Snapshot is not proof of a
+// committed transition. Only the authoritative Store can settle that error.
+// Likewise a feature's ErrTerminal/ErrNotFound may describe an unrelated
+// dependency rather than the parent Run that owns this delivery.
+func (dispatcher *Dispatcher) resumeResult(ctx context.Context, runID string, resumed kernel.Snapshot, resumeErr error) error {
+	if resumeErr == nil {
+		return nil
+	}
+	if !terminalSnapshotAfterResume(resumed) && !errors.Is(resumeErr, kernel.ErrTerminal) &&
+		!errors.Is(resumeErr, kernel.ErrNotFound) {
+		return resumeErr
+	}
+	current, err := dispatcher.runs.Load(ctx, runID)
+	if errors.Is(err, kernel.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return errors.Join(resumeErr, err)
+	}
+	if terminalSnapshotAfterResume(current) {
+		return nil
+	}
+	return resumeErr
+}
+
+// Terminal state is an ACK candidate only when loaded from the authoritative
+// Run Store; a returned Feature Snapshot alone cannot settle an error.
 func terminalSnapshotAfterResume(snapshot kernel.Snapshot) bool {
 	switch snapshot.Run.Status {
 	case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
@@ -165,11 +192,6 @@ func terminalSnapshotAfterResume(snapshot kernel.Snapshot) bool {
 	default:
 		return false
 	}
-}
-
-func nonRetryableResumeError(err error) bool {
-	return err == nil || errors.Is(err, kernel.ErrConflict) || errors.Is(err, kernel.ErrTerminal) ||
-		errors.Is(err, kernel.ErrNotFound)
 }
 
 func (dispatcher *Dispatcher) resumer(kind kernel.RunKind) (Resumer, error) {
