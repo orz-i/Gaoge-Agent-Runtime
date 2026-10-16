@@ -333,4 +333,65 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		}
 	})
 
+	t.Run("pre-dispatch-authority-before-and-after-takeover", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		runtime, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		created, err := runtime.Create(ctx, kernel.CreateRequest{
+			ID: "dispatch-guard", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "no side effects without lease", State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = runtime.RequireExecution(ctx, created.Run.ID); err != nil {
+			t.Fatalf("legacy unclaimed Run blocked: %v", err)
+		}
+		first, err := runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: created.Run.ID, OwnerID: "worker-1", LeaseDuration: 60 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = runtime.RequireExecution(ctx, created.Run.ID); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("unbound producer passed pre-dispatch after claim: %v", err)
+		}
+		owner, err := runtime.WithExecution(first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = owner.RequireExecution(ctx, created.Run.ID); err != nil {
+			t.Fatalf("valid owner denied: %v", err)
+		}
+		forged := first
+		forged.ExpiresAt = time.Now().UTC().Add(8 * time.Hour).Truncate(time.Millisecond)
+		time.Sleep(95 * time.Millisecond)
+		expired, err := runtime.WithExecution(forged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = expired.RequireExecution(ctx, created.Run.ID); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("spoofed caller expiry reached model/tool: %v", err)
+		}
+		replacement, err := runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: created.Run.ID, OwnerID: "worker-2", LeaseDuration: time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = owner.RequireExecution(ctx, created.Run.ID); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("stale owner authorized after replacement: %v", err)
+		}
+		next, err := runtime.WithExecution(replacement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = next.RequireExecution(ctx, created.Run.ID); err != nil {
+			t.Fatalf("replacement denied: %v", err)
+		}
+	})
+
 }

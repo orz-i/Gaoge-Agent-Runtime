@@ -3,8 +3,11 @@ package kernel
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
 // ControlKind enumerates only the current trusted Feature-owned gates.
@@ -23,8 +26,11 @@ const (
 // Feature MUST validate the Tool approval / allowance before invoking it.
 type ControlGuard struct {
 	Kind         ControlKind
-	CheckpointID string // Required for approval; binds the pending Checkpoint.
-	BlockedCode  string // Required for allowance; binds the blocked dimension.
+	CheckpointID string
+	BlockedCode  string
+	// Unexported and minted only by first-party Feature validators; custom SDK
+	// consumers and independent Store adapters cannot forge a guarded resume.
+	verified *featurecontrol.Proof
 }
 
 // ControlStore is one optional, guarded-CAS Store capability. It does not
@@ -66,6 +72,24 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 	if next.Result != nil {
 		return ErrInvalidInput
 	}
+	// The Store clock controls whether a suspended Run is still eligible
+	// to return to running. A client clock cannot extend the deadline.
+	if (guard.Kind == ControlApproval || guard.Kind == ControlAllowance) &&
+		current.Run.DeadlineAt != nil && !current.Run.DeadlineAt.After(storeNow) {
+		return ErrDeadline
+	}
+	if guard.Kind == ControlApproval || guard.Kind == ControlAllowance {
+		source := guard.CheckpointID
+		if guard.Kind == ControlAllowance {
+			source = guard.BlockedCode
+		}
+		// Trust boundary: arbitrary SDK calls cannot change Feature State
+		// without a proof issued by a first-party Feature after validation.
+		if !guard.verified.Matches(current.Run.ID, current.Run.Revision,
+			string(guard.Kind), source, next.State, next.Checkpoint) {
+			return ErrInvalidInput
+		}
+	}
 	switch guard.Kind {
 	case ControlApproval:
 		if strings.TrimSpace(guard.CheckpointID) == "" || guard.BlockedCode != "" ||
@@ -74,20 +98,28 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 			next.Run.Status != RunStatusRunning {
 			return ErrInvalidInput
 		}
-		if next.Checkpoint != nil {
-			// Approval-resolution decisions and exact pending Tool bindings are
-			// verified by the owning Feature; Kernel verifies checkpoint identity.
-			if next.Checkpoint.ID != current.Checkpoint.ID ||
-				next.Checkpoint.Kind != current.Checkpoint.Kind ||
-				next.Checkpoint.Status != CheckpointResolved ||
-				!bytes.Equal(next.Checkpoint.Payload, current.Checkpoint.Payload) {
-				return ErrInvalidInput
-			}
+		// Nil checkpoint previously cleared a gate without a persisted
+		// decision. Anchor the resolved decision to the exact payload.
+		if next.Checkpoint == nil ||
+			next.Checkpoint.ID != current.Checkpoint.ID ||
+			next.Checkpoint.Kind != current.Checkpoint.Kind ||
+			next.Checkpoint.Status != CheckpointResolved ||
+			!bytes.Equal(next.Checkpoint.Payload, current.Checkpoint.Payload) {
+			return ErrInvalidInput
+		}
+		var answer struct {
+			Decision string `json:"decision"`
+		}
+		if json.Unmarshal(next.Checkpoint.Response, &answer) != nil ||
+			(answer.Decision != "approve" && answer.Decision != "reject") {
+			return ErrInvalidInput
 		}
 	case ControlAllowance:
 		if guard.CheckpointID != "" || strings.TrimSpace(guard.BlockedCode) == "" ||
 			current.Run.Status != RunStatusPausedBudget || current.Run.ErrorCode != guard.BlockedCode ||
-			next.Run.Status != RunStatusRunning {
+			next.Run.Status != RunStatusRunning || bytes.Equal(next.State, current.State) {
+			// A no-op status reset is never proof of a changed allowance.
+			// The Agent validator remains responsible for hard ceilings.
 			return ErrInvalidInput
 		}
 	case ControlCancel:
@@ -113,7 +145,7 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 // state, journal and ReadyWork. A successful revoked=true result requires
 // a new execution claim before the Feature dispatches external effects.
 func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expectedRevision uint64,
-	guard ControlGuard, mutation Mutation) (Snapshot, bool, error) {
+	guard ControlGuard, mutation Mutation, permit *featurecontrol.Proof) (Snapshot, bool, error) {
 	if runtime == nil || runtime.execution != nil {
 		return Snapshot{}, false, ErrInvalidInput
 	}
@@ -128,6 +160,9 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 		return Snapshot{}, false, err
 	}
 	next := runtime.makeStoreMutation(current, mutation)
+	// The Store sees the exact same unforgeable, mutation-bound proof and
+	// checks it again under the authoritative transaction/row lock.
+	guard.verified = permit
 	if err = ValidateControl(current, guard, next, runtime.Now()); err != nil {
 		return Snapshot{}, false, err
 	}

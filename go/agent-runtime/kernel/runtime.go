@@ -37,11 +37,17 @@ func (runtime *Runtime) Cancel(
 	if current.Run.Revision != expectedRevision {
 		return Snapshot{}, ErrConflict
 	}
-	cancelled, _, err := runtime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlCancel}, Mutation{
+	controlRuntime := runtime
+	if runtime != nil && runtime.execution != nil {
+		unbound := *runtime
+		unbound.execution = nil
+		controlRuntime = &unbound
+	}
+	cancelled, _, err := controlRuntime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlCancel}, Mutation{
 		Status: RunStatusCancelled, State: current.State,
 		ErrorCode: "run.cancelled", ErrorDetail: strings.TrimSpace(reason),
 		Events: []EventDraft{{Type: "run.cancelled", Message: strings.TrimSpace(reason)}},
-	})
+	}, nil)
 	return cancelled, err
 }
 
@@ -61,12 +67,21 @@ func (runtime *Runtime) Expire(
 	if current.Run.DeadlineAt == nil || current.Run.DeadlineAt.After(runtime.Now()) {
 		return current, false, nil
 	}
-	expired, _, err := runtime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlDeadline}, Mutation{
+	controlRuntime := runtime
+	if runtime != nil && runtime.execution != nil {
+		unbound := *runtime
+		unbound.execution = nil
+		controlRuntime = &unbound
+	}
+	expired, _, err := controlRuntime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlDeadline}, Mutation{
 		Status: RunStatusFailed, State: current.State,
 		ErrorCode: "run.deadline_exceeded", ErrorDetail: ErrDeadline.Error(),
 		Events: []EventDraft{{Type: "run.deadline_exceeded", Message: ErrDeadline.Error()}},
-	})
-	return expired, true, err
+	}, nil)
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	return expired, true, nil
 }
 
 // IDSource supplies non-deterministic public identifiers.

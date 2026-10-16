@@ -154,3 +154,40 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 	}
 	return store.applyLocked(lease.RunID, expectedRevision, mutation)
 }
+
+// CheckExecution obtains the Store-owned clock under the same mutex as epoch
+// changes. An informational client ExpiresAt cannot revive a stale token.
+func (store *Store) CheckExecution(ctx context.Context, runID string, lease *kernel.ExecutionLease) error {
+	if store == nil || ctx == nil || strings.TrimSpace(runID) == "" {
+		return kernel.ErrInvalidInput
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	snap, ok := store.records[runID]
+	if !ok {
+		return kernel.ErrNotFound
+	}
+	if snap.Run.Status == kernel.RunStatusCompleted || snap.Run.Status == kernel.RunStatusFailed || snap.Run.Status == kernel.RunStatusCancelled {
+		return kernel.ErrTerminal
+	}
+	state := store.execution[runID]
+	if lease == nil {
+		if state.epoch > 0 {
+			return kernel.ErrExecutionRequired
+		}
+		return nil
+	}
+	if !validMemoryLease(*lease) || lease.RunID != runID {
+		return kernel.ErrExecutionConflict
+	}
+	if snap.Run.Status != kernel.RunStatusRunning {
+		return kernel.ErrExecutionRequired
+	}
+	if !activeMemoryLease(state, *lease, store.currentExecutionTime()) {
+		return kernel.ErrExecutionConflict
+	}
+	return nil
+}

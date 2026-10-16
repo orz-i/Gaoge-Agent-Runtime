@@ -59,6 +59,10 @@ type ExecutionStore interface {
 	RenewExecution(context.Context, ExecutionRenewRequest) (ExecutionLease, error)
 	ReleaseExecution(context.Context, ExecutionLease) error
 	ApplyExecution(context.Context, ExecutionLease, uint64, StoreMutation) (Snapshot, error)
+	// CheckExecution is a Store-time, pre-dispatch authorization check.
+	// nil token allows only a Run never claimed by execution fencing.
+	// It does not promise physical exactly-once effects after a check.
+	CheckExecution(context.Context, string, *ExecutionLease) error
 }
 
 // WithExecution returns a scoped Runtime bound to one exact lease.
@@ -131,4 +135,28 @@ func validExecutionLease(l ExecutionLease) bool {
 // Apply enforces the expected Run ID and exact Store lease in one transaction.
 func (runtime *Runtime) validBoundRun(runID string) bool {
 	return runtime.execution == nil || (validExecutionLease(*runtime.execution) && runtime.execution.RunID == runID)
+}
+
+// RequireExecution validates current Store authority BEFORE a Feature
+// dispatches a Model or Tool. Legacy Stores stay compatible; a Store
+// advertising ExecutionStore must fail closed for fenced, unbound Runs.
+// Store CAS fencing remains independently enforced at commit.
+func (runtime *Runtime) RequireExecution(ctx context.Context, runID string) error {
+	if runtime == nil || ctx == nil || strings.TrimSpace(runID) == "" {
+		return ErrInvalidInput
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !runtime.validBoundRun(runID) {
+		return ErrExecutionConflict
+	}
+	store, ok := runtime.store.(ExecutionStore)
+	if !ok {
+		if runtime.execution != nil {
+			return ErrExecutionRequired
+		}
+		return nil
+	}
+	return store.CheckExecution(ctx, runID, runtime.execution)
 }
