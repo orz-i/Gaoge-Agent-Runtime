@@ -164,5 +164,5 @@ func (s *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease,
 	if !validSQLiteExecutionLease(lease) || mutation.Record.Run.ID != lease.RunID || expectedRevision == 0 {
 		return kernel.Snapshot{}, kernel.ErrInvalidInput
 	}
-	return s.applyWithExecution(ctx, &lease, lease.RunID, expectedRevision, mutation)
+	return s.applyWithExecution(ctx, &lease, nil, nil, lease.RunID, expectedRevision, mutation)
 }

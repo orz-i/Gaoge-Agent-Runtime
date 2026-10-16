@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -278,12 +279,13 @@ func (s *Store) Load(ctx context.Context, runID string) (kernel.Snapshot, error)
 // Apply performs one single-Run CAS; it never does a post-commit Load which
 // might instead observe a different worker's next revision.
 func (s *Store) Apply(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	return s.applyWithExecution(ctx, nil, runID, expectedRevision, mutation)
+	return s.applyWithExecution(ctx, nil, nil, nil, runID, expectedRevision, mutation)
 }
 
 // applyWithExecution atomically combines Run CAS and Store-owned execution
 // authority with the same short transaction as journal/ReadyWork/proof.
-func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionLease, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionLease, guard *kernel.ControlGuard, revoked *bool,
+	runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	if s == nil || s.db == nil || ctx == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 {
 		return kernel.Snapshot{}, kernel.ErrInvalidInput
 	}
@@ -303,6 +305,32 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if guard != nil {
+		current, readErr := loadTx(ctx, tx, runID)
+		if readErr != nil {
+			return kernel.Snapshot{}, readErr
+		}
+		if current.Run.Revision != expectedRevision {
+			return kernel.Snapshot{}, kernel.ErrConflict
+		}
+		nowMS, clockErr := sqliteExecutionNow(ctx, tx)
+		if clockErr != nil {
+			return kernel.Snapshot{}, clockErr
+		}
+		if gateErr := kernel.ValidateControl(current, *guard, mutation, time.UnixMilli(nowMS).UTC()); gateErr != nil {
+			return kernel.Snapshot{}, gateErr
+		}
+		var epoch int64
+		if queryErr := tx.QueryRowContext(ctx, `SELECT execution_epoch FROM runtime_runs WHERE run_id=?`, runID).Scan(&epoch); queryErr != nil {
+			return kernel.Snapshot{}, queryErr
+		}
+		if epoch == math.MaxInt64 {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		if revoked != nil {
+			*revoked = epoch > 0
+		}
+	}
 	// The entire predicate is evaluated by SQLite while holding the same
 	// writer transaction, so a takeover cannot race between lease verification
 	// and the revision update. Claims/renewals also hold this DB writer lock.
@@ -313,14 +341,20 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		string(mutation.Record.Run.Status), mutation.Record.Run.Revision,
 		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(mutation.Events),
 		runID, expectedRevision}
-	if lease == nil {
+	if guard != nil {
+		// The write transaction already verified the exact existing gate.
+		// CAS + epoch revocation + journal/proof/wakeup are a single commit.
+		updateSQL = strings.Replace(updateSQL, "SET scope_id=?",
+			`SET execution_epoch=CASE WHEN execution_epoch>0 THEN execution_epoch+1 ELSE 0 END,
+             execution_owner='',execution_lease_id='',execution_expiry_ms=0,scope_id=?`, 1)
+	} else if lease == nil {
 		updateSQL += ` AND execution_epoch=0`
 	} else {
 		nowMS, clockErr := sqliteExecutionNow(ctx, tx)
 		if clockErr != nil {
 			return kernel.Snapshot{}, clockErr
 		}
-		updateSQL += ` AND execution_epoch=? AND execution_owner=?
+		updateSQL += ` AND status='running' AND execution_epoch=? AND execution_owner=?
           AND execution_lease_id=? AND execution_expiry_ms>?`
 		args = append(args, lease.Epoch, lease.OwnerID, lease.LeaseID, nowMS)
 	}
@@ -345,8 +379,21 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		}
 		// Never turn a stale execution token into a plain revision conflict.
 		// This matters when a replacement owner has not changed revision.
+		if guard != nil {
+			return kernel.Snapshot{}, kernel.ErrConflict
+		}
 		if lease == nil && authorityEpoch != 0 {
 			return kernel.Snapshot{}, kernel.ErrExecutionRequired
+		}
+		if lease != nil {
+			var currentStatus string
+			err = tx.QueryRowContext(ctx, `SELECT status FROM runtime_runs WHERE run_id=?`, runID).Scan(&currentStatus)
+			if err != nil {
+				return kernel.Snapshot{}, err
+			}
+			if currentStatus != string(kernel.RunStatusRunning) {
+				return kernel.Snapshot{}, kernel.ErrExecutionRequired
+			}
 		}
 		if lease != nil {
 			// A different revision can be a legitimate same-owner CAS race,
