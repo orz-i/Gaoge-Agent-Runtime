@@ -41,6 +41,9 @@ func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) err
 	if normalized.WaitGeneration != 0 {
 		return dispatcher.dispatchToolWait(ctx, normalized)
 	}
+	if normalized.Trigger == TriggerChildTerminal {
+		return dispatcher.dispatchChildTerminal(ctx, normalized)
+	}
 	snapshot, eligible, err := dispatcher.eligibleSnapshot(ctx, normalized)
 	if err != nil {
 		return err
@@ -56,6 +59,35 @@ func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) err
 }
 
 const maxToolWaitCASRetries = 8
+
+// A child-terminal fact is still actionable after an unrelated parent Run
+// revision changes. A CAS conflict does not prove that the child was consumed.
+// Retry from the authoritative parent Snapshot; if contention persists, let
+// the durable Worker NACK instead of losing the recovery obligation.
+func (dispatcher *Dispatcher) dispatchChildTerminal(ctx context.Context, payload Payload) error {
+	for attempt := 0; attempt < maxToolWaitCASRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		snapshot, eligible, err := dispatcher.eligibleSnapshot(ctx, payload)
+		if err != nil || !eligible {
+			return err
+		}
+		resumer, err := dispatcher.resumer(snapshot.Run.Kind)
+		if err != nil {
+			return err
+		}
+		resumed, resumeErr := resumer.Resume(ctx, snapshot.Run.ID, snapshot.Run.Revision)
+		if errors.Is(resumeErr, kernel.ErrConflict) {
+			continue
+		}
+		if nonRetryableResumeError(resumeErr) || terminalSnapshotAfterResume(resumed) {
+			return nil
+		}
+		return resumeErr
+	}
+	return kernel.ErrConflict
+}
 
 // A waiting generation outlives ordinary Run revisions. A concurrent mutation
 // can land between the Dispatch load and ResumeToolWait's CAS; that conflict is
