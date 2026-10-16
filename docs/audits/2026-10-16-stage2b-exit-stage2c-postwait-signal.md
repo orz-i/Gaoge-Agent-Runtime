@@ -5,6 +5,7 @@
 - **Status:** Stage 2B **experimental engineering exit accepted for entering Stage 2C**; Stage 2C **first narrow implementation slice** verified; no production approval
 - **Architecture:** [accepted ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) / [proposed ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md)
 - **Previous audit:** [Stage 2B second code-review remediation](2026-10-16-stage2-phase2b-second-code-review-remediation.md)
+- **Follow-up:** [Early native signal and ReadyWork recovery](2026-10-16-stage2c-early-signal-readywork-recovery.md) adds typed retryable early refusals and projector crash/ACK proof. The generic conflict behavior described below is the historical first-slice limitation.
 
 ## Stage 2B re-audit
 

@@ -182,8 +182,13 @@ Pending native Tool receipts also block direct Handler reentry, and
 wrong native receipt IDs cannot clear the dispatch marker. The
 [Stage 2C post-wait signal slice](../../docs/audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md)
 now stores a Feature-validated external-result signal with the same
-SQLite Run CAS, wakeup and Epoch revocation. It does not buffer signals
-that arrive before a wait is persisted.
+SQLite Run CAS, wakeup and Epoch revocation. An early signal matching
+an existing native `ToolDispatchID` but preceding `ToolWait` now gets
+`ErrToolSignalNotReady`: the host **must persist, retain and retry**
+its own delivery; the Kernel still does not buffer early signals.
+[Stage 2C early-signal and ReadyWork tests](../../docs/audits/2026-10-16-stage2c-early-signal-readywork-recovery.md)
+verify five OS process phases, projector lease expiry/reclaim and
+stale ACK rejection without repeating the Tool.
 See the [Stage 2B native implementation](../../docs/audits/2026-10-16-stage2-phase2b-native-run-execution.md)
 and [second code-review fixes](../../docs/audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md).
 

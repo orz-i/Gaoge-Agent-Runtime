@@ -39,8 +39,13 @@ receipt IDs and Pending no-auto-replay; pre-dispatch failures release
 newly acquired idle leases. The [Stage 2C signal slice](../../docs/audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md)
 adds one native Feature-validated post-wait readiness CAS using the
 existing PostgreSQL row lock, Store clock and Execution Epoch.
-It does not buffer early signals or **certify physical exactly-once
-effects or production multi-worker execution**.
+Native signals issued before the committed ToolWait receive a
+retryable `ErrToolSignalNotReady`; the host must retain the original
+signal in its own durable delivery source. No Kernel inbox was added.
+The [Stage 2C early-signal audit](../../docs/audits/2026-10-16-stage2c-early-signal-readywork-recovery.md)
+contains the PostgreSQL 16 negative timing test. These checks do
+**not** certify physical exactly-once effects or production
+multi-worker execution.
 The branch's unpublished Core APIs require a coordinated module
 release. See [Phase 1 execution evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md)
 and [Phase 2A control evidence](../../docs/audits/2026-10-16-stage2-phase2a-guarded-control.md).

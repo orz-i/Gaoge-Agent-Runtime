@@ -29,9 +29,11 @@ owners rather than being hidden behind a generic agent framework.
 > requires trusted provider lookups, retains Pending intent and releases
 > idle leases after failed pre-dispatch validation. The
 > [Stage 2C post-wait signal slice](audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md)
-> reuses guarded CAS for native external-result readiness. Early-signal
-> inbox, autonomous Pump and provider-specific physical exactly-once
-> guarantees remain incomplete.
+> reuses guarded CAS for native external-result readiness. The
+> [early-signal and ReadyWork recovery tests](audits/2026-10-16-stage2c-early-signal-readywork-recovery.md)
+> add an explicit retriable pre-wait signal refusal and prove projector
+> lease reclaim and stale ACK fencing. A Kernel early-signal inbox,
+> autonomous Pump and physical exactly-once guarantees remain incomplete.
 
 ## Layer map
 

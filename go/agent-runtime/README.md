@@ -57,9 +57,15 @@ control, invoke `Resume` to acquire a new Epoch. For an **already
 persisted external Tool wait**, `NotifyExternalToolResultReady` now
 uses the same guarded Control CAS and Store deadline as other native
 controls. This stores readiness without re-running the Tool; a trusted
-provider receipt must still be reconciled to finish it. **Early signals
-before the wait exists are not buffered.** None of this guarantees
-physical exactly-once effects. See the [Stage 2B/2C signal audit](../../docs/audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md).
+provider receipt must still be reconciled to finish it. When a Native
+Provider signals during `Tool.Execute` **before** the Pending wait is
+committed, `NotifyExternalToolResultReady` returns
+`ErrToolSignalNotReady`. This is a **negative acknowledgment**: the host
+must retain the signal in its own durable delivery source and retry
+after the ToolWait exists. The Kernel does not buffer early signals.
+ReadyWork projector leases and ACKs are not permission to execute a Tool.
+See the [Stage 2C early-signal recovery evidence](../../docs/audits/2026-10-16-stage2c-early-signal-readywork-recovery.md).
+None of this guarantees physical exactly-once effects.
 
 ## Runtime kinds
 
