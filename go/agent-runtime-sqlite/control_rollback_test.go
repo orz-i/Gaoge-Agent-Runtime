@@ -24,7 +24,7 @@ func TestGuardedCancelRollbackDoesNotRevokeOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := runtime.Create(ctx, kernel.CreateRequest{
+	created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
 		ID: "control-rollback", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "atomic control", State: json.RawMessage(`{}`),
 	})

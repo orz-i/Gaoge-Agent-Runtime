@@ -18,6 +18,59 @@ type ExecutionStoreFactory func(*testing.T) kernel.Store
 // contract. Time is Store-owned; no user-supplied Now participates in fencing.
 func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 	t.Helper()
+	t.Run("execution-mode-frozen-at-create", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		rt, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacy, err := rt.Create(ctx, kernel.CreateRequest{
+			ID: "original-legacy", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "no dynamic upgrade",
+			State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.RequireExecution(ctx, legacy.Run.ID); err != nil {
+			t.Fatalf("legacy unclaimed Run cannot run: %v", err)
+		}
+		if _, err = rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: legacy.Run.ID, OwnerID: "new-owner", LeaseDuration: time.Second,
+		}); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("legacy Run was silently upgraded to native: %v", err)
+		}
+		if _, err = rt.Apply(ctx, legacy.Run.ID, legacy.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: json.RawMessage(`{"legacy":true}`),
+		}); err != nil {
+			t.Fatalf("legacy compatibility regressed: %v", err)
+		}
+		native, err := rt.Create(ctx, kernel.CreateRequest{
+			ExecutionRequired: true, ID: "native-reserved", Kind: "agent",
+			Actor:  kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "atomic reserve",
+			State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = rt.RequireExecution(ctx, native.Run.ID); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("native Run was not fenced in Create transaction: %v", err)
+		}
+		if _, err = rt.Apply(ctx, native.Run.ID, native.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: native.State,
+		}); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("legacy writer reached protected Run before claim: %v", err)
+		}
+		lease, err := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: native.Run.ID, OwnerID: "native-worker", LeaseDuration: time.Second,
+		})
+		if err != nil || lease.Epoch != 2 {
+			t.Fatalf("first leased epoch must follow reserved epoch 1: %+v %v", lease, err)
+		}
+	})
+
 	t.Run("epoch-and-multi-cas-segment", func(t *testing.T) {
 		ctx := t.Context()
 		store := factory(t)
@@ -25,7 +78,7 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		created, err := runtime.Create(ctx, kernel.CreateRequest{
+		created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
 			ID: "fenced-run", Kind: "agent", Actor: kernel.ActorRef{TenantID: "profile", ActorID: "actor"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "fenced execution", State: json.RawMessage(`{}`),
 			Events: []kernel.EventDraft{{Type: "run.wakeup", Wakeup: true}},
@@ -42,7 +95,7 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 			return lease
 		}
 		first := acquire("owner-A", 300*time.Millisecond)
-		if first.Epoch != 1 || first.LeaseID == "" {
+		if first.Epoch != 2 || first.LeaseID == "" {
 			t.Fatalf("initial lease invalid: %+v", first)
 		}
 		mutation := func(current kernel.Snapshot, tag string) kernel.Mutation {
@@ -157,7 +210,7 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		created, err := runtime.Create(ctx, kernel.CreateRequest{
+		created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
 			ID: "forged-expiry", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "server clock", State: json.RawMessage(`{}`),
 		})
@@ -228,7 +281,7 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = runtime.Create(ctx, kernel.CreateRequest{
+		_, err = runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
 			ID: "exclusive", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "competing owners", State: json.RawMessage(`{}`),
 		})
@@ -283,7 +336,7 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		created, err := runtime.Create(ctx, kernel.CreateRequest{
+		created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
 			ID: "fenced-gate", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "fenced pause", State: json.RawMessage(`{}`),
 		})
@@ -340,15 +393,15 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		created, err := runtime.Create(ctx, kernel.CreateRequest{
+		created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
 			ID: "dispatch-guard", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "no side effects without lease", State: json.RawMessage(`{}`),
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err = runtime.RequireExecution(ctx, created.Run.ID); err != nil {
-			t.Fatalf("legacy unclaimed Run blocked: %v", err)
+		if err = runtime.RequireExecution(ctx, created.Run.ID); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("reserved fenced Run allowed unbound dispatch: %v", err)
 		}
 		first, err := runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
 			RunID: created.Run.ID, OwnerID: "worker-1", LeaseDuration: 60 * time.Millisecond,

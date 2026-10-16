@@ -141,6 +141,9 @@ func (store *KernelStore) Create(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	if record.ExecutionRequired {
+		model.ExecutionEpoch = 1
+	}
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if createErr := tx.Create(&model).Error; createErr != nil {

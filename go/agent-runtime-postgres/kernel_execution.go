@@ -103,6 +103,9 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		if err != nil {
 			return err
 		}
+		if current.ExecutionEpoch == 0 {
+			return kernel.ErrExecutionRequired
+		}
 		if current.ExecutionEpoch == math.MaxInt64 || (current.ExecutionExpiresAt != nil && now.Before(*current.ExecutionExpiresAt)) {
 			return kernel.ErrExecutionConflict
 		}

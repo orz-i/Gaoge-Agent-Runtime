@@ -18,10 +18,15 @@ var (
 
 // Record is the feature-neutral data persisted atomically with a Run.
 type Record struct {
-	Run        Run
-	State      json.RawMessage
-	Checkpoint *Checkpoint
-	Result     *Result
+	// ExecutionRequired is a creation-only Store hint: reserve Epoch 1 in
+	// the SAME Create transaction before any legacy executor can act.
+	// Existing/legacy Runs keep Epoch 0 and cannot switch modes implicitly.
+	// This flag is NOT another persisted status or mutable Run field.
+	ExecutionRequired bool
+	Run               Run
+	State             json.RawMessage
+	Checkpoint        *Checkpoint
+	Result            *Result
 }
 
 // NeedsTransitionProjection reports whether one committed transition must be

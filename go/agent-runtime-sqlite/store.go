@@ -238,11 +238,15 @@ func (s *Store) Create(ctx context.Context, record kernel.Record, drafts []kerne
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	reservedEpoch := 0
+	if record.ExecutionRequired {
+		reservedEpoch = 1
+	}
 	_, err = tx.ExecContext(ctx,
-		`INSERT INTO runtime_runs(run_id,scope_id,kind,status,revision,run_json,state_json,checkpoint_json,result_json,event_head)
-		  VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO runtime_runs(run_id,scope_id,kind,status,revision,run_json,state_json,checkpoint_json,result_json,event_head,execution_epoch)
+          VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		record.Run.ID, record.Run.Actor.TenantID, string(record.Run.Kind), string(record.Run.Status), record.Run.Revision,
-		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(drafts))
+		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(drafts), reservedEpoch)
 	if err != nil {
 		if constraintError(err) {
 			return kernel.Snapshot{}, fmt.Errorf("%w: %w", kernel.ErrAlreadyExists, err)

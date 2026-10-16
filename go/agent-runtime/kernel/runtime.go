@@ -132,6 +132,9 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 	if runtime == nil || !validCreateRequest(request) {
 		return Snapshot{}, ErrInvalidInput
 	}
+	if request.ExecutionRequired && !runtime.SupportsExecution() {
+		return Snapshot{}, ErrExecutionRequired
+	}
 	runID := strings.TrimSpace(request.ID)
 	if runID == "" {
 		var err error
@@ -146,6 +149,7 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		return Snapshot{}, ErrDeadline
 	}
 	record := Record{
+		ExecutionRequired: request.ExecutionRequired,
 		Run: Run{
 			ID: runID, Kind: request.Kind, Actor: request.Actor, Thread: request.Thread,
 			RequestID: strings.TrimSpace(request.RequestID), Goal: strings.TrimSpace(request.Goal),

@@ -68,6 +68,9 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 	if status != string(kernel.RunStatusRunning) {
 		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
 	}
+	if epoch == 0 {
+		return kernel.ExecutionLease{}, kernel.ErrExecutionRequired
+	}
 	if expires > now || epoch == math.MaxInt64 {
 		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
 	}

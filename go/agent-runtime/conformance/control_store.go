@@ -24,7 +24,7 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		created, err := runtime.Create(t.Context(), kernel.CreateRequest{
+		created, err := runtime.Create(t.Context(), kernel.CreateRequest{ExecutionRequired: true,
 			ID: "gate-run", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "actor"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: goal, State: json.RawMessage(`{"step":0}`),
 			DeadlineAt: deadline,
@@ -285,7 +285,7 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 			t.Fatal(err)
 		}
 		deadline := time.Now().UTC().Add(3 * time.Hour)
-		created, err := rt.Create(t.Context(), kernel.CreateRequest{
+		created, err := rt.Create(t.Context(), kernel.CreateRequest{ExecutionRequired: true,
 			ID: "future-deadline", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "actor"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "clock skew", State: json.RawMessage(`{}`),
 			DeadlineAt: &deadline,
@@ -314,7 +314,7 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		created, err := runtime.Create(ctx, kernel.CreateRequest{
+		created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
 			ID: "direct-proof", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "guard", State: json.RawMessage(`{"approved":false}`),
 		})

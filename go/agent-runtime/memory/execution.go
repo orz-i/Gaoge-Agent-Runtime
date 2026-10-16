@@ -79,6 +79,9 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 	}
 	now := store.currentExecutionTime()
 	state := store.execution[request.RunID]
+	if state.epoch == 0 {
+		return kernel.ExecutionLease{}, kernel.ErrExecutionRequired
+	}
 	if state.epoch > 0 && now.Before(state.lease.ExpiresAt) {
 		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
 	}

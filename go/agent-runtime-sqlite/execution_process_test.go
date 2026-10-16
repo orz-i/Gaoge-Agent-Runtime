@@ -56,7 +56,7 @@ func TestExecutionEpochTakeoverAcrossOSProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := rt.Create(ctx, kernel.CreateRequest{
+	created, err := rt.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
 		ID: "execution-restart", Kind: "agent", Actor: kernel.ActorRef{TenantID: "local", ActorID: "profile"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "same-revision takeover", State: json.RawMessage(`{}`),
 	})
@@ -140,7 +140,7 @@ func TestFencedApplyAtomicRollbackOnReadyWorkFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := runtime.Create(ctx, kernel.CreateRequest{
+	created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
 		ID: "fenced-rollback", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "atomic fence", State: json.RawMessage(`{}`),
 	})

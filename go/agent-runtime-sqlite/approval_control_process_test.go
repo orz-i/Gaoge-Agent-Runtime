@@ -59,6 +59,7 @@ type controlTestFencedCreateStore struct {
 }
 
 func (s *controlTestFencedCreateStore) Create(ctx context.Context, record kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
+	record.ExecutionRequired = true
 	snap, err := s.Store.Create(ctx, record, events)
 	if err != nil {
 		return snap, err

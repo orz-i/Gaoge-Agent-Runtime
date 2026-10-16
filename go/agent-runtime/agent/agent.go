@@ -502,7 +502,8 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	}
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
-		RequestID: request.RequestID, Goal: request.Goal, DeadlineAt: request.DeadlineAt, State: encoded,
+		ExecutionRequired: runner.runExecution != nil,
+		RequestID:         request.RequestID, Goal: request.Goal, DeadlineAt: request.DeadlineAt, State: encoded,
 		Events: []kernel.EventDraft{{
 			Type: "agent.started", Message: "Direct Agent loop started", Wakeup: true,
 			WakeupAt: agentWakeupAt(runner.clock.Now()),

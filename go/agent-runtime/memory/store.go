@@ -63,6 +63,9 @@ func (store *Store) Create(_ context.Context, record kernel.Record, events []ker
 	snapshot := snapshotFromRecord(record)
 	journal := appendEvents(nil, events, record.Run.UpdatedAt)
 	snapshot.EventHead = int64(len(journal))
+	if record.ExecutionRequired {
+		store.execution[record.Run.ID] = memoryExecutionState{epoch: 1}
+	}
 	store.records[record.Run.ID] = cloneSnapshot(snapshot)
 	store.events[record.Run.ID] = cloneEvents(journal)
 	store.appendCommittedTransition(record.Run, events)
