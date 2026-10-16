@@ -16,11 +16,16 @@ var errUncommittedTerminal = errors.New("terminal transition not durably persist
 type terminalOutcomeResumer struct {
 	runtime   *kernel.Runtime
 	persisted bool
+	nilError  bool
 	calls     int
 }
 
 func (resumer *terminalOutcomeResumer) Resume(ctx context.Context, id string, expected uint64) (kernel.Snapshot, error) {
 	resumer.calls++
+	resultErr := errUncommittedTerminal
+	if resumer.nilError {
+		resultErr = nil
+	}
 	if resumer.persisted {
 		current, err := resumer.runtime.Load(ctx, id)
 		if err != nil {
@@ -33,11 +38,11 @@ func (resumer *terminalOutcomeResumer) Resume(ctx context.Context, id string, ex
 		if err != nil {
 			return kernel.Snapshot{}, err
 		}
-		return saved, errUncommittedTerminal
+		return saved, resultErr
 	}
 	return kernel.Snapshot{Run: kernel.Run{
 		ID: id, Revision: expected + 1, Status: kernel.RunStatusFailed,
-	}}, errUncommittedTerminal
+	}}, resultErr
 }
 
 func (resumer *terminalOutcomeResumer) ResumeToolWait(ctx context.Context, id string, expected, _ uint64) (kernel.Snapshot, error) {
@@ -49,18 +54,25 @@ func TestDispatcherOnlyACKsAuthoritativelyPersistedTerminalOutcomes(t *testing.T
 		name      string
 		trigger   continuation.Trigger
 		persisted bool
+		nilError  bool
 	}{
 		{name: "self-wakeup uncommitted", trigger: continuation.TriggerSegmentYielded},
 		{name: "self-wakeup committed", trigger: continuation.TriggerSegmentYielded, persisted: true},
+		{name: "self-wakeup uncommitted nil error", trigger: continuation.TriggerSegmentYielded, nilError: true},
+		{name: "self-wakeup committed nil error", trigger: continuation.TriggerSegmentYielded, persisted: true, nilError: true},
 		{name: "child-terminal uncommitted", trigger: continuation.TriggerChildTerminal},
 		{name: "child-terminal committed", trigger: continuation.TriggerChildTerminal, persisted: true},
+		{name: "child-terminal uncommitted nil error", trigger: continuation.TriggerChildTerminal, nilError: true},
+		{name: "child-terminal committed nil error", trigger: continuation.TriggerChildTerminal, persisted: true, nilError: true},
 		{name: "tool-wait uncommitted", trigger: continuation.TriggerToolResultReady},
 		{name: "tool-wait committed", trigger: continuation.TriggerToolResultReady, persisted: true},
+		{name: "tool-wait uncommitted nil error", trigger: continuation.TriggerToolResultReady, nilError: true},
+		{name: "tool-wait committed nil error", trigger: continuation.TriggerToolResultReady, persisted: true, nilError: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runtime := newRuntime(t)
 			parent := createRun(t, runtime, "terminal-proof-parent", kernel.RunKind("test.outcome"))
-			resumer := &terminalOutcomeResumer{runtime: runtime, persisted: test.persisted}
+			resumer := &terminalOutcomeResumer{runtime: runtime, persisted: test.persisted, nilError: test.nilError}
 			dispatcher, err := continuation.NewDispatcher(runtime, continuation.RegisterResumer(parent.Run.Kind, resumer))
 			if err != nil {
 				t.Fatal(err)
@@ -82,8 +94,14 @@ func TestDispatcherOnlyACKsAuthoritativelyPersistedTerminalOutcomes(t *testing.T
 				if dispatched != nil || saved.Run.Status != kernel.RunStatusFailed {
 					t.Fatalf("durably failed parent should ACK: result=%v stored=%+v", dispatched, saved.Run)
 				}
-			} else if !errors.Is(dispatched, errUncommittedTerminal) || saved.Run.Status != kernel.RunStatusRunning {
-				t.Fatalf("uncommitted terminal Snapshot incorrectly ACKed: result=%v stored=%+v", dispatched, saved.Run)
+			} else {
+				want := errUncommittedTerminal
+				if test.nilError {
+					want = kernel.ErrConflict
+				}
+				if !errors.Is(dispatched, want) || saved.Run.Status != kernel.RunStatusRunning {
+					t.Fatalf("uncommitted terminal Snapshot incorrectly ACKed: result=%v stored=%+v", dispatched, saved.Run)
+				}
 			}
 		})
 	}

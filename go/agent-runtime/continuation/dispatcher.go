@@ -58,14 +58,14 @@ func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) err
 	return dispatcher.resumeOnce(ctx, resumer, snapshot)
 }
 
-const maxToolWaitCASRetries = 8
+const maxStableFactCASRetries = 8
 
 // A child-terminal fact is still actionable after an unrelated parent Run
 // revision changes. A CAS conflict does not prove that the child was consumed.
 // Retry from the authoritative parent Snapshot; if contention persists, let
 // the durable Worker NACK instead of losing the recovery obligation.
 func (dispatcher *Dispatcher) dispatchChildTerminal(ctx context.Context, payload Payload) error {
-	for attempt := 0; attempt < maxToolWaitCASRetries; attempt++ {
+	for attempt := 0; attempt < maxStableFactCASRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -91,7 +91,7 @@ func (dispatcher *Dispatcher) dispatchChildTerminal(ctx context.Context, payload
 // not a consumed wait. Re-read the current Run before each bounded attempt and
 // let the durable queue NACK/redeliver if contention persists.
 func (dispatcher *Dispatcher) dispatchToolWait(ctx context.Context, payload Payload) error {
-	for attempt := 0; attempt < maxToolWaitCASRetries; attempt++ {
+	for attempt := 0; attempt < maxStableFactCASRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -156,17 +156,18 @@ func (dispatcher *Dispatcher) resumeOnce(ctx context.Context, resumer Resumer, s
 	return dispatcher.resumeResult(ctx, snapshot.Run.ID, resumed, err)
 }
 
-// An error accompanied by a terminal-looking Snapshot is not proof of a
-// committed transition. Only the authoritative Store can settle that error.
-// Likewise a feature's ErrTerminal/ErrNotFound may describe an unrelated
-// dependency rather than the parent Run that owns this delivery.
+// A terminal-looking Feature Snapshot is not proof of a committed Run,
+// even when a custom Resumer returns nil error. Likewise ErrTerminal and
+// ErrNotFound may describe a dependency rather than the parent Run.
 func (dispatcher *Dispatcher) resumeResult(ctx context.Context, runID string, resumed kernel.Snapshot, resumeErr error) error {
-	if resumeErr == nil {
-		return nil
-	}
-	if !terminalSnapshotAfterResume(resumed) && !errors.Is(resumeErr, kernel.ErrTerminal) &&
-		!errors.Is(resumeErr, kernel.ErrNotFound) {
-		return resumeErr
+	terminalResult := terminalSnapshotAfterResume(resumed)
+	if !terminalResult {
+		if resumeErr == nil {
+			return nil
+		}
+		if !errors.Is(resumeErr, kernel.ErrTerminal) && !errors.Is(resumeErr, kernel.ErrNotFound) {
+			return resumeErr
+		}
 	}
 	current, err := dispatcher.runs.Load(ctx, runID)
 	if errors.Is(err, kernel.ErrNotFound) {
@@ -177,6 +178,9 @@ func (dispatcher *Dispatcher) resumeResult(ctx context.Context, runID string, re
 	}
 	if terminalSnapshotAfterResume(current) {
 		return nil
+	}
+	if resumeErr == nil {
+		return kernel.ErrConflict // A returned terminal result was never committed.
 	}
 	return resumeErr
 }
