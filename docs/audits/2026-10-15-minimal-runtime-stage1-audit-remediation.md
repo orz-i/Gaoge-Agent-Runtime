@@ -92,7 +92,7 @@ are separate acceptance requirements.
 ## 2026-10-16 — Merge-preparation P2 closure and branch cleanup
 
 The previous Stage 0/1 working-tree artifacts have been organized on
-`governance/minimal-kernel-sqlite-stage1-20261016`, without discarding
+`governance/kernel-runtime`, spanning the full kernel governance program (Stages 0–6), without discarding
 any historical research or changing `main`. The user separately
 requested **segmented local commits**, not a remote push or release.
 
