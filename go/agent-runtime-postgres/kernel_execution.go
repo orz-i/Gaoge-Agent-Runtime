@@ -254,3 +254,51 @@ func (store *KernelStore) executionCommitConflict(tx *gorm.DB, runID string, lea
 	}
 	return kernel.ErrConflict
 }
+
+// CheckExecution uses an authoritative database clock at read time. This
+// is a pre-dispatch gate, not a physical transaction encompassing a Tool.
+func (store *KernelStore) CheckExecution(ctx context.Context, runID string, lease *kernel.ExecutionLease) error {
+	if store == nil || store.db == nil || ctx == nil || strings.TrimSpace(runID) == "" {
+		return kernel.ErrInvalidInput
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var record models.KernelRunRecord
+		err := tx.Where("run_id = ?", runID).First(&record).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return kernel.ErrNotFound
+		}
+		if err != nil {
+			return executionQueryError(tx, err)
+		}
+		switch kernel.RunStatus(record.Status) {
+		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
+			return kernel.ErrTerminal
+		case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
+		default:
+			return kernel.ErrExecutionRequired
+		}
+		if lease == nil {
+			if record.ExecutionEpoch > 0 {
+				return kernel.ErrExecutionRequired
+			}
+			return nil
+		}
+		if !pgExecutionLeaseValid(*lease) || lease.RunID != runID {
+			return kernel.ErrExecutionConflict
+		}
+		if record.Status != string(kernel.RunStatusRunning) {
+			return kernel.ErrExecutionRequired
+		}
+		now, err := pgStoreNow(tx)
+		if err != nil {
+			return err
+		}
+		if !pgLeaseMatches(record, *lease, now) {
+			return kernel.ErrExecutionConflict
+		}
+		return nil
+	})
+}
