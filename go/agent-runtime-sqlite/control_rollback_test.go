@@ -12,7 +12,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-func TestGuardedApprovalRollbackDoesNotRevokeOwner(t *testing.T) {
+func TestGuardedCancelRollbackDoesNotRevokeOwner(t *testing.T) {
 	ctx := t.Context()
 	path := filepath.Join(privateDir(t), "control-rollback.sqlite")
 	store, err := sqlite.CreateNew(ctx, path)
@@ -60,38 +60,30 @@ func TestGuardedApprovalRollbackDoesNotRevokeOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved := *checkpoint
-	resolved.Status = kernel.CheckpointResolved
-	resolved.ResolvedAt = &now
-	resolved.Response = json.RawMessage(`{"decision":"approve"}`)
-	apply := func() (kernel.Snapshot, bool, error) {
-		return runtime.ApplyControl(ctx, waiting.Run.ID, waiting.Run.Revision,
-			kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: checkpoint.ID},
-			kernel.Mutation{Status: kernel.RunStatusRunning, State: waiting.State, Checkpoint: &resolved,
-				Events: []kernel.EventDraft{{Type: "interaction.resolved", Wakeup: true}}},
-		)
+	apply := func() (kernel.Snapshot, error) {
+		return runtime.Cancel(ctx, waiting.Run.ID, waiting.Run.Revision, "operator requested")
 	}
-	if _, revoked, e := apply(); e == nil || revoked {
-		t.Fatalf("injected projection failure wrongly committed/revoked: revoked=%v err=%v", revoked, e)
+	if _, e := apply(); e == nil {
+		t.Fatal("injected projection failure unexpectedly committed cancellation")
 	}
-	snap, err := runtime.Load(ctx, created.Run.ID)
-	if err != nil {
-		t.Fatal(err)
+	snap, e := runtime.Load(ctx, created.Run.ID)
+	if e != nil {
+		t.Fatal(e)
 	}
 	if snap.Run.Revision != waiting.Run.Revision || snap.Run.Status != kernel.RunStatusWaitingInput {
-		t.Fatalf("failed guarded control leaked state: %+v", snap.Run)
+		t.Fatalf("failed guarded cancellation leaked state: %+v", snap.Run)
 	}
-	if _, err = runtime.RenewExecution(ctx, kernel.ExecutionRenewRequest{Lease: lease, LeaseDuration: 5 * time.Second}); err != nil {
-		t.Fatalf("failed guarded control incorrectly revoked incumbent lease: %v", err)
+	if _, e = runtime.RenewExecution(ctx, kernel.ExecutionRenewRequest{Lease: lease, LeaseDuration: 5 * time.Second}); e != nil {
+		t.Fatalf("failed cancellation revoked incumbent lease: %v", e)
 	}
 	if _, err = raw.Exec("DROP TRIGGER block_approval_ready"); err != nil {
 		t.Fatal(err)
 	}
-	granted, revoked, err := apply()
-	if err != nil || !revoked || granted.Run.Status != kernel.RunStatusRunning {
-		t.Fatalf("guarded control did not recover after rollback: %+v revoked=%v err=%v", granted.Run, revoked, err)
+	cancelled, e := apply()
+	if e != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
+		t.Fatalf("guarded cancellation failed after trigger dropped: %+v %v", cancelled.Run, e)
 	}
 	if _, err = runtime.RenewExecution(ctx, kernel.ExecutionRenewRequest{Lease: lease, LeaseDuration: time.Second}); !errors.Is(err, kernel.ErrExecutionConflict) {
-		t.Fatalf("revoked lease renewed after approved control: %v", err)
+		t.Fatalf("revoked lease renewed after cancelled control: %v", err)
 	}
 }

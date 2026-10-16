@@ -173,7 +173,7 @@ func TestFencedApprovalProcessChild(t *testing.T) {
 		wrong := kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: "old-checkpoint"}
 		_, _, e := rt.ApplyControl(ctx, waiting.Run.ID, waiting.Run.Revision, wrong, kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: waiting.State,
-		})
+		}, nil)
 		if !errors.Is(e, kernel.ErrInvalidInput) {
 			t.Fatalf("stale checkpoint control unexpectedly authorized: %v", e)
 		}

@@ -166,3 +166,44 @@ func (s *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease,
 	}
 	return s.applyWithExecution(ctx, &lease, nil, nil, lease.RunID, expectedRevision, mutation)
 }
+
+// CheckExecution consults a single SQLite snapshot using SQLite engine time,
+// not the host's clock or the caller's informational expiry.
+func (s *Store) CheckExecution(ctx context.Context, runID string, lease *kernel.ExecutionLease) error {
+	if s == nil || s.db == nil || ctx == nil || strings.TrimSpace(runID) == "" {
+		return kernel.ErrInvalidInput
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var epoch, expiry, now int64
+	var owner, id, status string
+	err := s.db.QueryRowContext(ctx, `SELECT execution_epoch,execution_owner,execution_lease_id,execution_expiry_ms,status,
+   CAST(unixepoch('subsec')*1000 AS INTEGER) FROM runtime_runs WHERE run_id=?`, runID).
+		Scan(&epoch, &owner, &id, &expiry, &status, &now)
+	if errors.Is(err, sql.ErrNoRows) {
+		return kernel.ErrNotFound
+	}
+	if err != nil {
+		return conflictOrDatabaseError(err)
+	}
+	if status == string(kernel.RunStatusCompleted) || status == string(kernel.RunStatusFailed) || status == string(kernel.RunStatusCancelled) {
+		return kernel.ErrTerminal
+	}
+	if lease == nil {
+		if epoch != 0 {
+			return kernel.ErrExecutionRequired
+		}
+		return nil
+	}
+	if !validSQLiteExecutionLease(*lease) || lease.RunID != runID {
+		return kernel.ErrExecutionConflict
+	}
+	if status != string(kernel.RunStatusRunning) {
+		return kernel.ErrExecutionRequired
+	}
+	if epoch != int64(lease.Epoch) || owner != lease.OwnerID || id != lease.LeaseID || expiry <= now {
+		return kernel.ErrExecutionConflict
+	}
+	return nil
+}
