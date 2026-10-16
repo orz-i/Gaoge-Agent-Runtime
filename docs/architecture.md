@@ -18,7 +18,10 @@ owners rather than being hidden behind a generic agent framework.
 > five-state migration; it does not supersede ADR 0008 until accepted.
 > [Stage 2 Phase 2A](audits/2026-10-16-stage2-phase2a-guarded-control.md)
 > adds a small guarded control CAS for approval, budget and terminal
-> actions; full Agent execution fencing remains incomplete.
+> actions. The [Phase 2A security remediation](audits/2026-10-16-stage2-phase2a-code-review-remediation.md)
+> seals trusted Feature controls and checks execution ownership before
+> external Model/Tool dispatch; full concurrent Agent orchestration
+> and physical exactly-once effects remain incomplete.
 
 ## Layer map
 

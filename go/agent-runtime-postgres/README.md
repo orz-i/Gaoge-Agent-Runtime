@@ -23,8 +23,12 @@ unit tests do **not** certify PostgreSQL fencing. The experimental
 Stage 2 Phase 2A adds `ControlStore.ApplyControl` for trusted,
 Feature-validated approval, budget, cancellation and deadline CAS.
 It atomically invalidates prior Run ownership with the control state,
-journal and outbox; real PostgreSQL 16 control tests pass. Full Agent
-side-effect execution and recovery are **not yet production-enabled**.
+journal and outbox. [Phase 2A security remediation](../../docs/audits/2026-10-16-stage2-phase2a-code-review-remediation.md)
+adds first-party sealed Feature controls and Store-owned pre-dispatch
+execution checks, including expired lease and forged client-time
+negative tests. Real PostgreSQL 16 Control/Execution Conformance
+passed twice under Race. Full Agent side-effect execution and
+recovery are **not yet production-enabled**.
 The branch's unpublished Core APIs require a coordinated module
 release. See [Phase 1 execution evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md)
 and [Phase 2A control evidence](../../docs/audits/2026-10-16-stage2-phase2a-guarded-control.md).

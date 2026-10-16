@@ -5,6 +5,7 @@
 - **Branch baseline:** `governance/kernel-runtime@b1bfdcf` (unreleased kernel-governance branch)
 - **Architecture:** [ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) and [proposed minimality ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md)
 - **Previous checkpoint:** [Stage 2 Phase 1 execution fencing](2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md)
+- **Follow-up:** [Phase 2A code-review remediation](2026-10-16-stage2-phase2a-code-review-remediation.md) fixes unauthorized pre-dispatch effects, seals Feature-validated controls and closes deadline/cancellation error paths. This document preserves the historical initial implementation evidence.
 
 ## Concrete deadlock closed
 

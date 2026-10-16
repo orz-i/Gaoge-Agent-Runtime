@@ -156,10 +156,15 @@ an expired segment under a higher epoch without changing Run Revision.
 `ControlStore.ApplyControl` for exact approval Checkpoint, blocked
 allowance dimension, cancellation and Store-time deadline expiration.
 Control CAS revokes the former Epoch and returns whether an old owner
-was revoked; an Agent will not auto-dispatch external effects before a
-new execution claim, even with `DeferResumption=false`. Regression
-tests cover three-process Tool approval/rejection, two-process budget
-grants, and atomic rollback after injected ReadyWork failures.
+was revoked. After the [Phase 2A security remediation](../../docs/audits/2026-10-16-stage2-phase2a-code-review-remediation.md),
+first-party approval/allowance controls require a sealed, exact
+Feature-validated proof; external SDK clients cannot mint these
+proofs. Before Model/Tool dispatch, `Runtime.RequireExecution`
+checks this Store's authoritative epoch, lease and clock. An
+**unbound** `Runner.Resume` now fails before any Tool effect, even
+when `DeferResumption=false`. Regression tests cover three-process
+Tool approval/rejection, two-process budget grants, expired gates,
+and atomic rollback after injected ReadyWork failures.
 
 **Do not enable automatic concurrent Agent/Pump execution yet.** The
 production Agent `StartRun`/`Resume` path does not automatically claim
