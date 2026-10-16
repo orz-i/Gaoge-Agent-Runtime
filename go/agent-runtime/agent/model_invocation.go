@@ -330,7 +330,8 @@ func (runner *Runner) executeModelInvocation(
 			return runner.validatePendingModelToolDeclarations(dispatchCtx, snapshot, state, invocation.Request)
 		},
 	)
-	if err != nil {
+	late := errors.Is(err, ErrModelLateResult)
+	if err != nil && !late {
 		endedAt := runner.clock.Now().UTC()
 		phase := observability.PhaseFailed
 		errorCode := "provider_error"
@@ -422,6 +423,9 @@ func (runner *Runner) executeModelInvocation(
 	runner.publish(ctx, next.Run.ID, plugin.Event{
 		Type: EventModelCompleted, Revision: next.Run.Revision, Status: string(next.Run.Status),
 	})
+	if late {
+		return next, state, ErrModelLateResult
+	}
 	return next, state, nil
 }
 

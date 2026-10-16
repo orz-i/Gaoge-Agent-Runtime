@@ -31,11 +31,16 @@ var (
 	ErrModelFailure         = errors.New("agent model failure")
 	ErrModelInvocationBusy  = errors.New("agent model invocation execution is leased")
 	ErrToolFailure          = errors.New("agent tool failure")
-	ErrCallLimit            = errors.New("agent run call limit exceeded")
-	ErrBudgetExceeded       = errors.New("agent run budget exceeded")
-	ErrUsageUnavailable     = errors.New("agent model usage unavailable for configured token budget")
-	ErrApprovalRequired     = errors.New("agent run approval is required")
-	ErrRunTerminal          = errors.New("agent run is terminal")
+	// ErrToolOutcomeUnknown indicates an external dispatch intent was
+	// committed but its terminal receipt is absent. Do not replay.
+	ErrToolOutcomeUnknown = errors.New("agent external tool result is uncertain")
+	ErrToolLateResult     = errors.New("agent Tool completed after configured timeout")
+	ErrModelLateResult    = errors.New("agent Model completed after configured timeout")
+	ErrCallLimit          = errors.New("agent run call limit exceeded")
+	ErrBudgetExceeded     = errors.New("agent run budget exceeded")
+	ErrUsageUnavailable   = errors.New("agent model usage unavailable for configured token budget")
+	ErrApprovalRequired   = errors.New("agent run approval is required")
+	ErrRunTerminal        = errors.New("agent run is terminal")
 )
 
 func (runner *Runner) completeWithToolResult(
@@ -269,21 +274,24 @@ type Runner struct {
 }
 
 type runState struct {
-	Messages         []model.Message            `json:"messages"`
-	Model            string                     `json:"model,omitempty"`
-	ModelOptions     json.RawMessage            `json:"modelOptions,omitempty"`
-	ToolKeys         []string                   `json:"toolKeys"`
-	RequiredToolKeys []string                   `json:"requiredToolKeys,omitempty"`
-	HostedToolGrants []HostedToolGrant          `json:"hostedToolGrants,omitempty"`
-	Discovery        *discoveryState            `json:"discovery,omitempty"`
-	BlockedToolKeys  []string                   `json:"blockedToolKeys,omitempty"`
-	RequireToolCall  bool                       `json:"requireToolCall,omitempty"`
-	Budget           runtimebudget.Snapshot     `json:"budget"`
-	CallAllowance    *CallAllowance             `json:"callAllowance,omitempty"`
-	AutoAllowance    *autoAllowanceState        `json:"autoAllowance,omitempty"`
-	PendingCalls     []tools.Call               `json:"pendingCalls,omitempty"`
-	PendingApproval  *pendingToolApproval       `json:"pendingApproval,omitempty"`
-	ToolWait         *PendingTool               `json:"toolWait,omitempty"`
+	Messages         []model.Message        `json:"messages"`
+	Model            string                 `json:"model,omitempty"`
+	ModelOptions     json.RawMessage        `json:"modelOptions,omitempty"`
+	ToolKeys         []string               `json:"toolKeys"`
+	RequiredToolKeys []string               `json:"requiredToolKeys,omitempty"`
+	HostedToolGrants []HostedToolGrant      `json:"hostedToolGrants,omitempty"`
+	Discovery        *discoveryState        `json:"discovery,omitempty"`
+	BlockedToolKeys  []string               `json:"blockedToolKeys,omitempty"`
+	RequireToolCall  bool                   `json:"requireToolCall,omitempty"`
+	Budget           runtimebudget.Snapshot `json:"budget"`
+	CallAllowance    *CallAllowance         `json:"callAllowance,omitempty"`
+	AutoAllowance    *autoAllowanceState    `json:"autoAllowance,omitempty"`
+	PendingCalls     []tools.Call           `json:"pendingCalls,omitempty"`
+	PendingApproval  *pendingToolApproval   `json:"pendingApproval,omitempty"`
+	ToolWait         *PendingTool           `json:"toolWait,omitempty"`
+	// A fenced Direct Agent commits its Tool dispatch ID before invoking
+	// external effects. A missing receipt requires explicit reconciliation.
+	ToolDispatchID   string                     `json:"toolDispatchID,omitempty"`
 	ExternalSignals  []ExternalToolResultSignal `json:"externalSignals,omitempty"`
 	ModelInvocations []ModelInvocation          `json:"modelInvocations,omitempty"`
 }
@@ -515,7 +523,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	// Claim the Run before publishing the started event or dispatching any
 	// Model/Tool. If acquisition fails, preserve the created Run for safe
 	// recovery rather than running unfenced.
-	driven, driveErr := runner.withRunOwner(ctx, snapshot.Run.ID, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
+	driven, driveErr := runner.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 		scoped.publishRunEvent(driveCtx, snapshot, EventRunStarted, false)
 		return scoped.drive(driveCtx, snapshot)
 	})
@@ -599,10 +607,15 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrRunTerminal
 	}
+	if runner.runExecution != nil && state.ToolDispatchID != "" {
+		// An unresolved physical Tool outcome is NOT runnable work, so
+		// avoid claiming an epoch just to discover it is unsafe to retry.
+		return snapshot, ErrToolOutcomeUnknown
+	}
 	// Claim an execution segment BEFORE Run middleware and any Model/Tool
 	// side effect. A runner without RunExecution still follows the original
 	// pre-dispatch Store guard and will be rejected on fenced Runs.
-	resumed, resumeErr := runner.withRunOwner(ctx, snapshot.Run.ID, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
+	resumed, resumeErr := runner.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 		invocation := runInvocation(plugin.RunResume, snapshot)
 		return scoped.runChain.Invoke(driveCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 			return scoped.resumeRunning(nextCtx, snapshot, state)
@@ -1334,10 +1347,38 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if execution.call.ToolKey == ToolDiscoveryKey {
 		return runner.searchPendingTool(ctx, snapshot, execution)
 	}
+	if runner.runExecution != nil {
+		if execution.state.ToolDispatchID != "" {
+			return snapshot, true, ErrToolOutcomeUnknown
+		}
+		state := execution.state
+		state.ToolDispatchID = execution.call.ID
+		encoded, encodeErr := encodeState(state)
+		if encodeErr != nil {
+			return snapshot, true, encodeErr
+		}
+		// The CAS prepares an effect with a stable identity. A crash after
+		// this commit cannot be treated as permission to execute again.
+		staged, stageErr := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+			Events: []kernel.EventDraft{{Type: "tool.dispatch_intent", Message: execution.call.ID, Wakeup: true}},
+		})
+		if stageErr != nil {
+			return snapshot, true, stageErr
+		}
+		snapshot = staged
+		execution.state = state
+	}
 	result, err := runner.invokePendingTool(ctx, snapshot, execution.call, execution.definition)
-	if err != nil {
+	late := errors.Is(err, ErrToolLateResult)
+	if err != nil && !late {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return snapshot, true, ctxErr
+		}
+		// For an in-flight native Tool, a failed result does not authorize
+		// automatic retry after a new epoch. Keep dispatch intent durable.
+		if runner.runExecution != nil {
+			return snapshot, true, errors.Join(ErrToolOutcomeUnknown, err)
 		}
 		return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, err)
 	}
@@ -1345,7 +1386,16 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		failed, failErr := runner.fail(ctx, snapshot, execution.state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
 		return failed, false, failErr
 	}
-	return runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(result))
+	persisted, yielded, persistErr := runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(result))
+	if persistErr != nil {
+		return persisted, yielded, persistErr
+	}
+	if late {
+		// A tardy known receipt is persisted, but cannot be called a normal
+		// on-time success. Caller must explicitly Resume after this warning.
+		return persisted, true, ErrToolLateResult
+	}
+	return persisted, yielded, nil
 }
 
 type pendingToolExecution struct {
@@ -1473,11 +1523,10 @@ func (runner *Runner) handlePendingToolExecutionError(
 }
 
 func (runner *Runner) persistPendingToolResult(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	execution pendingToolExecution,
-	result tools.ExecutionResult,
-) (kernel.Snapshot, bool, error) {
+	ctx context.Context, snapshot kernel.Snapshot, execution pendingToolExecution,
+	result tools.ExecutionResult) (kernel.Snapshot, bool, error) {
+	// Receipt and dispatch-marker removal share one Run CAS.
+	execution.state.ToolDispatchID = ""
 	if strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
 		return runner.persistPendingToolYield(ctx, snapshot, execution.state, result)
 	}

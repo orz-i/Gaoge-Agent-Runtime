@@ -27,6 +27,7 @@ type stealerOnCreateStore struct {
 }
 
 func (s *stealerOnCreateStore) Create(ctx context.Context, record kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
+	record.ExecutionRequired = true
 	snapshot, err := s.Store.Create(ctx, record, events)
 	if err != nil {
 		return snapshot, err
@@ -112,5 +113,29 @@ func TestNativeStartRunClaimConflictLeavesRecoverableRun(t *testing.T) {
 	}
 	if err = rt.RequireExecution(t.Context(), created.Run.ID); !errors.Is(err, kernel.ErrTerminal) {
 		t.Fatalf("native completion not durable terminal: %v", err)
+	}
+}
+
+func TestRunExecutionRejectsRetryBudgetLongerThanLease(t *testing.T) {
+	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := agent.CallPolicy{Timeout: 650 * time.Millisecond, MaxAttempts: 3,
+		InitialBackoff: 300 * time.Millisecond, MaxBackoff: 300 * time.Millisecond}
+	m := &nativeLeaseFixtureModel{}
+	policy := agent.ExecutionPolicy{
+		Model: agent.CallPolicy{Timeout: 200 * time.Millisecond},
+		Tool:  tool,
+	}
+	if _, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Execution: policy,
+		RunExecution: &agent.RunExecution{OwnerID: "worker", LeaseDuration: 2 * time.Second},
+	}); !errors.Is(err, agent.ErrInvalidRequest) {
+		t.Fatalf("multiple retry/backoffs fit an unsafe short lease: %v", err)
+	}
+	if _, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Execution: policy,
+		RunExecution: &agent.RunExecution{OwnerID: "worker", LeaseDuration: 4 * time.Second},
+	}); err != nil {
+		t.Fatalf("bounded retry envelope rejected: %v", err)
 	}
 }

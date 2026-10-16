@@ -23,7 +23,31 @@ func validRunExecution(value RunExecution, policy ExecutionPolicy) bool {
 		value.LeaseDuration >= time.Millisecond && value.LeaseDuration <= 24*time.Hour &&
 		// One Model/Tool dispatch must not normally outlast the Run lease. This
 		// does NOT fence physical side effects of a stalled external provider.
-		value.LeaseDuration-time.Second > max(policy.Model.Timeout, policy.Tool.Timeout)
+		value.LeaseDuration-time.Second > max(policy.Model.Timeout, policy.Tool.Timeout) &&
+		safeToolRetryWindow(policy.Tool, value.LeaseDuration-time.Second)
+}
+
+// safeToolRetryWindow rejects configurations where the full configured Tool
+// retry/backoff window cannot fit one lease. An uncooperative external Tool
+// may STILL exceed Context timeout: durable dispatch intent prevents replay.
+func safeToolRetryWindow(policy CallPolicy, available time.Duration) bool {
+	attempts := time.Duration(policy.MaxAttempts)
+	if attempts < 1 || available <= 0 || policy.Timeout <= 0 {
+		return false
+	}
+	if policy.Timeout > available/attempts {
+		return false
+	}
+	remainder := available - attempts*policy.Timeout
+	if attempts == 1 {
+		return true
+	}
+	// Retry delay has up to 20% deterministic jitter, rounded conservatively.
+	if policy.MaxBackoff > 0 && policy.MaxBackoff > available/2 {
+		return false
+	}
+	delay := policy.MaxBackoff + policy.MaxBackoff/5
+	return delay <= remainder/(attempts-1)
 }
 
 // withRunOwner acquires a fresh authoritative segment before native
@@ -32,7 +56,7 @@ func validRunExecution(value RunExecution, policy ExecutionPolicy) bool {
 // On clean return, release is best effort. A failed, cancelled or ambiguous
 // segment retains its owner until Store TTL expiration.
 // No hidden goroutine or independent lease service.
-func (runner *Runner) withRunOwner(ctx context.Context, runID string,
+func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRevision uint64,
 	execute func(context.Context, *Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	if runner.runExecution == nil {
 		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
@@ -51,13 +75,33 @@ func (runner *Runner) withRunOwner(ctx context.Context, runID string,
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	// The pre-claim snapshot is not a grant. A concurrent valid control
+	// can commit before we acquire, or a Store implementation can
+	// commit before returning Acquire. Re-read under the acquired owner
+	// BEFORE any middleware/Model/Tool sees this snapshot.
+	persisted, err := bound.Load(ctx, runID)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if persisted.Run.Revision != expectedRevision {
+		return persisted, kernel.ErrConflict
+	}
+	if persisted.Run.Status != kernel.RunStatusRunning {
+		return persisted, kernel.ErrExecutionRequired
+	}
+	if err = bound.RequireExecution(ctx, runID); err != nil {
+		return persisted, err
+	}
 	scoped := *runner
 	scoped.runtime = bound
 	// The stable bearer identity survives RenewExecution; one lease can span
 	// many internal CAS operations without creating extra work items.
 	scoped.activeRunLease = &lease
 	result, driveErr := execute(ctx, &scoped)
-	if driveErr == nil {
+	// A late successful provider call is already recorded atomically with
+	// its receipt. Release so an explicit Resume can consume that known fact.
+	if driveErr == nil || errors.Is(driveErr, ErrToolLateResult) ||
+		errors.Is(driveErr, ErrModelLateResult) {
 		// The store retains the sticky Epoch fence after release. If Release fails
 		// (e.g. lease already replaced), a later recovery can still use its expiry.
 		releaseErr := runner.runtime.ReleaseExecution(ctx, lease)
