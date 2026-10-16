@@ -43,9 +43,14 @@ Native signals issued before the committed ToolWait receive a
 retryable `ErrToolSignalNotReady`; the host must retain the original
 signal in its own durable delivery source. No Kernel inbox was added.
 The [Stage 2C early-signal audit](../../docs/audits/2026-10-16-stage2c-early-signal-readywork-recovery.md)
-contains the PostgreSQL 16 negative timing test. These checks do
-**not** certify physical exactly-once effects or production
-multi-worker execution.
+contains the PostgreSQL 16 negative timing test.
+[Stage 2C Run-isolation remediation](../../docs/audits/2026-10-16-stage2c-run-isolation-and-dispatch-remediation.md)
+now isolates poisoned Outbox rows in the **existing** PostgreSQL
+Outbox table, retains their original payloads and exposes bounded
+`ListQuarantinedTransitions` diagnostics; healthy Runs continue to
+claim/ACK work. Two migration-managed transport diagnostic columns
+were added without introducing a new table. These checks do **not**
+certify physical exactly-once effects or production multi-worker execution.
 The branch's unpublished Core APIs require a coordinated module
 release. See [Phase 1 execution evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md)
 and [Phase 2A control evidence](../../docs/audits/2026-10-16-stage2-phase2a-guarded-control.md).

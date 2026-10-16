@@ -5,6 +5,7 @@
 - **Baseline:** `governance/kernel-runtime@dd7afbb`
 - **Architecture:** [accepted ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) and [proposed minimality ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md)
 - **Predecessor:** [Stage 2B experimental exit and Stage 2C post-wait signal](2026-10-16-stage2b-exit-stage2c-postwait-signal.md)
+- **Follow-up:** [Stage 2C Run-isolation and dispatch fixes](2026-10-16-stage2c-run-isolation-and-dispatch-remediation.md) address poisoned PostgreSQL Outbox rows, Native queue ACK eligibility and overdue diagnostic semantics. This page preserves the first-slice historical evidence.
 
 ## Failure window (reproduced)
 

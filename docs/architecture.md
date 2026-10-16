@@ -32,8 +32,12 @@ owners rather than being hidden behind a generic agent framework.
 > reuses guarded CAS for native external-result readiness. The
 > [early-signal and ReadyWork recovery tests](audits/2026-10-16-stage2c-early-signal-readywork-recovery.md)
 > add an explicit retriable pre-wait signal refusal and prove projector
-> lease reclaim and stale ACK fencing. A Kernel early-signal inbox,
-> autonomous Pump and physical exactly-once guarantees remain incomplete.
+> lease reclaim and stale ACK fencing. The
+> [Stage 2C Run-isolation/dispatch remediation](audits/2026-10-16-stage2c-run-isolation-and-dispatch-remediation.md)
+> isolates poisoned PostgreSQL Outbox projections, propagates native
+> unresolved Tool results for queue NACK, and defines late projector ACK
+> semantics. A Kernel early-signal inbox, autonomous Pump and physical
+> exactly-once guarantees remain incomplete.
 
 ## Layer map
 

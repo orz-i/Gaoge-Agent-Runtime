@@ -64,7 +64,14 @@ committed, `NotifyExternalToolResultReady` returns
 must retain the signal in its own durable delivery source and retry
 after the ToolWait exists. The Kernel does not buffer early signals.
 ReadyWork projector leases and ACKs are not permission to execute a Tool.
-See the [Stage 2C early-signal recovery evidence](../../docs/audits/2026-10-16-stage2c-early-signal-readywork-recovery.md).
+An exact native ready-wakeup now attempts the existing trusted Provider
+lookup; until an external COMMIT is verified, Dispatcher returns an error
+for queue NACK instead of falsely ACKing an unresolved Tool. A native
+ToolWait that is overdue but still uncertain reports
+`ErrToolOutcomeOverdue` while retaining its durable Call ID.
+Transport ACKs may arrive after lease expiry only while that exact
+Worker/Lease is still current; a replaced worker cannot ACK.
+See the [Stage 2C Run-isolation and dispatch remediation](../../docs/audits/2026-10-16-stage2c-run-isolation-and-dispatch-remediation.md).
 None of this guarantees physical exactly-once effects.
 
 ## Runtime kinds
