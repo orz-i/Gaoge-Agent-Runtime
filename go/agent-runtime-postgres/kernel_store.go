@@ -294,40 +294,64 @@ func (store *KernelStore) ClaimTransitions(
 	}
 	var claims []kernel.TransitionClaim
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Overfetch a small bounded page so one poisoned head row cannot
-		// starve a healthy different Run even when request.Limit == 1.
-		query := tx.Where("quarantine_code = ? AND available_at <= ? AND (lease_until IS NULL OR lease_until <= ?)",
-			"", request.Now.UTC(), request.Now.UTC()).
-			Order("available_at ASC, committed_at ASC, id ASC").Limit(max(request.Limit, 32))
-		if tx.Name() == "postgres" {
-			query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
-		}
-		var records []models.KernelTransitionOutboxRecord
-		if err := query.Find(&records).Error; err != nil {
-			return translateKernelError(err)
-		}
-		claims = make([]kernel.TransitionClaim, 0, min(len(records), request.Limit))
-		for _, record := range records {
-			if len(claims) >= request.Limit {
-				break
+		// Quarantine head poison and keep scanning within a fixed transaction
+		// budget. A single page may contain only malformed rows, so a healthy
+		// different Run must not wait for another projector polling interval.
+		// Do not scan unbounded poison within one database transaction.
+		const maxScanPages = 4
+		claims = make([]kernel.TransitionClaim, 0, min(request.Limit, 128))
+		for page := 0; page < maxScanPages && len(claims) < request.Limit; page++ {
+			pageSize := min(max(request.Limit-len(claims), 32), 128)
+			query := tx.Where("quarantine_code = ? AND available_at <= ? AND (lease_until IS NULL OR lease_until <= ?)",
+				"", request.Now.UTC(), request.Now.UTC()).
+				Order("available_at ASC, committed_at ASC, id ASC").Limit(pageSize)
+			if tx.Name() == "postgres" {
+				query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
 			}
-			transition, decodeErr := kernelTransitionFrom(record)
-			failure := ""
-			if decodeErr != nil {
-				failure = "invalid_events"
-			} else if record.Revision == 0 ||
-				record.ID != fmt.Sprintf("%s:%d", record.RunID, record.Revision) ||
-				!kernel.NeedsTransitionProjection(kernel.RunStatus(record.Status), transition.Events) {
-				failure = "invalid_projection"
+			var records []models.KernelTransitionOutboxRecord
+			if err := query.Find(&records).Error; err != nil {
+				return translateKernelError(err)
 			}
-			if failure != "" {
-				// This row is already locked. Quarantine only delivery metadata
-				// in the SAME claim transaction; preserve immutable events.
+			for _, record := range records {
+				if len(claims) >= request.Limit {
+					break
+				}
+				transition, decodeErr := kernelTransitionFrom(record)
+				failure := ""
+				if decodeErr != nil {
+					failure = "invalid_events"
+				} else if record.Revision == 0 ||
+					record.ID != fmt.Sprintf("%s:%d", record.RunID, record.Revision) ||
+					!kernel.NeedsTransitionProjection(kernel.RunStatus(record.Status), transition.Events) {
+					failure = "invalid_projection"
+				}
+				if failure != "" {
+					// This row is already locked. Quarantine only delivery metadata
+					// in the SAME claim transaction; preserve immutable events.
+					result := tx.Model(&models.KernelTransitionOutboxRecord{}).
+						Where("id = ? AND quarantine_code = ?", record.ID, "").
+						Updates(map[string]interface{}{
+							"quarantine_code": failure, "quarantined_at": request.Now.UTC(),
+							"lease_id": "", "worker_id": "", "lease_until": nil,
+						})
+					if result.Error != nil {
+						return translateKernelApplyError(result.Error)
+					}
+					if result.RowsAffected != 1 {
+						return kernel.ErrConflict
+					}
+					continue
+				}
+				record.Attempts++
+				record.WorkerID = strings.TrimSpace(request.WorkerID)
+				record.LeaseID = fmt.Sprintf("%s:%s:%d", record.WorkerID, record.ID, record.Attempts)
+				leaseUntil := request.Now.UTC().Add(request.LeaseDuration)
+				record.LeaseUntil = &leaseUntil
 				result := tx.Model(&models.KernelTransitionOutboxRecord{}).
-					Where("id = ? AND quarantine_code = ?", record.ID, "").
+					Where("id = ? AND attempts = ? AND quarantine_code = ?", record.ID, record.Attempts-1, "").
 					Updates(map[string]interface{}{
-						"quarantine_code": failure, "quarantined_at": request.Now.UTC(),
-						"lease_id": "", "worker_id": "", "lease_until": nil,
+						"attempts": record.Attempts, "worker_id": record.WorkerID,
+						"lease_id": record.LeaseID, "lease_until": leaseUntil,
 					})
 				if result.Error != nil {
 					return translateKernelApplyError(result.Error)
@@ -335,29 +359,14 @@ func (store *KernelStore) ClaimTransitions(
 				if result.RowsAffected != 1 {
 					return kernel.ErrConflict
 				}
-				continue
-			}
-			record.Attempts++
-			record.WorkerID = strings.TrimSpace(request.WorkerID)
-			record.LeaseID = fmt.Sprintf("%s:%s:%d", record.WorkerID, record.ID, record.Attempts)
-			leaseUntil := request.Now.UTC().Add(request.LeaseDuration)
-			record.LeaseUntil = &leaseUntil
-			result := tx.Model(&models.KernelTransitionOutboxRecord{}).
-				Where("id = ? AND attempts = ? AND quarantine_code = ?", record.ID, record.Attempts-1, "").
-				Updates(map[string]interface{}{
-					"attempts": record.Attempts, "worker_id": record.WorkerID,
-					"lease_id": record.LeaseID, "lease_until": leaseUntil,
+				transition.Attempts = record.Attempts
+				claims = append(claims, kernel.TransitionClaim{
+					Transition: transition, LeaseID: record.LeaseID, WorkerID: record.WorkerID, LeaseUntil: leaseUntil,
 				})
-			if result.Error != nil {
-				return translateKernelApplyError(result.Error)
 			}
-			if result.RowsAffected != 1 {
-				return kernel.ErrConflict
+			if len(records) < pageSize {
+				break // This scan exhausted currently eligible work.
 			}
-			transition.Attempts = record.Attempts
-			claims = append(claims, kernel.TransitionClaim{
-				Transition: transition, LeaseID: record.LeaseID, WorkerID: record.WorkerID, LeaseUntil: leaseUntil,
-			})
 		}
 		return nil
 	})
