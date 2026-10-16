@@ -53,9 +53,13 @@ Late known Model/Tool success is persisted and reported via
 `ErrModelLateResult` / `ErrToolLateResult`.
 
 A clean pause releases the claim; after a trusted approval/budget
-control, invoke `Resume` to acquire a new Epoch. None of this proves
-physical exactly-once effects across a lost lease. See the
-[Stage 2B second safety review](../../docs/audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md).
+control, invoke `Resume` to acquire a new Epoch. For an **already
+persisted external Tool wait**, `NotifyExternalToolResultReady` now
+uses the same guarded Control CAS and Store deadline as other native
+controls. This stores readiness without re-running the Tool; a trusted
+provider receipt must still be reconciled to finish it. **Early signals
+before the wait exists are not buffered.** None of this guarantees
+physical exactly-once effects. See the [Stage 2B/2C signal audit](../../docs/audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md).
 
 ## Runtime kinds
 

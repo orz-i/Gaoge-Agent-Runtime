@@ -7,6 +7,7 @@
 - **Pending simplification review:** [Proposed ADR 0009](adr/0009-minimal-kernel-complexity-reassessment.md) questions mandatory additional ProgressPlan state and forced five-state migration; current accepted contract remains in force until the proposal is approved
 - **Phase 2A implementation evidence:** [Exact guarded approval/budget/terminal CAS](audits/2026-10-16-stage2-phase2a-guarded-control.md) and [code-review remediation](audits/2026-10-16-stage2-phase2a-code-review-remediation.md), not full Agent concurrency or Hosted release authorization
 - **Phase 2B implementation evidence:** [Opt-in native Direct Agent execution leasing](audits/2026-10-16-stage2-phase2b-native-run-execution.md), [first code-review fixes](audits/2026-10-16-stage2-phase2b-code-review-remediation.md) and [second review fixes](audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md); requires trusted Tool-outcome verification and explicit Pending handling, **not** a generic Pump, automatic unknown-COMMIT resolution or external exactly-once acceptance
+- **Stage 2B exit/Stage 2C narrow signal evidence:** [Native post-wait signal guarded CAS](audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md). Does not implement an early-signal inbox, autonomous Pump or production multi-worker effect fencing.
 
 This document is a **test and migration contract** for the future
 `ProgressPlan`, `ReadyWorkSource`, Run-execution epoch and five-state

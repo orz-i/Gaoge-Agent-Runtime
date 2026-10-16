@@ -27,9 +27,11 @@ owners rather than being hidden behind a generic agent framework.
 > durable Tool dispatch identities and verified-receipt reconciliation.
 > The [second Stage 2B review](audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md)
 > requires trusted provider lookups, retains Pending intent and releases
-> idle leases after failed pre-dispatch validation.
-> Autonomous Pump and provider-specific physical exactly-once guarantees
-> remain incomplete.
+> idle leases after failed pre-dispatch validation. The
+> [Stage 2C post-wait signal slice](audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md)
+> reuses guarded CAS for native external-result readiness. Early-signal
+> inbox, autonomous Pump and provider-specific physical exactly-once
+> guarantees remain incomplete.
 
 ## Layer map
 

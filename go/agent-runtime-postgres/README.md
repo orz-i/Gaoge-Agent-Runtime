@@ -36,8 +36,11 @@ native takeover of Epoch-0 Legacy Runs. Late/ambiguous Tool receipts
 use persisted stable identities. The [second Stage 2B audit fix](../../docs/audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md)
 requires trusted Provider verification for external COMMIT, exact native
 receipt IDs and Pending no-auto-replay; pre-dispatch failures release
-newly acquired idle leases. This still **does not certify physical
-exactly-once effects or production multi-worker execution**.
+newly acquired idle leases. The [Stage 2C signal slice](../../docs/audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md)
+adds one native Feature-validated post-wait readiness CAS using the
+existing PostgreSQL row lock, Store clock and Execution Epoch.
+It does not buffer early signals or **certify physical exactly-once
+effects or production multi-worker execution**.
 The branch's unpublished Core APIs require a coordinated module
 release. See [Phase 1 execution evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md)
 and [Phase 2A control evidence](../../docs/audits/2026-10-16-stage2-phase2a-guarded-control.md).

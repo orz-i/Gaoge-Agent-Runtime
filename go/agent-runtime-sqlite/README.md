@@ -179,7 +179,11 @@ uncertain receipt blocks automatic replay. A trusted host must configure
 `ToolOutcomeVerifier` to query the provider by exact Run/Call ID; the
 `ReconcileToolOutcome` method no longer accepts an arbitrary result.
 Pending native Tool receipts also block direct Handler reentry, and
-wrong native receipt IDs cannot clear the dispatch marker.
+wrong native receipt IDs cannot clear the dispatch marker. The
+[Stage 2C post-wait signal slice](../../docs/audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md)
+now stores a Feature-validated external-result signal with the same
+SQLite Run CAS, wakeup and Epoch revocation. It does not buffer signals
+that arrive before a wait is persisted.
 See the [Stage 2B native implementation](../../docs/audits/2026-10-16-stage2-phase2b-native-run-execution.md)
 and [second code-review fixes](../../docs/audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md).
 
