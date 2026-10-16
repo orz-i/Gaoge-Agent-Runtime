@@ -324,6 +324,9 @@ func (runner *Runner) executeModelInvocation(
 	})
 	response, err := runner.generateModelWithPolicyGuarded(ctx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
 		func(dispatchCtx context.Context) error {
+			if err := runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID); err != nil {
+				return err
+			}
 			return runner.validatePendingModelToolDeclarations(dispatchCtx, snapshot, state, invocation.Request)
 		},
 	)

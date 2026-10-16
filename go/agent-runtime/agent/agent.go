@@ -10,6 +10,7 @@ import (
 	"time"
 
 	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
@@ -542,7 +543,8 @@ func (runner *Runner) resolveApproval(
 		return kernel.Snapshot{}, ErrApprovalRequired
 	}
 	if response.Decision == plugin.ApprovalReject {
-		return runner.resumeRejected(ctx, snapshot, state, response)
+		// Rejection is also a resolved checkpoint, not an unproven nil.
+		return runner.resumeRejected(ctx, snapshot, state, response, resolved)
 	}
 	return runner.resumeApproved(ctx, snapshot, state, resolved)
 }
@@ -570,6 +572,12 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrRunTerminal
 	}
+	// Fail before the Run middleware or Tool/model loop if another worker
+	// has ever fenced this Run. Persisting a receipt after a physical side
+	// effect is too late to prevent a duplicate Tool invocation.
+	if err := runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
+		return snapshot, err
+	}
 	invocation := runInvocation(plugin.RunResume, snapshot)
 	return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 		return runner.resumeRunning(nextCtx, snapshot, state)
@@ -578,6 +586,10 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 
 func (runner *Runner) drive(ctx context.Context, snapshot kernel.Snapshot) (kernel.Snapshot, error) {
 	for snapshot.Run.Status == kernel.RunStatusRunning {
+		// A bound lease can expire or be replaced between successive steps.
+		if err := runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
+			return snapshot, err
+		}
 		next, done, err := runner.driveStep(ctx, snapshot)
 		if err != nil || done {
 			return next, err
@@ -1367,6 +1379,12 @@ func (runner *Runner) invokePendingTool(
 	}
 	result, attempt, err := runner.executeToolWithPolicy(ctx, call.ID, snapshot.Run.DeadlineAt, func(callCtx context.Context) (tools.ExecutionResult, error) {
 		return runner.toolChain.Invoke(callCtx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
+			// Recheck after middleware/limiter delays, immediately before the
+			// executor call. A Store gate cannot itself make external effects
+			// physically exactly-once; the receipt is fenced separately.
+			if err := runner.runtime.RequireExecution(nextCtx, snapshot.Run.ID); err != nil {
+				return tools.ExecutionResult{}, err
+			}
 			return runner.executor.Execute(nextCtx, executionRequest)
 		})
 	})
@@ -1569,11 +1587,13 @@ func (runner *Runner) resumeApproved(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision,
+		string(kernel.ControlApproval), snapshot.Checkpoint.ID, encoded, checkpoint)
 	running, revoked, err := runner.runtime.ApplyControl(ctx, snapshot.Run.ID, snapshot.Run.Revision,
 		kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: snapshot.Checkpoint.ID}, kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
 			Events: []kernel.EventDraft{{Type: "interaction.resolved", Message: "Tool call approved", Wakeup: true}},
-		})
+		}, proof)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -1591,6 +1611,7 @@ func (runner *Runner) resumeRejected(
 	snapshot kernel.Snapshot,
 	state runState,
 	response plugin.ApprovalResponse,
+	resolved *kernel.Checkpoint,
 ) (kernel.Snapshot, error) {
 	call, ok := nextPendingCall(state)
 	if !ok {
@@ -1605,11 +1626,13 @@ func (runner *Runner) resumeRejected(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision,
+		string(kernel.ControlApproval), snapshot.Checkpoint.ID, encoded, resolved)
 	running, revoked, err := runner.runtime.ApplyControl(ctx, snapshot.Run.ID, snapshot.Run.Revision,
 		kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: snapshot.Checkpoint.ID}, kernel.Mutation{
-			Status: kernel.RunStatusRunning, State: encoded,
+			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: resolved,
 			Events: []kernel.EventDraft{{Type: "tool.rejected", Message: "Tool call rejected", Wakeup: true}},
-		})
+		}, proof)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
