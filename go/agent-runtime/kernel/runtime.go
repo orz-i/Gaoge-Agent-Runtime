@@ -85,6 +85,9 @@ type Runtime struct {
 	store Store
 	clock Clock
 	ids   IDSource
+	// execution optionally binds this Runtime to one Store-authorized segment.
+	// It is never inherited by a fresh Runtime created from the same Store.
+	execution *ExecutionLease
 }
 
 // New creates a minimal Runtime with no optional feature dependencies.
@@ -160,6 +163,9 @@ func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevisio
 	if runtime == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 {
 		return Snapshot{}, ErrInvalidInput
 	}
+	if !runtime.validBoundRun(strings.TrimSpace(runID)) {
+		return Snapshot{}, ErrExecutionConflict
+	}
 	current, err := runtime.store.Load(ctx, strings.TrimSpace(runID))
 	if err != nil {
 		return Snapshot{}, err
@@ -185,7 +191,15 @@ func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevisio
 		Run: next, State: cloneJSON(mutation.State),
 		Checkpoint: cloneCheckpoint(mutation.Checkpoint), Result: cloneResult(mutation.Result),
 	}
-	return runtime.store.Apply(ctx, runID, expectedRevision, StoreMutation{Record: record, Events: mutation.Events})
+	mutationRecord := StoreMutation{Record: record, Events: mutation.Events}
+	if runtime.execution != nil {
+		store, ok := runtime.store.(ExecutionStore)
+		if !ok {
+			return Snapshot{}, ErrExecutionRequired
+		}
+		return store.ApplyExecution(ctx, *runtime.execution, expectedRevision, mutationRecord)
+	}
+	return runtime.store.Apply(ctx, runID, expectedRevision, mutationRecord)
 }
 
 // NewID creates a public identifier through the configured entropy source.

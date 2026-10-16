@@ -19,6 +19,8 @@ type Store struct {
 	events          map[string][]kernel.Event
 	transitions     map[string]transitionState
 	transitionOrder []string
+	execution       map[string]memoryExecutionState
+	executionClock  func() time.Time
 }
 
 type transitionState struct {
@@ -45,7 +47,9 @@ func cloneRun(run kernel.Run) kernel.Run {
 func NewStore() *Store {
 	return &Store{
 		records: make(map[string]kernel.Snapshot), events: make(map[string][]kernel.Event),
-		transitions: make(map[string]transitionState),
+		transitions:    make(map[string]transitionState),
+		execution:      make(map[string]memoryExecutionState),
+		executionClock: time.Now,
 	}
 }
 
@@ -101,6 +105,14 @@ func (store *Store) Load(_ context.Context, runID string) (kernel.Snapshot, erro
 func (store *Store) Apply(_ context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.execution[runID].fenced {
+		return kernel.Snapshot{}, kernel.ErrExecutionRequired
+	}
+	return store.applyLocked(runID, expectedRevision, mutation)
+}
+
+// applyLocked is reached only after ordinary or fenced eligibility checks.
+func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	current, ok := store.records[runID]
 	if !ok {
 		return kernel.Snapshot{}, kernel.ErrNotFound
