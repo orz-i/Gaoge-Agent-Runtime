@@ -152,12 +152,21 @@ across heartbeats. Plain `Apply` is permanently fenced off
 for that Run after the first claim. A fresh process can safely claim
 an expired segment under a higher epoch without changing Run Revision.
 
-**Do not enable fenced full Agent loops with approvals, budgets, pending
-signals, or autonomous Pump workers yet.** Stage 2 Phase 2 must provide
-a small Feature-validated protected Control CAS and unified recovery
-eligibility; otherwise a waiting Run would fail closed, not be resumable by an
-unfenced approval call. Execution fencing does not prevent a stale
-in-flight Tool from performing an external physical effect.
+**Stage 2 Phase 2A:** the adapter now supports a narrow
+`ControlStore.ApplyControl` for exact approval Checkpoint, blocked
+allowance dimension, cancellation and Store-time deadline expiration.
+Control CAS revokes the former Epoch and returns whether an old owner
+was revoked; an Agent will not auto-dispatch external effects before a
+new execution claim, even with `DeferResumption=false`. Regression
+tests cover three-process Tool approval/rejection, two-process budget
+grants, and atomic rollback after injected ReadyWork failures.
+
+**Do not enable automatic concurrent Agent/Pump execution yet.** The
+production Agent `StartRun`/`Resume` path does not automatically claim
+this lease, external Tool effects are not physically fenced, and
+pending signal/unknown-result reconciliation is still Stage 2 work.
+Use explicit controlled test flows only. See the
+[Phase 2A evidence](../../docs/audits/2026-10-16-stage2-phase2a-guarded-control.md).
 
 The execution columns are part of the still-**unreleased Schema v1**;
 no automatic migration or version bump is implied. The local adapter

@@ -16,6 +16,9 @@ owners rather than being hidden behind a generic agent framework.
 > reassessment (ADR 0009)](adr/0009-minimal-kernel-complexity-reassessment.md)
 > recommends avoiding duplicate recovery state and an unproven
 > five-state migration; it does not supersede ADR 0008 until accepted.
+> [Stage 2 Phase 2A](audits/2026-10-16-stage2-phase2a-guarded-control.md)
+> adds a small guarded control CAS for approval, budget and terminal
+> actions; full Agent execution fencing remains incomplete.
 
 ## Layer map
 

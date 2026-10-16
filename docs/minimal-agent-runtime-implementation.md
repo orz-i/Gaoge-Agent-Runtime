@@ -5,6 +5,7 @@
 - **Baseline:** `main@44785f85d3117e9629c34ed48c7a6b458dbfbfab`
 - **Scope:** Normative gates for staged implementation; driver and ReadyWork V1 choices are in the [Stage 0 decision record](audits/2026-10-15-minimal-runtime-stage0-decisions.md)
 - **Pending simplification review:** [Proposed ADR 0009](adr/0009-minimal-kernel-complexity-reassessment.md) questions mandatory additional ProgressPlan state and forced five-state migration; current accepted contract remains in force until the proposal is approved
+- **Phase 2A implementation evidence:** [Exact guarded approval/budget/terminal CAS](audits/2026-10-16-stage2-phase2a-guarded-control.md), not full Agent concurrency or Hosted release authorization
 
 This document is a **test and migration contract** for the future
 `ProgressPlan`, `ReadyWorkSource`, Run-execution epoch and five-state

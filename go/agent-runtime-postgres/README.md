@@ -19,11 +19,15 @@ An explicit migration is required before trying these APIs on PostgreSQL.
 The new `ExecutionStore` port uses PostgreSQL row locking and
 `clock_timestamp()` for authoritative epoch/expiry CAS. A real PostgreSQL
 16 test is available via `TEST_POSTGRES_DSN`, while ordinary GORM SQLite
-unit tests do **not** certify PostgreSQL fencing. Do not enable the new
-port for Agents that may enter an approval/budget wait until authorized
-a narrow validated-control CAS and recovery eligibility are implemented.
-The branch's unreleased Kernel APIs require a coordinated Core/adapter release; see
-[Stage 2 Phase 1 evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md).
+unit tests do **not** certify PostgreSQL fencing. The experimental
+Stage 2 Phase 2A adds `ControlStore.ApplyControl` for trusted,
+Feature-validated approval, budget, cancellation and deadline CAS.
+It atomically invalidates prior Run ownership with the control state,
+journal and outbox; real PostgreSQL 16 control tests pass. Full Agent
+side-effect execution and recovery are **not yet production-enabled**.
+The branch's unpublished Core APIs require a coordinated module
+release. See [Phase 1 execution evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md)
+and [Phase 2A control evidence](../../docs/audits/2026-10-16-stage2-phase2a-guarded-control.md).
 
 Harness persistence has its own
 `harnesspostgres.Migrate(db)` and `harnesspostgres.New(db)` in

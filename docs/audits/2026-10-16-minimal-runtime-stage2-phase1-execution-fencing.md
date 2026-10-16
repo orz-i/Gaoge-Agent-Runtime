@@ -134,6 +134,12 @@ three Store implementations:
 
 ## Next implementation increment
 
+**Follow-up implementation evidence:** [Stage 2 Phase 2A — guarded
+Feature controls](2026-10-16-stage2-phase2a-guarded-control.md)
+has since closed the manual approval/allowance/cancellation/deadline
+CAS gaps documented below. This section remains a historical
+Phase 1 checkpoint, not current Phase 2A status.
+
 **Design-reassessment note (2026-10-16):**
 [Proposed ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md)
 and the [complexity audit](2026-10-16-stage2-kernel-complexity-audit.md)
