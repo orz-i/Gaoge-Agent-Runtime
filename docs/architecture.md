@@ -20,8 +20,10 @@ owners rather than being hidden behind a generic agent framework.
 > adds a small guarded control CAS for approval, budget and terminal
 > actions. The [Phase 2A security remediation](audits/2026-10-16-stage2-phase2a-code-review-remediation.md)
 > seals trusted Feature controls and checks execution ownership before
-> external Model/Tool dispatch; full concurrent Agent orchestration
-> and physical exactly-once effects remain incomplete.
+> external Model/Tool dispatch. The [Stage 2B native Agent slice](audits/2026-10-16-stage2-phase2b-native-run-execution.md)
+> now lets explicitly configured `StartRun`/`Resume` claim and renew
+> Store execution leases; autonomous Pump and reconciliation of physical
+> external effects remain incomplete.
 
 ## Layer map
 

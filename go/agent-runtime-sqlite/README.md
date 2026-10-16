@@ -166,12 +166,20 @@ when `DeferResumption=false`. Regression tests cover three-process
 Tool approval/rejection, two-process budget grants, expired gates,
 and atomic rollback after injected ReadyWork failures.
 
-**Do not enable automatic concurrent Agent/Pump execution yet.** The
-production Agent `StartRun`/`Resume` path does not automatically claim
-this lease, external Tool effects are not physically fenced, and
-pending signal/unknown-result reconciliation is still Stage 2 work.
-Use explicit controlled test flows only. See the
-[Phase 2A evidence](../../docs/audits/2026-10-16-stage2-phase2a-guarded-control.md).
+**Stage 2B native Direct Agent (experimental):** opt in with
+`agent.Dependencies.RunExecution = &agent.RunExecution{OwnerID: ...,
+LeaseDuration: ...}`. `StartRun`/`Resume` then claim Store execution
+ownership themselves, carry that same epoch through the Agent loop,
+renew near bounded provider-call windows and release after clean
+completion/pause. Real fresh-process SQLite tests cover independent
+Tool approvals, rejection, allowance recovery and competing owners.
+See the [Stage 2B implementation audit](../../docs/audits/2026-10-16-stage2-phase2b-native-run-execution.md).
+
+**Do not enable unattended production multi-worker Agent/Pump execution
+yet.** In-flight external Model/Tool effects are not physically fenced,
+and pending signal / unknown-result reconciliation remains Stage 2 work.
+An app/host still explicitly invokes `Resume`; there is no local
+background Pump or extra queue.
 
 The execution columns are part of the still-**unreleased Schema v1**;
 no automatic migration or version bump is implied. The local adapter

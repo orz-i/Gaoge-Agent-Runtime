@@ -4,6 +4,7 @@
 - **Date:** 2026-10-16
 - **Base revision:** `governance/kernel-runtime@87ef1f3`
 - **Design:** [Proposed minimal ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md); [Phase 2A guarded-control implementation](2026-10-16-stage2-phase2a-guarded-control.md)
+- **Follow-up:** [Stage 2B opt-in native Agent execution](2026-10-16-stage2-phase2b-native-run-execution.md) has now implemented owner acquisition for `StartRun` and `Resume`. This Phase 2A audit remains a historical checkpoint.
 - **Scope:** Kernel + first-party Agent + Memory/SQLite/PostgreSQL; no new queue, progress schema, state machine or database format version
 
 ## Findings fixed
