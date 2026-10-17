@@ -3,7 +3,7 @@
 - **审计/接受日期：** 2026-10-17
 - **基线：** `governance/kernel-runtime@ec53ad90342f66a2f3af30dcc2e38d22f52ed983`（本轮文档提交前）
 - **架构决定：** 项目负责人明确接受 [ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md)；[ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) 继续 Accepted，但其「强制七类 ProgressPlan / 重复 ActiveSegment / Stage 3 必须五态硬切」被 ADR 0009 **局部修订**。其余安全条款不被撤销。
-- **Stage 3 准入裁决：** **GO — 仅准入有界的架构、复杂度与六态/五态兼容性复评。**
+- **Stage 3 准入裁决：** **GO — 仅准入有界的架构、复杂度与六态/五态兼容性复评。** 随后的[单次设计复评与退出结论](2026-10-17-stage3-six-state-design-decision.md)已完成，确定保留六态；本审计保留准入时点的证据。
 - **不准入：** 以 Stage 3 为名自动引入五态 `suspended`、通用 ProgressPlan、SQLite Schema v2、Run Store 新表/端口、生产 Local Pump/Hosted 承诺或未经另行批准的发布。本报告不是 Stage 3 的实施命令或生产放行。
 
 ## 1. Stage 2 退出前提：原裁决与修订后边界

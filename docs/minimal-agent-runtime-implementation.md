@@ -473,6 +473,8 @@ MUST NOT be silently reinterpreted as a new generic `suspended` state.
 No Schema bump, SQL/Queue/wire conversion, status alias or compatibility
 fallback is authorized by entry to Stage 3.
 
+**Stage 3 design review completed on 2026-10-17: [retain six statuses](audits/2026-10-17-stage3-six-state-design-decision.md).** No measured migration benefit justified a five-state cut, and none was implemented.
+
 Stage 3 is a **bounded architecture/compatibility comparison**, not another
 Kernel implementation phase. Its entry requires the already tested Stage 2
 Kernel safety baseline and explicit acceptance of ADR 0009. Its deliverable

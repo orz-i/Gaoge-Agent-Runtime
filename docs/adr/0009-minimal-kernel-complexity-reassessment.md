@@ -183,3 +183,9 @@ Before adding any new cross-Store contract, document:
   explicit instead of silently publishing mixed Core/adapter APIs?
 
 **Accepted decision:** the Stage 2 eligibility contract and Stage 3 rollout text in ADR 0008 and its implementation annex must describe these smaller existing Feature-owned obligations, not a mandatory parallel ProgressPlan. ADR 0008 remains accepted for every invariant **not expressly amended** here. This acceptance is a design governance decision, **not** permission to deploy, publish a breaking contract or claim supported multi-worker/mobile/Hosted durability.
+
+## 7. Stage 3 design result — 2026-10-17
+
+**Decision: retain six Run statuses; Stage 3 design review completed.** The [one-time compatibility/complexity audit](../audits/2026-10-17-stage3-six-state-design-decision.md) inspected the actual Kernel, Feature, Harness, A2A, HTTP, TypeScript, OpenAPI and Store contracts. There is no measured five-state A/B simplification to offset the approval-vs-budget gate mapping, persisted-data migration, event/wire changes and consumer rollback risks. A proposed `suspended` status would save only four literal UTF-8 bytes per replaced status field; the distinct permission proofs remain necessary. No five-state migration ADR is proposed or approved.
+
+**Outcome:** preserve the existing six-state contract and one Feature-owned recovery authority. Stage 3 adds **no production code, new Store column, public API or SQLite schema version**. Product-specific Host/Provider/mobile safety gates remain independent and may not be described as production-ready merely because this design review is closed.

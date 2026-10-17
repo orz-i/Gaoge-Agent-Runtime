@@ -13,7 +13,8 @@ owners rather than being hidden behind a generic agent framework.
 > [Stage 2 final engineering exit](audits/2026-10-16-stage2-final-exit-audit.md)
 > covers audited experimental 2A/2B/2C control, Native Direct, signal,
 > quarantine and explicit Apply-proof increments. [Stage 3 admission](audits/2026-10-17-stage3-admission-after-adr0009.md)
-> authorizes **design/compatibility reassessment only**; real Host/Provider,
+> authorized a bounded design review; the [completed Stage 3 decision](audits/2026-10-17-stage3-six-state-design-decision.md)
+> retains six statuses without a schema or API migration. Real Host/Provider,
 > local activation, shared Profile, mobile and migration/release acceptance
 > remain independently gated. These experiments do not certify physical
 > exactly-once external effects or production Hosted/mobile support.
