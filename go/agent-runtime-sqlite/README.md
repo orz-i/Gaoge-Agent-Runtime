@@ -120,12 +120,16 @@ inspect/reopen the existing path rather than attempting to overwrite it.
 **Schema:** the **unreleased first-version Schema remains
 `PRAGMA user_version=1`**. Changing development-only DDL does **not**
 automatically create a new persisted format version. The adapter
-strictly validates the current table and index definitions on Open,
-so earlier experimental files using a different v1 layout fail with
-`ErrUnsupportedSchema`; their contents are neither migrated nor
-removed. This includes **earlier development v1 files missing the new quarantine columns or the Stage 5 RunRelation table/index**. Back up/transform or explicitly recreate those experimental fixtures; do not call this a published-schema v2 migration. Developer fixtures must be deliberately backed up and
-recreated or explicitly transformed, without pretending that an
-unreleased prototype has a production migration contract.
+strictly validates expected table and index definitions on Open and
+rejects extra persistent tables, indexes, views and triggers (ignoring
+SQLite's reserved internal objects). An unrecognized trigger can otherwise
+make a successful relation insert disappear. Earlier experimental files
+using a different v1 layout fail with `ErrUnsupportedSchema`; their
+contents are neither migrated nor removed. This includes earlier v1
+development files missing quarantine columns or Stage 5 RunRelation
+DDL. Back up and explicitly transform or recreate those experimental
+fixtures; do not call this a published-schema v2 migration. No existing
+data is silently deleted or migrated.
 
 Persisted timestamps used for ready/lease/due operations and relation
 creation must fit signed nanoseconds (~1677–2262); invalid/overflowing
@@ -152,7 +156,8 @@ claim/retry/ACK, and concurrent revision updates.
 
 Additional SQLite tests include transactional failure injection,
 private file/symlink checks, missing-database recovery refusal, strict
-schema rejection, bounded timestamp checks, corrupted-payload and
+schema rejection (including unknown triggers without WAL/header mutation),
+bounded timestamp checks, corrupted-payload and
 semantic ReadyWork quarantine, preserved unacknowledged outbox history,
 explicit first-create retry after cancellation, and **real subprocess
 restarts** after initial Run creation, model receipt commit and Tool
