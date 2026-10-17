@@ -28,7 +28,7 @@ func (s *claimantAfterCreateStore) Create(ctx context.Context, record kernel.Rec
 	if err != nil {
 		return snap, err
 	}
-	s.lease, err = s.ExecutionStore.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+	s.lease, err = s.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
 		RunID: snap.Run.ID, OwnerID: "fixture-stealer", LeaseDuration: time.Minute,
 	})
 	return snap, err
