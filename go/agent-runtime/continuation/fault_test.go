@@ -221,7 +221,7 @@ func TestQueueClaimCrashBeforeAckRedeliversAfterLeaseExpiry(t *testing.T) {
 	}
 }
 
-func TestDispatcherConsumesDuplicateLogicalContinuationOnce(t *testing.T) {
+func TestDispatcherDoesNotReplayDuplicateLogicalContinuationWithoutConsumptionProof(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
 	snapshot := createRun(t, runtime, "logical-once", kernel.RunKind("echo"))
@@ -240,11 +240,11 @@ func TestDispatcherConsumesDuplicateLogicalContinuationOnce(t *testing.T) {
 	if err = dispatcher.Dispatch(t.Context(), payload); err != nil {
 		t.Fatal(err)
 	}
-	if err = dispatcher.Dispatch(t.Context(), payload); err != nil {
-		t.Fatal(err)
+	if err = dispatcher.Dispatch(t.Context(), payload); !errors.Is(err, kernel.ErrConflict) {
+		t.Fatalf("newer running Revision is not a proven consumption of the old wakeup: %v", err)
 	}
 	if resumer.calls != 1 {
-		t.Fatalf("duplicate logical continuation consumed %d times", resumer.calls)
+		t.Fatalf("duplicate logical continuation was replayed %d times", resumer.calls)
 	}
 }
 

@@ -25,6 +25,11 @@ type WorkerOptions struct {
 	Reconciler        Reconciler
 	ReconcileInterval time.Duration
 	Report            ErrorReporter
+	// TerminalQuarantine is supplied ONLY by a trusted host. It must
+	// authenticate the work and atomically block the current Run/Generation
+	// in the authoritative Store before returning nil. A protected Queue
+	// Job cannot be sent to Dead Letter if this callback is absent/fails.
+	TerminalQuarantine func(context.Context, Payload, error) error
 }
 
 // Worker owns the optional continuation background lifecycle.
@@ -185,6 +190,27 @@ func (worker *Worker) consumeDelivery(ctx context.Context, delivery queuecore.De
 	if err == nil {
 		err = worker.handler.Dispatch(dispatchCtx, payload)
 	}
+	terminalFenced := false
+	if err != nil {
+		// A final Queue Nack is NOT authority to DLQ a Run. In particular,
+		// Redis independently reclaims crashed/expired leases: those must
+		// remain retryable until a PG Run quarantine has durably committed.
+		if delivery.Job.Policy.RequireTerminalFence &&
+			delivery.Job.Attempt >= delivery.Job.Policy.MaxAttempts {
+			if payloadErr := validateTerminalQuarantinePayload(delivery.Job, payload); payloadErr != nil {
+				err = errors.Join(err, payloadErr, ErrTerminalFenceRequired)
+			} else if worker.options.TerminalQuarantine == nil {
+				err = errors.Join(err, ErrTerminalFenceRequired)
+			} else if fenceErr := worker.options.TerminalQuarantine(dispatchCtx, payload, err); fenceErr != nil {
+				err = errors.Join(err, ErrTerminalFenceRequired, fenceErr)
+			} else {
+				terminalFenced = true
+			}
+		}
+	}
+	// Keep the Queue lease renewed THROUGH the cross-Store quarantine
+	// commit. Cancelling renewal before a slow PG write opens an avoidable
+	// expiry/reclaim window in which another Worker can observe the Run.
 	cancel()
 	if leaseDone != nil {
 		if leaseErr := <-leaseDone; leaseErr != nil {
@@ -207,10 +233,21 @@ func (worker *Worker) consumeDelivery(ctx context.Context, delivery queuecore.De
 	} else {
 		_, nackErr := worker.queue.Nack(ctx, queuecore.NackRequest{
 			LeaseRequest: request, ErrorCode: "continuation.dispatch_failed", Error: err.Error(),
+			AllowDeadLetter: terminalFenced,
 		})
 		err = errors.Join(err, nackErr)
 	}
 	worker.report(err)
+}
+
+// Invalid payloads cannot identify an authoritative Run and are orphan
+// diagnostics. Never grant final-DLQ permission for such work.
+func validateTerminalQuarantinePayload(job queuecore.Job, payload Payload) error {
+	if job.Kind != JobKind || payload.RunID == "" || payload.ExpectedRevision == 0 ||
+		payload.SchemaVersion != SchemaVersion {
+		return ErrInvalidInput
+	}
+	return nil
 }
 
 func keepDeliveryLease(

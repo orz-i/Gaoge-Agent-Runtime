@@ -4,6 +4,21 @@ Gaoge Agent Runtime is a statically composed Go SDK for durable agent workloads.
 The central design rule is that durability and feature semantics have explicit
 owners rather than being hidden behind a generic agent framework.
 
+> **Accepted Kernel architecture:** [ADR 0008](adr/0008-minimal-agent-runtime-architecture.md)
+> as amended by **accepted [ADR 0009](adr/0009-minimal-kernel-complexity-reassessment.md)**
+> on 2026-10-17. Retain the current **six-state** Run contract and derive
+> recovery from existing Feature State/Checkpoint/intent/receipt/Outbox,
+> with Store-fenced execution epochs. There is **no** mandatory new
+> ProgressPlan, ActiveSegment status or five-state Stage 3 migration.
+> [Stage 2 final engineering exit](audits/2026-10-16-stage2-final-exit-audit.md)
+> covers audited experimental 2A/2B/2C control, Native Direct, signal,
+> quarantine and explicit Apply-proof increments. [Stage 3 admission](audits/2026-10-17-stage3-admission-after-adr0009.md)
+> authorized a bounded design review; the [completed Stage 3 decision](audits/2026-10-17-stage3-six-state-design-decision.md)
+> retains six statuses without a schema or API migration. Real Host/Provider,
+> local activation, shared Profile, mobile and migration/release acceptance
+> remain independently gated. These experiments do not certify physical
+> exactly-once external effects or production Hosted/mobile support.
+
 ## Layer map
 
 ```text
@@ -20,7 +35,7 @@ Host application
   |
   +-- Kernel Runtime
         |
-        +-- Store (memory or PostgreSQL)
+        +-- Store (Memory / SQLite / PostgreSQL)
         +-- RunRelation
         +-- Queue / Run Feed (memory or Redis)
 ```

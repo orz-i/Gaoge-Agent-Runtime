@@ -277,6 +277,9 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 	cancel()
 
 	if callErr == nil {
+		if errors.Is(callContextErr, context.DeadlineExceeded) {
+			return response, ErrModelLateResult
+		}
 		return response, nil
 	}
 	if parentErr := ctx.Err(); parentErr != nil {
@@ -365,6 +368,12 @@ func (runner *Runner) executeToolWithPolicy(
 		release()
 
 		if callErr == nil {
+			// Some SDK Tool clients ignore Context. The physical effect
+			// may already have happened: return its result AND late warning
+			// for durable receipt, never discard it and retry blindly.
+			if errors.Is(callContextErr, context.DeadlineExceeded) {
+				return result, attempt, ErrToolLateResult
+			}
 			return result, attempt, nil
 		}
 		if parentErr := ctx.Err(); parentErr != nil {

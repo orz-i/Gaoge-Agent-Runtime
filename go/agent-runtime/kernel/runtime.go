@@ -37,11 +37,18 @@ func (runtime *Runtime) Cancel(
 	if current.Run.Revision != expectedRevision {
 		return Snapshot{}, ErrConflict
 	}
-	return runtime.Apply(ctx, runID, expectedRevision, Mutation{
+	controlRuntime := runtime
+	if runtime != nil && runtime.execution != nil {
+		unbound := *runtime
+		unbound.execution = nil
+		controlRuntime = &unbound
+	}
+	cancelled, _, err := controlRuntime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlCancel}, Mutation{
 		Status: RunStatusCancelled, State: current.State,
 		ErrorCode: "run.cancelled", ErrorDetail: strings.TrimSpace(reason),
 		Events: []EventDraft{{Type: "run.cancelled", Message: strings.TrimSpace(reason)}},
-	})
+	}, nil)
+	return cancelled, err
 }
 
 // Expire fails one Run only when its frozen DeadlineAt is due.
@@ -60,12 +67,21 @@ func (runtime *Runtime) Expire(
 	if current.Run.DeadlineAt == nil || current.Run.DeadlineAt.After(runtime.Now()) {
 		return current, false, nil
 	}
-	expired, err := runtime.Apply(ctx, runID, expectedRevision, Mutation{
+	controlRuntime := runtime
+	if runtime != nil && runtime.execution != nil {
+		unbound := *runtime
+		unbound.execution = nil
+		controlRuntime = &unbound
+	}
+	expired, _, err := controlRuntime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlDeadline}, Mutation{
 		Status: RunStatusFailed, State: current.State,
 		ErrorCode: "run.deadline_exceeded", ErrorDetail: ErrDeadline.Error(),
 		Events: []EventDraft{{Type: "run.deadline_exceeded", Message: ErrDeadline.Error()}},
-	})
-	return expired, true, err
+	}, nil)
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	return expired, true, nil
 }
 
 // IDSource supplies non-deterministic public identifiers.
@@ -85,6 +101,9 @@ type Runtime struct {
 	store Store
 	clock Clock
 	ids   IDSource
+	// execution optionally binds this Runtime to one Store-authorized segment.
+	// It is never inherited by a fresh Runtime created from the same Store.
+	execution *ExecutionLease
 }
 
 // New creates a minimal Runtime with no optional feature dependencies.
@@ -110,8 +129,11 @@ func (runtime *Runtime) Descriptor() FeatureDescriptor {
 
 // Create starts one explicitly selected Runtime Kind.
 func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snapshot, error) {
-	if runtime == nil || !validCreateRequest(request) {
+	if runtime == nil || !validCreateRequest(request) || hasReservedApplyEvidence(request.Events) {
 		return Snapshot{}, ErrInvalidInput
+	}
+	if request.ExecutionRequired && !runtime.SupportsExecution() {
+		return Snapshot{}, ErrExecutionRequired
 	}
 	runID := strings.TrimSpace(request.ID)
 	if runID == "" {
@@ -127,6 +149,7 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		return Snapshot{}, ErrDeadline
 	}
 	record := Record{
+		ExecutionRequired: request.ExecutionRequired,
 		Run: Run{
 			ID: runID, Kind: request.Kind, Actor: request.Actor, Thread: request.Thread,
 			RequestID: strings.TrimSpace(request.RequestID), Goal: strings.TrimSpace(request.Goal),
@@ -157,8 +180,20 @@ func (runtime *Runtime) ListEvents(ctx context.Context, runID string, afterSeq i
 
 // Apply validates and atomically commits one feature-owned state transition.
 func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevision uint64, mutation Mutation) (Snapshot, error) {
+	return runtime.apply(ctx, runID, expectedRevision, mutation, false)
+}
+
+func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevision uint64, mutation Mutation, evidence bool) (Snapshot, error) {
 	if runtime == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 {
 		return Snapshot{}, ErrInvalidInput
+	}
+	// A first-party proof can only be appended by ApplyIdentified. Raw
+	// Feature EventDrafts must not impersonate a committed operation.
+	if !evidence && hasReservedApplyEvidence(mutation.Events) {
+		return Snapshot{}, ErrInvalidInput
+	}
+	if !runtime.validBoundRun(strings.TrimSpace(runID)) {
+		return Snapshot{}, ErrExecutionConflict
 	}
 	current, err := runtime.store.Load(ctx, strings.TrimSpace(runID))
 	if err != nil {
@@ -170,6 +205,20 @@ func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevisio
 	if err = validateMutation(current, mutation); err != nil {
 		return Snapshot{}, err
 	}
+	proposed := runtime.makeStoreMutation(current, mutation)
+	if runtime.execution != nil {
+		store, ok := runtime.store.(ExecutionStore)
+		if !ok {
+			return Snapshot{}, ErrExecutionRequired
+		}
+		return store.ApplyExecution(ctx, *runtime.execution, expectedRevision, proposed)
+	}
+	return runtime.store.Apply(ctx, runID, expectedRevision, proposed)
+}
+
+// makeStoreMutation is the common validated replacement builder used by
+// normal execution and Feature-owned guarded control transitions.
+func (runtime *Runtime) makeStoreMutation(current Snapshot, mutation Mutation) StoreMutation {
 	next := current.Run
 	next.Status = mutation.Status
 	next.Revision++
@@ -185,7 +234,7 @@ func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevisio
 		Run: next, State: cloneJSON(mutation.State),
 		Checkpoint: cloneCheckpoint(mutation.Checkpoint), Result: cloneResult(mutation.Result),
 	}
-	return runtime.store.Apply(ctx, runID, expectedRevision, StoreMutation{Record: record, Events: mutation.Events})
+	return StoreMutation{Record: record, Events: mutation.Events}
 }
 
 // NewID creates a public identifier through the configured entropy source.

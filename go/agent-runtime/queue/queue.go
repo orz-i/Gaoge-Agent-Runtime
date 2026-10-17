@@ -39,6 +39,10 @@ type Policy struct {
 	InitialBackoff    time.Duration `json:"initialBackoff"`
 	MaxBackoff        time.Duration `json:"maxBackoff"`
 	BackoffMultiplier int           `json:"backoffMultiplier"`
+	// RequireTerminalFence prevents Nack/lease expiry from DLQing a Job
+	// without an explicit proof that the owning Run Store was fenced.
+	// The false/legacy value preserves existing Queue behavior and hashes.
+	RequireTerminalFence bool `json:"requireTerminalFence,omitempty"`
 }
 
 // PrepareEnqueue validates one request and returns the canonical initial Job.
@@ -136,6 +140,10 @@ type NackRequest struct {
 	LeaseRequest
 	ErrorCode string
 	Error     string
+	// Only a trusted worker with a COMMITTED authoritative Run quarantine
+	// may request final DLQ for a RequireTerminalFence Job. The Queue
+	// validates lease/attempt; it cannot verify another database's proof.
+	AllowDeadLetter bool
 }
 
 // normalizePolicy freezes safe defaults and upper bounds.

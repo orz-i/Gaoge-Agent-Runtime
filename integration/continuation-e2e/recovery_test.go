@@ -94,7 +94,7 @@ func TestRealPostgresRedisSchedulerRestart(t *testing.T) {
 	}
 	defer func() { sqlDB, _ := db2.DB(); _ = sqlDB.Close() }()
 	client2 := goredis.NewClient(&goredis.Options{Addr: address})
-	defer client2.Close()
+	defer func() { _ = client2.Close() }()
 	queue2 := redisadapter.NewQueue(client2, redisadapter.QueueOptions{KeyPrefix: prefix})
 	store2 := postgresadapter.NewKernelStore(db2)
 	runtime2, err := kernel.New(kernel.Dependencies{Store: store2})

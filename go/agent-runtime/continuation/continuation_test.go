@@ -178,7 +178,7 @@ func TestSchedulerPreservesDurableWakeupAvailability(t *testing.T) {
 	}
 }
 
-func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
+func TestDispatcherRoutesExactRevisionAndRetainsUnverifiedStaleDelivery(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
 	resumers := map[kernel.RunKind]*recordingResumer{
@@ -206,9 +206,17 @@ func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
 		if err = dispatcher.Dispatch(t.Context(), payload); err != nil || resumer.calls != 1 {
 			t.Fatalf("kind %s: calls=%d error=%v", kind, resumer.calls, err)
 		}
-		payload.ExpectedRevision++
-		if err = dispatcher.Dispatch(t.Context(), payload); err != nil || resumer.calls != 1 {
-			t.Fatalf("stale kind %s: calls=%d error=%v", kind, resumer.calls, err)
+		// An actual stale delivery carries its original immutable source
+		// revision after a different Run mutation has advanced the Store.
+		if _, err = runtime.Apply(t.Context(), snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: snapshot.State,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		// A newer running Revision is not an authoritative consumption
+		// marker. Retain this old candidate without replaying it.
+		if err = dispatcher.Dispatch(t.Context(), payload); !errors.Is(err, kernel.ErrConflict) || resumer.calls != 1 {
+			t.Fatalf("stale unverified kind %s: calls=%d error=%v", kind, resumer.calls, err)
 		}
 	}
 }
@@ -253,8 +261,8 @@ func TestDispatcherSkipsPausedBudgetUntilExplicitGrantWakeup(t *testing.T) {
 	if err = dispatcher.Dispatch(t.Context(), continuation.Payload{
 		RunID: renewed.Run.ID, ExpectedRevision: paused.Run.Revision, Trigger: continuation.TriggerRunReady,
 		SourceRunID: renewed.Run.ID, SourceRevision: paused.Run.Revision,
-	}); err != nil || resumer.calls != 1 {
-		t.Fatalf("stale pause replayed: %d %v", resumer.calls, err)
+	}); !errors.Is(err, kernel.ErrConflict) || resumer.calls != 1 {
+		t.Fatalf("stale pause lost its unverified recovery fact or replayed: %d %v", resumer.calls, err)
 	}
 }
 

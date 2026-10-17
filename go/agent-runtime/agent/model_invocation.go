@@ -45,9 +45,12 @@ type ModelInvocation struct {
 	Usage               *model.Usage          `json:"usage,omitempty"`
 	ExecutionAttempt    uint32                `json:"executionAttempt,omitempty"`
 	ExecutionLeaseUntil *time.Time            `json:"executionLeaseUntil,omitempty"`
-	CreatedAt           time.Time             `json:"createdAt"`
-	CompletedAt         *time.Time            `json:"completedAt,omitempty"`
-	ConsumedAt          *time.Time            `json:"consumedAt,omitempty"`
+	// RetryAfter is the Feature-owned ReadyAt gate for a released,
+	// retryable model call. It is not a second execution lease.
+	RetryAfter  *time.Time `json:"retryAfter,omitempty"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	CompletedAt *time.Time `json:"completedAt,omitempty"`
+	ConsumedAt  *time.Time `json:"consumedAt,omitempty"`
 }
 
 func telemetryModelUsage(value *model.Usage) runtimebudget.Usage {
@@ -153,6 +156,10 @@ func cloneModelInvocation(value ModelInvocation) ModelInvocation {
 		leaseUntil := value.ExecutionLeaseUntil.UTC()
 		value.ExecutionLeaseUntil = &leaseUntil
 	}
+	if value.RetryAfter != nil {
+		retryAfter := value.RetryAfter.UTC()
+		value.RetryAfter = &retryAfter
+	}
 	if value.CompletedAt != nil {
 		completed := value.CompletedAt.UTC()
 		value.CompletedAt = &completed
@@ -175,6 +182,10 @@ func validModelInvocations(values []ModelInvocation) bool {
 		switch invocation.Status {
 		case ModelInvocationPending:
 			active++
+			if invocation.RetryAfter != nil &&
+				(invocation.RetryAfter.IsZero() || invocation.ExecutionLeaseUntil != nil) {
+				return false
+			}
 			if index != len(values)-1 || strings.TrimSpace(invocation.Request.InvocationID) != invocation.ID {
 				return false
 			}
@@ -187,7 +198,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 			}
 		case ModelInvocationCompleted:
 			active++
-			if index != len(values)-1 || invocation.CompletedAt == nil ||
+			if invocation.RetryAfter != nil || index != len(values)-1 || invocation.CompletedAt == nil ||
 				invocation.ExecutionLeaseUntil != nil || strings.TrimSpace(invocation.Request.InvocationID) != invocation.ID ||
 				!validModelResponse(invocation.Response) {
 				return false
@@ -197,7 +208,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 				return false
 			}
 		case ModelInvocationConsumed:
-			if invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.ExecutionLeaseUntil != nil ||
+			if invocation.RetryAfter != nil || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.ExecutionLeaseUntil != nil ||
 				!validModelResponse(invocation.Response) {
 				return false
 			}
@@ -324,10 +335,14 @@ func (runner *Runner) executeModelInvocation(
 	})
 	response, err := runner.generateModelWithPolicyGuarded(ctx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
 		func(dispatchCtx context.Context) error {
+			if err := runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID); err != nil {
+				return err
+			}
 			return runner.validatePendingModelToolDeclarations(dispatchCtx, snapshot, state, invocation.Request)
 		},
 	)
-	if err != nil {
+	late := errors.Is(err, ErrModelLateResult)
+	if err != nil && !late {
 		endedAt := runner.clock.Now().UTC()
 		phase := observability.PhaseFailed
 		errorCode := "provider_error"
@@ -419,6 +434,9 @@ func (runner *Runner) executeModelInvocation(
 	runner.publish(ctx, next.Run.ID, plugin.Event{
 		Type: EventModelCompleted, Revision: next.Run.Revision, Status: string(next.Run.Status),
 	})
+	if late {
+		return next, state, ErrModelLateResult
+	}
 	return next, state, nil
 }
 
@@ -435,10 +453,12 @@ func (runner *Runner) claimModelInvocationExecution(
 		return snapshot, state, invocation, ErrInvalidRequest
 	}
 	now := runner.clock.Now().UTC()
-	if invocation.ExecutionLeaseUntil != nil && now.Before(invocation.ExecutionLeaseUntil.UTC()) {
+	if (invocation.ExecutionLeaseUntil != nil && now.Before(invocation.ExecutionLeaseUntil.UTC())) ||
+		(invocation.RetryAfter != nil && now.Before(invocation.RetryAfter.UTC())) {
 		return snapshot, state, invocation, ErrModelInvocationBusy
 	}
 	leaseUntil := now.Add(runner.modelLeaseDuration())
+	invocation.RetryAfter = nil
 	invocation.ExecutionAttempt++
 	invocation.ExecutionLeaseUntil = &leaseUntil
 	if !replaceLastModelInvocation(&state, invocation) {
@@ -471,6 +491,14 @@ func (runner *Runner) releaseModelInvocationExecution(
 		return snapshot, nil
 	}
 	invocation.ExecutionLeaseUntil = nil
+	delay := retryDelay(runner.execution.Model, int(invocation.ExecutionAttempt), invocation.ID)
+	wakeupAt := runner.clock.Now().UTC().Add(delay)
+	if runner.runExecution != nil {
+		// Only native opted-in execution promises a shared ReadyAt
+		// eligibility gate. Legacy explicit Resume retains its previous
+		// immediate-retry semantics until a separate compatibility cut.
+		invocation.RetryAfter = &wakeupAt
+	}
 	if !replaceLastModelInvocation(&state, invocation) {
 		return snapshot, ErrInvalidRequest
 	}
@@ -478,8 +506,6 @@ func (runner *Runner) releaseModelInvocationExecution(
 	if err != nil {
 		return snapshot, err
 	}
-	delay := retryDelay(runner.execution.Model, int(invocation.ExecutionAttempt), invocation.ID)
-	wakeupAt := runner.clock.Now().UTC().Add(delay)
 	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{

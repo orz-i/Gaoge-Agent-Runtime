@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -148,10 +149,13 @@ func (runner *Runner) GrantCallAllowance(
 	}
 	// Durable wakeup is committed with the CAS; stale worker deliveries are
 	// filtered by ExpectedRevision before any additional model/Tool dispatch.
-	running, err := runner.runtime.Apply(ctx, runID, expectedRevision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "agent.allowance_granted", Message: snapshot.Run.ErrorCode, Wakeup: true}},
-	})
+	proof := featurecontrol.Seal(runID, expectedRevision, string(kernel.ControlAllowance),
+		snapshot.Run.ErrorCode, encoded, snapshot.Checkpoint)
+	running, _, err := runner.runtime.ApplyControl(ctx, runID, expectedRevision,
+		kernel.ControlGuard{Kind: kernel.ControlAllowance, BlockedCode: snapshot.Run.ErrorCode}, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+			Events: []kernel.EventDraft{{Type: "agent.allowance_granted", Message: snapshot.Run.ErrorCode, Wakeup: true}},
+		}, proof)
 	if err == nil {
 		runner.publishRunEvent(ctx, running, EventRunResumed, false)
 	}

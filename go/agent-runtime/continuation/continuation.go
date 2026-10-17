@@ -21,11 +21,12 @@ const (
 )
 
 var (
-	ErrInvalidInput         = errors.New("invalid continuation input")
-	ErrUnsupportedRunKind   = errors.New("unsupported continuation run kind")
-	ErrAlreadyStarted       = errors.New("continuation worker already started")
-	ErrClosed               = errors.New("continuation worker is closed")
-	ErrDurableQueueRequired = errors.New("continuation reconciliation requires durable queue delivery")
+	ErrInvalidInput          = errors.New("invalid continuation input")
+	ErrUnsupportedRunKind    = errors.New("unsupported continuation run kind")
+	ErrAlreadyStarted        = errors.New("continuation worker already started")
+	ErrClosed                = errors.New("continuation worker is closed")
+	ErrDurableQueueRequired  = errors.New("continuation reconciliation requires durable queue delivery")
+	ErrTerminalFenceRequired = errors.New("continuation terminal delivery requires authoritative Run quarantine")
 )
 
 // Trigger identifies the committed fact that permits a Run to resume.
@@ -127,6 +128,16 @@ func normalizePayload(payload Payload) (Payload, error) {
 		return Payload{}, ErrInvalidInput
 	}
 	if (payload.Trigger == TriggerToolWaitDeadline || payload.Trigger == TriggerToolResultReady) && payload.WaitGeneration == 0 {
+		return Payload{}, ErrInvalidInput
+	}
+	// The projector emits self-wakeups only from the owning Run and its
+	// committed Revision. A delivery Job is not permission to borrow an
+	// unrelated Run or revision as a trigger.
+	if payload.Trigger != TriggerChildTerminal &&
+		(payload.SourceRunID != payload.RunID || payload.SourceRevision != payload.ExpectedRevision) {
+		return Payload{}, ErrInvalidInput
+	}
+	if payload.Trigger == TriggerChildTerminal && payload.SourceRunID == payload.RunID {
 		return Payload{}, ErrInvalidInput
 	}
 	return payload, nil

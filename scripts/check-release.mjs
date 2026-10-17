@@ -7,23 +7,23 @@ import { run } from "./release-command.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const version = readFileSync(path.join(root, "VERSION"), "utf8").trim();
 const temporary = mkdtempSync(path.join(tmpdir(), "gaoge-agent-runtime-release-"));
-const modules = [
-  "agent-runtime",
-  "agent-runtime-harness",
-  "agent-runtime-harness-postgres",
-  "agent-runtime-mcp",
-  "agent-runtime-otel",
-  "agent-runtime-a2a",
-  "agent-runtime-postgres",
-  "agent-runtime-redis",
-  "agent-runtime-http",
-];
+// The accepted Beta boundary is the single authoritative Go release cohort.
+// A tagged release must also pass --published, which removes ALL local Go
+// replacements and actually resolves the immutable versioned module graph.
+const boundary = JSON.parse(readFileSync(path.join(root, "agent-runtime-boundary.json"), "utf8"));
+const modules = boundary.goModules.map((name) => name.split("/").at(-1));
+const published = process.argv.includes("--published");
+if (process.argv.length > 3 || (process.argv[2] && !published)) {
+  throw new Error("usage: node scripts/check-release.mjs [--published]");
+}
 const consumers = path.join(root, "contracts", "consumers");
 
 try {
   for (const name of modules) checkGoConsumer(name);
-  checkTypeScriptConsumer();
-  console.log(`Agent Runtime ${version} clean-consumer release gate passed`);
+  if (!published) checkTypeScriptConsumer();
+  console.log(published
+    ? `Agent Runtime ${version} published Go consumer gate passed (no replaces)`
+    : `Agent Runtime ${version} clean-consumer local-cohort gate passed`);
 } finally {
   rmSync(temporary, { recursive: true, force: true });
 }
@@ -31,7 +31,7 @@ try {
 function checkGoConsumer(name) {
   const consumer = path.join(temporary, name);
   mkdirSync(consumer);
-  const replacements = modules
+  const replacements = published ? "" : modules
     .map((moduleName) => `replace github.com/orz-i/Gaoge-Agent-Runtime/go/${moduleName} => ${JSON.stringify(path.join(root, "go", moduleName).replaceAll("\\", "/"))}`)
     .join("\n");
   writeFileSync(path.join(consumer, "go.mod"), `module example.com/${name}-consumer\n\ngo 1.26\n\nrequire github.com/orz-i/Gaoge-Agent-Runtime/go/${name} v${version}\n\n${replacements}\n`);

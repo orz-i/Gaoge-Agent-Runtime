@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -18,6 +20,11 @@ const (
 var (
 	ErrToolNotPending     = errors.New("tool call is not waiting for an external result")
 	ErrToolSignalConflict = errors.New("external tool result signal conflicts with its durable wait")
+	// ErrToolSignalNotReady means the matching native Tool was durably
+	// dispatched, but its wait identity is not yet committed. The host must
+	// RETAIN the signal in its own durable delivery source and retry later;
+	// this is neither an ACK nor proof of the external Tool's COMMIT.
+	ErrToolSignalNotReady = errors.New("external result signal arrived before its durable Tool wait")
 )
 
 // PendingTool is the typed host query contract for one durable pending call.
@@ -102,6 +109,14 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 			return snapshot, ErrToolNotPending
 		}
 		wait := state.ToolWait
+		if wait == nil && runner.runExecution != nil && state.ToolDispatchID == signal.CallID {
+			// An external provider can emit a ready signal synchronously from
+			// Tool.Execute, before its Pending descriptor has been committed.
+			// The existing ToolDispatchID proves the call was prepared but
+			// cannot validate the operation ID/digest yet. Do not persist or
+			// ACK the early signal; let the host retry its durable delivery.
+			return snapshot, ErrToolSignalNotReady
+		}
 		if !matchesToolSignal(wait, signal) {
 			return snapshot, ErrToolSignalConflict
 		}
@@ -115,12 +130,31 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 		if encodeErr != nil {
 			return kernel.Snapshot{}, encodeErr
 		}
-		next, applyErr := runner.runtime.Apply(ctx, signal.RunID, snapshot.Run.Revision, kernel.Mutation{
+		mutation := kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+			ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail,
 			Events: []kernel.EventDraft{{
 				Type: EventExternalToolResultReady, Wakeup: true, WakeupGeneration: wait.Generation,
 			}},
-		})
+		}
+		var next kernel.Snapshot
+		var applyErr error
+		if runner.runExecution != nil {
+			// A waiting native Run may have a live/expired owner. This is a
+			// Feature-validated CONTROL, not permission to execute a Tool.
+			// Seal the exact wait identity/next state and recheck inside the
+			// authoritative Store transaction.
+			waitID := fmt.Sprintf("%d:%s:%d:%s:%s", len(wait.CallID), wait.CallID,
+				wait.Generation, wait.OperationID, wait.InputDigest)
+			permit := featurecontrol.Seal(signal.RunID, snapshot.Run.Revision,
+				string(kernel.ControlExternalSignal), waitID, encoded, snapshot.Checkpoint)
+			guard := kernel.ControlGuard{Kind: kernel.ControlExternalSignal,
+				WaitID: waitID, WaitDeadlineAt: wait.DeadlineAt}
+			next, _, applyErr = runner.runtime.ApplyControl(ctx, signal.RunID, snapshot.Run.Revision,
+				guard, mutation, permit)
+		} else {
+			next, applyErr = runner.runtime.Apply(ctx, signal.RunID, snapshot.Run.Revision, mutation)
+		}
 		if errors.Is(applyErr, kernel.ErrConflict) {
 			continue
 		}
@@ -233,6 +267,27 @@ func (runner *Runner) ResumeToolWait(ctx context.Context, runID string, expected
 	}
 	if snapshot.Run.Status != kernel.RunStatusRunning || state.ToolWait == nil || state.ToolWait.Generation != generation {
 		return snapshot, nil
+	}
+	if runner.runExecution != nil && state.ToolDispatchID != "" {
+		// A pending native Tool is already physically dispatched. For an
+		// exact ready signal, use the trusted read-only Provider verifier.
+		// NEVER call its non-idempotent Tool Handler from a queue delivery.
+		if state.ToolWait.Kind == tools.PendingExternalResult && state.ToolWait.SignalID != "" {
+			verified, verifyErr := runner.ReconcileToolOutcome(ctx, runID, expectedRevision, state.ToolDispatchID)
+			if verifyErr == nil {
+				return verified, nil
+			}
+			if state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
+				return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue, verifyErr)
+			}
+			return snapshot, errors.Join(ErrToolOutcomeUnknown, verifyErr)
+		}
+		// A deadline without a verified provider COMMIT must not discard its
+		// durable operation ID and must not authorize physical Tool replay.
+		if state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
+			return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue)
+		}
+		return snapshot, ErrToolOutcomeUnknown
 	}
 	return runner.Resume(ctx, runID, expectedRevision)
 }

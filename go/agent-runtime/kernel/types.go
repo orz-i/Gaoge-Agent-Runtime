@@ -120,15 +120,18 @@ type Snapshot struct {
 
 // CreateRequest creates one explicit Runtime Kind with opaque feature state.
 type CreateRequest struct {
-	ID         string
-	Kind       RunKind
-	Actor      ActorRef
-	Thread     ThreadRef
-	RequestID  string
-	Goal       string
-	DeadlineAt *time.Time
-	State      json.RawMessage
-	Events     []EventDraft
+	// ExecutionRequired reserves the existing Store execution epoch at
+	// creation. It must not be enabled after creating a legacy Run.
+	ExecutionRequired bool
+	ID                string
+	Kind              RunKind
+	Actor             ActorRef
+	Thread            ThreadRef
+	RequestID         string
+	Goal              string
+	DeadlineAt        *time.Time
+	State             json.RawMessage
+	Events            []EventDraft
 }
 
 // Mutation replaces feature state and advances the Run through one atomic CAS.
