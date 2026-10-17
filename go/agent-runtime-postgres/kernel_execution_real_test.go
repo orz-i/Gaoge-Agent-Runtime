@@ -26,6 +26,20 @@ func TestRealPostgresKernelControlStoreConformance(t *testing.T) {
 	})
 }
 
+func TestRealPostgresKernelApplyEvidenceConformance(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN not configured")
+	}
+	conformance.RunKernelApplyEvidenceSuite(t, func(child *testing.T) kernel.Store {
+		db, _ := openIsolatedRealPostgres(child, dsn)
+		if err := Migrate(db); err != nil {
+			child.Fatal(err)
+		}
+		return NewKernelStore(db)
+	})
+}
+
 func TestRealPostgresKernelQuarantineStoreConformance(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
 	if dsn == "" {

@@ -16,6 +16,12 @@ func TestKernelControlStoreConformance(t *testing.T) {
 	})
 }
 
+func TestKernelApplyEvidenceConformance(t *testing.T) {
+	conformance.RunKernelApplyEvidenceSuite(t, func(child *testing.T) kernel.Store {
+		return NewKernelStore(openKernelStoreTestDB(child))
+	})
+}
+
 func TestKernelQuarantineStoreConformance(t *testing.T) {
 	conformance.RunKernelQuarantineSuite(t, func(child *testing.T) kernel.Store {
 		return NewKernelStore(openKernelStoreTestDB(child))
