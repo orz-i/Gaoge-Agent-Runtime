@@ -51,6 +51,13 @@ func TestModelRetryReadyAtCannotBeBypassedByDirectResume(t *testing.T) {
 				view.ModelInvocations[0].Status != agent.ModelInvocationPending {
 				t.Fatalf("retryable intent not durable: %+v err=%v", view, viewErr)
 			}
+			if native && (view.ModelInvocations[0].RetryAfter == nil ||
+				!view.ModelInvocations[0].RetryAfter.After(clock.Now())) {
+				t.Fatal("native ReadyAt was not persisted in Feature state")
+			}
+			if !native && view.ModelInvocations[0].RetryAfter != nil {
+				t.Fatal("legacy state was silently given the native retry contract")
+			}
 			before, err := rt.Load(t.Context(), run.Run.ID)
 			if err != nil {
 				t.Fatal(err)
