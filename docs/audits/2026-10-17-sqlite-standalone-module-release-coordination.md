@@ -59,3 +59,16 @@
 - 发布前应重新联网验证预期 `beta.23` 尚无冲突标签，严格完成不可变标签及远程 `--published` 质量门。不能在本地报告中以源替换通过替代最终公开发行判断。
 
 **收口裁决：SQLite 独立模块工程集成与无替换版本化构建 PASS；beta.23 官方发布和生产部署独立 NO-GO。**
+
+
+## 合并前追加复核（2026-10-17，后续收口）
+
+此段补充上述原始验收，不篡改原始命令与时间窗口；**没有改变 SDK 业务代码、Go Module 版本或 SQLite Schema**。
+
+- **新通过：** `make integration-otel` 返回 **exit 0**，使用本机已存在的 `ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.149.0`，trace/metric 四项 Collector 标志完成 E2E 验证；临时 Docker 容器和网络已清理。日志：`/tmp/gaoge-beta23-final-otel.log`。
+- **混版负向证明：** 在带自动恢复 Trap 的临时本地测试中把 `go/agent-runtime-sqlite/go.mod` 的 Core 依赖由 beta.23 改为 beta.22，`node scripts/check-beta.mjs` **如期失败**并报告版本不一致；原文件立即恢复，未提交测试变更。日志：`/tmp/gaoge-beta23-negative-mixed-version.log`。
+- **仍未通过：** 再次完整执行 `make security` 返回 **exit 2**，在 Go 漏洞 DB 初始索引 `https://vuln.go.dev/index/modules.json.gz` 连接超时；不是发现了新的可达代码漏洞，但也绝不能把此轮扫描记录为 PASS。日志：`/tmp/gaoge-beta23-recheck-security.log`。不得为了发布而跳过安全门禁。
+- **GitHub 远程只读复核：** 通过已连接 GitHub 服务检查，`main` 相对 `44785f85d3117e9629c34ed48c7a6b458dbfbfab` **identical**；`governance/kernel-runtime` 无开放 PR；读取候选根标签 `v0.1.0-beta.23` 返回 GitHub 404（`No commit found for the ref`）。Mac Pi 本地至 GitHub 的 HTTPS 连通性仍异常，故以连接器的只读检查代替远程 fetch；**没有执行任何写操作**。
+- **前序成功仍有效：** `make check=0`、`make coverage=0`、真实 PG16/Redis8 集成 exit 0、离线版本化 ZIP 的十模块 `--published` 无替换消费者 exit 0、SQLite `GOWORK=off GOFLAGS=-mod=readonly go test -race -count=1 ./...` exit 0。离线 ZIP 不构成 GitHub 真实标签的发布证明。
+
+**最终合并/发布决策：** 已授权的 SQLite 独立模块**本地工程和发行候选准入 GO**；可在取得明确授权后 Push 分支、创建 PR 并等待远程必需检查。**直接合并 main、创建不可变标签和公开发布 beta.23 均未获授权，也尚未达到发布门禁**：待 GitHub PR 检查、安全扫描与实际标签消费者门禁。生产 Hosted/mobile/共享 Profile 不因本次 SDK 模块准入自动 GO。
