@@ -228,6 +228,14 @@ and pending signal / unknown-result reconciliation remains Stage 2 work.
 An app/host still explicitly invokes `Resume`; there is no local
 background Pump or extra queue.
 
+**Stage 6 bounded Snapshot read optimization (experimental):** State is scanned
+into an ordinary `[]byte` by `database/sql`, which returns caller-owned bytes;
+`decodeSnapshot` no longer duplicates that same State again. Unlike
+`sql.RawBytes`, the scanned buffer is independent of the query's lifetime.
+New tests cover snapshot isolation across loads, mutation, concurrent readers
+and store reopening. This changes neither persisted DDL nor event/commit
+proof retention. See the [Stage 6 performance and safety audit](../../docs/audits/2026-10-17-stage6-sqlite-snapshot-buffer-optimization.md).
+
 The execution columns are part of the still-**unreleased Schema v1**;
 no automatic migration or version bump is implied. The local adapter
 currently imports experimental Kernel interfaces absent from the

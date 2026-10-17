@@ -368,6 +368,8 @@ not silent concurrent merging.
 
 **Stage 5 bounded SQLite engineering closure (2026-10-17):** the [final RunRelationStore and Schema P2 remediation audit](../audits/2026-10-17-stage5-final-closure-after-schema-p2.md) seals **only** the previously admitted SQLite `runrelation.Store` experimental implementation. Schema v1 remains unreleased and unchanged in version; auto parent/child handoff, Workflow/Team/Harness durability, mobile devices, shared Profiles, SQLite standalone module release and Hosted production support are **not** certified. This engineering closure does not start Stage 6 or authorize compaction/CAS redesign without measured evidence.
 
+**Stage 6 bounded memory optimization (2026-10-17):** the [SQLite Snapshot scan ownership/performance audit](../audits/2026-10-17-stage6-sqlite-snapshot-buffer-optimization.md) validates one measured `decodeSnapshot` redundant State-copy reduction with no Kernel API, durable fact or Schema change. This closes only the authorized experimental allocation optimization; **EventJournal/receipt/commit-proof compaction, GC, partitioned CAS, new recovery state, independent SQLite module publication and product-level performance/device certification remain NO-GO**. Additional optimizations require new concrete evidence, not automatic stage expansion.
+
 **Stage 3 design entry is not production eligibility.** It may follow the
 completed Stage 2 experimental Kernel safety evidence while selected Host or
 mobile release gates remain NO-GO. Stage 3 itself does not implement a
