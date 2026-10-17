@@ -131,7 +131,14 @@ recheck a fenced execution segment:
    for an execution job or a generic quarantine bypass.
 4. After any CAS conflict or change of Feature wait/gate, reload and recheck;
    ACK a delivery as obsolete only when authoritative evidence proves
-   its exact logical work was already consumed or superseded.
+   its exact logical work was already consumed or superseded. **A normal
+   self-wakeup from Revision R followed by an unrelated non-wakeup CAS to
+   R+1 is NOT consumed by that Revision change.** For a still-running Run,
+   the existing Dispatcher must NACK the old Job without blindly driving
+   its new phase; an interleaved Resume CAS conflict follows the same
+   rule. See the [Stage 4 P1 negative recovery proof](audits/2026-10-17-stage4-p1-revision-wakeup-ack-remediation.md).
+   The selected Host/Feature must reconcile durable consumption or complete
+   the Run; current terminal Store proof allows the old Job to ACK safely.
 
 | Conceptual eligibility (not a persisted plan type) | Direct/queued candidate | Permitted action |
 | --- | --- | --- |
@@ -501,7 +508,7 @@ Host parity and coordinated consumer release gates before publication.
 | 1 — Single-executor SQLite proof | Direct Agent restart, receipt/approval and six-state Store CAS without mandatory PG/Redis | Not concurrent durable mobile certification |
 | **2 — Bounded experimental Kernel integration** | Memory/SQLite/PG epoch/expiry CAS; exact Feature controls, Native intent/receipt, 3+ CAS segment, current Run quarantine, due/wait source checks, early signal refusal, uncertainty recovery and actual selected Worker/Queue fault tests | **Engineering GO is not production GO**; don't demand generic ProgressPlan, general Inbox or production local Pump as new Kernel sub-stages |
 | **3 — Architecture reassessment** | ADR 0009 accepted, Stage 2 experimental safety evidence; compare six-state semantics vs any proposed five-state benefit, public API/wire/DDL consumers, negative tests, migration/rollback and ongoing operator cost. **Default: keep six states.** | No automatic five-state migration, public breaking contract or production release |
-| 4 — Selected Hosted integration | [PG16/Redis8 SDK/adapter fault contract](audits/2026-10-17-stage4-hosted-orphan-delivery.md) verified for test Host, including configured AOF process SIGKILL recovery; real product Host/Provider/tenant authorization remains conditional release evidence | **Experimental engineering GO ≠ production Hosted GO**; no new Kernel state or automatic Stage 5 |
+| 4 — Selected Hosted integration | [PG16/Redis8 SDK/adapter fault contract](audits/2026-10-17-stage4-hosted-orphan-delivery.md) verified for test Host, including configured AOF process SIGKILL recovery; [follow-up P1 guard](audits/2026-10-17-stage4-p1-revision-wakeup-ack-remediation.md) retains unverified self-wakeups after unrelated Rev CAS; real Host/Provider/tenant authorization remains a release gate | **Fail-closed NACK is not automatic Feature reconciliation or production Hosted GO**; no new Kernel state or automatic Stage 5 |
 | 5 — Optional embedded Features/OS | [Stage 5 conditional engineering entry](audits/2026-10-17-stage4-re-audit-stage5-admission.md) allows one SQLite Feature at a time, initially an isolated RunRelation Store conformance target; each enabled Feature and device still needs dedicated persistence/crash evidence | Existing SQLite Kernel tests do **not** certify Workflow/Team/Harness, generic Hosted ACK, shared Profile, or mobile |
 | 6 — Evidence-led optimization | Baseline/after A/B metrics, proof retention, accepted thresholds and explicit approval | No speculative GC/JSON Patch or extra scheduler state |
 

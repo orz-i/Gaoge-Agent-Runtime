@@ -126,6 +126,20 @@ proves NACK, client/Worker reconstruction and later fenced Run completion.
 This is **not** a production Hosted authorization, Provider or physical
 exactly-once certification.
 
+**Stage 4 revision-bound self-wakeup correction:** a newer nonterminal Run
+Revision alone is **not** proof that an older `RunReady`/`ModelReady`/
+`SegmentYielded` Job was consumed. Dispatcher now returns `kernel.ErrConflict`
+for these unverified old candidates and for an interleaved CAS conflict,
+causing the Worker to NACK rather than incorrectly ACK or blindly replay
+external Model/Tool effects against a newer phase. Actual terminal Store
+state still permits ACK, and stable child/ToolWait-generation routing is
+unchanged. Old Jobs can remain retryable until a trusted Feature/Host uses its
+existing current-Revision recovery path or proves consumption; persistent
+conflicts require diagnostics and bounded Host intervention. See the
+[Stage 4 P1 remediation audit](../../docs/audits/2026-10-17-stage4-p1-revision-wakeup-ack-remediation.md).
+This fail-closed safety fix does not certify autonomous recovery or production
+Hosted readiness.
+
 ## Runtime kinds
 
 Agent Runtime exposes explicit Run kinds over the same durable Kernel primitives:

@@ -54,3 +54,5 @@
 | 发布/设备 | `make check` 包含当前消费者兼容性构建；**没有**真实 Host Principal/Provider/移动设备认证，也没有整个 Embedded 生态的正式可发布组合 |
 
 **审计独立性与处置：** 以上为本轮依据当前源码及额外故障注入的人工复核，不是第三方独立审计；不重写此前审计发生时的历史事实，但必须缩小其超出真实证据的完整 Hosted 准入推论。Stage 4 **通用自唤醒生产 GO 被 P1 阻断**；Stage 5 **独立单项 SQLite 工程准入可 GO**，其 per-Feature/OS 生产验收仍 NO-GO。此决议不执行 Stage 5 实现、不进入 Stage 6、不 Push/PR/Merge。
+
+**后续修复结果（2026-10-17）：** [Stage 4 P1 原工作丢失的 fail-closed 修复](2026-10-17-stage4-p1-revision-wakeup-ack-remediation.md) 在 Dispatcher 的初次过期派发及 CAS-conflict 复查路径上不再把 Revision 前进当作 ACK 证明；以 Memory 与真实 PG/Redis 的永久负向回归取代本报告的临时故障探针。历史审计所记录的**修复前漏洞仍属实**；修复后避免无证据的 ACK/盲重放，非终态遗留 Job 的消费对账仍需可信 Host/Feature，不能自动将 Stage 4 生产发布改为 GO。

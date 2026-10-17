@@ -7,6 +7,7 @@
 - **选定用于本轮验证的集成 Profile：** 已存在的 Go Hosted **PostgreSQL 16 权威 Run Store + Redis 8 可选 Continuation Queue/Worker**；本轮使用独立测试 Host/故障注入，不创建/伪称生产产品 Host。
 - **本轮局部结论：** `ErrNotFound` 不可证明交付已消费 — **完成安全修复并以真实 PG/Redis 验证**。整个 Stage 4 产品生产出口仍 **NO-GO**；未验收真实身份授权、Provider COMMIT 或设备/Redis 持久化崩溃。
 - **后续独立复核（2026-10-17）：** [Stage 4 P1 ACK 证据及 Stage 5 限定准入审计](2026-10-17-stage4-re-audit-stage5-admission.md) 在真实 PG/Redis 证实 **Revision 前进时未消费的普通自唤醒可能被 ACK**。下文实验性 GO **仅覆盖其已验证的故障类别**，不意味着通用 Hosted 自唤醒可获得生产准入；保留该历史审计的原测试事实。
+- **后续 P1 安全修复：** [最小 Revision-bound self-wakeup NACK 修复与回归](2026-10-17-stage4-p1-revision-wakeup-ack-remediation.md) 已阻止该错误 ACK 的两条通用路径；在无消费证明时保留重投，生产 Host 的 Feature/Provider 自动对账与授权认证仍未取得 GO。
 
 ## 1. 具体错误：缺失权威 Run 被错误 ACK
 

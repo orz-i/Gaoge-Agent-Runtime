@@ -38,6 +38,16 @@ uses a disposable Redis 8 container started with `appendonly yes` and
 **only with the same container filesystem**. Default `make integration` does
 not enable AOF and does not certify Redis persistence or production HA.
 
+**Stage 4 Revision-bound self-wakeup correction:** newer Run Revision does
+**not** prove an older `RunReady` Job was consumed. Dispatcher now NACKs
+unverified nonterminal self-wakeups instead of ACKing or blindly replaying
+against the new revision. Protected Jobs retain this obligation (including
+on retry exhaustion unless a trusted Host commits its exact Run quarantine).
+A genuinely terminal Run permits safe ACK. Hosts must monitor and reconcile
+persistent conflicts through the owning Feature; this guard does **not**
+automate consumption proof or certify production Hosted delivery. See the
+[real PG16/Redis8 P1 regression](../../docs/audits/2026-10-17-stage4-p1-revision-wakeup-ack-remediation.md).
+
 **Upgrade caution:** existing persisted Jobs lack this protected policy and
 retain legacy automatic DLQ behavior. Reprojection under the new policy also
 changes the immutable Job fingerprint for the same ClientJobID. Drain or
