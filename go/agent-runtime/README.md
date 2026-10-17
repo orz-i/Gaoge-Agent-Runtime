@@ -80,6 +80,30 @@ None of this guarantees physical exactly-once effects.
 
 `kernel.Runtime.QuarantineExecution` writes a durable, exact Run/Revision/Generation diagnosis to the **existing Run authority** and invalidates the active execution epoch. Memory, SQLite and PostgreSQL now refuse Acquire, pre-dispatch Check and fenced Apply until a trusted host invokes exact `RepairExecutionQuarantine` or the Run settles terminally. An unrelated nonterminal Feature control cannot silently clear the block. An execution-lease-bound Runtime cannot set or repair it. These methods are **trusted-internal control capabilities**, not authenticated public endpoints: the embedding host must verify the active Run owner, poisoned Feature work and any ambiguous Provider outcome *before* using either method. For newly projected Continuation work, Scheduler opts into `queue.Policy.RequireTerminalFence`: Queue `Nack` and automatic lease-expiry recovery keep the Job retryable even after MaxAttempts unless an explicit `AllowDeadLetter` follows a verified authoritative block. The host provides `continuation.WorkerOptions.TerminalQuarantine`, which MUST validate persisted Run/Actor, immutable Work/Generation and uncertain Provider outcome, commit `QuarantineExecution`, and return nil only after durable success. The Worker retains Queue lease renewal throughout that commit, then permits final Redis NACK. When no trusted callback exists or it fails, the Job remains retryable and the Worker reports `ErrTerminalFenceRequired`; malformed orphan deliveries retain diagnostics rather than inventing a Run proof. This is **not** an authenticated operator repair endpoint or proof of physical exactly-once. **Existing Redis Jobs without the new protected Policy remain legacy/unprotected:** coordinate drain/reprojection or explicit recovery on rollout; stable Job fingerprint changes and automatic upgrade is intentionally not claimed. See the [Stage 2 hard-gate audit](../../docs/audits/2026-10-16-stage2-hard-gates-followup.md) and [terminal-DLQ evidence](../../docs/audits/2026-10-16-stage2-terminal-dlq-handoff.md).
 
+### Experimental identified Apply outcome recovery (S2-G6)
+
+For an external host/Feature that must reconcile an ambiguous Run CAS, opt into
+`kernel.Runtime.ApplyIdentified(ctx, runID, expectedRevision, operationID, mutation)`
+and `VerifyIdentifiedApply`. The caller MUST choose and durably remember its
+stable operation ID, exact expected Run revision and identical intended Mutation
+*before* attempting the write. The identified Apply appends one reserved
+`kernel.apply.evidence` event **in the same transaction** as Run State,
+journal and existing Outbox. Verification can return a committed revision even
+when unrelated later revisions or a terminal state have replaced the original
+snapshot. When no proof exists and the Run remains at that exact revision,
+retry **only the original revision-bound CAS**; if the journal is missing or
+Run has advanced without a matching proof, fail closed with
+`kernel.ErrApplyOutcomeUnknown`. The same operation ID with different content
+or revision fails with `kernel.ErrConflict`, and a known duplicate returns
+`kernel.ErrApplyAlreadyCommitted`.
+
+This is an **explicit recovery API**, not a replacement for ordinary `Apply`,
+not an authenticated Run access facade and not an external Provider effect
+receipt. It scans the retained EventJournal in bounded pages on the cold
+recovery path; host retention/compaction must preserve this proof. No new Store
+port, table or SQLite schema version is introduced. See the
+[Stage 2 identified Apply evidence audit](../../docs/audits/2026-10-16-stage2-g6-identified-apply-evidence.md).
+
 ## Runtime kinds
 
 Agent Runtime exposes explicit Run kinds over the same durable Kernel primitives:

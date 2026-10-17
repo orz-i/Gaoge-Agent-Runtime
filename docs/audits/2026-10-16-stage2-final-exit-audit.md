@@ -6,7 +6,7 @@
 - **架构依据：** [ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) **Accepted**，及其[实现与验收附件](../minimal-agent-runtime-implementation.md)；[ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md) 仍 **Proposed**
 - **最终双重裁决：** **GO — Stage 2A/2B/2C 已实现并经验证的实验性工程增量可以封板、进入维护/审计状态。NO-GO — 按已接受的 ADR 0008，Stage 2 的完整生产级退出条件未全部满足，不能宣布完整 Stage 2 验收通过或据此自动进入 Stage 3。**
 - **本次变更类型：** 阶段退出审计与状态同步；没有新的生产逻辑、表/索引、Schema 版本、Run 状态或公用接口变更。
-- **后续治理（不回写原验收）：** [Stage 2 S2-G1/G2/G6 硬阻断专项](2026-10-16-stage2-hard-gates-followup.md) 随后交付自唤醒来源校验、原子 Run 隔离及 Native Create 稳定 ID 的局部修复；[终态 DLQ 跨 Store 交接](2026-10-16-stage2-terminal-dlq-handoff.md) 继续关闭受保护 Continuation 的最终交付漏洞。原本完整生产 Gate 的 NO-GO 尚未解除；下文保留本审计当时基线事实。
+- **后续治理（不回写原验收）：** [Stage 2 S2-G1/G2/G6 硬阻断专项](2026-10-16-stage2-hard-gates-followup.md) 随后交付自唤醒来源校验、原子 Run 隔离及 Native Create 稳定 ID 的局部修复；[终态 DLQ 跨 Store 交接](2026-10-16-stage2-terminal-dlq-handoff.md) 继续关闭受保护 Continuation 的最终交付漏洞；[S2-G6 Apply 证明](2026-10-16-stage2-g6-identified-apply-evidence.md) 则补齐显式操作的提交响应丢失和历史 Revision 查证。原本完整生产 Gate 的 NO-GO 尚未解除；下文保留本审计当时基线事实。
 
 ## 1. 哪些增量已经具备验收证据
 

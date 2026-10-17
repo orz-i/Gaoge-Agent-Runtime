@@ -72,7 +72,13 @@ unavailability separately from new-database initialization.
   work; `ListQuarantinedTransitions` inspects these records.
 - `runtime_commit_proofs` — revision-keyed fingerprints of committed
   Kernel state transitions; **not** a model/tool physical-effect
-  deduplication protocol or a durable Run ID recovery API.
+  deduplication protocol or a durable Run ID recovery API. An opt-in
+  `Runtime.ApplyIdentified` instead places a caller-stable operation marker
+  in the **existing `runtime_events` journal**, atomically with its Run CAS.
+  `VerifyIdentifiedApply` can verify that exact old operation after later
+  revisions or Store reopen; loss of the journal is an UNKNOWN outcome, never
+  an authorization to repeat external effects. This does **not** change the
+  unreleased SQLite v1 DDL. See the [S2-G6 audit](../../docs/audits/2026-10-16-stage2-g6-identified-apply-evidence.md).
 
 All Run/Create/Apply changes to these four tables use a **single short
 SQLite transaction**. The adapter uses `WAL`, `foreign_keys=ON`,

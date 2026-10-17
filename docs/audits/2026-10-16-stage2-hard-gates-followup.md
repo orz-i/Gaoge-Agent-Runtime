@@ -5,7 +5,7 @@
 - **开始基线：** `a5ec483b5278092e295de8b6d7a048a86a4b2826`
 - **规范：** [ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) Accepted、[ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md) Proposed；现有六态与未发布 SQLite Schema v1 不变
 - **起始退出矩阵：** [Stage 2 最终退出审计](2026-10-16-stage2-final-exit-audit.md)
-- **后续专项（不倒写本报告的历史结论）：** [Stage 2 终态 DLQ 交接](2026-10-16-stage2-terminal-dlq-handoff.md) 增加受保护任务最终交付先写 PG 隔离、租约到期不越过权威保护及真实 PG/Redis 故障链测试；生产宿主授权与旧 Job 迁移另行验收。
+- **后续专项（不倒写本报告的历史结论）：** [Stage 2 终态 DLQ 交接](2026-10-16-stage2-terminal-dlq-handoff.md) 增加受保护任务最终交付先写 PG 隔离、租约到期不越过权威保护及真实 PG/Redis 故障链测试；[S2-G6 identified Apply evidence](2026-10-16-stage2-g6-identified-apply-evidence.md) 追加特定操作在未知 COMMIT/后继 Revision 后的原子日志证明，既有 Feature 接入与宿主授权仍单独验收。
 - **裁决：** S2-G1、S2-G2、S2-G6 均取得有负向证据的**局部修复**，但三项**完整硬 Gate 仍未通过**；Stage 2 不得因本轮实现自动改为生产 GO，也不进入 Stage 3。
 
 ## 1. 由失败测试驱动的具体改动
