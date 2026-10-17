@@ -194,7 +194,10 @@ func decodeSnapshot(row queryRow) (kernel.Snapshot, error) {
 	if !json.Valid(state) || run.Revision != uint64(revision) || run.ID == "" {
 		return kernel.Snapshot{}, ErrInvalidRecord
 	}
-	snapshot := kernel.Snapshot{Run: run, State: append(json.RawMessage(nil), state...), EventHead: head}
+	// database/sql.Scan into *[]byte already makes an independent,
+	// caller-owned copy (unlike RawBytes). Transfer that buffer to the
+	// Snapshot: cloning it again only adds a full-State allocation.
+	snapshot := kernel.Snapshot{Run: run, State: json.RawMessage(state), EventHead: head}
 	if len(checkpoint) > 0 {
 		var value kernel.Checkpoint
 		if err := json.Unmarshal(checkpoint, &value); err != nil {
