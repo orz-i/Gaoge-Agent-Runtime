@@ -348,7 +348,7 @@ func TestRealPostgresRedisNativeEarlySignalProviderRecovery(t *testing.T) {
 	}
 	_ = client.Close()
 	restartedClient := goredis.NewClient(&goredis.Options{Addr: address})
-	defer restartedClient.Close()
+	defer func() { _ = restartedClient.Close() }()
 	restartedQueue := redisadapter.NewQueue(restartedClient, redisadapter.QueueOptions{KeyPrefix: "stage2c:" + id})
 	verified, runtime2 := buildRunner(openDB(), "worker-verified")
 	restartedDispatcher, err := continuation.NewDispatcher(runtime2, continuation.RegisterResumer(agent.RunKind, verified))
