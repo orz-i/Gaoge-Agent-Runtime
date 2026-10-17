@@ -36,7 +36,14 @@ construction fails. **Native `StartRun` requires a caller-stable nonempty Run ID
 Legacy Runs at Epoch 0 cannot be upgraded to native execution while
 old executors may still be running. The first native owner claims Epoch 2.
 The lease must cover the configured Tool retry/backoff window, though
-external calls may still ignore Context deadlines.
+external calls may still ignore Context deadlines. In opt-in Native mode,
+a retryable Model error persists `ModelInvocation.RetryAfter` in existing
+Agent State alongside the committed Outbox `WakeupAt`. A Direct `Resume`
+before the due time returns `ErrModelInvocationBusy` **without claiming a
+new Store Epoch or calling the Model**; due recovery reuses the same
+invocation identity. The host must provide a trusted consistent Model
+scheduling clock. The Legacy explicit-resume path retains its previous
+immediate-retry semantics; this does not claim a production Local Pump.
 
 A native Tool writes a durable dispatch intent containing the stable
 Call ID **before** executing. The returned native receipt must match

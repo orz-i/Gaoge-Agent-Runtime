@@ -55,3 +55,15 @@
 5. **下一工程动作必须针对明确 Gate**：优先 S2-G1/G2 做最小的真实性质测试，依实际宿主选择 S2-G3/G6。任何 Run/Outbox DDL、公共接口或跨 Store Port 扩张都必须先证明现有 Run State/Checkpoint/Receipt/Outbox 无法表达问题；保留六态，不自动升级未发布的 SQLite v1。
 
 **收口性质：Stage 2 实验工程成果与审计记录完整封板；Stage 2 正式生产退出未通过，并保留具体可执行的阻断清单。** 无 Push、PR、Merge，也未更改 ADR 0009 Status。
+
+## 后续收敛裁决：Stage 2 工程范围封板，不再无限增加分期
+
+**新增的唯一执行资格修复（本轮基线 `77971d8`）：** Native Agent 的模型重试之前仅在 Outbox 标记 `WakeupAt`，直接 `Resume` 没有复核同一个 Retry ReadyAt。修复前的负向用例中，Legacy 直接提前调用 Model；Native 则只是被先前的 Store Lease 偶然挡住。现在仅在显式 opt-in `RunExecution` 模式，把相同到期时间保存在原 Agent `ModelInvocation.RetryAfter`（Feature State），Direct Resume 在领 Epoch 之前及真正重发之前都检查到期。Legacy 显式立即重试行为保持不变。修复前 FAIL、修复后双模式测试 PASS，无 Kernel 表/接口、额外 Pump、ProgressPlan 或 Run 状态增加。
+
+**已有足够工程证据，不再重复“创建下一小阶段”：** Stage 2A 的控制 CAS 和跨 Store Epoch 已验证；Stage 2B Native Direct 首次执行、3+ 内部 CAS 和无中间 Queue Fanout 在 `RunKernelExecutionSuite` 已验证；Stage 2C 的信号/Tool/Child 回收、Direct 与现有 Continuation Worker 对同一 Store Epoch 竞争、Run 级 quarantine、PG 先隔离后 Redis DLQ、显式 Apply COMMIT 历史证明均有对应负向测试。本轮补齐 Native 模型延迟重试的真实资格漏洞。这些仅为**已落地的实验性 Kernel 工程能力**，测试 Worker/模拟 Host **不是**实际产品 Local Pump 或生产 Hosted 的认证。
+
+**固定收口范围：** 不创建 Stage 2D、2E 或不断衍生 S2 新编号。保留 ADR 0008 已列出的生产安全/上线验收项为**一组固定条件**；后续选择真实 Hosted/Embedded/Profile/Provider 部署后，在相应 Host 集成与 release gate 验证授权、旧 Redis Job 升级、真实 Provider COMMIT、移动端生命周期、断电/恢复与 GC/备份。不预先构造通用调度器、认证层或双写协议。若将来出现新的可复现 P0/P1，按普通缺陷修复，不重开阶段。
+
+**双重裁决维持：** 本轮封板的 Stage 2 **实验性 Kernel 工程增量 GO**。按仍 **Accepted** 的 ADR 0008，含真实 Local Pump/Host 生命周期在内的**正式 Stage 2 生产级全量验收 NO-GO**，不声称此报告修改了规范。ADR 0009 仍 Proposed；Stage 3/五态迁移与任何正式生产发布需另行明确架构/发布批准。
+
+**回归复验：** `make metadata fmt-check tidy-check go-vet go-test`、`make go-race`、`make go-lint`（十个 Go 模块均 0 issues）、`make integration`（实际 PostgreSQL 16 + Redis 8）、`make ts-lint ts-typecheck ts-test ts-build eval-smoke benchmark-smoke otel-e2e-smoke a2a-product-check release-check` 均退出 0，日志 `/tmp/gaoge-stage2-close-{go-base,go-race,go-lint,integration,nongo}.log`。未将分别通过的目标宣称为单条 `make check` 已通过。人工工程审计不等于独立第三方认证。
