@@ -3,6 +3,7 @@ package conformance
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -57,6 +58,11 @@ func RunKernelQuarantineSuite(t *testing.T, factory ExecutionStoreFactory) {
 		block := kernel.ExecutionQuarantine{
 			RunID: current.Run.ID, Revision: current.Run.Revision,
 			Generation: 7, Reason: "invalid_current_work",
+		}
+		tooLarge := block
+		tooLarge.Generation = math.MaxUint64
+		if err = rt.QuarantineExecution(ctx, tooLarge); !errors.Is(err, kernel.ErrInvalidInput) {
+			t.Fatalf("unrepresentable work generation escaped validation: %v", err)
 		}
 		stale := block
 		stale.Revision--
@@ -135,13 +141,16 @@ func RunKernelQuarantineSuite(t *testing.T, factory ExecutionStoreFactory) {
 		}); err != nil {
 			t.Fatalf("healthy Run was poisoned: %v", err)
 		}
-		if err = neighbor.QuarantineExecution(ctx, block); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if err = neighbor.QuarantineExecution(ctx, block); !errors.Is(err, kernel.ErrInvalidInput) {
 			t.Fatalf("a bound different-Run executor poisoned the owner: %v", err)
 		}
-		if err = neighbor.RepairExecutionQuarantine(ctx, block); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if err = neighbor.RepairExecutionQuarantine(ctx, block); !errors.Is(err, kernel.ErrInvalidInput) {
 			t.Fatalf("a bound different-Run executor repaired the owner: %v", err)
 		}
 
+		if err = boundA.RepairExecutionQuarantine(ctx, block); !errors.Is(err, kernel.ErrInvalidInput) {
+			t.Fatalf("quarantined executor repaired its own work: %v", err)
+		}
 		if err = rt.RepairExecutionQuarantine(ctx, block); err != nil {
 			t.Fatalf("trusted exact repair failed: %v", err)
 		}

@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 )
 
@@ -36,7 +37,8 @@ type ExecutionQuarantineStore interface {
 
 func validExecutionQuarantine(value ExecutionQuarantine) bool {
 	return value.RunID != "" && strings.TrimSpace(value.RunID) == value.RunID &&
-		len(value.RunID) <= 128 && value.Revision > 0 &&
+		len(value.RunID) <= 128 && value.Revision > 0 && value.Revision <= math.MaxInt64 &&
+		value.Generation <= math.MaxInt64 &&
 		value.Reason != "" && len(value.Reason) <= 64 &&
 		strings.TrimSpace(value.Reason) == value.Reason
 }
@@ -54,11 +56,10 @@ func (runtime *Runtime) SupportsExecutionQuarantine() bool {
 // QuarantineExecution is a trusted-internal operation, NOT a user command or
 // a repair authorization grant. Store revision CAS makes stale work harmless.
 func (runtime *Runtime) QuarantineExecution(ctx context.Context, value ExecutionQuarantine) error {
-	if runtime == nil || ctx == nil || !validExecutionQuarantine(value) {
+	if runtime == nil || ctx == nil || !validExecutionQuarantine(value) || runtime.execution != nil {
+		// Executor-scoped Runtime authority is never an operator control
+		// authority, including when the Run ID happens to be the same.
 		return ErrInvalidInput
-	}
-	if !runtime.validBoundRun(value.RunID) {
-		return ErrExecutionConflict
 	}
 	store, ok := runtime.store.(ExecutionQuarantineStore)
 	if !ok {
@@ -70,11 +71,10 @@ func (runtime *Runtime) QuarantineExecution(ctx context.Context, value Execution
 // RepairExecutionQuarantine must be called only by a host that has validated
 // the exact work identity and any unresolved external Provider disposition.
 func (runtime *Runtime) RepairExecutionQuarantine(ctx context.Context, value ExecutionQuarantine) error {
-	if runtime == nil || ctx == nil || !validExecutionQuarantine(value) {
+	if runtime == nil || ctx == nil || !validExecutionQuarantine(value) || runtime.execution != nil {
+		// A fenced execution lease is not permission to repair its own
+		// quarantine. Only an authenticated host's unbound control can.
 		return ErrInvalidInput
-	}
-	if !runtime.validBoundRun(value.RunID) {
-		return ErrExecutionConflict
 	}
 	store, ok := runtime.store.(ExecutionQuarantineStore)
 	if !ok {
