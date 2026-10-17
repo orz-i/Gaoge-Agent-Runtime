@@ -129,7 +129,7 @@ func (runtime *Runtime) Descriptor() FeatureDescriptor {
 
 // Create starts one explicitly selected Runtime Kind.
 func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snapshot, error) {
-	if runtime == nil || !validCreateRequest(request) {
+	if runtime == nil || !validCreateRequest(request) || hasReservedApplyEvidence(request.Events) {
 		return Snapshot{}, ErrInvalidInput
 	}
 	if request.ExecutionRequired && !runtime.SupportsExecution() {
@@ -180,7 +180,16 @@ func (runtime *Runtime) ListEvents(ctx context.Context, runID string, afterSeq i
 
 // Apply validates and atomically commits one feature-owned state transition.
 func (runtime *Runtime) Apply(ctx context.Context, runID string, expectedRevision uint64, mutation Mutation) (Snapshot, error) {
+	return runtime.apply(ctx, runID, expectedRevision, mutation, false)
+}
+
+func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevision uint64, mutation Mutation, evidence bool) (Snapshot, error) {
 	if runtime == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 {
+		return Snapshot{}, ErrInvalidInput
+	}
+	// A first-party proof can only be appended by ApplyIdentified. Raw
+	// Feature EventDrafts must not impersonate a committed operation.
+	if !evidence && hasReservedApplyEvidence(mutation.Events) {
 		return Snapshot{}, ErrInvalidInput
 	}
 	if !runtime.validBoundRun(strings.TrimSpace(runID)) {

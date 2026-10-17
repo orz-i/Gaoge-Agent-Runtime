@@ -185,7 +185,7 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 // a new execution claim before the Feature dispatches external effects.
 func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expectedRevision uint64,
 	guard ControlGuard, mutation Mutation, permit *featurecontrol.Proof) (Snapshot, bool, error) {
-	if runtime == nil || runtime.execution != nil {
+	if runtime == nil || runtime.execution != nil || hasReservedApplyEvidence(mutation.Events) {
 		return Snapshot{}, false, ErrInvalidInput
 	}
 	current, err := runtime.Load(ctx, runID)
