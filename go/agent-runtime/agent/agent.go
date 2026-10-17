@@ -430,7 +430,11 @@ func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
 
 // StartRun creates and drives one direct Agent Run until terminal or approval wait.
 func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
-	if runner == nil || strings.TrimSpace(request.Goal) == "" {
+	if runner == nil || strings.TrimSpace(request.Goal) == "" ||
+		(runner.runExecution != nil && strings.TrimSpace(request.ID) == "") {
+		// Native durability cannot recover an uncertain Create when the
+		// caller never knew the generated Run ID. RequestID alone is not a
+		// Store-enforced unique idempotency key.
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	invocation := plugin.RunInvocation{
