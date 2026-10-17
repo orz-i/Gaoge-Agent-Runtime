@@ -1,11 +1,11 @@
 # ADR 0008: Minimal Agent Runtime Architecture (Embedded-First, Durable by Choice)
 
-- **Status:** **Accepted architectural direction**; Stage 1 SQLite prototype verified and Stage 2 Phase 1 optional Store execution fencing underway; **not fully implemented or released**
+- **Status:** **Accepted architectural direction**; Stage 1 verified; Stage 2A/2B/2C experimental engineering increments audited and locally closed, but **the normative Stage 2 exit remains NO-GO** and production durability is not certified or released
 - **Date:** 2026-10-15
 - **Baseline:** `main@44785f85d3117e9629c34ed48c7a6b458dbfbfab`
 - **Scope:** Gaoge-Agent-Runtime Go SDK; desktop/mobile embedded and hosted execution
 - **Acceptance decision record:** [Stage 0 SQLite and ReadyWork choices](../audits/2026-10-15-minimal-runtime-stage0-decisions.md)
-- **Implementation evidence:** [Stage 1 single-executor SQLite Store audit](../audits/2026-10-15-minimal-runtime-stage1-prototype.md); [Stage 2 Phase 1 execution-fence evidence](../audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md)
+- **Implementation evidence:** [Stage 1 single-executor SQLite Store audit](../audits/2026-10-15-minimal-runtime-stage1-prototype.md); [Stage 2 Phase 1 execution-fence evidence](../audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md); [Stage 2 final engineering exit audit and unfulfilled normative gates](../audits/2026-10-16-stage2-final-exit-audit.md)
 - **Normative test and migration annex:** [Minimal Agent Runtime — implementation and conformance contract](../minimal-agent-runtime-implementation.md)
 - **Reassessment under review:** [Proposed ADR 0009 — Minimal Kernel complexity reduction](0009-minimal-kernel-complexity-reassessment.md); this proposal does **not** change ADR 0008's accepted status until a separate acceptance decision
 - **Related:** [Current architecture](../architecture.md), [ADR 0001](./0001-runtime-durability-governance-v1.md), [ADR 0005](./0005-durable-agent-execution-allowances.md), [ADR 0006](./0006-runtime-owned-auto-allowance-segments.md), [Reliability evidence](../reliability.md)

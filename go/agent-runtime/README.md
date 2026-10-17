@@ -17,6 +17,8 @@ Redis or memory generation stream adapter.
 
 ## Experimental direct-Agent execution lease (Stage 2B)
 
+**Stage 2 governance:** The [final Stage 2 exit audit](../../docs/audits/2026-10-16-stage2-final-exit-audit.md) closes the demonstrated 2A/2B/2C experimental engineering increments, **not** the full ADR 0008 production acceptance. A shared Direct/Pump/Hosted eligibility gate, authoritative Run-level quarantine and repair, and verified host-specific recovery/identity contracts remain separate blockers. Do not treat this opt-in API as unattended production multi-worker certification.
+
 An opt-in `agent.Dependencies.RunExecution` configuration lets a Direct
 Agent `StartRun` or `Resume` claim the existing Store execution lease
 before its Model/Tool loop. It is **not** a workflow scheduler or a new
