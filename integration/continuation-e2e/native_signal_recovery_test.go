@@ -283,7 +283,8 @@ func TestRealPostgresRedisNativeEarlySignalProviderRecovery(t *testing.T) {
 		if err = json.Unmarshal(job.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if payload.Trigger == continuation.TriggerToolResultReady && payload.WaitGeneration == pending.Generation {
+		if payload.RunID == id && payload.Trigger == continuation.TriggerToolResultReady &&
+			payload.WaitGeneration == pending.Generation {
 			readyJob = job
 		}
 	}
@@ -314,13 +315,23 @@ func TestRealPostgresRedisNativeEarlySignalProviderRecovery(t *testing.T) {
 	if err = worker.Start(workerCtx); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case dispatchErr := <-reports:
-		if !errors.Is(dispatchErr, agent.ErrToolOutcomeUnknown) {
-			t.Fatalf("unverified external result did not NACK: %v", dispatchErr)
+	// Other older model/approval self-wakeups can be delivered before
+	// the exact ToolWait generation. A changed Run Revision alone no
+	// longer authorizes their ACK; the Worker reports Conflict and NACKs
+	// them until their Feature work is reconciled or the Run settles.
+	verifiedUnresolved := false
+	unverifiedDeadline := time.After(5 * time.Second)
+	for !verifiedUnresolved {
+		select {
+		case dispatchErr := <-reports:
+			if errors.Is(dispatchErr, agent.ErrToolOutcomeUnknown) {
+				verifiedUnresolved = true
+			} else if !errors.Is(dispatchErr, kernel.ErrConflict) {
+				t.Fatalf("unexpected Redis recovery error: %v", dispatchErr)
+			}
+		case <-unverifiedDeadline:
+			t.Fatal("Redis Worker did not NACK unverified external result")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Redis Worker did not NACK unverified result")
 	}
 	cancelWorker()
 	if err = worker.Close(context.Background()); err != nil {
