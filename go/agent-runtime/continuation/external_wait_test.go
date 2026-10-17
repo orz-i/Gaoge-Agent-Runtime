@@ -116,10 +116,22 @@ func (fixture *durableWaitFixture) pump(t *testing.T) {
 		if err = json.Unmarshal(delivery.Job.Payload, &payload); err != nil {
 			t.Fatal(err)
 		}
-		if err = fixture.dispatcher.Dispatch(t.Context(), payload); err != nil {
-			t.Fatal(err)
+		lease := queuecore.LeaseRequest{JobID: delivery.Job.ID, LeaseID: delivery.Lease.ID, WorkerID: "wait-test-worker"}
+		if dispatchErr := fixture.dispatcher.Dispatch(t.Context(), payload); dispatchErr != nil {
+			// Mirror the Worker: a changed Run revision without a proven
+			// Feature consumption must NACK and preserve the candidate, not
+			// make this test fixture silently ACK an unresolved wakeup.
+			if !errors.Is(dispatchErr, kernel.ErrConflict) {
+				t.Fatalf("unrelated delivery failure: %v", dispatchErr)
+			}
+			if _, err = fixture.queue.Nack(t.Context(), queuecore.NackRequest{
+				LeaseRequest: lease, ErrorCode: "continuation.dispatch_failed", Error: dispatchErr.Error(),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			continue
 		}
-		if _, err = fixture.queue.Ack(t.Context(), queuecore.LeaseRequest{JobID: delivery.Job.ID, LeaseID: delivery.Lease.ID, WorkerID: "wait-test-worker"}); err != nil {
+		if _, err = fixture.queue.Ack(t.Context(), lease); err != nil {
 			t.Fatal(err)
 		}
 	}

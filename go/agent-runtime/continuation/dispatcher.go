@@ -32,8 +32,9 @@ func NewDispatcher(runs SnapshotLoader, registrations ...ResumerRegistration) (*
 }
 
 // Dispatch performs at most one successful revision-guarded feature resumption.
-// Proven stale and already-terminal deliveries are successful no-ops. A Run
-// missing from the authoritative Store is UNKNOWN, not proof of consumption.
+// A terminal Run can retire an old delivery. For a still-running Run, neither
+// a missing Run nor a changed Revision proves Feature-owned work was consumed;
+// the Worker must retain that candidate for trusted Feature/Host recovery.
 func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) error {
 	normalized, err := normalizePayload(payload)
 	if err != nil {
@@ -142,16 +143,25 @@ func (dispatcher *Dispatcher) eligibleSnapshot(
 	}
 	// A renewable allowance must be granted explicitly by the owning host.
 	// A stale wakeup cannot dispatch new work while the Run is paused.
+	if snapshot.Run.Status != kernel.RunStatusRunning {
+		return snapshot, false, nil
+	}
 	stableFact := payload.Trigger == TriggerChildTerminal || payload.WaitGeneration != 0
-	eligible := (snapshot.Run.Revision == payload.ExpectedRevision || stableFact) && snapshot.Run.Status == kernel.RunStatusRunning
-	return snapshot, eligible, nil
+	if !stableFact && snapshot.Run.Revision != payload.ExpectedRevision {
+		// A later CAS may only have committed unrelated metadata while this
+		// wakeup is the last durable activation source. Neither blind replay
+		// against the newer phase nor Queue ACK is safe without a Feature
+		// consumption proof. Keep the original Job retryable for the host.
+		return snapshot, false, kernel.ErrConflict
+	}
+	return snapshot, true, nil
 }
 
 func (dispatcher *Dispatcher) resumeOnce(ctx context.Context, resumer Resumer, snapshot kernel.Snapshot) error {
 	resumed, err := resumer.Resume(ctx, snapshot.Run.ID, snapshot.Run.Revision)
 	if errors.Is(err, kernel.ErrConflict) {
-		// For a revision-bound wakeup, conflict is obsolete only once the
-		// authoritative revision has moved (or the Run is already settled).
+		// An interleaved CAS may only be an unrelated write. An advanced
+		// nonterminal Revision does not prove this wakeup was consumed.
 		current, loadErr := dispatcher.runs.Load(ctx, snapshot.Run.ID)
 		if errors.Is(loadErr, kernel.ErrNotFound) {
 			return errors.Join(err, loadErr)
@@ -159,7 +169,7 @@ func (dispatcher *Dispatcher) resumeOnce(ctx context.Context, resumer Resumer, s
 		if loadErr != nil {
 			return errors.Join(err, loadErr)
 		}
-		if current.Run.Revision != snapshot.Run.Revision || terminalSnapshotAfterResume(current) {
+		if terminalSnapshotAfterResume(current) {
 			return nil
 		}
 		return err
