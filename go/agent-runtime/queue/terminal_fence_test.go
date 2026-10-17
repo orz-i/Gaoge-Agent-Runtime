@@ -2,12 +2,40 @@ package queue_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 )
+
+func TestProtectedPolicyChangesFingerprintWithoutReencodingLegacyPolicy(t *testing.T) {
+	request := queue.EnqueueRequest{
+		Queue: queueNameContinuations, ClientJobID: "old-work-id", Kind: "runtime.continuation.v1",
+		Payload: json.RawMessage(`{}`), Policy: queue.Policy{MaxAttempts: 2},
+	}
+	legacy, err := queue.PrepareEnqueue(request, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(legacy.Policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "requireTerminalFence") {
+		t.Fatal("new bool changed the canonical old-policy JSON fingerprint")
+	}
+	request.Policy.RequireTerminalFence = true
+	protected, err := queue.PrepareEnqueue(request, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.ID != protected.ID || legacy.Fingerprint == protected.Fingerprint {
+		t.Fatalf("old unprotected Job was silently upgraded: old=%+v new=%+v", legacy, protected)
+	}
+}
 
 // A fenced continuation Job must never auto-DLQ simply because its owner
 // crashed or its retry budget expired. Only a prior authoritative Run fence

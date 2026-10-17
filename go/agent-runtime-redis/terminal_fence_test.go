@@ -2,11 +2,32 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 )
+
+func TestRedisLegacyJobIsNotSilentlyUpgradedToProtectedPolicy(t *testing.T) {
+	q, _ := newRedisQueueTest(t)
+	request := queuecore.EnqueueRequest{
+		Queue: redisQueueName, ClientJobID: "legacy-same-identity", Kind: "runtime.continuation.v1",
+		Payload: []byte(`{}`), Policy: queuecore.Policy{MaxAttempts: 2},
+	}
+	first, err := q.Enqueue(t.Context(), request)
+	if err != nil || first.Job.Policy.RequireTerminalFence {
+		t.Fatalf("legacy enqueue: %+v %v", first, err)
+	}
+	request.Policy.RequireTerminalFence = true
+	if _, err = q.Enqueue(t.Context(), request); !errors.Is(err, queuecore.ErrConflict) {
+		t.Fatalf("persisted unprotected Job silently reinterpreted on upgrade: %v", err)
+	}
+	persisted, err := q.Get(t.Context(), first.Job.ID)
+	if err != nil || persisted.Policy.RequireTerminalFence || persisted.Fingerprint != first.Job.Fingerprint {
+		t.Fatalf("old Queue Job mutated: %+v %v", persisted, err)
+	}
+}
 
 func TestRedisProtectedTerminalFenceSurvivesLeaseExpiryAndRequeue(t *testing.T) {
 	q, clock := newRedisQueueTest(t)
