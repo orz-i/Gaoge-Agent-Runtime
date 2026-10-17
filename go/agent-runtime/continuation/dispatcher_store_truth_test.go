@@ -80,7 +80,10 @@ func TestDispatcherOnlyACKsAuthoritativelyPersistedTerminalOutcomes(t *testing.T
 			payload := continuation.Payload{
 				SchemaVersion: continuation.SchemaVersion, RunID: parent.Run.ID,
 				ExpectedRevision: parent.Run.Revision, Trigger: test.trigger,
-				SourceRunID: "source-run", SourceRevision: 2,
+				SourceRunID: parent.Run.ID, SourceRevision: parent.Run.Revision,
+			}
+			if test.trigger == continuation.TriggerChildTerminal {
+				payload.SourceRunID, payload.SourceRevision = "source-run", 2
 			}
 			if test.trigger == continuation.TriggerToolResultReady {
 				payload.WaitGeneration = 1

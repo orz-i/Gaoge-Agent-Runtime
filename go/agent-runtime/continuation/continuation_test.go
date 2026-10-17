@@ -206,7 +206,13 @@ func TestDispatcherRoutesExactRevisionAndIgnoresStaleDelivery(t *testing.T) {
 		if err = dispatcher.Dispatch(t.Context(), payload); err != nil || resumer.calls != 1 {
 			t.Fatalf("kind %s: calls=%d error=%v", kind, resumer.calls, err)
 		}
-		payload.ExpectedRevision++
+		// An actual stale delivery carries its original immutable source
+		// revision after a different Run mutation has advanced the Store.
+		if _, err = runtime.Apply(t.Context(), snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: snapshot.State,
+		}); err != nil {
+			t.Fatal(err)
+		}
 		if err = dispatcher.Dispatch(t.Context(), payload); err != nil || resumer.calls != 1 {
 			t.Fatalf("stale kind %s: calls=%d error=%v", kind, resumer.calls, err)
 		}

@@ -129,6 +129,16 @@ func normalizePayload(payload Payload) (Payload, error) {
 	if (payload.Trigger == TriggerToolWaitDeadline || payload.Trigger == TriggerToolResultReady) && payload.WaitGeneration == 0 {
 		return Payload{}, ErrInvalidInput
 	}
+	// The projector emits self-wakeups only from the owning Run and its
+	// committed Revision. A delivery Job is not permission to borrow an
+	// unrelated Run or revision as a trigger.
+	if payload.Trigger != TriggerChildTerminal &&
+		(payload.SourceRunID != payload.RunID || payload.SourceRevision != payload.ExpectedRevision) {
+		return Payload{}, ErrInvalidInput
+	}
+	if payload.Trigger == TriggerChildTerminal && payload.SourceRunID == payload.RunID {
+		return Payload{}, ErrInvalidInput
+	}
 	return payload, nil
 }
 
