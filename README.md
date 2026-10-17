@@ -4,8 +4,10 @@ Gaoge Agent Runtime is a framework-neutral runtime SDK for durable, tool-using
 agents. It separates the deterministic run state machine from optional agent,
 harness, HTTP, protocol, and persistence capabilities.
 
-This repository is the canonical public source. The current release line is
-`v0.1.0-beta.22` and should be treated as a Beta API.
+This repository is the canonical public source. The current development
+cohort targets **v0.1.0-beta.23**. The last locally verified published release is
+**v0.1.0-beta.22** until the new immutable tags and GitHub release are
+available; see the [beta.23 release-candidate notes](docs/releases/v0.1.0-beta.23.md).
 
 ## Packages
 
@@ -15,6 +17,7 @@ This repository is the canonical public source. The current release line is
 | `go/agent-runtime-harness` | Durable turn orchestration, interactions, timelines, delegation | Supported |
 | `go/agent-runtime-http` | HTTP v1 handlers and SSE feeds | Supported |
 | `go/agent-runtime-postgres` | Kernel and run-relation stores | Supported |
+| `go/agent-runtime-sqlite` | Experimental embedded SQLite Kernel / RunRelation Store | beta.23 candidate; production/device NO-GO |
 | `go/agent-runtime-harness-postgres` | Harness and Context V2 store | Supported |
 | `go/agent-runtime-redis` | Durable continuation queue and run feed | Supported |
 | `go/agent-runtime-mcp` | MCP client, registry, and transport adapters | Supported |
@@ -133,8 +136,8 @@ reproducible checks, and remaining coverage limits.
 
 - [Architecture](docs/architecture.md)
 - [Accepted Minimal Agent Runtime architecture (ADR 0008; staged implementation)](docs/adr/0008-minimal-agent-runtime-architecture.md)
-- [Proposed Kernel minimality reassessment (ADR 0009; not yet accepted)](docs/adr/0009-minimal-kernel-complexity-reassessment.md)
-- [Experimental local SQLite Kernel Store (Stage 1, single executor)](go/agent-runtime-sqlite/README.md)
+- [Accepted Kernel minimality reassessment (ADR 0009)](docs/adr/0009-minimal-kernel-complexity-reassessment.md)
+- [Experimental local SQLite Kernel Store (bounded Stage 1–6 engineering)](go/agent-runtime-sqlite/README.md)
 - [Durable external Tool waits (P1 local candidate)](docs/external-tool-wait.md)
 - [Beta support policy](SUPPORT.md)
 - [Security policy](SECURITY.md)

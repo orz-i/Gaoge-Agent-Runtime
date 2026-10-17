@@ -6,9 +6,15 @@ An opt-in local SQLite adapter for the current
 **Status:** Stage 1 Direct Agent and opt-in Stage 2 execution-fencing
 experiments, plus a bounded **Stage 5 SQLite RunRelationStore** adapter.
 **Not a supported autonomous multi-worker Agent, complete durable
-Team/Workflow runtime or mobile durable runtime.** Experimental Kernel
-interfaces are internal development only until a coordinated Core
-release; no production release is implied by `go.work`.
+Team/Workflow runtime or mobile durable runtime.**
+
+The module is included in the coordinated **beta.23 release candidate**;
+its direct `GOWORK=off` installation requires the matching Core
+`v0.1.0-beta.23` tag and the SQLite module tag to be published on the
+same commit. Source-cohort consumer tests may use temporary local
+replacements, but shipped modules must not. See the
+[beta.23 candidate notes](../../docs/releases/v0.1.0-beta.23.md).
+No production release is implied by `go.work`.
 
 ## Minimal desktop example
 
@@ -236,12 +242,15 @@ New tests cover snapshot isolation across loads, mutation, concurrent readers
 and store reopening. This changes neither persisted DDL nor event/commit
 proof retention. See the [Stage 6 performance and safety audit](../../docs/audits/2026-10-17-stage6-sqlite-snapshot-buffer-optimization.md).
 
-The execution columns are part of the still-**unreleased Schema v1**;
-no automatic migration or version bump is implied. The local adapter
-currently imports experimental Kernel interfaces absent from the
-older published `agent-runtime v0.1.0-beta.22`: standalone
-`GOWORK=off` consumer builds are **not release-ready** until those
-cross-module API versions are coordinated. See
+The execution columns remain part of the still-**unreleased Schema v1**;
+no schema migration or version bump is implied. The older published Core
+`v0.1.0-beta.22` does not export the opt-in execution APIs. The coordinated
+**beta.23** candidate pins Core and SQLite to the same future release,
+and the repository tests both a `GOWORK=off` source cohort and a separate
+**no-replace versioned ZIP** cohort. Official standalone public consumption
+remains **unverified until immutable beta.23 tags are pushed**; the release
+workflow must run the real no-replace consumer and read-only SQLite module
+gates before issuing a GitHub prerelease. See the
 [Stage 2 Phase 1 evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md).
 
 ### Deliberate Stage 1 limits
