@@ -113,8 +113,12 @@ func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 		}
 		if candidateErr != nil {
 			if len(scheduler.reconcileFailures) >= maxReconcileRetryBacklog {
-				scheduler.reconcileCursor = lastProcessed
-				return errors.Join(result, candidateErr, errReconcileRetryBacklogFull)
+				// The relation remains unsettled in the durable pager. Do not
+				// stall every later candidate behind a full in-memory retry
+				// backlog; a future cursor wrap will revisit this item.
+				result = errors.Join(result, candidateErr, errReconcileRetryBacklogFull)
+				lastProcessed = id
+				continue
 			}
 			if scheduler.reconcileFailures == nil {
 				scheduler.reconcileFailures = make(map[string]runrelation.ReconciliationCandidate)
@@ -174,6 +178,9 @@ func (scheduler *Scheduler) reconcileCandidate(
 	if err != nil {
 		return err
 	}
+	if !sameRelationTenant(parent, child) {
+		return fmt.Errorf("%w: cross-tenant run relation", ErrInvalidInput)
+	}
 	if candidate.LastParentRevision >= parent.Run.Revision &&
 		candidate.LastChildRevision >= child.Run.Revision {
 		return nil
@@ -218,7 +225,7 @@ func (scheduler *Scheduler) reconcileLegacy(ctx context.Context) error {
 			result = errors.Join(result, loadErr)
 			continue
 		}
-		result = errors.Join(result, scheduler.scheduleRelation(ctx, relation, child.Run.ID, child.Run.Revision))
+		result = errors.Join(result, scheduler.scheduleRelation(ctx, relation, child))
 	}
 	return result
 }
@@ -351,22 +358,29 @@ func (scheduler *Scheduler) schedule(ctx context.Context, payload Payload, wakeu
 	return err
 }
 
-func (scheduler *Scheduler) scheduleOwningParent(ctx context.Context, child kernel.CommittedTransition) error {
-	relation, err := scheduler.relations.GetByChild(ctx, child.RunID)
+func (scheduler *Scheduler) scheduleOwningParent(ctx context.Context, transition kernel.CommittedTransition) error {
+	relation, err := scheduler.relations.GetByChild(ctx, transition.RunID)
 	if errors.Is(err, runrelation.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return scheduler.scheduleRelation(ctx, relation, child.RunID, child.Revision)
+	child, err := scheduler.runs.Load(ctx, transition.RunID)
+	if err != nil {
+		return err
+	}
+	return scheduler.scheduleRelation(ctx, relation, child)
+}
+
+func sameRelationTenant(parent, child kernel.Snapshot) bool {
+	return parent.Run.Actor.TenantID != "" && parent.Run.Actor.TenantID == child.Run.Actor.TenantID
 }
 
 func (scheduler *Scheduler) scheduleRelation(
 	ctx context.Context,
 	relation runrelation.Relation,
-	childRunID string,
-	childRevision uint64,
+	child kernel.Snapshot,
 ) error {
 	parent, err := scheduler.runs.Load(ctx, relation.ParentRunID)
 	if errors.Is(err, kernel.ErrNotFound) {
@@ -375,10 +389,15 @@ func (scheduler *Scheduler) scheduleRelation(
 	if err != nil || terminal(parent.Run.Status) {
 		return err
 	}
+	// A persisted relation is an ownership hint, not a grant to cross a
+	// tenant boundary. Keep invalid work retryable for host diagnostics.
+	if child.Run.ID != relation.ChildRunID || !sameRelationTenant(parent, child) {
+		return fmt.Errorf("%w: cross-tenant run relation", ErrInvalidInput)
+	}
 	return scheduler.Schedule(ctx, Payload{
 		SchemaVersion: SchemaVersion, RunID: parent.Run.ID,
 		ExpectedRevision: parent.Run.Revision, Trigger: TriggerChildTerminal,
-		SourceRunID: childRunID, SourceRevision: childRevision,
+		SourceRunID: child.Run.ID, SourceRevision: child.Run.Revision,
 	})
 }
 
