@@ -364,6 +364,8 @@ not silent concurrent merging.
 | **5 · P1** | Optional SQLite Workflow/Team/Harness and OS/mobile adapters only with per-Feature/device implementation and fault evidence. |
 | **6 · P2** | Evidence-led state/journal compaction and CAS performance optimization, behind separate measured proposals. |
 
+**Stage 4 experimental Hosted transport parity (2026-10-17):** the [PG16/Redis8 fault audit including AOF SIGKILL/restart](../audits/2026-10-17-stage4-hosted-orphan-delivery.md) seals the **SDK/adapter test-fixture engineering slice only**. Production Hosted release remains NO-GO without selected Host principal/Provider proof, persistence and rollout acceptance; no Stage 5 entry is inferred.
+
 **Stage 3 design entry is not production eligibility.** It may follow the
 completed Stage 2 experimental Kernel safety evidence while selected Host or
 mobile release gates remain NO-GO. Stage 3 itself does not implement a

@@ -44,3 +44,43 @@
 **Stage 4 的下一项工程工作**应先选定一个实际部署的 Hosted Host 与受信任 Provider，明确数据源和授权边界，再对相同 PG→Redis→Worker→Provider 链路做真实 Host 级故障注入。没有选定产品宿主时，**不继续制造通用认证门面、重复 Inbox、进度状态或新 Stage 4 子阶段**。
 
 **结论：本次是 Stage 4 的受限 Hosted 可靠性交付增量，非 Stage 4 生产验收。** ADR 0009 所批准的六态不变，SQLite 未发布 v1 不变；不进入 Stage 5，不声称物理 exactly-once，不进行未经授权的 PR/merge/push。
+
+## 4. Stage 4 最终工程收敛：Redis AOF 进程崩溃恢复（后续证据）
+
+**阶段范围裁决：GO — 已有 PostgreSQL/Redis Hosted SDK 传输及受保护执行合同的实验性工程证据可封板。NO-GO — 生产 Hosted/真实产品 Host 发布准入。** 本节是同一 Stage 4 的有界补充，**不增加新的阶段或通用恢复服务**。
+
+默认 `docker-compose.test.yml` 中 Redis 8 **没有明确启用 AOF**；所以默认 `make integration` 不能单独证明 Redis 服务停止后的 Job 持久性。新增仅用于故障测试的 [AOF Compose 覆盖](../../integration/continuation-e2e/docker-compose.redis-aof.test.yml)，以 `redis-server --appendonly yes --appendfsync always` 启动独立容器。对应 [真实 PG/Redis 崩溃回归](../../integration/continuation-e2e/redis_aof_crash_real_test.go) 必须显式传入测试容器 ID 环境变量，且在 SIGKILL 前严格验证**固定容器名与 Docker Compose project/service 标签**，拒绝任意用户指定的 Redis 容器；普通 CI/integration 不会破坏 Redis 进程。
+
+| 真实故障/恢复窗口 | 验证结果 |
+| --- | --- |
+| PG16 中已创建受保护 Native Run；Redis8 中受保护 Job 已 Enqueue/Claim | Run/Job 使用各自权威存储；Job `RequireTerminalFence=true`、`MaxAttempts=1` |
+| Redis **SIGKILL** 后以同一个容器文件系统重新启动 | AOF 恢复已租用 Job 的 ID、策略、Generation 和第一次 Attempt；PG Run 未改变 |
+| 原 Queue 租约到期 | 首轮 Claim 只扫描到期/安排退避，**不能假定一次 Claim 即交付**；有界重查后按原 Job ID、Generation+1、Attempt 2 重新领取，没有越过 protected terminal fence |
+| 旧 Worker 尝试原租约 ACK | `queue.ErrLeaseLost`，不可冒充恢复 Worker |
+| 新 PG 连接和新 Run Epoch 执行终态 CAS | PG Revision 从原值**仅推进一次**；随后当前 Redis 租约 ACK |
+| **ACK 以后第二次 Redis SIGKILL/重启** | 原 Job 仍为 completed，使用相同 `ClientJobID` 重发只返回 `Reused`；PG Run 保留唯一已提交终态 |
+
+本测试只使用**同一个 Docker 容器及文件系统**，证明指定 AOF/fdatasync 配置下的**Redis 进程级终止和重新启动**。**不证明**容器删除重建、Docker 主机/文件系统断电、磁盘丢失、AOF 损坏恢复、Redis Sentinel/Cluster failover，也不验证真实外部 Tool/Provider 的物理幂等。
+
+**复现命令（从仓库根目录执行，仅适用于一次性测试资源）：**
+
+```bash
+docker compose -p gaoge-stage4-aof-proof -f docker-compose.test.yml -f integration/continuation-e2e/docker-compose.redis-aof.test.yml up -d --wait --wait-timeout 90 postgres redis
+(
+  cd integration/continuation-e2e
+  TEST_POSTGRES_DSN='postgres://agent_runtime:agent_runtime@127.0.0.1:55432/agent_runtime?sslmode=disable' \
+  TEST_REDIS_ADDR=127.0.0.1:56379 \
+  STAGE4_REDIS_AOF_CONTAINER=gaoge-stage4-aof-proof-redis-1 \
+  GOWORK=off go test -race -count=3 -run '^TestStage4RealRedisAOFCrashRetainsProtectedDeliveryAndPGFence$' -v ./...
+)
+docker compose -p gaoge-stage4-aof-proof -f docker-compose.test.yml -f integration/continuation-e2e/docker-compose.redis-aof.test.yml down -v --remove-orphans
+```
+
+- 独立 AOF **双 SIGKILL 回归 `-race -count=3` PASS**：`/tmp/gaoge-stage4-aof-crash-real-race.log`，对应 `/tmp/gaoge-stage4-aof-crash-services.log` 与 `/tmp/gaoge-stage4-aof-crash-cleanup.log`。
+- 独立集成模块 `GOWORK=off go vet ./...`、`GOWORK=off golangci-lint run ./...` **PASS、0 issues**（`/tmp/gaoge-stage4-aof-vet-lint.log`）。
+- 默认真实 PostgreSQL 16 + Redis 8 `make integration` **PASS**（`/tmp/gaoge-stage4-final-integration.log`）；它默认 **SKIP** 上述需授权 SIGKILL 的 AOF 专项。
+- 该轮没有改变业务 Go/TS、Run 六态、PostgreSQL/SQLite DDL、Redis Lua 或 Queue Policy。此前相同代码 HEAD `72203ea` 的完整 `make check` 已返回 0；新增的是**独立集成测试**，不把两项测试误写成同一命令。
+
+**正式产品 Hosted 发布仍有固定的条件验收项：** 选定真实 Host 的 Principal/Profile/RBAC 和工作来源授权、实际 Provider COMMIT 查询/幂等及早到信号持久源、旧 Redis 非保护 Job 的迁移、真实进程/网络断连及 Redis 持久化方案、运行指标/Orphan 重试告警、备份/恢复；尤其对 **Run 仍 running、仅 Revision 变化** 的普通自唤醒，尚未证明所有 Feature 的具体消费资格，不能将这一处理等同于全局幂等 ACK。没有这些产品级证据时不得对外宣称 Stage 4 生产 GO、物理 exactly-once 或自动进入 Stage 5。
+
+**Stage 4 SDK 侧最小 Hosted 实验工程至此收敛/封板**，实际产品实施属于条件触发的独立上线验证；不再通过扩大 Kernel 表、状态机或增设治理分期推动它。

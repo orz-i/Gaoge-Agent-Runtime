@@ -32,7 +32,11 @@ for protected Jobs no automatic terminal DLQ can erase this unresolved
 obligation. A [real PG16/Redis8 reconstruction test](../../docs/audits/2026-10-17-stage4-hosted-orphan-delivery.md)
 exercises that failure and a subsequent Store-fenced Run completion. This
 requires explicit Host orphan alerts/quota policy; it does not authenticate
-incoming Jobs or certify Redis crash persistence.
+incoming Jobs. A separate opt-in [Stage 4 AOF process SIGKILL proof](../../docs/audits/2026-10-17-stage4-hosted-orphan-delivery.md)
+uses a disposable Redis 8 container started with `appendonly yes` and
+`appendfsync always`; leased Jobs and completed ACKs survive a process restart
+**only with the same container filesystem**. Default `make integration` does
+not enable AOF and does not certify Redis persistence or production HA.
 
 **Upgrade caution:** existing persisted Jobs lack this protected policy and
 retain legacy automatic DLQ behavior. Reprojection under the new policy also
