@@ -53,9 +53,9 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 	if err != nil {
 		return kernel.ExecutionLease{}, err
 	}
-	var epoch, expires int64
+	var epoch, expires, quarantineRev int64
 	var status string
-	err = tx.QueryRowContext(ctx, `SELECT execution_epoch,execution_expiry_ms,status FROM runtime_runs WHERE run_id=?`, req.RunID).Scan(&epoch, &expires, &status)
+	err = tx.QueryRowContext(ctx, `SELECT execution_epoch,execution_expiry_ms,status,execution_quarantine_revision FROM runtime_runs WHERE run_id=?`, req.RunID).Scan(&epoch, &expires, &status, &quarantineRev)
 	if errors.Is(err, sql.ErrNoRows) {
 		return kernel.ExecutionLease{}, kernel.ErrNotFound
 	}
@@ -67,6 +67,9 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 	}
 	if status != string(kernel.RunStatusRunning) {
 		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
+	}
+	if quarantineRev != 0 {
+		return kernel.ExecutionLease{}, kernel.ErrExecutionQuarantined
 	}
 	if epoch == 0 {
 		return kernel.ExecutionLease{}, kernel.ErrExecutionRequired
@@ -179,11 +182,11 @@ func (s *Store) CheckExecution(ctx context.Context, runID string, lease *kernel.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var epoch, expiry, now int64
+	var epoch, expiry, now, quarantineRev int64
 	var owner, id, status string
 	err := s.db.QueryRowContext(ctx, `SELECT execution_epoch,execution_owner,execution_lease_id,execution_expiry_ms,status,
-   CAST(unixepoch('subsec')*1000 AS INTEGER) FROM runtime_runs WHERE run_id=?`, runID).
-		Scan(&epoch, &owner, &id, &expiry, &status, &now)
+   execution_quarantine_revision,CAST(unixepoch('subsec')*1000 AS INTEGER) FROM runtime_runs WHERE run_id=?`, runID).
+		Scan(&epoch, &owner, &id, &expiry, &status, &quarantineRev, &now)
 	if errors.Is(err, sql.ErrNoRows) {
 		return kernel.ErrNotFound
 	}
@@ -192,6 +195,9 @@ func (s *Store) CheckExecution(ctx context.Context, runID string, lease *kernel.
 	}
 	if status == string(kernel.RunStatusCompleted) || status == string(kernel.RunStatusFailed) || status == string(kernel.RunStatusCancelled) {
 		return kernel.ErrTerminal
+	}
+	if quarantineRev != 0 {
+		return kernel.ErrExecutionQuarantined
 	}
 	if lease == nil {
 		if epoch != 0 {

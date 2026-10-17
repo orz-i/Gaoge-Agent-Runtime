@@ -322,7 +322,10 @@ var schemaDDL = []string{
         execution_epoch INTEGER NOT NULL DEFAULT 0,
         execution_owner TEXT NOT NULL DEFAULT '',
         execution_lease_id TEXT NOT NULL DEFAULT '',
-        execution_expiry_ms INTEGER NOT NULL DEFAULT 0
+        execution_expiry_ms INTEGER NOT NULL DEFAULT 0,
+        execution_quarantine_revision INTEGER NOT NULL DEFAULT 0,
+        execution_quarantine_generation INTEGER NOT NULL DEFAULT 0,
+        execution_quarantine_code TEXT NOT NULL DEFAULT ''
     )`,
 	`CREATE TABLE runtime_events (
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),

@@ -324,9 +324,13 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		if gateErr := kernel.ValidateControl(current, *guard, mutation, time.UnixMilli(nowMS).UTC()); gateErr != nil {
 			return kernel.Snapshot{}, gateErr
 		}
-		var epoch int64
-		if queryErr := tx.QueryRowContext(ctx, `SELECT execution_epoch FROM runtime_runs WHERE run_id=?`, runID).Scan(&epoch); queryErr != nil {
+		var epoch, blockedRevision int64
+		if queryErr := tx.QueryRowContext(ctx, `SELECT execution_epoch,execution_quarantine_revision FROM runtime_runs WHERE run_id=?`, runID).
+			Scan(&epoch, &blockedRevision); queryErr != nil {
 			return kernel.Snapshot{}, queryErr
+		}
+		if blockedRevision != 0 && mutation.Record.Run.Status == kernel.RunStatusRunning {
+			return kernel.Snapshot{}, kernel.ErrExecutionQuarantined
 		}
 		if epoch == math.MaxInt64 {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
@@ -359,7 +363,8 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 			return kernel.Snapshot{}, clockErr
 		}
 		updateSQL += ` AND status='running' AND execution_epoch=? AND execution_owner=?
-          AND execution_lease_id=? AND execution_expiry_ms>?`
+          AND execution_lease_id=? AND execution_expiry_ms>?
+          AND execution_quarantine_revision=0`
 		args = append(args, lease.Epoch, lease.OwnerID, lease.LeaseID, nowMS)
 	}
 	updated, err := tx.ExecContext(ctx, updateSQL, args...)
@@ -391,9 +396,14 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		}
 		if lease != nil {
 			var currentStatus string
-			err = tx.QueryRowContext(ctx, `SELECT status FROM runtime_runs WHERE run_id=?`, runID).Scan(&currentStatus)
+			var quarantineRev int64
+			err = tx.QueryRowContext(ctx, `SELECT status,execution_quarantine_revision FROM runtime_runs WHERE run_id=?`, runID).
+				Scan(&currentStatus, &quarantineRev)
 			if err != nil {
 				return kernel.Snapshot{}, err
+			}
+			if quarantineRev != 0 {
+				return kernel.Snapshot{}, kernel.ErrExecutionQuarantined
 			}
 			if currentStatus != string(kernel.RunStatusRunning) {
 				return kernel.Snapshot{}, kernel.ErrExecutionRequired
