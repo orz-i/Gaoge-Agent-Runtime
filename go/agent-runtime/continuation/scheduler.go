@@ -302,6 +302,9 @@ func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRe
 		jobPolicy: queuecore.Policy{
 			MaxAttempts: 12, VisibilityTimeout: 2 * time.Minute,
 			InitialBackoff: 250 * time.Millisecond, MaxBackoff: 30 * time.Second, BackoffMultiplier: 2,
+			// A Redis lease expiry must never DLQ an unfenced Run. Only
+			// a trusted Worker can confirm the PG quarantine before final Nack.
+			RequireTerminalFence: true,
 		},
 	}, nil
 }

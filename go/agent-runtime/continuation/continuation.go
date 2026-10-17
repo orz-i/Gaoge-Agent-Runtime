@@ -21,11 +21,12 @@ const (
 )
 
 var (
-	ErrInvalidInput         = errors.New("invalid continuation input")
-	ErrUnsupportedRunKind   = errors.New("unsupported continuation run kind")
-	ErrAlreadyStarted       = errors.New("continuation worker already started")
-	ErrClosed               = errors.New("continuation worker is closed")
-	ErrDurableQueueRequired = errors.New("continuation reconciliation requires durable queue delivery")
+	ErrInvalidInput          = errors.New("invalid continuation input")
+	ErrUnsupportedRunKind    = errors.New("unsupported continuation run kind")
+	ErrAlreadyStarted        = errors.New("continuation worker already started")
+	ErrClosed                = errors.New("continuation worker is closed")
+	ErrDurableQueueRequired  = errors.New("continuation reconciliation requires durable queue delivery")
+	ErrTerminalFenceRequired = errors.New("continuation terminal delivery requires authoritative Run quarantine")
 )
 
 // Trigger identifies the committed fact that permits a Run to resume.
