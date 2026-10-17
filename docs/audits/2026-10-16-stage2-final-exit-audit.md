@@ -3,7 +3,7 @@
 - **治理日期：** 2026-10-16（用户所在时区；Mac 执行日志可能显示 10 月 17 日）
 - **分支：** `governance/kernel-runtime`
 - **代码基线：** `6e02cc1674892d9a614f6ba0872cf6f6ff2be465`（本收口文档提交前）
-- **架构依据：** [ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) **Accepted**，及其[实现与验收附件](../minimal-agent-runtime-implementation.md)；[ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md) 仍 **Proposed**
+- **原审计当时的架构依据：** [ADR 0008](../adr/0008-minimal-agent-runtime-architecture.md) **Accepted**，及其[实现与验收附件](../minimal-agent-runtime-implementation.md)；**当时** [ADR 0009](../adr/0009-minimal-kernel-complexity-reassessment.md) 仍 **Proposed**。**2026-10-17 修订后**，以 [Stage 3 准入裁决](2026-10-17-stage3-admission-after-adr0009.md) 为准，不倒改以下历史证据。
 - **最终双重裁决：** **GO — Stage 2A/2B/2C 已实现并经验证的实验性工程增量可以封板、进入维护/审计状态。NO-GO — 按已接受的 ADR 0008，Stage 2 的完整生产级退出条件未全部满足，不能宣布完整 Stage 2 验收通过或据此自动进入 Stage 3。**
 - **本次变更类型：** 阶段退出审计与状态同步；没有新的生产逻辑、表/索引、Schema 版本、Run 状态或公用接口变更。
 - **后续治理（不回写原验收）：** [Stage 2 S2-G1/G2/G6 硬阻断专项](2026-10-16-stage2-hard-gates-followup.md) 随后交付自唤醒来源校验、原子 Run 隔离及 Native Create 稳定 ID 的局部修复；[终态 DLQ 跨 Store 交接](2026-10-16-stage2-terminal-dlq-handoff.md) 继续关闭受保护 Continuation 的最终交付漏洞；[S2-G6 Apply 证明](2026-10-16-stage2-g6-identified-apply-evidence.md) 则补齐显式操作的提交响应丢失和历史 Revision 查证。原本完整生产 Gate 的 NO-GO 尚未解除；下文保留本审计当时基线事实。
@@ -67,3 +67,7 @@
 **双重裁决维持：** 本轮封板的 Stage 2 **实验性 Kernel 工程增量 GO**。按仍 **Accepted** 的 ADR 0008，含真实 Local Pump/Host 生命周期在内的**正式 Stage 2 生产级全量验收 NO-GO**，不声称此报告修改了规范。ADR 0009 仍 Proposed；Stage 3/五态迁移与任何正式生产发布需另行明确架构/发布批准。
 
 **回归复验：** `make metadata fmt-check tidy-check go-vet go-test`、`make go-race`、`make go-lint`（十个 Go 模块均 0 issues）、`make integration`（实际 PostgreSQL 16 + Redis 8）、`make ts-lint ts-typecheck ts-test ts-build eval-smoke benchmark-smoke otel-e2e-smoke a2a-product-check release-check` 均退出 0，日志 `/tmp/gaoge-stage2-close-{go-base,go-race,go-lint,integration,nongo}.log`。未将分别通过的目标宣称为单条 `make check` 已通过。人工工程审计不等于独立第三方认证。
+
+## 2026-10-17 后续架构接受的准入更正（不重写本轮历史审计）
+
+项目负责人已**明确接受 ADR 0009**，因此以上在修订前 ADR 0008 下作出的「不得进入 Stage 3」仅适用于**原本的强制五态实施路线**。新规范将 Stage 3 定义为一次有界的**六态/五态复杂度及兼容性复评**，其设计准入已通过单独的 [Stage 3 admission audit](2026-10-17-stage3-admission-after-adr0009.md)。原测试与 Stage 2 **生产 Hosted/Local Pump/Provider 的 NO-GO** 不因此变成 PASS；Stage 2 实验工程能力封板可 GO，且未经单独 ADR 不得进行五态迁移或发布破坏性合约。
