@@ -1,10 +1,11 @@
-# ADR 0009 — Minimize the Kernel Recovery Surface Before Stage 2A
+# ADR 0009 — Minimal Kernel Recovery Surface and Stage 3 Reassessment
 
-- **Status:** **Proposed** — complexity reassessment requiring architecture acceptance; does **not** automatically supersede accepted [ADR 0008](0008-minimal-agent-runtime-architecture.md)
-- **Date:** 2026-10-16
+- **Status:** **Accepted** — explicitly approved by the project owner on **2026-10-17**. Amends the duplicate-state, forced five-state and Stage 3 rollout requirements of [ADR 0008](0008-minimal-agent-runtime-architecture.md); does **not** replace its execution, receipt, authorization or safety invariants.
+- **Date:** 2026-10-16; **accepted:** 2026-10-17
 - **Scope:** Agent Runtime Kernel, optional Embedded SQLite and Hosted PostgreSQL execution safety
 - **Evidence:** [Stage 2 complexity audit](../audits/2026-10-16-stage2-kernel-complexity-audit.md), [Stage 2 Phase 1 execution fence](../audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md), [Stage 2 Phase 2A guarded control prototype](../audits/2026-10-16-stage2-phase2a-guarded-control.md), [Stage 2B native Direct Agent opt-in](../audits/2026-10-16-stage2-phase2b-native-run-execution.md), [Stage 2B code-review remediation](../audits/2026-10-16-stage2-phase2b-code-review-remediation.md), [second Stage 2B review](../audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md), [Stage 2B exit/Stage 2C native signal slice](../audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md), [Stage 2C early-signal and ReadyWork recovery proof](../audits/2026-10-16-stage2c-early-signal-readywork-recovery.md), [Stage 2C Run-isolation/dispatch remediation](../audits/2026-10-16-stage2c-run-isolation-and-dispatch-remediation.md)
 - **Goal:** A Pi-style small imperative Agent loop **plus** minimal crash-safe atomic state/intent/receipt storage; **not** another Temporal/Cadence-style workflow interpreter
+- **Acceptance boundary:** Stage 2 experimental Kernel engineering evidence may be sealed and Stage 3 **architecture/compatibility reassessment** may start. Production Host/Provider/device eligibility, a breaking migration, Stage 3 implementation changes and release approval remain separate decisions. No new SQLite Schema version or Run status is authorized here.
 
 ## 1. Problem
 
@@ -80,7 +81,7 @@ more abstractions without closing this gate would make an unusable
     have independent gates; the current six-status format is not
     invalid merely because a five-state encoding looks smaller.
 
-## 3. Simpler target (proposed)
+## 3. Simpler target (accepted constraint)
 
 ```text
 Feature: Agent / Workflow / Team (owns its own small state machine)
@@ -124,8 +125,7 @@ Retain the six published statuses until a measurable simplification
 and a separately approved compatibility/migration decision justify
 a hard cut. Distinguishing `waiting_input` from `paused_budget` is
 currently useful; hiding the same distinction in a new persisted
-gate enum is not automatically simpler. This is a proposed change
-to ADR 0008's Stage 3 plan, **not yet an accepted replacement**.
+gate enum is not automatically simpler. This **supersedes ADR 0008's former mandatory five-state Stage 3 requirement**. Six statuses remain the authoritative existing Kernel contract. Any future hard cut requires a separate, evidence-based compatibility/migration ADR and explicit approval; acceptance of ADR 0009 does not approve that cut.
 
 ## 4. Execution fence simplification already safe to implement
 
@@ -152,14 +152,14 @@ token or the Store time authority.
 This is a reduction of redundant state and binding churn;
 **it does not relax the Store CAS/epoch/expiry proof**.
 
-## 5. Revised Stage 2 engineering order (proposed)
+## 5. Accepted Stage 2 engineering closure and Stage 3 scope
 
 | Phase | Minimum deliverable | Explicitly out of scope |
 | --- | --- | --- |
 | **2A. Gate closure** | Narrow Feature-validated approval, budget and cancellation CAS under fenced Runs. Tests with real Tool approval/rejection and expiry takeover. | Universal command framework; independent control queue |
 | **2B. Actual Agent integration** | Direct Runner acquires/uses/releases one lease; existing persisted intent/receipt and wakeup facts drive crash recovery, and one active segment avoids per-step queue fanout. | New `ProgressPlan` taxonomy by default |
 | **2C. Fault cases that remain** | Exact wait/signal generation, early signal or unknown commit reconciliation, Run-scoped poison, tenant scope **only where actual adversarial tests demand persisted metadata** | Generic inbox/DLQ implementation without a failure proof |
-| **Stage 3 reassessment** | Compare six-state compatibility and proposed five-state against real API size, migrations, negative tests and operator cost; explicit ADR decision | Automatic five-state breaking migration |
+| **Stage 3 reassessment** | Review retained six-state contract, existing Kernel/Feature eligibility and measured migration/API/operation costs. Default is **no schema/status migration**. Conclude with a bounded design decision and explicit GO/NO-GO for any separately justified change. | Automatic five-state breaking migration, mandatory generic ProgressPlan, unrequested production rollout |
 | **Hosted parity** | Verify PostgreSQL fencing and optional Redis delivery with real-engine faults; preserve single-Store authority | Distributed workflow coordinator |
 
 Do not conflate a Phase 2A/2B test pass with a production release.
@@ -182,8 +182,4 @@ Before adding any new cross-Store contract, document:
 - Does it keep the next Go release's compatibility boundary
   explicit instead of silently publishing mixed Core/adapter APIs?
 
-**Acceptance for this proposal** should update the Stage 2
-contract and Stage 3 rollout language in ADR 0008 and the
-implementation annex. Until explicitly accepted, ADR 0008 remains
-the normative target, while the proven intra-lease simplifications
-may ship as internal development changes.
+**Accepted decision:** the Stage 2 eligibility contract and Stage 3 rollout text in ADR 0008 and its implementation annex must describe these smaller existing Feature-owned obligations, not a mandatory parallel ProgressPlan. ADR 0008 remains accepted for every invariant **not expressly amended** here. This acceptance is a design governance decision, **not** permission to deploy, publish a breaking contract or claim supported multi-worker/mobile/Hosted durability.
