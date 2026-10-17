@@ -21,16 +21,21 @@ type KernelRunRecord struct {
 	ExecutionOwner     string     `gorm:"size:128;not null;default:''"`
 	ExecutionLeaseID   string     `gorm:"size:128;not null;default:''"`
 	ExecutionExpiresAt *time.Time `gorm:"index:idx_agent_kernel_runs_exec_expiry"`
-	ErrorCode          string     `gorm:"size:128;not null;default:''"`
-	ErrorDetail        string     `gorm:"type:text;not null;default:''"`
-	DeadlineAt         *time.Time `gorm:"index:idx_agent_kernel_runs_deadline"`
-	EndedAt            *time.Time `gorm:"index:idx_agent_kernel_runs_ended"`
-	StateJSON          string     `gorm:"type:text;not null"`
-	CheckpointJSON     string     `gorm:"type:text;not null;default:''"`
-	ResultJSON         string     `gorm:"type:text;not null;default:''"`
-	LastEventSeq       int64      `gorm:"not null;default:0"`
-	CreatedAt          time.Time  `gorm:"not null"`
-	UpdatedAt          time.Time  `gorm:"not null"`
+	// The current work revision/generation is blocked without duplicating
+	// Feature state. A later authenticated control revision retires this guard.
+	ExecutionQuarantineRevision   uint64     `gorm:"not null;default:0"`
+	ExecutionQuarantineGeneration uint64     `gorm:"not null;default:0"`
+	ExecutionQuarantineCode       string     `gorm:"size:64;not null;default:''"`
+	ErrorCode                     string     `gorm:"size:128;not null;default:''"`
+	ErrorDetail                   string     `gorm:"type:text;not null;default:''"`
+	DeadlineAt                    *time.Time `gorm:"index:idx_agent_kernel_runs_deadline"`
+	EndedAt                       *time.Time `gorm:"index:idx_agent_kernel_runs_ended"`
+	StateJSON                     string     `gorm:"type:text;not null"`
+	CheckpointJSON                string     `gorm:"type:text;not null;default:''"`
+	ResultJSON                    string     `gorm:"type:text;not null;default:''"`
+	LastEventSeq                  int64      `gorm:"not null;default:0"`
+	CreatedAt                     time.Time  `gorm:"not null"`
+	UpdatedAt                     time.Time  `gorm:"not null"`
 }
 
 func (KernelRunRecord) TableName() string { return "agent_kernel_runs" }

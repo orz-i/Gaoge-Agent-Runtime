@@ -103,6 +103,9 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		if err != nil {
 			return err
 		}
+		if current.ExecutionQuarantineRevision != 0 {
+			return kernel.ErrExecutionQuarantined
+		}
 		if current.ExecutionEpoch == 0 {
 			return kernel.ErrExecutionRequired
 		}
@@ -249,6 +252,9 @@ func (store *KernelStore) executionCommitConflict(tx *gorm.DB, runID string, lea
 	if err != nil {
 		return err
 	}
+	if current.ExecutionQuarantineRevision != 0 {
+		return kernel.ErrExecutionQuarantined
+	}
 	if current.Status != string(kernel.RunStatusRunning) {
 		return kernel.ErrExecutionRequired
 	}
@@ -282,6 +288,9 @@ func (store *KernelStore) CheckExecution(ctx context.Context, runID string, leas
 		case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
 		default:
 			return kernel.ErrExecutionRequired
+		}
+		if record.ExecutionQuarantineRevision != 0 {
+			return kernel.ErrExecutionQuarantined
 		}
 		if lease == nil {
 			if record.ExecutionEpoch > 0 {

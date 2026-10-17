@@ -58,8 +58,8 @@ func (store *KernelStore) applyKernelMutation(
 		query = query.Where("execution_epoch = ?", 0)
 	} else {
 		query = query.Where(`status = ? AND execution_epoch = ? AND execution_owner = ? AND
-            execution_lease_id = ?`, string(kernel.RunStatusRunning), lease.Epoch, lease.OwnerID,
-			lease.LeaseID)
+            execution_lease_id = ? AND execution_quarantine_revision = 0`,
+			string(kernel.RunStatusRunning), lease.Epoch, lease.OwnerID, lease.LeaseID)
 		if db.Name() == "postgres" {
 			query = query.Where("execution_expires_at > clock_timestamp()")
 		} else {
@@ -262,6 +262,9 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 			}
 			if validationErr := kernel.ValidateControl(current, *guard, mutation, now); validationErr != nil {
 				return validationErr
+			}
+			if persisted.ExecutionQuarantineRevision != 0 && mutation.Record.Run.Status == kernel.RunStatusRunning {
+				return kernel.ErrExecutionQuarantined
 			}
 			if persisted.ExecutionEpoch == math.MaxInt64 {
 				return kernel.ErrExecutionConflict
