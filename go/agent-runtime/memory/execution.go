@@ -12,11 +12,15 @@ import (
 )
 
 type memoryExecutionState struct {
-	epoch uint64
-	lease kernel.ExecutionLease
+	epoch          uint64
+	lease          kernel.ExecutionLease
+	quarantineRev  uint64
+	quarantineGen  uint64
+	quarantineCode string
 }
 
 var _ kernel.ExecutionStore = (*Store)(nil)
+var _ kernel.ExecutionQuarantineStore = (*Store)(nil)
 
 // NewStoreWithExecutionClock supplies a deterministic Store-owned clock for
 // fault tests. The default NewStore uses the host monotonic wall-clock source.
@@ -79,6 +83,9 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 	}
 	now := store.currentExecutionTime()
 	state := store.execution[request.RunID]
+	if state.quarantineRev != 0 {
+		return kernel.ExecutionLease{}, kernel.ErrExecutionQuarantined
+	}
 	if state.epoch == 0 {
 		return kernel.ExecutionLease{}, kernel.ErrExecutionRequired
 	}
@@ -96,7 +103,8 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 		RunID: request.RunID, OwnerID: strings.TrimSpace(request.OwnerID), LeaseID: id,
 		Epoch: state.epoch + 1, ExpiresAt: now.Add(request.LeaseDuration),
 	}
-	store.execution[request.RunID] = memoryExecutionState{epoch: lease.Epoch, lease: lease}
+	state.epoch, state.lease = lease.Epoch, lease
+	store.execution[request.RunID] = state
 	return lease, nil
 }
 func (store *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
@@ -143,7 +151,11 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if !activeMemoryLease(store.execution[lease.RunID], lease, store.currentExecutionTime()) {
+	state := store.execution[lease.RunID]
+	if state.quarantineRev != 0 {
+		return kernel.Snapshot{}, kernel.ErrExecutionQuarantined
+	}
+	if !activeMemoryLease(state, lease, store.currentExecutionTime()) {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
 	current, ok := store.records[lease.RunID]
@@ -177,6 +189,9 @@ func (store *Store) CheckExecution(ctx context.Context, runID string, lease *ker
 		return kernel.ErrTerminal
 	}
 	state := store.execution[runID]
+	if state.quarantineRev != 0 {
+		return kernel.ErrExecutionQuarantined
+	}
 	if lease == nil {
 		if state.epoch > 0 {
 			return kernel.ErrExecutionRequired

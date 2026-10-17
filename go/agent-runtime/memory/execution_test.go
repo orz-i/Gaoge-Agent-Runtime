@@ -15,3 +15,7 @@ func TestControlStoreConformance(t *testing.T) {
 func TestExecutionStoreConformance(t *testing.T) {
 	conformance.RunKernelExecutionSuite(t, func(_ *testing.T) kernel.Store { return memory.NewStore() })
 }
+
+func TestExecutionQuarantineConformance(t *testing.T) {
+	conformance.RunKernelQuarantineSuite(t, func(_ *testing.T) kernel.Store { return memory.NewStore() })
+}

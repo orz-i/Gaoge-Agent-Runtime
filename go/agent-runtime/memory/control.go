@@ -33,6 +33,11 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 		return kernel.Snapshot{}, false, err
 	}
 	authority := store.execution[runID]
+	if authority.quarantineRev != 0 && mutation.Record.Run.Status == kernel.RunStatusRunning {
+		// An unrelated validated control cannot age out a poisoned work
+		// identity while the same Feature wait remains unresolved.
+		return kernel.Snapshot{}, false, kernel.ErrExecutionQuarantined
+	}
 	if authority.epoch == math.MaxUint64 {
 		return kernel.Snapshot{}, false, kernel.ErrExecutionConflict
 	}
