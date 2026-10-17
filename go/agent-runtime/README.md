@@ -111,6 +111,21 @@ recovery path; host retention/compaction must preserve this proof. No new Store
 port, table or SQLite schema version is introduced. See the
 [Stage 2 identified Apply evidence audit](../../docs/audits/2026-10-16-stage2-g6-identified-apply-evidence.md).
 
+### Stage 4 Hosted Continuation: no ACK without authoritative Run proof
+
+An immutable Redis/Memory Continuation Job is **delivery evidence**, not
+proof of Run completion. A `continuation.Dispatcher` now NACKs when the
+**authoritative** Run Store returns `kernel.ErrNotFound` during its initial
+load, CAS-conflict retry, or terminal-result verification. A disappeared
+Run cannot be treated as an obsolete/consumed Job. Protected Jobs remain
+retryable until the trusted Host verifies and persists the exact current
+Run quarantine; persistent orphan failures require Host monitoring and
+reconciliation. Do not expose raw Redis Nack/terminal controls to untrusted
+callers. The [real PostgreSQL 16 / Redis 8 fault test](../../docs/audits/2026-10-17-stage4-hosted-orphan-delivery.md)
+proves NACK, client/Worker reconstruction and later fenced Run completion.
+This is **not** a production Hosted authorization, Provider or physical
+exactly-once certification.
+
 ## Runtime kinds
 
 Agent Runtime exposes explicit Run kinds over the same durable Kernel primitives:

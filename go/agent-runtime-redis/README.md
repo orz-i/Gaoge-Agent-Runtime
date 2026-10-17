@@ -25,6 +25,15 @@ host/Provider validation, and do not expose raw Queue controls to untrusted
 callers. Without a callback, protected Jobs remain retryable even beyond
 MaxAttempts and must be monitored for persistent failures/orphans.
 
+**Stage 4 Hosted delivery correction:** a Continuation's missing authoritative
+PostgreSQL Run is an **unknown outcome**, not evidence of stale/consumed work.
+Dispatcher propagates `kernel.ErrNotFound` for Queue NACK instead of ACK;
+for protected Jobs no automatic terminal DLQ can erase this unresolved
+obligation. A [real PG16/Redis8 reconstruction test](../../docs/audits/2026-10-17-stage4-hosted-orphan-delivery.md)
+exercises that failure and a subsequent Store-fenced Run completion. This
+requires explicit Host orphan alerts/quota policy; it does not authenticate
+incoming Jobs or certify Redis crash persistence.
+
 **Upgrade caution:** existing persisted Jobs lack this protected policy and
 retain legacy automatic DLQ behavior. Reprojection under the new policy also
 changes the immutable Job fingerprint for the same ClientJobID. Drain or
