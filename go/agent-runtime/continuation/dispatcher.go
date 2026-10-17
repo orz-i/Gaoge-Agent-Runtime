@@ -32,7 +32,8 @@ func NewDispatcher(runs SnapshotLoader, registrations ...ResumerRegistration) (*
 }
 
 // Dispatch performs at most one successful revision-guarded feature resumption.
-// Stale and already-terminal deliveries are successful no-ops.
+// Proven stale and already-terminal deliveries are successful no-ops. A Run
+// missing from the authoritative Store is UNKNOWN, not proof of consumption.
 func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) error {
 	normalized, err := normalizePayload(payload)
 	if err != nil {
@@ -124,7 +125,9 @@ func (dispatcher *Dispatcher) eligibleSnapshot(
 ) (kernel.Snapshot, bool, error) {
 	snapshot, err := dispatcher.runs.Load(ctx, payload.RunID)
 	if errors.Is(err, kernel.ErrNotFound) {
-		return kernel.Snapshot{}, false, nil
+		// The Job may be the only remaining durable evidence of unfinished
+		// work. Never ACK merely because its Run is currently unreadable.
+		return kernel.Snapshot{}, false, err
 	}
 	if err != nil {
 		return kernel.Snapshot{}, false, err
@@ -151,7 +154,7 @@ func (dispatcher *Dispatcher) resumeOnce(ctx context.Context, resumer Resumer, s
 		// authoritative revision has moved (or the Run is already settled).
 		current, loadErr := dispatcher.runs.Load(ctx, snapshot.Run.ID)
 		if errors.Is(loadErr, kernel.ErrNotFound) {
-			return nil
+			return errors.Join(err, loadErr)
 		}
 		if loadErr != nil {
 			return errors.Join(err, loadErr)
@@ -178,10 +181,9 @@ func (dispatcher *Dispatcher) resumeResult(ctx context.Context, runID string, re
 		}
 	}
 	current, err := dispatcher.runs.Load(ctx, runID)
-	if errors.Is(err, kernel.ErrNotFound) {
-		return nil
-	}
 	if err != nil {
+		// Resumer.ErrNotFound may describe an optional dependency, not
+		// the Run. A missing *Run* is never an ACK proof either.
 		return errors.Join(resumeErr, err)
 	}
 	if terminalSnapshotAfterResume(current) {
