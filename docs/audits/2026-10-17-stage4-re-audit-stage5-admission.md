@@ -56,3 +56,35 @@
 **审计独立性与处置：** 以上为本轮依据当前源码及额外故障注入的人工复核，不是第三方独立审计；不重写此前审计发生时的历史事实，但必须缩小其超出真实证据的完整 Hosted 准入推论。Stage 4 **通用自唤醒生产 GO 被 P1 阻断**；Stage 5 **独立单项 SQLite 工程准入可 GO**，其 per-Feature/OS 生产验收仍 NO-GO。此决议不执行 Stage 5 实现、不进入 Stage 6、不 Push/PR/Merge。
 
 **后续修复结果（2026-10-17）：** [Stage 4 P1 原工作丢失的 fail-closed 修复](2026-10-17-stage4-p1-revision-wakeup-ack-remediation.md) 在 Dispatcher 的初次过期派发及 CAS-conflict 复查路径上不再把 Revision 前进当作 ACK 证明；以 Memory 与真实 PG/Redis 的永久负向回归取代本报告的临时故障探针。历史审计所记录的**修复前漏洞仍属实**；修复后避免无证据的 ACK/盲重放，非终态遗留 Job 的消费对账仍需可信 Host/Feature，不能自动将 Stage 4 生产发布改为 GO。
+
+## 五、Stage 4 P1 修复后 Stage 5 工程准入复验（2026-10-17）
+
+- **复验基线（仅文档提交前）：** `governance/kernel-runtime@9f18817efb7174fa7e25b7d5dfd193704c7618da`，初始 Worktree Clean。
+- **有效架构合同：** [ADR 0008（经 Accepted ADR 0009 修订）](../adr/0008-minimal-agent-runtime-architecture.md) 保持六态、Feature 自有恢复事实与单一 Store fencing；Stage 5 是 **可选 SQLite Feature/OS 的逐项工程阶段**，不是 Stage 4 Hosted 产品生产验收的后置发布阶段。
+- **最终准入裁决：Stage 5 单项 Embedded SQLite 工程启动 GO。** 仅批准选择一个既有 Feature Port 落地 SQLite 持久化（首选 `runrelation.Store`）；不批准一口气实施 Workflow/Team/Harness、通用 Local Pump、多 Profile 共享授权、Android/iOS 生产支持，也不自动进入 Stage 6。
+- **Stage 5 功能/设备生产验收仍 NO-GO。** 进入某项 Feature 的开发与该 Feature 已通过持久化、真实设备、发布认证是两回事。
+
+### 固定准入检查
+
+| 门槛 | 本轮直接证据 | 裁决 |
+| --- | --- | --- |
+| Stage 4 P1 前置安全缺陷 | [已合入当前 HEAD 的最小修复](2026-10-17-stage4-p1-revision-wakeup-ack-remediation.md) 不再因 unrelated CAS Revision 变化而 ACK/盲重放旧 RunReady；无消费证明时保留 Job 并 NACK。`make integration` 真实 PG16/Redis8 重测此场景与 Provider/孤儿交付。 | **关闭这两条误 ACK 路径；不等于 Hosted 全 Feature 自动对账 GO** |
+| SQLite Kernel 基线 | `go/agent-runtime-sqlite` 的 Run/State/Checkpoint/Event/ReadyWork、Epoch/Quarantine、OpenExisting 禁止静默新建、严格 DDL v1 形状校验与单 Profile 私有文件隔离；无 Redis/PG 依赖。 | **满足一个 SQLite Feature 工程的前置基础** |
+| 现有可复用 Feature Port | `go/agent-runtime/runrelation.Store` 已有 `Put/GetByChild/ListChildren/ListAll`，Conformance 已由 Memory/PG 使用；**SQLite 目前尚无 RunRelationStore**。 | **准入 RunRelation 持久化实现**，尚无新实现的 PASS 可宣称 |
+| 完整 Stage 5 Feature/OS | SQLite Workflow Definitions、Team/GroupChat 关系与 Harness Session/Turn/Context 的各自持久层并不完整；共享 Profile 的强制 Scope Authorizer、真实 Android/iOS VFS/系统文件保护/后台生命周期未验证。 | **NO-GO**（独立可选目标，未验收） |
+| SQLite 发布兼容 | SQLite 模块在本地 `go.work` 下使用未发布 Core 接口；`make check` 中 clean consumer 通过**不等于**单独的 SQLite Core/Adapter 已协调对外发布。 | **仅开发态**，后续选定发行版本时独立证明 |
+
+### 当前 HEAD 的实际复验结果
+
+- **`make check`：PASS，退出码 0。** 10 个 Go 模块 Test/Vet/Race/Lint（10×`0 issues.`）、TS 44 tests、A2A/OTEL/Benchmark Smoke/Clean Consumer；日志 `/tmp/gaoge-stage5-admission-make-check.log`，退出码 `/tmp/gaoge-stage5-admission-make-check.rc`。
+- **`make integration`：PASS，退出码 0。** 真实 PostgreSQL 16 + Redis 8，含 `TestRealPostgresRedisStaleRevisionSelfWakeupNeverACKsWithoutProof`、旧 Run 缺失、Provider 早到信号、Run quarantine 等；日志 `/tmp/gaoge-stage5-admission-integration.log`。不包括需专门破坏 Redis 进程的 AOF 专项。
+- **SQLite 核心跨进程 Race：`-count=3` PASS。** 六项：`TestAgentCrashAndResumeInNewProcess`、`TestExecutionEpochTakeoverAcrossOSProcesses`、`TestNativeUnknownToolReconcilesAcrossProcessesWithoutReplay`、`TestSeparatePrivateProfilesKeepRunIDsAndRecoveryIndependentAfterReopen`、`TestIncompatibleV1SchemaRejectedWithoutChangingJournal`、`TestKernelQuarantinePersistsAcrossSQLiteReopen`。日志 `/tmp/gaoge-stage5-admission-sqlite-target-race.log`。
+- **Stage 4 P1 定向 Race：`-count=5` PASS**；现有 Memory RunRelation Store Conformance `-count=3` PASS。无 SQLite RunRelation Conformance 运行记录，因为该 Store **尚未实现**。
+
+### 单次 Stage 5 工程范围和退出边界
+
+第一个且唯一建议的实施目标是 **现有 `go/agent-runtime-sqlite` 模块中的 `runrelation.Store` SQLite 适配**：复用现有四方法 Port、`conformance.RunRunRelationStoreSuite`，添加与同一私有 Profile SQLite 文件一致的事务、幂等/owner-child 唯一性/并发冲突、失败回滚、关闭重开和真实跨进程测试。若随后要启用自动父子 handoff，需另证 `ReconciliationPager` 相关水位/晚到 Child 事实及 Feature 消费条件；**本次不授权把 Store 通过 Conformance 直接说成完整 Team/Workflow 自动恢复**。
+
+SQLite **未发布 Schema 仍为 v1**；因开发期增加必要 DDL 时更新当前 Schema Shape 验证和明确处理旧实验 DB 的不兼容，**不要为每次未发布结构变更自动升级版本**，也不得静默覆盖/清空现有用户数据。禁止引入重复状态机、ProgressPlan、ActiveSegment、新的通用 Kernel API、控制总线、Redis/PG 强依赖或常驻本地 Pump。
+
+**综合裁决：Stage 5 工程准入 GO，限定一个 SQLite Feature；全 Stage 5/Android/iOS/Hosted 生产验收 NO-GO。** 本审计不自动开始 Stage 5 代码实施、不发布 SDK、不 Push/PR/Merge。若未来选择正式设备/Host Profile，则按其真实发行和操作环境验收，而非增加新的 Stage 5 子阶段。
