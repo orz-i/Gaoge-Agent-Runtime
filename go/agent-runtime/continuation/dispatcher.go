@@ -129,6 +129,14 @@ func (dispatcher *Dispatcher) eligibleSnapshot(
 	if err != nil {
 		return kernel.Snapshot{}, false, err
 	}
+	// An unrecognized persisted status is poison, not an obsolete wakeup.
+	// Leave the Queue job retryable for diagnosis instead of silently ACKing.
+	switch snapshot.Run.Status {
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget,
+		kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
+	default:
+		return kernel.Snapshot{}, false, kernel.ErrInvalidInput
+	}
 	// A renewable allowance must be granted explicitly by the owning host.
 	// A stale wakeup cannot dispatch new work while the Run is paused.
 	stableFact := payload.Trigger == TriggerChildTerminal || payload.WaitGeneration != 0
