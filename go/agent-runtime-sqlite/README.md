@@ -1,12 +1,13 @@
-# Embedded SQLite Kernel Store — Stage 1 prototype
+# Embedded SQLite Kernel Store — experimental
 
 An opt-in local SQLite adapter for the current
 [Gaoge Agent Runtime](../agent-runtime) **six-state** Kernel API.
 
-**Status:** Stage 1 single-executor desktop prototype with an **opt-in
-Stage 2 Phase 1 Store execution fence**. **Not a supported autonomous
-multi-worker Agent or mobile durable runtime.** The new fenced Kernel
-interfaces are internal development only until the coordinated Core
+**Status:** Stage 1 Direct Agent and opt-in Stage 2 execution-fencing
+experiments, plus a bounded **Stage 5 SQLite RunRelationStore** adapter.
+**Not a supported autonomous multi-worker Agent, complete durable
+Team/Workflow runtime or mobile durable runtime.** Experimental Kernel
+interfaces are internal development only until a coordinated Core
 release; no production release is implied by `go.work`.
 
 ## Minimal desktop example
@@ -45,7 +46,12 @@ runtime, err := kernel.New(kernel.Dependencies{Store: store})
 ```
 
 The adapter implements `kernel.Store` including `EventJournal` and
-`TransitionOutbox`. It preserves the existing transition IDs
+`TransitionOutbox`. `sqlite.NewRunRelationStore(store)` separately implements
+the existing four-method `runrelation.Store` against the **same** SQLite
+Profile and its existing connection. Compose it with `runrelation.New` when
+needed; it does not implement optional `runrelation.ReconciliationPager`,
+automatically wake parent Runs or persist Team/Workflow definitions.
+The SQLite `Store` owns closing the shared connection. It preserves the existing transition IDs
 `runID:revision`, wakeup timestamps/generations and approval
 Checkpoint semantics. The existing Agent `StartRun` emits an initial
 durable wakeup, which is stored atomically with the Run.
@@ -70,6 +76,13 @@ unavailability separately from new-database initialization.
   must declare an actual Wakeup. Invalid projections retain a durable
   *delivery-only* quarantine diagnosis rather than blocking healthy
   work; `ListQuarantinedTransitions` inspects these records.
+- `runtime_run_relations` — Stage 5 immutable child-owner registry with
+  a unique Child Run ID and a unique `(parent_run_id, kind, owner_node_id)`.
+  Repeated identical `Put` returns the original creation timestamp; a
+  competing identity returns `runrelation.ErrConflict`. Relations do not
+  require an existing Kernel Run row, matching the existing Memory/PG
+  Store contract. Queries are deterministic. They do **not** encode
+  parent handoff watermarks or a reconciliation scheduler.
 - `runtime_commit_proofs` — revision-keyed fingerprints of committed
   Kernel state transitions; **not** a model/tool physical-effect
   deduplication protocol or a durable Run ID recovery API. An opt-in
@@ -110,12 +123,13 @@ automatically create a new persisted format version. The adapter
 strictly validates the current table and index definitions on Open,
 so earlier experimental files using a different v1 layout fail with
 `ErrUnsupportedSchema`; their contents are neither migrated nor
-removed. This includes **earlier development v1 files missing the new quarantine columns**. Back up/transform or explicitly recreate those experimental fixtures; do not call this a published-schema v2 migration. Developer fixtures must be deliberately backed up and
+removed. This includes **earlier development v1 files missing the new quarantine columns or the Stage 5 RunRelation table/index**. Back up/transform or explicitly recreate those experimental fixtures; do not call this a published-schema v2 migration. Developer fixtures must be deliberately backed up and
 recreated or explicitly transformed, without pretending that an
 unreleased prototype has a production migration contract.
 
-Persisted timestamps used for ready/lease/due operations must fit signed
-nanoseconds (~1677–2262); invalid/overflowing times are rejected instead
+Persisted timestamps used for ready/lease/due operations and relation
+creation must fit signed nanoseconds (~1677–2262); invalid/overflowing
+times are rejected instead
 of turning a far-future task into an immediately due negative timestamp.
 
 ## Verification
@@ -123,6 +137,7 @@ of turning a far-future task into an immediately due negative timestamp.
 ```shell
 cd go/agent-runtime-sqlite
 go test -count=1 -race ./...
+go test -count=3 -race ./... -run '^TestSQLiteRunRelation'
 go test -count=1 ./... -run TestAgentCrashAndResumeInNewProcess -v
 # Run outside the monorepo workspace to verify published Core-module sums:
 GOWORK=off GOFLAGS=-mod=readonly go test -count=1 ./...

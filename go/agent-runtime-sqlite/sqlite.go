@@ -364,6 +364,17 @@ var schemaDDL = []string{
 		committed_ns INTEGER NOT NULL,
 		PRIMARY KEY(run_id, revision)
 	)`,
+	// Immutable Feature-neutral child ownership; Run records need not exist
+	// in this Store (matching Memory/PostgreSQL runrelation.Store semantics).
+	`CREATE TABLE runtime_run_relations (
+		child_run_id TEXT PRIMARY KEY,
+		parent_run_id TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		owner_node_id TEXT NOT NULL,
+		created_ns INTEGER NOT NULL,
+		UNIQUE(parent_run_id, kind, owner_node_id)
+	)`,
+	`CREATE INDEX runtime_run_relations_parent_order ON runtime_run_relations(parent_run_id, created_ns, kind, owner_node_id, child_run_id)`,
 }
 
 func errorCode(err error) int {
