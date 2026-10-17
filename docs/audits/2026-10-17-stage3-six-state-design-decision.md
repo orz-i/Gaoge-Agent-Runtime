@@ -50,3 +50,10 @@
 本次 Stage 3 **仅做源码/兼容性审计与参考性能采样**，另外独立重跑 `make go-test`（10 个 Go 模块）和 `make ts-typecheck ts-test a2a-product-check release-check`（TS 44 tests、A2A、clean-consumer），**两组命令均退出 0**。日志分别为 `/tmp/gaoge-stage3-final-go-test.log`、`/tmp/gaoge-stage3-final-wire-release.log`。没有测试真实五态实现（该实现未获授权），也没有机房断电、真实外部 Provider、共享 SQLite 多 Profile 授权或移动设备发布证据。
 
 **唯一 Stage 3 设计输出：保留六态，反对无收益的状态迁移，不增恢复权威。** 若未来要发布 Host/设备支持，按选定的 Provider、权限、Redis 历史任务、GC/备份、OS 恢复等原有 **release gate** 独立验收；不把它们又拆成 Stage 2 或 Stage 3 的新内核开发分期。Stage 3 设计已完成 ≠ Hosted/Embedded 产品生产 GO。
+
+## 四、最终封板复验（2026-10-17，本轮追加）
+
+- **实际完整退出门槛：** 在同一生产代码 HEAD `10b88a7a39480e33da05a99c4cb52b16b58d2c64` 上执行原仓库 `make check`，**退出码 0（PASS）**。日志 `/tmp/gaoge-stage3-exit-make-check.log`，独立退出码记录 `/tmp/gaoge-stage3-exit-make-check.rc`。这一次取得了整条命令的终态，不再把此前中断的检查冒充成功。
+- **检查覆盖：** metadata、fmt、tidy、Go vet/test/race/lint（10 模块、Lint `0 issues` × 10）、TS lint/typecheck/test/build（44 项测试）、eval/benchmark smoke、OTEL e2e smoke、A2A 产品检查与 clean-consumer release 检查全部由同一 `make check` 完成。**实际 PostgreSQL16/Redis8 集成不属于 `make check` 配方**，沿用 [Stage 3 准入审计](2026-10-17-stage3-admission-after-adr0009.md) 本基线 `make integration` 单独退出码 0 的证据；不得误说它包含在本次命令里。
+- **规范/源码不变量：** 静态复核六态顺序与命名、SQLite `schemaVersion=1`、OpenAPI/TS 不含 `suspended`、Kernel 无新的持久化 ProgressPlan 类型；六份 ADR/架构/Stage 3 文档相对链接均可解析。未改业务 Go/TS、SQL DDL、公共 Run 状态或发布标签。
+- **最终 Stage 3 退出裁决：GO（设计/兼容性治理已完成、封板）**。这是以保留六态和既有 Feature-owned 恢复事实为**最终设计结论**，不要求再次启动 3A/3B。**明确不构成生产发布 GO**：真实选定 Hosted/Embedded Host、Provider/租户授权、历史 Redis Job 迁移、设备生命周期与断电/备份恢复仍由对应产品发布验收处理。未取得第三方独立审计签字，不因此改变已接受的 ADR 0009 安全条件，也不自动进入 Stage 4。
