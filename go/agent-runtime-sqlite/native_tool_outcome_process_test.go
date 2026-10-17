@@ -37,7 +37,11 @@ func TestNativeUnknownToolChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	rt, err := kernel.New(kernel.Dependencies{Store: store})
+	var elapsedClock kernel.Clock
+	if phase == "offline" {
+		elapsedClock = farFutureProofClock{value: time.Now().UTC().AddDate(2, 0, 0)}
+	}
+	rt, err := kernel.New(kernel.Dependencies{Store: store, Clock: elapsedClock})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +93,7 @@ func TestNativeUnknownToolChild(t *testing.T) {
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: rt, Model: controlBudgetModel{path: marker}, Catalog: registry, Executor: registry,
 		RunExecution:        &agent.RunExecution{OwnerID: "owner-" + phase, LeaseDuration: 2 * time.Minute},
-		ToolOutcomeVerifier: verifier,
+		ToolOutcomeVerifier: verifier, Clock: elapsedClock,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -103,6 +107,33 @@ func TestNativeUnknownToolChild(t *testing.T) {
 		})
 		if !errors.Is(runErr, kernel.ErrExecutionConflict) || current.Run.ID != "native-unknown" {
 			t.Fatalf("injected post-effect CAS expiry not detected: run=%+v err=%v", current.Run, runErr)
+		}
+	case "offline":
+		// Simulate a device returning two years later. No lease timeout or
+		// old transition age may grant permission to replay physical work.
+		current, loadErr := rt.Load(ctx, "native-unknown")
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		var state struct {
+			ToolDispatchID string `json:"toolDispatchID"`
+		}
+		if err = json.Unmarshal(current.State, &state); err != nil || state.ToolDispatchID != "lookup-call" {
+			t.Fatalf("stable pending intent was lost after offline interval: %+v err=%v", state, err)
+		}
+		raw, openErr := sql.Open("sqlite", "file:"+filepath.ToSlash(path))
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		var proofs int
+		queryErr := raw.QueryRow(`SELECT COUNT(*) FROM runtime_commit_proofs WHERE run_id=?`, current.Run.ID).Scan(&proofs)
+		closeErr := raw.Close()
+		if queryErr != nil || closeErr != nil || proofs < 2 {
+			t.Fatalf("committed revision evidence not retained: proofs=%d query=%v close=%v", proofs, queryErr, closeErr)
+		}
+		_, resumeErr := runner.Resume(ctx, current.Run.ID, current.Run.Revision)
+		if !errors.Is(resumeErr, agent.ErrToolOutcomeUnknown) {
+			t.Fatalf("two-year-offline unresolved Tool was replayed: %v", resumeErr)
 		}
 	case "blocked":
 		current, loadErr := rt.Load(ctx, "native-unknown")
@@ -131,16 +162,30 @@ func TestNativeUnknownToolChild(t *testing.T) {
 		if doneErr != nil || done.Run.Status != kernel.RunStatusCompleted {
 			t.Fatalf("reconciled native Agent did not complete: %+v %v", done.Run, doneErr)
 		}
+	case "historical":
+		// A delayed replay of the same Run cannot revive its settled Tool.
+		current, loadErr := rt.Load(ctx, "native-unknown")
+		if loadErr != nil || current.Run.Status != kernel.RunStatusCompleted {
+			t.Fatalf("settled Run missing on historical replay: %+v %v", current.Run, loadErr)
+		}
+		_, resumeErr := runner.Resume(ctx, current.Run.ID, current.Run.Revision)
+		if !errors.Is(resumeErr, agent.ErrRunTerminal) {
+			t.Fatalf("terminal Run accepted a stale Tool replay: %v", resumeErr)
+		}
 	default:
 		t.Fatalf("unsupported child phase: %s", phase)
 	}
 }
 
+type farFutureProofClock struct{ value time.Time }
+
+func (clock farFutureProofClock) Now() time.Time { return clock.value }
+
 func TestNativeUnknownToolReconcilesAcrossProcessesWithoutReplay(t *testing.T) {
 	profile := privateDir(t)
 	db := filepath.Join(profile, "runtime.sqlite")
 	marker := filepath.Join(profile, "effects.txt")
-	for _, phase := range []string{"start", "blocked", "reconcile"} {
+	for _, phase := range []string{"start", "offline", "blocked", "reconcile", "historical"} {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestNativeUnknownToolChild$")
 		cmd.Env = append(os.Environ(), "GAOGE_NATIVE_UNKNOWN_PHASE="+phase,
 			"GAOGE_NATIVE_UNKNOWN_DB="+db, "GAOGE_NATIVE_UNKNOWN_MARKER="+marker)
