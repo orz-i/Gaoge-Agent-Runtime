@@ -57,7 +57,7 @@ must choose a protected path and handle temporary filesystem/key
 unavailability separately from new-database initialization.
 
 - `runtime_runs` — opaque authoritative Run / State / Checkpoint /
-  Result and event head (six-state Kernel only).
+  Result and event head (six-state Kernel only). Experimental Stage 2 adds three small quarantine identity columns (**revision, generation, diagnosis**) in this existing Run row, not a separate quarantine table. The exact current diagnosis revokes the previous execution Epoch; all Native Acquire/Check/Apply paths reject it until trusted exact repair. No automatic Worker final-DLQ handoff or public repair endpoint is provided.
 - `runtime_events` — append-only Kernel event journal; does not carry
   private Wakeup metadata.
 - `runtime_ready_work` — in-database committed-transition projection
@@ -104,7 +104,7 @@ automatically create a new persisted format version. The adapter
 strictly validates the current table and index definitions on Open,
 so earlier experimental files using a different v1 layout fail with
 `ErrUnsupportedSchema`; their contents are neither migrated nor
-removed. Developer fixtures must be deliberately backed up and
+removed. This includes **earlier development v1 files missing the new quarantine columns**. Back up/transform or explicitly recreate those experimental fixtures; do not call this a published-schema v2 migration. Developer fixtures must be deliberately backed up and
 recreated or explicitly transformed, without pretending that an
 unreleased prototype has a production migration contract.
 

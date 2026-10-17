@@ -17,7 +17,7 @@ Redis or memory generation stream adapter.
 
 ## Experimental direct-Agent execution lease (Stage 2B)
 
-**Stage 2 governance:** The [final Stage 2 exit audit](../../docs/audits/2026-10-16-stage2-final-exit-audit.md) closes the demonstrated 2A/2B/2C experimental engineering increments, **not** the full ADR 0008 production acceptance. A shared Direct/Pump/Hosted eligibility gate, authoritative Run-level quarantine and repair, and verified host-specific recovery/identity contracts remain separate blockers. Do not treat this opt-in API as unattended production multi-worker certification.
+**Stage 2 governance:** The [final Stage 2 exit audit](../../docs/audits/2026-10-16-stage2-final-exit-audit.md) closes the previously demonstrated 2A/2B/2C experimental engineering increments, **not** ADR 0008's full production acceptance. A [subsequent hard-gate correction](../../docs/audits/2026-10-16-stage2-hard-gates-followup.md) adds Run Store quarantine and exact internal repair, self-wakeup source binding and partial Direct/Worker concurrency proof. Production Worker final-DLQ handoff, host-authorized repair and full Direct/Pump/Hosted eligibility are **still not certified**. Do not treat this opt-in API as unattended production multi-worker certification.
 
 An opt-in `agent.Dependencies.RunExecution` configuration lets a Direct
 Agent `StartRun` or `Resume` claim the existing Store execution lease
@@ -32,7 +32,7 @@ RunExecution: &agent.RunExecution{
 ```
 
 The Store must implement `kernel.ExecutionStore`; otherwise Runner
-construction fails. Native creation **atomically reserves Epoch 1**;
+construction fails. **Native `StartRun` requires a caller-stable nonempty Run ID**, allocated before any Create attempt: a scope-scoped unique `RequestID` is not guaranteed by the current Store. A failed or lost Create response must be reconciled by that same Run ID, never retried with a freshly minted identity. HTTP hosts using experimental Native mode must therefore supply a stable `ClientRunID` or their own authenticated idempotency admission layer. Legacy single-executor Starts retain their optional auto-ID behavior. Native creation **atomically reserves Epoch 1**;
 Legacy Runs at Epoch 0 cannot be upgraded to native execution while
 old executors may still be running. The first native owner claims Epoch 2.
 The lease must cover the configured Tool retry/backoff window, though
@@ -75,6 +75,10 @@ Transport ACKs may arrive after lease expiry only while that exact
 Worker/Lease is still current; a replaced worker cannot ACK.
 See the [Stage 2C Run-isolation and dispatch remediation](../../docs/audits/2026-10-16-stage2c-run-isolation-and-dispatch-remediation.md).
 None of this guarantees physical exactly-once effects.
+
+### Experimental Run-level poison fence
+
+`kernel.Runtime.QuarantineExecution` writes a durable, exact Run/Revision/Generation diagnosis to the **existing Run authority** and invalidates the active execution epoch. Memory, SQLite and PostgreSQL now refuse Acquire, pre-dispatch Check and fenced Apply until a trusted host invokes exact `RepairExecutionQuarantine` or the Run settles terminally. An unrelated nonterminal Feature control cannot silently clear the block. An execution-lease-bound Runtime cannot set or repair it. These methods are **trusted-internal control capabilities**, not authenticated public endpoints: the embedding host must verify the active Run owner, poisoned Feature work and any ambiguous Provider outcome *before* using either method. The SDK does not automatically invoke quarantine on final Queue DLQ, and does not certify an all-host operator repair flow. See the [Stage 2 hard-gate audit](../../docs/audits/2026-10-16-stage2-hard-gates-followup.md).
 
 ## Runtime kinds
 
