@@ -10,6 +10,8 @@
 
 **SQLite RunRelationStore 单项工程实验验收 PASS。** 当前变更范围内未发现经复现的 P1/P2 阻断；未批准其他 SQLite Feature、完整 Stage 5、共享 Profile、Android/iOS、Hosted 生产发布或 Stage 6。没有 Push、PR、Merge。
 
+**后续复审纠正（2026-10-17）：** 上句的“未发现 P1/P2”仅是当时的审计记录。后续复核确实发现额外 Schema Trigger 未被拒绝的 P2，并已完成修复、负向复验与最终收口；以 [Stage 5 最终收口审计](2026-10-17-stage5-final-closure-after-schema-p2.md) 为最新裁决。保留原文记录审计演进，不把旧判断冒充最终无缺陷证明。
+
 ## 已实现的最小适配
 
 1. `runrelation_store.go` 新增 `NewRunRelationStore(*sqlite.Store)` 与 `Put/GetByChild/ListChildren/ListAll`。复用已打开的单 Profile SQLite DB 与连接生命周期，不新增 Kernel/Feature Port、模块、状态机、后台协调器或第二数据库。
