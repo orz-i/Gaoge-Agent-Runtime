@@ -4,40 +4,19 @@ Gaoge Agent Runtime is a statically composed Go SDK for durable agent workloads.
 The central design rule is that durability and feature semantics have explicit
 owners rather than being hidden behind a generic agent framework.
 
-> **Accepted target (partially implemented):** [ADR 0008 — Minimal Agent Runtime
-> Architecture](adr/0008-minimal-agent-runtime-architecture.md) describes an
-> embedded-first target with SQLite-backed local recovery and optional hosted
-> orchestration. [Stage 0 choices](audits/2026-10-15-minimal-runtime-stage0-decisions.md)
-> record the driver/ReadyWork decisions. The [Stage 1 SQLite Store prototype](../go/agent-runtime-sqlite/README.md)
-> implements the **existing six-state Kernel Store** for a single executor;
-> its tests do not certify concurrent Run execution, mobile runtime, or the
-> future five-state/ProgressPlan contract. Other sections describe the
-> existing checked-in stable architecture. A [proposed minimality
-> reassessment (ADR 0009)](adr/0009-minimal-kernel-complexity-reassessment.md)
-> recommends avoiding duplicate recovery state and an unproven
-> five-state migration; it does not supersede ADR 0008 until accepted.
-> [Stage 2 Phase 2A](audits/2026-10-16-stage2-phase2a-guarded-control.md)
-> adds a small guarded control CAS for approval, budget and terminal
-> actions. The [Phase 2A security remediation](audits/2026-10-16-stage2-phase2a-code-review-remediation.md)
-> seals trusted Feature controls and checks execution ownership before
-> external Model/Tool dispatch. The [Stage 2B native Agent slice](audits/2026-10-16-stage2-phase2b-native-run-execution.md)
-> now lets explicitly configured `StartRun`/`Resume` claim and renew
-> Store execution leases. The [Stage 2B security fixes](audits/2026-10-16-stage2-phase2b-code-review-remediation.md)
-> add atomic native-mode reservation, post-acquire Revision checks,
-> durable Tool dispatch identities and verified-receipt reconciliation.
-> The [second Stage 2B review](audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md)
-> requires trusted provider lookups, retains Pending intent and releases
-> idle leases after failed pre-dispatch validation. The
-> [Stage 2C post-wait signal slice](audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md)
-> reuses guarded CAS for native external-result readiness. The
-> [early-signal and ReadyWork recovery tests](audits/2026-10-16-stage2c-early-signal-readywork-recovery.md)
-> add an explicit retriable pre-wait signal refusal and prove projector
-> lease reclaim and stale ACK fencing. The
-> [Stage 2C Run-isolation/dispatch remediation](audits/2026-10-16-stage2c-run-isolation-and-dispatch-remediation.md)
-> isolates poisoned PostgreSQL Outbox projections, propagates native
-> unresolved Tool results for queue NACK, and defines late projector ACK
-> semantics. A Kernel early-signal inbox, autonomous Pump and physical
-> exactly-once guarantees remain incomplete.
+> **Accepted Kernel architecture:** [ADR 0008](adr/0008-minimal-agent-runtime-architecture.md)
+> as amended by **accepted [ADR 0009](adr/0009-minimal-kernel-complexity-reassessment.md)**
+> on 2026-10-17. Retain the current **six-state** Run contract and derive
+> recovery from existing Feature State/Checkpoint/intent/receipt/Outbox,
+> with Store-fenced execution epochs. There is **no** mandatory new
+> ProgressPlan, ActiveSegment status or five-state Stage 3 migration.
+> [Stage 2 final engineering exit](audits/2026-10-16-stage2-final-exit-audit.md)
+> covers audited experimental 2A/2B/2C control, Native Direct, signal,
+> quarantine and explicit Apply-proof increments. [Stage 3 admission](audits/2026-10-17-stage3-admission-after-adr0009.md)
+> authorizes **design/compatibility reassessment only**; real Host/Provider,
+> local activation, shared Profile, mobile and migration/release acceptance
+> remain independently gated. These experiments do not certify physical
+> exactly-once external effects or production Hosted/mobile support.
 
 ## Layer map
 
@@ -55,7 +34,7 @@ Host application
   |
   +-- Kernel Runtime
         |
-        +-- Store (memory or PostgreSQL)
+        +-- Store (Memory / SQLite / PostgreSQL)
         +-- RunRelation
         +-- Queue / Run Feed (memory or Redis)
 ```

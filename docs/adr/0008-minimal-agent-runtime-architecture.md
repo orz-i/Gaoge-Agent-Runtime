@@ -1,13 +1,13 @@
 # ADR 0008: Minimal Agent Runtime Architecture (Embedded-First, Durable by Choice)
 
-- **Status:** **Accepted architectural direction**; Stage 1 verified; Stage 2A/2B/2C experimental engineering increments audited and locally closed, but **the normative Stage 2 exit remains NO-GO** and production durability is not certified or released
+- **Status:** **Accepted, amended by ADR 0009 on 2026-10-17**. Stage 1 verified; Stage 2A/2B/2C **bounded experimental Kernel engineering exit GO** under the amended scope. **Full product Host/Provider/mobile/production acceptance remains NO-GO**; no breaking migration or release is authorized.
 - **Date:** 2026-10-15
 - **Baseline:** `main@44785f85d3117e9629c34ed48c7a6b458dbfbfab`
 - **Scope:** Gaoge-Agent-Runtime Go SDK; desktop/mobile embedded and hosted execution
 - **Acceptance decision record:** [Stage 0 SQLite and ReadyWork choices](../audits/2026-10-15-minimal-runtime-stage0-decisions.md)
 - **Implementation evidence:** [Stage 1 single-executor SQLite Store audit](../audits/2026-10-15-minimal-runtime-stage1-prototype.md); [Stage 2 Phase 1 execution-fence evidence](../audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md); [Stage 2 final engineering exit audit and unfulfilled normative gates](../audits/2026-10-16-stage2-final-exit-audit.md)
 - **Normative test and migration annex:** [Minimal Agent Runtime — implementation and conformance contract](../minimal-agent-runtime-implementation.md)
-- **Reassessment under review:** [Proposed ADR 0009 — Minimal Kernel complexity reduction](0009-minimal-kernel-complexity-reassessment.md); this proposal does **not** change ADR 0008's accepted status until a separate acceptance decision
+- **Accepted amendment (2026-10-17):** [ADR 0009 — Minimal Kernel recovery surface](0009-minimal-kernel-complexity-reassessment.md) supersedes **only** mandatory seven-kind ProgressPlan, duplicate ActiveSegment and forced five-state Stage 3 hard cut. The six Run statuses and all execution/receipt/security invariants remain accepted. [Stage 3 admission audit](../audits/2026-10-17-stage3-admission-after-adr0009.md) records the bounded design-entry decision.
 - **Related:** [Current architecture](../architecture.md), [ADR 0001](./0001-runtime-durability-governance-v1.md), [ADR 0005](./0005-durable-agent-execution-allowances.md), [ADR 0006](./0006-runtime-owned-auto-allowance-segments.md), [Reliability evidence](../reliability.md)
 
 ## Context and decision
@@ -57,7 +57,7 @@ As of the stated commit:
 | Profile | Store | Activation | Infrastructure |
 | --- | --- | --- | --- |
 | **Ephemeral** | Memory | Direct in-process Agent Loop | None; no crash durability claim |
-| **Embedded Durable** | SQLite | On-demand local activation pump | No daemon, Redis, PostgreSQL or network listener |
+| **Embedded Durable** | SQLite | Direct Agent first; optional on-demand Host activation when implemented/verified | No daemon, Redis, PostgreSQL or network listener |
 | **Hosted Durable** | PostgreSQL | Continuous/scheduled workers, optional Redis queue/feed | Deploy only what workload needs |
 
 The Kernel exposes Run identity, lifecycle, single-Run CAS, opaque
@@ -102,176 +102,112 @@ each need their **own** SQLite implementation and crash conformance
 before they can be advertised as supported. A Memory fallback must
 not be misrepresented as durable. See the [feature matrix](../minimal-agent-runtime-implementation.md).
 
-## Decision 2 — Five states, distinct recovery gates
+## Decision 2 — Retain six Run states and Feature-owned gates (ADR 0009)
 
-The **target** Run lifecycle (introduced only after SQLite V1 proves
-the existing six-state flow):
+**ADR 0009 amends the former five-state target:** do not replace the current
+six statuses (`running`, `waiting_input`, `paused_budget`, `completed`,
+`failed`, `cancelled`) with a mandatory `suspended` status. The existing
+Kernel transition validation remains authoritative. No mandatory persisted
+gate enum is added to reinterpret the approvals and budget pauses already
+represented by Feature State and Checkpoint.
 
-| Status | Meaning |
+**Run status is not permission to execute.** `running` can have a scheduled
+model retry, an unresolved external Tool wait, a stable in-flight invocation
+or a child-terminal dependency. The owning Feature derives the current
+eligibility from persisted Feature State, Checkpoint, stable intent/receipt,
+committed Outbox work and optional Run Store execution lease. It validates
+exact call/wait/generation/due-time identity and known Provider dispositions
+before Model/Tool dispatch. Incorrect or unknown facts **fail closed**.
+
+- **Manual/privileged gates:** `waiting_input` and `paused_budget` keep exact
+  Feature approval/allowance identity and may only be released by the
+  authenticated host's narrowly validated control CAS; a generic Resume or
+  timer does not grant approval or budget.
+- **Condition gates:** wait/signal, child, timer and retry become eligible only
+  after their Feature-specific evidence is verified. The same physical wait
+  may have alternative signal/timeout triggers, never independent permissions.
+- **Recovery gates:** stable model/Tool intent and unresolved external COMMIT
+  require receipt verification; an expired Store lease is not permission to
+  repeat an unknown physical effect.
+- **Execution gates:** Native Direct and any configured activation Worker
+  contend for the one Store epoch and must check current Feature facts and
+  exact Run Revision under their existing protected execution path. A queue
+  claim is only a candidate and cannot bypass Run quarantine.
+
+**No automatic five-state migration is authorized.** Stage 3 reassesses the
+six-state contract and cost of any proposed change; a later hard cut needs
+its own positive evidence, separately approved ADR, migration/rollback plan
+and coordinated Host/consumer release gates. ADR 0005/0006 approval and
+budget safety requirements remain intact.
+
+## Decision 3 — Recover from existing Feature facts and committed delivery
+
+**One recovery authority, not a second ProgressPlan:** a durable nonterminal
+Agent or optional Workflow/Team must leave its next action discoverable from
+its current Feature State/Checkpoint, stable invocation/effect intent and
+receipt, and the existing committed `TransitionOutbox`/SQLite ReadyWork view.
+The Kernel stores these facts atomically with Run Revision CAS and Events;
+it does not parse private Feature JSON into a second seven-disposition state
+machine. The owning Feature proves the actual recovery condition in negative
+Conformance tests. Unknown or malformed state is not implicitly runnable.
+
+The former names `ReadyNow`, `ReadyAt`, `AwaitSignal`, `AwaitChild`,
+`ManualGate`, `InFlightRecovery`, `ActiveSegment` and `Terminal` are
+**examples of logical obligations, not mandatory persisted types**:
+
+| Existing authoritative fact | Required recovery behavior |
 | --- | --- |
-| `running` | Nonterminal and logically eligible; not evidence that a process is active |
-| `suspended` | Nonterminal, blocked by a persisted and verifiable gate |
-| `completed` | Immutable success, valid Result required |
-| `failed` | Immutable failure |
-| `cancelled` | Immutable cancellation |
+| First committed Run wakeup / due Outbox record | Direct and a configured local/Hosted activator compete for the **same** Run work identity; no second execution authority |
+| Feature-owned retry `ReadyAt` and wait generation | Early Direct/Queue invocation cannot dispatch; verify the same due fact and generation before work |
+| Current Checkpoint, blocked allowance and exact control grant | Privileged decision is validated by the Feature and committed via guarded control CAS; no arbitrary bypass |
+| Tool/Model intent and receipt, unknown external outcome | Retain stable physical operation identity and reconcile before any blind retry |
+| Run Store epoch, owner, lease and expiry | This **already is** the active execution segment; intermediate CAS must not require a new persisted `ActiveSegment` kind |
+| Child relation/terminal fact (optional Feature) | Parent wait consumes only the matching relation/generation; late handoff remains recoverable |
+| Terminal Run and its transition fact | Never re-execute or revive; preserve optional parent handoff facts |
 
-Allowed transitions: `running -> running/suspended/terminal` and
-`suspended -> running/terminal`; terminals never revive.
+Persist a **single minimal missing discriminator** (e.g. retry due time or
+wait identity) in the existing Feature/Run record only if a concrete failing
+crash/recovery test demands it. Do not add a generic `ReadyWorkSource`,
+ControlCommand queue, independent inbox or independent operation ledger by
+default. Embedded Direct Agent needs no always-on local daemon or Redis.
 
-**Process availability, an execution claim, and Run status are
-different dimensions.** A terminated or frozen app does not make
-the Run `suspended`. Model retry delays, child waits and in-flight
-Tool work need not become `suspended` automatically: they may remain
-`running` when they have a durable recovery obligation.
+A pre-wait external callback may arrive before the Feature has committed the
+final Tool wait. Prefer dispatching with a precommitted stable operation ID;
+otherwise a **real authenticated host** must retain and redeliver the signal
+from its durable ingress. The SDK must return a retriable rejection rather
+than falsely ACK an unmatched callback. An actual selected ingress/Provider
+requires its own delivery and permission tests, not a generic mandatory
+Kernel inbox.
 
-A `suspended` Run carries a versioned Feature-owned gate descriptor
-(gate class, exact wait ID, generation and referenced pending effect/
-decision). The Kernel validates shape and CAS; the Feature validates
-the specific condition and authority:
+**Uncertain Store commits:** Native Create uses a caller-known stable Run ID;
+a host that enables opt-in `ApplyIdentified` may find its original operation
+receipt in the existing atomic EventJournal even after a newer revision.
+Without an identifiable, retained proof a newer Run Revision is **not**
+evidence of that operation's COMMIT or rollback. Never rebase the operation
+or mint a new physical effect identity. Current plain `Apply` remains a
+legacy CAS and does not automatically obtain this recovery guarantee.
+Unsettled and redeliverable effects must retain their proof, and any future
+GC/compaction must fail closed rather than delete unknown COMMIT evidence.
 
-| Gate | Examples | Valid release |
-| --- | --- | --- |
-| **Manual/privileged** | Tool approval, budget grant, user input | Authorized Feature command binds exact checkpoint/Tool call/decision or exhausted budget dimension and hard ceiling |
-| **Condition-verified** | Tool result, child terminal, wait signal, timer | Feature verifies exact current wait ID/generation and evidence |
-| **Execution-recovery** | Expired model/effect claim | Reconcile stable effect outcome first; lease expiry is not permission for unsafe replay |
-
-A queue delivery/timer is a *candidate for verification*, not an
-authorization. **Status alone never authorizes execution, even while
-`running`**. Every direct `Resume`, background pump and Hosted dispatcher
-must evaluate the same eligibility predicate: nonterminal status,
-current progress plan, matching trigger/work identity and generation,
-required Feature condition (including due time), plus an effective
-execution claim before side-effect dispatch. `ReadyAt` must be due;
-`ActiveSegment` is exclusive to the current fenced owner (or eligible
-for takeover after an expired lease and safe recovery checks);
-`AwaitSignal` needs the matching committed signal; `AwaitChild` needs
-verified child completion; `InFlightRecovery` permits reconciliation,
-not blind redispatch. `ManualGate` cannot be bypassed by any general
-resume entry point. An unrelated `ReadyNow` delivery is never authority
-to advance a different pending wait.
-
-Gate release uses Feature validation and CAS, committing the next
-progress obligation atomically. A still-valid condition whose CAS
-conflicts must be retried, **not silently acknowledged**. A stale
-event can be acknowledged only after proving it no longer applies.
-Approvals cannot authorize a later Tool and a budget timer cannot
-grant model calls. The predicate and negative matrix are specified
-in the [conformance annex](../minimal-agent-runtime-implementation.md).
-
-**ADR precedence:** After acceptance **and coordinated release**, this
-five-state model supersedes only the Kernel status enum/transitions
-specified by [ADR 0005](./0005-durable-agent-execution-allowances.md)
-and corresponding status assumptions in
-[ADR 0006](./0006-runtime-owned-auto-allowance-segments.md).
-All earlier grant authority, immutable hard ceilings, exact approval
-binding and receipt guarantees remain mandatory. Until then the
-current six-state contract is operative.
-
-Hard-cut Go APIs are allowed, but persisted records are not
-disposable by implication. Version the new schema; migrate old
-`waiting_input` only after determining from the checkpoint whether
-it was an approval, manual input or condition wait. Map
-`paused_budget` only with validated allowance dimension/ceiling.
-Unknown/malformed records block migration with diagnostics rather
-than silently advancing. SQL, queues, client projections, workers
-and release/rollback policy migrate together. See the
-[migration matrix](../minimal-agent-runtime-implementation.md).
-
-## Decision 3 — Every durable transition declares how progress resumes
-
-**The Feature, not the Kernel, declares a typed progress plan** on
-every durable nonterminal `Create` and `Apply`. A plan has one
-authoritative logical progress phase and may expose **multiple
-alternative wake conditions** (for example an external signal **or**
-its timeout) tied to the same wait identity. An individual wake
-record is only a trigger for that plan, not another independent
-execution permission. A Store transaction atomically commits:
-
-1. Snapshot and expected-revision CAS, Feature checkpoint/intent/
-   receipt/result state.
-2. Any journal facts promised by the profile.
-3. The required next-work record or durable wait/reconciliation
-   reference, with stable identity and eligibility condition.
-
-Conceptual dispositions:
-
-| Kind | Durably recorded obligation |
-| --- | --- |
-| `ReadyNow` / `ReadyAt` | Indexed work with stable Run/revision/trigger/generation and optional due time |
-| `ActiveSegment` | Persisted Run execution owner/epoch/lease and expiration index; no new queue row for each internal CAS |
-| `AwaitSignal` | Validatable external signal ID, generation and reconciliation source |
-| `AwaitChild` | Stable child/owner identity plus late-child repair source |
-| `ManualGate` | Exact manual authority/checkpoint/decision binding; no automatic execution |
-| `InFlightRecovery` | Stable effect ID, claim/reconciliation eligibility, ambiguous result policy |
-| `Terminal` | No more self-work; retain terminal child fact for optional relation recovery |
-
-The Kernel validates **presence and structural consistency**, status
-compatibility, matching wait/generation, and atomicity. It cannot
-infer business needs from opaque JSON; Feature conformance tests
-must prove a truthful progress plan at **every** autonomous
-boundary, including alternative triggers. Missing or unknown plans
-fail closed, not as implicit "no work". `Create` has the same
-requirement as `Apply`: a crash after Run creation must not lose
-the first opportunity to run.
-
-For external callbacks that may race ahead of waiting-state
-publication, **prefer committing a stable operation/wait identity
-before external dispatch**. If a protocol cannot enforce that order,
-the embedding application's durable ingress must atomically record
-an authenticated, bounded, deduplicated early signal keyed by that
-identity, then correlate and consume it with the eventual wait
-via CAS. Uncorrelatable signals fail closed; a transient in-memory
-callback or unbounded orphan inbox cannot be the recovery source.
-
-A Store commit can succeed although its caller receives an error
-(e.g. transport failure after COMMIT). Each state-changing request
-must have a stable logical operation/commit identity discoverable
-after later revisions; on uncertain outcome, **read and reconcile
-the committed identity/receipt before any retry**. For `Create`,
-the caller must provide a stable Run ID or a scope-unique,
-queryable idempotency key: generating an unobservable new Run ID
-after an uncertain Create is forbidden. Existing `RequestID` does
-not automatically imply uniqueness without a Store contract.
-A newer Run revision alone is not proof that the particular
-operation committed. **Unsettled operations and any identity that
-might still be redelivered cannot lose their deduplication proof
-through age-based journal cleanup.** Retain a compact durable receipt
-or tombstone until the operation is settled, all relevant retries and
-deliveries have a proven terminal disposition, and the supported
-replay horizon has closed. Indefinitely offline devices cannot be
-assumed to have passed that horizon. Do not recycle a retired logical
-operation ID or issue another external effect merely because its
-original COMMIT response or historical record is unavailable.
-
-An embedded SQLite commit may write `ready_work` directly in the same
-transaction. A Hosted commit may use the existing Outbox and
-idempotently project into an external queue. **The durable progress
-record is necessary; the separate queue service is optional.**
-Event journal and live telemetry are not execution authority, and
-their existing public semantics must not be removed without separate
-conformance. Keep the public Run API narrow (`Create`, `Load`,
-`Apply`, optional `Cancel`/`Expire`); expose ready-work claiming and
-event reads as separately composed ports, not a universal scheduler.
+A Hosted commit may project its existing outbox to optional Redis; an Embedded
+commit can record SQLite ReadyWork in the same transaction. A delivery job,
+ACK or live telemetry stream is not another Kernel execution authority.
 
 ## Decision 4 — Lightweight execution segments and authoritative fencing
 
-A synchronous `StartRun` first commits its initial `ReadyNow`, then
-acquires the **same logical work identity** available to foreground
-Continue or the activation pump. These are competing activators,
-never separate unguarded Agent loops.
+A native synchronous `StartRun` commits the initial Run and its recoverable
+wakeup, then claims one **Store execution epoch** before dispatch. If the
+Host composes a foreground/local/Hosted activator, it must contend for **the
+same** persisted Run work and epoch, never run a second unguarded loop.
 
-**Do not claim a new queue job on every internal CAS.** A bounded
-**execution segment** holds one Run-scoped authority across several
-model/tool/state commits while the owner is alive and remains
-eligible. Its `ActiveSegment` obligation is persisted and indexed by
-lease expiry so a killed process cannot strand a Run. Intermediate
-mutations preserve that recovery evidence without publishing a
-second `ReadyNow` job. The segment ends at terminal,
-manual/condition wait, deliberate yield, cancellation, or lost
-authority. Yield atomically publishes the *next* stable work identity
-and relinquishes the previous segment; resuming requires a new
-claim. No work item is "claimed" twice just because Revision
-increased within one execution segment.
+The existing Store `(RunID, Epoch, OwnerID, LeaseID, Expiry)` **is** the
+active execution segment; no extra persisted `ActiveSegment` type is needed.
+An owner may make several CAS commits within one bounded execution lease.
+A crash leaves the same persisted Feature intent/receipt and Store lease for
+fenced takeover and cautious external-effect reconciliation. Intermediate
+wakeup/outbox records are delivery facts, **not** fresh execution permits.
+Avoid needless per-step queue fanout where proven safe, but do not delete
+existing unacknowledged work without consumer/expiry/receipt proof.
 
 **Authoritative fencing lives in the same Run Store as the CAS.**
 A Run-scoped monotonically increasing execution epoch and expiry
@@ -303,7 +239,7 @@ still execute after cancellation or expiry, so stable invocation
 IDs and reconciliation still gate retries and receipts. The
 lightweight delivery states are `Ready -> Claimed ->
 Acked / RetryPending / Quarantined`. ACK requires durable consumption
-or proof the delivery is stale. **Quarantine must also become an
+or proof the delivery is stale. **Quarantine must also be an
 authoritative Run Store execution-eligibility block** for the exact
 current work ID/generation; a queue-only DLQ flag cannot stop direct
 `Resume` from bypassing isolation. Embedded writes that block in
@@ -328,7 +264,7 @@ ready work. **Transactions are short-lived:** a logical execution
 segment can span several atomic commits, but never holds an open
 SQLite write transaction across model/Tool execution, network waits,
 user approval, sleep or lease-renewal delays. Acquire/revalidate,
-CAS+receipt+plan commit, and lease renewal each use bounded short
+CAS+receipt+Feature State/Outbox commit, and lease renewal each use bounded short
 transactions. Compare `BEGIN IMMEDIATE` for known writers against
 `DEFERRED` under contention; bound busy handling and do not promote
 a stale read snapshot to a writer. Test cross-process claim fencing,
@@ -416,26 +352,25 @@ the correctness boundary.
 A future Hybrid owner transfer requires explicit fencing/handshake,
 not silent concurrent merging.
 
-## Rollout (separate implementation authorization required)
+## Rollout (ADR 0009 amendment; release authorization is separate)
 
 | Stage | Outcome and exit rule |
 | --- | --- |
-| **0 · P0** | Inventory Feature transitions, execution-vs-control mutations and crash cases; measure binary/startup/RSS, public Kernel API/dependency footprint, per-step writes/metadata and short/long-state SQLite bytes/WAL/latency; fix reviewed complexity/performance thresholds and migration plan |
-| **1 · P0** | **Single-executor SQLite Direct Agent prototype using current six statuses**; prove sequential restart/receipt/approval safety, no PG/Redis; **not yet concurrency-safe Embedded Durable** |
-| **2 · P0** | Implement authoritative Store execution epoch, execution segments, shared eligibility predicate, signal ordering/inbox and ambiguous-commit reconciliation; pass concurrent direct/Pump and Memory/SQLite/PostgreSQL contract tests **before** claiming production durability |
-| **3 · P1** | **Coordinated five-state hard cut** and gate-aware Feature/Dispatcher, migrations and API/wire/client tests. Code may be merged internally, but **no independently published breaking-contract SDK** before Hosted Stage 4 is accepted (unless Hosted is disabled and explicitly experimental) |
-| **4 · P1** | Hosted equivalence including PostgreSQL Run fencing with optional Redis delivery; safe outbox/queue/reconciliation retained while Continuation is simplified. **Joint Stage 3+4 release gate** for any production-facing breaking SDK contract |
-| **5 · P1** | Optional SQLite Workflow/Team/Harness/ledger and OS adapters **only with per-Feature/device evidence** |
-| **6 · P2** | Evidence-led snapshot/state compaction, CAS optimization or further split behind separate ADR |
+| **0 · P0** | Inventory Feature and failure cases; establish baseline API/dependency/SQLite footprint and complexity thresholds. Completed engineering evidence does not certify production OS/device behavior. |
+| **1 · P0** | Single-executor SQLite Direct Agent on **existing six states**; prove restart/receipt/approval without mandatory PG/Redis. |
+| **2 · P0** | **Bounded experimental Kernel safety integration:** Store epoch and multi-CAS fencing, Feature-validated controls, Native Agent intent/receipt and due work, exact signal/poison and uncertainty failure proofs using existing State/Checkpoint/Outbox. Stage 2 engineering scope is **sealed** at its tested boundary; real Host, optional Profile, Provider and device acceptance remain **deployment/release gates**, not further Kernel sub-stages. |
+| **3 · P1** | **Architecture and compatibility reassessment only.** Compare retaining six states against a proposed five-state migration using actual API/state/DDL/wire/consumer footprint, migration complexity, measured benefit and adversarial evidence; document a bounded decision. **Default: retain six states, no forced new ProgressPlan or status/schema migration.** Any proposed breaking implementation requires a **separate approved ADR**. |
+| **4 · P1** | Optional Hosted parity/Host authorization and Provider confirmation with real PostgreSQL and Redis delivery tests for a **selected deployment**. Publish only explicitly certified features. If a future breaking Kernel change is separately approved, coordinate its Stage 4 Host/consumer release gate. |
+| **5 · P1** | Optional SQLite Workflow/Team/Harness and OS/mobile adapters only with per-Feature/device implementation and fault evidence. |
+| **6 · P2** | Evidence-led state/journal compaction and CAS performance optimization, behind separate measured proposals. |
 
-**Hard-cut API freedom does not waive persisted-data safety.**
-Any release must choose explicit migrate/reject/backup-and-rollback
-semantics and coordinate all Go modules and consumers. **Completing
-Stage 3 is a development milestone, not a release authorization:**
-production-facing breaking APIs must also pass Stage 4's Hosted
-parity gate. A deliberately disabled Hosted experimental surface
-must not be advertised as supported. Do not publish an intermediate
-SDK that misinterprets old approvals or budget pauses.
+**Stage 3 design entry is not production eligibility.** It may follow the
+completed Stage 2 experimental Kernel safety evidence while selected Host or
+mobile release gates remain NO-GO. Stage 3 itself does not implement a
+breaking migration or authorize a production deployment. For any separately
+approved future breaking API/DDL change, require an explicit migration,
+backup/rollback and coordinated module, Worker and consumer acceptance before
+release; no partially published mixed-version SDK.
 
 ## Acceptance and negative gates
 
@@ -479,8 +414,9 @@ precede that evidence. Mandatory outcomes include:
 
 Benefits: lighter embedding and clearer lifetime boundaries without
 sacrificing previous receipt/CAS security properties. Costs: a real
-SQLite adapter, new progress/gate contracts, coordinated status
-migration and stronger platform-specific evidence.
+SQLite adapter, Feature-owned recovery conformance and stronger
+platform-specific evidence. A separate migration decision may be required
+only if later justified by measured benefit.
 
 **Accepted as an architectural direction on 2026-10-15 after the
 final architecture review and user agreement.** The two outstanding
@@ -497,8 +433,9 @@ Conformance, atomic rollback, and cross-process receipt-recovery
 tests are documented in the [Stage 1 audit](../audits/2026-10-15-minimal-runtime-stage1-prototype.md).
 **The target architecture is not fully implemented.** Mobile
 runtime/file-lock evidence, production security/license signoff,
-quantitative release budgets, Stage 2 execution ownership and the
-Stage 3/4 five-state/Hosted release gates remain pending. Android/iOS compile/link evidence is **not** a
+quantitative release budgets and selected production Host/Provider/OS
+release gates remain pending. The mandatory five-state Stage 3 hard cut
+was superseded by accepted ADR 0009. Android/iOS compile/link evidence is **not** a
 production support claim. Existing six-state SDK and ADR 0005/0006
 behavior remains in force until a coordinated implementation release.
 Accepting this ADR does not authorize business-code changes,

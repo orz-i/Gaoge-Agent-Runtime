@@ -4,24 +4,25 @@
 - **Date:** 2026-10-15
 - **Baseline:** `main@44785f85d3117e9629c34ed48c7a6b458dbfbfab`
 - **Scope:** Normative gates for staged implementation; driver and ReadyWork V1 choices are in the [Stage 0 decision record](audits/2026-10-15-minimal-runtime-stage0-decisions.md)
-- **Pending simplification review:** [Proposed ADR 0009](adr/0009-minimal-kernel-complexity-reassessment.md) questions mandatory additional ProgressPlan state and forced five-state migration; current accepted contract remains in force until the proposal is approved
-- **Engineering scope freeze:** [Stage 2 final exit and later fixed-scope addendum](audits/2026-10-16-stage2-final-exit-audit.md). Native Agent now stores its **Feature-owned model retry ReadyAt** in the existing State and rejects premature Direct Resume; Legacy immediate explicit retry remains compatible. Product Host, actual Local Pump, Provider authorization, opt-in shared Profile, GC and release fault cases are deployment-specific acceptance, **not additional mandatory Kernel sub-stages**.
+- **Accepted simplification:** [ADR 0009](adr/0009-minimal-kernel-complexity-reassessment.md) accepted 2026-10-17. Feature-owned recovery obligations reuse existing State/Checkpoint/Outbox/Execution Epoch; mandatory ProgressPlan and Stage 3 five-state hard cut are **superseded** while all Store safety invariants remain in force.
+- **Engineering scope freeze and Stage 3 entry:** [Stage 2 engineering exit](audits/2026-10-16-stage2-final-exit-audit.md) plus [Stage 3 admission audit](audits/2026-10-17-stage3-admission-after-adr0009.md). Native Agent reuses Feature State for model ReadyAt and keeps Legacy immediate retry compatibility. Product Host, actual Local Pump, Provider authorization, shared-Profile opt-in, GC and device tests are deployment/release conditions, **not new Stage 2 Kernel sub-stages**. Stage 3 is an architecture reassessment, not migration approval.
 - **Phase 2A implementation evidence:** [Exact guarded approval/budget/terminal CAS](audits/2026-10-16-stage2-phase2a-guarded-control.md) and [code-review remediation](audits/2026-10-16-stage2-phase2a-code-review-remediation.md), not full Agent concurrency or Hosted release authorization
 - **Phase 2B implementation evidence:** [Opt-in native Direct Agent execution leasing](audits/2026-10-16-stage2-phase2b-native-run-execution.md), [first code-review fixes](audits/2026-10-16-stage2-phase2b-code-review-remediation.md) and [second review fixes](audits/2026-10-16-stage2-phase2b-second-code-review-remediation.md); requires trusted Tool-outcome verification and explicit Pending handling, **not** a generic Pump, automatic unknown-COMMIT resolution or external exactly-once acceptance
 - **Stage 2B exit/Stage 2C narrow signal evidence:** [Native post-wait signal guarded CAS](audits/2026-10-16-stage2b-exit-stage2c-postwait-signal.md), [early-signal/ReadyWork recovery](audits/2026-10-16-stage2c-early-signal-readywork-recovery.md), and [Run-isolation/dispatch remediation](audits/2026-10-16-stage2c-run-isolation-and-dispatch-remediation.md). Native early signals are retryable; unresolved provider effects NACK rather than falsely ACK. No Kernel signal inbox, autonomous Pump or production multi-worker effect fencing is authorized.
 
-This document is a **test and migration contract** for the future
-`ProgressPlan`, `ReadyWorkSource`, Run-execution epoch and five-state
-lifecycle. A [Stage 1 SQLite Store prototype](audits/2026-10-15-minimal-runtime-stage1-prototype.md)
-**now exists**, but implements **only the current six-state Kernel
-Store** with existing TransitionOutbox semantics; it is neither the
-final target architecture nor a production durability certification.
-Current published behavior remains governed by the
+This document is the **conformance, architecture-review and conditional
+migration contract** for accepted ADR 0008 **as amended by ADR 0009**.
+Its seven old progress dispositions remain useful **test-case names**, not
+mandatory persisted `ProgressPlan` variants. Existing six-state Kernel
+Store plus Feature-owned state/checkpoints/receipts and committed-transition
+Outbox are the execution truth. Stage 3 may review alternative encodings,
+but there is **no approved five-state migration** or new SQLite Schema version.
+Stage 1/2 in-repository evidence does not certify Hosted/mobile production.
+Current published behavior remains governed by
 [architecture](architecture.md), [ADR 0001](adr/0001-runtime-durability-governance-v1.md),
 [ADR 0005](adr/0005-durable-agent-execution-allowances.md) and
 [ADR 0006](adr/0006-runtime-owned-auto-allowance-segments.md)
-until an accepted, implemented and released change supersedes the
-specific older contracts.
+until a separately approved, implemented and released change supersedes it.
 
 ## 1. Source of truth and invariants
 
@@ -34,69 +35,63 @@ specific older contracts.
 | Execution ownership | **Run Store** execution epoch/owner/expiry plus stable ready-work ID | Execution-owned CAS checks Revision **and** epoch/expiry inside one Store transaction; Redis lease alone is not authoritative |
 | Poison-work quarantine | Run Store guard for exact work ID/generation, separate from transport DLQ | Quarantined work cannot be acquired through direct Resume/Pump/Hosted until authorized repair |
 | Privileged/ingress controls | Feature command identity, actor authorization and Run Revision | Exact approval/grant/cancel/signal command can mutate without an execution claim, never through a generic bypass |
-| Future progress | Committed progress plan / indexed due-work, active segment or resolvable gate | No missing durable recovery path for an autonomous nonterminal Run |
-| External signal | Committed wait identity or bounded durable pre-wait inbox | An early callback cannot be silently discarded or authorize a different wait |
+| Future progress | **Existing** Feature State/Checkpoint/intent/receipt + committed Outbox/SQLite ReadyWork + optional Store execution lease | No missing durable recovery path for any advertised autonomous nonterminal Run; no extra mandatory plan |
+| External signal | Committed Feature wait/operation identity and **Host-owned durable ingress when needed** | An early callback cannot be silently ACKed or authorize a different wait; no mandatory Kernel inbox |
 | Commit identity | Stable logical operation ID / durable receipt or marker | An ambiguous COMMIT response is reconciled before any repeated operation |
 | Parent/child relation | Durable edge + terminal child fact + consumed-watermark proof | Early terminal and late parent waits are repaired |
 | OS lifecycle & time | Platform callback, Store time policy; **not** Kernel Run status | Freezing/time jump may delay execution but must not erase or authorize intent |
 
 No optional Worker/queue is required for a minimal in-process Agent.
-No durable deployment may claim safe automatic resume without an
-authoritative progress record and a way to activate eligible work.
+No durable deployment may claim safe automatic resume without persisted
+Feature recovery facts and a **selected** Host activation mechanism.
 
-## 2. Progress obligation conformance
+## 2. Feature-owned recovery obligation conformance
 
-### 2.1 Who generates and verifies it?
+### 2.1 Who owns and validates recovery?
 
-**The owning Feature generates one versioned progress plan** whenever
-it prepares a durable `Create` or `Apply`. The plan identifies the
-current logical phase and **all permitted alternative triggers**
-for that phase (e.g. external result or matching timeout); it does
-not make each trigger an independent dispatch authorization.
-Feature transition builders classify their own state; Kernel cannot
-derive semantic needs from opaque JSON. The Kernel/Store reject a
-missing/invalid plan, check status/phase/wait ID/generation and
-persist the plan with its required ready-work, active-segment expiry
-or inbound-signal indexes in the same transaction.
+**The owning Feature** derives each recovery condition from its existing
+opaque State, pending Checkpoint, stable Model/Tool intent/receipt and optional
+committed work projection. It validates call/wait identity, generation,
+due time, manual permission and external result before acting. **The Kernel
+does not own a parallel versioned progress plan.**
 
-During a claimed execution segment, intermediate CAS commits may
-declare `ActiveSegment` rather than create another `ReadyNow` row.
-The persisted authority/expiry and stable invocation ID are the
-recovery source if the process dies. A controlled yield or a
-non-execution command that unblocks a wait publishes the **next**
-work obligation atomically.
+At a durable `Create` or `Apply`, the same Run Store transaction must commit
+all actual State/Checkpoint/receipt/journal/outbox facts required for recovery.
+Intermediate CAS under an active Store epoch can retain that same epoch and
+Feature intent without publishing a second Queue permit per step. An
+unrecognized Feature state or unresolved Provider outcome fails closed.
 
-The Kernel cannot detect a semantically dishonest Feature plan:
-each Feature needs transition-by-transition tests proving that
-every autonomous commit has a truthful recovery path. Unknown
-plan kinds/versions fail closed; no implicit `NoWork` fallback.
+If a concrete failing fault test proves a missing discriminator, persist the
+**smallest** due/wait/work identity in the existing Feature/Run record and
+re-run Conformance. There is no mandatory `ProgressPlan` kind, ActiveSegment
+row, general Inbox or `ReadyWorkSource` port.
 
 ### 2.2 Required test cases
 
-| Commit boundary | Progress disposition / proof |
+| Commit boundary | Feature-owned existing proof (former plan names are illustrative) |
 | --- | --- |
-| New autonomous Direct Agent | `ReadyNow` with same stable work identity for direct and Pump execution |
-| More steps in **same claimed execution segment** | `ActiveSegment` persists Run owner/epoch/expiry and in-flight work identity; **no new queue item per CAS** |
-| Segment yields or loses authority | Next `ReadyNow`/`ReadyAt` or expired-segment recovery source; new owner must reconcile ambiguous effects |
-| Model retry after bounded backoff | `ReadyAt`, preserved logical invocation ID/attempt and exact due time |
-| External Tool pending/leased | `AwaitSignal` or `InFlightRecovery` with stable operation ID/generation; timeout is an **alternative trigger for same wait** |
-| Approval required | `ManualGate` with checkpoint ID, pending Tool call ID, decision authority; **no automatic unblocking** |
-| Budget exhausted | `ManualGate` with blocked allowance dimension/remaining hard ceiling |
-| Workflow explicit signal wait (future scope) | Condition-bound `AwaitSignal` with verified wait ID/generation |
-| Parent waiting on child (future scope) | `AwaitChild` plus durable relation and late-child repair |
-| Run terminal | `Terminal` and durable terminal fact available to optional parent reconciliation |
-| Process stops between Create commit and direct drive | Persisted `ReadyNow` remains eligible on next activation |
-| Process stops during claimed multi-CAS segment | Expired `ActiveSegment` is discoverable by indexed scan and authoritative takeover; prior effects first reconciled |
-| Signal arrives before wait becomes visible | Precommitted wait identity or authenticated bounded durable inbox; correlate exactly once |
+| New autonomous Direct Agent | Initial committed wakeup with same stable work identity for Direct and **a configured** local activator |
+| More steps in **same claimed execution segment** | Existing Store epoch/owner/expiry plus Feature intent are retained; no **new authoritative** execution permit per CAS |
+| Segment yields or loses authority | Existing due Outbox/Feature State or expired Store lease; new owner must reconcile ambiguous effects |
+| Model retry after bounded backoff | Feature-owned `RetryAfter` plus existing Outbox `WakeupAt`, preserved invocation ID/attempt |
+| External Tool pending/leased | Existing ToolWait/dispatch ID, pending effect identity/generation; timeout is an **alternative trigger for same wait** |
+| Approval required | Current `waiting_input` Checkpoint/pending Tool call/decision authority; **no automatic unblocking** |
+| Budget exhausted | Current `paused_budget` allowance dimension/remaining hard ceiling |
+| Workflow explicit signal wait (future scope) | Existing Feature wait State with verified identity/generation |
+| Parent waiting on child (future scope) | Existing Feature wait plus durable relation and late-child repair |
+| Run terminal | Terminal status and durable terminal fact available to optional parent reconciliation |
+| Process stops between Create commit and direct drive | Initial committed wakeup/Run State remains available at next permitted activation |
+| Process stops during claimed multi-CAS segment | Expired Store execution lease plus persisted intent support a **selected Host** recovery scan; prior effects first reconciled |
+| Signal arrives before wait becomes visible | Precommitted stable identity or authenticated Host durable redelivery; correlate exact wait |
 | Caller sees error after successful commit | Same stable commit ID is found on reload even after later revisions; no new external call |
 | Existing `running` with no live executor | Still recoverable from committed intent; does not need synthetic `suspended` |
 
-Where a Feature chooses to leave a delayed or in-flight Run in
-`running`, a due/reconciliation obligation is still required. A
-`suspended` Run must have a gate descriptor and may not be resumed by
-the generic `Resume` path while unresolved.
+Where a Feature leaves delayed or in-flight work `running`, the due or
+reconciliation obligation must still be recorded in its current State or
+Outbox. Existing `waiting_input`/`paused_budget` remain precise manual gates;
+no generic `suspended` status is introduced.
 
-### 2.3 Suspension release matrix
+### 2.3 Feature gate release matrix (six-state contract)
 
 | Candidate / state | Expected result |
 | --- | --- |
@@ -120,13 +115,13 @@ authoritative state; before an external side effect, acquire and
 recheck a fenced execution segment:
 
 1. Run is nonterminal and the candidate matches the **current
-   progress plan**: ready-work source revision for a new claim,
+   Feature-owned recovery facts**: committed work source revision for a new claim,
    exact wait ID/generation for condition triggers, or current
    execution epoch for continuing an active segment. Earlier
    ReadyNow revisions cannot resume an unrelated later phase.
-2. Feature validates plan-specific facts (due time, signal, child,
+2. Feature validates obligation-specific facts (due time, signal, child,
    manual gate, receipt/ambiguous effect policy). Terminal state or
-   absent/unknown plan **never defaults to runnable**.
+   absent/unknown recovery proof **never defaults to runnable**.
 3. Before acquiring execution, the **Run Store** confirms the exact
    current work ID/generation is not quarantined; this block is
    authoritative even if a transport queue has already DLQ'd a job.
@@ -134,23 +129,23 @@ recheck a fenced execution segment:
    privileged signal/grant/approval command is handled through the
    separately validated **control mutation path**, never mistaken
    for an execution job or a generic quarantine bypass.
-4. After any CAS conflict or change of plan/gate, reload and recheck;
+4. After any CAS conflict or change of Feature wait/gate, reload and recheck;
    ACK a delivery as obsolete only when authoritative evidence proves
    its exact logical work was already consumed or superseded.
 
-| Current plan | Direct/queued candidate | Permitted action |
+| Conceptual eligibility (not a persisted plan type) | Direct/queued candidate | Permitted action |
 | --- | --- | --- |
-| `ReadyNow` | Matching work ID, eligible revision/generation | Claim Run authority, then execute |
-| `ReadyAt` | Correct work ID **and** Store time at/after due | Claim and execute; early delivery must wait |
-| `ActiveSegment` | Current owner with valid epoch/expiry | Continue without new queue claim; expired owner must stop; replacement must reconcile |
+| Ready now (committed wakeup) | Matching work ID, eligible revision/generation | Claim Run authority, then execute |
+| Ready at due time (Feature-owned State + Outbox) | Correct work ID **and** supported authoritative time at/after due | Claim and execute; early delivery must wait |
+| Existing active Store lease | Current owner with valid epoch/expiry | Continue without a second execution authority; expired owner must stop, replacement reconciles |
 | `AwaitSignal` | Matching durably recorded signal and generation | Verify resolution; mere `running`/old `ReadyNow` is insufficient |
 | `AwaitChild` | Matching terminal child and relation/wait | Feature verifies child and wait before resuming |
 | `ManualGate` | Generic Resume/timer/any old event | **Reject/keep blocked**; only authorized exact control may release |
 | `InFlightRecovery` | Matching invocation/effect ID and safe recovery classification | Reconcile receipt/unknown outcome before new dispatch |
 | `Terminal` | Any | No execution or gate release |
 
-The plan may have **alternative triggers** (signal vs timeout)
-for one wait. Consuming one must atomically invalidate other
+A Feature wait may have **alternative triggers** (signal vs timeout)
+for one stable identity. Consuming one must atomically invalidate other
 alternative triggers for that wait; outdated callbacks never reopen
 a new generation. This applies even if Run status is `running`.
 
@@ -175,8 +170,9 @@ Conceptual contract — *not* finalized exported Go signatures:
 
 ```text
 AcquireRunExecution(Run, WorkIdentity)
-  -> atomic check of current plan/eligibility
-     + epoch increment + active owner/expiry in Run Store
+  -> Feature validates persisted work/wait/due/receipt eligibility
+     + Run Store checks status/quarantine and atomically grants epoch
+     + active owner/expiry in the same Run Store
 
 ApplyExecution(Revision, Epoch, Owner, Mutation)
   -> one authoritative transaction:
@@ -184,8 +180,8 @@ ApplyExecution(Revision, Epoch, Owner, Mutation)
        AND execution_epoch = expected_epoch
        AND owner = expected_owner
        AND lease_valid_under_store_time
-     + next Feature state/ProgressPlan/receipt
-     + retain ActiveSegment OR publish next ready work
+     + next Feature State/Checkpoint/receipt
+     + existing Outbox wakeup only when that transition needs delivery
 
 ApplyValidatedControl(Revision, ValidatedCommand)
   -> CAS + Feature authorization + exact checkpoint/wait identity
@@ -210,20 +206,19 @@ cannot turn into a general arbitrary-Apply bypass.
 
 ### 3.2 Segment lifetime and crash recovery
 
-1. `Create` commits initial `ReadyNow`. Synchronous `StartRun` and
-   pump contend for **that same** work; only one obtains authority.
+1. `Create` commits its initial recoverable wakeup. Synchronous `StartRun`
+   and an **optional selected** activator contend for the same Run epoch.
 2. Owner performs a bounded segment, possibly multiple `Apply`
-   transitions under the **same** Run epoch. Those commits persist
-   `ActiveSegment`, stable in-flight effect ID, current lease expiry
-   and enough indexed recovery evidence; **no new queue work per
-   internal CAS**.
+   transitions under the **same** Run epoch. Those commits retain the
+   existing Store epoch/expiry and stable in-flight Feature intent;
+   no new **execution authority** is created by intermediate CAS.
 3. A segment may renew its own authoritative lease. Yielding,
    terminal completion or waiting ends the segment and atomically
-   publishes the appropriate next plan/work (or ManualGate). Old
+   commits its appropriate Feature gate/Outbox fact. Old
    owner is revoked; a new segment requires Acquire.
-4. If process dies mid-segment, an indexed expired-segment scan
-   discovers the Run; new authority increments the epoch. The
-   new executor classifies unsettled external effects before
+4. If process dies mid-segment, a selected Host must rediscover expired
+   Store authority and preserved Feature intent; the new owner increments
+   the epoch. The new executor classifies unsettled external effects before
    considering another physical call.
 5. State/receipt commits require Run Revision **and** valid epoch/
    expiry in one Store transaction. After Store commit, transport
@@ -235,8 +230,9 @@ cannot turn into a general arbitrary-Apply bypass.
    reconciliation are still necessary.
 
 Test an owner that performs **three or more internal CAS steps** in
-one segment; no duplicate ReadyWork enqueues and no extra claim
-generation per intermediate revision. Then expire the segment
+one segment; no duplicate **execution permission or epoch claim** per
+intermediate revision. Existing per-step Outbox facts may be emitted but
+must remain idempotent and are retained until proven consumed. Then expire the segment
 between steps without a Run revision change and verify that old
 owner's next commit fails while replacement safely reconciles.
 
@@ -250,9 +246,9 @@ Commit stable operation/wait ID -> dispatch external operation
 ```
 
 If the external protocol can callback **before** a final wait
-checkpoint is committed, its ingress must durably store a bounded,
-authenticated, deduplicated early signal keyed by a preallocated
-stable operation identity (same Run Store/inbox when possible).
+checkpoint is committed, a **selected Host ingress** must durably retain and
+redeliver bounded, authenticated, deduplicated early signals keyed by a
+preallocated stable operation identity; no generic Kernel inbox is required.
 When the wait becomes visible, reconcile/consume the signal
 atomically with the matching Feature state; do not discard it or
 accept arbitrary orphan signals. Set retention and quota bounds;
@@ -260,9 +256,10 @@ unmatched/cancelled/unauthorized signals fail closed. If the
 identity cannot be assigned before dispatch, do not advertise
 lossless early-callback semantics for that adapter.
 
-For `Create`/`Apply`, each logical mutation has a stable operation
-ID and durable commit receipt/marker discoverable even if a later
-Revision has advanced. For `Create`, require a caller-stable Run ID
+For **opt-in Native or selected production Host** `Create`/`Apply`,
+a known stable Run ID or identified Apply proof must be retained and
+queryable even if a later Revision has advanced. Existing plain Apply is
+not automatically identified. For `Create`, require a caller-stable Run ID
 **or** a Store-enforced, scoped-unique `RequestID` (with lookup):
 the current code's optional RequestID field does **not** by itself
 prove idempotency. Never mint a different Run ID on an uncertain
@@ -304,14 +301,14 @@ historical duplicate delivery in the GC conformance matrix.
 
 **Delivery outcomes:** `Ready -> Claimed -> Acked / RetryPending /
 Quarantined`. ACK/Retry/Quarantine are fenced to the current active
-delivery claim and cannot erase the authoritative Run progress
-plan. **Quarantine is two things:** a transport dead-letter record
+delivery claim and cannot erase the authoritative Run recovery
+facts. **Quarantine is two things:** a transport dead-letter record
 for investigation **and** an authoritative Run Store execution-
 eligibility guard for the exact current work ID/generation.
 
 A direct `Resume`, background activation or Redis-delivered Hosted
 worker must check the same Run Store guard **atomically with**
-`AcquireRunExecution`. `ReadyNow` remaining in the Progress Plan
+`AcquireRunExecution`. A queued wakeup or `running` Run status
 does not override that guard. Stale blocks for a previous work
 generation must not quarantine an unrelated later operation.
 
@@ -399,7 +396,7 @@ authorized identity mapping.
   multi-CAS execution segment holds an execution epoch **across
   transactions**, never a SQLite write lock across LLM/Tool/network
   calls, approval, sleep, retries, or filesystem Tool execution.
-  Acquire+fence, receipt+plan commit, renewal, and quarantine each
+  Acquire+fence, receipt+Feature State/Outbox commit, renewal, and quarantine each
   use a short bounded transaction. Compare `BEGIN IMMEDIATE` when
   a writer lock is known to be required against `DEFERRED`; ensure
   busy waits are bounded and a stale read transaction is restarted
@@ -466,61 +463,53 @@ must re-open an early-terminal relation when parent consumption is
 still outstanding. Deletion of the independent Continuation Worker
 is **not** sufficient replacement evidence.
 
-## 6. Coordinated five-state migration
+## 6. Stage 3 reassessment — keep six states unless a separate ADR approves a cut
 
-This is an **implementation-stage proposal**, not permission to
-rewrite persisted records in the current version.
+Accepted [ADR 0009](adr/0009-minimal-kernel-complexity-reassessment.md)
+**cancels the mandatory five-state status migration** previously proposed
+for Stage 3. The implementation contract remains the current six statuses;
+`waiting_input` and `paused_budget` encode distinct privileged gates and
+MUST NOT be silently reinterpreted as a new generic `suspended` state.
+No Schema bump, SQL/Queue/wire conversion, status alias or compatibility
+fallback is authorized by entry to Stage 3.
 
-| Existing status | Target | Migration prerequisite |
-| --- | --- | --- |
-| `running` | `running` | Reconstruct/verifiably preserve due/in-flight/wait recovery obligation; if impossible, stop migration for that Run |
-| `waiting_input` | `suspended` | Inspect Feature checkpoint; distinguish Tool approval, Workflow user input vs external condition, bind wait ID and generation |
-| `paused_budget` | `suspended` | Verify allowance/exhausted dimension and frozen ceiling; persist privileged ManualGate, no automatic resume |
-| `completed` | `completed` | Valid result, immutable |
-| `failed` | `failed` | Preserve error code and terminal identity |
-| `cancelled` | `cancelled` | Preserve cancellation and terminal identity |
+Stage 3 is a **bounded architecture/compatibility comparison**, not another
+Kernel implementation phase. Its entry requires the already tested Stage 2
+Kernel safety baseline and explicit acceptance of ADR 0009. Its deliverable
+is a short design decision backed by **measured evidence**, comparing:
 
-Do not infer gate class from status spelling alone. Unknown Feature
-kind, missing checkpoint/allowance data, malformed old event or unknown
-state version is a **migration blocker** with explicit diagnostics,
-never silently mapped to `running`.
+| Option | Concrete review obligation |
+| --- | --- |
+| **Retain six states (default)** | Review actual API/wire enums, use of `waiting_input` and `paused_budget`, Feature State/Checkpoint, existing Store DDL, minimal per-step writes and failure tests; document remaining complexity |
+| **Propose five states (not authorized)** | Demonstrate quantified benefit over six states and account for new gate encoding, status migration, downgrade/rollback, SQLite/PostgreSQL, Go/TS/HTTP/Queue/consumer compatibility and operational cost |
 
-Migration applies to **Kernel, Agent, Workflow, Team/GroupChat,
-Harness/HTTP/client projections, SQL data, transition outbox and
-continuation job payload versions**. Prevent mixed-version producers
-and consumers: drain/coordinate workers before the cutover, maintain
-replay-safe identity, and test upgraded record reads before release.
-If rollback would reinterpret new `suspended` states incorrectly,
-rollback must require a version-matched backup or an explicit
-forward-fix; **do not** claim automated downgrade.
+If the second option is measurably superior, draft a **separate ADR** with
+legacy-record mapping, full negative conformance, disabled/unknown Feature
+fail-closed behavior, rollout/rollback and explicit approval. **Do not
+implement that cut as an automatic Stage 3 action.** A design-only Stage 3
+review is permitted even while actual product Host/Provider/mobile release
+gates remain NO-GO. Any later approved breaking changes must pass selected
+Host parity and coordinated consumer release gates before publication.
 
-Once implemented, this status model supersedes **only the specific
-Kernel `paused_budget`/`waiting_input` status clauses** of ADR 0005
-and corresponding assumptions in ADR 0006. Explicit grant authority,
-budget ceilings, checkpoint/approval identity and existing security
-invariants remain in force.
-
-## 7. Evidence matrix and stage exits
+## 7. Evidence matrix and stage exits (ADR 0009 amended)
 
 | Stage | Required evidence | Forbidden inference |
 | --- | --- | --- |
-| 0 — Contract/baseline | Inventory Feature transition classes and direct/control mutation authority; stable IDs; single-/long-state SQLite metrics, Store-clock/skew policy, Kernel API/dependency/metadata/write budgets, clean-consumer graph | No new SQLite/OS support claim |
-| 1 — **Single-executor SQLite proof** on existing statuses | Sequential Direct Agent restart + receipt fault cases, native desktop build, no Redis/PG; do **not** enable concurrent pump/process claim | **Not yet production concurrent Embedded Durable**; no five-state/Workflow parity |
-| 2 — Progress/segment/fencing contract | Memory/SQLite/Postgres truth-plan, Store epoch+expiry CAS and validated controls; 3+ CAS under same segment, concurrent direct/Pump, authoritative quarantine, profile isolation, early signal/inbox, retention and uncertain COMMIT tests | Revision-only CAS or Redis lease alone is not a commit fence |
-| 3 — Five-state hard cut | Old/new status migration, exact wait/generation, running-but-blocked eligibility, coordinated all-module API/client tests; internal merge permitted | **NOT** independently releasable to production consumers before Hosted Stage 4 parity gate |
-| 4 — Hosted parity | Real PostgreSQL outbox/Redis or PG queue handoff, Run Store poison gating, lease/dead letter/recovery, parent/child repair; **joint Stage 3+4 release signoff** | SQLite mock success and passing Stage 3 alone are not hosted production evidence |
-| 5 — More embedded features + OS | Dedicated per-feature Store conformance; iOS/Android lifecycle and storage-lock tests | Desktop simulation does not certify mobile |
-| 6 — Optimization | A/B benchmark profile, accepted thresholds, regression analysis and ADR | No speculative CAS/queue complexity |
+| 0 — Baseline | Feature transition/ownership inventory, stable IDs, six-state API/dependency and SQLite size/time metrics | Measurements do not certify mobile/Hosted production |
+| 1 — Single-executor SQLite proof | Direct Agent restart, receipt/approval and six-state Store CAS without mandatory PG/Redis | Not concurrent durable mobile certification |
+| **2 — Bounded experimental Kernel integration** | Memory/SQLite/PG epoch/expiry CAS; exact Feature controls, Native intent/receipt, 3+ CAS segment, current Run quarantine, due/wait source checks, early signal refusal, uncertainty recovery and actual selected Worker/Queue fault tests | **Engineering GO is not production GO**; don't demand generic ProgressPlan, general Inbox or production local Pump as new Kernel sub-stages |
+| **3 — Architecture reassessment** | ADR 0009 accepted, Stage 2 experimental safety evidence; compare six-state semantics vs any proposed five-state benefit, public API/wire/DDL consumers, negative tests, migration/rollback and ongoing operator cost. **Default: keep six states.** | No automatic five-state migration, public breaking contract or production release |
+| 4 — Selected Hosted integration | Real PostgreSQL/Redis Host, authorized Provider/tenant recovery and deployment fault cases for any **advertised** Hosted features; conditional parity gate for a separately approved future breaking change | Passing SDK fixture ≠ production host authorization |
+| 5 — Optional embedded Features/OS | Per-Feature SQLite conformance, device filesystem/lifecycle failure evidence | Desktop evidence does not certify mobile |
+| 6 — Evidence-led optimization | Baseline/after A/B metrics, proof retention, accepted thresholds and explicit approval | No speculative GC/JSON Patch or extra scheduler state |
 
-**Coordinated release gate:** Stage 3 may have internal commits and
-mergeable migration code, but no production-facing breaking API,
-persisted Run encoding, or mixed-status worker/consumer release is
-authorized until the **same release candidate** also passes Stage 4
-Hosted conformance, real-engine crash windows, worker drain/migration,
-clean-consumer tests and explicit rollback policy. A Hosted surface
-intentionally kept disabled and experimental is not a supported
-production capability and may not be advertised as such. Preserve
-existing status contracts for published consumers in the meantime.
+**Release gate independent of Stage 3 entry:** Stage 3 may review designs
+without a new implementation or release. If a **separate ADR** later
+approves breaking Run status, persisted-state or public API changes,
+coordinate their SQLite/PostgreSQL/Queue migrations, Go/TS/HTTP consumers,
+worker drain and tested rollback with the selected Stage 4 Host deployment
+before publishing. Do not advertise Hosted or mobile production support
+from experimental Kernel/Memory fixtures alone.
 
 ### Minimum crash and adversarial windows
 
@@ -534,14 +523,14 @@ existing status contracts for published consumers in the meantime.
   PostgreSQL. Also check A's lease has expired with no B yet:
   A cannot commit. A Redis-delivery claim must not bypass the
   PostgreSQL epoch fence.
-- **P0 eligibility:** `running + AwaitSignal` receives unrelated
-  `ReadyNow` / direct `Resume`; `running + ReadyAt` receives early
-  timer; `running + InFlightRecovery` receives blind resend
-  request; all **reject dispatch**. Correct signals/child states
+- **P0 Feature eligibility (conceptual names, not a plan enum):** a
+  `running` Run awaiting an external signal receives an unrelated
+  self-wakeup / Direct Resume; a Feature-owned retry `RetryAfter` is
+  not yet due; an unknown in-flight Tool result receives blind resend;
+  all **reject external dispatch**. Correct signals/child states
   release only their own exact wait. ManualGate never unblocks
   from generic Resume.
-- **P1 segment:** Claim once, make 3+ internal CAS commits with
-  `ActiveSegment`, verify no extra queue claims; crash mid-segment,
+- **P1 segment:** Claim once, make 3+ internal CAS commits under the same Store epoch, verify no extra **execution** claims; crash mid-segment,
   scan expired epoch, reconcile pending effect, restart safely.
   Concurrent cancellation revokes epoch atomically, while a
   non-revoking signal update forces revalidation after CAS conflict.
@@ -624,8 +613,9 @@ All release evidence must include exact commit, command, engine/device
 versions, PASS/FAIL/SKIP, data-migration/rollback result and coverage
 limits. Required gates remain `make check`, race/conformance,
 real-engine integrations where appropriate, and clean consumer
-compilation. Stage 3's breaking contract **must not be published**
-as production-ready before Stage 4 Hosted signoff. Real provider
+compilation. Any **separately approved future breaking contract** must pass
+its selected Host/consumer acceptance before publication; Stage 3
+reassessment alone makes no breaking change. Real provider
 idempotency/billing cannot be inferred from fake model tests.
 
 ## 8. Source anchors
