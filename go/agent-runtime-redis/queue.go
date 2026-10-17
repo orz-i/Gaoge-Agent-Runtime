@@ -197,7 +197,8 @@ func (queue *DeliveryQueue) Nack(ctx context.Context, request queuecore.NackRequ
 	code, err := nackQueueScript.Run(ctx, queue.client, []string{
 		jobKey, queue.readyKey(job.Queue), queue.leasedKey(job.Queue),
 	}, queue.now().UnixMilli(), strings.TrimSpace(request.LeaseID), strings.TrimSpace(request.WorkerID),
-		job.ID, strings.TrimSpace(request.ErrorCode), truncateQueueText(request.Error, 1_024)).Int64()
+		job.ID, strings.TrimSpace(request.ErrorCode), truncateQueueText(request.Error, 1_024),
+		strconv.FormatBool(request.AllowDeadLetter)).Int64()
 	if err != nil {
 		return queuecore.Job{}, err
 	}
@@ -339,11 +340,12 @@ func enqueueArgs(job queuecore.Job) []interface{} {
 		"id": job.ID, "queue": job.Queue, "client_job_id": job.ClientJobID,
 		"fingerprint": job.Fingerprint, "kind": job.Kind, "payload": string(job.Payload),
 		"priority": strconv.Itoa(job.Priority), "max_attempts": strconv.Itoa(job.Policy.MaxAttempts),
-		"visibility_ms":      strconv.FormatInt(job.Policy.VisibilityTimeout.Milliseconds(), 10),
-		"initial_backoff_ms": strconv.FormatInt(job.Policy.InitialBackoff.Milliseconds(), 10),
-		"max_backoff_ms":     strconv.FormatInt(job.Policy.MaxBackoff.Milliseconds(), 10),
-		"backoff_multiplier": strconv.Itoa(job.Policy.BackoffMultiplier),
-		"status":             string(job.Status), "attempt": "0", "generation": "0",
+		"require_terminal_fence": strconv.FormatBool(job.Policy.RequireTerminalFence),
+		"visibility_ms":          strconv.FormatInt(job.Policy.VisibilityTimeout.Milliseconds(), 10),
+		"initial_backoff_ms":     strconv.FormatInt(job.Policy.InitialBackoff.Milliseconds(), 10),
+		"max_backoff_ms":         strconv.FormatInt(job.Policy.MaxBackoff.Milliseconds(), 10),
+		"backoff_multiplier":     strconv.Itoa(job.Policy.BackoffMultiplier),
+		"status":                 string(job.Status), "attempt": "0", "generation": "0",
 		"available_ms": strconv.FormatInt(job.AvailableAt.UnixMilli(), 10),
 		"created_ms":   strconv.FormatInt(job.CreatedAt.UnixMilli(), 10),
 		"updated_ms":   strconv.FormatInt(job.UpdatedAt.UnixMilli(), 10),
@@ -431,6 +433,7 @@ func redisPolicy(values map[string]string) (queuecore.Policy, error) {
 		MaxAttempts: maxAttempts, VisibilityTimeout: time.Duration(visibility) * time.Millisecond,
 		InitialBackoff: time.Duration(initial) * time.Millisecond,
 		MaxBackoff:     time.Duration(maximum) * time.Millisecond, BackoffMultiplier: multiplier,
+		RequireTerminalFence: values["require_terminal_fence"] == "true",
 	}, nil
 }
 
@@ -562,19 +565,20 @@ return output
 `)
 
 const releaseLua = `
-local function release(job, ready, leased, id, now)
+local function release(job, ready, leased, id, now, terminal_proven)
   local attempt = tonumber(redis.call('HGET', job, 'attempt')) or 0
   local max_attempts = tonumber(redis.call('HGET', job, 'max_attempts')) or 1
   redis.call('ZREM', leased, id)
   redis.call('HDEL', job, 'lease_id', 'worker_id', 'claimed_ms', 'expires_ms')
-  if attempt >= max_attempts then
+  local protected = redis.call('HGET', job, 'require_terminal_fence') == 'true'
+  if attempt >= max_attempts and (not protected or terminal_proven == 'true') then
     redis.call('HSET', job, 'status', 'dead_letter', 'dead_letter_ms', now, 'updated_ms', now)
     return 2
   end
   local delay = tonumber(redis.call('HGET', job, 'initial_backoff_ms')) or 0
   local maximum = tonumber(redis.call('HGET', job, 'max_backoff_ms')) or delay
   local multiplier = tonumber(redis.call('HGET', job, 'backoff_multiplier')) or 2
-  for index = 2, attempt do
+  for index = 2, math.min(attempt, 64) do
     if delay > maximum / multiplier then delay = maximum break end
     delay = delay * multiplier
   end
@@ -626,7 +630,7 @@ if tonumber(redis.call('HGET', KEYS[1], 'expires_ms')) <= tonumber(ARGV[1]) then
   return -2
 end
 redis.call('HSET', KEYS[1], 'last_error_code', ARGV[5], 'last_error', ARGV[6])
-release(KEYS[1], KEYS[2], KEYS[3], ARGV[4], tonumber(ARGV[1]))
+release(KEYS[1], KEYS[2], KEYS[3], ARGV[4], tonumber(ARGV[1]), ARGV[7])
 return 1
 `)
 

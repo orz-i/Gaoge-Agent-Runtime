@@ -159,7 +159,7 @@ func (queue *Memory) Nack(ctx context.Context, request NackRequest) (Job, error)
 	}
 	job.LastErrorCode = request.ErrorCode
 	job.LastError = request.Error
-	queue.releaseForRetryLocked(&job, now)
+	queue.releaseForRetryLocked(&job, now, request.AllowDeadLetter)
 	queue.jobs[job.ID] = job
 	return cloneJob(job), nil
 }
@@ -263,7 +263,7 @@ func (queue *Memory) currentLeaseLocked(request LeaseRequest, now time.Time) (Jo
 		return Job{}, ErrLeaseLost
 	}
 	if !job.Lease.ExpiresAt.After(now) {
-		queue.releaseForRetryLocked(&job, now)
+		queue.releaseForRetryLocked(&job, now, false)
 		queue.jobs[job.ID] = job
 		return Job{}, ErrLeaseExpired
 	}
@@ -300,17 +300,20 @@ func (queue *Memory) reapExpiredLocked(now time.Time, queueName string) int {
 		if job.Queue != queueName || job.Status != StatusLeased || job.Lease == nil || job.Lease.ExpiresAt.After(now) {
 			continue
 		}
-		queue.releaseForRetryLocked(&job, now)
+		queue.releaseForRetryLocked(&job, now, false)
 		queue.jobs[jobID] = job
 		transitioned++
 	}
 	return transitioned
 }
 
-func (queue *Memory) releaseForRetryLocked(job *Job, now time.Time) {
+func (queue *Memory) releaseForRetryLocked(job *Job, now time.Time, allowDeadLetter bool) {
 	job.Lease = nil
 	job.UpdatedAt = now
-	if job.Attempt >= job.Policy.MaxAttempts {
+	// A crashed worker cannot certify that the external Run authority was
+	// quarantined. Protected work remains retryable until an explicit
+	// terminal fence proof reaches Nack under a current Queue lease.
+	if job.Attempt >= job.Policy.MaxAttempts && (!job.Policy.RequireTerminalFence || allowDeadLetter) {
 		job.Status = StatusDeadLetter
 		deadLetterAt := now
 		job.DeadLetterAt = &deadLetterAt
@@ -322,7 +325,9 @@ func (queue *Memory) releaseForRetryLocked(job *Job, now time.Time) {
 
 func retryBackoff(policy Policy, attempt int) time.Duration {
 	delay := policy.InitialBackoff
-	for index := 1; index < attempt && delay < policy.MaxBackoff; index++ {
+	// Protected deliveries can be retried past MaxAttempts; never loop for
+	// potentially millions of attempts while calculating backoff.
+	for index := 1; index < min(attempt, 64) && delay < policy.MaxBackoff; index++ {
 		if delay > policy.MaxBackoff/time.Duration(policy.BackoffMultiplier) {
 			return policy.MaxBackoff
 		}
