@@ -50,6 +50,14 @@ func (store *KernelStore) applyKernelMutation(
 	lease *kernel.ExecutionLease,
 	control bool,
 ) (kernel.Snapshot, error) {
+	// Lock before evaluating the DB-time expiry predicate. An UPDATE can
+	// otherwise evaluate it before waiting for an unchanged row's lock and
+	// commit after the execution lease expires.
+	if lease != nil {
+		if _, err := lockKernelRun(db, runID); err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
 	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ?", runID, expectedRevision)
 	if control {
 		// Guarded controls are independently validated under a row lock by
