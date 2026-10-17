@@ -622,6 +622,12 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrRunTerminal
 	}
+	if invocation, active := activeModelInvocation(state); runner.runExecution != nil && active && invocation.RetryAfter != nil &&
+		runner.clock.Now().UTC().Before(invocation.RetryAfter.UTC()) {
+		// A Queue WakeupAt alone is not a Direct execution gate: check the
+		// same Feature-owned due fact BEFORE acquiring a Store epoch.
+		return snapshot, ErrModelInvocationBusy
+	}
 	if runner.runExecution != nil && state.ToolDispatchID != "" {
 		// Do not acquire/execute an unresolved physical Tool under a new
 		// Epoch. Distinguish an overdue provider wait without erasing its
