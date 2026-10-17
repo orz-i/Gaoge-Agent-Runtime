@@ -77,25 +77,37 @@ function checkTidy(cwd, modulePath) {
   try {
     const core = "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime";
     const harness = "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness";
-    // The experimental SQLite module only uses the published Core API.
-    // Tidy it against its pinned standalone dependency so go.sum also
-    // contains the hashes needed by a GOWORK=off read-only consumer.
-    const replaceCore = modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-sqlite";
+    // Every optional module, including SQLite, must build against the
+    // coordinated *source* Core until the next immutable module tags exist.
+    // A real no-replace consumer is verified separately by --published.
+    const replaceCore = modulePath !== "go/agent-runtime";
+    const replaceHarness = ["go/agent-runtime-harness-postgres", "go/agent-runtime-http"].includes(modulePath);
+    const version = readFileSync(path.join(root, "VERSION"), "utf8").trim();
+    const localVersions = [replaceCore ? core : null, replaceHarness ? harness : null].filter(Boolean)
+      .flatMap((name) => [`${name} v${version} `, `${name} v${version}/go.mod `]);
+    // go mod tidy with temporary source replaces drops genuine release-tag
+    // hashes from go.sum. Preserve exact current-cohort pins for direct
+    // GOWORK=off -mod=readonly builds, but still catch every OTHER tidy drift.
+    const normalizedSum = (content) => (content?.toString("utf8") ?? "").split("\n")
+      .filter((line) => !localVersions.some((prefix) => line.startsWith(prefix)))
+      .join("\n");
     if (replaceCore) {
       run("go", ["mod", "edit", `-replace=${core}=../agent-runtime`], cwd);
     }
-    if (["go/agent-runtime-harness-postgres", "go/agent-runtime-http"].includes(modulePath)) {
+    if (replaceHarness) {
       run("go", ["mod", "edit", `-replace=${harness}=../agent-runtime-harness`], cwd);
     }
     run("go", ["mod", "tidy"], cwd);
     if (replaceCore) run("go", ["mod", "edit", `-dropreplace=${core}`], cwd);
-    if (["go/agent-runtime-harness-postgres", "go/agent-runtime-http"].includes(modulePath)) {
+    if (replaceHarness) {
       run("go", ["mod", "edit", `-dropreplace=${harness}`], cwd);
     }
     run("go", ["mod", "edit", "-fmt"], cwd);
     const changed = [...snapshots].filter(([file, before]) => {
       const after = existsSync(file) ? readFileSync(file) : null;
-      return before === null ? after !== null : after === null || !before.equals(after);
+      if (before === null || after === null) return before !== after;
+      if (file.endsWith("go.sum")) return normalizedSum(before) !== normalizedSum(after);
+      return !before.equals(after);
     });
     if (changed.length > 0) {
       throw new Error(`go mod tidy changed ${changed.map(([file]) => path.relative(root, file)).join(", ")}`);

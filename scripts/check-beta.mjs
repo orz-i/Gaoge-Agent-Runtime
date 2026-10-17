@@ -15,6 +15,7 @@ const expectedModules = [
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres",
+  "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http",
 ];
@@ -31,7 +32,7 @@ const retiredPlanMarkers = [
   ["Capability", "Plan", "Execute"].join(""),
 ];
 
-if (version !== "0.1.0-beta.22") violations.push(`unexpected VERSION ${version}`);
+if (version !== "0.1.0-beta.23") violations.push(`unexpected VERSION ${version}`);
 if (boundary.version !== version) violations.push("boundary version does not match VERSION");
 if (JSON.stringify(boundary.goModules) !== JSON.stringify(expectedModules)) {
   violations.push("boundary Go module list is not the canonical ordered list");
@@ -50,8 +51,17 @@ for (const modulePath of expectedModules) {
     violations.push(`missing ${moduleFile}`);
     continue;
   }
-  const declaration = read(moduleFile).match(/^module\s+(\S+)/mu)?.[1];
+  const contents = read(moduleFile);
+  const declaration = contents.match(/^module\s+(\S+)/mu)?.[1];
   if (declaration !== modulePath) violations.push(`${moduleFile} declares ${declaration ?? "nothing"}`);
+  // A standalone public module must never depend on a mixed old Core release
+  // or carry a local filesystem replacement. A source consumer validates the
+  // pending cohort, and the release workflow validates published tag contents.
+  if (/^replace(?:\s|\()/mu.test(contents)) violations.push(`${moduleFile} contains release-unsafe replace`);
+  for (const [, dependency, requiredVersion] of contents.matchAll(/^\s*(github\.com\/orz-i\/Gaoge-Agent-Runtime\/go\/[a-z-]+)\s+(v[^\s]+)/gmu)) {
+    if (!expectedModules.includes(dependency)) violations.push(`${moduleFile} requires unknown cohort member ${dependency}`);
+    if (requiredVersion !== `v${version}`) violations.push(`${moduleFile} requires ${dependency}@${requiredVersion} (expected v${version})`);
+  }
 }
 
 if (packageJSON.name !== boundary.typescriptPackage || packageJSON.version !== version) {
