@@ -73,20 +73,23 @@ func TestAutoAllowanceHostedYieldSurvivesRestartWithoutToolReplay(t *testing.T) 
 	}
 	wg.Wait()
 	close(results)
-	success, conflicts := 0, 0
+	success, fenced := 0, 0
 	for result := range results {
 		switch {
 		case result.err == nil && result.snapshot.Run.Status == kernel.RunStatusCompleted:
 			success++
-		case errors.Is(result.err, kernel.ErrConflict):
-			conflicts++
+		case errors.Is(result.err, kernel.ErrConflict), errors.Is(result.err, kernel.ErrTerminal):
+			// The losing worker may race an in-flight CAS or the winner's
+			// terminal commit. Both forbid replay; the final Store check below
+			// proves that the winner did commit successfully.
+			fenced++
 		default:
 			t.Fatalf("unexpected concurrent continuation: run=%#v err=%v", result.snapshot.Run, result.err)
 		}
 	}
-	if success != 1 || conflicts != 1 || model.calls != 2 || len(executions) != 1 {
-		t.Fatalf("restart CAS lost idempotency: success=%d conflict=%d model=%d tools=%v",
-			success, conflicts, model.calls, executions)
+	if success != 1 || fenced != 1 || model.calls != 2 || len(executions) != 1 {
+		t.Fatalf("restart CAS lost idempotency: success=%d fenced=%d model=%d tools=%v",
+			success, fenced, model.calls, executions)
 	}
 	done, err := runtime.Load(t.Context(), first.Run.ID)
 	if err != nil || done.Run.Status != kernel.RunStatusCompleted {

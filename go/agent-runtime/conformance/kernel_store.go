@@ -33,6 +33,12 @@ func RunKernelStoreSuite(t *testing.T, factory KernelStoreFactory) {
 	t.Run("cas-and-event-journal", func(t *testing.T) { testCASAndEvents(t, factory(t)) })
 	t.Run("concurrent-cas", func(t *testing.T) { testConcurrentCAS(t, factory(t)) })
 	t.Run("transition-outbox", func(t *testing.T) { testTransitionOutbox(t, factory(t)) })
+	t.Run("transition-late-ack-before-takeover", func(t *testing.T) {
+		testTransitionLateAckBeforeTakeover(t, factory(t))
+	})
+	t.Run("transition-stale-ack-after-takeover", func(t *testing.T) {
+		testTransitionStaleAckAfterTakeover(t, factory(t))
+	})
 }
 
 func testCheckpointResultIsolation(t *testing.T, store kernel.Store) {
@@ -279,5 +285,70 @@ func conformanceRecord(runID string) kernel.Record {
 			DeadlineAt: &deadline, CreatedAt: now, UpdatedAt: now,
 		},
 		State: json.RawMessage(conformanceValueJSON),
+	}
+}
+
+// Late ACK policy: the exact current lease may acknowledge an already
+// durably projected transition after its nominal TTL, ONLY if no other
+// Worker has re-claimed the record. Projection must precede the ACK.
+func testTransitionLateAckBeforeTakeover(t *testing.T, store kernel.Store) {
+	t.Helper()
+	ctx := context.Background()
+	record := conformanceRecord("outbox_late_ack")
+	if _, err := store.Create(ctx, record, []kernel.EventDraft{{Type: "ready", Wakeup: true}}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	claims, err := store.ClaimTransitions(ctx, kernel.TransitionClaimRequest{
+		WorkerID: "late-ack-worker", Limit: 1, LeaseDuration: 25 * time.Millisecond, Now: now,
+	})
+	if err != nil || len(claims) != 1 {
+		t.Fatalf("claim: %+v %v", claims, err)
+	}
+	time.Sleep(65 * time.Millisecond)
+	old := claims[0]
+	if err = store.AckTransition(ctx, kernel.TransitionLeaseRequest{
+		TransitionID: old.Transition.ID, LeaseID: old.LeaseID, WorkerID: old.WorkerID,
+	}); err != nil {
+		t.Fatalf("unchanged expired lease lost the already projected ACK: %v", err)
+	}
+	after, err := store.ClaimTransitions(ctx, kernel.TransitionClaimRequest{
+		WorkerID: "replacement", Limit: 1, LeaseDuration: time.Second, Now: time.Now().UTC(),
+	})
+	if err != nil || len(after) != 0 {
+		t.Fatalf("ACKed projection delivered twice: %+v %v", after, err)
+	}
+}
+func testTransitionStaleAckAfterTakeover(t *testing.T, store kernel.Store) {
+	t.Helper()
+	ctx := context.Background()
+	record := conformanceRecord("outbox_stale_lease")
+	if _, err := store.Create(ctx, record, []kernel.EventDraft{{Type: "ready", Wakeup: true}}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	first, err := store.ClaimTransitions(ctx, kernel.TransitionClaimRequest{
+		WorkerID: "first", Limit: 1, LeaseDuration: time.Second, Now: now,
+	})
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first claim: %+v %v", first, err)
+	}
+	second, err := store.ClaimTransitions(ctx, kernel.TransitionClaimRequest{
+		WorkerID: "second", Limit: 1, LeaseDuration: time.Second, Now: now.Add(2 * time.Second),
+	})
+	if err != nil || len(second) != 1 {
+		t.Fatalf("second claim: %+v %v", second, err)
+	}
+	old := first[0]
+	if err = store.AckTransition(ctx, kernel.TransitionLeaseRequest{
+		TransitionID: old.Transition.ID, LeaseID: old.LeaseID, WorkerID: old.WorkerID,
+	}); !errors.Is(err, kernel.ErrConflict) {
+		t.Fatalf("superseded projector ACK succeeded: %v", err)
+	}
+	current := second[0]
+	if err = store.AckTransition(ctx, kernel.TransitionLeaseRequest{
+		TransitionID: current.Transition.ID, LeaseID: current.LeaseID, WorkerID: current.WorkerID,
+	}); err != nil {
+		t.Fatalf("replacement projector couldn't ACK: %v", err)
 	}
 }

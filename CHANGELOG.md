@@ -12,6 +12,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 - Have the continuation Worker claim deliveries just in time and renew an active delivery while its handler runs. Cancel cooperative dispatch on renewal failure. The optional renewal capability preserves existing custom Queue interfaces; custom queues without `Renew` must bound execution below their visibility timeout.
 - Add deterministic queue/Worker regression tests and real-Redis restart evidence for recovery without an explicit Reap.
 
+## [0.1.0-beta.23] — release candidate (unpublished)
+
+- Coordinate ten Go modules including new experimental SQLite Kernel/RunRelation
+  Store against the same new Core API cohort; add independent no-workspace,
+  no-replace published Go consumer verification before GitHub prerelease.
+- Retain the six-status Kernel, bounded execution fencing and native recovery,
+  and fail-closed stale Hosted wakeups; external Provider/Host certification
+  remains product-specific.
+- Remove an extra SQLite Snapshot State copy after caller-owned SQL Scan; no
+  SQLite Schema version increase, historical proof deletion, or GC.
+- See [beta.23 release-candidate notes](docs/releases/v0.1.0-beta.23.md).
+
 ## 0.1.0-beta.22
 
 - Fix a loss-of-wakeup race in the external-result and child-terminal wait continuation: after an unrelated Run revision changes between dispatch and resume, retry the current generation instead of falsely ACKing an unresolved deadline or result-ready delivery.

@@ -10,8 +10,9 @@ use (
 	./go/agent-runtime-otel
 	./go/agent-runtime-postgres
 	./go/agent-runtime-redis
+	./go/agent-runtime-sqlite
 )
 
-replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.22 => ./go/agent-runtime
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.23 => ./go/agent-runtime
 
-replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.22 => ./go/agent-runtime-harness
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.23 => ./go/agent-runtime-harness

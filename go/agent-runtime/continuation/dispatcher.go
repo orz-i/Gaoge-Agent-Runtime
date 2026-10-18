@@ -32,7 +32,9 @@ func NewDispatcher(runs SnapshotLoader, registrations ...ResumerRegistration) (*
 }
 
 // Dispatch performs at most one successful revision-guarded feature resumption.
-// Stale and already-terminal deliveries are successful no-ops.
+// A terminal Run can retire an old delivery. For a still-running Run, neither
+// a missing Run nor a changed Revision proves Feature-owned work was consumed;
+// the Worker must retain that candidate for trusted Feature/Host recovery.
 func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) error {
 	normalized, err := normalizePayload(payload)
 	if err != nil {
@@ -40,6 +42,9 @@ func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) err
 	}
 	if normalized.WaitGeneration != 0 {
 		return dispatcher.dispatchToolWait(ctx, normalized)
+	}
+	if normalized.Trigger == TriggerChildTerminal {
+		return dispatcher.dispatchChildTerminal(ctx, normalized)
 	}
 	snapshot, eligible, err := dispatcher.eligibleSnapshot(ctx, normalized)
 	if err != nil {
@@ -52,17 +57,43 @@ func (dispatcher *Dispatcher) Dispatch(ctx context.Context, payload Payload) err
 	if err != nil {
 		return err
 	}
-	return resumeOnce(ctx, resumer, snapshot)
+	return dispatcher.resumeOnce(ctx, resumer, snapshot)
 }
 
-const maxToolWaitCASRetries = 8
+const maxStableFactCASRetries = 8
+
+// A child-terminal fact is still actionable after an unrelated parent Run
+// revision changes. A CAS conflict does not prove that the child was consumed.
+// Retry from the authoritative parent Snapshot; if contention persists, let
+// the durable Worker NACK instead of losing the recovery obligation.
+func (dispatcher *Dispatcher) dispatchChildTerminal(ctx context.Context, payload Payload) error {
+	for attempt := 0; attempt < maxStableFactCASRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		snapshot, eligible, err := dispatcher.eligibleSnapshot(ctx, payload)
+		if err != nil || !eligible {
+			return err
+		}
+		resumer, err := dispatcher.resumer(snapshot.Run.Kind)
+		if err != nil {
+			return err
+		}
+		resumed, resumeErr := resumer.Resume(ctx, snapshot.Run.ID, snapshot.Run.Revision)
+		if errors.Is(resumeErr, kernel.ErrConflict) {
+			continue
+		}
+		return dispatcher.resumeResult(ctx, snapshot.Run.ID, resumed, resumeErr)
+	}
+	return kernel.ErrConflict
+}
 
 // A waiting generation outlives ordinary Run revisions. A concurrent mutation
 // can land between the Dispatch load and ResumeToolWait's CAS; that conflict is
 // not a consumed wait. Re-read the current Run before each bounded attempt and
 // let the durable queue NACK/redeliver if contention persists.
 func (dispatcher *Dispatcher) dispatchToolWait(ctx context.Context, payload Payload) error {
-	for attempt := 0; attempt < maxToolWaitCASRetries; attempt++ {
+	for attempt := 0; attempt < maxStableFactCASRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -82,10 +113,9 @@ func (dispatcher *Dispatcher) dispatchToolWait(ctx context.Context, payload Payl
 		if errors.Is(resumeErr, kernel.ErrConflict) {
 			continue
 		}
-		if resumed.Run.ID != "" || nonRetryableResumeError(resumeErr) {
-			return nil
-		}
-		return resumeErr
+		// An unresolved native Tool MUST NACK, irrespective of a non-empty
+		// Snapshot; a terminal-looking result with an error needs Store proof.
+		return dispatcher.resumeResult(ctx, snapshot.Run.ID, resumed, resumeErr)
 	}
 	return kernel.ErrConflict
 }
@@ -96,29 +126,96 @@ func (dispatcher *Dispatcher) eligibleSnapshot(
 ) (kernel.Snapshot, bool, error) {
 	snapshot, err := dispatcher.runs.Load(ctx, payload.RunID)
 	if errors.Is(err, kernel.ErrNotFound) {
-		return kernel.Snapshot{}, false, nil
+		// The Job may be the only remaining durable evidence of unfinished
+		// work. Never ACK merely because its Run is currently unreadable.
+		return kernel.Snapshot{}, false, err
 	}
 	if err != nil {
 		return kernel.Snapshot{}, false, err
 	}
+	// An unrecognized persisted status is poison, not an obsolete wakeup.
+	// Leave the Queue job retryable for diagnosis instead of silently ACKing.
+	switch snapshot.Run.Status {
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget,
+		kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
+	default:
+		return kernel.Snapshot{}, false, kernel.ErrInvalidInput
+	}
 	// A renewable allowance must be granted explicitly by the owning host.
 	// A stale wakeup cannot dispatch new work while the Run is paused.
+	if snapshot.Run.Status != kernel.RunStatusRunning {
+		return snapshot, false, nil
+	}
 	stableFact := payload.Trigger == TriggerChildTerminal || payload.WaitGeneration != 0
-	eligible := (snapshot.Run.Revision == payload.ExpectedRevision || stableFact) && snapshot.Run.Status == kernel.RunStatusRunning
-	return snapshot, eligible, nil
+	if !stableFact && snapshot.Run.Revision != payload.ExpectedRevision {
+		// A later CAS may only have committed unrelated metadata while this
+		// wakeup is the last durable activation source. Neither blind replay
+		// against the newer phase nor Queue ACK is safe without a Feature
+		// consumption proof. Keep the original Job retryable for the host.
+		return snapshot, false, kernel.ErrConflict
+	}
+	return snapshot, true, nil
 }
 
-func resumeOnce(ctx context.Context, resumer Resumer, snapshot kernel.Snapshot) error {
+func (dispatcher *Dispatcher) resumeOnce(ctx context.Context, resumer Resumer, snapshot kernel.Snapshot) error {
 	resumed, err := resumer.Resume(ctx, snapshot.Run.ID, snapshot.Run.Revision)
-	if resumed.Run.ID != "" || nonRetryableResumeError(err) {
+	if errors.Is(err, kernel.ErrConflict) {
+		// An interleaved CAS may only be an unrelated write. An advanced
+		// nonterminal Revision does not prove this wakeup was consumed.
+		current, loadErr := dispatcher.runs.Load(ctx, snapshot.Run.ID)
+		if errors.Is(loadErr, kernel.ErrNotFound) {
+			return errors.Join(err, loadErr)
+		}
+		if loadErr != nil {
+			return errors.Join(err, loadErr)
+		}
+		if terminalSnapshotAfterResume(current) {
+			return nil
+		}
+		return err
+	}
+	return dispatcher.resumeResult(ctx, snapshot.Run.ID, resumed, err)
+}
+
+// A terminal-looking Feature Snapshot is not proof of a committed Run,
+// even when a custom Resumer returns nil error. Likewise ErrTerminal and
+// ErrNotFound may describe a dependency rather than the parent Run.
+func (dispatcher *Dispatcher) resumeResult(ctx context.Context, runID string, resumed kernel.Snapshot, resumeErr error) error {
+	terminalResult := terminalSnapshotAfterResume(resumed)
+	if !terminalResult {
+		if resumeErr == nil {
+			return nil
+		}
+		if !errors.Is(resumeErr, kernel.ErrTerminal) && !errors.Is(resumeErr, kernel.ErrNotFound) {
+			return resumeErr
+		}
+	}
+	current, err := dispatcher.runs.Load(ctx, runID)
+	if err != nil {
+		// Resumer.ErrNotFound may describe an optional dependency, not
+		// the Run. A missing *Run* is never an ACK proof either.
+		return errors.Join(resumeErr, err)
+	}
+	if terminalSnapshotAfterResume(current) {
 		return nil
 	}
-	return err
+	if resumeErr == nil {
+		return kernel.ErrConflict // A returned terminal result was never committed.
+	}
+	return resumeErr
 }
 
-func nonRetryableResumeError(err error) bool {
-	return err == nil || errors.Is(err, kernel.ErrConflict) || errors.Is(err, kernel.ErrTerminal) ||
-		errors.Is(err, kernel.ErrNotFound)
+// Terminal state is an ACK candidate only when loaded from the authoritative
+// Run Store; a returned Feature Snapshot alone cannot settle an error.
+func terminalSnapshotAfterResume(snapshot kernel.Snapshot) bool {
+	switch snapshot.Run.Status {
+	case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
+		return snapshot.Run.ID != ""
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
+		return false
+	default:
+		return false
+	}
 }
 
 func (dispatcher *Dispatcher) resumer(kind kernel.RunKind) (Resumer, error) {

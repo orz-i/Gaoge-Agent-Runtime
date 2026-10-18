@@ -1,0 +1,5 @@
+services:
+  redis:
+    # Optional Stage 4 crash fixture: Redis persistence is explicit here,
+    # not guaranteed by the default fast unit/integration Compose profile.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always"]

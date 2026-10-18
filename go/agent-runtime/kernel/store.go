@@ -18,10 +18,15 @@ var (
 
 // Record is the feature-neutral data persisted atomically with a Run.
 type Record struct {
-	Run        Run
-	State      json.RawMessage
-	Checkpoint *Checkpoint
-	Result     *Result
+	// ExecutionRequired is a creation-only Store hint: reserve Epoch 1 in
+	// the SAME Create transaction before any legacy executor can act.
+	// Existing/legacy Runs keep Epoch 0 and cannot switch modes implicitly.
+	// This flag is NOT another persisted status or mutable Run field.
+	ExecutionRequired bool
+	Run               Run
+	State             json.RawMessage
+	Checkpoint        *Checkpoint
+	Result            *Result
 }
 
 // NeedsTransitionProjection reports whether one committed transition must be
@@ -77,7 +82,10 @@ type TransitionClaim struct {
 	LeaseUntil time.Time
 }
 
-// TransitionLeaseRequest identifies the exact active lease being acknowledged.
+// TransitionLeaseRequest identifies the exact current delivery lease. The
+// projector may ACK after the lease's nominal deadline if NO newer claim
+// replaced its lease identity; this is a delivery acknowledgment, NOT Run
+// execution authority. Superseded Worker IDs/lease IDs must fail closed.
 type TransitionLeaseRequest struct {
 	TransitionID string
 	LeaseID      string

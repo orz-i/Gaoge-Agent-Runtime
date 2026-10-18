@@ -67,20 +67,21 @@ PostgreSQL. These checks do not establish compatibility with older releases.
 ## Create and push tags
 
 ```bash
-node scripts/release-tags.mjs --version 0.1.0-beta.22
-node scripts/release-tags.mjs --version 0.1.0-beta.22 --create
-git push --atomic origin \
-  v0.1.0-beta.22 \
-  go/agent-runtime/v0.1.0-beta.22 \
-  go/agent-runtime-harness/v0.1.0-beta.22 \
-  go/agent-runtime-harness-postgres/v0.1.0-beta.22 \
-  go/agent-runtime-mcp/v0.1.0-beta.22 \
-  go/agent-runtime-otel/v0.1.0-beta.22 \
-  go/agent-runtime-a2a/v0.1.0-beta.22 \
-  go/agent-runtime-postgres/v0.1.0-beta.22 \
-  go/agent-runtime-redis/v0.1.0-beta.22 \
-  go/agent-runtime-http/v0.1.0-beta.22
+# Run ONLY after the release candidate is reviewed and merged to main.
+node scripts/release-tags.mjs --version "$(cat VERSION)"
+node scripts/release-tags.mjs --version "$(cat VERSION)" --create
+# Use the full atomic git push command printed by release-tags.mjs.
+# NEVER move existing immutable tags.
 ```
+
+The cohort now includes ten Go modules, including optional experimental SQLite.
+`make check` validates local source consumers under `GOWORK=off` with
+*temporary test-module replacements*, not an independently published version.
+Once the root and all ten Go module tags have been pushed, the release
+workflow runs `node scripts/check-release.mjs --published` against the real
+tagged modules with **no replace directives**, before creating a GitHub Release.
+The SQLite adapter's `go.mod` must depend on the *same* Core release version;
+a mixed beta.22 Core + beta.23 SQLite installation is not supported.
 
 GitHub does not create a push event when one push updates more than three tags.
 Because this repository deliberately pushes the complete tag set atomically,
@@ -88,7 +89,7 @@ start the release workflow against the existing immutable root tag after the
 push:
 
 ```bash
-gh workflow run release.yml --ref main -f release_tag=v0.1.0-beta.22
+gh workflow run release.yml --ref main -f release_tag="v$(cat VERSION)"
 ```
 
 The workflow checks out the root tag, re-runs the quality/coverage/security and

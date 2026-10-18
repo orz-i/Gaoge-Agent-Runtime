@@ -92,6 +92,12 @@ jobs:
       - name: Run Beta gate
         run: make check && make coverage && make security && make integration-test
 
+      - name: Verify published Go module versions without local replacements
+        run: node scripts/check-release.mjs --published
+
+      - name: Verify SQLite standalone module with published Core
+        run: cd go/agent-runtime-sqlite && GOWORK=off GOFLAGS=-mod=readonly go test ./... -count=1
+
       - name: Authenticate to GHCR
         env:
           GHCR_USER: ${{ github.actor }}

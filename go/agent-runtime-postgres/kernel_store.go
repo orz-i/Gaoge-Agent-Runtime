@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -46,15 +47,53 @@ func (store *KernelStore) applyKernelMutation(
 	expectedRevision uint64,
 	updatedModel models.KernelRunRecord,
 	mutation kernel.StoreMutation,
+	lease *kernel.ExecutionLease,
+	control bool,
 ) (kernel.Snapshot, error) {
-	result := db.Model(&models.KernelRunRecord{}).
-		Where("run_id = ? AND revision = ?", runID, expectedRevision).
-		Updates(kernelRunUpdates(updatedModel, len(mutation.Events)))
+	// Lock before evaluating the DB-time expiry predicate. An UPDATE can
+	// otherwise evaluate it before waiting for an unchanged row's lock and
+	// commit after the execution lease expires.
+	if lease != nil {
+		if _, err := lockKernelRun(db, runID); err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
+	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ?", runID, expectedRevision)
+	if control {
+		// Guarded controls are independently validated under a row lock by
+		// applyWithExecution. Do NOT enforce active execution-lease identity.
+	} else if lease == nil {
+		query = query.Where("execution_epoch = ?", 0)
+	} else {
+		query = query.Where(`status = ? AND execution_epoch = ? AND execution_owner = ? AND
+            execution_lease_id = ? AND execution_quarantine_revision = 0`,
+			string(kernel.RunStatusRunning), lease.Epoch, lease.OwnerID, lease.LeaseID)
+		if db.Name() == "postgres" {
+			query = query.Where("execution_expires_at > clock_timestamp()")
+		} else {
+			// SQLite GORM is only a conformance fixture; the authoritative
+			// production PostgreSQL path uses DB clock_timestamp() above.
+			query = query.Where("execution_expires_at > ?", time.Now().UTC())
+		}
+	}
+	updates := kernelRunUpdates(updatedModel, len(mutation.Events))
+	if control {
+		// One CAS revokes the old owner before any new worker can commit.
+		// Never reset a claimed Run's epoch to zero.
+		updates["execution_epoch"] = gorm.Expr("CASE WHEN execution_epoch > 0 THEN execution_epoch + 1 ELSE 0 END")
+		updates["execution_owner"] = ""
+		updates["execution_lease_id"] = ""
+		updates["execution_expires_at"] = nil
+	}
+	result := query.Updates(updates)
 	if result.Error != nil {
 		return kernel.Snapshot{}, translateKernelApplyError(result.Error)
 	}
 	if result.RowsAffected != 1 {
-		return kernel.Snapshot{}, store.kernelMissingOrConflict(db, runID)
+		if control {
+			return kernel.Snapshot{}, kernel.ErrConflict
+		}
+		return kernel.Snapshot{}, store.executionCommitConflict(db, runID, lease)
 	}
 	var persisted models.KernelRunRecord
 	if err := db.Where("run_id = ?", runID).First(&persisted).Error; err != nil {
@@ -109,6 +148,9 @@ func (store *KernelStore) Create(
 	model, err := kernelRunRecordFrom(record, int64(len(events)))
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	if record.ExecutionRequired {
+		model.ExecutionEpoch = 1
 	}
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -193,6 +235,11 @@ func (store *KernelStore) Apply(
 	expectedRevision uint64,
 	mutation kernel.StoreMutation,
 ) (kernel.Snapshot, error) {
+	return store.applyWithExecution(ctx, nil, nil, nil, runID, expectedRevision, mutation)
+}
+
+func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.ExecutionLease, guard *kernel.ControlGuard, revoked *bool,
+	runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	if store == nil || store.db == nil || strings.TrimSpace(runID) == "" {
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
@@ -205,8 +252,37 @@ func (store *KernelStore) Apply(
 	}
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if guard != nil {
+			persisted, lockErr := lockKernelRun(tx, runID)
+			if lockErr != nil {
+				return lockErr
+			}
+			if persisted.Revision != expectedRevision {
+				return kernel.ErrConflict
+			}
+			current, decodeErr := kernelSnapshotFrom(persisted)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			now, timeErr := pgStoreNow(tx)
+			if timeErr != nil {
+				return timeErr
+			}
+			if validationErr := kernel.ValidateControl(current, *guard, mutation, now); validationErr != nil {
+				return validationErr
+			}
+			if persisted.ExecutionQuarantineRevision != 0 && mutation.Record.Run.Status == kernel.RunStatusRunning {
+				return kernel.ErrExecutionQuarantined
+			}
+			if persisted.ExecutionEpoch == math.MaxInt64 {
+				return kernel.ErrExecutionConflict
+			}
+			if revoked != nil {
+				*revoked = persisted.ExecutionEpoch > 0
+			}
+		}
 		var applyErr error
-		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation)
+		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, lease, guard != nil)
 		return applyErr
 	})
 	if err != nil {
@@ -229,41 +305,79 @@ func (store *KernelStore) ClaimTransitions(
 	}
 	var claims []kernel.TransitionClaim
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		query := tx.Where("available_at <= ? AND (lease_until IS NULL OR lease_until <= ?)", request.Now.UTC(), request.Now.UTC()).
-			Order("available_at ASC, committed_at ASC, id ASC").Limit(request.Limit)
-		if tx.Name() == "postgres" {
-			query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
-		}
-		var records []models.KernelTransitionOutboxRecord
-		if err := query.Find(&records).Error; err != nil {
-			return translateKernelError(err)
-		}
-		claims = make([]kernel.TransitionClaim, 0, len(records))
-		for _, record := range records {
-			record.Attempts++
-			record.WorkerID = strings.TrimSpace(request.WorkerID)
-			record.LeaseID = fmt.Sprintf("%s:%s:%d", record.WorkerID, record.ID, record.Attempts)
-			leaseUntil := request.Now.UTC().Add(request.LeaseDuration)
-			record.LeaseUntil = &leaseUntil
-			result := tx.Model(&models.KernelTransitionOutboxRecord{}).
-				Where("id = ? AND attempts = ?", record.ID, record.Attempts-1).
-				Updates(map[string]interface{}{
-					"attempts": record.Attempts, "worker_id": record.WorkerID,
-					"lease_id": record.LeaseID, "lease_until": leaseUntil,
+		// Quarantine head poison and keep scanning within a fixed transaction
+		// budget. A single page may contain only malformed rows, so a healthy
+		// different Run must not wait for another projector polling interval.
+		// Do not scan unbounded poison within one database transaction.
+		const maxScanPages = 4
+		claims = make([]kernel.TransitionClaim, 0, min(request.Limit, 128))
+		for page := 0; page < maxScanPages && len(claims) < request.Limit; page++ {
+			pageSize := min(max(request.Limit-len(claims), 32), 128)
+			query := tx.Where("quarantine_code = ? AND available_at <= ? AND (lease_until IS NULL OR lease_until <= ?)",
+				"", request.Now.UTC(), request.Now.UTC()).
+				Order("available_at ASC, committed_at ASC, id ASC").Limit(pageSize)
+			if tx.Name() == "postgres" {
+				query = query.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"})
+			}
+			var records []models.KernelTransitionOutboxRecord
+			if err := query.Find(&records).Error; err != nil {
+				return translateKernelError(err)
+			}
+			for _, record := range records {
+				if len(claims) >= request.Limit {
+					break
+				}
+				transition, decodeErr := kernelTransitionFrom(record)
+				failure := ""
+				if decodeErr != nil {
+					failure = "invalid_events"
+				} else if record.Revision == 0 ||
+					record.ID != fmt.Sprintf("%s:%d", record.RunID, record.Revision) ||
+					!kernel.NeedsTransitionProjection(kernel.RunStatus(record.Status), transition.Events) {
+					failure = "invalid_projection"
+				}
+				if failure != "" {
+					// This row is already locked. Quarantine only delivery metadata
+					// in the SAME claim transaction; preserve immutable events.
+					result := tx.Model(&models.KernelTransitionOutboxRecord{}).
+						Where("id = ? AND quarantine_code = ?", record.ID, "").
+						Updates(map[string]interface{}{
+							"quarantine_code": failure, "quarantined_at": request.Now.UTC(),
+							"lease_id": "", "worker_id": "", "lease_until": nil,
+						})
+					if result.Error != nil {
+						return translateKernelApplyError(result.Error)
+					}
+					if result.RowsAffected != 1 {
+						return kernel.ErrConflict
+					}
+					continue
+				}
+				record.Attempts++
+				record.WorkerID = strings.TrimSpace(request.WorkerID)
+				record.LeaseID = fmt.Sprintf("%s:%s:%d", record.WorkerID, record.ID, record.Attempts)
+				leaseUntil := request.Now.UTC().Add(request.LeaseDuration)
+				record.LeaseUntil = &leaseUntil
+				result := tx.Model(&models.KernelTransitionOutboxRecord{}).
+					Where("id = ? AND attempts = ? AND quarantine_code = ?", record.ID, record.Attempts-1, "").
+					Updates(map[string]interface{}{
+						"attempts": record.Attempts, "worker_id": record.WorkerID,
+						"lease_id": record.LeaseID, "lease_until": leaseUntil,
+					})
+				if result.Error != nil {
+					return translateKernelApplyError(result.Error)
+				}
+				if result.RowsAffected != 1 {
+					return kernel.ErrConflict
+				}
+				transition.Attempts = record.Attempts
+				claims = append(claims, kernel.TransitionClaim{
+					Transition: transition, LeaseID: record.LeaseID, WorkerID: record.WorkerID, LeaseUntil: leaseUntil,
 				})
-			if result.Error != nil {
-				return translateKernelApplyError(result.Error)
 			}
-			if result.RowsAffected != 1 {
-				return kernel.ErrConflict
+			if len(records) < pageSize {
+				break // This scan exhausted currently eligible work.
 			}
-			transition, err := kernelTransitionFrom(record)
-			if err != nil {
-				return err
-			}
-			claims = append(claims, kernel.TransitionClaim{
-				Transition: transition, LeaseID: record.LeaseID, WorkerID: record.WorkerID, LeaseUntil: leaseUntil,
-			})
 		}
 		return nil
 	})
@@ -276,7 +390,7 @@ func (store *KernelStore) AckTransition(ctx context.Context, request kernel.Tran
 		return kernel.ErrInvalidInput
 	}
 	result := store.db.WithContext(ctx).Where(
-		"id = ? AND lease_id = ? AND worker_id = ?", request.TransitionID, request.LeaseID, request.WorkerID,
+		"id = ? AND lease_id = ? AND worker_id = ? AND quarantine_code = ?", request.TransitionID, request.LeaseID, request.WorkerID, "",
 	).Delete(&models.KernelTransitionOutboxRecord{})
 	if result.Error != nil {
 		return translateKernelError(result.Error)
@@ -304,17 +418,6 @@ func (store *KernelStore) RetryTransition(ctx context.Context, request kernel.Tr
 		return nil
 	}
 	return store.kernelTransitionMissingOrConflict(store.db.WithContext(ctx), request.TransitionID)
-}
-
-func (store *KernelStore) kernelMissingOrConflict(db *gorm.DB, runID string) error {
-	var count int64
-	if err := db.Model(&models.KernelRunRecord{}).Where("run_id = ?", runID).Count(&count).Error; err != nil {
-		return translateKernelError(err)
-	}
-	if count == 0 {
-		return kernel.ErrNotFound
-	}
-	return kernel.ErrConflict
 }
 
 func kernelRunRecordFrom(record kernel.Record, lastEventSeq int64) (models.KernelRunRecord, error) {

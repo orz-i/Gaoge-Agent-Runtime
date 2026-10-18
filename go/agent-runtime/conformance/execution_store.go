@@ -1,0 +1,450 @@
+package conformance
+
+import (
+	"encoding/json"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+)
+
+// ExecutionStoreFactory provisions an empty, isolated durable/volatile Store.
+// The fixture MUST be a real adapter, not a mocked execution map.
+type ExecutionStoreFactory func(*testing.T) kernel.Store
+
+// RunKernelExecutionSuite exercises the opt-in Stage 2 execution-authority
+// contract. Time is Store-owned; no user-supplied Now participates in fencing.
+func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
+	t.Helper()
+	t.Run("execution-mode-frozen-at-create", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		rt, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacy, err := rt.Create(ctx, kernel.CreateRequest{
+			ID: "original-legacy", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "no dynamic upgrade",
+			State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := rt.RequireExecution(ctx, legacy.Run.ID); err != nil {
+			t.Fatalf("legacy unclaimed Run cannot run: %v", err)
+		}
+		if _, err = rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: legacy.Run.ID, OwnerID: "new-owner", LeaseDuration: time.Second,
+		}); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("legacy Run was silently upgraded to native: %v", err)
+		}
+		if _, err = rt.Apply(ctx, legacy.Run.ID, legacy.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: json.RawMessage(`{"legacy":true}`),
+		}); err != nil {
+			t.Fatalf("legacy compatibility regressed: %v", err)
+		}
+		native, err := rt.Create(ctx, kernel.CreateRequest{
+			ExecutionRequired: true, ID: "native-reserved", Kind: "agent",
+			Actor:  kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "atomic reserve",
+			State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = rt.RequireExecution(ctx, native.Run.ID); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("native Run was not fenced in Create transaction: %v", err)
+		}
+		if _, err = rt.Apply(ctx, native.Run.ID, native.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: native.State,
+		}); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("legacy writer reached protected Run before claim: %v", err)
+		}
+		lease, err := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: native.Run.ID, OwnerID: "native-worker", LeaseDuration: time.Second,
+		})
+		if err != nil || lease.Epoch != 2 {
+			t.Fatalf("first leased epoch must follow reserved epoch 1: %+v %v", lease, err)
+		}
+	})
+
+	t.Run("epoch-and-multi-cas-segment", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		runtime, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
+			ID: "fenced-run", Kind: "agent", Actor: kernel.ActorRef{TenantID: "profile", ActorID: "actor"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "fenced execution", State: json.RawMessage(`{}`),
+			Events: []kernel.EventDraft{{Type: "run.wakeup", Wakeup: true}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		acquire := func(owner string, ttl time.Duration) kernel.ExecutionLease {
+			t.Helper()
+			lease, e := runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: created.Run.ID, OwnerID: owner, LeaseDuration: ttl})
+			if e != nil {
+				t.Fatalf("acquire %q: %v", owner, e)
+			}
+			return lease
+		}
+		first := acquire("owner-A", 300*time.Millisecond)
+		if first.Epoch != 2 || first.LeaseID == "" {
+			t.Fatalf("initial lease invalid: %+v", first)
+		}
+		mutation := func(current kernel.Snapshot, tag string) kernel.Mutation {
+			return kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{"tag":` + `"` + tag + `"}`), Events: []kernel.EventDraft{{Type: "agent.step"}}}
+		}
+		if _, err = runtime.Apply(ctx, created.Run.ID, created.Run.Revision, mutation(created, "unfenced")); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("unfenced execution was authorized: %v", err)
+		}
+		if _, err = runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: created.Run.ID, OwnerID: "owner-B", LeaseDuration: time.Second}); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("active lease was stolen: %v", err)
+		}
+		bound, err := runtime.WithExecution(first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current := created
+		for step := 1; step <= 3; step++ {
+			current, err = bound.Apply(ctx, created.Run.ID, current.Run.Revision, mutation(current, "step"))
+			if err != nil {
+				t.Fatalf("multi-CAS segment step %d: %v", step, err)
+			}
+		}
+		if current.Run.Revision != created.Run.Revision+3 {
+			t.Fatalf("multi-CAS run=%+v", current.Run)
+		}
+		// Renew rotates the expiry in the exact token while retaining Epoch.
+		renewed, err := runtime.RenewExecution(ctx, kernel.ExecutionRenewRequest{Lease: first, LeaseDuration: 50 * time.Millisecond})
+		if err != nil || renewed.Epoch != first.Epoch || renewed.ExpiresAt.Equal(first.ExpiresAt) {
+			t.Fatalf("renewed segment epoch/expiry error: %+v %v", renewed, err)
+		}
+		// Renew keeps the same owner/epoch/lease token; a long-running
+		// Agent need not rebuild its Runner or Runtime on every heartbeat.
+		current, err = bound.Apply(ctx, created.Run.ID, current.Run.Revision,
+			mutation(current, "renewed-with-stable-token"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Expired A cannot write even before B reclaims the lease.
+		time.Sleep(90 * time.Millisecond)
+		if _, err = bound.Apply(ctx, created.Run.ID, current.Run.Revision, mutation(current, "expired")); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("expired owner without B committed: %v", err)
+		}
+		revisionAtTakeover := current.Run.Revision
+		second := acquire("owner-B", time.Second)
+		if second.Epoch != first.Epoch+1 || second.OwnerID != "owner-B" {
+			t.Fatalf("takeover did not bump epoch: %+v", second)
+		}
+		stored, err := runtime.Load(ctx, created.Run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.Run.Revision != revisionAtTakeover {
+			t.Fatalf("takeover unexpectedly advanced Run revision: %d vs %d", stored.Run.Revision, revisionAtTakeover)
+		}
+		if _, err = bound.Apply(ctx, created.Run.ID, revisionAtTakeover, mutation(current, "old-epoch")); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("A committed unchanged Run revision after B takeover: %v", err)
+		}
+		if err = runtime.ReleaseExecution(ctx, renewed); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("stale owner released new lease: %v", err)
+		}
+		b, err := runtime.WithExecution(second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err = b.Apply(ctx, created.Run.ID, revisionAtTakeover, mutation(current, "owner-B"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = runtime.ReleaseExecution(ctx, second); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = runtime.Apply(ctx, created.Run.ID, current.Run.Revision, mutation(current, "released-unfenced")); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("release disabled the sticky execution fence: %v", err)
+		}
+		third := acquire("owner-C", time.Second)
+		if third.Epoch != second.Epoch+1 {
+			t.Fatalf("epoch not monotonic after release: %+v", third)
+		}
+		c, err := runtime.WithExecution(third)
+		if err != nil {
+			t.Fatal(err)
+		}
+		completed, err := c.Apply(ctx, created.Run.ID, current.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusCompleted, State: json.RawMessage(`{"result":"done"}`),
+			Result: &kernel.Result{ContentType: "application/json", Content: json.RawMessage(`{"ok":true}`)},
+		})
+		if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
+			t.Fatalf("terminal fenced apply: %+v %v", completed.Run, err)
+		}
+		if _, err = runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: created.Run.ID, OwnerID: "revival", LeaseDuration: time.Second}); !errors.Is(err, kernel.ErrTerminal) {
+			t.Fatalf("terminal Run obtained execution rights: %v", err)
+		}
+		events, err := runtime.ListEvents(ctx, created.Run.ID, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(events) != 7 {
+			t.Fatalf("expected all 7 event facts across one segment, got %d", len(events))
+		}
+		// Only initial wakeup and final terminal fact should be enqueued.
+		claims, err := store.ClaimTransitions(ctx, kernel.TransitionClaimRequest{
+			WorkerID: "projection", Limit: 10, LeaseDuration: time.Second, Now: time.Now().Add(time.Second),
+		})
+		if err != nil || len(claims) != 2 {
+			t.Fatalf("unexpected intermediate wakeup jobs %#v %v", claims, err)
+		}
+	})
+	t.Run("client-expiry-is-not-an-authority", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		runtime, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
+			ID: "forged-expiry", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "server clock", State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease, err := runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: created.Run.ID, OwnerID: "owner", LeaseDuration: 50 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The immutable authority is RunID+Owner+LeaseID+Epoch and actual
+		// Store expiry. Rewriting the informational ExpiresAt is powerless.
+		forged := lease
+		forged.ExpiresAt = time.Now().UTC().Truncate(time.Millisecond).Add(24 * time.Hour)
+		time.Sleep(90 * time.Millisecond)
+		bound, err := runtime.WithExecution(forged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = bound.Apply(ctx, created.Run.ID, created.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: json.RawMessage(`{"forged":true}`),
+		})
+		if !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("caller expiry spoof bypassed Store expiry: %v", err)
+		}
+	})
+
+	t.Run("pending-gates-cannot-acquire", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		runtime, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, status := range []kernel.RunStatus{kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget} {
+			id := "gate-" + string(status)
+			current, err := runtime.Create(ctx, kernel.CreateRequest{
+				ID: id, Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+				Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "gate", State: json.RawMessage(`{}`),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutation := kernel.Mutation{Status: status, State: json.RawMessage(`{}`)}
+			if status == kernel.RunStatusWaitingInput {
+				mutation.Checkpoint = &kernel.Checkpoint{
+					ID: "approval", Kind: "tool_approval", Status: kernel.CheckpointPending,
+					Payload: json.RawMessage(`{"callID":"c"}`), CreatedAt: time.Now().UTC(),
+				}
+			}
+			gated, err := runtime.Apply(ctx, id, current.Run.Revision, mutation)
+			if err != nil || gated.Run.Status != status {
+				t.Fatalf("gate: %+v %v", gated.Run, err)
+			}
+			_, err = runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: id, OwnerID: "drive-without-approval", LeaseDuration: time.Second})
+			if !errors.Is(err, kernel.ErrExecutionConflict) {
+				t.Fatalf("%s bypassed by acquire: %v", status, err)
+			}
+		}
+	})
+
+	t.Run("simultaneous-claims-are-exclusive", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		runtime, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
+			ID: "exclusive", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "competing owners", State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		var workers sync.WaitGroup
+		for _, owner := range []string{"owner-A", "owner-B"} {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				<-start
+				var claimErr error
+				for attempt := 0; attempt < 6; attempt++ {
+					_, claimErr = runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+						RunID: "exclusive", OwnerID: owner, LeaseDuration: 2 * time.Second,
+					})
+					if !errors.Is(claimErr, kernel.ErrExecutionBusy) {
+						break
+					}
+					// Bounded contention retries are safe: no lease was
+					// acquired by this attempt, and no side effect was run.
+					time.Sleep(10 * time.Millisecond)
+				}
+				results <- claimErr
+			}()
+		}
+		close(start)
+		workers.Wait()
+		close(results)
+		successes, conflicts := 0, 0
+		for result := range results {
+			if result == nil {
+				successes++
+			} else if errors.Is(result, kernel.ErrExecutionConflict) {
+				conflicts++
+			} else {
+				t.Fatalf("unexpected claim failure: %v", result)
+			}
+		}
+		if successes != 1 || conflicts != 1 {
+			t.Fatalf("concurrent claim successes=%d conflicts=%d", successes, conflicts)
+		}
+	})
+
+	t.Run("fenced-run-cannot-use-legacy-control-bypass", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		runtime, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
+			ID: "fenced-gate", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "fenced pause", State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claim, err := runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: created.Run.ID, OwnerID: "worker", LeaseDuration: time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bound, err := runtime.WithExecution(claim)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gated, err := bound.Apply(ctx, created.Run.ID, created.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusWaitingInput, State: json.RawMessage(`{}`),
+			Checkpoint: &kernel.Checkpoint{
+				ID: "approval", Kind: "tool_approval", Status: kernel.CheckpointPending,
+				Payload: json.RawMessage(`{"callID":"c"}`), CreatedAt: time.Now().UTC(),
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Both plain/unbound AND incumbent-bound execution updates must
+		// fail closed at a persisted manual approval gate.
+		_, err = bound.Apply(ctx, created.Run.ID, gated.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: gated.State,
+		})
+		if !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("incumbent owner bypassed manual gate: %v", err)
+		}
+		// A separately validated control CAS is required to release the gate.
+		_, err = runtime.Apply(ctx, created.Run.ID, gated.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
+		})
+		if !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("unfenced control bypassed epoch: %v", err)
+		}
+		_, err = runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: created.Run.ID, OwnerID: "new-worker", LeaseDuration: time.Second,
+		})
+		if !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("waiting approval was reclaimed as executable: %v", err)
+		}
+	})
+
+	t.Run("pre-dispatch-authority-before-and-after-takeover", func(t *testing.T) {
+		ctx := t.Context()
+		store := factory(t)
+		runtime, err := kernel.New(kernel.Dependencies{Store: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		created, err := runtime.Create(ctx, kernel.CreateRequest{ExecutionRequired: true,
+			ID: "dispatch-guard", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+			Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "no side effects without lease", State: json.RawMessage(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = runtime.RequireExecution(ctx, created.Run.ID); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("reserved fenced Run allowed unbound dispatch: %v", err)
+		}
+		first, err := runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: created.Run.ID, OwnerID: "worker-1", LeaseDuration: 60 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = runtime.RequireExecution(ctx, created.Run.ID); !errors.Is(err, kernel.ErrExecutionRequired) {
+			t.Fatalf("unbound producer passed pre-dispatch after claim: %v", err)
+		}
+		owner, err := runtime.WithExecution(first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = owner.RequireExecution(ctx, created.Run.ID); err != nil {
+			t.Fatalf("valid owner denied: %v", err)
+		}
+		forged := first
+		forged.ExpiresAt = time.Now().UTC().Add(8 * time.Hour).Truncate(time.Millisecond)
+		time.Sleep(95 * time.Millisecond)
+		expired, err := runtime.WithExecution(forged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = expired.RequireExecution(ctx, created.Run.ID); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("spoofed caller expiry reached model/tool: %v", err)
+		}
+		replacement, err := runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+			RunID: created.Run.ID, OwnerID: "worker-2", LeaseDuration: time.Second,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = owner.RequireExecution(ctx, created.Run.ID); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("stale owner authorized after replacement: %v", err)
+		}
+		next, err := runtime.WithExecution(replacement)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = next.RequireExecution(ctx, created.Run.ID); err != nil {
+			t.Fatalf("replacement denied: %v", err)
+		}
+	})
+
+}
