@@ -50,3 +50,18 @@ func TestUnproductiveToolKeysStopRecoverableFailuresWithoutBlanketBlocking(t *te
 		t.Fatalf("successful discovery broke streak: %v", got)
 	}
 }
+
+func TestUnproductiveToolKeysBlockRepeatedFreshEvidenceDenials(t *testing.T) {
+	t.Parallel()
+	const denied = `{"ok":false,"retryable":false,"error":{"code":"delegation.current_evidence_unavailable"}}`
+	if got := unproductiveToolKeys(unsettledToolHistory("harness.delegate_agent", denied)); len(got) != 0 {
+		t.Fatalf("one denial must allow trying a different authorized role: %v", got)
+	}
+	if got := unproductiveToolKeys(unsettledToolHistory("harness.delegate_agent", denied, denied)); !slices.Equal(got, []string{"harness.delegate_agent"}) {
+		t.Fatalf("repeated unarmed role delegation continued: %v", got)
+	}
+	const other = `{"ok":false,"retryable":false,"error":{"code":"other.reason"}}`
+	if got := unproductiveToolKeys(unsettledToolHistory("harness.delegate_agent", other, other)); len(got) != 0 {
+		t.Fatalf("unrelated denials must not block delegation: %v", got)
+	}
+}

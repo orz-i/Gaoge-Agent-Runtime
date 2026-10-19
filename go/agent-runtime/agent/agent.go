@@ -875,11 +875,11 @@ func unproductiveToolKeys(messages []model.Message) []string {
 			if json.Unmarshal([]byte(message.Content), &result) != nil || len(result.ToolKeys) != 0 || !strings.Contains(message.Content, `"toolKeys"`) {
 				break
 			}
-		} else if !recoverableToolResult(message.Content) {
+		} else if !recoverableToolResult(message.Content) && !unavailableEvidenceToolResult(message.Content) {
 			break
 		}
 		lastKey, count = key, count+1
-		if key == ToolDiscoveryKey && count == 2 || count == 3 {
+		if count >= 3 || count >= 2 && (key == ToolDiscoveryKey || unavailableEvidenceToolResult(message.Content)) {
 			return []string{key}
 		}
 	}
@@ -902,6 +902,22 @@ func repeatedUnchangedToolKeys(messages []model.Message) []string {
 		}
 	}
 	return keys
+}
+
+// Explicit denial of fresh source access is final for that member. Two such
+// denials of the same delegation Tool (even with different role arguments)
+// are sufficient to remove it from future model declarations for this Run.
+// No other failed Tool body is interpreted as a capability prohibition.
+func unavailableEvidenceToolResult(content string) bool {
+	var result struct {
+		OK        *bool `json:"ok"`
+		Retryable bool  `json:"retryable"`
+		Error     struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	return json.Unmarshal([]byte(content), &result) == nil && result.OK != nil && !*result.OK &&
+		!result.Retryable && result.Error.Code == "delegation.current_evidence_unavailable"
 }
 
 func completedToolBatches(messages []model.Message) [][]completedToolCall {
@@ -1720,7 +1736,11 @@ func (runner *Runner) recordRecoverableToolError(
 	snapshot.Checkpoint = nil
 	state.Budget.Usage.ToolCalls++
 	state.BlockedToolKeys = normalizedToolKeys(append(state.BlockedToolKeys, blockedToolKeys...))
-	state.RequireToolCall = !allowCompletion
+	// A third consecutive recoverable failure (even with different Tool
+	// arguments) has no productive Tool correction left. Other granted Tools
+	// remain available, but the model must be allowed to report the evidence
+	// gap instead of being forced into another Tool invocation.
+	state.RequireToolCall = !allowCompletion && len(unproductiveToolKeys(state.Messages)) == 0
 	if allowCompletion {
 		state.Messages = withSystemGuidance(state.Messages,
 			"The unavailable capability cannot be recovered by repeating the same Tool call. A truthful final answer reporting missing sources is allowed now; do not fabricate evidence or citations.")
