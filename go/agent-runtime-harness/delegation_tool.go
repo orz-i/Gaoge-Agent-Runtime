@@ -80,6 +80,14 @@ func (handler *DelegationToolHandler) Execute(
 		return tools.ExecutionResult{}, err
 	}
 	result, err := runner.DelegateByExecutionRefID(ctx, request.RunID, input)
+	// An independently delegated specialist is an observation, not a mandatory
+	// join prerequisite. Its terminal failure is a valid durable Tool receipt:
+	// the parent Agent must see the status and decide how to proceed. Preserve
+	// hard failures for authorization, invalid state, deadlines and budgets.
+	if errors.Is(err, handoff.ErrChildFailed) && result.Snapshot.Turn.ID != "" &&
+		(result.Delegation.Status == handoff.StatusFailed || result.Delegation.Status == handoff.StatusCancelled) {
+		err = nil
+	}
 	if err != nil {
 		if dimension, ok := budget.DeniedDimension(err); ok && dimension == budget.DimensionChildRuns {
 			return tools.ExecutionResult{}, tools.NewRecoverableCallErrorWithBlockedTools(
@@ -96,11 +104,13 @@ func (handler *DelegationToolHandler) Execute(
 		ChildRunID   string          `json:"childRunID"`
 		Status       string          `json:"status"`
 		Result       json.RawMessage `json:"result,omitempty"`
+		ErrorCode    string          `json:"errorCode,omitempty"`
 	}{
 		DelegationID: result.Delegation.ID,
 		ChildRunID:   result.Delegation.ChildRunID,
 		Status:       string(result.Delegation.Status),
 		Result:       append(json.RawMessage(nil), result.Delegation.Result...),
+		ErrorCode:    delegationReceiptErrorCode(result.Delegation.Status),
 	})
 	if err != nil {
 		return tools.ExecutionResult{}, err
@@ -121,6 +131,19 @@ func (handler *DelegationToolHandler) Execute(
 		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: disposition},
 		Pending: pending,
 	}, nil
+}
+
+// Error details from a Child Run are untrusted provider text. Return a
+// bounded, stable code to the supervising model instead.
+func delegationReceiptErrorCode(status handoff.Status) string {
+	switch status {
+	case handoff.StatusFailed:
+		return "delegation.child_failed"
+	case handoff.StatusCancelled:
+		return "delegation.child_cancelled"
+	default:
+		return ""
+	}
 }
 
 // Only the local SDK Agent has an autonomous committed-transition contract.
@@ -198,7 +221,7 @@ func DelegationToolRegistration(handler *DelegationToolHandler) tools.Registrati
 		Definition: tools.Definition{
 			Key:         DelegationToolKey,
 			Name:        "delegate_to_specialist_agent",
-			Description: "Delegate one focused subtask to an environment-authorized specialist role.",
+			Description: "Delegate one focused subtask to an authorized specialist. A failed or cancelled child returns a status receipt; use successful evidence, retry selectively, or explain the limitation instead of assuming the parent task failed.",
 			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["goal"],"anyOf":[{"required":["roleID"]},{"required":["memberID"]}],"properties":{"roleID":{"type":"string","minLength":1,"maxLength":160},"memberID":{"type":"string","minLength":1,"maxLength":160},"goal":{"type":"string","minLength":1,"maxLength":200000}}}`),
 		},
 		Handler: handler,
