@@ -2,10 +2,11 @@ package agent
 
 import (
 	"encoding/json"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	"slices"
 	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 func unsettledToolHistory(key string, outputs ...string) []model.Message {

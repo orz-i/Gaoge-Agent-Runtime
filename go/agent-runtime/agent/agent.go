@@ -712,7 +712,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		if prepareErr != nil {
 			if code, message, recoverable := tools.RecoverableCallErrorInfo(prepareErr); recoverable {
 				corrected, correctionErr := runner.recordRecoverableToolError(
-					ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(prepareErr),
+					ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(prepareErr), tools.RecoverableCallErrorAllowsCompletion(prepareErr),
 				)
 				return corrected, correctionErr != nil, correctionErr
 			}
@@ -1580,7 +1580,7 @@ func (runner *Runner) handlePendingToolExecutionError(
 ) (kernel.Snapshot, bool, error) {
 	if code, message, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
 		corrected, correctionErr := runner.recordRecoverableToolError(
-			ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(err),
+			ctx, snapshot, state, code, message, tools.RecoverableCallErrorBlockedToolKeys(err), tools.RecoverableCallErrorAllowsCompletion(err),
 		)
 		return corrected, false, correctionErr
 	}
@@ -1687,6 +1687,7 @@ func (runner *Runner) recordRecoverableToolError(
 	code string,
 	message string,
 	blockedToolKeys []string,
+	allowCompletion bool,
 ) (kernel.Snapshot, error) {
 	call, ok := nextPendingCall(state)
 	if !ok {
@@ -1701,7 +1702,7 @@ func (runner *Runner) recordRecoverableToolError(
 		} `json:"error"`
 	}{
 		OK:        false,
-		Retryable: true,
+		Retryable: !allowCompletion,
 		Error: struct {
 			Code    string `json:"code"`
 			Message string `json:"message"`
@@ -1719,7 +1720,11 @@ func (runner *Runner) recordRecoverableToolError(
 	snapshot.Checkpoint = nil
 	state.Budget.Usage.ToolCalls++
 	state.BlockedToolKeys = normalizedToolKeys(append(state.BlockedToolKeys, blockedToolKeys...))
-	state.RequireToolCall = true
+	state.RequireToolCall = !allowCompletion
+	if allowCompletion {
+		state.Messages = withSystemGuidance(state.Messages,
+			"The unavailable capability cannot be recovered by repeating the same Tool call. A truthful final answer reporting missing sources is allowed now; do not fabricate evidence or citations.")
+	}
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err

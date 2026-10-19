@@ -38,6 +38,9 @@ type RecoverableCallError struct {
 	Message         string
 	Cause           error
 	BlockedToolKeys []string
+	// Some correctable capability refusals allow an honest final answer rather
+	// than requiring another Tool call. Default remains strict correction.
+	AllowCompletion bool
 }
 
 // RetryableExecutionError marks a transient executor failure that is safe to
@@ -169,6 +172,24 @@ func (err *RecoverableCallError) Unwrap() error {
 // NewRecoverableCallError creates an explicit model-correctable Tool error.
 func NewRecoverableCallError(code, message string, cause error) error {
 	return newRecoverableCallError(code, message, cause, nil)
+}
+
+// NewRecoverableCallErrorAllowCompletion signals a non-retryable capability
+// refusal. It still records a structured recoverable Tool result, but the
+// Agent may finish without being forced to call another Tool.
+func NewRecoverableCallErrorAllowCompletion(code, message string, cause error) error {
+	err := newRecoverableCallError(code, message, cause, nil)
+	var typed *RecoverableCallError
+	if errors.As(err, &typed) {
+		typed.AllowCompletion = true
+	}
+	return err
+}
+
+// RecoverableCallErrorAllowsCompletion detects this explicit opt-in only.
+func RecoverableCallErrorAllowsCompletion(err error) bool {
+	var target *RecoverableCallError
+	return errors.As(err, &target) && target != nil && target.AllowCompletion
 }
 
 // NewRecoverableCallErrorWithBlockedTools creates a correctable Tool error and
