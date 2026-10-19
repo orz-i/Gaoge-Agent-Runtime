@@ -15,6 +15,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 type TurnResponse struct {
@@ -613,6 +614,13 @@ func (handler *Handler) authorizedTurn(context *gin.Context) (harness.Snapshot, 
 }
 
 func writeHarnessError(context *gin.Context, err error) {
+	// A known, frozen-role capability refusal is safe, user-actionable and
+	// not a generic malformed request. Never serialize the policy's cause.
+	if code, _, recoverable := tools.RecoverableCallErrorInfo(err); recoverable && code == "delegation.current_evidence_unavailable" {
+		runtimehttp.WriteError(context, stdhttp.StatusUnprocessableEntity, code,
+			"This member cannot verify current sources. Choose a member with an authorized web research tool or change the task.")
+		return
+	}
 	switch {
 	case errors.Is(err, harness.ErrInvalidRequest):
 		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "harness.invalid_request", "invalid Harness request")
