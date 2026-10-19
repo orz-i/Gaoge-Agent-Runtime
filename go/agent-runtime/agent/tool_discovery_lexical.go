@@ -23,6 +23,10 @@ func (LexicalToolDiscovery) Search(ctx context.Context, request ToolDiscoveryReq
 		return nil, ErrToolDiscoveryInvalid
 	}
 	terms := lexicalDiscoveryTerms(request.Query)
+	// Authorized tools often expose English names although a user asks in
+	// Chinese. These are narrow, deterministic *query* aliases, never grants;
+	// the existing candidate whitelist still validates every returned key.
+	terms = appendChineseToolDiscoveryAliases(terms, request.Query)
 	if len(terms) == 0 {
 		return nil, ErrToolDiscoveryInvalid
 	}
@@ -108,4 +112,49 @@ func lexicalDiscoveryTerms(query string) []string {
 		result = append(result, term)
 	}
 	return result
+}
+
+// Do not translate arbitrary user content or infer a capability from "today"
+// alone. Match explicit Chinese tool-action nouns only, preserving the exact
+// frozen candidate authorization and stable lexical ordering.
+func appendChineseToolDiscoveryAliases(terms []string, query string) []string {
+	var aliases = [...]struct {
+		phrases []string
+		words   []string
+	}{
+		{[]string{"新闻", "资讯", "快讯"}, []string{"news"}},
+		{[]string{"搜索", "检索", "查找"}, []string{"search"}},
+		{[]string{"网页", "联网", "互联网"}, []string{"web"}},
+		{[]string{"浏览"}, []string{"browse"}},
+		{[]string{"文档"}, []string{"document"}},
+		{[]string{"天气", "气象"}, []string{"weather"}},
+	}
+	seen := make(map[string]struct{}, len(terms))
+	for _, term := range terms {
+		seen[term] = struct{}{}
+	}
+	for _, group := range aliases {
+		if !slicesContainsChinesePhrase(query, group.phrases) {
+			continue
+		}
+		for _, word := range group.words {
+			if len(terms) >= 32 {
+				return terms
+			}
+			if _, exists := seen[word]; !exists {
+				terms = append(terms, word)
+				seen[word] = struct{}{}
+			}
+		}
+	}
+	return terms
+}
+
+func slicesContainsChinesePhrase(query string, values []string) bool {
+	for _, value := range values {
+		if strings.Contains(query, value) {
+			return true
+		}
+	}
+	return false
 }

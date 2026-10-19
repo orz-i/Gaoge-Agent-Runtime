@@ -140,3 +140,38 @@ func BenchmarkLexicalToolDiscovery(b *testing.B) {
 		})
 	}
 }
+
+func TestLexicalToolDiscoveryChineseNewsMatchesAuthorizedEnglishTool(t *testing.T) {
+	t.Parallel()
+	search := agent.LexicalToolDiscovery{}
+	request := agent.ToolDiscoveryRequest{
+		RunID: "child-news", Query: "最新全球AI与科技资讯", MaxResults: 5,
+		Candidates: []agent.ToolDiscoveryCandidate{
+			{Key: "mcp.web_search", Fingerprint: "one"},
+			{Key: "mcp.files.delete", Fingerprint: "two"},
+		},
+		Definitions: []agent.ToolDiscoveryDescriptor{
+			{Key: "mcp.web_search", Name: "web_search", Description: "Search the web for current news articles"},
+			{Key: "mcp.files.delete", Name: "delete_files", Description: "Delete local files"},
+		},
+	}
+	for _, query := range []string{"最新全球AI与科技资讯", "今天AI新闻", "检索网页新闻"} {
+		request.Query = query
+		got, err := search.Search(t.Context(), request)
+		if err != nil || !slices.Equal(got, []string{"mcp.web_search"}) {
+			t.Fatalf("query %q: authorized result=%v err=%v", query, got, err)
+		}
+	}
+	request.Query = "今天有什么新进展" // temporal wording alone is not a grant or tool name
+	got, err := search.Search(t.Context(), request)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("generic temporal query unexpectedly matched tools: %v %v", got, err)
+	}
+	request.Candidates = request.Candidates[1:]
+	request.Definitions = request.Definitions[1:]
+	request.Query = "今天AI新闻"
+	got, err = search.Search(t.Context(), request)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("unauthorized web search discovered: %v %v", got, err)
+	}
+}

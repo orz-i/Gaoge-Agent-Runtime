@@ -847,6 +847,45 @@ type completedToolCall struct {
 	result string
 }
 
+// unproductiveToolKeys enforces a bounded exit from repeated empty Tool
+// discovery and recoverable Tool failures. It counts only the latest
+// consecutive settled outcomes; an intervening successful/different Tool
+// clears the streak. Distinct call IDs and argument changes cannot reset it.
+// This is a request-projection guard, rebuilt from durable transcript after
+// restart, never an added Tool grant or a retry of an uncertain write.
+func unproductiveToolKeys(messages []model.Message) []string {
+	keysByCallID := toolCallKeysByID(messages)
+	lastKey, count := "", 0
+	for i := len(messages) - 1; i >= 0; i-- {
+		message := messages[i]
+		if message.Role == model.RoleAssistant && len(message.ToolCalls) == 0 && strings.TrimSpace(message.Content) != "" {
+			break
+		}
+		if message.Role != model.RoleTool {
+			continue
+		}
+		key := keysByCallID[message.ToolCallID]
+		if key == "" || key != lastKey && lastKey != "" {
+			break
+		}
+		if key == ToolDiscoveryKey {
+			var result struct {
+				ToolKeys []string `json:"toolKeys"`
+			}
+			if json.Unmarshal([]byte(message.Content), &result) != nil || len(result.ToolKeys) != 0 || !strings.Contains(message.Content, `"toolKeys"`) {
+				break
+			}
+		} else if !recoverableToolResult(message.Content) {
+			break
+		}
+		lastKey, count = key, count+1
+		if key == ToolDiscoveryKey && count == 2 || count == 3 {
+			return []string{key}
+		}
+	}
+	return nil
+}
+
 func repeatedUnchangedToolKeys(messages []model.Message) []string {
 	batches := completedToolBatches(messages)
 	keys := make([]string, 0)
