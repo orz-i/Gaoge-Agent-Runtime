@@ -24,6 +24,7 @@ func TestPublicHarnessSnapshotAndFeedRedactAllFailureDetails(t *testing.T) {
 		Subtasks: []harness.Subtask{{
 			ID: "child", Status: "failed", ErrorCode: "model.upstream_auth_failed",
 			ErrorDetail: private, CancelStatus: "failed", CancelError: private,
+			Approval: &harness.SubtaskApproval{CheckpointID: "checkpoint-1", ToolKey: "example.read", ToolName: "Read data", Arguments: json.RawMessage(`{"apiKey":"PRIVATE_SUBTASK_TOOL_ARGUMENT","request":{"personal":"PRIVATE_SUBTASK_DATA"}}`)},
 		}},
 		Items: []harness.Item{{
 			ID: "tool-item", TurnID: testHarnessTurnID, Kind: harness.ItemAgentMessage,
@@ -38,9 +39,22 @@ func TestPublicHarnessSnapshotAndFeedRedactAllFailureDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(body), private) || !strings.Contains(string(body), "model.upstream_auth_failed") ||
+	if strings.Contains(string(body), private) || strings.Contains(string(body), "PRIVATE_SUBTASK_TOOL_ARGUMENT") ||
+		strings.Contains(string(body), "PRIVATE_SUBTASK_DATA") || !strings.Contains(string(body), "checkpoint-1") ||
+		!strings.Contains(string(body), "model.upstream_auth_failed") ||
 		!strings.Contains(string(body), "safe answer") {
 		t.Fatalf("owner-visible snapshot leaked diagnostic details: %s", body)
+	}
+	if string(snapshot.Subtasks[0].Approval.Arguments) != `{"apiKey":"PRIVATE_SUBTASK_TOOL_ARGUMENT","request":{"personal":"PRIVATE_SUBTASK_DATA"}}` {
+		t.Fatal("public approval projection mutated durable arguments")
+	}
+	subtaskPayload, err := json.Marshal(snapshot.Subtasks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	itemPayload, err := publicItemPayload(harness.ItemSubtask, subtaskPayload)
+	if err != nil || strings.Contains(string(itemPayload), "PRIVATE_SUBTASK_TOOL_ARGUMENT") || strings.Contains(string(itemPayload), "PRIVATE_SUBTASK_DATA") {
+		t.Fatalf("subtask feed item leaked raw approval arguments: %s, %v", itemPayload, err)
 	}
 	if snapshot.Turn.ErrorDetail != private || snapshot.Subtasks[0].CancelError != private {
 		t.Fatal("public projection mutated Harness durable facts")

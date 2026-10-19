@@ -299,6 +299,14 @@ func publicSubtasks(items []harness.Subtask) []harness.Subtask {
 		if item.CancelError != "" {
 			item.CancelError = "subtask cancellation could not be completed"
 		}
+		if item.Approval != nil {
+			// Arbitrary Tool arguments can contain secrets or account data. An
+			// owner may decide an approval using the authorized tool identity
+			// and stable checkpoint, but cannot inspect its raw arguments here.
+			approval := *item.Approval
+			approval.Arguments = json.RawMessage(`{}`)
+			item.Approval = &approval
+		}
 		projected[index] = item
 	}
 	return projected
@@ -324,6 +332,17 @@ func itemResponse(item harness.Item) (ItemResponse, error) {
 func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.RawMessage, error) {
 	if len(payload) == 0 {
 		return nil, nil
+	}
+	if kind == harness.ItemSubtask {
+		var item harness.Subtask
+		if err := json.Unmarshal(payload, &item); err != nil {
+			return nil, errors.Join(harness.ErrConflict, err)
+		}
+		projected, err := json.Marshal(publicSubtasks([]harness.Subtask{item})[0])
+		if err != nil {
+			return nil, err
+		}
+		return runtimehttp.PublicDiagnosticPayload(projected), nil
 	}
 	if kind != harness.ItemDelegation && kind != harness.ItemInvocation {
 		return runtimehttp.PublicDiagnosticPayload(payload), nil

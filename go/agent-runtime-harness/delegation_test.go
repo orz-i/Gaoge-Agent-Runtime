@@ -3,7 +3,9 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -225,6 +227,82 @@ func TestHarnessDelegatesDifferentGoalsToSameMember(t *testing.T) {
 	if err != nil || len(children) != 2 {
 		t.Fatalf("same-member delegation relations=%#v err=%v", children, err)
 	}
+}
+
+// Each independently delegated member has its own terminal status. A failed
+// specialist must not erase a successful sibling receipt or the root synthesis.
+func TestHarnessIndependentDelegationsCollectMixedTerminalResults(t *testing.T) {
+	t.Parallel()
+	client := &mixedDelegationModel{}
+	runner, _, _ := newDelegationHarnessWithRuntime(t, client, 4, false)
+	snapshot, err := runner.Start(t.Context(), harness.StartRequest{
+		HostThread: harness.HostRef{Kind: testThreadKind, ID: "mixed-delegation-thread"},
+		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "mixed-delegation-turn"},
+		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
+		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "mixed-delegation-thread"},
+		Goal:       "Synthesize successful specialist evidence even if another specialist fails",
+		Config: harness.ConfigSnapshot{Model: delegationTestModelName,
+			ToolKeys:     []string{harness.DelegationToolKey},
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}},
+	})
+	if err != nil || snapshot.Turn.Status != harness.TurnCompleted || string(snapshot.Output.Content) == "" {
+		t.Fatalf("mixed delegation root did not complete: %#v, err=%v", snapshot.Turn, err)
+	}
+	if !client.synthesized {
+		t.Fatal("root never observed both success and failure receipts")
+	}
+	for _, reload := range []func(context.Context, string) (harness.Snapshot, error){runner.Load, runner.Refresh} {
+		loaded, loadErr := reload(t.Context(), snapshot.Turn.ID)
+		if loadErr != nil || len(loaded.Subtasks) != 2 {
+			t.Fatalf("mixed terminal results missing after reload: %#v, err=%v", loaded.Subtasks, loadErr)
+		}
+		statuses := map[string]int{}
+		for _, item := range loaded.Subtasks {
+			statuses[item.Status]++
+		}
+		if statuses["completed"] != 1 || statuses["failed"] != 1 {
+			t.Fatalf("sibling status corrupted: %#v", loaded.Subtasks)
+		}
+	}
+}
+
+type mixedDelegationModel struct{ synthesized bool }
+
+func (client *mixedDelegationModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
+	if len(request.Tools) == 0 {
+		if strings.Contains(request.Messages[len(request.Messages)-1].Content, "risk") {
+			return model.Response{}, errors.New("PRIVATE-specialist-provider-failure")
+		}
+		return model.Response{Content: "successful sibling research"}, nil
+	}
+	toolsReturned := 0
+	success, failed := false, false
+	for _, message := range request.Messages {
+		if message.Role != model.RoleTool {
+			continue
+		}
+		toolsReturned++
+		if strings.Contains(message.Content, "successful sibling research") {
+			success = true
+		}
+		if strings.Contains(message.Content, `"status":"failed"`) && strings.Contains(message.Content, "delegation.child_failed") {
+			failed = true
+		}
+		if strings.Contains(message.Content, "PRIVATE-specialist-provider-failure") {
+			return model.Response{}, errors.New("child private error leaked into parent transcript")
+		}
+	}
+	if toolsReturned == 0 {
+		return model.Response{ToolCalls: []tools.Call{
+			{ID: "good", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"researcher","goal":"collect public evidence"}`)},
+			{ID: "bad", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"reviewer","goal":"evaluate risk"}`)},
+		}}, nil
+	}
+	client.synthesized = success && failed
+	if !client.synthesized {
+		return model.Response{}, errors.New("root missing terminal sibling receipts")
+	}
+	return model.Response{Content: "Synthesized with available evidence; one reviewer failed."}, nil
 }
 
 type blockingDelegationPolicy struct {
