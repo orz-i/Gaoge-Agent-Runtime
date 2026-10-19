@@ -333,6 +333,9 @@ func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.Raw
 	if len(payload) == 0 {
 		return nil, nil
 	}
+	if kind == harness.ItemApproval {
+		return publicApprovalItemPayload(payload)
+	}
 	if kind == harness.ItemSubtask {
 		var item harness.Subtask
 		if err := json.Unmarshal(payload, &item); err != nil {
@@ -366,10 +369,46 @@ func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.Raw
 	return runtimehttp.PublicDiagnosticPayload(encoded), nil
 }
 
+// Public approval items expose only the action and checkpoint identity needed
+// for owner decisions. Unknown fields and raw Tool arguments are private, even
+// when the payload was inserted by a host-owned timeline adapter.
+func publicApprovalItemPayload(payload json.RawMessage) (json.RawMessage, error) {
+	var public struct {
+		Subtask      bool                     `json:"subtask,omitempty"`
+		CheckpointID string                   `json:"checkpointID,omitempty"`
+		ToolCallID   string                   `json:"toolCallID,omitempty"`
+		ToolKey      string                   `json:"toolKey,omitempty"`
+		ToolName     string                   `json:"toolName,omitempty"`
+		Arguments    json.RawMessage          `json:"arguments,omitempty"`
+		Decision     harness.ApprovalDecision `json:"decision,omitempty"`
+		Comment      string                   `json:"comment,omitempty"`
+	}
+	if err := json.Unmarshal(payload, &public); err != nil {
+		return nil, errors.Join(harness.ErrConflict, err)
+	}
+	if len(public.Arguments) != 0 {
+		public.Arguments = json.RawMessage(`{}`)
+	}
+	encoded, err := json.Marshal(public)
+	if err != nil {
+		return nil, err
+	}
+	return runtimehttp.PublicDiagnosticPayload(encoded), nil
+}
+
 func turnEventResponse(event harness.TurnEvent) (harness.TurnEvent, error) {
 	result := event
 	result.Message = runtimehttp.PublicEventMessage(event.Type, event.Status, event.Message)
 	result.Data = runtimehttp.PublicDiagnosticPayload(event.Data)
+	if event.ItemKind == harness.ItemApproval {
+		// Approval items have no public free-text event fields. The request
+		// payload is projected separately for started/completed events.
+		result.Message, result.Delta = "", ""
+		if event.Type == harness.EventItemDelta {
+			result.Data = nil
+			return result, nil
+		}
+	}
 	if event.Type != harness.EventItemStarted && event.Type != harness.EventItemCompleted || len(event.Data) == 0 {
 		return result, nil
 	}
