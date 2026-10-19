@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -74,11 +75,30 @@ func TestAsyncDelegationRecordsChildFailureAndCancellation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			failed, err := direct.Resume(t.Context(), root.Run.ID, root.Run.Revision)
-			if !errors.Is(err, handoff.ErrChildFailed) || failed.Run.Status != kernel.RunStatusFailed {
-				t.Fatalf("failed child = %#v, %v", failed.Run, err)
+			// The independently delegated child may fail, but the root must be
+			// able to synthesize the successes that remain in the transcript.
+			runner, direct = fixture.compose(t, nil)
+			completed, err := direct.Resume(t.Context(), root.Run.ID, root.Run.Revision)
+			if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
+				t.Fatalf("child failure escaped as parent failure: %#v, %v", completed.Run, err)
 			}
 			fixture.assertTerminalItems(t, runner, started.Turn.ID, harness.ItemStatus(status))
+			fixture.assertSinglePreparedChild(t)
+			requests := fixture.model.requestsCopy()
+			if len(requests) != 2 {
+				t.Fatalf("parent did not resume after terminal child: %d requests", len(requests))
+			}
+			last := requests[1].Messages[len(requests[1].Messages)-1]
+			var receipt struct {
+				Status    string `json:"status"`
+				ErrorCode string `json:"errorCode"`
+			}
+			if err := json.Unmarshal([]byte(last.Content), &receipt); err != nil || receipt.Status != string(status) || receipt.ErrorCode == "" {
+				t.Fatalf("child terminal receipt missing or unsafe: %s, err=%v", last.Content, err)
+			}
+			if jsonContains := string(last.Content); strings.Contains(jsonContains, "test.child.terminal") {
+				t.Fatalf("provider child detail leaked to root transcript: %s", jsonContains)
+			}
 		})
 	}
 }
