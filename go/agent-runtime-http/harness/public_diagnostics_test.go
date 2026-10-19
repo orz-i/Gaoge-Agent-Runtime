@@ -71,3 +71,106 @@ func TestPublicHarnessSnapshotAndFeedRedactAllFailureDetails(t *testing.T) {
 		t.Fatalf("Harness terminal feed leaked diagnostic detail: %s", eventJSON)
 	}
 }
+
+// Approval request arguments belong to the durable internal checkpoint, not
+// the owner-visible Harness timeline. The public snapshot and streamed item
+// lifecycle must agree, while retaining the exact approval identity and the
+// explicitly authored approve/reject decision.
+func TestPublicHarnessApprovalItemOmitsRawArgumentsInSnapshotAndFeed(t *testing.T) {
+	t.Parallel()
+	const secret = "DUMMY_PRIVATE_APPROVAL_PASSWORD"
+	pending := harness.Item{
+		ID: "approval-pending", TurnID: testHarnessTurnID, Kind: harness.ItemApproval,
+		Status:  harness.ItemWaiting,
+		Payload: json.RawMessage(`{"subtask":true,"checkpointID":"checkpoint-1","toolCallID":"call-1","toolKey":"example.write","toolName":"Write file","arguments":{"password":"DUMMY_PRIVATE_APPROVAL_PASSWORD"},"unexpectedProviderData":{"token":"DUMMY_PRIVATE_APPROVAL_PASSWORD"}}`),
+	}
+	decision := harness.Item{
+		ID: "approval-decision", TurnID: testHarnessTurnID, Kind: harness.ItemApproval,
+		Status: harness.ItemCompleted, ParentItemID: pending.ID,
+		Payload: json.RawMessage(`{"subtask":true,"checkpointID":"checkpoint-1","decision":"reject","comment":"Rejected by owner"}`),
+	}
+	response, err := snapshotResponse(harness.Snapshot{Items: []harness.Item{pending, decision}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range response.Items {
+		assertPublicApprovalItem(t, item.Payload, secret)
+	}
+	for _, test := range []struct {
+		name     string
+		typeName string
+		item     harness.Item
+	}{
+		{name: "started", typeName: harness.EventItemStarted, item: pending},
+		{name: "completed", typeName: harness.EventItemCompleted, item: decision},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw, err := json.Marshal(test.item)
+			if err != nil {
+				t.Fatal(err)
+			}
+			projected, err := turnEventResponse(harness.TurnEvent{
+				TurnID: testHarnessTurnID, Type: test.typeName,
+				ItemID: test.item.ID, ItemKind: harness.ItemApproval, Data: raw, Message: secret, Delta: secret,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var eventItem ItemResponse
+			if err := json.Unmarshal(projected.Data, &eventItem); err != nil {
+				t.Fatal(err)
+			}
+			if eventItem.ID != test.item.ID || eventItem.Kind != harness.ItemApproval {
+				t.Fatalf("public approval event lost its item identity: %#v", eventItem)
+			}
+			if projected.Message != "" || projected.Delta != "" {
+				t.Fatalf("approval event leaked untrusted text: %#v", projected)
+			}
+			assertPublicApprovalItem(t, eventItem.Payload, secret)
+		})
+	}
+	// Approval events never have a public text delta. A malformed or future
+	// producer must not bypass ItemApproval's typed projection via event fields.
+	delta, err := turnEventResponse(harness.TurnEvent{
+		TurnID: testHarnessTurnID, Type: harness.EventItemDelta,
+		ItemID: pending.ID, ItemKind: harness.ItemApproval,
+		Delta: secret, Message: secret,
+		Data: json.RawMessage(`{"arguments":{"password":"DUMMY_PRIVATE_APPROVAL_PASSWORD"}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delta.Delta != "" || delta.Message != "" || len(delta.Data) != 0 {
+		t.Fatalf("approval item delta leaked through its alternate fields: %#v", delta)
+	}
+	if !strings.Contains(string(pending.Payload), secret) {
+		t.Fatal("projection mutated the original internal approval request")
+	}
+}
+
+func assertPublicApprovalItem(t *testing.T, payload json.RawMessage, secret string) {
+	t.Helper()
+	if strings.Contains(string(payload), secret) {
+		t.Fatalf("private approval argument escaped through public projection: %s", payload)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["checkpointID"]) != `"checkpoint-1"` || string(fields["subtask"]) != "true" {
+		t.Fatalf("public approval identity or subtask marker lost: %s", payload)
+	}
+	if _, unexpected := fields["unexpectedProviderData"]; unexpected {
+		t.Fatalf("unrecognized private approval field exported: %s", payload)
+	}
+	if string(fields["decision"]) == `"reject"` {
+		if string(fields["comment"]) != `"Rejected by owner"` {
+			t.Fatalf("approval decision content lost: %s", payload)
+		}
+		return
+	}
+	if string(fields["toolCallID"]) != `"call-1"` || string(fields["toolKey"]) != `"example.write"` ||
+		string(fields["toolName"]) != `"Write file"` || string(fields["arguments"]) != "{}" {
+		t.Fatalf("safe approval summary missing or private arguments not empty: %s", payload)
+	}
+}
