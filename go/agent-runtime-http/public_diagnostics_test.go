@@ -201,3 +201,58 @@ func TestPublicRunFeedPairsStableToolPhasesWithoutDisclosure(t *testing.T) {
 		t.Fatal("private identifiers escaped public feed")
 	}
 }
+
+// Every owner-visible lifecycle phase must be covered: hiding only tool.started
+// leaves the earlier tool.requested model arguments, and interaction.required
+// checkpoint payload, accessible through SSE replay and live delivery.
+func TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint(t *testing.T) {
+	t.Parallel()
+	const secret = "DUMMY_SECRET_FOR_PUBLIC_FEED_PROBE"
+	for _, fixture := range []struct {
+		kind           string
+		event          runfeed.Event
+		expectedStatus string
+	}{
+		{kind: "requested", event: runfeed.Event{RunID: "child", Type: runfeed.EventToolRequested, Message: secret, Delta: secret,
+			Data: json.RawMessage(`{"id":"call-local","toolKey":"mcp.web_search","arguments":{"query":"DUMMY_SECRET_FOR_PUBLIC_FEED_PROBE"},"internal":"DUMMY_SECRET_FOR_PUBLIC_FEED_PROBE"}`)}, expectedStatus: "requested"},
+		{kind: "pending", event: runfeed.Event{RunID: "child", Type: "tool.pending", Message: secret, Delta: secret,
+			Data: json.RawMessage(`{"executionID":"receipt-1","toolKey":"mcp.web_search","arguments":{"key":"DUMMY_SECRET_FOR_PUBLIC_FEED_PROBE"},"internal":"DUMMY_SECRET_FOR_PUBLIC_FEED_PROBE"}`)}, expectedStatus: "pending"},
+		{kind: "approval", event: runfeed.Event{RunID: "child", Type: runfeed.EventInteractionRequired, Message: secret, Delta: secret,
+			Data: json.RawMessage(`{"id":"checkpoint-one","kind":"tool_approval","status":"pending","payload":{"toolCallID":"call-local","toolKey":"mcp.web_search","toolName":"Search","arguments":{"apiKey":"DUMMY_SECRET_FOR_PUBLIC_FEED_PROBE"}},"response":{"comment":"DUMMY_SECRET_FOR_PUBLIC_FEED_PROBE"}}`)}, expectedStatus: "pending"},
+	} {
+		t.Run(fixture.kind, func(t *testing.T) {
+			original, _ := json.Marshal(fixture.event)
+			projected := publicRunFeedEvent(fixture.event)
+			exported, _ := json.Marshal(projected)
+			if strings.Contains(string(exported), secret) || strings.Contains(string(exported), `"arguments"`) || strings.Contains(string(exported), `"payload"`) || strings.Contains(string(exported), `"response"`) {
+				t.Fatalf("private %s event leaked: %s", fixture.kind, exported)
+			}
+			if !strings.Contains(string(exported), `"status":"`+fixture.expectedStatus+`"`) || !strings.Contains(string(exported), `"call_`) {
+				t.Fatalf("safe %s identity/status missing: %s", fixture.kind, exported)
+			}
+			if fixture.kind == "approval" && !strings.Contains(string(exported), `"id":"checkpoint-one"`) {
+				t.Fatalf("approval checkpoint identity missing: %s", exported)
+			}
+			after, _ := json.Marshal(fixture.event)
+			if string(after) != string(original) {
+				t.Fatal("projection changed durable Run Feed content")
+			}
+		})
+	}
+}
+
+func TestPublicRunFeedUnknownInteractionAndMalformedPayloadFailClosed(t *testing.T) {
+	t.Parallel()
+	for _, raw := range []string{
+		`{"id":"checkpoint-one","kind":"unknown_extension","status":"pending","payload":{"arguments":{"secret":"DUMMY_SECRET"}}}`,
+		`{"id":"checkpoint-one","kind":"tool_approval","status":"pending","payload":{"arguments":{"secret":"DUMMY_SECRET"},"toolCallID":42}}`,
+		`{"id":"DUMMY_SECRET checkpoint","kind":"tool_approval","status":"pending","payload":{"toolCallID":"call-one"}}`,
+		`not json`,
+	} {
+		event := runfeed.Event{RunID: "child", Type: runfeed.EventInteractionRequired, Message: "DUMMY_SECRET", Data: json.RawMessage(raw)}
+		projected := publicRunFeedEvent(event)
+		if len(projected.Data) > 0 || projected.Message != "" || projected.Delta != "" {
+			t.Fatalf("untrusted approval data escaped: %s", projected.Data)
+		}
+	}
+}

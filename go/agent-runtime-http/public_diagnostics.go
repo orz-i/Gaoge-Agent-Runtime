@@ -276,13 +276,19 @@ func publicToolRunFeedData(event runfeed.Event) json.RawMessage {
 	}{
 		CallID: publicToolCallID(event.RunID, fields.CallID), ToolKey: publicToolFeedKey(fields.ToolKey),
 		Status: func() string {
-			if event.Type == runfeed.EventToolStarted {
+			switch event.Type {
+			case runfeed.EventToolRequested:
+				return "requested"
+			case runfeed.EventToolStarted:
 				return "running"
+			case "tool.pending":
+				return "pending"
+			default:
+				if event.Message != "" {
+					return "needs_correction"
+				}
+				return "completed"
 			}
-			if event.Message != "" {
-				return "needs_correction"
-			}
-			return "completed"
 		}(),
 	})
 	if err != nil {
@@ -324,17 +330,59 @@ func publicDiscoveryProgress(value json.RawMessage) json.RawMessage {
 	return projected
 }
 
+// The Tool approval checkpoint contains the complete private arguments in
+// Payload. Only a known, pending Tool approval gets an owner-visible identity;
+// arbitrary interaction plugins cannot inject their opaque payloads here.
+func publicRunFeedApprovalData(event runfeed.Event) json.RawMessage {
+	var checkpoint struct {
+		ID      string          `json:"id"`
+		Kind    string          `json:"kind"`
+		Status  string          `json:"status"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if json.Unmarshal(event.Data, &checkpoint) != nil || checkpoint.Kind != "tool_approval" ||
+		checkpoint.Status != "pending" || checkpoint.ID == "" || len(checkpoint.ID) > 128 ||
+		publicToolFeedKey(checkpoint.ID) != checkpoint.ID {
+		return nil
+	}
+	var approval struct {
+		ToolCallID string `json:"toolCallID"`
+		ToolKey    string `json:"toolKey"`
+	}
+	if json.Unmarshal(checkpoint.Payload, &approval) != nil {
+		return nil
+	}
+	result, err := json.Marshal(struct {
+		ID         string `json:"id"`
+		Kind       string `json:"kind"`
+		Status     string `json:"status"`
+		ToolCallID string `json:"toolCallID,omitempty"`
+		ToolKey    string `json:"toolKey,omitempty"`
+	}{
+		ID: checkpoint.ID, Kind: checkpoint.Kind, Status: checkpoint.Status,
+		ToolCallID: publicToolCallID(event.RunID, approval.ToolCallID),
+		ToolKey:    publicToolFeedKey(approval.ToolKey),
+	})
+	if err != nil {
+		return nil
+	}
+	return result
+}
+
 func publicRunFeedEvent(event runfeed.Event) runfeed.Event {
 	switch event.Type {
 	case "activity.user":
 		event.Data = publicDiscoveryProgress(event.Data)
 		event.Message, event.Delta = "", ""
-	case runfeed.EventToolStarted, runfeed.EventToolCompleted:
+	case runfeed.EventToolRequested, runfeed.EventToolStarted, runfeed.EventToolCompleted, "tool.pending":
 		event.Data = publicToolRunFeedData(event)
 		// Untrusted model arguments or error text must never escape through
 		// Message, Delta or an opaque nested provider field.
 		event.Message, event.Delta = "", ""
-	case runfeed.EventModelDelta, runfeed.EventModelCompleted:
+	case runfeed.EventInteractionRequired:
+		event.Data = publicRunFeedApprovalData(event)
+		event.Message, event.Delta = "", ""
+	case runfeed.EventModelStarted, runfeed.EventModelDelta, runfeed.EventModelCompleted:
 		// Model Delta is rendered from the explicit author-visible delta field;
 		// its opaque provider metadata may contain internal reasoning.
 		event.Data = nil
