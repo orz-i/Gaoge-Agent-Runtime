@@ -10,6 +10,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 type HandoffStarter interface {
@@ -63,6 +64,30 @@ func (runner *Runner) Delegate(ctx context.Context, turnID string, request Deleg
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil {
 		return DelegationResult{}, err
+	}
+	if !runner.canDelegate(invocation) {
+		return DelegationResult{}, ErrInvalidRequest
+	}
+	// Manual API must check the same frozen host capability policy as the
+	// model's Tool path, before any child topology/budget side effects.
+	if runner.manualDelegationPolicy != nil {
+		normalized, normalizeErr := normalizeDelegateRequest(request)
+		if normalizeErr != nil {
+			return DelegationResult{}, normalizeErr
+		}
+		callArguments, marshalErr := json.Marshal(normalized)
+		if marshalErr != nil {
+			return DelegationResult{}, marshalErr
+		}
+		request, err = runner.manualDelegationPolicy.PrepareDelegation(ctx, tools.ExecutionRequest{
+			RunID: invocation.ExecutionRefID, Call: tools.Call{
+				ID:      stableID("manual", turn.ID, normalized.RoleID, normalized.Goal),
+				ToolKey: DelegationToolKey, Arguments: callArguments,
+			},
+		}, normalized)
+		if err != nil {
+			return DelegationResult{}, err
+		}
 	}
 	return runner.delegate(ctx, turn, invocation, request)
 }
