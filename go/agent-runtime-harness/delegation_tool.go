@@ -141,6 +141,8 @@ func delegationReceiptErrorCode(status handoff.Status) string {
 		return "delegation.child_failed"
 	case handoff.StatusCancelled:
 		return "delegation.child_cancelled"
+	case handoff.StatusQueued, handoff.StatusRunning, handoff.StatusCompleted:
+		return ""
 	default:
 		return ""
 	}
