@@ -504,3 +504,56 @@ func TestRuntimeToolSearchMaximumCandidateUnion(t *testing.T) {
 			len(persisted.Discovery.LoadedKeys), persisted.Discovery.Receipts)
 	}
 }
+
+type emptyNewsDiscovery struct{ calls int }
+
+func (search *emptyNewsDiscovery) Search(_ context.Context, request agent.ToolDiscoveryRequest) ([]string, error) {
+	search.calls++
+	if request.RunID == "" || request.MaxResults != 5 {
+		return nil, agent.ErrToolDiscoveryInvalid
+	}
+	return nil, nil
+}
+
+type changingEmptySearchModel struct {
+	t     *testing.T
+	calls int
+}
+
+func (client *changingEmptySearchModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
+	client.calls++
+	if client.calls <= 2 {
+		if !slices.ContainsFunc(request.Tools, func(item tools.Definition) bool { return item.Key == agent.ToolDiscoveryKey }) {
+			client.t.Fatal("Tool discovery missing before the empty-match cap")
+		}
+		return model.Response{ToolCalls: []tools.Call{{ID: fmt.Sprintf("news-search-%d", client.calls), ToolKey: agent.ToolDiscoveryKey,
+			Arguments: json.RawMessage(fmt.Sprintf(`{"query":"今天科技新闻查询%d"}`, client.calls))}}}, nil
+	}
+	if slices.ContainsFunc(request.Tools, func(item tools.Definition) bool { return item.Key == agent.ToolDiscoveryKey }) {
+		client.t.Fatal("empty discovery searches continued instead of stopping after two")
+	}
+	if len(request.Messages) == 0 || !strings.Contains(strings.ToLower(request.Messages[0].Content), "never invent citations") {
+		client.t.Fatal("no-evidence completion guidance not provided")
+	}
+	return model.Response{Content: "Unable to verify recent AI news without authorized sources."}, nil
+}
+func TestRuntimeEmptyChineseToolSearchStopsBeforeHardBudgetAcrossChangedQueries(t *testing.T) {
+	t.Parallel()
+	runtime, _ := newTestRuntimeAndApprovals(t)
+	executions := 0
+	registry, keys := discoveryTestRegistry(t, 18, &executions)
+	search := &emptyNewsDiscovery{}
+	client := &changingEmptySearchModel{t: t}
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, Catalog: registry, Executor: registry, ToolDiscovery: search})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := startRequest("news-discovery-bound", "news-discovery-request", "Find verified AI news in the last 24 hours", keys...)
+	snapshot, err := runner.StartRun(t.Context(), request)
+	if err != nil || snapshot.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("news response status=%s err=%v", snapshot.Run.Status, err)
+	}
+	if client.calls != 3 || search.calls != 2 || executions != 0 {
+		t.Fatalf("unbounded discovery: model=%d search=%d actual=%d", client.calls, search.calls, executions)
+	}
+}

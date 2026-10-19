@@ -293,6 +293,17 @@ func (runner *Runner) buildModelRequest(
 		hostedTools = hostedToolsWithoutKeys(hostedTools, repeatedToolKeys)
 		messages = withRepeatedToolGuidance(messages, repeatedToolKeys)
 	}
+	// Unlike identical-call suppression, this detects *consecutive failed
+	// outcomes* even when the model changes search terms or Tool arguments.
+	// A stopped Tool is removed only from this Run's next declarations; this
+	// cannot increase authorized capabilities and requires no new state key.
+	if stalled := unproductiveToolKeys(messages); len(stalled) != 0 {
+		definitions = definitionsWithoutKeys(definitions, stalled)
+		hostedTools = hostedToolsWithoutKeys(hostedTools, stalled)
+		messages = withSystemGuidance(messages,
+			"Repeated attempts to use these tools returned no authorized match or recoverable failures: "+strings.Join(stalled, ", ")+
+				". Do not repeat the same operation using altered parameters. Continue with available evidence or finish now, clearly reporting any missing current information or sources. Never invent citations.")
+	}
 	if hint := automaticAllowanceHint(state); hint != "" {
 		messages = withSystemGuidance(messages, hint)
 	}
