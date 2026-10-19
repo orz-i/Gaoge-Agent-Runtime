@@ -68,7 +68,7 @@ func TestAsyncDelegationRecordsChildFailureAndCancellation(t *testing.T) {
 		t.Run(string(status), func(t *testing.T) {
 			t.Parallel()
 			fixture := newAsyncDelegationFixture(t)
-			runner, direct := fixture.compose(t, nil)
+			runner, _ := fixture.compose(t, nil)
 			started := fixture.start(t, runner)
 			fixture.finishChild(t, status)
 			root, err := fixture.runtime.Load(t.Context(), snapshotExecutionRef(t, started))
@@ -77,7 +77,7 @@ func TestAsyncDelegationRecordsChildFailureAndCancellation(t *testing.T) {
 			}
 			// The independently delegated child may fail, but the root must be
 			// able to synthesize the successes that remain in the transcript.
-			runner, direct = fixture.compose(t, nil)
+			runner, direct := fixture.compose(t, nil)
 			completed, err := direct.Resume(t.Context(), root.Run.ID, root.Run.Revision)
 			if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
 				t.Fatalf("child failure escaped as parent failure: %#v, %v", completed.Run, err)
@@ -96,8 +96,8 @@ func TestAsyncDelegationRecordsChildFailureAndCancellation(t *testing.T) {
 			if err := json.Unmarshal([]byte(last.Content), &receipt); err != nil || receipt.Status != string(status) || receipt.ErrorCode == "" {
 				t.Fatalf("child terminal receipt missing or unsafe: %s, err=%v", last.Content, err)
 			}
-			if jsonContains := string(last.Content); strings.Contains(jsonContains, "test.child.terminal") {
-				t.Fatalf("provider child detail leaked to root transcript: %s", jsonContains)
+			if strings.Contains(last.Content, "test.child.terminal") {
+				t.Fatalf("provider child detail leaked to root transcript: %s", last.Content)
 			}
 		})
 	}
