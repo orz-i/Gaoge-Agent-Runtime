@@ -78,7 +78,7 @@ func (runner *Runner) completeWithToolResult(
 		},
 	})
 	if err == nil {
-		runner.publishToolEvent(ctx, completed, EventToolCompleted, result.Receipt)
+		runner.publishToolEvent(ctx, completed, EventToolCompleted, publicToolCompletionReceipt(state, result.Receipt))
 		runner.publishRunEvent(ctx, completed, EventRunCompleted, true)
 	}
 	return completed, err
@@ -1675,7 +1675,7 @@ func (runner *Runner) persistCompletedToolCall(
 		}},
 	})
 	if err == nil {
-		runner.publishToolEvent(ctx, next, EventToolCompleted, result.Receipt)
+		runner.publishToolEvent(ctx, next, EventToolCompleted, toolFeedCompletion{Receipt: result.Receipt, CallID: execution.call.ID, ToolKey: execution.call.ToolKey})
 	}
 	return next, false, err
 }
@@ -1896,6 +1896,29 @@ func (runner *Runner) publishRunEvent(ctx context.Context, snapshot kernel.Snaps
 		Status: string(snapshot.Run.Status), Terminal: terminal,
 	})
 	runner.recordRunTelemetry(ctx, snapshot, eventType)
+}
+
+// Keep the established executor receipt fields and attach frozen call
+// identity for correlating public started/completed phases. HTTP projects
+// this metadata through a separate allowlist before it leaves the server.
+type toolFeedCompletion struct {
+	tools.Receipt
+	CallID  string `json:"callID,omitempty"`
+	ToolKey string `json:"toolKey,omitempty"`
+}
+
+func publicToolCompletionReceipt(state runState, receipt tools.Receipt) toolFeedCompletion {
+	value := toolFeedCompletion{Receipt: receipt}
+	for i := len(state.Messages) - 1; i >= 0; i-- {
+		message := state.Messages[i]
+		if message.Role != model.RoleTool {
+			continue
+		}
+		value.CallID = message.ToolCallID
+		value.ToolKey = toolCallKeysByID(state.Messages)[value.CallID]
+		break
+	}
+	return value
 }
 
 func (runner *Runner) publishToolEvent(

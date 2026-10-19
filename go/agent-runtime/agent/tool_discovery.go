@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -398,5 +399,19 @@ func (runner *Runner) searchPendingTool(
 	})
 	state.Discovery = &next
 	execution.state = state
-	return runner.persistCompletedToolCall(ctx, snapshot, execution, result)
+	committed, yielded, commitErr := runner.persistCompletedToolCall(ctx, snapshot, execution, result)
+	if commitErr == nil {
+		// This is SDK-authored, non-provider progress. Only the number of
+		// matched *already authorized* Tool definitions is public; never
+		// publish search terms, schemas or returned Tool arguments.
+		code := "tool_discovery.matched"
+		if len(output.ToolKeys) == 0 {
+			code = "tool_discovery.empty"
+		}
+		runner.publishValue(ctx, committed.Run.ID, plugin.Event{Type: "activity.user", Revision: committed.Run.Revision, Status: string(committed.Run.Status)}, struct {
+			Code  string `json:"code"`
+			Count int    `json:"count"`
+		}{Code: code, Count: len(output.ToolKeys)})
+	}
+	return committed, yielded, commitErr
 }

@@ -1,7 +1,10 @@
 package http
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -223,9 +226,123 @@ func publicKernelEvents(events []kernel.Event) []kernel.Event {
 	return result
 }
 
+// Tool lifecycle events are not generic business JSON: Agent publishes the
+// complete model-authored Tool Call at tool.started. A readable Run Feed must
+// never turn that private execution intent into an HTTP data channel.
+// Keep a stable opaque call ID and a canonical, bounded Tool key only.
+func publicToolFeedKey(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 160 {
+		return ""
+	}
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' ||
+			char >= '0' && char <= '9' || char == '.' || char == '-' || char == '_' || char == ':' {
+			continue
+		}
+		return ""
+	}
+	return value
+}
+
+func publicToolCallID(runID, callID string) string {
+	if strings.TrimSpace(callID) == "" {
+		return ""
+	}
+	digest := sha256.Sum256([]byte(runID + "\x00" + callID))
+	return "call_" + hex.EncodeToString(digest[:8])
+}
+
+func publicToolRunFeedData(event runfeed.Event) json.RawMessage {
+	var fields struct {
+		ID          string `json:"id"`
+		CallID      string `json:"callID"`
+		ToolKey     string `json:"toolKey"`
+		ExecutionID string `json:"executionID"`
+	}
+	if json.Unmarshal(event.Data, &fields) != nil {
+		return nil
+	}
+	if fields.CallID == "" {
+		fields.CallID = fields.ID
+	}
+	if fields.CallID == "" {
+		fields.CallID = fields.ExecutionID
+	}
+	result, err := json.Marshal(struct {
+		CallID  string `json:"callID,omitempty"`
+		ToolKey string `json:"toolKey,omitempty"`
+		Status  string `json:"status"`
+	}{
+		CallID: publicToolCallID(event.RunID, fields.CallID), ToolKey: publicToolFeedKey(fields.ToolKey),
+		Status: func() string {
+			if event.Type == runfeed.EventToolStarted {
+				return "running"
+			}
+			if event.Message != "" {
+				return "needs_correction"
+			}
+			return "completed"
+		}(),
+	})
+	if err != nil {
+		return nil
+	}
+	return result
+}
+
+func publicDiscoveryProgress(value json.RawMessage) json.RawMessage {
+	var data struct {
+		Code  string `json:"code"`
+		Count int    `json:"count"`
+	}
+	if json.Unmarshal(value, &data) != nil || data.Count < 0 || data.Count > 5 {
+		return nil
+	}
+	title, summary := "Tool discovery", ""
+	switch data.Code {
+	case "tool_discovery.empty":
+		if data.Count != 0 {
+			return nil
+		}
+		summary = "No matching authorized tools found"
+	case "tool_discovery.matched":
+		if data.Count == 0 {
+			return nil
+		}
+		summary = fmt.Sprintf("Matched %d authorized tools", data.Count)
+	default:
+		return nil
+	}
+	projected, err := json.Marshal(struct {
+		Title   string `json:"title"`
+		Summary string `json:"summary"`
+	}{title, summary})
+	if err != nil {
+		return nil
+	}
+	return projected
+}
+
 func publicRunFeedEvent(event runfeed.Event) runfeed.Event {
-	event.Message = PublicEventMessage(event.Type, event.Status, event.Message)
-	event.Data = PublicDiagnosticPayload(event.Data)
+	switch event.Type {
+	case "activity.user":
+		event.Data = publicDiscoveryProgress(event.Data)
+		event.Message, event.Delta = "", ""
+	case runfeed.EventToolStarted, runfeed.EventToolCompleted:
+		event.Data = publicToolRunFeedData(event)
+		// Untrusted model arguments or error text must never escape through
+		// Message, Delta or an opaque nested provider field.
+		event.Message, event.Delta = "", ""
+	case runfeed.EventModelDelta, runfeed.EventModelCompleted:
+		// Model Delta is rendered from the explicit author-visible delta field;
+		// its opaque provider metadata may contain internal reasoning.
+		event.Data = nil
+		event.Message = ""
+	default:
+		event.Message = PublicEventMessage(event.Type, event.Status, event.Message)
+		event.Data = PublicDiagnosticPayload(event.Data)
+	}
 	return event
 }
 

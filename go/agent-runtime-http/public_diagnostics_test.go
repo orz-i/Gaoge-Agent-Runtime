@@ -124,3 +124,80 @@ func TestPublicSDKErrorJournalFailsClosedOnMalformedDiagnostics(t *testing.T) {
 		t.Fatal("projecting journal events must not modify durable events")
 	}
 }
+
+func TestPublicRunFeedRedactsToolArgumentsAndProviderDeltaMetadata(t *testing.T) {
+	t.Parallel()
+	const secret = "PRIVATE_TEST_TOOL_TOKEN"
+	for _, event := range []runfeed.Event{
+		{RunID: "child-run", Seq: 1, Type: runfeed.EventToolStarted, Message: secret, Delta: secret, Data: json.RawMessage(`{"id":"call-one","toolKey":"mcp.web_search","name":"web_search","arguments":{"apiKey":"PRIVATE_TEST_TOOL_TOKEN"},"secret":"PRIVATE_TEST_TOOL_TOKEN"}`)},
+		{RunID: "child-run", Seq: 2, Type: runfeed.EventToolCompleted, Message: "tool.arguments_schema", Data: json.RawMessage(`{"id":"call-one","toolKey":"mcp.web_search","arguments":{"apiKey":"PRIVATE_TEST_TOOL_TOKEN"}}`)},
+		{RunID: "child-run", Seq: 3, Type: runfeed.EventModelDelta, Delta: "Visible answer", Data: json.RawMessage(`{"reasoning":"PRIVATE_TEST_TOOL_TOKEN","usage":42}`)},
+		{RunID: "child-run", Seq: 4, Type: runfeed.EventModelCompleted, Data: json.RawMessage(`{"response":{"internal":"PRIVATE_TEST_TOOL_TOKEN"}}`)},
+	} {
+		projected := publicRunFeedEvent(event)
+		encoded, _ := json.Marshal(projected)
+		if strings.Contains(string(encoded), secret) || strings.Contains(string(encoded), `"arguments"`) || strings.Contains(string(encoded), `"reasoning"`) {
+			t.Fatalf("public feed event %s leaked raw payload: %s", event.Type, encoded)
+		}
+		if event.Type == runfeed.EventToolStarted && (!strings.Contains(string(encoded), `"toolKey":"mcp.web_search"`) || !strings.Contains(string(encoded), `"status":"running"`)) {
+			t.Fatalf("missing safe tool identity: %s", encoded)
+		}
+		if event.Type == runfeed.EventToolCompleted && !strings.Contains(string(encoded), `"status":"needs_correction"`) {
+			t.Fatalf("recoverable tool error was marked successful: %s", encoded)
+		}
+		if event.Type == runfeed.EventModelDelta && !strings.Contains(string(encoded), `"delta":"Visible answer"`) {
+			t.Fatalf("visible model delta removed: %s", encoded)
+		}
+		if !strings.Contains(string(event.Data), secret) {
+			t.Fatal("projection mutated internal Run Feed event")
+		}
+	}
+}
+
+func TestPublicToolFeedProjectionDoesNotForwardUntrustedToolIdentifier(t *testing.T) {
+	t.Parallel()
+	event := runfeed.Event{RunID: "child", Type: runfeed.EventToolStarted, Data: json.RawMessage(`{"id":"call:secret-key","toolKey":"Bearer PRIVATE_TOOL_SECRET","arguments":{"secret":"PRIVATE_TOOL_SECRET"}}`)}
+	projected := publicRunFeedEvent(event)
+	if strings.Contains(string(projected.Data), "PRIVATE") || strings.Contains(string(projected.Data), "Bearer") || strings.Contains(string(projected.Data), "secret-key") {
+		t.Fatalf("tool identifiers escaped: %s", projected.Data)
+	}
+	if !strings.Contains(string(projected.Data), `"callID":"call_`) {
+		t.Fatalf("opaque stable id absent: %s", projected.Data)
+	}
+}
+
+func TestPublicRunFeedDiscoveryProgressOnlyAcceptsTrustedEnumeratedFacts(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		data     string
+		expected string
+	}{
+		{`{"code":"tool_discovery.empty","count":0,"secret":"PRIVATE_DISCOVERY_QUERY"}`, "No matching authorized tools found"},
+		{`{"code":"tool_discovery.matched","count":2,"searchTerms":"PRIVATE_DISCOVERY_QUERY"}`, "Matched 2 authorized tools"},
+		{`{"title":"PRIVATE_DISCOVERY_QUERY","summary":"unsafe"}`, ""},
+		{`{"code":"tool_discovery.matched","count":99}`, ""},
+	} {
+		event := runfeed.Event{RunID: "child", Type: "activity.user", Data: json.RawMessage(tc.data), Message: "PRIVATE_DISCOVERY_QUERY"}
+		projected := publicRunFeedEvent(event)
+		encoded, _ := json.Marshal(projected)
+		if strings.Contains(string(encoded), "PRIVATE_DISCOVERY_QUERY") {
+			t.Fatalf("untrusted progress leaked: %s", encoded)
+		}
+		if tc.expected != "" && !strings.Contains(string(encoded), tc.expected) || tc.expected == "" && len(projected.Data) != 0 {
+			t.Fatalf("public progress projection=%s expected=%q", encoded, tc.expected)
+		}
+	}
+}
+
+func TestPublicRunFeedPairsStableToolPhasesWithoutDisclosure(t *testing.T) {
+	t.Parallel()
+	started := publicRunFeedEvent(runfeed.Event{RunID: "child", Type: runfeed.EventToolStarted, Data: json.RawMessage(`{"id":"local-call-1","toolKey":"mcp.web_search","arguments":{"query":"PRIVATE_SEARCH_TEXT"}}`)})
+	finished := publicRunFeedEvent(runfeed.Event{RunID: "child", Type: runfeed.EventToolCompleted, Data: json.RawMessage(`{"callID":"local-call-1","executionID":"executor-receipt-differs","toolKey":"mcp.web_search","disposition":"committed"}`)})
+	var start, finish struct{ CallID, ToolKey, Status string }
+	if json.Unmarshal(started.Data, &start) != nil || json.Unmarshal(finished.Data, &finish) != nil || start.CallID == "" || start.CallID != finish.CallID || start.ToolKey != "mcp.web_search" || start.ToolKey != finish.ToolKey || start.Status != "running" || finish.Status != "completed" {
+		t.Fatalf("started=%s finished=%s", started.Data, finished.Data)
+	}
+	if strings.Contains(string(started.Data), "PRIVATE_SEARCH_TEXT") || strings.Contains(string(finished.Data), "executor-receipt-differs") {
+		t.Fatal("private identifiers escaped public feed")
+	}
+}
