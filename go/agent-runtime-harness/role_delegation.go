@@ -62,10 +62,18 @@ func intersectToolKeys(requested, allowed []string) []string {
 // currently authorized parent Run. Only provider-hosted and backend-local
 // dispatches are eligible; runtime controls and client/browser dispatches
 // cannot be silently delegated to a child session.
+// Internal Harness/Agent orchestration is never a redistributable tool grant.
+// It may be available to the parent but cannot be delegated as generic local
+// dispatch: doing so would bypass context, depth and scope-specific controls.
+func nonAssignableRuntimeTool(key string) bool {
+	return strings.HasPrefix(key, "harness.") || key == agent.ToolDiscoveryKey ||
+		strings.HasPrefix(key, "runtime.")
+}
+
 func assignableParentToolPolicies(config ConfigSnapshot, parent agent.View) []ToolPolicySnapshot {
 	policies := make([]ToolPolicySnapshot, 0, len(config.ToolPolicies))
 	for _, policy := range config.ToolPolicies {
-		if !slices.Contains(parent.ToolKeys, policy.Key) {
+		if !slices.Contains(parent.ToolKeys, policy.Key) || nonAssignableRuntimeTool(policy.Key) {
 			continue
 		}
 		if policy.ExecutionMode != "local_dispatch" && policy.ExecutionMode != "provider_hosted" {
