@@ -58,6 +58,83 @@ func intersectToolKeys(requested, allowed []string) []string {
 	return normalizeStrings(result)
 }
 
+// Parent-issued Tool selection is a per-delegation *subset* of a frozen,
+// currently authorized parent Run. Only provider-hosted and backend-local
+// dispatches are eligible; runtime controls and client/browser dispatches
+// cannot be silently delegated to a child session.
+func assignableParentToolPolicies(config ConfigSnapshot, parent agent.View) []ToolPolicySnapshot {
+	policies := make([]ToolPolicySnapshot, 0, len(config.ToolPolicies))
+	for _, policy := range config.ToolPolicies {
+		if !slices.Contains(parent.ToolKeys, policy.Key) {
+			continue
+		}
+		if policy.ExecutionMode != "local_dispatch" && policy.ExecutionMode != "provider_hosted" {
+			continue
+		}
+		if policy.DefinitionVersion == "" {
+			continue
+		}
+		policies = append(policies, policy)
+	}
+	return policies
+}
+
+func delegatedParentToolSelection(config ConfigSnapshot, parent agent.View, role RoleSnapshot, keys []string) ([]string, []agent.HostedToolGrant, error) {
+	if len(keys) == 0 {
+		return nil, nil, nil
+	}
+	// Parent-local execution capabilities cannot be grafted onto an A2A or
+	// otherwise externally routed member. Those runners own their own
+	// independently negotiated capabilities and credential boundaries.
+	if role.MemberID != "" && role.MemberID != role.ID {
+		return nil, nil, ErrInvalidRequest
+	}
+	policies := assignableParentToolPolicies(config, parent)
+	local := []string{}
+	hosted := []agent.HostedToolGrant{}
+	effectiveChildModel := firstNonEmpty(role.Model, parent.Model)
+	for _, key := range keys {
+		matched := false
+		for _, policy := range policies {
+			if policy.Key != key {
+				continue
+			}
+			matched = true
+			if policy.ExecutionMode == "provider_hosted" {
+				// Provider-native Tools are tied to the exact parent model, not
+				// simply their key or vendor. A different child model must
+				// receive its own independently validated Role grant.
+				if effectiveChildModel != parent.Model || parent.Model == "" {
+					return nil, nil, ErrInvalidRequest
+				}
+				hosted = append(hosted, agent.HostedToolGrant{Key: key, DefinitionVersion: policy.DefinitionVersion})
+			} else {
+				local = append(local, key)
+			}
+			break
+		}
+		if !matched {
+			return nil, nil, ErrInvalidRequest
+		}
+	}
+	return normalizeStrings(local), hosted, nil
+}
+
+func joinDelegatedHostedGrants(roleGrants, selectedGrants []agent.HostedToolGrant) ([]agent.HostedToolGrant, error) {
+	versions := map[string]string{}
+	for _, grant := range append(append([]agent.HostedToolGrant(nil), roleGrants...), selectedGrants...) {
+		if existing, ok := versions[grant.Key]; ok && existing != grant.DefinitionVersion {
+			return nil, ErrInvalidRequest
+		}
+		versions[grant.Key] = grant.DefinitionVersion
+	}
+	result := make([]agent.HostedToolGrant, 0, len(versions))
+	for key, version := range versions {
+		result = append(result, agent.HostedToolGrant{Key: key, DefinitionVersion: version})
+	}
+	return agent.NormalizeHostedToolGrantsForRole(result)
+}
+
 func roleAgentLimits(parent agent.Limits, role budget.Limits) agent.Limits {
 	// Shared child/concurrency limits are enforced by the Turn ledger. The
 	// Feature still receives its ordinary local call/token limits.
@@ -155,6 +232,42 @@ func NewRoleModelMiddleware(store Store) (plugin.ModelMiddleware, error) {
 
 type roleModelMiddleware struct{ store Store }
 
+// Only advertise keys that are both frozen on this Turn and actually visible
+// in the supervising model's resolved, current request. Provider-hosted names
+// are provider/model-bound; their assigned child must run this same model.
+func modelDelegationToolCandidates(request model.Request, config ConfigSnapshot) []string {
+	visible := map[string]bool{}
+	for _, tool := range request.Tools {
+		visible[tool.Key] = true
+	}
+	for _, tool := range request.HostedTools {
+		visible[tool.Key] = true
+	}
+	keys := []string{}
+	for _, policy := range config.ToolPolicies {
+		if !visible[policy.Key] || (policy.ExecutionMode != "local_dispatch" && policy.ExecutionMode != "provider_hosted") {
+			continue
+		}
+		if policy.ExecutionMode == "provider_hosted" {
+			anyCompatible := false
+			for _, role := range config.Roles {
+				if role.MemberID != "" && role.MemberID != role.ID {
+					continue
+				}
+				if firstNonEmpty(role.Model, request.Model) == request.Model && request.Model != "" {
+					anyCompatible = true
+					break
+				}
+			}
+			if !anyCompatible {
+				continue
+			}
+		}
+		keys = append(keys, policy.Key)
+	}
+	return normalizeStrings(keys)
+}
+
 func (roleModelMiddleware) Name() string { return "harness.roles" }
 
 func (middleware roleModelMiddleware) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
@@ -186,6 +299,7 @@ func (middleware roleModelMiddleware) Model(ctx context.Context, request model.R
 		ids = append(ids, role.ID)
 		descriptions = append(descriptions, role.ID+": "+role.Name+" — "+role.Description)
 	}
+	assignable := modelDelegationToolCandidates(request, config)
 	definitions := request.Tools[:0]
 	for _, definition := range request.Tools {
 		if definition.Key == DelegationToolKey {
@@ -193,9 +307,17 @@ func (middleware roleModelMiddleware) Model(ctx context.Context, request model.R
 				continue
 			}
 			definition.Description = "Delegate a focused subtask using one available role. Available roles:\n" + strings.Join(descriptions, "\n")
-			definition.InputSchema, err = json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": []string{"roleID", "goal"}, "properties": map[string]any{
+			properties := map[string]any{
 				"roleID": map[string]any{"type": "string", "enum": ids}, "goal": map[string]any{"type": "string", "minLength": 1, "maxLength": 200000},
-			}})
+			}
+			if len(assignable) != 0 {
+				properties["toolKeys"] = map[string]any{
+					"type": "array", "maxItems": 16, "uniqueItems": true,
+					"items":       map[string]any{"type": "string", "enum": assignable},
+					"description": "OPTIONAL: select only these currently authorized parent tools for this child. Omitting this field grants no additional parent tools. A provider-hosted tool may be delegated ONLY if the child uses the exact parent model. A child using a different model requires its own role-hosted authorization.",
+				}
+			}
+			definition.InputSchema, err = json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": []string{"roleID", "goal"}, "properties": properties})
 			if err != nil {
 				return model.Response{}, err
 			}

@@ -23,6 +23,9 @@ type DelegateRequest struct {
 	RoleID   string `json:"roleID,omitempty"`
 	MemberID string `json:"memberID,omitempty"`
 	Goal     string `json:"goal"`
+	// Explicit subset of this parent Run's currently authorized tools.
+	// Omitting this field never copies the parent's full toolset.
+	ToolKeys []string `json:"toolKeys,omitempty"`
 	callID   string
 }
 
@@ -50,9 +53,19 @@ func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) 
 	request.MemberID = strings.TrimSpace(request.MemberID)
 	request.RoleID = strings.TrimSpace(request.RoleID)
 	request.Goal = strings.TrimSpace(request.Goal)
-	if (request.MemberID == "" && request.RoleID == "") || request.Goal == "" || len(request.MemberID) > 160 || len(request.RoleID) > 160 || len(request.Goal) > 200_000 {
+	if (request.MemberID == "" && request.RoleID == "") || request.Goal == "" || len(request.MemberID) > 160 || len(request.RoleID) > 160 || len(request.Goal) > 200_000 || len(request.ToolKeys) > 16 {
 		return DelegateRequest{}, ErrInvalidRequest
 	}
+	seen := map[string]bool{}
+	for index, key := range request.ToolKeys {
+		key = strings.TrimSpace(key)
+		if key == "" || len(key) > 160 || seen[key] {
+			return DelegateRequest{}, ErrInvalidRequest
+		}
+		seen[key] = true
+		request.ToolKeys[index] = key
+	}
+	request.ToolKeys = normalizeStrings(request.ToolKeys)
 	return request, nil
 }
 
@@ -150,6 +163,9 @@ func (runner *Runner) prepareDelegation(
 		return handoff.Delegation{}, kernel.Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	delegationID := stableID("hd", turn.ID, firstNonEmpty(request.RoleID, request.MemberID), request.Goal)
+	if len(request.ToolKeys) != 0 && request.callID == "" {
+		delegationID = stableID("hd", turn.ID, firstNonEmpty(request.RoleID, request.MemberID), request.Goal, strings.Join(request.ToolKeys, "\x00"))
+	}
 	if request.callID != "" {
 		delegationID = delegationToolID(invocation, request.callID)
 	}
@@ -166,6 +182,9 @@ func (runner *Runner) prepareDelegation(
 		return frozen, parent, loadErr
 	}
 	if config.Roles == nil && config.SharedBudget == nil && request.RoleID == "" {
+		if len(request.ToolKeys) != 0 {
+			return handoff.Delegation{}, parent, ErrInvalidRequest
+		}
 		return delegation, parent, nil
 	}
 	role, found := findRole(config.Roles, request.RoleID)
@@ -184,14 +203,27 @@ func (runner *Runner) prepareDelegation(
 	if len(role.ModelOptions) != 0 {
 		delegation.ModelOptions = append(json.RawMessage(nil), role.ModelOptions...)
 	}
+	view, viewErr := agent.ViewState(parent)
+	if viewErr != nil {
+		return handoff.Delegation{}, parent, viewErr
+	}
+	selectedLocal, selectedHosted, selectErr := delegatedParentToolSelection(config, view, role, request.ToolKeys)
+	if selectErr != nil {
+		return handoff.Delegation{}, parent, tools.NewRecoverableCallError(
+			"delegation.tool_selection_denied", "Select only tools already authorized on the parent Run and supported by the child model. Provider-hosted Tools require the same parent/child model.", selectErr)
+	}
 	delegation.Instructions = roleInstructions(role)
 	delegation.ToolKeys = append(delegation.ToolKeys, roleToolKeys(role)...)
+	delegation.ToolKeys = append(delegation.ToolKeys, selectedLocal...)
 	if view, viewErr := agent.ViewState(parent); viewErr == nil {
 		delegation.ToolKeys = intersectToolKeys(delegation.ToolKeys, view.ToolKeys)
 	}
 	// This grant is frozen specifically for the selected role. It does not
 	// change the parent Agent's ToolKeys, or become available to sibling Runs.
-	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), role.HostedToolGrants...)
+	delegation.HostedToolGrants, err = joinDelegatedHostedGrants(role.HostedToolGrants, selectedHosted)
+	if err != nil {
+		return handoff.Delegation{}, parent, ErrInvalidRequest
+	}
 	for _, grant := range delegation.HostedToolGrants {
 		delegation.ToolKeys = append(delegation.ToolKeys, grant.Key)
 	}
