@@ -97,6 +97,20 @@ func TestDelegationModelAdvertisesOnlyAssignableVisibleTools(t *testing.T) {
 	if !slices.Equal(got, []string{"mcp.lookup", "minimax.web_search"}) {
 		t.Fatalf("bad model-facing candidates: %+v", got)
 	}
+	// Even if an erroneous host labels an internal control as local and
+	// exposes it to the parent model, the delegation schema must not offer it
+	// as a child grant; the execution guard already rejects the same keys.
+	for _, control := range []string{DelegationToolKey, CapabilityInvocationToolKey, ContextArtifactToolKey,
+		GroupChatHandoffToolKey, agent.ToolDiscoveryKey, "runtime.internal"} {
+		config.ToolPolicies = append(config.ToolPolicies, ToolPolicySnapshot{
+			Key: control, DefinitionVersion: "forged-v1", ExecutionMode: "local_dispatch",
+		})
+		request.Tools = append(request.Tools, tools.Definition{Key: control})
+	}
+	got = modelDelegationToolCandidates(request, config)
+	if !slices.Equal(got, []string{"mcp.lookup", "minimax.web_search"}) {
+		t.Fatalf("parent's private control keys were advertised for delegation: %+v", got)
+	}
 	config.Roles = config.Roles[1:]
 	got = modelDelegationToolCandidates(request, config)
 	if !slices.Equal(got, []string{"mcp.lookup"}) {
