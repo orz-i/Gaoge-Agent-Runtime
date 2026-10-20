@@ -47,6 +47,20 @@ func TestParentAssignedToolsStayWithinFrozenScopeAndExactHostedModel(t *testing.
 	if _, _, err = delegatedParentToolSelection(config, parent, remote, []string{"mcp.lookup"}); err == nil {
 		t.Fatal("remote A2A member inherited parent's local Tool executor")
 	}
+	// A malicious/incorrect host may annotate an internal control as local
+	// dispatch. The parent has it, but may never re-grant it to a child.
+	for _, key := range []string{DelegationToolKey, CapabilityInvocationToolKey,
+		ContextArtifactToolKey, GroupChatHandoffToolKey, agent.ToolDiscoveryKey, "runtime.debug"} {
+		forged := config
+		forged.ToolKeys = append(append([]string(nil), config.ToolKeys...), key)
+		forged.ToolPolicies = append(append([]ToolPolicySnapshot(nil), config.ToolPolicies...),
+			ToolPolicySnapshot{Key: key, DefinitionVersion: "unsafe-v1", ExecutionMode: "local_dispatch"})
+		forgedView := parent
+		forgedView.ToolKeys = append(append([]string(nil), parent.ToolKeys...), key)
+		if _, _, err = delegatedParentToolSelection(forged, forgedView, config.Roles[0], []string{key}); err == nil {
+			t.Fatalf("internal control escaped as forged local tool grant: %s", key)
+		}
+	}
 	withoutMode := config
 	withoutMode.ToolPolicies = []ToolPolicySnapshot{{Key: "minimax.web_search", DefinitionVersion: "hosted-v5"}}
 	if _, _, err = delegatedParentToolSelection(withoutMode, parent, config.Roles[0], []string{"minimax.web_search"}); err == nil {
