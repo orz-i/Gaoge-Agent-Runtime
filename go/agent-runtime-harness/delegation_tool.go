@@ -224,7 +224,7 @@ func DelegationToolRegistration(handler *DelegationToolHandler) tools.Registrati
 			Key:         DelegationToolKey,
 			Name:        "delegate_to_specialist_agent",
 			Description: "Delegate one focused subtask to an authorized specialist. A failed or cancelled child returns a status receipt; use successful evidence, retry selectively, or explain the limitation instead of assuming the parent task failed.",
-			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["goal"],"anyOf":[{"required":["roleID"]},{"required":["memberID"]}],"properties":{"roleID":{"type":"string","minLength":1,"maxLength":160},"memberID":{"type":"string","minLength":1,"maxLength":160},"goal":{"type":"string","minLength":1,"maxLength":200000}}}`),
+			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["goal"],"anyOf":[{"required":["roleID"]},{"required":["memberID"]}],"properties":{"roleID":{"type":"string","minLength":1,"maxLength":160},"memberID":{"type":"string","minLength":1,"maxLength":160},"goal":{"type":"string","minLength":1,"maxLength":200000},"toolKeys":{"type":"array","maxItems":16,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":160}}}}`),
 		},
 		Handler: handler,
 	}
