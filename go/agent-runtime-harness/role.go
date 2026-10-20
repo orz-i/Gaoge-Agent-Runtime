@@ -29,7 +29,7 @@ type RoleSnapshot struct {
 	Limits           budget.Limits           `json:"limits"`
 }
 
-func normalizeRoleSnapshots(values []RoleSnapshot, parentTools []string) ([]RoleSnapshot, error) {
+func normalizeRoleSnapshots(values []RoleSnapshot, parentTools []string, parentModel string) ([]RoleSnapshot, error) {
 	if values == nil {
 		return nil, nil
 	}
@@ -56,10 +56,9 @@ func normalizeRoleSnapshots(values []RoleSnapshot, parentTools []string) ([]Role
 		}
 		value.ToolKeys = normalizeStrings(value.ToolKeys)
 		value.HostedToolGrants, err = agent.NormalizeHostedToolGrantsForRole(value.HostedToolGrants)
-		if err != nil || (len(value.HostedToolGrants) != 0 && value.Model == "") {
-			// Hosted child grants require an explicit role model. Inheriting the
-			// parent model here would turn an unpinned role declaration into a
-			// new provider tool authorization on a mutable model route.
+		if err != nil || (len(value.HostedToolGrants) != 0 && value.Model == "" && strings.TrimSpace(parentModel) == "") {
+			// A hosted grant must use either this Role's pinned model or the
+			// already-frozen parent Turn model; never an unbound provider route.
 			return nil, ErrInvalidRequest
 		}
 		for _, grant := range value.HostedToolGrants {

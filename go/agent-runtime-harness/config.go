@@ -32,6 +32,7 @@ func normalizeToolPolicies(values []ToolPolicySnapshot) ([]ToolPolicySnapshot, e
 	for index, value := range values {
 		value.Key = strings.TrimSpace(value.Key)
 		value.DefinitionVersion = strings.TrimSpace(value.DefinitionVersion)
+		value.ExecutionMode = strings.TrimSpace(value.ExecutionMode)
 		value.ApprovalCapability = strings.TrimSpace(value.ApprovalCapability)
 		value.ApprovalMode = strings.TrimSpace(value.ApprovalMode)
 		value.RiskLevel = strings.TrimSpace(value.RiskLevel)
@@ -85,6 +86,7 @@ func normalizeSkillSnapshots(values []SkillSnapshot) ([]SkillSnapshot, error) {
 type ToolPolicySnapshot struct {
 	Key                string `json:"key"`
 	DefinitionVersion  string `json:"definitionVersion"`
+	ExecutionMode      string `json:"executionMode,omitempty"`
 	ApprovalCapability string `json:"approvalCapability,omitempty"`
 	ApprovalMode       string `json:"approvalMode,omitempty"`
 	RiskLevel          string `json:"riskLevel,omitempty"`
@@ -194,7 +196,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if value.DelegationPolicy.MaxDepth < 0 || value.DelegationPolicy.MaxDepth > 32 {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
-	value.Roles, err = normalizeRoleSnapshots(value.Roles, value.ToolKeys)
+	value.Roles, err = normalizeRoleSnapshots(value.Roles, value.ToolKeys, value.Model)
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
