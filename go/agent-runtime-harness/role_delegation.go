@@ -253,7 +253,11 @@ func modelDelegationToolCandidates(request model.Request, config ConfigSnapshot)
 	}
 	keys := []string{}
 	for _, policy := range config.ToolPolicies {
-		if !visible[policy.Key] || (policy.ExecutionMode != "local_dispatch" && policy.ExecutionMode != "provider_hosted") {
+		// Candidate discovery and actual delegation admission share the same
+		// non-redistributable control exclusion. Never invite the model to
+		// request a Tool that the frozen authorization layer will reject.
+		if !visible[policy.Key] || nonAssignableRuntimeTool(policy.Key) || policy.DefinitionVersion == "" ||
+			(policy.ExecutionMode != "local_dispatch" && policy.ExecutionMode != "provider_hosted") {
 			continue
 		}
 		if policy.ExecutionMode == "provider_hosted" {
