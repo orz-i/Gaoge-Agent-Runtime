@@ -70,8 +70,15 @@ func (r *Router) route(request model.Request) (model.Client, model.Request, stri
 		name = prefix
 		request.Model = tail
 	}
-	if strings.TrimSpace(request.Model) != request.Model || strings.Contains(request.Model, "/") {
+	if strings.TrimSpace(request.Model) != request.Model || strings.TrimSpace(request.Model) == "" {
 		return nil, model.Request{}, "", ErrInvalidRouting
+	}
+	// A provider may use namespaced model IDs, e.g. openrouter/anthropic/claude-*.
+	// Only the first slash is the router delimiter; validate the remaining ID.
+	for _, segment := range strings.Split(request.Model, "/") {
+		if strings.TrimSpace(segment) == "" || strings.TrimSpace(segment) != segment {
+			return nil, model.Request{}, "", ErrInvalidRouting
+		}
 	}
 	client := r.clients[name]
 	if client == nil {

@@ -55,23 +55,34 @@ func New(config Config) (*Client, error) {
 func (*Client) ProviderName() string { return "anthropic" }
 
 type contentBlock struct {
-	Type  string          `json:"type"`
-	Text  string          `json:"text,omitempty"`
-	ID    string          `json:"id,omitempty"`
-	Name  string          `json:"name,omitempty"`
-	Input json.RawMessage `json:"input,omitempty"`
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	Thinking  string          `json:"thinking,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	Data      string          `json:"data,omitempty"`
 }
 type usage struct {
-	Input      int64 `json:"input_tokens"`
-	Output     int64 `json:"output_tokens"`
-	CacheRead  int64 `json:"cache_read_input_tokens"`
-	CacheWrite int64 `json:"cache_creation_input_tokens"`
+	Input      *int64 `json:"input_tokens"`
+	Output     *int64 `json:"output_tokens"`
+	CacheRead  *int64 `json:"cache_read_input_tokens"`
+	CacheWrite *int64 `json:"cache_creation_input_tokens"`
 }
+
+func tokenCount(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
 type messageBody struct {
-	ID         string         `json:"id"`
-	StopReason string         `json:"stop_reason"`
-	Content    []contentBlock `json:"content"`
-	Usage      usage          `json:"usage"`
+	ID         string            `json:"id"`
+	StopReason string            `json:"stop_reason"`
+	Content    []json.RawMessage `json:"content"`
+	Usage      *usage            `json:"usage"`
 }
 type prepared struct {
 	body  map[string]any
@@ -124,6 +135,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 			}
 			systems = append(systems, m.Content)
 		case model.RoleUser:
+			if m.ProviderReplay != nil {
+				return prepared{}, ErrUnsupported
+			}
 			seenNonSystem = true
 			if m.ToolCallID != "" || len(m.ToolCalls) != 0 {
 				return prepared{}, ErrUnsupported
@@ -133,6 +147,14 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 			seenNonSystem = true
 			if m.ToolCallID != "" {
 				return prepared{}, ErrUnsupported
+			}
+			if m.ProviderReplay != nil {
+				replayed, err := verifiedReplay(m)
+				if err != nil {
+					return prepared{}, err
+				}
+				messages = append(messages, map[string]any{"role": "assistant", "content": replayed})
+				continue
 			}
 			blocks := make([]map[string]any, 0, len(m.ToolCalls)+1)
 			if m.Content != "" {
@@ -155,6 +177,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 			}
 			messages = append(messages, map[string]any{"role": "assistant", "content": blocks})
 		case model.RoleTool:
+			if m.ProviderReplay != nil {
+				return prepared{}, ErrUnsupported
+			}
 			seenNonSystem = true
 			if m.ToolCallID == "" || len(m.ToolCalls) != 0 {
 				return prepared{}, ErrUnsupported
@@ -183,6 +208,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if len(definitions) > 0 {
 		payload["tools"] = definitions
 		if request.RequireToolCall {
+			if forcedChoiceUnsupported(name) {
+				return prepared{}, ErrUnsupported
+			}
 			payload["tool_choice"] = map[string]any{"type": "any"}
 		}
 	} else if request.RequireToolCall {
@@ -200,19 +228,28 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 	default:
 		return model.Response{}, ErrUnsupported
 	}
-	if body.ID == "" || body.Usage.Input < 0 || body.Usage.Output < 0 ||
-		body.Usage.CacheRead < 0 || body.Usage.CacheWrite < 0 ||
-		body.Usage.Input > math.MaxInt64-body.Usage.CacheRead ||
-		body.Usage.Input+body.Usage.CacheRead > math.MaxInt64-body.Usage.CacheWrite {
+	if body.ID == "" {
 		return model.Response{}, ErrUnsupported
 	}
-	result := model.Response{ResponseID: body.ID, Usage: &model.Usage{
-		InputTokens:  body.Usage.Input + body.Usage.CacheRead + body.Usage.CacheWrite,
-		OutputTokens: body.Usage.Output, CacheReadTokens: body.Usage.CacheRead,
-		CacheWriteTokens: body.Usage.CacheWrite,
-	}}
+	result := model.Response{ResponseID: body.ID}
+	if body.Usage != nil && body.Usage.Input != nil && body.Usage.Output != nil {
+		input, output := tokenCount(body.Usage.Input), tokenCount(body.Usage.Output)
+		read, write := tokenCount(body.Usage.CacheRead), tokenCount(body.Usage.CacheWrite)
+		if input < 0 || output < 0 || read < 0 || write < 0 ||
+			input > math.MaxInt64-read || input+read > math.MaxInt64-write {
+			return model.Response{}, ErrUnsupported
+		}
+		result.Usage = &model.Usage{
+			InputTokens:  input + read + write,
+			OutputTokens: output, CacheReadTokens: read, CacheWriteTokens: write,
+		}
+	}
 	var output strings.Builder
-	for _, block := range body.Content {
+	for _, raw := range body.Content {
+		block, err := parseContentBlock(raw)
+		if err != nil {
+			return model.Response{}, err
+		}
 		switch block.Type {
 		case "text":
 			output.WriteString(block.Text)
@@ -224,13 +261,29 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 			result.ToolCalls = append(result.ToolCalls, tools.Call{
 				ID: block.ID, ToolKey: key, Name: block.Name, Arguments: append(json.RawMessage(nil), block.Input...),
 			})
+		case "thinking":
+			if block.Signature == "" {
+				return model.Response{}, ErrUnsupported
+			}
+		case "redacted_thinking":
+			if block.Data == "" {
+				return model.Response{}, ErrUnsupported
+			}
 		default:
-			// Thinking/redacted-thinking cannot be losslessly replayed with
-			// today's text-only model.Message; fail, do not discard it.
 			return model.Response{}, ErrUnsupported
 		}
 	}
 	result.Content = output.String()
+	if len(result.ToolCalls) != 0 {
+		if body.StopReason != "tool_use" {
+			return model.Response{}, ErrUnsupported
+		}
+		serialized, err := json.Marshal(body.Content)
+		if err != nil || len(serialized) > 16<<20 {
+			return model.Response{}, ErrUnsupported
+		}
+		result.ProviderReplay = &model.ProviderReplay{Provider: "anthropic", Format: "messages.content.v1", Data: serialized}
+	}
 	if result.Content == "" && len(result.ToolCalls) == 0 {
 		return model.Response{}, ErrUnsupported
 	}
@@ -270,19 +323,23 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	var chunks = map[int]*strings.Builder{}
 	var closed = map[int]bool{}
 	var resultBytes int
+	var initialUsagePresent bool
+	var finalOutputUsageObserved bool
 	err = providerhttp.Stream(resp, func(event string, data []byte) error {
 		var frame struct {
-			Type         string       `json:"type"`
-			Message      messageBody  `json:"message"`
-			Index        int          `json:"index"`
-			ContentBlock contentBlock `json:"content_block"`
+			Type         string          `json:"type"`
+			Message      messageBody     `json:"message"`
+			Index        int             `json:"index"`
+			ContentBlock json.RawMessage `json:"content_block"`
 			Delta        struct {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json"`
 				StopReason  string `json:"stop_reason"`
+				Thinking    string `json:"thinking"`
+				Signature   string `json:"signature"`
 			} `json:"delta"`
-			Usage usage `json:"usage"`
+			Usage *usage `json:"usage"`
 		}
 		if err := json.Unmarshal(data, &frame); err != nil || (event != "" && event != frame.Type) {
 			return providerhttp.ErrProtocol
@@ -296,16 +353,20 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				return providerhttp.ErrProtocol
 			}
 			started, body = true, frame.Message
+			initialUsagePresent = body.Usage != nil && body.Usage.Input != nil
 			body.Content = nil
 		case "content_block_start":
 			if !started || blocks[frame.Index] != nil || frame.Index < 0 || frame.Index > 1024 {
 				return providerhttp.ErrProtocol
 			}
-			b := frame.ContentBlock
-			if b.Type != "text" && b.Type != "tool_use" {
+			b, err := parseContentBlock(frame.ContentBlock)
+			if err != nil {
+				return err
+			}
+			if b.Type != "text" && b.Type != "tool_use" && b.Type != "thinking" && b.Type != "redacted_thinking" {
 				return ErrUnsupported
 			}
-			resultBytes += len(b.Text) + len(b.Input)
+			resultBytes += len(b.Text) + len(b.Input) + len(b.Thinking) + len(b.Signature) + len(b.Data)
 			if resultBytes > 16<<20 {
 				return providerhttp.ErrProtocol
 			}
@@ -316,7 +377,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			if b == nil || closed[frame.Index] {
 				return providerhttp.ErrProtocol
 			}
-			resultBytes += len(frame.Delta.Text) + len(frame.Delta.PartialJSON)
+			resultBytes += len(frame.Delta.Text) + len(frame.Delta.PartialJSON) + len(frame.Delta.Thinking) + len(frame.Delta.Signature)
 			if resultBytes > 16<<20 {
 				return providerhttp.ErrProtocol
 			}
@@ -329,6 +390,16 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				if emit != nil {
 					return emit(model.StreamEvent{Delta: frame.Delta.Text})
 				}
+			case "thinking_delta":
+				if b.Type != "thinking" || b.Signature != "" {
+					return providerhttp.ErrProtocol
+				}
+				b.Thinking += frame.Delta.Thinking
+			case "signature_delta":
+				if b.Type != "thinking" || b.Signature != "" || frame.Delta.Signature == "" {
+					return providerhttp.ErrProtocol
+				}
+				b.Signature = frame.Delta.Signature
 			case "input_json_delta":
 				if b.Type != "tool_use" {
 					return providerhttp.ErrProtocol
@@ -349,8 +420,16 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				b.Input = json.RawMessage(chunks[frame.Index].String())
 			}
 		case "message_delta":
-			body.StopReason = frame.Delta.StopReason
-			body.Usage.Output = frame.Usage.Output
+			if !started {
+				return providerhttp.ErrProtocol
+			}
+			if frame.Delta.StopReason != "" {
+				body.StopReason = frame.Delta.StopReason
+			}
+			if frame.Usage != nil && frame.Usage.Output != nil && initialUsagePresent {
+				body.Usage.Output = frame.Usage.Output
+				finalOutputUsageObserved = true
+			}
 		case "message_stop":
 			if !started || len(blocks) != len(closed) {
 				return providerhttp.ErrProtocol
@@ -360,7 +439,8 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		case "error":
 			return ErrUnsupported
 		default:
-			return ErrUnsupported
+			// Anthropic explicitly permits adding new non-critical top-level
+			// SSE event types. Never ignore unknown content blocks/deltas.
 		}
 		return nil
 	})
@@ -370,12 +450,22 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	if !started || !stopped {
 		return model.Response{}, providerhttp.ErrProtocol
 	}
+	// The initial SSE usage is not final billing evidence. If the final
+	// cumulative output observation is missing, the Agent must not treat
+	// the initial zero/partial usage as a settled token receipt.
+	if !initialUsagePresent || !finalOutputUsageObserved {
+		body.Usage = nil
+	}
 	for index := 0; index < len(blocks); index++ {
 		b := blocks[index]
 		if b == nil {
 			return model.Response{}, providerhttp.ErrProtocol
 		}
-		body.Content = append(body.Content, *b)
+		encoded, err := marshalStreamBlock(b)
+		if err != nil {
+			return model.Response{}, providerhttp.ErrProtocol
+		}
+		body.Content = append(body.Content, encoded)
 	}
 	result, err := decodeResponse(body, prepared.names)
 	if err == nil && emit != nil {

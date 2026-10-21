@@ -19,12 +19,23 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// ProviderReplay is opaque provider-owned conversational evidence required for
+// lossless continuation across Tool calls (for example signed thinking blocks).
+// Only the original provider may interpret Data. It is not user-facing content
+// or a source of additional Tool permissions.
+type ProviderReplay struct {
+	Provider string          `json:"provider"`
+	Format   string          `json:"format"`
+	Data     json.RawMessage `json:"data"`
+}
+
 // Message is one provider-neutral transcript item consumed by a model.
 type Message struct {
-	Role       Role         `json:"role"`
-	Content    string       `json:"content"`
-	ToolCalls  []tools.Call `json:"toolCalls,omitempty"`
-	ToolCallID string       `json:"toolCallID,omitempty"`
+	Role           Role            `json:"role"`
+	Content        string          `json:"content"`
+	ToolCalls      []tools.Call    `json:"toolCalls,omitempty"`
+	ToolCallID     string          `json:"toolCallID,omitempty"`
+	ProviderReplay *ProviderReplay `json:"providerReplay,omitempty"`
 }
 
 // Request is one provider-neutral model call.
@@ -81,6 +92,7 @@ type Response struct {
 	Citations       []string         `json:"citations,omitempty"`
 	ResponseID      string           `json:"responseID,omitempty"`
 	Usage           *Usage           `json:"usage,omitempty"`
+	ProviderReplay  *ProviderReplay  `json:"providerReplay,omitempty"`
 }
 
 // ReasoningDelta is one provider-neutral reasoning progress observation.
@@ -206,7 +218,18 @@ func CloneResponse(value Response) Response {
 	value.Artifacts = CloneArtifactRefs(value.Artifacts)
 	value.Citations = append([]string(nil), value.Citations...)
 	value.Usage = CloneUsage(value.Usage)
+	value.ProviderReplay = CloneProviderReplay(value.ProviderReplay)
 	return value
+}
+
+// CloneProviderReplay isolates provider-specific opaque data across SDK boundaries.
+func CloneProviderReplay(value *ProviderReplay) *ProviderReplay {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	cloned.Data = cloneJSON(value.Data)
+	return &cloned
 }
 
 // CloneUsage returns an isolated usage observation.
@@ -224,6 +247,7 @@ func CloneMessages(values []Message) []Message {
 	for index, message := range values {
 		result[index] = message
 		result[index].ToolCalls = cloneToolCalls(message.ToolCalls)
+		result[index].ProviderReplay = CloneProviderReplay(message.ProviderReplay)
 	}
 	return result
 }

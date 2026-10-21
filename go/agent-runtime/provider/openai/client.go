@@ -41,8 +41,9 @@ func (*Client) ProviderName() string { return "openai" }
 type outputItem struct {
 	Type    string `json:"type"`
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type    string `json:"type"`
+		Text    string `json:"text"`
+		Refusal string `json:"refusal"`
 	} `json:"content"`
 	CallID    string `json:"call_id"`
 	Name      string `json:"name"`
@@ -52,9 +53,9 @@ type responseBody struct {
 	ID     string       `json:"id"`
 	Status string       `json:"status"`
 	Output []outputItem `json:"output"`
-	Usage  struct {
-		Input        int64 `json:"input_tokens"`
-		Output       int64 `json:"output_tokens"`
+	Usage  *struct {
+		Input        *int64 `json:"input_tokens"`
+		Output       *int64 `json:"output_tokens"`
 		InputDetails struct {
 			Cached int64 `json:"cached_tokens"`
 		} `json:"input_tokens_details"`
@@ -100,6 +101,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	}
 	input := make([]map[string]any, 0, len(request.Messages))
 	for _, m := range request.Messages {
+		if m.ProviderReplay != nil {
+			return prepared{}, ErrUnsupported
+		}
 		switch m.Role {
 		case model.RoleSystem, model.RoleUser:
 			if len(m.ToolCalls) != 0 || m.ToolCallID != "" {
@@ -155,19 +159,29 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 	if body.Status != "completed" || strings.TrimSpace(body.ID) == "" {
 		return model.Response{}, ErrUnsupported
 	}
-	result := model.Response{ResponseID: body.ID, Usage: &model.Usage{
-		InputTokens: body.Usage.Input, OutputTokens: body.Usage.Output,
-		CacheReadTokens: body.Usage.InputDetails.Cached, ReasoningTokens: body.Usage.OutputDetails.Reasoning,
-	}}
+	result := model.Response{ResponseID: body.ID}
+	if body.Usage != nil && body.Usage.Input != nil && body.Usage.Output != nil {
+		result.Usage = &model.Usage{
+			InputTokens: *body.Usage.Input, OutputTokens: *body.Usage.Output,
+			CacheReadTokens: body.Usage.InputDetails.Cached, ReasoningTokens: body.Usage.OutputDetails.Reasoning,
+		}
+	}
 	var output strings.Builder
-	var sawReasoning bool
+	var sawReasoning, sawRefusal bool
 	for _, item := range body.Output {
 		switch item.Type {
 		case "message":
 			for _, part := range item.Content {
-				if part.Type == "output_text" {
+				switch part.Type {
+				case "output_text":
 					output.WriteString(part.Text)
-				} else if part.Type != "refusal" {
+				case "refusal":
+					if part.Refusal == "" {
+						return model.Response{}, ErrUnsupported
+					}
+					sawRefusal = true
+					output.WriteString(part.Refusal)
+				default:
 					return model.Response{}, ErrUnsupported
 				}
 			}
@@ -189,6 +203,9 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 		}
 	}
 	result.Content = output.String()
+	if sawRefusal && len(result.ToolCalls) != 0 {
+		return model.Response{}, ErrUnsupported
+	}
 	if sawReasoning && len(result.ToolCalls) != 0 {
 		return model.Response{}, ErrUnsupported
 	}
@@ -244,7 +261,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			return providerhttp.ErrProtocol
 		}
 		switch frame.Type {
-		case "response.output_text.delta":
+		case "response.output_text.delta", "response.refusal.delta":
 			if emit != nil {
 				return emit(model.StreamEvent{Delta: frame.Delta})
 			}

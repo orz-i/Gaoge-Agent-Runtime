@@ -329,7 +329,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		return View{}, err
 	}
 	return View{
-		Messages:         model.CloneMessages(state.Messages),
+		Messages:         publicModelMessages(state.Messages),
 		Model:            state.Model,
 		ModelOptions:     cloneRawJSON(state.ModelOptions),
 		ToolKeys:         append([]string(nil), state.ToolKeys...),
@@ -337,9 +337,28 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		Budget:           state.Budget,
 		CallAllowance:    cloneCallAllowance(state.CallAllowance),
 		AutoAllowance:    autoAllowanceProgress(state.AutoAllowance),
-		ModelInvocations: cloneModelInvocations(state.ModelInvocations),
+		ModelInvocations: publicModelInvocations(state.ModelInvocations),
 		PendingTool:      publicPendingTool(snapshot, state.ToolWait),
 	}, nil
+}
+
+// Provider replay payloads contain opaque signed Model content. Retain them in
+// authoritative State, but do not expose them in ordinary public projections.
+func publicModelMessages(values []model.Message) []model.Message {
+	messages := model.CloneMessages(values)
+	for index := range messages {
+		messages[index].ProviderReplay = nil
+	}
+	return messages
+}
+
+func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
+	invocations := cloneModelInvocations(values)
+	for index := range invocations {
+		invocations[index].Response.ProviderReplay = nil
+		invocations[index].Request.Messages = publicModelMessages(invocations[index].Request.Messages)
+	}
+	return invocations
 }
 
 // NewRunner constructs a direct Agent feature without planning or automatic routing.
@@ -835,6 +854,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		definitions,
 		response.Content,
 		response.ToolCalls,
+		response.ProviderReplay,
 	)
 	if err != nil {
 		return queued, true, err
@@ -1287,6 +1307,7 @@ func (runner *Runner) queueToolCalls(
 	definitions []tools.Definition,
 	content string,
 	calls []tools.Call,
+	providerReplay *model.ProviderReplay,
 ) (kernel.Snapshot, error) {
 	preparedCalls := make([]tools.Call, len(calls))
 	seenCallIDs := make(map[string]struct{})
@@ -1324,7 +1345,7 @@ func (runner *Runner) queueToolCalls(
 	}
 	state.Messages = append(state.Messages, model.Message{
 		Role: model.RoleAssistant, Content: strings.TrimSpace(content),
-		ToolCalls: cloneToolCalls(preparedCalls),
+		ToolCalls: cloneToolCalls(preparedCalls), ProviderReplay: model.CloneProviderReplay(providerReplay),
 	})
 	state.PendingCalls = cloneToolCalls(preparedCalls)
 	state.RequireToolCall = false

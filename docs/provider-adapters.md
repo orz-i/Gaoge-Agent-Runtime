@@ -9,7 +9,7 @@ created.
 
 | Package | Responsibility |
 | --- | --- |
-| `model` | Existing `Client`, optional `StreamingClient`, `Request`/`Response`; optional per-request provider name for durable receipts |
+| `model` | Existing `Client`, optional `StreamingClient`, `Request`/`Response`; per-request provider name and optional opaque, signed replay envelope for faithful continuation |
 | `provider` | Immutable, explicitly composed `Router`: `provider/model-id` routes to registered providers |
 | `provider/openai` | OpenAI **Responses API**, text + local function tools |
 | `provider/anthropic` | Anthropic **Messages API**, text + local tool-use/tool-result |
@@ -24,7 +24,7 @@ The router supports a default provider for unqualified model IDs, but hosts
 should use explicitly qualified model IDs (such as `openai/gpt-4.1`) for durable
 Runs. Changing a provider's default model or swapping a registration can
 otherwise alter later calls or recovery semantics. Names are static lower-case
-identifiers. Unknown provider prefixes are rejected.
+identifiers. Only the first slash is the router delimiter, so a provider can use its own namespaced model IDs (for example `gateway/anthropic/claude-*`). Unknown provider prefixes and empty path segments are rejected.
 
 ## Running with real credentials
 
@@ -76,8 +76,25 @@ multi-provider router.
   response is required; partial SSE delivery is **not** success.
 - OpenAI response IDs, output/input/cache-read/reasoning token accounting;
   Anthropic message IDs, input/output/cache-read/cache-write token accounting.
+  Missing, null or incomplete usage is preserved as **unknown** (`nil`) and is
+  never fabricated as a zero-token receipt; existing Agent/Harness token
+  admission fails closed when accurate billing evidence is required.
+- OpenAI refusal text is preserved as terminal model content (rather than
+  disappearing behind an unsupported-response error).
+- Anthropic signed `thinking`/`redacted_thinking` blocks are preserved in an
+  optional provider-neutral `model.ProviderReplay` envelope for tool-call
+  continuation. The Agent commits the original, ordered assistant content
+  alongside the Tool intent. The Anthropic adapter validates replay against
+  the Agent-approved Tool Call IDs/names/arguments before resending it.
+  Ordinary `agent.ViewState` projections strip opaque signed evidence; trusted
+  Kernel Feature State still stores it for recovery.
 - `MaxOutputTokens`, provider-specific configured defaults (Anthropic
-  defaults to 4096), and `RequireToolCall`.
+  defaults to 4096), and `RequireToolCall` **only where supported by the selected
+  model**. Anthropic Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 reject
+  forced `tool_choice=any`; the adapter fails before HTTP dispatch instead of
+  silently downgrading the requirement. Ordinary automatic tool selection and
+  signed Thinking replay remain supported. For newer, unrecognized model IDs,
+  provider validation remains the final authority.
 - The only allowed `ModelOptions` today are `temperature` and
   `top_p`, both in [0, 1]. Unknown keys are rejected, not silently sent.
 - Retryable HTTP status 408/409/425/429/5xx and transport failures return
@@ -94,12 +111,17 @@ multi-provider router.
 - No images, audio, files, provider-hosted tools, native web search, or
   automatic authentication/proxy discovery. `HostedTools` are rejected,
   not downgraded silently.
-- The normalized `model.Message` does not yet represent opaque reasoning
-  or provider-specific continuation items. Anthropic extended thinking blocks
-  and OpenAI reasoning + function-call responses are rejected rather than
-  resuming with a lossy transcript. Text-only terminal responses from OpenAI
-  reasoning-capable models may still work, but lossless reasoning replay is
-  **not certified**.
+- The normalized `model.Message` remains text-first. Anthropic signed Thinking
+  is stored as a bounded, provider-opaque replay envelope only when a model
+  makes local Tool calls; the SDK does **not** expose or interpret the private
+  thinking content. Opaque replay is subject to the original provider's
+  signature/prefix rules. If a Host changes the prompt/tool prefix incompatibly,
+  the provider can reject continuation rather than silently ignoring evidence.
+  Other advanced Anthropic content types not recognized by the adapter still
+  fail closed. OpenAI reasoning + function-call responses are likewise rejected
+  until full Responses reasoning-item replay can be provided. Text-only terminal
+  responses from reasoning-capable OpenAI models may still work, but lossless
+  OpenAI reasoning replay is **not certified**.
 - Not all OpenAI models permit `temperature`/`top_p`; unsupported
   combinations fail through that provider's API. The adapters do not promise
   schema-strict decoding for all model families.
@@ -119,7 +141,10 @@ go test -count=1 -race ./provider/... ./agent ./model
 ```
 
 The fixture suite covers provider routing, function/tool argument conversion,
-transcript round-tripping, SSE text/tool events and truncation, token receipts,
-safe failure classification, and a full Agent → provider → tool → Agent run.
+transcript round-tripping (including signed Thinking), SSE text/tool events,
+unknown top-level Anthropic events and truncation, explicit unknown-vs-zero
+usage receipts, forced-tool model capability errors, refusal text, replay
+mutation rejection and public projection scrubbing, safe failure classification,
+and a full Agent → provider → tool → Agent run.
 Run live smoke tests separately with real credentials before claiming
 production provider compatibility. Do not put live tokens in test fixtures.

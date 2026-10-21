@@ -50,3 +50,24 @@ func TestInvalidRegistry(t *testing.T) {
 		}
 	}
 }
+
+func TestRouterAllowsProviderNamespacedModelIDsWithoutAmbiguity(t *testing.T) {
+	backend := &recorder{}
+	router, err := provider.NewRouter("gateway", provider.Binding{Name: "gateway", Client: backend})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := model.Request{Model: "gateway/anthropic/claude-opus-5-5"}
+	response, err := router.Generate(context.Background(), request)
+	if err != nil || backend.last != "anthropic/claude-opus-5-5" || response.Content != "ok" {
+		t.Fatalf("provider model namespace not preserved: %+v, %v, %q", response, err, backend.last)
+	}
+	if router.ProviderNameForRequest(request) != "gateway" {
+		t.Fatal("provider identity changed")
+	}
+	for _, name := range []string{"gateway/", "gateway//model", "gateway/model/", "gateway/model/ other", "gateway/ model", "unknown/model"} {
+		if _, err := router.Generate(context.Background(), model.Request{Model: name}); !errors.Is(err, provider.ErrInvalidRouting) {
+			t.Errorf("invalid route %q accepted: %v", name, err)
+		}
+	}
+}
