@@ -111,7 +111,8 @@ See [the configured example](go/agent-runtime/examples/configured/main.go).
 
 | Dependency | Tested baseline |
 | --- | --- |
-| Go | 1.26.6+ |
+| Go SDK modules | 1.26.10+ on the 1.26 line, or 1.27.3+ on the 1.27 line |
+| Go contributor workspace | 1.27.3+ (`go.work`, security-patched standard library) |
 | Node.js | 24 LTS or newer |
 | pnpm | 11.22 |
 | PostgreSQL | 16 |
