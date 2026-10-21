@@ -150,6 +150,12 @@ type ProviderNamer interface {
 	ProviderName() string
 }
 
+// RequestProviderNamer optionally identifies a routed provider for a specific
+// immutable request. It avoids persisting a generic router name in receipts.
+type RequestProviderNamer interface {
+	ProviderNameForRequest(Request) string
+}
+
 // RetryableError lets provider adapters distinguish transient invocation
 // failures without forcing Agent to fail the durable Run. The same logical
 // InvocationID is retried.

@@ -1316,6 +1316,9 @@ func (runner *Runner) queueToolCalls(
 			call.ToolKey == ToolDiscoveryKey && len(calls) != 1 {
 			return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
 		}
+		// Freeze the model-visible name with the call. Future discovery or
+		// catalog changes must not alter the provider transcript on replay.
+		call.Name = definition.Name
 		preparedCalls[index] = call
 		preparedCalls[index].Arguments = append(json.RawMessage(nil), call.Arguments...)
 	}

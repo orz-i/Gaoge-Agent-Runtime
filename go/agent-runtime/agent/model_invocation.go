@@ -219,12 +219,14 @@ func validModelInvocations(values []ModelInvocation) bool {
 	return active <= 1
 }
 
-func providerName(client model.Client) string {
-	namer, ok := client.(model.ProviderNamer)
-	if !ok {
-		return ""
+func providerName(client model.Client, request model.Request) string {
+	if namer, ok := client.(model.RequestProviderNamer); ok {
+		return strings.TrimSpace(namer.ProviderNameForRequest(request))
 	}
-	return strings.TrimSpace(namer.ProviderName())
+	if namer, ok := client.(model.ProviderNamer); ok {
+		return strings.TrimSpace(namer.ProviderName())
+	}
+	return ""
 }
 
 func (runner *Runner) ensureModelInvocation(
@@ -242,7 +244,7 @@ func (runner *Runner) ensureModelInvocation(
 		// obscures policy revocation as invalid Kernel input.
 		return snapshot, state, ModelInvocation{}, err
 	}
-	invocation, err := newModelInvocation(snapshot.Run, request, providerName(runner.model), runner.clock.Now())
+	invocation, err := newModelInvocation(snapshot.Run, request, providerName(runner.model, request), runner.clock.Now())
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
 	}
