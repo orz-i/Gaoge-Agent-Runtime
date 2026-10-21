@@ -81,6 +81,16 @@ multi-provider router.
   admission fails closed when accurate billing evidence is required.
 - OpenAI refusal text is preserved as terminal model content (rather than
   disappearing behind an unsupported-response error).
+- OpenAI Responses **reasoning + local function calls** support stateless
+  encrypted reasoning replay. Tool-bearing requests ask for
+  `include: ["reasoning.encrypted_content"]` with `store: false`; if a
+  response contains reasoning and local function calls, the original ordered
+  output items are stored in an optional `model.ProviderReplay` envelope.
+  Follow-up requests replay those items before `function_call_output`, and
+  validate Tool IDs, names, arguments and visible text against the Agent's
+  committed transcript. No raw reasoning text is interpreted or exposed.
+  Missing encrypted content fails explicitly as `openai.ErrReplayUnavailable`,
+  never by silently dropping reasoning or enabling server-side storage.
 - Anthropic signed `thinking`/`redacted_thinking` blocks are preserved in an
   optional provider-neutral `model.ProviderReplay` envelope for tool-call
   continuation. The Agent commits the original, ordered assistant content
@@ -118,10 +128,13 @@ multi-provider router.
   signature/prefix rules. If a Host changes the prompt/tool prefix incompatibly,
   the provider can reject continuation rather than silently ignoring evidence.
   Other advanced Anthropic content types not recognized by the adapter still
-  fail closed. OpenAI reasoning + function-call responses are likewise rejected
-  until full Responses reasoning-item replay can be provided. Text-only terminal
-  responses from reasoning-capable OpenAI models may still work, but lossless
-  OpenAI reasoning replay is **not certified**.
+  fail closed. OpenAI encrypted reasoning is supported for local Tool
+  continuation in this bounded text-and-function profile, but **not** for
+  arbitrary provider-hosted tools, cross-model-family reasoning transfers,
+  or standalone multi-turn reasoning history without a local Tool call.
+  Gateways that strip or do not implement `encrypted_content` remain
+  incompatible with stateless reasoning-plus-function responses; this is
+  diagnosed as `ErrReplayUnavailable` rather than silently downgraded.
 - Not all OpenAI models permit `temperature`/`top_p`; unsupported
   combinations fail through that provider's API. The adapters do not promise
   schema-strict decoding for all model families.
@@ -129,7 +142,12 @@ multi-provider router.
 - HTTP adapters use the documented REST+SSE API contract and Go stdlib rather
   than vendor SDK dependencies. This keeps Core dependency-neutral, but
   requires fixture and live API compatibility checks when provider protocols
-  change. **Live credentialed tests were not run for this candidate.**
+  change. A user ran proxy live tests for `gpt-6.1-sol` and `gpt-6-sol`:
+  both achieved 3/4 before the encrypted-replay fix (unary, streaming and full
+  Agent passed; standalone Tool round-trips failed at different phases).
+  These historical failures motivated the stateless replay remediation;
+  **the revised adapter has not yet been revalidated against that proxy or
+  against the official OpenAI endpoint with live credentials.**
 - Provider-model default changes and explicit host HTTP client settings are
   controlled by the Host; the router does not persist a provider registry.
 
@@ -141,7 +159,8 @@ go test -count=1 -race ./provider/... ./agent ./model
 ```
 
 The fixture suite covers provider routing, function/tool argument conversion,
-transcript round-tripping (including signed Thinking), SSE text/tool events,
+transcript round-tripping (including signed Anthropic Thinking and encrypted
+OpenAI Responses reasoning), SSE text/tool events,
 unknown top-level Anthropic events and truncation, explicit unknown-vs-zero
 usage receipts, forced-tool model capability errors, refusal text, replay
 mutation rejection and public projection scrubbing, safe failure classification,

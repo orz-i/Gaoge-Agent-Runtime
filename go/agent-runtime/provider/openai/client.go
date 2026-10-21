@@ -45,14 +45,15 @@ type outputItem struct {
 		Text    string `json:"text"`
 		Refusal string `json:"refusal"`
 	} `json:"content"`
-	CallID    string `json:"call_id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	CallID           string `json:"call_id"`
+	Name             string `json:"name"`
+	Arguments        string `json:"arguments"`
+	EncryptedContent string `json:"encrypted_content"`
 }
 type responseBody struct {
-	ID     string       `json:"id"`
-	Status string       `json:"status"`
-	Output []outputItem `json:"output"`
+	ID     string            `json:"id"`
+	Status string            `json:"status"`
+	Output []json.RawMessage `json:"output"`
 	Usage  *struct {
 		Input        *int64 `json:"input_tokens"`
 		Output       *int64 `json:"output_tokens"`
@@ -70,6 +71,13 @@ type prepared struct {
 }
 
 var ErrUnsupported = errors.New("unsupported OpenAI model request or response")
+
+// ErrReplayUnavailable means a reasoning Tool response lacks the encrypted
+// evidence required for stateless continuation. Never retry by dropping it.
+var ErrReplayUnavailable = errors.New("OpenAI encrypted reasoning replay unavailable")
+
+// ErrIncomplete means the provider did not return a completed logical response.
+var ErrIncomplete = errors.New("OpenAI response incomplete")
 
 func (c *Client) prepare(request model.Request, streaming bool) (prepared, error) {
 	if c == nil || len(request.HostedTools) != 0 {
@@ -99,10 +107,20 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 			"parameters": tool.InputSchema, "strict": false,
 		})
 	}
-	input := make([]map[string]any, 0, len(request.Messages))
+	input := make([]any, 0, len(request.Messages))
 	for _, m := range request.Messages {
 		if m.ProviderReplay != nil {
-			return prepared{}, ErrUnsupported
+			if m.Role != model.RoleAssistant || m.ToolCallID != "" {
+				return prepared{}, ErrUnsupported
+			}
+			items, replayErr := verifiedReplay(m)
+			if replayErr != nil {
+				return prepared{}, replayErr
+			}
+			for _, item := range items {
+				input = append(input, item)
+			}
+			continue
 		}
 		switch m.Role {
 		case model.RoleSystem, model.RoleUser:
@@ -138,7 +156,14 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 			return prepared{}, ErrUnsupported
 		}
 	}
-	payload := map[string]any{"model": name, "input": input, "store": false, "stream": streaming}
+	payload := map[string]any{
+		"model": name, "input": input, "store": false, "stream": streaming,
+	}
+	if len(definitions) != 0 {
+		// Tool continuation needs encrypted reasoning in stateless mode.
+		// Do not impose this parameter on ordinary text-only proxies.
+		payload["include"] = []string{"reasoning.encrypted_content"}
+	}
 	if request.MaxOutputTokens > 0 {
 		payload["max_output_tokens"] = request.MaxOutputTokens
 	}
@@ -156,6 +181,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	return prepared{body: payload, names: byName}, nil
 }
 func decodeResponse(body responseBody, names map[string]string) (model.Response, error) {
+	if body.Status == "incomplete" {
+		return model.Response{}, errors.Join(ErrUnsupported, ErrIncomplete)
+	}
 	if body.Status != "completed" || strings.TrimSpace(body.ID) == "" {
 		return model.Response{}, ErrUnsupported
 	}
@@ -167,8 +195,12 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 		}
 	}
 	var output strings.Builder
-	var sawReasoning, sawRefusal bool
-	for _, item := range body.Output {
+	var sawReasoning, missingEncrypted, sawRefusal bool
+	for _, raw := range body.Output {
+		var item outputItem
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return model.Response{}, ErrUnsupported
+		}
 		switch item.Type {
 		case "message":
 			for _, part := range item.Content {
@@ -194,10 +226,10 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 				ID: item.CallID, ToolKey: key, Name: item.Name, Arguments: json.RawMessage(item.Arguments),
 			})
 		case "reasoning":
-			// The current model.Message cannot replay opaque reasoning items.
-			// A reasoning + Tool response must not be silently replayed with
-			// missing provider state in the next Agent step.
 			sawReasoning = true
+			if item.EncryptedContent == "" {
+				missingEncrypted = true
+			}
 		default:
 			return model.Response{}, ErrUnsupported
 		}
@@ -207,7 +239,14 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 		return model.Response{}, ErrUnsupported
 	}
 	if sawReasoning && len(result.ToolCalls) != 0 {
-		return model.Response{}, ErrUnsupported
+		if missingEncrypted {
+			return model.Response{}, errors.Join(ErrUnsupported, ErrReplayUnavailable)
+		}
+		replay, err := encodeReplay(body.Output)
+		if err != nil {
+			return model.Response{}, err
+		}
+		result.ProviderReplay = replay
 	}
 	if result.Content == "" && len(result.ToolCalls) == 0 {
 		return model.Response{}, ErrUnsupported
@@ -277,7 +316,9 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				return providerhttp.ErrProtocol
 			}
 			final = &result
-		case "response.failed", "response.incomplete", "error":
+		case "response.incomplete":
+			return errors.Join(ErrUnsupported, ErrIncomplete)
+		case "response.failed", "error":
 			return ErrUnsupported
 		}
 		return nil
