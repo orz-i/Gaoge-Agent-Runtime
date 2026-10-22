@@ -478,9 +478,10 @@ func appendHostedToolTimelineItem(
 }
 
 func hostedToolItemStatus(status string) ItemStatus {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "requested", "pending", "in_progress", "running", "queued":
+	if !model.HostedToolTerminalStatus(status) {
 		return ItemStarted
+	}
+	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "failed", "error":
 		return ItemFailed
 	case "cancelled", "canceled":

@@ -37,13 +37,13 @@ func toolUsageFromLedger(ledger budget.Ledger) *ToolUsage {
 			result.Incomplete = true
 			continue
 		}
-		for index, call := range response.HostedToolCalls {
+		for index, call := range model.CollapseHostedToolCalls(response.HostedToolCalls) {
 			identity, _ := json.Marshal([]any{reservation.RunID, call.ToolKey, call.ID})
 			if call.ID == "" {
 				identity, _ = json.Marshal([]any{reservation.ID, index})
 			}
 			id := string(identity)
-			if call.Status == "in_progress" || call.Status == "requested" {
+			if !model.HostedToolTerminalStatus(call.Status) {
 				pending[id] = true
 				continue
 			}

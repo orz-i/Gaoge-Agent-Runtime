@@ -183,3 +183,91 @@ func TestHostedContinuationReservesOnlyFreshCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Provider final frames can contain both an interim and final observation for
+// one named Tool. Their relative order must not strand a paid native receipt.
+func TestHostedSameResponseTerminalWinsAndReplaysExactlyOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name, first, last string
+	}{
+		{"pending_then_completed", "in_progress", "completed"},
+		{"completed_then_pending", "completed", "in_progress"},
+		{"running_then_failed", "running", "failed"},
+		{"queued_then_cancelled", "queued", "cancelled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3})
+			_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+					t.Fatalf("missing bounded initial dispatch: %v", bounded.HostedToolCallLimit)
+				}
+				return model.Response{Content: "final result", HostedToolCalls: []model.HostedToolCall{
+					{ID: "call", ToolKey: "native.search", Status: tc.first},
+					{ID: "call", ToolKey: "native.search", Status: tc.last},
+				}}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := ledger.View("")
+			if view.Usage.HostedToolCalls != 1 || view.Reserved.HostedToolCalls != 0 || view.UnknownUsage {
+				t.Fatalf("terminal lost / duplicate billed: %+v", view)
+			}
+			usage := toolUsageFromLedger(ledger)
+			if usage.Incomplete || usage.HostedCalls != 1 || usage.HostedCallsByKey["native.search"] != 1 {
+				t.Fatalf("host projection disagrees with settled receipt: %+v", usage)
+			}
+			_, err = shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+				t.Fatal("replayed model invocation dispatched a second time")
+				return model.Response{}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.InvocationID = "after-terminal"
+			_, err = shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
+					t.Fatalf("already-charged tool has gained new authorization: %v", bounded.HostedToolCallLimit)
+				}
+				return model.Response{Content: "done"}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// In-progress synonyms and unfamiliar nonempty statuses do not prove a
+// completion. All consumers must classify them identically.
+func TestHostedNonterminalStatusesPreserveUncertainCharges(t *testing.T) {
+	for _, status := range []string{"requested", "pending", "in_progress", "running", "queued", "unknown_vendor_state"} {
+		t.Run(status, func(t *testing.T) {
+			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1})
+			_, err := shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+				return model.Response{Content: "still pending", HostedToolCalls: []model.HostedToolCall{
+					{ID: "unresolved", ToolKey: "native.search", Status: status},
+				}}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := ledger.View("")
+			usage := toolUsageFromLedger(ledger)
+			if view.Usage.HostedToolCalls != 0 || view.Reserved.HostedToolCalls != 1 ||
+				!view.UnknownUsage || !usage.Incomplete || usage.HostedCalls != 0 ||
+				usage.HostedCallsByKey["native.search"] != 0 || hostedToolItemStatus(status) != ItemStarted {
+				t.Fatalf("inconsistent pending status %q: ledger=%+v presentation=%+v timeline=%s",
+					status, view, usage, hostedToolItemStatus(status))
+			}
+		})
+	}
+}

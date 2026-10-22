@@ -13,16 +13,13 @@ import (
 // must still appear in the child's public activity feed. Publish identity and
 // lifecycle only; provider inputs, results and opaque replay stay private.
 func (runner *Runner) publishHostedToolReceipts(ctx context.Context, snapshot kernel.Snapshot, calls []model.HostedToolCall) {
-	seen := make(map[string]bool, len(calls))
-	for _, call := range calls {
+	for _, call := range model.CollapseHostedToolCalls(calls) {
 		id := strings.TrimSpace(call.ID)
-		if id == "" || seen[id] {
+		if id == "" {
 			continue
 		}
-		seen[id] = true
 		runner.publishToolEvent(ctx, snapshot, EventToolStarted, toolFeedCompletion{CallID: id, ToolKey: call.ToolKey})
-		switch call.Status {
-		case "completed", "failed", "error", "cancelled":
+		if model.HostedToolTerminalStatus(call.Status) {
 			runner.publishToolEvent(ctx, snapshot, EventToolCompleted, toolFeedCompletion{
 				CallID: id, ToolKey: call.ToolKey, Receipt: tools.Receipt{ExecutionID: id, Disposition: "committed"},
 			})

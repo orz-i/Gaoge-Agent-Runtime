@@ -231,9 +231,10 @@ func (runner *Runner) preparedDelegationToolRequest(
 	if err != nil {
 		return DelegateRequest{}, false, err
 	}
-	id := stableID("hid", invocation.TurnID, delegationToolID(invocation, request.Call.ID), string(ItemStarted))
+	startedID := stableID("hid", invocation.TurnID, delegationToolID(invocation, request.Call.ID), string(ItemStarted))
+	waitingID := stableID("hid", invocation.TurnID, delegationToolID(invocation, request.Call.ID), string(ItemWaiting))
 	for _, item := range items {
-		if item.ID != id || item.Kind != ItemDelegation || item.InvocationID != invocation.ID {
+		if (item.ID != startedID && item.ID != waitingID) || item.Kind != ItemDelegation || item.InvocationID != invocation.ID {
 			continue
 		}
 		var payload delegationItemPayload

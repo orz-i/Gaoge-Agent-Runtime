@@ -26,9 +26,8 @@ func pendingHostedAllowance(ledger budget.Ledger, runID string) int {
 func hostedReceiptTransfers(ledger budget.Ledger, runID string, calls []model.HostedToolCall) (int, []budget.Reservation, error) {
 	completed := 0
 	related := make([]budget.Reservation, 0, len(calls))
-	seen := map[string]bool{}
-	for _, call := range calls {
-		pending := call.Status == "in_progress" || call.Status == "requested"
+	for _, call := range model.CollapseHostedToolCalls(calls) {
+		pending := !model.HostedToolTerminalStatus(call.Status)
 		if call.ID == "" {
 			if !pending {
 				completed++
@@ -40,10 +39,6 @@ func hostedReceiptTransfers(ledger budget.Ledger, runID string, calls []model.Ho
 			return 0, nil, err
 		}
 		id := hostedReceiptPrefix + hashInvocationBytes(identity)
-		if seen[id] {
-			continue
-		}
-		seen[id] = true
 		previous, exists := ledger.Reservations[id]
 		if exists && previous.Status == budget.ReservationSettled {
 			continue
