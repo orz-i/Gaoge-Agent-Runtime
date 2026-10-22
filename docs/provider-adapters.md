@@ -96,8 +96,9 @@ multi-provider router.
   continuation. The Agent commits the original, ordered assistant content
   alongside the Tool intent. The Anthropic adapter validates replay against
   the Agent-approved Tool Call IDs/names/arguments before resending it.
-  Ordinary `agent.ViewState` projections strip opaque signed evidence; trusted
-  Kernel Feature State still stores it for recovery.
+  Ordinary `agent.ViewState` and public HTTP Run/Workbench/Feed projections
+  strip opaque provider replay evidence, including nested ModelInvocations.
+  Only trusted Kernel Feature State retains it for authorized recovery.
 - Current Anthropic Messages responses may add optional `caller` on local
   `tool_use` blocks, `toolset_name`, or `citations` on text. The adapter accepts
   missing/null or explicitly `direct` callers and empty/null text citations,

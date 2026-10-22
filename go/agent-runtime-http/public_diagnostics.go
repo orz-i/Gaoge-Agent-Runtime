@@ -104,9 +104,12 @@ func PublicRun(run kernel.Run) kernel.Run {
 	return run
 }
 
-// PublicDiagnosticPayload strips *diagnostic-only* keys from structured
-// optional feature payloads while preserving ordinary author-visible content,
-// model text, tool arguments and results. Non-JSON payloads fail closed.
+// PublicDiagnosticPayload strips diagnostic-only and provider-private replay
+// fields from structured feature payloads while preserving ordinary
+// author-visible model text, Tool arguments and results. ProviderReplay
+// contains signed/encrypted reasoning for internal continuation only and
+// must never cross a public HTTP projection, even inside business content.
+// Non-JSON payloads fail closed.
 func PublicDiagnosticPayload(value json.RawMessage) json.RawMessage {
 	if len(value) == 0 {
 		return nil
@@ -137,6 +140,12 @@ func stripDiagnosticFields(value any, businessContent bool) {
 		for key, child := range item {
 			normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key))
 			switch normalized {
+			case "providerreplay":
+				// Internal signed/encrypted Model evidence is persisted for
+				// recovery but never readable through public HTTP JSON, including
+				// nested messages, ModelInvocation receipts and business payloads.
+				delete(item, key)
+				continue
 			case "error", "errors":
 				if !businessContent {
 					delete(item, key)
