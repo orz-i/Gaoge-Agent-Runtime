@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -334,7 +335,32 @@ func (runner *Runner) buildModelRequest(
 		zero := 0
 		request.Tools, request.RequireToolCall, request.HostedToolCallLimit = nil, false, &zero
 	}
+	if runner.prepareModelRequest != nil {
+		// Context must be projected before the persisted intent is hashed. A
+		// ModelMiddleware can observe/transform an invocation, but cannot be
+		// the authority for durable transcript projection.
+		prepared, prepareErr := runner.prepareModelRequest(ctx, model.CloneRequest(request))
+		if prepareErr != nil {
+			return model.Request{}, prepareErr
+		}
+		if !samePreparedModelIdentity(request, prepared) || len(prepared.Messages) == 0 {
+			return model.Request{}, ErrInvalidRequest
+		}
+		request = model.CloneRequest(prepared)
+	}
 	return request, nil
+}
+
+// A trusted context preparer may replace the transcript, but it cannot
+// extend Tool authority, change provider routing, or lift execution limits.
+func samePreparedModelIdentity(original, prepared model.Request) bool {
+	original.Messages = nil
+	prepared.Messages = nil
+	return reflect.DeepEqual(original, prepared)
+}
+
+func sameFrozenModelMessages(original, candidate []model.Message) bool {
+	return reflect.DeepEqual(original, candidate)
 }
 
 func (runner *Runner) executeModelInvocation(

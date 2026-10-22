@@ -96,12 +96,30 @@ func MaterializeContextWindowRequest(ctx context.Context, request model.Request)
 		return request, nil
 	}
 	messages := runtimecontext.Materialize(checkpoint.Window)
+	// Context prepared before a durable Agent model intent already contains
+	// this exact checkpoint prefix. A legacy middleware composed alongside
+	// the preparer must not inject it again after RequestHash is frozen.
+	if hasExactContextPrefix(messages, request.Messages) {
+		return request, nil
+	}
 	merged, err := mergeContextRuntimeMessagesForCheckpoint(checkpoint, messages, request.Messages)
 	if err != nil {
 		return model.Request{}, err
 	}
 	request.Messages = merged
 	return request, nil
+}
+
+func hasExactContextPrefix(prefix, messages []model.Message) bool {
+	if len(prefix) == 0 || len(prefix) > len(messages) {
+		return false
+	}
+	for index := range prefix {
+		if !sameContextModelMessage(prefix[index], messages[index]) {
+			return false
+		}
+	}
+	return true
 }
 
 func mergeContextRuntimeMessages(contextMessages, runtimeMessages []model.Message) ([]model.Message, error) {
