@@ -126,13 +126,17 @@ func (runner *Runner) correctCompletion(
 	response model.Response,
 	correction CompletionCorrection,
 ) (kernel.Snapshot, error) {
-	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleAssistant, Content: strings.TrimSpace(response.Content),
-	})
+	if state.CompletionRepair || state.Budget.Usage.LLMCalls >= state.Budget.Limits.MaxLLMCalls {
+		return runner.fail(ctx, snapshot, state, "agent.completion_repair_exhausted", ErrInvalidModelResponse)
+	}
+	state.CompletionRepair = true
+	if content := strings.TrimSpace(response.Content); content != "" {
+		state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: content})
+	}
 	state.Messages = withSystemGuidance(
 		state.Messages,
 		"Completion rejected by the Runtime: "+correction.Message+
-			" The previous response was not delivered to the user. Repair only the terminal answer using the successful results already present in this transcript.",
+			" The previous response was not delivered to the user. This is the only terminal repair attempt. Tools and delegation are unavailable. Finish using successful results already present in this transcript; clearly state gaps and never invent sources.",
 	)
 	state.BlockedToolKeys = normalizedToolKeys(append(state.BlockedToolKeys, correction.BlockedToolKeys...))
 	state.RequireToolCall = false
@@ -293,12 +297,14 @@ type runState struct {
 	Discovery        *discoveryState        `json:"discovery,omitempty"`
 	BlockedToolKeys  []string               `json:"blockedToolKeys,omitempty"`
 	RequireToolCall  bool                   `json:"requireToolCall,omitempty"`
+	CompletionRepair bool                   `json:"completionRepair,omitempty"`
 	Budget           runtimebudget.Snapshot `json:"budget"`
 	CallAllowance    *CallAllowance         `json:"callAllowance,omitempty"`
 	AutoAllowance    *autoAllowanceState    `json:"autoAllowance,omitempty"`
 	PendingCalls     []tools.Call           `json:"pendingCalls,omitempty"`
 	PendingApproval  *pendingToolApproval   `json:"pendingApproval,omitempty"`
 	ToolWait         *PendingTool           `json:"toolWait,omitempty"`
+	DeferredChildren []deferredChildCall    `json:"deferredChildren,omitempty"`
 	// A fenced Direct Agent commits its Tool dispatch ID before invoking
 	// external effects. A missing receipt requires explicit reconciliation.
 	ToolDispatchID   string                     `json:"toolDispatchID,omitempty"`
@@ -449,6 +455,17 @@ func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
 
 // StartRun creates and drives one direct Agent Run until terminal or approval wait.
 func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
+	return runner.startRunWithMiddleware(ctx, request, false)
+}
+
+// PrepareRun durably creates a Run without executing a model or Tool. A host
+// using this method must compose a continuation worker for its wakeup event.
+// It keeps a delegated child's lifetime outside the parent's Tool timeout.
+func (runner *Runner) PrepareRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
+	return runner.startRunWithMiddleware(ctx, request, true)
+}
+
+func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartRequest, deferred bool) (kernel.Snapshot, error) {
 	if runner == nil || strings.TrimSpace(request.Goal) == "" ||
 		(runner.runExecution != nil && strings.TrimSpace(request.ID) == "") {
 		// Native durability cannot recover an uncertain Create when the
@@ -461,11 +478,11 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 		Actor: request.Actor, Thread: request.Thread, Goal: strings.TrimSpace(request.Goal),
 	}
 	return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-		return runner.startRun(nextCtx, request)
+		return runner.startRun(nextCtx, request, deferred)
 	})
 }
 
-func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
+func (runner *Runner) startRun(ctx context.Context, request StartRequest, deferred bool) (kernel.Snapshot, error) {
 	local, hosted, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model, request.DeadlineAt)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -553,6 +570,9 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest) (kerne
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	if deferred {
+		return snapshot, nil
 	}
 	// Claim the Run before publishing the started event or dispatching any
 	// Model/Tool. If acquisition fails, preserve the created Run for safe
@@ -696,6 +716,9 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		failed, failErr := runner.fail(ctx, snapshot, runState{}, "agent.state_invalid", err)
 		return failed, true, failErr
 	}
+	if len(state.PendingCalls) == 0 && len(state.DeferredChildren) != 0 {
+		return runner.activateDeferredChild(ctx, snapshot, state)
+	}
 	if len(state.PendingCalls) > 0 {
 		if state.ToolWait != nil {
 			waitSnapshot, ready, waitErr := runner.toolWaitReady(ctx, snapshot, state)
@@ -743,7 +766,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		executed, yielded, executeErr := runner.executePending(ctx, prepared)
 		return executed, yielded || executeErr != nil, executeErr
 	}
-	if state.Budget.Usage.LLMCalls >= state.Budget.Limits.MaxLLMCalls {
+	if _, active := activeModelInvocation(state); !active && state.Budget.Usage.LLMCalls >= state.Budget.Limits.MaxLLMCalls {
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.llm_limit", ErrCallLimit)
 		return failed, true, failErr
 	}
@@ -826,8 +849,30 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		)
 		return failed, true, failErr
 	}
+	if consumed.ErrorCode != "" {
+		if consumed.ErrorCode != rejectedModelResponseCode {
+			failed, failErr := runner.fail(ctx, snapshot, state, consumed.ErrorCode, ErrModelFailure)
+			return failed, true, failErr
+		}
+		corrected, correctionErr := runner.correctCompletion(ctx, snapshot, state, model.Response{}, CompletionCorrection{
+			Code: consumed.ErrorCode, Message: "the completed model response violated the declared response or tool contract",
+		})
+		return corrected, correctionErr != nil, correctionErr
+	}
+	if state.CompletionRepair && (response.Continue || len(response.ToolCalls) != 0 || len(response.HostedToolCalls) != 0 || response.Content == "" && len(response.Artifacts) == 0) {
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.completion_repair_exhausted", ErrInvalidModelResponse)
+		return failed, true, failErr
+	}
+	if response.Continue {
+		continued, continueErr := runner.continueModel(ctx, snapshot, state, response)
+		return continued, true, continueErr
+	}
 	if len(response.ToolCalls) == 0 {
 		if missing := missingRequiredToolKeys(state); len(missing) != 0 {
+			if state.CompletionRepair {
+				failed, failErr := runner.fail(ctx, snapshot, state, "agent.completion_repair_exhausted", ErrInvalidModelResponse)
+				return failed, true, failErr
+			}
 			corrected, correctionErr := runner.correctRequiredToolCompletion(ctx, snapshot, state, response, missing)
 			return corrected, correctionErr != nil, correctionErr
 		}
@@ -1230,7 +1275,7 @@ func (runner *Runner) generateProviderModel(
 		return emit(event)
 	})
 	if err != nil {
-		return model.Response{}, err
+		return response, err
 	}
 	if strings.TrimSpace(response.ResponseID) == "" {
 		response.ResponseID = responseID
@@ -2060,7 +2105,8 @@ func selectedDefinition(definitions []tools.Definition, key string) (tools.Defin
 
 func validModelResponse(response model.Response) bool {
 	return validModelUsage(response.Usage) &&
-		(len(response.ToolCalls) > 0 || response.Content != "" || len(response.HostedToolCalls) > 0 || len(response.Artifacts) > 0)
+		(!response.Continue || len(response.ToolCalls) == 0) &&
+		(response.Continue || len(response.ToolCalls) > 0 || response.Content != "" || len(response.HostedToolCalls) > 0 || len(response.Artifacts) > 0)
 }
 
 func validModelUsage(usage *model.Usage) bool {
@@ -2123,6 +2169,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 		!validHostedGrantSnapshot(state.HostedToolGrants, state.ToolKeys) ||
 		!validDiscoveryState(state) ||
 		!validToolWaitState(state) ||
+		!validDeferredChildren(state) ||
 		!validModelInvocations(state.ModelInvocations) {
 		return runState{}, ErrInvalidRequest
 	}

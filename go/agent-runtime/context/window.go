@@ -1253,7 +1253,10 @@ func validMessage(message model.Message) bool {
 	case model.RoleSystem, model.RoleUser:
 		return strings.TrimSpace(message.Content) != "" && len(message.ToolCalls) == 0 && message.ToolCallID == ""
 	case model.RoleAssistant:
-		if message.ToolCallID != "" || (strings.TrimSpace(message.Content) == "" && len(message.ToolCalls) == 0) {
+		// Native provider turns may contain only opaque thinking/server-tool
+		// replay. Agent continuation deliberately retains their empty assistant
+		// placeholder; removing it would shift replay identity on the next step.
+		if message.ToolCallID != "" {
 			return false
 		}
 		for _, call := range message.ToolCalls {

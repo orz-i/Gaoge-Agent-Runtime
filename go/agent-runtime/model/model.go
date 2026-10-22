@@ -50,6 +50,11 @@ type Request struct {
 	// MaxOutputTokens is an enforceable provider-neutral output ceiling. A host
 	// enabling token admission must translate it to the selected provider.
 	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
+	// HostedToolCallLimit is a host-enforced per-request execution ceiling.
+	// Nil retains existing unlimited semantics; zero forbids new executions
+	// while retaining declarations needed to validate native replay. Hosts reject
+	// bounded dispatch when the selected protocol cannot enforce this ceiling.
+	HostedToolCallLimit *int `json:"hostedToolCallLimit,omitempty"`
 	// RequireToolCall asks the host model adapter to enforce a provider Tool call
 	// instead of accepting another text-only response.
 	RequireToolCall bool `json:"requireToolCall,omitempty"`
@@ -93,6 +98,9 @@ type Response struct {
 	ResponseID      string           `json:"responseID,omitempty"`
 	Usage           *Usage           `json:"usage,omitempty"`
 	ProviderReplay  *ProviderReplay  `json:"providerReplay,omitempty"`
+	// Continue requests another durable model step after a provider-owned
+	// server-tool pause. It is not a final answer or a local Tool dispatch.
+	Continue bool `json:"continue,omitempty"`
 }
 
 // ReasoningDelta is one provider-neutral reasoning progress observation.
@@ -200,6 +208,10 @@ func IsRetryableError(err error) bool {
 
 // CloneRequest returns an isolated request copy suitable for middleware boundaries.
 func CloneRequest(value Request) Request {
+	if value.HostedToolCallLimit != nil {
+		ceiling := *value.HostedToolCallLimit
+		value.HostedToolCallLimit = &ceiling
+	}
 	value.ModelOptions = cloneJSON(value.ModelOptions)
 	value.Messages = CloneMessages(value.Messages)
 	definitions := value.Tools

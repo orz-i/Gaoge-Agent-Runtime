@@ -13,6 +13,15 @@ import (
 
 const privateDiagnosticFixture = "Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"
 
+func TestPublicCompletedGenerationFailuresKeepBoundedRecoveryFacts(t *testing.T) {
+	for _, code := range []string{"agent.completion_repair_exhausted", "agent.model_response_rejected", "model.post_generation_failed"} {
+		public := PublicRun(kernel.Run{ErrorCode: code, ErrorDetail: privateDiagnosticFixture})
+		if public.ErrorCode != code || strings.Contains(public.ErrorDetail, privateDiagnosticFixture) || public.ErrorDetail == "execution could not be completed" {
+			t.Fatalf("receipt/repair failure lost its safe explanation: %+v", public)
+		}
+	}
+}
+
 func TestPublicContextLimitFailuresExplainRecoveryWithoutDiagnosticBytes(t *testing.T) {
 	t.Parallel()
 	for _, code := range []string{"context.artifact_payload_too_large", "context.input_budget_exceeded"} {

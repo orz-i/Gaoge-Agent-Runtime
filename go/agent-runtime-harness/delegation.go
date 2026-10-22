@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
@@ -128,10 +129,18 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 	if err != nil {
 		return DelegationResult{}, err
 	}
-	if delegation.RoleID != "" {
-		if err = runner.admitRoleChild(ctx, turn, invocation, delegation); err != nil {
-			return DelegationResult{}, err
+	if err = runner.admitRoleChild(ctx, turn, invocation, delegation); err != nil {
+		if errors.Is(err, budget.ErrWaiting) {
+			// Freeze the requested delegation, but create no child Invocation,
+			// relation or Run until lifetime capacity is available. The same
+			// logical Tool call is observed again by the scheduled continuation.
+			if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemWaiting, ""); itemErr != nil {
+				return DelegationResult{}, itemErr
+			}
+			snapshot, loadErr := runner.Load(ctx, turn.ID)
+			return DelegationResult{Delegation: delegation, Snapshot: snapshot}, loadErr
 		}
+		return DelegationResult{}, err
 	}
 	startedItemID, err := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemStarted, "")
 	if err != nil {
@@ -290,6 +299,9 @@ func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn)
 	projected := make(map[string]struct{})
 	for _, item := range items {
 		if item.Kind != ItemDelegation {
+			continue
+		}
+		if item.Status == ItemWaiting {
 			continue
 		}
 		var payload delegationItemPayload

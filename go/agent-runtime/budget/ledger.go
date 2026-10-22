@@ -95,21 +95,23 @@ type Ledger struct {
 	Reservations  map[string]Reservation `json:"reservations"`
 	Cancelled     bool                   `json:"cancelled,omitempty"`
 	CancelledRuns map[string]bool        `json:"cancelledRuns,omitempty"`
+	FinishedRuns  map[string]bool        `json:"finishedRuns,omitempty"`
 }
 
 // LedgerView contains authoritative aggregate and per-subtree accounting. Zero
 // remaining only denotes exhaustion where the matching ceiling is nonzero.
 type LedgerView struct {
-	ScopeID      string `json:"scopeID"`
-	Revision     uint64 `json:"revision"`
-	Limits       Limits `json:"limits"`
-	Usage        Usage  `json:"usage"`
-	Reserved     Usage  `json:"reserved"`
-	Remaining    Usage  `json:"remaining"`
-	ActiveRuns   int    `json:"activeRuns"`
-	WaitingRuns  int    `json:"waitingRuns"`
-	UnknownUsage bool   `json:"unknownUsage,omitempty"`
-	Cancelled    bool   `json:"cancelled,omitempty"`
+	ScopeID               string `json:"scopeID"`
+	Revision              uint64 `json:"revision"`
+	Limits                Limits `json:"limits"`
+	Usage                 Usage  `json:"usage"`
+	Reserved              Usage  `json:"reserved"`
+	Remaining             Usage  `json:"remaining"`
+	ActiveRuns            int    `json:"activeRuns"`
+	WaitingRuns           int    `json:"waitingRuns"`
+	UnfinishedDescendants int    `json:"unfinishedDescendants"`
+	UnknownUsage          bool   `json:"unknownUsage,omitempty"`
+	Cancelled             bool   `json:"cancelled,omitempty"`
 }
 
 // Coordinator applies common admission rules while the Harness owns scope and
@@ -157,6 +159,18 @@ func (coordinator Coordinator) RegisterRun(ctx context.Context, scopeID, runID s
 			if _, ok := ledger.Runs[binding.ParentRunID]; !ok {
 				return ErrLedgerConflict
 			}
+			if ledger.FinishedRuns[binding.ParentRunID] {
+				return ErrExhausted
+			}
+			for current := binding.ParentRunID; ; current = ledger.Runs[current].ParentRunID {
+				view := ledger.View(current)
+				if view.Limits.MaxConcurrentDescendants > 0 && view.UnfinishedDescendants >= view.Limits.MaxConcurrentDescendants {
+					return deny(ErrWaiting, DimensionConcurrentDescendants)
+				}
+				if current == "" {
+					break
+				}
+			}
 			charge := Usage{ChildRuns: 1}
 			if _, err := ledger.admit(binding.ParentRunID, charge, false); err != nil {
 				return err
@@ -165,6 +179,26 @@ func (coordinator Coordinator) RegisterRun(ctx context.Context, scopeID, runID s
 			ledger.Reservations[id] = Reservation{ID: id, RunID: binding.ParentRunID, Status: ReservationSettled, Usage: charge, Requested: charge}
 		}
 		ledger.Runs[runID] = binding
+		return nil
+	})
+}
+
+// FinishRuns releases lifetime capacity only after the host observes committed
+// terminal Run facts. Model/Tool reservations, including unknown charges, remain.
+// Repeating reconciliation after a crash is safe.
+func (coordinator Coordinator) FinishRuns(ctx context.Context, scopeID string, runIDs ...string) (Ledger, error) {
+	return coordinator.update(ctx, scopeID, func(ledger *Ledger) error {
+		for _, runID := range runIDs {
+			if _, ok := ledger.Runs[runID]; !ok {
+				return ErrLedgerNotFound
+			}
+		}
+		if len(runIDs) > 0 && ledger.FinishedRuns == nil {
+			ledger.FinishedRuns = map[string]bool{}
+		}
+		for _, runID := range runIDs {
+			ledger.FinishedRuns[runID] = true
+		}
 		return nil
 	})
 }
@@ -397,6 +431,11 @@ func (ledger Ledger) View(runID string) LedgerView {
 	if runID != "" {
 		view.Limits = ledger.Runs[runID].Limits
 	}
+	for id, binding := range ledger.Runs {
+		if binding.ParentRunID != "" && id != runID && !ledger.FinishedRuns[id] && ledger.contains(runID, id) {
+			view.UnfinishedDescendants++
+		}
+	}
 	active, waiting := map[string]bool{}, map[string]bool{}
 	for _, value := range ledger.Reservations {
 		if !ledger.contains(runID, value.RunID) {
@@ -446,6 +485,13 @@ func (ledger Ledger) contains(parent, child string) bool {
 }
 
 func CloneLedger(value Ledger) Ledger {
+	if value.FinishedRuns != nil {
+		finished := make(map[string]bool, len(value.FinishedRuns))
+		for id, flag := range value.FinishedRuns {
+			finished[id] = flag
+		}
+		value.FinishedRuns = finished
+	}
 	cancelled := make(map[string]bool, len(value.CancelledRuns))
 	for id, flag := range value.CancelledRuns {
 		cancelled[id] = flag

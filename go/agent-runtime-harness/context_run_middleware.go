@@ -84,6 +84,15 @@ func (middleware contextRunMiddleware) hydrateRun(ctx context.Context, runID str
 	if runID == "" {
 		return ctx, nil
 	}
+	// An independently delegated specialist owns its goal/transcript. Replaying
+	// the supervisor's conversation on Resume can reintroduce orchestration
+	// instructions and an arbitrarily large search history. Rebuild exclusion
+	// from durable invocation facts, just as StartOrLoad excludes it initially.
+	if invocation, lookupErr := middleware.store.GetInvocationByExecutionRefID(ctx, runID); lookupErr == nil && invocation.ParentItemID != "" {
+		if isRoleDelegationInvocation(invocation, runID) {
+			return withoutContextCheckpoint(ctx), nil
+		}
+	}
 	turn, access, err := resolveContextTurnForRun(ctx, middleware.store, middleware.relations, runID)
 	if errors.Is(err, ErrNotFound) {
 		return ctx, nil

@@ -29,8 +29,12 @@ const (
 	ModelInvocationConsumed  ModelInvocationStatus = "consumed"
 )
 
+const rejectedModelResponseCode = "agent.model_response_rejected"
+
 // ModelInvocation is the Agent-owned durable intent/receipt for one logical
 // model step. Kernel persists it only as opaque feature state.
+// ErrorCode marks a known completed but unusable response; its usage is still
+// consumed exactly once, without executing any local Tools from that response.
 type ModelInvocation struct {
 	ID                  string                `json:"id"`
 	RunID               string                `json:"runID"`
@@ -43,6 +47,7 @@ type ModelInvocation struct {
 	ProviderResponseID  string                `json:"providerResponseID,omitempty"`
 	Response            model.Response        `json:"response,omitempty"`
 	Usage               *model.Usage          `json:"usage,omitempty"`
+	ErrorCode           string                `json:"errorCode,omitempty"`
 	ExecutionAttempt    uint32                `json:"executionAttempt,omitempty"`
 	ExecutionLeaseUntil *time.Time            `json:"executionLeaseUntil,omitempty"`
 	// RetryAfter is the Feature-owned ReadyAt gate for a released,
@@ -182,6 +187,9 @@ func validModelInvocations(values []ModelInvocation) bool {
 		switch invocation.Status {
 		case ModelInvocationPending:
 			active++
+			if invocation.ErrorCode != "" {
+				return false
+			}
 			if invocation.RetryAfter != nil &&
 				(invocation.RetryAfter.IsZero() || invocation.ExecutionLeaseUntil != nil) {
 				return false
@@ -200,7 +208,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 			active++
 			if invocation.RetryAfter != nil || index != len(values)-1 || invocation.CompletedAt == nil ||
 				invocation.ExecutionLeaseUntil != nil || strings.TrimSpace(invocation.Request.InvocationID) != invocation.ID ||
-				!validModelResponse(invocation.Response) {
+				!validModelInvocationReceipt(invocation) {
 				return false
 			}
 			hash, err := modelRequestHash(invocation.Request)
@@ -209,7 +217,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 			}
 		case ModelInvocationConsumed:
 			if invocation.RetryAfter != nil || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.ExecutionLeaseUntil != nil ||
-				!validModelResponse(invocation.Response) {
+				!validModelInvocationReceipt(invocation) {
 				return false
 			}
 		default:
@@ -217,6 +225,14 @@ func validModelInvocations(values []ModelInvocation) bool {
 		}
 	}
 	return active <= 1
+}
+
+func validModelInvocationReceipt(invocation ModelInvocation) bool {
+	if invocation.ErrorCode != "" {
+		return invocation.Usage != nil && invocation.Response.Usage != nil &&
+			validModelUsage(invocation.Usage) && *invocation.Usage == *invocation.Response.Usage
+	}
+	return validModelResponse(invocation.Response)
 }
 
 func providerName(client model.Client, request model.Request) string {
@@ -309,11 +325,16 @@ func (runner *Runner) buildModelRequest(
 	if hint := automaticAllowanceHint(state); hint != "" {
 		messages = withSystemGuidance(messages, hint)
 	}
-	return model.Request{
+	request := model.Request{
 		RunID: snapshot.Run.ID, Model: state.Model, ModelOptions: cloneRawJSON(state.ModelOptions),
 		Messages: messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
 		RequireToolCall: state.RequireToolCall && (len(definitions) != 0 || len(hostedTools) != 0),
-	}, nil
+	}
+	if state.CompletionRepair {
+		zero := 0
+		request.Tools, request.RequireToolCall, request.HostedToolCallLimit = nil, false, &zero
+	}
+	return request, nil
 }
 
 func (runner *Runner) executeModelInvocation(
@@ -355,29 +376,25 @@ func (runner *Runner) executeModelInvocation(
 		},
 	)
 	late := errors.Is(err, ErrModelLateResult)
-	if err != nil && !late {
+	response.Content = strings.TrimSpace(response.Content)
+	if err == nil && response.Usage != nil && validModelUsage(response.Usage) && !validModelResponse(response) {
+		err = model.NewResponseRejectedError(ErrInvalidModelResponse)
+	}
+	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
+	if err != nil && !late && !knownRejection {
 		endedAt := runner.clock.Now().UTC()
 		phase := observability.PhaseFailed
 		errorCode := "provider_error"
+		cause := errors.Join(ErrModelFailure, err)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			phase = observability.PhaseCancelled
 			errorCode = "cancelled"
-			runner.recordTelemetry(ctx, observability.Event{
-				Scope: observability.ScopeModelInvocation, Phase: phase,
-				RunID: snapshot.Run.ID, RunKind: RunKind, Revision: snapshot.Run.Revision,
-				Status: string(snapshot.Run.Status), OperationID: invocation.ID,
-				Operation: "generate", Provider: invocation.Provider, Model: invocation.Model,
-				Attempt: int(invocation.ExecutionAttempt), ErrorCode: errorCode,
-				ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
-			})
-			return snapshot, state, ctxErr
-		}
-		switch {
-		case errors.Is(err, ErrModelTimeout):
+			cause = ctxErr
+		} else if errors.Is(err, ErrModelTimeout) {
 			errorCode = "timeout"
-		case errors.Is(err, ErrModelPanic):
+		} else if errors.Is(err, ErrModelPanic) {
 			errorCode = "panic"
-		case errors.Is(err, kernel.ErrDeadline):
+		} else if errors.Is(err, kernel.ErrDeadline) {
 			errorCode = "deadline"
 		}
 		runner.recordTelemetry(ctx, observability.Event{
@@ -388,10 +405,9 @@ func (runner *Runner) executeModelInvocation(
 			Attempt: int(invocation.ExecutionAttempt), ErrorCode: errorCode,
 			ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
 		})
-		return snapshot, state, errors.Join(ErrModelFailure, err)
+		return snapshot, state, cause
 	}
-	response.Content = strings.TrimSpace(response.Content)
-	if !validModelResponse(response) {
+	if !knownRejection && !validModelResponse(response) {
 		endedAt := runner.clock.Now().UTC()
 		runner.recordTelemetry(ctx, observability.Event{
 			Scope: observability.ScopeModelInvocation, Phase: observability.PhaseFailed,
@@ -408,6 +424,12 @@ func (runner *Runner) executeModelInvocation(
 	invocation.ProviderResponseID = strings.TrimSpace(response.ResponseID)
 	invocation.Response = model.CloneResponse(response)
 	invocation.Usage = model.CloneUsage(response.Usage)
+	if knownRejection {
+		invocation.ErrorCode = model.ClassifiedErrorCode(err)
+		if invocation.ErrorCode == "" {
+			invocation.ErrorCode = rejectedModelResponseCode
+		}
+	}
 	invocation.ExecutionLeaseUntil = nil
 	invocation.CompletedAt = &completedAt
 	if !replaceLastModelInvocation(&state, invocation) {
@@ -417,7 +439,7 @@ func (runner *Runner) executeModelInvocation(
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.runtime.Apply(context.WithoutCancel(ctx), snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "agent.model_invocation.completed", Message: invocation.ID, Wakeup: true,
@@ -442,11 +464,12 @@ func (runner *Runner) executeModelInvocation(
 		Status: string(next.Run.Status), OperationID: invocation.ID,
 		Operation: "generate", Provider: invocation.Provider, Model: invocation.Model,
 		ResponseID: response.ResponseID, Attempt: int(invocation.ExecutionAttempt), ObservedAt: endedAt,
-		Duration: endedAt.Sub(startedAt), Usage: telemetryModelUsage(response.Usage),
+		Duration: endedAt.Sub(startedAt), Usage: telemetryModelUsage(response.Usage), ErrorCode: invocation.ErrorCode,
 	})
 	runner.publish(ctx, next.Run.ID, plugin.Event{
 		Type: EventModelCompleted, Revision: next.Run.Revision, Status: string(next.Run.Status),
 	})
+	runner.publishHostedToolReceipts(ctx, next, response.HostedToolCalls)
 	if late {
 		return next, state, ErrModelLateResult
 	}

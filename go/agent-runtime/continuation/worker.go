@@ -18,6 +18,9 @@ import (
 type WorkerOptions struct {
 	WorkerID     string
 	PollInterval time.Duration
+	// Concurrency bounds independently leased deliveries. Each consumer claims
+	// just before dispatch; a slow model cannot hold up unrelated child Runs.
+	Concurrency int
 	// ClaimLimit bounds the number of just-in-time deliveries per poll. A
 	// worker never pre-leases jobs that are waiting behind a slow handler.
 	ClaimLimit        int
@@ -43,6 +46,12 @@ type Worker struct {
 	closed  bool
 	cancel  context.CancelFunc
 	done    chan struct{}
+	runs    map[string]*workerRunGate
+}
+
+type workerRunGate struct {
+	ready chan struct{}
+	refs  int
 }
 
 // NewWorker constructs a leased continuation consumer.
@@ -62,7 +71,13 @@ func NewWorker(queue DeliveryQueue, handler Handler, options WorkerOptions) (*Wo
 	if options.ReconcileInterval <= 0 {
 		options.ReconcileInterval = 5 * time.Second
 	}
-	return &Worker{queue: queue, handler: handler, options: options}, nil
+	if options.Concurrency <= 0 {
+		options.Concurrency = 1
+	}
+	if options.Concurrency > 100 {
+		return nil, ErrInvalidInput
+	}
+	return &Worker{queue: queue, handler: handler, options: options, runs: map[string]*workerRunGate{}}, nil
 }
 
 // Descriptor declares the explicitly composed background recovery graph.
@@ -120,6 +135,11 @@ func (worker *Worker) Close(ctx context.Context) error {
 
 func (worker *Worker) loop(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
+	var consumers sync.WaitGroup
+	for range worker.options.Concurrency {
+		consumers.Go(func() { worker.consumeLoop(ctx) })
+	}
+	defer consumers.Wait()
 	ticker := time.NewTicker(worker.options.PollInterval)
 	defer ticker.Stop()
 	nextReconcile := time.Time{}
@@ -131,6 +151,18 @@ func (worker *Worker) loop(ctx context.Context, done chan<- struct{}) {
 			worker.report(worker.options.Reconciler.Reconcile(ctx))
 			nextReconcile = time.Now().Add(worker.options.ReconcileInterval)
 		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (worker *Worker) consumeLoop(ctx context.Context) {
+	ticker := time.NewTicker(worker.options.PollInterval)
+	defer ticker.Stop()
+	for {
 		worker.consume(ctx)
 		select {
 		case <-ctx.Done():
@@ -188,7 +220,7 @@ func (worker *Worker) consumeDelivery(ctx context.Context, delivery queuecore.De
 		err = ErrInvalidInput
 	}
 	if err == nil {
-		err = worker.handler.Dispatch(dispatchCtx, payload)
+		err = worker.dispatchRun(dispatchCtx, payload)
 	}
 	terminalFenced := false
 	if err != nil {
@@ -238,6 +270,36 @@ func (worker *Worker) consumeDelivery(ctx context.Context, delivery queuecore.De
 		err = errors.Join(err, nackErr)
 	}
 	worker.report(err)
+}
+
+// Distinct child-terminal deliveries can target the same legacy Run. Keep
+// those activations serial even while unrelated Runs make progress. Queue
+// lease renewal remains active while waiting; cancellation releases the lane.
+func (worker *Worker) dispatchRun(ctx context.Context, payload Payload) error {
+	worker.mu.Lock()
+	gate := worker.runs[payload.RunID]
+	if gate == nil {
+		gate = &workerRunGate{ready: make(chan struct{}, 1)}
+		gate.ready <- struct{}{}
+		worker.runs[payload.RunID] = gate
+	}
+	gate.refs++
+	worker.mu.Unlock()
+	defer func() {
+		worker.mu.Lock()
+		gate.refs--
+		if gate.refs == 0 {
+			delete(worker.runs, payload.RunID)
+		}
+		worker.mu.Unlock()
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-gate.ready:
+		defer func() { gate.ready <- struct{}{} }()
+		return worker.handler.Dispatch(ctx, payload)
+	}
 }
 
 // Invalid payloads cannot identify an authoritative Run and are orphan

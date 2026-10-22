@@ -5,6 +5,21 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Atomically retain unfinished hosted-call reservations alongside final model token receipts. Reconcile native identities once across continuations and restarts, preserve unknown outcomes on Run termination, and mark incomplete usage instead of claiming cancellation. Existing settled receipts are not rewritten; no default test ceilings are installed.
+
+- Persist known rejected model completions with `ModelInvocation.errorCode`, final usage and response identity before consuming their charges. Preserve these receipts through streaming, cancellation and budget replay, including failures projecting an already settled ledger. Local post-generation save failures use `model.post_generation_failed` and never authorize regeneration or Tool execution.
+- Reuse terminal completion correction for one tool-free repair within the existing call budget. A durable `completionRepair` flag prevents repeated corrections, native pauses or renewed delegation from extending the repair. Repeated violations fail explicitly for parent takeover. State fields are additive; historical terminal Runs are not rewritten. Drain in-flight Runs before downgrading to readers that do not understand rejected completion receipts.
+
+- Use only explicit native-call ceilings and remaining shared quota when reserving hosted tools; remove the implicit two-call cap. Emit one idempotent final-answer instruction after all local and native tools are unavailable, owned by shared-budget preparation.
+
+- Preserve empty assistant placeholders and provider-owned replay for native continuations across Context checkpoints and restarts. Retain stable replay alignment while rejecting malformed local Tool transcripts and unmatched result identities.
+
+- Settle authoritative usage when a host rejects an already completed model response via `model.NewResponseRejectedError`. Replay the rejection after restart without redispatch; partial streams and missing receipts still retain uncertain reservations.
+
+- Add opt-in `MaxConcurrentDescendants` lifetime admission for all unfinished descendants, including waiting coordinators. Queue capacity waits before creating child Runs, reconcile committed terminal facts after restarts, and preserve uncertain usage reservations. Zero remains unlimited; no default testing limits are installed.
+
+- Derive host-only `Snapshot.ToolUsage` from settled Turn ledger receipts, including descendants and native calls by opaque tool key. Keep reservations out of actual counts and mark incomplete accounting explicitly. Count native execution in tool usage even without a native quota; no new default ceilings or HTTP fields.
+
 - Bound child-terminal reconciliation to 128-ID keyset scans before PostgreSQL status joins; maintain a sorted Memory index, preserve empty-page cursors, and rotate a bounded retry backlog without starving later pages.
 - Persist monotonic reconciliation progress in two additive PostgreSQL relation columns. Queue acceptance precedes `MarkEnqueued`; feature-verified consumed children use `MarkObserved`. Parent wait commits reopen recovery eligibility.
 - Add opt-in first-party Team/Group Chat/Workflow child-consumption guards, a production durable-queue requirement, memory/PostgreSQL paging and migration tests, and a real PostgreSQL + Redis joint restart integration suite. Preserve the legacy custom Store interface. See docs/audits/2026-10-14-stage2-reconciliation.md.

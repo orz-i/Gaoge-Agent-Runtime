@@ -70,6 +70,7 @@ func knownModelFailureCode(code string) bool {
 		"model.upstream_request_rejected",
 		"model.upstream_model_unavailable",
 		"model.upstream_safety_rejected",
+		"model.post_generation_failed",
 		"model_route_not_configured",
 		"model.access_denied",
 		"model.entitlement_denied",

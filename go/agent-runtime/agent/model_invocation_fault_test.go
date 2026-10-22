@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -11,12 +12,137 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 var (
 	errInjectedModelInvocationCrash = errors.New("injected model invocation crash")
 	errRetryableProvider            = errors.New("retryable provider failure")
 )
+
+type rejectedInvocationModel struct {
+	invocationRecordingModel
+	rejections int
+	code       string
+	t          *testing.T
+	empty      bool
+	repair     string
+}
+
+func (provider *rejectedInvocationModel) Generate(ctx context.Context, request runtimemodel.Request) (runtimemodel.Response, error) {
+	response, _ := provider.invocationRecordingModel.Generate(ctx, request)
+	if len(provider.callsCopy()) > 1 && (len(request.Tools) != 0 || request.RequireToolCall || request.HostedToolCallLimit == nil || *request.HostedToolCallLimit != 0) {
+		provider.t.Fatal("terminal repair regained tool execution authority")
+	}
+	if len(provider.callsCopy()) <= provider.rejections {
+		if provider.empty {
+			response.Content = ""
+			return response, nil
+		}
+		response.Content = "rejected candidate"
+		response.ToolCalls = []tools.Call{{ID: "forbidden", ToolKey: "not.authorized", Arguments: []byte(`{}`)}}
+		return response, runtimemodel.NewResponseRejectedError(runtimemodel.NewClassifiedError(errDomainRejected, provider.code))
+	}
+	switch provider.repair {
+	case "pause":
+		response.Continue = true
+	case "local":
+		response.ToolCalls = []tools.Call{{ID: "repair-tool", ToolKey: manifestToolKey, Arguments: []byte(`{}`)}}
+	case "native":
+		response.HostedToolCalls = []runtimemodel.HostedToolCall{{ID: "repair-native", ToolKey: "native.search", Status: "completed"}}
+	}
+	return response, nil
+}
+
+func (provider *rejectedInvocationModel) GenerateStream(ctx context.Context, request runtimemodel.Request, _ runtimemodel.StreamSink) (runtimemodel.Response, error) {
+	return provider.Generate(ctx, request)
+}
+
+func TestModelInvocationKnownRejectionHasOneToolFreeTerminalRepair(t *testing.T) {
+	for _, test := range []struct {
+		name, code                      string
+		repair                          string
+		rejections, maxCalls, wantCalls int
+		completed                       bool
+		policy                          bool
+		empty, required                 bool
+	}{
+		{name: "repair", rejections: 1, maxCalls: 4, wantCalls: 2, completed: true},
+		{name: "repeat_violation", rejections: 3, maxCalls: 4, wantCalls: 2},
+		{name: "no_remaining_calls", rejections: 1, maxCalls: 1, wantCalls: 1},
+		{name: "persistence_failure", code: "model.post_generation_failed", rejections: 1, maxCalls: 4, wantCalls: 1},
+		{name: "repeated_completion_policy", maxCalls: 4, wantCalls: 2, policy: true},
+		{name: "empty_completed_response", rejections: 1, maxCalls: 4, wantCalls: 2, completed: true, empty: true},
+		{name: "repair_cannot_bypass_required_tool", rejections: 1, maxCalls: 4, wantCalls: 2, required: true},
+		{name: "repair_cannot_pause", rejections: 1, maxCalls: 4, wantCalls: 2, repair: "pause"},
+		{name: "repair_cannot_execute_local_tool", rejections: 1, maxCalls: 4, wantCalls: 2, repair: "local"},
+		{name: "repair_cannot_execute_native_tool", rejections: 1, maxCalls: 4, wantCalls: 2, repair: "native"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			provider := &rejectedInvocationModel{t: t, rejections: test.rejections, code: test.code, empty: test.empty, repair: test.repair}
+			runtime := newModelInvocationRuntime(t, memory.NewStore())
+			registry := mustRegistry(t, []tools.Registration{{Definition: tools.Definition{Key: manifestToolKey, Name: manifestToolName, InputSchema: []byte(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				t.Fatal("rejected local tool executed")
+				return tools.ExecutionResult{}, nil
+			})}})
+			dependencies := agent.Dependencies{Runtime: runtime, Model: provider, Catalog: registry, Executor: registry}
+			if test.policy {
+				dependencies.CompletionPolicies = []agent.CompletionPolicy{correctingCompletionPolicy{}}
+			}
+			runner, err := agent.NewRunner(dependencies)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := startRequest("rejected-"+test.name, "request-"+test.name, "finish from evidence", manifestToolKey)
+			request.Limits.MaxLLMCalls = test.maxCalls
+			if test.required {
+				request.RequiredToolKeys = []string{manifestToolKey}
+			}
+			snapshot, callErr := runner.StartRun(t.Context(), request)
+			if test.completed && callErr != nil {
+				t.Fatal(callErr)
+			}
+			if (snapshot.Run.Status == kernel.RunStatusCompleted) != test.completed || len(provider.callsCopy()) != test.wantCalls {
+				t.Fatalf("status=%s calls=%d err=%v", snapshot.Run.Status, len(provider.callsCopy()), callErr)
+			}
+			view := mustModelInvocationView(t, mustLoadModelInvocationRun(t, runtime, snapshot.Run.ID))
+			if view.Budget.Usage.LLMCalls != test.wantCalls || view.Budget.Usage.TotalTokens != int64(test.wantCalls*10) || view.Budget.Usage.ToolCalls != 0 {
+				t.Fatalf("known completion usage lost: %+v", view.Budget.Usage)
+			}
+			for _, invocation := range view.ModelInvocations {
+				if invocation.Status != agent.ModelInvocationConsumed || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.Usage == nil || invocation.Response.Usage == nil || invocation.ExecutionLeaseUntil != nil {
+					t.Fatalf("known completion left pending: %+v", invocation)
+				}
+			}
+			if test.rejections > 0 && view.ModelInvocations[0].ErrorCode == "" {
+				t.Fatal("rejected receipt was persisted as accepted")
+			}
+		})
+	}
+}
+
+func TestModelTerminalRepairBoundSurvivesRestart(t *testing.T) {
+	for _, rejections := range []int{1, 3} {
+		t.Run(fmt.Sprint(rejections), func(t *testing.T) {
+			base := memory.NewStore()
+			faults := &modelInvocationFaultStore{Store: base, eventType: "agent.completion_corrected", afterCommit: true}
+			provider := &rejectedInvocationModel{t: t, rejections: rejections}
+			runner := newModelInvocationRunner(t, faults, provider)
+			_, err := runner.StartRun(t.Context(), startRequest("repair-restart", "repair-request", "finish"))
+			if !errors.Is(err, errInjectedModelInvocationCrash) {
+				t.Fatalf("correction commit failure = %v", err)
+			}
+			runtime := newModelInvocationRuntime(t, base)
+			pending := mustLoadModelInvocationRun(t, runtime, "repair-restart")
+			restarted := newModelInvocationRunnerWithClock(t, runtime, provider, modelInvocationClock{offset: 3 * time.Minute})
+			final, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+			wantCompleted := rejections == 1
+			if (final.Run.Status == kernel.RunStatusCompleted) != wantCompleted || len(provider.callsCopy()) != 2 || (err == nil) != wantCompleted {
+				t.Fatalf("repair reset across restart: status=%s calls=%d err=%v", final.Run.Status, len(provider.callsCopy()), err)
+			}
+		})
+	}
+}
 
 func TestModelInvocationRecoversCrashAfterPendingCommitBeforeProviderCall(t *testing.T) {
 	t.Parallel()

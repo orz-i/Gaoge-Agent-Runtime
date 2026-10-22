@@ -276,6 +276,11 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 	callContextErr := callCtx.Err()
 	cancel()
 
+	if model.IsResponseRejectedError(callErr) && response.Usage != nil {
+		// A final receipt remains authoritative even if cancellation raced with
+		// local validation/persistence. Never replace it with a transport retry.
+		return response, callErr
+	}
 	if callErr == nil {
 		if errors.Is(callContextErr, context.DeadlineExceeded) {
 			return response, ErrModelLateResult

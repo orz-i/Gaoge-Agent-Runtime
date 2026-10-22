@@ -61,13 +61,19 @@ func (middleware *BudgetMiddleware) Run(ctx context.Context, invocation plugin.R
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if err = middleware.project(ctx, ledger); err != nil {
-		return kernel.Snapshot{}, err
-	}
+	// A presentation failure cannot block reconciliation of a committed model
+	// receipt. New effects still pass their ordinary reservation/dispatch guards.
+	projectErr := middleware.project(ctx, ledger)
 	if ledger.View(invocation.RunID).Cancelled {
 		return kernel.Snapshot{}, budget.ErrExhausted
 	}
-	return next(ctx)
+	snapshot, runErr := next(ctx)
+	if ledger.ID != "" && snapshot.Run.ID == invocation.RunID && terminalRuntimeStatus(snapshot.Run.Status) {
+		accountingCtx := context.WithoutCancel(ctx)
+		updated, finishErr := middleware.coordinator().FinishRuns(accountingCtx, ledger.ID, invocation.RunID)
+		runErr = errors.Join(runErr, finishErr, middleware.project(accountingCtx, updated))
+	}
+	return snapshot, errors.Join(runErr, projectErr)
 }
 
 func (middleware *BudgetMiddleware) bindRun(ctx context.Context, runID string) (budget.Ledger, error) {
@@ -111,11 +117,25 @@ func (middleware *BudgetMiddleware) registerAncestry(ctx context.Context, ledger
 }
 
 func (middleware *BudgetMiddleware) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
+	return middleware.ModelWithPrepare(ctx, request, emit, nil, next)
+}
+
+// ModelWithPrepare freezes the remaining allowance before host input preparation,
+// but marks dispatch only after that preparation succeeds. Prepare must not send
+// a generation request: its errors prove the reservation can be released safely.
+// Errors from next retain the ordinary unknown-outcome accounting contract.
+func (middleware *BudgetMiddleware) ModelWithPrepare(ctx context.Context, request model.Request, emit model.StreamSink, prepare func(context.Context, model.Request) (model.Request, error), next plugin.ModelNext) (model.Response, error) {
 	ledger, err := middleware.bindRun(ctx, request.RunID)
 	if err != nil {
 		return model.Response{}, err
 	}
 	if ledger.ID == "" {
+		if prepare != nil {
+			request, err = prepare(ctx, request)
+			if err != nil {
+				return model.Response{}, err
+			}
+		}
 		return next(ctx, request, emit)
 	}
 	if strings.TrimSpace(request.InvocationID) == "" {
@@ -131,7 +151,12 @@ func (middleware *BudgetMiddleware) Model(ctx context.Context, request model.Req
 		return model.Response{}, model.NewRetryableError(budget.ErrWaiting)
 	}
 	ledger, err = middleware.coordinator().Reserve(ctx, ledger.ID, reservation, true)
-	if projectErr := middleware.project(ctx, ledger); projectErr != nil {
+	projectErr := middleware.project(ctx, ledger)
+	if value := ledger.Reservations[reservation.ID]; err == nil && value.Status == budget.ReservationSettled {
+		response, callErr := decodeBudgetModelReceipt(value.Receipt)
+		return settledModelResult(response, callErr, projectErr)
+	}
+	if projectErr != nil {
 		return model.Response{}, projectErr
 	}
 	if errors.Is(err, budget.ErrWaiting) {
@@ -140,10 +165,14 @@ func (middleware *BudgetMiddleware) Model(ctx context.Context, request model.Req
 	if err != nil {
 		return model.Response{}, err
 	}
-	if value := ledger.Reservations[reservation.ID]; value.Status == budget.ReservationSettled {
-		var response model.Response
-		err = json.Unmarshal(value.Receipt, &response)
-		return response, err
+	request = applyLocalToolBudget(request, ledger, request.RunID)
+	if prepare != nil {
+		request, err = prepare(ctx, request)
+		if err != nil {
+			accountingCtx := context.WithoutCancel(ctx)
+			updated, releaseErr := middleware.coordinator().Release(accountingCtx, ledger.ID, reservation.ID)
+			return model.Response{}, errors.Join(err, releaseErr, middleware.project(accountingCtx, updated))
+		}
 	}
 	if _, err = middleware.coordinator().Dispatch(ctx, ledger.ID, reservation.ID); err != nil {
 		if errors.Is(err, budget.ErrWaiting) {
@@ -166,6 +195,7 @@ func (middleware *BudgetMiddleware) modelReservation(ctx context.Context, ledger
 			return request, reservation, budget.ErrLedgerConflict
 		}
 		request.MaxOutputTokens = existing.Requested.OutputTokens
+		request = applyHostedReservation(request, existing.Requested.HostedToolCalls, ledger, existing.RunID)
 		if existing.Status != budget.ReservationSettled && !existing.Dispatched && hasRunTokenLimits(ledger, request.RunID) {
 			if middleware.dependencies.Meter == nil {
 				return request, existing, budget.ErrUnmetered
@@ -180,6 +210,7 @@ func (middleware *BudgetMiddleware) modelReservation(ctx context.Context, ledger
 		}
 		return request, existing, nil
 	}
+	request, reservation = reserveHostedModelTools(request, reservation, ledger)
 	if !hasRunTokenLimits(ledger, request.RunID) {
 		return request, reservation, nil
 	}
@@ -209,7 +240,8 @@ func (middleware *BudgetMiddleware) modelReservation(ctx context.Context, ledger
 
 func (middleware *BudgetMiddleware) settleModel(ctx context.Context, ledger budget.Ledger, reservation budget.Reservation, response model.Response, callErr error) (model.Response, error) {
 	accountingCtx := context.WithoutCancel(ctx)
-	if callErr != nil || (hasRunTokenLimits(ledger, reservation.RunID) && response.Usage == nil) {
+	knownRejection := model.IsResponseRejectedError(callErr) && response.Usage != nil
+	if (callErr != nil && !knownRejection) || (hasRunTokenLimits(ledger, reservation.RunID) && response.Usage == nil) {
 		// A timeout, cancellation, or missing receipt cannot prove a zero charge.
 		updated, err := middleware.coordinator().Suspend(accountingCtx, ledger.ID, reservation.ID)
 		if callErr == nil {
@@ -226,18 +258,28 @@ func (middleware *BudgetMiddleware) settleModel(ctx context.Context, ledger budg
 	if err != nil {
 		return response, err
 	}
-	raw, err := json.Marshal(response)
+	hostedCount, related, err := hostedReceiptTransfers(ledger, reservation.RunID, response.HostedToolCalls)
 	if err != nil {
 		return response, err
 	}
-	updated, err := middleware.coordinator().Settle(accountingCtx, ledger.ID, reservation.ID, usage, raw)
+	usage.HostedToolCalls = hostedCount
+	usage.ToolCalls = usage.HostedToolCalls
+	_, hostedLimited := remainingHostedCalls(ledger, reservation.RunID)
+	raw, err := encodeBudgetModelReceipt(response, callErr)
+	if err != nil {
+		return response, err
+	}
+	updated, err := middleware.coordinator().SettleWithReceipts(accountingCtx, ledger.ID, reservation.ID, usage, raw, related)
 	if err != nil {
 		return response, err
 	}
 	if hasRunTokenLimits(ledger, reservation.RunID) && (usage.InputTokens > reservation.Requested.InputTokens || usage.OutputTokens > reservation.Requested.OutputTokens) {
 		err = budget.ErrInvalidUsage
 	}
-	return response, errors.Join(err, middleware.project(accountingCtx, updated))
+	if hostedLimited && usage.HostedToolCalls+pendingHostedAllowance(updated, reservation.RunID) > reservation.Requested.HostedToolCalls+pendingHostedAllowance(ledger, reservation.RunID) {
+		err = budget.ErrInvalidUsage
+	}
+	return settledModelResult(response, callErr, errors.Join(err, middleware.project(accountingCtx, updated)))
 }
 
 func (middleware *BudgetMiddleware) Tool(ctx context.Context, invocation plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
