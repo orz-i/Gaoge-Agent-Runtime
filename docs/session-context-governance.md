@@ -86,7 +86,7 @@ Compaction additionally requires:
 
 The Context tool must enforce its existing session scope and authorization. The host is responsible for additional tenant isolation, artifact access policy, and any external blob store.
 
-`NewContextWindowMiddleware` remains available for existing code. It can coexist with the pre-intent hook: exact already-injected Context prefixes are not duplicated. Prefer the pre-intent hook for new compositions. With the pre-intent hook configured, Agent rejects any post-intent Model middleware rewrite of the frozen Context messages before provider dispatch. **Do not combine strict pre-intent projection with other middleware that legitimately injects role/delegation messages at dispatch time** until that injection is migrated to the pre-intent boundary; existing legacy compositions remain unchanged.
+`NewContextWindowMiddleware` remains available for existing code. It can coexist with the pre-intent hook: exact already-injected Context prefixes are not duplicated. Prefer the pre-intent hook for new compositions. With the pre-intent hook configured, Agent rejects any post-intent Model middleware rewrite of the frozen Context messages before provider dispatch. The existing `NewRoleModelMiddleware` is compatible for newly created delegated child Runs: their fixed specialist directive is included in **durable child instructions** before intent construction, and the middleware does not inject it again. Old Runs retain the legacy fallback when no strict preparer is enabled. Other custom middlewares that add or rewrite messages at dispatch time remain incompatible with strict pre-intent freezing; move those message projections to the pre-intent boundary.
 
 ## Known limits and follow-up work
 
@@ -103,6 +103,6 @@ cd ../agent-runtime-harness && go test -count=1 ./...
 make check
 ```
 
-Regression suites include pre-intent commit-loss recovery, post-intent middleware mutation rejection, identity/tool authority validation, idempotent Context materialization, two-turn Session restart and replay, text-window rollover, exact artifact persistence, next-turn source-path reuse, crash between Context rollover and Agent intent commit, and fail-closed model window budget enforcement.
+Regression suites include pre-intent commit-loss recovery, post-intent middleware mutation rejection, identity/tool authority validation, idempotent Context materialization, two-turn Session restart and replay, text-window rollover, exact artifact persistence, next-turn source-path reuse, crash between Context rollover and Agent intent commit, and fail-closed model window budget enforcement. The real PostgreSQL suite additionally exercises `OpenSession` with managed compaction, persisted artifacts, a fresh Store connection, and a subsequent turn without replaying archived history. A separate Harness regression covers role-specialist delegation with managed Context and scoped hosted-Tool grants.
 
-Full PostgreSQL/Redis integration requires the repository Docker services; it is not covered by these local unit suites.
+Real PostgreSQL/Redis and cross-process continuation tests were additionally verified with `make integration` using the repository's Docker Compose services (Docker Engine 29.8.0, Docker Compose 5.5.1); containers and network were removed by the test runner. This verifies database/queue correctness separately from local unit and race tests. It does not substitute for live external model-provider compatibility checks.
