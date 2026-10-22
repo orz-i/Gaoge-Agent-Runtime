@@ -219,6 +219,13 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	state.ToolWait = &PendingTool{
 		PendingExecution: *pending, CallID: call.ID, ToolKey: call.ToolKey, Generation: snapshot.Run.Revision + 1,
 	}
+	// Dispatch the remaining calls of this model-produced batch before joining
+	// independent local children. External effects and approval checkpoints keep
+	// their original serial receipt/fencing contract.
+	if pending.Kind == tools.PendingChildTerminal && runner.runExecution == nil &&
+		len(state.PendingCalls) > 1 && snapshot.Checkpoint == nil && state.PendingApproval == nil && independentChildBatch(state) {
+		return runner.deferChildCall(ctx, snapshot, state, call)
+	}
 	events := []kernel.EventDraft{{Type: EventToolPending, Message: string(pending.Kind)}}
 	if pending.DeadlineAt != nil {
 		events = append(events, kernel.EventDraft{

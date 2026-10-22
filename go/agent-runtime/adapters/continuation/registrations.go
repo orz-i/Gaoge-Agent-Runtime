@@ -46,7 +46,7 @@ func agentTrigger(event kernel.EventDraft) (continuation.Trigger, bool) {
 		return continuation.TriggerToolResultReady, true
 	}
 	if eventType == "agent.model_invocation.pending" || eventType == "agent.model_invocation.claimed" ||
-		eventType == "agent.model_invocation.retryable" || eventType == "agent.model_invocation.completed" {
+		eventType == "agent.model_invocation.retryable" || eventType == "agent.model_invocation.completed" || eventType == "agent.model_continued" {
 		return continuation.TriggerModelReady, true
 	}
 	return continuation.TriggerApprovalResolved,

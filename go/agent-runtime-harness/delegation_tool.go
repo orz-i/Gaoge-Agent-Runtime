@@ -99,6 +99,10 @@ func (handler *DelegationToolHandler) Execute(
 		}
 		return tools.ExecutionResult{}, err
 	}
+	modelResult, err := runner.delegationModelResult(ctx, result.Delegation)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
 	content, err := json.Marshal(struct {
 		DelegationID string          `json:"delegationID"`
 		ChildRunID   string          `json:"childRunID"`
@@ -109,7 +113,7 @@ func (handler *DelegationToolHandler) Execute(
 		DelegationID: result.Delegation.ID,
 		ChildRunID:   result.Delegation.ChildRunID,
 		Status:       string(result.Delegation.Status),
-		Result:       append(json.RawMessage(nil), result.Delegation.Result...),
+		Result:       modelResult,
 		ErrorCode:    delegationReceiptErrorCode(result.Delegation.Status),
 	})
 	if err != nil {
@@ -131,6 +135,33 @@ func (handler *DelegationToolHandler) Execute(
 		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: disposition},
 		Pending: pending,
 	}, nil
+}
+
+// A local Agent's terminal output includes full native search receipts for
+// auditing. Forward the actual answer, citations and artifact references to
+// its supervisor, plus receipt identities, rather than copying whole web pages
+// into the parent context. The exact receipts remain on the child Run.
+func (runner *Runner) delegationModelResult(ctx context.Context, delegation handoff.Delegation) (json.RawMessage, error) {
+	raw := append(json.RawMessage(nil), delegation.Result...)
+	if delegation.Status != handoff.StatusCompleted || len(raw) == 0 || raw[0] != '{' {
+		return raw, nil
+	}
+	child, err := runner.runtime.Load(ctx, delegation.ChildRunID)
+	if err != nil {
+		return nil, err
+	}
+	if child.Run.Kind != agent.RunKind {
+		return raw, nil
+	}
+	var result agent.Result
+	if err = json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	for index := range result.HostedToolCalls {
+		call := &result.HostedToolCalls[index]
+		call.Input, call.Output, call.Error = nil, nil, nil
+	}
+	return json.Marshal(result)
 }
 
 // Error details from a Child Run are untrusted provider text. Return a
@@ -200,9 +231,10 @@ func (runner *Runner) preparedDelegationToolRequest(
 	if err != nil {
 		return DelegateRequest{}, false, err
 	}
-	id := stableID("hid", invocation.TurnID, delegationToolID(invocation, request.Call.ID), string(ItemStarted))
+	startedID := stableID("hid", invocation.TurnID, delegationToolID(invocation, request.Call.ID), string(ItemStarted))
+	waitingID := stableID("hid", invocation.TurnID, delegationToolID(invocation, request.Call.ID), string(ItemWaiting))
 	for _, item := range items {
-		if item.ID != id || item.Kind != ItemDelegation || item.InvocationID != invocation.ID {
+		if (item.ID != startedID && item.ID != waitingID) || item.Kind != ItemDelegation || item.InvocationID != invocation.ID {
 			continue
 		}
 		var payload delegationItemPayload

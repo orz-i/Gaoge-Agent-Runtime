@@ -10,6 +10,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -148,6 +149,7 @@ func roleAgentLimits(parent agent.Limits, role budget.Limits) agent.Limits {
 	// Feature still receives its ordinary local call/token limits.
 	role.MaxChildRuns, role.MaxConcurrentRuns, role.MaxCostUnits, role.MaxStateBytes = 0, 0, 0, 0
 	parent.MaxChildRuns, parent.MaxConcurrentRuns, parent.MaxCostUnits, parent.MaxStateBytes = 0, 0, 0, 0
+	role.MaxConcurrentDescendants, parent.MaxConcurrentDescendants = 0, 0
 	resolved, _ := budget.TightenLimits(parent, role)
 	return resolved
 }
@@ -166,7 +168,7 @@ func (runner *Runner) frozenDelegation(ctx context.Context, turnID, id string) (
 		return handoff.Delegation{}, false, err
 	}
 	for _, item := range items {
-		if item.Kind != ItemDelegation || item.Status != ItemStarted {
+		if item.Kind != ItemDelegation || (item.Status != ItemStarted && item.Status != ItemWaiting) {
 			continue
 		}
 		var payload delegationItemPayload
@@ -185,22 +187,68 @@ func (runner *Runner) admitRoleChild(ctx context.Context, turn Turn, parent Invo
 	if err != nil || config.SharedBudget == nil {
 		return err
 	}
-	role, found := findRole(config.Roles, delegation.RoleID)
-	if !found {
-		return ErrConflict
+	var limits budget.Limits
+	if delegation.RoleID != "" {
+		role, found := findRole(config.Roles, delegation.RoleID)
+		if !found {
+			return ErrConflict
+		}
+		limits = role.Limits
 	}
 	if runner.budgets == nil {
 		return ErrInvalidRequest
 	}
 	coordinator := runner.budgets.coordinator()
-	if _, err = runner.budgets.bindRun(ctx, parent.ExecutionRefID); err != nil {
+	ledger, err := runner.budgets.bindRun(ctx, parent.ExecutionRefID)
+	if err != nil {
 		return err
+	}
+	// Recover terminal releases missed between the Runtime commit and the budget
+	// commit. Waiting coordinators and merely cancelled requests still occupy
+	// capacity until their Run has actually ended.
+	var finished []string
+	for id, binding := range ledger.Runs {
+		if ledger.FinishedRuns[id] {
+			continue
+		}
+		snapshot, loadErr := runner.runtime.Load(ctx, id)
+		if errors.Is(loadErr, kernel.ErrNotFound) {
+			// A registered child that was never created must not consume
+			// descendant capacity forever after its owner has terminated.
+			// Do not reclaim under a live/unknown parent: it may still be
+			// preparing the child in another process.
+			if binding.ParentRunID != "" {
+				owner, ownerErr := runner.runtime.Load(ctx, binding.ParentRunID)
+				if ownerErr == nil && terminalRuntimeStatus(owner.Run.Status) {
+					// Cancellation prevents a late StartRun from spending budget;
+					// reconciliation frees only lifetime capacity, not usage.
+					if _, cancelErr := coordinator.CancelRun(ctx, turn.ID, id); cancelErr != nil {
+						return cancelErr
+					}
+					finished = append(finished, id)
+				} else if ownerErr != nil && !errors.Is(ownerErr, kernel.ErrNotFound) {
+					return ownerErr
+				}
+			}
+			continue
+		}
+		if loadErr != nil {
+			return loadErr
+		}
+		if terminalRuntimeStatus(snapshot.Run.Status) {
+			finished = append(finished, id)
+		}
+	}
+	if len(finished) > 0 {
+		if _, err = coordinator.FinishRuns(ctx, turn.ID, finished...); err != nil {
+			return err
+		}
 	}
 	// Admission happens before child topology facts are appended so a hard
 	// descendant ceiling cannot leave a phantom relation or child Invocation.
-	ledger, err := coordinator.RegisterRun(ctx, turn.ID, delegation.ChildRunID, budget.RunBudget{
+	ledger, err = coordinator.RegisterRun(ctx, turn.ID, delegation.ChildRunID, budget.RunBudget{
 		ParentRunID: parent.ExecutionRefID,
-		Limits:      role.Limits,
+		Limits:      limits,
 	})
 	if err != nil {
 		return err
@@ -239,6 +287,14 @@ func NewRoleModelMiddleware(store Store) (plugin.ModelMiddleware, error) {
 }
 
 type roleModelMiddleware struct{ store Store }
+
+func isRoleDelegationInvocation(invocation Invocation, runID string) bool {
+	if invocation.ParentItemID == "" {
+		return false
+	}
+	var delegation handoff.Delegation
+	return json.Unmarshal(invocation.Input, &delegation) == nil && delegation.RoleID != "" && delegation.ChildRunID == runID
+}
 
 // Only advertise keys that are both frozen on this Turn and actually visible
 // in the supervising model's resolved, current request. Provider-hosted names
@@ -306,6 +362,14 @@ func (middleware roleModelMiddleware) Model(ctx context.Context, request model.R
 		return model.Response{}, err
 	}
 	request = model.CloneRequest(request)
+	if isRoleDelegationInvocation(invocation, request.RunID) {
+		instruction := "You are a delegated specialist. Execute only the delegated user goal. Use only the tools declared for this request. Never call delegate_to_specialist_agent unless it is explicitly available. Return your findings with source URLs and limitations to the parent; do not merely announce more work."
+		if len(request.Messages) > 0 && request.Messages[0].Role == model.RoleSystem {
+			request.Messages[0].Content += "\n\n" + instruction
+		} else {
+			request.Messages = append([]model.Message{{Role: model.RoleSystem, Content: instruction}}, request.Messages...)
+		}
+	}
 	ids, descriptions := []string{}, []string{}
 	for _, role := range config.Roles {
 		ids = append(ids, role.ID)
@@ -318,7 +382,7 @@ func (middleware roleModelMiddleware) Model(ctx context.Context, request model.R
 			if len(ids) == 0 || !allowed {
 				continue
 			}
-			definition.Description = "Delegate a focused subtask using one available role. Available roles:\n" + strings.Join(descriptions, "\n")
+			definition.Description = "Delegate a focused subtask using one available role. If a child fails, take over and complete the user-facing answer with available evidence and explicit limitations. Available roles:\n" + strings.Join(descriptions, "\n")
 			properties := map[string]any{
 				"roleID": map[string]any{"type": "string", "enum": ids}, "goal": map[string]any{"type": "string", "minLength": 1, "maxLength": 200000},
 			}

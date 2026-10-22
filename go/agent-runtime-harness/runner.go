@@ -1405,6 +1405,7 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	if ledger != nil {
 		view := ledger.View("")
 		result.Budget = &view
+		result.ToolUsage = toolUsageFromLedger(*ledger)
 	}
 	result.Subtasks, err = runner.loadSubtasks(ctx, turn, items, ledger)
 	if err != nil {
@@ -1445,6 +1446,14 @@ func cloneSnapshot(value Snapshot) Snapshot {
 	value.Interactions = cloneInteractions(value.Interactions)
 	value.Items = cloneItems(value.Items)
 	value.Output = cloneOutput(value.Output)
+	if value.ToolUsage != nil {
+		usage := *value.ToolUsage
+		usage.HostedCallsByKey = make(map[string]int, len(value.ToolUsage.HostedCallsByKey))
+		for key, count := range value.ToolUsage.HostedCallsByKey {
+			usage.HostedCallsByKey[key] = count
+		}
+		value.ToolUsage = &usage
+	}
 	return value
 }
 

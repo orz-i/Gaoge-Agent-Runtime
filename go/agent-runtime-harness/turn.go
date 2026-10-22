@@ -55,7 +55,9 @@ type Snapshot struct {
 	Items        []Item             `json:"items"`
 	Output       *Output            `json:"output,omitempty"`
 	Budget       *budget.LedgerView `json:"budget,omitempty"`
-	Subtasks     []Subtask          `json:"subtasks,omitempty"`
+	// ToolUsage is derived host presentation metadata, not a new wire contract.
+	ToolUsage *ToolUsage `json:"-"`
+	Subtasks  []Subtask  `json:"subtasks,omitempty"`
 }
 
 // TurnID deterministically derives one Harness Turn identity within a Session.

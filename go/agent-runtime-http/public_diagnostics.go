@@ -32,6 +32,7 @@ func PublicFailureCode(code string) string {
 		"agent.output_bytes_budget", "agent.model_invocation_invalid",
 		"agent.model_invocation.pending", "agent.model_invocation.claimed",
 		"agent.completion_validation_failed", "agent.usage_invalid",
+		"agent.completion_repair_exhausted", "agent.model_response_rejected", "model.post_generation_failed",
 		"agent.model_invocation.retryable", "agent.model_invocation.completed",
 		"model.upstream_auth_failed", "model.upstream_access_denied",
 		"model.upstream_quota_exhausted", "model.upstream_rate_limited",
@@ -83,6 +84,12 @@ func PublicFailureDetail(code, detail string) string {
 		return "model execution route is unavailable"
 	case "agent.tool_failed":
 		return "tool execution failed"
+	case "agent.completion_repair_exhausted":
+		return "model could not produce an acceptable final answer within its repair allowance"
+	case "agent.model_response_rejected":
+		return "completed model response violated its response or tool contract"
+	case "model.post_generation_failed":
+		return "model generation completed but its local receipt or artifacts could not be saved"
 	case "agent.tool_deadline_exceeded":
 		return "external tool result did not arrive before its deadline"
 	case "context.artifact_payload_too_large":

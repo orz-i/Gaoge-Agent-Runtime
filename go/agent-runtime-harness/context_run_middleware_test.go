@@ -2,10 +2,12 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
@@ -13,6 +15,40 @@ import (
 )
 
 type contextRunRelationFixture map[string]runrelation.Relation
+
+func TestDelegatedSpecialistResumeDoesNotRehydrateSupervisorContext(t *testing.T) {
+	store, turn, _, root := contextRunMiddlewareFixture(t)
+	input, err := json.Marshal(handoff.Delegation{RoleID: "researcher", ChildRunID: "specialist-child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := root
+	child.ID, child.ExecutionRefID, child.ParentItemID, child.Input = "specialist-invocation", "specialist-child", "parent-delegation", input
+	child.InputHash = hashInvocationBytes(input)
+	if _, _, err = store.CreateInvocation(t.Context(), child); err != nil {
+		t.Fatal(err)
+	}
+	middleware, err := NewContextRunMiddleware(store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+		if _, ok := CurrentContextCheckpoint(ctx); ok {
+			t.Fatal("supervisor history leaked into specialist")
+		}
+		if _, ok := CurrentContextWindowBinding(ctx); ok {
+			t.Fatal("specialist bound to supervisor context")
+		}
+		resolved, _, resolveErr := resolveContextTurnForRun(ctx, store, nil, child.ExecutionRefID)
+		if resolveErr != nil || resolved.ID != turn.ID {
+			t.Fatalf("artifact ownership lost: %+v %v", resolved, resolveErr)
+		}
+		return kernel.Snapshot{}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
 
 const (
 	contextRunHostTurnKind = "conversation_turn"

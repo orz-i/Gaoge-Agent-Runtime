@@ -804,7 +804,10 @@ func finishBlockedWorkflowStart(t *testing.T, feature *blockedWorkflowFeature, r
 	t.Helper()
 	close(feature.release)
 	select {
-	case <-result:
+	case err := <-result:
+		if err != nil && !errors.Is(err, kernel.ErrConflict) {
+			t.Errorf("blocked workflow start: %v", err)
+		}
 	case <-time.After(5 * time.Second):
 		t.Error("blocked workflow StartRun did not finish")
 	}

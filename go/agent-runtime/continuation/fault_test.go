@@ -34,6 +34,7 @@ func TestProjectorRecoversCommittedSelfTriggersAfterCrashBeforeEnqueue(t *testin
 		{name: "model invocation claimed", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.claimed", Wakeup: true}, trigger: continuation.TriggerModelReady},
 		{name: "model invocation retryable", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.retryable", Wakeup: true}, trigger: continuation.TriggerModelReady},
 		{name: "model invocation completed", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_invocation.completed", Wakeup: true}, trigger: continuation.TriggerModelReady},
+		{name: "provider paused turn", kind: agent.RunKind, event: kernel.EventDraft{Type: "agent.model_continued", Wakeup: true}, trigger: continuation.TriggerModelReady},
 		{name: "workflow wait resolved", kind: workflow.RunKind, event: kernel.EventDraft{Type: "workflow.wait.resolved", Wakeup: true}, trigger: continuation.TriggerWaitResolved},
 		{name: "workflow segment yielded", kind: workflow.RunKind, event: kernel.EventDraft{Type: "workflow.segment.yielded", Message: "activation_budget", Wakeup: true}, trigger: continuation.TriggerSegmentYielded},
 	}

@@ -14,6 +14,7 @@ func AddUsage(left, right Usage) (Usage, error) {
 	}{
 		{left.LLMCalls, right.LLMCalls, &result.LLMCalls},
 		{left.ToolCalls, right.ToolCalls, &result.ToolCalls},
+		{left.HostedToolCalls, right.HostedToolCalls, &result.HostedToolCalls},
 		{left.ChildRuns, right.ChildRuns, &result.ChildRuns},
 		{left.OutputBytes, right.OutputBytes, &result.OutputBytes},
 		{left.StateBytes, right.StateBytes, &result.StateBytes},
@@ -46,11 +47,12 @@ func AddUsage(left, right Usage) (Usage, error) {
 
 func remainingUsage(limits Limits, used, reserved Usage) Usage {
 	return Usage{
-		LLMCalls:     max(0, limits.MaxLLMCalls-used.LLMCalls-reserved.LLMCalls),
-		ToolCalls:    max(0, limits.MaxToolCalls-used.ToolCalls-reserved.ToolCalls),
-		ChildRuns:    max(0, limits.MaxChildRuns-used.ChildRuns-reserved.ChildRuns),
-		InputTokens:  max(0, limits.MaxInputTokens-used.InputTokens-reserved.InputTokens),
-		OutputTokens: max(0, limits.MaxOutputTokens-used.OutputTokens-reserved.OutputTokens),
-		TotalTokens:  max(0, limits.MaxTotalTokens-used.TotalTokens-reserved.TotalTokens),
+		LLMCalls:        max(0, limits.MaxLLMCalls-used.LLMCalls-reserved.LLMCalls),
+		ToolCalls:       max(0, limits.MaxToolCalls-used.ToolCalls-reserved.ToolCalls),
+		HostedToolCalls: max(0, limits.MaxHostedToolCalls-used.HostedToolCalls-reserved.HostedToolCalls),
+		ChildRuns:       max(0, limits.MaxChildRuns-used.ChildRuns-reserved.ChildRuns),
+		InputTokens:     max(0, limits.MaxInputTokens-used.InputTokens-reserved.InputTokens),
+		OutputTokens:    max(0, limits.MaxOutputTokens-used.OutputTokens-reserved.OutputTokens),
+		TotalTokens:     max(0, limits.MaxTotalTokens-used.TotalTokens-reserved.TotalTokens),
 	}
 }

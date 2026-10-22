@@ -32,8 +32,7 @@ func appendHostedToolStartedItem(
 	call model.HostedToolCall,
 ) error {
 	payload, err := json.Marshal(hostedToolTimelinePayload{
-		CallID: state.CallID, ToolKey: state.ToolKey, Status: strings.TrimSpace(call.Status),
-		InputHash: state.InputHash, OutputHash: hashTimelineBytes(call.Output), ErrorHash: hashTimelineBytes(call.Error),
+		CallID: state.CallID, ToolKey: state.ToolKey, Status: "in_progress",
 	})
 	if err != nil {
 		return err
@@ -443,10 +442,18 @@ func appendHostedToolTimelineItem(
 	tracker *hostedToolStreamTracker,
 	ordinal int,
 ) error {
-	payload, err := json.Marshal(hostedToolTimelinePayload{
+	status := hostedToolItemStatus(call.Status)
+	value := hostedToolTimelinePayload{
 		CallID: call.ID, ToolKey: call.ToolKey, Status: call.Status,
 		InputHash: hashTimelineBytes(call.Input), OutputHash: hashTimelineBytes(call.Output), ErrorHash: hashTimelineBytes(call.Error),
-	})
+	}
+	if status == ItemStarted {
+		// A paused search may be observed again with fuller input/output in
+		// a later invocation. Its started fact is immutable; terminal evidence
+		// belongs only to the separate completed/failed fact.
+		value = hostedToolTimelinePayload{CallID: call.ID, ToolKey: call.ToolKey, Status: "in_progress"}
+	}
+	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
@@ -461,7 +468,6 @@ func appendHostedToolTimelineItem(
 	if identity == "" {
 		identity = firstNonEmpty(parentItemID, strconv.Itoa(ordinal+1))
 	}
-	status := hostedToolItemStatus(call.Status)
 	now := clock.Now().UTC()
 	_, err = appendItemFact(ctx, store, feed, Item{
 		ID: stableID("hiht", turn.ID, call.ToolKey, identity, string(status)), TurnID: turn.ID,
@@ -472,6 +478,9 @@ func appendHostedToolTimelineItem(
 }
 
 func hostedToolItemStatus(status string) ItemStatus {
+	if !model.HostedToolTerminalStatus(status) {
+		return ItemStarted
+	}
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "failed", "error":
 		return ItemFailed

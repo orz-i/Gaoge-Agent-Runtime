@@ -13,16 +13,18 @@ var ErrInvalidUsage = errors.New("invalid runtime budget usage")
 type Dimension string
 
 const (
-	DimensionLLMCalls       Dimension = "llm_calls"
-	DimensionToolCalls      Dimension = "tool_calls"
-	DimensionInputTokens    Dimension = "input_tokens"
-	DimensionOutputTokens   Dimension = "output_tokens"
-	DimensionTotalTokens    Dimension = "total_tokens"
-	DimensionOutputBytes    Dimension = "output_bytes"
-	DimensionStateBytes     Dimension = "state_bytes"
-	DimensionChildRuns      Dimension = "child_runs"
-	DimensionCostUnits      Dimension = "cost_units"
-	DimensionConcurrentRuns Dimension = "concurrent_runs"
+	DimensionLLMCalls              Dimension = "llm_calls"
+	DimensionToolCalls             Dimension = "tool_calls"
+	DimensionHostedToolCalls       Dimension = "hosted_tool_calls"
+	DimensionInputTokens           Dimension = "input_tokens"
+	DimensionOutputTokens          Dimension = "output_tokens"
+	DimensionTotalTokens           Dimension = "total_tokens"
+	DimensionOutputBytes           Dimension = "output_bytes"
+	DimensionStateBytes            Dimension = "state_bytes"
+	DimensionChildRuns             Dimension = "child_runs"
+	DimensionCostUnits             Dimension = "cost_units"
+	DimensionConcurrentRuns        Dimension = "concurrent_runs"
+	DimensionConcurrentDescendants Dimension = "concurrent_descendants"
 )
 
 // Limits are optional ceilings shared only where features have identical
@@ -30,22 +32,26 @@ const (
 // Reasoning tokens are intentionally observation-only because providers do not
 // report them consistently enough for a portable hard limit.
 type Limits struct {
-	MaxLLMCalls       int   `json:"maxLLMCalls,omitempty"`
-	MaxToolCalls      int   `json:"maxToolCalls,omitempty"`
-	MaxInputTokens    int64 `json:"maxInputTokens,omitempty"`
-	MaxOutputTokens   int64 `json:"maxOutputTokens,omitempty"`
-	MaxTotalTokens    int64 `json:"maxTotalTokens,omitempty"`
-	MaxOutputBytes    int   `json:"maxOutputBytes,omitempty"`
-	MaxStateBytes     int   `json:"maxStateBytes,omitempty"`
-	MaxChildRuns      int   `json:"maxChildRuns,omitempty"`
-	MaxCostUnits      int64 `json:"maxCostUnits,omitempty"`
-	MaxConcurrentRuns int   `json:"maxConcurrentRuns,omitempty"`
+	MaxLLMCalls        int   `json:"maxLLMCalls,omitempty"`
+	MaxToolCalls       int   `json:"maxToolCalls,omitempty"`
+	MaxHostedToolCalls int   `json:"maxHostedToolCalls,omitempty"`
+	MaxInputTokens     int64 `json:"maxInputTokens,omitempty"`
+	MaxOutputTokens    int64 `json:"maxOutputTokens,omitempty"`
+	MaxTotalTokens     int64 `json:"maxTotalTokens,omitempty"`
+	MaxOutputBytes     int   `json:"maxOutputBytes,omitempty"`
+	MaxStateBytes      int   `json:"maxStateBytes,omitempty"`
+	MaxChildRuns       int   `json:"maxChildRuns,omitempty"`
+	MaxCostUnits       int64 `json:"maxCostUnits,omitempty"`
+	MaxConcurrentRuns  int   `json:"maxConcurrentRuns,omitempty"`
+	// MaxConcurrentDescendants includes waiting coordinators until terminal.
+	// It excludes the subtree root and is independent of active execution slots.
+	MaxConcurrentDescendants int `json:"maxConcurrentDescendants,omitempty"`
 }
 
 // ValidUsage validates a durable ledger, including the invariant that total
 // tokens are exactly the sum of observed input and output tokens.
 func ValidUsage(value Usage) bool {
-	if value.LLMCalls < 0 || value.ToolCalls < 0 || value.InputTokens < 0 || value.OutputTokens < 0 ||
+	if value.LLMCalls < 0 || value.ToolCalls < 0 || value.HostedToolCalls < 0 || value.InputTokens < 0 || value.OutputTokens < 0 ||
 		value.TotalTokens < 0 || value.CacheReadTokens < 0 || value.CacheWriteTokens < 0 ||
 		value.ReasoningTokens < 0 || value.OutputBytes < 0 || value.StateBytes < 0 ||
 		value.ChildRuns < 0 || value.CostUnits < 0 {
@@ -71,6 +77,9 @@ func ResolveLimits(defaults Limits, requested Limits) (Limits, error) {
 	if resolved.MaxToolCalls == 0 {
 		resolved.MaxToolCalls = defaults.MaxToolCalls
 	}
+	if resolved.MaxHostedToolCalls == 0 {
+		resolved.MaxHostedToolCalls = defaults.MaxHostedToolCalls
+	}
 	if resolved.MaxInputTokens == 0 {
 		resolved.MaxInputTokens = defaults.MaxInputTokens
 	}
@@ -95,6 +104,9 @@ func ResolveLimits(defaults Limits, requested Limits) (Limits, error) {
 	if resolved.MaxConcurrentRuns == 0 {
 		resolved.MaxConcurrentRuns = defaults.MaxConcurrentRuns
 	}
+	if resolved.MaxConcurrentDescendants == 0 {
+		resolved.MaxConcurrentDescendants = defaults.MaxConcurrentDescendants
+	}
 	return resolved, nil
 }
 
@@ -108,16 +120,18 @@ func TightenLimits(hard Limits, requested Limits) (Limits, error) {
 		return Limits{}, ErrInvalidUsage
 	}
 	return Limits{
-		MaxLLMCalls:       tightenInt(hard.MaxLLMCalls, requested.MaxLLMCalls),
-		MaxToolCalls:      tightenInt(hard.MaxToolCalls, requested.MaxToolCalls),
-		MaxInputTokens:    tightenInt64(hard.MaxInputTokens, requested.MaxInputTokens),
-		MaxOutputTokens:   tightenInt64(hard.MaxOutputTokens, requested.MaxOutputTokens),
-		MaxTotalTokens:    tightenInt64(hard.MaxTotalTokens, requested.MaxTotalTokens),
-		MaxOutputBytes:    tightenInt(hard.MaxOutputBytes, requested.MaxOutputBytes),
-		MaxStateBytes:     tightenInt(hard.MaxStateBytes, requested.MaxStateBytes),
-		MaxChildRuns:      tightenInt(hard.MaxChildRuns, requested.MaxChildRuns),
-		MaxCostUnits:      tightenInt64(hard.MaxCostUnits, requested.MaxCostUnits),
-		MaxConcurrentRuns: tightenInt(hard.MaxConcurrentRuns, requested.MaxConcurrentRuns),
+		MaxLLMCalls:              tightenInt(hard.MaxLLMCalls, requested.MaxLLMCalls),
+		MaxToolCalls:             tightenInt(hard.MaxToolCalls, requested.MaxToolCalls),
+		MaxHostedToolCalls:       tightenInt(hard.MaxHostedToolCalls, requested.MaxHostedToolCalls),
+		MaxInputTokens:           tightenInt64(hard.MaxInputTokens, requested.MaxInputTokens),
+		MaxOutputTokens:          tightenInt64(hard.MaxOutputTokens, requested.MaxOutputTokens),
+		MaxTotalTokens:           tightenInt64(hard.MaxTotalTokens, requested.MaxTotalTokens),
+		MaxOutputBytes:           tightenInt(hard.MaxOutputBytes, requested.MaxOutputBytes),
+		MaxStateBytes:            tightenInt(hard.MaxStateBytes, requested.MaxStateBytes),
+		MaxChildRuns:             tightenInt(hard.MaxChildRuns, requested.MaxChildRuns),
+		MaxCostUnits:             tightenInt64(hard.MaxCostUnits, requested.MaxCostUnits),
+		MaxConcurrentRuns:        tightenInt(hard.MaxConcurrentRuns, requested.MaxConcurrentRuns),
+		MaxConcurrentDescendants: tightenInt(hard.MaxConcurrentDescendants, requested.MaxConcurrentDescendants),
 	}, nil
 }
 
@@ -149,6 +163,7 @@ func tightenInt64(hard, requested int64) int64 {
 type Usage struct {
 	LLMCalls         int   `json:"llmCalls,omitempty"`
 	ToolCalls        int   `json:"toolCalls,omitempty"`
+	HostedToolCalls  int   `json:"hostedToolCalls,omitempty"`
 	InputTokens      int64 `json:"inputTokens,omitempty"`
 	OutputTokens     int64 `json:"outputTokens,omitempty"`
 	TotalTokens      int64 `json:"totalTokens,omitempty"`
@@ -178,9 +193,9 @@ type TokenUsage struct {
 
 // ValidLimits rejects negative ceilings while preserving zero as unlimited.
 func ValidLimits(value Limits) bool {
-	return value.MaxLLMCalls >= 0 && value.MaxToolCalls >= 0 &&
+	return value.MaxLLMCalls >= 0 && value.MaxToolCalls >= 0 && value.MaxHostedToolCalls >= 0 &&
 		value.MaxInputTokens >= 0 && value.MaxOutputTokens >= 0 && value.MaxTotalTokens >= 0 &&
-		value.MaxOutputBytes >= 0 && value.MaxStateBytes >= 0 && value.MaxChildRuns >= 0 && value.MaxCostUnits >= 0 && value.MaxConcurrentRuns >= 0
+		value.MaxOutputBytes >= 0 && value.MaxStateBytes >= 0 && value.MaxChildRuns >= 0 && value.MaxCostUnits >= 0 && value.MaxConcurrentRuns >= 0 && value.MaxConcurrentDescendants >= 0
 }
 
 // HasTokenLimits reports whether exact token observations are required to
@@ -238,6 +253,8 @@ func Exceeded(limits Limits, usage Usage) Dimension {
 		return DimensionLLMCalls
 	case limits.MaxToolCalls > 0 && usage.ToolCalls > limits.MaxToolCalls:
 		return DimensionToolCalls
+	case limits.MaxHostedToolCalls > 0 && usage.HostedToolCalls > limits.MaxHostedToolCalls:
+		return DimensionHostedToolCalls
 	case limits.MaxInputTokens > 0 && usage.InputTokens > limits.MaxInputTokens:
 		return DimensionInputTokens
 	case limits.MaxOutputTokens > 0 && usage.OutputTokens > limits.MaxOutputTokens:
