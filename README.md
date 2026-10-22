@@ -78,6 +78,17 @@ GAOGE_PROVIDER=openai GAOGE_MODEL=gpt-4.1 OPENAI_API_KEY="$OPENAI_API_KEY" \
 
 See [provider adapters, supported capabilities, and limitations](docs/provider-adapters.md).
 
+### Session and Context governance
+
+For text conversations, the optional Harness `OpenSession` facade exposes
+`Prompt`, `Load`, and `Refresh` over the existing durable Session/Turn Store.
+A trusted pre-intent model request preparer can inject the Context Window
+without changing a persisted model intent on restart. A separately opt-in
+managed preparer estimates routed model-window pressure and archives removed
+history as durable, retrievable Context artifacts; unknown token limits and
+unsafe compaction fail closed. No additional Session authority or schema is
+introduced. See [Session and Context governance, composition and limits](docs/session-context-governance.md).
+
 ### Configuration-driven bootstrap
 
 Hosts that prefer configuration-driven assembly can use the optional
