@@ -29,12 +29,24 @@ func toolsRoleUnavailable() error {
 	return tools.NewRecoverableCallError("delegation.role_unavailable", "Choose a roleID from this task's frozen available roles.", ErrInvalidRequest)
 }
 
+const delegatedSpecialistInstruction = "You are a delegated specialist. Execute only the delegated user goal. Use only the tools declared for this request. Never call delegate_to_specialist_agent unless it is explicitly available. Return your findings with source URLs and limitations to the parent; do not merely announce more work."
+
 func roleInstructions(role RoleSnapshot) string {
 	parts := []string{strings.TrimSpace(role.Instructions)}
 	for _, skill := range role.Skills {
 		parts = append(parts, "## "+skill.Title+"\n"+skill.Markdown)
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+// Only a delegated child receives the specialist boundary. Standalone role
+// invocations retain the existing roleInstructions contract unchanged.
+func delegatedRoleInstructions(role RoleSnapshot) string {
+	instructions := roleInstructions(role)
+	if instructions == "" {
+		return delegatedSpecialistInstruction
+	}
+	return instructions + "\n\n" + delegatedSpecialistInstruction
 }
 
 func roleToolKeys(role RoleSnapshot) []string {
@@ -363,11 +375,16 @@ func (middleware roleModelMiddleware) Model(ctx context.Context, request model.R
 	}
 	request = model.CloneRequest(request)
 	if isRoleDelegationInvocation(invocation, request.RunID) {
-		instruction := "You are a delegated specialist. Execute only the delegated user goal. Use only the tools declared for this request. Never call delegate_to_specialist_agent unless it is explicitly available. Return your findings with source URLs and limitations to the parent; do not merely announce more work."
+		// New delegated Runs persist this directive in delegatedRoleInstructions. Preserve
+		// the legacy injection only for previously created Runs lacking it;
+		// when an Agent uses pre-intent Context freezing, a late change is
+		// correctly rejected instead of silently changing the model request.
 		if len(request.Messages) > 0 && request.Messages[0].Role == model.RoleSystem {
-			request.Messages[0].Content += "\n\n" + instruction
+			if !strings.HasSuffix(strings.TrimSpace(request.Messages[0].Content), delegatedSpecialistInstruction) {
+				request.Messages[0].Content += "\n\n" + delegatedSpecialistInstruction
+			}
 		} else {
-			request.Messages = append([]model.Message{{Role: model.RoleSystem, Content: instruction}}, request.Messages...)
+			request.Messages = append([]model.Message{{Role: model.RoleSystem, Content: delegatedSpecialistInstruction}}, request.Messages...)
 		}
 	}
 	ids, descriptions := []string{}, []string{}

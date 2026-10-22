@@ -8,6 +8,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -20,12 +21,24 @@ type parentHostedAssignmentModel struct {
 	t                     *testing.T
 	requested             []string
 	expectedChildModel    string
+	frozen                bool
 	rootCalls, childCalls int
 }
 
 func (capture *parentHostedAssignmentModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	if strings.HasPrefix(request.RunID, "hchild_") {
 		capture.childCalls++
+		if capture.frozen {
+			if len(request.Messages) == 0 || request.Messages[0].Role != model.RoleSystem ||
+				strings.Count(request.Messages[0].Content, "You are a delegated specialist.") != 1 {
+				capture.t.Fatalf("specialist instruction not frozen exactly once: %+v", request.Messages)
+			}
+			for _, message := range request.Messages {
+				if strings.Contains(message.Content, "prior supervisor conversation") {
+					capture.t.Fatal("delegated child inherited supervisor-only Context")
+				}
+			}
+		}
 		if request.Model != capture.expectedChildModel {
 			capture.t.Fatalf("child model %q != %q", request.Model, capture.expectedChildModel)
 		}
@@ -39,6 +52,17 @@ func (capture *parentHostedAssignmentModel) Generate(_ context.Context, request 
 		return model.Response{Content: "specialist finished"}, nil
 	}
 	capture.rootCalls++
+	if capture.frozen {
+		found := false
+		for _, message := range request.Messages {
+			if message.Content == "prior supervisor conversation" {
+				found = true
+			}
+		}
+		if !found {
+			capture.t.Fatal("managed Context prefix missing in root request")
+		}
+	}
 	if request.Model != "specialist-model" || len(request.HostedTools) != 1 || request.HostedTools[0].Key != scopedSearchKey {
 		capture.t.Fatalf("parent hosted evidence is missing: %+v", request)
 	}
@@ -75,6 +99,10 @@ func (capture *parentHostedAssignmentModel) Generate(_ context.Context, request 
 }
 
 func runSelectedHostedParentTool(t *testing.T, childModel string, selected []string, wantChild bool) {
+	runSelectedHostedParentToolWithFrozenContext(t, childModel, selected, wantChild, false)
+}
+
+func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel string, selected []string, wantChild, frozen bool) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -90,13 +118,29 @@ func runSelectedHostedParentTool(t *testing.T, childModel string, selected []str
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture := &parentHostedAssignmentModel{t: t, requested: selected, expectedChildModel: childModel}
+	capture := &parentHostedAssignmentModel{t: t, requested: selected, expectedChildModel: childModel, frozen: frozen}
 	dependencies := delegationAgentDependencies(runtime, capture, registry, approvals, 12, false)
 	middleware, err := harness.NewRoleModelMiddleware(store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dependencies.ModelMiddleware = append(dependencies.ModelMiddleware, middleware)
+	var manager *runtimecontext.Manager
+	if frozen {
+		manager = runtimecontext.NewManager(runtimecontext.Dependencies{})
+		managed, prepareErr := harness.NewManagedContextPreparer(store, manager, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+			return runtimecontext.ModelWindow{ContextTokens: 20000, ReservedOutputTokens: 512}, nil
+		})
+		if prepareErr != nil {
+			t.Fatal(prepareErr)
+		}
+		dependencies.PrepareModelRequest = managed
+		ctxRun, contextErr := harness.NewContextRunMiddleware(store, nil)
+		if contextErr != nil {
+			t.Fatal(contextErr)
+		}
+		dependencies.RunMiddleware = append(dependencies.RunMiddleware, ctxRun)
+	}
 	dependencies.HostedTools = roleScopedHostedCatalog{}
 	direct, err := agent.NewRunner(dependencies)
 	if err != nil {
@@ -110,14 +154,18 @@ func runSelectedHostedParentTool(t *testing.T, childModel string, selected []str
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := harness.NewRunner(delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false))
+	composed := delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false)
+	if frozen {
+		composed.Context = manager
+	}
+	runner, err := harness.NewRunner(composed)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = handler.Bind(runner); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := runner.Start(t.Context(), harness.StartRequest{
+	start := harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "tool-selection-thread"},
 		HostTurn:   harness.HostRef{Kind: "message", ID: "tool-selection-turn"},
 		Actor:      kernel.ActorRef{TenantID: "test", ActorID: "parent"},
@@ -129,7 +177,15 @@ func runSelectedHostedParentTool(t *testing.T, childModel string, selected []str
 				{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1", ExecutionMode: "provider_hosted"},
 			}, Roles: []harness.RoleSnapshot{{ID: "researcher", Revision: 1, Name: "Researcher", Model: childModel}},
 		},
-	})
+	}
+	if frozen {
+		start.Context = contextSeed("",
+			contextEntry("prev-user", "previous", model.RoleUser, "prior supervisor conversation", false),
+			contextEntry("prev-answer", "previous", model.RoleAssistant, "supervisor earlier answer", false),
+			contextEntry("current-user", "current", model.RoleUser, start.Goal, true),
+		)
+	}
+	snapshot, err := runner.Start(t.Context(), start)
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("delegation result=%s err=%v", snapshot.Turn.Status, err)
 	}
@@ -144,6 +200,14 @@ func runSelectedHostedParentTool(t *testing.T, childModel string, selected []str
 	}
 	if !wantChild && len(snapshot.Subtasks) != 0 {
 		t.Fatalf("rejected child left phantom subtask: %+v", snapshot.Subtasks)
+	}
+}
+
+// Proves a delegated child with role-specific instructions can run through
+// strict pre-intent Context freezing alongside the existing role middleware.
+func TestDelegatedRoleCompatibleWithFrozenContextPreparation(t *testing.T) {
+	for _, selected := range [][]string{nil, {scopedSearchKey}} {
+		runSelectedHostedParentToolWithFrozenContext(t, "specialist-model", selected, true, true)
 	}
 }
 

@@ -221,7 +221,7 @@ func (runner *Runner) prepareDelegation(
 		return handoff.Delegation{}, parent, tools.NewRecoverableCallError(
 			"delegation.tool_selection_denied", "Select only tools already authorized on the parent Run and supported by the child model. Provider-hosted Tools require the same parent/child model.", selectErr)
 	}
-	delegation.Instructions = roleInstructions(role)
+	delegation.Instructions = delegatedRoleInstructions(role)
 	delegation.ToolKeys = append(delegation.ToolKeys, roleToolKeys(role)...)
 	delegation.ToolKeys = append(delegation.ToolKeys, selectedLocal...)
 	if view, viewErr := agent.ViewState(parent); viewErr == nil {
