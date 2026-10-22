@@ -49,7 +49,8 @@ func (runner *Runner) persistChildBatch(ctx context.Context, snapshot kernel.Sna
 }
 
 func validDeferredChildren(state runState) bool {
-	seen := make(map[string]bool, len(state.PendingCalls)+len(state.DeferredChildren))
+	// Avoid summing untrusted slice lengths for a map allocation hint.
+	seen := make(map[string]bool)
 	for _, call := range state.PendingCalls {
 		seen[call.ID] = true
 	}

@@ -33,9 +33,11 @@ func TestHostedPauseReceiptsHoldAndReconcileAcrossRestart(t *testing.T) {
 			}
 		}
 		_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-			want := 1
-			if step >= 3 {
-				want = 0
+			// The in-progress receipt holds the only slot until settled.
+			// Continuation of that old execution is not a new allowance.
+			want := 0
+			if step == 0 {
+				want = 1
 			}
 			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != want {
 				t.Fatalf("step %d allowance=%v", step, bounded.HostedToolCallLimit)
@@ -109,5 +111,75 @@ func TestHostedUnfinishedReceiptSurvivesTerminalRun(t *testing.T) {
 	}
 	if view := ledger.View(""); view.Usage.HostedToolCalls != 0 || view.Reserved.HostedToolCalls != 1 || !view.UnknownUsage || !toolUsageFromLedger(ledger).Incomplete {
 		t.Fatalf("terminal/cancel fabricated a completion: %+v", view)
+	}
+}
+
+// Held receipts authorize completion of the existing effect only. They are
+// not another allowance for new provider executions on the next model step.
+func TestHostedContinuationHeldReceiptCannotGrantNewNativeCall(t *testing.T) {
+	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3})
+	_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+			t.Fatalf("initial new-call allowance: %v", bounded.HostedToolCallLimit)
+		}
+		return model.Response{Continue: true, HostedToolCalls: []model.HostedToolCall{{ID: "old", ToolKey: "native.search", Status: "in_progress"}}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.InvocationID = "finish-old"
+	_, err = shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
+			t.Fatalf("held receipt became a fresh call permit: %v", bounded.HostedToolCallLimit)
+		}
+		if len(bounded.HostedTools) != 1 || len(bounded.Tools) != 0 {
+			t.Fatalf("native replay was removed or a local call was admitted: %+v", bounded)
+		}
+		for _, message := range bounded.Messages {
+			if message.Content == exhaustedToolGuidance {
+				t.Fatal("exhaustion guidance would incorrectly abandon a pending native completion")
+			}
+		}
+		return model.Response{Content: "old complete", HostedToolCalls: []model.HostedToolCall{{ID: "old", ToolKey: "native.search", Status: "completed"}}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, e := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	if e != nil {
+		t.Fatal(e)
+	}
+	view := ledger.View("")
+	if view.Usage.HostedToolCalls != 1 || view.Reserved.HostedToolCalls != 0 || view.UnknownUsage {
+		t.Fatalf("old receipt was not settled exactly once: %+v", view)
+	}
+}
+
+// Existing held work and newly available quota are independent. Only unused
+// quota may be delegated for NEW native executions.
+func TestHostedContinuationReservesOnlyFreshCalls(t *testing.T) {
+	_, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 3, MaxToolCalls: 3})
+	_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		return model.Response{Continue: true, HostedToolCalls: []model.HostedToolCall{
+			{ID: "old-1", ToolKey: "native.search", Status: "in_progress"},
+			{ID: "old-2", ToolKey: "native.search", Status: "in_progress"},
+		}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.InvocationID = "fresh-only"
+	_, err = shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+			t.Fatalf("held calls inflated the new-execution limit: %v", bounded.HostedToolCallLimit)
+		}
+		return model.Response{Content: "done", HostedToolCalls: []model.HostedToolCall{
+			{ID: "old-1", ToolKey: "native.search", Status: "completed"},
+			{ID: "old-2", ToolKey: "native.search", Status: "completed"},
+			{ID: "new-3", ToolKey: "native.search", Status: "completed"},
+		}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

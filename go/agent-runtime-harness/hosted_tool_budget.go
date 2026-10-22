@@ -30,6 +30,9 @@ func remainingHostedCalls(ledger budget.Ledger, runID string) (int, bool) {
 			maximum = min(maximum, max(0, view.Limits.MaxHostedToolCalls-view.Usage.HostedToolCalls-view.Reserved.HostedToolCalls))
 		}
 		if view.Limits.MaxToolCalls > 0 {
+			// The shared Tool ceiling also covers provider-hosted executions.
+			// A deployment need not configure a separate hosted-only limit.
+			limited = true
 			maximum = min(maximum, max(0, view.Limits.MaxToolCalls-view.Usage.ToolCalls-view.Reserved.ToolCalls))
 		}
 		if current == "" {
@@ -46,10 +49,11 @@ func applyHostedReservation(request model.Request, maximum int, ledger budget.Le
 	if request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 {
 		return request // An explicit final-only repair must not resume native work.
 	}
-	// Existing unfinished effects already own their slots. A continuation may
-	// complete them without reserving or spending those same slots twice.
-	ceiling := maximum + pendingHostedAllowance(ledger, runID)
-	request.HostedToolCallLimit = &ceiling
+	// This limit governs NEW native executions, not completions of already
+	// dispatched calls. Held receipts retain the old calls' budget and can
+	// be reconciled by provider replay without authorizing a new call.
+	// Adding the held count here would let a provider spend it again.
+	request.HostedToolCallLimit = &maximum
 	return request
 }
 
@@ -69,7 +73,10 @@ func applyLocalToolBudget(request model.Request, ledger budget.Ledger, runID str
 			break
 		}
 	}
-	if request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 && len(request.Tools) == 0 {
+	// A paused native execution can still complete on a zero-NEW-calls
+	// continuation. Do not instruct the model to abandon its replay.
+	if request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 &&
+		len(request.Tools) == 0 && pendingHostedAllowance(ledger, runID) == 0 {
 		for _, message := range request.Messages {
 			if message.Role == model.RoleSystem && message.Content == exhaustedToolGuidance {
 				return request

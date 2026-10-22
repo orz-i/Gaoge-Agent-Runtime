@@ -50,10 +50,12 @@ type Request struct {
 	// MaxOutputTokens is an enforceable provider-neutral output ceiling. A host
 	// enabling token admission must translate it to the selected provider.
 	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
-	// HostedToolCallLimit is a host-enforced per-request execution ceiling.
-	// Nil retains existing unlimited semantics; zero forbids new executions
-	// while retaining declarations needed to validate native replay. Hosts reject
-	// bounded dispatch when the selected protocol cannot enforce this ceiling.
+	// HostedToolCallLimit is a host-enforced limit on NEW native executions
+	// in this request, excluding completions of previously dispatched calls.
+	// Nil is unlimited; zero forbids new executions but retains native tool
+	// declarations and provider replay so already-running calls can finish.
+	// Hosts must reject bounded dispatch unless their protocol distinguishes
+	// replays/completions from new executions and enforces this ceiling.
 	HostedToolCallLimit *int `json:"hostedToolCallLimit,omitempty"`
 	// RequireToolCall asks the host model adapter to enforce a provider Tool call
 	// instead of accepting another text-only response.

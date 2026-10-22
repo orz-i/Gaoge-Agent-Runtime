@@ -202,3 +202,62 @@ func TestHostedBudgetIsOptIn(t *testing.T) {
 		t.Fatalf("unlimited native execution must still be accounted: %+v", usage)
 	}
 }
+
+// The shared Tool ceiling is sufficient by itself. A hosted-only ceiling is
+// optional, not a prerequisite for native execution admission.
+func TestHostedSharedToolLimitBoundsNativeCallsWithoutHostedLimit(t *testing.T) {
+	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1, MaxLLMCalls: 3})
+	request.RequireToolCall = true
+	for step := range 2 {
+		request.InvocationID = fmt.Sprintf("total-only-%d", step)
+		_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+			want := 1 - step
+			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != want {
+				t.Fatalf("step %d failed to bound native dispatch under shared tool limit: %v", step, bounded.HostedToolCallLimit)
+			}
+			if len(bounded.Tools) != 0 || bounded.RequireToolCall {
+				t.Fatalf("step %d exposes local calls competing for native budget: %+v", step, bounded)
+			}
+			answer := model.Response{Content: "done"}
+			if step == 0 {
+				answer.HostedToolCalls = []model.HostedToolCall{{ID: "one", ToolKey: "native.search", Status: "completed"}}
+			}
+			return answer, nil
+		})
+		if err != nil {
+			t.Fatalf("step %d: %v", step, err)
+		}
+	}
+	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage := ledger.View("").Usage; usage.HostedToolCalls != 1 || usage.ToolCalls != 1 {
+		t.Fatalf("shared tool budget was overspent: %+v", usage)
+	}
+}
+
+// A completed provider response that violates the host's limit is accounted
+// truthfully but MUST be rejected, never reported as an admitted success.
+func TestHostedSharedToolLimitRejectsOverrunAfterAuthoritativeReceipt(t *testing.T) {
+	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1})
+	_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+			t.Fatalf("missing dispatch limit: %v", bounded.HostedToolCallLimit)
+		}
+		return model.Response{Content: "unexpected extra hosted execution", HostedToolCalls: []model.HostedToolCall{
+			{ID: "a", ToolKey: "native.search", Status: "completed"},
+			{ID: "b", ToolKey: "native.search", Status: "completed"},
+		}}, nil
+	})
+	if !errors.Is(err, budget.ErrInvalidUsage) {
+		t.Fatalf("unreported provider overrun: %v", err)
+	}
+	ledger, e := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got := ledger.View("").Usage.ToolCalls; got != 2 {
+		t.Fatalf("authoritative charges were erased: %d", got)
+	}
+}

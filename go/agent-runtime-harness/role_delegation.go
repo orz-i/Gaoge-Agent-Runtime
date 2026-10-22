@@ -207,12 +207,29 @@ func (runner *Runner) admitRoleChild(ctx context.Context, turn Turn, parent Invo
 	// commit. Waiting coordinators and merely cancelled requests still occupy
 	// capacity until their Run has actually ended.
 	var finished []string
-	for id := range ledger.Runs {
+	for id, binding := range ledger.Runs {
 		if ledger.FinishedRuns[id] {
 			continue
 		}
 		snapshot, loadErr := runner.runtime.Load(ctx, id)
 		if errors.Is(loadErr, kernel.ErrNotFound) {
+			// A registered child that was never created must not consume
+			// descendant capacity forever after its owner has terminated.
+			// Do not reclaim under a live/unknown parent: it may still be
+			// preparing the child in another process.
+			if binding.ParentRunID != "" {
+				owner, ownerErr := runner.runtime.Load(ctx, binding.ParentRunID)
+				if ownerErr == nil && terminalRuntimeStatus(owner.Run.Status) {
+					// Cancellation prevents a late StartRun from spending budget;
+					// reconciliation frees only lifetime capacity, not usage.
+					if _, cancelErr := coordinator.CancelRun(ctx, turn.ID, id); cancelErr != nil {
+						return cancelErr
+					}
+					finished = append(finished, id)
+				} else if ownerErr != nil && !errors.Is(ownerErr, kernel.ErrNotFound) {
+					return ownerErr
+				}
+			}
 			continue
 		}
 		if loadErr != nil {
