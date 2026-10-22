@@ -61,6 +61,23 @@ See [the Go quickstart](go/agent-runtime/examples/quickstart/main.go), the
 [deployment boundary](docs/deployment.md) for runnable examples and host
 integration guidance.
 
+### OpenAI / Anthropic Model Providers
+
+The optional `provider` packages implement the existing `model.Client` contract
+against OpenAI Responses and Anthropic Messages. `provider.NewRouter` selects
+explicitly registered vendors using names such as `openai/gpt-4.1` or
+`anthropic/<model-id>` without changing Kernel or Agent state ownership.
+The adapters support local JSON Tool calls, response receipts and streaming.
+They require host-supplied API keys; no external credentials are bundled.
+
+```bash
+cd go/agent-runtime
+GAOGE_PROVIDER=openai GAOGE_MODEL=gpt-4.1 OPENAI_API_KEY="$OPENAI_API_KEY" \
+  go run ./examples/providers "Echo hello and report the result"
+```
+
+See [provider adapters, supported capabilities, and limitations](docs/provider-adapters.md).
+
 ### Configuration-driven bootstrap
 
 Hosts that prefer configuration-driven assembly can use the optional
@@ -94,7 +111,8 @@ See [the configured example](go/agent-runtime/examples/configured/main.go).
 
 | Dependency | Tested baseline |
 | --- | --- |
-| Go | 1.26.6+ |
+| Go SDK modules | 1.26.10+ on the 1.26 line, or 1.27.3+ on the 1.27 line |
+| Go contributor workspace | 1.27.3+ (`go.work`, security-patched standard library) |
 | Node.js | 24 LTS or newer |
 | pnpm | 11.22 |
 | PostgreSQL | 16 |

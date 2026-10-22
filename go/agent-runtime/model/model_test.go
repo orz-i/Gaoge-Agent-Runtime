@@ -50,3 +50,21 @@ func TestCloneResponseIsolatesHostedFacts(t *testing.T) {
 		t.Fatalf("clone mutated source response: %#v", response)
 	}
 }
+
+func TestProviderReplayIsDeepClonedAcrossMessagesAndReceipts(t *testing.T) {
+	original := &model.ProviderReplay{Provider: "anthropic", Format: "messages.content.v1", Data: json.RawMessage(`[{"type":"thinking","thinking":"","signature":"signed"}]`)}
+	request := model.Request{Messages: []model.Message{{Role: model.RoleAssistant, ProviderReplay: original}}}
+	response := model.Response{Content: "ok", ProviderReplay: original}
+	clonedRequest := model.CloneRequest(request)
+	clonedResponse := model.CloneResponse(response)
+	clonedRequest.Messages[0].ProviderReplay.Data[1] = 'X'
+	clonedResponse.ProviderReplay.Data[2] = 'Y'
+	clonedRequest.Messages[0].ProviderReplay.Provider = "not-anthropic"
+	if original.Provider != "anthropic" || !json.Valid(original.Data) {
+		t.Fatalf("opaque replay mutated across CloneRequest/CloneResponse: %+v", original)
+	}
+	if clonedRequest.Messages[0].ProviderReplay == clonedResponse.ProviderReplay ||
+		&clonedRequest.Messages[0].ProviderReplay.Data[0] == &clonedResponse.ProviderReplay.Data[0] {
+		t.Fatal("opaque replay aliases across independent clones")
+	}
+}
