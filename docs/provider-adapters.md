@@ -98,6 +98,15 @@ multi-provider router.
   the Agent-approved Tool Call IDs/names/arguments before resending it.
   Ordinary `agent.ViewState` projections strip opaque signed evidence; trusted
   Kernel Feature State still stores it for recovery.
+- Current Anthropic Messages responses may add optional `caller` on local
+  `tool_use` blocks, `toolset_name`, or `citations` on text. The adapter accepts
+  missing/null or explicitly `direct` callers and empty/null text citations,
+  preserving safe non-null fields during SSE reconstruction and Tool replay.
+  Outbound replay omits null optional metadata (which is not valid for some
+  Anthropic input parameters), while preserving signed Thinking blocks intact.
+  Indirect/server-tool callers, nonempty toolset membership, nonempty rich
+  citations and unknown content fields still fail closed, since these cannot
+  be represented or authorized by this local text/Tool profile.
 - `MaxOutputTokens`, provider-specific configured defaults (Anthropic
   defaults to 4096), and `RequireToolCall` **only where supported by the selected
   model**. Anthropic Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 reject
@@ -161,7 +170,9 @@ go test -count=1 -race ./provider/... ./agent ./model
 The fixture suite covers provider routing, function/tool argument conversion,
 transcript round-tripping (including signed Anthropic Thinking and encrypted
 OpenAI Responses reasoning), SSE text/tool events,
-unknown top-level Anthropic events and truncation, explicit unknown-vs-zero
+unknown top-level Anthropic events and truncation, documented optional
+Anthropic `caller` and empty citations metadata with negative tests for
+server callers / toolsets / non-replayable citations, explicit unknown-vs-zero
 usage receipts, forced-tool model capability errors, refusal text, replay
 mutation rejection and public projection scrubbing, safe failure classification,
 and a full Agent → provider → tool → Agent run.

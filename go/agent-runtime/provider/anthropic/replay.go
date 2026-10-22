@@ -25,6 +25,42 @@ func forcedChoiceUnsupported(name string) bool {
 	return false
 }
 
+// normalizedContentForReplay keeps signed Thinking bytes unchanged but removes
+// nullable optional metadata from text/local Tool blocks. Some upstream
+// Messages validators reject caller:null when used as an input parameter;
+// omission is semantically equivalent to an unspecified direct caller.
+func normalizedContentForReplay(blocks []json.RawMessage) ([]json.RawMessage, error) {
+	normalized := make([]json.RawMessage, 0, len(blocks))
+	for _, raw := range blocks {
+		block, err := parseContentBlock(raw)
+		if err != nil {
+			return nil, err
+		}
+		if block.Type == "thinking" || block.Type == "redacted_thinking" {
+			normalized = append(normalized, append(json.RawMessage(nil), raw...))
+			continue
+		}
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(raw, &fields) != nil {
+			return nil, ErrUnsupported
+		}
+		for _, name := range []string{"caller", "toolset_name", "citations"} {
+			if value, present := fields[name]; present {
+				if bytes.Equal(bytes.TrimSpace(value), []byte("null")) ||
+					name == "toolset_name" && bytes.Equal(bytes.TrimSpace(value), []byte(`""`)) {
+					delete(fields, name)
+				}
+			}
+		}
+		safe, err := json.Marshal(fields)
+		if err != nil {
+			return nil, ErrUnsupported
+		}
+		normalized = append(normalized, safe)
+	}
+	return normalized, nil
+}
+
 // verifiedReplay allows an Anthropic continuation to resend the exact
 // signed assistant blocks (including thinking/redacted thinking) after a Tool
 // call. Verify they still match the Agent-validated visible transcript and
@@ -95,12 +131,21 @@ func marshalStreamBlock(block *contentBlock) (json.RawMessage, error) {
 	switch block.Type {
 	case "text":
 		output = map[string]any{"type": "text", "text": block.Text}
+		if len(block.Citations) != 0 {
+			output["citations"] = block.Citations
+		}
 	case "tool_use":
 		if block.Name == "" || block.ID == "" || !json.Valid(block.Input) {
 			return nil, ErrUnsupported
 		}
 		output = map[string]any{"type": "tool_use", "id": block.ID,
 			"name": block.Name, "input": block.Input}
+		if len(block.Caller) != 0 {
+			output["caller"] = block.Caller
+		}
+		if len(block.ToolsetName) != 0 {
+			output["toolset_name"] = block.ToolsetName
+		}
 	case "thinking":
 		if block.Signature == "" {
 			return nil, ErrUnsupported
@@ -128,9 +173,38 @@ func parseContentBlock(raw json.RawMessage) (contentBlock, error) {
 	allowed := map[string]bool{"type": true}
 	switch block.Type {
 	case "text":
-		allowed["text"] = true
+		allowed["text"], allowed["citations"] = true, true
+		// Rich citations would be lost in today's text-only model.Message;
+		// empty or null citations are representable and safe to replay.
+		if len(block.Citations) != 0 {
+			trimmed := bytes.TrimSpace(block.Citations)
+			if !bytes.Equal(trimmed, []byte("null")) && !bytes.Equal(trimmed, []byte("[]")) {
+				return contentBlock{}, ErrUnsupported
+			}
+		}
 	case "tool_use":
 		allowed["id"], allowed["name"], allowed["input"] = true, true, true
+		allowed["caller"], allowed["toolset_name"] = true, true
+		// Modern Claude responses may include caller:null or a direct
+		// caller. Server-delegated callers must not be executed as local Tools.
+		if len(block.Caller) != 0 && !bytes.Equal(bytes.TrimSpace(block.Caller), []byte("null")) {
+			var caller map[string]json.RawMessage
+			if json.Unmarshal(block.Caller, &caller) != nil || len(caller) != 1 {
+				return contentBlock{}, ErrUnsupported
+			}
+			var callerType string
+			if json.Unmarshal(caller["type"], &callerType) != nil || callerType != "direct" {
+				return contentBlock{}, ErrUnsupported
+			}
+		}
+		// Toolsets have separate authorization and result contracts. Only
+		// direct, individually registered local tools are supported here.
+		if len(block.ToolsetName) != 0 && !bytes.Equal(bytes.TrimSpace(block.ToolsetName), []byte("null")) {
+			var name string
+			if json.Unmarshal(block.ToolsetName, &name) != nil || name != "" {
+				return contentBlock{}, ErrUnsupported
+			}
+		}
 	case "thinking":
 		allowed["thinking"], allowed["signature"] = true, true
 	case "redacted_thinking":

@@ -63,6 +63,10 @@ type contentBlock struct {
 	Thinking  string          `json:"thinking,omitempty"`
 	Signature string          `json:"signature,omitempty"`
 	Data      string          `json:"data,omitempty"`
+	// Preserve only vetted optional metadata in stateless Tool replay.
+	Caller      json.RawMessage `json:"caller,omitempty"`
+	ToolsetName json.RawMessage `json:"toolset_name,omitempty"`
+	Citations   json.RawMessage `json:"citations,omitempty"`
 }
 type usage struct {
 	Input      *int64 `json:"input_tokens"`
@@ -278,7 +282,11 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 		if body.StopReason != "tool_use" {
 			return model.Response{}, ErrUnsupported
 		}
-		serialized, err := json.Marshal(body.Content)
+		serializedBlocks, err := normalizedContentForReplay(body.Content)
+		if err != nil {
+			return model.Response{}, err
+		}
+		serialized, err := json.Marshal(serializedBlocks)
 		if err != nil || len(serialized) > 16<<20 {
 			return model.Response{}, ErrUnsupported
 		}
