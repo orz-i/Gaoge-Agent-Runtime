@@ -359,7 +359,8 @@ func TestModelInvocationRetryableProviderErrorReusesPendingIntent(t *testing.T) 
 		t.Fatalf("retryable provider error made run terminal: %s", pending.Run.Status)
 	}
 	assertInvocationState(t, pending, agent.ModelInvocationPending, 0)
-	completed, err := runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+	due := newModelRunnerAfterRetryDue(t, pending, agent.Dependencies{Runtime: runtime, Model: provider})
+	completed, err := due.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}

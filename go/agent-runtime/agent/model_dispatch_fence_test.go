@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
@@ -75,9 +76,12 @@ func TestModelDispatchRejectsPostIntentIdentityOrAuthorityMutation(t *testing.T)
 			request := startRequest("dispatch-guard-"+test.name, "request-"+test.name, "complete", manifestToolKey)
 			request.Model = "sealed-model"
 			request.ModelOptions = json.RawMessage(`{"temperature":0.3}`)
-			_, err = runner.StartRun(t.Context(), request)
+			finished, err := runner.StartRun(t.Context(), request)
 			if !errors.Is(err, agent.ErrInvalidRequest) || len(provider.callsCopy()) != 0 {
 				t.Fatalf("post-intent change reached provider or did not fail closed: err=%v, calls=%+v", err, provider.callsCopy())
+			}
+			if finished.Run.Status != kernel.RunStatusFailed || finished.Run.ErrorCode != "agent.model_dispatch_invalid" {
+				t.Fatalf("permanent invalid Model Middleware left a Run retrying indefinitely: status=%s code=%q", finished.Run.Status, finished.Run.ErrorCode)
 			}
 		})
 	}

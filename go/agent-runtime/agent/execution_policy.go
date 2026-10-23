@@ -15,6 +15,24 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
+// modelPreDispatchDenied distinguishes a failed ownership/authorization
+// preflight from an actual Provider error. No physical send occurred, so it
+// must not be charged, retried as a Provider failure, or terminalize the Run.
+type modelPreDispatchDenied struct{ cause error }
+
+func (denied modelPreDispatchDenied) Error() string { return denied.cause.Error() }
+func (denied modelPreDispatchDenied) Unwrap() error { return denied.cause }
+
+// IsModelPreDispatchDenied proves that Agent's final physical Provider
+// boundary rejected a call before invoking model.Client. It is intentionally
+// distinct from a similarly named error returned by a Provider: only Agent
+// constructs this private evidence type. Trusted budget middleware may use it
+// to recover a not-sent dispatch marker with a matching ledger CAS revision.
+func IsModelPreDispatchDenied(err error) bool {
+	var denied modelPreDispatchDenied
+	return errors.As(err, &denied)
+}
+
 var (
 	ErrModelTimeout = errors.New("agent model invocation timeout")
 	ErrToolTimeout  = errors.New("agent tool invocation timeout")
@@ -266,12 +284,9 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 	}
 	callCtx, cancel := callContext(ctx, timeout)
 	response, callErr := safeModelCall(func() (model.Response, error) {
-		if beforeDispatch != nil {
-			if err := beforeDispatch(callCtx); err != nil {
-				return model.Response{}, err
-			}
-		}
-		return runner.generateModel(callCtx, request)
+		// Validation must run after every ModelMiddleware and concurrency
+		// wait, at the final physical Provider boundary, not here.
+		return runner.generateModel(callCtx, request, beforeDispatch)
 	})
 	callContextErr := callCtx.Err()
 	cancel()
@@ -280,6 +295,12 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 		// A final receipt remains authoritative even if cancellation raced with
 		// local validation/persistence. Never replace it with a transport retry.
 		return response, callErr
+	}
+	var denied modelPreDispatchDenied
+	if errors.As(callErr, &denied) {
+		// No physical request was sent. A cancellation/deadline racing with
+		// the final guard cannot turn it into a retryable Provider timeout.
+		return model.Response{}, callErr
 	}
 	if callErr == nil {
 		if errors.Is(callContextErr, context.DeadlineExceeded) {

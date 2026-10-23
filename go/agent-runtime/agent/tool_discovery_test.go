@@ -358,10 +358,7 @@ func TestRuntimeToolSearchPersistsReceiptAcrossRetryResume(t *testing.T) {
 	}
 	// Reconstruction of the SDK Runner (same Kernel Store) must not rerun
 	// search, must retain the frozen grant and exact pending Invocation ID.
-	restarted, err := agent.NewRunner(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
+	restarted := newModelRunnerAfterRetryDue(t, pending, deps)
 	completed, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || search.calls != 1 ||
 		provider.calls != 3 || executions != 0 {

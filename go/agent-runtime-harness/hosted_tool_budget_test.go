@@ -75,15 +75,9 @@ func TestHostedBudgetExhaustionStillAllowsFinalModelResponse(t *testing.T) {
 func TestHostedReservationLeavesNoLocalToolsInLastSharedSlot(t *testing.T) {
 	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3})
 	request.RequireToolCall = true
-	prepare := func(_ context.Context, bounded model.Request) (model.Request, error) {
-		if len(bounded.Tools) != 0 || bounded.RequireToolCall {
-			t.Fatalf("input preparation still exposes local tools reserved for native search: %+v", bounded)
-		}
-		return bounded, nil
-	}
 	for index, want := range []int{1, 0} {
 		request.InvocationID = fmt.Sprintf("last-slot-%d", index)
-		_, err := shared.ModelWithPrepare(t.Context(), request, nil, prepare, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 			if len(bounded.Tools) != 0 || bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != want {
 				t.Fatalf("native search and local tool can compete for last slot: %+v", bounded)
 			}

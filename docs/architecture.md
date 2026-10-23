@@ -107,6 +107,39 @@ not backward compatible with in-flight Beta Model Invocations. See
 [ADR 0010](adr/0010-prestable-model-dispatch-contract.md). No Kernel state
 machine or database schema is introduced.
 
+### ModelInvocation claim and retry eligibility
+
+A persisted ModelInvocation Claim is not an unrestricted permission to send a
+Model request later. The final `model.Client` boundary runs **after**
+concurrency admission and all Model Middleware. It reloads current Kernel
+Run Revision and checks that it still matches the originally committed
+Invocation claim, while independently verifying the local claim's status,
+attempt and lease deadline. Under Kernel CAS, a different Invocation ID/hash
+or a takeover necessarily advances the Run Revision. Stale, expired or
+superseded Claims fail closed without a Provider dispatch. A rejected
+pre-dispatch claim is **not** a Provider error: if the Run is still pending,
+it remains recoverable instead of terminalizing on an invalid lease. By
+contrast, a permanently invalid post-intent middleware request terminates
+the Run with `agent.model_dispatch_invalid`. This
+adds one Store read per physical Provider invocation; include it in
+long-session profiling. Kernel CAS continues to own receipt commits.
+
+Harness Shared Budget no longer offers a post-intent `ModelWithPrepare`
+input-injection path; all such projections happen before the ModelInvocation
+intent is committed. Failed pre-intent preparation makes no model reservation.
+When Harness Shared Budget marked a reservation dispatched but the final Agent
+boundary proves that **no Provider send occurred**, the middleware may requeue
+only the exact committed budget ledger revision that it owns. The same logical
+Invocation can then retry after a fresh Claim. This cannot refund unknown
+physical Provider outcomes, and an intervening ledger write blocks this
+reversal rather than risking double spend. See [ADR 0011](adr/0011-model-invocation-lease-and-retry-governance.md).
+
+All direct Agent retryable failures now persist `RetryAfter`, regardless of
+`RunExecution` opt-in. Direct `Resume` before that due time returns busy
+without a second Provider attempt. Released old-Beta retries lacking this
+durable due fact are **invalid state**, not a migration fallback.
+See [ADR 0011](adr/0011-model-invocation-lease-and-retry-governance.md).
+
 ## State and read models
 
 - `kernel.Snapshot` is the authoritative current aggregate and event head.

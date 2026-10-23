@@ -77,9 +77,11 @@ func TestModelTimeoutUsesDurableBoundedRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider := &timeoutPolicyModel{}
+	clock := &modelRetryTestClock{now: time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)}
 	runner, err := NewRunner(Dependencies{
 		Runtime: runtime,
 		Model:   provider,
+		Clock:   clock,
 		Execution: ExecutionPolicy{Model: CallPolicy{
 			Timeout:        10 * time.Millisecond,
 			MaxAttempts:    2,
@@ -99,6 +101,7 @@ func TestModelTimeoutUsesDurableBoundedRetry(t *testing.T) {
 	if !errors.Is(err, ErrModelTimeout) || snapshot.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("first attempt status=%q err=%v", snapshot.Run.Status, err)
 	}
+	clock.Advance(time.Second)
 	snapshot, err = runner.Resume(t.Context(), snapshot.Run.ID, snapshot.Run.Revision)
 	if snapshot.Run.Status != kernel.RunStatusFailed {
 		t.Fatalf("second attempt status=%q err=%v", snapshot.Run.Status, err)

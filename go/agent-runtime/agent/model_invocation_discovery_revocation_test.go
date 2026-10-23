@@ -92,10 +92,7 @@ func TestPendingHostedGrantRevocationBlocksProviderRetry(t *testing.T) {
 					pending.Run, err, len(provider.requests))
 			}
 			tc.revoke(catalog)
-			restarted, err := agent.NewRunner(deps)
-			if err != nil {
-				t.Fatal(err)
-			}
+			restarted := newModelRunnerAfterRetryDue(t, pending, deps)
 			after, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 			if err == nil || after.Run.Status != kernel.RunStatusFailed ||
 				after.Run.ErrorCode != "agent.discovery_invalid" || len(provider.requests) != 1 {
@@ -130,10 +127,7 @@ func TestPendingLocalToolDefinitionDriftBlocksProviderRetry(t *testing.T) {
 			pending.Run, err, len(provider.requests))
 	}
 	catalog.changed = true
-	restarted, err := agent.NewRunner(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
+	restarted := newModelRunnerAfterRetryDue(t, pending, deps)
 	after, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err == nil || after.Run.Status != kernel.RunStatusFailed ||
 		after.Run.ErrorCode != "agent.discovery_invalid" || len(provider.requests) != 1 || executions != 0 {
@@ -171,10 +165,7 @@ func TestPendingUnchangedHostedGrantRetainsInvocationIdentity(t *testing.T) {
 	if !errors.Is(err, errRetryableProvider) || pending.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("expected recoverable model failure: status=%s err=%v", pending.Run.Status, err)
 	}
-	restarted, err := agent.NewRunner(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
+	restarted := newModelRunnerAfterRetryDue(t, pending, deps)
 	completed, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted ||
 		len(provider.requests) != 2 ||

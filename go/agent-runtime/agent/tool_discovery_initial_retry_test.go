@@ -52,10 +52,7 @@ func TestRuntimeToolDiscoveryInitialSetSurvivesRetryAndRunnerRestart(t *testing.
 		len(stub.requests) != 1 {
 		t.Fatalf("expected durable retryable model attempt: run=%+v err=%v calls=%d", pending.Run, err, len(stub.requests))
 	}
-	restarted, err := agent.NewRunner(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
+	restarted := newModelRunnerAfterRetryDue(t, pending, deps)
 	completed, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted ||
 		len(stub.requests) != 2 || executions != 0 {

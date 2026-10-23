@@ -703,10 +703,10 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrRunTerminal
 	}
-	if invocation, active := activeModelInvocation(state); runner.runExecution != nil && active && invocation.RetryAfter != nil &&
+	if invocation, active := activeModelInvocation(state); active && invocation.RetryAfter != nil &&
 		runner.clock.Now().UTC().Before(invocation.RetryAfter.UTC()) {
-		// A Queue WakeupAt alone is not a Direct execution gate: check the
-		// same Feature-owned due fact BEFORE acquiring a Store epoch.
+		// A Queue WakeupAt is not an execution grant. Every direct or
+		// Store-fenced Resume obeys the same persisted Feature due time.
 		return snapshot, ErrModelInvocationBusy
 	}
 	if runner.runExecution != nil && state.ToolDispatchID != "" {
@@ -833,6 +833,14 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	if err != nil {
 		if errors.Is(err, ErrToolDiscoveryDenied) || errors.Is(err, ErrToolDiscoveryInvalid) {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", err)
+			return failed, true, failErr
+		}
+		var denied modelPreDispatchDenied
+		if errors.As(err, &denied) && errors.Is(denied.cause, ErrInvalidRequest) {
+			// A broken, frozen request cannot become valid on retry: report
+			// the permanent Host protocol violation as a terminal Run error.
+			// Expired/replaced execution Claims remain recoverable instead.
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_dispatch_invalid", err)
 			return failed, true, failErr
 		}
 		if errors.Is(err, runtimebudget.ErrExhausted) {
@@ -1296,7 +1304,9 @@ func withBlockedToolGuidance(messages []model.Message, toolKeys []string) []mode
 	return append([]model.Message{{Role: model.RoleSystem, Content: guidance}}, messages...)
 }
 
-func (runner *Runner) generateModel(ctx context.Context, request model.Request) (model.Response, error) {
+func (runner *Runner) generateModel(
+	ctx context.Context, request model.Request, beforeProvider func(context.Context) error,
+) (model.Response, error) {
 	emit := func(event model.StreamEvent) error {
 		runner.publishValue(ctx, request.RunID, plugin.Event{
 			Type: EventModelDelta, Delta: event.Delta,
@@ -1309,7 +1319,16 @@ func (runner *Runner) generateModel(ctx context.Context, request model.Request) 
 	frozen := model.CloneRequest(request)
 	terminal := func(callCtx context.Context, candidate model.Request, sink model.StreamSink) (model.Response, error) {
 		if !validDispatchModelRequest(frozen, candidate) {
-			return model.Response{}, ErrInvalidRequest
+			return model.Response{}, modelPreDispatchDenied{cause: ErrInvalidRequest}
+		}
+		if beforeProvider != nil {
+			// The final chance to reject an expired or stolen invocation claim
+			// is AFTER ModelMiddleware, before physical Provider dispatch.
+			if err := beforeProvider(callCtx); err != nil {
+				// This is an execution admission rejection, not a Provider
+				// failure. The caller must not terminalize a recoverable Run.
+				return model.Response{}, modelPreDispatchDenied{cause: err}
+			}
 		}
 		return runner.generateProviderModel(callCtx, candidate, sink)
 	}
