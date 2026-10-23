@@ -120,21 +120,30 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 	}
 	capture := &parentHostedAssignmentModel{t: t, requested: selected, expectedChildModel: childModel, frozen: frozen}
 	dependencies := delegationAgentDependencies(runtime, capture, registry, approvals, 12, false)
-	middleware, err := harness.NewRoleModelMiddleware(store)
+	rolePrepare, err := harness.NewRoleModelRequestPreparer(store)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dependencies.ModelMiddleware = append(dependencies.ModelMiddleware, middleware)
+	dependencies.PrepareModelRequest = rolePrepare
 	var manager *runtimecontext.Manager
+	projectedRoleWindowChecked := false
 	if frozen {
 		manager = runtimecontext.NewManager(runtimecontext.Dependencies{})
-		managed, prepareErr := harness.NewManagedContextPreparer(store, manager, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		managed, prepareErr := harness.NewManagedContextPreparer(store, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+			for _, definition := range request.Tools {
+				if definition.Key == harness.DelegationToolKey {
+					if !strings.Contains(definition.Description, "Available roles:") || !strings.Contains(string(definition.InputSchema), "roleID") {
+						t.Fatalf("managed Context measured unprojected delegation Tool: %+v", definition)
+					}
+					projectedRoleWindowChecked = true
+				}
+			}
 			return runtimecontext.ModelWindow{ContextTokens: 20000, ReservedOutputTokens: 512}, nil
 		})
 		if prepareErr != nil {
 			t.Fatal(prepareErr)
 		}
-		dependencies.PrepareModelRequest = managed
+		dependencies.PrepareModelRequest = agent.ChainModelRequestPreparers(rolePrepare, managed)
 		ctxRun, contextErr := harness.NewContextRunMiddleware(store, nil)
 		if contextErr != nil {
 			t.Fatal(contextErr)
@@ -189,6 +198,9 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("delegation result=%s err=%v", snapshot.Turn.Status, err)
 	}
+	if frozen && !projectedRoleWindowChecked {
+		t.Fatal("managed Context never measured frozen role Tool presentation")
+	}
 	if capture.rootCalls != 2 {
 		t.Fatalf("root calls=%d", capture.rootCalls)
 	}
@@ -204,7 +216,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 }
 
 // Proves a delegated child with role-specific instructions can run through
-// strict pre-intent Context freezing alongside the existing role middleware.
+// pre-intent Context and role Tool schema preparation in one frozen intent.
 func TestDelegatedRoleCompatibleWithFrozenContextPreparation(t *testing.T) {
 	for _, selected := range [][]string{nil, {scopedSearchKey}} {
 		runSelectedHostedParentToolWithFrozenContext(t, "specialist-model", selected, true, true)

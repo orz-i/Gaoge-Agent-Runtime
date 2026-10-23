@@ -208,12 +208,31 @@ type HostedToolCatalog interface {
 // other feature-owned budget projections.
 type Limits = runtimebudget.Limits
 
-// ModelRequestPreparer projects a provider-neutral context window before the
-// logical model intent is committed. It must not call the provider or mutate
-// request identity, model, options, Tool declarations or execution ceilings.
-// The returned Messages are frozen in the durable ModelInvocation; recovery
-// never calls the preparer again for that pending invocation.
+// ModelRequestPreparer projects messages and Host-scoped Tool presentation
+// before the logical ModelInvocation intent is committed. It must not call a
+// provider or expand Tool authority, modify model identity or execution limits.
+// The complete request is frozen; recovery never invokes a preparer for a
+// previously committed pending intent.
 type ModelRequestPreparer func(context.Context, model.Request) (model.Request, error)
+
+// ChainModelRequestPreparers composes trusted pre-intent projections in order.
+// Every stage runs before the single ModelInvocation intent is persisted.
+func ChainModelRequestPreparers(preparers ...ModelRequestPreparer) ModelRequestPreparer {
+	stages := append([]ModelRequestPreparer(nil), preparers...)
+	return func(ctx context.Context, request model.Request) (model.Request, error) {
+		var err error
+		for _, prepare := range stages {
+			if prepare == nil {
+				return model.Request{}, ErrInvalidRequest
+			}
+			request, err = prepare(ctx, request)
+			if err != nil {
+				return model.Request{}, err
+			}
+		}
+		return request, nil
+	}
+}
 
 // Dependencies explicitly provide the direct Agent loop capabilities.
 type Dependencies struct {
@@ -230,8 +249,8 @@ type Dependencies struct {
 	Telemetry        []observability.Recorder
 	RunMiddleware    []plugin.RunMiddleware
 	ModelMiddleware  []plugin.ModelMiddleware
-	// PrepareModelRequest is the trusted, pre-intent Context projection boundary.
-	// Unlike ModelMiddleware, it may change Messages before RequestHash is sealed.
+	// PrepareModelRequest is the only pre-intent message/Tool schema projection
+	// boundary. ModelMiddleware cannot rewrite persisted model-visible input.
 	PrepareModelRequest ModelRequestPreparer
 	ToolMiddleware      []plugin.ToolMiddleware
 	CompletionPolicies  []CompletionPolicy
@@ -1284,22 +1303,15 @@ func (runner *Runner) generateModel(ctx context.Context, request model.Request) 
 		}, event)
 		return nil
 	}
-	terminal := runner.generateProviderModel
-	if runner.prepareModelRequest != nil || request.OutputContract != nil {
-		// Once a logical request has been sealed by ModelInvocation, no
-		// dispatch-time middleware may rewrite the conversation used by the
-		// provider. This also rejects a legacy Context middleware injecting a
-		// different checkpoint after the pre-intent projection was frozen.
-		frozen := model.CloneMessages(request.Messages)
-		frozenContract := model.CloneOutputContract(request.OutputContract)
-		frozenModel, frozenOptions := request.Model, cloneRawJSON(request.ModelOptions)
-		terminal = func(callCtx context.Context, candidate model.Request, sink model.StreamSink) (model.Response, error) {
-			if !sameFrozenModelMessages(frozen, candidate.Messages) ||
-				(request.OutputContract != nil && (candidate.Model != frozenModel || !sameFrozenOutputContract(frozenContract, candidate.OutputContract) || !sameFrozenModelOptions(frozenOptions, candidate.ModelOptions))) {
-				return model.Response{}, ErrInvalidRequest
-			}
-			return runner.generateProviderModel(callCtx, candidate, sink)
+	// All provider-visible instructions and Tool schemas were sealed before
+	// persisting the ModelInvocation. Middleware is strictly observational or
+	// budget-narrowing: no late message/schema compatibility injection.
+	frozen := model.CloneRequest(request)
+	terminal := func(callCtx context.Context, candidate model.Request, sink model.StreamSink) (model.Response, error) {
+		if !validDispatchModelRequest(frozen, candidate) {
+			return model.Response{}, ErrInvalidRequest
 		}
+		return runner.generateProviderModel(callCtx, candidate, sink)
 	}
 	return runner.modelChain.Invoke(ctx, request, emit, terminal)
 }

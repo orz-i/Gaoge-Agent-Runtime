@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -32,7 +31,7 @@ func TestHarnessBuildsAndInjectsContextCheckpoint(t *testing.T) {
 	provider := &contextCaptureModel{}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: provider,
-		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
+		PrepareModelRequest: harness.MaterializeContextWindowRequest,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +81,7 @@ func TestHarnessAppendsConversationDeltaAcrossTurnsWithoutChangingGeneration(t *
 	provider := &multiContextCaptureModel{}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: provider,
-		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
+		PrepareModelRequest: harness.MaterializeContextWindowRequest,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +234,7 @@ func newSourceDeltaHarnessFixture(t *testing.T, threadID string) sourceDeltaHarn
 	provider := &multiContextCaptureModel{}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: provider,
-		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
+		PrepareModelRequest: harness.MaterializeContextWindowRequest,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -370,7 +369,7 @@ func runToolResultContextHarness(t *testing.T) (harness.Snapshot, *toolResultCap
 	provider := &toolResultCaptureModel{}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: provider, Catalog: registry, Executor: registry,
-		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
+		PrepareModelRequest: harness.MaterializeContextWindowRequest,
 	})
 	if err != nil {
 		t.Fatal(err)

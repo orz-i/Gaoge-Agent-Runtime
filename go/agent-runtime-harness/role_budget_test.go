@@ -54,13 +54,13 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	roleSchema, err := harness.NewRoleModelMiddleware(store)
+	rolePreparer, err := harness.NewRoleModelRequestPreparer(store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: meteredModel, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy},
-		RunMiddleware: []plugin.RunMiddleware{shared}, ModelMiddleware: []plugin.ModelMiddleware{roleSchema, shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}})
+		RunMiddleware: []plugin.RunMiddleware{shared}, PrepareModelRequest: rolePreparer, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}})
 	if err != nil {
 		t.Fatal(err)
 	}

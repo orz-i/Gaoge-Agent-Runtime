@@ -75,6 +75,38 @@ records atomically with Run state and journal events; the continuation
 projector converts those records into idempotent queue work. Runtime
 correctness must never depend on an in-memory callback or telemetry observer.
 
+### Durable Model dispatch boundary (breaking Beta contract)
+
+Model-visible `Messages`, opaque Provider replay, local Tool descriptions and
+input schemas, immutable Provider/Model identity, output contract, and Tool
+authority are projected by **one** pre-intent `PrepareModelRequest` pipeline and
+then sealed in the persisted Agent `ModelInvocation`. No post-intent prompt,
+Tool Schema, or model identity rewrites are permitted, including text-only Runs.
+
+Trusted Harness projection may specialize the model-visible Tool schema before
+commit, but Agent also hashes the **original** registered Catalog fingerprint
+for each retained local Tool. A resumed pending invocation uses its frozen
+request and checks the current Catalog against those fingerprints before any
+physical dispatch. A recovered request also verifies the committed Provider
+name against the reconstructed provider/router binding when exposed. The executor always validates Tool arguments using the
+registered definition rather than the projected model-facing one.
+
+Dispatch-time `ModelMiddleware` may only observe, reject, meter or narrow a
+committed request: filter granted local/hosted Tool declarations, tighten or
+introduce token/native-call limits, and relax forced Tool selection **only**
+when no callable Tools remain. No Middleware may introduce, rename, retarget,
+reversion or reauthorize a Tool, remove an existing budget ceiling or rewrite
+frozen messages/schemas. A failed check prevents Provider dispatch.
+
+`ModelInvocation.RequestHash` covers the **frozen model request + original
+Catalog fingerprints**; it is not necessarily a byte-for-byte wire payload
+hash because bounded budget restrictions can still apply at dispatch.
+This pre-stable change deliberately removes old compatibility APIs and is
+not backward compatible with in-flight Beta Model Invocations. See
+[Breaking Changes](breaking-changes.md) and
+[ADR 0010](adr/0010-prestable-model-dispatch-contract.md). No Kernel state
+machine or database schema is introduced.
+
 ## State and read models
 
 - `kernel.Snapshot` is the authoritative current aggregate and event head.

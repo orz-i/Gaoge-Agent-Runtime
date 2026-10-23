@@ -87,21 +87,6 @@ func TestHostedReservationLeavesNoLocalToolsInLastSharedSlot(t *testing.T) {
 			if len(bounded.Tools) != 0 || bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != want {
 				t.Fatalf("native search and local tool can compete for last slot: %+v", bounded)
 			}
-			if want == 0 {
-				count := 0
-				for _, message := range bounded.Messages {
-					if message.Content == exhaustedToolGuidance {
-						count++
-					}
-				}
-				if count != 1 {
-					t.Fatalf("finalization guidance count=%d", count)
-				}
-				again := applyLocalToolBudget(bounded, budget.Ledger{}, "")
-				if len(again.Messages) != len(bounded.Messages) {
-					t.Fatal("finalization guidance duplicated")
-				}
-			}
 			response := model.Response{Content: "completed from existing evidence"}
 			if want > 0 {
 				response.HostedToolCalls = []model.HostedToolCall{{ID: "last-search", ToolKey: "native.search"}}

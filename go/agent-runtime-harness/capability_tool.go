@@ -7,10 +7,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
@@ -330,43 +330,48 @@ func CapabilityInvocationToolPolicySnapshot() ToolPolicySnapshot {
 	}
 }
 
-// CapabilityInvocationModelMiddleware narrows the generic registry definition
-// to the exact command union sealed in the current Harness Config Snapshot.
-type CapabilityInvocationModelMiddleware struct{ store Store }
-
-func NewCapabilityInvocationModelMiddleware(store Store) (*CapabilityInvocationModelMiddleware, error) {
+// NewCapabilityInvocationRequestPreparer freezes the exact command Tool schema
+// before the ModelInvocation is stored. No post-intent schema transformer.
+func NewCapabilityInvocationRequestPreparer(store Store) (agent.ModelRequestPreparer, error) {
 	if store == nil {
 		return nil, ErrInvalidRequest
 	}
-	return &CapabilityInvocationModelMiddleware{store: store}, nil
+	return func(ctx context.Context, request model.Request) (model.Request, error) {
+		if !containsCapabilityInvocationTool(request.Tools) {
+			return request, nil
+		}
+		turn, _, harnessRun, err := timelineTurn(ctx, store, request.RunID)
+		if err != nil {
+			return model.Request{}, err
+		}
+		if !harnessRun {
+			return model.Request{}, ErrInvalidRequest
+		}
+		config, err := store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+		if err != nil {
+			return model.Request{}, err
+		}
+		schema, err := capabilityInvocationToolSchema(config.Commands)
+		if err != nil {
+			return model.Request{}, err
+		}
+		request = model.CloneRequest(request)
+		for index := range request.Tools {
+			if request.Tools[index].Key == CapabilityInvocationToolKey {
+				request.Tools[index].InputSchema = schema
+			}
+		}
+		return request, nil
+	}, nil
 }
 
-func (*CapabilityInvocationModelMiddleware) Name() string { return "harness.capability_schema" }
-
-func (middleware *CapabilityInvocationModelMiddleware) Model(
-	ctx context.Context,
-	request model.Request,
-	emit model.StreamSink,
-	next plugin.ModelNext,
-) (model.Response, error) {
-	turn, _, harnessRun, err := timelineTurn(ctx, middleware.store, request.RunID)
-	if err != nil || !harnessRun {
-		return next(ctx, request, emit)
-	}
-	config, err := middleware.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
-	if err != nil {
-		return model.Response{}, err
-	}
-	schema, err := capabilityInvocationToolSchema(config.Commands)
-	if err != nil {
-		return model.Response{}, err
-	}
-	for index := range request.Tools {
-		if request.Tools[index].Key == CapabilityInvocationToolKey {
-			request.Tools[index].InputSchema = schema
+func containsCapabilityInvocationTool(definitions []tools.Definition) bool {
+	for _, definition := range definitions {
+		if definition.Key == CapabilityInvocationToolKey {
+			return true
 		}
 	}
-	return next(ctx, request, emit)
+	return false
 }
 
 func capabilityInvocationToolSchema(commands []CommandDescriptor) (json.RawMessage, error) {

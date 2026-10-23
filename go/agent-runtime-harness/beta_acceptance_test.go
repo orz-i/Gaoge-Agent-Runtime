@@ -174,8 +174,8 @@ func newBetaAcceptanceRunner(
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: provider, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{approvalPolicy},
-		ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
-		Limits:          agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1},
+		PrepareModelRequest: harness.MaterializeContextWindowRequest,
+		Limits:              agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1},
 	})
 	if err != nil {
 		t.Fatal(err)

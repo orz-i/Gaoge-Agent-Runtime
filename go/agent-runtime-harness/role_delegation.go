@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -289,16 +288,16 @@ func (runner *Runner) prepareRoleChild(ctx context.Context, turn Turn, _ Invocat
 	return runner.recordInvocationItem(ctx, invocation)
 }
 
-// NewRoleModelMiddleware exposes only role IDs frozen for the current Turn.
-// Legacy stored memberID calls stay readable by the base Tool registration.
-func NewRoleModelMiddleware(store Store) (plugin.ModelMiddleware, error) {
+// NewRoleModelRequestPreparer projects the frozen role-specific Tool schema
+// before a durable ModelInvocation is committed. No dispatch-time rewriting.
+func NewRoleModelRequestPreparer(store Store) (agent.ModelRequestPreparer, error) {
 	if store == nil {
 		return nil, ErrInvalidRequest
 	}
-	return roleModelMiddleware{store: store}, nil
+	return roleModelRequestPreparer{store: store}.prepare, nil
 }
 
-type roleModelMiddleware struct{ store Store }
+type roleModelRequestPreparer struct{ store Store }
 
 func isRoleDelegationInvocation(invocation Invocation, runID string) bool {
 	if invocation.ParentItemID == "" {
@@ -348,45 +347,30 @@ func modelDelegationToolCandidates(request model.Request, config ConfigSnapshot)
 	return normalizeStrings(keys)
 }
 
-func (roleModelMiddleware) Name() string { return "harness.roles" }
-
-func (middleware roleModelMiddleware) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	invocation, err := middleware.store.GetInvocationByExecutionRefID(ctx, request.RunID)
+func (preparer roleModelRequestPreparer) prepare(ctx context.Context, request model.Request) (model.Request, error) {
+	invocation, err := preparer.store.GetInvocationByExecutionRefID(ctx, request.RunID)
 	if errors.Is(err, ErrNotFound) {
-		return next(ctx, request, emit)
+		return request, nil
 	}
 	if err != nil {
-		return model.Response{}, err
+		return model.Request{}, err
 	}
-	turn, err := middleware.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := preparer.store.GetTurn(ctx, invocation.TurnID)
 	if err != nil {
-		return model.Response{}, err
+		return model.Request{}, err
 	}
-	config, err := middleware.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := preparer.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
 	if err != nil {
-		return model.Response{}, err
+		return model.Request{}, err
 	}
 	if config.Roles == nil && config.SharedBudget == nil {
-		return next(ctx, request, emit)
+		return request, nil
 	}
-	allowed, err := delegationAllowed(ctx, middleware.store, config.DelegationPolicy, invocation)
+	allowed, err := delegationAllowed(ctx, preparer.store, config.DelegationPolicy, invocation)
 	if err != nil {
-		return model.Response{}, err
+		return model.Request{}, err
 	}
 	request = model.CloneRequest(request)
-	if isRoleDelegationInvocation(invocation, request.RunID) {
-		// New delegated Runs persist this directive in delegatedRoleInstructions. Preserve
-		// the legacy injection only for previously created Runs lacking it;
-		// when an Agent uses pre-intent Context freezing, a late change is
-		// correctly rejected instead of silently changing the model request.
-		if len(request.Messages) > 0 && request.Messages[0].Role == model.RoleSystem {
-			if !strings.HasSuffix(strings.TrimSpace(request.Messages[0].Content), delegatedSpecialistInstruction) {
-				request.Messages[0].Content += "\n\n" + delegatedSpecialistInstruction
-			}
-		} else {
-			request.Messages = append([]model.Message{{Role: model.RoleSystem, Content: delegatedSpecialistInstruction}}, request.Messages...)
-		}
-	}
 	ids, descriptions := []string{}, []string{}
 	for _, role := range config.Roles {
 		ids = append(ids, role.ID)
@@ -412,11 +396,11 @@ func (middleware roleModelMiddleware) Model(ctx context.Context, request model.R
 			}
 			definition.InputSchema, err = json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "required": []string{"roleID", "goal"}, "properties": properties})
 			if err != nil {
-				return model.Response{}, err
+				return model.Request{}, err
 			}
 		}
 		definitions = append(definitions, definition)
 	}
 	request.Tools = definitions
-	return next(ctx, request, emit)
+	return request, nil
 }

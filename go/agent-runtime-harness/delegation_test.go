@@ -537,7 +537,7 @@ func delegationAgentDependencies(
 		Limits:           agent.Limits{MaxLLMCalls: 4, MaxToolCalls: maxToolCalls},
 	}
 	if contextAware {
-		dependencies.ModelMiddleware = []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()}
+		dependencies.PrepareModelRequest = harness.MaterializeContextWindowRequest
 	}
 	return dependencies
 }

@@ -40,17 +40,17 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	roleSchema, err := harness.NewRoleModelMiddleware(store)
+	rolePreparer, err := harness.NewRoleModelRequestPreparer(store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	client := &childRunLimitModel{t: t}
 	direct, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: client, Catalog: registry, Executor: registry,
-		RunMiddleware:   []plugin.RunMiddleware{shared},
-		ModelMiddleware: []plugin.ModelMiddleware{roleSchema, shared},
-		ToolMiddleware:  []plugin.ToolMiddleware{shared},
-		Limits:          agent.Limits{MaxLLMCalls: 6, MaxToolCalls: 4},
+		RunMiddleware:       []plugin.RunMiddleware{shared},
+		PrepareModelRequest: rolePreparer, ModelMiddleware: []plugin.ModelMiddleware{shared},
+		ToolMiddleware: []plugin.ToolMiddleware{shared},
+		Limits:         agent.Limits{MaxLLMCalls: 6, MaxToolCalls: 4},
 	})
 	if err != nil {
 		t.Fatal(err)

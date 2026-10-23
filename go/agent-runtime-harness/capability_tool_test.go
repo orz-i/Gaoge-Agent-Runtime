@@ -72,7 +72,7 @@ func newCapabilityToolFixture(t *testing.T) capabilityToolFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schemaMiddleware, err := harness.NewCapabilityInvocationModelMiddleware(store)
+	schemaPreparer, err := harness.NewCapabilityInvocationRequestPreparer(store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +83,8 @@ func newCapabilityToolFixture(t *testing.T) capabilityToolFixture {
 	model := &capabilityToolModel{t: t}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
-		ModelMiddleware: []plugin.ModelMiddleware{schemaMiddleware},
-		ToolMiddleware:  []plugin.ToolMiddleware{timeline},
+		PrepareModelRequest: schemaPreparer,
+		ToolMiddleware:      []plugin.ToolMiddleware{timeline},
 	})
 	if err != nil {
 		t.Fatal(err)

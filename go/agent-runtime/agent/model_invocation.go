@@ -37,10 +37,14 @@ const rejectedModelResponseCode = "agent.model_response_rejected"
 // ErrorCode marks a known completed but unusable response; its usage is still
 // consumed exactly once, without executing any local Tools from that response.
 type ModelInvocation struct {
-	ID                  string                `json:"id"`
-	RunID               string                `json:"runID"`
-	SourceRevision      uint64                `json:"sourceRevision"`
-	RequestHash         string                `json:"requestHash"`
+	ID             string `json:"id"`
+	RunID          string `json:"runID"`
+	SourceRevision uint64 `json:"sourceRevision"`
+	RequestHash    string `json:"requestHash"`
+	// CatalogFingerprints bind each model-visible Tool to its original Catalog
+	// definition. Request.Tools may have a narrower Host projection, but replay
+	// still rejects Catalog changes. Entry order matches Request.Tools.
+	CatalogFingerprints []string              `json:"catalogFingerprints,omitempty"`
 	Provider            string                `json:"provider,omitempty"`
 	Model               string                `json:"model,omitempty"`
 	Status              ModelInvocationStatus `json:"status"`
@@ -77,11 +81,12 @@ func telemetryModelUsage(value *model.Usage) runtimebudget.Usage {
 func newModelInvocation(
 	run kernel.Run,
 	request model.Request,
+	catalogFingerprints []string,
 	provider string,
 	now time.Time,
 ) (ModelInvocation, error) {
 	request.InvocationID = ""
-	hash, err := modelRequestHash(request)
+	hash, err := modelRequestHash(request, catalogFingerprints)
 	if err != nil {
 		return ModelInvocation{}, err
 	}
@@ -92,13 +97,17 @@ func newModelInvocation(
 	return ModelInvocation{
 		ID: id, RunID: run.ID, SourceRevision: run.Revision, RequestHash: hash,
 		Provider: strings.TrimSpace(provider), Model: strings.TrimSpace(request.Model),
-		Status: ModelInvocationPending, Request: model.CloneRequest(request), CreatedAt: now.UTC(),
+		Status: ModelInvocationPending, Request: model.CloneRequest(request),
+		CatalogFingerprints: append([]string(nil), catalogFingerprints...), CreatedAt: now.UTC(),
 	}, nil
 }
 
-func modelRequestHash(request model.Request) (string, error) {
+func modelRequestHash(request model.Request, fingerprints []string) (string, error) {
 	request.InvocationID = ""
-	encoded, err := json.Marshal(model.CloneRequest(request))
+	encoded, err := json.Marshal(struct {
+		Request             model.Request `json:"request"`
+		CatalogFingerprints []string      `json:"catalogFingerprints"`
+	}{Request: model.CloneRequest(request), CatalogFingerprints: fingerprints})
 	if err != nil {
 		return "", errors.Join(ErrInvalidRequest, err)
 	}
@@ -142,6 +151,7 @@ func consumeLastModelInvocation(state *runState, now time.Time) (ModelInvocation
 	// Once consumed, the normalized request is no longer needed for replay. The
 	// hash and receipt remain durable while duplicated transcript bytes are not.
 	invocation.Request = model.Request{}
+	invocation.CatalogFingerprints = nil
 	state.ModelInvocations[index] = cloneModelInvocation(invocation)
 	return consumed, true
 }
@@ -156,6 +166,7 @@ func cloneModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 func cloneModelInvocation(value ModelInvocation) ModelInvocation {
 	value.Request = model.CloneRequest(value.Request)
+	value.CatalogFingerprints = append([]string(nil), value.CatalogFingerprints...)
 	value.Response = model.CloneResponse(value.Response)
 	value.Usage = model.CloneUsage(value.Usage)
 	if value.ExecutionLeaseUntil != nil {
@@ -198,7 +209,10 @@ func validModelInvocations(values []ModelInvocation) bool {
 			if index != len(values)-1 || strings.TrimSpace(invocation.Request.InvocationID) != invocation.ID {
 				return false
 			}
-			hash, err := modelRequestHash(invocation.Request)
+			if !validCatalogFingerprints(invocation.Request.Tools, invocation.CatalogFingerprints) {
+				return false
+			}
+			hash, err := modelRequestHash(invocation.Request, invocation.CatalogFingerprints)
 			if err != nil || hash != invocation.RequestHash {
 				return false
 			}
@@ -212,11 +226,17 @@ func validModelInvocations(values []ModelInvocation) bool {
 				!validModelInvocationReceipt(invocation) {
 				return false
 			}
-			hash, err := modelRequestHash(invocation.Request)
+			if !validCatalogFingerprints(invocation.Request.Tools, invocation.CatalogFingerprints) {
+				return false
+			}
+			hash, err := modelRequestHash(invocation.Request, invocation.CatalogFingerprints)
 			if err != nil || hash != invocation.RequestHash {
 				return false
 			}
 		case ModelInvocationConsumed:
+			if len(invocation.CatalogFingerprints) != 0 {
+				return false
+			}
 			if invocation.RetryAfter != nil || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.ExecutionLeaseUntil != nil ||
 				!validModelInvocationReceipt(invocation) {
 				return false
@@ -226,6 +246,21 @@ func validModelInvocations(values []ModelInvocation) bool {
 		}
 	}
 	return active <= 1
+}
+
+func validCatalogFingerprints(definitions []tools.Definition, fingerprints []string) bool {
+	if len(definitions) != len(fingerprints) {
+		return false
+	}
+	for _, fingerprint := range fingerprints {
+		if len(fingerprint) != sha256.Size*2 {
+			return false
+		}
+		if _, err := hex.DecodeString(fingerprint); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func validModelInvocationReceipt(invocation ModelInvocation) bool {
@@ -254,14 +289,14 @@ func (runner *Runner) ensureModelInvocation(
 	if invocation, ok := activeModelInvocation(state); ok {
 		return snapshot, state, cloneModelInvocation(*invocation), nil
 	}
-	request, err := runner.buildModelRequest(ctx, snapshot, state)
+	request, fingerprints, err := runner.buildModelRequest(ctx, snapshot, state)
 	if err != nil {
 		// Caller needs the original committed aggregate to fail a stale
 		// discovery grant through Kernel CAS. Returning a zero snapshot here
 		// obscures policy revocation as invalid Kernel input.
 		return snapshot, state, ModelInvocation{}, err
 	}
-	invocation, err := newModelInvocation(snapshot.Run, request, providerName(runner.model, request), runner.clock.Now())
+	invocation, err := newModelInvocation(snapshot.Run, request, fingerprints, providerName(runner.model, request), runner.clock.Now())
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
 	}
@@ -286,19 +321,19 @@ func (runner *Runner) buildModelRequest(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state runState,
-) (model.Request, error) {
+) (model.Request, []string, error) {
 	definitions, hostedTools, err := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model, snapshot.Run.DeadlineAt)
 	if err != nil {
-		return model.Request{}, err
+		return model.Request{}, nil, err
 	}
 	if err = verifyHostedGrantVersions(state.HostedToolGrants, hostedTools); err != nil {
-		return model.Request{}, err
+		return model.Request{}, nil, err
 	}
 	if err = validateDiscoveryCatalog(state.Discovery, definitions); err != nil {
-		return model.Request{}, err
+		return model.Request{}, nil, err
 	}
 	if state.Discovery != nil && state.Discovery.RunID != snapshot.Run.ID {
-		return model.Request{}, ErrToolDiscoveryInvalid
+		return model.Request{}, nil, ErrToolDiscoveryInvalid
 	}
 	definitions = filterLoadedDiscoveryTools(definitions, state.Discovery)
 	messages := model.CloneMessages(state.Messages)
@@ -336,28 +371,91 @@ func (runner *Runner) buildModelRequest(
 		zero := 0
 		request.Tools, request.RequireToolCall, request.HostedToolCallLimit = nil, false, &zero
 	}
+	// Capture Catalog authority before Host-owned, model-facing projection.
+	// The final Request and original Catalog fingerprints are both hashed into
+	// the same durable ModelInvocation, never recomputed on resume.
+	originalTools := append([]tools.Definition(nil), request.Tools...)
 	if runner.prepareModelRequest != nil {
-		// Context must be projected before the persisted intent is hashed. A
-		// ModelMiddleware can observe/transform an invocation, but cannot be
-		// the authority for durable transcript projection.
 		prepared, prepareErr := runner.prepareModelRequest(ctx, model.CloneRequest(request))
 		if prepareErr != nil {
-			return model.Request{}, prepareErr
+			return model.Request{}, nil, prepareErr
 		}
-		if !samePreparedModelIdentity(request, prepared) || len(prepared.Messages) == 0 {
-			return model.Request{}, ErrInvalidRequest
+		if !validPreparedModelRequest(request, prepared) {
+			return model.Request{}, nil, ErrInvalidRequest
 		}
 		request = model.CloneRequest(prepared)
 	}
-	return request, nil
+	fingerprints, err := catalogFingerprintsForRequest(originalTools, request.Tools)
+	if err != nil {
+		return model.Request{}, nil, err
+	}
+	return request, fingerprints, nil
 }
 
-// A trusted context preparer may replace the transcript, but it cannot
-// extend Tool authority, change provider routing, or lift execution limits.
-func samePreparedModelIdentity(original, prepared model.Request) bool {
-	original.Messages = nil
-	prepared.Messages = nil
-	return reflect.DeepEqual(original, prepared)
+// PrepareModelRequest may project messages and visible Tool schemas before the
+// intent is sealed. It may never change identity, granted Tool keys, provider
+// targets or budgets. Dispatch-time ModelMiddleware cannot change them later.
+func validPreparedModelRequest(original, prepared model.Request) bool {
+	return len(prepared.Messages) > 0 && sameModelRequestIdentity(original, prepared) &&
+		prepared.MaxOutputTokens == original.MaxOutputTokens &&
+		reflect.DeepEqual(prepared.HostedToolCallLimit, original.HostedToolCallLimit) &&
+		prepared.RequireToolCall == original.RequireToolCall &&
+		preparedOutputToolsWithinAuthority(original.Tools, prepared.Tools) &&
+		reflect.DeepEqual(original.HostedTools, prepared.HostedTools)
+}
+
+func sameModelRequestIdentity(frozen, candidate model.Request) bool {
+	return frozen.RunID == candidate.RunID && frozen.InvocationID == candidate.InvocationID &&
+		frozen.Model == candidate.Model && sameFrozenModelOptions(frozen.ModelOptions, candidate.ModelOptions) &&
+		sameFrozenOutputContract(frozen.OutputContract, candidate.OutputContract)
+}
+
+// A model-facing schema may narrow or specialize a registered Tool before the
+// intent is frozen. Execution still uses the registered Catalog definition.
+func preparedOutputToolsWithinAuthority(registered, projected []tools.Definition) bool {
+	if len(projected) > len(registered) {
+		return false
+	}
+	byKey := make(map[string]tools.Definition, len(registered))
+	for _, definition := range registered {
+		if definition.Key == "" || definition.Name == "" {
+			return false
+		}
+		if _, exists := byKey[definition.Key]; exists {
+			return false
+		}
+		byKey[definition.Key] = definition
+	}
+	seen := make(map[string]bool, len(projected))
+	for _, definition := range projected {
+		original, ok := byKey[definition.Key]
+		if !ok || seen[definition.Key] || definition.Name != original.Name || definition.Terminal != original.Terminal ||
+			tools.ValidateDefinition(definition) != nil {
+			return false
+		}
+		seen[definition.Key] = true
+	}
+	return true
+}
+
+func catalogFingerprintsForRequest(registered, projected []tools.Definition) ([]string, error) {
+	byKey := make(map[string]tools.Definition, len(registered))
+	for _, definition := range registered {
+		byKey[definition.Key] = definition
+	}
+	var fingerprints []string
+	for _, definition := range projected {
+		original, ok := byKey[definition.Key]
+		if !ok {
+			return nil, ErrToolDiscoveryDenied
+		}
+		hash, err := definitionFingerprint(original)
+		if err != nil {
+			return nil, err
+		}
+		fingerprints = append(fingerprints, hash)
+	}
+	return fingerprints, nil
 }
 
 func sameFrozenModelMessages(original, candidate []model.Message) bool {
@@ -370,6 +468,101 @@ func sameFrozenOutputContract(original, candidate *model.OutputContract) bool {
 
 func sameFrozenModelOptions(original, candidate json.RawMessage) bool {
 	return reflect.DeepEqual(original, candidate)
+}
+
+// A durable invocation permits only budget restrictions and filtering already
+// authorized Tool declarations at physical dispatch. All model-visible bytes
+// (messages, Tool schemas and descriptions) are sealed before intent commit.
+func validDispatchModelRequest(frozen, candidate model.Request) bool {
+	return sameModelRequestIdentity(frozen, candidate) &&
+		sameFrozenModelMessages(frozen.Messages, candidate.Messages) &&
+		dispatchLocalToolsWithinIntent(frozen.Tools, candidate.Tools) &&
+		dispatchHostedToolsWithinIntent(frozen.HostedTools, candidate.HostedTools) &&
+		dispatchToolChoiceWithinIntent(frozen, candidate) &&
+		dispatchOutputCeilingWithinIntent(frozen.MaxOutputTokens, candidate.MaxOutputTokens) &&
+		dispatchHostedToolCeilingWithinIntent(frozen.HostedToolCallLimit, candidate.HostedToolCallLimit)
+}
+
+// A required Tool call may be relaxed only if dispatch restrictions leave no
+// callable local or NEW provider-hosted Tools. Budget exhaustion must not turn
+// an otherwise enforceable required call into an optional one by accident.
+func dispatchToolChoiceWithinIntent(frozen, candidate model.Request) bool {
+	if !frozen.RequireToolCall {
+		return !candidate.RequireToolCall
+	}
+	if candidate.RequireToolCall {
+		return true
+	}
+	return len(candidate.Tools) == 0 && (len(candidate.HostedTools) == 0 ||
+		(candidate.HostedToolCallLimit != nil && *candidate.HostedToolCallLimit == 0))
+}
+
+// A zero output ceiling means unspecified (not zero new tokens). A positive
+// bound may be added to an unbounded intent, but never removed or increased.
+func dispatchOutputCeilingWithinIntent(frozen, candidate int64) bool {
+	return frozen >= 0 && candidate >= 0 && (frozen == 0 || (candidate > 0 && candidate <= frozen))
+}
+
+// A nil native Tool limit is unlimited, while an explicit zero forbids NEW
+// calls but still permits previously dispatched completions and provider replay.
+func dispatchHostedToolCeilingWithinIntent(frozen, candidate *int) bool {
+	if candidate != nil && *candidate < 0 {
+		return false
+	}
+	if frozen == nil {
+		return true
+	}
+	return *frozen >= 0 && candidate != nil && *candidate <= *frozen
+}
+
+func dispatchLocalToolsWithinIntent(frozen, candidate []tools.Definition) bool {
+	if len(candidate) > len(frozen) {
+		return false
+	}
+	authorized := make(map[string]tools.Definition, len(frozen))
+	for _, definition := range frozen {
+		if definition.Key == "" || definition.Name == "" {
+			return false
+		}
+		if _, exists := authorized[definition.Key]; exists {
+			return false
+		}
+		authorized[definition.Key] = definition
+	}
+	seen := make(map[string]bool, len(candidate))
+	for _, definition := range candidate {
+		original, ok := authorized[definition.Key]
+		if !ok || seen[definition.Key] || !reflect.DeepEqual(original, definition) {
+			return false
+		}
+		seen[definition.Key] = true
+	}
+	return true
+}
+
+func dispatchHostedToolsWithinIntent(frozen, candidate []model.HostedTool) bool {
+	if len(candidate) > len(frozen) {
+		return false
+	}
+	authorized := make(map[string]model.HostedTool, len(frozen))
+	for _, definition := range frozen {
+		if definition.Key == "" {
+			return false
+		}
+		if _, exists := authorized[definition.Key]; exists {
+			return false
+		}
+		authorized[definition.Key] = definition
+	}
+	seen := make(map[string]bool, len(candidate))
+	for _, definition := range candidate {
+		original, ok := authorized[definition.Key]
+		if !ok || seen[definition.Key] || !reflect.DeepEqual(original, definition) {
+			return false
+		}
+		seen[definition.Key] = true
+	}
+	return true
 }
 
 func (runner *Runner) executeModelInvocation(
@@ -388,7 +581,12 @@ func (runner *Runner) executeModelInvocation(
 		!runner.clock.Now().UTC().Before(invocation.ExecutionLeaseUntil.UTC()) {
 		return snapshot, state, ErrModelInvocationBusy
 	}
-	if err := runner.validatePendingModelToolDeclarations(ctx, snapshot, state, invocation.Request); err != nil {
+	// A restart may reconstruct a Router with a different default provider.
+	// The committed invocation must not silently cross that routing boundary.
+	if providerName(runner.model, invocation.Request) != invocation.Provider {
+		return snapshot, state, ErrInvalidRequest
+	}
+	if err := runner.validatePendingModelToolDeclarations(ctx, snapshot, state, invocation); err != nil {
 		return snapshot, state, err
 	}
 	startedAt := runner.clock.Now().UTC()
@@ -407,7 +605,7 @@ func (runner *Runner) executeModelInvocation(
 			if err := runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID); err != nil {
 				return err
 			}
-			return runner.validatePendingModelToolDeclarations(dispatchCtx, snapshot, state, invocation.Request)
+			return runner.validatePendingModelToolDeclarations(dispatchCtx, snapshot, state, invocation)
 		},
 	)
 	late := errors.Is(err, ErrModelLateResult)

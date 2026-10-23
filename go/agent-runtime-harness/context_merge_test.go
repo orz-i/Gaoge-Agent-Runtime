@@ -50,7 +50,7 @@ func TestMergeContextRuntimeMessagesDirectGoalDoesNotDuplicateCurrentTurn(t *tes
 		{Role: model.RoleAssistant, Content: "live continuation"},
 	}
 
-	merged, err := mergeContextRuntimeMessages(contextMessages, runtimeMessages)
+	merged, err := mergeContextRuntimeMessagesForCheckpoint(runtimecontext.Checkpoint{}, contextMessages, runtimeMessages)
 	if err != nil {
 		t.Fatalf("merge direct goal: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestMergeContextRuntimeMessagesNestedGoalKeepsParentContextAndChildGoal(t *
 		{Role: model.RoleUser, Content: "child plan step goal"},
 	}
 
-	merged, err := mergeContextRuntimeMessages(contextMessages, runtimeMessages)
+	merged, err := mergeContextRuntimeMessagesForCheckpoint(runtimecontext.Checkpoint{}, contextMessages, runtimeMessages)
 	if err != nil {
 		t.Fatalf("merge nested goal: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestMergeContextRuntimeMessagesNestedGoalKeepsParentContextAndChildGoal(t *
 
 func TestMergeContextRuntimeMessagesStillRejectsRuntimeWithoutUserGoal(t *testing.T) {
 	t.Parallel()
-	_, err := mergeContextRuntimeMessages(
+	_, err := mergeContextRuntimeMessagesForCheckpoint(runtimecontext.Checkpoint{},
 		[]model.Message{{Role: model.RoleUser, Content: parentGoal}},
 		[]model.Message{{Role: model.RoleSystem, Content: "guidance only"}},
 	)

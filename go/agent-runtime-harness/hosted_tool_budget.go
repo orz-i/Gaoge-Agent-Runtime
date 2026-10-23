@@ -57,8 +57,6 @@ func applyHostedReservation(request model.Request, maximum int, ledger budget.Le
 	return request
 }
 
-const exhaustedToolGuidance = "No tools are available for this model step under the current authorization and budget. Do not call any tool mentioned in earlier messages, tool descriptions, delegated goals, or history. Do not delegate again. Return the final answer now using completed results and existing source evidence. Clearly state any gaps; do not promise future work or invent sources."
-
 // Run after the atomic reservation: its native calls occupy shared tool slots
 // even though they have not executed yet. Local calls cannot spend those slots.
 func applyLocalToolBudget(request model.Request, ledger budget.Ledger, runID string) model.Request {
@@ -72,17 +70,6 @@ func applyLocalToolBudget(request model.Request, ledger budget.Ledger, runID str
 		if current == "" {
 			break
 		}
-	}
-	// A paused native execution can still complete on a zero-NEW-calls
-	// continuation. Do not instruct the model to abandon its replay.
-	if request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 &&
-		len(request.Tools) == 0 && pendingHostedAllowance(ledger, runID) == 0 {
-		for _, message := range request.Messages {
-			if message.Role == model.RoleSystem && message.Content == exhaustedToolGuidance {
-				return request
-			}
-		}
-		request.Messages = append(request.Messages, model.Message{Role: model.RoleSystem, Content: exhaustedToolGuidance})
 	}
 	return request
 }

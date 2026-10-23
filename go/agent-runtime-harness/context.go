@@ -9,7 +9,6 @@ import (
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -66,26 +65,6 @@ type contextWindowState struct {
 	checkpoint runtimecontext.Checkpoint
 }
 
-// NewContextWindowMiddleware injects the exact active Context Window carried by Harness execution.
-func NewContextWindowMiddleware() plugin.ModelMiddleware { return contextWindowMiddleware{} }
-
-type contextWindowMiddleware struct{}
-
-func (contextWindowMiddleware) Name() string { return "harness.context_window" }
-
-func (contextWindowMiddleware) Model(
-	ctx context.Context,
-	request model.Request,
-	emit model.StreamSink,
-	next plugin.ModelNext,
-) (model.Response, error) {
-	materialized, err := MaterializeContextWindowRequest(ctx, request)
-	if err != nil {
-		return model.Response{}, err
-	}
-	return next(ctx, materialized, emit)
-}
-
 // MaterializeContextWindowRequest prepends the active Harness Context prefix to any provider-neutral
 // model request. Production callers invoke this at the universal sampling boundary; the middleware
 // remains a reusable Runtime composition primitive for hosts that do not own that boundary.
@@ -96,34 +75,12 @@ func MaterializeContextWindowRequest(ctx context.Context, request model.Request)
 		return request, nil
 	}
 	messages := runtimecontext.Materialize(checkpoint.Window)
-	// Context prepared before a durable Agent model intent already contains
-	// this exact checkpoint prefix. A legacy middleware composed alongside
-	// the preparer must not inject it again after RequestHash is frozen.
-	if hasExactContextPrefix(messages, request.Messages) {
-		return request, nil
-	}
 	merged, err := mergeContextRuntimeMessagesForCheckpoint(checkpoint, messages, request.Messages)
 	if err != nil {
 		return model.Request{}, err
 	}
 	request.Messages = merged
 	return request, nil
-}
-
-func hasExactContextPrefix(prefix, messages []model.Message) bool {
-	if len(prefix) == 0 || len(prefix) > len(messages) {
-		return false
-	}
-	for index := range prefix {
-		if !sameContextModelMessage(prefix[index], messages[index]) {
-			return false
-		}
-	}
-	return true
-}
-
-func mergeContextRuntimeMessages(contextMessages, runtimeMessages []model.Message) ([]model.Message, error) {
-	return mergeContextRuntimeMessagesForCheckpoint(runtimecontext.Checkpoint{}, contextMessages, runtimeMessages)
 }
 
 func mergeContextRuntimeMessagesForCheckpoint(

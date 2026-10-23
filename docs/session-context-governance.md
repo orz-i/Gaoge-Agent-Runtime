@@ -1,6 +1,6 @@
 # Session and Context governance — second round
 
-Status: opt-in, backwards compatible with existing Harness Session/Turn/Context V2 and Agent Kernel. No new database schema, Session Store, workflow engine, or Go module.
+Status: opt-in Session/Context ownership unchanged. **The pre-stable Model Request dispatch contract was superseded by breaking ADR 0010 (2026-10-23).** No new database schema, Session Store, workflow engine, or Go module.
 
 ## Purpose and boundaries
 
@@ -37,7 +37,7 @@ The `HostThread` identity **must be tenant-scoped**. A Session opened for anothe
 
 ## Pre-intent Context projection
 
-`agent.Dependencies.PrepareModelRequest` is an optional trusted hook for message-only projection **before** `ModelInvocation` intent creation and hashing. It must never send a model generation request, mutate Model/Run/tool authority, or change request budgets. Its result is committed in the existing Kernel Run state. A recovered pending intent dispatches the **same frozen request** without rerunning the hook. Ordinary `ModelMiddleware` still runs at dispatch time; do not use it as the sole authoritative place to project Context history.
+`agent.Dependencies.PrepareModelRequest` is the single trusted projection boundary **before** `ModelInvocation` intent creation and hashing. It may project messages and Host-scoped Tool descriptions/schemas but must not call a Provider, change Model/Run identity, alter limits, or enlarge Tool authority. The final request and original Catalog fingerprints are persisted atomically. A recovered pending intent dispatches that same frozen projection without rerunning preparers. `ModelMiddleware` may only apply enforcement/observation and bounded Tool/budget restrictions; no message/schema edits are supported. See [ADR 0010](adr/0010-prestable-model-dispatch-contract.md).
 
 Basic integration:
 
@@ -86,7 +86,7 @@ Compaction additionally requires:
 
 The Context tool must enforce its existing session scope and authorization. The host is responsible for additional tenant isolation, artifact access policy, and any external blob store.
 
-`NewContextWindowMiddleware` remains available for existing code. It can coexist with the pre-intent hook: exact already-injected Context prefixes are not duplicated. Prefer the pre-intent hook for new compositions. With the pre-intent hook configured, Agent rejects any post-intent Model middleware rewrite of the frozen Context messages before provider dispatch. The existing `NewRoleModelMiddleware` is compatible for newly created delegated child Runs: their fixed specialist directive is included in **durable child instructions** before intent construction, and the middleware does not inject it again. Old Runs retain the legacy fallback when no strict preparer is enabled. Other custom middlewares that add or rewrite messages at dispatch time remain incompatible with strict pre-intent freezing; move those message projections to the pre-intent boundary.
+The former Context, Role and Capability model middleware bridges are **removed**, not deprecated. Compose `NewRoleModelRequestPreparer` and `NewCapabilityInvocationRequestPreparer` **before** `MaterializeContextWindowRequest` or `NewManagedContextPreparer` using `agent.ChainModelRequestPreparers`. Managed Context must run last to assess the complete model-visible messages and Tool schemas. Role specialist instructions are already persisted as child instructions before intent creation. There is no legacy late-injection fallback; unsupported old in-flight Beta Model Invocations must be drained or explicitly reconciled before deployment. See [Breaking Changes](breaking-changes.md).
 
 ## Known limits and follow-up work
 
@@ -103,6 +103,6 @@ cd ../agent-runtime-harness && go test -count=1 ./...
 make check
 ```
 
-Regression suites include pre-intent commit-loss recovery, post-intent middleware mutation rejection, identity/tool authority validation, idempotent Context materialization, two-turn Session restart and replay, text-window rollover, exact artifact persistence, next-turn source-path reuse, crash between Context rollover and Agent intent commit, and fail-closed model window budget enforcement. The real PostgreSQL suite additionally exercises `OpenSession` with managed compaction, persisted artifacts, a fresh Store connection, and a subsequent turn without replaying archived history. A separate Harness regression covers role-specialist delegation with managed Context and scoped hosted-Tool grants.
+Regression suites include pre-intent commit-loss recovery, post-intent middleware mutation rejection, identity/tool authority validation, single pre-intent Context materialization, two-turn Session restart and replay, text-window rollover, exact artifact persistence, next-turn source-path reuse, crash between Context rollover and Agent intent commit, and fail-closed model window budget enforcement. The real PostgreSQL suite additionally exercises `OpenSession` with managed compaction, persisted artifacts, a fresh Store connection, and a subsequent turn without replaying archived history. A separate Harness regression covers role-specialist delegation with managed Context and scoped hosted-Tool grants.
 
 Real PostgreSQL/Redis and cross-process continuation tests were additionally verified with `make integration` using the repository's Docker Compose services (Docker Engine 29.8.0, Docker Compose 5.5.1); containers and network were removed by the test runner. This verifies database/queue correctness separately from local unit and race tests. It does not substitute for live external model-provider compatibility checks.

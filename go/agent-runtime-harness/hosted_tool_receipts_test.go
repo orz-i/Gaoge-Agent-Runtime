@@ -135,11 +135,6 @@ func TestHostedContinuationHeldReceiptCannotGrantNewNativeCall(t *testing.T) {
 		if len(bounded.HostedTools) != 1 || len(bounded.Tools) != 0 {
 			t.Fatalf("native replay was removed or a local call was admitted: %+v", bounded)
 		}
-		for _, message := range bounded.Messages {
-			if message.Content == exhaustedToolGuidance {
-				t.Fatal("exhaustion guidance would incorrectly abandon a pending native completion")
-			}
-		}
 		return model.Response{Content: "old complete", HostedToolCalls: []model.HostedToolCall{{ID: "old", ToolKey: "native.search", Status: "completed"}}}, nil
 	})
 	if err != nil {
