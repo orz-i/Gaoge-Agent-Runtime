@@ -328,7 +328,8 @@ func (runner *Runner) buildModelRequest(
 	}
 	request := model.Request{
 		RunID: snapshot.Run.ID, Model: state.Model, ModelOptions: cloneRawJSON(state.ModelOptions),
-		Messages: messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
+		OutputContract: model.CloneOutputContract(state.OutputContract),
+		Messages:       messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
 		RequireToolCall: state.RequireToolCall && (len(definitions) != 0 || len(hostedTools) != 0),
 	}
 	if state.CompletionRepair {
@@ -360,6 +361,14 @@ func samePreparedModelIdentity(original, prepared model.Request) bool {
 }
 
 func sameFrozenModelMessages(original, candidate []model.Message) bool {
+	return reflect.DeepEqual(original, candidate)
+}
+
+func sameFrozenOutputContract(original, candidate *model.OutputContract) bool {
+	return reflect.DeepEqual(original, candidate)
+}
+
+func sameFrozenModelOptions(original, candidate json.RawMessage) bool {
 	return reflect.DeepEqual(original, candidate)
 }
 
