@@ -106,6 +106,24 @@ func (r *Router) GenerateStream(ctx context.Context, request model.Request, emit
 	return client.Generate(ctx, routed)
 }
 
+// CheckOutputContract routes an optional pre-intent structured-output
+// capability check to the selected provider and model. Missing capability
+// implementations must fail closed, never claim strict support by default.
+func (r *Router) CheckOutputContract(ctx context.Context, request model.Request) error {
+	if request.Output == nil {
+		return nil
+	}
+	client, routed, _, err := r.route(request)
+	if err != nil {
+		return err
+	}
+	capability, ok := client.(model.OutputContractSupport)
+	if !ok {
+		return model.ErrInvalidOutputContract
+	}
+	return capability.CheckOutputContract(ctx, routed)
+}
+
 // ProviderNameForRequest records the chosen provider with durable Agent
 // invocations, rather than an ambiguous "router" identity.
 func (r *Router) ProviderNameForRequest(request model.Request) string {
@@ -119,3 +137,4 @@ func (r *Router) ProviderNameForRequest(request model.Request) string {
 var _ model.Client = (*Router)(nil)
 var _ model.StreamingClient = (*Router)(nil)
 var _ model.RequestProviderNamer = (*Router)(nil)
+var _ model.OutputContractSupport = (*Router)(nil)
