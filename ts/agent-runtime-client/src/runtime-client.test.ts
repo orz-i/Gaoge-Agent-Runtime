@@ -20,6 +20,15 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 });
 
 describe("RuntimeClient target API", () => {
+  it.each([undefined, "checkpoint/1"])("binds a Harness approval to the optional checkpoint %s", async (checkpointID) => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({}));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+    const controller = new AbortController();
+    await client.harness.turns.resolveApproval("ht/1", "reject", "Use the current evidence", { checkpointID, signal: controller.signal });
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ decision: "reject", comment: "Use the current evidence", ...(checkpointID ? { checkpointID } : {}) });
+    expect(fetcher.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+  });
+
   it("uses only published Runtime endpoints", async () => {
     const fetcher = vi.fn().mockImplementation((url: string) => Promise.resolve(
       url.includes("/feed?")

@@ -220,6 +220,9 @@ func (runner *Runner) ResolveApproval(
 	if err != nil || !ok {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
+	if request.CheckpointID != "" && request.CheckpointID != pending.CheckpointID {
+		return Snapshot{}, ErrConflict
+	}
 	decision, err := pluginApprovalDecision(request.Decision)
 	if err != nil {
 		return Snapshot{}, err

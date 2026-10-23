@@ -110,6 +110,10 @@ The response shape is defined by the specific host interaction. Host policy may
 require `resolveApproval` instead; do not substitute a generic run resume for a
 Harness decision or a Workflow wait.
 
+Pass the displayed approval's `checkpointID` in the `resolveApproval` request
+options to bind the decision to that request. If the Turn has advanced to a newer
+approval, the server returns a conflict. Older clients may omit this field.
+
 ## Cancellation
 
 Read the current snapshot and provide its revision when cancelling:

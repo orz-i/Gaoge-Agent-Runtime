@@ -46,6 +46,26 @@ func TestRootAgentInvokesFrozenCapabilityAndResumesSameToolCall(t *testing.T) {
 	assertCompletedCapabilityHarness(t, fixture.runner, started.Turn.ID)
 }
 
+func TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild(t *testing.T) {
+	fixture := newCapabilityToolFixture(t)
+	fixture.model.correctArguments = true
+	started := startCapabilityToolHarness(t, fixture)
+	root, child := rootAndWorkflowInvocations(t, started.Invocations)
+	if fixture.model.calls != 2 || fixture.workflowFeature.starts != 1 {
+		t.Fatalf("argument correction model calls=%d, child starts=%d", fixture.model.calls, fixture.workflowFeature.starts)
+	}
+	completeCapabilityChild(t, fixture.runtime, child)
+	rootRuntime, err := fixture.runtime.Load(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := fixture.agentRunner.Resume(t.Context(), root.ExecutionRefID, rootRuntime.Run.Revision)
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || fixture.model.calls != 3 || fixture.workflowFeature.starts != 1 {
+		t.Fatalf("corrected execution = %#v, model calls=%d, child starts=%d, %v", completed.Run, fixture.model.calls, fixture.workflowFeature.starts, err)
+	}
+	assertCompletedCapabilityHarness(t, fixture.runner, started.Turn.ID)
+}
+
 type capabilityToolFixture struct {
 	runtime         *kernel.Runtime
 	relations       *runrelation.Registry
@@ -55,7 +75,7 @@ type capabilityToolFixture struct {
 	workflowFeature *pendingWorkflowFeature
 }
 
-func newCapabilityToolFixture(t *testing.T) capabilityToolFixture {
+func newCapabilityToolFixture(t *testing.T, definitions ...workflow.Definition) capabilityToolFixture {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -67,6 +87,9 @@ func newCapabilityToolFixture(t *testing.T) capabilityToolFixture {
 		t.Fatal(err)
 	}
 	materializer := workflowOnlyMaterializer{t: t}
+	if len(definitions) > 0 {
+		materializer.definition = &definitions[0]
+	}
 	toolHandler := harness.NewCapabilityInvocationToolHandler(materializer)
 	registry, err := tools.NewRegistry([]tools.Registration{harness.CapabilityInvocationToolRegistration(toolHandler)})
 	if err != nil {
@@ -90,9 +113,18 @@ func newCapabilityToolFixture(t *testing.T) capabilityToolFixture {
 		t.Fatal(err)
 	}
 	workflowFeature := &pendingWorkflowFeature{runtime: runtime}
+	var workflows harness.WorkflowFeature = workflowFeature
+	var interactions harness.InteractionResponseHandler
+	if len(definitions) > 0 {
+		workflows, err = workflow.NewRunner(workflow.Dependencies{Runtime: runtime, Effects: workflowWaitNoopEffects{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		interactions = &workflowWaitInteractionHandler{}
+	}
 	runner, err := harness.NewRunner(harness.Dependencies{
 		Runtime: runtime, Agent: agentRunner, Store: store, Clock: capabilityToolClock{},
-		Workflows: workflowFeature, Relations: relations,
+		Workflows: workflows, Relations: relations, Interactions: interactions,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +253,8 @@ func assertCapabilityRelation(
 }
 
 type workflowOnlyMaterializer struct {
-	t *testing.T
+	t          *testing.T
+	definition *workflow.Definition
 }
 
 func (materializer workflowOnlyMaterializer) MaterializeCapability(
@@ -235,8 +268,12 @@ func (materializer workflowOnlyMaterializer) MaterializeCapability(
 		request.Thread != (kernel.ThreadRef{Kind: testThreadKind, ID: "capability-thread"})) {
 		materializer.t.Fatalf("capability materialization identity = actor:%#v thread:%#v", request.Actor, request.Thread)
 	}
+	definition := workflow.Definition{ID: "fixture-workflow", Revision: 1, Name: "Fixture workflow"}
+	if materializer.definition != nil {
+		definition = *materializer.definition
+	}
 	return harness.CapabilityInvocationSpec{Workflow: &harness.WorkflowCapabilitySpec{
-		Definition: workflow.Definition{ID: "fixture-workflow", Revision: 1, Name: "Fixture workflow"},
+		Definition: definition,
 		Input:      json.RawMessage(`{}`),
 	}}, nil
 }
@@ -272,13 +309,32 @@ func (feature *pendingWorkflowFeature) ResolveWait(
 }
 
 type capabilityToolModel struct {
-	t     *testing.T
-	calls int
+	t                *testing.T
+	calls            int
+	correctArguments bool
 }
 
 func (model *capabilityToolModel) Generate(_ context.Context, request runtimemodel.Request) (runtimemodel.Response, error) {
 	model.calls++
-	if model.calls == 1 {
+	invocationCall := 1
+	arguments := json.RawMessage(`{"commandID":"workflow","goal":"child workflow","arguments":{}}`)
+	if model.correctArguments {
+		if model.calls == 1 {
+			return runtimemodel.Response{ToolCalls: []tools.Call{{
+				ID: "invalid-revision", ToolKey: harness.CapabilityInvocationToolKey,
+				Arguments: json.RawMessage(`{"commandID":"workflow","goal":"child workflow","arguments":{"definitionReference":{"id":"fixture-workflow","revision":"1"}}}`),
+			}}}, nil
+		}
+		invocationCall = 2
+		arguments = json.RawMessage(`{"commandID":"workflow","goal":"child workflow","arguments":{"definitionReference":{"id":"fixture-workflow","revision":1}}}`)
+		if model.calls == invocationCall {
+			last := request.Messages[len(request.Messages)-1]
+			if last.Role != runtimemodel.RoleTool || last.ToolCallID != "invalid-revision" || !strings.Contains(last.Content, "/definitionReference/revision") || !strings.Contains(last.Content, "integer") {
+				model.t.Fatalf("missing actionable type correction: %#v", last)
+			}
+		}
+	}
+	if model.calls == invocationCall {
 		if len(request.Tools) != 1 || request.Tools[0].Key != harness.CapabilityInvocationToolKey {
 			model.t.Fatalf("root capability Tools = %#v", request.Tools)
 		}
@@ -288,7 +344,7 @@ func (model *capabilityToolModel) Generate(_ context.Context, request runtimemod
 		}
 		return runtimemodel.Response{ToolCalls: []tools.Call{{
 			ID: "invoke-workflow", ToolKey: harness.CapabilityInvocationToolKey,
-			Arguments: json.RawMessage(`{"commandID":"workflow","goal":"child workflow","arguments":{}}`),
+			Arguments: arguments,
 		}}}, nil
 	}
 	last := request.Messages[len(request.Messages)-1]

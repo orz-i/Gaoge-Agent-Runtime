@@ -503,7 +503,15 @@ func (runner *Runner) finishResolvedInteractionOwner(
 			return Snapshot{}, err
 		}
 	}
-	updated, changed, err := runner.reconcileTurnStatus(ctx, turn.ID, TurnRunning)
+	waiting, err := runner.hasOtherWaitingInteraction(ctx, Interaction{TurnID: turn.ID})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	status := TurnRunning
+	if waiting {
+		status = TurnWaitingInput
+	}
+	updated, changed, err := runner.reconcileTurnStatus(ctx, turn.ID, status)
 	if errors.Is(err, ErrConflict) {
 		return runner.loadInteractionSnapshot(ctx, Interaction{TurnID: turn.ID})
 	}
@@ -511,7 +519,7 @@ func (runner *Runner) finishResolvedInteractionOwner(
 		return Snapshot{}, err
 	}
 	if changed {
-		runner.publishTurnStatus(ctx, updated, EventTurnStarted, false)
+		runner.publishTurnStatus(ctx, updated, turnEventTypeForStatus(status), false)
 	}
 	return runner.loadSnapshot(ctx, updated, nil)
 }

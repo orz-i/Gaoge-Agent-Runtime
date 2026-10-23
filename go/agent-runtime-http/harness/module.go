@@ -160,7 +160,7 @@ func (handler *Handler) ResolveApproval(context *gin.Context) {
 		return
 	}
 	resolved, err := handler.runner.ResolveApproval(context.Request.Context(), snapshot.Turn.ID, harness.ResolveApprovalRequest{
-		Decision: request.Decision, Comment: strings.TrimSpace(request.Comment),
+		Decision: request.Decision, Comment: strings.TrimSpace(request.Comment), CheckpointID: request.CheckpointID,
 	})
 	if err != nil {
 		writeHarnessError(context, err)
@@ -502,8 +502,9 @@ type SnapshotResponse struct {
 }
 
 type ResolveApprovalRequest struct {
-	Decision harness.ApprovalDecision `json:"decision" binding:"required"`
-	Comment  string                   `json:"comment,omitempty"`
+	Decision     harness.ApprovalDecision `json:"decision" binding:"required"`
+	Comment      string                   `json:"comment,omitempty"`
+	CheckpointID string                   `json:"checkpointID,omitempty"`
 }
 
 type Dependencies struct {

@@ -233,7 +233,9 @@ func memoryInteractionOwnersCanWait(
 	ownersRunning := turn.Status == TurnRunning &&
 		(invocation.Status == InvocationAccepted || invocation.Status == InvocationRunning)
 	ownersWaiting := turn.Status == TurnWaitingInput && invocation.Status == InvocationWaitingInput
-	return invocation.TurnID == turn.ID && (ownersRunning || ownersWaiting)
+	// A child can reach its first wait before the root's initial segment yields.
+	childWaiting := (turn.Status == TurnAccepted || turn.Status == TurnRunning) && invocation.Status == InvocationWaitingInput && invocation.ParentItemID != ""
+	return invocation.TurnID == turn.ID && (ownersRunning || ownersWaiting || childWaiting)
 }
 
 func memoryHasWaitingInteraction(values map[string]Interaction, turnID string) bool {

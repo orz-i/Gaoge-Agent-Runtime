@@ -5,6 +5,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Preserve child Workflow input waits while the parent continues running, and retain the next Interaction wait after a response resumes its owner. Memory and PostgreSQL admission use the same parent/child boundary.
+- Present typed capability arguments at the root of the model-facing command schema and validate the frozen command contract before materialization. Invalid argument types remain recoverable Tool failures without executing a Workflow.
+- Allow Harness approval requests to carry the displayed `checkpointID`, rejecting stale owner actions before they can resolve a later checkpoint. The HTTP contract and TypeScript client retain support for existing Turn-only clients.
+
 - Atomically retain unfinished hosted-call reservations alongside final model token receipts. Reconcile native identities once across continuations and restarts, preserve unknown outcomes on Run termination, and mark incomplete usage instead of claiming cancellation. Existing settled receipts are not rewritten; no default test ceilings are installed.
 
 - Persist known rejected model completions with `ModelInvocation.errorCode`, final usage and response identity before consuming their charges. Preserve these receipts through streaming, cancellation and budget replay, including failures projecting an already settled ledger. Local post-generation save failures use `model.post_generation_failed` and never authorize regeneration or Tool execution.

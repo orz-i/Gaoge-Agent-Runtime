@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -40,6 +41,56 @@ func TestHarnessApprovalUsesFrozenToolPolicyAndPersistsDecisionItems(t *testing.
 	if completed.Turn.Status != harness.TurnCompleted || approvalItemCount(completed.Items, harness.ItemCompleted) != 2 {
 		t.Fatalf("approval lifecycle did not complete: turn=%#v items=%#v", completed.Turn, completed.Items)
 	}
+}
+
+func TestHarnessApprovalRejectsStaleCheckpointWithoutResolvingNextRequest(t *testing.T) {
+	t.Parallel()
+	runner, config := newApprovalHarness(t)
+	waiting := startApprovalHarness(t, runner, config)
+	checkpointID := latestApprovalCheckpoint(t, waiting)
+	next, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
+		CheckpointID: checkpointID, Decision: harness.ApprovalApprove, Comment: "first approved",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHarnessApprovalWait(t, next, 2)
+	nextCheckpointID := latestApprovalCheckpoint(t, next)
+	if checkpointID == nextCheckpointID {
+		t.Fatal("the second tool call reused the first approval checkpoint")
+	}
+	for _, decision := range []harness.ApprovalDecision{harness.ApprovalApprove, harness.ApprovalReject} {
+		if _, err = runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
+			CheckpointID: checkpointID, Decision: decision, Comment: "stale owner action",
+		}); !errors.Is(err, harness.ErrConflict) {
+			t.Fatalf("stale %s resolved the next checkpoint: %v", decision, err)
+		}
+	}
+	completed, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
+		CheckpointID: nextCheckpointID, Decision: harness.ApprovalApprove, Comment: "second approved",
+	})
+	if err != nil || completed.Turn.Status != harness.TurnCompleted || approvalItemCount(completed.Items, harness.ItemCompleted) != 2 {
+		t.Fatalf("the current approval did not remain actionable: turn=%#v err=%v", completed.Turn, err)
+	}
+}
+
+func latestApprovalCheckpoint(t *testing.T, snapshot harness.Snapshot) string {
+	t.Helper()
+	for index := len(snapshot.Items) - 1; index >= 0; index-- {
+		item := snapshot.Items[index]
+		if item.Kind != harness.ItemApproval || item.Status != harness.ItemWaiting {
+			continue
+		}
+		var payload struct{ CheckpointID string }
+		if err := json.Unmarshal(item.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.CheckpointID != "" {
+			return payload.CheckpointID
+		}
+	}
+	t.Fatal("no waiting approval checkpoint")
+	return ""
 }
 
 func TestFrozenApprovalPolicyFollowsChildRunRelations(t *testing.T) {

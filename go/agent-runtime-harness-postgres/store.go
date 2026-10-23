@@ -299,7 +299,7 @@ func lockInteractionOwners(
 	var turn turnRecord
 	err := tx.Clauses(clause.Locking{Strength: rowLockStrengthUpdate}).
 		Where("id = ? AND revision = ? AND status IN ?", value.TurnID, expectedTurnRevision,
-			[]string{string(harness.TurnRunning), string(harness.TurnWaitingInput)}).
+			[]string{string(harness.TurnAccepted), string(harness.TurnRunning), string(harness.TurnWaitingInput)}).
 		Take(&turn).Error
 	if err = interactionOwnerLockError(err); err != nil {
 		return err
@@ -315,7 +315,9 @@ func lockInteractionOwners(
 	ownersRunning := turn.Status == string(harness.TurnRunning) &&
 		(invocation.Status == string(harness.InvocationAccepted) || invocation.Status == string(harness.InvocationRunning))
 	ownersWaiting := turn.Status == string(harness.TurnWaitingInput) && invocation.Status == string(harness.InvocationWaitingInput)
-	if !ownersRunning && !ownersWaiting {
+	// A child can reach its first wait before the root's initial segment yields.
+	childWaiting := (turn.Status == string(harness.TurnAccepted) || turn.Status == string(harness.TurnRunning)) && invocation.Status == string(harness.InvocationWaitingInput) && invocation.ParentItemID != ""
+	if !ownersRunning && !ownersWaiting && !childWaiting {
 		return harness.ErrConflict
 	}
 	return nil
