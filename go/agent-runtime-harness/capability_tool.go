@@ -428,6 +428,16 @@ func capabilityArgumentSchema(commands []CommandDescriptor) (map[string]any, err
 		if bytes.Equal(raw, []byte("true")) || bytes.Equal(raw, []byte("false")) {
 			return map[string]any{"type": "object"}, nil
 		}
+		var document any
+		if err := json.Unmarshal(raw, &document); err != nil {
+			return nil, errors.Join(ErrInvalidRequest, err)
+		}
+		// Copying a property out of its resource can detach local references,
+		// dialects or anchors from their scope. Keep those complete schemas in
+		// oneOf and omit the optional flattened hint for this command catalog.
+		if capabilitySchemaHasScope(document) {
+			return map[string]any{"type": "object"}, nil
+		}
 		var schema struct {
 			Properties           map[string]json.RawMessage `json:"properties"`
 			AdditionalProperties json.RawMessage            `json:"additionalProperties"`
@@ -453,4 +463,26 @@ func capabilityArgumentSchema(commands []CommandDescriptor) (map[string]any, err
 		}
 	}
 	return map[string]any{"type": "object", "properties": properties}, nil
+}
+
+func capabilitySchemaHasScope(value any) bool {
+	switch value := value.(type) {
+	case map[string]any:
+		for key, child := range value {
+			switch key {
+			case "$id", "$schema", "$ref", "$defs", "definitions", "$anchor", "$dynamicRef", "$dynamicAnchor", "$recursiveRef", "$recursiveAnchor":
+				return true
+			}
+			if capabilitySchemaHasScope(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range value {
+			if capabilitySchemaHasScope(child) {
+				return true
+			}
+		}
+	}
+	return false
 }

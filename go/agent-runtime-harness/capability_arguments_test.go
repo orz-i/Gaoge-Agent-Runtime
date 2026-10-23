@@ -116,3 +116,37 @@ func TestCapabilitySchemaPreservesOpenCommandArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestCapabilitySchemaPreservesCommandReferenceScopes(t *testing.T) {
+	commands := append(FirstPartyCommandDescriptors(),
+		CommandDescriptor{ID: "string-value", InputSchema: json.RawMessage(`{"$id":"https://example.test/string-command","type":"object","$defs":{"value":{"type":"string"}},"properties":{"value":{"$ref":"#/$defs/value"}},"required":["value"],"additionalProperties":false}`)},
+		CommandDescriptor{ID: "integer-value", InputSchema: json.RawMessage(`{"$id":"https://example.test/integer-command","type":"object","$defs":{"value":{"type":"integer"}},"properties":{"value":{"$ref":"#/$defs/value"}},"required":["value"],"additionalProperties":false}`)},
+		CommandDescriptor{ID: "nested-resource", InputSchema: json.RawMessage(`{"type":"object","properties":{"nested":{"type":"array","items":{"$id":"https://example.test/nested-value","$defs":{"value":{"type":"boolean"}},"$ref":"#/$defs/value"}}},"additionalProperties":false}`)},
+	)
+	schema, err := capabilityInvocationToolSchema(commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := tools.Definition{Key: CapabilityInvocationToolKey, Name: "invoke_capability", InputSchema: schema}
+	if err = tools.ValidateDefinition(definition); err != nil {
+		t.Fatalf("command-local references invalidate the whole tool: %v", err)
+	}
+	for _, test := range []struct {
+		arguments string
+		valid     bool
+	}{
+		{`{"commandID":"string-value","goal":"fixture","arguments":{"value":"hello"}}`, true},
+		{`{"commandID":"string-value","goal":"fixture","arguments":{"value":1}}`, false},
+		{`{"commandID":"integer-value","goal":"fixture","arguments":{"value":1}}`, true},
+		{`{"commandID":"integer-value","goal":"fixture","arguments":{"value":"hello"}}`, false},
+		{`{"commandID":"nested-resource","goal":"fixture","arguments":{"nested":[true,false]}}`, true},
+		{`{"commandID":"nested-resource","goal":"fixture","arguments":{"nested":["true"]}}`, false},
+		{`{"commandID":"workflow","goal":"fixture","arguments":{"definitionReference":{"id":"fixture","revision":1}}}`, true},
+		{`{"commandID":"workflow","goal":"fixture","arguments":{"definitionReference":{"id":"fixture","revision":"1"}}}`, false},
+	} {
+		err = tools.ValidateCall(definition, tools.Call{ID: "fixture", ToolKey: CapabilityInvocationToolKey, Arguments: json.RawMessage(test.arguments)})
+		if (err == nil) != test.valid {
+			t.Fatalf("command reference scope changed for %s: %v", test.arguments, err)
+		}
+	}
+}

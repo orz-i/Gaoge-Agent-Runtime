@@ -66,6 +66,21 @@ func TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild(t *testing.T) 
 	assertCompletedCapabilityHarness(t, fixture.runner, started.Turn.ID)
 }
 
+func TestRootAgentPreparesWorkflowWithScopedApplicationCommand(t *testing.T) {
+	fixture := newCapabilityToolFixture(t)
+	started := startCapabilityToolHarness(t, fixture, harness.CommandDescriptor{
+		ID: "scoped", Trigger: "/scoped", Title: "Scoped application",
+		CapabilityKey: "application.scoped", DefinitionVersion: "1", ExecutionClass: harness.ExecutionApplication,
+		Source: harness.CommandSourceApplication, ApplicationKind: "fixture",
+		InputSchema: json.RawMessage(`{"$id":"https://example.test/scoped-application","type":"object","$defs":{"value":{"type":"string"}},"properties":{"value":{"$ref":"#/$defs/value"}},"additionalProperties":false}`),
+	})
+	root, child := rootAndWorkflowInvocations(t, started.Invocations)
+	assertPendingCapabilityHarness(t, started, fixture, root, child)
+	completeCapabilityChild(t, fixture.runtime, child)
+	resumeCapabilityRoot(t, fixture, root)
+	assertCompletedCapabilityHarness(t, fixture.runner, started.Turn.ID)
+}
+
 type capabilityToolFixture struct {
 	runtime         *kernel.Runtime
 	relations       *runrelation.Registry
@@ -138,9 +153,9 @@ func newCapabilityToolFixture(t *testing.T, definitions ...workflow.Definition) 
 	}
 }
 
-func startCapabilityToolHarness(t *testing.T, fixture capabilityToolFixture) harness.Snapshot {
+func startCapabilityToolHarness(t *testing.T, fixture capabilityToolFixture, additionalCommands ...harness.CommandDescriptor) harness.Snapshot {
 	t.Helper()
-	commands := harness.FirstPartyCommandDescriptors()
+	commands := append(harness.FirstPartyCommandDescriptors(), additionalCommands...)
 	started, err := fixture.runner.Start(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "capability-thread"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "capability-turn"},
