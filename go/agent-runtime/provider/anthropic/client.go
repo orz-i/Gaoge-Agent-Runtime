@@ -367,7 +367,10 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	var finalOutputUsageObserved bool
 	err = providerhttp.Stream(resp, func(event string, data []byte) error {
 		var frame struct {
-			Type         string          `json:"type"`
+			Type  string `json:"type"`
+			Error struct {
+				Type string `json:"type"`
+			} `json:"error"`
 			Message      messageBody     `json:"message"`
 			Index        int             `json:"index"`
 			ContentBlock json.RawMessage `json:"content_block"`
@@ -477,7 +480,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			stopped = true
 		case "ping":
 		case "error":
-			return ErrUnsupported
+			return streamFailure(frame.Error.Type)
 		default:
 			// Anthropic explicitly permits adding new non-critical top-level
 			// SSE event types. Never ignore unknown content blocks/deltas.
@@ -514,6 +517,17 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		}
 	}
 	return result, err
+}
+
+// Error events can follow HTTP 200. Retry only documented transient types,
+// without exposing the server-supplied message through errors or durable state.
+func streamFailure(errorType string) error {
+	switch errorType {
+	case "api_error", "overloaded_error", "rate_limit_error", "timeout_error":
+		return model.NewRetryableError(ErrUnsupported)
+	default:
+		return ErrUnsupported
+	}
 }
 
 var _ model.Client = (*Client)(nil)

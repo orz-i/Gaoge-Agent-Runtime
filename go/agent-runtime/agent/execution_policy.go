@@ -164,6 +164,56 @@ func (runner *Runner) boundedCallTimeout(deadlineAt *time.Time, timeout time.Dur
 	return timeout, false
 }
 
+// Acquire a shared call slot under the Run's deadline, not only the caller's
+// Context. Per-call Timeout begins after admission; it must not be consumed
+// while queued for another Run's physical Model or Tool execution.
+func (runner *Runner) acquireCallPermit(ctx context.Context, limiter *callLimiter, deadlineAt *time.Time) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	permitCtx := ctx
+	if deadlineAt != nil {
+		remaining, _ := runner.boundedCallTimeout(deadlineAt, 0)
+		if remaining <= 0 {
+			return nil, kernel.ErrDeadline
+		}
+		var cancel context.CancelFunc
+		permitCtx, cancel = context.WithTimeout(ctx, remaining)
+		defer cancel()
+	}
+	release, err := limiter.acquire(permitCtx)
+	if err != nil {
+		if parentErr := ctx.Err(); parentErr != nil {
+			return nil, parentErr
+		}
+		if deadlineAt != nil && errors.Is(err, context.DeadlineExceeded) {
+			return nil, errors.Join(kernel.ErrDeadline, err)
+		}
+		return nil, err
+	}
+	// The semaphore can grant a slot while cancellation is racing. Never
+	// dispatch with a cancelled permission context or leak that new permit.
+	if parentErr := ctx.Err(); parentErr != nil {
+		release()
+		return nil, parentErr
+	}
+	if deadlineAt != nil {
+		if permitErr := permitCtx.Err(); permitErr != nil {
+			release()
+			if parentErr := ctx.Err(); parentErr != nil {
+				return nil, parentErr
+			}
+			return nil, errors.Join(kernel.ErrDeadline, permitErr)
+		}
+		remaining, _ := runner.boundedCallTimeout(deadlineAt, 0)
+		if remaining <= 0 {
+			release()
+			return nil, kernel.ErrDeadline
+		}
+	}
+	return release, nil
+}
+
 func safeModelCall(call func() (model.Response, error)) (response model.Response, err error) {
 	defer func() {
 		if recover() != nil {
@@ -272,7 +322,7 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 	deadlineAt *time.Time,
 	beforeDispatch func(context.Context) error,
 ) (model.Response, error) {
-	release, err := runner.modelLimiter.acquire(ctx)
+	release, err := runner.acquireCallPermit(ctx, runner.modelLimiter, deadlineAt)
 	if err != nil {
 		return model.Response{}, err
 	}
@@ -329,7 +379,7 @@ func (runner *Runner) resolveHostedToolWithPolicy(
 	policy := runner.execution.Tool
 	identity := "hosted-tool:" + key + ":" + modelName
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
-		release, err := runner.toolLimiter.acquire(ctx)
+		release, err := runner.acquireCallPermit(ctx, runner.toolLimiter, deadlineAt)
 		if err != nil {
 			return model.HostedTool{}, false, err
 		}
@@ -377,12 +427,13 @@ func (runner *Runner) executeToolWithPolicy(
 ) (tools.ExecutionResult, int, error) {
 	policy := runner.execution.Tool
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
-		release, err := runner.toolLimiter.acquire(ctx)
+		release, err := runner.acquireCallPermit(ctx, runner.toolLimiter, deadlineAt)
 		if err != nil {
 			return tools.ExecutionResult{}, attempt, err
 		}
 		timeout, runBound := runner.boundedCallTimeout(deadlineAt, policy.Timeout)
 		if runBound && timeout <= 0 {
+			release()
 			return tools.ExecutionResult{}, attempt, kernel.ErrDeadline
 		}
 		callCtx, cancel := callContext(ctx, timeout)

@@ -316,6 +316,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		}
 		var frame struct {
 			Type     string          `json:"type"`
+			Code     string          `json:"code"`
 			Delta    string          `json:"delta"`
 			ItemID   string          `json:"item_id"`
 			Response json.RawMessage `json:"response"`
@@ -345,8 +346,18 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			final = &result
 		case "response.incomplete":
 			return errors.Join(ErrUnsupported, ErrIncomplete)
-		case "response.failed", "error":
-			return ErrUnsupported
+		case "response.failed":
+			var failed struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(frame.Response, &failed) != nil {
+				return providerhttp.ErrProtocol
+			}
+			return streamFailure(failed.Error.Code)
+		case "error":
+			return streamFailure(frame.Code)
 		}
 		return nil
 	})
@@ -363,6 +374,17 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		}
 	}
 	return result, err
+}
+
+// Only documented transient codes opt into durable retries. Never retain the
+// upstream message: it may include prompts, credentials or provider internals.
+func streamFailure(code string) error {
+	switch code {
+	case "server_error", "rate_limit_exceeded", "slow_down", "server_is_overloaded":
+		return model.NewRetryableError(ErrUnsupported)
+	default:
+		return ErrUnsupported
+	}
 }
 
 var _ model.Client = (*Client)(nil)

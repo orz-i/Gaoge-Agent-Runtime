@@ -156,6 +156,38 @@ func TestToolPolicyRetriesOnlyExplicitRetryableFailures(t *testing.T) {
 	}
 }
 
+func TestToolPolicyExpiredRunDoesNotBlockSubsequentCalls(t *testing.T) {
+	t.Parallel()
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := &modelRetryTestClock{now: time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)}
+	runner, err := NewRunner(Dependencies{
+		Runtime: runtime, Model: fixedPolicyModel{}, Clock: clock,
+		Execution: ExecutionPolicy{Tool: CallPolicy{MaxConcurrency: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := clock.Now().Add(-time.Second)
+	called := false
+	call := func(context.Context) (tools.ExecutionResult, error) {
+		called = true
+		return tools.ExecutionResult{Receipt: tools.Receipt{ExecutionID: "healthy", Disposition: "committed"}}, nil
+	}
+	_, _, err = runner.executeToolWithPolicy(t.Context(), "expired", &deadline, call)
+	if !errors.Is(err, kernel.ErrDeadline) || called {
+		t.Fatalf("expired call: executed=%v err=%v", called, err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	result, attempts, err := runner.executeToolWithPolicy(ctx, "healthy", nil, call)
+	if err != nil || !called || attempts != 1 || result.Receipt.ExecutionID != "healthy" {
+		t.Fatalf("healthy call after expiry: executed=%v attempts=%d result=%+v err=%v", called, attempts, result, err)
+	}
+}
+
 func TestModelPanicIsContained(t *testing.T) {
 	t.Parallel()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})

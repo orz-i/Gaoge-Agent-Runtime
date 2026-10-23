@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -213,8 +214,13 @@ func normalizeJSON(value json.RawMessage, fallback json.RawMessage) json.RawMess
 	if len(value) == 0 {
 		value = fallback
 	}
+	if !json.Valid(value) {
+		return cloneJSON(value)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.UseNumber()
 	var normalized any
-	if err := json.Unmarshal(value, &normalized); err != nil {
+	if err := decoder.Decode(&normalized); err != nil {
 		return cloneJSON(value)
 	}
 	encoded, err := json.Marshal(normalized)
