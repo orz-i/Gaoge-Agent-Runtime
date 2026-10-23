@@ -78,6 +78,13 @@ GAOGE_PROVIDER=openai GAOGE_MODEL=gpt-4.1 OPENAI_API_KEY="$OPENAI_API_KEY" \
 
 See [provider adapters, supported capabilities, and limitations](docs/provider-adapters.md).
 
+Third-round optional strict JSON Schema outputs let callers freeze a model-specific
+`OutputContract` into a durable Agent Run or Harness `ConfigSnapshot`. OpenAI
+Responses and Anthropic Messages map the same provider-neutral contract to
+their native schema format. Unknown models, invalid schemas and failed
+completion validation never downgrade to prompt-only JSON. See
+[Model Capability and Structured Output governance](docs/model-structured-output-governance.md).
+
 ### Session and Context governance
 
 For text conversations, the optional Harness `OpenSession` facade exposes

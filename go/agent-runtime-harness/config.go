@@ -12,6 +12,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 // VersionRef freezes one host-owned configuration resource identity and revision.
@@ -122,6 +123,7 @@ type ConfigSnapshot struct {
 	Instructions          string                   `json:"instructions,omitempty"`
 	Model                 string                   `json:"model,omitempty"`
 	ModelOptions          json.RawMessage          `json:"modelOptions,omitempty"`
+	OutputContract        *model.OutputContract    `json:"outputContract,omitempty"`
 	ToolKeys              []string                 `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
 	Commands              []CommandDescriptor      `json:"commands"`
@@ -143,6 +145,7 @@ type configPayload struct {
 	Instructions          string                   `json:"instructions,omitempty"`
 	Model                 string                   `json:"model,omitempty"`
 	ModelOptions          json.RawMessage          `json:"modelOptions,omitempty"`
+	OutputContract        *model.OutputContract    `json:"outputContract,omitempty"`
 	ToolKeys              []string                 `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
 	Commands              []CommandDescriptor      `json:"commands"`
@@ -176,6 +179,10 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
+	if model.ValidateOutputContract(value.OutputContract) != nil {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
+	value.OutputContract = model.CloneOutputContract(value.OutputContract)
 	value.ToolKeys = normalizeStrings(value.ToolKeys)
 	value.ToolPolicies, err = normalizeToolPolicies(value.ToolPolicies)
 	if err != nil {
@@ -202,7 +209,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	}
 	payload := configPayload{
 		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
-		Model: value.Model, ModelOptions: value.ModelOptions, ToolKeys: value.ToolKeys,
+		Model: value.Model, ModelOptions: value.ModelOptions, OutputContract: value.OutputContract, ToolKeys: value.ToolKeys,
 		ToolPolicies: value.ToolPolicies, Commands: value.Commands, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
 		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy, Roles: value.Roles,
@@ -253,6 +260,7 @@ func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
 	}
 	value.Roles = cloneRoleSnapshots(value.Roles)
 	value.ModelOptions = append(json.RawMessage(nil), value.ModelOptions...)
+	value.OutputContract = model.CloneOutputContract(value.OutputContract)
 	value.ToolKeys = append([]string(nil), value.ToolKeys...)
 	value.ToolPolicies = append([]ToolPolicySnapshot(nil), value.ToolPolicies...)
 	value.Commands = cloneCommandDescriptors(value.Commands)
