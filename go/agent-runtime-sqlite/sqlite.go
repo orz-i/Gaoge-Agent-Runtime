@@ -166,7 +166,12 @@ func openStore(ctx context.Context, path string, create bool) (*Store, error) {
 		return nil, err
 	}
 	// mode=rw prevents SQLite's normal implicit file creation on reopen.
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs)}
+	uriPath := filepath.ToSlash(abs)
+	if !strings.HasPrefix(uriPath, "/") {
+		// Windows drive letters belong to the URI path, not its authority.
+		uriPath = "/" + uriPath
+	}
+	u := url.URL{Scheme: "file", Path: uriPath}
 	params := url.Values{}
 	params.Set("mode", "rw")
 	params.Add("_pragma", "foreign_keys(ON)")

@@ -41,11 +41,19 @@ func sameInvocationIdentity(left, right Invocation) bool {
 }
 
 func (store *MemoryStore) CreateInvocation(_ context.Context, value Invocation) (Invocation, bool, error) {
+	value.ParentItemID = strings.TrimSpace(value.ParentItemID)
 	if store == nil || !validInvocation(value) {
 		return Invocation{}, false, ErrInvalidRequest
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if value.ParentItemID == "" {
+		for _, existing := range store.invocations {
+			if existing.TurnID == value.TurnID && strings.TrimSpace(existing.ParentItemID) == "" && existing.ID != value.ID {
+				return Invocation{}, false, ErrConflict
+			}
+		}
+	}
 	created, fresh, err := createMemoryValue(store.invocations, value.ID, value, sameInvocationIdentity, cloneInvocation)
 	if err != nil || !fresh {
 		return created, fresh, err

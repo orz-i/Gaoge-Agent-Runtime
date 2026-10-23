@@ -43,6 +43,25 @@ module to the same release cohort, run migrations from a host-controlled
 migration job, and keep old/new workers from processing the same durable work
 unless that mixed-version topology has explicit compatibility evidence.
 
+### Harness root Invocation migration
+
+Before starting upgraded Harness workers, run `harnesspostgres.Migrate(db)` to
+add `uk_harness_invocation_root`, a partial unique index on
+`agent_harness_invocations.turn_id` where `parent_item_id = ''`. Each Turn has
+one root Invocation across Agent and command capabilities; changing RequestID
+cannot create another root. `RetryInvocation` retains that root identity and
+rotates its execution attempt as before. Custom Harness Stores must enforce
+the same atomic `CreateInvocation` constraint.
+
+If historical data contains multiple roots for a Turn, or a nonempty
+`parent_item_id` consisting entirely of whitespace under Go `strings.TrimSpace`
+(including tabs and Unicode whitespace such as nonbreaking spaces), migration
+fails without deleting or normalizing those records. The host must review
+their Run outcomes and external effects, reconcile the affected Turns
+explicitly, then rerun migration. Do not silently select, rewrite or delete a
+root to make the index succeed. Keep old workers stopped during this migration
+and rollout.
+
 ### Stage-two reconciliation migration
 
 Before deploying workers with bounded child-terminal reconciliation, run the

@@ -40,7 +40,7 @@ func (turnRecord) TableName() string { return "agent_harness_turns" }
 
 type invocationRecord struct {
 	ID                string    `gorm:"primaryKey;size:64"`
-	TurnID            string    `gorm:"size:64;not null;index:idx_harness_invocation_turn"`
+	TurnID            string    `gorm:"size:64;not null;index:idx_harness_invocation_turn;uniqueIndex:uk_harness_invocation_root,where:parent_item_id = ''"`
 	ParentItemID      string    `gorm:"size:64;not null;default:''"`
 	CapabilityKey     string    `gorm:"size:128;not null"`
 	DefinitionVersion string    `gorm:"size:128;not null;default:''"`

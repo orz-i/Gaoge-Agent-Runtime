@@ -383,6 +383,7 @@ func (runner *Runner) executeToolWithPolicy(
 		}
 		timeout, runBound := runner.boundedCallTimeout(deadlineAt, policy.Timeout)
 		if runBound && timeout <= 0 {
+			release()
 			return tools.ExecutionResult{}, attempt, kernel.ErrDeadline
 		}
 		callCtx, cancel := callContext(ctx, timeout)

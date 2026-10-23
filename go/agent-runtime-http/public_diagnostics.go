@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -118,11 +119,13 @@ func PublicRun(run kernel.Run) kernel.Run {
 // must never cross a public HTTP projection, even inside business content.
 // Non-JSON payloads fail closed.
 func PublicDiagnosticPayload(value json.RawMessage) json.RawMessage {
-	if len(value) == 0 {
+	if !json.Valid(value) {
 		return nil
 	}
+	decoder := json.NewDecoder(bytes.NewReader(value))
+	decoder.UseNumber()
 	var decoded any
-	if err := json.Unmarshal(value, &decoded); err != nil {
+	if err := decoder.Decode(&decoded); err != nil {
 		return nil
 	}
 	stripDiagnosticFields(decoded, false)

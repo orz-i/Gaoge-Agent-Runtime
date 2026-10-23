@@ -71,6 +71,7 @@ func invocationFromRecord(value invocationRecord) (harness.Invocation, error) {
 }
 
 func (store *Store) CreateInvocation(ctx context.Context, value harness.Invocation) (harness.Invocation, bool, error) {
+	value.ParentItemID = strings.TrimSpace(value.ParentItemID)
 	record, err := invocationToRecord(value)
 	if err != nil {
 		return harness.Invocation{}, false, err
@@ -605,7 +606,34 @@ func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return ErrNilDatabase
 	}
+	if err := checkInvocationRootMigration(db); err != nil {
+		return err
+	}
 	return db.AutoMigrate(Models()...)
+}
+
+func checkInvocationRootMigration(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&invocationRecord{}) || !db.Migrator().HasColumn(&invocationRecord{}, "parent_item_id") {
+		return nil
+	}
+	// Older Stores could persist whitespace-only parents. Runtime treats them
+	// as roots, but the root index covers only the canonical empty string.
+	// Use Go's whitespace semantics and leave historical data for host review.
+	rows, err := db.Model(&invocationRecord{}).Select("parent_item_id").Where("parent_item_id <> ?", "").Rows()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var parentItemID string
+		if err = rows.Scan(&parentItemID); err != nil {
+			return err
+		}
+		if strings.TrimSpace(parentItemID) == "" {
+			return errors.New("harness migration requires host review of whitespace-only invocation parent_item_id")
+		}
+	}
+	return rows.Err()
 }
 
 func (store *Store) CreateSession(ctx context.Context, value harness.Session) (harness.Session, bool, error) {

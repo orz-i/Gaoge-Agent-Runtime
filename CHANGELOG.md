@@ -5,6 +5,11 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Release the Tool concurrency slot when a Run deadline expires before dispatch, so expired calls cannot block unrelated Runs.
+- Preserve exact JSON numbers in Queue payloads and public HTTP projections. Queue fingerprints now retain numeric spelling; replaying Jobs written with earlier lossy numeric normalization may return `ErrConflict` and requires host reconciliation instead of silently reusing changed input.
+- Retry documented transient OpenAI and Anthropic SSE errors through the existing durable ModelInvocation retry budget, while keeping permanent/unknown errors terminal and upstream messages private.
+- Encode Windows drive letters as SQLite URI paths, preserving escaped filename characters. This does not certify Windows ACL or directory-sync support for database publication.
+- Enforce one root Harness Invocation per Turn atomically in Memory and PostgreSQL Stores, preventing changed RequestIDs or competing capability starts from dispatching a second root Run. Apply the Harness migration before rollout; historical duplicate roots require host review before the new unique index can be installed.
 - Keep command-local JSON Schema references and resource scopes intact when projecting model-facing capability arguments; scoped schemas retain their exact command constraints without invalidating unrelated commands.
 - Persist classified permanent model-request preparation failures as terminal Run outcomes before creating a model intent or spending budget, while keeping explicitly retryable preparation failures resumable.
 - Preserve child Workflow input waits while the parent continues running, and retain the next Interaction wait after a response resumes its owner. Memory and PostgreSQL admission use the same parent/child boundary.

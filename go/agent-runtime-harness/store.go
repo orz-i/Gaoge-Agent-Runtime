@@ -64,6 +64,9 @@ type Store interface {
 	CreateTurn(context.Context, Turn) (Turn, bool, error)
 	GetTurn(context.Context, string) (Turn, error)
 	UpdateTurn(context.Context, Turn, uint64) (Turn, error)
+	// CreateInvocation atomically permits one top-level Invocation per Turn.
+	// ParentItemID is trimmed; an empty value identifies the root. Replaying
+	// the same identity is allowed, but a different root returns ErrConflict.
 	CreateInvocation(context.Context, Invocation) (Invocation, bool, error)
 	GetInvocation(context.Context, string) (Invocation, error)
 	GetInvocationByExecutionRefID(context.Context, string) (Invocation, error)

@@ -112,6 +112,13 @@ Windows ACL support is not certified by these POSIX checks. Hosts must
 provide encryption and OS-protected secrets where required; POSIX
 permissions are not database encryption.
 
+File URI construction handles Windows drive letters and escaped filename
+characters, but Windows is still not a certified publication target.
+`CreateNew` requires parent-directory sync after publication; a platform that
+cannot sync directories returns the existing uncertain-publication error.
+Do not bypass that error or replace the published database to claim Windows
+durability support.
+
 `CreateNew` initializes a uniquely named private temporary database,
 closes/checkpoints it, then publishes the completed main file via a
 **no-overwrite hard link** in the same directory. A failed or cancelled
