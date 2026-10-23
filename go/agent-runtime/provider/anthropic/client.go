@@ -206,6 +206,14 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	payload := map[string]any{
 		"model": name, "max_tokens": tokens, "messages": messages, "stream": streaming,
 	}
+	if request.Output != nil {
+		if err := model.ValidateOutputContract(request.Output); err != nil {
+			return prepared{}, errors.Join(ErrUnsupported, err)
+		}
+		payload["output_config"] = map[string]any{"format": map[string]any{
+			"type": "json_schema", "schema": request.Output.Schema,
+		}}
+	}
 	if len(systems) > 0 {
 		payload["system"] = strings.Join(systems, "\n\n")
 	}
@@ -235,7 +243,7 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 	if body.ID == "" {
 		return model.Response{}, ErrUnsupported
 	}
-	result := model.Response{ResponseID: body.ID}
+	result := model.Response{ResponseID: body.ID, Refusal: body.StopReason == "refusal"}
 	if body.Usage != nil && body.Usage.Input != nil && body.Usage.Output != nil {
 		input, output := tokenCount(body.Usage.Input), tokenCount(body.Usage.Output)
 		read, write := tokenCount(body.Usage.CacheRead), tokenCount(body.Usage.CacheWrite)
@@ -296,6 +304,16 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 		return model.Response{}, ErrUnsupported
 	}
 	return result, nil
+}
+
+// CheckOutputContract verifies the adapter's strict JSON output wire mapping
+// before a durable ModelInvocation is committed, without sending a request.
+func (c *Client) CheckOutputContract(_ context.Context, request model.Request) error {
+	if request.Output == nil {
+		return nil
+	}
+	_, err := c.prepare(request, false)
+	return err
 }
 
 func (c *Client) Generate(ctx context.Context, request model.Request) (model.Response, error) {
