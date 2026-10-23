@@ -5,6 +5,7 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Persist classified permanent model-request preparation failures as terminal Run outcomes before creating a model intent or spending budget, while keeping explicitly retryable preparation failures resumable.
 - Preserve child Workflow input waits while the parent continues running, and retain the next Interaction wait after a response resumes its owner. Memory and PostgreSQL admission use the same parent/child boundary.
 - Present typed capability arguments at the root of the model-facing command schema and validate the frozen command contract before materialization. Invalid argument types remain recoverable Tool failures without executing a Workflow.
 - Allow Harness approval requests to carry the displayed `checkpointID`, rejecting stale owner actions before they can resolve a later checkpoint. The HTTP contract and TypeScript client retain support for existing Turn-only clients.

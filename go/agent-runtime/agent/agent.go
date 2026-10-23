@@ -823,6 +823,13 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", err)
 			return failed, true, failErr
 		}
+		if code := model.ClassifiedErrorCode(err); code != "" && !model.IsRetryableError(err) {
+			// A host's classified permanent preparation failure happens before
+			// any intent or physical attempt. Commit the terminal cause so
+			// supervising runs can observe it without spending model budget.
+			failed, failErr := runner.fail(ctx, snapshot, state, code, err)
+			return failed, true, failErr
+		}
 		return snapshot, true, err
 	}
 	snapshot, state, invocation, err = runner.claimModelInvocationExecution(ctx, snapshot, state, invocation)
