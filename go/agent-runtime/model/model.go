@@ -44,6 +44,7 @@ type Request struct {
 	InvocationID string             `json:"invocationID,omitempty"`
 	Model        string             `json:"model,omitempty"`
 	ModelOptions json.RawMessage    `json:"modelOptions,omitempty"`
+	Output       *OutputContract    `json:"output,omitempty"`
 	Messages     []Message          `json:"messages"`
 	Tools        []tools.Definition `json:"tools,omitempty"`
 	HostedTools  []HostedTool       `json:"hostedTools,omitempty"`
@@ -215,6 +216,7 @@ func CloneRequest(value Request) Request {
 		value.HostedToolCallLimit = &ceiling
 	}
 	value.ModelOptions = cloneJSON(value.ModelOptions)
+	value.Output = CloneOutputContract(value.Output)
 	value.Messages = CloneMessages(value.Messages)
 	definitions := value.Tools
 	value.Tools = make([]tools.Definition, len(definitions))
