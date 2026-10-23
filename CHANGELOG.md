@@ -5,7 +5,7 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
-- Release the Tool concurrency slot when a Run deadline expires before dispatch, so expired calls cannot block unrelated Runs.
+- Bound Model, Tool and Hosted Tool concurrency admission by Run deadlines, and release permits on expiry or cancellation before dispatch. Permit waiters can no longer remain blocked beyond their Run deadline or consume another Run's concurrency slot.
 - Preserve exact JSON numbers in Queue payloads and public HTTP projections. Queue fingerprints now retain numeric spelling; replaying Jobs written with earlier lossy numeric normalization may return `ErrConflict` and requires host reconciliation instead of silently reusing changed input.
 - Retry documented transient OpenAI and Anthropic SSE errors through the existing durable ModelInvocation retry budget, while keeping permanent/unknown errors terminal and upstream messages private.
 - Encode Windows drive letters as SQLite URI paths, preserving escaped filename characters. This does not certify Windows ACL or directory-sync support for database publication.
