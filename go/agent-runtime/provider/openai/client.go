@@ -159,6 +159,15 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	payload := map[string]any{
 		"model": name, "input": input, "store": false, "stream": streaming,
 	}
+	if request.Output != nil {
+		if err := model.ValidateOutputContract(request.Output); err != nil {
+			return prepared{}, errors.Join(ErrUnsupported, err)
+		}
+		payload["text"] = map[string]any{"format": map[string]any{
+			"type": "json_schema", "name": request.Output.Name,
+			"schema": request.Output.Schema, "strict": true,
+		}}
+	}
 	if len(definitions) != 0 {
 		// Tool continuation needs encrypted reasoning in stateless mode.
 		// Do not impose this parameter on ordinary text-only proxies.
@@ -235,6 +244,7 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 		}
 	}
 	result.Content = output.String()
+	result.Refusal = sawRefusal
 	if sawRefusal && len(result.ToolCalls) != 0 {
 		return model.Response{}, ErrUnsupported
 	}
@@ -253,6 +263,17 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 	}
 	return result, nil
 }
+// CheckOutputContract validates this adapter's strict output wire mapping
+// without contacting the provider. The selected remote model can still reject
+// unsupported schema features or model-specific formats at generation time.
+func (c *Client) CheckOutputContract(_ context.Context, request model.Request) error {
+	if request.Output == nil {
+		return nil
+	}
+	_, err := c.prepare(request, false)
+	return err
+}
+
 func (c *Client) Generate(ctx context.Context, request model.Request) (model.Response, error) {
 	prepared, err := c.prepare(request, false)
 	if err != nil {
