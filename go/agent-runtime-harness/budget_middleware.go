@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -116,26 +117,15 @@ func (middleware *BudgetMiddleware) registerAncestry(ctx context.Context, ledger
 	return middleware.coordinator().RegisterRun(ctx, ledger.ID, runID, budget.RunBudget{ParentRunID: parent})
 }
 
+// Model owns only post-intent shared-budget admission, dispatch accounting
+// and settlement. Input/Tool projections must already be frozen via Agent's
+// PrepareModelRequest before this middleware is invoked.
 func (middleware *BudgetMiddleware) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	return middleware.ModelWithPrepare(ctx, request, emit, nil, next)
-}
-
-// ModelWithPrepare freezes the remaining allowance before host input preparation,
-// but marks dispatch only after that preparation succeeds. Prepare must not send
-// a generation request: its errors prove the reservation can be released safely.
-// Errors from next retain the ordinary unknown-outcome accounting contract.
-func (middleware *BudgetMiddleware) ModelWithPrepare(ctx context.Context, request model.Request, emit model.StreamSink, prepare func(context.Context, model.Request) (model.Request, error), next plugin.ModelNext) (model.Response, error) {
 	ledger, err := middleware.bindRun(ctx, request.RunID)
 	if err != nil {
 		return model.Response{}, err
 	}
 	if ledger.ID == "" {
-		if prepare != nil {
-			request, err = prepare(ctx, request)
-			if err != nil {
-				return model.Response{}, err
-			}
-		}
 		return next(ctx, request, emit)
 	}
 	if strings.TrimSpace(request.InvocationID) == "" {
@@ -166,21 +156,28 @@ func (middleware *BudgetMiddleware) ModelWithPrepare(ctx context.Context, reques
 		return model.Response{}, err
 	}
 	request = applyLocalToolBudget(request, ledger, request.RunID)
-	if prepare != nil {
-		request, err = prepare(ctx, request)
-		if err != nil {
-			accountingCtx := context.WithoutCancel(ctx)
-			updated, releaseErr := middleware.coordinator().Release(accountingCtx, ledger.ID, reservation.ID)
-			return model.Response{}, errors.Join(err, releaseErr, middleware.project(accountingCtx, updated))
-		}
-	}
-	if _, err = middleware.coordinator().Dispatch(ctx, ledger.ID, reservation.ID); err != nil {
+	dispatched, err := middleware.coordinator().Dispatch(ctx, ledger.ID, reservation.ID)
+	if err != nil {
 		if errors.Is(err, budget.ErrWaiting) {
 			return model.Response{}, model.NewRetryableError(err)
 		}
 		return model.Response{}, err
 	}
 	response, callErr := next(ctx, request, emit)
+	if agent.IsModelPreDispatchDenied(callErr) {
+		// Dispatch reserved the upper bound BEFORE entering downstream Model
+		// middleware. The Agent's private final-boundary proof is the only
+		// evidence that allows the marker to be revoked. Fence that reversal
+		// by the exact Dispatch revision; never clear a newer worker's slot.
+		accountingCtx := context.WithoutCancel(ctx)
+		updated, revertErr := middleware.coordinator().RequeueProvenUnsent(accountingCtx, ledger.ID, reservation.ID, dispatched.Revision)
+		if revertErr != nil {
+			// A failed reversal is NOT proof of zero usage. Keep the ledger's
+			// already-dispatched reservation conservative, never refund it.
+			return model.Response{}, errors.Join(callErr, revertErr)
+		}
+		return model.Response{}, errors.Join(callErr, middleware.project(accountingCtx, updated))
+	}
 	return middleware.settleModel(ctx, ledger, reservation, response, callErr)
 }
 

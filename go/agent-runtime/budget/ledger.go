@@ -269,6 +269,33 @@ func (coordinator Coordinator) Dispatch(ctx context.Context, scopeID, id string)
 	})
 }
 
+// RequeueProvenUnsent revokes a speculative dispatch marker ONLY when the
+// trusted caller has proof that no external Model request was physically sent.
+// The exact ledger revision returned by Dispatch is required: a stale worker
+// cannot refund a reservation after any intervening ledger transition or a
+// later worker's new Dispatch. Without that proof, use Suspend and keep quota
+// held as unknown usage. Requeue preserves the immutable logical request hash
+// and original quota estimate, allowing the same Invocation ID to be admitted
+// again after the Agent obtains a fresh execution claim.
+func (coordinator Coordinator) RequeueProvenUnsent(ctx context.Context, scopeID, id string, dispatchRevision uint64) (Ledger, error) {
+	if dispatchRevision == 0 || !strings.HasPrefix(id, "model:") || len(id) <= len("model:") {
+		return Ledger{}, ErrLedgerConflict
+	}
+	return coordinator.update(ctx, scopeID, func(ledger *Ledger) error {
+		if ledger.Revision != dispatchRevision {
+			return ErrLedgerConflict
+		}
+		value, found := ledger.Reservations[id]
+		if !found || value.Status != ReservationHeld || !value.Active || !value.Dispatched ||
+			len(value.Receipt) != 0 || value.Usage != (Usage{}) {
+			return ErrLedgerConflict
+		}
+		value.Status, value.Active, value.Dispatched, value.Dimension = ReservationWaiting, false, false, ""
+		ledger.Reservations[id] = value
+		return nil
+	})
+}
+
 // Suspend releases only the execution slot; a pending logical call retains its
 // quota. It is used for durable async tools and explicit safe provider retries.
 func (coordinator Coordinator) Suspend(ctx context.Context, scopeID, id string) (Ledger, error) {

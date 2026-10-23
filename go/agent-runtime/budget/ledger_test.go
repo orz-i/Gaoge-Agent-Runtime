@@ -175,3 +175,96 @@ func TestCancellationFencesUnregisteredChildAcrossCoordinatorRestart(t *testing.
 		t.Fatalf("cancelled child admitted: %+v, %v", ledger, err)
 	}
 }
+
+func TestProvenUnsentBudgetDispatchRequeueFencesStaleProof(t *testing.T) {
+	coordinator := newLedger(t, budget.Limits{MaxLLMCalls: 1, MaxConcurrentRuns: 1})
+	request := reservation("model:retry-same-id", 0, 0)
+	if _, err := coordinator.Reserve(t.Context(), "turn", request, true); err != nil {
+		t.Fatal(err)
+	}
+	first, err := coordinator.Dispatch(t.Context(), "turn", request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = coordinator.RequeueProvenUnsent(t.Context(), "turn", request.ID, 0); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("empty evidence accepted: %v", err)
+	}
+	if _, err = coordinator.RequeueProvenUnsent(t.Context(), "turn", request.ID, first.Revision-1); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("stale dispatch revision accepted: %v", err)
+	}
+	queued, err := coordinator.RequeueProvenUnsent(t.Context(), "turn", request.ID, first.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := queued.Reservations[request.ID]
+	if value.Status != budget.ReservationWaiting || value.Dispatched || value.Active ||
+		value.RequestHash != request.RequestHash || queued.View("").UnknownUsage || queued.View("").Reserved.LLMCalls != 0 {
+		t.Fatalf("proven unsent request cannot be retried: value=%+v view=%+v", value, queued.View(""))
+	}
+	// The next legitimate execution claims exactly the same logical request.
+	if _, err = coordinator.Reserve(t.Context(), "turn", request, true); err != nil {
+		t.Fatalf("re-admission with stable identity failed: %v", err)
+	}
+	newer, err := coordinator.Dispatch(t.Context(), "turn", request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = coordinator.RequeueProvenUnsent(t.Context(), "turn", request.ID, first.Revision); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("old worker revoked newer Dispatch: %v", err)
+	}
+	checked, err := coordinator.Store.LoadBudget(t.Context(), "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !checked.View("").UnknownUsage || !checked.Reservations[request.ID].Dispatched || checked.Revision != newer.Revision {
+		t.Fatalf("new worker's uncertain request was refunded: %+v", checked)
+	}
+	usage := budget.Usage{LLMCalls: 1}
+	if _, err = coordinator.Settle(t.Context(), "turn", request.ID, usage, []byte(`{"ok":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = coordinator.RequeueProvenUnsent(t.Context(), "turn", request.ID, newer.Revision+1); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("settled receipt was rewound: %v", err)
+	}
+}
+
+func TestProvenUnsentBudgetRequeueRefusesUnrelatedLedgerRevisionChange(t *testing.T) {
+	coordinator := newLedger(t, budget.Limits{MaxLLMCalls: 3})
+	request := reservation("model:side-effects", 0, 0)
+	if _, err := coordinator.Reserve(t.Context(), "turn", request, true); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := coordinator.Dispatch(t.Context(), "turn", request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = coordinator.Reserve(t.Context(), "turn", reservation("unrelated", 0, 0), true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = coordinator.RequeueProvenUnsent(t.Context(), "turn", request.ID, snapshot.Revision); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("concurrent ledger mutation was ignored: %v", err)
+	}
+	latest, err := coordinator.Store.LoadBudget(t.Context(), "turn")
+	if err != nil || !latest.Reservations[request.ID].Dispatched || !latest.View("").UnknownUsage {
+		t.Fatalf("conservative uncertain charge was removed: %+v, %v", latest, err)
+	}
+}
+
+func TestProvenUnsentRequeueNeverRefundsPhysicalToolDispatch(t *testing.T) {
+	coordinator := newLedger(t, budget.Limits{MaxToolCalls: 1})
+	request := budget.Reservation{ID: "tool:physical-effect", RunID: "root", RequestHash: "tool-input", Requested: budget.Usage{ToolCalls: 1}}
+	if _, err := coordinator.Reserve(t.Context(), "turn", request, true); err != nil {
+		t.Fatal(err)
+	}
+	dispatched, err := coordinator.Dispatch(t.Context(), "turn", request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = coordinator.RequeueProvenUnsent(t.Context(), "turn", request.ID, dispatched.Revision); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("model proof gate requeued a dispatched Tool: %v", err)
+	}
+	latest, err := coordinator.Store.LoadBudget(t.Context(), "turn")
+	if err != nil || !latest.View("").UnknownUsage || latest.View("").Reserved.ToolCalls != 1 {
+		t.Fatalf("physical Tool reservation was refunded: %+v err=%v", latest, err)
+	}
+}
