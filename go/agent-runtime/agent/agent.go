@@ -835,6 +835,14 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", err)
 			return failed, true, failErr
 		}
+		var denied modelPreDispatchDenied
+		if errors.As(err, &denied) && errors.Is(denied.cause, ErrInvalidRequest) {
+			// A broken, frozen request cannot become valid on retry: report
+			// the permanent Host protocol violation as a terminal Run error.
+			// Expired/replaced execution Claims remain recoverable instead.
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_dispatch_invalid", err)
+			return failed, true, failErr
+		}
 		if errors.Is(err, runtimebudget.ErrExhausted) {
 			failed, failErr := runner.fail(ctx, snapshot, state, sharedBudgetErrorCode(err), err)
 			return failed, true, failErr

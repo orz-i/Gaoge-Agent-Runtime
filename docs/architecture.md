@@ -118,7 +118,9 @@ attempt and lease deadline. Under Kernel CAS, a different Invocation ID/hash
 or a takeover necessarily advances the Run Revision. Stale, expired or
 superseded Claims fail closed without a Provider dispatch. A rejected
 pre-dispatch claim is **not** a Provider error: if the Run is still pending,
-it remains recoverable instead of terminalizing on an invalid lease. This
+it remains recoverable instead of terminalizing on an invalid lease. By
+contrast, a permanently invalid post-intent middleware request terminates
+the Run with `agent.model_dispatch_invalid`. This
 adds one Store read per physical Provider invocation; include it in
 long-session profiling. Kernel CAS continues to own receipt commits.
 

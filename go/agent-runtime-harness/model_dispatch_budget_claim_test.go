@@ -207,3 +207,58 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 		t.Fatalf("parent budget was not available after pre-intent error: %+v", view)
 	}
 }
+
+type corruptFrozenModelRequest struct{}
+
+func (corruptFrozenModelRequest) Name() string { return "test.invalid-frozen-model" }
+func (corruptFrozenModelRequest) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
+	request.Model = "unauthorized-model"
+	return next(ctx, request, emit)
+}
+
+func TestPermanentModelDispatchViolationTerminatesAndReleasesUnsentBudget(t *testing.T) {
+	store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2})
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &countedBudgetModel{}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: provider,
+		ModelMiddleware: []plugin.ModelMiddleware{shared, corruptFrozenModelRequest{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := runner.StartRun(t.Context(), agent.StartRequest{
+		ID: "hosted-run", Actor: kernel.ActorRef{TenantID: "audit", ActorID: "actor"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "invalid-dispatch"},
+		Goal:   "should never be dispatched", Model: "original-model",
+	})
+	if !errors.Is(err, agent.ErrInvalidRequest) || failed.Run.Status != kernel.RunStatusFailed ||
+		failed.Run.ErrorCode != "agent.model_dispatch_invalid" || provider.calls.Load() != 0 {
+		t.Fatalf("invalid model dispatch did not terminate safely: status=%s code=%q err=%v calls=%d",
+			failed.Run.Status, failed.Run.ErrorCode, err, provider.calls.Load())
+	}
+	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := ledger.Reservations["model:"+agentInvocationID(t, failed)]
+	if reservation.Dispatched || ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 {
+		t.Fatalf("permanently invalid no-send leaked shared-budget quota: %+v view=%+v", reservation, ledger.View(""))
+	}
+	_, err = runner.Resume(t.Context(), failed.Run.ID, failed.Run.Revision)
+	if !errors.Is(err, agent.ErrRunTerminal) || provider.calls.Load() != 0 {
+		t.Fatalf("permanent middleware mutation was reissued: err=%v calls=%d", err, provider.calls.Load())
+	}
+}
+
+func agentInvocationID(t *testing.T, snapshot kernel.Snapshot) string {
+	t.Helper()
+	view, err := agent.ViewState(snapshot)
+	if err != nil || len(view.ModelInvocations) != 1 {
+		t.Fatalf("invalid persistent Model Invocation: %v", err)
+	}
+	return view.ModelInvocations[0].ID
+}

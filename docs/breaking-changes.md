@@ -10,7 +10,7 @@
 
 **Persisted state:** Released Pending `ModelInvocation` records with `ExecutionAttempt > 0`, no active claim and no persisted `RetryAfter` are **invalid**. Earlier Beta Runs in that condition must be drained or explicitly reconciled before upgrading; no silent ReadyAt reconstruction, retry replay or state migration is provided. First-attempt, unclaimed pending invocations remain valid.
 
-**Execution safety:** The final `model.Client` boundary reloads the committed claim **after ModelMiddleware and concurrency waiting**, fencing stale Revision/attempt/lease combinations before network dispatch. This costs one extra Store read per physical Model delivery but adds no Kernel state or database schema. It reduces stale-worker duplicate dispatch; it does **not** prove physical exactly-once after upstream delivery.
+**Execution safety:** The final `model.Client` boundary reloads the committed claim **after ModelMiddleware and concurrency waiting**, fencing stale Revision/attempt/lease combinations before network dispatch. A stolen or expired Claim leaves a recoverable Pending Run; a permanently invalid post-intent Middleware request instead fails the Run with `agent.model_dispatch_invalid` rather than retrying indefinitely. This costs one extra Store read per physical Model delivery but adds no Kernel state or database schema. It reduces stale-worker duplicate dispatch; it does **not** prove physical exactly-once after upstream delivery.
 
 **Reference:** [ADR 0011 — ModelInvocation Physical Dispatch Claim and Retry Eligibility](adr/0011-model-invocation-lease-and-retry-governance.md).
 
