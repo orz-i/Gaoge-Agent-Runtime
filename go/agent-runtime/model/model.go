@@ -94,6 +94,9 @@ type ArtifactRef struct {
 // Response returns final content, local Tool calls, provider-hosted Tool facts, and durable artifact refs.
 type Response struct {
 	Content         string           `json:"content,omitempty"`
+	// Refusal is a provider-observed explicit refusal, not malformed JSON.
+	// Terminal strict-output paths must not report it as schema-compliant data.
+	Refusal         bool             `json:"refusal,omitempty"`
 	ToolCalls       []tools.Call     `json:"toolCalls,omitempty"`
 	HostedToolCalls []HostedToolCall `json:"hostedToolCalls,omitempty"`
 	Artifacts       []ArtifactRef    `json:"artifacts,omitempty"`
