@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -198,6 +199,14 @@ func decodeCapabilityToolInput(raw json.RawMessage, commands []CommandDescriptor
 	if !ok {
 		return capabilityInvocationToolInput{}, CommandDescriptor{}, tools.NewRecoverableCallError("capability.not_authorized", "the requested capability is not authorized for this Harness Turn", ErrNotFound)
 	}
+	// The catalog Tool schema is generic; the model middleware only narrows its
+	// declaration. Enforce the selected frozen command before host decoding so
+	// invalid nested types can be corrected without starting a child execution.
+	if err := tools.ValidateCall(tools.Definition{
+		Key: CapabilityInvocationToolKey, Name: "invoke_capability", InputSchema: descriptor.InputSchema,
+	}, tools.Call{ID: "capability-arguments", ToolKey: CapabilityInvocationToolKey, Arguments: input.Arguments}); err != nil {
+		return capabilityInvocationToolInput{}, CommandDescriptor{}, err
+	}
 	return input, descriptor, nil
 }
 
@@ -376,7 +385,9 @@ func containsCapabilityInvocationTool(definitions []tools.Definition) bool {
 
 func capabilityInvocationToolSchema(commands []CommandDescriptor) (json.RawMessage, error) {
 	variants := make([]any, 0, len(commands))
+	commandIDs := make([]string, 0, len(commands))
 	for _, descriptor := range commands {
+		commandIDs = append(commandIDs, descriptor.ID)
 		variants = append(variants, map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -391,5 +402,87 @@ func capabilityInvocationToolSchema(commands []CommandDescriptor) (json.RawMessa
 	if len(variants) == 0 {
 		return nil, ErrInvalidRequest
 	}
-	return json.Marshal(map[string]any{"oneOf": variants})
+	arguments, err := capabilityArgumentSchema(commands)
+	if err != nil {
+		return nil, err
+	}
+	// Expose ordinary object properties as well as the exact command union.
+	// Providers that infer nested argument types from properties must not see
+	// an empty object just because the constraints also include oneOf.
+	return json.Marshal(map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{capabilityCommandIDField, "goal"},
+		"properties": map[string]any{
+			capabilityCommandIDField: map[string]any{"type": "string", "enum": commandIDs},
+			"goal":                   map[string]any{"type": "string", "minLength": 1, "maxLength": 200000},
+			"arguments":              arguments,
+		},
+		"oneOf": variants,
+	})
+}
+
+func capabilityArgumentSchema(commands []CommandDescriptor) (map[string]any, error) {
+	properties := make(map[string]json.RawMessage)
+	for _, command := range commands {
+		raw := bytes.TrimSpace(command.InputSchema)
+		if bytes.Equal(raw, []byte("true")) || bytes.Equal(raw, []byte("false")) {
+			return map[string]any{"type": "object"}, nil
+		}
+		var document any
+		if err := json.Unmarshal(raw, &document); err != nil {
+			return nil, errors.Join(ErrInvalidRequest, err)
+		}
+		// Copying a property out of its resource can detach local references,
+		// dialects or anchors from their scope. Keep those complete schemas in
+		// oneOf and omit the optional flattened hint for this command catalog.
+		if capabilitySchemaHasScope(document) {
+			return map[string]any{"type": "object"}, nil
+		}
+		var schema struct {
+			Properties           map[string]json.RawMessage `json:"properties"`
+			AdditionalProperties json.RawMessage            `json:"additionalProperties"`
+			PatternProperties    map[string]json.RawMessage `json:"patternProperties"`
+		}
+		// An open command can accept a property with any type. Projecting another
+		// command's type onto that name would narrow its original contract.
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			return nil, errors.Join(ErrInvalidRequest, err)
+		}
+		if !bytes.Equal(bytes.TrimSpace(schema.AdditionalProperties), []byte("false")) || len(schema.PatternProperties) != 0 {
+			return map[string]any{"type": "object"}, nil
+		}
+		for name, property := range schema.Properties {
+			if previous, exists := properties[name]; exists && !bytes.Equal(previous, property) {
+				merged, err := json.Marshal(map[string]any{"anyOf": []json.RawMessage{previous, property}})
+				if err != nil {
+					return nil, err
+				}
+				property = merged
+			}
+			properties[name] = property
+		}
+	}
+	return map[string]any{"type": "object", "properties": properties}, nil
+}
+
+func capabilitySchemaHasScope(value any) bool {
+	switch value := value.(type) {
+	case map[string]any:
+		for key, child := range value {
+			switch key {
+			case "$id", "$schema", "$ref", "$defs", "definitions", "$anchor", "$dynamicRef", "$dynamicAnchor", "$recursiveRef", "$recursiveAnchor":
+				return true
+			}
+			if capabilitySchemaHasScope(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range value {
+			if capabilitySchemaHasScope(child) {
+				return true
+			}
+		}
+	}
+	return false
 }

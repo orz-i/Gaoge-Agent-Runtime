@@ -240,10 +240,10 @@ export class RuntimeClient {
           turnID: string,
           decision: "approve" | "reject",
           comment = "",
-          request?: RequestOptions,
+          request?: RequestOptions & { checkpointID?: string },
         ) => this.request<HarnessTurnSnapshotDTO>(
           `/harness/turns/${pathPart(turnID)}/approval`,
-          { method: "POST", body: JSON.stringify({ decision, comment }) },
+          { method: "POST", body: JSON.stringify({ decision, comment, checkpointID: request?.checkpointID }) },
           request,
         ),
         resolveInteraction: (

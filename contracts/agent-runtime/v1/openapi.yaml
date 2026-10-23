@@ -572,6 +572,9 @@ components:
       properties:
         decision: {type: string, enum: [approve, reject]}
         comment: {type: string}
+        checkpointID:
+          type: string
+          description: Optional displayed approval checkpoint. A different current checkpoint returns a conflict; omitted by legacy Turn-only clients.
     GrantHarnessCallAllowanceRequest:
       type: object
       additionalProperties: false

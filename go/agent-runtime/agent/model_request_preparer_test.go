@@ -93,3 +93,46 @@ func TestContextPreparerCannotChangeFrozenExecutionAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestClassifiedPreparationFailureIsDurableWithoutModelIntent(t *testing.T) {
+	for _, retryable := range []bool{false, true} {
+		t.Run(map[bool]string{false: "permanent", true: "retryable"}[retryable], func(t *testing.T) {
+			provider := &invocationRecordingModel{}
+			runtime := newModelInvocationRuntime(t, memory.NewStore())
+			cause := errors.New("input exceeds the model context window")
+			failure := cause
+			if retryable {
+				failure = model.NewRetryableError(failure)
+			}
+			failure = model.NewClassifiedError(failure, "context.input_budget_exceeded")
+			runner, err := agent.NewRunner(agent.Dependencies{
+				Runtime: runtime, Model: provider,
+				PrepareModelRequest: func(context.Context, model.Request) (model.Request, error) {
+					return model.Request{}, failure
+				},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := runner.StartRun(t.Context(), startRequest("prepare-failure", "prepare-request", "question"))
+			if !errors.Is(err, cause) || len(provider.callsCopy()) != 0 {
+				t.Fatalf("preparation error=%v physical calls=%d", err, len(provider.callsCopy()))
+			}
+			reloaded, err := runtime.Load(t.Context(), snapshot.Run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			state, err := agent.ViewState(reloaded)
+			if err != nil || len(state.ModelInvocations) != 0 || state.Budget.Usage.LLMCalls != 0 {
+				t.Fatalf("preparation spent a model attempt: state=%+v err=%v", state, err)
+			}
+			if retryable {
+				if reloaded.Run.Status != kernel.RunStatusRunning || reloaded.Run.ErrorCode != "" {
+					t.Fatalf("retryable preparation terminated: %+v", reloaded.Run)
+				}
+			} else if reloaded.Run.Status != kernel.RunStatusFailed || reloaded.Run.ErrorCode != "context.input_budget_exceeded" {
+				t.Fatalf("permanent preparation failure was not committed: %+v", reloaded.Run)
+			}
+		})
+	}
+}

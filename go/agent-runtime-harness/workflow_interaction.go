@@ -18,6 +18,15 @@ func (runner *Runner) projectsWorkflowWaits(invocation Invocation) bool {
 // The root remains running while a subworkflow waits. Harness projects the
 // pending descendant inputs without changing Workflow's execution ownership.
 func (runner *Runner) invocationRuntimeStatus(ctx context.Context, invocation Invocation, snapshot kernel.Snapshot) (TurnStatus, error) {
+	if snapshot.Run.Status == kernel.RunStatusRunning && invocation.ParentItemID == "" {
+		waiting, err := runner.hasOtherWaitingInteraction(ctx, Interaction{TurnID: invocation.TurnID})
+		if err != nil {
+			return "", err
+		}
+		if waiting {
+			return TurnWaitingInput, nil
+		}
+	}
 	if snapshot.Run.Status == kernel.RunStatusRunning && runner.projectsWorkflowWaits(invocation) {
 		runs, err := runner.workflowInteractionRuns(ctx, snapshot)
 		if err != nil {
