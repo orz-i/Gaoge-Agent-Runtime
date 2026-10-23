@@ -40,13 +40,14 @@ type Message struct {
 
 // Request is one provider-neutral model call.
 type Request struct {
-	RunID        string             `json:"runID"`
-	InvocationID string             `json:"invocationID,omitempty"`
-	Model        string             `json:"model,omitempty"`
-	ModelOptions json.RawMessage    `json:"modelOptions,omitempty"`
-	Messages     []Message          `json:"messages"`
-	Tools        []tools.Definition `json:"tools,omitempty"`
-	HostedTools  []HostedTool       `json:"hostedTools,omitempty"`
+	RunID          string             `json:"runID"`
+	InvocationID   string             `json:"invocationID,omitempty"`
+	Model          string             `json:"model,omitempty"`
+	ModelOptions   json.RawMessage    `json:"modelOptions,omitempty"`
+	OutputContract *OutputContract    `json:"outputContract,omitempty"`
+	Messages       []Message          `json:"messages"`
+	Tools          []tools.Definition `json:"tools,omitempty"`
+	HostedTools    []HostedTool       `json:"hostedTools,omitempty"`
 	// MaxOutputTokens is an enforceable provider-neutral output ceiling. A host
 	// enabling token admission must translate it to the selected provider.
 	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
@@ -100,6 +101,9 @@ type Response struct {
 	ResponseID      string           `json:"responseID,omitempty"`
 	Usage           *Usage           `json:"usage,omitempty"`
 	ProviderReplay  *ProviderReplay  `json:"providerReplay,omitempty"`
+	// Refused distinguishes a provider safety refusal from schema-invalid JSON.
+	// Refusals must not be repaired into an apparent structured success.
+	Refused bool `json:"refused,omitempty"`
 	// Continue requests another durable model step after a provider-owned
 	// server-tool pause. It is not a final answer or a local Tool dispatch.
 	Continue bool `json:"continue,omitempty"`
@@ -215,6 +219,7 @@ func CloneRequest(value Request) Request {
 		value.HostedToolCallLimit = &ceiling
 	}
 	value.ModelOptions = cloneJSON(value.ModelOptions)
+	value.OutputContract = CloneOutputContract(value.OutputContract)
 	value.Messages = CloneMessages(value.Messages)
 	definitions := value.Tools
 	value.Tools = make([]tools.Definition, len(definitions))

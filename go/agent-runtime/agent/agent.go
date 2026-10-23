@@ -55,6 +55,9 @@ func (runner *Runner) completeWithToolResult(
 	state runState,
 	result tools.ExecutionResult,
 ) (kernel.Snapshot, error) {
+	if err := validateStructuredDocument(state.OutputContract, result.Content); err != nil {
+		return runner.fail(ctx, snapshot, state, "agent.output_schema_invalid", err)
+	}
 	state.Budget.Usage.OutputBytes = len(result.Content)
 	if dimension := runtimebudget.Exceeded(state.Budget.Limits, state.Budget.Usage); dimension != "" {
 		return runner.fail(
@@ -255,6 +258,7 @@ type StartRequest struct {
 	Instructions     string
 	Model            string
 	ModelOptions     json.RawMessage
+	OutputContract   *model.OutputContract
 	ToolKeys         []string
 	RequiredToolKeys []string
 	// InitialToolKeys are already authorized local tools shown on the first
@@ -302,6 +306,7 @@ type runState struct {
 	Messages         []model.Message        `json:"messages"`
 	Model            string                 `json:"model,omitempty"`
 	ModelOptions     json.RawMessage        `json:"modelOptions,omitempty"`
+	OutputContract   *model.OutputContract  `json:"outputContract,omitempty"`
 	ToolKeys         []string               `json:"toolKeys"`
 	RequiredToolKeys []string               `json:"requiredToolKeys,omitempty"`
 	HostedToolGrants []HostedToolGrant      `json:"hostedToolGrants,omitempty"`
@@ -330,6 +335,7 @@ type View struct {
 	Messages         []model.Message
 	Model            string
 	ModelOptions     json.RawMessage
+	OutputContract   *model.OutputContract
 	ToolKeys         []string
 	RequiredToolKeys []string
 	Budget           runtimebudget.Snapshot
@@ -349,6 +355,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		Messages:         publicModelMessages(state.Messages),
 		Model:            state.Model,
 		ModelOptions:     cloneRawJSON(state.ModelOptions),
+		OutputContract:   model.CloneOutputContract(state.OutputContract),
 		ToolKeys:         append([]string(nil), state.ToolKeys...),
 		RequiredToolKeys: append([]string(nil), state.RequiredToolKeys...),
 		Budget:           state.Budget,
@@ -495,6 +502,9 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 }
 
 func (runner *Runner) startRun(ctx context.Context, request StartRequest, deferred bool) (kernel.Snapshot, error) {
+	if err := runner.validateOutputCapability(ctx, request.Model, request.OutputContract); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	local, hosted, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model, request.DeadlineAt)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -556,6 +566,7 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest, deferr
 		Messages:         []model.Message{{Role: model.RoleUser, Content: strings.TrimSpace(request.Goal)}},
 		Model:            strings.TrimSpace(request.Model),
 		ModelOptions:     cloneRawJSON(request.ModelOptions),
+		OutputContract:   model.CloneOutputContract(request.OutputContract),
 		ToolKeys:         toolKeys,
 		RequiredToolKeys: requiredToolKeys,
 		HostedToolGrants: grants,
@@ -875,6 +886,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.completion_repair_exhausted", ErrInvalidModelResponse)
 		return failed, true, failErr
 	}
+	if response.Refused && state.OutputContract != nil {
+		failed, failErr := runner.fail(ctx, snapshot, state, "agent.output_refused", ErrOutputRefused)
+		return failed, true, failErr
+	}
 	if response.Continue {
 		continued, continueErr := runner.continueModel(ctx, snapshot, state, response)
 		return continued, true, continueErr
@@ -886,6 +901,15 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 				return failed, true, failErr
 			}
 			corrected, correctionErr := runner.correctRequiredToolCompletion(ctx, snapshot, state, response, missing)
+			return corrected, correctionErr != nil, correctionErr
+		}
+		structuredCorrection, structuredErr := structuredOutputCorrection(state.OutputContract, response)
+		if structuredErr != nil {
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.output_refused", structuredErr)
+			return failed, true, failErr
+		}
+		if completionCorrectionRequired(structuredCorrection) {
+			corrected, correctionErr := runner.correctCompletion(ctx, snapshot, state, response, structuredCorrection)
 			return corrected, correctionErr != nil, correctionErr
 		}
 		correction, validationErr := runner.validateCompletion(ctx, snapshot.Run, response)
@@ -1261,14 +1285,17 @@ func (runner *Runner) generateModel(ctx context.Context, request model.Request) 
 		return nil
 	}
 	terminal := runner.generateProviderModel
-	if runner.prepareModelRequest != nil {
+	if runner.prepareModelRequest != nil || request.OutputContract != nil {
 		// Once a logical request has been sealed by ModelInvocation, no
 		// dispatch-time middleware may rewrite the conversation used by the
 		// provider. This also rejects a legacy Context middleware injecting a
 		// different checkpoint after the pre-intent projection was frozen.
 		frozen := model.CloneMessages(request.Messages)
+		frozenContract := model.CloneOutputContract(request.OutputContract)
+		frozenModel, frozenOptions := request.Model, cloneRawJSON(request.ModelOptions)
 		terminal = func(callCtx context.Context, candidate model.Request, sink model.StreamSink) (model.Response, error) {
-			if !sameFrozenModelMessages(frozen, candidate.Messages) {
+			if !sameFrozenModelMessages(frozen, candidate.Messages) ||
+				(request.OutputContract != nil && (candidate.Model != frozenModel || !sameFrozenOutputContract(frozenContract, candidate.OutputContract) || !sameFrozenModelOptions(frozenOptions, candidate.ModelOptions))) {
 				return model.Response{}, ErrInvalidRequest
 			}
 			return runner.generateProviderModel(callCtx, candidate, sink)
@@ -1940,7 +1967,7 @@ func (runner *Runner) complete(
 	state runState,
 	response model.Response,
 ) (kernel.Snapshot, error) {
-	result, err := terminalResult(response)
+	result, err := terminalResult(response, state.OutputContract)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -1967,7 +1994,16 @@ func (runner *Runner) complete(
 	return completed, err
 }
 
-func terminalResult(response model.Response) (*kernel.Result, error) {
+func terminalResult(response model.Response, contract *model.OutputContract) (*kernel.Result, error) {
+	if contract != nil {
+		if err := validateStructuredDocument(contract, []byte(response.Content)); err != nil {
+			return nil, err
+		}
+		if response.Refused || len(response.HostedToolCalls) > 0 || len(response.Artifacts) > 0 || len(response.Citations) > 0 {
+			return nil, ErrOutputSchema
+		}
+		return &kernel.Result{ContentType: "application/json", Content: json.RawMessage(response.Content)}, nil
+	}
 	if len(response.HostedToolCalls) == 0 && len(response.Artifacts) == 0 && len(response.Citations) == 0 {
 		encodedContent, err := json.Marshal(response.Content)
 		if err != nil {
@@ -2194,6 +2230,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) ||
 		!validHostedGrantSnapshot(state.HostedToolGrants, state.ToolKeys) ||
 		!validDiscoveryState(state) ||
+		model.ValidateOutputContract(state.OutputContract) != nil ||
 		!validToolWaitState(state) ||
 		!validDeferredChildren(state) ||
 		!validModelInvocations(state.ModelInvocations) {

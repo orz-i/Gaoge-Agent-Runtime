@@ -27,14 +27,22 @@ type Config struct {
 	Endpoint               string
 	HTTPClient             *http.Client
 	DefaultMaxOutputTokens int64
+	// StructuredOutputModels opts explicitly verified private/gateway model IDs
+	// into native strict JSON Schema output; unknown IDs otherwise fail closed.
+	StructuredOutputModels []string
 }
 type Client struct {
-	http         *providerhttp.Client
-	defaultModel string
-	maxTokens    int64
+	http                   *providerhttp.Client
+	defaultModel           string
+	maxTokens              int64
+	structuredOutputModels map[string]bool
 }
 
 var ErrUnsupported = errors.New("unsupported Anthropic model request or response")
+
+// ErrIncomplete distinguishes token-truncated output from a user refusal or
+// a completed response that violates a frozen JSON output contract.
+var ErrIncomplete = errors.New("anthropic response ended at max_tokens")
 
 func New(config Config) (*Client, error) {
 	if config.DefaultMaxOutputTokens < 0 {
@@ -50,7 +58,14 @@ func New(config Config) (*Client, error) {
 	if tokens == 0 {
 		tokens = defaultMaxTokens
 	}
-	return &Client{http: h, defaultModel: strings.TrimSpace(config.DefaultModel), maxTokens: tokens}, nil
+	allowed := make(map[string]bool, len(config.StructuredOutputModels))
+	for _, name := range config.StructuredOutputModels {
+		if name == "" || strings.TrimSpace(name) != name {
+			return nil, providerhttp.ErrConfig
+		}
+		allowed[name] = true
+	}
+	return &Client{http: h, defaultModel: strings.TrimSpace(config.DefaultModel), maxTokens: tokens, structuredOutputModels: allowed}, nil
 }
 func (*Client) ProviderName() string { return "anthropic" }
 
@@ -107,6 +122,15 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	}
 	if name == "" {
 		return prepared{}, ErrUnsupported
+	}
+	if request.OutputContract != nil {
+		if err := model.ValidateOutputContract(request.OutputContract); err != nil {
+			return prepared{}, errors.Join(ErrUnsupported, err)
+		}
+		caps, err := c.Capabilities(context.Background(), name)
+		if err != nil || !caps.StructuredJSONSchema {
+			return prepared{}, errors.Join(ErrUnsupported, model.ErrCapabilityUnavailable)
+		}
 	}
 	tokens := request.MaxOutputTokens
 	if tokens == 0 {
@@ -209,6 +233,11 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if len(systems) > 0 {
 		payload["system"] = strings.Join(systems, "\n\n")
 	}
+	if request.OutputContract != nil {
+		payload["output_config"] = map[string]any{"format": map[string]any{
+			"type": "json_schema", "schema": request.OutputContract.Schema,
+		}}
+	}
 	if len(definitions) > 0 {
 		payload["tools"] = definitions
 		if request.RequireToolCall {
@@ -227,6 +256,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 }
 
 func decodeResponse(body messageBody, names map[string]string) (model.Response, error) {
+	if body.StopReason == "max_tokens" {
+		return model.Response{}, errors.Join(ErrUnsupported, ErrIncomplete)
+	}
 	switch body.StopReason {
 	case "end_turn", "tool_use", "stop_sequence", "refusal":
 	default:
@@ -235,7 +267,7 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 	if body.ID == "" {
 		return model.Response{}, ErrUnsupported
 	}
-	result := model.Response{ResponseID: body.ID}
+	result := model.Response{ResponseID: body.ID, Refused: body.StopReason == "refusal"}
 	if body.Usage != nil && body.Usage.Input != nil && body.Usage.Output != nil {
 		input, output := tokenCount(body.Usage.Input), tokenCount(body.Usage.Output)
 		read, write := tokenCount(body.Usage.CacheRead), tokenCount(body.Usage.CacheWrite)

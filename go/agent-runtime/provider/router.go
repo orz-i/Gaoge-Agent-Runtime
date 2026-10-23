@@ -106,6 +106,20 @@ func (r *Router) GenerateStream(ctx context.Context, request model.Request, emit
 	return client.Generate(ctx, routed)
 }
 
+// Capabilities resolves the exact routed model before an opt-in strict output
+// is persisted. A provider without capability metadata must fail closed.
+func (r *Router) Capabilities(ctx context.Context, modelID string) (model.Capabilities, error) {
+	client, routed, _, err := r.route(model.Request{Model: modelID})
+	if err != nil {
+		return model.Capabilities{}, err
+	}
+	capable, ok := client.(model.CapabilityProvider)
+	if !ok {
+		return model.Capabilities{}, model.ErrCapabilityUnavailable
+	}
+	return capable.Capabilities(ctx, routed.Model)
+}
+
 // ProviderNameForRequest records the chosen provider with durable Agent
 // invocations, rather than an ambiguous "router" identity.
 func (r *Router) ProviderNameForRequest(request model.Request) string {
@@ -116,6 +130,7 @@ func (r *Router) ProviderNameForRequest(request model.Request) string {
 	return name
 }
 
+var _ model.CapabilityProvider = (*Router)(nil)
 var _ model.Client = (*Router)(nil)
 var _ model.StreamingClient = (*Router)(nil)
 var _ model.RequestProviderNamer = (*Router)(nil)

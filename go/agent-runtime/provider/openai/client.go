@@ -21,10 +21,14 @@ type Config struct {
 	DefaultModel string
 	Endpoint     string
 	HTTPClient   *http.Client
+	// StructuredOutputModels opts explicitly named models/gateways into strict
+	// JSON Schema output. Unknown models otherwise fail closed.
+	StructuredOutputModels []string
 }
 type Client struct {
-	http         *providerhttp.Client
-	defaultModel string
+	http                   *providerhttp.Client
+	defaultModel           string
+	structuredOutputModels map[string]bool
 }
 
 func New(config Config) (*Client, error) {
@@ -34,7 +38,14 @@ func New(config Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{http: httpClient, defaultModel: strings.TrimSpace(config.DefaultModel)}, nil
+	allowed := make(map[string]bool, len(config.StructuredOutputModels))
+	for _, name := range config.StructuredOutputModels {
+		if name == "" || strings.TrimSpace(name) != name {
+			return nil, providerhttp.ErrConfig
+		}
+		allowed[name] = true
+	}
+	return &Client{http: httpClient, defaultModel: strings.TrimSpace(config.DefaultModel), structuredOutputModels: allowed}, nil
 }
 func (*Client) ProviderName() string { return "openai" }
 
@@ -93,6 +104,15 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	}
 	if name == "" {
 		return prepared{}, ErrUnsupported
+	}
+	if request.OutputContract != nil {
+		if err := model.ValidateOutputContract(request.OutputContract); err != nil {
+			return prepared{}, errors.Join(ErrUnsupported, err)
+		}
+		caps, err := c.Capabilities(context.Background(), name)
+		if err != nil || !caps.StructuredJSONSchema {
+			return prepared{}, errors.Join(ErrUnsupported, model.ErrCapabilityUnavailable)
+		}
 	}
 	byName := make(map[string]string, len(request.Tools))
 	byKey := make(map[string]string, len(request.Tools))
@@ -158,6 +178,12 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	}
 	payload := map[string]any{
 		"model": name, "input": input, "store": false, "stream": streaming,
+	}
+	if request.OutputContract != nil {
+		payload["text"] = map[string]any{"format": map[string]any{
+			"type": "json_schema", "name": request.OutputContract.Name,
+			"schema": request.OutputContract.Schema, "strict": true,
+		}}
 	}
 	if len(definitions) != 0 {
 		// Tool continuation needs encrypted reasoning in stateless mode.
@@ -235,6 +261,7 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 		}
 	}
 	result.Content = output.String()
+	result.Refused = sawRefusal
 	if sawRefusal && len(result.ToolCalls) != 0 {
 		return model.Response{}, ErrUnsupported
 	}

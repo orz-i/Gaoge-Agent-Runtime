@@ -10,6 +10,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -117,7 +118,8 @@ func (runner *Runner) resumeDirectAgentStart(
 		ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turn.ID), Goal: request.Goal,
 		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-		ToolKeys: append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
+		OutputContract: model.CloneOutputContract(config.OutputContract),
+		ToolKeys:       append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
 		InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
 		Limits:          config.Limits,
 		CallAllowance:   request.CallAllowance,
@@ -684,6 +686,7 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
 		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
 		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+		OutputContract:   model.CloneOutputContract(config.OutputContract),
 		ToolKeys:         append([]string(nil), config.ToolKeys...),
 		RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
 		InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
