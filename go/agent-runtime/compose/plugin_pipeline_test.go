@@ -36,8 +36,12 @@ func TestAgentPluginPipelinePreservesExplicitRunAndModelOrder(t *testing.T) {
 		RunMiddleware: []plugin.RunMiddleware{
 			pipelineRunMiddleware{name: "run", order: &order},
 		},
+		PrepareModelRequest: func(_ context.Context, request runtimemodel.Request) (runtimemodel.Request, error) {
+			request.Messages[0].Content = "augmented goal"
+			return request, nil
+		},
 		ModelMiddleware: []plugin.ModelMiddleware{
-			pipelineModelMiddleware{name: "model", order: &order, replacement: "augmented goal"},
+			pipelineModelMiddleware{name: "model", order: &order},
 		},
 	})
 	if err != nil {
@@ -191,9 +195,8 @@ func (middleware pipelineRunMiddleware) Run(
 }
 
 type pipelineModelMiddleware struct {
-	name        string
-	order       *[]string
-	replacement string
+	name  string
+	order *[]string
 }
 
 func (middleware pipelineModelMiddleware) Name() string { return middleware.name }
@@ -205,7 +208,6 @@ func (middleware pipelineModelMiddleware) Model(
 	next plugin.ModelNext,
 ) (runtimemodel.Response, error) {
 	*middleware.order = append(*middleware.order, middleware.name+":before")
-	request.Messages[0].Content = middleware.replacement
 	response, err := next(ctx, request, emit)
 	*middleware.order = append(*middleware.order, middleware.name+":after")
 	return response, err

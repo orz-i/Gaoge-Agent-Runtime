@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -55,7 +54,6 @@ func TestManagedContextCompactsLongSessionAndPersistsExactArtifacts(t *testing.T
 		}
 		direct, err := agent.NewRunner(agent.Dependencies{
 			Runtime: rt, Model: provider, Catalog: reg, Executor: reg, PrepareModelRequest: prepare,
-			ModelMiddleware: []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
 		})
 		if err != nil {
 			t.Fatal(err)

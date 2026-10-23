@@ -1,5 +1,10 @@
 # Gaoge Agent Runtime
 
+> **Next pre-stable Beta (unreleased):** Model dispatch and pre-intent request preparation
+> have an explicitly breaking API/persistence contract. See
+> [Breaking Changes](docs/breaking-changes.md) and [ADR 0010](docs/adr/0010-prestable-model-dispatch-contract.md)
+> before resuming in-flight Runs from earlier prereleases.
+
 Gaoge Agent Runtime is a framework-neutral runtime SDK for durable, tool-using
 agents. It separates the deterministic run state machine from optional agent,
 harness, HTTP, protocol, and persistence capabilities.

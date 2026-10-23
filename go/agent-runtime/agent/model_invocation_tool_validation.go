@@ -18,8 +18,12 @@ import (
 // the old tool grants remain available. This guard neither rebuilds the
 // invocation nor changes its model, ToolKeys, or retry identity.
 func (runner *Runner) validatePendingModelToolDeclarations(
-	ctx context.Context, snapshot kernel.Snapshot, state runState, request model.Request,
+	ctx context.Context, snapshot kernel.Snapshot, state runState, invocation ModelInvocation,
 ) error {
+	request := invocation.Request
+	if !validCatalogFingerprints(request.Tools, invocation.CatalogFingerprints) {
+		return ErrToolDiscoveryDenied
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -48,20 +52,30 @@ func (runner *Runner) validatePendingModelToolDeclarations(
 		localByKey[definition.Key] = definition
 	}
 	seen := make(map[string]struct{}, len(request.Tools))
-	for _, original := range request.Tools {
+	for index, original := range request.Tools {
 		if _, duplicate := seen[original.Key]; duplicate {
 			return ErrToolDiscoveryDenied
 		}
 		seen[original.Key] = struct{}{}
-		if original.Key == ToolDiscoveryKey {
-			if state.Discovery == nil || !sameFrozenToolDefinition(discoveryToolDefinition, original) {
-				return ErrToolDiscoveryDenied
-			}
-			continue
+		if tools.ValidateDefinition(original) != nil {
+			return ErrToolDiscoveryDenied
 		}
 		current, found := localByKey[original.Key]
-		if !found || !sameFrozenToolDefinition(current, original) {
+		if original.Key == ToolDiscoveryKey {
+			if state.Discovery == nil {
+				return ErrToolDiscoveryDenied
+			}
+			current, found = discoveryToolDefinition, true
+		}
+		if !found || original.Name != current.Name || original.Terminal != current.Terminal {
 			return ErrToolDiscoveryDenied
+		}
+		fingerprint, hashErr := definitionFingerprint(current)
+		if hashErr != nil || fingerprint != invocation.CatalogFingerprints[index] {
+			return ErrToolDiscoveryDenied
+		}
+		if original.Key == ToolDiscoveryKey {
+			continue
 		}
 		if err = validateLoadedDiscoveryExecution(state.Discovery, original.Key, current); err != nil {
 			return ErrToolDiscoveryDenied
@@ -84,12 +98,6 @@ func (runner *Runner) validatePendingModelToolDeclarations(
 		}
 	}
 	return nil
-}
-
-func sameFrozenToolDefinition(left, right tools.Definition) bool {
-	leftHash, leftErr := definitionFingerprint(left)
-	rightHash, rightErr := definitionFingerprint(right)
-	return leftErr == nil && rightErr == nil && leftHash == rightHash
 }
 
 // JSON serialization canonicalizes insignificant RawMessage whitespace.

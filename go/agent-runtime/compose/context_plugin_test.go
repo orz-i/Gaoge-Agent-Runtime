@@ -7,7 +7,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 const (
@@ -15,17 +14,17 @@ const (
 	testMemoryMessage  = "semantic memory: prefer concise answers"
 )
 
-func TestContextAndSemanticMemoryMiddlewareRemainNonDurableAndFeatureNeutral(t *testing.T) {
+func TestContextAndSemanticMemoryAreFrozenInModelIntent(t *testing.T) {
 	t.Parallel()
 	runtime := newMinimalKernel(t)
 	provider := &contextAwareModel{t: t}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime,
 		Model:   provider,
-		ModelMiddleware: []plugin.ModelMiddleware{
-			promptAugmentationMiddleware{name: "context", content: testContextMessage},
-			promptAugmentationMiddleware{name: "semantic-memory", content: testMemoryMessage},
-		},
+		PrepareModelRequest: agent.ChainModelRequestPreparers(
+			prependModelInstruction(testContextMessage),
+			prependModelInstruction(testMemoryMessage),
+		),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -49,23 +48,13 @@ func TestContextAndSemanticMemoryMiddlewareRemainNonDurableAndFeatureNeutral(t *
 	}
 }
 
-type promptAugmentationMiddleware struct {
-	name    string
-	content string
-}
-
-func (middleware promptAugmentationMiddleware) Name() string { return middleware.name }
-
-func (middleware promptAugmentationMiddleware) Model(
-	ctx context.Context,
-	request runtimemodel.Request,
-	emit runtimemodel.StreamSink,
-	next plugin.ModelNext,
-) (runtimemodel.Response, error) {
-	request.Messages = append([]runtimemodel.Message{{
-		Role: runtimemodel.RoleSystem, Content: middleware.content,
-	}}, request.Messages...)
-	return next(ctx, request, emit)
+// Pre-intent inputs become part of the durable ModelInvocation request rather
+// than a dispatch-only prompt mutation invisible to recovery.
+func prependModelInstruction(content string) agent.ModelRequestPreparer {
+	return func(_ context.Context, request runtimemodel.Request) (runtimemodel.Request, error) {
+		request.Messages = append([]runtimemodel.Message{{Role: runtimemodel.RoleSystem, Content: content}}, request.Messages...)
+		return request, nil
+	}
 }
 
 type contextAwareModel struct{ t *testing.T }

@@ -57,7 +57,6 @@ func TestSessionFacadeRestartsAcrossTurnsWithFrozenContextProjection(t *testing.
 		direct, err := agent.NewRunner(agent.Dependencies{
 			Runtime: runtime, Model: provider, RunMiddleware: []plugin.RunMiddleware{rehydrate},
 			PrepareModelRequest: harness.MaterializeContextWindowRequest,
-			ModelMiddleware:     []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -200,8 +199,21 @@ func assertPersistedModelHash(t *testing.T, runtime *kernel.Runtime, snapshot ha
 	if err != nil || len(view.ModelInvocations) != 1 {
 		t.Fatalf("durable receipt missing: %+v err=%v", view, err)
 	}
+	sent = model.CloneRequest(sent)
 	sent.InvocationID = ""
-	encoded, err := json.Marshal(sent)
+	var catalogFingerprints []string
+	for _, definition := range sent.Tools {
+		raw, marshalErr := json.Marshal(definition)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		digest := sha256.Sum256(raw)
+		catalogFingerprints = append(catalogFingerprints, hex.EncodeToString(digest[:]))
+	}
+	encoded, err := json.Marshal(struct {
+		Request             model.Request `json:"request"`
+		CatalogFingerprints []string      `json:"catalogFingerprints"`
+	}{Request: sent, CatalogFingerprints: catalogFingerprints})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,7 +9,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func TestHarnessAutomaticAllowanceDoesNotRewriteContextCheckpoint(t *testing.T) {
@@ -20,9 +19,9 @@ func TestHarnessAutomaticAllowanceDoesNotRewriteContextCheckpoint(t *testing.T) 
 	correction := &autoCorrectionPolicy{reject: 1}
 	direct, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: directModel{},
-		Limits:             agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 6},
-		ModelMiddleware:    []plugin.ModelMiddleware{harness.NewContextWindowMiddleware()},
-		CompletionPolicies: []agent.CompletionPolicy{correction},
+		Limits:              agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 6},
+		PrepareModelRequest: harness.MaterializeContextWindowRequest,
+		CompletionPolicies:  []agent.CompletionPolicy{correction},
 	})
 	if err != nil {
 		t.Fatal(err)
