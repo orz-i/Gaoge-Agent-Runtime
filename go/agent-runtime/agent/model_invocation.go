@@ -216,7 +216,10 @@ func validModelInvocations(values []ModelInvocation) bool {
 			if err != nil || hash != invocation.RequestHash {
 				return false
 			}
-			if invocation.ExecutionLeaseUntil != nil && invocation.ExecutionAttempt == 0 {
+			if (invocation.ExecutionLeaseUntil != nil && invocation.ExecutionAttempt == 0) ||
+				(invocation.ExecutionAttempt > 0 && invocation.ExecutionLeaseUntil == nil && invocation.RetryAfter == nil) {
+				// A released attempt must always carry its durable retry due
+				// time. The old direct-Resume immediate-retry state is invalid.
 				return false
 			}
 		case ModelInvocationCompleted:
@@ -602,10 +605,17 @@ func (runner *Runner) executeModelInvocation(
 	})
 	response, err := runner.generateModelWithPolicyGuarded(ctx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
 		func(dispatchCtx context.Context) error {
-			if err := runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID); err != nil {
+			// Resolve and revalidate Catalog authority first: a slow external
+			// Hosted Tool resolver can also outlive the claim lease. The
+			// committed Revision/lease and Store epoch checks MUST be last,
+			// after all such waits and immediately before Provider dispatch.
+			if err := runner.validatePendingModelToolDeclarations(dispatchCtx, snapshot, state, invocation); err != nil {
 				return err
 			}
-			return runner.validatePendingModelToolDeclarations(dispatchCtx, snapshot, state, invocation)
+			if err := runner.validateModelInvocationClaim(dispatchCtx, snapshot, invocation); err != nil {
+				return err
+			}
+			return runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID)
 		},
 	)
 	late := errors.Is(err, ErrModelLateResult)
@@ -614,6 +624,13 @@ func (runner *Runner) executeModelInvocation(
 		err = model.NewResponseRejectedError(ErrInvalidModelResponse)
 	}
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
+	var denied modelPreDispatchDenied
+	if errors.As(err, &denied) {
+		// Nothing reached the Provider. Keep the committed pending Claim
+		// recoverable without consuming a retry or forging a Model receipt.
+		// Retain any downstream budget reconciliation errors as well.
+		return snapshot, state, err
+	}
 	if err != nil && !late && !knownRejection {
 		endedAt := runner.clock.Now().UTC()
 		phase := observability.PhaseFailed
@@ -709,6 +726,31 @@ func (runner *Runner) executeModelInvocation(
 	return next, state, nil
 }
 
+// validateModelInvocationClaim checks the current committed Run Revision
+// AFTER all ModelMiddleware and semaphore waits, at the physical Provider
+// boundary. Claim identity, attempt and hash are already sealed by the
+// previous successful Kernel Apply, so any valid claimant/takeover or other
+// change necessarily increments Revision. Do not unmarshal the full Agent
+// state a second time here: that would amplify long-session read costs.
+// The local Claim lease is checked independently, including in unfenced Runs.
+func (runner *Runner) validateModelInvocationClaim(
+	ctx context.Context, snapshot kernel.Snapshot, claimed ModelInvocation,
+) error {
+	if claimed.Status != ModelInvocationPending || claimed.ExecutionAttempt == 0 ||
+		claimed.ExecutionLeaseUntil == nil ||
+		!runner.clock.Now().UTC().Before(claimed.ExecutionLeaseUntil.UTC()) {
+		return ErrModelInvocationBusy
+	}
+	current, err := runner.runtime.Load(ctx, snapshot.Run.ID)
+	if err != nil {
+		return err
+	}
+	if current.Run.Status != kernel.RunStatusRunning || current.Run.Revision != snapshot.Run.Revision {
+		return kernel.ErrConflict
+	}
+	return nil
+}
+
 func (runner *Runner) claimModelInvocationExecution(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
@@ -762,12 +804,9 @@ func (runner *Runner) releaseModelInvocationExecution(
 	invocation.ExecutionLeaseUntil = nil
 	delay := retryDelay(runner.execution.Model, int(invocation.ExecutionAttempt), invocation.ID)
 	wakeupAt := runner.clock.Now().UTC().Add(delay)
-	if runner.runExecution != nil {
-		// Only native opted-in execution promises a shared ReadyAt
-		// eligibility gate. Legacy explicit Resume retains its previous
-		// immediate-retry semantics until a separate compatibility cut.
-		invocation.RetryAfter = &wakeupAt
-	}
+	// One Feature-owned retry eligibility applies to every Agent Runner.
+	// No legacy immediate-Resume compatibility path remains.
+	invocation.RetryAfter = &wakeupAt
 	if !replaceLastModelInvocation(&state, invocation) {
 		return snapshot, ErrInvalidRequest
 	}

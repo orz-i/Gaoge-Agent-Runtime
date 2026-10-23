@@ -49,8 +49,9 @@ func TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry(t *testing.
 				cause = model.NewRetryableError(cause)
 			}
 			provider := &classifiedFailureModel{cause: cause}
+			clock := &modelRetryTestClock{now: time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)}
 			runner, err := NewRunner(Dependencies{
-				Runtime: runtime, Model: provider,
+				Runtime: runtime, Model: provider, Clock: clock,
 				Execution: ExecutionPolicy{Model: CallPolicy{
 					Timeout: time.Second, MaxAttempts: 2,
 					InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, MaxConcurrency: 1,
@@ -71,6 +72,7 @@ func TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry(t *testing.
 				if snapshot.Run.Status != kernel.RunStatusRunning || provider.calls != 1 {
 					t.Fatalf("retryable invocation should remain durable after attempt 1: %#v calls=%d", snapshot.Run, provider.calls)
 				}
+				clock.Advance(time.Second)
 				snapshot, err = runner.Resume(t.Context(), snapshot.Run.ID, snapshot.Run.Revision)
 			}
 			if snapshot.Run.Status != kernel.RunStatusFailed || snapshot.Run.ErrorCode != tc.want ||
