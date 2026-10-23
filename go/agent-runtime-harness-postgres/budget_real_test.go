@@ -152,3 +152,81 @@ func testRealDescendantLifetimeAdmission(t *testing.T, first, second budget.Ledg
 		t.Fatalf("recovered=%+v err=%v", ledger.View(""), err)
 	}
 }
+
+// Two independent PostgreSQL connections must agree on the exact ledger
+// Revision that permits revoking a proven-unsent Model dispatch. A previously
+// revoked worker must never refund another worker's newer physical request.
+func TestRealPostgresProvenUnsentModelDispatchRequeueAcrossWorkers(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	db, isolatedDSN := openIsolatedHarnessPostgres(t, dsn)
+	if err := harnesspostgres.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	first, err := harnesspostgres.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDB, err := gorm.Open(postgres.Open(isolatedDSN), realHarnessPostgresTestConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := secondDB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	second, err := harnesspostgres.New(secondDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const scope = "turn-unsent-requeue"
+	const runID = "agent-unsent-requeue"
+	const invocationID = "model:invocation-unsent-requeue"
+	a := budget.Coordinator{Store: first}
+	b := budget.Coordinator{Store: second}
+	if _, err = a.Ensure(t.Context(), scope, budget.Limits{MaxLLMCalls: 1, MaxConcurrentRuns: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = a.RegisterRun(t.Context(), scope, runID, budget.RunBudget{}); err != nil {
+		t.Fatal(err)
+	}
+	request := budget.Reservation{ID: invocationID, RunID: runID, RequestHash: "frozen-request-hash", Requested: budget.Usage{LLMCalls: 1}}
+	if _, err = a.Reserve(t.Context(), scope, request, true); err != nil {
+		t.Fatal(err)
+	}
+	firstDispatch, err := a.Dispatch(t.Context(), scope, invocationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := second.LoadBudget(t.Context(), scope)
+	if err != nil || !observed.View("").UnknownUsage {
+		t.Fatalf("worker B cannot see held dispatch: ledger=%+v err=%v", observed, err)
+	}
+
+	reverted, err := b.RequeueProvenUnsent(t.Context(), scope, invocationID, firstDispatch.Revision)
+	if err != nil || reverted.View("").UnknownUsage || reverted.View("").Reserved.LLMCalls != 0 {
+		t.Fatalf("worker B could not requeue no-send proof: ledger=%+v err=%v", reverted, err)
+	}
+	if _, err = a.Reserve(t.Context(), scope, request, true); err != nil {
+		t.Fatalf("new claimant cannot reserve logical request: %v", err)
+	}
+	newer, err := a.Dispatch(t.Context(), scope, invocationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.RequeueProvenUnsent(t.Context(), scope, invocationID, firstDispatch.Revision); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("old worker erased newer dispatch: %v", err)
+	}
+	latest, err := second.LoadBudget(t.Context(), scope)
+	if err != nil || latest.Revision != newer.Revision || !latest.View("").UnknownUsage || !latest.Reservations[invocationID].Dispatched {
+		t.Fatalf("newer physical request lost its committed marker: ledger=%+v err=%v", latest, err)
+	}
+	settled, err := b.Settle(t.Context(), scope, invocationID, budget.Usage{LLMCalls: 1}, []byte(`{"content":"ok"}`))
+	if err != nil || settled.View("").Usage.LLMCalls != 1 || settled.View("").Reserved.LLMCalls != 0 || settled.View("").UnknownUsage {
+		t.Fatalf("recovered invocation not charged exactly once: ledger=%+v err=%v", settled, err)
+	}
+}
