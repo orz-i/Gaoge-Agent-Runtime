@@ -35,6 +35,21 @@ The repository's `docker-compose.test.yml` is test infrastructure only. It
 starts PostgreSQL and Redis for real-engine verification and is not a production
 deployment manifest.
 
+## MCP and A2A outbound endpoints
+
+Configure the final protocol URLs directly. MCP and A2A clients reject every
+HTTP redirect, including same-origin trailing-slash or HTTP-to-HTTPS redirects.
+Endpoint-scoped authentication stays bound to the validated endpoint; no
+redirect destination is contacted. A host `CheckRedirect` rejection is retained,
+but a host allow decision cannot override the adapter's refusal. The host's
+HTTP client is copied rather than modified.
+
+Hosts still own endpoint authorization, DNS/IP validation, TLS, proxies and
+network egress. Resolve any endpoint change through that policy before creating
+new work; do not silently replace a frozen A2A binding or replay uncertain Tool
+effects against a different target. See the
+[protocol redirect upgrade note](releases/unreleased-protocol-redirect-safety.md).
+
 ## Containerized hosts
 
 Containerized applications should build the **host executable** in the host

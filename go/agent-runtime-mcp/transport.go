@@ -53,7 +53,8 @@ type Transport struct {
 }
 
 // NewTransport refuses implicit network defaults so the host must supply its
-// security/tracing-aware HTTP stack and endpoint policy.
+// security/tracing-aware HTTP stack and endpoint policy. Protocol clients copy
+// this HTTP client and reject all redirects while preserving host rejections.
 func NewTransport(dependencies TransportDependencies) (*Transport, error) {
 	if dependencies.HTTPClient == nil || dependencies.EndpointValidator == nil {
 		return nil, ErrInvalidTransport
