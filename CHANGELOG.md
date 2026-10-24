@@ -5,6 +5,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Add an interactive real-model Agent baseline with hidden key input, explicit endpoint/model budgets, native-schema preflight, repeated fixed evidence/recovery tasks, failure-preserving reports and compatible-report comparison. Keep offline protocol tests separate from real-model observations; Python 3.9+ is required for the new launcher tests in `make check`. See the [baseline note](docs/releases/unreleased-agent-model-baseline.md).
+
 - Add explicit `Runner.ResumeTurn` and `SessionClient.Resume` for an existing direct-Agent Turn, restoring persisted Context while retaining Agent revision, execution-claim, retry, approval, budget and uncertain-Tool guards. Allow transcript-free Session read/recovery handles. See the [single-Agent task recovery note](docs/releases/unreleased-agent-task-recovery.md).
 - Make the offline quickstart execute an Agent and Tool, and add a task-oriented Context/recovery example with an output oracle plus real PostgreSQL process-recovery coverage. Pin the standalone integration test toolchain to patched Go 1.27.3. Keep deterministic execution evidence separate from optional live-model quality checks.
 

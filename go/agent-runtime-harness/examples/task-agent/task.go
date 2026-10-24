@@ -15,10 +15,12 @@ import (
 )
 
 const (
-	lookupKey  = "task.lookup_release"
-	draftKey   = "task.save_draft"
-	hostTurnID = "release-R-17"
-	taskPrompt = "Find release R-17's deployment code and deployment window in the release dossier. Recover exact evidence from its Context artifact, save one local draft, and return JSON with release, deploymentCode, window, artifactID and draftID."
+	lookupKey         = "task.lookup_release"
+	draftKey          = "task.save_draft"
+	hostTurnID        = "release-R-17"
+	artifactReadLimit = 128
+	taskPrompt        = "Find release R-17's deployment code and deployment window in the release dossier. Recover exact evidence from its Context artifact, save one local draft, and return JSON with release, deploymentCode, window, artifactID and draftID."
+	taskInstructions  = "Use only returned evidence. Call lookup_release, recover the deep RELEASE R-17 record with read_context_artifact query and limit 128, then save_draft exactly once. Return the saved draft as JSON. Copy exact artifact IDs; never guess them."
 )
 
 var answerSchema = json.RawMessage(`{"type":"object","properties":{"release":{"type":"string"},"deploymentCode":{"type":"string"},"window":{"type":"string"},"artifactID":{"type":"string"},"draftID":{"type":"string"}},"required":["release","deploymentCode","window","artifactID","draftID"],"additionalProperties":false}`)
@@ -59,14 +61,17 @@ type artifactPage struct {
 }
 
 type taskState struct {
-	store       harness.Store
-	clock       *demoClock
-	source      sourceFixture
-	mu          sync.Mutex
-	lookupCalls int
-	reads       []artifactPage
-	drafts      []taskAnswer
-	requests    []model.Request
+	store        harness.Store
+	clock        *demoClock
+	source       sourceFixture
+	mu           sync.Mutex
+	lookupCalls  int
+	reads        []artifactPage
+	drafts       []taskAnswer
+	requests     []model.Request
+	observations []modelObservation
+	executions   []toolExecution
+	sampleID     string
 }
 
 func (state *taskState) registrations() []tools.Registration {
@@ -159,7 +164,7 @@ func (scriptedModel) Generate(_ context.Context, request model.Request) (model.R
 			return model.Response{}, errors.New("lookup result was not archived with its deep facts excluded")
 		}
 		return toolCall("read-release-evidence", harness.ContextArtifactToolKey, map[string]any{
-			"artifactID": marker[1], "query": "RELEASE R-17", "limit": 300,
+			"artifactID": marker[1], "query": "RELEASE R-17", "limit": artifactReadLimit,
 		})
 	}
 	return toolCall("lookup-release", lookupKey, map[string]string{"release": "R-17"})

@@ -1,5 +1,4 @@
-// task-agent runs a synthetic evidence-to-draft task and resumes it after a
-// committed Tool receipt. The default scripted model needs no network or keys.
+// task-agent provides an offline acceptance demo and an explicit live baseline.
 package main
 
 import (
@@ -7,10 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
-	"fmt"
-	"log"
+	"io"
 	"os"
-	"time"
+	"os/signal"
+	"syscall"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider"
@@ -23,47 +22,70 @@ const serviceInputTokens int64 = 6144
 type settings struct {
 	mode, provider, modelID     string
 	contextTokens, outputTokens int64
+	endpoint, apiKey, sampleID  string
+	allowUnknownStructuredModel bool
 }
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := runCommand(ctx, os.Args[1:], os.Stdin, os.Stdout)
+	stop()
+	os.Exit(code)
+}
+
+func runCommand(ctx context.Context, args []string, input io.Reader, output io.Writer) int {
 	var config settings
-	flag.StringVar(&config.mode, "mode", "scripted", "scripted runtime acceptance, or explicit live model smoke")
-	flag.StringVar(&config.provider, "provider", "", "live only: openai or anthropic")
-	flag.StringVar(&config.modelID, "model", "", "live only: exact provider model ID")
-	flag.Int64Var(&config.contextTokens, "context-tokens", 0, "live only: documented context capacity of the selected model")
-	flag.Int64Var(&config.outputTokens, "max-output-tokens", 0, "live only: explicit per-call output ceiling and context reservation")
-	flag.Parse()
+	flags := flag.NewFlagSet("task-agent", flag.ContinueOnError)
+	// Flag errors may quote arbitrary argv. Emit only a bounded classification.
+	flags.SetOutput(io.Discard)
+	flags.StringVar(&config.mode, "mode", "scripted", "scripted, live, or baseline-stdin")
+	flags.StringVar(&config.provider, "provider", "", "live only: openai or anthropic")
+	flags.StringVar(&config.modelID, "model", "", "live only: exact provider model ID")
+	flags.Int64Var(&config.contextTokens, "context-tokens", 0, "live only: documented model capacity")
+	flags.Int64Var(&config.outputTokens, "max-output-tokens", 0, "live only: output ceiling")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		return configurationError(output)
+	}
+	if config.mode == "baseline-stdin" {
+		if config.provider != "" || config.modelID != "" || config.contextTokens != 0 || config.outputTokens != 0 {
+			return configurationError(output)
+		}
+		return runBaseline(ctx, input, output)
+	}
 	if err := config.resolve(); err != nil {
-		log.Fatal(err)
+		return configurationError(output)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, sampleTimeout)
 	defer cancel()
-	result, err := runTask(ctx, config, config.newModel, defaultSource())
+	result, err := runTask(runCtx, config, config.newModel, defaultSource())
+	encoder := json.NewEncoder(output)
 	if err != nil {
-		log.Fatal(err)
+		result.Answer = taskAnswer{} // Never print an unverified model answer.
 	}
-	encoder := json.NewEncoder(os.Stdout)
-	encoder.SetIndent("", "  ")
-	if err = encoder.Encode(result); err != nil {
-		log.Fatal(err)
+	if encoder.Encode(result) != nil {
+		return 1
 	}
+	if err != nil {
+		return 1
+	}
+	return 0
 }
 
 func (config *settings) resolve() error {
 	switch config.mode {
 	case "scripted":
 		if config.provider != "" || config.modelID != "" || config.contextTokens != 0 || config.outputTokens != 0 {
-			return errors.New("scripted mode has fixed synthetic model limits; provider flags require -mode=live")
+			return errors.New("scripted mode requires its fixed synthetic model limits")
 		}
 		config.modelID, config.contextTokens, config.outputTokens = "scripted-task", 8192, 512
 	case "live":
-		if (config.provider != "openai" && config.provider != "anthropic") || config.modelID == "" ||
+		if (config.provider != "openai" && config.provider != "anthropic") || !validModelID(config.modelID) ||
 			config.outputTokens <= 0 || config.contextTokens <= config.outputTokens ||
 			config.contextTokens-config.outputTokens < serviceInputTokens {
-			return errors.New("live mode requires -provider=openai|anthropic, -model, documented -context-tokens and -max-output-tokens, with at least 6144 input tokens remaining")
+			return errors.New("live mode requires explicit provider, model and sufficient capacity")
 		}
 	default:
-		return errors.New("-mode must be scripted or live")
+		return errors.New("invalid mode")
 	}
 	return nil
 }
@@ -75,21 +97,34 @@ func (config settings) routedModel() string {
 	return config.provider + "/" + config.modelID
 }
 
-// Credentials are read only after explicit live-mode validation. This function
-// is never called in live mode by the offline tests or the default command.
+// baseline-stdin supplies credentials only in memory. Environment lookup is
+// retained exclusively for the original explicit live-mode command.
 func (config settings) newModel() (model.Client, error) {
 	if config.mode == "scripted" {
 		return scriptedModel{}, nil
+	}
+	key := config.apiKey
+	if key == "" {
+		switch config.provider {
+		case "openai":
+			key = os.Getenv("OPENAI_API_KEY")
+		case "anthropic":
+			key = os.Getenv("ANTHROPIC_API_KEY")
+		}
+	}
+	var allowed []string
+	if config.allowUnknownStructuredModel {
+		allowed = []string{config.modelID}
 	}
 	var client model.Client
 	var err error
 	switch config.provider {
 	case "openai":
-		client, err = openai.New(openai.Config{APIKey: os.Getenv("OPENAI_API_KEY")})
+		client, err = openai.New(openai.Config{APIKey: key, Endpoint: config.endpoint, StructuredOutputModels: allowed})
 	case "anthropic":
-		client, err = anthropic.New(anthropic.Config{APIKey: os.Getenv("ANTHROPIC_API_KEY")})
+		client, err = anthropic.New(anthropic.Config{APIKey: key, Endpoint: config.endpoint, StructuredOutputModels: allowed})
 	default:
-		return nil, fmt.Errorf("unsupported provider %q", config.provider)
+		return nil, errors.New("unsupported provider")
 	}
 	if err != nil {
 		return nil, err

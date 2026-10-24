@@ -15,7 +15,33 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-const leaseDuration = 2 * time.Minute
+const (
+	leaseDuration = 2 * time.Minute
+	modelTimeout  = time.Minute
+	toolTimeout   = 10 * time.Second
+	sampleTimeout = 5 * time.Minute
+	maxModelCalls = 12
+	maxToolCalls  = 10
+)
+
+func taskLimits() agent.Limits {
+	return agent.Limits{MaxLLMCalls: maxModelCalls, MaxToolCalls: maxToolCalls}
+}
+
+func taskToolPolicies() []harness.ToolPolicySnapshot {
+	return []harness.ToolPolicySnapshot{
+		{Key: lookupKey, DefinitionVersion: "task-v1", ApprovalMode: "never", SideEffectLevel: "read"},
+		harness.ContextArtifactToolPolicySnapshot(),
+		{Key: draftKey, DefinitionVersion: "task-v1", ApprovalMode: "never", SideEffectLevel: "write", IdempotencyMode: "none"},
+	}
+}
+
+func taskContextPolicy() runtimecontext.Policy {
+	return runtimecontext.NormalizePolicy(runtimecontext.Policy{
+		MaxInputTokens: serviceInputTokens, PreserveRecentTurns: 1, MinimumRecentTurns: 1,
+		MaxCompactionTokens: 80, MaxToolResultBytes: 512,
+	})
+}
 
 // compose is deliberately local to this example: the host chooses stores,
 // authority, real model limits, preparation order and execution ownership.
@@ -40,7 +66,11 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 		}
 		return result, readErr
 	})
-	registry, err := tools.NewRegistry(append(state.registrations(), reader))
+	registrations := append(state.registrations(), reader)
+	for index := range registrations {
+		registrations[index].Handler = recordingHandler{state: state, handler: registrations[index].Handler}
+	}
+	registry, err := tools.NewRegistry(registrations)
 	if err != nil {
 		return nil, err
 	}
@@ -68,10 +98,11 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 		PrepareModelRequest: agent.ChainModelRequestPreparers(managed),
 		RunMiddleware:       []plugin.RunMiddleware{rehydrate},
 		ModelMiddleware:     []plugin.ModelMiddleware{outputCeiling{tokens: config.outputTokens, state: state}},
+		Limits:              taskLimits(),
 		RunExecution:        &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration},
 		Execution: agent.ExecutionPolicy{
-			Model: agent.CallPolicy{Timeout: 60 * time.Second, MaxAttempts: 1, MaxConcurrency: 1},
-			Tool:  agent.CallPolicy{Timeout: 10 * time.Second, MaxAttempts: 1, MaxConcurrency: 1},
+			Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, MaxConcurrency: 1},
+			Tool:  agent.CallPolicy{Timeout: toolTimeout, MaxAttempts: 1, MaxConcurrency: 1},
 		},
 	})
 	if err != nil {
@@ -84,25 +115,18 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 		return nil, err
 	}
 	return host.OpenSession(harness.SessionOptions{
-		HostThread: harness.HostRef{Kind: "conversation", ID: "task-agent/local/session"},
+		HostThread: harness.HostRef{Kind: "conversation", ID: "task-agent/local/" + state.sampleID},
 		Actor:      kernel.ActorRef{TenantID: "local", ActorID: "operator"},
-		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "task-agent/local/session"},
+		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "task-agent/local/" + state.sampleID},
 		Transcript: transcript,
 		Config: harness.ConfigSnapshot{
 			Model:          config.routedModel(),
-			Instructions:   "Use only returned evidence. Call lookup_release, recover the deep RELEASE R-17 record with read_context_artifact query, then save_draft exactly once. Return the saved draft as JSON. Copy exact artifact IDs; never guess them.",
+			Instructions:   taskInstructions,
 			OutputContract: &model.OutputContract{Name: "task_answer", Schema: answerSchema},
 			ToolKeys:       []string{lookupKey, harness.ContextArtifactToolKey, draftKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{
-				{Key: lookupKey, DefinitionVersion: "task-v1", ApprovalMode: "never", SideEffectLevel: "read"},
-				harness.ContextArtifactToolPolicySnapshot(),
-				{Key: draftKey, DefinitionVersion: "task-v1", ApprovalMode: "never", SideEffectLevel: "write", IdempotencyMode: "none"},
-			},
-			ContextPolicy: runtimecontext.Policy{
-				MaxInputTokens: serviceInputTokens, PreserveRecentTurns: 1, MinimumRecentTurns: 1,
-				MaxCompactionTokens: 80, MaxToolResultBytes: 512,
-			},
-			Limits: agent.Limits{MaxLLMCalls: 12, MaxToolCalls: 10},
+			ToolPolicies:   taskToolPolicies(),
+			ContextPolicy:  taskContextPolicy(),
+			Limits:         taskLimits(),
 		},
 	})
 }
@@ -120,10 +144,18 @@ func (ceiling outputCeiling) Model(ctx context.Context, request model.Request, s
 	if request.MaxOutputTokens == 0 || request.MaxOutputTokens > ceiling.tokens {
 		request.MaxOutputTokens = ceiling.tokens
 	}
-	ceiling.state.mu.Lock()
-	ceiling.state.requests = append(ceiling.state.requests, model.CloneRequest(request))
-	ceiling.state.mu.Unlock()
-	return next(ctx, request, sink)
+	started := time.Now()
+	response, err := next(ctx, request, sink)
+	// An ownership rejection before physical dispatch is not a model call.
+	if !agent.IsModelPreDispatchDenied(err) {
+		ceiling.state.mu.Lock()
+		ceiling.state.requests = append(ceiling.state.requests, model.CloneRequest(request))
+		ceiling.state.observations = append(ceiling.state.observations, modelObservation{
+			DurationMs: time.Since(started).Milliseconds(), Usage: numericUsage(response.Usage),
+		})
+		ceiling.state.mu.Unlock()
+	}
+	return response, err
 }
 
 func initialTranscript(_ context.Context, _ harness.HostRef, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {

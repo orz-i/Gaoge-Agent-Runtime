@@ -3,7 +3,8 @@
 ## Development setup
 
 Install Go 1.26, Node.js 24, pnpm 11.22, Docker, and GNU Make. Then install the
-workspace dependencies:
+workspace dependencies. Python 3.9+ is also required for the interactive Agent
+baseline launcher and its offline tests in `make check`:
 
 ```bash
 pnpm install --frozen-lockfile

@@ -123,6 +123,9 @@ oracle checks facts returned by Tools, evidence recovered from an archive, task
 output, stable identity and non-duplication after reconstructing the runner. A
 scripted model makes this regression reproducible; optional live-provider runs
 are a separate model-quality check and consume the host's configured credentials.
+The [interactive real-model baseline](agent-model-baseline.md) collects endpoint,
+model and a hidden API key locally, repeats fixed task variants and retains both
+successes and failures in comparable reports.
 
 The real integration suite also exercises persisted Agent/Context recovery using
 PostgreSQL. Run `make integration` with the repository's local Docker setup. Keep
