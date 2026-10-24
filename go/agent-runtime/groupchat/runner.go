@@ -171,7 +171,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		Participants:        cloneParticipants(state.Participants),
 		DirectedSpeakerIDs:  append([]string(nil), state.DirectedSpeakerIDs...),
 		CandidateSpeakerIDs: append([]string(nil), state.CandidateSpeakerIDs...),
-		SelectorInvocation:  cloneSelectorInvocation(state.SelectorInvocation),
+		SelectorInvocation:  publicSelectorInvocation(state.SelectorInvocation),
 		SpeakerTurns:        turns,
 		NextSpeakerIndex:    state.NextSpeakerIndex,
 		TerminationReason:   state.TerminationReason,

@@ -35,6 +35,9 @@ type SelectorRequest struct {
 	Candidates   []SelectorCandidate   `json:"candidates"`
 	History      []SelectorHistoryItem `json:"history,omitempty"`
 	CanComplete  bool                  `json:"canComplete"`
+	// PreparedInput is private, host-owned JSON frozen before the pending
+	// selector intent. It is excluded from public views and diagnostics.
+	PreparedInput json.RawMessage `json:"preparedInput,omitempty"`
 }
 
 // SelectorResponse is one validated next-speaker decision. Complete and SpeakerID
@@ -50,6 +53,15 @@ type SelectorResponse struct {
 // when ctx is done.
 type Selector interface {
 	Select(context.Context, SelectorRequest) (SelectorResponse, error)
+}
+
+// SelectorRequestPreparer is an optional pre-intent capability of a Selector.
+// It may only populate PreparedInput; identity, candidates and logical input
+// must remain unchanged. Preparation must not dispatch a model or other
+// external effect. Pending invocation recovery never calls it again.
+// Implementations must honor context cancellation and deadlines.
+type SelectorRequestPreparer interface {
+	PrepareSelectorRequest(context.Context, SelectorRequest) (SelectorRequest, error)
 }
 
 type SelectorInvocationStatus string
@@ -108,6 +120,7 @@ func selectorRequestHash(request SelectorRequest) (string, error) {
 
 func cloneSelectorRequest(request SelectorRequest) SelectorRequest {
 	request.ModelOptions = append(json.RawMessage(nil), request.ModelOptions...)
+	request.PreparedInput = append(json.RawMessage(nil), request.PreparedInput...)
 	request.Candidates = append([]SelectorCandidate(nil), request.Candidates...)
 	request.History = append([]SelectorHistoryItem(nil), request.History...)
 	return request
@@ -132,6 +145,14 @@ func cloneSelectorInvocation(value *SelectorInvocation) *SelectorInvocation {
 		cloned.ConsumedAt = &at
 	}
 	return &cloned
+}
+
+func publicSelectorInvocation(value *SelectorInvocation) *SelectorInvocation {
+	cloned := cloneSelectorInvocation(value)
+	if cloned != nil {
+		cloned.Request.PreparedInput = nil
+	}
+	return cloned
 }
 
 func validSelectorInvocation(value *SelectorInvocation) bool {

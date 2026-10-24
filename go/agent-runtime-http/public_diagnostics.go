@@ -114,9 +114,9 @@ func PublicRun(run kernel.Run) kernel.Run {
 
 // PublicDiagnosticPayload strips diagnostic-only and provider-private replay
 // fields from structured feature payloads while preserving ordinary
-// author-visible model text, Tool arguments and results. ProviderReplay
-// contains signed/encrypted reasoning for internal continuation only and
-// must never cross a public HTTP projection, even inside business content.
+// author-visible model text, Tool arguments and results. ProviderReplay and
+// PreparedInput contain private continuation evidence and frozen host input;
+// neither may cross a public HTTP projection, even inside business content.
 // Non-JSON payloads fail closed.
 func PublicDiagnosticPayload(value json.RawMessage) json.RawMessage {
 	if !json.Valid(value) {
@@ -150,10 +150,10 @@ func stripDiagnosticFields(value any, businessContent bool) {
 		for key, child := range item {
 			normalized := strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key))
 			switch normalized {
-			case "providerreplay":
-				// Internal signed/encrypted Model evidence is persisted for
-				// recovery but never readable through public HTTP JSON, including
-				// nested messages, ModelInvocation receipts and business payloads.
+			case "providerreplay", "preparedinput":
+				// Private host input and signed/encrypted evidence are persisted
+				// for recovery but never readable through public HTTP JSON, including
+				// nested messages, model/selector invocation inputs and business payloads.
 				delete(item, key)
 				continue
 			case "error", "errors":

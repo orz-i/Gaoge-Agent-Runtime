@@ -5,6 +5,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Freeze optional host-prepared Group Chat selector input before its pending invocation, retaining the exact request across restarts and shared-budget receipt replay. Reject preparer changes to logical authority and strip private prepared input from public views and HTTP diagnostics; selectors without preparation remain unchanged.
+
 - Bound Model, Tool and Hosted Tool concurrency admission by Run deadlines, and release permits on expiry or cancellation before dispatch. Permit waiters can no longer remain blocked beyond their Run deadline or consume another Run's concurrency slot.
 - Preserve exact JSON numbers in Queue payloads and public HTTP projections. Queue fingerprints now retain numeric spelling; replaying Jobs written with earlier lossy numeric normalization may return `ErrConflict` and requires host reconciliation instead of silently reusing changed input.
 - Retry documented transient OpenAI and Anthropic SSE errors through the existing durable ModelInvocation retry budget, while keeping permanent/unknown errors terminal and upstream messages private.
