@@ -102,6 +102,11 @@ func (c *Client) Post(ctx context.Context, payload any, stream bool) (*http.Resp
 		}
 		// Model generation is logically retryable with the same invocation
 		// identity, even when a network failure makes billing ambiguous.
+		// Keep only a fixed timeout fact, never the raw URL, network address
+		// or transport error. The caller's own cancellation still wins above.
+		if transportTimedOut(err) {
+			return nil, model.NewRetryableError(model.NewClassifiedError(ErrProtocol, "model.upstream_timeout"))
+		}
 		return nil, model.NewRetryableError(ErrProtocol)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
@@ -125,6 +130,27 @@ func (c *Client) Post(ctx context.Context, payload any, stream bool) (*http.Resp
 		return nil, cause
 	}
 	return resp, nil
+}
+
+// transportTimedOut keeps looking after a non-timeout wrapper: http.Client's
+// url.Error can report false when a typed timeout is behind another wrapper.
+func transportTimedOut(err error) bool {
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return true
+	}
+	if cause := errors.Unwrap(err); cause != nil {
+		return transportTimedOut(cause)
+	}
+	var joined interface{ Unwrap() []error }
+	if errors.As(err, &joined) {
+		for _, cause := range joined.Unwrap() {
+			if transportTimedOut(cause) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type StatusError struct {

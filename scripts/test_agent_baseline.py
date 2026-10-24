@@ -573,30 +573,76 @@ class ProcessReportTests(unittest.TestCase):
             self.assertEqual(result["summary"]["skipped"], 2)
             baseline.read_report(writer.json_path)
 
-    def test_launch_explains_preflight_failure_in_console_and_markdown(self):
+    def test_no_http_failure_roundtrips_with_network_advice_in_console_and_markdown(self):
         real_run_child = baseline.run_child
 
-        def fixture_runner(_command, root, config, secret, report, writer):
-            program = child_program(events(preflight_passed=False), exit_code=1)
-            return real_run_child([sys.executable, "-u", "-c", program], root, config, secret, report, writer)
+        for code in ("model.upstream_timeout", "provider_failed"):
+            records = events(preflight_passed=False)
+            records[1].update(failureCode=code, durationMs=30001)
 
-        with tempfile.TemporaryDirectory() as directory, \
-                mock.patch.object(baseline, "source_metadata", return_value={}), \
-                mock.patch.object(baseline, "run_child", side_effect=fixture_runner), \
-                contextlib.redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(baseline.launch(
-                configuration(), Path(directory), get_key=lambda: self.secret, builder=lambda *_: None,
-            ), 1)
-            markdown_path = next((Path(directory) / "artifacts" / "agent-baselines").glob("*.md"))
-            for rendered in (output.getvalue(), markdown_path.read_text(encoding="utf-8")):
-                self.assertIn("阶段 preflight；失败分类 provider_failed", rendered)
-                self.assertIn("已尝试 0，跳过 2", rendered)
-                self.assertIn("任务尚未开始", rendered)
-                self.assertIn("下一步", rendered)
-                self.assertIn("现有证据不足以确定具体原因", rendered)
-                self.assertNotIn(self.secret, rendered)
-                self.assertNotIn("HTTP 401", rendered)
-            self.assertIn("预检：未通过", output.getvalue())
+            def fixture_runner(_command, root, config, secret, report, writer):
+                program = child_program(records, exit_code=1)
+                return real_run_child([sys.executable, "-u", "-c", program], root, config, secret, report, writer)
+
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory, \
+                    mock.patch.object(baseline, "source_metadata", return_value={}), \
+                    mock.patch.object(baseline, "run_child", side_effect=fixture_runner), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(baseline.launch(
+                    configuration(), Path(directory), get_key=lambda: self.secret, builder=lambda *_: None,
+                ), 1)
+                report_path = next((Path(directory) / "artifacts" / "agent-baselines").glob("*.json"))
+                original = report_path.read_bytes()
+                loaded = baseline.read_report(report_path)
+                self.assertEqual(loaded["status"], "failed")
+                self.assertEqual(loaded["preflight"]["failureCode"], code)
+                self.assertEqual(loaded["preflight"]["durationMs"], 30001)
+                self.assertEqual(loaded["samples"], [])
+                self.assertEqual(loaded["summary"]["attempted"], 0)
+                for absent in ("httpStatus", "responseKind", "schemaCheck", "wireCheck"):
+                    self.assertNotIn(absent, loaded["preflight"])
+                for rendered in (output.getvalue(), report_path.with_suffix(".md").read_text(encoding="utf-8"),
+                                 baseline.render_markdown(loaded)):
+                    self.assertIn("阶段 preflight；失败分类 " + code, rendered)
+                    self.assertIn("已尝试 0，跳过 2", rendered)
+                    self.assertIn("任务尚未开始", rendered)
+                    self.assertIn("下一步", rendered)
+                    self.assertIn("未记录本次请求的 HTTP 响应状态", rendered)
+                    self.assertIn("先检查 endpoint 连通性、本机网络、代理设置和出口", rendered)
+                    self.assertNotIn("输出预算 1024", rendered)
+                    self.assertNotIn("每任务 1 次", rendered)
+                    self.assertNotIn(self.secret, rendered)
+                    self.assertNotIn("HTTP 401", rendered)
+                    if code == "model.upstream_timeout":
+                        self.assertIn("上游请求超时", rendered)
+                        self.assertIn("现有证据不足以确定具体阶段", rendered)
+                        self.assertIn("不能判断是 DNS 解析、TCP 连接、TLS 协商还是等待 HTTP 响应超时", rendered)
+                    else:
+                        self.assertIn("现有证据不足以确定具体原因或阶段", rendered)
+                        self.assertIn("不能据此判定为超时", rendered)
+                        self.assertNotIn("上游请求超时", rendered)
+                self.assertEqual(report_path.read_bytes(), original)
+                self.assertIn("预检：未通过", output.getvalue())
+
+    def test_upstream_timeout_advice_uses_only_current_stage_http_facts(self):
+        for stage, preflight, expected in (
+            ("preflight", {"httpStatus": 200, "responseKind": "json"}, "已观察到 HTTP 响应状态"),
+            ("preflight", {"httpStatus": 400, "responseKind": "json"}, "已观察到 HTTP 响应状态"),
+            ("resume", {"httpStatus": 200, "responseKind": "json"}, "未记录本次请求的 HTTP 响应状态"),
+        ):
+            with self.subTest(stage=stage, preflight=preflight):
+                advice = baseline.failure_advice(stage, "model.upstream_timeout", preflight)
+                self.assertIn(expected, advice)
+                self.assertIn("代理", advice)
+                self.assertIn("出口", advice)
+                self.assertNotIn("输出预算", advice)
+                self.assertNotIn("每任务", advice)
+        for code in ("timeout", "runner_timeout"):
+            with self.subTest(code=code):
+                advice = baseline.failure_advice("runner", code, {})
+                self.assertIn("结合失败阶段", advice)
+                self.assertNotIn("输出预算", advice)
+                self.assertNotIn("每任务", advice)
 
     def test_preflight_transport_facts_are_preserved_and_drive_bounded_advice(self):
         for status, kind, expected in (

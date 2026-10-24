@@ -52,6 +52,13 @@ runs the original preflight plus task sequence. It never rewrites or resumes
 samples from the previous report, guesses another endpoint, or retrieves a
 credential from a report.
 
+The shared provider HTTP adapter now preserves typed dispatch timeouts with the
+existing `model.upstream_timeout` code while keeping the raw network cause
+private and preserving retryability and caller Context handling. The launcher
+uses this code to recommend connectivity checks when no HTTP response was
+observed. It does not infer a network phase from elapsed time, change timeout
+budgets, or rewrite historical failure codes.
+
 Contributor setup now requires Python 3.9+ for the standard-library launcher
 tests in `make check`. No third-party Python dependency is added.
 `make agent-baseline` starts the interactive runner;

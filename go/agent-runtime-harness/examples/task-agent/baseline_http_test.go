@@ -876,6 +876,61 @@ func TestBaselineHTTPHTMLRootPageFailsPreflight(t *testing.T) {
 	}
 }
 
+type baselineHTTPTransportTimeout string
+
+func (failure baselineHTTPTransportTimeout) Error() string { return string(failure) }
+func (baselineHTTPTransportTimeout) Timeout() bool         { return true }
+func (baselineHTTPTransportTimeout) Temporary() bool       { return true }
+
+func TestBaselineHTTPTransportTimeoutPreservesSafeClassification(t *testing.T) {
+	for _, protocol := range []string{"openai", "anthropic"} {
+		t.Run(protocol, func(t *testing.T) {
+			var calls atomic.Int32
+			// runBaseline constructs the real provider client. Keep this fixture
+			// sequential and restore the default transport before any other test.
+			original := http.DefaultTransport
+			t.Cleanup(func() { http.DefaultTransport = original })
+			http.DefaultTransport = preflightRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+				calls.Add(1)
+				if request.Context().Err() != nil {
+					t.Error("transport timeout fixture unexpectedly used an expired context")
+				}
+				if request.Method != http.MethodPost {
+					t.Error("preflight did not use a provider POST")
+				}
+				if protocol == "openai" {
+					if request.Header.Get("Authorization") != "Bearer "+baselineHTTPFakeKey {
+						t.Error("OpenAI client omitted the configured fake credential")
+					}
+				} else if request.Header.Get("X-Api-Key") != baselineHTTPFakeKey {
+					t.Error("Anthropic client omitted the configured fake credential")
+				}
+				return nil, baselineHTTPTransportTimeout("private-transport-timeout-" + baselineHTTPFakeKey)
+			})
+			code, events, output := executeHTTPBaseline(t, baselineHTTPInput(protocol, "https://provider.invalid/timeout-fixture", true))
+			if code == 0 || calls.Load() != 1 || strings.Contains(output, "private-transport-timeout") ||
+				len(baselineEventsOfType(events, "sample")) != 0 {
+				t.Fatalf("transport timeout leaked, retried or ran samples: code=%d calls=%d events=%+v", code, calls.Load(), events)
+			}
+			preflight := baselineEventsOfType(events, "preflight")
+			if len(preflight) != 1 || preflight[0]["status"] != "failed" || preflight[0]["failureCode"] != "model.upstream_timeout" {
+				t.Fatalf("typed transport timeout lost its safe classification: %+v", preflight)
+			}
+			for _, field := range []string{"httpStatus", "responseKind", "schemaCheck", "wireCheck", "usage"} {
+				if _, present := preflight[0][field]; present {
+					t.Fatalf("transport timeout fabricated %s evidence: %+v", field, preflight)
+				}
+			}
+			summary := baselineEventsOfType(events, "summary")
+			if len(summary) != 1 || summary[0]["requested"] != float64(2) || summary[0]["attempted"] != float64(0) ||
+				summary[0]["passed"] != float64(0) || summary[0]["failed"] != float64(0) ||
+				summary[0]["skipped"] != float64(2) || summary[0]["successRate"] != nil || summary[0]["complete"] != false {
+				t.Fatalf("transport timeout changed the unattempted task denominator: %+v", summary)
+			}
+		})
+	}
+}
+
 func TestBaselineHTTPNoResponseDoesNotInventDiagnostics(t *testing.T) {
 	for _, protocol := range []string{"openai", "anthropic"} {
 		t.Run(protocol, func(t *testing.T) {
@@ -902,13 +957,13 @@ func TestBaselineHTTPNoResponseDoesNotInventDiagnostics(t *testing.T) {
 				t.Fatalf("network failure was retried or ran task samples: code=%d calls=%d events=%+v", code, calls.Load(), events)
 			}
 			preflight := baselineEventsOfType(events, "preflight")
-			if len(preflight) != 1 || preflight[0]["status"] != "failed" || preflight[0]["failureCode"] == nil || preflight[0]["failureCode"] == "" {
-				t.Fatalf("network failure was not classified: %+v", preflight)
+			if len(preflight) != 1 || preflight[0]["status"] != "failed" || preflight[0]["failureCode"] != "provider_failed" {
+				t.Fatalf("non-timeout network failure changed its generic classification: %+v", preflight)
 			}
-			_, hasStatus := preflight[0]["httpStatus"]
-			_, hasKind := preflight[0]["responseKind"]
-			if hasStatus || hasKind {
-				t.Fatalf("network failure fabricated an HTTP response: %+v", preflight)
+			for _, field := range []string{"httpStatus", "responseKind", "schemaCheck", "wireCheck", "usage"} {
+				if _, present := preflight[0][field]; present {
+					t.Fatalf("network failure fabricated %s evidence: %+v", field, preflight)
+				}
 			}
 		})
 	}

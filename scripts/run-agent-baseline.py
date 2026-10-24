@@ -298,6 +298,13 @@ def md_cell(value):
 def failure_advice(stage, code, preflight):
     status = preflight.get("httpStatus") if stage == "preflight" else None
     kind = preflight.get("responseKind") if stage == "preflight" else None
+    if code == "model.upstream_timeout":
+        if status is None:
+            return ("上游请求超时；报告未记录本次请求的 HTTP 响应状态。"
+                    "先检查 endpoint 连通性、本机网络、代理设置和出口，确认连通后再采样。"
+                    "现有证据不足以确定具体阶段，不能判断是 DNS 解析、TCP 连接、TLS 协商还是等待 HTTP 响应超时。")
+        return ("上游请求超时；报告已观察到 HTTP 响应状态，仍不能定位具体超时阶段。"
+                "检查 endpoint 的服务状态、网络、代理、出口以及上游响应耗时，确认后再采样。")
     if status is not None:
         if 300 <= status < 400:
             return "端点返回重定向，本工具不跟随；请填写网关文档中的最终 API 地址。"
@@ -312,6 +319,10 @@ def failure_advice(stage, code, preflight):
         if status == 429:
             return "检查网关配额与调用频率，待限制解除后再运行。"
     if code == "provider_failed":
+        if status is None:
+            return ("报告未记录本次请求的 HTTP 响应状态；先检查 endpoint 连通性、本机网络、代理设置和出口，确认连通后再采样。"
+                    "现有证据不足以确定具体原因或阶段，也不能据此判定为超时；"
+                    "连通性正常后，再核对 endpoint、所选协议及 model 的原生严格 JSON Schema 支持。")
         return ("网关拒绝、协议不兼容或连接异常均可能导致此分类，现有证据不足以确定具体原因。"
                 "请按网关文档核对最终 endpoint、所选协议及 model 的原生严格 JSON Schema 支持；"
                 "可先使用输出预算 1024、每任务 1 次重新运行。")
@@ -322,7 +333,8 @@ def failure_advice(stage, code, preflight):
     if code in {"capability_unavailable", "provider_unsupported", "output_schema_invalid"}:
         return "核对模型与网关对原生严格 JSON Schema 的支持；未知模型需明确允许探测，任务样本还会验证工具调用。"
     if code in {"timeout", "runner_timeout"}:
-        return "检查网关连接与响应耗时；可先使用输出预算 1024、每任务 1 次重新运行。"
+        return ("结合失败阶段检查任务执行与上游响应耗时；若缺少 HTTP 响应记录，先检查 endpoint 连通性、网络、代理和出口。"
+                "现有证据不能定位具体超时阶段，确认原因后再采样。")
     if code == "build_failed":
         return "先检查本地 Go 工具链与工作区构建配置；编译失败时尚未读取 API key。"
     if code in {"invalid_configuration", "provider_configuration_failed", "context_budget_exceeded"}:

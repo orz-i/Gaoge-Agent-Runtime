@@ -156,7 +156,16 @@ Use the observations to choose the next check:
 | HTTP 404 | Check the complete endpoint and model identifier |
 | HTTP 400 or 422 | Check the API protocol, model, native schema support and task output budget |
 | HTTP 3xx | Configure the final API URL directly; the client does not forward credentials through redirects |
-| No HTTP status | Check connectivity, timeout and provider availability; do not infer a server status from a generic error |
+| `model.upstream_timeout`, no HTTP status | A typed transport timeout occurred before an HTTP response was observed; check network, proxy and endpoint reachability before another live sample. This code alone does not identify DNS, TCP, TLS or waiting-for-response as the failing phase |
+| No HTTP status with a generic failure | Check connectivity, timeout and provider availability; do not infer a server status or a particular network phase from a generic error |
+
+The probe's 60-second Context deadline is separate from the HTTP transport's
+connection and TLS deadlines. A lower transport deadline may fire first. A
+network timeout without an observed HTTP response provides no new evidence
+about native-schema support, credentials, model output quality or the task
+oracle. Reducing output tokens or sample repetitions does not repair connection
+establishment. Historical failures retain their original classification; the
+launcher does not infer a new cause from duration alone.
 
 The OpenAI adapter distinguishes `commentary` from `final_answer` in phased
 Responses output and preserves original phases on continuation. Its previous

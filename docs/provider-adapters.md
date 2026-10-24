@@ -143,12 +143,19 @@ multi-provider router.
   `top_p`, both in [0, 1]. Unknown keys are rejected, not silently sent.
 - Retryable HTTP status 408/409/425/429/5xx and transport failures return
   `model.RetryableError`; 400/401/403 errors do not. Agent owns retry
-  budgets. HTTP error messages, credentials, and raw remote response bodies
-  are never included in returned errors.
+  budgets. A typed `net.Error` timeout from HTTP dispatch, while the caller
+  Context is still active, also retains the existing
+  `model.upstream_timeout` classification. The safe cause remains local;
+  network error text, URLs, addresses and underlying errors are not retained.
+  Caller cancellation/deadlines keep their existing Context errors, and the
+  classification does not add retries. HTTP error messages, credentials, and
+  raw remote response bodies are never included in returned errors.
 - HTTPS-only endpoints unless explicitly configured to loopback HTTP.
   Redirects are not followed with credentials. Clients honor Context and
   have a default two-minute HTTP timeout; the Agent can enforce a stricter
-  deadline. Requests and SSE events have bounded sizes.
+  deadline. Transport-specific connection/TLS deadlines may expire earlier;
+  increasing a model deadline does not change those transport settings.
+  Requests and SSE events have bounded sizes.
 
 ## Current explicit limitations
 

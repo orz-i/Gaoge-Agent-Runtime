@@ -5,6 +5,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Preserve typed provider HTTP transport timeouts as the existing `model.upstream_timeout` classification without exposing raw network errors or changing retry budgets. Baseline diagnostics distinguish a timeout with no observed HTTP response from a native-schema failure and direct connectivity checks before another live sample.
+
 - Diagnose failed OpenAI strict-schema probes at the same HTTP request/response boundary with bounded, content-free wire observations. Keep native-schema pass/fail unchanged, distinguish incomplete evidence from a negative finding, and add `run-agent-baseline.py retry <report.json>` to reuse public settings with a fresh hidden key and new report.
 
 - Select OpenAI Responses `final_answer` separately from `commentary`, preserve original assistant phases during stateless continuation, and use the same projection for replay identity checks. Retain private replay evidence in Agent completion and bounded completion-repair history. Reject ambiguous phase combinations without extracting or repairing JSON. Review persisted transcripts before upgrade; see the [phase upgrade note](docs/releases/unreleased-openai-response-phases.md).
