@@ -116,6 +116,7 @@ type preflightEvent struct {
 	HTTPStatus   int                   `json:"httpStatus,omitempty"`
 	ResponseKind preflightResponseKind `json:"responseKind,omitempty"`
 	SchemaCheck  *probeSchemaCheck     `json:"schemaCheck,omitempty"`
+	WireCheck    *probeWireCheck       `json:"wireCheck,omitempty"`
 }
 
 var probeSchema = json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean","enum":[true]}},"required":["ok"],"additionalProperties":false}`)
@@ -125,6 +126,7 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 	event.Type, event.Status = "preflight", "failed"
 	// Observe only this probe. The caller's settings and task clients are unchanged.
 	clientHTTP, observation := newPreflightHTTPClient(config.httpClient)
+	observation.captureWire = config.provider == "openai"
 	config.httpClient = clientHTTP
 	defer func() {
 		event.DurationMs = time.Since(started).Milliseconds()
@@ -168,6 +170,9 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 		len(response.ToolCalls) != 0 || len(response.HostedToolCalls) != 0 || len(response.Artifacts) != 0 {
 		event.FailureCode = "strict_schema_probe_failed"
 		event.SchemaCheck = diagnoseProbeSchema(response, schemaValid)
+		if config.provider == "openai" {
+			event.WireCheck = observation.wireSnapshot(response.Content)
+		}
 		return event
 	}
 	event.Status = "passed"

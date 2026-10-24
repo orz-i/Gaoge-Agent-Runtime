@@ -17,6 +17,21 @@ python3 scripts/run-agent-baseline.py
 make agent-baseline
 ```
 
+To run again with a saved report's public configuration:
+
+```sh
+python3 scripts/run-agent-baseline.py retry artifacts/agent-baselines/previous-run.json
+```
+
+`retry` validates the report and displays its exact endpoint, model, budgets,
+repetitions and explicit unknown-model opt-in. It checks those settings against
+the current runner, builds the current checkout, and asks only for a new hidden
+API key. It starts a new measured run, including the normal native-schema probe;
+it does not resume old samples or overwrite the original report. Saved endpoints
+are not expanded or silently changed. To correct configuration, use the ordinary
+interactive command instead. A successful probe proceeds to the requested task
+samples; a failed probe still makes no task calls.
+
 The script asks for the protocol, base URL or complete endpoint, exact
 provider-native model ID, documented context capacity, task output budget, and
 repetitions. It builds the
@@ -91,6 +106,42 @@ text, property names, arbitrary values, validation errors or fingerprints.
 Earlier reports without `schemaCheck` remain valid. The original strict schema
 still decides success; diagnostics do not extract JSON, repair a response or
 retry with a weaker contract.
+
+### Diagnose native-schema failures
+
+An OpenAI `strict_schema_probe_failed` event can also include `wireCheck` from
+that same preflight request. It observes the actual adapter HTTP boundary:
+
+- A separate `GetBody` copy checks the outbound `text.format` type, explicit
+  strict setting and semantic equality with the fixed probe schema.
+- A bounded response-body observer records the original message order, phase,
+  text/refusal/other part counts, per-message JSON/schema validity and equality
+  with the adapter's final content. Part-validity counts are explanatory only;
+  a valid JSON document can span multiple text parts.
+- The optional response `text.format` echo is classified separately. A missing
+  echo is not evidence that native schema is unsupported.
+
+The observer captures at most 256 KiB per body in memory and emits at most 16
+message summaries. It does not save response text, arbitrary property names,
+values, IDs, headers, hashes or raw errors. It does not add a request or retry,
+and it preserves the original body read, close and error behavior. Incomplete,
+oversized or unavailable captures are explicitly marked; they do not become
+negative capability findings. The normal validator remains the authority for
+passing or failing the probe.
+
+| Complete observation | Supported conclusion |
+| --- | --- |
+| Outbound format/strict/schema does not match the probe | The contract is already wrong at the local HTTP boundary |
+| Correct outbound contract; the unique final or sole legacy message is invalid on the wire and exactly matches the adapter content | The received upstream answer violated the requested contract; text assembly did not introduce this failure |
+| The unique original final satisfies the schema, but the adapter's final content differs and fails | Investigate the local response projection |
+| Multiple messages without phase, an unsupported layout or an incomplete capture | The evidence is ambiguous; do not select whichever text happens to parse |
+
+Even a confirmed upstream violation does not distinguish a gateway forwarding
+problem from a routed model's behavior. The HTTP JSON envelope and the JSON
+inside its answer are separate contracts. Failure of this deliberately strong
+native-schema probe does not establish the Agent's task-solving quality: no task
+sample has run. Changing the prompt to coax JSON or stripping code fences would
+not validate the original native contract.
 
 Use the observations to choose the next check:
 

@@ -5,6 +5,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Diagnose failed OpenAI strict-schema probes at the same HTTP request/response boundary with bounded, content-free wire observations. Keep native-schema pass/fail unchanged, distinguish incomplete evidence from a negative finding, and add `run-agent-baseline.py retry <report.json>` to reuse public settings with a fresh hidden key and new report.
+
 - Select OpenAI Responses `final_answer` separately from `commentary`, preserve original assistant phases during stateless continuation, and use the same projection for replay identity checks. Retain private replay evidence in Agent completion and bounded completion-repair history. Reject ambiguous phase combinations without extracting or repairing JSON. Review persisted transcripts before upgrade; see the [phase upgrade note](docs/releases/unreleased-openai-response-phases.md).
 - Explain strict-schema baseline failures with safe JSON shape/type, required-field and continuation diagnostics while retaining the native strict contract and historical reports. No raw response content, arbitrary field names, provider error text or credentials enter these diagnostics.
 - Revise the example baseline service input ceiling from 6,144 to 8,192 after native phase/replay fixtures exceeded the former allowance; retain actual archival/retrieval and recovery checks. Record the changed policy in the profile/dataset hash, read historical reports under their own budgets, and reject score comparisons across the two profiles.

@@ -36,6 +36,22 @@ when available. Console and Markdown output explain the failing stage, skipped
 samples and the next configuration check. Reports without these optional fields
 remain readable; no report schema version or SDK contract change is required.
 
+For a failed OpenAI strict-schema probe, optional `wireCheck` observations now
+compare the actual outbound native format with the original response message
+boundaries and normalized answer. Both bodies are observed only in bounded
+memory; saved facts contain fixed classifications, booleans and counts. The
+observer adds no network call, does not alter pass/fail, and cannot assign an
+upstream failure to a particular gateway or model implementation. Partial
+captures remain explicitly inconclusive. No raw text, headers, IDs or error
+strings are saved.
+
+`python3 scripts/run-agent-baseline.py retry <report.json>` reuses a validated
+report's public settings, displays them, checks current execution requirements,
+and builds before asking for a fresh hidden key. It creates a new report and
+runs the original preflight plus task sequence. It never rewrites or resumes
+samples from the previous report, guesses another endpoint, or retrieves a
+credential from a report.
+
 Contributor setup now requires Python 3.9+ for the standard-library launcher
 tests in `make check`. No third-party Python dependency is added.
 `make agent-baseline` starts the interactive runner;

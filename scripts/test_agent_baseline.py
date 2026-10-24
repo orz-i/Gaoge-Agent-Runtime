@@ -62,6 +62,27 @@ def schema_check_fixture(kind="object", ok_type="boolean", ok_true=False):
     return check
 
 
+def wire_check_fixture(phase="final_answer", json_valid=False, schema_valid=False, matches=True):
+    return {
+        "request": {"capture": "complete", "format": {
+            "type": "json_schema", "strictEnabled": True, "schemaMatchesProbe": True,
+        }},
+        "response": {
+            "capture": "complete", "status": "completed", "format": {
+                "type": "missing", "strictEnabled": False, "schemaMatchesProbe": False,
+            },
+            "outputItemCount": 1, "messageCount": 1, "messagesTruncated": False,
+            "messages": [{
+                "index": 0, "phase": phase, "textPartCount": 1, "refusalPartCount": 0,
+                "unknownPartCount": 0, "jsonValidPartCount": int(json_valid),
+                "schemaValidPartCount": int(schema_valid), "jsonValid": json_valid,
+                "schemaValid": schema_valid, "matchesNormalized": matches,
+                "leadingBOM": False, "codeFence": False,
+            }],
+        },
+    }
+
+
 def sample(index=1, passed=True):
     result = {
         "sampleID": "sample-%d" % index, "caseID": "case-%d" % index, "repetition": 1,
@@ -271,6 +292,217 @@ class SecretAndBuildTests(unittest.TestCase):
             self.assertEqual(baseline.main(["--help"]), 0)
             self.assertIn("compare", output.getvalue())
             builder.assert_not_called()
+
+
+class RetryTests(unittest.TestCase):
+    def test_retry_reuses_public_configuration_builds_then_reads_fresh_key_and_creates_new_report(self):
+        original = complete_report()
+        original["configuration"]["apiKey"] = "old-fake-key-must-not-be-reused"
+        steps = []
+        fresh_key = "fresh-fake-key-only-stdin"
+        real_run_child = baseline.run_child
+
+        def fixture_runner(_command, root, config, secret, report, writer):
+            self.assertEqual(set(config), set(baseline.PUBLIC_CONFIGURATION))
+            self.assertEqual(config, configuration())
+            self.assertEqual(secret, fresh_key)
+            steps.append("run")
+            return real_run_child([sys.executable, "-u", "-c", child_program(events())],
+                                  root, config, secret, report, writer)
+
+        def build(_root, _executable):
+            steps.append("build")
+
+        def key():
+            steps.append("key")
+            return fresh_key
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "old-report.json"
+            original_bytes = json.dumps(original).encode("utf-8")
+            path.write_bytes(original_bytes)
+            with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                    mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                    mock.patch.object(baseline, "repository_root", return_value=Path(directory)), \
+                    mock.patch.object(baseline, "source_metadata", return_value={}), \
+                    mock.patch.object(baseline, "collect_configuration", side_effect=AssertionError("must reuse config")), \
+                    mock.patch.object(baseline, "build_runner", side_effect=build), \
+                    mock.patch.object(baseline, "read_api_key", side_effect=key), \
+                    mock.patch.object(baseline, "run_child", side_effect=fixture_runner), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(baseline.main(["retry", str(path)]), 0)
+            self.assertEqual(steps, ["build", "key", "run"])
+            self.assertEqual(path.read_bytes(), original_bytes)
+            self.assertIn("复用报告中的公开配置", output.getvalue())
+            self.assertIn(configuration()["endpoint"], output.getvalue())
+            self.assertIn("另加 1 次能力探测", output.getvalue())
+            self.assertNotIn(original["configuration"]["apiKey"], output.getvalue())
+            self.assertNotIn(fresh_key, output.getvalue())
+            reports = list((Path(directory) / "artifacts" / "agent-baselines").glob("*.json"))
+            self.assertEqual(len(reports), 1)
+            saved = baseline.read_report(reports[0])
+            self.assertEqual(saved["status"], "passed")
+            self.assertEqual(saved["configuration"], configuration())
+            self.assertNotIn(fresh_key, reports[0].read_text(encoding="utf-8"))
+            self.assertNotIn(original["configuration"]["apiKey"], reports[0].read_text(encoding="utf-8"))
+
+    def test_retry_preserves_full_endpoint_and_explicit_probe_choice(self):
+        report = complete_report()
+        report["configuration"]["endpoint"] = "https://gateway.example"
+        report["configuration"]["allowUnknownStructuredModel"] = True
+        report["runner"]["configuration"]["allowUnknownStructuredModel"] = True
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "historical-endpoint.json"
+            path.write_text(json.dumps(report), encoding="utf-8")
+            with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                    mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                    mock.patch.object(baseline, "launch", return_value=1) as launch, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(baseline.main(["retry", str(path)]), 1)
+            config = launch.call_args[0][0]
+            self.assertEqual(config["endpoint"], "https://gateway.example")
+            self.assertTrue(config["allowUnknownStructuredModel"])
+
+    def test_retry_revalidates_current_capacity_and_requires_tty_before_build_or_key(self):
+        historical = complete_report()
+        historical["configuration"]["contextTokens"] = historical["runner"]["configuration"]["contextTokens"] = 8192
+        historical["runner"]["profile"]["contextPolicy"]["maxInputTokens"] = 6144
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "historical-budget.json"
+            original = json.dumps(historical).encode("utf-8")
+            path.write_bytes(original)
+            with contextlib.redirect_stderr(io.StringIO()) as error, \
+                    mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                    mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                    mock.patch.object(baseline, "launch") as launch, \
+                    mock.patch.object(baseline, "build_runner") as builder, \
+                    mock.patch.object(baseline, "read_api_key") as key_reader:
+                self.assertEqual(baseline.main(["retry", str(path)]), 2)
+                self.assertIn("insufficient_context_capacity", error.getvalue())
+                with mock.patch.object(sys.stdin, "isatty", return_value=False):
+                    self.assertEqual(baseline.main(["retry", str(path)]), 2)
+                launch.assert_not_called()
+                builder.assert_not_called()
+                key_reader.assert_not_called()
+            self.assertEqual(path.read_bytes(), original)
+
+
+class WireDiagnosticsTests(unittest.TestCase):
+    def test_wire_facts_distinguish_upstream_projection_request_and_missing_evidence(self):
+        schema_check = schema_check_fixture("invalid")
+        upstream = wire_check_fixture()
+        projection = wire_check_fixture(json_valid=True, schema_valid=True, matches=False)
+        wrong_request = wire_check_fixture()
+        wrong_request["request"]["format"]["strictEnabled"] = False
+        incomplete = wire_check_fixture()
+        incomplete["response"] = {"capture": "incomplete"}
+        missing_request = wire_check_fixture()
+        missing_request["request"] = {"capture": "unavailable"}
+        multiple_legacy = wire_check_fixture(phase="absent", matches=False)
+        final = wire_check_fixture(phase="null", json_valid=True, schema_valid=True, matches=False)["response"]["messages"][0]
+        final["index"] = 1
+        multiple_legacy["response"].update(outputItemCount=2, messageCount=2)
+        multiple_legacy["response"]["messages"].append(final)
+        for check, expected in (
+            (upstream, "该次上游响应未满足已发送的原生 Schema 契约"),
+            (projection, "适配器却交出不同文本且校验失败"),
+            (wrong_request, "实际出站请求未满足固定原生 Schema 契约"),
+            (incomplete, "不能据此区分上游与适配器"),
+            (missing_request, "缺少完整出站证据"),
+            (multiple_legacy, "终答来源有歧义"),
+        ):
+            with self.subTest(expected=expected):
+                baseline.validate_wire_check(check)
+                rendered = "\n".join(baseline.wire_diagnostics(check, schema_check))
+                self.assertIn(expected, rendered)
+        rendered = "\n".join(baseline.wire_diagnostics(upstream, schema_check))
+        self.assertIn("缺失不能证明原生 Schema 是否生效", rendered)
+        self.assertIn("不能区分网关改写、参数未透传或所路由模型", rendered)
+
+    def test_wire_selection_uses_final_and_whole_message_not_individual_parts(self):
+        schema_check = schema_check_fixture("invalid")
+        invalid_final = wire_check_fixture()
+        commentary = wire_check_fixture(phase="commentary", json_valid=True, schema_valid=True, matches=False)["response"]["messages"][0]
+        invalid_final["response"]["messages"][0]["index"] = 1
+        invalid_final["response"]["messages"].insert(0, commentary)
+        invalid_final["response"].update(outputItemCount=2, messageCount=2)
+        baseline.validate_wire_check(invalid_final)
+        rendered = "\n".join(baseline.wire_diagnostics(invalid_final, schema_check))
+        self.assertIn("原始答案文本已经不是有效 JSON", rendered)
+        self.assertNotIn("原始明确终答满足 Schema", rendered)
+
+        split = wire_check_fixture(json_valid=True, schema_valid=True, matches=False)
+        split["response"]["messages"][0].update(textPartCount=2, jsonValidPartCount=0, schemaValidPartCount=0)
+        baseline.validate_wire_check(split)
+        rendered = "\n".join(baseline.wire_diagnostics(split, schema_check))
+        self.assertIn("判定使用整条消息合并后的文本", rendered)
+        self.assertIn("原始明确终答满足 Schema", rendered)
+        self.assertNotIn("该次上游响应未满足", rendered)
+
+    def test_wire_format_echo_and_text_markers_are_observations_not_repairs(self):
+        check = wire_check_fixture()
+        check["response"]["format"]["type"] = "text"
+        check["response"]["messages"][0].update(leadingBOM=True, codeFence=True)
+        baseline.validate_wire_check(check)
+        rendered = "\n".join(baseline.wire_diagnostics(check, schema_check_fixture("invalid")))
+        self.assertIn("响应回显的格式与出站 json_schema 模式不一致", rendered)
+        self.assertIn("前导 UTF-8 BOM", rendered)
+        self.assertIn("起始 Markdown 代码围栏", rendered)
+        self.assertIn("不是有效 JSON", rendered)
+
+    def test_invalid_wire_fields_types_counts_and_applicability_are_rejected(self):
+        mutations = [
+            lambda check: check["request"].update(capture="raw-response"),
+            lambda check: check["request"].update(capture="unavailable"),
+            lambda check: check["request"]["format"].update(type="untrusted-format"),
+            lambda check: check["request"]["format"].update(strictEnabled=1),
+            lambda check: check["response"].update(status="untrusted-status"),
+            lambda check: check["response"].update(messageCount=2),
+            lambda check: check["response"].update(messagesTruncated=True),
+            lambda check: check["response"]["messages"][0].update(index=1),
+            lambda check: check["response"]["messages"][0].update(phase="untrusted-phase"),
+            lambda check: check["response"]["messages"][0].update(textPartCount=True),
+            lambda check: check["response"]["messages"][0].update(schemaValidPartCount=2),
+            lambda check: check["response"]["messages"][0].update(schemaValid=True),
+            lambda check: check["response"]["messages"][0].update(raw="private-text"),
+        ]
+        for mutate in mutations:
+            check = wire_check_fixture()
+            mutate(check)
+            with self.subTest(mutate=mutate), self.assertRaisesRegex(
+                    baseline.ProtocolFailure, "^invalid_preflight_wire_check$"):
+                baseline.validate_wire_check(check)
+        for change in ("provider", "status", "failureCode", "schemaCheck"):
+            report = baseline.new_report(configuration(), {})
+            baseline.accept_event(report, start_event())
+            event = dict(events(preflight_passed=False)[1], failureCode="strict_schema_probe_failed",
+                         schemaCheck=schema_check_fixture("invalid"), wireCheck=wire_check_fixture())
+            if change == "provider":
+                report["configuration"]["provider"] = "anthropic"
+            elif change == "status":
+                event["status"] = "passed"
+                event.pop("schemaCheck")
+            elif change == "failureCode":
+                event["failureCode"] = "provider_failed"
+                event.pop("schemaCheck")
+            else:
+                event.pop("schemaCheck")
+            with self.subTest(change=change), self.assertRaisesRegex(
+                    baseline.ProtocolFailure, "^invalid_preflight_wire_check$"):
+                baseline.accept_event(report, event)
+            self.assertIsNone(report["preflight"])
+
+    def test_bounded_message_list_retains_truncation_and_never_claims_unique_final(self):
+        check = wire_check_fixture()
+        template = check["response"]["messages"][0]
+        check["response"].update(
+            outputItemCount=17, messageCount=17, messagesTruncated=True,
+            messages=[dict(template, index=index) for index in range(16)],
+        )
+        baseline.validate_wire_check(check)
+        rendered = "\n".join(baseline.wire_diagnostics(check, schema_check_fixture("invalid")))
+        self.assertIn("消息摘要达到记录上限", rendered)
+        self.assertNotIn("该次上游响应未满足", rendered)
 
 
 class ProcessReportTests(unittest.TestCase):
@@ -573,6 +805,52 @@ class ProcessReportTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertNotIn(self.secret, out.getvalue() + err.getvalue())
             self.assertIn("报告无法保存", err.getvalue())
+
+
+    def test_wire_check_survives_report_roundtrip_and_explains_the_same_failed_probe(self):
+        records = events(preflight_passed=False)
+        records[1].update(failureCode="strict_schema_probe_failed", httpStatus=200, responseKind="json",
+                          schemaCheck=schema_check_fixture("invalid"), wireCheck=wire_check_fixture())
+        real_run_child = baseline.run_child
+
+        def fixture_runner(_command, root, config, secret, report, writer):
+            return real_run_child([sys.executable, "-u", "-c", child_program(records, exit_code=1)],
+                                  root, config, secret, report, writer)
+
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(baseline, "source_metadata", return_value={}), \
+                mock.patch.object(baseline, "run_child", side_effect=fixture_runner), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(baseline.launch(configuration(), Path(directory),
+                                             get_key=lambda: self.secret, builder=lambda *_: None), 1)
+            path = next((Path(directory) / "artifacts" / "agent-baselines").glob("*.json"))
+            report = baseline.read_report(path)
+            self.assertEqual(report["preflight"]["wireCheck"], records[1]["wireCheck"])
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["summary"]["attempted"], 0)
+            comparison, comparable = baseline.comparison_markdown(report, report)
+            self.assertFalse(comparable)
+            for rendered in (output.getvalue(), path.with_suffix(".md").read_text(encoding="utf-8"), comparison):
+                self.assertIn("实际出站契约：text.format.type=json_schema", rendered)
+                self.assertIn("该次上游响应未满足已发送的原生 Schema 契约", rendered)
+                self.assertNotIn(self.secret, rendered)
+
+    def test_unknown_wire_key_or_value_never_enters_saved_output(self):
+        for location in ("key", "value"):
+            records = events(preflight_passed=False)
+            check = wire_check_fixture()
+            if location == "key":
+                check[self.secret] = self.secret
+            else:
+                check["response"]["messages"][0]["phase"] = self.secret
+            records[1].update(failureCode="strict_schema_probe_failed",
+                              schemaCheck=schema_check_fixture("invalid"), wireCheck=check)
+            with self.subTest(location=location), tempfile.TemporaryDirectory() as directory:
+                result, writer, _, output = self.invoke(directory, records, exit_code=1)
+                self.assertEqual(result["launcherFailure"]["failureCode"], "invalid_preflight_wire_check")
+                self.assertIsNone(result["preflight"])
+                self.assertNotIn(self.secret, output + writer.json_path.read_text() + writer.md_path.read_text())
+
 
 
 class ComparisonTests(unittest.TestCase):

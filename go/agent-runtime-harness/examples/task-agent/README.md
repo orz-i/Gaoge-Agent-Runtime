@@ -121,7 +121,12 @@ variants with explicit repetitions. Successes, failures and incomplete runs are
 saved under `artifacts/agent-baselines/` with source/configuration metadata,
 measured durations, usage coverage and separate oracle/recovery observations.
 Preflight failures show a safe failure category and observed HTTP status/response
-kind when available, together with a next-step hint. No real service is invoked
+kind when available, together with a next-step hint. Failed OpenAI schema probes
+also report bounded request/response structure observations from that same call,
+so wire-level answer violations can be distinguished from ambiguous or changed
+text projections without saving the answer. Use
+`python3 scripts/run-agent-baseline.py retry <report.json>` to reuse a saved
+public configuration and enter only a fresh key for a new measured run. No real service is invoked
 by ordinary test gates.
 
 See the [baseline guide](../../../../docs/agent-model-baseline.md) for the input

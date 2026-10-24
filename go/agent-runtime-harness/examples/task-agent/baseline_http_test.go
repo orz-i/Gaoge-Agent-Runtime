@@ -450,8 +450,10 @@ func TestBaselineHTTPAdaptersCompleteBothCases(t *testing.T) {
 			if len(baselineEventsOfType(events, "start")) != 1 || len(preflight) != 1 || preflight[0]["status"] != "passed" {
 				t.Fatalf("start/preflight envelope missing: %+v", events)
 			}
-			if _, diagnosed := preflight[0]["schemaCheck"]; diagnosed {
-				t.Fatal("successful strict preflight emitted failure diagnostics")
+			for _, field := range []string{"schemaCheck", "wireCheck"} {
+				if _, diagnosed := preflight[0][field]; diagnosed {
+					t.Fatal("successful strict preflight emitted failure diagnostics")
+				}
 			}
 			samples := baselineEventsOfType(events, "sample")
 			if len(samples) != 2 {
@@ -527,8 +529,9 @@ func TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls atomic.Int32
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
+				baselineHTTPAssertStrictProbeRequest(t, r)
 				w.Header().Set("Content-Type", "application/json")
 				// Even a schema-valid commentary is not the terminal answer.
 				_ = json.NewEncoder(w).Encode(map[string]any{
@@ -561,11 +564,201 @@ func TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics(t *testing.T) {
 			if !ok || !reflect.DeepEqual(got, want) {
 				t.Fatalf("schema diagnostics changed or exposed extra data: got=%+v want=%+v", got, want)
 			}
+			validJSON, _ := tc.check["jsonValid"].(bool)
+			jsonParts := 0
+			if validJSON {
+				jsonParts = 1
+			}
+			baselineHTTPAssertWireCheck(t, preflight[0]["wireCheck"], baselineHTTPWireFormat("missing", false, false),
+				baselineHTTPWireMessage(0, "commentary", 1, 1, 1, true, true, false),
+				baselineHTTPWireMessage(1, "final_answer", 1, jsonParts, 0, validJSON, false, true),
+			)
 			summary := baselineEventsOfType(events, "summary")
 			if len(summary) != 1 || summary[0]["attempted"] != float64(0) || summary[0]["skipped"] != float64(2) || summary[0]["successRate"] != nil {
 				t.Fatalf("invalid strict preflight changed the task denominator: %+v", summary)
 			}
 		})
+	}
+}
+
+func baselineHTTPAssertStrictProbeRequest(t *testing.T, request *http.Request) {
+	t.Helper()
+	if request.Method != http.MethodPost || request.Header.Get("Authorization") != "Bearer "+baselineHTTPFakeKey {
+		t.Error("probe request changed its method or authentication contract")
+	}
+	var payload map[string]json.RawMessage
+	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+		t.Error("observer consumed or changed the actual request body")
+		return
+	}
+	(&baselineHTTPFixture{t: t, protocol: "openai"}).assertContract(payload, false)
+	var input []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	const prompt = "Say that this check passed in a plain sentence. The response must still obey the API's output schema."
+	if json.Unmarshal(payload["input"], &input) != nil || len(input) != 1 || input[0].Role != "user" || input[0].Content != prompt {
+		t.Error("wire diagnostics changed the strict probe instructions")
+	}
+	var streaming bool
+	if json.Unmarshal(payload["stream"], &streaming) != nil || streaming || len(payload["tools"]) != 0 {
+		t.Error("wire diagnostics changed the single tool-free unary probe")
+	}
+}
+
+func baselineHTTPWireFormat(kind string, strict, matches bool) map[string]any {
+	return map[string]any{"type": kind, "strictEnabled": strict, "schemaMatchesProbe": matches}
+}
+
+func baselineHTTPWireMessage(index int, phase string, textParts, jsonParts, schemaParts int, jsonValid, schemaValid, matches bool) map[string]any {
+	return map[string]any{
+		"index": float64(index), "phase": phase, "textPartCount": float64(textParts),
+		"refusalPartCount": float64(0), "unknownPartCount": float64(0),
+		"jsonValidPartCount": float64(jsonParts), "schemaValidPartCount": float64(schemaParts),
+		"jsonValid": jsonValid, "schemaValid": schemaValid, "matchesNormalized": matches,
+		"leadingBOM": false, "codeFence": false,
+	}
+}
+
+func baselineHTTPAssertWireCheck(t *testing.T, actual any, responseFormat map[string]any, messages ...map[string]any) {
+	t.Helper()
+	wireMessages := make([]any, len(messages))
+	for index, message := range messages {
+		wireMessages[index] = message
+	}
+	want := map[string]any{
+		"request": map[string]any{
+			"capture": "complete", "format": baselineHTTPWireFormat("json_schema", true, true),
+		},
+		"response": map[string]any{
+			"capture": "complete", "status": "completed", "format": responseFormat,
+			"outputItemCount": float64(len(messages)), "messageCount": float64(len(messages)),
+			"messagesTruncated": false, "messages": wireMessages,
+		},
+	}
+	if !reflect.DeepEqual(actual, want) {
+		t.Fatalf("wire evidence changed or retained unexpected provider data: got=%+v want=%+v", actual, want)
+	}
+}
+
+func TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages(t *testing.T) {
+	plain := "private-schema-probe-" + baselineHTTPFakeKey
+	legacyFirst := baselineOpenAIPhaseMessage("commentary", plain)
+	delete(legacyFirst, "phase")
+	legacySecond := baselineOpenAIPhaseMessage("final_answer", "{\"ok\":true}")
+	delete(legacySecond, "phase")
+	for _, tc := range []struct {
+		name           string
+		output         []any
+		echoFormat     map[string]any
+		responseFormat map[string]any
+		messages       []map[string]any
+	}{
+		{
+			name:           "single_final_plain_without_format_echo",
+			output:         []any{baselineOpenAIPhaseMessage("final_answer", plain)},
+			responseFormat: baselineHTTPWireFormat("missing", false, false),
+			messages:       []map[string]any{baselineHTTPWireMessage(0, "final_answer", 1, 0, 0, false, false, true)},
+		},
+		{
+			name:           "single_final_plain_with_text_format_echo",
+			output:         []any{baselineOpenAIPhaseMessage("final_answer", plain)},
+			echoFormat:     map[string]any{"type": "text"},
+			responseFormat: baselineHTTPWireFormat("text", false, false),
+			messages:       []map[string]any{baselineHTTPWireMessage(0, "final_answer", 1, 0, 0, false, false, true)},
+		},
+		{
+			name:           "strict_format_echo_does_not_validate_content",
+			output:         []any{baselineOpenAIPhaseMessage("final_answer", plain)},
+			echoFormat:     map[string]any{"type": "json_schema", "strict": true, "schema": probeSchema},
+			responseFormat: baselineHTTPWireFormat("json_schema", true, true),
+			messages:       []map[string]any{baselineHTTPWireMessage(0, "final_answer", 1, 0, 0, false, false, true)},
+		},
+		{
+			name:           "unknown_format_type_does_not_echo_private_value",
+			output:         []any{baselineOpenAIPhaseMessage("final_answer", plain)},
+			echoFormat:     map[string]any{"type": baselineHTTPFakeKey, "strict": baselineHTTPFakeKey, "schema": map[string]string{baselineHTTPFakeKey: baselineHTTPFakeKey}},
+			responseFormat: baselineHTTPWireFormat("other", false, false),
+			messages:       []map[string]any{baselineHTTPWireMessage(0, "final_answer", 1, 0, 0, false, false, true)},
+		},
+		{
+			name:           "two_unphased_messages_remain_ambiguous",
+			output:         []any{legacyFirst, legacySecond},
+			responseFormat: baselineHTTPWireFormat("missing", false, false),
+			messages: []map[string]any{
+				baselineHTTPWireMessage(0, "absent", 1, 0, 0, false, false, false),
+				baselineHTTPWireMessage(1, "absent", 1, 1, 1, true, true, false),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				baselineHTTPAssertStrictProbeRequest(t, r)
+				body := map[string]any{
+					"id": baselineHTTPFakeKey + "_response", "status": "completed", "output": tc.output,
+				}
+				if tc.echoFormat != nil {
+					body["text"] = map[string]any{"format": tc.echoFormat}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(body)
+			}))
+			defer server.Close()
+			code, events, output := executeHTTPBaseline(t, baselineHTTPInput("openai", server.URL+"/wire-probe", true))
+			if code == 0 || calls.Load() != 1 || strings.Contains(output, "private-schema-probe") ||
+				len(baselineEventsOfType(events, "sample")) != 0 {
+				t.Fatalf("wire observer retried, leaked text or accepted an invalid answer: code=%d calls=%d", code, calls.Load())
+			}
+			preflight := baselineEventsOfType(events, "preflight")
+			if len(preflight) != 1 || preflight[0]["failureCode"] != "strict_schema_probe_failed" {
+				t.Fatalf("wire evidence changed strict failure classification: %+v", preflight)
+			}
+			check, ok := preflight[0]["schemaCheck"].(map[string]any)
+			if !ok || check["jsonValid"] != false || check["schemaValid"] != false {
+				t.Fatalf("invalid normalized text was repaired: %+v", check)
+			}
+			baselineHTTPAssertWireCheck(t, preflight[0]["wireCheck"], tc.responseFormat, tc.messages...)
+		})
+	}
+}
+
+func TestBaselineHTTPWireObserverPreservesJSONSplitAcrossTextParts(t *testing.T) {
+	final := baselineOpenAIPhaseMessage("final_answer", "")
+	final["content"] = []any{
+		map[string]string{"type": "output_text", "text": " \n{\"ok\":"},
+		map[string]string{"type": "output_text", "text": "true}\n "},
+	}
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		baselineHTTPAssertStrictProbeRequest(t, r)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": baselineHTTPFakeKey + "_response", "status": "completed",
+			"output": []any{baselineOpenAIPhaseMessage("commentary", "{\"ok\":true}"), final},
+		})
+	}))
+	defer server.Close()
+	input := unitBaselineInput()
+	input.Endpoint, input.APIKey = server.URL+"/split-probe", baselineHTTPFakeKey
+	event := baselinePreflight(t.Context(), input.settings())
+	if event.Status != "passed" || event.FailureCode != "" || calls.Load() != 1 {
+		t.Fatalf("valid combined JSON was rejected or retried: status=%s failure=%s calls=%d", event.Status, event.FailureCode, calls.Load())
+	}
+	raw, err := json.Marshal(event)
+	if err != nil || bytes.Contains(raw, []byte(baselineHTTPFakeKey)) {
+		t.Fatal("successful probe exposed private response evidence")
+	}
+	var saved map[string]any
+	if err = json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"schemaCheck", "wireCheck"} {
+		if _, present := saved[field]; present {
+			t.Fatalf("successful fragmented JSON acquired failure diagnostics: %s", field)
+		}
 	}
 }
 

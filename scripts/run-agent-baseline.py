@@ -35,6 +35,12 @@ MAX_LINE_BYTES = 256 * 1024
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_EVENTS = 256
 PROBE_JSON_TYPES = {"object", "array", "string", "number", "boolean", "null"}
+WIRE_CAPTURE_STATES = {"complete", "unavailable", "too_large", "incomplete", "read_error", "invalid_json", "invalid_envelope"}
+WIRE_FORMAT_TYPES = {"missing", "text", "json_schema", "json_object", "other"}
+WIRE_RESPONSE_STATUSES = {"missing", "completed", "incomplete", "failed", "other"}
+WIRE_PHASES = {"absent", "null", "commentary", "final_answer", "other"}
+MAX_WIRE_MESSAGES = 16
+MAX_WIRE_COUNT = 1 << 20
 STAGES = {
     "configuration", "preflight", "start", "evidence", "interrupted",
     "lease_check", "resume", "oracle", "terminal_check", "completed",
@@ -201,12 +207,17 @@ def collect_configuration():
         "contextTokens": context_tokens, "maxOutputTokens": output_tokens,
         "repetitions": repetitions, "allowUnknownStructuredModel": probe in ("y", "yes"),
     })
-    print("\n配置：")
+    display_configuration(config)
+    return config
+
+
+def display_configuration(config, heading="配置"):
+    print("\n%s：" % heading)
     for name in PUBLIC_CONFIGURATION:
         print("  %s: %s" % (name, config[name]))
+    repetitions = config["repetitions"]
     print("将执行 2 个任务 × %d 次 = %d 个样本，另加 1 次能力探测；会调用真实服务。" %
           (repetitions, 2 * repetitions))
-    return config
 
 
 def read_api_key():
@@ -356,6 +367,88 @@ def schema_diagnostics(check):
     return lines
 
 
+def wire_diagnostics(wire, schema_check):
+    request, response = wire["request"], wire["response"]
+    lines = []
+    requested_schema = False
+    if request["capture"] == "complete":
+        fmt = request["format"]
+        requested_schema = fmt["type"] == "json_schema" and fmt["strictEnabled"] and fmt["schemaMatchesProbe"]
+        lines.append("实际出站契约：text.format.type=%s；strict=true=%s；schema 与固定探测一致=%s。" %
+                     (fmt["type"], md_cell(fmt["strictEnabled"]), md_cell(fmt["schemaMatchesProbe"])))
+    else:
+        lines.append("实际出站契约：未取得完整证据，capture=%s。" % request["capture"])
+    if response["capture"] != "complete":
+        lines.append("原始响应结构：未取得完整证据，capture=%s；不能据此区分上游与适配器。" % response["capture"])
+        if request["capture"] == "complete" and not requested_schema:
+            lines.append("定位：实际出站请求未满足固定原生 Schema 契约，应检查客户端请求构造或 transport 边界。")
+        return lines
+    fmt = response["format"]
+    if fmt["type"] == "missing":
+        lines.append("响应格式回显：缺少可识别的 format.type；缺失不能证明原生 Schema 是否生效。")
+    else:
+        lines.append("响应格式回显：type=%s；strict=true=%s；schema 与固定探测一致=%s。" %
+                     (fmt["type"], md_cell(fmt["strictEnabled"]), md_cell(fmt["schemaMatchesProbe"])))
+        if requested_schema and fmt["type"] in {"text", "json_object"}:
+            lines.append("响应回显的格式与出站 json_schema 模式不一致。")
+    lines.append("原始响应结构：status=%s；output 项 %d；message %d；记录 %d 条消息摘要。" %
+                 (response["status"], response["outputItemCount"], response["messageCount"], len(response["messages"])))
+    for message in response["messages"]:
+        lines.append("原始 message[%d]：phase=%s；text/refusal/unknown parts=%d/%d/%d；"
+                     "合并文本有效 JSON=%s；schema 通过=%s；与适配器答案相同=%s。" %
+                     (message["index"], message["phase"], message["textPartCount"],
+                      message["refusalPartCount"], message["unknownPartCount"], md_cell(message["jsonValid"]),
+                      md_cell(message["schemaValid"]), md_cell(message["matchesNormalized"])))
+        if message["textPartCount"] > 1:
+            lines.append("该消息独立成文的 JSON 片段 %d、符合 schema 的片段 %d；判定使用整条消息合并后的文本。" %
+                         (message["jsonValidPartCount"], message["schemaValidPartCount"]))
+        if message["leadingBOM"]:
+            lines.append("该消息文本检测到前导 UTF-8 BOM。")
+        if message["codeFence"]:
+            lines.append("该消息文本检测到起始 Markdown 代码围栏。")
+    if request["capture"] != "complete":
+        lines.append("定位：缺少完整出站证据，尚不能确定无效答案是否违反实际发送的契约。")
+        return lines
+    if not requested_schema:
+        lines.append("定位：实际出站请求未满足固定原生 Schema 契约，应检查客户端请求构造或 transport 边界。")
+        return lines
+    if response["messagesTruncated"]:
+        lines.append("定位：消息摘要达到记录上限，无法对完整终答来源作确定判断。")
+        return lines
+    messages = response["messages"]
+    if response["status"] != "completed" or not messages:
+        lines.append("定位：原始响应没有可明确识别的 completed 答案消息。")
+        return lines
+    if any(message["refusalPartCount"] or message["unknownPartCount"] for message in messages):
+        lines.append("定位：原始消息含拒绝或未识别片段，需要结合协议处理边界核对。")
+        return lines
+    phases = [message["phase"] for message in messages]
+    candidate = None
+    if all(phase in {"absent", "null"} for phase in phases):
+        if len(messages) == 1:
+            candidate = messages[0]
+        else:
+            lines.append("定位：多条原始消息均未标注有效 phase，终答来源有歧义；不能挑选最后一条或可解析片段判为通过。")
+            return lines
+    elif phases[-1] == "final_answer" and all(phase == "commentary" for phase in phases[:-1]):
+        candidate = messages[-1]
+    if candidate is None:
+        lines.append("定位：原始消息的 phase 组合有歧义，尚不能确定唯一终答来源。")
+        return lines
+    if candidate["matchesNormalized"]:
+        if not candidate["jsonValid"] or not candidate["schemaValid"]:
+            violation = "不是有效 JSON" if not candidate["jsonValid"] else "不满足固定 Schema"
+            lines.append("定位：原始答案文本已经%s，且与适配器交出的内容相同；该次上游响应未满足已发送的原生 Schema 契约。" % violation)
+            lines.append("此证据定位到客户端收到的上游响应，不能区分网关改写、参数未透传或所路由模型未兑现契约。")
+        else:
+            lines.append("定位：原始答案与适配器内容一致且满足 Schema，应继续核对行为检查或本地校验边界。")
+    elif candidate["schemaValid"] and not schema_check["schemaValid"]:
+        lines.append("定位：原始明确终答满足 Schema，适配器却交出不同文本且校验失败，应检查适配器投影或组合路径。")
+    else:
+        lines.append("定位：原始答案与适配器内容不同，现有事实不能将失败归于单一路径。")
+    return lines
+
+
 def failure_diagnostics(report):
     preflight = report.get("preflight") or {}
     failures = []
@@ -394,6 +487,8 @@ def failure_diagnostics(report):
                 lines += schema_diagnostics(preflight["schemaCheck"])
             else:
                 lines.append("本报告未记录 schema 细项，无法从已存数据还原具体违例。")
+            if "wireCheck" in preflight:
+                lines += wire_diagnostics(preflight["wireCheck"], preflight["schemaCheck"])
         lines.append("下一步：" + failure_advice(stage, code, preflight))
     return lines
 
@@ -570,6 +665,60 @@ def validate_schema_check(check):
         raise ProtocolFailure("invalid_preflight_schema_check")
 
 
+def validate_wire_format(value):
+    if (not isinstance(value, dict) or set(value) != {"type", "strictEnabled", "schemaMatchesProbe"} or
+            not isinstance(value["type"], str) or value["type"] not in WIRE_FORMAT_TYPES or
+            type(value["strictEnabled"]) is not bool or type(value["schemaMatchesProbe"]) is not bool):
+        raise ProtocolFailure("invalid_preflight_wire_check")
+
+
+def validate_wire_check(check):
+    if not isinstance(check, dict) or set(check) != {"request", "response"}:
+        raise ProtocolFailure("invalid_preflight_wire_check")
+    for name in ("request", "response"):
+        value = check[name]
+        if (not isinstance(value, dict) or not isinstance(value.get("capture"), str) or
+                value["capture"] not in WIRE_CAPTURE_STATES):
+            raise ProtocolFailure("invalid_preflight_wire_check")
+        required = {"capture"}
+        if value["capture"] == "complete":
+            required.add("format")
+            if name == "response":
+                required |= {"status", "outputItemCount", "messageCount", "messagesTruncated", "messages"}
+        if set(value) != required:
+            raise ProtocolFailure("invalid_preflight_wire_check")
+        if value["capture"] == "complete":
+            validate_wire_format(value["format"])
+    response = check["response"]
+    if response["capture"] != "complete":
+        return
+    if (not isinstance(response["status"], str) or response["status"] not in WIRE_RESPONSE_STATUSES or
+            any(type(response[name]) is not int or not 0 <= response[name] <= MAX_WIRE_COUNT
+                for name in ("outputItemCount", "messageCount")) or
+            response["messageCount"] > response["outputItemCount"] or
+            type(response["messagesTruncated"]) is not bool or
+            response["messagesTruncated"] != (response["messageCount"] > MAX_WIRE_MESSAGES) or
+            not isinstance(response["messages"], list) or
+            len(response["messages"]) != min(response["messageCount"], MAX_WIRE_MESSAGES)):
+        raise ProtocolFailure("invalid_preflight_wire_check")
+    counts = {
+        "index", "textPartCount", "refusalPartCount", "unknownPartCount",
+        "jsonValidPartCount", "schemaValidPartCount",
+    }
+    flags = {"jsonValid", "schemaValid", "matchesNormalized", "leadingBOM", "codeFence"}
+    previous_index = -1
+    for message in response["messages"]:
+        if (not isinstance(message, dict) or set(message) != counts | flags | {"phase"} or
+                not isinstance(message["phase"], str) or message["phase"] not in WIRE_PHASES or
+                any(type(message[name]) is not int or not 0 <= message[name] <= MAX_WIRE_COUNT for name in counts) or
+                any(type(message[name]) is not bool for name in flags) or
+                not previous_index < message["index"] < response["outputItemCount"] or
+                not message["schemaValidPartCount"] <= message["jsonValidPartCount"] <= message["textPartCount"] or
+                (message["schemaValid"] and not message["jsonValid"])):
+            raise ProtocolFailure("invalid_preflight_wire_check")
+        previous_index = message["index"]
+
+
 def validate_sample_diagnostics(sample):
     validate_usage(sample.get("usage"), coverage=True)
     for name in ("lookupCalls", "artifactReads", "draftWrites", "contextGeneration"):
@@ -642,8 +791,13 @@ def accept_event(report, event):
             if event["status"] != "failed" or event.get("failureCode") != "strict_schema_probe_failed":
                 raise ProtocolFailure("invalid_preflight_schema_check")
             validate_schema_check(event["schemaCheck"])
+        if "wireCheck" in event:
+            if (report["configuration"]["provider"] != "openai" or event["status"] != "failed" or
+                    event.get("failureCode") != "strict_schema_probe_failed" or "schemaCheck" not in event):
+                raise ProtocolFailure("invalid_preflight_wire_check")
+            validate_wire_check(event["wireCheck"])
         report["preflight"] = {name: event[name] for name in (
-            "status", "failureCode", "durationMs", "usage", "httpStatus", "responseKind", "schemaCheck",
+            "status", "failureCode", "durationMs", "usage", "httpStatus", "responseKind", "schemaCheck", "wireCheck",
         ) if name in event}
     elif kind == "sample":
         if not runner.get("taskVersion") or not report["preflight"] or report["preflight"]["status"] != "passed":
@@ -1032,20 +1186,27 @@ def comparison_markdown(old, new):
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
+    usage = "用法：python3 scripts/run-agent-baseline.py [retry report.json | compare old.json new.json]"
     try:
         if args in (["--help"], ["-h"]):
-            print("用法：python3 scripts/run-agent-baseline.py [compare old.json new.json]\n"
-                  "无参数交互运行；compare 离线读取报告，不编译、不读取 key、不会联网。")
+            print(usage + "\n无参数交互运行；retry 复用报告的公开配置，按当前代码创建新运行并重新隐藏输入 key；"
+                  "compare 离线读取报告，不编译、不读取 key、不会联网。")
             return 0
-        if args:
-            if len(args) != 3 or args[0] != "compare":
-                print("用法：python3 scripts/run-agent-baseline.py [compare old.json new.json]", file=sys.stderr)
-                return 2
+        if len(args) == 3 and args[0] == "compare":
             rendered, complete = comparison_markdown(read_report(args[1]), read_report(args[2]))
             print(rendered)
             return 0 if complete else 2
+        if args and (len(args) != 2 or args[0] != "retry"):
+            print(usage, file=sys.stderr)
+            return 2
         if not sys.stdin.isatty() or not sys.stderr.isatty():
             raise SafeFailure("interactive_tty_required")
+        if args:
+            # Revalidate against the current execution budget; historical
+            # reports remain readable under their own recorded profile.
+            config = validate_configuration(read_report(args[1])["configuration"])
+            display_configuration(config, "复用报告中的公开配置（本次按当前代码创建新运行）")
+            return launch(config, repository_root())
         return launch(collect_configuration(), repository_root())
     except KeyboardInterrupt:
         print("\n已取消；尚未启动的新采样不会执行。", file=sys.stderr)
