@@ -109,13 +109,17 @@ python3 scripts/run-agent-baseline.py
 ```
 
 This is the repeatable path for collecting an initial real-model baseline.
-Enter a complete Responses or Messages endpoint, exact model ID, documented
-context window and output ceiling. The script builds this example before
+Enter a Responses or Messages base URL or complete endpoint, exact model ID,
+documented context window and task output budget. The launcher expands only
+root and `/v1` base URLs, preserves gateway prefixes, and shows the final request
+URL before key entry. The script builds this example before
 requesting a hidden API key, then runs a native-schema probe and two fixed data
 variants with explicit repetitions. Successes, failures and incomplete runs are
 saved under `artifacts/agent-baselines/` with source/configuration metadata,
 measured durations, usage coverage and separate oracle/recovery observations.
-No real service is invoked by ordinary test gates.
+Preflight failures show a safe failure category and observed HTTP status/response
+kind when available, together with a next-step hint. No real service is invoked
+by ordinary test gates.
 
 See the [baseline guide](../../../../docs/agent-model-baseline.md) for the input
 contract, offline comparison command, credential boundary and scope of the

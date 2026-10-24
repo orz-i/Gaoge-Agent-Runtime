@@ -17,18 +17,19 @@ python3 scripts/run-agent-baseline.py
 make agent-baseline
 ```
 
-The script asks for the protocol, complete endpoint, exact provider-native model
-ID, documented context capacity, output ceiling, and repetitions. It builds the
+The script asks for the protocol, base URL or complete endpoint, exact
+provider-native model ID, documented context capacity, task output budget, and
+repetitions. It builds the
 current checkout before requesting the API key. Enter the key at the hidden
 terminal prompt; do not paste it into a command, report or chat.
 
 | Input | Meaning |
 | --- | --- |
 | Protocol | OpenAI **Responses** or Anthropic **Messages** |
-| Endpoint | Complete API request URL; blank selects the protocol's official default |
+| Endpoint | Base URL or complete API request URL; the final resolved URL is shown before key entry; blank selects the official default |
 | Model | Exact provider-native model ID; do not add the runtime router's vendor prefix |
 | Context tokens | The selected model's documented capacity; the script does not infer it from its name |
-| Maximum output tokens | Explicit limit on every model request; default 1,024 |
+| Maximum output tokens | This task's per-request output budget; default 1,024, rather than the model's maximum supported output capacity |
 | Repetitions | 1–20 repetitions of each of two cases; default 3, for six task samples |
 | Unknown-model schema opt-in | Explicit permission to probe native strict JSON Schema for an unlisted model; default no |
 | API key | Hidden input, passed to the already built runner through stdin |
@@ -40,11 +41,26 @@ the existing conservative Context estimate; it does not claim an exact provider
 tokenizer or reliable token-admission capability.
 
 Official endpoint defaults are `https://api.openai.com/v1/responses` and
-`https://api.anthropic.com/v1/messages`. A gateway may use a different complete
-path. The script never appends paths or turns a Chat Completions endpoint into a
-Responses endpoint. HTTPS is required except for explicit loopback HTTP used by
-local tests. URL credentials, query parameters and fragments are rejected.
-Redirects remain disabled by the existing provider transport.
+`https://api.anthropic.com/v1/messages`. Interactive input resolves only the
+following recognizable base URL forms, before reading a key or sending a request:
+
+| Input form | OpenAI Responses | Anthropic Messages |
+| --- | --- | --- |
+| `https://gateway.example` or its root `/` | Append `/v1/responses` | Append `/v1/messages` |
+| `https://gateway.example/v1` | Append `/responses` | Append `/messages` |
+| `https://gateway.example/proxy/v1` | Preserve the prefix and append `/responses` | Preserve the prefix and append `/messages` |
+| Complete endpoint or another custom path | Preserve the supplied path | Preserve the supplied path |
+
+The launcher displays any expansion and the final URL before key entry. It does
+not discover routes, probe alternatives, convert Chat Completions, or change an
+endpoint belonging to the other protocol. HTTPS is required except for explicit
+loopback HTTP used by local tests. URL credentials, query parameters and
+fragments are rejected. Redirects remain disabled by the provider transport.
+
+This convenience belongs only to interactive input. The SDK and the runner's
+stdin contract still receive a complete request URL. Existing reports are read
+with their original endpoint unchanged, including earlier runs that posted to
+a gateway's root URL.
 
 Every run first makes a small native strict-schema probe. An unknown model fails
 before dispatch unless the user explicitly enables the exact-model override.
@@ -52,6 +68,34 @@ A successful probe is an observation of that endpoint/model configuration; it
 does not certify all gateway behavior. Failure never falls back to prompt-only
 JSON or a different API protocol. Probe latency and usage are separate from
 task sample totals.
+
+## If a run reports failed
+
+The console and Markdown summary explain the failing stage, the safe error code,
+and how many task samples ran. A preflight failure with `attempted = 0` means
+that the task cases never started; all requested cases remain skipped.
+
+New preflight events may include an observed HTTP status and a fixed response
+kind (`json`, `html`, `event_stream`, or `other`). They contain no response body,
+raw header values or provider error text. A response that was never received has
+no invented status. Earlier reports without these fields remain readable.
+
+Use the observations to choose the next check:
+
+| Observation | Next check |
+| --- | --- |
+| Root/base URL in an earlier report | Run the updated launcher and inspect the resolved API endpoint before entering the key |
+| HTTP 200 with HTML | Verify that the configured address reaches the API rather than a website or gateway page |
+| HTTP 401 or 403 | Check the key, its permissions, and gateway access policy; the status alone does not establish which one is wrong |
+| HTTP 404 | Check the complete endpoint and model identifier |
+| HTTP 400 or 422 | Check the API protocol, model, native schema support and task output budget |
+| HTTP 3xx | Configure the final API URL directly; the client does not forward credentials through redirects |
+| No HTTP status | Check connectivity, timeout and provider availability; do not infer a server status from a generic error |
+
+For this small task, start with the default 1,024 output-token budget rather than
+copying the model's maximum supported output capacity. Keep the same task output
+budget when comparing model reports. After correcting a configuration issue, run
+again to produce a new observation; keep the earlier failure reports intact.
 
 ## What is held constant
 

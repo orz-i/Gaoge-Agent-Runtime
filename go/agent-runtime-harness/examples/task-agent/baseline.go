@@ -108,11 +108,13 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 }
 
 type preflightEvent struct {
-	Type        string      `json:"type"`
-	Status      string      `json:"status"`
-	FailureCode string      `json:"failureCode,omitempty"`
-	DurationMs  int64       `json:"durationMs"`
-	Usage       *tokenUsage `json:"usage,omitempty"`
+	Type         string                `json:"type"`
+	Status       string                `json:"status"`
+	FailureCode  string                `json:"failureCode,omitempty"`
+	DurationMs   int64                 `json:"durationMs"`
+	Usage        *tokenUsage           `json:"usage,omitempty"`
+	HTTPStatus   int                   `json:"httpStatus,omitempty"`
+	ResponseKind preflightResponseKind `json:"responseKind,omitempty"`
 }
 
 var probeSchema = json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean","enum":[true]}},"required":["ok"],"additionalProperties":false}`)
@@ -120,7 +122,13 @@ var probeSchema = json.RawMessage(`{"type":"object","properties":{"ok":{"type":"
 func baselinePreflight(ctx context.Context, config settings) (event preflightEvent) {
 	started := time.Now()
 	event.Type, event.Status = "preflight", "failed"
-	defer func() { event.DurationMs = time.Since(started).Milliseconds() }()
+	// Observe only this probe. The caller's settings and task clients are unchanged.
+	clientHTTP, observation := newPreflightHTTPClient(config.httpClient)
+	config.httpClient = clientHTTP
+	defer func() {
+		event.DurationMs = time.Since(started).Milliseconds()
+		event.HTTPStatus, event.ResponseKind = observation.snapshot()
+	}()
 	probeCtx, cancel := context.WithTimeout(ctx, modelTimeout)
 	defer cancel()
 	client, err := config.newModel()

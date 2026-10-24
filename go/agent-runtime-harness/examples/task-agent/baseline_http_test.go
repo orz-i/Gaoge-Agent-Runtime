@@ -476,6 +476,7 @@ func TestBaselineHTTPFailureCannotEchoCredentials(t *testing.T) {
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.WriteHeader(http.StatusUnauthorized)
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"error": map[string]string{
@@ -491,8 +492,9 @@ func TestBaselineHTTPFailureCannotEchoCredentials(t *testing.T) {
 				t.Fatalf("HTTP failure leaked or became a sample: code=%d calls=%d events=%+v", code, calls.Load(), events)
 			}
 			preflight := baselineEventsOfType(events, "preflight")
-			if len(preflight) != 1 || preflight[0]["status"] != "failed" {
-				t.Fatalf("provider refusal was not reported: %+v", preflight)
+			if len(preflight) != 1 || preflight[0]["status"] != "failed" ||
+				preflight[0]["httpStatus"] != float64(http.StatusUnauthorized) || preflight[0]["responseKind"] != "json" {
+				t.Fatalf("provider refusal diagnostics were not reported: %+v", preflight)
 			}
 		})
 	}
@@ -512,12 +514,88 @@ func TestBaselineHTTPRedirectDoesNotForwardCredentials(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer "+baselineHTTPFakeKey {
 			t.Error("source did not receive the configured fake credential")
 		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		http.Redirect(w, r, targetURL+"/redirected", http.StatusTemporaryRedirect)
 	}))
 	defer source.Close()
 	code, events, _ := executeHTTPBaseline(t, baselineHTTPInput("openai", source.URL+"/original", true))
 	if code == 0 || sourceCalls.Load() != 1 || targetCalls.Load() != 0 || len(baselineEventsOfType(events, "sample")) != 0 {
 		t.Fatalf("redirect escaped the selected endpoint: code=%d source=%d target=%d events=%+v", code, sourceCalls.Load(), targetCalls.Load(), events)
+	}
+	preflight := baselineEventsOfType(events, "preflight")
+	if len(preflight) != 1 || preflight[0]["status"] != "failed" ||
+		preflight[0]["httpStatus"] != float64(http.StatusTemporaryRedirect) || preflight[0]["responseKind"] != "html" {
+		t.Fatalf("redirect diagnostics did not describe the original response: %+v", preflight)
+	}
+}
+
+func TestBaselineHTTPHTMLRootPageFailsPreflight(t *testing.T) {
+	for _, protocol := range []string{"openai", "anthropic"} {
+		t.Run(protocol, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if r.Method != http.MethodPost || r.URL.Path != "/" {
+					t.Errorf("root endpoint changed: method=%s path=%s", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusOK)
+				_, _ = io.WriteString(w, "<html><body>private-login-page-"+baselineHTTPFakeKey+"</body></html>")
+			}))
+			defer server.Close()
+			code, events, output := executeHTTPBaseline(t, baselineHTTPInput(protocol, server.URL, true))
+			if code == 0 || calls.Load() != 1 || strings.Contains(output, "private-login-page") ||
+				len(baselineEventsOfType(events, "sample")) != 0 {
+				t.Fatalf("HTML root response leaked or ran task samples: code=%d calls=%d events=%+v", code, calls.Load(), events)
+			}
+			preflight := baselineEventsOfType(events, "preflight")
+			if len(preflight) != 1 || preflight[0]["status"] != "failed" || preflight[0]["failureCode"] != "provider_failed" ||
+				preflight[0]["httpStatus"] != float64(http.StatusOK) || preflight[0]["responseKind"] != "html" {
+				t.Fatalf("HTML response was not distinguished from a valid API result: %+v", preflight)
+			}
+			summary := baselineEventsOfType(events, "summary")
+			if len(summary) != 1 || summary[0]["attempted"] != float64(0) || summary[0]["skipped"] != float64(2) || summary[0]["successRate"] != nil {
+				t.Fatalf("failed HTML preflight changed the task denominator: %+v", summary)
+			}
+		})
+	}
+}
+
+func TestBaselineHTTPNoResponseDoesNotInventDiagnostics(t *testing.T) {
+	for _, protocol := range []string{"openai", "anthropic"} {
+		t.Run(protocol, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				hijacker, ok := w.(http.Hijacker)
+				if !ok {
+					t.Error("fixture cannot close the connection before an HTTP response")
+					return
+				}
+				connection, _, err := hijacker.Hijack()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				if err = connection.Close(); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			code, events, _ := executeHTTPBaseline(t, baselineHTTPInput(protocol, server.URL+"/close-without-response", true))
+			if code == 0 || calls.Load() != 1 || len(baselineEventsOfType(events, "sample")) != 0 {
+				t.Fatalf("network failure was retried or ran task samples: code=%d calls=%d events=%+v", code, calls.Load(), events)
+			}
+			preflight := baselineEventsOfType(events, "preflight")
+			if len(preflight) != 1 || preflight[0]["status"] != "failed" || preflight[0]["failureCode"] == nil || preflight[0]["failureCode"] == "" {
+				t.Fatalf("network failure was not classified: %+v", preflight)
+			}
+			_, hasStatus := preflight[0]["httpStatus"]
+			_, hasKind := preflight[0]["responseKind"]
+			if hasStatus || hasKind {
+				t.Fatalf("network failure fabricated an HTTP response: %+v", preflight)
+			}
+		})
 	}
 }
 

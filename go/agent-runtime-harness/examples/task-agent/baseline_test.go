@@ -5,12 +5,96 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
+
+type preflightRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip preflightRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
+}
+
+func TestBaselinePreflightObservationKeepsOnlyTypedMetadata(t *testing.T) {
+	client, observation := newPreflightHTTPClient(nil)
+	if client.Timeout != 0 || observation.transport != http.DefaultTransport {
+		t.Fatal("observer replaced transport or adapter timeout defaults")
+	}
+	for _, tc := range []struct {
+		name, contentType string
+		status            int
+		kind              preflightResponseKind
+	}{
+		{"json", "Application/JSON; note=private-fixture-key", 200, preflightJSON},
+		{"json-suffix", "application/problem+json", 401, preflightJSON},
+		{"html", "text/html; charset=utf-8", 307, preflightHTML},
+		{"xhtml", "application/xhtml+xml", 200, preflightHTML},
+		{"sse", "text/event-stream; charset=utf-8", 200, preflightEventStream},
+		{"other", "private-fixture-key", 503, preflightOther},
+		{"nonstandard-status", "application/octet-stream", 999, preflightOther},
+		{"missing-type", "", 200, preflightOther},
+		{"malformed-type", "text/html; charset=\"", 200, preflightOther},
+		{"invalid-status", "application/json", 1000, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "https://provider.invalid/private-fixture-key", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := &http.Response{StatusCode: tc.status, Status: "private-fixture-key",
+				Header: http.Header{"Content-Type": {tc.contentType}}, Body: io.NopCloser(strings.NewReader("private-fixture-key"))}
+			calls := 0
+			hostDenied := errors.New("host denied")
+			base := &http.Client{
+				Timeout:       3 * time.Second,
+				CheckRedirect: func(*http.Request, []*http.Request) error { return hostDenied },
+				Transport: preflightRoundTripFunc(func(got *http.Request) (*http.Response, error) {
+					calls++
+					if got != request {
+						t.Fatal("observer replaced the request or its context")
+					}
+					return response, nil
+				}),
+			}
+			observed, observer := newPreflightHTTPClient(base)
+			if observed == base || observed.Transport == base.Transport || observed.Timeout != base.Timeout ||
+				!errors.Is(observed.CheckRedirect(nil, nil), hostDenied) || !errors.Is(base.CheckRedirect(nil, nil), hostDenied) {
+				t.Fatal("observer mutated the host client or its settings")
+			}
+			got, err := observed.Transport.RoundTrip(request)
+			if err != nil || got == nil {
+				t.Fatal("observer lost the response")
+			}
+			defer func() { _ = got.Body.Close() }()
+			if got != response || calls != 1 {
+				t.Fatal("observer changed the response or retried the request")
+			}
+			body, err := io.ReadAll(got.Body)
+			if err != nil || string(body) != "private-fixture-key" {
+				t.Fatal("observer read or changed the response body")
+			}
+			status, kind := observer.snapshot()
+			wantStatus := tc.status
+			if tc.kind == "" {
+				wantStatus = 0
+			}
+			if status != wantStatus || kind != tc.kind {
+				t.Fatalf("unexpected bounded observation: status=%d kind=%s", status, kind)
+			}
+			raw, err := json.Marshal(preflightEvent{HTTPStatus: status, ResponseKind: kind})
+			if err != nil || bytes.Contains(raw, []byte("private-fixture-key")) ||
+				(tc.kind == "" && (bytes.Contains(raw, []byte("httpStatus")) || bytes.Contains(raw, []byte("responseKind")))) {
+				t.Fatalf("unsafe or fabricated transport diagnosis: %s error=%v", raw, err)
+			}
+		})
+	}
+}
 
 func unitBaselineInput() baselineInput {
 	return baselineInput{

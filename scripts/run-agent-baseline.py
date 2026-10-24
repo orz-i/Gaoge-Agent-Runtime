@@ -117,6 +117,20 @@ def validate_endpoint(provider, value):
     return endpoint
 
 
+def resolve_interactive_endpoint(provider, value):
+    """Expand only standard base addresses entered in the interactive prompt."""
+    endpoint = validate_endpoint(provider, value)
+    parts = urlsplit(endpoint)
+    operation = "responses" if provider == "openai" else "messages"
+    if parts.path in ("", "/"):
+        path = "/v1/" + operation
+    elif parts.path.rstrip("/").endswith("/v1"):
+        path = parts.path.rstrip("/") + "/" + operation
+    else:
+        return endpoint
+    return validate_endpoint(provider, parts._replace(path=path).geturl())
+
+
 def positive_integer(value, minimum=1, maximum=None):
     if type(value) is not int or value < minimum or (maximum is not None and value > maximum):
         raise SafeFailure("invalid_integer")
@@ -161,15 +175,17 @@ def collect_configuration():
             break
         print("请选择 1 或 2。")
     while True:
-        endpoint = input("完整 endpoint URL（不自动补路径；留空使用官方默认）: ")
+        entered_endpoint = input("endpoint URL（根域名或 /v1 基地址会补齐；完整自定义路径原样；留空使用官方默认）: ")
         try:
-            endpoint = validate_endpoint(provider, endpoint)
+            endpoint = resolve_interactive_endpoint(provider, entered_endpoint)
+            print("端点：%s → %s" % (entered_endpoint.strip() or "（官方默认）", endpoint), flush=True)
             break
         except SafeFailure:
-            print("端点无效：需要匹配协议的完整 HTTPS URL；仅显式 loopback 可用 HTTP，不能含账号、query 或 fragment。")
+            print("端点无效：需要匹配协议的 HTTPS URL；仅显式 loopback 可用 HTTP，不能含账号、query 或 fragment。")
     model = input("精确 model ID: ").strip()
     context_tokens = prompt_integer("该模型已核实的 context capacity（必须填写）: ", maximum=1 << 24)
-    output_tokens = prompt_integer("每次调用 max output tokens [1024]: ", default=1024, maximum=1 << 20)
+    print("本次任务输出预算默认 1024，不必填模型最大输出容量。")
+    output_tokens = prompt_integer("本次任务每次调用 max output tokens [1024]: ", default=1024, maximum=1 << 20)
     repetitions = prompt_integer("每个任务重复次数 [3，范围 1..20]: ", default=3, maximum=20)
     while True:
         probe = input("允许对 SDK 未登记的模型执行原生严格 JSON Schema 探测？工具能力由后续任务验证。[y/N]: ").strip().lower()
@@ -264,6 +280,80 @@ def md_cell(value):
     return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def failure_advice(stage, code, preflight):
+    status = preflight.get("httpStatus") if stage == "preflight" else None
+    kind = preflight.get("responseKind") if stage == "preflight" else None
+    if status is not None:
+        if 300 <= status < 400:
+            return "端点返回重定向，本工具不跟随；请填写网关文档中的最终 API 地址。"
+        if 200 <= status < 300 and kind == "html":
+            return "响应声明为 HTML，预期为 API JSON；请核对 API 路径，根域名可能是网页入口。"
+        if status in (401, 403):
+            return "检查 key 的访问权限，以及网关路由和策略；该状态本身不足以确定密钥是否错误。"
+        if status in (400, 422):
+            return "按网关文档检查 model ID、输出预算和请求协议；本次任务输出预算可先使用默认 1024。"
+        if status == 404:
+            return "核对完整 API 地址，以及该网关是否提供所填 model ID。"
+        if status == 429:
+            return "检查网关配额与调用频率，待限制解除后再运行。"
+    if code == "provider_failed":
+        return ("网关拒绝、协议不兼容或连接异常均可能导致此分类，现有证据不足以确定具体原因。"
+                "请按网关文档核对最终 endpoint、所选协议及 model 的原生严格 JSON Schema 支持；"
+                "可先使用输出预算 1024、每任务 1 次重新运行。")
+    if code in {"capability_unavailable", "provider_unsupported", "strict_schema_probe_failed", "output_schema_invalid"}:
+        return "核对模型与网关对原生严格 JSON Schema 的支持；未知模型需明确允许探测，任务样本还会验证工具调用。"
+    if code in {"timeout", "runner_timeout"}:
+        return "检查网关连接与响应耗时；可先使用输出预算 1024、每任务 1 次重新运行。"
+    if code == "build_failed":
+        return "先检查本地 Go 工具链与工作区构建配置；编译失败时尚未读取 API key。"
+    if code in {"invalid_configuration", "provider_configuration_failed", "context_budget_exceeded"}:
+        return "核对 endpoint、model ID、已核实的 context capacity 与本次任务输出预算。"
+    if code == "cancelled":
+        return "已保留收到的样本；需要完整基线时重新运行，并保留本次部分结果作为记录。"
+    if stage == "protocol":
+        return "检查启动器与 Go 执行器是否来自同一工作区版本；保留当前报告，重新编译后再运行。"
+    if stage in {"oracle", "lease_check", "resume", "terminal_check", "interrupted"}:
+        return "查看失败样本的 oraclePassed、recoveryChecks 和工具执行计数，按具体阶段定位任务或恢复检查。"
+    return "结合阶段与失败分类检查报告中的配置和样本；修正后重新运行，保留当前结果便于比较。"
+
+
+def failure_diagnostics(report):
+    preflight = report.get("preflight") or {}
+    failures = []
+    if report.get("launcherFailure"):
+        failure = report["launcherFailure"]
+        failures.append(("启动器", failure["stage"], failure["failureCode"]))
+    if preflight.get("status") == "failed":
+        failures.append(("原生严格 JSON Schema 预检", "preflight", preflight["failureCode"]))
+    error = (report.get("runner") or {}).get("error")
+    if error:
+        failures.append(("执行器", error["stage"], error["failureCode"]))
+    grouped = {}
+    for sample in report.get("samples", []):
+        if sample["status"] == "failed":
+            key = (sample["stage"], sample["failureCode"])
+            grouped[key] = grouped.get(key, 0) + 1
+    for (stage, code), count in grouped.items():
+        failures.append(("%d 个任务样本" % count, stage, code))
+    if not failures:
+        return []
+    summary = report.get("summary") or {}
+    if summary:
+        lines = ["任务样本：请求 %d，已尝试 %d，跳过 %d。" %
+                 (summary["requested"], summary["attempted"], summary["skipped"])]
+    else:
+        lines = ["已收到 %d 个样本结果；已尝试与跳过总数未知（缺少最终汇总）。" % len(report.get("samples", []))]
+    if preflight.get("status") == "failed" and not report.get("samples"):
+        lines.append("任务尚未开始：暂无任务完成率证据。")
+    if "httpStatus" in preflight:
+        lines.append("预检传输事实：HTTP %d；响应 Content-Type 归类 %s。" %
+                     (preflight["httpStatus"], preflight["responseKind"]))
+    for label, stage, code in failures:
+        lines.append("%s：阶段 %s；失败分类 %s。" % (label, stage, code))
+        lines.append("下一步：" + failure_advice(stage, code, preflight))
+    return lines
+
+
 def render_markdown(report):
     summary = report.get("summary") or {}
     preflight = report.get("preflight") or {}
@@ -291,6 +381,9 @@ def render_markdown(report):
         lines.append("- 启动器失败：%s" % md_cell(report["launcherFailure"]))
     if runner.get("error"):
         lines.append("- 执行器失败：%s" % md_cell(runner["error"]))
+    diagnostics = failure_diagnostics(report)
+    if diagnostics:
+        lines += ["", "## 失败诊断与下一步", ""] + ["- " + md_cell(line) for line in diagnostics]
     lines += [
         "", "## 样本", "",
         "| 样本 | 任务 | 重复 | 状态 | 阶段 | 失败分类 | 毫秒 | 模型调用 | 工具调用 | Oracle |",
@@ -465,7 +558,15 @@ def accept_event(report, event):
         if event["status"] == "failed" and not valid_code(event.get("failureCode")):
             raise ProtocolFailure("invalid_preflight")
         validate_usage(event.get("usage"))
-        report["preflight"] = {name: event[name] for name in ("status", "failureCode", "durationMs", "usage") if name in event}
+        if ("httpStatus" in event) != ("responseKind" in event):
+            raise ProtocolFailure("invalid_preflight_transport")
+        if "httpStatus" in event and (
+                type(event["httpStatus"]) is not int or not 100 <= event["httpStatus"] <= 999 or
+                event["responseKind"] not in ("json", "html", "event_stream", "other")):
+            raise ProtocolFailure("invalid_preflight_transport")
+        report["preflight"] = {name: event[name] for name in (
+            "status", "failureCode", "durationMs", "usage", "httpStatus", "responseKind",
+        ) if name in event}
     elif kind == "sample":
         if not runner.get("taskVersion") or not report["preflight"] or report["preflight"]["status"] != "passed":
             raise ProtocolFailure("invalid_sample_order")
@@ -663,10 +764,16 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
             event = decode_event(value)
             accept_event(report, event)
             writer.save(report, secret)
-            if event["type"] == "sample":
+            if event["type"] == "preflight":
+                preflight = redact(report["preflight"], secret)
+                detail = "；失败分类 " + preflight["failureCode"] if preflight["status"] == "failed" else ""
+                print("预检：%s；阶段 preflight%s。" %
+                      ("通过" if preflight["status"] == "passed" else "未通过", detail), flush=True)
+            elif event["type"] == "sample":
                 sample = redact(report["samples"][-1], secret)
-                print("样本 %d：%s，第 %s 次，%s，阶段 %s。" %
-                      (len(report["samples"]), sample["caseID"], sample["repetition"], sample["status"], sample["stage"]), flush=True)
+                detail = "；失败分类 " + sample["failureCode"] if sample["status"] == "failed" else ""
+                print("样本 %d：%s，第 %s 次，%s，阶段 %s%s。" %
+                      (len(report["samples"]), sample["caseID"], sample["repetition"], sample["status"], sample["stage"], detail), flush=True)
         process.wait(timeout=max(0.1, min(5, deadline - time.monotonic())))
     except KeyboardInterrupt:
         failure = {"stage": "launcher", "failureCode": "cancelled"}
@@ -733,7 +840,10 @@ def launch(config, root, get_key=None, builder=None):
         except ReportFailure:
             print("报告无法保存；执行已停止。", file=sys.stderr)
             return 1
-    print("状态：%s" % report["status"])
+    safe = redact(report, secret)
+    print("状态：%s" % safe["status"])
+    for line in failure_diagnostics(safe):
+        print(line)
     print("JSON 报告：%s\nMarkdown 报告：%s" % (writer.json_path, writer.md_path))
     return 0 if report["status"] == "passed" else 1
 
@@ -828,6 +938,10 @@ def comparison_markdown(old, new):
         lines += ["", "至少一份报告未完整完成。本表只列已观察到的样本，不能给出总体提升、排名或完整基线结论。"]
     else:
         lines += ["", "成功率的分母为各自已尝试样本；同时列出请求和未执行数。耗时为同一合成任务上的观察值，没有统计显著性或自动胜者结论。"]
+    for label, report in (("基线", old), ("新报告", new)):
+        diagnostics = failure_diagnostics(report)
+        if diagnostics:
+            lines += ["", "### " + label + "失败诊断", ""] + ["- " + md_cell(line) for line in diagnostics]
     lines += ["", "这不是通用能力排名。能力探测费用与任务 usage 分开；未知 usage 不按零处理。", ""]
     return "\n".join(lines), complete
 
