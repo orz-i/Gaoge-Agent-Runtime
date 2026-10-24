@@ -2,10 +2,14 @@ module example.com/agent-runtime-continuation-e2e
 
 go 1.26.6
 
+toolchain go1.27.3
+
 require (
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/uuid v1.6.0
 	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.23
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.23
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres v0.1.0-beta.23
 	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres v0.1.0-beta.23
 	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis v0.1.0-beta.23
 	gorm.io/driver/postgres v1.6.0
@@ -27,6 +31,10 @@ require (
 )
 
 replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime => ../../go/agent-runtime
+
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness => ../../go/agent-runtime-harness
+
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres => ../../go/agent-runtime-harness-postgres
 
 replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres => ../../go/agent-runtime-postgres
 

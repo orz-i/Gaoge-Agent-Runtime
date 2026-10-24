@@ -41,9 +41,11 @@ type harnessStoreContract interface {
 }
 
 var (
-	_ harness.Store                                       = (harnessStoreContract)(nil)
-	_ harnessStoreContract                                = (harness.Store)(nil)
-	_ harness.Store                                       = (*harness.MemoryStore)(nil)
-	_ func(harness.Dependencies) (*harness.Runner, error) = harness.NewRunner
-	_ func() *harness.MemoryStore                         = harness.NewMemoryStore
+	_ harness.Store                                                                   = (harnessStoreContract)(nil)
+	_ harnessStoreContract                                                            = (harness.Store)(nil)
+	_ harness.Store                                                                   = (*harness.MemoryStore)(nil)
+	_ func(harness.Dependencies) (*harness.Runner, error)                             = harness.NewRunner
+	_ func() *harness.MemoryStore                                                     = harness.NewMemoryStore
+	_ func(*harness.Runner, context.Context, string) (harness.Snapshot, error)        = (*harness.Runner).ResumeTurn
+	_ func(*harness.SessionClient, context.Context, string) (harness.Snapshot, error) = (*harness.SessionClient).Resume
 )

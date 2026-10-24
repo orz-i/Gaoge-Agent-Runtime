@@ -31,3 +31,23 @@ make eval
 ```
 
 `make eval-smoke` is part of ordinary `make check` and is deliberately fast, deterministic, and network-free. Future broader recovery matrices can use the same contracts in nightly/release suites without making PR correctness depend on wall-clock timing or external model services.
+
+## Task-oriented Agent acceptance
+
+The [task-agent example](../go/agent-runtime-harness/examples/task-agent/README.md)
+adds an executable task oracle on top of the existing Agent/Harness APIs. Its
+ordinary Go tests verify task output against Tool evidence, bounded Context
+artifact retrieval, the original Turn/Run identity after runner reconstruction,
+and no replay of a committed Tool effect. These package tests run in `make check`;
+they do not alter the structural scenario dataset or its pinned baseline.
+
+The PostgreSQL integration suite separately verifies persisted Kernel and
+Harness/Context recovery across a real child-process interruption. This proves a
+specific crash boundary with deterministic model fixtures, not general physical
+exactly-once execution or language-model reasoning quality.
+
+The example's explicit live-provider mode reuses the task and oracle for a real
+model. It requires host credentials and an explicitly supplied model window;
+it is not run by ordinary unit or CI gates. Report provider/model identity and
+observed output separately from offline acceptance. No success-rate, latency or
+cost baseline is inferred from a scripted-model run.

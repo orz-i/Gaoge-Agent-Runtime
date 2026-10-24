@@ -13,9 +13,9 @@ These concepts must **not** become competing sources of truth. A persistent Sess
 
 ## Minimal text Session API
 
-`Runner.OpenSession(SessionOptions)` returns a **stateless handle** offering `Prompt(ctx, stableTurnID, text)`, `Load(ctx, stableTurnID)`, and `Refresh(ctx, stableTurnID)`. It delegates to the existing `Runner.Start`/Load/Refresh.
+`Runner.OpenSession(SessionOptions)` returns a **stateless handle** offering `Prompt(ctx, stableTurnID, text)`, `Load(ctx, stableTurnID)`, `Refresh(ctx, stableTurnID)`, and `Resume(ctx, stableTurnID)`. It delegates to `Runner.Start`/Load/Refresh/ResumeTurn. The complete [single-Agent task guide](agent-task-workflow.md) connects these methods to Context assembly, Tool use and interruption recovery.
 
-The host supplies a `TranscriptSource` whose `Seed` method returns a `ContextSeed` with the complete source ancestry (or a validated source delta), **including the new user message last**. Past assistant outputs and stable source IDs must be provided by the host. The SDK does not silently store model output as a second transcript. Reusing the same Turn ID reloads the same durable Turn; a different Turn ID creates a new logical request.
+For `Prompt`, the host supplies a `TranscriptSource` whose `Seed` method returns a `ContextSeed` with the complete source ancestry (or a validated source delta), **including the new user message last**. `OpenSession` also accepts a nil transcript for a recovery/read handle; `Load`, `Refresh` and `Resume` do not require a new transcript. Calling `Prompt` on that handle returns `ErrInvalidRequest`. Past assistant outputs and stable source IDs must be provided by the host. The SDK does not silently store model output as a second transcript. Reusing the same Turn ID reloads the same durable Turn; a different Turn ID creates a new logical request.
 
 Example (assuming `hostRunner` and `lookupHostTranscript` are already composed):
 
@@ -33,7 +33,15 @@ if err != nil { return err }
 _ = turn
 ```
 
-The `HostThread` identity **must be tenant-scoped**. A Session opened for another actor cannot read, refresh, or reuse an existing Session identity; the `Prompt` path checks owner identity before calling the Host transcript provider. These are identity safeguards, **not** a substitute for authorization enforced by the Host.
+The `HostThread` identity **must be tenant-scoped**. A Session opened for another actor cannot read, refresh, resume, or reuse an existing Session identity; the `Prompt` path checks owner identity before calling the Host transcript provider. These are identity safeguards, **not** a substitute for authorization enforced by the Host.
+
+### Explicit recovery of an existing Agent Turn
+
+`SessionClient.Resume(ctx, stableTurnID)` resolves the same durable Turn and calls `Runner.ResumeTurn`. Recovery restores the persisted Context checkpoint, loads the existing direct-Agent Run revision, and invokes the Agent's existing `Resume` path. It never creates a new Run or reprojects a pending ModelInvocation request from a fresh transcript.
+
+Only an existing running direct-Agent Run is advanced. Completed, failed and cancelled Turns are returned without another dispatch. Approval waits, budget pauses and other non-running Runtime states are synchronized for the host to handle through their existing controls. Retry due times, execution claims and uncertain Tool outcomes remain enforced by Agent; their errors are preserved. A missing Runtime or missing root Invocation is reported instead of inventing a replacement execution. If creation was interrupted before a Run existed, retry the original `Prompt` with its original stable identity and input.
+
+`Load` remains read-only. `Refresh` repairs Harness projections from Runtime facts. Repeating `Prompt` remains an idempotent start/reload, not an implicit execution retry. `Runner.ResumeTurn` is a trusted host capability; the Session facade adds the existing actor/session ownership check. No worker or scheduler is started.
 
 ## Pre-intent Context projection
 
