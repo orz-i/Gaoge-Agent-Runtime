@@ -22,7 +22,7 @@ import uuid
 import warnings
 
 SCHEMA_VERSION = 1
-SERVICE_INPUT_TOKENS = 6144
+SERVICE_INPUT_TOKENS = 8192
 DEFAULT_ENDPOINTS = {
     "openai": "https://api.openai.com/v1/responses",
     "anthropic": "https://api.anthropic.com/v1/messages",
@@ -34,6 +34,7 @@ PUBLIC_CONFIGURATION = (
 MAX_LINE_BYTES = 256 * 1024
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
 MAX_EVENTS = 256
+PROBE_JSON_TYPES = {"object", "array", "string", "number", "boolean", "null"}
 STAGES = {
     "configuration", "preflight", "start", "evidence", "interrupted",
     "lease_check", "resume", "oracle", "terminal_check", "completed",
@@ -137,7 +138,7 @@ def positive_integer(value, minimum=1, maximum=None):
     return value
 
 
-def validate_configuration(value):
+def validate_configuration(value, service_input_tokens=SERVICE_INPUT_TOKENS):
     config = {name: value[name] for name in PUBLIC_CONFIGURATION if name in value}
     if len(config) != len(PUBLIC_CONFIGURATION):
         raise SafeFailure("invalid_configuration")
@@ -148,7 +149,10 @@ def validate_configuration(value):
     positive_integer(config["contextTokens"], maximum=1 << 24)
     positive_integer(config["maxOutputTokens"], maximum=1 << 20)
     positive_integer(config["repetitions"], maximum=20)
-    if config["contextTokens"] - config["maxOutputTokens"] < SERVICE_INPUT_TOKENS:
+    available_input = config["contextTokens"] - config["maxOutputTokens"]
+    if service_input_tokens is not None:
+        positive_integer(service_input_tokens)
+    if available_input <= 0 or (service_input_tokens is not None and available_input < service_input_tokens):
         raise SafeFailure("insufficient_context_capacity")
     if type(config["allowUnknownStructuredModel"]) is not bool:
         raise SafeFailure("invalid_probe_choice")
@@ -300,7 +304,11 @@ def failure_advice(stage, code, preflight):
         return ("网关拒绝、协议不兼容或连接异常均可能导致此分类，现有证据不足以确定具体原因。"
                 "请按网关文档核对最终 endpoint、所选协议及 model 的原生严格 JSON Schema 支持；"
                 "可先使用输出预算 1024、每任务 1 次重新运行。")
-    if code in {"capability_unavailable", "provider_unsupported", "strict_schema_probe_failed", "output_schema_invalid"}:
+    if code == "strict_schema_probe_failed":
+        return ("请确认该 endpoint/model 的原生严格 JSON Schema 实现及最终回答映射；"
+                "修正协议适配或改用已验证支持的入口后再采样。"
+                "这些事实不能定位网关内部哪一步失效。")
+    if code in {"capability_unavailable", "provider_unsupported", "output_schema_invalid"}:
         return "核对模型与网关对原生严格 JSON Schema 的支持；未知模型需明确允许探测，任务样本还会验证工具调用。"
     if code in {"timeout", "runner_timeout"}:
         return "检查网关连接与响应耗时；可先使用输出预算 1024、每任务 1 次重新运行。"
@@ -315,6 +323,37 @@ def failure_advice(stage, code, preflight):
     if stage in {"oracle", "lease_check", "resume", "terminal_check", "interrupted"}:
         return "查看失败样本的 oraclePassed、recoveryChecks 和工具执行计数，按具体阶段定位任务或恢复检查。"
     return "结合阶段与失败分类检查报告中的配置和样本；修正后重新运行，保留当前结果便于比较。"
+
+
+def schema_diagnostics(check):
+    lines = ["模型回答检查：有内容=%s；有效 JSON=%s；根类型=%s；schema 校验通过=%s。" %
+             (md_cell(check["contentPresent"]), md_cell(check["jsonValid"]),
+              check["jsonType"], md_cell(check["schemaValid"]))]
+    reasons = []
+    if not check["contentPresent"]:
+        reasons.append("回答内容为空")
+    elif not check["jsonValid"]:
+        reasons.append("回答不是可解析的单个 JSON 文档")
+    elif check["jsonType"] != "object":
+        reasons.append("JSON 根类型为 %s，要求 object" % check["jsonType"])
+    else:
+        if not check["okPresent"]:
+            reasons.append("必填字段 ok 缺失")
+        elif check["okType"] != "boolean":
+            reasons.append("ok 类型为 %s，要求 boolean" % check["okType"])
+        elif not check["okIsTrue"]:
+            reasons.append("ok 为 false，要求 true")
+        if check["extraPropertyCount"]:
+            reasons.append("存在 %d 个额外属性，schema 禁止额外属性" % check["extraPropertyCount"])
+    if not check["schemaValid"] and not reasons:
+        reasons.append("本地 schema 验证器拒绝，当前结构摘要未覆盖该原因")
+    if any(check[name] for name in ("toolCallCount", "hostedToolCallCount", "artifactCount")) or check["continue"]:
+        reasons.append("纯 JSON 预检要求无工具调用、无产物且 continue=false")
+    lines += ["未满足：" + reason + "。" for reason in reasons]
+    lines.append("行为检查：工具调用 %d；托管工具调用 %d；产物 %d；continue=%s。" %
+                 (check["toolCallCount"], check["hostedToolCallCount"], check["artifactCount"],
+                  "true" if check["continue"] else "false"))
+    return lines
 
 
 def failure_diagnostics(report):
@@ -350,6 +389,11 @@ def failure_diagnostics(report):
                      (preflight["httpStatus"], preflight["responseKind"]))
     for label, stage, code in failures:
         lines.append("%s：阶段 %s；失败分类 %s。" % (label, stage, code))
+        if stage == "preflight" and code == "strict_schema_probe_failed":
+            if "schemaCheck" in preflight:
+                lines += schema_diagnostics(preflight["schemaCheck"])
+            else:
+                lines.append("本报告未记录 schema 细项，无法从已存数据还原具体违例。")
         lines.append("下一步：" + failure_advice(stage, code, preflight))
     return lines
 
@@ -496,6 +540,36 @@ def validate_usage(value, coverage=False):
     validate_usage(value["known"])
 
 
+def validate_schema_check(check):
+    required = {
+        "contentPresent", "jsonValid", "jsonType", "schemaValid", "toolCallCount",
+        "hostedToolCallCount", "artifactCount", "continue",
+    }
+    if not isinstance(check, dict) or not required <= set(check):
+        raise ProtocolFailure("invalid_preflight_schema_check")
+    if (any(type(check[name]) is not bool for name in ("contentPresent", "jsonValid", "schemaValid", "continue")) or
+            not isinstance(check["jsonType"], str) or check["jsonType"] not in PROBE_JSON_TYPES | {"invalid"} or
+            check["jsonValid"] != (check["jsonType"] != "invalid") or
+            (check["jsonValid"] and not check["contentPresent"]) or
+            (check["schemaValid"] and not check["jsonValid"]) or
+            any(type(check[name]) is not int or not 0 <= check[name] <= (1 << 62)
+                for name in ("toolCallCount", "hostedToolCallCount", "artifactCount"))):
+        raise ProtocolFailure("invalid_preflight_schema_check")
+    if check["jsonType"] == "object":
+        required |= {"okPresent", "okType", "extraPropertyCount"}
+        if (type(check.get("okPresent")) is not bool or
+                not isinstance(check.get("okType"), str) or check["okType"] not in PROBE_JSON_TYPES | {"missing"} or
+                check["okPresent"] != (check["okType"] != "missing") or
+                type(check.get("extraPropertyCount")) is not int or not 0 <= check["extraPropertyCount"] <= (1 << 62)):
+            raise ProtocolFailure("invalid_preflight_schema_check")
+        if check["okType"] == "boolean":
+            required.add("okIsTrue")
+            if type(check.get("okIsTrue")) is not bool:
+                raise ProtocolFailure("invalid_preflight_schema_check")
+    if set(check) != required:
+        raise ProtocolFailure("invalid_preflight_schema_check")
+
+
 def validate_sample_diagnostics(sample):
     validate_usage(sample.get("usage"), coverage=True)
     for name in ("lookupCalls", "artifactReads", "draftWrites", "contextGeneration"):
@@ -564,8 +638,12 @@ def accept_event(report, event):
                 type(event["httpStatus"]) is not int or not 100 <= event["httpStatus"] <= 999 or
                 event["responseKind"] not in ("json", "html", "event_stream", "other")):
             raise ProtocolFailure("invalid_preflight_transport")
+        if "schemaCheck" in event:
+            if event["status"] != "failed" or event.get("failureCode") != "strict_schema_probe_failed":
+                raise ProtocolFailure("invalid_preflight_schema_check")
+            validate_schema_check(event["schemaCheck"])
         report["preflight"] = {name: event[name] for name in (
-            "status", "failureCode", "durationMs", "usage", "httpStatus", "responseKind",
+            "status", "failureCode", "durationMs", "usage", "httpStatus", "responseKind", "schemaCheck",
         ) if name in event}
     elif kind == "sample":
         if not runner.get("taskVersion") or not report["preflight"] or report["preflight"]["status"] != "passed":
@@ -859,9 +937,15 @@ def validate_report(report):
             (report.get("preflight") is not None and not isinstance(report["preflight"], dict))):
         raise SafeFailure("invalid_report")
     try:
-        config = validate_configuration(report["configuration"])
-        rebuilt = new_report(config, report["source"])
         runner = report["runner"]
+        # Historical runs keep their own execution budget. A checkpoint before
+        # start has no measured profile and cannot be numerically compared.
+        service_input_tokens = None
+        if runner.get("taskVersion"):
+            service_input_tokens = runner["profile"]["contextPolicy"]["maxInputTokens"]
+            positive_integer(service_input_tokens)
+        config = validate_configuration(report["configuration"], service_input_tokens=service_input_tokens)
+        rebuilt = new_report(config, report["source"])
         if runner.get("taskVersion"):
             accept_event(rebuilt, dict(runner, type="start"))
         if report["preflight"] is not None:

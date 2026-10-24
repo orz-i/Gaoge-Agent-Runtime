@@ -49,9 +49,9 @@ it does not deploy, publish, send a message or modify repository files.
 - The archive reader is registered in the Tool registry and explicitly granted
   in `ConfigSnapshot.ToolKeys`, with its policy snapshot.
 - The model-window resolver accepts only the exact configured model. Scripted
-  mode declares an 8,192-token synthetic capacity. Live mode requires the host
+  mode declares a 16,384-token synthetic capacity. Live mode requires the host
   to supply the selected model's documented capacity.
-- `ContextPolicy.MaxInputTokens = 6144` is a separate service ceiling that
+- `ContextPolicy.MaxInputTokens = 8192` is a separate service ceiling that
   makes this small task exercise compaction, even with a large model window.
   The default Context estimator is conservative; this is not an exact
   provider tokenizer measurement.
@@ -65,7 +65,10 @@ it does not deploy, publish, send a message or modify repository files.
 The service ceiling must still leave room for the selected model's Tool
 schemas, instructions and retrieved evidence. Making it too small can archive
 the reader's result again or fail admission; increasing the provider capacity
-alone does not raise the separate service ceiling.
+alone does not raise the separate service ceiling. The current 8,192 ceiling
+replaces the earlier 6,144 baseline profile after native phase/replay fixtures
+exceeded that conservative input allowance. The dataset hash and measurement
+profile record this change; results across those budgets are not comparable.
 
 ## Oracle and correctness boundary
 
@@ -146,7 +149,7 @@ go run ./go/agent-runtime-harness/examples/task-agent \
 The provider constructor reads `OPENAI_API_KEY` only in live mode. Use
 `-provider=anthropic` with `ANTHROPIC_API_KEY` for the Anthropic adapter.
 Supply the actual selected model's documented window and an explicit output
-ceiling, leaving at least 6,144 input tokens. No real model or window is guessed.
+ceiling, leaving at least 8,192 input tokens. No real model or window is guessed.
 
 A successful live run reports `live_model_task_smoke`. It is evidence for one
 task/configuration, not a general model-quality score or ranking. Tool misuse,

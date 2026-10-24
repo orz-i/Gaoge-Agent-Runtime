@@ -99,7 +99,7 @@ func TestBaselinePreflightObservationKeepsOnlyTypedMetadata(t *testing.T) {
 func unitBaselineInput() baselineInput {
 	return baselineInput{
 		SchemaVersion: 1, Provider: "openai", Endpoint: "https://provider.invalid/v1/responses",
-		APIKey: "private-fixture-key", Model: "gpt-4.1", ContextTokens: 8192, MaxOutputTokens: 512, Repetitions: 1,
+		APIKey: "private-fixture-key", Model: "gpt-4.1", ContextTokens: 16384, MaxOutputTokens: 512, Repetitions: 1,
 	}
 }
 
@@ -107,6 +107,7 @@ func TestBaselineInvalidInputEmitsOnlySafeConfigurationFailure(t *testing.T) {
 	for _, change := range []func(*baselineInput){
 		func(input *baselineInput) { input.Repetitions = 21 },
 		func(input *baselineInput) { input.ContextTokens = 512 },
+		func(input *baselineInput) { input.ContextTokens = serviceInputTokens + input.MaxOutputTokens - 1 },
 		func(input *baselineInput) { input.Endpoint += "?api_key=" + input.APIKey },
 		func(input *baselineInput) { input.Endpoint = "http://provider.invalid/v1/responses" },
 		func(input *baselineInput) { input.Model = input.APIKey },
@@ -138,7 +139,7 @@ func TestBaselineInvalidInputEmitsOnlySafeConfigurationFailure(t *testing.T) {
 }
 
 func TestBaselineManifestIsComparableAcrossModelConfigurations(t *testing.T) {
-	first, err := baselineStart(publicConfiguration{Provider: "openai", Model: "first-model", ContextTokens: 8192, MaxOutputTokens: 512, Repetitions: 1})
+	first, err := baselineStart(publicConfiguration{Provider: "openai", Model: "first-model", ContextTokens: 16384, MaxOutputTokens: 512, Repetitions: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,8 +149,15 @@ func TestBaselineManifestIsComparableAcrossModelConfigurations(t *testing.T) {
 	}
 	if first.DatasetHash != second.DatasetHash || first.RequestedSamples != 2 || second.RequestedSamples != 6 ||
 		first.Profile.MaxLLMCalls != taskLimits().MaxLLMCalls || first.Profile.MaxToolCalls != taskLimits().MaxToolCalls ||
-		first.Profile.ContextPolicy != taskContextPolicy() || first.Profile.ArtifactReadInstructionLimit != 128 {
+		first.Profile.ContextPolicy != taskContextPolicy() || first.Profile.ContextPolicy.MaxInputTokens != 8192 ||
+		first.Profile.ArtifactReadInstructionLimit != 128 {
 		t.Fatalf("manifest mixed model settings with task policy: first=%+v second=%+v", first, second)
+	}
+	// This budget revision must not reuse the identity of the original 6144
+	// profile. baselineStart remains the single manifest/hash construction path.
+	const original6144DatasetHash = "sha256:0223727830be3ef1e77c60cfa5e77e2991008f3560ef29ebded89be3610e0039"
+	if first.DatasetHash == original6144DatasetHash {
+		t.Fatal("new service input budget reused the previous dataset identity")
 	}
 	cases := baselineCases()
 	if digest([]byte(cases[0].source.document())) == digest([]byte(cases[1].source.document())) {

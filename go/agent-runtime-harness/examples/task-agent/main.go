@@ -18,7 +18,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/openai"
 )
 
-const serviceInputTokens int64 = 6144
+const serviceInputTokens int64 = 8192
 
 type settings struct {
 	mode, provider, modelID     string
@@ -79,7 +79,7 @@ func (config *settings) resolve() error {
 		if config.provider != "" || config.modelID != "" || config.contextTokens != 0 || config.outputTokens != 0 {
 			return errors.New("scripted mode requires its fixed synthetic model limits")
 		}
-		config.modelID, config.contextTokens, config.outputTokens = "scripted-task", 8192, 512
+		config.modelID, config.contextTokens, config.outputTokens = "scripted-task", 16384, 512
 	case "live":
 		if (config.provider != "openai" && config.provider != "anthropic") || !validModelID(config.modelID) ||
 			config.outputTokens <= 0 || config.contextTokens <= config.outputTokens ||

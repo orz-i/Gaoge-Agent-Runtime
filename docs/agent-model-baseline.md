@@ -34,10 +34,11 @@ terminal prompt; do not paste it into a command, report or chat.
 | Unknown-model schema opt-in | Explicit permission to probe native strict JSON Schema for an unlisted model; default no |
 | API key | Hidden input, passed to the already built runner through stdin |
 
-The context capacity must leave at least 6,144 tokens after reserving the output
-ceiling. The service input ceiling stays 6,144 tokens so that the task exercises
-Context compaction even when the model supports a much larger window. This uses
-the existing conservative Context estimate; it does not claim an exact provider
+The context capacity must leave at least 8,192 tokens after reserving the output
+ceiling. The service input ceiling is fixed at 8,192 tokens for this measurement
+profile, so that the task exercises Context compaction even when the model
+supports a much larger window. This uses the existing conservative Context
+estimate; it does not claim an exact provider
 tokenizer or reliable token-admission capability.
 
 Official endpoint defaults are `https://api.openai.com/v1/responses` and
@@ -80,17 +81,40 @@ kind (`json`, `html`, `event_stream`, or `other`). They contain no response body
 raw header values or provider error text. A response that was never received has
 no invented status. Earlier reports without these fields remain readable.
 
+A `strict_schema_probe_failed` event can additionally include `schemaCheck`.
+This records only fixed JSON-type labels, booleans and counts: whether content
+and valid JSON exist, whether the original validator accepted the fixed schema,
+the presence/type of the required `ok` field, whether a boolean `ok` is true,
+the count of extra properties, and unexpected Tool/artifact/continuation facts.
+Object-field facts are omitted for non-object output. It does not include output
+text, property names, arbitrary values, validation errors or fingerprints.
+Earlier reports without `schemaCheck` remain valid. The original strict schema
+still decides success; diagnostics do not extract JSON, repair a response or
+retry with a weaker contract.
+
 Use the observations to choose the next check:
 
 | Observation | Next check |
 | --- | --- |
 | Root/base URL in an earlier report | Run the updated launcher and inspect the resolved API endpoint before entering the key |
 | HTTP 200 with HTML | Verify that the configured address reaches the API rather than a website or gateway page |
+| HTTP 200 with JSON and `strict_schema_probe_failed` | The adapter returned a model response, but its projected final output failed the probe; use `schemaCheck` to distinguish invalid JSON, wrong shape/value, extra properties, or unexpected continuation |
+| `schemaCheck.jsonValid = false` | Inspect the provider/adapter's final-answer handling and native strict-schema behavior; a JSON HTTP envelope does not imply that the contained answer is valid JSON |
+| `schemaCheck.schemaValid = true` with a failed probe | Inspect the reported Tool/artifact counts and continuation flag; the probe also requires a terminal, tool-free answer |
 | HTTP 401 or 403 | Check the key, its permissions, and gateway access policy; the status alone does not establish which one is wrong |
 | HTTP 404 | Check the complete endpoint and model identifier |
 | HTTP 400 or 422 | Check the API protocol, model, native schema support and task output budget |
 | HTTP 3xx | Configure the final API URL directly; the client does not forward credentials through redirects |
 | No HTTP status | Check connectivity, timeout and provider availability; do not infer a server status from a generic error |
+
+The OpenAI adapter distinguishes `commentary` from `final_answer` in phased
+Responses output and preserves original phases on continuation. Its previous
+text concatenation could make a valid final JSON answer fail this probe.
+Offline fixtures reproduce and cover that defect, including the task's Context
+and recovery path. A historical failed report without the original response
+cannot establish whether that defect occurred in that particular live request.
+Do not infer gateway behavior or a model's general capability from the failure
+code alone. See the [adapter upgrade note](releases/unreleased-openai-response-phases.md).
 
 For this small task, start with the default 1,024 output-token budget rather than
 copying the model's maximum supported output capacity. Keep the same task output
@@ -112,9 +136,9 @@ artifact, save one local draft, and return the required structured fields.
 The task instructions suggest a 128-character artifact query page so that the
 returned evidence fits alongside both providers' native transcript overhead.
 This is a prompt instruction, not a new SDK reader limit; the oracle checks the
-actual recovered evidence. The shared 6,144-token service ceiling stays fixed. After
-the draft's Tool receipt commits, a controlled interruption reconstructs the
-runners. The same Run and Turn must complete without executing the committed
+actual recovered evidence. The shared 8,192-token service ceiling stays fixed.
+After the draft's Tool receipt commits, a controlled interruption reconstructs
+the runners. The same Run and Turn must complete without executing the committed
 Tool call again. The oracle checks source facts, archived evidence, actual
 retrieval, the saved draft, output bounds and recovery identity.
 
@@ -122,6 +146,16 @@ This is one task family, not two unrelated capability benchmarks. The draft is
 an in-memory fixture; the task does not deploy a release or send a message.
 
 ## Reports and comparison
+
+The phase-support revision raises the baseline's service input ceiling from
+6,144 to 8,192. A full native phase/replay fixture measured a conservative hard
+estimate of 6,758 before the final recovery dispatch; the former ceiling could
+not accommodate that supported transcript. This is an example policy change,
+not a new SDK default or a weaker estimate. The roughly 120 KB dossier still
+requires archival and actual retrieval, and all task, native-schema and recovery
+checks remain in force. The larger ceiling is included in the saved measurement
+profile and its dataset hash. Older reports remain readable with their recorded
+budgets, but the comparison command rejects old/new profile score comparisons.
 
 Reports are written under the ignored `artifacts/agent-baselines/` directory as
 a unique JSON file and a Markdown summary. The script prints their exact paths.

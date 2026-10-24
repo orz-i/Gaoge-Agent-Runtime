@@ -15,6 +15,9 @@ func scriptedSettings(t *testing.T) settings {
 	if err := config.resolve(); err != nil {
 		t.Fatal(err)
 	}
+	if config.contextTokens != 16384 || config.outputTokens != 512 {
+		t.Fatalf("scripted model capacity drifted: %+v", config)
+	}
 	return config
 }
 
@@ -71,6 +74,7 @@ func TestLiveSettingsRequireExplicitModelCapacityAndOutputLimit(t *testing.T) {
 		{mode: "live", provider: "openai", modelID: "host-selected"},
 		{mode: "live", provider: "openai", modelID: "host-selected", contextTokens: 8192},
 		{mode: "live", provider: "openai", modelID: "host-selected", contextTokens: 4096, outputTokens: 512},
+		{mode: "live", provider: "openai", modelID: "host-selected", contextTokens: 8192, outputTokens: 512},
 	} {
 		if err := config.resolve(); err == nil {
 			t.Fatalf("accepted unknown or insufficient model limits: %+v", config)
@@ -78,7 +82,7 @@ func TestLiveSettingsRequireExplicitModelCapacityAndOutputLimit(t *testing.T) {
 	}
 	// Configuration validation does not construct a provider, read a key, or
 	// make any model call.
-	config := settings{mode: "live", provider: "openai", modelID: "host-selected", contextTokens: 8192, outputTokens: 512}
+	config := settings{mode: "live", provider: "openai", modelID: "host-selected", contextTokens: 16384, outputTokens: 512}
 	if err := config.resolve(); err != nil {
 		t.Fatal(err)
 	}

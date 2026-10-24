@@ -134,7 +134,9 @@ func (runner *Runner) correctCompletion(
 	}
 	state.CompletionRepair = true
 	if content := strings.TrimSpace(response.Content); content != "" {
-		state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: content})
+		state.Messages = append(state.Messages, model.Message{
+			Role: model.RoleAssistant, Content: content, ProviderReplay: model.CloneProviderReplay(response.ProviderReplay),
+		})
 	}
 	state.Messages = withSystemGuidance(
 		state.Messages,
@@ -2016,7 +2018,9 @@ func (runner *Runner) complete(
 			fmt.Errorf("%w: %s", ErrBudgetExceeded, dimension),
 		)
 	}
-	state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: response.Content})
+	state.Messages = append(state.Messages, model.Message{
+		Role: model.RoleAssistant, Content: response.Content, ProviderReplay: model.CloneProviderReplay(response.ProviderReplay),
+	})
 	encodedState, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err

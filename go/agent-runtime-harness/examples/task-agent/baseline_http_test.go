@@ -19,7 +19,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-const baselineHTTPFakeKey = "fake_baseline_key_123"
+const (
+	baselineHTTPFakeKey    = "fake_baseline_key_123"
+	baselineHTTPCommentary = " \nWorking.\n "
+)
 
 var baselineToolNames = map[string]string{
 	"lookup_release":        lookupKey,
@@ -30,15 +33,16 @@ var baselineToolNames = map[string]string{
 // The server decodes the real provider request and derives every task action
 // from those messages. No source fixture or scripted cursor bypasses HTTP.
 type baselineHTTPFixture struct {
-	t          *testing.T
-	protocol   string
-	path       string
-	model      string
-	wrongFinal bool
-	mu         sync.Mutex
-	probes     int
-	streams    int
-	answers    []taskAnswer
+	t                   *testing.T
+	protocol            string
+	path                string
+	model               string
+	wrongFinal          bool
+	mu                  sync.Mutex
+	probes              int
+	streams             int
+	answers             []taskAnswer
+	phaseReplayRequests int
 }
 
 func (fixture *baselineHTTPFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -174,13 +178,17 @@ func (fixture *baselineHTTPFixture) assertSchema(schema json.RawMessage, stream 
 }
 
 type baselineOpenAIItem struct {
-	Type      string     `json:"type"`
-	Role      model.Role `json:"role"`
-	Content   string     `json:"content"`
-	CallID    string     `json:"call_id"`
-	Name      string     `json:"name"`
-	Arguments string     `json:"arguments"`
-	Output    string     `json:"output"`
+	Type      string          `json:"type"`
+	ID        string          `json:"id"`
+	Role      model.Role      `json:"role"`
+	Phase     string          `json:"phase"`
+	Status    string          `json:"status"`
+	Opaque    string          `json:"fixture_opaque"`
+	Content   json.RawMessage `json:"content"`
+	CallID    string          `json:"call_id"`
+	Name      string          `json:"name"`
+	Arguments string          `json:"arguments"`
+	Output    string          `json:"output"`
 }
 
 type baselineAnthropicBlock struct {
@@ -200,10 +208,30 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 		if err := json.Unmarshal(payload["input"], &items); err != nil {
 			return request, err
 		}
+		var replayedPhase bool
 		for _, item := range items {
 			switch item.Type {
 			case "":
-				request.Messages = append(request.Messages, model.Message{Role: item.Role, Content: item.Content})
+				var content string
+				if err := json.Unmarshal(item.Content, &content); err != nil {
+					return request, err
+				}
+				request.Messages = append(request.Messages, model.Message{Role: item.Role, Content: content})
+			case "message":
+				if item.Phase != "commentary" || item.Role != model.RoleAssistant || item.Status != "completed" ||
+					item.ID != baselineHTTPFakeKey+"_commentary" || item.Opaque != baselineHTTPFakeKey+"_opaque" {
+					return request, errors.New("native phase replay lost its original metadata")
+				}
+				var content []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(item.Content, &content); err != nil || len(content) != 1 ||
+					content[0].Type != "output_text" || content[0].Text != baselineHTTPCommentary {
+					return request, errors.New("native phase replay changed its message content")
+				}
+				request.Messages = append(request.Messages, model.Message{Role: item.Role, Content: content[0].Text})
+				replayedPhase = true
 			case "function_call":
 				key, ok := baselineToolNames[item.Name]
 				if !ok {
@@ -217,6 +245,11 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 			default:
 				return request, fmt.Errorf("unexpected Responses input type %q", item.Type)
 			}
+		}
+		if replayedPhase {
+			fixture.mu.Lock()
+			fixture.phaseReplayRequests++
+			fixture.mu.Unlock()
 		}
 		return request, nil
 	}
@@ -275,17 +308,29 @@ func baselineProviderToolName(call tools.Call) string {
 	return ""
 }
 
+func baselineOpenAIPhaseMessage(phase, content string) map[string]any {
+	return map[string]any{
+		"type": "message", "id": baselineHTTPFakeKey + "_" + phase, "role": "assistant", "phase": phase,
+		"status": "completed", "fixture_opaque": baselineHTTPFakeKey + "_opaque",
+		"content": []any{map[string]string{"type": "output_text", "text": content}},
+	}
+}
+
 func (fixture *baselineHTTPFixture) writeResponse(w http.ResponseWriter, response model.Response, stream bool) {
 	usage := map[string]int{"input_tokens": 31, "output_tokens": 13}
+	if !stream {
+		w.Header().Set("Content-Type", "application/json")
+	}
 	if fixture.protocol == "openai" {
-		output := make([]any, 0, len(response.ToolCalls)+1)
+		output := make([]any, 0, len(response.ToolCalls)+2)
+		output = append(output, baselineOpenAIPhaseMessage("commentary", baselineHTTPCommentary))
 		for _, call := range response.ToolCalls {
 			output = append(output, map[string]any{
 				"type": "function_call", "call_id": baselineHTTPFakeKey + "_" + call.ID, "name": baselineProviderToolName(call), "arguments": string(call.Arguments),
 			})
 		}
 		if response.Content != "" {
-			output = append(output, map[string]any{"type": "message", "content": []any{map[string]string{"type": "output_text", "text": response.Content}}})
+			output = append(output, baselineOpenAIPhaseMessage("final_answer", response.Content))
 		}
 		body := map[string]any{"id": baselineHTTPFakeKey + "_response", "status": "completed", "output": output, "usage": usage}
 		if !stream {
@@ -338,7 +383,7 @@ func baselineSSE(t *testing.T, w io.Writer, event string, payload any) {
 func baselineHTTPInput(protocol, endpoint string, allowUnknown bool) map[string]any {
 	return map[string]any{
 		"schemaVersion": 1, "provider": protocol, "endpoint": endpoint, "apiKey": baselineHTTPFakeKey,
-		"model": "private/baseline-verified", "contextTokens": 8192, "maxOutputTokens": 512,
+		"model": "private/baseline-verified", "contextTokens": 16384, "maxOutputTokens": 512,
 		"repetitions": 1, "allowUnknownStructuredModel": allowUnknown,
 	}
 }
@@ -401,8 +446,12 @@ func TestBaselineHTTPAdaptersCompleteBothCases(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("real adapter baseline failed: code=%d events=%+v", code, events)
 			}
-			if len(baselineEventsOfType(events, "start")) != 1 || len(baselineEventsOfType(events, "preflight")) != 1 {
+			preflight := baselineEventsOfType(events, "preflight")
+			if len(baselineEventsOfType(events, "start")) != 1 || len(preflight) != 1 || preflight[0]["status"] != "passed" {
 				t.Fatalf("start/preflight envelope missing: %+v", events)
+			}
+			if _, diagnosed := preflight[0]["schemaCheck"]; diagnosed {
+				t.Fatal("successful strict preflight emitted failure diagnostics")
 			}
 			samples := baselineEventsOfType(events, "sample")
 			if len(samples) != 2 {
@@ -437,11 +486,84 @@ func TestBaselineHTTPAdaptersCompleteBothCases(t *testing.T) {
 			if fixture.probes != 1 || fixture.streams != 8 || len(fixture.answers) != 2 {
 				t.Fatalf("provider path was bypassed or retried: probes=%d streams=%d answers=%+v", fixture.probes, fixture.streams, fixture.answers)
 			}
+			if protocol == "openai" && fixture.phaseReplayRequests != 6 {
+				t.Fatalf("tool continuation or recovered request lost phase replay: got=%d want=6", fixture.phaseReplayRequests)
+			}
 			first, second := fixture.answers[0], fixture.answers[1]
 			if first.DraftID != "draft-1" || second.DraftID != "draft-1" ||
 				first.DeploymentCode == second.DeploymentCode || first.Window == second.Window ||
 				first.ArtifactID == second.ArtifactID || first.ArtifactID == "" || second.ArtifactID == "" {
 				t.Fatalf("cases did not independently recover distinct persisted evidence: %+v", fixture.answers)
+			}
+		})
+	}
+}
+
+func TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		content string
+		check   map[string]any
+	}{
+		{
+			name: "false_literal", content: `{"ok":false}`,
+			check: map[string]any{
+				"jsonValid": true, "jsonType": "object", "okPresent": true, "okType": "boolean",
+				"okIsTrue": false, "extraPropertyCount": float64(0),
+			},
+		},
+		{
+			name: "plain_secret", content: "private-schema-probe-" + baselineHTTPFakeKey,
+			check: map[string]any{"jsonValid": false, "jsonType": "invalid"},
+		},
+		{
+			name:    "secret_key_and_value",
+			content: fmt.Sprintf(`{"ok":%q,%q:%q}`, baselineHTTPFakeKey, baselineHTTPFakeKey, "private-schema-probe-"+baselineHTTPFakeKey),
+			check: map[string]any{
+				"jsonValid": true, "jsonType": "object", "okPresent": true, "okType": "string",
+				"extraPropertyCount": float64(1),
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				// Even a schema-valid commentary is not the terminal answer.
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"id": baselineHTTPFakeKey + "_response", "status": "completed",
+					"output": []any{
+						baselineOpenAIPhaseMessage("commentary", `{"ok":true}`),
+						baselineOpenAIPhaseMessage("final_answer", tc.content),
+					},
+				})
+			}))
+			defer server.Close()
+			code, events, output := executeHTTPBaseline(t, baselineHTTPInput("openai", server.URL+"/phase-probe", true))
+			if code == 0 || calls.Load() != 1 || strings.Contains(output, "private-schema-probe") ||
+				len(baselineEventsOfType(events, "sample")) != 0 {
+				t.Fatalf("invalid final answer passed, leaked or retried: code=%d calls=%d events=%+v", code, calls.Load(), events)
+			}
+			preflight := baselineEventsOfType(events, "preflight")
+			if len(preflight) != 1 || preflight[0]["status"] != "failed" || preflight[0]["failureCode"] != "strict_schema_probe_failed" ||
+				preflight[0]["httpStatus"] != float64(http.StatusOK) || preflight[0]["responseKind"] != "json" {
+				t.Fatalf("invalid final answer lost its failure classification: %+v", preflight)
+			}
+			want := map[string]any{
+				"contentPresent": true, "schemaValid": false, "continue": false,
+				"toolCallCount": float64(0), "hostedToolCallCount": float64(0), "artifactCount": float64(0),
+			}
+			for key, value := range tc.check {
+				want[key] = value
+			}
+			got, ok := preflight[0]["schemaCheck"].(map[string]any)
+			if !ok || !reflect.DeepEqual(got, want) {
+				t.Fatalf("schema diagnostics changed or exposed extra data: got=%+v want=%+v", got, want)
+			}
+			summary := baselineEventsOfType(events, "summary")
+			if len(summary) != 1 || summary[0]["attempted"] != float64(0) || summary[0]["skipped"] != float64(2) || summary[0]["successRate"] != nil {
+				t.Fatalf("invalid strict preflight changed the task denominator: %+v", summary)
 			}
 		})
 	}

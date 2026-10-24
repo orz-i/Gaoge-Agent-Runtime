@@ -3,7 +3,6 @@ package openai
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -18,7 +17,7 @@ const (
 // encodeReplay stores provider-authored output items in their original order.
 // The ordinary Agent transcript remains the authority for user-visible
 // messages and executable Tool calls. This evidence is only for stateless
-// Responses reasoning continuity with store=false.
+// Responses phase and reasoning continuity with store=false.
 func encodeReplay(output []json.RawMessage) (*model.ProviderReplay, error) {
 	if len(output) == 0 || len(output) > maxReplayItems {
 		return nil, ErrUnsupported
@@ -32,10 +31,10 @@ func encodeReplay(output []json.RawMessage) (*model.ProviderReplay, error) {
 	}, nil
 }
 
-// verifiedReplay allows only the original OpenAI reasoning/function-call
-// output items to be returned. It never interprets encrypted reasoning as
-// authority; every Function Call ID, name and argument must match the Agent's
-// durable, already authorized transcript before the request is dispatched.
+// verifiedReplay allows only supported original phase/reasoning output items.
+// It never interprets provider context as authority; every Function Call ID,
+// name and argument must match the Agent's durable, already authorized
+// transcript before the request is dispatched.
 func verifiedReplay(message model.Message) ([]json.RawMessage, error) {
 	replay := message.ProviderReplay
 	if replay == nil || replay.Provider != "openai" || replay.Format != replayFormat ||
@@ -47,50 +46,24 @@ func verifiedReplay(message model.Message) ([]json.RawMessage, error) {
 		len(outputs) == 0 || len(outputs) > maxReplayItems {
 		return nil, ErrUnsupported
 	}
-	var text strings.Builder
-	calls := make([]outputItem, 0, len(message.ToolCalls))
-	seenReasoning := false
-	for _, raw := range outputs {
-		var item outputItem
-		if len(raw) == 0 || json.Unmarshal(raw, &item) != nil {
-			return nil, ErrUnsupported
-		}
-		switch item.Type {
-		case "reasoning":
-			if item.EncryptedContent == "" {
-				return nil, errors.Join(ErrUnsupported, ErrReplayUnavailable)
-			}
-			seenReasoning = true
-		case "message":
-			// The original message is replayed exactly, including any phase
-			// markers. Only known textual content types are eligible.
-			for _, part := range item.Content {
-				switch part.Type {
-				case "output_text":
-					text.WriteString(part.Text)
-				case "refusal":
-					if part.Refusal == "" {
-						return nil, ErrUnsupported
-					}
-					text.WriteString(part.Refusal)
-				default:
-					return nil, ErrUnsupported
-				}
-			}
-		case "function_call":
-			if item.CallID == "" || item.Name == "" || !json.Valid([]byte(item.Arguments)) {
-				return nil, ErrUnsupported
-			}
-			calls = append(calls, item)
-		default:
-			return nil, ErrUnsupported
-		}
+	projection, err := projectOutput(outputs)
+	if err != nil {
+		return nil, err
 	}
-	if !seenReasoning || len(calls) == 0 || len(calls) != len(message.ToolCalls) ||
-		strings.TrimSpace(text.String()) != strings.TrimSpace(message.Content) {
+	if !projection.phased && (!projection.reasoning || len(projection.calls) == 0) ||
+		projection.phased && len(projection.calls) == 0 && projection.reasoning ||
+		len(projection.calls) != len(message.ToolCalls) {
 		return nil, ErrUnsupported
 	}
-	for i, original := range calls {
+	// Agent normalizes outer whitespace before storing either a tool step or a
+	// final message. Compare that same projection without altering raw replay.
+	if strings.TrimSpace(projection.content) != strings.TrimSpace(message.Content) {
+		return nil, ErrUnsupported
+	}
+	// Intermediate provider messages, like encrypted reasoning, are context
+	// evidence. Every function call still must match the committed transcript;
+	// excluding commentary from final content cannot hide an executable call.
+	for i, original := range projection.calls {
 		approved := message.ToolCalls[i]
 		if approved.ToolKey == "" || original.CallID != approved.ID || original.Name != approved.Name {
 			return nil, ErrUnsupported

@@ -115,6 +115,7 @@ type preflightEvent struct {
 	Usage        *tokenUsage           `json:"usage,omitempty"`
 	HTTPStatus   int                   `json:"httpStatus,omitempty"`
 	ResponseKind preflightResponseKind `json:"responseKind,omitempty"`
+	SchemaCheck  *probeSchemaCheck     `json:"schemaCheck,omitempty"`
 }
 
 var probeSchema = json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean","enum":[true]}},"required":["ok"],"additionalProperties":false}`)
@@ -162,9 +163,11 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 		return event
 	}
 	validator, err := jsoncontract.Compile(probeSchema)
-	if err != nil || validator.Validate(json.RawMessage(response.Content)) != nil || response.Continue ||
+	schemaValid := err == nil && validator.Validate(json.RawMessage(response.Content)) == nil
+	if !schemaValid || response.Continue ||
 		len(response.ToolCalls) != 0 || len(response.HostedToolCalls) != 0 || len(response.Artifacts) != 0 {
 		event.FailureCode = "strict_schema_probe_failed"
+		event.SchemaCheck = diagnoseProbeSchema(response, schemaValid)
 		return event
 	}
 	event.Status = "passed"

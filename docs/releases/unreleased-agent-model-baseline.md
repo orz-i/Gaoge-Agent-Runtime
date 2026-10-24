@@ -19,6 +19,13 @@ measurement profile, and separate task outcomes from recovery observations.
 Token usage includes coverage; a missing receipt is never reported as free
 consumption. The probe is measured separately from task samples.
 
+The current measurement profile uses an 8,192-token service input ceiling,
+revised from 6,144 after full native phase/replay fixtures demonstrated the old
+ceiling was insufficient. The large dossier must still be archived and queried.
+The saved profile and dataset hash include the changed budget; historical reports
+retain their recorded constraints, and comparisons across these profiles are
+rejected. See the [phase support note](unreleased-openai-response-phases.md).
+
 The launcher writes JSON and Markdown reports under the ignored
 `artifacts/agent-baselines/` directory and can compare compatible JSON reports
 offline. Keys travel through stdin to the built binary and do not enter command

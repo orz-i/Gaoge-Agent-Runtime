@@ -24,7 +24,7 @@ SPEC.loader.exec_module(baseline)
 def configuration():
     return {
         "provider": "openai", "endpoint": "https://gateway.example/custom/infer",
-        "model": "fixture-model", "contextTokens": 8192, "maxOutputTokens": 1024,
+        "model": "fixture-model", "contextTokens": 16384, "maxOutputTokens": 1024,
         "repetitions": 1, "allowUnknownStructuredModel": False,
     }
 
@@ -38,7 +38,7 @@ def start_event(config=None):
         "datasetHash": "sha256:" + "d" * 64,
         "profile": {
             "sampling": "sequential-round-robin",
-            "contextPolicy": {"maxInputTokens": 6144},
+            "contextPolicy": {"maxInputTokens": 8192},
             "oracleVersion": "evidence-draft-recovery-v1",
         },
         "configuration": public, "requestedSamples": 2 * config["repetitions"],
@@ -47,6 +47,19 @@ def start_event(config=None):
 
 def usage(missing=4):
     return {"knownCalls": 0, "missingCalls": missing, "complete": missing == 0, "known": None}
+
+
+def schema_check_fixture(kind="object", ok_type="boolean", ok_true=False):
+    check = {
+        "contentPresent": True, "jsonValid": kind != "invalid", "jsonType": kind,
+        "schemaValid": False, "toolCallCount": 0, "hostedToolCallCount": 0,
+        "artifactCount": 0, "continue": False,
+    }
+    if kind == "object":
+        check.update(okPresent=ok_type != "missing", okType=ok_type, extraPropertyCount=0)
+        if ok_type == "boolean":
+            check["okIsTrue"] = ok_true
+    return check
 
 
 def sample(index=1, passed=True):
@@ -149,7 +162,7 @@ class EndpointTests(unittest.TestCase):
     def test_interactive_address_and_output_budget_are_shown_before_launch(self):
         entered = "https://gateway.example"
         final = entered + "/v1/responses"
-        choices = ["1", entered, "fixture-model", "8192", "", "1", "n"]
+        choices = ["1", entered, "fixture-model", "16384", "", "1", "n"]
         with mock.patch.object(sys.stdin, "isatty", return_value=True), \
                 mock.patch.object(sys.stderr, "isatty", return_value=True), \
                 mock.patch("builtins.input", side_effect=choices), \
@@ -198,7 +211,7 @@ class EndpointTests(unittest.TestCase):
 
     def test_explicit_capacity_and_bounded_repetitions(self):
         for field, value in [
-            ("contextTokens", 0), ("contextTokens", 4096), ("contextTokens", True),
+            ("contextTokens", 0), ("contextTokens", 4096), ("contextTokens", 8192), ("contextTokens", True),
             ("repetitions", 0), ("repetitions", 21), ("maxOutputTokens", 0),
             ("allowUnknownStructuredModel", "yes"),
         ]:
@@ -207,6 +220,16 @@ class EndpointTests(unittest.TestCase):
             with self.subTest(field=field, value=value):
                 with self.assertRaises(baseline.SafeFailure):
                     baseline.validate_configuration(config)
+
+
+    def test_current_input_requires_the_current_service_budget(self):
+        self.assertEqual(baseline.SERVICE_INPUT_TOKENS, 8192)
+        config = configuration()
+        config["contextTokens"] = baseline.SERVICE_INPUT_TOKENS + config["maxOutputTokens"]
+        self.assertEqual(baseline.validate_configuration(config), config)
+        config["contextTokens"] -= 1
+        with self.assertRaisesRegex(baseline.SafeFailure, "^insufficient_context_capacity$"):
+            baseline.validate_configuration(config)
 
 
 class SecretAndBuildTests(unittest.TestCase):
@@ -386,6 +409,105 @@ class ProcessReportTests(unittest.TestCase):
                 with self.assertRaisesRegex(baseline.ProtocolFailure, "^invalid_preflight_transport$"):
                     baseline.accept_event(report, preflight)
 
+    def test_schema_check_is_saved_and_explained_in_console_and_markdown(self):
+        records = events(preflight_passed=False)
+        check = schema_check_fixture()
+        records[1].update(failureCode="strict_schema_probe_failed", httpStatus=200,
+                          responseKind="json", schemaCheck=check)
+        real_run_child = baseline.run_child
+
+        def fixture_runner(_command, root, config, secret, report, writer):
+            program = child_program(records, exit_code=1)
+            return real_run_child([sys.executable, "-u", "-c", program], root, config, secret, report, writer)
+
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(baseline, "source_metadata", return_value={}), \
+                mock.patch.object(baseline, "run_child", side_effect=fixture_runner), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(baseline.launch(
+                configuration(), Path(directory), get_key=lambda: self.secret, builder=lambda *_: None,
+            ), 1)
+            report_path = next((Path(directory) / "artifacts" / "agent-baselines").glob("*.json"))
+            loaded = baseline.read_report(report_path)
+            self.assertEqual(loaded["preflight"]["schemaCheck"], check)
+            for rendered in (output.getvalue(), report_path.with_suffix(".md").read_text(encoding="utf-8")):
+                self.assertIn("ok 为 false，要求 true", rendered)
+                self.assertIn("已尝试 0，跳过 2", rendered)
+                self.assertIn("不能定位网关内部哪一步失效", rendered)
+                self.assertNotIn("每任务 1 次重新运行", rendered)
+                self.assertNotIn(self.secret, rendered)
+
+    def test_schema_check_reasons_distinguish_structure_and_behavior(self):
+        for check, expected in (
+            (dict(schema_check_fixture("invalid"), contentPresent=False), "回答内容为空"),
+            (schema_check_fixture("invalid"), "不是可解析的单个 JSON 文档"),
+            (schema_check_fixture("string"), "根类型为 string，要求 object"),
+            (schema_check_fixture(ok_type="missing"), "必填字段 ok 缺失"),
+            (schema_check_fixture(ok_type="string"), "ok 类型为 string，要求 boolean"),
+            (dict(schema_check_fixture(ok_true=True), extraPropertyCount=2), "存在 2 个额外属性"),
+            (dict(schema_check_fixture(ok_true=True), schemaValid=True, toolCallCount=1), "无工具调用"),
+            ({**schema_check_fixture(ok_true=True), "schemaValid": True, "continue": True}, "continue=false"),
+        ):
+            with self.subTest(expected=expected):
+                baseline.validate_schema_check(check)
+                self.assertIn(expected, "\n".join(baseline.schema_diagnostics(check)))
+
+    def test_invalid_schema_check_never_enters_saved_report(self):
+        mutations = [
+            lambda check: check.update(jsonType="untrusted-response-type"),
+            lambda check: check.update(contentPresent=1),
+            lambda check: check.update(jsonValid=False),
+            lambda check: check.update(jsonType="array"),
+            lambda check: check.update(okType="string"),
+            lambda check: check.update(toolCallCount=True),
+            lambda check: check.update(artifactCount=-1),
+            lambda check: check.update(okType="untrusted-field-value"),
+            lambda check: check.update(okPresent=False),
+            lambda check: check.update(okIsTrue="true"),
+            lambda check: check.pop("extraPropertyCount"),
+        ]
+        for mutate in mutations:
+            check = schema_check_fixture()
+            mutate(check)
+            report = baseline.new_report(configuration(), {})
+            baseline.accept_event(report, start_event())
+            preflight = events(preflight_passed=False)[1]
+            preflight.update(failureCode="strict_schema_probe_failed", schemaCheck=check)
+            with self.subTest(mutate=mutate), self.assertRaisesRegex(
+                    baseline.ProtocolFailure, "^invalid_preflight_schema_check$"):
+                baseline.accept_event(report, preflight)
+            self.assertIsNone(report["preflight"])
+        for status, code in (("passed", None), ("failed", "provider_failed")):
+            report = baseline.new_report(configuration(), {})
+            baseline.accept_event(report, start_event())
+            preflight = dict(events(preflight_passed=False)[1], status=status, schemaCheck=schema_check_fixture())
+            if code is not None:
+                preflight["failureCode"] = code
+            else:
+                preflight.pop("failureCode")
+            with self.assertRaisesRegex(baseline.ProtocolFailure, "^invalid_preflight_schema_check$"):
+                baseline.accept_event(report, preflight)
+        records = events(preflight_passed=False)
+        records[1].update(failureCode="strict_schema_probe_failed", schemaCheck=schema_check_fixture())
+        records[1]["schemaCheck"][self.secret] = self.secret
+        with tempfile.TemporaryDirectory() as directory:
+            result, writer, _, output = self.invoke(directory, records, exit_code=1)
+            self.assertEqual(result["launcherFailure"]["failureCode"], "invalid_preflight_schema_check")
+            self.assertIsNone(result["preflight"])
+            self.assertNotIn(self.secret, output + writer.json_path.read_text() + writer.md_path.read_text())
+
+    def test_legacy_schema_failure_has_no_invented_structure_facts(self):
+        records = events(preflight_passed=False)
+        records[1]["failureCode"] = "strict_schema_probe_failed"
+        with tempfile.TemporaryDirectory() as directory:
+            _, writer, _, _ = self.invoke(directory, records, exit_code=1)
+            report = baseline.read_report(writer.json_path)
+            self.assertNotIn("schemaCheck", report["preflight"])
+            rendered = writer.md_path.read_text(encoding="utf-8")
+            self.assertIn("本报告未记录 schema 细项", rendered)
+            self.assertNotIn("模型回答检查", rendered)
+            self.assertNotIn("每任务 1 次重新运行", rendered)
+
     def test_invalid_jsonl_keeps_prior_sample_and_hides_raw_output(self):
         ending = "print('not-json-' + config['apiKey'], flush=True)\n"
         with tempfile.TemporaryDirectory() as directory:
@@ -486,7 +608,7 @@ class ComparisonTests(unittest.TestCase):
     def test_different_context_capacity_warns_with_matching_service_profile(self):
         old = complete_report()
         new = copy.deepcopy(old)
-        new["configuration"]["contextTokens"] = new["runner"]["configuration"]["contextTokens"] = 16384
+        new["configuration"]["contextTokens"] = new["runner"]["configuration"]["contextTokens"] = 32768
         rendered, complete = baseline.comparison_markdown(old, new)
         self.assertTrue(complete)
         self.assertIn("context capacity 不同", rendered)
@@ -523,6 +645,56 @@ class ComparisonTests(unittest.TestCase):
             self.assertNotIn("https://gateway.example/v1/responses", rendered)
             self.assertIn("阶段 preflight；失败分类 provider_failed", rendered)
             self.assertIn("已尝试 0，跳过 2", rendered)
+
+    def test_historical_service_budget_remains_readable_but_not_comparable_to_current(self):
+        historical = complete_report()
+        historical["configuration"]["contextTokens"] = historical["runner"]["configuration"]["contextTokens"] = 8192
+        historical["runner"]["profile"]["contextPolicy"]["maxInputTokens"] = 6144
+        historical["runner"]["datasetHash"] = "sha256:" + "f" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "historical-budget.json"
+            original = json.dumps(historical).encode("utf-8")
+            path.write_bytes(original)
+            loaded = baseline.read_report(path)
+            self.assertEqual(loaded["configuration"]["contextTokens"], 8192)
+            self.assertEqual(loaded["runner"]["profile"]["contextPolicy"]["maxInputTokens"], 6144)
+            with self.assertRaisesRegex(baseline.SafeFailure, "^insufficient_context_capacity$"):
+                baseline.validate_configuration(loaded["configuration"])
+            rendered, comparable = baseline.comparison_markdown(loaded, complete_report())
+            self.assertFalse(comparable)
+            self.assertIn("无法进行数值比较", rendered)
+            self.assertIn("datasetHash", rendered)
+            self.assertIn("profile", rendered)
+            self.assertNotIn("## 已观察结果", rendered)
+            self.assertEqual(path.read_bytes(), original)
+            historical_only, comparable = baseline.comparison_markdown(loaded, loaded)
+            self.assertTrue(comparable)
+            self.assertIn("## 已观察结果", historical_only)
+
+    def test_report_configuration_is_checked_against_its_recorded_budget(self):
+        for service_cap in (8192, 0, -1, True, None, "6144"):
+            report = complete_report()
+            report["configuration"]["contextTokens"] = report["runner"]["configuration"]["contextTokens"] = 8192
+            report["runner"]["profile"]["contextPolicy"]["maxInputTokens"] = service_cap
+            with self.subTest(service_cap=service_cap), self.assertRaises(baseline.SafeFailure):
+                baseline.validate_report(report)
+
+    def test_historical_prestart_failure_has_no_invented_service_budget(self):
+        config = configuration()
+        config["contextTokens"] = 8192
+        report = baseline.new_report(config, {})
+        baseline.finish_report(report, None, {"stage": "launcher", "failureCode": "build_failed"})
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "old-build-failure.json"
+            original = json.dumps(report).encode("utf-8")
+            path.write_bytes(original)
+            loaded = baseline.read_report(path)
+            self.assertEqual(loaded["status"], "failed")
+            self.assertFalse(loaded["runner"])
+            rendered, comparable = baseline.comparison_markdown(loaded, complete_report())
+            self.assertFalse(comparable)
+            self.assertIn("无法进行数值比较", rendered)
+            self.assertEqual(path.read_bytes(), original)
 
     def test_unknown_schema_and_corrupt_counts_types_are_rejected(self):
         mutations = [
