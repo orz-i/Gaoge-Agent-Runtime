@@ -155,6 +155,25 @@ jitter, execution leases longer than the call timeout, panic containment, and a
 per-Runner concurrency semaphore. Selector timeout is retryable; retry
 exhaustion fails the Group Chat Run instead of scheduling wakeups forever.
 
+A Selector may also implement `groupchat.SelectorRequestPreparer`. The Runner
+assigns the stable invocation ID, then calls `PrepareSelectorRequest` before
+committing the pending intent. Preparation may only add private JSON to
+`SelectorRequest.PreparedInput`; it cannot change the logical request, model,
+candidates, history or completion authority, and must not dispatch effects.
+The normalized JSON is deep-copied into the invocation and covered by its
+request hash. Recovery calls `Select` with that same input and never prepares
+it again, even if route defaults, attachments or replay sources have changed.
+Selectors without the optional interface retain their existing behavior.
+
+Preparation observes the selector timeout, cancellation and panic boundaries.
+A preparation failure creates no invocation and spends no model attempt;
+explicitly retryable failures and preparation timeouts leave the Run resumable,
+while permanent failures terminate it. Public `ViewState` and HTTP diagnostic
+projections remove `PreparedInput`, including from nested business payloads.
+Hosts adding preparation to an existing selector must drain or reconcile older
+pending invocations that lack their required prepared payload; do not reprepare
+an already committed invocation or rewrite its budget hash during upgrade.
+
 ## Existing complementary coverage
 
 | Guarantee | Tests and evidence level |

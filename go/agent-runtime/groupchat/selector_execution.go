@@ -78,6 +78,11 @@ func (runner *Runner) prepareSelectorInvocation(
 		failed, failErr := runner.fail(ctx, snapshot, state, "groupchat.selector_invalid", err)
 		return failed, state, failErr
 	}
+	invocation, err = runner.prepareSelectorInput(ctx, invocation)
+	if err != nil {
+		failed, failErr := runner.handleSelectorPreparationFailure(ctx, snapshot, state, err)
+		return failed, state, failErr
+	}
 	state.SelectorInvocation = &invocation
 	encoded, err := encodeState(state)
 	if err != nil {
