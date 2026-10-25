@@ -112,7 +112,7 @@ func redactPreflightDebugJSON(value any, marker string, replaceKey func(string) 
 
 func preflightCredentialField(name string) bool {
 	switch strings.ToLower(name) {
-	case "authorization", "api_key", "apikey", "x-api-key", "access_token", "refresh_token":
+	case "authorization", "api_key", "apikey", "x-api-key", "access_token", "refresh_token", "encrypted_content":
 		return true
 	default:
 		return false

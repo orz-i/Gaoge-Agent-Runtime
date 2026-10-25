@@ -356,6 +356,25 @@ class RetryTests(unittest.TestCase):
             self.assertNotIn(fresh_key, reports[0].read_text(encoding="utf-8"))
             self.assertNotIn(original["configuration"]["apiKey"], reports[0].read_text(encoding="utf-8"))
 
+    def test_retry_can_reduce_repetitions_without_changing_old_report(self):
+        original = complete_report()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'original.json'
+            payload = json.dumps(original).encode('utf-8')
+            path.write_bytes(payload)
+            with mock.patch.object(sys.stdin, 'isatty', return_value=True), \
+                    mock.patch.object(sys.stderr, 'isatty', return_value=True), \
+                    mock.patch.object(baseline, 'launch', return_value=1) as launch, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(baseline.main(['retry', str(path), '--repetitions', '2']), 1)
+            self.assertEqual(launch.call_args[0][0]['repetitions'], 2)
+            self.assertEqual(path.read_bytes(), payload)
+            for invalid in ('0', '-1', '21', '1.0', 'a', '01'):
+                with self.subTest(invalid=invalid), mock.patch.object(
+                        sys.stdin, 'isatty', side_effect=AssertionError('no tty')):
+                    with contextlib.redirect_stderr(io.StringIO()):
+                        self.assertEqual(baseline.main(['retry', str(path), '--repetitions', invalid]), 2)
+
     def test_retry_preserves_full_endpoint_and_explicit_probe_choice(self):
         report = complete_report()
         report["configuration"]["endpoint"] = "https://gateway.example"
@@ -398,6 +417,14 @@ class RetryTests(unittest.TestCase):
 
 
 class WireDiagnosticsTests(unittest.TestCase):
+    def test_task_unsupported_guidance_uses_task_response_not_preflight_schema(self):
+        advice = baseline.failure_advice('start', 'provider_unsupported', {'httpStatus': 200})
+        self.assertIn('物理 HTTP 请求数', advice)
+        self.assertIn('reasoning', advice)
+        self.assertNotIn('核对模型与网关对原生严格 JSON Schema', advice)
+        replay = baseline.failure_advice('start', 'provider_replay_unavailable', {'httpStatus': 200})
+        self.assertIn('encrypted_content', replay)
+
     def test_wire_facts_distinguish_upstream_projection_request_and_missing_evidence(self):
         schema_check = schema_check_fixture("invalid")
         upstream = wire_check_fixture()
@@ -559,6 +586,50 @@ class ProcessReportTests(unittest.TestCase):
             self.assertEqual(len(baseline.read_report(writer.json_path)["samples"]), 2)
             self.assertIn("toolExecutions", result["samples"][0])
             self.assertIn("modelDurationsMs", result["samples"][0])
+
+    def test_task_http_response_debug_survives_console_json_markdown_and_roundtrip(self):
+        records = events(passed=False)
+        response = '{"output":[{"type":"reasoning","summary":[{"text":"LOOKUP_TOOL_FAILURE"}]}]}'
+        for record in records:
+            if record['type'] != 'sample':
+                continue
+            item = record['sample']
+            item.update(stage='start', failureCode='provider_replay_unavailable', modelCalls=1,
+                        toolCalls=0, providerHTTPRequests=1, lastHTTPStatus=200,
+                        lastResponseKind='event_stream',
+                        lastResponseDebug=response_debug_fixture(body=response, answer=''))
+        with tempfile.TemporaryDirectory() as directory:
+            report, writer, _, output = self.invoke(directory, records, exit_code=1)
+            self.assertEqual(report['status'], 'failed')
+            self.assertEqual(report['summary']['failed'], 2)
+            loaded = baseline.read_report(writer.json_path)
+            self.assertEqual(loaded['samples'][0]['lastResponseDebug']['body'], response)
+            for rendered in (output, writer.json_path.read_text(), writer.md_path.read_text()):
+                self.assertIn('LOOKUP_TOOL_FAILURE', rendered)
+                self.assertIn('provider_replay_unavailable', rendered)
+                self.assertNotIn(self.secret, rendered)
+            self.assertIn('任务最后一次 HTTP response', output)
+            self.assertEqual(loaded['samples'][0]['providerHTTPRequests'], 1)
+            self.assertNotIn('lastResponseDebug', complete_report()['samples'][0])
+
+    def test_task_response_debug_malformed_metadata_is_rejected(self):
+        value = sample(1, passed=False)
+        value.update(providerHTTPRequests=0, lastResponseDebug=response_debug_fixture(
+            body='', answer='', capture='unavailable'))
+        baseline.validate_sample_diagnostics(value)
+        for mutation in (
+            lambda v: v.update(lastHTTPStatus=200, lastResponseKind='json'),
+            lambda v: v.update(providerHTTPRequests=True),
+            lambda v: v.update(providerHTTPRequests=101),
+            lambda v: v.update(lastResponseDebug=dict(v['lastResponseDebug'], body=['unexpected'])),
+            lambda v: v.update(lastResponseDebug=dict(v['lastResponseDebug'], unknown='sensitive')),
+            lambda v: v.update(status='passed'),
+        ):
+            changed = copy.deepcopy(value)
+            mutation(changed)
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(
+                    baseline.ProtocolFailure, '^invalid_'):
+                baseline.validate_sample_diagnostics(changed)
 
     def test_completed_failed_samples_are_preserved_with_zero_success_rate(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1083,6 +1154,31 @@ class ProcessReportTests(unittest.TestCase):
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_different_repetition_counts_are_not_numerically_comparable(self):
+        old = complete_report()
+        cfg = configuration()
+        cfg['repetitions'] = 2
+        new = baseline.new_report(cfg, {'revision': 'b' * 40, 'dirty': False})
+        baseline.accept_event(new, start_event(cfg))
+        baseline.accept_event(new, events()[1])
+        for repetition in (1, 2):
+            for base in (sample(1), sample(2)):
+                item = copy.deepcopy(base)
+                item['repetition'] = repetition
+                item['sampleID'] = f"{base['sampleID']}-rep{repetition}"
+                baseline.accept_event(new, {'type': 'sample', 'sample': item})
+        summary = copy.deepcopy(events()[-1]['summary'])
+        summary.update(requested=4, attempted=4, passed=4, skipped=0, complete=True,
+                       modelCalls=16, toolCalls=12, usage=usage(16))
+        summary['durationMs'].update(count=4, total=60)
+        baseline.accept_event(new, {'type': 'summary', 'summary': summary})
+        baseline.finish_report(new, 0)
+        baseline.validate_report(new)
+        rendered, compatible = baseline.comparison_markdown(old, new)
+        self.assertFalse(compatible)
+        self.assertIn('repetitions', rendered)
+        self.assertIn('无法进行数值比较', rendered)
+
     def test_model_provider_revision_differences_are_visible_and_comparable(self):
         old = complete_report()
         new = copy.deepcopy(old)

@@ -39,6 +39,15 @@ observed numeric status and a fixed response-kind classification when available.
 samples and the next configuration check. Reports without these optional fields
 remain readable; no report schema version or SDK contract change is required.
 
+Failed task samples likewise record the last actual provider HTTP response,
+physical request count, last observed status/type and a bounded redacted body.
+This is the observed last response, not necessarily the direct cause when a
+later call fails locally before dispatch. Opaque encrypted reasoning evidence
+is never written into task diagnostics. A one-repetition `retry` override allows
+a limited diagnostic run without changing the prior report. There is no new
+provider request, SDK API or persistence schema; replay failures still fail
+closed and remain distinguishable from generic unsupported responses.
+
 For a failed OpenAI strict-schema probe, optional `wireCheck` observations now
 compare the actual outbound native format with the original response message
 boundaries and normalized answer. Observation is bounded; `wireCheck` contains

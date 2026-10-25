@@ -10,6 +10,21 @@ import (
 	"unicode/utf8"
 )
 
+func TestResponseDebugRedactsOpaqueReplayInStreamWithoutHidingMessage(t *testing.T) {
+	const encrypted = "fake-encrypted-reasoning-must-not-be-written"
+	stream := "event: response.completed\n" +
+		"data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"reasoning\",\"encrypted_content\":\"" +
+		encrypted + "\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"SAFE_DIAGNOSTIC\"}]}]}}\n\n"
+	capture := &preflightWireCapture{}
+	capture.observe([]byte(stream), io.EOF)
+	got := (&preflightHTTPObserver{responseWire: capture}).responseDebugSnapshot("", "unrelated-key")
+	if got.Capture != wireComplete || !got.Redacted || strings.Contains(got.Body, encrypted) ||
+		!strings.Contains(got.Body, "SAFE_DIAGNOSTIC") ||
+		!strings.Contains(got.Body, "[REDACTED]") {
+		t.Fatal("private encrypted reasoning escaped or useful SSE response disappeared")
+	}
+}
+
 func TestPreflightResponseDebugPreservesVisibleBodyAndAnswer(t *testing.T) {
 	body := " \n{\"ok\":false,\"n\":9007199254740993}\t"
 	answer := " \nThe check did not return JSON.\t "

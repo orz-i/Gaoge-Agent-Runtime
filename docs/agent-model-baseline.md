@@ -21,13 +21,17 @@ To run again with a saved report's public configuration:
 
 ```sh
 python3 scripts/run-agent-baseline.py retry artifacts/agent-baselines/previous-run.json
+# Diagnose a failing provider with only one repeat per case (two task samples):
+python3 scripts/run-agent-baseline.py retry artifacts/agent-baselines/previous-run.json --repetitions 1
 ```
 
 `retry` validates the report and displays its exact endpoint, model, budgets,
 repetitions and explicit unknown-model opt-in. It checks those settings against
 the current runner, builds the current checkout, and asks only for a new hidden
 API key. It starts a new measured run, including the normal native-schema probe;
-it does not resume old samples or overwrite the original report. Saved endpoints
+it does not resume old samples or overwrite the original report. `--repetitions 1`
+changes only the new run's sample count, preserving the old report and showing
+the changed count in the new configuration. Saved endpoints
 are not expanded or silently changed. To correct configuration, use the ordinary
 interactive command instead. A successful probe proceeds to the requested task
 samples; a failed probe still makes no task calls.
@@ -123,6 +127,19 @@ JSON/schema validator. The observer adds no request, retry or body drain.
 
 Historical reports that did not save a body cannot recover it later. They remain
 readable and unchanged; a new run is required to collect missing response text.
+
+Task failures also display and save `lastResponseDebug`: the final HTTP body
+actually consumed by the adapter in that sample, the physical request count and
+last observed HTTP status/type. The observer does not make extra calls. A
+response seen before a later local validation failure is **not** automatically
+the cause of that failure; inspect the recorded physical/model call counts.
+`provider_replay_unavailable` is distinct from generic `provider_unsupported`:
+stateless OpenAI reasoning-plus-function continuation requires the provider's
+opaque encrypted reasoning item. Its `encrypted_content` payload is suppressed
+in the saved debug body while its presence or absence remains observable.
+Never bypass replay validation, authorization or the exactly-once-effect guard
+to make the model pass. Reports may still contain other response-generated
+content, so review them before sharing.
 
 A `strict_schema_probe_failed` event can additionally include `schemaCheck`.
 This records only fixed JSON-type labels, booleans and counts: whether content

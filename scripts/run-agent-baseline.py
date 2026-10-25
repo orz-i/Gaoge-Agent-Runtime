@@ -55,6 +55,7 @@ SAMPLE_FIELDS = {
     "durationMs", "modelCalls", "toolCalls", "oraclePassed", "recoveryChecks",
     "usage", "contextGeneration", "runID", "turnID", "modelDurationsMs",
     "toolExecutions", "lookupCalls", "artifactReads", "draftWrites",
+    "providerHTTPRequests", "lastHTTPStatus", "lastResponseKind", "lastResponseDebug",
 }
 RECOVERY_FIELDS = {
     "interruptionObserved", "leaseBlocked", "sameRun", "sameTurn",
@@ -353,7 +354,11 @@ def failure_advice(stage, code, preflight):
     if code == "provider_replay_unavailable":
         return ("OpenAI reasoning 与工具调用续接缺少必需的加密回放证据；检查网关是否转发 include=reasoning.encrypted_content 并保留返回的 encrypted_content。"
                 "不要通过删除 reasoning 或重试工具来绕过该要求。")
-    if code in {"capability_unavailable", "provider_unsupported", "output_schema_invalid"}:
+    if code == "provider_unsupported":
+        return ("当前模型请求或响应格式不在适配器支持范围。预检通过不代表工具与无状态续接兼容；"
+                "先查看失败样本的物理 HTTP 请求数及最后响应正文，确认工具调用、reasoning 和 encrypted_content，"
+                "再定位本地请求校验或上游协议差异。不要仅凭此分类归因于 Schema。")
+    if code in {"capability_unavailable", "output_schema_invalid"}:
         return "核对模型与网关对原生严格 JSON Schema 的支持；未知模型需明确允许探测，任务样本还会验证工具调用。"
     if code in {"timeout", "runner_timeout"}:
         return ("结合失败阶段检查任务执行与上游响应耗时；若缺少 HTTP 响应记录，先检查 endpoint 连通性、网络、代理和出口。"
@@ -493,10 +498,10 @@ def safe_response_text(text):
     )
 
 
-def response_debug_lines(preflight, markdown=False):
+def response_debug_lines(preflight, markdown=False, title="失败预检响应正文", include_answer=True):
     if preflight.get("status") != "failed":
         return []
-    lines = ["## 失败预检响应正文" if markdown else "失败预检响应正文：", ""]
+    lines = ["## " + title if markdown else title + "：", ""]
     debug = preflight.get("responseDebug")
     if debug is None:
         return lines + ["本报告未捕获 HTTP response body 和 SDK 答案，无法从已存数据还原正文。"]
@@ -521,6 +526,8 @@ def response_debug_lines(preflight, markdown=False):
         lines.append("已完整捕获 HTTP response body，正文为空。")
     else:
         lines.append("未捕获可展示的 HTTP response body；不能视为完整响应。")
+    if not include_answer:
+        return lines
     lines += ["", "SDK normalized answer：answerTruncated=%s；以下为 JSON 字符串表示，BOM、换行和控制字符均可见。" %
               md_cell(debug["answerTruncated"])]
     if debug["answerTruncated"]:
@@ -618,6 +625,16 @@ def render_markdown(report):
             "sampleID", "caseID", "repetition", "status", "stage", "failureCode",
             "durationMs", "modelCalls", "toolCalls", "oraclePassed",
         )) + " |")
+    for sample in report["samples"]:
+        if sample["status"] != "failed" or "lastResponseDebug" not in sample:
+            continue
+        lines += ["", "### 样本 %s 的任务 HTTP 响应" % md_cell(sample["sampleID"]),
+                  "物理 HTTP 请求 %s；最后观测到的状态 %s；类型 %s。"
+                  % (md_cell(sample.get("providerHTTPRequests", 0)),
+                     md_cell(sample.get("lastHTTPStatus")), md_cell(sample.get("lastResponseKind"))),
+                  "这是最后一次已观察到的 HTTP 响应；若之后的调用在本地被拒绝，该响应不一定是直接原因。"]
+        lines += response_debug_lines({"status": "failed", "responseDebug": sample["lastResponseDebug"]},
+                                      markdown=True, title="任务最后一次 HTTP response", include_answer=False)
     lines += [
         "", "## 可比性与证据边界", "",
         "只有相同任务版本、数据集、完整执行 profile 和输出上限的报告适合数值横向比较。"
@@ -834,6 +851,24 @@ def validate_sample_diagnostics(sample):
             not isinstance(sample["modelDurationsMs"], list) or
             len(sample["modelDurationsMs"]) > 100 or
             any(type(value) is not int or value < 0 for value in sample["modelDurationsMs"])):
+        raise ProtocolFailure("invalid_sample_diagnostics")
+    if "lastResponseDebug" in sample:
+        if sample["status"] != "failed":
+            raise ProtocolFailure("invalid_sample_diagnostics")
+        validate_response_debug(sample["lastResponseDebug"])
+        count = sample.get("providerHTTPRequests")
+        if type(count) is not int or not 0 <= count <= 100:
+            raise ProtocolFailure("invalid_sample_diagnostics")
+        if ("lastHTTPStatus" in sample) != ("lastResponseKind" in sample):
+            raise ProtocolFailure("invalid_sample_diagnostics")
+        if "lastHTTPStatus" in sample and (
+                type(sample["lastHTTPStatus"]) is not int or not 100 <= sample["lastHTTPStatus"] <= 999 or
+                sample["lastResponseKind"] not in ("json", "html", "event_stream", "other") or count == 0):
+            raise ProtocolFailure("invalid_sample_diagnostics")
+        if count == 0 and (sample["lastResponseDebug"]["capture"] != "unavailable" or
+                           "lastHTTPStatus" in sample):
+            raise ProtocolFailure("invalid_sample_diagnostics")
+    elif any(field in sample for field in ("providerHTTPRequests", "lastHTTPStatus", "lastResponseKind")):
         raise ProtocolFailure("invalid_sample_diagnostics")
     if "toolExecutions" in sample:
         if not isinstance(sample["toolExecutions"], list) or len(sample["toolExecutions"]) > 100:
@@ -1119,6 +1154,14 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
                 detail = "；失败分类 " + sample["failureCode"] if sample["status"] == "failed" else ""
                 print("样本 %d：%s，第 %s 次，%s，阶段 %s%s。" %
                       (len(report["samples"]), sample["caseID"], sample["repetition"], sample["status"], sample["stage"], detail), flush=True)
+                if sample["status"] == "failed" and "lastResponseDebug" in sample:
+                    print("物理 HTTP 请求 %s；最后观测状态 %s；类型 %s。"
+                          % (sample.get("providerHTTPRequests", 0), sample.get("lastHTTPStatus", "未收到"),
+                             sample.get("lastResponseKind", "未收到")), flush=True)
+                    for line in response_debug_lines({"status": "failed", "responseDebug": sample["lastResponseDebug"]},
+                                                     title="任务最后一次 HTTP response（不一定是触发失败的请求）",
+                                                     include_answer=False):
+                        print(line, flush=True)
         process.wait(timeout=max(0.1, min(5, deadline - time.monotonic())))
     except KeyboardInterrupt:
         failure = {"stage": "launcher", "failureCode": "cancelled"}
@@ -1270,6 +1313,8 @@ def comparison_markdown(old, new):
             incompatible.append(name)
     if old["configuration"].get("maxOutputTokens") != new["configuration"].get("maxOutputTokens"):
         incompatible.append("maxOutputTokens")
+    if old["configuration"].get("repetitions") != new["configuration"].get("repetitions"):
+        incompatible.append("repetitions")
     if incompatible:
         lines += ["", "无法进行数值比较：%s 不一致或缺失。请使用相同任务、数据集、执行策略和输出上限重新采样。" % "、".join(incompatible), ""]
         return "\n".join(lines), False
@@ -1299,7 +1344,8 @@ def comparison_markdown(old, new):
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
-    usage = "用法：python3 scripts/run-agent-baseline.py [retry report.json | compare old.json new.json]"
+    usage = ("用法：python3 scripts/run-agent-baseline.py "
+             "[retry report.json [--repetitions 1..20] | compare old.json new.json]")
     try:
         if args in (["--help"], ["-h"]):
             print(usage + "\n无参数交互运行；retry 复用报告的公开配置，按当前代码创建新运行并重新隐藏输入 key；"
@@ -1309,7 +1355,9 @@ def main(argv=None):
             rendered, complete = comparison_markdown(read_report(args[1]), read_report(args[2]))
             print(rendered)
             return 0 if complete else 2
-        if args and (len(args) != 2 or args[0] != "retry"):
+        if args and (args[0] != "retry" or len(args) not in (2, 4) or
+                     len(args) == 4 and (args[2] != "--repetitions" or
+                                         not re.fullmatch(r"[1-9]|1[0-9]|20", args[3]))):
             print(usage, file=sys.stderr)
             return 2
         if not sys.stdin.isatty() or not sys.stderr.isatty():
@@ -1317,7 +1365,10 @@ def main(argv=None):
         if args:
             # Revalidate against the current execution budget; historical
             # reports remain readable under their own recorded profile.
-            config = validate_configuration(read_report(args[1])["configuration"])
+            config = dict(read_report(args[1])["configuration"])
+            if len(args) == 4:
+                config["repetitions"] = int(args[3])
+            config = validate_configuration(config)
             display_configuration(config, "复用报告中的公开配置（本次按当前代码创建新运行）")
             return launch(config, repository_root())
         return launch(collect_configuration(), repository_root())

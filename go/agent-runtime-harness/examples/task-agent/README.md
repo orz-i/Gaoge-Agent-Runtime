@@ -122,13 +122,18 @@ saved under `artifacts/agent-baselines/` with source/configuration metadata,
 measured durations, usage coverage and separate oracle/recovery observations.
 Preflight failures show the captured, credential-redacted HTTP response body and
 the SDK's extracted answer directly, and save both in JSON/Markdown reports.
-No additional debug flag is required. Partial captures and truncation are marked;
-HTTP status, response kind and safe failure categories remain separate facts.
+No additional debug flag is required. Task failures likewise show the last
+provider HTTP response that the adapter actually consumed, with physical request
+count and safe redaction of `reasoning.encrypted_content`. An observed response
+may precede a later local failure; do not assume it is causal. Partial captures
+and truncation are marked; HTTP status, response kind and safe failure categories
+remain separate facts.
 Failed OpenAI schema probes also report bounded request/response structure
 observations from that same call. Original validation and request counts are
 unchanged. Use
 `python3 scripts/run-agent-baseline.py retry <report.json>` to reuse a saved
-public configuration and enter only a fresh key for a new measured run. No real service is invoked
+public configuration and enter only a fresh key for a new measured run.
+Use `retry <report.json> --repetitions 1` to diagnose with only two task samples. No real service is invoked
 by ordinary test gates.
 
 See the [baseline guide](../../../../docs/agent-model-baseline.md) for the input

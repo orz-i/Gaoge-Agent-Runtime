@@ -23,6 +23,7 @@ const (
 type preflightHTTPObserver struct {
 	transport    http.RoundTripper
 	mu           sync.Mutex
+	requestCount int
 	httpStatus   int
 	responseKind preflightResponseKind
 	captureWire  bool // Set before dispatch, only for the OpenAI probe.
@@ -48,6 +49,8 @@ func newPreflightHTTPClient(base *http.Client) (*http.Client, *preflightHTTPObse
 
 func (observer *preflightHTTPObserver) RoundTrip(request *http.Request) (*http.Response, error) {
 	observer.mu.Lock()
+	observer.requestCount++
+	observer.httpStatus, observer.responseKind = 0, ""
 	observer.responseWire = nil
 	observer.mu.Unlock()
 	if observer.captureWire {
@@ -71,6 +74,12 @@ func (observer *preflightHTTPObserver) RoundTrip(request *http.Request) (*http.R
 		observer.mu.Unlock()
 	}
 	return response, err
+}
+
+func (observer *preflightHTTPObserver) dispatchedRequests() int {
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
+	return observer.requestCount
 }
 
 func (observer *preflightHTTPObserver) snapshot() (int, preflightResponseKind) {

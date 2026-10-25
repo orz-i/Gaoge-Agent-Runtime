@@ -189,26 +189,30 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 }
 
 type baselineSample struct {
-	SampleID          string                `json:"sampleID"`
-	CaseID            string                `json:"caseID"`
-	Repetition        int                   `json:"repetition"`
-	Status            string                `json:"status"`
-	Stage             string                `json:"stage"`
-	FailureCode       string                `json:"failureCode,omitempty"`
-	DurationMs        int64                 `json:"durationMs"`
-	ModelCalls        int                   `json:"modelCalls"`
-	ToolCalls         int                   `json:"toolCalls"`
-	LookupCalls       int                   `json:"lookupCalls"`
-	ArtifactReads     int                   `json:"artifactReads"`
-	DraftWrites       int                   `json:"draftWrites"`
-	OraclePassed      bool                  `json:"oraclePassed"`
-	RecoveryChecks    recoveryChecks        `json:"recoveryChecks"`
-	Usage             usageCoverage         `json:"usage"`
-	ModelDurationsMs  []int64               `json:"modelDurationsMs"`
-	ToolExecutions    []toolExecutionMetric `json:"toolExecutions"`
-	ContextGeneration int                   `json:"contextGeneration"`
-	RunID             string                `json:"runID,omitempty"`
-	TurnID            string                `json:"turnID,omitempty"`
+	SampleID             string                  `json:"sampleID"`
+	CaseID               string                  `json:"caseID"`
+	Repetition           int                     `json:"repetition"`
+	Status               string                  `json:"status"`
+	Stage                string                  `json:"stage"`
+	FailureCode          string                  `json:"failureCode,omitempty"`
+	DurationMs           int64                   `json:"durationMs"`
+	ModelCalls           int                     `json:"modelCalls"`
+	ToolCalls            int                     `json:"toolCalls"`
+	LookupCalls          int                     `json:"lookupCalls"`
+	ArtifactReads        int                     `json:"artifactReads"`
+	DraftWrites          int                     `json:"draftWrites"`
+	OraclePassed         bool                    `json:"oraclePassed"`
+	RecoveryChecks       recoveryChecks          `json:"recoveryChecks"`
+	Usage                usageCoverage           `json:"usage"`
+	ModelDurationsMs     []int64                 `json:"modelDurationsMs"`
+	ToolExecutions       []toolExecutionMetric   `json:"toolExecutions"`
+	ContextGeneration    int                     `json:"contextGeneration"`
+	ProviderHTTPRequests int                     `json:"providerHTTPRequests,omitempty"`
+	LastHTTPStatus       int                     `json:"lastHTTPStatus,omitempty"`
+	LastResponseKind     preflightResponseKind   `json:"lastResponseKind,omitempty"`
+	LastResponseDebug    *preflightResponseDebug `json:"lastResponseDebug,omitempty"`
+	RunID                string                  `json:"runID,omitempty"`
+	TurnID               string                  `json:"turnID,omitempty"`
 }
 
 func sampleMetrics(report taskReport, caseID, sampleID string, repetition int) baselineSample {
@@ -288,9 +292,19 @@ func runBaseline(ctx context.Context, input io.Reader, output io.Writer) int {
 				}
 				config.sampleID = fmt.Sprintf("%s-%02d", item.id, repetition)
 				sampleCtx, cancel := context.WithTimeout(ctx, sampleTimeout)
-				report, _ := runTask(sampleCtx, config, config.newModel, item.source)
+				// Observe the real provider boundary on this sample, not a
+				// synthetic follow-up probe. The adapter still owns body reads.
+				observedHTTP, observation := newPreflightHTTPClient(config.httpClient)
+				sampleConfig := config
+				sampleConfig.httpClient = observedHTTP
+				report, _ := runTask(sampleCtx, sampleConfig, sampleConfig.newModel, item.source)
 				cancel()
 				sample := sampleMetrics(report, item.id, config.sampleID, repetition)
+				if sample.Status == "failed" {
+					sample.ProviderHTTPRequests = observation.dispatchedRequests()
+					sample.LastHTTPStatus, sample.LastResponseKind = observation.snapshot()
+					sample.LastResponseDebug = observation.responseDebugSnapshot("", config.apiKey)
+				}
 				samples = append(samples, sample)
 				if encoder.Encode(struct {
 					Type   string         `json:"type"`
