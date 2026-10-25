@@ -345,7 +345,7 @@ class RetryTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), original_bytes)
             self.assertIn("复用报告中的公开配置", output.getvalue())
             self.assertIn(configuration()["endpoint"], output.getvalue())
-            self.assertIn("另加 1 次能力探测", output.getvalue())
+            self.assertIn("最多 2 次无副作用 SSE 工具/回放探测", output.getvalue())
             self.assertNotIn(original["configuration"]["apiKey"], output.getvalue())
             self.assertNotIn(fresh_key, output.getvalue())
             reports = list((Path(directory) / "artifacts" / "agent-baselines").glob("*.json"))
@@ -1151,6 +1151,86 @@ class ProcessReportTests(unittest.TestCase):
                 self.assertIsNone(result["preflight"])
                 self.assertNotIn(self.secret, output + writer.json_path.read_text() + writer.md_path.read_text())
 
+
+
+class ToolReplayProbeTests(unittest.TestCase):
+    def tool_failure_records(self):
+        records = events(preflight_passed=False)
+        records[0]["profile"]["preflightVersion"] = baseline.OPENAI_TOOL_PROBE_PROFILE
+        probe = {
+            "status": "failed", "stage": "tool_call",
+            "failureCode": "provider_replay_unavailable",
+            "modelCalls": 1, "httpRequests": 1, "usage": usage(1),
+            "reasoningSeen": True, "encryptedReplaySeen": False,
+            "httpStatus": 200, "responseKind": "event_stream",
+            "responseDebug": response_debug_fixture(body="event: response.completed\\ndata: NO_ENCRYPTED_REPLAY_EVIDENCE\\n"),
+        }
+        records[1].update(failureCode="provider_replay_unavailable", toolProbe=probe,
+                          httpStatus=200, responseKind="json")
+        return records
+
+    def test_missing_replay_aborts_before_samples_and_report_includes_actual_response(self):
+        records = self.tool_failure_records()
+        secret = "fake-local-secret-keep-private"
+        with tempfile.TemporaryDirectory() as directory:
+            writer = baseline.ReportWriter(Path(directory) / "reports")
+            report = baseline.new_report(configuration(), {})
+            program = child_program(records,exit_code=1)
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                observed = baseline.run_child(
+                    [sys.executable, "-u", "-c", program], Path(directory),
+                    configuration(), secret, report, writer)
+            saved = baseline.read_report(writer.json_path)
+            self.assertEqual(observed["status"], "failed")
+            self.assertEqual(saved["status"], "failed")
+            self.assertEqual(saved["summary"]["attempted"], 0)
+            self.assertEqual(saved["summary"]["skipped"], 2)
+            self.assertEqual(saved["preflight"]["toolProbe"]["failureCode"],
+                             "provider_replay_unavailable")
+            for rendered in (output.getvalue(), writer.json_path.read_text(),
+                             writer.md_path.read_text()):
+                self.assertIn("NO_ENCRYPTED_REPLAY_EVIDENCE", rendered)
+                self.assertIn("reasoning", rendered)
+                self.assertNotIn(secret, rendered)
+            self.assertIn("工具/回放预检", output.getvalue())
+
+    def test_new_openai_profile_requires_proven_tool_probe(self):
+        records = events()
+        records[0]["profile"]["preflightVersion"] = baseline.OPENAI_TOOL_PROBE_PROFILE
+        report = baseline.new_report(configuration(), {})
+        baseline.accept_event(report, records[0])
+        with self.assertRaisesRegex(baseline.ProtocolFailure, "^missing_tool_probe$"):
+            baseline.accept_event(report, records[1])
+        self.assertIsNone(report["preflight"])
+        probe = {
+            "status": "passed", "stage": "completed",
+            "modelCalls": 2, "httpRequests": 2,
+            "usage": usage(2), "reasoningSeen": True, "encryptedReplaySeen": True,
+        }
+        event = dict(records[1], toolProbe=probe)
+        baseline.accept_event(report,event)
+        self.assertEqual(report["preflight"]["toolProbe"]["status"], "passed")
+
+    def test_tool_probe_rejects_invalid_raw_input_without_recording_it(self):
+        records = self.tool_failure_records()
+        for mutation in (
+            lambda check: check.update(stage="finished"),
+            lambda check: check.update(modelCalls=True),
+            lambda check: check.update(httpRequests=2),
+            lambda check: check.update(reasoningSeen=False, encryptedReplaySeen=True),
+            lambda check: check.update(unknown="private-provider-value"),
+            lambda check: check.update(status="passed"),
+            lambda check: check.update(responseDebug=dict(check["responseDebug"], body=[])),
+        ):
+            with self.subTest(mutation=mutation):
+                report = baseline.new_report(configuration(), {})
+                baseline.accept_event(report, records[0])
+                bad = copy.deepcopy(records[1])
+                mutation(bad["toolProbe"])
+                with self.assertRaisesRegex(baseline.ProtocolFailure, "^invalid_"):
+                    baseline.accept_event(report,bad)
+                self.assertIsNone(report["preflight"])
 
 
 class ComparisonTests(unittest.TestCase):

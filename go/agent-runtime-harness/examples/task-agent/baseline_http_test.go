@@ -44,6 +44,7 @@ type baselineHTTPFixture struct {
 	streams             int
 	answers             []taskAnswer
 	phaseReplayRequests int
+	probeStreams        int
 }
 
 func (fixture *baselineHTTPFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +62,10 @@ func (fixture *baselineHTTPFixture) ServeHTTP(w http.ResponseWriter, r *http.Req
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		fixture.t.Error(err)
 		http.Error(w, "invalid fixture request", http.StatusBadRequest)
+		return
+	}
+	if fixture.protocol == "openai" && isReplayProbeRequest(payload) {
+		fixture.respondToolReplayProbe(w, payload)
 		return
 	}
 	var modelID string
@@ -116,6 +121,102 @@ func (fixture *baselineHTTPFixture) ServeHTTP(w http.ResponseWriter, r *http.Req
 		}
 	}
 	fixture.writeResponse(w, response, stream)
+}
+
+func (fixture *baselineHTTPFixture) respondToolReplayProbe(w http.ResponseWriter, request map[string]json.RawMessage) {
+	fixture.t.Helper()
+	var input []map[string]json.RawMessage
+	if json.Unmarshal(request["input"], &input) != nil || len(input) == 0 {
+		fixture.t.Error("tool compatibility probe lost input messages")
+	}
+	var include []string
+	if json.Unmarshal(request["include"], &include) != nil ||
+		len(include) != 1 || include[0] != "reasoning.encrypted_content" {
+		fixture.t.Error("OpenAI tool compatibility probe did not require encrypted replay")
+	}
+	var format struct {
+		Format struct {
+			Type   string          `json:"type"`
+			Strict bool            `json:"strict"`
+			Schema json.RawMessage `json:"schema"`
+		} `json:"format"`
+	}
+	if json.Unmarshal(request["text"], &format) != nil ||
+		format.Format.Type != "json_schema" || !format.Format.Strict {
+		fixture.t.Error("tool probe omitted strict schema")
+	}
+	var schemaGot, schemaWant any
+	_ = json.Unmarshal(format.Format.Schema, &schemaGot)
+	_ = json.Unmarshal(probeSchema, &schemaWant)
+	if !reflect.DeepEqual(schemaGot, schemaWant) {
+		fixture.t.Error("tool probe did not retain fixed native schema")
+	}
+	var streaming, store bool
+	_ = json.Unmarshal(request["stream"], &streaming)
+	_ = json.Unmarshal(request["store"], &store)
+	if !streaming || store {
+		fixture.t.Error("tool probe changed stateless streaming transport")
+	}
+
+	continuation := len(input) > 1
+	fixture.mu.Lock()
+	fixture.probeStreams++
+	fixture.mu.Unlock()
+	var output []any
+	if !continuation {
+		var choice string
+		_ = json.Unmarshal(request["tool_choice"], &choice)
+		if choice != "required" {
+			fixture.t.Error("first replay probe is not a required tool step")
+		}
+		output = []any{
+			map[string]any{"type": "reasoning", "id": "rs_probe_1", "summary": []any{},
+				"encrypted_content": "private-tool-probe-encrypted-evidence"},
+			map[string]any{"type": "function_call", "call_id": "call_probe_1", "name": replayProbeToolName,
+				"arguments": `{"value":"probe"}`},
+		}
+	} else {
+		var reasoning, called, toolResult bool
+		for _, item := range input {
+			var kind string
+			_ = json.Unmarshal(item["type"], &kind)
+			switch kind {
+			case "reasoning":
+				reasoning = string(item["encrypted_content"]) == `"private-tool-probe-encrypted-evidence"`
+			case "function_call":
+				called = string(item["call_id"]) == `"call_probe_1"`
+			case "function_call_output":
+				var echoed string
+				toolResult = string(item["call_id"]) == `"call_probe_1"` &&
+					json.Unmarshal(item["output"], &echoed) == nil && echoed == `{"value":"probe"}`
+			}
+		}
+		if !reasoning || !called || !toolResult {
+			fixture.t.Errorf("tool probe failed to replay signed reasoning/function/output: r=%v c=%v o=%v", reasoning, called, toolResult)
+		}
+		output = []any{map[string]any{
+			"type": "message", "role": "assistant",
+			"content": []any{map[string]any{"type": "output_text", "text": `{"ok":true}`}},
+		}}
+	}
+	response := map[string]any{
+		"id": "probe-response", "status": "completed", "output": output,
+		"usage": map[string]int{"input_tokens": 13, "output_tokens": 5},
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	baselineSSE(fixture.t, w, "response.completed", map[string]any{
+		"type": "response.completed", "response": response,
+	})
+}
+
+func isReplayProbeRequest(payload map[string]json.RawMessage) bool {
+	var definitions []struct {
+		Name string `json:"name"`
+	}
+	if json.Unmarshal(payload["tools"], &definitions) != nil {
+		return false
+	}
+	return len(definitions) == 1 && definitions[0].Name == replayProbeToolName
 }
 
 func (fixture *baselineHTTPFixture) assertContract(payload map[string]json.RawMessage, stream bool) {
@@ -611,6 +712,16 @@ func TestBaselineHTTPAdaptersCompleteBothCases(t *testing.T) {
 					t.Fatal("successful strict preflight emitted failure diagnostics")
 				}
 			}
+			if protocol == "openai" {
+				probe, ok := preflight[0]["toolProbe"].(map[string]any)
+				if !ok || probe["status"] != "passed" || probe["modelCalls"] != float64(2) ||
+					probe["httpRequests"] != float64(2) || probe["reasoningSeen"] != true ||
+					probe["encryptedReplaySeen"] != true {
+					t.Fatalf("OpenAI task admission skipped stateless reasoning/tool replay: %+v", probe)
+				}
+			} else if _, present := preflight[0]["toolProbe"]; present {
+				t.Fatal("Anthropic task was incorrectly gated on OpenAI encrypted replay")
+			}
 			samples := baselineEventsOfType(events, "sample")
 			if len(samples) != 2 {
 				t.Fatalf("fixed two-case denominator changed: %+v", samples)
@@ -641,8 +752,12 @@ func TestBaselineHTTPAdaptersCompleteBothCases(t *testing.T) {
 			}
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
-			if fixture.probes != 1 || fixture.streams != 8 || len(fixture.answers) != 2 {
-				t.Fatalf("provider path was bypassed or retried: probes=%d streams=%d answers=%+v", fixture.probes, fixture.streams, fixture.answers)
+			wantProbeStreams := 0
+			if protocol == "openai" {
+				wantProbeStreams = 2
+			}
+			if fixture.probes != 1 || fixture.probeStreams != wantProbeStreams || fixture.streams != 8 || len(fixture.answers) != 2 {
+				t.Fatalf("provider path was bypassed or retried: schema=%d toolProbes=%d streams=%d answers=%+v", fixture.probes, fixture.probeStreams, fixture.streams, fixture.answers)
 			}
 			if protocol == "openai" && fixture.phaseReplayRequests != 6 {
 				t.Fatalf("tool continuation or recovered request lost phase replay: got=%d want=6", fixture.phaseReplayRequests)
@@ -897,8 +1012,18 @@ func TestBaselineHTTPWireObserverPreservesJSONSplitAcrossTextParts(t *testing.T)
 		map[string]string{"type": "output_text", "text": "true}\n "},
 	}
 	var calls atomic.Int32
+	probeFixture := &baselineHTTPFixture{t: t, protocol: "openai"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
+		if r.Header.Get("Accept") == "text/event-stream" {
+			var payload map[string]json.RawMessage
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Error(err)
+				return
+			}
+			probeFixture.respondToolReplayProbe(w, payload)
+			return
+		}
 		baselineHTTPAssertStrictProbeRequest(t, r)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -910,8 +1035,9 @@ func TestBaselineHTTPWireObserverPreservesJSONSplitAcrossTextParts(t *testing.T)
 	input := unitBaselineInput()
 	input.Endpoint, input.APIKey = server.URL+"/split-probe", baselineHTTPFakeKey
 	event := baselinePreflight(t.Context(), input.settings())
-	if event.Status != "passed" || event.FailureCode != "" || calls.Load() != 1 {
-		t.Fatalf("valid combined JSON was rejected or retried: status=%s failure=%s calls=%d", event.Status, event.FailureCode, calls.Load())
+	if event.Status != "passed" || event.FailureCode != "" || calls.Load() != 3 ||
+		event.ToolProbe == nil || event.ToolProbe.Status != "passed" {
+		t.Fatalf("valid combined JSON was rejected or tool replay failed: status=%s failure=%s calls=%d", event.Status, event.FailureCode, calls.Load())
 	}
 	raw, err := json.Marshal(event)
 	if err != nil || bytes.Contains(raw, []byte(baselineHTTPFakeKey)) {

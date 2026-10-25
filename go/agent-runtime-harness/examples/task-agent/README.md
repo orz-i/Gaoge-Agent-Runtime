@@ -116,7 +116,8 @@ Enter a Responses or Messages base URL or complete endpoint, exact model ID,
 documented context window and task output budget. The launcher expands only
 root and `/v1` base URLs, preserves gateway prefixes, and shows the final request
 URL before key entry. The script builds this example before
-requesting a hidden API key, then runs a native-schema probe and two fixed data
+requesting a hidden API key, then runs a native-schema probe; OpenAI also runs
+up to two side-effect-free SSE Tool/replay calls before the two fixed data
 variants with explicit repetitions. Successes, failures and incomplete runs are
 saved under `artifacts/agent-baselines/` with source/configuration metadata,
 measured durations, usage coverage and separate oracle/recovery observations.

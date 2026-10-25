@@ -86,10 +86,33 @@ The native-schema probe now uses JSON-only instructions matching the supplied sc
 
 Every run first makes a small native strict-schema probe. An unknown model fails
 before dispatch unless the user explicitly enables the exact-model override.
-A successful probe is an observation of that endpoint/model configuration; it
-does not certify all gateway behavior. Failure never falls back to prompt-only
-JSON or a different API protocol. Probe latency and usage are separate from
-task sample totals.
+For OpenAI Responses, a passing Schema probe is followed by a separate,
+side-effect-free stateless Tool/reasoning replay admission test (up to two SSE
+model calls). The first SSE call requests exactly one synthetic
+baseline_probe_echo Tool call, with store:false and
+include:["reasoning.encrypted_content"]. It checks the returned Tool call and,
+whenever reasoning occurs, requires the provider's encrypted reasoning item.
+The second SSE call replays the original provider evidence and a matching local
+synthetic Tool result, then requires a valid strict-schema final JSON answer.
+The test never registers or executes real task tools or saves a draft.
+Failure aborts before task sampling.
+
+The new OpenAI preflight profile is
+native-json-schema-v2-openai-tool-replay-v1, allowing up to three separately
+bounded model calls. This changes the dataset fingerprint and prevents direct
+numerical comparison with historical Schema-only profiles. The Schema probe's
+usage remains in preflight.usage, while preflight.toolProbe records independent
+model calls, HTTP calls, usage coverage, reasoningSeen, encryptedReplaySeen,
+stage and safe failure diagnostics. A model that returns no reasoning can pass
+tool round-tripping but this does not prove encrypted reasoning support.
+Anthropic keeps its own native Schema admission and signed reasoning support;
+it does not need OpenAI encrypted replay admission.
+
+Passing these specific probes is useful endpoint/model compatibility evidence,
+not proof of universal support. Failure does not silently drop reasoning,
+weaken schema validation, enable remote storage or switch API protocols. Probe
+usage and task sample usage/latency remain separate. Historical reports retain
+their original measurement profiles.
 
 ## If a run reports failed
 
@@ -127,6 +150,14 @@ JSON/schema validator. The observer adds no request, retry or body drain.
 
 Historical reports that did not save a body cannot recover it later. They remain
 readable and unchanged; a new run is required to collect missing response text.
+
+A failed OpenAI Tool/replay probe reports its error separately in
+preflight.toolProbe, including its own HTTP status and bounded redacted SSE body
+(responseDebug). The top-level preflight HTTP status continues to refer only
+to the earlier JSON Schema probe. Encrypted reasoning is never printed or
+saved; reasoningSeen and encryptedReplaySeen are boolean observations.
+Console and Markdown identify which gate failed, how many preflight calls
+were attempted, and how many task samples were skipped.
 
 Task failures also display and save `lastResponseDebug`: the final HTTP body
 actually consumed by the adapter in that sample, the physical request count and

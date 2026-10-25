@@ -26,6 +26,19 @@ The saved profile and dataset hash include the changed budget; historical report
 retain their recorded constraints, and comparisons across these profiles are
 rejected. See the [phase support note](unreleased-openai-response-phases.md).
 
+OpenAI Responses now runs a separate stateless Tool/reasoning replay gate
+only after the native strict JSON Schema gate passes. The side-effect-free
+probe requires a synthetic Tool call, verifies encrypted reasoning when it
+occurs, replays the original signed/opaque output with a synthetic Tool result,
+and validates a strict-schema final JSON answer. The OpenAI preflight can use
+up to three model calls; probe calls, status, usage, reasoning coverage and
+bounded redacted response evidence are separate from real task samples.
+Missing replay aborts before any task Tool call. The preflight profile changes
+to native-json-schema-v2-openai-tool-replay-v1, recording a larger aggregate
+preflight timeout and dataset fingerprint without a report schema bump.
+Historical reports are still readable under their original profile and are
+not upgraded or assigned fabricated Tool-probe results.
+
 The launcher writes JSON and Markdown reports under the ignored
 `artifacts/agent-baselines/` directory and can compare compatible JSON reports
 offline. Keys travel through stdin to the built binary and do not enter command

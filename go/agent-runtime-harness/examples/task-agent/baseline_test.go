@@ -147,11 +147,22 @@ func TestBaselineManifestIsComparableAcrossModelConfigurations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.DatasetHash != second.DatasetHash || first.RequestedSamples != 2 || second.RequestedSamples != 6 ||
+	third, err := baselineStart(publicConfiguration{Provider: "openai", Model: "another-model", ContextTokens: 32768, MaxOutputTokens: 1024, Repetitions: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the selected provider changes the admission protocol. Different
+	// model IDs and capacities within that provider still share task identity.
+	if first.DatasetHash != third.DatasetHash || first.DatasetHash == second.DatasetHash ||
+		first.Profile.PreflightVersion != "native-json-schema-v2-openai-tool-replay-v1" ||
+		first.Profile.PreflightTimeoutMs != (3*modelTimeout).Milliseconds() ||
+		second.Profile.PreflightVersion != "native-json-schema-v2" ||
+		second.Profile.PreflightTimeoutMs != modelTimeout.Milliseconds() ||
+		first.RequestedSamples != 2 || second.RequestedSamples != 6 || third.RequestedSamples != 6 ||
 		first.Profile.MaxLLMCalls != taskLimits().MaxLLMCalls || first.Profile.MaxToolCalls != taskLimits().MaxToolCalls ||
 		first.Profile.ContextPolicy != taskContextPolicy() || first.Profile.ContextPolicy.MaxInputTokens != 8192 ||
 		first.Profile.ArtifactReadInstructionLimit != 128 {
-		t.Fatalf("manifest mixed model settings with task policy: first=%+v second=%+v", first, second)
+		t.Fatalf("manifest/probe identity did not isolate provider-specific admission: openai=%+v anthropic=%+v other-openai=%+v", first, second, third)
 	}
 	// This budget revision must not reuse the identity of the original 6144
 	// profile. baselineStart remains the single manifest/hash construction path.

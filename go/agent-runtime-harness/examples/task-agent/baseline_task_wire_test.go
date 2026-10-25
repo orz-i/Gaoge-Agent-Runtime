@@ -14,6 +14,7 @@ func TestBaselineReportsActualTaskResponseWhenEncryptedReplayMissing(t *testing.
 	var physical atomic.Int32
 	var probes atomic.Int32
 	var tasks atomic.Int32
+	toolProbeFixture := &baselineHTTPFixture{t: t, protocol: "openai"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		physical.Add(1)
 		if r.Header.Get("Authorization") != "Bearer "+baselineHTTPFakeKey {
@@ -25,7 +26,16 @@ func TestBaselineReportsActualTaskResponseWhenEncryptedReplayMissing(t *testing.
 			Include []string `json:"include"`
 			Tools   []any    `json:"tools"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		var payload map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+			return
+		}
+		if isReplayProbeRequest(payload) {
+			toolProbeFixture.respondToolReplayProbe(w, payload)
+			return
+		}
+		if err := decodeTaskRequestPayload(payload, &request); err != nil {
 			t.Error(err)
 			return
 		}
@@ -53,7 +63,7 @@ func TestBaselineReportsActualTaskResponseWhenEncryptedReplayMissing(t *testing.
 	config := baselineHTTPInput("openai", server.URL+"/task", true)
 	code, events, output := executeHTTPBaseline(t, config)
 	samples := baselineEventsOfType(events, "sample")
-	if code == 0 || probes.Load() != 1 || tasks.Load() != 2 || physical.Load() != 3 || len(samples) != 2 {
+	if code == 0 || probes.Load() != 1 || tasks.Load() != 2 || physical.Load() != 5 || len(samples) != 2 {
 		t.Fatalf("baseline made unexpected requests or discarded samples: probes=%d tasks=%d samples=%d code=%d", probes.Load(), tasks.Load(), len(samples), code)
 	}
 	for _, item := range samples {
@@ -75,6 +85,7 @@ func TestBaselineReportsActualTaskResponseWhenEncryptedReplayMissing(t *testing.
 func TestBaselineReportsSecondTaskHTTPResponseAfterSuccessfulLookup(t *testing.T) {
 	var physical atomic.Int32
 	var tasks atomic.Int32
+	toolProbeFixture := &baselineHTTPFixture{t: t, protocol: "openai"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		physical.Add(1)
 		var req struct {
@@ -82,7 +93,16 @@ func TestBaselineReportsSecondTaskHTTPResponseAfterSuccessfulLookup(t *testing.T
 			Input   []map[string]json.RawMessage `json:"input"`
 			Include []string                     `json:"include"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var payload map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+			return
+		}
+		if isReplayProbeRequest(payload) {
+			toolProbeFixture.respondToolReplayProbe(w, payload)
+			return
+		}
+		if err := decodeTaskRequestPayload(payload, &req); err != nil {
 			t.Error(err)
 			return
 		}
@@ -121,7 +141,7 @@ func TestBaselineReportsSecondTaskHTTPResponseAfterSuccessfulLookup(t *testing.T
 	defer server.Close()
 	code, events, _ := executeHTTPBaseline(t, baselineHTTPInput("openai", server.URL+"/task", true))
 	samples := baselineEventsOfType(events, "sample")
-	if code == 0 || physical.Load() != 5 || tasks.Load() != 4 || len(samples) != 2 {
+	if code == 0 || physical.Load() != 7 || tasks.Load() != 4 || len(samples) != 2 {
 		t.Fatalf("unexpected task request/response sequence: physical=%d tasks=%d samples=%d", physical.Load(), tasks.Load(), len(samples))
 	}
 	for _, sample := range samples {
@@ -137,4 +157,12 @@ func TestBaselineReportsSecondTaskHTTPResponseAfterSuccessfulLookup(t *testing.T
 			t.Fatal("last response evidence belongs to prior successful request or leaked private replay")
 		}
 	}
+}
+
+func decodeTaskRequestPayload(source map[string]json.RawMessage, dest any) error {
+	encoded, err := json.Marshal(source)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(encoded, dest)
 }

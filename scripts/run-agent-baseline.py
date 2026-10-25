@@ -39,6 +39,7 @@ MAX_NORMALIZED_ANSWER_BYTES = 64 * 1024
 RESPONSE_DEBUG_CAPTURE_STATES = {"complete", "unavailable", "too_large", "incomplete", "read_error"}
 RESPONSE_DEBUG_FIELDS = {"capture", "body", "capturedBytes", "bodyTruncated", "normalizedAnswer", "answerTruncated", "redacted"}
 MAX_EVENTS = 256
+OPENAI_TOOL_PROBE_PROFILE = "native-json-schema-v2-openai-tool-replay-v1"
 PROBE_JSON_TYPES = {"object", "array", "string", "number", "boolean", "null"}
 WIRE_CAPTURE_STATES = {"complete", "unavailable", "too_large", "incomplete", "read_error", "invalid_json", "invalid_envelope"}
 WIRE_FORMAT_TYPES = {"missing", "text", "json_schema", "json_object", "other"}
@@ -222,8 +223,13 @@ def display_configuration(config, heading="配置"):
     for name in PUBLIC_CONFIGURATION:
         print("  %s: %s" % (name, config[name]))
     repetitions = config["repetitions"]
-    print("将执行 2 个任务 × %d 次 = %d 个样本，另加 1 次能力探测；会调用真实服务。" %
-          (repetitions, 2 * repetitions))
+    if config["provider"] == "openai":
+        print("将执行 2 个任务 × %d 次 = %d 个样本；先执行 1 次原生 Schema 探测，"
+              "通过后最多 2 次无副作用 SSE 工具/回放探测。探测失败不启动任务；会调用真实服务。" %
+              (repetitions, 2 * repetitions))
+    else:
+        print("将执行 2 个任务 × %d 次 = %d 个样本，另加 1 次能力探测；会调用真实服务。" %
+              (repetitions, 2 * repetitions))
 
 
 def read_api_key():
@@ -317,8 +323,9 @@ def md_cell(value):
 
 
 def failure_advice(stage, code, preflight):
-    status = preflight.get("httpStatus") if stage == "preflight" else None
-    kind = preflight.get("responseKind") if stage == "preflight" else None
+    facts = preflight.get("toolProbe", preflight) if stage == "preflight" else {}
+    status = facts.get("httpStatus")
+    kind = facts.get("responseKind")
     if code == "model.upstream_timeout":
         if status is None:
             return ("上游请求超时；报告未记录本次请求的 HTTP 响应状态。"
@@ -340,6 +347,9 @@ def failure_advice(stage, code, preflight):
         if status == 429:
             return "检查网关配额与调用频率，待限制解除后再运行。"
     if code == "provider_failed":
+        if preflight.get("toolProbe") is not None:
+            return ("严格 JSON Schema 探测已通过；本次问题发生在工具与回放预检。"
+                    "检查实际工具探针的 HTTP 响应、SSE 事件和本机网络，不要再次调整 Schema 提示词。")
         if status is None:
             return ("报告未记录本次请求的 HTTP 响应状态；先检查 endpoint 连通性、本机网络、代理设置和出口，确认连通后再采样。"
                     "现有证据不足以确定具体原因或阶段，也不能据此判定为超时；"
@@ -354,6 +364,15 @@ def failure_advice(stage, code, preflight):
     if code == "provider_replay_unavailable":
         return ("OpenAI reasoning 与工具调用续接缺少必需的加密回放证据；检查网关是否转发 include=reasoning.encrypted_content 并保留返回的 encrypted_content。"
                 "不要通过删除 reasoning 或重试工具来绕过该要求。")
+    if code == "tool_probe_call_invalid":
+        return "原生 Schema 检查已经通过，但网关没有返回一个符合定义的 probe_echo 工具调用；请检查 tool_choice、工具名称和工具参数。"
+    if code == "tool_probe_arguments_invalid":
+        return "工具探针返回了不满足固定参数 Schema 的调用；不能把无效参数当作可执行工具。"
+    if code == "tool_probe_completion_invalid":
+        return "工具调用和回放已通过首步检查，但续接回答不满足原生终答 Schema，或夹带新工具/拒绝/继续信号。"
+    if code == "tool_probe_stream_unavailable":
+        return "当前 Provider 缺少流式模型接口；此基线不回退到非流式工具续接。"
+
     if code == "provider_unsupported":
         return ("当前模型请求或响应格式不在适配器支持范围。预检通过不代表工具与无状态续接兼容；"
                 "先查看失败样本的物理 HTTP 请求数及最后响应正文，确认工具调用、reasoning 和 encrypted_content，"
@@ -545,7 +564,9 @@ def failure_diagnostics(report):
         failure = report["launcherFailure"]
         failures.append(("启动器", failure["stage"], failure["failureCode"]))
     if preflight.get("status") == "failed":
-        failures.append(("原生严格 JSON Schema 预检", "preflight", preflight["failureCode"]))
+        label = ("工具与无状态回放准入" if "toolProbe" in preflight else
+                 "原生严格 JSON Schema 预检")
+        failures.append((label, "preflight", preflight["failureCode"]))
     error = (report.get("runner") or {}).get("error")
     if error:
         failures.append(("执行器", error["stage"], error["failureCode"]))
@@ -567,8 +588,18 @@ def failure_diagnostics(report):
     if preflight.get("status") == "failed" and not report.get("samples"):
         lines.append("任务尚未开始：暂无任务完成率证据。")
     if "httpStatus" in preflight:
-        lines.append("预检传输事实：HTTP %d；响应 Content-Type 归类 %s。" %
+        lines.append("JSON Schema 探测传输事实：HTTP %d；响应 Content-Type 归类 %s。" %
                      (preflight["httpStatus"], preflight["responseKind"]))
+    if "toolProbe" in preflight:
+        tool = preflight["toolProbe"]
+        lines.append("无副作用工具续接探测：状态 %s；阶段 %s；模型请求 %s；实际 HTTP 请求 %s。" %
+                     (tool["status"], tool["stage"], tool["modelCalls"], tool["httpRequests"]))
+        lines.append("推理/加密回放证据：reasoning=%s；encrypted replay=%s；已知 usage=%s。" %
+                     (md_cell(tool["reasoningSeen"]), md_cell(tool["encryptedReplaySeen"]),
+                      md_cell(tool["usage"])))
+        if "httpStatus" in tool:
+            lines.append("工具续接 HTTP 事实：HTTP %d；类型 %s。" %
+                         (tool["httpStatus"], tool["responseKind"]))
     for label, stage, code in failures:
         lines.append("%s：阶段 %s；失败分类 %s。" % (label, stage, code))
         if stage == "preflight" and code == "strict_schema_probe_failed":
@@ -609,7 +640,15 @@ def render_markdown(report):
         lines.append("- 启动器失败：%s" % md_cell(report["launcherFailure"]))
     if runner.get("error"):
         lines.append("- 执行器失败：%s" % md_cell(runner["error"]))
-    debug_lines = response_debug_lines(preflight, markdown=True)
+    if "toolProbe" in preflight:
+        tool = preflight["toolProbe"]
+        lines += ["", "- 原生 Schema：通过；工具与回放：%s；阶段：%s；探针模型调用：%d；HTTP 请求：%d。" %
+                  (tool["status"], tool["stage"], tool["modelCalls"], tool["httpRequests"]),
+                  "- 探针 reasoning=%s；encrypted replay=%s；探针 usage：%s。" %
+                  (md_cell(tool["reasoningSeen"]), md_cell(tool["encryptedReplaySeen"]), md_cell(tool["usage"]))]
+    debug_target = preflight.get("toolProbe", preflight)
+    debug_lines = response_debug_lines(debug_target, markdown=True,
+                                        title="工具与回放预检响应正文" if "toolProbe" in preflight else "失败预检响应正文")
     if debug_lines:
         lines += [""] + debug_lines
     diagnostics = failure_diagnostics(report)
@@ -756,6 +795,44 @@ def validate_response_debug(debug):
             (debug["capture"] == "too_large" and not debug["bodyTruncated"]) or
             (debug["capturedBytes"] == 0 and debug["body"])):
         raise ProtocolFailure("invalid_preflight_response_debug")
+
+
+def validate_tool_probe(check):
+    required = {"status", "stage", "modelCalls", "httpRequests", "usage",
+                "reasoningSeen", "encryptedReplaySeen"}
+    if not isinstance(check, dict) or not required <= set(check) or (
+            set(check) - required - {"failureCode", "httpStatus", "responseKind", "responseDebug"}):
+        raise ProtocolFailure("invalid_tool_probe")
+    if (check["status"] not in ("passed", "failed") or
+            check["stage"] not in ("tool_call", "continuation", "completed") or
+            type(check["modelCalls"]) is not int or not 0 <= check["modelCalls"] <= 2 or
+            type(check["httpRequests"]) is not int or
+            not 0 <= check["httpRequests"] <= check["modelCalls"] or
+            type(check["reasoningSeen"]) is not bool or
+            type(check["encryptedReplaySeen"]) is not bool or
+            (check["encryptedReplaySeen"] and not check["reasoningSeen"])):
+        raise ProtocolFailure("invalid_tool_probe")
+    validate_usage(check["usage"], coverage=True)
+    if check["usage"]["knownCalls"] + check["usage"]["missingCalls"] != check["modelCalls"]:
+        raise ProtocolFailure("invalid_tool_probe")
+    if ("httpStatus" in check) != ("responseKind" in check):
+        raise ProtocolFailure("invalid_tool_probe")
+    if "httpStatus" in check and (type(check["httpStatus"]) is not int or
+                                  not 100 <= check["httpStatus"] <= 999 or
+                                  check["httpRequests"] == 0 or
+                                  check["responseKind"] not in ("json", "html", "event_stream", "other")):
+        raise ProtocolFailure("invalid_tool_probe")
+    if check["status"] == "passed":
+        if (check["stage"] != "completed" or check["modelCalls"] != 2 or
+                check["httpRequests"] != 2 or "failureCode" in check or
+                "responseDebug" in check or
+                (check["reasoningSeen"] and not check["encryptedReplaySeen"])):
+            raise ProtocolFailure("invalid_tool_probe")
+    else:
+        if (check["stage"] == "completed" or not valid_code(check.get("failureCode")) or
+                "responseDebug" not in check):
+            raise ProtocolFailure("invalid_tool_probe")
+        validate_response_debug(check["responseDebug"])
 
 
 def validate_schema_check(check):
@@ -941,9 +1018,23 @@ def accept_event(report, event):
             if event["status"] != "failed":
                 raise ProtocolFailure("invalid_preflight_response_debug")
             validate_response_debug(event["responseDebug"])
+        if "toolProbe" in event:
+            if (report["configuration"]["provider"] != "openai" or
+                    "schemaCheck" in event or "wireCheck" in event or
+                    "responseDebug" in event):
+                raise ProtocolFailure("invalid_tool_probe")
+            validate_tool_probe(event["toolProbe"])
+            if event["toolProbe"]["status"] != event["status"] or (
+                    event["status"] == "failed" and
+                    event["failureCode"] != event["toolProbe"]["failureCode"]):
+                raise ProtocolFailure("invalid_tool_probe")
+        if (report["configuration"]["provider"] == "openai" and
+                runner["profile"].get("preflightVersion") == OPENAI_TOOL_PROBE_PROFILE and
+                event["status"] == "passed" and "toolProbe" not in event):
+            raise ProtocolFailure("missing_tool_probe")
         report["preflight"] = {name: event[name] for name in (
             "status", "failureCode", "durationMs", "usage", "httpStatus", "responseKind", "schemaCheck", "wireCheck",
-            "responseDebug",
+            "responseDebug", "toolProbe",
         ) if name in event}
     elif kind == "sample":
         if not runner.get("taskVersion") or not report["preflight"] or report["preflight"]["status"] != "passed":
@@ -1147,7 +1238,14 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
                 detail = "；失败分类 " + preflight["failureCode"] if preflight["status"] == "failed" else ""
                 print("预检：%s；阶段 preflight%s。" %
                       ("通过" if preflight["status"] == "passed" else "未通过", detail), flush=True)
-                for line in response_debug_lines(preflight):
+                if "toolProbe" in preflight:
+                    tool = preflight["toolProbe"]
+                    print("原生 JSON Schema：通过。工具/回放预检：%s；阶段 %s；模型请求 %s；实际 HTTP 请求 %s；reasoning=%s；encrypted replay=%s。" %
+                          (tool["status"], tool["stage"], tool["modelCalls"], tool["httpRequests"],
+                           md_cell(tool["reasoningSeen"]), md_cell(tool["encryptedReplaySeen"])), flush=True)
+                debug_target = preflight.get("toolProbe", preflight)
+                for line in response_debug_lines(debug_target,
+                                                  title="工具与回放预检响应正文" if "toolProbe" in preflight else "失败预检响应正文"):
                     print(line, flush=True)
             elif event["type"] == "sample":
                 sample = redact(report["samples"][-1], secret)

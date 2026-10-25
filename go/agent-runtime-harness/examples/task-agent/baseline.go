@@ -50,10 +50,14 @@ type measurementProfile struct {
 	UsageAccounting              string                `json:"usageAccounting"`
 }
 
-func baselineProfile() measurementProfile {
+func baselineProfile(provider string) measurementProfile {
+	preflightTimeout, version := modelTimeout, "native-json-schema-v2"
+	if provider == "openai" {
+		preflightTimeout, version = 3*modelTimeout, "native-json-schema-v2-openai-tool-replay-v1"
+	}
 	return measurementProfile{
 		Sampling: "sequential-round-robin", SampleTimeoutMs: sampleTimeout.Milliseconds(),
-		PreflightTimeoutMs: modelTimeout.Milliseconds(), PreflightVersion: "native-json-schema-v2", MaxLLMCalls: maxModelCalls, MaxToolCalls: maxToolCalls,
+		PreflightTimeoutMs: preflightTimeout.Milliseconds(), PreflightVersion: version, MaxLLMCalls: maxModelCalls, MaxToolCalls: maxToolCalls,
 		ModelTimeoutMs: modelTimeout.Milliseconds(), ToolTimeoutMs: toolTimeout.Milliseconds(),
 		MaxAttempts: 1, MaxConcurrency: 1, LeaseDurationMs: leaseDuration.Milliseconds(), ContextPolicy: taskContextPolicy(), ArtifactReadInstructionLimit: artifactReadLimit,
 		OracleVersion: "evidence-draft-recovery-v1", Recovery: "in-process-store-clock-expiry",
@@ -76,7 +80,7 @@ type startEvent struct {
 // and execution policy. Model identity and host-supplied capacity remain in the
 // separate configuration so the task can be compared across models.
 func baselineStart(configuration publicConfiguration) (startEvent, error) {
-	profile := baselineProfile()
+	profile := baselineProfile(configuration.Provider)
 	type caseManifest struct {
 		ID         string `json:"id"`
 		SourceHash string `json:"sourceHash"`
@@ -119,6 +123,7 @@ type preflightEvent struct {
 	SchemaCheck   *probeSchemaCheck       `json:"schemaCheck,omitempty"`
 	WireCheck     *probeWireCheck         `json:"wireCheck,omitempty"`
 	ResponseDebug *preflightResponseDebug `json:"responseDebug,omitempty"`
+	ToolProbe     *toolProbeCheck         `json:"toolProbe,omitempty"`
 }
 
 const preflightPrompt = "Return a JSON object with exactly one property, ok, set to true. The API output schema is authoritative. Do not add prose or Markdown."
@@ -128,7 +133,9 @@ var probeSchema = json.RawMessage(`{"type":"object","properties":{"ok":{"type":"
 func baselinePreflight(ctx context.Context, config settings) (event preflightEvent) {
 	started := time.Now()
 	event.Type, event.Status = "preflight", "failed"
-	// Observe only this probe. The caller's settings and task clients are unchanged.
+	// Keep the schema and tool probes on separate HTTP observers so a failed
+	// tool response can never masquerade as the prior successful JSON probe.
+	originalConfig := config
 	clientHTTP, observation := newPreflightHTTPClient(config.httpClient)
 	observation.captureWire = config.provider == "openai"
 	config.httpClient = clientHTTP
@@ -136,7 +143,7 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 	defer func() {
 		event.DurationMs = time.Since(started).Milliseconds()
 		event.HTTPStatus, event.ResponseKind = observation.snapshot()
-		if event.Status == "failed" {
+		if event.Status == "failed" && event.ToolProbe == nil {
 			event.ResponseDebug = observation.responseDebugSnapshot(normalizedAnswer, config.apiKey)
 		}
 	}()
@@ -183,6 +190,16 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 			event.WireCheck = observation.wireSnapshot(response.Content)
 		}
 		return event
+	}
+	// Only OpenAI Responses requires the stateless encrypted-reasoning probe.
+	// Other providers retain their own already-defined replay contract.
+	if originalConfig.provider == "openai" {
+		check := baselineToolReplayProbe(ctx, originalConfig)
+		event.ToolProbe = &check
+		if check.Status != "passed" {
+			event.FailureCode = check.FailureCode
+			return event
+		}
 	}
 	event.Status = "passed"
 	return event
