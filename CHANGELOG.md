@@ -5,6 +5,30 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Document dated, report-scoped real-model endpoint compatibility findings and explicit, low-cost recheck discipline; keep gateway-specific evidence in ignored local artifacts, preserve fail-closed replay, and avoid introducing permanent SDK blacklists or mixing independent governance subjects into one PR.
+
+- Gate OpenAI Responses real-model task baselines on a separate, bounded stateless Tool+reasoning replay probe after the strict JSON Schema probe. Demand a side-effect-free synthetic Tool call, verify encrypted reasoning when reasoning occurs, replay the original output with a synthetic Tool receipt, and validate a strict final answer before any task sample runs. Preserve bounded redacted wire evidence, independent usage/request counts, a distinct preflight profile fingerprint, and prior reports unchanged. No SDK API or provider fallback is added.
+
+- Capture the last actual provider HTTP response when a live baseline task fails, with physical-dispatch count, status, bounded credential-redacted body and explicit capture state in console/JSON/Markdown. Mask provider-owned `reasoning.encrypted_content`; do not treat a previously observed response as proof of a later local failure. Add `retry <report.json> --repetitions 1` for lower-cost diagnosis without changing the existing task oracle, replay fencing or earlier reports.
+
+- Classify missing OpenAI encrypted reasoning replay evidence in the live baseline as `provider_replay_unavailable` before generic `provider_unsupported`, keeping the actual provider fail-closed contract unchanged.
+
+- Align the native strict-schema preflight prompt with its JSON contract and record `native-json-schema-v2` in the measurement profile/dataset fingerprint. Earlier conflicting plain-sentence probe results remain distinct; validation stays strict.
+
+- Show the captured HTTP response body and extracted SDK answer for failed baseline preflights by default, and retain both in JSON/Markdown reports after credential redaction. Mark incomplete and truncated captures, escape terminal controls and Markdown fences, and preserve original validation without another model request or a debug flag.
+
+- Preserve typed provider HTTP transport timeouts as the existing `model.upstream_timeout` classification without exposing raw network errors or changing retry budgets. Baseline diagnostics distinguish a timeout with no observed HTTP response from a native-schema failure and direct connectivity checks before another live sample.
+
+- Diagnose failed OpenAI strict-schema probes at the same HTTP request/response boundary with bounded, content-free wire observations. Keep native-schema pass/fail unchanged, distinguish incomplete evidence from a negative finding, and add `run-agent-baseline.py retry <report.json>` to reuse public settings with a fresh hidden key and new report.
+
+- Select OpenAI Responses `final_answer` separately from `commentary`, preserve original assistant phases during stateless continuation, and use the same projection for replay identity checks. Retain private replay evidence in Agent completion and bounded completion-repair history. Reject ambiguous phase combinations without extracting or repairing JSON. Review persisted transcripts before upgrade; see the [phase upgrade note](docs/releases/unreleased-openai-response-phases.md).
+- Explain strict-schema baseline failures with safe JSON shape/type, required-field and continuation diagnostics while retaining the native strict contract and historical reports. The `schemaCheck` summary excludes response content and credentials; failed-response text is available separately through redacted `responseDebug`.
+- Revise the example baseline service input ceiling from 6,144 to 8,192 after native phase/replay fixtures exceeded the former allowance; retain actual archival/retrieval and recovery checks. Record the changed policy in the profile/dataset hash, read historical reports under their own budgets, and reject score comparisons across the two profiles.
+
+- Resolve recognizable root and `/v1` base URLs at interactive baseline input, displaying the final protocol endpoint before key entry. Explain preflight failures with safe observed HTTP metadata and actionable hints, preserve historical endpoint values, and distinguish the task output budget from model capacity.
+
+- Add an interactive real-model Agent baseline with hidden key input, explicit endpoint/model budgets, native-schema preflight, repeated fixed evidence/recovery tasks, failure-preserving reports and compatible-report comparison. Keep offline protocol tests separate from real-model observations; Python 3.9+ is required for the new launcher tests in `make check`. See the [baseline note](docs/releases/unreleased-agent-model-baseline.md).
+
 - Add explicit `Runner.ResumeTurn` and `SessionClient.Resume` for an existing direct-Agent Turn, restoring persisted Context while retaining Agent revision, execution-claim, retry, approval, budget and uncertain-Tool guards. Allow transcript-free Session read/recovery handles. See the [single-Agent task recovery note](docs/releases/unreleased-agent-task-recovery.md).
 - Make the offline quickstart execute an Agent and Tool, and add a task-oriented Context/recovery example with an output oracle plus real PostgreSQL process-recovery coverage. Pin the standalone integration test toolchain to patched Go 1.27.3. Keep deterministic execution evidence separate from optional live-model quality checks.
 - Reject every HTTP redirect in MCP and A2A clients, including same-origin redirects, before another request can forward endpoint-scoped authentication or bypass endpoint validation. Preserve host redirect rejections without mutating the supplied HTTP client. Hosts must configure final protocol URLs directly; see the [breaking upgrade note](docs/releases/unreleased-protocol-redirect-safety.md).

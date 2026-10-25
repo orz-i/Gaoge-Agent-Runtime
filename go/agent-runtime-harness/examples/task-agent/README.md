@@ -49,9 +49,9 @@ it does not deploy, publish, send a message or modify repository files.
 - The archive reader is registered in the Tool registry and explicitly granted
   in `ConfigSnapshot.ToolKeys`, with its policy snapshot.
 - The model-window resolver accepts only the exact configured model. Scripted
-  mode declares an 8,192-token synthetic capacity. Live mode requires the host
+  mode declares a 16,384-token synthetic capacity. Live mode requires the host
   to supply the selected model's documented capacity.
-- `ContextPolicy.MaxInputTokens = 6144` is a separate service ceiling that
+- `ContextPolicy.MaxInputTokens = 8192` is a separate service ceiling that
   makes this small task exercise compaction, even with a large model window.
   The default Context estimator is conservative; this is not an exact
   provider tokenizer measurement.
@@ -65,7 +65,10 @@ it does not deploy, publish, send a message or modify repository files.
 The service ceiling must still leave room for the selected model's Tool
 schemas, instructions and retrieved evidence. Making it too small can archive
 the reader's result again or fail admission; increasing the provider capacity
-alone does not raise the separate service ceiling.
+alone does not raise the separate service ceiling. The current 8,192 ceiling
+replaces the earlier 6,144 baseline profile after native phase/replay fixtures
+exceeded that conservative input allowance. The dataset hash and measurement
+profile record this change; results across those budgets are not comparable.
 
 ## Oracle and correctness boundary
 
@@ -100,6 +103,44 @@ claim exactly-once external effects across a crash before that receipt.
 An unresolved native Tool dispatch requires the existing outcome reconciliation
 path; blindly replaying the handler would violate that boundary.
 
+## Interactive real-model baseline
+
+From the repository root, run:
+
+```sh
+python3 scripts/run-agent-baseline.py
+```
+
+This is the repeatable path for collecting an initial real-model baseline.
+Enter a Responses or Messages base URL or complete endpoint, exact model ID,
+documented context window and task output budget. The launcher expands only
+root and `/v1` base URLs, preserves gateway prefixes, and shows the final request
+URL before key entry. The script builds this example before
+requesting a hidden API key, then runs a native-schema probe; OpenAI also runs
+up to two side-effect-free SSE Tool/replay calls before the two fixed data
+variants with explicit repetitions. Successes, failures and incomplete runs are
+saved under `artifacts/agent-baselines/` with source/configuration metadata,
+measured durations, usage coverage and separate oracle/recovery observations.
+Preflight failures show the captured, credential-redacted HTTP response body and
+the SDK's extracted answer directly, and save both in JSON/Markdown reports.
+No additional debug flag is required. Task failures likewise show the last
+provider HTTP response that the adapter actually consumed, with physical request
+count and safe redaction of `reasoning.encrypted_content`. An observed response
+may precede a later local failure; do not assume it is causal. Partial captures
+and truncation are marked; HTTP status, response kind and safe failure categories
+remain separate facts.
+Failed OpenAI schema probes also report bounded request/response structure
+observations from that same call. Original validation and request counts are
+unchanged. Use
+`python3 scripts/run-agent-baseline.py retry <report.json>` to reuse a saved
+public configuration and enter only a fresh key for a new measured run.
+Use `retry <report.json> --repetitions 1` to diagnose with only two task samples. No real service is invoked
+by ordinary test gates.
+
+See the [baseline guide](../../../../docs/agent-model-baseline.md) for the input
+contract, offline comparison command, credential boundary and scope of the
+in-process recovery evidence.
+
 ## Optional real model smoke
 
 Live mode runs the same synthetic task and oracle with a real provider. It is
@@ -121,7 +162,7 @@ go run ./go/agent-runtime-harness/examples/task-agent \
 The provider constructor reads `OPENAI_API_KEY` only in live mode. Use
 `-provider=anthropic` with `ANTHROPIC_API_KEY` for the Anthropic adapter.
 Supply the actual selected model's documented window and an explicit output
-ceiling, leaving at least 6,144 input tokens. No real model or window is guessed.
+ceiling, leaving at least 8,192 input tokens. No real model or window is guessed.
 
 A successful live run reports `live_model_task_smoke`. It is evidence for one
 task/configuration, not a general model-quality score or ranking. Tool misuse,

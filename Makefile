@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
+.PHONY: bootstrap metadata agent-baseline agent-baseline-test fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -6,6 +6,12 @@ bootstrap:
 metadata:
 	node --test scripts/beta-release-policy.test.mjs scripts/check-pr-body-format.test.mjs scripts/release-command.test.mjs scripts/sqlite-release-policy.test.mjs
 	node scripts/check-beta.mjs
+
+agent-baseline:
+	python3 scripts/run-agent-baseline.py
+
+agent-baseline-test:
+	python3 -m unittest discover -s scripts -p 'test_agent_baseline.py'
 
 fmt-check:
 	node scripts/go-workspace.mjs fmt-check
@@ -114,6 +120,6 @@ a2a-tck:
 release-check:
 	node scripts/check-release.mjs
 
-check: metadata fmt-check tidy-check go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build eval-smoke benchmark-smoke otel-e2e-smoke a2a-product-check release-check
+check: metadata agent-baseline-test fmt-check tidy-check go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build eval-smoke benchmark-smoke otel-e2e-smoke a2a-product-check release-check
 
 beta: check coverage security integration integration-otel

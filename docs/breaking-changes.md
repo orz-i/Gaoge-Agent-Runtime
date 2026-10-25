@@ -2,6 +2,16 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-24 — OpenAI Responses assistant phases
+
+**Breaking behavior:** Phased assistant responses now use their single `final_answer` for terminal normalized content and retain original `commentary`/`final_answer` message items for stateless replay. Unknown phases, mixed phased/unphased messages, duplicate final answers, commentary-only terminal output, and final-answer-plus-local-Tool output fail explicitly. There is no fallback to the former concatenation or to JSON extraction.
+
+**Host upgrade:** Drain affected in-flight work before upgrading. If a persisted replay envelope's phases no longer project to its committed normalized content, reconcile or quarantine that Run through the existing host process; do not rewrite the frozen request, rehash old evidence, or automatically repeat committed Tools. Earlier messages whose phases were discarded cannot be reconstructed from normalized text alone.
+
+**API and persistence:** No public Go symbols, HTTP fields, SQL migration, or schema-version change. Phased completed text turns can now carry the existing optional `ProviderReplay` envelope. Native streaming deltas remain progress; terminal `Response.Content` is the final-answer contract. Historical benchmark reports remain unchanged and readable.
+
+**Reference:** [OpenAI response phase upgrade note](releases/unreleased-openai-response-phases.md). Publish only in a new immutable prerelease.
+
 ## 2026-10-24 — MCP/A2A redirects fail closed
 
 **Breaking behavior:** MCP and A2A clients reject all HTTP redirects, including same-origin redirects, regardless of whether the host HTTP client's `CheckRedirect` allows them. The adapters previously reattached endpoint-scoped authentication after a redirect without validating the new endpoint. A host rejection still takes precedence; the supplied HTTP client is copied and remains unchanged.

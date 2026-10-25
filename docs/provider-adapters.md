@@ -9,7 +9,7 @@ created.
 
 | Package | Responsibility |
 | --- | --- |
-| `model` | Existing `Client`, optional `StreamingClient`, `Request`/`Response`; per-request provider name and optional opaque, signed replay envelope for faithful continuation |
+| `model` | Existing `Client`, optional `StreamingClient`, `Request`/`Response`; per-request provider name and optional provider-owned replay envelope, signed/encrypted where required, for faithful continuation |
 | `provider` | Immutable, explicitly composed `Router`: `provider/model-id` routes to registered providers |
 | `provider/openai` | OpenAI **Responses API**, text + local function tools |
 | `provider/anthropic` | Anthropic **Messages API**, text + local tool-use/tool-result |
@@ -74,13 +74,25 @@ multi-provider router.
   stable Call IDs. Provider tool names map back to Gaoge Tool Keys.
 - Synchronous `Generate` and SSE `GenerateStream`. A streaming terminal
   response is required; partial SSE delivery is **not** success.
+- OpenAI Responses assistant `phase` is preserved. When messages use phases,
+  only the single `final_answer` message supplies terminal `Response.Content`;
+  preceding `commentary` does not become part of a structured final answer.
+  A commentary-plus-local-Tool step remains intermediate and keeps its text
+  and original output items for continuation. Unknown phases, mixed phased and
+  unphased messages, multiple final answers, commentary-only terminal responses,
+  and a final answer mixed with local Tool calls fail as `ErrUnsupported`.
+  Responses whose messages all omit/null the phase retain the existing text
+  concatenation behavior. SSE deltas remain progress events; consume the
+  returned terminal response to validate a completed structured answer.
 - OpenAI response IDs, output/input/cache-read/reasoning token accounting;
   Anthropic message IDs, input/output/cache-read/cache-write token accounting.
   Missing, null or incomplete usage is preserved as **unknown** (`nil`) and is
   never fabricated as a zero-token receipt; existing Agent/Harness token
   admission fails closed when accurate billing evidence is required.
-- OpenAI refusal text is preserved as terminal model content (rather than
-  disappearing behind an unsupported-response error).
+- OpenAI terminal refusal text is preserved as model content. A refusal in any
+  supported assistant message also sets `Response.Refused`, including commentary
+  before a final answer; completion validation must check this flag as well as
+  final content. Selecting a valid final JSON answer cannot hide a refusal.
 - OpenAI Responses **reasoning + local function calls** support stateless
   encrypted reasoning replay. Tool-bearing requests ask for
   `include: ["reasoning.encrypted_content"]` with `store: false`; if a
@@ -91,6 +103,18 @@ multi-provider router.
   committed transcript. No raw reasoning text is interpreted or exposed.
   Missing encrypted content fails explicitly as `openai.ErrReplayUnavailable`,
   never by silently dropping reasoning or enabling server-side storage.
+  Phased assistant messages also retain provider-opaque replay even without a
+  local Tool call; the original message order, phase and opaque fields survive
+  later requests. Such completed text-only turns replay their message items,
+  not standalone reasoning. Decoding and replay validation share one phase
+  projection, while every replayed Tool retains the existing identity,
+  argument and order checks. Agent completion and bounded completion repair
+  retain this envelope in trusted persisted messages; public views still strip
+  it. Conservative Context estimates account for opaque replay as well as the
+  normalized transcript; the adapter sends verified original items only once.
+  See the
+  [phase upgrade note](releases/unreleased-openai-response-phases.md) before
+  resuming older persisted transcripts.
 - Anthropic signed `thinking`/`redacted_thinking` blocks are preserved in an
   optional provider-neutral `model.ProviderReplay` envelope for tool-call
   continuation. The Agent commits the original, ordered assistant content
@@ -119,12 +143,19 @@ multi-provider router.
   `top_p`, both in [0, 1]. Unknown keys are rejected, not silently sent.
 - Retryable HTTP status 408/409/425/429/5xx and transport failures return
   `model.RetryableError`; 400/401/403 errors do not. Agent owns retry
-  budgets. HTTP error messages, credentials, and raw remote response bodies
-  are never included in returned errors.
+  budgets. A typed `net.Error` timeout from HTTP dispatch, while the caller
+  Context is still active, also retains the existing
+  `model.upstream_timeout` classification. The safe cause remains local;
+  network error text, URLs, addresses and underlying errors are not retained.
+  Caller cancellation/deadlines keep their existing Context errors, and the
+  classification does not add retries. HTTP error messages, credentials, and
+  raw remote response bodies are never included in returned errors.
 - HTTPS-only endpoints unless explicitly configured to loopback HTTP.
   Redirects are not followed with credentials. Clients honor Context and
   have a default two-minute HTTP timeout; the Agent can enforce a stricter
-  deadline. Requests and SSE events have bounded sizes.
+  deadline. Transport-specific connection/TLS deadlines may expire earlier;
+  increasing a model deadline does not change those transport settings.
+  Requests and SSE events have bounded sizes.
 
 ## Current explicit limitations
 
@@ -169,8 +200,9 @@ go test -count=1 -race ./provider/... ./agent ./model
 ```
 
 The fixture suite covers provider routing, function/tool argument conversion,
-transcript round-tripping (including signed Anthropic Thinking and encrypted
-OpenAI Responses reasoning), SSE text/tool events,
+transcript round-tripping (including signed Anthropic Thinking, encrypted
+OpenAI Responses reasoning and original assistant phases), final-answer
+selection without JSON extraction or repair, SSE text/tool events,
 unknown top-level Anthropic events and truncation, documented optional
 Anthropic `caller` and empty citations metadata with negative tests for
 server callers / toolsets / non-replayable citations, explicit unknown-vs-zero

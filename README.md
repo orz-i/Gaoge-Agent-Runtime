@@ -77,6 +77,10 @@ Tool loop. See the [complete quickstart](go/agent-runtime/examples/quickstart/ma
 For a Session with bounded Context, retrievable archives and explicit recovery,
 follow the [single-Agent task guide](docs/agent-task-workflow.md) and
 [task-agent example](go/agent-runtime-harness/examples/task-agent/README.md).
+For an interactive real-model baseline, run
+`python3 scripts/run-agent-baseline.py`; enter the endpoint, model and hidden
+API key locally. The [baseline guide](docs/agent-model-baseline.md) explains
+fixed tasks, repeatable reports, comparison and recovery limits.
 
 The [TypeScript client guide](ts/agent-runtime-client/README.md),
 [observability guidance](docs/observability.md), and

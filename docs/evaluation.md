@@ -51,3 +51,13 @@ model. It requires host credentials and an explicitly supplied model window;
 it is not run by ordinary unit or CI gates. Report provider/model identity and
 observed output separately from offline acceptance. No success-rate, latency or
 cost baseline is inferred from a scripted-model run.
+
+The [real-model baseline launcher](agent-model-baseline.md) adds a local,
+interactive entry point to this same example. It runs two fixed data variants
+with explicit repetitions, records a dataset hash and measurement profile, and
+preserves failed or incomplete observations. A separate native-schema probe
+precedes task sampling; its latency and usage are not counted as task results.
+The launcher compares compatible reports without installing an evaluation
+service or turning a recorded run into an automatically accepted baseline.
+`make agent-baseline-test` verifies the launcher offline and is part of
+`make check`; real models remain opt-in.

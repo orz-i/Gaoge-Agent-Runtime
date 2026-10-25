@@ -1,0 +1,1485 @@
+#!/usr/bin/env python3
+"""Interactive, credential-safe launcher for the task-agent live baseline."""
+
+from __future__ import annotations
+
+import datetime as dt
+import getpass
+import ipaddress
+import json
+import math
+import os
+from pathlib import Path
+import queue
+import re
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import unicodedata
+from urllib.parse import unquote, urlsplit
+import uuid
+import warnings
+
+SCHEMA_VERSION = 1
+SERVICE_INPUT_TOKENS = 8192
+DEFAULT_ENDPOINTS = {
+    "openai": "https://api.openai.com/v1/responses",
+    "anthropic": "https://api.anthropic.com/v1/messages",
+}
+PUBLIC_CONFIGURATION = (
+    "provider", "endpoint", "model", "contextTokens", "maxOutputTokens",
+    "repetitions", "allowUnknownStructuredModel",
+)
+MAX_LINE_BYTES = 2 * 1024 * 1024
+MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+MAX_RESPONSE_BODY_BYTES = 256 * 1024
+MAX_NORMALIZED_ANSWER_BYTES = 64 * 1024
+RESPONSE_DEBUG_CAPTURE_STATES = {"complete", "unavailable", "too_large", "incomplete", "read_error"}
+RESPONSE_DEBUG_FIELDS = {"capture", "body", "capturedBytes", "bodyTruncated", "normalizedAnswer", "answerTruncated", "redacted"}
+MAX_EVENTS = 256
+OPENAI_TOOL_PROBE_PROFILE = "native-json-schema-v2-openai-tool-replay-v1"
+PROBE_JSON_TYPES = {"object", "array", "string", "number", "boolean", "null"}
+WIRE_CAPTURE_STATES = {"complete", "unavailable", "too_large", "incomplete", "read_error", "invalid_json", "invalid_envelope"}
+WIRE_FORMAT_TYPES = {"missing", "text", "json_schema", "json_object", "other"}
+WIRE_RESPONSE_STATUSES = {"missing", "completed", "incomplete", "failed", "other"}
+WIRE_PHASES = {"absent", "null", "commentary", "final_answer", "other"}
+MAX_WIRE_MESSAGES = 16
+MAX_WIRE_COUNT = 1 << 20
+STAGES = {
+    "configuration", "preflight", "start", "evidence", "interrupted",
+    "lease_check", "resume", "oracle", "terminal_check", "completed",
+}
+SAMPLE_FIELDS = {
+    "sampleID", "caseID", "repetition", "status", "stage", "failureCode",
+    "durationMs", "modelCalls", "toolCalls", "oraclePassed", "recoveryChecks",
+    "usage", "contextGeneration", "runID", "turnID", "modelDurationsMs",
+    "toolExecutions", "lookupCalls", "artifactReads", "draftWrites",
+    "providerHTTPRequests", "lastHTTPStatus", "lastResponseKind", "lastResponseDebug",
+}
+RECOVERY_FIELDS = {
+    "interruptionObserved", "leaseBlocked", "sameRun", "sameTurn",
+    "committedToolsNotReplayed", "noExtraToolsAfterResume", "terminalResumeNoOp",
+}
+
+
+class SafeFailure(Exception):
+    """An internal fixed code; never carries a child payload or a credential."""
+
+
+class ProtocolFailure(SafeFailure):
+    pass
+
+
+class ReportFailure(SafeFailure):
+    pass
+
+
+def repository_root():
+    return Path(__file__).resolve().parents[1]
+
+
+def utc_now():
+    return dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def safe_environment(root):
+    env = dict(os.environ)
+    env.pop("OPENAI_API_KEY", None)
+    env.pop("ANTHROPIC_API_KEY", None)
+    # Go honors PWD when it names the same directory. A logical /tmp PWD and
+    # physical /private/tmp GOWORK otherwise disagree on macOS workspace paths.
+    env.pop("PWD", None)
+    env["GOWORK"] = str(Path(root).resolve() / "go.work")
+    return env
+
+
+def validate_endpoint(provider, value):
+    """Validate a full endpoint. Never append paths or resolve DNS."""
+    if not isinstance(provider, str) or provider not in DEFAULT_ENDPOINTS:
+        raise SafeFailure("invalid_provider")
+    if not isinstance(value, str) or any(ord(char) < 32 or ord(char) == 127 for char in value):
+        raise SafeFailure("invalid_endpoint")
+    endpoint = value.strip() or DEFAULT_ENDPOINTS[provider]
+    if len(endpoint.encode("utf-8")) > 2048 or any(char.isspace() for char in endpoint) or "?" in endpoint or "#" in endpoint:
+        raise SafeFailure("invalid_endpoint")
+    try:
+        parts = urlsplit(endpoint)
+        host = parts.hostname
+        port = parts.port
+    except ValueError:
+        raise SafeFailure("invalid_endpoint") from None
+    if not host or parts.scheme not in ("https", "http") or "@" in parts.netloc:
+        raise SafeFailure("invalid_endpoint")
+    if port is not None and not 1 <= port <= 65535:
+        raise SafeFailure("invalid_endpoint")
+    loopback = host == "localhost"
+    try:
+        address = ipaddress.ip_address(host)
+        mapped = getattr(address, "ipv4_mapped", None)
+        loopback = loopback or address.is_loopback or (mapped is not None and mapped.is_loopback)
+    except ValueError:
+        pass
+    # Match the Go transport's literal localhost check, including its casing.
+    if parts.scheme == "http" and (not loopback or (host == "localhost" and parts.netloc.split(":")[0] != "localhost")):
+        raise SafeFailure("non_loopback_http")
+    path = unquote(parts.path).rstrip("/").lower()
+    opposite = "/messages" if provider == "openai" else "/responses"
+    if path.endswith("/chat/completions") or path.endswith(opposite):
+        raise SafeFailure("endpoint_protocol_mismatch")
+    return endpoint
+
+
+def resolve_interactive_endpoint(provider, value):
+    """Expand only standard base addresses entered in the interactive prompt."""
+    endpoint = validate_endpoint(provider, value)
+    parts = urlsplit(endpoint)
+    operation = "responses" if provider == "openai" else "messages"
+    if parts.path in ("", "/"):
+        path = "/v1/" + operation
+    elif parts.path.rstrip("/").endswith("/v1"):
+        path = parts.path.rstrip("/") + "/" + operation
+    else:
+        return endpoint
+    return validate_endpoint(provider, parts._replace(path=path).geturl())
+
+
+def positive_integer(value, minimum=1, maximum=None):
+    if type(value) is not int or value < minimum or (maximum is not None and value > maximum):
+        raise SafeFailure("invalid_integer")
+    return value
+
+
+def validate_configuration(value, service_input_tokens=SERVICE_INPUT_TOKENS):
+    config = {name: value[name] for name in PUBLIC_CONFIGURATION if name in value}
+    if len(config) != len(PUBLIC_CONFIGURATION):
+        raise SafeFailure("invalid_configuration")
+    config["endpoint"] = validate_endpoint(config["provider"], config["endpoint"])
+    model = config["model"]
+    if not isinstance(model, str) or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}", model) is None:
+        raise SafeFailure("invalid_model")
+    positive_integer(config["contextTokens"], maximum=1 << 24)
+    positive_integer(config["maxOutputTokens"], maximum=1 << 20)
+    positive_integer(config["repetitions"], maximum=20)
+    available_input = config["contextTokens"] - config["maxOutputTokens"]
+    if service_input_tokens is not None:
+        positive_integer(service_input_tokens)
+    if available_input <= 0 or (service_input_tokens is not None and available_input < service_input_tokens):
+        raise SafeFailure("insufficient_context_capacity")
+    if type(config["allowUnknownStructuredModel"]) is not bool:
+        raise SafeFailure("invalid_probe_choice")
+    return config
+
+
+def prompt_integer(label, default=None, maximum=None):
+    while True:
+        text = input(label).strip()
+        if not text and default is not None:
+            return default
+        try:
+            return positive_integer(int(text), maximum=maximum)
+        except (ValueError, SafeFailure):
+            print("请输入有效的正整数" + ("（不超过 %d）" % maximum if maximum else "") + "。")
+
+
+def collect_configuration():
+    print("真实模型基线：两个合成任务，验证证据读取、草稿、Context 和中断恢复。")
+    while True:
+        choice = input("协议 [1=OpenAI Responses, 2=Anthropic Messages，默认 1]: ").strip() or "1"
+        if choice in ("1", "2"):
+            provider = "openai" if choice == "1" else "anthropic"
+            break
+        print("请选择 1 或 2。")
+    while True:
+        entered_endpoint = input("endpoint URL（根域名或 /v1 基地址会补齐；完整自定义路径原样；留空使用官方默认）: ")
+        try:
+            endpoint = resolve_interactive_endpoint(provider, entered_endpoint)
+            print("端点：%s → %s" % (entered_endpoint.strip() or "（官方默认）", endpoint), flush=True)
+            break
+        except SafeFailure:
+            print("端点无效：需要匹配协议的 HTTPS URL；仅显式 loopback 可用 HTTP，不能含账号、query 或 fragment。")
+    model = input("精确 model ID: ").strip()
+    context_tokens = prompt_integer("该模型已核实的 context capacity（必须填写）: ", maximum=1 << 24)
+    print("本次任务输出预算默认 1024，不必填模型最大输出容量。")
+    output_tokens = prompt_integer("本次任务每次调用 max output tokens [1024]: ", default=1024, maximum=1 << 20)
+    repetitions = prompt_integer("每个任务重复次数 [3，范围 1..20]: ", default=3, maximum=20)
+    while True:
+        probe = input("允许对 SDK 未登记的模型执行原生严格 JSON Schema 探测？工具能力由后续任务验证。[y/N]: ").strip().lower()
+        if probe in ("", "n", "no", "y", "yes"):
+            break
+        print("请输入 y 或 n。")
+    config = validate_configuration({
+        "provider": provider, "endpoint": endpoint, "model": model,
+        "contextTokens": context_tokens, "maxOutputTokens": output_tokens,
+        "repetitions": repetitions, "allowUnknownStructuredModel": probe in ("y", "yes"),
+    })
+    display_configuration(config)
+    return config
+
+
+def display_configuration(config, heading="配置"):
+    print("\n%s：" % heading)
+    for name in PUBLIC_CONFIGURATION:
+        print("  %s: %s" % (name, config[name]))
+    repetitions = config["repetitions"]
+    if config["provider"] == "openai":
+        print("将执行 2 个任务 × %d 次 = %d 个样本；先执行 1 次原生 Schema 探测，"
+              "通过后最多 2 次无副作用 SSE 工具/回放探测。探测失败不启动任务；会调用真实服务。" %
+              (repetitions, 2 * repetitions))
+    else:
+        print("将执行 2 个任务 × %d 次 = %d 个样本，另加 1 次能力探测；会调用真实服务。" %
+              (repetitions, 2 * repetitions))
+
+
+def read_api_key():
+    if not sys.stdin.isatty() or not sys.stderr.isatty():
+        raise SafeFailure("interactive_tty_required")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            key = getpass.getpass("API key（隐藏输入，仅送入子进程 stdin）: ")
+    except getpass.GetPassWarning:
+        raise SafeFailure("hidden_input_unavailable") from None
+    key = key.strip()
+    if not key or "\r" in key or "\n" in key or len(key.encode("utf-8")) > 8192:
+        raise SafeFailure("invalid_api_key")
+    return key
+
+
+def source_metadata(root):
+    env = safe_environment(root)
+    try:
+        revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, env=env, check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=10,
+        ).stdout.strip()
+        if not re.fullmatch(r"[0-9a-f]{40,64}", revision):
+            revision = None
+        dirty = bool(subprocess.run(
+            ["git", "status", "--porcelain"], cwd=root, env=env, check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=10,
+        ).stdout)
+        return {"revision": revision, "dirty": dirty}
+    except (OSError, subprocess.SubprocessError):
+        return {"revision": None, "dirty": None}
+
+
+def build_runner(root, executable):
+    try:
+        result = subprocess.run(
+            ["go", "build", "-o", str(executable), "./go/agent-runtime-harness/examples/task-agent"],
+            cwd=root, env=safe_environment(root), stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=300,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise SafeFailure("build_failed") from None
+    if result.returncode:
+        raise SafeFailure("build_failed")
+
+
+def redact(value, secret):
+    if isinstance(value, str):
+        return value.replace(secret, "[REDACTED]") if secret else value
+    if isinstance(value, list):
+        return [redact(item, secret) for item in value]
+    if isinstance(value, dict):
+        safe = {redact(key, secret): redact(item, secret) for key, item in value.items()}
+        debug = safe.get("responseDebug")
+        original = value.get("responseDebug")
+        if isinstance(debug, dict) and isinstance(original, dict):
+            for field, limit, flag in (
+                ("body", MAX_RESPONSE_BODY_BYTES, "bodyTruncated"),
+                ("normalizedAnswer", MAX_NORMALIZED_ANSWER_BYTES, "answerTruncated"),
+            ):
+                text = debug.get(field)
+                if isinstance(text, str) and text != original.get(field):
+                    debug["redacted"] = True
+                    encoded = text.encode("utf-8")
+                    if len(encoded) > limit:
+                        debug[field] = encoded[:limit].decode("utf-8", errors="ignore")
+                        debug[flag] = True
+        return safe
+    return value
+
+
+def new_report(config, source):
+    return {
+        "schemaVersion": SCHEMA_VERSION, "startedAt": utc_now(), "finishedAt": None,
+        "source": source, "configuration": dict(config), "runner": {}, "preflight": None,
+        "samples": [], "summary": None, "status": "running", "runnerExitCode": None,
+        "launcherFailure": None,
+    }
+
+
+def md_cell(value):
+    if value is None:
+        return "未知"
+    if isinstance(value, bool):
+        return "是" if value else "否"
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False)
+    return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\r", " ").replace("\n", " ").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def failure_advice(stage, code, preflight):
+    facts = preflight.get("toolProbe", preflight) if stage == "preflight" else {}
+    status = facts.get("httpStatus")
+    kind = facts.get("responseKind")
+    if code == "model.upstream_timeout":
+        if status is None:
+            return ("上游请求超时；报告未记录本次请求的 HTTP 响应状态。"
+                    "先检查 endpoint 连通性、本机网络、代理设置和出口，确认连通后再采样。"
+                    "现有证据不足以确定具体阶段，不能判断是 DNS 解析、TCP 连接、TLS 协商还是等待 HTTP 响应超时。")
+        return ("上游请求超时；报告已观察到 HTTP 响应状态，仍不能定位具体超时阶段。"
+                "检查 endpoint 的服务状态、网络、代理、出口以及上游响应耗时，确认后再采样。")
+    if status is not None:
+        if 300 <= status < 400:
+            return "端点返回重定向，本工具不跟随；请填写网关文档中的最终 API 地址。"
+        if 200 <= status < 300 and kind == "html":
+            return "响应声明为 HTML，预期为 API JSON；请核对 API 路径，根域名可能是网页入口。"
+        if status in (401, 403):
+            return "检查 key 的访问权限，以及网关路由和策略；该状态本身不足以确定密钥是否错误。"
+        if status in (400, 422):
+            return "按网关文档检查 model ID、输出预算和请求协议；本次任务输出预算可先使用默认 1024。"
+        if status == 404:
+            return "核对完整 API 地址，以及该网关是否提供所填 model ID。"
+        if status == 429:
+            return "检查网关配额与调用频率，待限制解除后再运行。"
+    if code == "provider_failed":
+        if preflight.get("toolProbe") is not None:
+            return ("严格 JSON Schema 探测已通过；本次问题发生在工具与回放预检。"
+                    "检查实际工具探针的 HTTP 响应、SSE 事件和本机网络，不要再次调整 Schema 提示词。")
+        if status is None:
+            return ("报告未记录本次请求的 HTTP 响应状态；先检查 endpoint 连通性、本机网络、代理设置和出口，确认连通后再采样。"
+                    "现有证据不足以确定具体原因或阶段，也不能据此判定为超时；"
+                    "连通性正常后，再核对 endpoint、所选协议及 model 的原生严格 JSON Schema 支持。")
+        return ("网关拒绝、协议不兼容或连接异常均可能导致此分类，现有证据不足以确定具体原因。"
+                "请按网关文档核对最终 endpoint、所选协议及 model 的原生严格 JSON Schema 支持；"
+                "可先使用输出预算 1024、每任务 1 次重新运行。")
+    if code == "strict_schema_probe_failed":
+        return ("请确认该 endpoint/model 的原生严格 JSON Schema 实现及最终回答映射；"
+                "修正协议适配或改用已验证支持的入口后再采样。"
+                "这些事实不能定位网关内部哪一步失效。")
+    if code == "provider_replay_unavailable":
+        return ("OpenAI reasoning 与工具调用续接缺少必需的加密回放证据；检查网关是否转发 include=reasoning.encrypted_content 并保留返回的 encrypted_content。"
+                "不要通过删除 reasoning 或重试工具来绕过该要求。")
+    if code == "tool_probe_call_invalid":
+        return "原生 Schema 检查已经通过，但网关没有返回一个符合定义的 probe_echo 工具调用；请检查 tool_choice、工具名称和工具参数。"
+    if code == "tool_probe_arguments_invalid":
+        return "工具探针返回了不满足固定参数 Schema 的调用；不能把无效参数当作可执行工具。"
+    if code == "tool_probe_completion_invalid":
+        return "工具调用和回放已通过首步检查，但续接回答不满足原生终答 Schema，或夹带新工具/拒绝/继续信号。"
+    if code == "tool_probe_stream_unavailable":
+        return "当前 Provider 缺少流式模型接口；此基线不回退到非流式工具续接。"
+
+    if code == "provider_unsupported":
+        return ("当前模型请求或响应格式不在适配器支持范围。预检通过不代表工具与无状态续接兼容；"
+                "先查看失败样本的物理 HTTP 请求数及最后响应正文，确认工具调用、reasoning 和 encrypted_content，"
+                "再定位本地请求校验或上游协议差异。不要仅凭此分类归因于 Schema。")
+    if code in {"capability_unavailable", "output_schema_invalid"}:
+        return "核对模型与网关对原生严格 JSON Schema 的支持；未知模型需明确允许探测，任务样本还会验证工具调用。"
+    if code in {"timeout", "runner_timeout"}:
+        return ("结合失败阶段检查任务执行与上游响应耗时；若缺少 HTTP 响应记录，先检查 endpoint 连通性、网络、代理和出口。"
+                "现有证据不能定位具体超时阶段，确认原因后再采样。")
+    if code == "build_failed":
+        return "先检查本地 Go 工具链与工作区构建配置；编译失败时尚未读取 API key。"
+    if code in {"invalid_configuration", "provider_configuration_failed", "context_budget_exceeded"}:
+        return "核对 endpoint、model ID、已核实的 context capacity 与本次任务输出预算。"
+    if code == "cancelled":
+        return "已保留收到的样本；需要完整基线时重新运行，并保留本次部分结果作为记录。"
+    if stage == "protocol":
+        return "检查启动器与 Go 执行器是否来自同一工作区版本；保留当前报告，重新编译后再运行。"
+    if stage in {"oracle", "lease_check", "resume", "terminal_check", "interrupted"}:
+        return "查看失败样本的 oraclePassed、recoveryChecks 和工具执行计数，按具体阶段定位任务或恢复检查。"
+    return "结合阶段与失败分类检查报告中的配置和样本；修正后重新运行，保留当前结果便于比较。"
+
+
+def schema_diagnostics(check):
+    lines = ["模型回答检查：有内容=%s；有效 JSON=%s；根类型=%s；schema 校验通过=%s。" %
+             (md_cell(check["contentPresent"]), md_cell(check["jsonValid"]),
+              check["jsonType"], md_cell(check["schemaValid"]))]
+    reasons = []
+    if not check["contentPresent"]:
+        reasons.append("回答内容为空")
+    elif not check["jsonValid"]:
+        reasons.append("回答不是可解析的单个 JSON 文档")
+    elif check["jsonType"] != "object":
+        reasons.append("JSON 根类型为 %s，要求 object" % check["jsonType"])
+    else:
+        if not check["okPresent"]:
+            reasons.append("必填字段 ok 缺失")
+        elif check["okType"] != "boolean":
+            reasons.append("ok 类型为 %s，要求 boolean" % check["okType"])
+        elif not check["okIsTrue"]:
+            reasons.append("ok 为 false，要求 true")
+        if check["extraPropertyCount"]:
+            reasons.append("存在 %d 个额外属性，schema 禁止额外属性" % check["extraPropertyCount"])
+    if not check["schemaValid"] and not reasons:
+        reasons.append("本地 schema 验证器拒绝，当前结构摘要未覆盖该原因")
+    if any(check[name] for name in ("toolCallCount", "hostedToolCallCount", "artifactCount")) or check["continue"]:
+        reasons.append("纯 JSON 预检要求无工具调用、无产物且 continue=false")
+    lines += ["未满足：" + reason + "。" for reason in reasons]
+    lines.append("行为检查：工具调用 %d；托管工具调用 %d；产物 %d；continue=%s。" %
+                 (check["toolCallCount"], check["hostedToolCallCount"], check["artifactCount"],
+                  "true" if check["continue"] else "false"))
+    return lines
+
+
+def wire_diagnostics(wire, schema_check):
+    request, response = wire["request"], wire["response"]
+    lines = []
+    requested_schema = False
+    if request["capture"] == "complete":
+        fmt = request["format"]
+        requested_schema = fmt["type"] == "json_schema" and fmt["strictEnabled"] and fmt["schemaMatchesProbe"]
+        lines.append("实际出站契约：text.format.type=%s；strict=true=%s；schema 与固定探测一致=%s。" %
+                     (fmt["type"], md_cell(fmt["strictEnabled"]), md_cell(fmt["schemaMatchesProbe"])))
+    else:
+        lines.append("实际出站契约：未取得完整证据，capture=%s。" % request["capture"])
+    if response["capture"] != "complete":
+        lines.append("原始响应结构：未取得完整证据，capture=%s；不能据此区分上游与适配器。" % response["capture"])
+        if request["capture"] == "complete" and not requested_schema:
+            lines.append("定位：实际出站请求未满足固定原生 Schema 契约，应检查客户端请求构造或 transport 边界。")
+        return lines
+    fmt = response["format"]
+    if fmt["type"] == "missing":
+        lines.append("响应格式回显：缺少可识别的 format.type；缺失不能证明原生 Schema 是否生效。")
+    else:
+        lines.append("响应格式回显：type=%s；strict=true=%s；schema 与固定探测一致=%s。" %
+                     (fmt["type"], md_cell(fmt["strictEnabled"]), md_cell(fmt["schemaMatchesProbe"])))
+        if requested_schema and fmt["type"] in {"text", "json_object"}:
+            lines.append("响应回显的格式与出站 json_schema 模式不一致。")
+    lines.append("原始响应结构：status=%s；output 项 %d；message %d；记录 %d 条消息摘要。" %
+                 (response["status"], response["outputItemCount"], response["messageCount"], len(response["messages"])))
+    for message in response["messages"]:
+        lines.append("原始 message[%d]：phase=%s；text/refusal/unknown parts=%d/%d/%d；"
+                     "合并文本有效 JSON=%s；schema 通过=%s；与适配器答案相同=%s。" %
+                     (message["index"], message["phase"], message["textPartCount"],
+                      message["refusalPartCount"], message["unknownPartCount"], md_cell(message["jsonValid"]),
+                      md_cell(message["schemaValid"]), md_cell(message["matchesNormalized"])))
+        if message["textPartCount"] > 1:
+            lines.append("该消息独立成文的 JSON 片段 %d、符合 schema 的片段 %d；判定使用整条消息合并后的文本。" %
+                         (message["jsonValidPartCount"], message["schemaValidPartCount"]))
+        if message["leadingBOM"]:
+            lines.append("该消息文本检测到前导 UTF-8 BOM。")
+        if message["codeFence"]:
+            lines.append("该消息文本检测到起始 Markdown 代码围栏。")
+    if request["capture"] != "complete":
+        lines.append("定位：缺少完整出站证据，尚不能确定无效答案是否违反实际发送的契约。")
+        return lines
+    if not requested_schema:
+        lines.append("定位：实际出站请求未满足固定原生 Schema 契约，应检查客户端请求构造或 transport 边界。")
+        return lines
+    if response["messagesTruncated"]:
+        lines.append("定位：消息摘要达到记录上限，无法对完整终答来源作确定判断。")
+        return lines
+    messages = response["messages"]
+    if response["status"] != "completed" or not messages:
+        lines.append("定位：原始响应没有可明确识别的 completed 答案消息。")
+        return lines
+    if any(message["refusalPartCount"] or message["unknownPartCount"] for message in messages):
+        lines.append("定位：原始消息含拒绝或未识别片段，需要结合协议处理边界核对。")
+        return lines
+    phases = [message["phase"] for message in messages]
+    candidate = None
+    if all(phase in {"absent", "null"} for phase in phases):
+        if len(messages) == 1:
+            candidate = messages[0]
+        else:
+            lines.append("定位：多条原始消息均未标注有效 phase，终答来源有歧义；不能挑选最后一条或可解析片段判为通过。")
+            return lines
+    elif phases[-1] == "final_answer" and all(phase == "commentary" for phase in phases[:-1]):
+        candidate = messages[-1]
+    if candidate is None:
+        lines.append("定位：原始消息的 phase 组合有歧义，尚不能确定唯一终答来源。")
+        return lines
+    if candidate["matchesNormalized"]:
+        if not candidate["jsonValid"] or not candidate["schemaValid"]:
+            violation = "不是有效 JSON" if not candidate["jsonValid"] else "不满足固定 Schema"
+            lines.append("定位：原始答案文本已经%s，且与适配器交出的内容相同；该次上游响应未满足已发送的原生 Schema 契约。" % violation)
+            lines.append("此证据定位到客户端收到的上游响应，不能区分网关改写、参数未透传或所路由模型未兑现契约。")
+        else:
+            lines.append("定位：原始答案与适配器内容一致且满足 Schema，应继续核对行为检查或本地校验边界。")
+    elif candidate["schemaValid"] and not schema_check["schemaValid"]:
+        lines.append("定位：原始明确终答满足 Schema，适配器却交出不同文本且校验失败，应检查适配器投影或组合路径。")
+    else:
+        lines.append("定位：原始答案与适配器内容不同，现有事实不能将失败归于单一路径。")
+    return lines
+
+
+def safe_response_text(text):
+    """Keep readable text, escaping terminal controls and invisible formatting."""
+    return "".join(
+        json.dumps(char, ensure_ascii=True)[1:-1]
+        if (char != "\n" and unicodedata.category(char) in {"Cc", "Cf", "Cs"}) or char in "\u2028\u2029"
+        else char for char in text
+    )
+
+
+def response_debug_lines(preflight, markdown=False, title="失败预检响应正文", include_answer=True):
+    if preflight.get("status") != "failed":
+        return []
+    lines = ["## " + title if markdown else title + "：", ""]
+    debug = preflight.get("responseDebug")
+    if debug is None:
+        return lines + ["本报告未捕获 HTTP response body 和 SDK 答案，无法从已存数据还原正文。"]
+
+    def content_block(text):
+        if not markdown:
+            return [text]
+        longest = max((len(match.group()) for match in re.finditer(r"`+", text)), default=0)
+        fence = "`" * max(3, longest + 1)
+        return [fence + "text", text, fence]
+
+    lines.append("HTTP response body：capture=%s；capturedBytes=%d；bodyTruncated=%s；redacted=%s。" %
+                 (debug["capture"], debug["capturedBytes"], md_cell(debug["bodyTruncated"]), md_cell(debug["redacted"])))
+    if debug["capture"] == "unavailable":
+        lines.append("未捕获 HTTP response body。")
+    elif debug["body"]:
+        partial = debug["capture"] != "complete" or debug["bodyTruncated"]
+        lines.append("以下仅为已捕获并脱敏后的部分正文，不代表完整 HTTP body。" if partial else
+                     "以下为完整捕获的脱敏正文；控制字符以转义表示，换行保留。")
+        lines += content_block(safe_response_text(debug["body"]))
+    elif debug["capture"] == "complete" and not debug["bodyTruncated"]:
+        lines.append("已完整捕获 HTTP response body，正文为空。")
+    else:
+        lines.append("未捕获可展示的 HTTP response body；不能视为完整响应。")
+    if not include_answer:
+        return lines
+    lines += ["", "SDK normalized answer：answerTruncated=%s；以下为 JSON 字符串表示，BOM、换行和控制字符均可见。" %
+              md_cell(debug["answerTruncated"])]
+    if debug["answerTruncated"]:
+        lines.append("答案仅保留脱敏后的前缀，不代表完整 SDK 答案。")
+    if not debug["normalizedAnswer"]:
+        lines.append("未获得 SDK 答案或答案为空。")
+    lines += content_block(safe_response_text(json.dumps(debug["normalizedAnswer"], ensure_ascii=False)))
+    return lines
+
+
+def failure_diagnostics(report):
+    preflight = report.get("preflight") or {}
+    failures = []
+    if report.get("launcherFailure"):
+        failure = report["launcherFailure"]
+        failures.append(("启动器", failure["stage"], failure["failureCode"]))
+    if preflight.get("status") == "failed":
+        label = ("工具与无状态回放准入" if "toolProbe" in preflight else
+                 "原生严格 JSON Schema 预检")
+        failures.append((label, "preflight", preflight["failureCode"]))
+    error = (report.get("runner") or {}).get("error")
+    if error:
+        failures.append(("执行器", error["stage"], error["failureCode"]))
+    grouped = {}
+    for sample in report.get("samples", []):
+        if sample["status"] == "failed":
+            key = (sample["stage"], sample["failureCode"])
+            grouped[key] = grouped.get(key, 0) + 1
+    for (stage, code), count in grouped.items():
+        failures.append(("%d 个任务样本" % count, stage, code))
+    if not failures:
+        return []
+    summary = report.get("summary") or {}
+    if summary:
+        lines = ["任务样本：请求 %d，已尝试 %d，跳过 %d。" %
+                 (summary["requested"], summary["attempted"], summary["skipped"])]
+    else:
+        lines = ["已收到 %d 个样本结果；已尝试与跳过总数未知（缺少最终汇总）。" % len(report.get("samples", []))]
+    if preflight.get("status") == "failed" and not report.get("samples"):
+        lines.append("任务尚未开始：暂无任务完成率证据。")
+    if "httpStatus" in preflight:
+        lines.append("JSON Schema 探测传输事实：HTTP %d；响应 Content-Type 归类 %s。" %
+                     (preflight["httpStatus"], preflight["responseKind"]))
+    if "toolProbe" in preflight:
+        tool = preflight["toolProbe"]
+        lines.append("无副作用工具续接探测：状态 %s；阶段 %s；模型请求 %s；实际 HTTP 请求 %s。" %
+                     (tool["status"], tool["stage"], tool["modelCalls"], tool["httpRequests"]))
+        lines.append("推理/加密回放证据：reasoning=%s；encrypted replay=%s；已知 usage=%s。" %
+                     (md_cell(tool["reasoningSeen"]), md_cell(tool["encryptedReplaySeen"]),
+                      md_cell(tool["usage"])))
+        if "httpStatus" in tool:
+            lines.append("工具续接 HTTP 事实：HTTP %d；类型 %s。" %
+                         (tool["httpStatus"], tool["responseKind"]))
+    for label, stage, code in failures:
+        lines.append("%s：阶段 %s；失败分类 %s。" % (label, stage, code))
+        if stage == "preflight" and code == "strict_schema_probe_failed":
+            if "schemaCheck" in preflight:
+                lines += schema_diagnostics(preflight["schemaCheck"])
+            else:
+                lines.append("本报告未记录 schema 细项，无法从已存数据还原具体违例。")
+            if "wireCheck" in preflight:
+                lines += wire_diagnostics(preflight["wireCheck"], preflight["schemaCheck"])
+        lines.append("下一步：" + failure_advice(stage, code, preflight))
+    return lines
+
+
+def render_markdown(report):
+    summary = report.get("summary") or {}
+    preflight = report.get("preflight") or {}
+    runner = report.get("runner") or {}
+    lines = [
+        "# 真实模型 Agent 基线", "",
+        "- 状态：%s" % md_cell(report.get("status")),
+        "- 开始：%s；结束：%s" % (md_cell(report.get("startedAt")), md_cell(report.get("finishedAt"))),
+        "- 代码：%s；工作区有修改：%s" % (md_cell(report.get("source", {}).get("revision")), md_cell(report.get("source", {}).get("dirty"))),
+        "- 任务版本：%s；数据集：%s" % (md_cell(runner.get("taskVersion")), md_cell(runner.get("datasetHash"))),
+        "", "## 配置", "", "| 项目 | 值 |", "| --- | --- |",
+    ]
+    for key, value in report.get("configuration", {}).items():
+        lines.append("| %s | %s |" % (md_cell(key), md_cell(value)))
+    lines += [
+        "", "## 结果", "",
+        "- 能力探测：%s；失败分类：%s" % (md_cell(preflight.get("status")), md_cell(preflight.get("failureCode"))),
+        "- 请求 %s，已尝试 %s，通过 %s，失败 %s，未执行 %s。" % tuple(md_cell(summary.get(key)) for key in ("requested", "attempted", "passed", "failed", "skipped")),
+        "- 尝试样本成功率：%s（通过 / 已尝试；不把未执行样本视为成功）。" % md_cell(summary.get("successRate")),
+        "- 耗时摘要（毫秒）：%s" % md_cell(summary.get("durationMs")),
+        "- 模型调用 %s；工具执行 %s。" % (md_cell(summary.get("modelCalls")), md_cell(summary.get("toolCalls"))),
+        "- 任务调用 usage 覆盖：%s；能力探测 usage 单列：%s。" % (md_cell(summary.get("usage")), md_cell(preflight.get("usage"))),
+    ]
+    if report.get("launcherFailure"):
+        lines.append("- 启动器失败：%s" % md_cell(report["launcherFailure"]))
+    if runner.get("error"):
+        lines.append("- 执行器失败：%s" % md_cell(runner["error"]))
+    if "toolProbe" in preflight:
+        tool = preflight["toolProbe"]
+        lines += ["", "- 原生 Schema：通过；工具与回放：%s；阶段：%s；探针模型调用：%d；HTTP 请求：%d。" %
+                  (tool["status"], tool["stage"], tool["modelCalls"], tool["httpRequests"]),
+                  "- 探针 reasoning=%s；encrypted replay=%s；探针 usage：%s。" %
+                  (md_cell(tool["reasoningSeen"]), md_cell(tool["encryptedReplaySeen"]), md_cell(tool["usage"]))]
+    debug_target = preflight.get("toolProbe", preflight)
+    debug_lines = response_debug_lines(debug_target, markdown=True,
+                                        title="工具与回放预检响应正文" if "toolProbe" in preflight else "失败预检响应正文")
+    if debug_lines:
+        lines += [""] + debug_lines
+    diagnostics = failure_diagnostics(report)
+    if diagnostics:
+        lines += ["", "## 失败诊断与下一步", ""] + ["- " + md_cell(line) for line in diagnostics]
+    lines += [
+        "", "## 样本", "",
+        "| 样本 | 任务 | 重复 | 状态 | 阶段 | 失败分类 | 毫秒 | 模型调用 | 工具调用 | Oracle |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for sample in report["samples"]:
+        lines.append("| " + " | ".join(md_cell(sample.get(key)) for key in (
+            "sampleID", "caseID", "repetition", "status", "stage", "failureCode",
+            "durationMs", "modelCalls", "toolCalls", "oraclePassed",
+        )) + " |")
+    for sample in report["samples"]:
+        if sample["status"] != "failed" or "lastResponseDebug" not in sample:
+            continue
+        lines += ["", "### 样本 %s 的任务 HTTP 响应" % md_cell(sample["sampleID"]),
+                  "物理 HTTP 请求 %s；最后观测到的状态 %s；类型 %s。"
+                  % (md_cell(sample.get("providerHTTPRequests", 0)),
+                     md_cell(sample.get("lastHTTPStatus")), md_cell(sample.get("lastResponseKind"))),
+                  "这是最后一次已观察到的 HTTP 响应；若之后的调用在本地被拒绝，该响应不一定是直接原因。"]
+        lines += response_debug_lines({"status": "failed", "responseDebug": sample["lastResponseDebug"]},
+                                      markdown=True, title="任务最后一次 HTTP response", include_answer=False)
+    lines += [
+        "", "## 可比性与证据边界", "",
+        "只有相同任务版本、数据集、完整执行 profile 和输出上限的报告适合数值横向比较。"
+        "模型、provider、endpoint 与代码版本可以不同，必须保留这些差异。"
+        "Context capacity 不同时，服务输入上限仍须一致。",
+        "",
+        "这两个合成任务使用明确的 oracle；结果不等于通用模型能力评分。"
+        "恢复模式是同一进程内重新组装并使用测试 Store 时钟，"
+        "不代表真实持久化进程恢复，也不声称外部副作用 exactly-once。",
+        "",
+        "未完成、取消、协议错误或未知 schema 的报告只能展示已经观察到的样本，"
+        "不能据此给出总体提升结论。未知 token usage 保持未知，不按零计费量处理。",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def atomic_private_write(path, text):
+    temp_path = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor, name = tempfile.mkstemp(prefix="." + path.name + ".", dir=str(path.parent))
+        temp_path = Path(name)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            os.chmod(temp_path, 0o600)
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(str(temp_path), str(path))
+        temp_path = None
+    except OSError:
+        raise ReportFailure("report_write_failed") from None
+    finally:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
+
+class ReportWriter:
+    def __init__(self, directory):
+        name = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:8]
+        self.json_path = Path(directory) / (name + ".json")
+        self.md_path = Path(directory) / (name + ".md")
+
+    def save(self, report, secret=""):
+        safe = redact(report, secret)
+        try:
+            encoded = json.dumps(safe, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+            markdown = render_markdown(safe)
+        except (TypeError, ValueError, RecursionError):
+            raise ReportFailure("report_encoding_failed") from None
+        atomic_private_write(self.json_path, encoded)
+        atomic_private_write(self.md_path, markdown)
+
+
+def reject_constant(_):
+    raise ValueError("nonfinite")
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate_key")
+        result[key] = value
+    return result
+
+
+def parse_json(text):
+    return json.loads(text, parse_constant=reject_constant, object_pairs_hook=unique_object)
+
+
+def nonnegative_number(value):
+    if type(value) is int:
+        return 0 <= value <= (1 << 62)
+    return type(value) is float and math.isfinite(value) and value >= 0
+
+
+def valid_code(value):
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", value) is not None
+
+
+def validate_usage(value, coverage=False):
+    token_fields = {"inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"}
+    if not coverage:
+        if value is None:
+            return
+        if not isinstance(value, dict) or set(value) != token_fields or any(
+                type(number) is not int or not 0 <= number <= (1 << 62) for number in value.values()):
+            raise ProtocolFailure("invalid_usage")
+        return
+    if (not isinstance(value, dict) or
+            set(value) != {"knownCalls", "missingCalls", "complete", "known"} or
+            any(type(value.get(name)) is not int or value[name] < 0 for name in ("knownCalls", "missingCalls")) or
+            type(value.get("complete")) is not bool or value["complete"] != (value["missingCalls"] == 0) or
+            (value["knownCalls"] == 0) != (value["known"] is None)):
+        raise ProtocolFailure("invalid_usage")
+    validate_usage(value["known"])
+
+
+def validate_response_debug(debug):
+    if (not isinstance(debug, dict) or set(debug) != RESPONSE_DEBUG_FIELDS or
+            not isinstance(debug["capture"], str) or debug["capture"] not in RESPONSE_DEBUG_CAPTURE_STATES or
+            type(debug["capturedBytes"]) is not int or not 0 <= debug["capturedBytes"] <= MAX_RESPONSE_BODY_BYTES or
+            any(type(debug[name]) is not bool for name in ("bodyTruncated", "answerTruncated", "redacted"))):
+        raise ProtocolFailure("invalid_preflight_response_debug")
+    for field, limit in (("body", MAX_RESPONSE_BODY_BYTES), ("normalizedAnswer", MAX_NORMALIZED_ANSWER_BYTES)):
+        if not isinstance(debug[field], str):
+            raise ProtocolFailure("invalid_preflight_response_debug")
+        try:
+            if len(debug[field].encode("utf-8")) > limit:
+                raise ProtocolFailure("invalid_preflight_response_debug")
+        except UnicodeError:
+            raise ProtocolFailure("invalid_preflight_response_debug") from None
+    if ((debug["capture"] == "unavailable" and
+         (debug["body"] or debug["capturedBytes"] != 0 or debug["bodyTruncated"])) or
+            (debug["capture"] == "too_large" and not debug["bodyTruncated"]) or
+            (debug["capturedBytes"] == 0 and debug["body"])):
+        raise ProtocolFailure("invalid_preflight_response_debug")
+
+
+def validate_tool_probe(check):
+    required = {"status", "stage", "modelCalls", "httpRequests", "usage",
+                "reasoningSeen", "encryptedReplaySeen"}
+    if not isinstance(check, dict) or not required <= set(check) or (
+            set(check) - required - {"failureCode", "httpStatus", "responseKind", "responseDebug"}):
+        raise ProtocolFailure("invalid_tool_probe")
+    if (check["status"] not in ("passed", "failed") or
+            check["stage"] not in ("tool_call", "continuation", "completed") or
+            type(check["modelCalls"]) is not int or not 0 <= check["modelCalls"] <= 2 or
+            type(check["httpRequests"]) is not int or
+            not 0 <= check["httpRequests"] <= check["modelCalls"] or
+            type(check["reasoningSeen"]) is not bool or
+            type(check["encryptedReplaySeen"]) is not bool or
+            (check["encryptedReplaySeen"] and not check["reasoningSeen"])):
+        raise ProtocolFailure("invalid_tool_probe")
+    validate_usage(check["usage"], coverage=True)
+    if check["usage"]["knownCalls"] + check["usage"]["missingCalls"] != check["modelCalls"]:
+        raise ProtocolFailure("invalid_tool_probe")
+    if ("httpStatus" in check) != ("responseKind" in check):
+        raise ProtocolFailure("invalid_tool_probe")
+    if "httpStatus" in check and (type(check["httpStatus"]) is not int or
+                                  not 100 <= check["httpStatus"] <= 999 or
+                                  check["httpRequests"] == 0 or
+                                  check["responseKind"] not in ("json", "html", "event_stream", "other")):
+        raise ProtocolFailure("invalid_tool_probe")
+    if check["status"] == "passed":
+        if (check["stage"] != "completed" or check["modelCalls"] != 2 or
+                check["httpRequests"] != 2 or "failureCode" in check or
+                "responseDebug" in check or
+                (check["reasoningSeen"] and not check["encryptedReplaySeen"])):
+            raise ProtocolFailure("invalid_tool_probe")
+    else:
+        if (check["stage"] == "completed" or not valid_code(check.get("failureCode")) or
+                "responseDebug" not in check):
+            raise ProtocolFailure("invalid_tool_probe")
+        validate_response_debug(check["responseDebug"])
+
+
+def validate_schema_check(check):
+    required = {
+        "contentPresent", "jsonValid", "jsonType", "schemaValid", "toolCallCount",
+        "hostedToolCallCount", "artifactCount", "continue",
+    }
+    if not isinstance(check, dict) or not required <= set(check):
+        raise ProtocolFailure("invalid_preflight_schema_check")
+    if (any(type(check[name]) is not bool for name in ("contentPresent", "jsonValid", "schemaValid", "continue")) or
+            not isinstance(check["jsonType"], str) or check["jsonType"] not in PROBE_JSON_TYPES | {"invalid"} or
+            check["jsonValid"] != (check["jsonType"] != "invalid") or
+            (check["jsonValid"] and not check["contentPresent"]) or
+            (check["schemaValid"] and not check["jsonValid"]) or
+            any(type(check[name]) is not int or not 0 <= check[name] <= (1 << 62)
+                for name in ("toolCallCount", "hostedToolCallCount", "artifactCount"))):
+        raise ProtocolFailure("invalid_preflight_schema_check")
+    if check["jsonType"] == "object":
+        required |= {"okPresent", "okType", "extraPropertyCount"}
+        if (type(check.get("okPresent")) is not bool or
+                not isinstance(check.get("okType"), str) or check["okType"] not in PROBE_JSON_TYPES | {"missing"} or
+                check["okPresent"] != (check["okType"] != "missing") or
+                type(check.get("extraPropertyCount")) is not int or not 0 <= check["extraPropertyCount"] <= (1 << 62)):
+            raise ProtocolFailure("invalid_preflight_schema_check")
+        if check["okType"] == "boolean":
+            required.add("okIsTrue")
+            if type(check.get("okIsTrue")) is not bool:
+                raise ProtocolFailure("invalid_preflight_schema_check")
+    if set(check) != required:
+        raise ProtocolFailure("invalid_preflight_schema_check")
+
+
+def validate_wire_format(value):
+    if (not isinstance(value, dict) or set(value) != {"type", "strictEnabled", "schemaMatchesProbe"} or
+            not isinstance(value["type"], str) or value["type"] not in WIRE_FORMAT_TYPES or
+            type(value["strictEnabled"]) is not bool or type(value["schemaMatchesProbe"]) is not bool):
+        raise ProtocolFailure("invalid_preflight_wire_check")
+
+
+def validate_wire_check(check):
+    if not isinstance(check, dict) or set(check) != {"request", "response"}:
+        raise ProtocolFailure("invalid_preflight_wire_check")
+    for name in ("request", "response"):
+        value = check[name]
+        if (not isinstance(value, dict) or not isinstance(value.get("capture"), str) or
+                value["capture"] not in WIRE_CAPTURE_STATES):
+            raise ProtocolFailure("invalid_preflight_wire_check")
+        required = {"capture"}
+        if value["capture"] == "complete":
+            required.add("format")
+            if name == "response":
+                required |= {"status", "outputItemCount", "messageCount", "messagesTruncated", "messages"}
+        if set(value) != required:
+            raise ProtocolFailure("invalid_preflight_wire_check")
+        if value["capture"] == "complete":
+            validate_wire_format(value["format"])
+    response = check["response"]
+    if response["capture"] != "complete":
+        return
+    if (not isinstance(response["status"], str) or response["status"] not in WIRE_RESPONSE_STATUSES or
+            any(type(response[name]) is not int or not 0 <= response[name] <= MAX_WIRE_COUNT
+                for name in ("outputItemCount", "messageCount")) or
+            response["messageCount"] > response["outputItemCount"] or
+            type(response["messagesTruncated"]) is not bool or
+            response["messagesTruncated"] != (response["messageCount"] > MAX_WIRE_MESSAGES) or
+            not isinstance(response["messages"], list) or
+            len(response["messages"]) != min(response["messageCount"], MAX_WIRE_MESSAGES)):
+        raise ProtocolFailure("invalid_preflight_wire_check")
+    counts = {
+        "index", "textPartCount", "refusalPartCount", "unknownPartCount",
+        "jsonValidPartCount", "schemaValidPartCount",
+    }
+    flags = {"jsonValid", "schemaValid", "matchesNormalized", "leadingBOM", "codeFence"}
+    previous_index = -1
+    for message in response["messages"]:
+        if (not isinstance(message, dict) or set(message) != counts | flags | {"phase"} or
+                not isinstance(message["phase"], str) or message["phase"] not in WIRE_PHASES or
+                any(type(message[name]) is not int or not 0 <= message[name] <= MAX_WIRE_COUNT for name in counts) or
+                any(type(message[name]) is not bool for name in flags) or
+                not previous_index < message["index"] < response["outputItemCount"] or
+                not message["schemaValidPartCount"] <= message["jsonValidPartCount"] <= message["textPartCount"] or
+                (message["schemaValid"] and not message["jsonValid"])):
+            raise ProtocolFailure("invalid_preflight_wire_check")
+        previous_index = message["index"]
+
+
+def validate_sample_diagnostics(sample):
+    validate_usage(sample.get("usage"), coverage=True)
+    for name in ("lookupCalls", "artifactReads", "draftWrites", "contextGeneration"):
+        if name in sample and (type(sample[name]) is not int or sample[name] < 0):
+            raise ProtocolFailure("invalid_sample_diagnostics")
+    if "modelDurationsMs" in sample and (
+            not isinstance(sample["modelDurationsMs"], list) or
+            len(sample["modelDurationsMs"]) > 100 or
+            any(type(value) is not int or value < 0 for value in sample["modelDurationsMs"])):
+        raise ProtocolFailure("invalid_sample_diagnostics")
+    if "lastResponseDebug" in sample:
+        if sample["status"] != "failed":
+            raise ProtocolFailure("invalid_sample_diagnostics")
+        validate_response_debug(sample["lastResponseDebug"])
+        count = sample.get("providerHTTPRequests")
+        if type(count) is not int or not 0 <= count <= 100:
+            raise ProtocolFailure("invalid_sample_diagnostics")
+        if ("lastHTTPStatus" in sample) != ("lastResponseKind" in sample):
+            raise ProtocolFailure("invalid_sample_diagnostics")
+        if "lastHTTPStatus" in sample and (
+                type(sample["lastHTTPStatus"]) is not int or not 100 <= sample["lastHTTPStatus"] <= 999 or
+                sample["lastResponseKind"] not in ("json", "html", "event_stream", "other") or count == 0):
+            raise ProtocolFailure("invalid_sample_diagnostics")
+        if count == 0 and (sample["lastResponseDebug"]["capture"] != "unavailable" or
+                           "lastHTTPStatus" in sample):
+            raise ProtocolFailure("invalid_sample_diagnostics")
+    elif any(field in sample for field in ("providerHTTPRequests", "lastHTTPStatus", "lastResponseKind")):
+        raise ProtocolFailure("invalid_sample_diagnostics")
+    if "toolExecutions" in sample:
+        if not isinstance(sample["toolExecutions"], list) or len(sample["toolExecutions"]) > 100:
+            raise ProtocolFailure("invalid_sample_diagnostics")
+        for execution in sample["toolExecutions"]:
+            if (not isinstance(execution, dict) or
+                    set(execution) != {"toolKey", "callIDHash", "executions"} or
+                    not isinstance(execution["toolKey"], str) or not execution["toolKey"] or
+                    not isinstance(execution["callIDHash"], str) or
+                    not re.fullmatch(r"sha256:[0-9a-f]{64}", execution["callIDHash"]) or
+                    type(execution["executions"]) is not int or execution["executions"] < 1):
+                raise ProtocolFailure("invalid_sample_diagnostics")
+
+
+def accept_event(report, event):
+    if not isinstance(event, dict) or not isinstance(event.get("type"), str) or report["summary"] is not None:
+        raise ProtocolFailure("invalid_event")
+    kind = event["type"]
+    runner = report["runner"]
+    if kind == "start":
+        if runner.get("taskVersion") or type(event.get("schemaVersion")) is not int or event["schemaVersion"] != 1:
+            raise ProtocolFailure("invalid_start")
+        for name in ("taskVersion", "datasetHash"):
+            if not isinstance(event.get(name), str) or not event[name] or len(event[name]) > 256:
+                raise ProtocolFailure("invalid_start")
+        if not isinstance(event.get("profile"), dict) or not event["profile"] or not isinstance(event.get("configuration"), dict):
+            raise ProtocolFailure("invalid_start")
+        if type(event.get("requestedSamples")) is not int or event["requestedSamples"] != 2 * report["configuration"]["repetitions"]:
+            raise ProtocolFailure("sample_count_mismatch")
+        configuration = event["configuration"]
+        for name in ("provider", "model", "contextTokens", "maxOutputTokens", "repetitions", "allowUnknownStructuredModel"):
+            if configuration.get(name) != report["configuration"][name]:
+                raise ProtocolFailure("configuration_mismatch")
+        public = {name: configuration[name] for name in (
+            "provider", "model", "endpointOrigin", "endpointHash", "contextTokens",
+            "maxOutputTokens", "repetitions", "allowUnknownStructuredModel",
+        ) if name in configuration}
+        report["runner"] = {name: event[name] for name in ("schemaVersion", "taskVersion", "datasetHash", "profile", "requestedSamples")}
+        report["runner"]["configuration"] = public
+    elif kind == "error":
+        if not valid_code(event.get("stage")) or not valid_code(event.get("failureCode")):
+            raise ProtocolFailure("invalid_error_event")
+        if runner.get("error"):
+            raise ProtocolFailure("duplicate_error_event")
+        runner["error"] = {name: event[name] for name in ("stage", "failureCode")}
+    elif kind == "preflight":
+        if not runner.get("taskVersion") or report["preflight"] is not None or report["samples"]:
+            raise ProtocolFailure("invalid_preflight_order")
+        if event.get("status") not in ("passed", "failed") or not nonnegative_number(event.get("durationMs")):
+            raise ProtocolFailure("invalid_preflight")
+        if event["status"] == "failed" and not valid_code(event.get("failureCode")):
+            raise ProtocolFailure("invalid_preflight")
+        validate_usage(event.get("usage"))
+        if ("httpStatus" in event) != ("responseKind" in event):
+            raise ProtocolFailure("invalid_preflight_transport")
+        if "httpStatus" in event and (
+                type(event["httpStatus"]) is not int or not 100 <= event["httpStatus"] <= 999 or
+                event["responseKind"] not in ("json", "html", "event_stream", "other")):
+            raise ProtocolFailure("invalid_preflight_transport")
+        if "schemaCheck" in event:
+            if event["status"] != "failed" or event.get("failureCode") != "strict_schema_probe_failed":
+                raise ProtocolFailure("invalid_preflight_schema_check")
+            validate_schema_check(event["schemaCheck"])
+        if "wireCheck" in event:
+            if (report["configuration"]["provider"] != "openai" or event["status"] != "failed" or
+                    event.get("failureCode") != "strict_schema_probe_failed" or "schemaCheck" not in event):
+                raise ProtocolFailure("invalid_preflight_wire_check")
+            validate_wire_check(event["wireCheck"])
+        if "responseDebug" in event:
+            if event["status"] != "failed":
+                raise ProtocolFailure("invalid_preflight_response_debug")
+            validate_response_debug(event["responseDebug"])
+        if "toolProbe" in event:
+            if (report["configuration"]["provider"] != "openai" or
+                    "schemaCheck" in event or "wireCheck" in event or
+                    "responseDebug" in event):
+                raise ProtocolFailure("invalid_tool_probe")
+            validate_tool_probe(event["toolProbe"])
+            if event["toolProbe"]["status"] != event["status"] or (
+                    event["status"] == "failed" and
+                    event["failureCode"] != event["toolProbe"]["failureCode"]):
+                raise ProtocolFailure("invalid_tool_probe")
+        if (report["configuration"]["provider"] == "openai" and
+                runner["profile"].get("preflightVersion") == OPENAI_TOOL_PROBE_PROFILE and
+                event["status"] == "passed" and "toolProbe" not in event):
+            raise ProtocolFailure("missing_tool_probe")
+        report["preflight"] = {name: event[name] for name in (
+            "status", "failureCode", "durationMs", "usage", "httpStatus", "responseKind", "schemaCheck", "wireCheck",
+            "responseDebug", "toolProbe",
+        ) if name in event}
+    elif kind == "sample":
+        if not runner.get("taskVersion") or not report["preflight"] or report["preflight"]["status"] != "passed":
+            raise ProtocolFailure("invalid_sample_order")
+        sample = event.get("sample")
+        if not isinstance(sample, dict) or sample.get("status") not in ("passed", "failed") or not isinstance(sample.get("stage"), str) or sample["stage"] not in STAGES:
+            raise ProtocolFailure("invalid_sample")
+        if any(not isinstance(sample.get(name), str) or not sample[name] or len(sample[name]) > 256 for name in ("sampleID", "caseID")):
+            raise ProtocolFailure("invalid_sample")
+        if type(sample.get("repetition")) is not int or not 1 <= sample["repetition"] <= report["configuration"]["repetitions"]:
+            raise ProtocolFailure("invalid_sample")
+        if type(sample.get("oraclePassed")) is not bool or (sample["status"] == "passed" and not sample["oraclePassed"]):
+            raise ProtocolFailure("invalid_sample")
+        if not nonnegative_number(sample.get("durationMs")) or any(type(sample.get(name)) is not int or sample[name] < 0 for name in ("modelCalls", "toolCalls")):
+            raise ProtocolFailure("invalid_sample")
+        if sample["status"] == "failed" and not valid_code(sample.get("failureCode")):
+            raise ProtocolFailure("invalid_sample")
+        checks = sample.get("recoveryChecks")
+        if not isinstance(checks, dict) or set(checks) != RECOVERY_FIELDS or any(type(value) is not bool for value in checks.values()):
+            raise ProtocolFailure("invalid_sample")
+        validate_sample_diagnostics(sample)
+        if len(report["samples"]) >= runner["requestedSamples"] or any(
+                item["sampleID"] == sample["sampleID"] or
+                (item["caseID"], item["repetition"]) == (sample["caseID"], sample["repetition"])
+                for item in report["samples"]):
+            raise ProtocolFailure("duplicate_or_extra_sample")
+        if len({item["caseID"] for item in report["samples"]} | {sample["caseID"]}) > 2:
+            raise ProtocolFailure("unexpected_case")
+        report["samples"].append({name: value for name, value in sample.items() if name in SAMPLE_FIELDS})
+    elif kind == "summary":
+        summary = event.get("summary")
+        if not runner.get("taskVersion") or report["preflight"] is None or not isinstance(summary, dict):
+            raise ProtocolFailure("invalid_summary")
+        for name in ("requested", "attempted", "passed", "failed", "skipped"):
+            if type(summary.get(name)) is not int or summary[name] < 0:
+                raise ProtocolFailure("invalid_summary")
+        if (summary["requested"] != runner["requestedSamples"] or
+                summary["attempted"] != len(report["samples"]) or
+                summary["passed"] != sum(item["status"] == "passed" for item in report["samples"]) or
+                summary["failed"] != sum(item["status"] == "failed" for item in report["samples"]) or
+                summary["attempted"] + summary["skipped"] != summary["requested"] or
+                type(summary.get("complete")) is not bool):
+            raise ProtocolFailure("summary_count_mismatch")
+        if summary["complete"] and (summary["attempted"] != summary["requested"] or summary["skipped"] != 0):
+            raise ProtocolFailure("partial_marked_complete")
+        durations = summary.get("durationMs")
+        if not isinstance(durations, dict) or any(type(durations.get(name)) is not int or durations[name] < 0 for name in ("count", "total", "min", "max", "p50", "p95")):
+            raise ProtocolFailure("invalid_duration_summary")
+        if durations["count"] != summary["attempted"]:
+            raise ProtocolFailure("invalid_duration_summary")
+        expected_rate = summary["passed"] / summary["attempted"] if summary["attempted"] else None
+        rate = summary.get("successRate")
+        if (expected_rate is None and rate is not None) or (expected_rate is not None and (not nonnegative_number(rate) or abs(rate - expected_rate) > 1e-9)):
+            raise ProtocolFailure("summary_rate_mismatch")
+        validate_usage(summary.get("usage"), coverage=True)
+        for name in ("modelCalls", "toolCalls"):
+            if name in summary and (type(summary[name]) is not int or summary[name] != sum(item[name] for item in report["samples"])):
+                raise ProtocolFailure("summary_call_count_mismatch")
+        report["summary"] = {name: summary[name] for name in (
+            "requested", "attempted", "passed", "failed", "skipped", "complete",
+            "successRate", "durationMs", "usage", "modelCalls", "toolCalls",
+        ) if name in summary}
+    else:
+        raise ProtocolFailure("unknown_event")
+
+
+def finish_report(report, exit_code, failure=None):
+    report["finishedAt"] = utc_now()
+    report["runnerExitCode"] = exit_code
+    report["launcherFailure"] = failure
+    summary = report["summary"]
+    if failure:
+        code = failure["failureCode"]
+        report["status"] = ("interrupted" if code == "cancelled" else
+                            "failed" if code in {"build_failed", "interactive_tty_required", "hidden_input_unavailable", "invalid_api_key", "launcher_io_failed"} else "incomplete")
+    elif summary is not None:
+        all_passed = summary["complete"] and summary["requested"] == summary["passed"] and summary["skipped"] == 0
+        if (exit_code == 0) != all_passed:
+            report["status"] = "incomplete"
+            report["launcherFailure"] = {"stage": "protocol", "failureCode": "exit_summary_mismatch"}
+        else:
+            known_failure = summary["complete"] or (report.get("preflight") or {}).get("status") == "failed"
+            report["status"] = "passed" if all_passed else ("failed" if known_failure else "incomplete")
+    elif report["runner"].get("error") and not report["samples"] and exit_code in (1, 2):
+        report["status"] = "failed"
+    else:
+        report["status"] = "incomplete"
+        report["launcherFailure"] = {"stage": "protocol", "failureCode": "missing_summary"}
+
+
+def read_output(stream, events, stop):
+    total = 0
+
+    def send(kind, value):
+        while not stop.is_set():
+            try:
+                events.put((kind, value), timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    try:
+        while not stop.is_set():
+            line = stream.readline(MAX_LINE_BYTES + 1)
+            if not line:
+                send("eof", None)
+                return
+            total += len(line)
+            if len(line) > MAX_LINE_BYTES or total > MAX_OUTPUT_BYTES:
+                send("failure", "output_limit")
+                return
+            if not send("line", line):
+                return
+    except OSError:
+        send("failure", "output_read_failed")
+
+
+def terminate_and_reap(process):
+    if process is None:
+        return
+    try:
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=5)
+    except (OSError, subprocess.TimeoutExpired):
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def decode_event(line):
+    try:
+        return parse_json(line.decode("utf-8"))
+    except (UnicodeError, ValueError, RecursionError):
+        raise ProtocolFailure("invalid_jsonl") from None
+
+
+def retain_queued_samples(events, reader, report, writer, secret, remaining):
+    """Keep already emitted records when cancellation stops the main reader."""
+    deadline = time.monotonic() + 1
+    while remaining > 0 and time.monotonic() < deadline:
+        try:
+            kind, value = events.get(timeout=0.1)
+        except queue.Empty:
+            if reader is None or not reader.is_alive():
+                return
+            continue
+        if kind != "line":
+            return
+        remaining -= 1
+        try:
+            accept_event(report, decode_event(value))
+        except ProtocolFailure:
+            return
+        writer.save(report, secret)
+
+
+def run_child(command, root, config, secret, report, writer, timeout_seconds=None):
+    process = None
+    reader = None
+    stop = threading.Event()
+    failure = None
+    events = queue.Queue(maxsize=16)
+    seen = 0
+    deadline = time.monotonic() + (timeout_seconds if timeout_seconds is not None else 90 + 600 * config["repetitions"])
+    try:
+        writer.save(report, secret)
+        process = subprocess.Popen(
+            command, cwd=root, env=safe_environment(root), stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=(os.name != "nt"),
+        )
+        reader = threading.Thread(target=read_output, args=(process.stdout, events, stop), daemon=True)
+        reader.start()
+        payload = dict(config, schemaVersion=1, apiKey=secret)
+        encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8") + b"\n"
+        process.stdin.write(encoded)
+        process.stdin.close()
+        del payload, encoded
+        while True:
+            if time.monotonic() >= deadline:
+                raise SafeFailure("runner_timeout")
+            try:
+                kind, value = events.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if kind == "eof":
+                break
+            if kind == "failure":
+                raise ProtocolFailure(value)
+            seen += 1
+            if seen > MAX_EVENTS:
+                raise ProtocolFailure("event_limit")
+            event = decode_event(value)
+            accept_event(report, event)
+            writer.save(report, secret)
+            if event["type"] == "preflight":
+                preflight = redact(report["preflight"], secret)
+                detail = "；失败分类 " + preflight["failureCode"] if preflight["status"] == "failed" else ""
+                print("预检：%s；阶段 preflight%s。" %
+                      ("通过" if preflight["status"] == "passed" else "未通过", detail), flush=True)
+                if "toolProbe" in preflight:
+                    tool = preflight["toolProbe"]
+                    print("原生 JSON Schema：通过。工具/回放预检：%s；阶段 %s；模型请求 %s；实际 HTTP 请求 %s；reasoning=%s；encrypted replay=%s。" %
+                          (tool["status"], tool["stage"], tool["modelCalls"], tool["httpRequests"],
+                           md_cell(tool["reasoningSeen"]), md_cell(tool["encryptedReplaySeen"])), flush=True)
+                debug_target = preflight.get("toolProbe", preflight)
+                for line in response_debug_lines(debug_target,
+                                                  title="工具与回放预检响应正文" if "toolProbe" in preflight else "失败预检响应正文"):
+                    print(line, flush=True)
+            elif event["type"] == "sample":
+                sample = redact(report["samples"][-1], secret)
+                detail = "；失败分类 " + sample["failureCode"] if sample["status"] == "failed" else ""
+                print("样本 %d：%s，第 %s 次，%s，阶段 %s%s。" %
+                      (len(report["samples"]), sample["caseID"], sample["repetition"], sample["status"], sample["stage"], detail), flush=True)
+                if sample["status"] == "failed" and "lastResponseDebug" in sample:
+                    print("物理 HTTP 请求 %s；最后观测状态 %s；类型 %s。"
+                          % (sample.get("providerHTTPRequests", 0), sample.get("lastHTTPStatus", "未收到"),
+                             sample.get("lastResponseKind", "未收到")), flush=True)
+                    for line in response_debug_lines({"status": "failed", "responseDebug": sample["lastResponseDebug"]},
+                                                     title="任务最后一次 HTTP response（不一定是触发失败的请求）",
+                                                     include_answer=False):
+                        print(line, flush=True)
+        process.wait(timeout=max(0.1, min(5, deadline - time.monotonic())))
+    except KeyboardInterrupt:
+        failure = {"stage": "launcher", "failureCode": "cancelled"}
+    except ProtocolFailure as error:
+        failure = {"stage": "protocol", "failureCode": str(error)}
+    except SafeFailure as error:
+        if isinstance(error, ReportFailure):
+            raise
+        failure = {"stage": "launcher", "failureCode": str(error)}
+    except (OSError, subprocess.SubprocessError):
+        failure = {"stage": "launcher", "failureCode": "runner_process_failed"}
+    finally:
+        terminate_and_reap(process)
+        try:
+            if failure and failure["failureCode"] in ("cancelled", "runner_timeout", "runner_process_failed"):
+                retain_queued_samples(events, reader, report, writer, secret, MAX_EVENTS - seen)
+        finally:
+            stop.set()
+            if reader is not None:
+                reader.join(timeout=1)
+            if process is not None:
+                for stream in (process.stdin, process.stdout):
+                    if stream is not None:
+                        try:
+                            stream.close()
+                        except OSError:
+                            pass
+    finish_report(report, process.returncode if process is not None else None, failure)
+    safe = redact(report, secret)
+    report.clear()
+    report.update(safe)
+    writer.save(report, secret)
+    return report
+
+
+def launch(config, root, get_key=None, builder=None):
+    config = validate_configuration(config)
+    get_key = get_key or read_api_key
+    builder = builder or build_runner
+    writer = ReportWriter(Path(root) / "artifacts" / "agent-baselines")
+    report = new_report(config, source_metadata(root))
+    secret = ""
+    try:
+        with tempfile.TemporaryDirectory(prefix="gaoge-agent-baseline-") as directory:
+            executable = Path(directory) / ("task-agent.exe" if os.name == "nt" else "task-agent")
+            print("正在编译当前工作区；编译成功后才读取 API key。", flush=True)
+            builder(root, executable)
+            secret = get_key()
+            run_child([str(executable), "-mode=baseline-stdin"], root, config, secret, report, writer)
+    except KeyboardInterrupt:
+        finish_report(report, None, {"stage": "launcher", "failureCode": "cancelled"})
+        writer.save(report, secret)
+    except ReportFailure:
+        print("报告无法保存；执行已停止。请检查 artifacts/agent-baselines 的可写性。", file=sys.stderr)
+        return 1
+    except SafeFailure as error:
+        finish_report(report, None, {"stage": "launcher", "failureCode": str(error)})
+        report["status"] = "failed"
+        writer.save(report, secret)
+    except OSError:
+        finish_report(report, None, {"stage": "launcher", "failureCode": "launcher_io_failed"})
+        try:
+            writer.save(report, secret)
+        except ReportFailure:
+            print("报告无法保存；执行已停止。", file=sys.stderr)
+            return 1
+    safe = redact(report, secret)
+    print("状态：%s" % safe["status"])
+    for line in failure_diagnostics(safe):
+        print(line)
+    print("JSON 报告：%s\nMarkdown 报告：%s" % (writer.json_path, writer.md_path))
+    return 0 if report["status"] == "passed" else 1
+
+
+def validate_report(report):
+    if not isinstance(report, dict) or type(report.get("schemaVersion")) is not int or report["schemaVersion"] != 1:
+        raise SafeFailure("unknown_report_schema")
+    if (not isinstance(report.get("source"), dict) or
+            not isinstance(report.get("configuration"), dict) or
+            not isinstance(report.get("runner"), dict) or
+            not isinstance(report.get("samples"), list) or
+            (report.get("summary") is not None and not isinstance(report["summary"], dict)) or
+            (report.get("preflight") is not None and not isinstance(report["preflight"], dict))):
+        raise SafeFailure("invalid_report")
+    try:
+        runner = report["runner"]
+        # Historical runs keep their own execution budget. A checkpoint before
+        # start has no measured profile and cannot be numerically compared.
+        service_input_tokens = None
+        if runner.get("taskVersion"):
+            service_input_tokens = runner["profile"]["contextPolicy"]["maxInputTokens"]
+            positive_integer(service_input_tokens)
+        config = validate_configuration(report["configuration"], service_input_tokens=service_input_tokens)
+        rebuilt = new_report(config, report["source"])
+        if runner.get("taskVersion"):
+            accept_event(rebuilt, dict(runner, type="start"))
+        if report["preflight"] is not None:
+            accept_event(rebuilt, dict(report["preflight"], type="preflight"))
+        for sample in report["samples"]:
+            accept_event(rebuilt, {"type": "sample", "sample": sample})
+        if runner.get("error") is not None:
+            if not isinstance(runner["error"], dict):
+                raise SafeFailure("invalid_report")
+            accept_event(rebuilt, dict(runner["error"], type="error"))
+        if report["summary"] is not None:
+            accept_event(rebuilt, {"type": "summary", "summary": report["summary"]})
+        failure = report.get("launcherFailure")
+        if failure is not None and (
+                not isinstance(failure, dict) or not valid_code(failure.get("stage")) or
+                not valid_code(failure.get("failureCode"))):
+            raise SafeFailure("invalid_report")
+        exit_code = report.get("runnerExitCode")
+        if exit_code is not None and type(exit_code) is not int:
+            raise SafeFailure("invalid_report")
+        if report.get("status") == "running":
+            # A checkpoint may be the last file left after an external kill.
+            if report.get("finishedAt") is not None:
+                raise SafeFailure("invalid_report")
+        else:
+            finish_report(rebuilt, exit_code, failure)
+            if rebuilt["status"] != report.get("status"):
+                raise SafeFailure("report_status_mismatch")
+    except (KeyError, TypeError, AttributeError, ValueError, RecursionError):
+        raise SafeFailure("invalid_report") from None
+    return report
+
+
+def read_report(path):
+    try:
+        if Path(path).stat().st_size > MAX_OUTPUT_BYTES:
+            raise SafeFailure("report_too_large")
+        report = parse_json(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, RecursionError):
+        raise SafeFailure("invalid_report") from None
+    return validate_report(report)
+
+
+def comparison_markdown(old, new):
+    validate_report(old)
+    validate_report(new)
+    lines = ["# 模型基线比较", "", "| 配置 | 基线 | 新报告 |", "| --- | --- | --- |"]
+    for name in ("provider", "endpoint", "model", "contextTokens", "maxOutputTokens", "repetitions"):
+        lines.append("| %s | %s | %s |" % (name, md_cell(old["configuration"].get(name)), md_cell(new["configuration"].get(name))))
+    lines.append("| revision | %s | %s |" % (md_cell(old.get("source", {}).get("revision")), md_cell(new.get("source", {}).get("revision"))))
+    incompatible = []
+    for name in ("taskVersion", "datasetHash", "profile"):
+        left, right = old["runner"].get(name), new["runner"].get(name)
+        if left is None or right is None or left != right:
+            incompatible.append(name)
+    if old["configuration"].get("maxOutputTokens") != new["configuration"].get("maxOutputTokens"):
+        incompatible.append("maxOutputTokens")
+    if old["configuration"].get("repetitions") != new["configuration"].get("repetitions"):
+        incompatible.append("repetitions")
+    if incompatible:
+        lines += ["", "无法进行数值比较：%s 不一致或缺失。请使用相同任务、数据集、执行策略和输出上限重新采样。" % "、".join(incompatible), ""]
+        return "\n".join(lines), False
+    if old["configuration"].get("contextTokens") != new["configuration"].get("contextTokens"):
+        lines += ["", "两边 context capacity 不同；执行 profile（含固定服务输入上限）相同，请将容量差异保留为解释条件。"]
+    complete = all(
+        report.get("status") in ("passed", "failed") and
+        isinstance(report.get("summary"), dict) and report["summary"].get("complete") is True
+        for report in (old, new)
+    )
+    lines += ["", "## 已观察结果", "", "| 项目 | 基线 | 新报告 |", "| --- | --- | --- |"]
+    for name in ("status",):
+        lines.append("| %s | %s | %s |" % (name, md_cell(old.get(name)), md_cell(new.get(name))))
+    for name in ("requested", "attempted", "passed", "failed", "skipped", "successRate", "durationMs", "modelCalls", "toolCalls", "usage"):
+        lines.append("| %s | %s | %s |" % (name, md_cell((old.get("summary") or {}).get(name)), md_cell((new.get("summary") or {}).get(name))))
+    if not complete:
+        lines += ["", "至少一份报告未完整完成。本表只列已观察到的样本，不能给出总体提升、排名或完整基线结论。"]
+    else:
+        lines += ["", "成功率的分母为各自已尝试样本；同时列出请求和未执行数。耗时为同一合成任务上的观察值，没有统计显著性或自动胜者结论。"]
+    for label, report in (("基线", old), ("新报告", new)):
+        diagnostics = failure_diagnostics(report)
+        if diagnostics:
+            lines += ["", "### " + label + "失败诊断", ""] + ["- " + md_cell(line) for line in diagnostics]
+    lines += ["", "这不是通用能力排名。能力探测费用与任务 usage 分开；未知 usage 不按零处理。", ""]
+    return "\n".join(lines), complete
+
+
+def main(argv=None):
+    args = list(sys.argv[1:] if argv is None else argv)
+    usage = ("用法：python3 scripts/run-agent-baseline.py "
+             "[retry report.json [--repetitions 1..20] | compare old.json new.json]")
+    try:
+        if args in (["--help"], ["-h"]):
+            print(usage + "\n无参数交互运行；retry 复用报告的公开配置，按当前代码创建新运行并重新隐藏输入 key；"
+                  "compare 离线读取报告，不编译、不读取 key、不会联网。")
+            return 0
+        if len(args) == 3 and args[0] == "compare":
+            rendered, complete = comparison_markdown(read_report(args[1]), read_report(args[2]))
+            print(rendered)
+            return 0 if complete else 2
+        if args and (args[0] != "retry" or len(args) not in (2, 4) or
+                     len(args) == 4 and (args[2] != "--repetitions" or
+                                         not re.fullmatch(r"[1-9]|1[0-9]|20", args[3]))):
+            print(usage, file=sys.stderr)
+            return 2
+        if not sys.stdin.isatty() or not sys.stderr.isatty():
+            raise SafeFailure("interactive_tty_required")
+        if args:
+            # Revalidate against the current execution budget; historical
+            # reports remain readable under their own recorded profile.
+            config = dict(read_report(args[1])["configuration"])
+            if len(args) == 4:
+                config["repetitions"] = int(args[3])
+            config = validate_configuration(config)
+            display_configuration(config, "复用报告中的公开配置（本次按当前代码创建新运行）")
+            return launch(config, repository_root())
+        return launch(collect_configuration(), repository_root())
+    except KeyboardInterrupt:
+        print("\n已取消；尚未启动的新采样不会执行。", file=sys.stderr)
+        return 1
+    except (SafeFailure, ReportFailure) as error:
+        print("无法完成操作（%s）。未记录凭据或子进程原始错误。" % str(error), file=sys.stderr)
+        return 2
+    except (OSError, EOFError):
+        print("终端输入或报告文件操作失败；未记录原始异常。", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

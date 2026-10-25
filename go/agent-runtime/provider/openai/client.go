@@ -50,7 +50,9 @@ func New(config Config) (*Client, error) {
 func (*Client) ProviderName() string { return "openai" }
 
 type outputItem struct {
-	Type    string `json:"type"`
+	Type    string  `json:"type"`
+	Role    string  `json:"role"`
+	Phase   *string `json:"phase"`
 	Content []struct {
 		Type    string `json:"type"`
 		Text    string `json:"text"`
@@ -220,63 +222,32 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 			CacheReadTokens: body.Usage.InputDetails.Cached, ReasoningTokens: body.Usage.OutputDetails.Reasoning,
 		}
 	}
-	var output strings.Builder
-	var sawReasoning, missingEncrypted, sawRefusal bool
-	for _, raw := range body.Output {
-		var item outputItem
-		if err := json.Unmarshal(raw, &item); err != nil {
+	projection, err := projectOutput(body.Output)
+	if err != nil {
+		return model.Response{}, err
+	}
+	result.Content, result.Refused = projection.content, projection.refused
+	for _, item := range projection.calls {
+		key := names[item.Name]
+		if key == "" {
 			return model.Response{}, ErrUnsupported
 		}
-		switch item.Type {
-		case "message":
-			for _, part := range item.Content {
-				switch part.Type {
-				case "output_text":
-					output.WriteString(part.Text)
-				case "refusal":
-					if part.Refusal == "" {
-						return model.Response{}, ErrUnsupported
-					}
-					sawRefusal = true
-					output.WriteString(part.Refusal)
-				default:
-					return model.Response{}, ErrUnsupported
-				}
-			}
-		case "function_call":
-			key := names[item.Name]
-			if key == "" || item.CallID == "" || !json.Valid([]byte(item.Arguments)) {
-				return model.Response{}, ErrUnsupported
-			}
-			result.ToolCalls = append(result.ToolCalls, tools.Call{
-				ID: item.CallID, ToolKey: key, Name: item.Name, Arguments: json.RawMessage(item.Arguments),
-			})
-		case "reasoning":
-			sawReasoning = true
-			if item.EncryptedContent == "" {
-				missingEncrypted = true
-			}
-		default:
-			return model.Response{}, ErrUnsupported
-		}
+		result.ToolCalls = append(result.ToolCalls, tools.Call{
+			ID: item.CallID, ToolKey: key, Name: item.Name, Arguments: json.RawMessage(item.Arguments),
+		})
 	}
-	result.Content = output.String()
-	result.Refused = sawRefusal
-	if sawRefusal && len(result.ToolCalls) != 0 {
-		return model.Response{}, ErrUnsupported
-	}
-	if sawReasoning && len(result.ToolCalls) != 0 {
-		if missingEncrypted {
-			return model.Response{}, errors.Join(ErrUnsupported, ErrReplayUnavailable)
+	if projection.phased || projection.reasoning && len(result.ToolCalls) != 0 {
+		outputs := body.Output
+		if projection.phased && len(result.ToolCalls) == 0 {
+			// Preserve real message phases on later turns. As before, completed
+			// text-only responses do not replay unsigned reasoning evidence.
+			outputs = projection.messages
 		}
-		replay, err := encodeReplay(body.Output)
+		replay, err := encodeReplay(outputs)
 		if err != nil {
 			return model.Response{}, err
 		}
 		result.ProviderReplay = replay
-	}
-	if result.Content == "" && len(result.ToolCalls) == 0 {
-		return model.Response{}, ErrUnsupported
 	}
 	return result, nil
 }
