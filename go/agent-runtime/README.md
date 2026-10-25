@@ -42,8 +42,11 @@ Agent State alongside the committed Outbox `WakeupAt`. A Direct `Resume`
 before the due time returns `ErrModelInvocationBusy` **without claiming a
 new Store Epoch or calling the Model**; due recovery reuses the same
 invocation identity. The host must provide a trusted consistent Model
-scheduling clock. The Legacy explicit-resume path retains its previous
-immediate-retry semantics; this does not claim a production Local Pump.
+scheduling clock. The same durable retry due time also applies when
+`RunExecution` is unset: an early explicit `Resume` returns
+`ErrModelInvocationBusy` without another Provider attempt. See
+[ADR 0011](../../docs/adr/0011-model-invocation-lease-and-retry-governance.md).
+This contract does not start a background recovery worker.
 
 A native Tool writes a durable dispatch intent containing the stable
 Call ID **before** executing. The returned native receipt must match

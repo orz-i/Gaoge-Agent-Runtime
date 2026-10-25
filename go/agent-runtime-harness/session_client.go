@@ -50,10 +50,12 @@ type SessionClient struct {
 	transcript TranscriptSource
 }
 
-// OpenSession prepares a short Prompt/Load/Refresh API for text conversations.
+// OpenSession prepares a short Prompt/Load/Refresh/Resume API for text conversations.
+// Transcript may be omitted when reopening a Session only to read or resume
+// existing Turns. Prompt requires it; recovery uses committed Context instead.
 // Advanced orchestration continues to use Runner.Start directly.
 func (runner *Runner) OpenSession(options SessionOptions) (*SessionClient, error) {
-	if runner == nil || runner.store == nil || runner.context == nil || options.Transcript == nil ||
+	if runner == nil || runner.store == nil || runner.context == nil ||
 		!validActor(options.Actor) || strings.TrimSpace(options.Thread.Kind) == "" ||
 		strings.TrimSpace(options.Thread.ID) == "" {
 		return nil, ErrInvalidRequest
@@ -73,7 +75,7 @@ func (runner *Runner) OpenSession(options SessionOptions) (*SessionClient, error
 // turnID is a host-stable identity, not a generated sequence number: retrying
 // the same turn must reuse the same ID, while a new prompt uses a new ID.
 func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string) (Snapshot, error) {
-	if session == nil || session.runner == nil || strings.TrimSpace(prompt) == "" {
+	if session == nil || session.runner == nil || session.transcript == nil || strings.TrimSpace(prompt) == "" {
 		return Snapshot{}, ErrInvalidRequest
 	}
 	hostTurn, err := session.hostTurn(turnID)
@@ -128,6 +130,20 @@ func (session *SessionClient) Refresh(ctx context.Context, turnID string) (Snaps
 		return Snapshot{}, err
 	}
 	return session.runner.Refresh(ctx, id)
+}
+
+// Resume continues one admitted direct-Agent Turn from its committed Context.
+// It neither reads TranscriptSource nor creates a new execution attempt. A
+// waiting or terminal Turn is returned without resolving approval or budget.
+func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapshot, error) {
+	id, err := session.turnID(turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = session.requireIdentity(ctx); err != nil {
+		return Snapshot{}, err
+	}
+	return session.runner.ResumeTurn(ctx, id)
 }
 
 func (session *SessionClient) hostTurn(turnID string) (HostRef, error) {

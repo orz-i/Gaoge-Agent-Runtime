@@ -5,6 +5,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Add explicit `Runner.ResumeTurn` and `SessionClient.Resume` for an existing direct-Agent Turn, restoring persisted Context while retaining Agent revision, execution-claim, retry, approval, budget and uncertain-Tool guards. Allow transcript-free Session read/recovery handles. See the [single-Agent task recovery note](docs/releases/unreleased-agent-task-recovery.md).
+- Make the offline quickstart execute an Agent and Tool, and add a task-oriented Context/recovery example with an output oracle plus real PostgreSQL process-recovery coverage. Pin the standalone integration test toolchain to patched Go 1.27.3. Keep deterministic execution evidence separate from optional live-model quality checks.
 - Reject every HTTP redirect in MCP and A2A clients, including same-origin redirects, before another request can forward endpoint-scoped authentication or bypass endpoint validation. Preserve host redirect rejections without mutating the supplied HTTP client. Hosts must configure final protocol URLs directly; see the [breaking upgrade note](docs/releases/unreleased-protocol-redirect-safety.md).
 
 - Freeze optional host-prepared Group Chat selector input before its pending invocation, retaining the exact request across restarts and shared-budget receipt replay. Reject preparer changes to logical authority and strip private prepared input from public views and HTTP diagnostics; selectors without preparation remain unchanged.

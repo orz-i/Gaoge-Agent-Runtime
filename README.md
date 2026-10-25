@@ -42,29 +42,45 @@ Prereleases are distributed through Go module tags and GitHub Release archives.
 The npm registry is reserved for stable releases; Beta publication does not
 require npm credentials.
 
-## Minimal Go runtime
+## Run a tool-using Agent
+
+Run the offline quickstart from this source checkout:
+
+```bash
+go run ./go/agent-runtime/examples/quickstart
+```
+
+It creates an Agent, calls a registered release-check Tool, and completes with
+`Release checks: 12 passed, 0 failed.` The fixture model is deterministic and
+needs no credentials. The Memory Store lasts for the current process.
+
+The execution entry point is `agent.NewRunner` followed by `StartRun`:
 
 ```go
-store := memory.NewStore()
-runtime, err := kernel.New(kernel.Dependencies{Store: store})
-if err != nil {
-    log.Fatal(err)
-}
-
-snapshot, err := runtime.Create(context.Background(), kernel.CreateRequest{
-    Kind:   kernel.RunKind("agent"),
-    Actor:  kernel.ActorRef{TenantID: "acme", ActorID: "user-1"},
+// runtime, modelClient and registry are explicit host dependencies.
+runner, err := agent.NewRunner(agent.Dependencies{
+    Runtime: runtime, Model: modelClient, Catalog: registry, Executor: registry,
+    RunExecution: &agent.RunExecution{OwnerID: "worker-1", LeaseDuration: 5 * time.Minute},
+})
+if err != nil { return err }
+snapshot, err := runner.StartRun(ctx, agent.StartRequest{
+    ID: stableRunID,
+    Actor: kernel.ActorRef{TenantID: "acme", ActorID: "user-1"},
     Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread-1"},
-    Goal:   "Prepare a release summary",
-    State:  json.RawMessage(`{}`),
+    Goal: "Prepare a release summary", Model: selectedModel,
+    ToolKeys: []string{"release_checks:v1"},
 })
 ```
 
-See [the Go quickstart](go/agent-runtime/examples/quickstart/main.go), the
-[TypeScript client guide](ts/agent-runtime-client/README.md),
-[observability guidance](docs/observability.md), and the
-[deployment boundary](docs/deployment.md) for runnable examples and host
-integration guidance.
+A Kernel `Create` call only persists a Run; `agent.Runner` executes the model and
+Tool loop. See the [complete quickstart](go/agent-runtime/examples/quickstart/main.go).
+For a Session with bounded Context, retrievable archives and explicit recovery,
+follow the [single-Agent task guide](docs/agent-task-workflow.md) and
+[task-agent example](go/agent-runtime-harness/examples/task-agent/README.md).
+
+The [TypeScript client guide](ts/agent-runtime-client/README.md),
+[observability guidance](docs/observability.md), and
+[deployment boundary](docs/deployment.md) cover host integration.
 
 ### OpenAI / Anthropic Model Providers
 
@@ -93,7 +109,9 @@ completion validation never downgrade to prompt-only JSON. See
 ### Session and Context governance
 
 For text conversations, the optional Harness `OpenSession` facade exposes
-`Prompt`, `Load`, and `Refresh` over the existing durable Session/Turn Store.
+`Prompt`, `Load`, `Refresh`, and explicit `Resume` over the existing durable
+Session/Turn Store. A reopened Session can resume its original Agent Turn from
+persisted state without reading the Host transcript again.
 A trusted pre-intent model request preparer can inject the Context Window
 without changing a persisted model intent on restart. A separately opt-in
 managed preparer estimates routed model-window pressure and archives removed

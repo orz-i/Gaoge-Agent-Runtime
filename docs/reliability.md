@@ -86,6 +86,24 @@ Sources: [PostgreSQL agent recovery](../go/agent-runtime-postgres/agent_recovery
 [PostgreSQL atomicity](../go/agent-runtime-postgres/atomicity_real_test.go),
 [Redis lease recovery](../go/agent-runtime-redis/recovery_real_test.go).
 
+### Single-Agent Session task recovery
+
+`TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash` in the
+[combined integration suite](../integration/continuation-e2e/managed_agent_session_recovery_real_test.go)
+persists both Kernel execution and Harness/Context in PostgreSQL. A child process
+exits after a model intent commits and after the preceding Tool receipt is
+already durable. A new child reconstructs the composition, opens a Session with
+no TranscriptSource, retrieves an archived task fact through the registered
+artifact Tool, and completes the original Run and Turn. An independent append-only
+fixture ledger detects any repeat of the committed Tool effect.
+
+The test checks stable invocation identity and request hash, exact archive
+retention, root completion, and terminal Resume idempotency. It covers this
+specific known-receipt crash window; an external effect with a missing receipt
+still requires the existing reconciliation contract. The offline
+[task-agent example](../go/agent-runtime-harness/examples/task-agent/README.md)
+separately makes task output and recovery observable without a live model.
+
 ## Runtime-owned execution policy
 
 Execution safety is owned by Runtime composition rather than product Role or
