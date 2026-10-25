@@ -258,6 +258,39 @@ copying the model's maximum supported output capacity. Keep the same task output
 budget when comparing model reports. After correcting a configuration issue, run
 again to produce a new observation; keep the earlier failure reports intact.
 
+## Compatibility verdicts and recheck policy
+
+A baseline report is a **dated observation** for its exact provider, complete
+endpoint, model ID, request protocol, measurement profile, and source revision.
+Use only capabilities actually exercised. HTTP reachability, native JSON Schema
+compliance, SSE Function-call generation, encrypted reasoning replay,
+two-turn Tool continuation, and successful Agent task/recovery are separate
+claims. A passed JSON Schema preflight alone must not be described as a
+successful Agent run.
+
+When an OpenAI tool-bearing Responses request specifies store:false and
+include:["reasoning.encrypted_content"], returns reasoning plus a Function
+call, but the complete upstream response lacks encrypted_content, classify
+that observation as provider_replay_unavailable. The adapter must fail closed
+before performing the Tool action. Preserve the bounded, locally redacted
+evidence and the exact HTTP-request count. Do not infer which gateway hop
+caused the loss or mark the underlying model globally unsupported.
+
+A known incompatibility is not a timeless SDK blacklist, a permanent failure
+registry, or an instruction to retry automatically. Continue unrelated offline
+and deterministic governance tests; pause billable live samples for that exact
+endpoint/model until the upstream provider reports a change or the host
+chooses another route. If a new check is explicitly authorized, create a
+fresh report using the one-repetition option. Keep old reports intact and do
+not compare numeric task scores across different admission profiles or
+repetition counts.
+
+Endpoint-specific observations belong in local, ignored
+artifacts/agent-baselines/ files rather than hardcoded SDK provider rules.
+Never paste raw SSE response bodies, encrypted replay payloads, or API keys
+into tracked documentation, issue reports, or pull requests without separate
+review.
+
 ## What is held constant
 
 Each sample gets fresh in-memory Kernel/Harness stores and model instances. The

@@ -90,6 +90,16 @@ tests in `make check`. No third-party Python dependency is added.
 `make agent-baseline` starts the interactive runner;
 `make agent-baseline-test` runs its offline checks.
 
+A dated, endpoint-specific compatibility assessment is treated as local observation,
+not a permanent SDK allow/deny list. A successful Schema probe, generated
+Function call, encrypted replay, and actual Agent task completion are separate
+admission outcomes. If a completed OpenAI SSE response lacks necessary
+reasoning.encrypted_content, maintain fail-closed execution and preserve its
+bounded redacted evidence; do not repeatedly spend live requests on unchanged
+incompatible routes. Endpoint-specific reports stay in ignored local artifacts,
+not checked-in provider policy. Review stacked governance changes independently
+before preparing PRs.
+
 No real-model result is bundled or implied by offline tests. The live task uses
 in-memory stores and a controlled lease clock, as before; real process recovery
 continues to be established by the separate durable-store integration suite.

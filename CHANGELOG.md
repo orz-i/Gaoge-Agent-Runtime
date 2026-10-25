@@ -5,6 +5,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Document dated, report-scoped real-model endpoint compatibility findings and explicit, low-cost recheck discipline; keep gateway-specific evidence in ignored local artifacts, preserve fail-closed replay, and avoid introducing permanent SDK blacklists or mixing independent governance subjects into one PR.
+
 - Gate OpenAI Responses real-model task baselines on a separate, bounded stateless Tool+reasoning replay probe after the strict JSON Schema probe. Demand a side-effect-free synthetic Tool call, verify encrypted reasoning when reasoning occurs, replay the original output with a synthetic Tool receipt, and validate a strict final answer before any task sample runs. Preserve bounded redacted wire evidence, independent usage/request counts, a distinct preflight profile fingerprint, and prior reports unchanged. No SDK API or provider fallback is added.
 
 - Capture the last actual provider HTTP response when a live baseline task fails, with physical-dispatch count, status, bounded credential-redacted body and explicit capture state in console/JSON/Markdown. Mask provider-owned `reasoning.encrypted_content`; do not treat a previously observed response as proof of a later local failure. Add `retry <report.json> --repetitions 1` for lower-cost diagnosis without changing the existing task oracle, replay fencing or earlier reports.
