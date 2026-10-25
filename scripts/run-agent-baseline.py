@@ -17,6 +17,7 @@ import sys
 import tempfile
 import threading
 import time
+import unicodedata
 from urllib.parse import unquote, urlsplit
 import uuid
 import warnings
@@ -31,8 +32,12 @@ PUBLIC_CONFIGURATION = (
     "provider", "endpoint", "model", "contextTokens", "maxOutputTokens",
     "repetitions", "allowUnknownStructuredModel",
 )
-MAX_LINE_BYTES = 256 * 1024
+MAX_LINE_BYTES = 2 * 1024 * 1024
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+MAX_RESPONSE_BODY_BYTES = 256 * 1024
+MAX_NORMALIZED_ANSWER_BYTES = 64 * 1024
+RESPONSE_DEBUG_CAPTURE_STATES = {"complete", "unavailable", "too_large", "incomplete", "read_error"}
+RESPONSE_DEBUG_FIELDS = {"capture", "body", "capturedBytes", "bodyTruncated", "normalizedAnswer", "answerTruncated", "redacted"}
 MAX_EVENTS = 256
 PROBE_JSON_TYPES = {"object", "array", "string", "number", "boolean", "null"}
 WIRE_CAPTURE_STATES = {"complete", "unavailable", "too_large", "incomplete", "read_error", "invalid_json", "invalid_envelope"}
@@ -272,7 +277,22 @@ def redact(value, secret):
     if isinstance(value, list):
         return [redact(item, secret) for item in value]
     if isinstance(value, dict):
-        return {redact(key, secret): redact(item, secret) for key, item in value.items()}
+        safe = {redact(key, secret): redact(item, secret) for key, item in value.items()}
+        debug = safe.get("responseDebug")
+        original = value.get("responseDebug")
+        if isinstance(debug, dict) and isinstance(original, dict):
+            for field, limit, flag in (
+                ("body", MAX_RESPONSE_BODY_BYTES, "bodyTruncated"),
+                ("normalizedAnswer", MAX_NORMALIZED_ANSWER_BYTES, "answerTruncated"),
+            ):
+                text = debug.get(field)
+                if isinstance(text, str) and text != original.get(field):
+                    debug["redacted"] = True
+                    encoded = text.encode("utf-8")
+                    if len(encoded) > limit:
+                        debug[field] = encoded[:limit].decode("utf-8", errors="ignore")
+                        debug[flag] = True
+        return safe
     return value
 
 
@@ -461,6 +481,53 @@ def wire_diagnostics(wire, schema_check):
     return lines
 
 
+def safe_response_text(text):
+    """Keep readable text, escaping terminal controls and invisible formatting."""
+    return "".join(
+        json.dumps(char, ensure_ascii=True)[1:-1]
+        if (char != "\n" and unicodedata.category(char) in {"Cc", "Cf", "Cs"}) or char in "\u2028\u2029"
+        else char for char in text
+    )
+
+
+def response_debug_lines(preflight, markdown=False):
+    if preflight.get("status") != "failed":
+        return []
+    lines = ["## 失败预检响应正文" if markdown else "失败预检响应正文：", ""]
+    debug = preflight.get("responseDebug")
+    if debug is None:
+        return lines + ["本报告未捕获 HTTP response body 和 SDK 答案，无法从已存数据还原正文。"]
+
+    def content_block(text):
+        if not markdown:
+            return [text]
+        longest = max((len(match.group()) for match in re.finditer(r"`+", text)), default=0)
+        fence = "`" * max(3, longest + 1)
+        return [fence + "text", text, fence]
+
+    lines.append("HTTP response body：capture=%s；capturedBytes=%d；bodyTruncated=%s；redacted=%s。" %
+                 (debug["capture"], debug["capturedBytes"], md_cell(debug["bodyTruncated"]), md_cell(debug["redacted"])))
+    if debug["capture"] == "unavailable":
+        lines.append("未捕获 HTTP response body。")
+    elif debug["body"]:
+        partial = debug["capture"] != "complete" or debug["bodyTruncated"]
+        lines.append("以下仅为已捕获并脱敏后的部分正文，不代表完整 HTTP body。" if partial else
+                     "以下为完整捕获的脱敏正文；控制字符以转义表示，换行保留。")
+        lines += content_block(safe_response_text(debug["body"]))
+    elif debug["capture"] == "complete" and not debug["bodyTruncated"]:
+        lines.append("已完整捕获 HTTP response body，正文为空。")
+    else:
+        lines.append("未捕获可展示的 HTTP response body；不能视为完整响应。")
+    lines += ["", "SDK normalized answer：answerTruncated=%s；以下为 JSON 字符串表示，BOM、换行和控制字符均可见。" %
+              md_cell(debug["answerTruncated"])]
+    if debug["answerTruncated"]:
+        lines.append("答案仅保留脱敏后的前缀，不代表完整 SDK 答案。")
+    if not debug["normalizedAnswer"]:
+        lines.append("未获得 SDK 答案或答案为空。")
+    lines += content_block(safe_response_text(json.dumps(debug["normalizedAnswer"], ensure_ascii=False)))
+    return lines
+
+
 def failure_diagnostics(report):
     preflight = report.get("preflight") or {}
     failures = []
@@ -532,6 +599,9 @@ def render_markdown(report):
         lines.append("- 启动器失败：%s" % md_cell(report["launcherFailure"]))
     if runner.get("error"):
         lines.append("- 执行器失败：%s" % md_cell(runner["error"]))
+    debug_lines = response_debug_lines(preflight, markdown=True)
+    if debug_lines:
+        lines += [""] + debug_lines
     diagnostics = failure_diagnostics(report)
     if diagnostics:
         lines += ["", "## 失败诊断与下一步", ""] + ["- " + md_cell(line) for line in diagnostics]
@@ -645,6 +715,27 @@ def validate_usage(value, coverage=False):
             (value["knownCalls"] == 0) != (value["known"] is None)):
         raise ProtocolFailure("invalid_usage")
     validate_usage(value["known"])
+
+
+def validate_response_debug(debug):
+    if (not isinstance(debug, dict) or set(debug) != RESPONSE_DEBUG_FIELDS or
+            not isinstance(debug["capture"], str) or debug["capture"] not in RESPONSE_DEBUG_CAPTURE_STATES or
+            type(debug["capturedBytes"]) is not int or not 0 <= debug["capturedBytes"] <= MAX_RESPONSE_BODY_BYTES or
+            any(type(debug[name]) is not bool for name in ("bodyTruncated", "answerTruncated", "redacted"))):
+        raise ProtocolFailure("invalid_preflight_response_debug")
+    for field, limit in (("body", MAX_RESPONSE_BODY_BYTES), ("normalizedAnswer", MAX_NORMALIZED_ANSWER_BYTES)):
+        if not isinstance(debug[field], str):
+            raise ProtocolFailure("invalid_preflight_response_debug")
+        try:
+            if len(debug[field].encode("utf-8")) > limit:
+                raise ProtocolFailure("invalid_preflight_response_debug")
+        except UnicodeError:
+            raise ProtocolFailure("invalid_preflight_response_debug") from None
+    if ((debug["capture"] == "unavailable" and
+         (debug["body"] or debug["capturedBytes"] != 0 or debug["bodyTruncated"])) or
+            (debug["capture"] == "too_large" and not debug["bodyTruncated"]) or
+            (debug["capturedBytes"] == 0 and debug["body"])):
+        raise ProtocolFailure("invalid_preflight_response_debug")
 
 
 def validate_schema_check(check):
@@ -808,8 +899,13 @@ def accept_event(report, event):
                     event.get("failureCode") != "strict_schema_probe_failed" or "schemaCheck" not in event):
                 raise ProtocolFailure("invalid_preflight_wire_check")
             validate_wire_check(event["wireCheck"])
+        if "responseDebug" in event:
+            if event["status"] != "failed":
+                raise ProtocolFailure("invalid_preflight_response_debug")
+            validate_response_debug(event["responseDebug"])
         report["preflight"] = {name: event[name] for name in (
             "status", "failureCode", "durationMs", "usage", "httpStatus", "responseKind", "schemaCheck", "wireCheck",
+            "responseDebug",
         ) if name in event}
     elif kind == "sample":
         if not runner.get("taskVersion") or not report["preflight"] or report["preflight"]["status"] != "passed":
@@ -1013,6 +1109,8 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
                 detail = "；失败分类 " + preflight["failureCode"] if preflight["status"] == "failed" else ""
                 print("预检：%s；阶段 preflight%s。" %
                       ("通过" if preflight["status"] == "passed" else "未通过", detail), flush=True)
+                for line in response_debug_lines(preflight):
+                    print(line, flush=True)
             elif event["type"] == "sample":
                 sample = redact(report["samples"][-1], secret)
                 detail = "；失败分类 " + sample["failureCode"] if sample["status"] == "failed" else ""

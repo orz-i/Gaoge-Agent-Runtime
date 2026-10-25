@@ -5,12 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Show the captured HTTP response body and extracted SDK answer for failed baseline preflights by default, and retain both in JSON/Markdown reports after credential redaction. Mark incomplete and truncated captures, escape terminal controls and Markdown fences, and preserve original validation without another model request or a debug flag.
+
 - Preserve typed provider HTTP transport timeouts as the existing `model.upstream_timeout` classification without exposing raw network errors or changing retry budgets. Baseline diagnostics distinguish a timeout with no observed HTTP response from a native-schema failure and direct connectivity checks before another live sample.
 
 - Diagnose failed OpenAI strict-schema probes at the same HTTP request/response boundary with bounded, content-free wire observations. Keep native-schema pass/fail unchanged, distinguish incomplete evidence from a negative finding, and add `run-agent-baseline.py retry <report.json>` to reuse public settings with a fresh hidden key and new report.
 
 - Select OpenAI Responses `final_answer` separately from `commentary`, preserve original assistant phases during stateless continuation, and use the same projection for replay identity checks. Retain private replay evidence in Agent completion and bounded completion-repair history. Reject ambiguous phase combinations without extracting or repairing JSON. Review persisted transcripts before upgrade; see the [phase upgrade note](docs/releases/unreleased-openai-response-phases.md).
-- Explain strict-schema baseline failures with safe JSON shape/type, required-field and continuation diagnostics while retaining the native strict contract and historical reports. No raw response content, arbitrary field names, provider error text or credentials enter these diagnostics.
+- Explain strict-schema baseline failures with safe JSON shape/type, required-field and continuation diagnostics while retaining the native strict contract and historical reports. The `schemaCheck` summary excludes response content and credentials; failed-response text is available separately through redacted `responseDebug`.
 - Revise the example baseline service input ceiling from 6,144 to 8,192 after native phase/replay fixtures exceeded the former allowance; retain actual archival/retrieval and recovery checks. Record the changed policy in the profile/dataset hash, read historical reports under their own budgets, and reject score comparisons across the two profiles.
 
 - Resolve recognizable root and `/v1` base URLs at interactive baseline input, displaying the final protocol endpoint before key entry. Explain preflight failures with safe observed HTTP metadata and actionable hints, preserve historical endpoint values, and distinguish the task output budget from model capacity.

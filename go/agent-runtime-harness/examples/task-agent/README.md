@@ -120,11 +120,13 @@ requesting a hidden API key, then runs a native-schema probe and two fixed data
 variants with explicit repetitions. Successes, failures and incomplete runs are
 saved under `artifacts/agent-baselines/` with source/configuration metadata,
 measured durations, usage coverage and separate oracle/recovery observations.
-Preflight failures show a safe failure category and observed HTTP status/response
-kind when available, together with a next-step hint. Failed OpenAI schema probes
-also report bounded request/response structure observations from that same call,
-so wire-level answer violations can be distinguished from ambiguous or changed
-text projections without saving the answer. Use
+Preflight failures show the captured, credential-redacted HTTP response body and
+the SDK's extracted answer directly, and save both in JSON/Markdown reports.
+No additional debug flag is required. Partial captures and truncation are marked;
+HTTP status, response kind and safe failure categories remain separate facts.
+Failed OpenAI schema probes also report bounded request/response structure
+observations from that same call. Original validation and request counts are
+unchanged. Use
 `python3 scripts/run-agent-baseline.py retry <report.json>` to reuse a saved
 public configuration and enter only a fresh key for a new measured run. No real service is invoked
 by ordinary test gates.

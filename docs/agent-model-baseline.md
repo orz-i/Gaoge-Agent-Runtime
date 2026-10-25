@@ -91,10 +91,36 @@ The console and Markdown summary explain the failing stage, the safe error code,
 and how many task samples ran. A preflight failure with `attempted = 0` means
 that the task cases never started; all requested cases remain skipped.
 
-New preflight events may include an observed HTTP status and a fixed response
-kind (`json`, `html`, `event_stream`, or `other`). They contain no response body,
-raw header values or provider error text. A response that was never received has
-no invented status. Earlier reports without these fields remain readable.
+Preflight events may include an observed HTTP status and a fixed response kind
+(`json`, `html`, `event_stream`, or `other`). Raw HTTP headers are not recorded.
+A response that was never received has no invented status. Earlier reports
+without these fields remain readable.
+
+### See the actual failed response
+
+A failed preflight now includes `responseDebug` by default. The console displays
+the captured HTTP response body and the SDK's extracted answer directly; JSON
+and Markdown reports preserve the same redacted text. The normal run and
+`retry <report.json>` commands need no additional debug flag. Successful
+preflights omit this failure-only field.
+
+The observer retains at most 256 KiB of the bytes consumed by the adapter. After
+credential redaction, the displayed body is bounded to 256 KiB and the extracted
+answer to 64 KiB. `capturedBytes` counts the retained original byte prefix, not
+the total response size. `capture` distinguishes complete, unavailable,
+incomplete, read-error and over-limit observations; `bodyTruncated` and
+`answerTruncated` explicitly identify shortened output. An incomplete body is
+shown as the observed prefix, not hidden or presented as a complete response.
+
+The current API key and recognized credential fields are redacted before the Go
+event is emitted; `redacted` records replacement. JSON may be reserialized when
+redaction is needed. Console control characters are escaped, the extracted
+answer has a visible JSON-string representation, and Markdown uses a safe code
+fence. These display transformations never alter the answer used by the original
+JSON/schema validator. The observer adds no request, retry or body drain.
+
+Historical reports that did not save a body cannot recover it later. They remain
+readable and unchanged; a new run is required to collect missing response text.
 
 A `strict_schema_probe_failed` event can additionally include `schemaCheck`.
 This records only fixed JSON-type labels, booleans and counts: whether content
@@ -122,12 +148,13 @@ that same preflight request. It observes the actual adapter HTTP boundary:
   echo is not evidence that native schema is unsupported.
 
 The observer captures at most 256 KiB per body in memory and emits at most 16
-message summaries. It does not save response text, arbitrary property names,
-values, IDs, headers, hashes or raw errors. It does not add a request or retry,
-and it preserves the original body read, close and error behavior. Incomplete,
-oversized or unavailable captures are explicitly marked; they do not become
-negative capability findings. The normal validator remains the authority for
-passing or failing the probe.
+message summaries. `wireCheck` itself contains no response text, arbitrary
+property names, values, IDs, headers, hashes or raw errors; failed preflights
+expose redacted body text separately in `responseDebug`. Observation adds no
+request or retry and preserves the original body read, close and error behavior.
+Incomplete, oversized or unavailable wire captures remain explicitly marked;
+they do not become negative capability findings. The normal validator remains
+the authority for passing or failing the probe.
 
 | Complete observation | Supported conclusion |
 | --- | --- |
@@ -276,10 +303,13 @@ Anthropic key environment variables before starting build/runner subprocesses.
 The runner receives one bounded stdin JSON object; public configuration and
 credential-bearing input use separate representations.
 
-Reports do not contain raw model requests, provider replay, HTTP bodies,
-authorization headers or raw error text. Error categories are stable and
-bounded. The launcher also redacts the entered key from persisted strings and
-visible diagnostics. If terminal echo cannot be disabled, key entry fails
+Reports exclude model request bodies and authorization headers. Failed
+preflights now retain bounded, redacted HTTP response content and the extracted
+answer, including provider error-message content when received; these are local
+debug artifacts, so review their contents before sharing them. Transport error
+categories remain stable and bounded rather than copying raw network errors.
+The launcher also redacts the entered key from persisted strings and visible
+diagnostics. If terminal echo cannot be disabled, key entry fails
 instead of falling back to visible input. Python strings are not guaranteed to
 be securely erased from memory; this workflow makes no such claim.
 

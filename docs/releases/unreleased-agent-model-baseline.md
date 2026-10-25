@@ -29,21 +29,25 @@ rejected. See the [phase support note](unreleased-openai-response-phases.md).
 The launcher writes JSON and Markdown reports under the ignored
 `artifacts/agent-baselines/` directory and can compare compatible JSON reports
 offline. Keys travel through stdin to the built binary and do not enter command
-arguments, environment fallback or report configuration. Raw provider errors and
-request/response bodies are excluded from reports. Safe preflight diagnostics
-include an observed numeric HTTP status and a fixed response-kind classification
-when available. Console and Markdown output explain the failing stage, skipped
+arguments, environment fallback or report configuration. Request bodies,
+authorization headers and raw network errors are excluded from reports. Failed
+preflights now include bounded, credential-redacted response body content and
+the SDK's extracted answer in `responseDebug`, displayed directly in the console
+and preserved in JSON/Markdown without an extra flag. Body and answer truncation
+and incomplete captures are explicit. Existing HTTP diagnostics include an
+observed numeric status and a fixed response-kind classification when available. Console and Markdown output explain the failing stage, skipped
 samples and the next configuration check. Reports without these optional fields
 remain readable; no report schema version or SDK contract change is required.
 
 For a failed OpenAI strict-schema probe, optional `wireCheck` observations now
 compare the actual outbound native format with the original response message
-boundaries and normalized answer. Both bodies are observed only in bounded
-memory; saved facts contain fixed classifications, booleans and counts. The
-observer adds no network call, does not alter pass/fail, and cannot assign an
-upstream failure to a particular gateway or model implementation. Partial
-captures remain explicitly inconclusive. No raw text, headers, IDs or error
-strings are saved.
+boundaries and normalized answer. Observation is bounded; `wireCheck` contains
+fixed classifications, booleans and counts, while `responseDebug` separately
+retains redacted response text for inspection. The observer adds no network call
+or body drain, does not alter pass/fail, and cannot assign an upstream failure
+to a particular gateway or model implementation. Partial captures remain
+explicitly inconclusive. Earlier reports without response text cannot recover
+that text after the original process exits.
 
 `python3 scripts/run-agent-baseline.py retry <report.json>` reuses a validated
 report's public settings, displays them, checks current execution requirements,

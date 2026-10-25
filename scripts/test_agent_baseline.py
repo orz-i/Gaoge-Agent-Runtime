@@ -62,6 +62,15 @@ def schema_check_fixture(kind="object", ok_type="boolean", ok_true=False):
     return check
 
 
+def response_debug_fixture(body="http-body", answer="sdk-answer", capture="complete",
+                           body_truncated=False, answer_truncated=False):
+    return {
+        "capture": capture, "body": body, "capturedBytes": len(body.encode("utf-8")),
+        "bodyTruncated": body_truncated, "normalizedAnswer": answer,
+        "answerTruncated": answer_truncated, "redacted": False,
+    }
+
+
 def wire_check_fixture(phase="final_answer", json_valid=False, schema_valid=False, matches=True):
     return {
         "request": {"capture": "complete", "format": {
@@ -303,6 +312,7 @@ class RetryTests(unittest.TestCase):
         real_run_child = baseline.run_child
 
         def fixture_runner(_command, root, config, secret, report, writer):
+            self.assertEqual(_command[1:], ["-mode=baseline-stdin"])
             self.assertEqual(set(config), set(baseline.PUBLIC_CONFIGURATION))
             self.assertEqual(config, configuration())
             self.assertEqual(secret, fresh_key)
@@ -781,10 +791,183 @@ class ProcessReportTests(unittest.TestCase):
             _, writer, _, _ = self.invoke(directory, records, exit_code=1)
             report = baseline.read_report(writer.json_path)
             self.assertNotIn("schemaCheck", report["preflight"])
+            self.assertNotIn("responseDebug", report["preflight"])
             rendered = writer.md_path.read_text(encoding="utf-8")
+            self.assertIn("本报告未捕获 HTTP response body 和 SDK 答案", rendered)
             self.assertIn("本报告未记录 schema 细项", rendered)
             self.assertNotIn("模型回答检查", rendered)
             self.assertNotIn("每任务 1 次重新运行", rendered)
+
+    def test_main_launch_shows_and_saves_failed_response_with_the_original_child_command(self):
+        records = events(preflight_passed=False)
+        records[1]["responseDebug"] = response_debug_fixture(
+            "default-body-start\n完整 response body\ndefault-body-end", "\ufeff\n完整 SDK answer")
+        steps = []
+
+        def build(_root, executable):
+            steps.append("build")
+            source = child_program(records, exit_code=1).replace(
+                "config = json.loads(sys.stdin.readline())\n",
+                "assert sys.argv[1:] == ['-mode=baseline-stdin']\n"
+                "config = json.loads(sys.stdin.readline())\n")
+            executable.write_text("#!" + sys.executable + "\n" + source, encoding="utf-8")
+            executable.chmod(0o700)
+
+        def key():
+            steps.append("key")
+            return self.secret
+
+        real_popen = baseline.subprocess.Popen
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                mock.patch.object(baseline, "repository_root", return_value=Path(directory)), \
+                mock.patch.object(baseline, "source_metadata", return_value={}), \
+                mock.patch.object(baseline, "collect_configuration", return_value=configuration()), \
+                mock.patch.object(baseline, "build_runner", side_effect=build), \
+                mock.patch.object(baseline, "read_api_key", side_effect=key), \
+                mock.patch.object(baseline.subprocess, "Popen", wraps=real_popen) as popen, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(baseline.main([]), 1)
+            self.assertEqual(steps, ["build", "key"])
+            self.assertEqual(popen.call_count, 1)
+            self.assertEqual(popen.call_args.args[0][1:], ["-mode=baseline-stdin"])
+            path = next((Path(directory) / "artifacts" / "agent-baselines").glob("*.json"))
+            loaded = baseline.read_report(path)
+            self.assertEqual(loaded["status"], "failed")
+            self.assertIsNone(loaded["launcherFailure"])
+            self.assertEqual(loaded["preflight"]["responseDebug"], records[1]["responseDebug"])
+            for rendered in (output.getvalue(), path.with_suffix(".md").read_text(encoding="utf-8")):
+                self.assertIn("default-body-start\n完整 response body\ndefault-body-end", rendered)
+                self.assertIn('"\\ufeff\\n完整 SDK answer"', rendered)
+                self.assertNotIn(self.secret, rendered)
+
+    def test_response_debug_body_and_answer_are_shown_and_saved_without_terminal_effects(self):
+        tick = chr(96)
+        body = ("body-start\n" + tick * 3 + "json\n" + '{"message":"完整正文"}\n' +
+                tick * 4 + "\n# still-body\nbody-end " + self.secret +
+                "\r\x1b[31m\u009b31m\a\t\u202e\ufeff")
+        answer = "\ufeff\n SDK answer: " + self.secret + "\n" + tick * 3 + "\t"
+        records = events(preflight_passed=False)
+        records[1].update(httpStatus=200, responseKind="json",
+                          responseDebug=response_debug_fixture(body, answer))
+        with tempfile.TemporaryDirectory() as directory:
+            result, writer, _, output = self.invoke(directory, records, exit_code=1)
+            before = writer.json_path.read_bytes()
+            loaded = baseline.read_report(writer.json_path)
+            debug = loaded["preflight"]["responseDebug"]
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(loaded["samples"], [])
+            self.assertEqual(debug["body"], body.replace(self.secret, "[REDACTED]"))
+            self.assertEqual(debug["normalizedAnswer"], answer.replace(self.secret, "[REDACTED]"))
+            self.assertEqual(debug["capturedBytes"], len(body.encode("utf-8")))
+            self.assertTrue(debug["redacted"])
+            self.assertFalse(debug["bodyTruncated"])
+            self.assertFalse(debug["answerTruncated"])
+            markdown = writer.md_path.read_text(encoding="utf-8")
+            self.assertIn(tick * 5 + "text\nbody-start\n", markdown)
+            self.assertIn("\n" + tick * 4 + "\n# still-body\n", markdown)
+            self.assertIn("\\ufeff\n" + tick * 5 + "\n", markdown)
+            for rendered in (output, markdown, baseline.render_markdown(loaded)):
+                self.assertIn('{"message":"完整正文"}', rendered)
+                self.assertIn("body-start\n", rendered)
+                self.assertIn("body-end [REDACTED]", rendered)
+                self.assertIn("\\r\\u001b[31m\\u009b31m\\u0007\\t\\u202e\\ufeff", rendered)
+                self.assertIn('"\\ufeff\\n SDK answer: [REDACTED]\\n' + tick * 3 + '\\t"', rendered)
+                self.assertNotIn(self.secret, rendered)
+                for control in ("\r", "\x1b", "\u009b", "\a", "\t", "\u202e", "\ufeff"):
+                    self.assertNotIn(control, rendered)
+            self.assertEqual(writer.json_path.read_bytes(), before)
+            self.assertNotIn(self.secret, writer.json_path.read_text(encoding="utf-8"))
+
+    def test_response_debug_partial_empty_and_unavailable_captures_are_explicit(self):
+        for capture, body, truncated, expected in (
+            ("complete", "prefix", True, "部分正文，不代表完整 HTTP body"),
+            ("incomplete", "prefix", False, "部分正文，不代表完整 HTTP body"),
+            ("read_error", "prefix", False, "部分正文，不代表完整 HTTP body"),
+            ("too_large", "prefix", True, "部分正文，不代表完整 HTTP body"),
+            ("unavailable", "", False, "未捕获 HTTP response body"),
+            ("complete", "", False, "已完整捕获 HTTP response body，正文为空"),
+        ):
+            with self.subTest(capture=capture, body=body, truncated=truncated), tempfile.TemporaryDirectory() as directory:
+                records = events(preflight_passed=False)
+                records[1]["responseDebug"] = response_debug_fixture(
+                    body, "answer-prefix", capture, body_truncated=truncated, answer_truncated=True)
+                _, writer, _, output = self.invoke(directory, records, exit_code=1)
+                loaded = baseline.read_report(writer.json_path)
+                self.assertEqual(loaded["preflight"]["responseDebug"], records[1]["responseDebug"])
+                for rendered in (output, writer.md_path.read_text(encoding="utf-8")):
+                    self.assertIn("capture=" + capture, rendered)
+                    self.assertIn(expected, rendered)
+                    self.assertIn("答案仅保留脱敏后的前缀", rendered)
+                    self.assertIn('"answer-prefix"', rendered)
+
+    def test_response_debug_rejects_malformed_or_success_payloads_before_saving(self):
+        invalid = [
+            dict(response_debug_fixture(), extra="unexpected"),
+            {name: value for name, value in response_debug_fixture().items() if name != "body"},
+        ]
+        for field, value in (
+            ("capture", "invalid_json"), ("capture", []), ("body", []),
+            ("normalizedAnswer", None), ("capturedBytes", True), ("capturedBytes", 1.0),
+            ("capturedBytes", -1), ("capturedBytes", 256 * 1024 + 1),
+            ("bodyTruncated", 1), ("answerTruncated", "true"), ("redacted", None),
+            ("body", "界" * (256 * 1024 // 3 + 1)),
+            ("normalizedAnswer", "界" * (64 * 1024 // 3 + 1)),
+            ("body", "\ud800"), ("normalizedAnswer", "\udfff"),
+            ("capture", "unavailable"), ("capture", "too_large"), ("capturedBytes", 0),
+        ):
+            invalid.append(dict(response_debug_fixture(), **{field: value}))
+        for debug in invalid:
+            with self.subTest(fields=sorted(debug)):
+                report = baseline.new_report(configuration(), {})
+                baseline.accept_event(report, start_event())
+                event = dict(events(preflight_passed=False)[1], responseDebug=debug)
+                with self.assertRaisesRegex(baseline.ProtocolFailure, "^invalid_preflight_response_debug$"):
+                    baseline.accept_event(report, event)
+                self.assertIsNone(report["preflight"])
+        report = baseline.new_report(configuration(), {})
+        baseline.accept_event(report, start_event())
+        with self.assertRaisesRegex(baseline.ProtocolFailure, "^invalid_preflight_response_debug$"):
+            baseline.accept_event(report, dict(events()[1], responseDebug=response_debug_fixture()))
+
+    def test_response_debug_worst_case_json_escaping_fits_jsonl_and_report_limits(self):
+        records = events(preflight_passed=False)
+        records[1]["responseDebug"] = response_debug_fixture("", "")
+        records[1]["responseDebug"]["capturedBytes"] = 256 * 1024
+        program = child_program(records, exit_code=1).replace(
+            "for record in records:\n",
+            "records[1]['responseDebug']['body'] = '\\x01' * (256 * 1024)\n"
+            "records[1]['responseDebug']['normalizedAnswer'] = '\\x02' * (64 * 1024)\n"
+            "for record in records:\n")
+        with tempfile.TemporaryDirectory() as directory:
+            writer = baseline.ReportWriter(Path(directory) / "reports")
+            report = baseline.new_report(configuration(), {})
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                result = baseline.run_child(
+                    [sys.executable, "-u", "-c", program], Path(directory), configuration(),
+                    self.secret, report, writer)
+            self.assertEqual(result["status"], "failed")
+            self.assertIsNone(result["launcherFailure"])
+            debug = baseline.read_report(writer.json_path)["preflight"]["responseDebug"]
+            self.assertEqual(debug["body"], "\x01" * (256 * 1024))
+            self.assertEqual(debug["normalizedAnswer"], "\x02" * (64 * 1024))
+            self.assertFalse(debug["bodyTruncated"])
+            self.assertFalse(debug["answerTruncated"])
+            self.assertEqual(output.getvalue().count("\\u0001"), 256 * 1024)
+            self.assertEqual(output.getvalue().count("\\u0002"), 64 * 1024)
+
+    def test_secondary_secret_redaction_preserves_capture_count_and_bounded_reports(self):
+        debug = response_debug_fixture("zz" * (128 * 1024), "zz" * (32 * 1024))
+        safe = baseline.redact({"responseDebug": debug}, "zz")["responseDebug"]
+        baseline.validate_response_debug(safe)
+        self.assertEqual(safe["capturedBytes"], 256 * 1024)
+        self.assertTrue(safe["redacted"])
+        self.assertTrue(safe["bodyTruncated"])
+        self.assertTrue(safe["answerTruncated"])
+        self.assertNotIn("zz", safe["body"] + safe["normalizedAnswer"])
+        self.assertLessEqual(len(safe["body"].encode("utf-8")), 256 * 1024)
+        self.assertLessEqual(len(safe["normalizedAnswer"].encode("utf-8")), 64 * 1024)
 
     def test_invalid_jsonl_keeps_prior_sample_and_hides_raw_output(self):
         ending = "print('not-json-' + config['apiKey'], flush=True)\n"
@@ -827,7 +1010,7 @@ class ProcessReportTests(unittest.TestCase):
     def test_unknown_event_and_bounded_output_are_protocol_failures(self):
         for records, ending, expected in [
             ([{"type": "future-event"}], "", "unknown_event"),
-            ([], "print('x' * (256 * 1024 + 1), flush=True)\n", "output_limit"),
+            ([], "print('x' * (2 * 1024 * 1024 + 1), flush=True)\n", "output_limit"),
         ]:
             with self.subTest(expected=expected), tempfile.TemporaryDirectory() as directory:
                 result, _, _, _ = self.invoke(directory, records, ending=ending)

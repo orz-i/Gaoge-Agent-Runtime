@@ -108,15 +108,16 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 }
 
 type preflightEvent struct {
-	Type         string                `json:"type"`
-	Status       string                `json:"status"`
-	FailureCode  string                `json:"failureCode,omitempty"`
-	DurationMs   int64                 `json:"durationMs"`
-	Usage        *tokenUsage           `json:"usage,omitempty"`
-	HTTPStatus   int                   `json:"httpStatus,omitempty"`
-	ResponseKind preflightResponseKind `json:"responseKind,omitempty"`
-	SchemaCheck  *probeSchemaCheck     `json:"schemaCheck,omitempty"`
-	WireCheck    *probeWireCheck       `json:"wireCheck,omitempty"`
+	Type          string                  `json:"type"`
+	Status        string                  `json:"status"`
+	FailureCode   string                  `json:"failureCode,omitempty"`
+	DurationMs    int64                   `json:"durationMs"`
+	Usage         *tokenUsage             `json:"usage,omitempty"`
+	HTTPStatus    int                     `json:"httpStatus,omitempty"`
+	ResponseKind  preflightResponseKind   `json:"responseKind,omitempty"`
+	SchemaCheck   *probeSchemaCheck       `json:"schemaCheck,omitempty"`
+	WireCheck     *probeWireCheck         `json:"wireCheck,omitempty"`
+	ResponseDebug *preflightResponseDebug `json:"responseDebug,omitempty"`
 }
 
 var probeSchema = json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean","enum":[true]}},"required":["ok"],"additionalProperties":false}`)
@@ -128,9 +129,13 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 	clientHTTP, observation := newPreflightHTTPClient(config.httpClient)
 	observation.captureWire = config.provider == "openai"
 	config.httpClient = clientHTTP
+	var normalizedAnswer string
 	defer func() {
 		event.DurationMs = time.Since(started).Milliseconds()
 		event.HTTPStatus, event.ResponseKind = observation.snapshot()
+		if event.Status == "failed" {
+			event.ResponseDebug = observation.responseDebugSnapshot(normalizedAnswer, config.apiKey)
+		}
 	}()
 	probeCtx, cancel := context.WithTimeout(ctx, modelTimeout)
 	defer cancel()
@@ -155,6 +160,7 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 		OutputContract:  &model.OutputContract{Name: "baseline_probe", Schema: probeSchema},
 		MaxOutputTokens: config.outputTokens,
 	})
+	normalizedAnswer = response.Content
 	event.Usage = numericUsage(response.Usage)
 	if err != nil {
 		event.FailureCode = failureCode(err, "provider_failed")

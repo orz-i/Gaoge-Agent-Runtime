@@ -31,7 +31,8 @@ const (
 )
 
 // All durable fields below are fixed labels, booleans or bounded counts.
-// Captured bytes exist only in this probe's memory and never enter an event.
+// Wire facts never contain captured bytes. Failed-probe responseDebug is a
+// separate, bounded and redacted view of those bytes.
 type probeWireCheck struct {
 	Request  probeWireRequestCheck  `json:"request"`
 	Response probeWireResponseCheck `json:"response"`
@@ -104,21 +105,31 @@ func (capture *preflightWireCapture) observe(data []byte, err error) {
 }
 
 func (capture *preflightWireCapture) snapshot() ([]byte, wireCaptureState) {
+	data, state := capture.snapshotPrefix()
+	if state != wireComplete {
+		return nil, state
+	}
+	return data, state
+}
+
+// Partial bodies remain useful to a person inspecting a failed request, but
+// must never be mistaken for complete evidence by the wire validator.
+func (capture *preflightWireCapture) snapshotPrefix() ([]byte, wireCaptureState) {
 	if capture == nil {
 		return nil, wireUnavailable
 	}
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
+	state := wireComplete
 	switch {
 	case capture.tooLarge:
-		return nil, wireTooLarge
+		state = wireTooLarge
 	case capture.readErr:
-		return nil, wireReadError
+		state = wireReadError
 	case !capture.eof:
-		return nil, wireIncomplete
-	default:
-		return append([]byte(nil), capture.data...), wireComplete
+		state = wireIncomplete
 	}
+	return append([]byte(nil), capture.data...), state
 }
 
 type preflightWireBody struct {

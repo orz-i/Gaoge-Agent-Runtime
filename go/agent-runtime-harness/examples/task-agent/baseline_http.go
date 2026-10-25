@@ -16,9 +16,10 @@ const (
 	preflightOther       preflightResponseKind = "other"
 )
 
-// The observer emits only bounded transport and optional wire structure facts.
-// OpenAI probe bytes are captured transiently in memory; no raw body, headers
-// or error text enters the event. It does not initiate requests.
+// The observer captures bounded response bytes for failed-probe diagnostics
+// and optional OpenAI wire structure facts. Bodies are redacted before events
+// are emitted; headers and transport error text are never copied into events.
+// It does not initiate requests or consume additional response bytes.
 type preflightHTTPObserver struct {
 	transport    http.RoundTripper
 	mu           sync.Mutex
@@ -46,14 +47,17 @@ func newPreflightHTTPClient(base *http.Client) (*http.Client, *preflightHTTPObse
 }
 
 func (observer *preflightHTTPObserver) RoundTrip(request *http.Request) (*http.Response, error) {
+	observer.mu.Lock()
+	observer.responseWire = nil
+	observer.mu.Unlock()
 	if observer.captureWire {
 		check := observePreflightWireRequest(request)
 		observer.mu.Lock()
-		observer.requestWire, observer.responseWire = check, nil
+		observer.requestWire = check
 		observer.mu.Unlock()
 	}
 	response, err := observer.transport.RoundTrip(request)
-	if observer.captureWire && response != nil && response.Body != nil {
+	if response != nil && response.Body != nil {
 		capture := &preflightWireCapture{}
 		response.Body = &preflightWireBody{body: response.Body, capture: capture}
 		observer.mu.Lock()
