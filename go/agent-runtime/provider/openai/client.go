@@ -278,6 +278,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var final *responseBody
+	var completedReasoning completedReasoningItems
 	err = providerhttp.Stream(resp, func(event string, data []byte) error {
 		if string(data) == "[DONE]" && final != nil {
 			return nil
@@ -286,11 +287,13 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			return providerhttp.ErrProtocol
 		}
 		var frame struct {
-			Type     string          `json:"type"`
-			Code     string          `json:"code"`
-			Delta    string          `json:"delta"`
-			ItemID   string          `json:"item_id"`
-			Response json.RawMessage `json:"response"`
+			Type        string          `json:"type"`
+			Code        string          `json:"code"`
+			Delta       string          `json:"delta"`
+			ItemID      string          `json:"item_id"`
+			OutputIndex *int            `json:"output_index"`
+			Item        json.RawMessage `json:"item"`
+			Response    json.RawMessage `json:"response"`
 		}
 		if err := json.Unmarshal(data, &frame); err != nil {
 			return providerhttp.ErrProtocol
@@ -309,10 +312,17 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 					EventType: frame.Type, ItemID: frame.ItemID, Kind: "summary", Text: frame.Delta,
 				}})
 			}
+		case "response.output_item.done":
+			if err := completedReasoning.observe(frame.OutputIndex, frame.Item); err != nil {
+				return err
+			}
 		case "response.completed":
 			var result responseBody
 			if final != nil || json.Unmarshal(frame.Response, &result) != nil {
 				return providerhttp.ErrProtocol
+			}
+			if err := completedReasoning.reconcile(&result); err != nil {
+				return err
 			}
 			final = &result
 		case "response.incomplete":
