@@ -31,6 +31,7 @@ type measurementProfile struct {
 	Sampling                     string                `json:"sampling"`
 	SampleTimeoutMs              int64                 `json:"sampleTimeoutMs"`
 	PreflightTimeoutMs           int64                 `json:"preflightTimeoutMs"`
+	PreflightVersion             string                `json:"preflightVersion,omitempty"`
 	MaxLLMCalls                  int                   `json:"maxLLMCalls"`
 	MaxToolCalls                 int                   `json:"maxToolCalls"`
 	ArtifactReadInstructionLimit int                   `json:"artifactReadInstructionLimit"`
@@ -52,7 +53,7 @@ type measurementProfile struct {
 func baselineProfile() measurementProfile {
 	return measurementProfile{
 		Sampling: "sequential-round-robin", SampleTimeoutMs: sampleTimeout.Milliseconds(),
-		PreflightTimeoutMs: modelTimeout.Milliseconds(), MaxLLMCalls: maxModelCalls, MaxToolCalls: maxToolCalls,
+		PreflightTimeoutMs: modelTimeout.Milliseconds(), PreflightVersion: "native-json-schema-v2", MaxLLMCalls: maxModelCalls, MaxToolCalls: maxToolCalls,
 		ModelTimeoutMs: modelTimeout.Milliseconds(), ToolTimeoutMs: toolTimeout.Milliseconds(),
 		MaxAttempts: 1, MaxConcurrency: 1, LeaseDurationMs: leaseDuration.Milliseconds(), ContextPolicy: taskContextPolicy(), ArtifactReadInstructionLimit: artifactReadLimit,
 		OracleVersion: "evidence-draft-recovery-v1", Recovery: "in-process-store-clock-expiry",
@@ -120,6 +121,8 @@ type preflightEvent struct {
 	ResponseDebug *preflightResponseDebug `json:"responseDebug,omitempty"`
 }
 
+const preflightPrompt = "Return a JSON object with exactly one property, ok, set to true. The API output schema is authoritative. Do not add prose or Markdown."
+
 var probeSchema = json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean","enum":[true]}},"required":["ok"],"additionalProperties":false}`)
 
 func baselinePreflight(ctx context.Context, config settings) (event preflightEvent) {
@@ -156,7 +159,7 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 	}
 	response, err := client.Generate(probeCtx, model.Request{
 		RunID: "baseline-preflight", InvocationID: "baseline-preflight", Model: config.routedModel(),
-		Messages:        []model.Message{{Role: model.RoleUser, Content: "Say that this check passed in a plain sentence. The response must still obey the API's output schema."}},
+		Messages:        []model.Message{{Role: model.RoleUser, Content: preflightPrompt}},
 		OutputContract:  &model.OutputContract{Name: "baseline_probe", Schema: probeSchema},
 		MaxOutputTokens: config.outputTokens,
 	})

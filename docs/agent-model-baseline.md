@@ -78,6 +78,8 @@ stdin contract still receive a complete request URL. Existing reports are read
 with their original endpoint unchanged, including earlier runs that posted to
 a gateway's root URL.
 
+The native-schema probe now uses JSON-only instructions matching the supplied schema (`native-json-schema-v2`). The former request for a plain sentence conflicted with the API output constraint. The preflight version is part of the measurement profile and dataset fingerprint; historical reports remain unchanged. A pass still cannot distinguish native enforcement from a model choosing to follow the compatible prompt.
+
 Every run first makes a small native strict-schema probe. An unknown model fails
 before dispatch unless the user explicitly enables the exact-model override.
 A successful probe is an observation of that endpoint/model configuration; it

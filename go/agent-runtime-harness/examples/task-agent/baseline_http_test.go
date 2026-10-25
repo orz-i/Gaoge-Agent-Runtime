@@ -757,7 +757,7 @@ func baselineHTTPAssertStrictProbeRequest(t *testing.T, request *http.Request) {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
-	const prompt = "Say that this check passed in a plain sentence. The response must still obey the API's output schema."
+	prompt := preflightPrompt
 	if json.Unmarshal(payload["input"], &input) != nil || len(input) != 1 || input[0].Role != "user" || input[0].Content != prompt {
 		t.Error("wire diagnostics changed the strict probe instructions")
 	}
