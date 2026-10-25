@@ -350,6 +350,9 @@ def failure_advice(stage, code, preflight):
         return ("请确认该 endpoint/model 的原生严格 JSON Schema 实现及最终回答映射；"
                 "修正协议适配或改用已验证支持的入口后再采样。"
                 "这些事实不能定位网关内部哪一步失效。")
+    if code == "provider_replay_unavailable":
+        return ("OpenAI reasoning 与工具调用续接缺少必需的加密回放证据；检查网关是否转发 include=reasoning.encrypted_content 并保留返回的 encrypted_content。"
+                "不要通过删除 reasoning 或重试工具来绕过该要求。")
     if code in {"capability_unavailable", "provider_unsupported", "output_schema_invalid"}:
         return "核对模型与网关对原生严格 JSON Schema 的支持；未知模型需明确允许探测，任务样本还会验证工具调用。"
     if code in {"timeout", "runner_timeout"}:

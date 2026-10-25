@@ -150,6 +150,8 @@ func failureCode(err error, fallback string) string {
 		return "output_refused"
 	case errors.Is(err, openai.ErrIncomplete), errors.Is(err, anthropic.ErrIncomplete):
 		return "provider_incomplete"
+	case errors.Is(err, openai.ErrReplayUnavailable):
+		return "provider_replay_unavailable"
 	case errors.Is(err, openai.ErrUnsupported), errors.Is(err, anthropic.ErrUnsupported):
 		return "provider_unsupported"
 	case errors.Is(err, agent.ErrToolOutcomeUnknown):

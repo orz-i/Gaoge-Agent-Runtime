@@ -5,6 +5,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Classify missing OpenAI encrypted reasoning replay evidence in the live baseline as `provider_replay_unavailable` before generic `provider_unsupported`, keeping the actual provider fail-closed contract unchanged.
+
 - Align the native strict-schema preflight prompt with its JSON contract and record `native-json-schema-v2` in the measurement profile/dataset fingerprint. Earlier conflicting plain-sentence probe results remain distinct; validation stays strict.
 
 - Show the captured HTTP response body and extracted SDK answer for failed baseline preflights by default, and retain both in JSON/Markdown reports after credential redaction. Mark incomplete and truncated captures, escape terminal controls and Markdown fences, and preserve original validation without another model request or a debug flag.
