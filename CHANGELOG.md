@@ -5,6 +5,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
+- Reject every HTTP redirect in MCP and A2A clients, including same-origin redirects, before another request can forward endpoint-scoped authentication or bypass endpoint validation. Preserve host redirect rejections without mutating the supplied HTTP client. Hosts must configure final protocol URLs directly; see the [breaking upgrade note](docs/releases/unreleased-protocol-redirect-safety.md).
+
 - Freeze optional host-prepared Group Chat selector input before its pending invocation, retaining the exact request across restarts and shared-budget receipt replay. Reject preparer changes to logical authority and strip private prepared input from public views and HTTP diagnostics; selectors without preparation remain unchanged.
 
 - Bound Model, Tool and Hosted Tool concurrency admission by Run deadlines, and release permits on expiry or cancellation before dispatch. Permit waiters can no longer remain blocked beyond their Run deadline or consume another Run's concurrency slot.

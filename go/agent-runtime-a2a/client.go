@@ -774,6 +774,17 @@ func (client *Client) protocolHTTPClient(ctx context.Context, rawEndpoint string
 	headers.Del("A2A-Version")
 	headers.Del("A2A-Extensions")
 	httpClient := *client.transport.client
+	// Headers are authorized for the validated endpoint, not any redirect
+	// destination. Keep host rejections, but never allow a redirected request.
+	hostCheckRedirect := httpClient.CheckRedirect
+	httpClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if hostCheckRedirect != nil {
+			if err := hostCheckRedirect(request, via); err != nil {
+				return err
+			}
+		}
+		return http.ErrUseLastResponse
+	}
 	base := httpClient.Transport
 	if base == nil {
 		base = http.DefaultTransport

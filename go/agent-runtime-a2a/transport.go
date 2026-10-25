@@ -53,6 +53,8 @@ type Transport struct {
 }
 
 // NewTransport refuses implicit network defaults so security/tracing stay host-owned.
+// Protocol clients copy the HTTP client and reject all redirects while preserving
+// host rejections. Hosts must configure final discovery and interface URLs.
 func NewTransport(dependencies TransportDependencies) (*Transport, error) {
 	if dependencies.HTTPClient == nil || dependencies.EndpointValidator == nil {
 		return nil, ErrInvalidTransport
