@@ -384,6 +384,17 @@ func (client *Client) connect(ctx context.Context, rawEndpoint string) (*mcpsdk.
 	headers.Del("MCP-Protocol-Version")
 
 	httpClient := *client.transport.client
+	// Headers are authorized for the validated endpoint, not any redirect
+	// destination. Keep host rejections, but never allow a redirected request.
+	hostCheckRedirect := httpClient.CheckRedirect
+	httpClient.CheckRedirect = func(request *http.Request, via []*http.Request) error {
+		if hostCheckRedirect != nil {
+			if err := hostCheckRedirect(request, via); err != nil {
+				return err
+			}
+		}
+		return http.ErrUseLastResponse
+	}
 	base := httpClient.Transport
 	if base == nil {
 		base = http.DefaultTransport

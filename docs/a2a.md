@@ -74,7 +74,7 @@ host owns:
 
 - stable public target IDs and the active/inactive lifecycle;
 - encrypted credentials and request-scoped header injection;
-- endpoint allowlists, DNS/IP validation, redirect policy and egress controls;
+- final endpoint URLs, endpoint allowlists, DNS/IP validation and egress controls;
 - immutable public Agent Card revisions and optimistic configuration updates;
 - authenticated tenant/subject mapping and a durable `HostedTaskStore`;
 - bounded descriptions exposed to models and the user-facing trust boundary;
@@ -86,8 +86,13 @@ request time without changing a frozen public discovery revision.
 
 ## Security defaults
 
-- Client endpoints are validated before discovery and every request. Redirects
-  are host policy and should remain same-origin unless explicitly approved.
+- Client endpoints are validated before discovery and protocol operations. All
+  HTTP redirects are rejected, including same-origin redirects, so endpoint-scoped
+  credentials cannot be reattached to an unvalidated destination. Host
+  `CheckRedirect` rejections are preserved; a host allow decision cannot enable
+  following a redirect. The supplied HTTP client is not mutated. Configure final
+  discovery/interface URLs directly; see the
+  [breaking upgrade note](releases/unreleased-protocol-redirect-safety.md).
 - Reserved protocol headers cannot be supplied as arbitrary credentials.
 - Production hosting requires HTTPS, an authenticator, a durable task store and
   declared Agent Card security schemes/requirements.

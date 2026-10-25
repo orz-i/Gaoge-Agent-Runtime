@@ -12,6 +12,16 @@
 
 **Reference:** [OpenAI response phase upgrade note](releases/unreleased-openai-response-phases.md). Publish only in a new immutable prerelease.
 
+## 2026-10-24 — MCP/A2A redirects fail closed
+
+**Breaking behavior:** MCP and A2A clients reject all HTTP redirects, including same-origin redirects, regardless of whether the host HTTP client's `CheckRedirect` allows them. The adapters previously reattached endpoint-scoped authentication after a redirect without validating the new endpoint. A host rejection still takes precedence; the supplied HTTP client is copied and remains unchanged.
+
+**Host upgrade:** Configure the final MCP endpoint and A2A discovery/interface URLs directly. Trailing-slash normalization, HTTP-to-HTTPS redirects, and cross-origin gateways must be resolved in trusted host configuration before making a protocol call. There is no opt-out or compatibility redirect path. Hosts continue to own DNS/IP policy, TLS, proxy and egress controls.
+
+**API and persistence:** No exported symbols, Kernel states, database schemas, or persisted records change. Existing in-flight work can fail if its frozen endpoint depends on a redirect; reconcile or restart it with an explicitly authorized final binding instead of silently retargeting that work.
+
+**Reference:** [Protocol redirect safety upgrade note](releases/unreleased-protocol-redirect-safety.md). Publish only in a new immutable prerelease.
+
 ## 2026-10-23 — ModelInvocation retry/claim boundary (ADR 0011)
 
 **Breaking:** A directly resumed Agent Run no longer bypasses the Model retry due time when `RunExecution` is unset. Every retryable Model failure commits a Feature-owned `RetryAfter`; any premature `Resume` returns `ErrModelInvocationBusy` without reissuing a Provider call. The native Store-fenced and direct Agent paths now have the **same** retry admission contract. There is no immediate-retry compatibility branch.
