@@ -5,7 +5,7 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## Unreleased
 
-- Preserve OpenAI Responses stateless encrypted reasoning from the completed SSE `response.output_item.done` when `response.completed` omits that field, but only after an exact output-index/ID/other-fields consistency check. Never use partial added items or synthesize missing reasoning; conflicting evidence fails closed. Document the mandatory drain/quarantine and host TranscriptSource cutover for earlier incompatible phase/replay history, with no schema bump or compatibility shim.
+- Preserve OpenAI Responses stateless encrypted reasoning from the completed SSE `response.output_item.done` when `response.completed` omits that field, but only after an output-index/ID/other-fields consistency check. An optional `status: "completed"` in the done item may be absent from the final response; other mismatches still fail closed. Never use partial added items or synthesize missing reasoning. Document the mandatory drain/quarantine and host TranscriptSource cutover for earlier incompatible phase/replay history, with no schema bump or compatibility shim.
 
 - Document dated, report-scoped real-model endpoint compatibility findings and explicit, low-cost recheck discipline; keep gateway-specific evidence in ignored local artifacts, preserve fail-closed replay, and avoid introducing permanent SDK blacklists or mixing independent governance subjects into one PR.
 

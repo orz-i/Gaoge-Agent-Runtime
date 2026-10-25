@@ -103,8 +103,10 @@ multi-provider router.
   committed transcript. No raw reasoning text is interpreted or exposed.
   During SSE streaming, the adapter uses the encrypted reasoning from a
   completed `response.output_item.done` item if its index, ID and all
-  other fields match `response.completed`; partial `output_item.added`
-  data is never authoritative. A mismatched completed item is a protocol
+  other fields match `response.completed`, except that the terminal response
+  may omit the done item's optional `status: "completed"`.
+  Partial `output_item.added` data is never authoritative. A mismatched item
+  beyond that narrow exception is a protocol
   error. Missing encryption from both completed events fails explicitly as
   `openai.ErrReplayUnavailable`, never by silently dropping reasoning
   or enabling server-side storage.

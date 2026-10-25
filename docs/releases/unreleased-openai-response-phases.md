@@ -144,9 +144,11 @@ In stateless OpenAI Responses streaming, use `encrypted_content` from the
 `response.output_item.added` can contain incomplete content and is never
 trusted. If `response.completed` omits encryption but otherwise agrees
 with the completed item's output index, ID and other JSON fields, the
-adapter preserves the completed encrypted payload. Duplicate, reordered,
-mismatched or oversize items are rejected. Nothing is generated from a
-summary or guessed identifier.
+adapter preserves the completed encrypted payload. The optional reasoning
+`status: "completed"` may appear in `response.output_item.done` and be absent
+from `response.completed`; this omission alone is permitted. Noncompleted or
+conflicting statuses, duplicate, reordered, mismatched or oversize items are
+rejected. Nothing is generated from a summary or guessed identifier.
 
 This cannot make a gateway that omits encryption from **both** completion
 events compatible. The SDK still sends `store:false` and requests

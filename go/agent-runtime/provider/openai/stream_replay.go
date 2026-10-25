@@ -42,9 +42,10 @@ func (items *completedReasoningItems) observe(index *int, raw json.RawMessage) e
 }
 
 // reconcile uses the completed SSE item only to supply encrypted reasoning that
-// the final response omitted. All other fields, identity and output positions
-// must agree exactly after canonical JSON encoding. Mismatches fail closed;
-// in particular no encrypted reasoning is fabricated from summaries.
+// the final response omitted. Other fields, identity and output positions must
+// agree, except that the final response may omit an optional done status
+// of "completed". Mismatches still fail closed; in particular no encrypted
+// reasoning is fabricated from summaries.
 func (items *completedReasoningItems) reconcile(final *responseBody) error {
 	for index, raw := range items.byIndex {
 		if index >= len(final.Output) {
@@ -70,6 +71,19 @@ func (items *completedReasoningItems) reconcile(final *responseBody) error {
 		originalEncryption := done["encrypted_content"]
 		delete(done, "encrypted_content")
 		delete(complete, "encrypted_content")
+		// Reasoning status is optional in Responses. A completed SSE item may
+		// carry status: "completed" while response.completed omits the status.
+		// Accept only that one omission; incomplete/in-progress/null status,
+		// mismatched present values and all other field differences still fail.
+		if rawStatus, present := done["status"]; present {
+			var status string
+			if json.Unmarshal(rawStatus, &status) != nil || status != "completed" {
+				return providerhttp.ErrProtocol
+			}
+			if _, present := complete["status"]; !present {
+				delete(done, "status")
+			}
+		}
 		doneBase, err := json.Marshal(done)
 		if err != nil {
 			return providerhttp.ErrProtocol
