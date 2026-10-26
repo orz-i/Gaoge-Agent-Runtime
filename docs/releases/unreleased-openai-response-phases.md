@@ -67,6 +67,100 @@ path or automatic migration of historical records.
 Apply the normal coordinated prerelease rollout and consumer/recovery gates;
 never replace an already published Beta tag.
 
+## Required persisted-Run cutover gate
+
+This phase projection changed after the previous published Beta. It is **not**
+a SQL schema migration, and a new schema number or compatibility bridge
+would not restore provider phases already lost to normalization. For a
+pre-stable coordinated rollout, the Host must inventory **all nonterminal
+Agent Runs**, not just those whose state contains a recognizable OpenAI
+model ID. A Provider might have been selected by a host default.
+
+1. Pause new admissions and let the **old SDK cohort** drain admitted Runs
+   under its existing execution fencing. Then stop old Agent/Harness workers
+   and continuation consumers; account for all uncertain Model/Tool effects.
+   A query while old writers are still running is **not** a release gate.
+2. In PostgreSQL (the `agent-runtime-postgres` Kernel Store), run a read-only
+   inventory after worker shutdown:
+
+   ```sql
+   BEGIN READ ONLY;
+   SELECT status, COUNT(*) AS active_agent_runs
+   FROM agent_kernel_runs
+   WHERE kind = 'agent'
+     AND status IN ('running', 'waiting_input', 'paused_budget')
+   GROUP BY status ORDER BY status;
+   COMMIT;
+   ```
+
+   For the SQLite Kernel Store, using its actual `runtime_runs` table in a
+   read transaction:
+
+   ```sql
+   BEGIN;
+   SELECT status, COUNT(*) AS active_agent_runs
+   FROM runtime_runs
+   WHERE kind = 'agent'
+     AND status IN ('running', 'waiting_input', 'paused_budget')
+   GROUP BY status ORDER BY status;
+   COMMIT;
+   ```
+
+   Any nonzero count is a **cutover blocker** until the Host proves each
+   affected Run completed under the old cohort before shutdown, or has
+   explicitly isolated the remaining work.
+   These queries only read status; do **not** export StateJSON, encrypted
+   reasoning or customer transcript data into audit logs.
+3. For pending/waiting/budget-paused Runs, reconcile the current Run revision,
+   outstanding ModelInvocation and externally uncertain Tool outcomes. Use the
+   first-party Kernel execution quarantine where supported and where an
+   authenticated Host independently verifies the revision/generation.
+   Never edit Run status through SQL, clear a lease, blindly replay a Tool,
+   or fabricate new Run IDs as an upgrade shortcut. If a Store lacks durable
+   execution quarantine, keep its workers stopped until an explicit
+   authoritative terminal disposition.
+4. Audit the Host's durable `TranscriptSource` separately. A flattened old
+   assistant message without original `phase` or `ProviderReplay` cannot be
+   certified from text. Start a new conversation at an explicitly authorized
+   boundary, or reconcile original provider evidence through the Host.
+   Do not synthesize `commentary`, `final_answer`, signed reasoning or
+   encrypted bytes.
+5. After active work is drained/isolated and transcript continuity is
+   accepted, deploy the coordinated SDK cohort and restart workers.
+   Confirm native JSON Schema and stateless Tool replay against the intended
+   endpoint before enabling charged Agent traffic.
+
+Valid persisted replay is checked against authoritative assistant Content
+and committed Tool identity before network dispatch. Mismatched or malformed
+phase envelopes fail closed even after JSON persistence and reload. Older
+phase-less history cannot prove which phase the model originally emitted:
+use a **cutover gate**, not an implicit wire-format/schema-version bump or
+automatic migration.
+
+## Streaming reasoning completion contract
+
+In stateless OpenAI Responses streaming, use `encrypted_content` from the
+**completed reasoning item** in `response.output_item.done`. The initial
+`response.output_item.added` can contain incomplete content and is never
+trusted. If `response.completed` omits encryption but otherwise agrees
+with the completed item's output index, ID and other JSON fields, the
+adapter preserves the completed encrypted payload. The optional reasoning
+`status: "completed"` may appear in `response.output_item.done` and be absent
+from `response.completed`; this omission alone is permitted. Noncompleted or
+conflicting statuses, duplicate, reordered, mismatched or oversize items are
+rejected. Nothing is generated from a summary or guessed identifier.
+
+This cannot make a gateway that omits encryption from **both** completion
+events compatible. The SDK still sends `store:false` and requests
+`reasoning.encrypted_content` for local Tools; it must abort before Tool
+execution when required evidence is missing. Obtain a new harmless probe
+only after a reported upstream fix, not repeated paid Agent samples.
+
+Official API references:
+
+- [Preserve reasoning without stored responses](https://developers.openai.com/api/docs/guides/reasoning)
+- [Responses conversation state](https://developers.openai.com/api/docs/guides/conversation-state)
+
 ## Baseline diagnostics and evidence boundary
 
 The real-model baseline retains its original native strict-schema probe,

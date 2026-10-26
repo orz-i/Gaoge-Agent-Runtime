@@ -10,6 +10,8 @@
 
 **API and persistence:** No public Go symbols, HTTP fields, SQL migration, or schema-version change. Phased completed text turns can now carry the existing optional `ProviderReplay` envelope. Native streaming deltas remain progress; terminal `Response.Content` is the final-answer contract. Historical benchmark reports remain unchanged and readable.
 
+**Release admission:** Stop old workers and inventory *all* nonterminal Agent Runs in the actual PostgreSQL/SQLite Kernel Store before cutover. Drain or explicitly quarantine affected work and reconcile old Host transcripts separately; lost phases cannot be inferred from normalized text. Read-only queries and the required operator sequence appear in the [phase upgrade note](releases/unreleased-openai-response-phases.md). Do not automatically migrate, rehash or replay effects. Streaming encrypted reasoning is retained from an exact-matching completed `response.output_item.done` item when the terminal response omits it; no partial or invented ciphertext is allowed.
+
 **Reference:** [OpenAI response phase upgrade note](releases/unreleased-openai-response-phases.md). Publish only in a new immutable prerelease.
 
 ## 2026-10-24 — MCP/A2A redirects fail closed

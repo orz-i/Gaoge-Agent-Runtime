@@ -101,8 +101,15 @@ multi-provider router.
   Follow-up requests replay those items before `function_call_output`, and
   validate Tool IDs, names, arguments and visible text against the Agent's
   committed transcript. No raw reasoning text is interpreted or exposed.
-  Missing encrypted content fails explicitly as `openai.ErrReplayUnavailable`,
-  never by silently dropping reasoning or enabling server-side storage.
+  During SSE streaming, the adapter uses the encrypted reasoning from a
+  completed `response.output_item.done` item if its index, ID and all
+  other fields match `response.completed`, except that the terminal response
+  may omit the done item's optional `status: "completed"`.
+  Partial `output_item.added` data is never authoritative. A mismatched item
+  beyond that narrow exception is a protocol
+  error. Missing encryption from both completed events fails explicitly as
+  `openai.ErrReplayUnavailable`, never by silently dropping reasoning
+  or enabling server-side storage.
   Phased assistant messages also retain provider-opaque replay even without a
   local Tool call; the original message order, phase and opaque fields survive
   later requests. Such completed text-only turns replay their message items,
