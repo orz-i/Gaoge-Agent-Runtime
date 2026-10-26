@@ -30,6 +30,21 @@ The original fault-injection cases were run with a Go test overlay outside the r
 
 The corrective boundaries are: only explicit Application start/retry may claim `accepted` work, the executing CAS is after all preflight reads, `running` Application cancellation refuses an unproven physical cancellation, the frozen root capability and typed input hash are committed with Turn admission, old Turns are gated at child/delegation/interaction/control dispatch entrypoints, and terminal feed recovery checks retained events for an existing matching terminal signal.
 
+## Second independent merge-audit correction (local `2938dec`)
+
+The next independent audit found and deterministically reproduced four additional failures:
+
+1. Application completion published `turn.completed` before the Host assistant-output acknowledgement;
+2. Application cancellation published `turn.cancelled` before that acknowledgement;
+3. `ensureTerminalTurnFeed` examined only the first replay page; a 140-event Feed accumulated four `turn.completed` events after repeated `Refresh`;
+4. An Interaction response handler ran its external business callback after a successful Application cancellation.
+
+These are retained as `TestReaudit*` in `reaudit_recovery_test.go`; success asserts absence of premature terminal events and safe cancellation arbitration. Repair uses the existing Host Output Item/ACK protocol, a complete cursor-paged retained Feed scan guarded by a shared local mutex, and the existing Invocation revision CAS to claim response handler dispatch.
+
+The same cancellation/handler race was additionally reproduced for a direct Agent root. `TestGenericInteractionCancellationDoesNotFollowCommittedResponse` and `TestInteractionDispatchClaimSurvivesConcurrentRefresh` lock down its resolution: a waiting Interaction's cancellation must win the same Invocation CAS or fail, and an outstanding resolved handler claim must not be overwritten by a concurrent Kernel Refresh or continuation. A follow-up adversarial test also reproduced two concurrent physical business callbacks for the same resolved Interaction when the first caller held a `running` dispatch claim. The fix disallows all duplicate callbacks while the claim remains outstanding: an uncertain Host error blocks with `ErrInteractionOutcomeUnknown`, whereas only a host-certified `ErrInteractionNoEffect` releases it through CAS. The successful callback's in-process execution witness permits its own Runtime projection to finish without confusing another consumer's read-only `Refresh` for a receipt. Host business reconciliation still keys on `Interaction.ID`; the SDK cannot guarantee exactly-once physical execution across arbitrary failures.
+
+Additional tests cover concurrent `Refresh` terminal deduplication, lost terminal Feed publication after committed Host ACK, and Memory/GORM SQL Invocation CAS exclusivity (both winning orderings). No new Kernel state, job queue, parallel effect ledger or SQL schema version was added.
+
 ## Four stages
 
 1. **External effect safety.** `ApplicationCapabilityExecutor` cannot be re-entered on `running` Invocation. The durable CAS is recorded before execution; ambiguous error or commit loss returns `ErrApplicationOutcomeUnknown`. Optional `ApplicationCapabilityReconciler` observes the same frozen Invocation and does not dispatch side effects. Explicit `ErrApplicationNoEffect` is allowed only when the host proves no effect occurred.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
@@ -57,7 +58,12 @@ type turnFeedEnvelope struct {
 
 // TurnFeed reuses the Runtime replay transport while replacing root Run
 // identity with the stable Harness Turn identity and semantic Item events.
-type TurnFeed struct{ feed *runfeed.Feed }
+type TurnFeed struct {
+	feed *runfeed.Feed
+	// Serialize best-effort terminal replay checks and publication for all
+	// Runners sharing this Feed; cross-process delivery remains at-least-once.
+	terminalMu sync.Mutex
+}
 
 func NewTurnFeed(feed *runfeed.Feed) (*TurnFeed, error) {
 	if feed == nil {
@@ -88,6 +94,47 @@ func (feed *TurnFeed) Publish(ctx context.Context, turnID string, draft TurnEven
 		return TurnEvent{}, err
 	}
 	return turnEventFromRunFeed(event)
+}
+
+// publishTerminalOnce deduplicates a terminal event across the *entire*
+// retained Feed, not just its first bounded replay page. It serializes local
+// publishers without introducing another persisted execution state machine.
+// Across processes the Feed remains at-least-once; consumers deduplicate.
+func (feed *TurnFeed) publishTerminalOnce(ctx context.Context, turn Turn) error {
+	if feed == nil || feed.feed == nil || !terminalTurnStatus(turn.Status) || strings.TrimSpace(turn.ID) == "" {
+		return ErrInvalidRequest
+	}
+	feed.terminalMu.Lock()
+	defer feed.terminalMu.Unlock()
+	var after int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		page, err := feed.Replay(ctx, turn.ID, after)
+		if err != nil {
+			// On an expired cursor we cannot prove whether the terminal
+			// event is still present. Do not fabricate a duplicate.
+			return err
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, event := range page {
+			if event.Seq <= after {
+				return ErrConflict
+			}
+			after = event.Seq
+			if event.Terminal && event.Type == turnEventTypeForStatus(turn.Status) {
+				return nil
+			}
+		}
+	}
+	_, err := feed.Publish(ctx, turn.ID, TurnEventDraft{
+		Type: turnEventTypeForStatus(turn.Status), Status: string(turn.Status),
+		Message: turn.ErrorDetail, Terminal: true,
+	})
+	return err
 }
 
 func (feed *TurnFeed) Replay(ctx context.Context, turnID string, afterSeq int64) ([]TurnEvent, error) {

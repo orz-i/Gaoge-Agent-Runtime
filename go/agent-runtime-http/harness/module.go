@@ -623,6 +623,9 @@ func writeHarnessError(context *gin.Context, err error) {
 	case errors.Is(err, harness.ErrApplicationOutcomeUnknown):
 		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.application_outcome_unknown",
 			"Application capability outcome requires external reconciliation before retry")
+	case errors.Is(err, harness.ErrInteractionOutcomeUnknown):
+		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.interaction_outcome_unknown",
+			"Interaction business response outcome requires host reconciliation before retry")
 	case errors.Is(err, harness.ErrConflict):
 		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.conflict", "Harness Turn state conflicts")
 	default:

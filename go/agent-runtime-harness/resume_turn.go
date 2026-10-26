@@ -35,6 +35,15 @@ func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, 
 	if terminalTurnStatus(turn.Status) {
 		return runner.Refresh(ctx, turn.ID)
 	}
+	if turn.Status == TurnWaitingInput {
+		pending, pendingErr := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+		if pendingErr != nil {
+			return Snapshot{}, pendingErr
+		}
+		if pending {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+	}
 	session, err := runner.store.GetSession(ctx, turn.SessionID)
 	if err != nil {
 		return runner.resumeTurnError(ctx, turn, nil, err)

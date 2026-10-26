@@ -11,6 +11,18 @@ import (
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 )
 
+func TestInteractionUnknownOutcomeReturnsSafeConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	writeHarnessError(ctx, errors.Join(harness.ErrInteractionOutcomeUnknown, errors.New("PRIVATE BUSINESS RESULT")))
+	if recorder.Code != http.StatusConflict ||
+		!strings.Contains(recorder.Body.String(), "harness.interaction_outcome_unknown") ||
+		strings.Contains(recorder.Body.String(), "PRIVATE BUSINESS RESULT") {
+		t.Fatalf("error projection=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestApplicationUnknownOutcomeReturnsSafeConflict(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

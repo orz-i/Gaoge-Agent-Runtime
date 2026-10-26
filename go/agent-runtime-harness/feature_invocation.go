@@ -455,6 +455,16 @@ func (runner *Runner) replayTopLevelFeatureStart(
 		snapshot, err := runner.Refresh(ctx, prepared.turn.ID)
 		return snapshot, true, err
 	}
+	if prepared.turn.Status == TurnWaitingInput {
+		pending, err := runner.resolvedInteractionClaimPending(ctx, prepared.turn.ID, "")
+		if err != nil {
+			return Snapshot{}, true, err
+		}
+		if pending {
+			snapshot, loadErr := runner.loadSnapshot(ctx, prepared.turn, nil)
+			return snapshot, true, loadErr
+		}
+	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, prepared.invocation.ExecutionRefID)
 	if err == nil {
 		if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
@@ -636,6 +646,15 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if turn.Status == TurnWaitingInput {
+		pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if pending {
+			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+		}
+	}
 	return runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
 }
 
@@ -655,6 +674,15 @@ func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string)
 	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if turn.Status == TurnWaitingInput {
+		pending, pendingErr := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+		if pendingErr != nil {
+			return Snapshot{}, pendingErr
+		}
+		if pending {
+			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+		}
 	}
 	if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
 		return runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
@@ -932,6 +960,9 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
+	}
+	if err = runner.fenceInteractionCancellation(ctx, turn, invocation.ID); err != nil {
+		return Snapshot{}, err
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
 	if err != nil {

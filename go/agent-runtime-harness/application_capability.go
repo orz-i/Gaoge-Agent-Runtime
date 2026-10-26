@@ -296,12 +296,12 @@ func (runner *Runner) completeApplicationInvocation(
 		return Snapshot{}, err
 	}
 	if strings.TrimSpace(updated.ParentItemID) == "" {
-		completedTurn, changed, turnErr := runner.reconcileTurnStatus(ctx, turn.ID, TurnCompleted)
+		completedTurn, _, turnErr := runner.reconcileTurnStatus(ctx, turn.ID, TurnCompleted)
 		if turnErr != nil {
 			return Snapshot{}, turnErr
 		}
-		if changed {
-			runner.publishTurnStatus(ctx, completedTurn, EventTurnCompleted, true)
+		if err = runner.finalizeApplicationTerminalProjection(ctx, completedTurn, updated); err != nil {
+			return Snapshot{}, err
 		}
 		return runner.loadSnapshot(ctx, completedTurn, nil)
 	}
@@ -374,6 +374,15 @@ func (runner *Runner) resumeApplicationParentAgent(ctx context.Context, updatedT
 }
 
 func (runner *Runner) refreshApplicationInvocation(ctx context.Context, invocation Invocation, turn Turn) (Snapshot, error) {
+	if turn.Status == TurnWaitingInput {
+		pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, invocation.ID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if pending {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+	}
 	// Refresh is an observation/reconciliation boundary, not admission to
 	// dispatch an Accepted external effect. Running effects may be verified
 	// through the read-only reconciliation port only.
@@ -410,16 +419,37 @@ func (runner *Runner) repairApplicationProjection(ctx context.Context, turn Turn
 		if terminalTurnStatus(turn.Status) {
 			return Snapshot{}, ErrConflict
 		}
-		updated, changed, err := runner.reconcileTurnStatus(ctx, turn.ID, desired)
+		updated, _, err := runner.reconcileTurnStatus(ctx, turn.ID, desired)
 		if err != nil {
 			return Snapshot{}, err
 		}
 		turn = updated
-		if changed {
-			runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
-		}
+	}
+	if err := runner.finalizeApplicationTerminalProjection(ctx, turn, invocation); err != nil {
+		return Snapshot{}, err
 	}
 	return runner.loadSnapshot(ctx, turn, nil)
+}
+
+// Application has no Kernel Run, but shares the same host-owned Assistant
+// Message acknowledgement and terminal feed protocol as Agent/Team/Workflow.
+// A committed terminal Invocation does not authorize emitting a terminal
+// event while the host output Item is still unacknowledged.
+func (runner *Runner) finalizeApplicationTerminalProjection(ctx context.Context, turn Turn, invocation Invocation) error {
+	if !terminalTurnStatus(turn.Status) || strings.TrimSpace(invocation.ParentItemID) != "" {
+		return nil
+	}
+	pending, _, err := hostOutputProjectionState(ctx, runner.store, turn)
+	if err != nil || pending {
+		return err
+	}
+	if err = runner.recordTerminalAgentMessageItem(ctx, turn, kernel.Snapshot{
+		Run: kernel.Run{ID: invocation.ExecutionRefID},
+	}); err != nil {
+		return err
+	}
+	runner.ensureTerminalTurnFeed(ctx, turn)
+	return nil
 }
 
 func (runner *Runner) cancelApplicationInvocation(
@@ -452,12 +482,12 @@ func (runner *Runner) cancelApplicationInvocation(
 		return Snapshot{}, err
 	}
 	if strings.TrimSpace(updated.ParentItemID) == "" {
-		cancelledTurn, changed, turnErr := runner.reconcileTurnStatus(ctx, turn.ID, TurnCancelled)
+		cancelledTurn, _, turnErr := runner.reconcileTurnStatus(ctx, turn.ID, TurnCancelled)
 		if turnErr != nil {
 			return Snapshot{}, turnErr
 		}
-		if changed {
-			runner.publishTurnStatus(ctx, cancelledTurn, EventTurnCancelled, true)
+		if err = runner.finalizeApplicationTerminalProjection(ctx, cancelledTurn, updated); err != nil {
+			return Snapshot{}, err
 		}
 		return runner.loadSnapshot(ctx, cancelledTurn, nil)
 	}

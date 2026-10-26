@@ -813,6 +813,17 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 	if err = runner.repairStartItems(ctx, turn, invocation); err != nil {
 		return Snapshot{}, err
 	}
+	if turn.Status == TurnWaitingInput {
+		pending, pendingErr := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+		if pendingErr != nil {
+			return Snapshot{}, pendingErr
+		}
+		if pending {
+			// Do not let a concurrent Kernel snapshot overwrite the durable
+			// business-callback claim before the host effect finishes.
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+	}
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.refreshApplicationInvocation(ctx, invocation, turn)
 	}
@@ -870,6 +881,9 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		// Revoke the shared ledger only after an authoritative Application
 		// cancellation, never when its external effect is still uncertain.
 		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
+	}
+	if err = runner.fenceInteractionCancellation(ctx, turn, ""); err != nil {
+		return Snapshot{}, err
 	}
 	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
 		return Snapshot{}, err
@@ -961,6 +975,20 @@ func (runner *Runner) syncRuntimeSnapshot(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
+	// A callback claim may win its Invocation CAS after Refresh observes
+	// the Interaction but before the Runtime projection attempts its CAS.
+	// Recheck on *every* synchronization/retry, not only at the Refresh
+	// entrypoint, so a stale Kernel Run cannot reopen the Turn during a
+	// physical host business effect.
+	if turn.Status == TurnWaitingInput && !interactionCallbackConfirmed(ctx, turn.ID, invocation.ID) {
+		pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if pending {
+			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+		}
+	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {
 		return Snapshot{}, err
@@ -976,7 +1004,7 @@ func (runner *Runner) syncRuntimeSnapshot(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	turn, turnChanged, err := runner.syncTurnProjection(ctx, turn, runtimeSnapshot, status)
+	turn, _, err = runner.syncTurnProjection(ctx, turn, runtimeSnapshot, status)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -991,7 +1019,7 @@ func (runner *Runner) syncRuntimeSnapshot(
 		return Snapshot{}, err
 	}
 	if err = runner.finalizeTerminalRuntimeProjection(
-		ctx, turn, runtimeSnapshot, turnChanged, deferTerminalProjection,
+		ctx, turn, runtimeSnapshot, deferTerminalProjection,
 	); err != nil {
 		return Snapshot{}, err
 	}
@@ -1072,7 +1100,6 @@ func (runner *Runner) finalizeTerminalRuntimeProjection(
 	ctx context.Context,
 	turn Turn,
 	runtimeSnapshot kernel.Snapshot,
-	turnChanged bool,
 	deferHostProjection bool,
 ) error {
 	if !terminalTurnStatus(turn.Status) {
@@ -1091,34 +1118,19 @@ func (runner *Runner) finalizeTerminalRuntimeProjection(
 		return err
 	}
 	if !deferHostProjection {
-		runner.ensureTerminalTurnFeed(ctx, turn, turnChanged)
+		runner.ensureTerminalTurnFeed(ctx, turn)
 	}
 	return nil
 }
 
-// A terminal Run and its durable Items may commit before publishing the
-// ephemeral TurnFeed event. Replaying the exact terminal status on Refresh is
-// safe once the host-output acknowledgement gate has passed. Keep the original
-// first-commit fast path; on recovery inspect existing retained events before
-// publishing so repeated Refresh calls do not produce a terminal storm.
-// TurnFeed is observational, not a transactional outbox or execution grant.
-func (runner *Runner) ensureTerminalTurnFeed(ctx context.Context, turn Turn, firstCommit bool) {
+// Terminal Feed publication is best-effort; the Run/Turn and Item facts stay
+// authoritative. The shared Feed checks all retained pages under one local
+// publication lock. Host-output ACK must be checked by the caller first.
+func (runner *Runner) ensureTerminalTurnFeed(ctx context.Context, turn Turn) {
 	if runner == nil || runner.turnFeed == nil || !terminalTurnStatus(turn.Status) {
 		return
 	}
-	eventType := turnEventTypeForStatus(turn.Status)
-	if !firstCommit {
-		events, err := runner.turnFeed.Replay(ctx, turn.ID, 0)
-		if err != nil {
-			return // Leave unavailable feed delivery to its own retention/reconnect contract.
-		}
-		for _, event := range events {
-			if event.Terminal && event.Type == eventType {
-				return
-			}
-		}
-	}
-	runner.publishTurnStatus(ctx, turn, eventType, true)
+	_ = runner.turnFeed.publishTerminalOnce(ctx, turn)
 }
 
 func (runner *Runner) terminalRuntimeSnapshot(ctx context.Context, turn Turn) (kernel.Snapshot, error) {
@@ -1164,6 +1176,9 @@ func (runner *Runner) FinalizeHostOutput(ctx context.Context, turnID string) (Sn
 		return Snapshot{}, err
 	}
 	if finalized {
+		// The Host ACK Item can commit just before Feed publication fails.
+		// Repeated finalization must repair only the missing notification.
+		runner.ensureTerminalTurnFeed(ctx, turn)
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
 	if !pending {
@@ -1176,7 +1191,7 @@ func (runner *Runner) FinalizeHostOutput(ctx context.Context, turnID string) (Sn
 	if err = runner.recordTerminalAgentMessageItem(ctx, turn, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
-	runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
+	runner.ensureTerminalTurnFeed(ctx, turn)
 	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 }
 
@@ -1340,7 +1355,7 @@ func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Tu
 		if err = runner.recordTerminalAgentMessageItem(ctx, updated, kernel.Snapshot{Run: kernel.Run{ID: invocation.ExecutionRefID}}); err != nil {
 			return Snapshot{}, err
 		}
-		runner.publishTurnStatus(ctx, updated, EventTurnFailed, true)
+		runner.ensureTerminalTurnFeed(ctx, updated)
 	}
 	return runner.loadSnapshot(ctx, updated, nil)
 }

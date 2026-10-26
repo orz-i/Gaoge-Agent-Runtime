@@ -97,9 +97,25 @@ type InteractionResponseResult struct {
 	OutputRefs []HostRef
 }
 
+// This unexported execution-scope witness exists only after the host business
+// callback returned successfully. It lets the same call finish its Runtime
+// continuation while unrelated Refresh/Resume callers remain fail-closed.
+// It is never persisted or reconstructed from an ambiguous external result.
+type completedInteractionCallbackKey struct{}
+type completedInteractionCallback struct {
+	turnID       string
+	invocationID string
+}
+
+func interactionCallbackConfirmed(ctx context.Context, turnID, invocationID string) bool {
+	value, ok := ctx.Value(completedInteractionCallbackKey{}).(completedInteractionCallback)
+	return ok && value.turnID == turnID && value.invocationID == invocationID
+}
+
 // InteractionResponseHandler persists the application-owned meaning of one
 // resolved generic response. Implementations must be idempotent by Interaction
-// identity and response because crash recovery can invoke the handler again.
+// identity and response. An ambiguous outcome remains blocked until the host
+// reconciles it; an error alone never proves a side effect did not occur.
 type InteractionResponseHandler interface {
 	HandleInteractionResponse(context.Context, InteractionResponseContext) (InteractionResponseResult, error)
 }
@@ -141,6 +157,16 @@ type WorkflowWaitInteractionProjector interface {
 // ErrInteractionResponseHandlerUnavailable reports missing static application
 // composition for a response that has already been durably accepted.
 var ErrInteractionResponseHandlerUnavailable = errors.New("harness interaction response handler unavailable")
+
+// ErrInteractionOutcomeUnknown prevents a second physical dispatch of a
+// previously claimed Interaction business response. The host must reconcile
+// the outcome using the stable Interaction ID and its own durable business data.
+var ErrInteractionOutcomeUnknown = errors.New("harness interaction business outcome is unknown")
+
+// ErrInteractionNoEffect may be wrapped by the host response handler ONLY when
+// it can prove that absolutely no external effect was dispatched. This permits
+// a new explicit resolution attempt under the same frozen Interaction identity.
+var ErrInteractionNoEffect = errors.New("harness interaction response definitively performed no effect")
 
 // InteractionResolution is the atomically persisted response plus the still
 // waiting owners that may only resume after application handling succeeds.
@@ -330,12 +356,55 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if invocation.Status == InvocationRunning {
+		// Running is the durable dispatch claim, NOT permission to re-enter
+		// the host callback. A second caller, including another process or a
+		// crash recovery attempt, must fail closed on an unknown outcome.
+		return Snapshot{}, ErrInteractionOutcomeUnknown
+	}
+	if invocation.Status != InvocationWaitingInput {
+		return Snapshot{}, ErrConflict
+	}
+	// This CAS grants the host business handler's effect across all
+	// owning execution classes. Cancellation must compete for the same
+	// Invocation revision while the Turn is waiting for input.
+	claimed := invocation
+	claimed.Status = InvocationRunning
+	claimed.UpdatedAt = runner.clock.Now().UTC()
+	invocation, err = runner.store.UpdateInvocation(ctx, claimed, invocation.Revision)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
+		return Snapshot{}, err
+	}
 	result, err := runner.interactions.HandleInteractionResponse(ctx, InteractionResponseContext{
 		Interaction: cloneInteraction(interaction), Invocation: cloneInvocation(invocation), Session: session,
 	})
 	if err != nil {
-		return Snapshot{}, err
+		if errors.Is(err, ErrInteractionNoEffect) {
+			// Only a proven non-dispatch can safely release the durable
+			// claim. Generic callback errors leave it running/unknown.
+			noEffect := invocation
+			noEffect.Status = InvocationWaitingInput
+			noEffect.UpdatedAt = runner.clock.Now().UTC()
+			reset, resetErr := runner.store.UpdateInvocation(ctx, noEffect, invocation.Revision)
+			if resetErr != nil {
+				return Snapshot{}, errors.Join(err, resetErr)
+			}
+			if itemErr := runner.recordInvocationItem(ctx, reset); itemErr != nil {
+				return Snapshot{}, errors.Join(err, itemErr)
+			}
+			return Snapshot{}, err
+		}
+		return Snapshot{}, errors.Join(ErrInteractionOutcomeUnknown, err)
 	}
+	// Only this call stack has firsthand evidence that the business callback
+	// returned successfully. Ordinary Refresh/Resume must not infer this from
+	// a Running Invocation after an unknown/crashed physical dispatch.
+	ctx = context.WithValue(ctx, completedInteractionCallbackKey{}, completedInteractionCallback{
+		turnID: turn.ID, invocationID: invocation.ID,
+	})
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.finishResolvedApplicationInteraction(ctx, turn, invocation, result)
 	}
@@ -412,6 +481,76 @@ func interactionOwnerCanResume(turnStatus TurnStatus, invocationStatus Invocatio
 
 func interactionOwnersRunning(turn Turn, invocation Invocation) bool {
 	return turn.Status == TurnRunning && invocation.Status == InvocationRunning
+}
+
+// fenceInteractionCancellation competes with an accepted Interaction
+// response for the same durable Invocation revision. For a waiting owner,
+// cancellation wins by marking the Invocation cancelled before attempting
+// Kernel cancellation, so no later business callback can obtain a Running
+// dispatch claim. An already-running resolved response is an uncertain
+// external outcome: never report cancellation succeeded while it may execute.
+// A root cancellation fences every waiting Interaction owner in the Turn.
+// resolvedInteractionClaimPending reports an in-flight host business callback.
+// Kernel Run snapshots cannot project a waiting Turn to running while this
+// independent, persisted Harness effect boundary remains unresolved.
+func (runner *Runner) resolvedInteractionClaimPending(ctx context.Context, turnID string, invocationID string) (bool, error) {
+	interactions, err := runner.store.ListInteractions(ctx, turnID)
+	if err != nil {
+		return false, err
+	}
+	for _, interaction := range interactions {
+		if interaction.Status != InteractionResolved || (invocationID != "" && interaction.InvocationID != invocationID) {
+			continue
+		}
+		owner, loadErr := runner.store.GetInvocation(ctx, interaction.InvocationID)
+		if loadErr != nil {
+			return false, loadErr
+		}
+		if owner.TurnID != turnID {
+			return false, ErrConflict
+		}
+		if owner.Status == InvocationRunning {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (runner *Runner) fenceInteractionCancellation(ctx context.Context, turn Turn, invocationID string) error {
+	if turn.Status != TurnWaitingInput {
+		return nil
+	}
+	interactions, err := runner.store.ListInteractions(ctx, turn.ID)
+	if err != nil {
+		return err
+	}
+	for _, interaction := range interactions {
+		if invocationID != "" && interaction.InvocationID != invocationID {
+			continue
+		}
+		if interaction.Status != InteractionWaiting && interaction.Status != InteractionResolved {
+			continue
+		}
+		owner, loadErr := runner.store.GetInvocation(ctx, interaction.InvocationID)
+		if loadErr != nil {
+			return loadErr
+		}
+		switch owner.Status {
+		case InvocationRunning:
+			if interaction.Status == InteractionResolved {
+				return ErrConflict
+			}
+		case InvocationWaitingInput:
+			owner.Status = InvocationCancelled
+			owner.UpdatedAt = runner.clock.Now().UTC()
+			if _, updateErr := runner.store.UpdateInvocation(ctx, owner, owner.Revision); updateErr != nil {
+				return updateErr
+			}
+		case InvocationAccepted, InvocationPausedBudget, InvocationCompleted, InvocationFailed, InvocationCancelled:
+			// These do not carry a dispatched response-handler claim.
+		}
+	}
+	return nil
 }
 
 func (runner *Runner) resumeResolvedInteractionOwner(
