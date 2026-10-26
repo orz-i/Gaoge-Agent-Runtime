@@ -33,7 +33,7 @@ func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, 
 		return runner.resumeTurnError(ctx, turn, nil, ErrInvalidRequest)
 	}
 	if terminalTurnStatus(turn.Status) {
-		return runner.loadSnapshot(ctx, turn, nil)
+		return runner.Refresh(ctx, turn.ID)
 	}
 	session, err := runner.store.GetSession(ctx, turn.SessionID)
 	if err != nil {
@@ -53,10 +53,16 @@ func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, 
 	if err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
 	}
+	if err = runner.repairStartItems(ctx, turn, invocation); err != nil {
+		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
+	}
 	// Approval or allowance control may already be committed while the Turn
 	// projection is stale. The Run and unresolved interactions own this gate.
 	if status != TurnRunning {
 		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
 	}
 	runCtx, err := runner.restoreInvocationContext(ctx, turn, invocation)
 	if err != nil {

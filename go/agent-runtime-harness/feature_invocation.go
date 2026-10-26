@@ -324,6 +324,9 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 		return topLevelFeatureStart{}, err
 	}
 	if !envelope.created {
+		if err := runner.repairStartItems(ctx, envelope.turn, invocation); err != nil {
+			return topLevelFeatureStart{}, err
+		}
 		turn, runCtx, contextErr := runner.restoreOrBuildContext(
 			ctx, envelope.turn, envelope.request.Context, envelope.config,
 		)
@@ -351,6 +354,10 @@ func (runner *Runner) prepareTopLevelFeatureEnvelope(
 	}
 	now := runner.clock.Now().UTC()
 	resolvedConfig, err := runner.resolveConfigExecutionPolicy(request.Config)
+	if err != nil {
+		return topLevelFeatureEnvelope{}, err
+	}
+	request, err = sealStartAdmission(request, &resolvedConfig)
 	if err != nil {
 		return topLevelFeatureEnvelope{}, err
 	}
@@ -424,7 +431,7 @@ func (runner *Runner) replayTopLevelFeatureStart(
 	prepared topLevelFeatureStart,
 ) (Snapshot, bool, error) {
 	if terminalTurnStatus(prepared.turn.Status) || terminalInvocationStatus(prepared.invocation.Status) {
-		snapshot, err := runner.loadSnapshot(ctx, prepared.turn, nil)
+		snapshot, err := runner.Refresh(ctx, prepared.turn.ID)
 		return snapshot, true, err
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, prepared.invocation.ExecutionRefID)
@@ -623,6 +630,9 @@ func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string)
 	if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
 		return runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
 	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return Snapshot{}, err
+	}
 	resumed, resumeErr := runner.resumeFeature(ctx, invocation, runtimeSnapshot.Run.Revision)
 	if resumed.Run.ID == "" {
 		return Snapshot{}, resumeErr
@@ -645,6 +655,9 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
 	if err != nil || (strings.TrimSpace(invocation.ParentItemID) != "" && terminalTurnStatus(turn.Status)) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return Snapshot{}, err
 	}
 	if invocation.Attempt > 1 && !retryableInvocationStatus(invocation.Status) {
 		return runner.replayRetriedInvocation(ctx, turn, invocation)
@@ -1147,6 +1160,13 @@ func (runner *Runner) resumeInvocationExecution(
 	invocation Invocation,
 	expectedRevision uint64,
 ) (kernel.Snapshot, error) {
+	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	if invocation.ExecutionClass == ExecutionAgent {
 		resumer, ok := runner.agent.(agentResumer)
 		if !ok {

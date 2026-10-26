@@ -138,7 +138,7 @@ func (runner *Runner) replayDirectAgentStart(
 	invocation Invocation,
 ) (Snapshot, bool, error) {
 	if terminalTurnStatus(turn.Status) || terminalInvocationStatus(invocation.Status) {
-		snapshot, err := runner.loadSnapshot(ctx, turn, nil)
+		snapshot, err := runner.Refresh(ctx, turn.ID)
 		return snapshot, true, err
 	}
 	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
@@ -225,6 +225,9 @@ func (runner *Runner) ResolveApproval(
 	}
 	decision, err := pluginApprovalDecision(request.Decision)
 	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
 	runCtx, err := runner.restoreInvocationContext(ctx, turn, invocation)
@@ -638,6 +641,10 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	if err != nil {
 		return Snapshot{}, err
 	}
+	request, err = sealStartAdmission(request, &resolvedConfig)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
 	if err != nil {
 		return Snapshot{}, err
@@ -664,6 +671,9 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		return Snapshot{}, err
 	}
 	if !created {
+		if err := runner.repairStartItems(ctx, createdTurn, invocation); err != nil {
+			return Snapshot{}, err
+		}
 		return runner.resumeDirectAgentStart(ctx, createdTurn, invocation, request, config)
 	}
 	if err = runner.recordHostMessageItems(ctx, createdTurn, request.InputMessage, request.OutputMessage); err != nil {
@@ -790,19 +800,42 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
-	if terminalTurnStatus(turn.Status) {
-		return runner.loadSnapshot(ctx, turn, nil)
-	}
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
+		if terminalTurnStatus(turn.Status) {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
 		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if err = runner.repairStartItems(ctx, turn, invocation); err != nil {
+		return Snapshot{}, err
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.refreshApplicationInvocation(ctx, invocation, turn)
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+	if errors.Is(err, kernel.ErrNotFound) && terminalTurnStatus(turn.Status) && missingRuntimeSnapshotAllowed(turn, invocation) {
+		// A failed/cancelled admission can be terminal without ever creating
+		// a Kernel Run. Restore the final host message fact when safe, but do
+		// not create a synthetic execution or bypass host-output ACK.
+		pending, _, projectionErr := hostOutputProjectionState(ctx, runner.store, turn)
+		if projectionErr != nil {
+			return Snapshot{}, projectionErr
+		}
+		if !pending {
+			if projectionErr = runner.recordTerminalAgentMessageItem(ctx, turn, kernel.Snapshot{
+				Run: kernel.Run{ID: invocation.ExecutionRefID},
+			}); projectionErr != nil {
+				return Snapshot{}, projectionErr
+			}
+		}
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if terminalTurnStatus(turn.Status) && !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		return Snapshot{}, ErrConflict
 	}
 	// Refresh races naturally with Runtime continuation callbacks: a Team member,
 	// Plan step, or Workflow effect can advance the same root between the initial
@@ -870,9 +903,6 @@ func (runner *Runner) syncRuntimeSnapshotWithRetry(
 		if err != nil {
 			return Snapshot{}, err
 		}
-		if terminalTurnStatus(turn.Status) {
-			return runner.loadSnapshot(ctx, turn, nil)
-		}
 		invocation, err = runner.store.GetInvocation(ctx, invocation.ID)
 		if err != nil {
 			return Snapshot{}, err
@@ -926,7 +956,11 @@ func (runner *Runner) syncRuntimeSnapshot(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) {
+	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) ||
+		(terminalTurnStatus(turn.Status) && turn.Status != status) ||
+		(terminalInvocationStatus(invocation.Status) && invocation.Status != invocationStatusFromTurn(status)) {
+		// A lagging projection may be repaired, but a committed terminal
+		// outcome is never rewritten into another outcome or back to running.
 		return Snapshot{}, ErrConflict
 	}
 	invocation, err = runner.syncInvocationProjection(ctx, invocation, runtimeSnapshot, status)
@@ -1308,6 +1342,23 @@ func normalizeOptionalHostRef(value **HostRef) error {
 	}
 	*value = &normalized
 	return nil
+}
+
+// repairStartItems reconstructs committed, deterministic presentation facts
+// from the frozen Config and current Invocation. It never dispatches a Model,
+// Tool, or host capability. This is safe after any partial Item append.
+func (runner *Runner) repairStartItems(ctx context.Context, turn Turn, invocation Invocation) error {
+	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	if err != nil {
+		return err
+	}
+	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
+		return err
+	}
+	if err = runner.recordHostMessageItems(ctx, turn, config.InputMessage, config.OutputMessage); err != nil {
+		return err
+	}
+	return runner.recordContextItem(ctx, turn)
 }
 
 func (runner *Runner) recordHostMessageItems(

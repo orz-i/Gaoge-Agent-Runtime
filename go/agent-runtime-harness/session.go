@@ -14,6 +14,12 @@ var (
 	ErrInvalidRequest = errors.New("invalid harness request")
 	ErrNotFound       = errors.New("harness entity not found")
 	ErrConflict       = errors.New("harness state conflict")
+	// An Application capability may already have performed an external effect.
+	// Its original invocation must be reconciled, never blindly dispatched again.
+	ErrApplicationOutcomeUnknown = errors.New("application capability outcome is unknown")
+	// Hosts may wrap this sentinel only when they can prove no external effect
+	// was dispatched; it permits an explicit failed Invocation and later retry.
+	ErrApplicationNoEffect = errors.New("application capability definitively performed no effect")
 )
 
 const (

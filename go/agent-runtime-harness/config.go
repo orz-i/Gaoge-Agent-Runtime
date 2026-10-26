@@ -137,6 +137,11 @@ type ConfigSnapshot struct {
 	Roles                 []RoleSnapshot           `json:"roles,omitempty"`
 	ContentHash           string                   `json:"contentHash"`
 	CreatedAt             time.Time                `json:"createdAt"`
+	// AdmissionHash binds the immutable start request (including Context and
+	// execution allowances) to the Config ID before any Turn is persisted.
+	AdmissionHash string   `json:"admissionHash,omitempty"`
+	InputMessage  *HostRef `json:"inputMessage,omitempty"`
+	OutputMessage *HostRef `json:"outputMessage,omitempty"`
 }
 
 type configPayload struct {
@@ -157,6 +162,9 @@ type configPayload struct {
 	SharedBudget          *budget.Limits           `json:"sharedBudget,omitempty"`
 	DelegationPolicy      DelegationPolicySnapshot `json:"delegationPolicy,omitempty"`
 	Roles                 []RoleSnapshot           `json:"roles,omitempty"`
+	AdmissionHash         string                   `json:"admissionHash,omitempty"`
+	InputMessage          *HostRef                 `json:"inputMessage,omitempty"`
+	OutputMessage         *HostRef                 `json:"outputMessage,omitempty"`
 }
 
 // SealConfigSnapshot normalizes, hashes and seals one immutable configuration for a Harness Turn.
@@ -171,6 +179,24 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	value.Model = strings.TrimSpace(value.Model)
 	value.MemoryPolicy = strings.TrimSpace(value.MemoryPolicy)
 	value.ContextPolicy = runtimecontext.NormalizePolicy(value.ContextPolicy)
+	value.AdmissionHash = strings.TrimSpace(value.AdmissionHash)
+	if value.AdmissionHash != "" {
+		if len(value.AdmissionHash) != 64 {
+			return ConfigSnapshot{}, ErrInvalidRequest
+		}
+		if _, err := hex.DecodeString(value.AdmissionHash); err != nil {
+			return ConfigSnapshot{}, ErrInvalidRequest
+		}
+	}
+	var refErr error
+	value.InputMessage, refErr = cloneAdmissionHostRef(value.InputMessage)
+	if refErr != nil {
+		return ConfigSnapshot{}, refErr
+	}
+	value.OutputMessage, refErr = cloneAdmissionHostRef(value.OutputMessage)
+	if refErr != nil {
+		return ConfigSnapshot{}, refErr
+	}
 	if (value.Environment.ID == "") != (value.Environment.Revision == 0) {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
@@ -197,8 +223,13 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
-	if value.SharedBudget != nil && !budget.ValidLimits(*value.SharedBudget) {
-		return ConfigSnapshot{}, ErrInvalidRequest
+	if value.SharedBudget != nil {
+		if !budget.ValidLimits(*value.SharedBudget) {
+			return ConfigSnapshot{}, ErrInvalidRequest
+		}
+		// The sealed hash and later execution must use the same owned value.
+		copied := *value.SharedBudget
+		value.SharedBudget = &copied
 	}
 	if value.DelegationPolicy.MaxDepth < 0 || value.DelegationPolicy.MaxDepth > 32 {
 		return ConfigSnapshot{}, ErrInvalidRequest
@@ -213,6 +244,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		ToolPolicies: value.ToolPolicies, Commands: value.Commands, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
 		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy, Roles: value.Roles,
+		AdmissionHash: value.AdmissionHash, InputMessage: value.InputMessage, OutputMessage: value.OutputMessage,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -254,6 +286,14 @@ func normalizeStrings(values []string) []string {
 }
 
 func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
+	if value.InputMessage != nil {
+		copied := *value.InputMessage
+		value.InputMessage = &copied
+	}
+	if value.OutputMessage != nil {
+		copied := *value.OutputMessage
+		value.OutputMessage = &copied
+	}
 	if value.SharedBudget != nil {
 		copied := *value.SharedBudget
 		value.SharedBudget = &copied

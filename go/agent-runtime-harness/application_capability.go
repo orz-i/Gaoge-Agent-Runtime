@@ -17,6 +17,14 @@ type ApplicationCapabilityExecutor interface {
 	ExecuteApplicationCapability(context.Context, ApplicationCapabilityRequest) (ApplicationCapabilityResult, error)
 }
 
+// ApplicationCapabilityReconciler is optional, read-only outcome verification.
+// Reconcile must never cause another external effect. It uses the exact frozen
+// Invocation and stable ExecutionRefID from the original physical attempt.
+// A false known result leaves the Invocation running and blocked.
+type ApplicationCapabilityReconciler interface {
+	ReconcileApplicationCapability(context.Context, ApplicationCapabilityRequest) (result ApplicationCapabilityResult, known bool, err error)
+}
+
 type ApplicationCapabilityRequest struct {
 	Invocation Invocation
 	Session    Session
@@ -80,7 +88,7 @@ func (runner *Runner) StartApplicationTurn(ctx context.Context, request Applicat
 		return Snapshot{}, err
 	}
 	if prepared.replayed && (prepared.invocation.Status == InvocationWaitingInput || terminalInvocationStatus(prepared.invocation.Status)) {
-		return runner.loadSnapshot(ctx, prepared.turn, nil)
+		return runner.repairApplicationProjection(ctx, prepared.turn, prepared.invocation)
 	}
 	return runner.executeApplicationInvocation(ctx, prepared.turn, prepared.invocation)
 }
@@ -108,7 +116,7 @@ func (runner *Runner) StartApplicationInvocation(
 		return Snapshot{}, err
 	}
 	if replayed && (invocation.Status == InvocationWaitingInput || terminalInvocationStatus(invocation.Status)) {
-		return runner.loadSnapshot(ctx, child.turn, nil)
+		return runner.repairApplicationProjection(ctx, child.turn, invocation)
 	}
 	return runner.executeApplicationInvocation(ctx, child.turn, invocation)
 }
@@ -128,8 +136,22 @@ func (runner *Runner) executeApplicationInvocation(
 	if runner.applications == nil || invocation.ExecutionClass != ExecutionApplication || !json.Valid(invocation.Input) {
 		return Snapshot{}, ErrInvalidRequest
 	}
+	// A stale accepted/running Application must never dispatch after its owning
+	// Turn was terminalized by cancellation or another authoritative control.
+	if terminalTurnStatus(turn.Status) && !terminalInvocationStatus(invocation.Status) {
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
 	if invocation.Status == InvocationWaitingInput || terminalInvocationStatus(invocation.Status) {
 		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	if invocation.Status == InvocationRunning {
+		return runner.reconcileApplicationOutcome(ctx, turn, invocation)
+	}
+	if invocation.Status != InvocationAccepted {
+		return Snapshot{}, ErrConflict
+	}
+	if err := runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return Snapshot{}, err
 	}
 	turn, invocation, request, err := runner.prepareApplicationExecution(ctx, turn, invocation)
 	if err != nil {
@@ -137,7 +159,12 @@ func (runner *Runner) executeApplicationInvocation(
 	}
 	result, executeErr := runner.applications.ExecuteApplicationCapability(ctx, request)
 	if executeErr != nil {
-		return runner.failApplicationInvocation(ctx, turn, invocation, executeErr)
+		if errors.Is(executeErr, ErrApplicationNoEffect) {
+			return runner.failApplicationInvocation(ctx, turn, invocation, executeErr)
+		}
+		// An ordinary error does not prove that the remote effect was absent.
+		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
+		return snapshot, errors.Join(ErrApplicationOutcomeUnknown, executeErr, loadErr)
 	}
 	if result.Interaction != nil {
 		return runner.requestApplicationInteraction(ctx, turn, invocation, *result.Interaction)
@@ -154,7 +181,24 @@ func (runner *Runner) prepareApplicationExecution(
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
 		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, ErrConflict
 	}
-	if err := runner.reconcileInvocationStatus(ctx, invocation.ID, InvocationRunning); err != nil {
+	// The Accepted -> Running CAS is the durable dispatch intent and single
+	// winner election. A previously Running Invocation is ambiguous, never an
+	// authorization to call the external Executor again.
+	current, err := runner.store.GetInvocation(ctx, invocation.ID)
+	if err != nil {
+		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, err
+	}
+	if current.Revision != invocation.Revision || current.Status != InvocationAccepted ||
+		current.ExecutionRefID != invocation.ExecutionRefID {
+		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, ErrConflict
+	}
+	current.Status = InvocationRunning
+	current.UpdatedAt = runner.clock.Now().UTC()
+	claimed, err := runner.store.UpdateInvocation(ctx, current, current.Revision)
+	if err != nil {
+		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, err
+	}
+	if err = runner.recordInvocationItem(ctx, claimed); err != nil {
 		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, err
 	}
 	updatedTurn, changed, err := runner.reconcileTurnStatus(ctx, turn.ID, TurnRunning)
@@ -176,6 +220,34 @@ func (runner *Runner) prepareApplicationExecution(
 		Invocation: cloneInvocation(invocation), Session: session,
 		Goal: strings.TrimSpace(input.Goal), Input: normalizedApplicationInput(input.Input),
 	}, nil
+}
+
+func (runner *Runner) reconcileApplicationOutcome(ctx context.Context, turn Turn, invocation Invocation) (Snapshot, error) {
+	reconciler, ok := runner.applications.(ApplicationCapabilityReconciler)
+	if !ok {
+		snapshot, err := runner.loadSnapshot(ctx, turn, nil)
+		return snapshot, errors.Join(ErrApplicationOutcomeUnknown, err)
+	}
+	var input applicationInvocationInput
+	if err := json.Unmarshal(invocation.Input, &input); err != nil {
+		return Snapshot{}, ErrConflict
+	}
+	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, known, err := reconciler.ReconcileApplicationCapability(ctx, ApplicationCapabilityRequest{
+		Invocation: cloneInvocation(invocation), Session: session,
+		Goal: strings.TrimSpace(input.Goal), Input: normalizedApplicationInput(input.Input),
+	})
+	if err != nil || !known {
+		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
+		return snapshot, errors.Join(ErrApplicationOutcomeUnknown, err, loadErr)
+	}
+	if result.Interaction != nil {
+		return runner.requestApplicationInteraction(ctx, turn, invocation, *result.Interaction)
+	}
+	return runner.completeApplicationInvocation(ctx, turn, invocation, result.OutputRefs)
 }
 
 func (runner *Runner) requestApplicationInteraction(
@@ -207,7 +279,7 @@ func (runner *Runner) completeApplicationInvocation(
 		return Snapshot{}, err
 	}
 	if terminalInvocationStatus(current.Status) {
-		return runner.loadSnapshot(ctx, turn, nil)
+		return runner.repairApplicationProjection(ctx, turn, current)
 	}
 	current.Status = InvocationCompleted
 	current.OutputRefs = append([]HostRef(nil), outputRefs...)
@@ -301,6 +373,45 @@ func (runner *Runner) resumeApplicationParentAgent(ctx context.Context, updatedT
 func (runner *Runner) refreshApplicationInvocation(ctx context.Context, invocation Invocation, turn Turn) (Snapshot, error) {
 	if invocation.Status == InvocationAccepted || invocation.Status == InvocationRunning {
 		return runner.executeApplicationInvocation(ctx, turn, invocation)
+	}
+	return runner.repairApplicationProjection(ctx, turn, invocation)
+}
+
+// A terminal Invocation is the authority for an Application capability, which
+// deliberately has no Kernel Run. Repair its Item and root Turn projection
+// idempotently after a crash without ever re-entering the external Executor.
+func (runner *Runner) repairApplicationProjection(ctx context.Context, turn Turn, invocation Invocation) (Snapshot, error) {
+	if err := runner.recordInvocationItem(ctx, invocation); err != nil {
+		return Snapshot{}, err
+	}
+	if strings.TrimSpace(invocation.ParentItemID) != "" || !terminalInvocationStatus(invocation.Status) {
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	var desired TurnStatus
+	switch invocation.Status {
+	case InvocationCompleted:
+		desired = TurnCompleted
+	case InvocationFailed:
+		desired = TurnFailed
+	case InvocationCancelled:
+		desired = TurnCancelled
+	case InvocationAccepted, InvocationRunning, InvocationWaitingInput, InvocationPausedBudget:
+		return Snapshot{}, ErrConflict
+	default:
+		return Snapshot{}, ErrConflict
+	}
+	if turn.Status != desired {
+		if terminalTurnStatus(turn.Status) {
+			return Snapshot{}, ErrConflict
+		}
+		updated, changed, err := runner.reconcileTurnStatus(ctx, turn.ID, desired)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		turn = updated
+		if changed {
+			runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
+		}
 	}
 	return runner.loadSnapshot(ctx, turn, nil)
 }

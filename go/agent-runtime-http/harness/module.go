@@ -627,6 +627,9 @@ func writeHarnessError(context *gin.Context, err error) {
 		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "harness.invalid_request", "invalid Harness request")
 	case errors.Is(err, harness.ErrNotFound):
 		runtimehttp.WriteError(context, stdhttp.StatusNotFound, "harness.not_found", "Harness Turn not found")
+	case errors.Is(err, harness.ErrApplicationOutcomeUnknown):
+		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.application_outcome_unknown",
+			"Application capability outcome requires external reconciliation before retry")
 	case errors.Is(err, harness.ErrConflict):
 		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.conflict", "Harness Turn state conflicts")
 	default:

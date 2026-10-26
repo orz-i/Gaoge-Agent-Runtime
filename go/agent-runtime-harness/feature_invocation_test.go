@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -531,7 +532,8 @@ func seedFeatureInvocationEnvelope(
 	}); err != nil {
 		t.Fatal(err)
 	}
-	config, err := harness.SealConfigSnapshot(turnID, harness.ConfigSnapshot{}, now)
+	// Simulated already-admitted Turn must carry the current hard-cut proof.
+	config, err := harness.SealConfigSnapshot(turnID, harness.ConfigSnapshot{AdmissionHash: strings.Repeat("a", 64)}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

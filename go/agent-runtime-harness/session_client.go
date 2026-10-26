@@ -120,6 +120,31 @@ func (session *SessionClient) Load(ctx context.Context, turnID string) (Snapshot
 	return session.runner.Load(ctx, id)
 }
 
+// LoadState reads bounded status/config facts without scanning Timeline history.
+// Like Load, it does not advance the underlying Agent Run.
+func (session *SessionClient) LoadState(ctx context.Context, turnID string) (StateSnapshot, error) {
+	id, err := session.turnID(turnID)
+	if err != nil {
+		return StateSnapshot{}, err
+	}
+	if err = session.requireIdentity(ctx); err != nil {
+		return StateSnapshot{}, err
+	}
+	return session.runner.LoadState(ctx, id)
+}
+
+// Timeline reads one page of the committed Turn Item history.
+func (session *SessionClient) Timeline(ctx context.Context, turnID string, afterSeq uint64, limit int) ([]Item, error) {
+	id, err := session.turnID(turnID)
+	if err != nil {
+		return nil, err
+	}
+	if err = session.requireIdentity(ctx); err != nil {
+		return nil, err
+	}
+	return session.runner.ListTimeline(ctx, id, afterSeq, limit)
+}
+
 // Refresh synchronizes one existing Turn from its underlying Runtime facts.
 func (session *SessionClient) Refresh(ctx context.Context, turnID string) (Snapshot, error) {
 	id, err := session.turnID(turnID)
