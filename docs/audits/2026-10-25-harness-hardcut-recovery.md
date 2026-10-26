@@ -65,6 +65,16 @@ The correction removes Turn-status shortcuts from the Invocation-based cancellat
 
 This uses existing immutable Timeline Items, Store revision CAS and Kernel continuation contracts. There is no new SQL DDL, second dispatcher, old-protocol bridge, or promise of exactly-once physical side effects.
 
+## Fifth independent merge-audit correction (local `c21bbf4`)
+
+The next independent fault-injection audit demonstrated that both sequential and concurrent `ReconcileInteraction` calls could enter `Agent.Resume` twice after one verified physical Host business callback. The callback-success Item had no one-time claim for the subsequent Runtime continuation. A second P1 demonstrated that `CancelSubtask` and `CancelInvocation` could cancel a descendant Team Run whose Interaction response handler was physically in-flight because only the immediate parent Invocation was checked.
+
+The regression file `independent_receipt_continuation_audit_test.go` retains these exact repros and a Running Application child case without a RunRelation. The fix uses the **existing** Store's atomic, unique Item insert to elect one Runtime continuation caller per frozen Interaction ID, separate from the verified Host receipt. A committed continuation claim prevents re-dispatch under concurrent or ambiguous recovery even if the Host reconcilier repeatedly reports success; the owning Kernel CAS / execution Epoch remains authoritative for physical feature progress. Product replay of already-advanced Workflow waits remains read-only and cannot consume the next wait. A resolved `running` Invocation without a verified outcome is not accepted as replay success.
+
+Recursive cancellation now discovers the known RunRelation subtree before physical cancellation/budget changes, extends ancestry by existing immutable Item parent references for Application children without RunRelation, checks all affected callback grants without mutation, and then uses existing Invocation CAS to fence waiting owners. Missing ownership data or an uncertain Application executor fails closed. Tests verify that an unrelated sibling can still be cancelled while another sibling's Host callback is in flight, when RunRelation proves the branches disjoint. Additional fault injection commits the continuation-claim Item but loses its write ACK: the next host reconciliation must not launch the Agent again.
+
+Remaining proof limits: there is no exactly-once physical guarantee across external Host effects or across independently committed Harness/Kernel transactions. After a continuation claim commits but the Runtime execution outcome is unknown, the host must inspect Kernel/feature-owned facts before proceeding; repeating the Host read-only reconciliation must not launch the same continuation. Full live PostgreSQL/Redis process-failure recovery still requires infrastructure-dependent testing before a production release.
+
 ## Four stages
 
 1. **External effect safety.** `ApplicationCapabilityExecutor` cannot be re-entered on `running` Invocation. The durable CAS is recorded before execution; ambiguous error or commit loss returns `ErrApplicationOutcomeUnknown`. Optional `ApplicationCapabilityReconciler` observes the same frozen Invocation and does not dispatch side effects. Explicit `ErrApplicationNoEffect` is allowed only when the host proves no effect occurred.

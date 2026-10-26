@@ -286,7 +286,7 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	// CancelSubtask is another physical Runtime cancellation entrypoint. It
 	// must compete with any already-resolved business callback BEFORE
 	// revoking the shared budget or cancelling the target Run.
-	if err = runner.fenceSubtaskInteractionCancellation(ctx, turn, task.RunID); err != nil {
+	if err = runner.fenceRelatedCancellation(ctx, turn, task.RunID); err != nil {
 		return Snapshot{}, err
 	}
 	task.CancelStatus, task.CancelError = "requested", ""
@@ -324,34 +324,6 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 		return Snapshot{}, err
 	}
 	return runner.loadSnapshot(ctx, turn, nil)
-}
-
-// A Subtask may be a typed child Invocation or a delegated Kernel Run with
-// no Harness Invocation identity of its own. Fence the exact child when it has
-// one. Otherwise fail closed if ANY business callback is still unverified for
-// this Turn: we cannot prove cancellation is unrelated to that effect.
-func (runner *Runner) fenceSubtaskInteractionCancellation(ctx context.Context, turn Turn, runID string) error {
-	// The root may already be running while a child is still waiting or
-	// dispatching a resolved business response. Do not use Turn.Status as a
-	// proxy for that child's persisted Invocation claim.
-	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, strings.TrimSpace(runID))
-	switch {
-	case err == nil:
-		if owner.TurnID != turn.ID {
-			return ErrConflict
-		}
-		return runner.fenceInteractionCancellation(ctx, turn, owner.ID)
-	case !errors.Is(err, ErrNotFound):
-		return err
-	}
-	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
-	if err != nil {
-		return err
-	}
-	if pending {
-		return ErrConflict
-	}
-	return nil
 }
 
 // ResolveSubtaskApproval requires the exact checkpoint shown to the user, so an

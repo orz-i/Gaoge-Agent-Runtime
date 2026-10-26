@@ -880,6 +880,9 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		// cancellation, never when its external effect is still uncertain.
 		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
 	}
+	if err = runner.fenceTurnApplicationEffects(ctx, turn.ID); err != nil {
+		return Snapshot{}, err
+	}
 	if err = runner.fenceInteractionCancellation(ctx, turn, ""); err != nil {
 		return Snapshot{}, err
 	}

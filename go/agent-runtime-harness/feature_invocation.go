@@ -955,7 +955,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
 	}
-	if err = runner.fenceInteractionCancellation(ctx, turn, invocation.ID); err != nil {
+	if err = runner.fenceRelatedCancellation(ctx, turn, invocation.ExecutionRefID); err != nil {
 		return Snapshot{}, err
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)

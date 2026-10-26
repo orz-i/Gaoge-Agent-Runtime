@@ -338,6 +338,44 @@ func (runner *Runner) ResolveInteraction(
 }
 
 func (runner *Runner) replayResolvedInteraction(ctx context.Context, interaction Interaction) (Snapshot, error) {
+	// A prior successful callback may already have claimed exactly one
+	// physical Runtime continuation. Product response replay is read-only:
+	// neither replay the business callback nor re-enter the same Workflow
+	// Wait / Agent segment. An in-flight continuation with no newer visible
+	// projection remains unknown and must be reconciled explicitly.
+	claimed, err := runner.interactionContinuationClaimed(ctx, interaction)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if claimed {
+		turn, invocation, loadErr := runner.loadResolvedInteractionOwners(ctx, interaction)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		otherWaiting, waitErr := runner.hasOtherWaitingInteraction(ctx, interaction)
+		if waitErr != nil {
+			return Snapshot{}, waitErr
+		}
+		if terminalTurnStatus(turn.Status) || otherWaiting ||
+			(turn.Status == TurnRunning && invocation.Status == InvocationRunning) {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+		return Snapshot{}, ErrInteractionOutcomeUnknown
+	}
+	// A committed Running Invocation without a continuation claim might be
+	// executing the Host business callback, or it may have crashed after
+	// that callback and before any completion receipt. Neither case is a
+	// successful product replay. Require explicit read-only reconciliation.
+	owner, err := runner.store.GetInvocation(ctx, interaction.InvocationID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if owner.TurnID != interaction.TurnID {
+		return Snapshot{}, ErrConflict
+	}
+	if owner.Status == InvocationRunning {
+		return Snapshot{}, ErrInteractionOutcomeUnknown
+	}
 	return runner.continueResolvedInteraction(ctx, interaction)
 }
 
@@ -427,6 +465,18 @@ func (runner *Runner) continueConfirmedInteraction(
 	turn, invocation, snapshot, handled, err := runner.prepareResolvedInteractionContinuation(ctx, interaction)
 	if err != nil || handled {
 		return snapshot, err
+	}
+	// An already-terminal Kernel Run can be projected without another
+	// physical continuation; do not claim a dispatch for read-only repair.
+	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		return runner.finishResolvedInteractionOwner(ctx, turn, invocation, runtimeSnapshot)
+	}
+	if err = runner.claimInteractionContinuation(ctx, interaction, invocation); err != nil {
+		return Snapshot{}, err
 	}
 	return runner.resumeResolvedInteractionOwner(ctx, turn, invocation, interaction)
 }
