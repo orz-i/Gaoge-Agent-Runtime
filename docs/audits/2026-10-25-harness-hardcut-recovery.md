@@ -45,6 +45,18 @@ The same cancellation/handler race was additionally reproduced for a direct Agen
 
 Additional tests cover concurrent `Refresh` terminal deduplication, lost terminal Feed publication after committed Host ACK, and Memory/GORM SQL Invocation CAS exclusivity (both winning orderings). No new Kernel state, job queue, parallel effect ledger or SQL schema version was added.
 
+## Third independent merge-audit correction (local `5bfb4d3`)
+
+The third review confirmed three new, independently fault-injected gaps:
+
+1. After `HandleInteractionResponse` performed one external business effect, a failed Invocation completion CAS left `Turn=waiting_input` / `Invocation=running`. The safe no-redispatch policy also offered no public path for the host to assert its independently verified business result.
+2. A Turn running longer than semantic Feed retention could reach a durable terminal status after the prior progress events expired, but `publishTerminalOnce` silently abandoned terminal publication on `CursorExpiredError`.
+3. `CancelSubtask` bypassed the existing Interaction response callback claim for a child Team Invocation and succeeded while the physical business callback was running.
+
+The executable reproductions were moved into `independent_post_claim_recovery_test.go`: they now require successful read-only `Runner.ReconcileInteraction` after Host evidence, a terminal event after prefix expiry without subsequent duplicate notifications, and refusal to cancel a Subtask once its business handler holds the dispatch grant. The public optional `InteractionResponseReconciler` consumes exactly the persisted Interaction ID and response; `known=false` retains `ErrInteractionOutcomeUnknown`. The verified result reuses the existing Invocation/Turn projection rather than creating another persisted execution object. `CancelSubtask` now competes through the same Invocation status CAS before making cancellation/budget side effects. The Feed recovers its earliest readable cursor through a logarithmic search and checks retained pages before publication. The expired prefix is not proof of physical exactly-once delivery: remote consumers must still deduplicate.
+
+The real PostgreSQL/Redis multi-process failover gate remains unverified while Docker is unavailable. A passing SQLite-backed GORM or memory test is not equivalent to a real shared persistent Store restart.
+
 ## Four stages
 
 1. **External effect safety.** `ApplicationCapabilityExecutor` cannot be re-entered on `running` Invocation. The durable CAS is recorded before execution; ambiguous error or commit loss returns `ErrApplicationOutcomeUnknown`. Optional `ApplicationCapabilityReconciler` observes the same frozen Invocation and does not dispatch side effects. Explicit `ErrApplicationNoEffect` is allowed only when the host proves no effect occurred.

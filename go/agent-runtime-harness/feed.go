@@ -106,15 +106,22 @@ func (feed *TurnFeed) publishTerminalOnce(ctx context.Context, turn Turn) error 
 	}
 	feed.terminalMu.Lock()
 	defer feed.terminalMu.Unlock()
-	var after int64
+	// Long-running Turns can outlive the feed's progress-event retention.
+	// Find the earliest readable cursor without assuming the expired prefix
+	// includes (or excludes) a terminal event. Binary search uses only the
+	// existing monotonic cursor contract, then scans all retained pages.
+	after, err := feed.firstRetainedCursor(ctx, turn.ID)
+	if err != nil {
+		return err
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		page, err := feed.Replay(ctx, turn.ID, after)
 		if err != nil {
-			// On an expired cursor we cannot prove whether the terminal
-			// event is still present. Do not fabricate a duplicate.
+			// Expiry can race a scan. Fail closed and let a later explicit
+			// Refresh/FinalizeHostOutput retry with a fresh cursor.
 			return err
 		}
 		if len(page) == 0 {
@@ -130,11 +137,44 @@ func (feed *TurnFeed) publishTerminalOnce(ctx context.Context, turn Turn) error 
 			}
 		}
 	}
-	_, err := feed.Publish(ctx, turn.ID, TurnEventDraft{
+	_, err = feed.Publish(ctx, turn.ID, TurnEventDraft{
 		Type: turnEventTypeForStatus(turn.Status), Status: string(turn.Status),
 		Message: turn.ErrorDetail, Terminal: true,
 	})
 	return err
+}
+
+// firstRetainedCursor never guesses from HeadSeq that the terminal event was
+// absent. An expired prefix requires finding the first readable suffix, which
+// may still contain the terminal event (including after a process restart).
+// If no events remain, HeadSeq itself is the valid empty cursor and a new
+// terminal event may be appended to the same durable Turn.
+func (feed *TurnFeed) firstRetainedCursor(ctx context.Context, turnID string) (int64, error) {
+	_, err := feed.Replay(ctx, turnID, 0)
+	if err == nil {
+		return 0, nil
+	}
+	var expired *runfeed.CursorExpiredError
+	if !errors.As(err, &expired) || expired.HeadSeq <= 0 {
+		return 0, err
+	}
+	low, high := int64(0), expired.HeadSeq
+	for low+1 < high {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		mid := low + (high-low)/2
+		_, replayErr := feed.Replay(ctx, turnID, mid)
+		switch {
+		case replayErr == nil:
+			high = mid
+		case errors.Is(replayErr, runfeed.ErrCursorExpired):
+			low = mid
+		default:
+			return 0, replayErr
+		}
+	}
+	return high, nil
 }
 
 func (feed *TurnFeed) Replay(ctx context.Context, turnID string, afterSeq int64) ([]TurnEvent, error) {

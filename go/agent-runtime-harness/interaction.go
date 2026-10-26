@@ -399,16 +399,26 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 		}
 		return Snapshot{}, errors.Join(ErrInteractionOutcomeUnknown, err)
 	}
-	// Only this call stack has firsthand evidence that the business callback
-	// returned successfully. Ordinary Refresh/Resume must not infer this from
-	// a Running Invocation after an unknown/crashed physical dispatch.
+	return runner.continueConfirmedInteraction(ctx, interaction, turn, invocation, result)
+}
+
+// An actual successful callback, or a positive read-only host reconciliation,
+// grants only this call stack permission to resume the owning Runtime. Neither
+// Refresh nor an unrelated retry may infer such a receipt from Running alone.
+func (runner *Runner) continueConfirmedInteraction(
+	ctx context.Context,
+	interaction Interaction,
+	turn Turn,
+	invocation Invocation,
+	result InteractionResponseResult,
+) (Snapshot, error) {
 	ctx = context.WithValue(ctx, completedInteractionCallbackKey{}, completedInteractionCallback{
 		turnID: turn.ID, invocationID: invocation.ID,
 	})
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.finishResolvedApplicationInteraction(ctx, turn, invocation, result)
 	}
-	turn, invocation, snapshot, handled, err = runner.prepareResolvedInteractionContinuation(ctx, interaction)
+	turn, invocation, snapshot, handled, err := runner.prepareResolvedInteractionContinuation(ctx, interaction)
 	if err != nil || handled {
 		return snapshot, err
 	}

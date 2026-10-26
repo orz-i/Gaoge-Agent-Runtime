@@ -88,6 +88,10 @@ func TestAmbiguousInteractionResponseCannotBeReplayedWithoutReconciliation(t *te
 	if !errors.Is(secondErr, harness.ErrInteractionOutcomeUnknown) || handler.calls.Load() != 1 {
 		t.Fatalf("unverified response re-dispatched: calls=%d err=%v", handler.calls.Load(), secondErr)
 	}
+	_, reconcileErr := runner.ReconcileInteraction(t.Context(), waiting.Turn.ID, waiting.Interactions[0].ID)
+	if !errors.Is(reconcileErr, harness.ErrInteractionOutcomeUnknown) || handler.calls.Load() != 1 {
+		t.Fatalf("missing read-only host reconciler caused a second effect: calls=%d err=%v", handler.calls.Load(), reconcileErr)
+	}
 	observed, err := runner.Load(t.Context(), waiting.Turn.ID)
 	if err != nil || observed.Turn.Status != harness.TurnWaitingInput {
 		t.Fatalf("unknown outcome rewrote waiting Turn: %+v err=%v", observed.Turn, err)
