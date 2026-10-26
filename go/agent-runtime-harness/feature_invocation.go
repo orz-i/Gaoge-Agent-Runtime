@@ -455,15 +455,13 @@ func (runner *Runner) replayTopLevelFeatureStart(
 		snapshot, err := runner.Refresh(ctx, prepared.turn.ID)
 		return snapshot, true, err
 	}
-	if prepared.turn.Status == TurnWaitingInput {
-		pending, err := runner.resolvedInteractionClaimPending(ctx, prepared.turn.ID, "")
-		if err != nil {
-			return Snapshot{}, true, err
-		}
-		if pending {
-			snapshot, loadErr := runner.loadSnapshot(ctx, prepared.turn, nil)
-			return snapshot, true, loadErr
-		}
+	pending, err := runner.resolvedInteractionClaimPending(ctx, prepared.turn.ID, "")
+	if err != nil {
+		return Snapshot{}, true, err
+	}
+	if pending {
+		snapshot, loadErr := runner.loadSnapshot(ctx, prepared.turn, nil)
+		return snapshot, true, loadErr
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, prepared.invocation.ExecutionRefID)
 	if err == nil {
@@ -646,14 +644,12 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if turn.Status == TurnWaitingInput {
-		pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if pending {
-			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
-		}
+	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if pending {
+		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 	}
 	return runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
 }
@@ -675,14 +671,12 @@ func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if turn.Status == TurnWaitingInput {
-		pending, pendingErr := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
-		if pendingErr != nil {
-			return Snapshot{}, pendingErr
-		}
-		if pending {
-			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
-		}
+	pending, pendingErr := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+	if pendingErr != nil {
+		return Snapshot{}, pendingErr
+	}
+	if pending {
+		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 	}
 	if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
 		return runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
@@ -1246,6 +1240,16 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
+	// Feature callbacks can also synchronize an independently advancing
+	// Kernel Run. Do not overwrite a claimed, unverified business response
+	// solely because its parent Turn was already projected as running.
+	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, invocation.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if pending {
+		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+	}
 	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) {
 		return Snapshot{}, ErrConflict
 	}

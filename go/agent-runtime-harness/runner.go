@@ -813,16 +813,14 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 	if err = runner.repairStartItems(ctx, turn, invocation); err != nil {
 		return Snapshot{}, err
 	}
-	if turn.Status == TurnWaitingInput {
-		pending, pendingErr := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
-		if pendingErr != nil {
-			return Snapshot{}, pendingErr
-		}
-		if pending {
-			// Do not let a concurrent Kernel snapshot overwrite the durable
-			// business-callback claim before the host effect finishes.
-			return runner.loadSnapshot(ctx, turn, nil)
-		}
+	pending, pendingErr := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+	if pendingErr != nil {
+		return Snapshot{}, pendingErr
+	}
+	if pending {
+		// The parent Turn can be running while a child owns an unverified
+		// business callback. Never terminalize or resume through that claim.
+		return runner.loadSnapshot(ctx, turn, nil)
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.refreshApplicationInvocation(ctx, invocation, turn)
@@ -980,14 +978,14 @@ func (runner *Runner) syncRuntimeSnapshot(
 	// Recheck on *every* synchronization/retry, not only at the Refresh
 	// entrypoint, so a stale Kernel Run cannot reopen the Turn during a
 	// physical host business effect.
-	if turn.Status == TurnWaitingInput && !interactionCallbackConfirmed(ctx, turn.ID, invocation.ID) {
-		pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if pending {
-			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
-		}
+	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if pending {
+		// Even a verified callback for this Invocation cannot bypass an
+		// independently claimed, still-unverified sibling effect.
+		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {

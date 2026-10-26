@@ -412,6 +412,12 @@ func (runner *Runner) continueConfirmedInteraction(
 	invocation Invocation,
 	result InteractionResponseResult,
 ) (Snapshot, error) {
+	// Record the verified physical callback result BEFORE continuing Kernel
+	// execution. If this commit is lost, cancellation stays fenced until a
+	// read-only host reconciliation confirms the effect again.
+	if err := runner.recordVerifiedInteractionResponse(ctx, interaction, invocation); err != nil {
+		return Snapshot{}, err
+	}
 	ctx = context.WithValue(ctx, completedInteractionCallbackKey{}, completedInteractionCallback{
 		turnID: turn.ID, invocationID: invocation.ID,
 	})
@@ -441,7 +447,13 @@ func (runner *Runner) prepareResolvedInteractionContinuation(
 	if err != nil {
 		return Turn{}, Invocation{}, Snapshot{}, false, err
 	}
-	if (waiting || interactionOwnersRunning(turn, invocation)) && !runner.projectsWorkflowWaits(invocation) {
+	// A running owner alone does not prove that the resolved business
+	// response has been applied. Only the original successful callback or
+	// the read-only reconciler's verified witness may drive continuation.
+	// Unrelated replay/Refresh callers still observe without dispatching.
+	unconfirmedRunning := interactionOwnersRunning(turn, invocation) &&
+		!interactionCallbackConfirmed(ctx, turn.ID, invocation.ID)
+	if (waiting || unconfirmedRunning) && !runner.projectsWorkflowWaits(invocation) {
 		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
 		return turn, invocation, snapshot, true, loadErr
 	}
@@ -508,6 +520,8 @@ func (runner *Runner) resolvedInteractionClaimPending(ctx context.Context, turnI
 	if err != nil {
 		return false, err
 	}
+	var items []Item
+	itemsLoaded := false
 	for _, interaction := range interactions {
 		if interaction.Status != InteractionResolved || (invocationID != "" && interaction.InvocationID != invocationID) {
 			continue
@@ -519,7 +533,17 @@ func (runner *Runner) resolvedInteractionClaimPending(ctx context.Context, turnI
 		if owner.TurnID != turnID {
 			return false, ErrConflict
 		}
-		if owner.Status == InvocationRunning {
+		if owner.Status != InvocationRunning {
+			continue
+		}
+		if !itemsLoaded {
+			items, err = listAllItems(ctx, runner.store, turnID)
+			if err != nil {
+				return false, err
+			}
+			itemsLoaded = true
+		}
+		if !hasVerifiedInteractionResponse(items, interaction, owner) {
 			return true, nil
 		}
 	}
@@ -527,13 +551,15 @@ func (runner *Runner) resolvedInteractionClaimPending(ctx context.Context, turnI
 }
 
 func (runner *Runner) fenceInteractionCancellation(ctx context.Context, turn Turn, invocationID string) error {
-	if turn.Status != TurnWaitingInput {
-		return nil
-	}
+	// A parent Turn may be running while one of its child Invocations owns
+	// a resolved Interaction's physical business callback. The Invocation
+	// CAS, not the top-level Turn projection, arbitrates dispatch/cancel.
 	interactions, err := runner.store.ListInteractions(ctx, turn.ID)
 	if err != nil {
 		return err
 	}
+	var items []Item
+	itemsLoaded := false
 	for _, interaction := range interactions {
 		if invocationID != "" && interaction.InvocationID != invocationID {
 			continue
@@ -548,7 +574,16 @@ func (runner *Runner) fenceInteractionCancellation(ctx context.Context, turn Tur
 		switch owner.Status {
 		case InvocationRunning:
 			if interaction.Status == InteractionResolved {
-				return ErrConflict
+				if !itemsLoaded {
+					items, err = listAllItems(ctx, runner.store, turn.ID)
+					if err != nil {
+						return err
+					}
+					itemsLoaded = true
+				}
+				if !hasVerifiedInteractionResponse(items, interaction, owner) {
+					return ErrConflict
+				}
 			}
 		case InvocationWaitingInput:
 			owner.Status = InvocationCancelled

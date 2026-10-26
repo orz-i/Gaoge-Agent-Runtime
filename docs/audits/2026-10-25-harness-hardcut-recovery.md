@@ -57,6 +57,14 @@ The executable reproductions were moved into `independent_post_claim_recovery_te
 
 The real PostgreSQL/Redis multi-process failover gate remains unverified while Docker is unavailable. A passing SQLite-backed GORM or memory test is not equivalent to a real shared persistent Store restart.
 
+## Fourth independent merge-audit correction (local `5130842`)
+
+A fourth review deterministically reproduced four variants of two new P1 issues: a child Team Interaction's business callback remained physically in-flight while the parent Turn was `running`, yet `CancelSubtask`, `CancelInvocation`, and root `Cancel` each reported success and cancelled the Kernel Run; independently, read-only `ReconcileInteraction` returned a successful snapshot for a `running` Agent Turn while never invoking its required Runtime continuation. A related fault-injection case also showed `Refresh` could prematurely terminalize the parent while the child's business callback remained unverified.
+
+The correction removes Turn-status shortcuts from the Invocation-based cancellation and execution gates and preserves the replay-versus-verified-continuation distinction. A deterministic, append-only `ItemDiagnostic` fact is recorded after the Host callback returns successfully or a positive read-only reconciliation verifies success, **before** the Runtime continuation. The fact proves business callback completion, not Runtime continuation completion. Cancellation on any Turn status refuses a resolved `running` Invocation that has no such verified fact; once verified, legitimate cancellation is no longer permanently blocked. `ReconcileInteraction` carries a private in-process verified witness so it cannot silently skip the unfinished Agent/Team continuation solely because Turn/Invocation both read `running`. Read-only projection and replay gates inspect unverified child callback grants independently of the parent Turn status. The cases are retained in `independent_turn_running_audit_test.go`, including the post-verification successful cancellation and the premature terminal-Refresh guard.
+
+This uses existing immutable Timeline Items, Store revision CAS and Kernel continuation contracts. There is no new SQL DDL, second dispatcher, old-protocol bridge, or promise of exactly-once physical side effects.
+
 ## Four stages
 
 1. **External effect safety.** `ApplicationCapabilityExecutor` cannot be re-entered on `running` Invocation. The durable CAS is recorded before execution; ambiguous error or commit loss returns `ErrApplicationOutcomeUnknown`. Optional `ApplicationCapabilityReconciler` observes the same frozen Invocation and does not dispatch side effects. Explicit `ErrApplicationNoEffect` is allowed only when the host proves no effect occurred.

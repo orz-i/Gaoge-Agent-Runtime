@@ -374,13 +374,26 @@ func (runner *Runner) resumeApplicationParentAgent(ctx context.Context, updatedT
 }
 
 func (runner *Runner) refreshApplicationInvocation(ctx context.Context, invocation Invocation, turn Turn) (Snapshot, error) {
-	if turn.Status == TurnWaitingInput {
-		pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, invocation.ID)
+	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, invocation.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if pending {
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	if invocation.Status == InvocationRunning {
+		// A resolved business Interaction has its OWN external result and
+		// explicit read-only reconciliation port. Even after its physical
+		// success Item commits, refreshing the original Application executor
+		// cannot infer that the business response continuation has settled.
+		interactions, err := runner.store.ListInteractions(ctx, turn.ID)
 		if err != nil {
 			return Snapshot{}, err
 		}
-		if pending {
-			return runner.loadSnapshot(ctx, turn, nil)
+		for _, interaction := range interactions {
+			if interaction.InvocationID == invocation.ID && interaction.Status == InteractionResolved {
+				return runner.loadSnapshot(ctx, turn, nil)
+			}
 		}
 	}
 	// Refresh is an observation/reconciliation boundary, not admission to
