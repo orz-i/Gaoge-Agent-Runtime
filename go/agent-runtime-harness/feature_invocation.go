@@ -133,10 +133,14 @@ func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest
 			return snapshot, replayErr
 		}
 	}
+	var frozen teamInvocationInput
+	if err = json.Unmarshal(prepared.invocation.Input, &frozen); err != nil {
+		return Snapshot{}, ErrConflict
+	}
 	runtimeSnapshot, startErr := runner.teams.StartRun(prepared.runContext, team.StartRequest{
-		ID: prepared.invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
-		Mode: request.Mode, Members: append([]team.Member(nil), request.Members...), Join: request.Join,
+		ID: prepared.invocation.ExecutionRefID, Actor: frozen.Actor, Thread: frozen.Thread,
+		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: frozen.Goal,
+		Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
 	})
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
@@ -169,8 +173,17 @@ func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatT
 			return snapshot, replayErr
 		}
 	}
+	var frozen groupChatInvocationInput
+	if err = json.Unmarshal(prepared.invocation.Input, &frozen); err != nil {
+		return Snapshot{}, ErrConflict
+	}
 	runtimeRequest.ID = prepared.invocation.ExecutionRefID
 	runtimeRequest.RequestID = firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID)
+	runtimeRequest.Goal, runtimeRequest.Actor, runtimeRequest.Thread = frozen.Goal, frozen.Actor, frozen.Thread
+	runtimeRequest.SpeakerPolicy, runtimeRequest.MaxUtterances = frozen.SpeakerPolicy, frozen.MaxUtterances
+	runtimeRequest.Participants, runtimeRequest.SpeakerConfigs = frozen.Participants, frozen.SpeakerConfigs
+	runtimeRequest.DirectedSpeakerIDs, runtimeRequest.CandidateSpeakerIDs = frozen.DirectedSpeakerIDs, frozen.CandidateSpeakerIDs
+	runtimeRequest.SelectorModel, runtimeRequest.SelectorModelOptions = frozen.SelectorModel, frozen.SelectorModelOptions
 	runtimeSnapshot, startErr := runner.groupChats.StartRun(prepared.runContext, runtimeRequest)
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
@@ -296,10 +309,14 @@ func (runner *Runner) StartWorkflowTurn(ctx context.Context, request WorkflowTur
 			return snapshot, replayErr
 		}
 	}
+	var frozen workflowInvocationInput
+	if err = json.Unmarshal(prepared.invocation.Input, &frozen); err != nil {
+		return Snapshot{}, ErrConflict
+	}
 	runtimeSnapshot, startErr := runner.workflows.StartRun(prepared.runContext, workflow.StartRequest{
-		ID: prepared.invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: request.Goal,
-		Definition: request.Definition, Input: append(json.RawMessage(nil), request.Input...),
+		ID: prepared.invocation.ExecutionRefID, Actor: frozen.Actor, Thread: frozen.Thread,
+		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: frozen.Goal,
+		Definition: frozen.Definition, Input: frozen.Input,
 	})
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
@@ -313,7 +330,10 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 	input json.RawMessage,
 	inputHash string,
 ) (topLevelFeatureStart, error) {
-	envelope, err := runner.prepareTopLevelFeatureEnvelope(ctx, request)
+	envelope, err := runner.prepareTopLevelFeatureEnvelope(ctx, request, rootAdmission{
+		ExecutionClass: executionClass, CapabilityKey: capabilityKey,
+		DefinitionVersion: definitionVersion, InputHash: inputHash,
+	})
 	if err != nil {
 		return topLevelFeatureStart{}, err
 	}
@@ -347,6 +367,7 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 func (runner *Runner) prepareTopLevelFeatureEnvelope(
 	ctx context.Context,
 	request StartRequest,
+	root rootAdmission,
 ) (topLevelFeatureEnvelope, error) {
 	request, sessionID, turnID, err := normalizeStartRequest(request)
 	if err != nil {
@@ -357,7 +378,7 @@ func (runner *Runner) prepareTopLevelFeatureEnvelope(
 	if err != nil {
 		return topLevelFeatureEnvelope{}, err
 	}
-	request, err = sealStartAdmission(request, &resolvedConfig)
+	request, err = sealStartAdmission(request, &resolvedConfig, root)
 	if err != nil {
 		return topLevelFeatureEnvelope{}, err
 	}
@@ -547,10 +568,14 @@ func (runner *Runner) StartTeamInvocation(
 			return snapshot, replayErr
 		}
 	}
+	var frozen teamInvocationInput
+	if err = json.Unmarshal(invocation.Input, &frozen); err != nil {
+		return Snapshot{}, ErrConflict
+	}
 	runtimeSnapshot, startErr := runner.teams.StartRun(ctx, team.StartRequest{
 		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
-		RequestID: strings.TrimSpace(request.RequestID), Goal: strings.TrimSpace(request.Goal),
-		Mode: request.Mode, Members: append([]team.Member(nil), request.Members...), Join: request.Join,
+		RequestID: strings.TrimSpace(request.RequestID), Goal: frozen.Goal,
+		Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
 	})
 	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
 }
@@ -582,10 +607,14 @@ func (runner *Runner) StartWorkflowInvocation(
 			return snapshot, replayErr
 		}
 	}
+	var frozen workflowInvocationInput
+	if err = json.Unmarshal(invocation.Input, &frozen); err != nil {
+		return Snapshot{}, ErrConflict
+	}
 	runtimeSnapshot, startErr := runner.workflows.StartRun(ctx, workflow.StartRequest{
 		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
-		RequestID: strings.TrimSpace(request.RequestID), Goal: strings.TrimSpace(request.Goal),
-		Definition: request.Definition, Input: append(json.RawMessage(nil), request.Input...),
+		RequestID: strings.TrimSpace(request.RequestID), Goal: frozen.Goal,
+		Definition: frozen.Definition, Input: frozen.Input,
 	})
 	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
 }
@@ -978,6 +1007,9 @@ func (runner *Runner) childInvocationContext(
 	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
 	if err != nil || terminalTurnStatus(turn.Status) {
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
+	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return childInvocationContext{}, err
 	}
 	if err = runner.validateParentItem(ctx, turn.ID, parentItemID); err != nil {
 		return childInvocationContext{}, err

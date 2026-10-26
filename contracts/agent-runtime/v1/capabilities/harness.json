@@ -17,6 +17,16 @@
       "operationId": "streamHarnessTurnFeed"
     },
     {
+      "method": "get",
+      "path": "/harness/turns/{turnID}/state",
+      "operationId": "getHarnessTurnState"
+    },
+    {
+      "method": "get",
+      "path": "/harness/turns/{turnID}/items",
+      "operationId": "listHarnessTurnItems"
+    },
+    {
       "method": "post",
       "path": "/harness/turns/{turnID}/approval",
       "operationId": "resolveHarnessApproval"

@@ -20,14 +20,22 @@ Kernel remains authoritative for feature-neutral Run CAS, lease/epoch, journal, 
 | Application executor repeated after external result was lost before Invocation completion CAS | `TestAuditApplicationEffectDoesNotRedispatchUnknownOutcome` | CAS `accepted` → `running` is the only dispatch grant; ambiguous outcome stays blocked until read-only reconciliation |
 | Changed ContextSeed accepted after Turn/Invocation admission, before Context checkpoint | `TestAuditAcceptedTurnRejectsChangedContextSeed` | Context identity/content is part of the immutable admission digest, never reconstructed from mutable caller input |
 
-The original fault-injection cases were run with a Go test overlay outside the repository. They are now retained as regular tests with post-correction assertions. Additional cases verify read-only external reconciliation, concurrent Application admission, and bounded status/Timeline access.
+The original fault-injection cases were run with a Go test overlay outside the repository. They are now retained as regular tests with post-correction assertions. An independent follow-up audit on local commit `7189c1b` exposed seven additional failures. Their reproductions are retained in `independent_recovery_regression_test.go` and are required to pass, not merely acknowledged as theoretical risks:
+
+- `Refresh` dispatched a never-started Application effect;
+- a legacy Turn without admission proof started a new Team child or handled a resolved business Interaction;
+- cancellation could commit while an Application was pre-dispatch and the physical Executor still ran afterward;
+- a crash before root Invocation creation permitted altered Team Members/Goal or a switched Team → Application root;
+- terminal Turn/Item repair did not restore a missing TurnFeed completion event.
+
+The corrective boundaries are: only explicit Application start/retry may claim `accepted` work, the executing CAS is after all preflight reads, `running` Application cancellation refuses an unproven physical cancellation, the frozen root capability and typed input hash are committed with Turn admission, old Turns are gated at child/delegation/interaction/control dispatch entrypoints, and terminal feed recovery checks retained events for an existing matching terminal signal.
 
 ## Four stages
 
 1. **External effect safety.** `ApplicationCapabilityExecutor` cannot be re-entered on `running` Invocation. The durable CAS is recorded before execution; ambiguous error or commit loss returns `ErrApplicationOutcomeUnknown`. Optional `ApplicationCapabilityReconciler` observes the same frozen Invocation and does not dispatch side effects. Explicit `ErrApplicationNoEffect` is allowed only when the host proves no effect occurred.
-2. **Frozen admission.** Compute the canonical complete StartRequest digest before the first Turn write. Store it in existing JSON ConfigSnapshot and bind it into immutable Config ID. Clone request-owned Context, allowance policies and HostRefs before hashing/dispatch. Changed replay cannot choose a new budget, transcript, message identity, or instructions.
+2. **Frozen admission.** Compute the canonical complete StartRequest plus root Feature class/capability/version/typed-input digest before the first Turn write. Store it in existing JSON ConfigSnapshot and bind it into immutable Config ID. Clone request-owned Context, allowance policies and HostRefs before hashing/dispatch. Changed replay cannot choose a new budget, transcript, message identity, or instructions.
 3. **Single recovery explanation.** `Refresh` and root/terminal replays re-project deterministic Items from committed Config, Invocation and Kernel Run. Application terminal Invocation can repair a lagging Turn without re-entering the executor. No independent authoritative recovery object, queue or additional status was introduced.
-4. **Bounded reads.** `LoadState` returns Session/Turn/config without full Timeline or Kernel execution; `ListTimeline` validates an ordered bounded Item page. Full `Load` remains available for explicit full-history use.
+4. **Bounded reads.** `LoadState` returns Session/Turn/config without full Timeline or Kernel execution; `ListTimeline` validates an ordered bounded Item page. HTTP exposes owner-authorized `/state` and `/items` endpoints and TypeScript convenience methods, with public Item payload redaction. Active SSE subscribers authorize using the bounded state; terminal synthesis loads complete history only when needed to check product Host-output acknowledgment. Full `Load` remains available for explicit full-history use.
 
 ## Bounded in-memory performance evidence
 

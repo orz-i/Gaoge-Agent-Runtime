@@ -19,8 +19,25 @@ import (
 // Context bodies are hashed, never stored in ConfigSnapshot. Host message
 // identities are stored separately because a crashed Item projection must be
 // reconstructible without consulting a mutable Host transcript.
-func sealStartAdmission(request StartRequest, config *ConfigSnapshot) (StartRequest, error) {
-	if config == nil {
+// rootAdmission is the already-normalized, concrete root capability frozen
+// together with the host request. It must be sealed before CreateTurn: a
+// crash before CreateInvocation must not permit another capability or plan.
+type rootAdmission struct {
+	ExecutionClass    ExecutionClass `json:"executionClass"`
+	CapabilityKey     string         `json:"capabilityKey"`
+	DefinitionVersion string         `json:"definitionVersion"`
+	InputHash         string         `json:"inputHash"`
+}
+
+func sealStartAdmission(request StartRequest, config *ConfigSnapshot, root rootAdmission) (StartRequest, error) {
+	if config == nil || strings.TrimSpace(root.CapabilityKey) == "" || strings.TrimSpace(root.DefinitionVersion) == "" ||
+		strings.TrimSpace(string(root.ExecutionClass)) == "" {
+		return StartRequest{}, ErrInvalidRequest
+	}
+	root.CapabilityKey = strings.TrimSpace(root.CapabilityKey)
+	root.DefinitionVersion = strings.TrimSpace(root.DefinitionVersion)
+	root.InputHash = strings.TrimSpace(root.InputHash)
+	if root.ExecutionClass != ExecutionAgent && root.InputHash == "" {
 		return StartRequest{}, ErrInvalidRequest
 	}
 	var contextSeed *ContextSeed
@@ -57,6 +74,7 @@ func sealStartAdmission(request StartRequest, config *ConfigSnapshot) (StartRequ
 	config.InputMessage = input
 	config.OutputMessage = output
 	payload := struct {
+		Root             rootAdmission              `json:"root"`
 		HostThread       HostRef                    `json:"hostThread"`
 		HostTurn         HostRef                    `json:"hostTurn"`
 		Actor            kernel.ActorRef            `json:"actor"`
@@ -71,7 +89,7 @@ func sealStartAdmission(request StartRequest, config *ConfigSnapshot) (StartRequ
 		CallAllowance    *agent.CallAllowance       `json:"callAllowance"`
 		AutoAllowance    *agent.AutoAllowancePolicy `json:"autoAllowance"`
 	}{
-		HostThread: request.HostThread, HostTurn: request.HostTurn,
+		Root: root, HostThread: request.HostThread, HostTurn: request.HostTurn,
 		Actor: request.Actor, Thread: request.Thread,
 		RequestID:        strings.TrimSpace(request.RequestID),
 		Goal:             strings.TrimSpace(request.Goal),

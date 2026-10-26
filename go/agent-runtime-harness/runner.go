@@ -641,7 +641,10 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	if err != nil {
 		return Snapshot{}, err
 	}
-	request, err = sealStartAdmission(request, &resolvedConfig)
+	request, err = sealStartAdmission(request, &resolvedConfig, rootAdmission{
+		ExecutionClass: ExecutionAgent, CapabilityKey: CapabilityAgent,
+		DefinitionVersion: RuntimeCapabilityVersion,
+	})
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -855,15 +858,21 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
-	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
-		return Snapshot{}, err
-	}
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
-		return runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
+		cancelled, cancelErr := runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
+		if cancelErr != nil {
+			return cancelled, cancelErr
+		}
+		// Revoke the shared ledger only after an authoritative Application
+		// cancellation, never when its external effect is still uncertain.
+		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
+	}
+	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
+		return Snapshot{}, err
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
 	if err != nil {
@@ -1081,10 +1090,35 @@ func (runner *Runner) finalizeTerminalRuntimeProjection(
 	if err := runner.projectDelegationRelations(ctx, turn); err != nil {
 		return err
 	}
-	if turnChanged && !deferHostProjection {
-		runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
+	if !deferHostProjection {
+		runner.ensureTerminalTurnFeed(ctx, turn, turnChanged)
 	}
 	return nil
+}
+
+// A terminal Run and its durable Items may commit before publishing the
+// ephemeral TurnFeed event. Replaying the exact terminal status on Refresh is
+// safe once the host-output acknowledgement gate has passed. Keep the original
+// first-commit fast path; on recovery inspect existing retained events before
+// publishing so repeated Refresh calls do not produce a terminal storm.
+// TurnFeed is observational, not a transactional outbox or execution grant.
+func (runner *Runner) ensureTerminalTurnFeed(ctx context.Context, turn Turn, firstCommit bool) {
+	if runner == nil || runner.turnFeed == nil || !terminalTurnStatus(turn.Status) {
+		return
+	}
+	eventType := turnEventTypeForStatus(turn.Status)
+	if !firstCommit {
+		events, err := runner.turnFeed.Replay(ctx, turn.ID, 0)
+		if err != nil {
+			return // Leave unavailable feed delivery to its own retention/reconnect contract.
+		}
+		for _, event := range events {
+			if event.Terminal && event.Type == eventType {
+				return
+			}
+		}
+	}
+	runner.publishTurnStatus(ctx, turn, eventType, true)
 }
 
 func (runner *Runner) terminalRuntimeSnapshot(ctx context.Context, turn Turn) (kernel.Snapshot, error) {

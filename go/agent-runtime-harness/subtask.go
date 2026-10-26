@@ -330,6 +330,9 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	if task.Approval == nil || task.Approval.CheckpointID != checkpointID || terminalTurnStatus(turn.Status) {
 		return Snapshot{}, ErrConflict
 	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return Snapshot{}, err
+	}
 	decision, err := pluginApprovalDecision(request.Decision)
 	if err != nil {
 		return Snapshot{}, err

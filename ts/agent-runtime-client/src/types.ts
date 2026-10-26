@@ -112,6 +112,11 @@ export type HarnessDelegationDTO = {
   roles: HarnessDelegationRoleDTO[];
 };
 
+/** Committed Harness status, independent of Host assistant-output acknowledgement. */
+export type HarnessTurnStateDTO = { turn: HarnessTurnDTO };
+/** Cursor-paged, publicly filtered Harness Timeline facts. */
+export type HarnessTimelinePageDTO = { items: HarnessItemDTO[]; nextAfterSeq: number };
+
 export type HarnessTurnSnapshotDTO = {
   turn: HarnessTurnDTO;
   invocations: HarnessCapabilityInvocationDTO[];

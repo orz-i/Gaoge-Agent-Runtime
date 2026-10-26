@@ -233,6 +233,9 @@ func (runner *Runner) RequestInteraction(
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return Snapshot{}, err
+	}
 	if err = runner.validateParentItem(ctx, turn.ID, request.ParentItemID); err != nil {
 		return Snapshot{}, err
 	}
@@ -272,6 +275,13 @@ func (runner *Runner) ResolveInteraction(
 	interaction, err := runner.store.GetInteraction(ctx, strings.TrimSpace(interactionID))
 	if err != nil || interaction.TurnID != strings.TrimSpace(turnID) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	owner, err := runner.store.GetTurn(ctx, interaction.TurnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.requireFrozenAdmission(ctx, owner); err != nil {
+		return Snapshot{}, err
 	}
 	if interaction.Status == InteractionResolved {
 		if !bytes.Equal(interaction.Response, request.Response) {

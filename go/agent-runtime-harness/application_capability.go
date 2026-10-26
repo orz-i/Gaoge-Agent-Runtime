@@ -181,6 +181,13 @@ func (runner *Runner) prepareApplicationExecution(
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
 		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, ErrConflict
 	}
+	// Materialize all reads and policy inputs BEFORE claiming the external
+	// dispatch. A concurrent cancellation at this point still wins its
+	// Accepted -> Cancelled CAS and the claim then fails without an effect.
+	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	if err != nil {
+		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, err
+	}
 	// The Accepted -> Running CAS is the durable dispatch intent and single
 	// winner election. A previously Running Invocation is ambiguous, never an
 	// authorization to call the external Executor again.
@@ -209,10 +216,6 @@ func (runner *Runner) prepareApplicationExecution(
 		runner.publishTurnStatus(ctx, updatedTurn, EventTurnStarted, false)
 	}
 	invocation, err = runner.store.GetInvocation(ctx, invocation.ID)
-	if err != nil {
-		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, err
-	}
-	session, err := runner.store.GetSession(ctx, updatedTurn.SessionID)
 	if err != nil {
 		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, err
 	}
@@ -371,8 +374,11 @@ func (runner *Runner) resumeApplicationParentAgent(ctx context.Context, updatedT
 }
 
 func (runner *Runner) refreshApplicationInvocation(ctx context.Context, invocation Invocation, turn Turn) (Snapshot, error) {
-	if invocation.Status == InvocationAccepted || invocation.Status == InvocationRunning {
-		return runner.executeApplicationInvocation(ctx, turn, invocation)
+	// Refresh is an observation/reconciliation boundary, not admission to
+	// dispatch an Accepted external effect. Running effects may be verified
+	// through the read-only reconciliation port only.
+	if invocation.Status == InvocationRunning && !terminalTurnStatus(turn.Status) {
+		return runner.reconcileApplicationOutcome(ctx, turn, invocation)
 	}
 	return runner.repairApplicationProjection(ctx, turn, invocation)
 }
@@ -424,6 +430,15 @@ func (runner *Runner) cancelApplicationInvocation(
 ) (Snapshot, error) {
 	if terminalInvocationStatus(invocation.Status) {
 		return runner.loadSnapshot(ctx, turn, nil)
+	}
+	if invocation.Status == InvocationRunning {
+		// The first physical effect may already have been dispatched. A
+		// successful cancellation must not imply that it was prevented.
+		// Reconcile its outcome before any terminal cancellation.
+		return Snapshot{}, ErrApplicationOutcomeUnknown
+	}
+	if invocation.Status != InvocationAccepted && invocation.Status != InvocationWaitingInput {
+		return Snapshot{}, ErrConflict
 	}
 	invocation.Status = InvocationCancelled
 	invocation.ErrorCode = "run.cancelled"
