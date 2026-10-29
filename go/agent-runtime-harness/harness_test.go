@@ -224,10 +224,18 @@ func assertCompletedHarnessSnapshot(t *testing.T, snapshot harness.Snapshot, err
 		snapshot.Invocations[0].Status != harness.InvocationCompleted || snapshot.Invocations[0].ExecutionRefID == "" {
 		t.Fatalf("unexpected capability invocations: %#v", snapshot.Invocations)
 	}
-	if len(snapshot.Items) != 3 || snapshot.Items[0].Kind != harness.ItemInvocation ||
-		snapshot.Items[1].Kind != harness.ItemInvocation || snapshot.Items[1].Status != harness.ItemCompleted ||
-		snapshot.Items[2].Kind != harness.ItemAgentRun || snapshot.Items[2].Status != harness.ItemCompleted {
-		t.Fatalf("unexpected durable items: %#v", snapshot.Items)
+	// Physical dispatch grants are now durable diagnostic facts. The product
+	// lifecycle remains the same three public Invocation/Run facts.
+	productItems := make([]harness.Item, 0, 3)
+	for _, item := range snapshot.Items {
+		if item.Kind == harness.ItemInvocation || item.Kind == harness.ItemAgentRun {
+			productItems = append(productItems, item)
+		}
+	}
+	if len(productItems) != 3 || productItems[0].Kind != harness.ItemInvocation ||
+		productItems[1].Kind != harness.ItemInvocation || productItems[1].Status != harness.ItemCompleted ||
+		productItems[2].Kind != harness.ItemAgentRun || productItems[2].Status != harness.ItemCompleted {
+		t.Fatalf("unexpected lifecycle items: %#v", snapshot.Items)
 	}
 }
 

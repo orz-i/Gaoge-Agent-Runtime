@@ -1240,10 +1240,16 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	if err = lockTurn(tx, value.TurnID); err != nil {
 		return err
 	}
-	if value.Kind == harness.ItemDiagnostic && value.Status == harness.ItemStarted &&
-		value.ParentItemID == harness.CancellationFenceParentItemID {
-		if err = checkCancellationFenceTx(tx, value.TurnID); err != nil {
-			return err
+	if value.Kind == harness.ItemDiagnostic && value.Status == harness.ItemStarted {
+		switch value.ParentItemID {
+		case harness.CancellationFenceParentItemID:
+			if err = checkCancellationFenceTx(tx, value.TurnID); err != nil {
+				return err
+			}
+		case harness.ExecutionDispatchParentItemID:
+			if err = checkExecutionDispatchGrantTx(tx, value); err != nil {
+				return err
+			}
 		}
 	}
 	// The first lookup happened before the Turn lock. A competing append

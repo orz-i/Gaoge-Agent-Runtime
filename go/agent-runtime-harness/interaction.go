@@ -720,9 +720,11 @@ func (runner *Runner) resumeRuntimeInteractionOwner(
 		if invocation.ExecutionClass != ExecutionWorkflow || runner.workflows == nil || len(response) == 0 {
 			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 		}
-		resolved, resolveErr := runner.workflows.ResolveWait(
-			ctx, invocation.ExecutionRefID, runtimeSnapshot.Run.Revision, append(json.RawMessage(nil), response...),
-		)
+		resolved, resolveErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resolve-wait", func() (kernel.Snapshot, error) {
+			return runner.workflows.ResolveWait(
+				ctx, invocation.ExecutionRefID, runtimeSnapshot.Run.Revision, append(json.RawMessage(nil), response...),
+			)
+		})
 		if resolved.Run.ID == "" {
 			return Snapshot{}, resolveErr
 		}

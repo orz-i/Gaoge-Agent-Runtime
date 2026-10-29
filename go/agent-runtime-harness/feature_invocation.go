@@ -137,10 +137,12 @@ func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest
 	if err = json.Unmarshal(prepared.invocation.Input, &frozen); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	runtimeSnapshot, startErr := runner.teams.StartRun(prepared.runContext, team.StartRequest{
-		ID: prepared.invocation.ExecutionRefID, Actor: frozen.Actor, Thread: frozen.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: frozen.Goal,
-		Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
+	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.teams.StartRun(prepared.runContext, team.StartRequest{
+			ID: prepared.invocation.ExecutionRefID, Actor: frozen.Actor, Thread: frozen.Thread,
+			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: frozen.Goal,
+			Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
+		})
 	})
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
@@ -184,7 +186,9 @@ func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatT
 	runtimeRequest.Participants, runtimeRequest.SpeakerConfigs = frozen.Participants, frozen.SpeakerConfigs
 	runtimeRequest.DirectedSpeakerIDs, runtimeRequest.CandidateSpeakerIDs = frozen.DirectedSpeakerIDs, frozen.CandidateSpeakerIDs
 	runtimeRequest.SelectorModel, runtimeRequest.SelectorModelOptions = frozen.SelectorModel, frozen.SelectorModelOptions
-	runtimeSnapshot, startErr := runner.groupChats.StartRun(prepared.runContext, runtimeRequest)
+	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.groupChats.StartRun(prepared.runContext, runtimeRequest)
+	})
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
 
@@ -313,10 +317,12 @@ func (runner *Runner) StartWorkflowTurn(ctx context.Context, request WorkflowTur
 	if err = json.Unmarshal(prepared.invocation.Input, &frozen); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	runtimeSnapshot, startErr := runner.workflows.StartRun(prepared.runContext, workflow.StartRequest{
-		ID: prepared.invocation.ExecutionRefID, Actor: frozen.Actor, Thread: frozen.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: frozen.Goal,
-		Definition: frozen.Definition, Input: frozen.Input,
+	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.workflows.StartRun(prepared.runContext, workflow.StartRequest{
+			ID: prepared.invocation.ExecutionRefID, Actor: frozen.Actor, Thread: frozen.Thread,
+			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: frozen.Goal,
+			Definition: frozen.Definition, Input: frozen.Input,
+		})
 	})
 	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
@@ -580,10 +586,12 @@ func (runner *Runner) StartTeamInvocation(
 	if err = json.Unmarshal(invocation.Input, &frozen); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	runtimeSnapshot, startErr := runner.teams.StartRun(ctx, team.StartRequest{
-		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
-		RequestID: strings.TrimSpace(request.RequestID), Goal: frozen.Goal,
-		Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
+	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.teams.StartRun(ctx, team.StartRequest{
+			ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
+			RequestID: strings.TrimSpace(request.RequestID), Goal: frozen.Goal,
+			Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
+		})
 	})
 	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
 }
@@ -619,10 +627,12 @@ func (runner *Runner) StartWorkflowInvocation(
 	if err = json.Unmarshal(invocation.Input, &frozen); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	runtimeSnapshot, startErr := runner.workflows.StartRun(ctx, workflow.StartRequest{
-		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
-		RequestID: strings.TrimSpace(request.RequestID), Goal: frozen.Goal,
-		Definition: frozen.Definition, Input: frozen.Input,
+	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.workflows.StartRun(ctx, workflow.StartRequest{
+			ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
+			RequestID: strings.TrimSpace(request.RequestID), Goal: frozen.Goal,
+			Definition: frozen.Definition, Input: frozen.Input,
+		})
 	})
 	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
 }
@@ -858,20 +868,22 @@ func (runner *Runner) startInvocationAttempt(
 	child childInvocationContext,
 ) (kernel.Snapshot, error) {
 	requestID := stableID("hretry", invocation.ID, attemptString(invocation.Attempt))
-	switch invocation.ExecutionClass {
-	case ExecutionAgent:
-		return runner.startRetriedAgent(ctx, invocation, child, requestID)
-	case ExecutionTeam:
-		return runner.startRetriedTeam(ctx, invocation, child, requestID)
-	case ExecutionGroupChat:
-		return runner.startRetriedGroupChat(ctx, invocation, child, requestID)
-	case ExecutionWorkflow:
-		return runner.startRetriedWorkflow(ctx, invocation, child, requestID)
-	case ExecutionApplication:
-		return kernel.Snapshot{}, ErrInvalidRequest
-	default:
-		return kernel.Snapshot{}, ErrInvalidRequest
-	}
+	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start-retry", func() (kernel.Snapshot, error) {
+		switch invocation.ExecutionClass {
+		case ExecutionAgent:
+			return runner.startRetriedAgent(ctx, invocation, child, requestID)
+		case ExecutionTeam:
+			return runner.startRetriedTeam(ctx, invocation, child, requestID)
+		case ExecutionGroupChat:
+			return runner.startRetriedGroupChat(ctx, invocation, child, requestID)
+		case ExecutionWorkflow:
+			return runner.startRetriedWorkflow(ctx, invocation, child, requestID)
+		case ExecutionApplication:
+			return kernel.Snapshot{}, ErrInvalidRequest
+		default:
+			return kernel.Snapshot{}, ErrInvalidRequest
+		}
+	})
 }
 
 func (runner *Runner) startRetriedAgent(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
@@ -1206,27 +1218,29 @@ func (runner *Runner) resumeFeature(
 	if err := runner.requireUnclaimedInteractionContinuation(ctx, invocation.TurnID, invocation.ID); err != nil {
 		return kernel.Snapshot{}, err
 	}
-	switch invocation.ExecutionClass {
-	case ExecutionTeam:
-		if runner.teams == nil {
+	return runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func() (kernel.Snapshot, error) {
+		switch invocation.ExecutionClass {
+		case ExecutionTeam:
+			if runner.teams == nil {
+				return kernel.Snapshot{}, ErrInvalidRequest
+			}
+			return runner.teams.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+		case ExecutionGroupChat:
+			if runner.groupChats == nil {
+				return kernel.Snapshot{}, ErrInvalidRequest
+			}
+			return runner.groupChats.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+		case ExecutionWorkflow:
+			if runner.workflows == nil {
+				return kernel.Snapshot{}, ErrInvalidRequest
+			}
+			return runner.workflows.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+		case ExecutionAgent, ExecutionApplication:
+			return kernel.Snapshot{}, ErrInvalidRequest
+		default:
 			return kernel.Snapshot{}, ErrInvalidRequest
 		}
-		return runner.teams.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
-	case ExecutionGroupChat:
-		if runner.groupChats == nil {
-			return kernel.Snapshot{}, ErrInvalidRequest
-		}
-		return runner.groupChats.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
-	case ExecutionWorkflow:
-		if runner.workflows == nil {
-			return kernel.Snapshot{}, ErrInvalidRequest
-		}
-		return runner.workflows.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
-	case ExecutionAgent, ExecutionApplication:
-		return kernel.Snapshot{}, ErrInvalidRequest
-	default:
-		return kernel.Snapshot{}, ErrInvalidRequest
-	}
+	})
 }
 
 func (runner *Runner) resumeInvocationExecution(
@@ -1253,7 +1267,17 @@ func (runner *Runner) resumeInvocationExecution(
 		if !ok {
 			return kernel.Snapshot{}, ErrInvalidRequest
 		}
-		return resumer.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+		resumed, resumeErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func() (kernel.Snapshot, error) {
+			return resumer.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+		})
+		if errors.Is(resumeErr, ErrConflict) && resumed.Run.ID == "" {
+			// A crashed native Agent Start may retain a Harness grant even
+			// after its Kernel Run acquired a sticky execution Epoch. Let
+			// only the first-party Kernel lease arbitrate that recovery.
+			return runner.resumeNativeFencedAgentAfterInterruptedStart(
+				ctx, invocation, expectedRevision, resumer, resumeErr)
+		}
+		return resumed, resumeErr
 	}
 	return runner.resumeFeature(ctx, invocation, expectedRevision)
 }

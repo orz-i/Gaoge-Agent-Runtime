@@ -89,4 +89,31 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 	if _, fresh, err := second.CreateInvocation(t.Context(), late); err != nil || !fresh {
 		t.Fatalf("remote admission remained blocked after terminal fence: fresh=%v err=%v", fresh, err)
 	}
+	dispatch := harness.Item{
+		ID: "pg_real_dispatch_first", TurnID: turn.ID, InvocationID: late.ID, RunID: late.ExecutionRefID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
+		ParentItemID: harness.ExecutionDispatchParentItemID,
+		Payload:      json.RawMessage(`{"phase":"start"}`),
+		CreatedAt:    now, UpdatedAt: now,
+	}
+	if _, fresh, err := first.AppendItem(t.Context(), dispatch); err != nil || !fresh {
+		t.Fatalf("first process could not claim physical dispatch: fresh=%v err=%v", fresh, err)
+	}
+	secondDispatch := dispatch
+	secondDispatch.ID = "pg_real_dispatch_second"
+	if _, _, err := second.AppendItem(t.Context(), secondDispatch); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("second connection obtained a concurrent physical grant: %v", err)
+	}
+	if _, _, err := second.AppendItem(t.Context(), harness.Item{
+		ID: "pg_real_dispatch_first_done", TurnID: turn.ID,
+		InvocationID: late.ID, RunID: late.ExecutionRefID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
+		ParentItemID: dispatch.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, fresh, err := second.AppendItem(t.Context(), secondDispatch); err != nil || !fresh {
+		t.Fatalf("second process could not claim after first dispatch settled: fresh=%v err=%v", fresh, err)
+	}
 }

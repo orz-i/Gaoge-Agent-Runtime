@@ -12,6 +12,9 @@ import (
 
 // RuntimeCanceller lets the host perform feature-owned cleanup, including
 // cancelling remote tasks, before projecting a Runtime Run as terminal.
+// IMPORTANT: kernel.ErrConflict from Cancel certifies that the rejected
+// attempt performed NO external cleanup. A canceller which might already
+// have changed remote state must return an outcome-unknown error instead.
 type RuntimeCanceller interface {
 	Cancel(context.Context, string, uint64, string) (kernel.Snapshot, error)
 }
@@ -42,7 +45,9 @@ func (runner *Runner) cancelRuntimeRun(
 		}
 		return cancelled, true, err
 	}
-	return kernel.Snapshot{}, false, ErrConflict
+	// All attempts were rejected at the Kernel revision CAS and every
+	// adapter-provided kernel.ErrConflict is contractually no-effect.
+	return kernel.Snapshot{}, false, kernel.ErrConflict
 }
 
 func (runner *Runner) syncTerminalDelegations(ctx context.Context, turn Turn, runs map[string]kernel.Snapshot) error {

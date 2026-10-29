@@ -87,6 +87,13 @@ type Store interface {
 	CommitContextCheckpoint(context.Context, ContextCheckpointCommit) (Turn, error)
 	PutContextArtifact(context.Context, runtimecontext.Artifact) (runtimecontext.Artifact, bool, error)
 	GetContextArtifact(context.Context, string) (runtimecontext.Artifact, error)
+	// AppendItem is an execution-authority boundary for diagnostic Items:
+	// a fresh ExecutionDispatchParentItemID grant MUST atomically reject
+	// active cancellation intents, terminal Turn/Invocation owners, and
+	// unfinished grants for the same Invocation. A cancellation-intent
+	// insertion MUST serialize against these grants on the same Turn lock.
+	// Custom Stores must implement the hard-cut semantics; a loose
+	// append-only implementation is no longer a safe execution Store.
 	AppendItem(context.Context, Item) (Item, bool, error)
 	ListItems(context.Context, string, uint64, int) ([]Item, error)
 }

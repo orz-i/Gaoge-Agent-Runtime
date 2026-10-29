@@ -114,16 +114,18 @@ func (runner *Runner) resumeDirectAgentStart(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	runtimeSnapshot, startErr := runner.agent.StartRun(runCtx, agent.StartRequest{
-		ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turn.ID), Goal: request.Goal,
-		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-		OutputContract: model.CloneOutputContract(config.OutputContract),
-		ToolKeys:       append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-		InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
-		Limits:          config.Limits,
-		CallAllowance:   request.CallAllowance,
-		AutoAllowance:   request.AutoAllowance,
+	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.agent.StartRun(runCtx, agent.StartRequest{
+			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turn.ID), Goal: request.Goal,
+			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+			OutputContract: model.CloneOutputContract(config.OutputContract),
+			ToolKeys:       append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
+			InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
+			Limits:          config.Limits,
+			CallAllowance:   request.CallAllowance,
+			AutoAllowance:   request.AutoAllowance,
+		})
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
@@ -698,15 +700,17 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		}
 		runCtx = withContextWindowBinding(runCtx, createdTurn.ID, ContextWindowOwner)
 	}
-	runtimeSnapshot, startErr := runner.agent.StartRun(runCtx, agent.StartRequest{
-		ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
-		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-		OutputContract:   model.CloneOutputContract(config.OutputContract),
-		ToolKeys:         append([]string(nil), config.ToolKeys...),
-		RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-		InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
-		CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
+	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.agent.StartRun(runCtx, agent.StartRequest{
+			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
+			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+			OutputContract:   model.CloneOutputContract(config.OutputContract),
+			ToolKeys:         append([]string(nil), config.ToolKeys...),
+			RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
+			InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
+			CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
+		})
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		if errors.Is(startErr, kernel.ErrConflict) {
@@ -885,11 +889,28 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
 				return checkErr
 			}
-			return runner.checkInteractionCancellation(ctx, turn, "")
+			if checkErr := runner.checkInteractionCancellation(ctx, turn, ""); checkErr != nil {
+				return checkErr
+			}
+			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil)
+			if checkErr != nil {
+				return checkErr
+			}
+			if pending {
+				return ErrConflict
+			}
+			return nil
 		},
 		func() error {
 			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
 				return checkErr
+			}
+			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil)
+			if checkErr != nil {
+				return checkErr
+			}
+			if pending {
+				return ErrConflict
 			}
 			return runner.fenceInteractionCancellation(ctx, turn, "")
 		},
@@ -907,7 +928,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
 	}
 	if !found {
 		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)

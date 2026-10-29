@@ -745,10 +745,24 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 		}
 		return cloneItem(existing), false, nil
 	}
-	if value.Kind == ItemDiagnostic && value.Status == ItemStarted &&
-		value.ParentItemID == CancellationFenceParentItemID &&
-		ActiveCancellationFence(store.items[value.TurnID]) {
-		return Item{}, false, ErrConflict
+	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
+		switch value.ParentItemID {
+		case CancellationFenceParentItemID:
+			if ActiveCancellationFence(store.items[value.TurnID]) {
+				return Item{}, false, ErrConflict
+			}
+		case ExecutionDispatchParentItemID:
+			turn, turnFound := store.turns[value.TurnID]
+			owner, ownerFound := store.invocations[value.InvocationID]
+			if !turnFound || terminalTurnStatus(turn.Status) ||
+				!ownerFound || owner.TurnID != value.TurnID ||
+				owner.ExecutionRefID != value.RunID ||
+				terminalInvocationStatus(owner.Status) ||
+				ActiveCancellationFence(store.items[value.TurnID]) ||
+				PendingExecutionDispatch(store.items[value.TurnID], value.InvocationID) {
+				return Item{}, false, ErrConflict
+			}
+		}
 	}
 	value.Seq = uint64(len(store.items[value.TurnID]) + 1)
 	value = cloneItem(value)
