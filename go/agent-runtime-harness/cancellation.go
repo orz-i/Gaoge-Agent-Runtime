@@ -28,6 +28,12 @@ func (runner *Runner) cancelRuntimeRun(
 	if runID == "" {
 		return kernel.Snapshot{}, false, ErrInvalidRequest
 	}
+	// A native Kernel control can distinguish a read-only/pre-Store rejection
+	// from a write-capable Store outcome. Custom cancellers retain their
+	// explicit contract that kernel.ErrConflict certifies zero external
+	// cleanup; never infer that guarantee from a native Store conflict.
+	_, nativeKernel := runner.cancellation.(*kernel.Runtime)
+	var lastNativeNoEffect error
 	for range maxRuntimeSyncRetryAttempts {
 		current, err := runner.runtime.Load(ctx, runID)
 		if errors.Is(err, kernel.ErrNotFound) {
@@ -40,13 +46,31 @@ func (runner *Runner) cancelRuntimeRun(
 			return current, true, nil
 		}
 		cancelled, err := runner.cancellation.Cancel(ctx, runID, current.Run.Revision, strings.TrimSpace(reason))
+		if nativeKernel {
+			if kernel.IsControlNoEffect(err) {
+				if errors.Is(err, kernel.ErrConflict) {
+					// A pre-Store CAS revision mismatch is safe to retry,
+					// but preserve its native proof if all retries exhaust.
+					lastNativeNoEffect = err
+					continue
+				}
+				return cancelled, true, err
+			}
+			// Even a native Store ErrConflict can follow an uncertain
+			// write-capable CAS. Never retry or release its intent blindly.
+			return cancelled, true, err
+		}
 		if errors.Is(err, kernel.ErrConflict) {
+			// The custom RuntimeCanceller contract reserves this error
+			// for attempts with absolutely no external cleanup.
 			continue
 		}
 		return cancelled, true, err
 	}
-	// All attempts were rejected at the Kernel revision CAS and every
-	// adapter-provided kernel.ErrConflict is contractually no-effect.
+	if nativeKernel && lastNativeNoEffect != nil {
+		return kernel.Snapshot{}, false, lastNativeNoEffect
+	}
+	// Every custom canceller conflict was contractually no-effect.
 	return kernel.Snapshot{}, false, kernel.ErrConflict
 }
 
