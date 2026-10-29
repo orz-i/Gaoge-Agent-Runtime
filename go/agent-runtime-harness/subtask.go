@@ -300,7 +300,7 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	}
 	defer func() {
 		if err == nil {
-			err = runner.finishCancellationFence(context.WithoutCancel(ctx), intent)
+			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
 	task.CancelStatus, task.CancelError = "requested", ""
@@ -333,8 +333,15 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	}
 	if cancelErr != nil {
 		task.CancelStatus, task.CancelError = "failed", cancelErr.Error()
-		if err = runner.recordSubtaskItem(context.WithoutCancel(ctx), turn.ID, task); err != nil {
-			return Snapshot{}, errors.Join(cancelErr, err)
+		// Keep the failed Subtask fact bounded even when the request has
+		// disconnected. A timeout or lost acknowledgement is not a
+		// no-effect receipt and must preserve the cancellation intent.
+		settlementCtx, stopSettlement := cancellationSettlementContext(ctx)
+		recordErr := runner.recordSubtaskItem(settlementCtx, turn.ID, task)
+		recordErr = errors.Join(recordErr, settlementCtx.Err())
+		stopSettlement()
+		if recordErr != nil {
+			return Snapshot{}, errors.Join(cancelErr, recordErr)
 		}
 		// The requested/failed Subtask timeline facts are observational:
 		// a proven no-effect Kernel CAS conflict, without budget or Host

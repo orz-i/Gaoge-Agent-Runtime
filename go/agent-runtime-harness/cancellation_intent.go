@@ -5,9 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
+
+// cancellationSettlementTimeout bounds cancellation receipt and failure
+// timeline writes when the original request has disconnected or expired.
+// A single bounded context also covers native no-effect verification.
+const cancellationSettlementTimeout = 5 * time.Second
+
+func cancellationSettlementContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cancellationSettlementTimeout)
+}
 
 // CancellationFenceParentItemID marks an admitted cancellation in the
 // existing append-only Harness Item ledger. All Store implementations MUST
@@ -109,6 +119,16 @@ func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn
 	return Item{}, ErrConflict
 }
 
+// finishCancellationFenceAfterRequest bounds durable completion without
+// depending on a cancelled caller Context. An expired or lost acknowledgment
+// is still an unknown receipt outcome: never infer a safe release from it.
+func (runner *Runner) finishCancellationFenceAfterRequest(ctx context.Context, intent Item) error {
+	settlementCtx, stopSettlement := cancellationSettlementContext(ctx)
+	defer stopSettlement()
+	err := runner.finishCancellationFence(settlementCtx, intent)
+	return errors.Join(err, settlementCtx.Err())
+}
+
 func (runner *Runner) finishCancellationFence(ctx context.Context, intent Item) error {
 	now := runner.clock.Now().UTC()
 	payload := json.RawMessage(`{"boundary":"cancel_scope_settled"}`)
@@ -145,7 +165,7 @@ func (runner *Runner) cancelPreflightWithIntent(
 		// A Host Store CAS can commit before an error/ACK loss, so never
 		// infer no-effect from fresh=true after such a call was attempted.
 		if fresh && !writeAttempted {
-			err = errors.Join(err, runner.finishCancellationFence(context.WithoutCancel(ctx), intent))
+			err = errors.Join(err, runner.finishCancellationFenceAfterRequest(ctx, intent))
 		}
 		return Item{}, err
 	}

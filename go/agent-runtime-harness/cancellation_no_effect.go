@@ -3,7 +3,6 @@ package harness
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -18,11 +17,6 @@ type cancellationReadNoEffect struct{ cause error }
 
 func (failure cancellationReadNoEffect) Error() string { return failure.cause.Error() }
 func (failure cancellationReadNoEffect) Unwrap() error { return failure.cause }
-
-// noEffectCancellationRecoveryTimeout bounds independent verification and
-// durable intent completion after a request context is already cancelled.
-// The deadline applies to all of these operations as one recovery attempt.
-const noEffectCancellationRecoveryTimeout = 5 * time.Second
 
 // releaseNoEffectCancellation retires this attempt's cancellation intent
 // only after proof that the TARGET cancellation did not enter physical cleanup.
@@ -52,7 +46,7 @@ func (runner *Runner) releaseNoEffectCancellation(
 	// Store write/cleanup, but the request may now be cancelled or expired.
 	// Validate ALL remaining safety conditions on an independent, bounded
 	// context. Never use the detached context on an outcome-unknown error.
-	recoveryCtx, stopRecovery := context.WithTimeout(context.WithoutCancel(ctx), noEffectCancellationRecoveryTimeout)
+	recoveryCtx, stopRecovery := cancellationSettlementContext(ctx)
 	defer stopRecovery()
 	ledger, err := runner.loadTurnBudget(recoveryCtx, turn)
 	if err != nil || ledger != nil {

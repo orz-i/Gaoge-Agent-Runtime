@@ -981,7 +981,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	}
 	defer func() {
 		if err == nil {
-			err = runner.finishCancellationFence(context.WithoutCancel(ctx), intent)
+			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)

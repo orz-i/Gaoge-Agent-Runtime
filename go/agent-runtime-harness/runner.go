@@ -922,7 +922,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	}
 	defer func() {
 		if err == nil {
-			err = runner.finishCancellationFence(context.WithoutCancel(ctx), intent)
+			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
 	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
