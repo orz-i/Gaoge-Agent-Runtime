@@ -24,18 +24,23 @@ func normalizeDeadline(value *time.Time) *time.Time {
 }
 
 // Cancel atomically terminates one non-terminal Run while preserving its last feature state.
+// A read or revision check failure before ApplyControl carries a direct
+// no-effect proof; errors from the write-capable Store boundary never do.
 func (runtime *Runtime) Cancel(
 	ctx context.Context,
 	runID string,
 	expectedRevision uint64,
 	reason string,
 ) (Snapshot, error) {
+	// These checks precede every write-capable Store control call. Preserve
+	// a direct Kernel-issued no-effect proof when a transient read or stale
+	// revision rejects cancellation before ApplyControl can begin.
 	current, err := runtime.Load(ctx, runID)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, controlNoEffectBeforeStore(err)
 	}
 	if current.Run.Revision != expectedRevision {
-		return Snapshot{}, ErrConflict
+		return Snapshot{}, controlNoEffectBeforeStore(ErrConflict)
 	}
 	controlRuntime := runtime
 	if runtime != nil && runtime.execution != nil {

@@ -22,8 +22,19 @@ func TestRealPostgresNativeNoEffectCancelAcrossConnections(t *testing.T) {
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not configured")
 	}
-	for _, retry := range []string{"same-connection", "separate-connection"} {
-		t.Run(retry, func(t *testing.T) {
+	for _, scenario := range []struct {
+		name               string
+		read               int32
+		separateConnection bool
+	}{
+		{"harness-first-read/same-connection", 1, false},
+		{"harness-first-read/separate-connection", 1, true},
+		{"kernel-cancel-second-read/same-connection", 2, false},
+		{"kernel-cancel-second-read/separate-connection", 2, true},
+		{"kernel-apply-control-third-read/same-connection", 3, false},
+		{"kernel-apply-control-third-read/separate-connection", 3, true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
 			db, isolated := managedRecoveryDatabase(t, dsn)
 			if err := postgresadapter.Migrate(db); err != nil {
 				t.Fatal(err)
@@ -32,7 +43,7 @@ func TestRealPostgresNativeNoEffectCancelAcrossConnections(t *testing.T) {
 				t.Fatal(err)
 			}
 			fault := &realControlReadFault{KernelStore: postgresadapter.NewKernelStore(db)}
-			fault.failAt.Store(3)
+			fault.failAt.Store(scenario.read)
 			first, firstStore, firstRuntime := newRealControlHost(t, db, fault)
 			request := harness.StartRequest{
 				HostThread:    harness.HostRef{Kind: "conversation", ID: "native-noeffect-cancel"},
@@ -55,10 +66,11 @@ func TestRealPostgresNativeNoEffectCancelAcrossConnections(t *testing.T) {
 			_, firstErr := first.Cancel(t.Context(), paused.Turn.ID,
 				"cancel during Kernel pre-Store read outage")
 			fault.armed.Store(false)
-			if fault.reads.Load() < 3 || !errors.Is(firstErr, errRealControlReadFault) ||
-				!kernel.IsControlNoEffect(firstErr) {
-				t.Fatalf("first cancellation did not certify pre-Store no-effect: reads=%d err=%v",
-					fault.reads.Load(), firstErr)
+			if fault.reads.Load() < scenario.read || !errors.Is(firstErr, errRealControlReadFault) ||
+				(scenario.read >= 2 && !kernel.IsControlNoEffect(firstErr)) ||
+				(scenario.read == 1 && kernel.IsControlNoEffect(firstErr)) {
+				t.Fatalf("cancellation did not retain the correct read-only proof: stage=%d reads=%d err=%v",
+					scenario.read, fault.reads.Load(), firstErr)
 			}
 			current, err := firstRuntime.Load(t.Context(), owner.ExecutionRefID)
 			if err != nil || current.Run.Status != kernel.RunStatusPausedBudget {
@@ -68,7 +80,7 @@ func TestRealPostgresNativeNoEffectCancelAcrossConnections(t *testing.T) {
 			second := first
 			secondStore := firstStore
 			secondRuntime := firstRuntime
-			if retry == "separate-connection" {
+			if scenario.separateConnection {
 				secondDB := openManagedRecoveryDB(t, isolated)
 				second, secondStore, secondRuntime = newRealControlHost(t, secondDB, nil)
 			}
