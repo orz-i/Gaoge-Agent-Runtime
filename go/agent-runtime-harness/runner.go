@@ -858,7 +858,7 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 
 // Cancel cancels the active top-level Invocation and persists the resulting
 // Harness Turn state. C2 extends dispatch to the other explicit Feature adapters.
-func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (Snapshot, error) {
+func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (snapshot Snapshot, err error) {
 	turnID = strings.TrimSpace(turnID)
 	turn, err := runner.store.GetTurn(ctx, turnID)
 	if err != nil {
@@ -880,12 +880,28 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		// cancellation, never when its external effect is still uncertain.
 		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
 	}
-	if err = runner.fenceTurnApplicationEffects(ctx, turn.ID); err != nil {
+	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
+		func() error {
+			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
+				return checkErr
+			}
+			return runner.checkInteractionCancellation(ctx, turn, "")
+		},
+		func() error {
+			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
+				return checkErr
+			}
+			return runner.fenceInteractionCancellation(ctx, turn, "")
+		},
+	)
+	if err != nil {
 		return Snapshot{}, err
 	}
-	if err = runner.fenceInteractionCancellation(ctx, turn, ""); err != nil {
-		return Snapshot{}, err
-	}
+	defer func() {
+		if err == nil {
+			err = runner.finishCancellationFence(context.WithoutCancel(ctx), intent)
+		}
+	}()
 	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}

@@ -15,22 +15,35 @@ import (
 // cancellation path. An unknown relation owner conservatively fences the
 // entire Turn rather than claim the cancellation was unrelated to an effect.
 func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, rootRunID string) error {
+	targets, err := runner.inspectRelatedCancellation(ctx, turn, rootRunID)
+	if err != nil {
+		return err
+	}
+	for invocationID := range targets {
+		if err = runner.fenceInteractionCancellation(ctx, turn, invocationID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (runner *Runner) inspectRelatedCancellation(ctx context.Context, turn Turn, rootRunID string) (map[string]struct{}, error) {
 	rootRunID = strings.TrimSpace(rootRunID)
 	if rootRunID == "" {
-		return ErrInvalidRequest
+		return nil, ErrInvalidRequest
 	}
 	affected := map[string]struct{}{rootRunID: {}}
 	if runner.relationReader != nil {
 		queue := []string{rootRunID}
 		for len(queue) > 0 {
 			if err := ctx.Err(); err != nil {
-				return err
+				return nil, err
 			}
 			runID := queue[0]
 			queue = queue[1:]
 			children, err := runner.relatedChildRunIDs(ctx, runID)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			for _, childID := range children {
 				if _, seen := affected[childID]; seen {
@@ -43,7 +56,7 @@ func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, r
 	}
 	invocations, err := runner.store.ListInvocations(ctx, turn.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	targetInvocations := make(map[string]struct{})
 	matchedRuns := make(map[string]struct{})
@@ -63,18 +76,18 @@ func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, r
 		// its existing ParentItemID through immutable Timeline ownership
 		// instead of silently excluding its external physical effect.
 		if err = runner.addItemOwnedCancellationDescendants(ctx, turn.ID, invocations, targetInvocations); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, inv := range invocations {
 		if _, target := targetInvocations[inv.ID]; target &&
 			inv.ExecutionClass == ExecutionApplication && inv.Status == InvocationRunning {
-			return ErrApplicationOutcomeUnknown
+			return nil, ErrApplicationOutcomeUnknown
 		}
 	}
 	interactions, err := runner.store.ListInteractions(ctx, turn.ID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var items []Item
 	itemsLoaded := false
@@ -87,10 +100,10 @@ func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, r
 		}
 		owner, loadErr := runner.store.GetInvocation(ctx, interaction.InvocationID)
 		if loadErr != nil {
-			return loadErr
+			return nil, loadErr
 		}
 		if owner.TurnID != turn.ID {
-			return ErrConflict
+			return nil, ErrConflict
 		}
 		if owner.Status != InvocationRunning {
 			continue
@@ -98,13 +111,13 @@ func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, r
 		if !itemsLoaded {
 			items, err = listAllItems(ctx, runner.store, turn.ID)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			itemsLoaded = true
 		}
 		if !hasVerifiedInteractionResponse(items, interaction, owner) {
 			// No cancellation or budget side effects have been attempted.
-			return ErrConflict
+			return nil, ErrConflict
 		}
 	}
 	// A descendant Run without a Harness Invocation might be an application-
@@ -114,18 +127,13 @@ func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, r
 	if !allOwners && len(matchedRuns) < len(affected) {
 		pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if pending {
-			return ErrConflict
+			return nil, ErrConflict
 		}
 	}
-	for invocationID := range targetInvocations {
-		if err = runner.fenceInteractionCancellation(ctx, turn, invocationID); err != nil {
-			return err
-		}
-	}
-	return nil
+	return targetInvocations, nil
 }
 
 // Follow child Invocation ownership through the same persisted Item references

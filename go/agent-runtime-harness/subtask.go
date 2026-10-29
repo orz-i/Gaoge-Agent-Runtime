@@ -275,7 +275,7 @@ func (runner *Runner) findSubtask(ctx context.Context, turnID, taskID string) (T
 
 // CancelSubtask keeps cancellation intent/failure visible while a remote or
 // local canceller acknowledges cleanup. Retrying does not cancel siblings.
-func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason string) (Snapshot, error) {
+func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason string) (snapshot Snapshot, err error) {
 	turn, task, err := runner.findSubtask(ctx, turnID, taskID)
 	if err != nil {
 		return Snapshot{}, err
@@ -286,9 +286,23 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	// CancelSubtask is another physical Runtime cancellation entrypoint. It
 	// must compete with any already-resolved business callback BEFORE
 	// revoking the shared budget or cancelling the target Run.
-	if err = runner.fenceRelatedCancellation(ctx, turn, task.RunID); err != nil {
+	intent, err := runner.cancelPreflightWithIntent(ctx, turn, task.RunID,
+		func() error {
+			_, checkErr := runner.inspectRelatedCancellation(ctx, turn, task.RunID)
+			return checkErr
+		},
+		func() error {
+			return runner.fenceRelatedCancellation(ctx, turn, task.RunID)
+		},
+	)
+	if err != nil {
 		return Snapshot{}, err
 	}
+	defer func() {
+		if err == nil {
+			err = runner.finishCancellationFence(context.WithoutCancel(ctx), intent)
+		}
+	}()
 	task.CancelStatus, task.CancelError = "requested", ""
 	task.CancelAttempt++
 	if err = runner.recordSubtaskItem(ctx, turn.ID, task); err != nil {

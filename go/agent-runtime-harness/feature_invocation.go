@@ -940,7 +940,7 @@ func (runner *Runner) startRetriedWorkflow(ctx context.Context, invocation Invoc
 }
 
 // CancelInvocation cancels one child Runtime Feature by its durable Invocation identity.
-func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason string) (Snapshot, error) {
+func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason string) (snapshot Snapshot, err error) {
 	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
 	if err != nil {
 		return Snapshot{}, err
@@ -955,9 +955,23 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
 	}
-	if err = runner.fenceRelatedCancellation(ctx, turn, invocation.ExecutionRefID); err != nil {
+	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
+		func() error {
+			_, checkErr := runner.inspectRelatedCancellation(ctx, turn, invocation.ExecutionRefID)
+			return checkErr
+		},
+		func() error {
+			return runner.fenceRelatedCancellation(ctx, turn, invocation.ExecutionRefID)
+		},
+	)
+	if err != nil {
 		return Snapshot{}, err
 	}
+	defer func() {
+		if err == nil {
+			err = runner.finishCancellationFence(context.WithoutCancel(ctx), intent)
+		}
+	}()
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
 	if err != nil {
 		return Snapshot{}, err
@@ -1189,6 +1203,9 @@ func (runner *Runner) resumeFeature(
 	invocation Invocation,
 	expectedRevision uint64,
 ) (kernel.Snapshot, error) {
+	if err := runner.requireUnclaimedInteractionContinuation(ctx, invocation.TurnID, invocation.ID); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	switch invocation.ExecutionClass {
 	case ExecutionTeam:
 		if runner.teams == nil {
@@ -1222,6 +1239,13 @@ func (runner *Runner) resumeInvocationExecution(
 		return kernel.Snapshot{}, err
 	}
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	scopeID := invocation.ID
+	if invocation.ParentItemID == "" {
+		scopeID = "" // Root resume must also respect pending child continuations.
+	}
+	if err = runner.requireUnclaimedInteractionContinuation(ctx, turn.ID, scopeID); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	if invocation.ExecutionClass == ExecutionAgent {

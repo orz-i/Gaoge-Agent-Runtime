@@ -356,8 +356,14 @@ func (runner *Runner) replayResolvedInteraction(ctx context.Context, interaction
 		if waitErr != nil {
 			return Snapshot{}, waitErr
 		}
-		if terminalTurnStatus(turn.Status) || otherWaiting ||
-			(turn.Status == TurnRunning && invocation.Status == InvocationRunning) {
+		if terminalTurnStatus(turn.Status) || otherWaiting || terminalInvocationStatus(invocation.Status) {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+		items, itemErr := listAllItems(ctx, runner.store, turn.ID)
+		if itemErr != nil {
+			return Snapshot{}, itemErr
+		}
+		if hasCompletedInteractionContinuation(items, interaction, invocation) {
 			return runner.loadSnapshot(ctx, turn, nil)
 		}
 		return Snapshot{}, ErrInteractionOutcomeUnknown
@@ -478,7 +484,14 @@ func (runner *Runner) continueConfirmedInteraction(
 	if err = runner.claimInteractionContinuation(ctx, interaction, invocation); err != nil {
 		return Snapshot{}, err
 	}
-	return runner.resumeResolvedInteractionOwner(ctx, turn, invocation, interaction)
+	continued, resumeErr := runner.resumeResolvedInteractionOwner(ctx, turn, invocation, interaction)
+	if resumeErr != nil {
+		return continued, resumeErr
+	}
+	if err = runner.recordCompletedInteractionContinuation(ctx, interaction, invocation); err != nil {
+		return continued, err
+	}
+	return continued, nil
 }
 
 func (runner *Runner) prepareResolvedInteractionContinuation(
@@ -601,6 +614,14 @@ func (runner *Runner) resolvedInteractionClaimPending(ctx context.Context, turnI
 }
 
 func (runner *Runner) fenceInteractionCancellation(ctx context.Context, turn Turn, invocationID string) error {
+	return runner.fenceInteractionCancellationWithClaim(ctx, turn, invocationID, true)
+}
+
+func (runner *Runner) checkInteractionCancellation(ctx context.Context, turn Turn, invocationID string) error {
+	return runner.fenceInteractionCancellationWithClaim(ctx, turn, invocationID, false)
+}
+
+func (runner *Runner) fenceInteractionCancellationWithClaim(ctx context.Context, turn Turn, invocationID string, claim bool) error {
 	// A parent Turn may be running while one of its child Invocations owns
 	// a resolved Interaction's physical business callback. The Invocation
 	// CAS, not the top-level Turn projection, arbitrates dispatch/cancel.
@@ -636,6 +657,9 @@ func (runner *Runner) fenceInteractionCancellation(ctx context.Context, turn Tur
 				}
 			}
 		case InvocationWaitingInput:
+			if !claim {
+				continue
+			}
 			owner.Status = InvocationCancelled
 			owner.UpdatedAt = runner.clock.Now().UTC()
 			if _, updateErr := runner.store.UpdateInvocation(ctx, owner, owner.Revision); updateErr != nil {
