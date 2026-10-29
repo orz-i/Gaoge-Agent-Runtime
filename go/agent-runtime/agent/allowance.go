@@ -156,8 +156,17 @@ func (runner *Runner) GrantCallAllowance(
 			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 			Events: []kernel.EventDraft{{Type: "agent.allowance_granted", Message: snapshot.Run.ErrorCode, Wakeup: true}},
 		}, proof)
+	if err != nil && kernel.IsControlNoEffect(err) {
+		// Kernel certifies this attempt failed before entering its
+		// write-capable Store boundary. Preserve the original error for
+		// diagnostics, and let Harness retire only this native control's
+		// pending dispatch grant.
+		return running, agentControlNoEffect(err)
+	}
 	if err == nil {
 		runner.publishRunEvent(ctx, running, EventRunResumed, false)
 	}
+	// Any Store.ApplyControl/Apply error is outcome-unknown here, including
+	// ErrConflict and an ACK lost after committing a control CAS.
 	return running, err
 }

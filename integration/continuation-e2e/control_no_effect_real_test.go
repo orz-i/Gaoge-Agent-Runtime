@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,15 +24,23 @@ import (
 // belongs to the Harness's preliminary run inspection.
 type realControlReadFault struct {
 	*postgresadapter.KernelStore
-	armed atomic.Bool
-	reads atomic.Int32
+	armed  atomic.Bool
+	reads  atomic.Int32
+	failAt atomic.Int32
 }
 
 var errRealControlReadFault = errors.New("injected real PostgreSQL read failure")
 
 func (store *realControlReadFault) Load(ctx context.Context, runID string) (kernel.Snapshot, error) {
-	if store.armed.Load() && store.reads.Add(1) == 2 {
-		return kernel.Snapshot{}, errRealControlReadFault
+	if store.armed.Load() {
+		read := store.reads.Add(1)
+		failureAt := store.failAt.Load()
+		if failureAt == 0 {
+			failureAt = 2 // Existing native Agent preflight failure.
+		}
+		if read == failureAt {
+			return kernel.Snapshot{}, errRealControlReadFault
+		}
 	}
 	return store.KernelStore.Load(ctx, runID)
 }
@@ -177,6 +186,13 @@ func TestRealPostgresNativeControlNoEffectProcess(t *testing.T) {
 	}
 	db := openManagedRecoveryDB(t, dsn)
 	fault := &realControlReadFault{KernelStore: postgresadapter.NewKernelStore(db)}
+	if requested := os.Getenv("GAOGE_TEST_NATIVE_CONTROL_FAIL_AT"); requested != "" {
+		failAt, err := strconv.Atoi(requested)
+		if err != nil || (failAt != 2 && failAt != 3) {
+			t.Fatalf("unsupported Kernel read injection point: %q", requested)
+		}
+		fault.failAt.Store(int32(failAt))
+	}
 	runner, store, _ := newRealControlHost(t, db, fault)
 	turn, err := store.GetTurn(t.Context(), turnID)
 	if err != nil || turn.Status != harness.TurnPausedBudget {
@@ -185,9 +201,14 @@ func TestRealPostgresNativeControlNoEffectProcess(t *testing.T) {
 	fault.armed.Store(true)
 	_, err = runner.GrantCallAllowance(t.Context(), turn.ID, turn.Revision, agent.CallAllowance{LLMCalls: 1})
 	fault.armed.Store(false)
-	if fault.reads.Load() != 2 || !errors.Is(err, errRealControlReadFault) ||
+	expectedReads := fault.failAt.Load()
+	if expectedReads == 0 {
+		expectedReads = 2
+	}
+	if fault.reads.Load() != expectedReads || !errors.Is(err, errRealControlReadFault) ||
 		!errors.Is(err, agent.ErrControlNoEffect) {
-		t.Fatalf("expected proven pre-effect control read failure: reads=%d err=%v", fault.reads.Load(), err)
+		t.Fatalf("expected proven pre-effect control read failure: reads=%d expected=%d err=%v",
+			fault.reads.Load(), expectedReads, err)
 	}
 	items, err := store.ListItems(t.Context(), turn.ID, 0, 500)
 	if err != nil {
@@ -202,6 +223,20 @@ func TestRealPostgresNativeControlNoEffectProcess(t *testing.T) {
 }
 
 func TestRealPostgresNativeControlNoEffectSurvivesProcessCrash(t *testing.T) {
+	for _, scenario := range []struct {
+		name   string
+		failAt int
+	}{
+		{"agent-preflight-read", 2},
+		{"kernel-pre-store-read", 3},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			testRealPostgresNativeControlNoEffectSurvivesProcessCrash(t, scenario.failAt)
+		})
+	}
+}
+
+func testRealPostgresNativeControlNoEffectSurvivesProcessCrash(t *testing.T, failAt int) {
 	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not configured")
@@ -234,6 +269,7 @@ func TestRealPostgresNativeControlNoEffectSurvivesProcessCrash(t *testing.T) {
 	command.Env = append(os.Environ(),
 		"TEST_POSTGRES_DSN="+isolated,
 		"GAOGE_TEST_NATIVE_CONTROL_PRE_DISPATCH=inject",
+		"GAOGE_TEST_NATIVE_CONTROL_FAIL_AT="+strconv.Itoa(failAt),
 		"GAOGE_TEST_NATIVE_CONTROL_TURN_ID="+paused.Turn.ID,
 	)
 	output, exitErr := command.CombinedOutput()

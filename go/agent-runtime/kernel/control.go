@@ -186,33 +186,36 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expectedRevision uint64,
 	guard ControlGuard, mutation Mutation, permit *featurecontrol.Proof) (Snapshot, bool, error) {
 	if runtime == nil || runtime.execution != nil || hasReservedApplyEvidence(mutation.Events) {
-		return Snapshot{}, false, ErrInvalidInput
+		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
 	}
 	current, err := runtime.Load(ctx, runID)
 	if err != nil {
-		return Snapshot{}, false, err
+		return Snapshot{}, false, controlNoEffectBeforeStore(err)
 	}
 	if current.Run.Revision != expectedRevision {
-		return Snapshot{}, false, ErrConflict
+		return Snapshot{}, false, controlNoEffectBeforeStore(ErrConflict)
 	}
 	if err = validateMutation(current, mutation); err != nil {
-		return Snapshot{}, false, err
+		return Snapshot{}, false, controlNoEffectBeforeStore(err)
 	}
 	next := runtime.makeStoreMutation(current, mutation)
 	// The Store sees the exact same unforgeable, mutation-bound proof and
 	// checks it again under the authoritative transaction/row lock.
 	guard.verified = permit
 	if err = ValidateControl(current, guard, next, runtime.Now()); err != nil {
-		return Snapshot{}, false, err
+		return Snapshot{}, false, controlNoEffectBeforeStore(err)
 	}
+	// Write-capable Store code begins here. Never certify a Store-returned
+	// error as no-effect: even a failed CAS response can be outcome-unknown.
 	if store, ok := runtime.store.(ControlStore); ok {
-		return store.ApplyControl(ctx, runID, expectedRevision, guard, next)
+		snapshot, revoked, writeErr := store.ApplyControl(ctx, runID, expectedRevision, guard, next)
+		return snapshot, revoked, controlStoreOutcome(writeErr)
 	}
 	// Older custom stores implement no execution epochs and retain the existing
 	// six-state single-executor behavior; never fall back on a fenced Store.
 	if _, fenced := runtime.store.(ExecutionStore); fenced {
-		return Snapshot{}, false, ErrExecutionRequired
+		return Snapshot{}, false, controlNoEffectBeforeStore(ErrExecutionRequired)
 	}
-	result, err := runtime.store.Apply(ctx, runID, expectedRevision, next)
-	return result, false, err
+	result, writeErr := runtime.store.Apply(ctx, runID, expectedRevision, next)
+	return result, false, controlStoreOutcome(writeErr)
 }
