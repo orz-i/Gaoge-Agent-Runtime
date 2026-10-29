@@ -972,8 +972,8 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 			_, checkErr := runner.inspectRelatedCancellation(ctx, turn, invocation.ExecutionRefID)
 			return checkErr
 		},
-		func() error {
-			return runner.fenceRelatedCancellation(ctx, turn, invocation.ExecutionRefID)
+		func(writeAttempted *bool) error {
+			return runner.fenceRelatedCancellation(ctx, turn, invocation.ExecutionRefID, writeAttempted)
 		},
 	)
 	if err != nil {

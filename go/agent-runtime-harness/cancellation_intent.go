@@ -121,12 +121,13 @@ func (runner *Runner) finishCancellationFence(ctx context.Context, intent Item) 
 	return err
 }
 
-// A failed read-only preflight releases the cancellation intent. Once any
-// physical cancellation/budget side effect begins the fence remains durable
-// until that operation's authoritative outcome has been reconciled.
+// Only a failed read-only preflight can retire its fresh cancellation intent.
+// The post-intent claim may contain Host Invocation CAS writes; an attempted
+// write makes even a conflict/error with no reply outcome-unknown. Mark that
+// boundary BEFORE invoking any write-capable Host Store method.
 func (runner *Runner) cancelPreflightWithIntent(
 	ctx context.Context, turn Turn, rootRunID string,
-	inspect func() error, claim func() error,
+	inspect func() error, claim func(writeAttempted *bool) error,
 ) (Item, error) {
 	if err := inspect(); err != nil {
 		return Item{}, err
@@ -138,11 +139,12 @@ func (runner *Runner) cancelPreflightWithIntent(
 	// Admission and the intent commit now compete in the same Store
 	// transaction. Re-read all existing owners after sealing so work
 	// admitted before this boundary cannot escape the cancellation check.
-	if err = claim(); err != nil {
-		// Do not release a previous process's partially completed physical
-		// cancellation. Only this attempt's fresh, pre-effect intent may
-		// be withdrawn on a failed local preflight.
-		if fresh {
+	writeAttempted := false
+	if err = claim(&writeAttempted); err != nil {
+		// A read-only failure can retire only this attempt's fresh intent.
+		// A Host Store CAS can commit before an error/ACK loss, so never
+		// infer no-effect from fresh=true after such a call was attempted.
+		if fresh && !writeAttempted {
 			err = errors.Join(err, runner.finishCancellationFence(context.WithoutCancel(ctx), intent))
 		}
 		return Item{}, err

@@ -14,13 +14,13 @@ import (
 // compete with late Interaction responses, as on the existing direct
 // cancellation path. An unknown relation owner conservatively fences the
 // entire Turn rather than claim the cancellation was unrelated to an effect.
-func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, rootRunID string) error {
+func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, rootRunID string, writeAttempted *bool) error {
 	targets, err := runner.inspectRelatedCancellation(ctx, turn, rootRunID)
 	if err != nil {
 		return err
 	}
 	for invocationID := range targets {
-		if err = runner.fenceInteractionCancellation(ctx, turn, invocationID); err != nil {
+		if err = runner.fenceInteractionCancellation(ctx, turn, invocationID, writeAttempted); err != nil {
 			return err
 		}
 	}

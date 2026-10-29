@@ -903,7 +903,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			}
 			return nil
 		},
-		func() error {
+		func(writeAttempted *bool) error {
 			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
 				return checkErr
 			}
@@ -914,7 +914,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			if pending {
 				return ErrConflict
 			}
-			return runner.fenceInteractionCancellation(ctx, turn, "")
+			return runner.fenceInteractionCancellation(ctx, turn, "", writeAttempted)
 		},
 	)
 	if err != nil {

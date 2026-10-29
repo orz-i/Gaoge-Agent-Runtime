@@ -613,15 +613,17 @@ func (runner *Runner) resolvedInteractionClaimPending(ctx context.Context, turnI
 	return false, nil
 }
 
-func (runner *Runner) fenceInteractionCancellation(ctx context.Context, turn Turn, invocationID string) error {
-	return runner.fenceInteractionCancellationWithClaim(ctx, turn, invocationID, true)
+func (runner *Runner) fenceInteractionCancellation(ctx context.Context, turn Turn, invocationID string, writeAttempted *bool) error {
+	return runner.fenceInteractionCancellationWithClaim(ctx, turn, invocationID, writeAttempted)
 }
 
 func (runner *Runner) checkInteractionCancellation(ctx context.Context, turn Turn, invocationID string) error {
-	return runner.fenceInteractionCancellationWithClaim(ctx, turn, invocationID, false)
+	return runner.fenceInteractionCancellationWithClaim(ctx, turn, invocationID, nil)
 }
 
-func (runner *Runner) fenceInteractionCancellationWithClaim(ctx context.Context, turn Turn, invocationID string, claim bool) error {
+// The optional marker is present only during a post-intent claim. Reads do
+// not set it; the first write-capable Host CAS does, before calling Store.
+func (runner *Runner) fenceInteractionCancellationWithClaim(ctx context.Context, turn Turn, invocationID string, writeAttempted *bool) error {
 	// A parent Turn may be running while one of its child Invocations owns
 	// a resolved Interaction's physical business callback. The Invocation
 	// CAS, not the top-level Turn projection, arbitrates dispatch/cancel.
@@ -657,11 +659,14 @@ func (runner *Runner) fenceInteractionCancellationWithClaim(ctx context.Context,
 				}
 			}
 		case InvocationWaitingInput:
-			if !claim {
+			if writeAttempted == nil {
 				continue
 			}
 			owner.Status = InvocationCancelled
 			owner.UpdatedAt = runner.clock.Now().UTC()
+			// Do not clear the cancellation intent if Store commits this
+			// CAS then drops its reply (or rejects without a snapshot).
+			*writeAttempted = true
 			if _, updateErr := runner.store.UpdateInvocation(ctx, owner, owner.Revision); updateErr != nil {
 				return updateErr
 			}

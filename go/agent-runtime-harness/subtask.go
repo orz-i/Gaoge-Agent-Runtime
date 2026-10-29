@@ -291,8 +291,8 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 			_, checkErr := runner.inspectRelatedCancellation(ctx, turn, task.RunID)
 			return checkErr
 		},
-		func() error {
-			return runner.fenceRelatedCancellation(ctx, turn, task.RunID)
+		func(writeAttempted *bool) error {
+			return runner.fenceRelatedCancellation(ctx, turn, task.RunID, writeAttempted)
 		},
 	)
 	if err != nil {
