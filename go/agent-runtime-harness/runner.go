@@ -168,8 +168,11 @@ func (runner *Runner) resumeDirectAgentContext(
 	if err == nil {
 		return updated, withContextWindowBinding(runCtx, updated.ID, ContextWindowOwner), nil
 	}
-	_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
-	return Turn{}, nil, errors.Join(err, failErr)
+	// Context reconciliation has not obtained a physical dispatch grant.
+	// Even an invalid or transient read cannot elect this replay to mark the
+	// shared Invocation/Turn failed: another Start may be building the same
+	// context and will otherwise lose its valid execution authority.
+	return Turn{}, nil, err
 }
 
 func (runner *Runner) restoreOrBuildContext(
@@ -694,8 +697,10 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	if request.Context != nil {
 		builtContext, buildErr := runner.buildContext(ctx, createdTurn.SessionID, config, request.Context)
 		if buildErr != nil {
-			failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, buildErr)
-			return failed, errors.Join(buildErr, failErr)
+			// No physical authority has been claimed. A concurrent admitted
+			// replay might still build Context and Start successfully; keep
+			// this read-only failure local and the Turn safely replayable.
+			return Snapshot{}, buildErr
 		}
 		createdTurn, runCtx, err = runner.attachContextCheckpoint(
 			ctx, createdTurn, builtContext.checkpoint, builtContext.expectedHeadID,

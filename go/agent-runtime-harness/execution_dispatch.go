@@ -195,10 +195,24 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 			return snapshot, errors.Join(physicalErr,
 				runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_control_no_effect"))
 		}
-		// Only a Feature's explicit zero-effect contract can classify a Start
-		// failure as terminal. The completion receipt must durably close the
-		// grant first; an unknown/lost ACK keeps the original Invocation.
-		if (phase == "start" || phase == "start-retry") && errors.Is(physicalErr, ErrExecutionNoEffect) {
+		// A direct first-party Agent pre-middleware/pre-Create failure is
+		// also definitive. Its private result cannot be minted by a
+		// custom Feature or returned from an effectful Run middleware.
+		// Every other no-snapshot Agent error remains outcome-unknown.
+		if nativeAgent && (phase == "start" || phase == "start-retry") && agent.IsNativeStartNoEffect(physicalErr) {
+			if receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_start_no_effect"); receiptErr == nil {
+				return snapshot, dispatchProvenNoEffect{cause: physicalErr}
+			} else {
+				return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
+			}
+		}
+		// The public Host Feature no-effect contract applies to custom
+		// Features/Agents, never to an exact native *agent.Runner Start. A
+		// native Run Middleware can perform effects and return that public
+		// marker; only the private direct pre-middleware proof above may
+		// discharge the native Agent's physical grant.
+		customFeatureNoEffect := !nativeAgent || invocation.ExecutionClass != ExecutionAgent
+		if customFeatureNoEffect && (phase == "start" || phase == "start-retry") && errors.Is(physicalErr, ErrExecutionNoEffect) {
 			if receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "feature_start_no_effect"); receiptErr == nil {
 				return snapshot, dispatchProvenNoEffect{cause: physicalErr}
 			} else {

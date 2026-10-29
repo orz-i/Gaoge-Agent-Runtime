@@ -357,8 +357,9 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 			ctx, envelope.turn, envelope.request.Context, envelope.config,
 		)
 		if contextErr != nil {
-			_, failErr := runner.failTopLevelInvocationAndTurn(ctx, envelope.turn, invocation, contextErr)
-			return topLevelFeatureStart{}, errors.Join(contextErr, failErr)
+			// A replay's Context read is not terminal execution authority.
+			// Another Start may own the same immutable Turn concurrently.
+			return topLevelFeatureStart{}, contextErr
 		}
 		runCtx = withContextWindowBinding(runCtx, turn.ID, ContextWindowReadOnly)
 		return topLevelFeatureStart{turn: turn, invocation: invocation, runContext: runCtx, replayed: true}, nil
@@ -447,8 +448,9 @@ func (runner *Runner) prepareTopLevelFeatureContext(
 		ctx, turn, request.Context, envelope.config,
 	)
 	if err != nil {
-		_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
-		return Turn{}, nil, errors.Join(err, failErr)
+		// No physical Feature Start has been granted. An unsuccessful
+		// Context build cannot terminalize a concurrently admitted owner.
+		return Turn{}, nil, err
 	}
 	return updated, withContextWindowBinding(runCtx, updated.ID, ContextWindowReadOnly), nil
 }
