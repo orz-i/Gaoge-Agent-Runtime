@@ -106,46 +106,46 @@ func (runner *Runner) GrantCallAllowance(
 	if runner == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 ||
 		increment.LLMCalls < 0 || increment.ToolCalls < 0 ||
 		increment.LLMCalls == 0 && increment.ToolCalls == 0 {
-		return kernel.Snapshot{}, ErrInvalidCallAllowance
+		return kernel.Snapshot{}, agentControlNoEffect(ErrInvalidCallAllowance)
 	}
 	snapshot, state, err := runner.loadState(ctx, runID)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return kernel.Snapshot{}, agentControlNoEffect(err)
 	}
 	if snapshot.Run.Revision != expectedRevision {
-		return kernel.Snapshot{}, kernel.ErrConflict
+		return kernel.Snapshot{}, agentControlNoEffect(kernel.ErrConflict)
 	}
 	if snapshot.Run.Status != kernel.RunStatusPausedBudget || state.CallAllowance == nil {
-		return snapshot, ErrRunNotBudgetPaused
+		return snapshot, agentControlNoEffect(ErrRunNotBudgetPaused)
 	}
 	if snapshot.Run.DeadlineAt != nil && !snapshot.Run.DeadlineAt.After(runner.clock.Now()) {
-		return snapshot, kernel.ErrDeadline
+		return snapshot, agentControlNoEffect(kernel.ErrDeadline)
 	}
 	// A grant may only resolve the blocked dimension. Other dimensions cannot
 	// be silently expanded during an unrelated approval or allowance action.
 	switch snapshot.Run.ErrorCode {
 	case modelAllowanceErrorCode:
 		if increment.LLMCalls == 0 || increment.ToolCalls != 0 {
-			return snapshot, ErrInvalidCallAllowance
+			return snapshot, agentControlNoEffect(ErrInvalidCallAllowance)
 		}
 	case toolAllowanceErrorCode:
 		if increment.ToolCalls == 0 || increment.LLMCalls != 0 {
-			return snapshot, ErrInvalidCallAllowance
+			return snapshot, agentControlNoEffect(ErrInvalidCallAllowance)
 		}
 	default:
-		return snapshot, ErrRunNotBudgetPaused
+		return snapshot, agentControlNoEffect(ErrRunNotBudgetPaused)
 	}
 	next := *state.CallAllowance
 	if increment.LLMCalls > state.Budget.Limits.MaxLLMCalls-next.LLMCalls ||
 		increment.ToolCalls > state.Budget.Limits.MaxToolCalls-next.ToolCalls {
-		return snapshot, ErrInvalidCallAllowance
+		return snapshot, agentControlNoEffect(ErrInvalidCallAllowance)
 	}
 	next.LLMCalls += increment.LLMCalls
 	next.ToolCalls += increment.ToolCalls
 	state.CallAllowance = &next
 	encoded, err := encodeState(state)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return kernel.Snapshot{}, agentControlNoEffect(err)
 	}
 	// Durable wakeup is committed with the CAS; stale worker deliveries are
 	// filtered by ExpectedRevision before any additional model/Tool dispatch.

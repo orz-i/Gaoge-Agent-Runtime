@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -144,9 +145,19 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 	snapshot, physicalErr := physical()
 	if snapshot.Run.ID == "" {
 		// An arbitrary Feature may have dispatched remote side effects
-		// before reporting kernel.ErrConflict or ErrNotFound. Neither
-		// sentinel, absent a real Kernel Run snapshot, proves no-effect.
-		// Keep the durable grant until authoritative reconciliation.
+		// before returning a generic error, including a Kernel CAS conflict.
+		// Only the concrete first-party Agent control can certify that its
+		// own preflight failed BEFORE invoking middleware or ApplyControl.
+		// Never accept that marker from a custom wrapper or from a general
+		// physical Start/Resume path.
+		_, nativeAgent := runner.agent.(*agent.Runner)
+		control := phase == "resolve-approval" || phase == "resolve-subtask-approval" ||
+			phase == "grant-call-allowance"
+		if nativeAgent && control && agent.IsNativeControlNoEffect(physicalErr) {
+			return snapshot, errors.Join(physicalErr,
+				runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_control_no_effect"))
+		}
+		// Unknown effects retain the grant for explicit reconciliation.
 		return snapshot, physicalErr
 	}
 	if snapshot.Run.ID != resultRunID {

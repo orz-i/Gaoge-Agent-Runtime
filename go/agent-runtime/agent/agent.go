@@ -47,6 +47,12 @@ var (
 	ErrUsageUnavailable         = errors.New("agent model usage unavailable for configured token budget")
 	ErrApprovalRequired         = errors.New("agent run approval is required")
 	ErrRunTerminal              = errors.New("agent run is terminal")
+	// ErrControlNoEffect is returned by native Agent controls only when the
+	// current attempt failed BEFORE approval middleware/physical dispatch or
+	// Kernel ApplyControl. It proves nothing about earlier attempts or
+	// independently running external work. Never attach it to uncertain
+	// post-dispatch outcomes.
+	ErrControlNoEffect = errors.New("agent control did not dispatch an effect")
 )
 
 func (runner *Runner) completeWithToolResult(
@@ -639,18 +645,20 @@ func (runner *Runner) ResolveApproval(
 	response plugin.ApprovalResponse,
 ) (kernel.Snapshot, error) {
 	if runner == nil || runner.approvals == nil {
-		return kernel.Snapshot{}, ErrApprovalRequired
+		return kernel.Snapshot{}, agentControlNoEffect(ErrApprovalRequired)
 	}
 	snapshot, state, err := runner.loadState(ctx, runID)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return kernel.Snapshot{}, agentControlNoEffect(err)
 	}
 	if snapshot.Run.Revision != expectedRevision {
-		return kernel.Snapshot{}, kernel.ErrConflict
+		return kernel.Snapshot{}, agentControlNoEffect(kernel.ErrConflict)
 	}
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput || len(state.PendingCalls) == 0 {
-		return kernel.Snapshot{}, ErrApprovalRequired
+		return kernel.Snapshot{}, agentControlNoEffect(ErrApprovalRequired)
 	}
+	// From this boundary onward a Run middleware, approval handler or
+	// Model/Tool may perform effects; no generic return error proves no-effect.
 	invocation := runInvocation(plugin.RunResolveApproval, snapshot)
 	return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 		return runner.resolveApproval(nextCtx, snapshot, state, response)
