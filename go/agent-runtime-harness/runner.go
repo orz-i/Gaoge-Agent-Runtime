@@ -236,10 +236,12 @@ func (runner *Runner) ResolveApproval(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	resolved, resolveErr := runner.agent.ResolveApproval(
-		runCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
-		plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)},
-	)
+	resolved, resolveErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", func() (kernel.Snapshot, error) {
+		return runner.agent.ResolveApproval(
+			runCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
+			plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)},
+		)
+	})
 	if resolved.Run.ID == "" {
 		return Snapshot{}, resolveErr
 	}
@@ -892,7 +894,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			if checkErr := runner.checkInteractionCancellation(ctx, turn, ""); checkErr != nil {
 				return checkErr
 			}
-			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil)
+			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
 			if checkErr != nil {
 				return checkErr
 			}
@@ -905,7 +907,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
 				return checkErr
 			}
-			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil)
+			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
 			if checkErr != nil {
 				return checkErr
 			}

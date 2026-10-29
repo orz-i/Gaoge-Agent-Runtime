@@ -77,6 +77,21 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 	if _, err = second.UpdateInvocation(t.Context(), invocation, invocation.Revision); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("remote callback CAS accepted across fence: %v", err)
 	}
+	for _, phase := range []string{"resolve-approval", "resolve-subtask-approval", "grant-call-allowance"} {
+		// The distinct DB handle must never commit a physical control
+		// authorization while the other process owns cancellation.
+		grant := harness.Item{
+			ID: "pg_cancel_control_" + phase, TurnID: turn.ID,
+			InvocationID: invocation.ID, RunID: invocation.ExecutionRefID,
+			Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
+			ParentItemID: harness.ExecutionDispatchParentItemID,
+			Payload:      json.RawMessage(`{"phase":"` + phase + `","physicalRunID":"child-agent-run"}`),
+			CreatedAt:    now, UpdatedAt: now,
+		}
+		if _, _, err = second.AppendItem(t.Context(), grant); !errors.Is(err, harness.ErrConflict) {
+			t.Fatalf("remote %s bypassed committed cancellation intent: %v", phase, err)
+		}
+	}
 	closed := harness.Item{
 		ID: "pg_fence_settled", TurnID: turn.ID, Kind: harness.ItemDiagnostic,
 		Status: harness.ItemCompleted, ParentItemID: intent.ID,

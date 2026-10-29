@@ -106,3 +106,50 @@ func TestSQLPhysicalDispatchGrantCompetesWithCancellation(t *testing.T) {
 		t.Fatalf("released physical and cancellation grants did not reopen admission: fresh=%v err=%v", fresh, err)
 	}
 }
+
+// Physical control commands use the same Turn lock as cancellation intents.
+func TestSQLApprovalAndAllowanceDispatchClaimsCompeteWithCancellation(t *testing.T) {
+	for _, phase := range []string{"resolve-approval", "resolve-subtask-approval", "grant-call-allowance"} {
+		t.Run(phase, func(t *testing.T) {
+			store := newStore(t)
+			turn, owner, _ := createWaitingInteractionFixture(t, store, "control_"+phase)
+			now := time.Now().UTC()
+			cancel := harness.Item{
+				ID: "sql_control_cancel", TurnID: turn.ID, RunID: owner.ExecutionRefID,
+				Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
+				ParentItemID: harness.CancellationFenceParentItemID,
+				Payload:      json.RawMessage("{\"boundary\":\"cancel_scope_pending\"}"),
+				CreatedAt:    now, UpdatedAt: now,
+			}
+			if _, fresh, err := store.AppendItem(t.Context(), cancel); err != nil || !fresh {
+				t.Fatalf("cancel intent fresh=%v err=%v", fresh, err)
+			}
+			grant := harness.Item{
+				ID: "sql_control_grant", TurnID: turn.ID, InvocationID: owner.ID, RunID: owner.ExecutionRefID,
+				Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
+				ParentItemID: harness.ExecutionDispatchParentItemID,
+				Payload:      json.RawMessage("{\"phase\":\"" + phase + "\",\"physicalRunID\":\"delegated-agent-run\"}"),
+				CreatedAt:    now, UpdatedAt: now,
+			}
+			if _, _, err := store.AppendItem(t.Context(), grant); !errors.Is(err, harness.ErrConflict) {
+				t.Fatalf("control %s crossed cancel intent: %v", phase, err)
+			}
+			if _, _, err := store.AppendItem(t.Context(), harness.Item{
+				ID: "sql_control_cancel_closed", TurnID: turn.ID, Kind: harness.ItemDiagnostic,
+				Status: harness.ItemCompleted, ParentItemID: cancel.ID,
+				Payload:   json.RawMessage("{\"boundary\":\"cancel_scope_settled\"}"),
+				CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, fresh, err := store.AppendItem(t.Context(), grant); err != nil || !fresh {
+				t.Fatalf("settled cancel should grant %s: fresh=%v err=%v", phase, fresh, err)
+			}
+			other := grant
+			other.ID = "sql_control_second_grant"
+			if _, _, err := store.AppendItem(t.Context(), other); !errors.Is(err, harness.ErrConflict) {
+				t.Fatalf("control %s concurrently admitted twice: %v", phase, err)
+			}
+		})
+	}
+}

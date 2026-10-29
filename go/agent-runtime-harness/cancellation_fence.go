@@ -133,7 +133,7 @@ func (runner *Runner) inspectRelatedCancellation(ctx context.Context, turn Turn,
 			return nil, ErrConflict
 		}
 	}
-	if pending, err := runner.pendingExecutionDispatch(ctx, turn.ID, targetInvocations); err != nil {
+	if pending, err := runner.pendingExecutionDispatch(ctx, turn.ID, targetInvocations, affected); err != nil {
 		return nil, err
 	} else if pending {
 		return nil, ErrConflict

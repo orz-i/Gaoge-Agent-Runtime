@@ -986,7 +986,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	}()
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
 	}
 	if !found {
 		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)

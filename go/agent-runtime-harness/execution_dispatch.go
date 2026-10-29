@@ -37,7 +37,9 @@ func PendingExecutionDispatch(items []Item, invocationID string) bool {
 	return false
 }
 
-func (runner *Runner) pendingExecutionDispatch(ctx context.Context, turnID string, targets map[string]struct{}) (bool, error) {
+func (runner *Runner) pendingExecutionDispatch(
+	ctx context.Context, turnID string, targets map[string]struct{}, targetRuns map[string]struct{},
+) (bool, error) {
 	items, err := listAllItems(ctx, runner.store, turnID)
 	if err != nil {
 		return false, err
@@ -53,19 +55,24 @@ func (runner *Runner) pendingExecutionDispatch(ctx context.Context, turnID strin
 			item.ParentItemID != ExecutionDispatchParentItemID {
 			continue
 		}
-		if targets != nil {
-			if _, involved := targets[item.InvocationID]; !involved {
-				continue
-			}
-		}
 		if _, done := closed[item.ID]; done {
 			continue
 		}
 		var phase struct {
-			Phase string `json:"phase"`
+			Phase         string `json:"phase"`
+			PhysicalRunID string `json:"physicalRunID"`
 		}
-		if json.Unmarshal(item.Payload, &phase) == nil &&
-			(phase.Phase == "start" || phase.Phase == "start-retry") {
+		if json.Unmarshal(item.Payload, &phase) != nil {
+			return false, ErrConflict
+		}
+		if targets != nil {
+			_, matchedOwner := targets[item.InvocationID]
+			_, matchedRun := targetRuns[phase.PhysicalRunID]
+			if !matchedOwner && (phase.PhysicalRunID == "" || !matchedRun) {
+				continue
+			}
+		}
+		if phase.Phase == "start" || phase.Phase == "start-retry" {
 			// A Kernel Run that is already durably running/completed belongs
 			// to Kernel control, whose cancellation CAS can now fence it.
 			// Before the Run exists, the Feature may still be about to
@@ -108,8 +115,9 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 		return kernel.Snapshot{}, err
 	}
 	payload, err := json.Marshal(struct {
-		Phase string `json:"phase"`
-	}{Phase: phase})
+		Phase         string `json:"phase"`
+		PhysicalRunID string `json:"physicalRunID,omitempty"`
+	}{Phase: phase, PhysicalRunID: resultRunID})
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
