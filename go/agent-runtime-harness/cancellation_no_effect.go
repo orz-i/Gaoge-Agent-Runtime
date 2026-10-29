@@ -26,12 +26,12 @@ const noEffectCancellationRecoveryTimeout = 5 * time.Second
 
 // releaseNoEffectCancellation retires this attempt's cancellation intent
 // only after proof that the TARGET cancellation did not enter physical cleanup.
-// The native Kernel's direct pre-Store proof, or a Harness-minted proof
-// from its own failed read before calling a native canceller, is trusted for
-// any recognized nonterminal Run. A custom RuntimeCanceller's historical
-// ErrConflict no-effect contract
-// remains limited to running Runs. Budget or Interaction mutations, a terminal
-// target, partial descendant cleanup and uncertain Store outcomes stay fenced.
+// A Harness-minted direct proof from its own failed read before calling
+// ANY canceller is trusted for recognized nonterminal Runs. The native
+// Kernel's direct pre-Store proof has the same scope. A custom Canceller's
+// ErrConflict result after the callback starts remains limited to running
+// Runs. Budget/Interaction mutations, terminal Runs, partial cleanup and
+// unknown Store outcomes stay fenced.
 //
 // Custom RuntimeCanceller implementations MUST reserve kernel.ErrConflict for
 // attempts with absolutely no remote cleanup; other outcomes must remain
@@ -41,10 +41,11 @@ func (runner *Runner) releaseNoEffectCancellation(
 	ctx context.Context, turn Turn, intent Item, runID string, cause error,
 ) error {
 	_, nativeKernel := runner.cancellation.(*kernel.Runtime)
-	_, preflightRead := cause.(cancellationReadNoEffect) //nolint:errorlint // Reject wrapped or Store-produced claims.
-	nativeNoEffect := nativeKernel && (kernel.IsControlNoEffect(cause) || preflightRead)
-	customNoEffect := !nativeKernel && errors.Is(cause, kernel.ErrConflict)
-	if !nativeNoEffect && !customNoEffect {
+	_, preflightRead := cause.(cancellationReadNoEffect) //nolint:errorlint // Only a direct Harness-minted proof is valid.
+	nativeNoEffect := nativeKernel && kernel.IsControlNoEffect(cause)
+	preDispatchNoEffect := preflightRead || nativeNoEffect
+	customNoEffect := !preflightRead && !nativeKernel && errors.Is(cause, kernel.ErrConflict)
+	if !preDispatchNoEffect && !customNoEffect {
 		return cause
 	}
 	// This cancellation attempt is known not to have entered a physical
@@ -65,7 +66,7 @@ func (runner *Runner) releaseNoEffectCancellation(
 	if err != nil || run.Run.ID != runID || terminalRuntimeStatus(run.Run.Status) {
 		return errors.Join(cause, err)
 	}
-	if nativeNoEffect && run.Run.Status != kernel.RunStatusRunning &&
+	if preDispatchNoEffect && run.Run.Status != kernel.RunStatusRunning &&
 		run.Run.Status != kernel.RunStatusPausedBudget &&
 		run.Run.Status != kernel.RunStatusWaitingInput {
 		return cause

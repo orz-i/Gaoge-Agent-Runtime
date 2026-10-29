@@ -40,14 +40,11 @@ func (runner *Runner) cancelRuntimeRun(
 			return kernel.Snapshot{}, false, nil
 		}
 		if err != nil {
-			if nativeKernel {
-				// This was the Harness's own read-only admission check,
-				// before any RuntimeCanceller was called. Retain a direct,
-				// Harness-minted proof without trusting the Store's error
-				// as evidence of any write-capable control outcome.
-				return kernel.Snapshot{}, false, cancellationReadNoEffect{cause: err}
-			}
-			return kernel.Snapshot{}, false, err
+			// This is a Harness-owned read-only check before calling ANY
+			// RuntimeCanceller, native or custom. The private direct proof
+			// certifies only that no cancellation callback ran in this
+			// attempt; the underlying Store error proves nothing itself.
+			return kernel.Snapshot{}, false, cancellationReadNoEffect{cause: err}
 		}
 		if terminalRuntimeStatus(current.Run.Status) {
 			return current, true, nil
