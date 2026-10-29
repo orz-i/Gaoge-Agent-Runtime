@@ -156,12 +156,24 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 	}
 	record.Revision = expectedRevision + 1
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if value.Status == harness.InvocationRunning {
+		if value.Status == harness.InvocationRunning || value.Status == harness.InvocationFailed {
+			// Failed projection must not outrun a new physical Start after
+			// the prior attempt's no-effect receipt closes its grant.
 			if lockErr := lockAdmissionTurn(tx, value.TurnID); lockErr != nil {
 				return lockErr
 			}
-			if checkErr := checkCancellationFenceTx(tx, value.TurnID); checkErr != nil {
-				return checkErr
+			if value.Status == harness.InvocationRunning {
+				if checkErr := checkCancellationFenceTx(tx, value.TurnID); checkErr != nil {
+					return checkErr
+				}
+			} else {
+				pending, checkErr := pendingExecutionDispatchTx(tx, value.TurnID, value.ID)
+				if checkErr != nil {
+					return checkErr
+				}
+				if pending {
+					return harness.ErrConflict
+				}
 			}
 		}
 		result := tx.Model(&invocationRecord{}).
@@ -213,6 +225,20 @@ func (store *Store) RetryInvocation(
 		}
 		if checkErr := checkCancellationFenceTx(tx, current.TurnID); checkErr != nil {
 			return checkErr
+		}
+		// A failed projection cannot rotate a Run identity whose physical
+		// Start/Resume is still outcome-unknown. The Turn lock serializes this
+		// check with grant append and completion on every SQL connection.
+		scopeID := current.ID
+		if strings.TrimSpace(current.ParentItemID) == "" {
+			scopeID = "" // Root retry owns every unfinished child dispatch.
+		}
+		pending, pendingErr := pendingExecutionDispatchTx(tx, current.TurnID, scopeID)
+		if pendingErr != nil {
+			return pendingErr
+		}
+		if pending {
+			return harness.ErrConflict
 		}
 		if strings.TrimSpace(current.ParentItemID) == "" {
 			result := tx.Model(&turnRecord{}).

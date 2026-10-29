@@ -657,7 +657,9 @@ var errRejectedTopLevelWorkflow = errors.New("rejected before runtime create")
 type rejectedWorkflowFeature struct{}
 
 func (rejectedWorkflowFeature) StartRun(context.Context, workflow.StartRequest) (kernel.Snapshot, error) {
-	return kernel.Snapshot{}, errRejectedTopLevelWorkflow
+	// The fixture explicitly certifies pre-dispatch rejection; a bare Feature
+	// error is no longer proof that a remote execution never started.
+	return kernel.Snapshot{}, harness.FeatureStartNoEffect(errRejectedTopLevelWorkflow)
 }
 
 func (rejectedWorkflowFeature) Resume(context.Context, string, uint64) (kernel.Snapshot, error) {

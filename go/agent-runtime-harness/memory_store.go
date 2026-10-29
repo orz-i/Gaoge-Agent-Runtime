@@ -116,6 +116,12 @@ func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, 
 		ActiveCancellationFence(store.items[value.TurnID]) {
 		return Invocation{}, ErrConflict
 	}
+	// A verified no-effect Start can finish its grant just before another
+	// worker takes the next physical grant. Marking Failed must compete with
+	// that admission under the same mutex, not terminalize the new owner.
+	if value.Status == InvocationFailed && PendingExecutionDispatch(store.items[value.TurnID], value.ID) {
+		return Invocation{}, ErrConflict
+	}
 	value.Revision = expectedRevision + 1
 	store.invocations[value.ID] = cloneInvocation(value)
 	return cloneInvocation(value), nil
@@ -139,8 +145,13 @@ func (store *MemoryStore) RetryInvocation(
 	if !ok {
 		return Invocation{}, ErrNotFound
 	}
+	scopeID := current.ID
+	if current.ParentItemID == "" {
+		scopeID = "" // Root retry cannot invalidate unfinished descendant effects.
+	}
 	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
-		ActiveCancellationFence(store.items[current.TurnID]) {
+		ActiveCancellationFence(store.items[current.TurnID]) ||
+		PendingExecutionDispatch(store.items[current.TurnID], scopeID) {
 		return Invocation{}, ErrConflict
 	}
 	var rootTurn Turn

@@ -10,6 +10,44 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
+// ErrExecutionNoEffect may be returned by a host Feature StartRun ONLY when
+// the Feature can certify it issued no external effect and created no Kernel
+// Run. A generic error (including kernel.ErrConflict) is never such proof.
+// It permits a failed Invocation only after the Harness persists the grant's
+// no-effect completion receipt, so an uncertain receipt remains fenced.
+var ErrExecutionNoEffect = errors.New("harness feature start definitively performed no effect")
+
+// FeatureStartNoEffect preserves the original, host-visible failure while
+// explicitly certifying that StartRun did not create a Run or dispatch an
+// external effect. Hosts must never use it for timeouts or unknown outcomes.
+func FeatureStartNoEffect(cause error) error {
+	if cause == nil {
+		return ErrExecutionNoEffect
+	}
+	return featureStartNoEffect{cause: cause}
+}
+
+type featureStartNoEffect struct{ cause error }
+
+func (e featureStartNoEffect) Error() string      { return e.cause.Error() }
+func (e featureStartNoEffect) Unwrap() error      { return e.cause }
+func (featureStartNoEffect) Is(target error) bool { return target == ErrExecutionNoEffect }
+
+// ErrExecutionOutcomeUnknown means a Feature Start returned no authoritative
+// Kernel Run snapshot without a proven no-effect outcome. The original Run ID
+// and grant must be retained for reconciliation; Retry cannot rotate them.
+var ErrExecutionOutcomeUnknown = errors.New("harness physical feature start outcome is unknown")
+
+type dispatchProvenNoEffect struct{ cause error }
+
+func (e dispatchProvenNoEffect) Error() string { return e.cause.Error() }
+func (e dispatchProvenNoEffect) Unwrap() error { return e.cause }
+
+func isDispatchProvenNoEffect(err error) bool {
+	_, ok := err.(dispatchProvenNoEffect) //nolint:errorlint // Direct Harness-minted proof, not a wrapped error.
+	return ok
+}
+
 // ExecutionDispatchParentItemID marks a physical Feature Start/Resume grant.
 // New grants and cancellation intents serialize at the same existing Turn
 // Store boundary. An unfinished grant prevents a competing cancellation from
@@ -157,8 +195,19 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 			return snapshot, errors.Join(physicalErr,
 				runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_control_no_effect"))
 		}
-		// Unknown effects retain the grant for explicit reconciliation.
-		return snapshot, physicalErr
+		// Only a Feature's explicit zero-effect contract can classify a Start
+		// failure as terminal. The completion receipt must durably close the
+		// grant first; an unknown/lost ACK keeps the original Invocation.
+		if (phase == "start" || phase == "start-retry") && errors.Is(physicalErr, ErrExecutionNoEffect) {
+			if receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "feature_start_no_effect"); receiptErr == nil {
+				return snapshot, dispatchProvenNoEffect{cause: physicalErr}
+			} else {
+				return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
+			}
+		}
+		// Unknown effects retain the grant and its exact execution identity
+		// for explicit reconciliation, including errors without a snapshot.
+		return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr)
 	}
 	if snapshot.Run.ID != resultRunID {
 		return snapshot, errors.Join(physicalErr, ErrConflict)
@@ -220,12 +269,17 @@ func (runner *Runner) finishPhysicalDispatchGrant(ctx context.Context, grant Ite
 	if err != nil {
 		return err
 	}
-	_, _, err = runner.store.AppendItem(context.WithoutCancel(ctx), Item{
+	// The caller may have disconnected while the physical Feature returned.
+	// Preserve the completion opportunity, but never wait unboundedly on a
+	// blocked Store row. An expired/lost ACK is not a settled grant.
+	settlementCtx, stopSettlement := cancellationSettlementContext(ctx)
+	defer stopSettlement()
+	_, _, err = runner.store.AppendItem(settlementCtx, Item{
 		ID: stableID("hdispatchdone", grant.ID), TurnID: grant.TurnID,
 		InvocationID: grant.InvocationID, RunID: grant.RunID,
 		Kind: ItemDiagnostic, Status: ItemCompleted,
 		ParentItemID: grant.ID,
 		Payload:      payload, CreatedAt: now, UpdatedAt: now,
 	})
-	return err
+	return errors.Join(err, settlementCtx.Err())
 }

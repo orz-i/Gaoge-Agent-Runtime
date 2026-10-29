@@ -515,6 +515,9 @@ func (runner *Runner) finishTopLevelFeatureStart(
 				return recovered, nil
 			}
 		}
+		if !isDispatchProvenNoEffect(startErr) {
+			return Snapshot{}, startErr
+		}
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
 		return failed, errors.Join(startErr, failErr)
 	}
@@ -1125,6 +1128,11 @@ func (runner *Runner) finishChildInvocationStart(
 	startErr error,
 ) (Snapshot, error) {
 	if runtimeSnapshot.Run.ID == "" {
+		if !isDispatchProvenNoEffect(startErr) {
+			// An accepted child with an unknown remote Start must retain its
+			// execution reference and unresolved grant, not become retryable.
+			return Snapshot{}, startErr
+		}
 		return runner.failChildInvocation(ctx, turn, invocation, startErr)
 	}
 	snapshot, syncErr := runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)

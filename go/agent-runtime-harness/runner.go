@@ -128,6 +128,9 @@ func (runner *Runner) resumeDirectAgentStart(
 		})
 	})
 	if runtimeSnapshot.Run.ID == "" {
+		if !isDispatchProvenNoEffect(startErr) {
+			return Snapshot{}, startErr
+		}
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
 		return failed, errors.Join(startErr, failErr)
 	}
@@ -720,6 +723,12 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 			if recoverErr == nil && recovered.Turn.Status == TurnCancelled {
 				return recovered, nil
 			}
+		}
+		// Another Start may hold the grant, or a physical feature may have
+		// returned an outcome-unknown error. Neither authorizes marking its
+		// Invocation/Turn Failed while the original effect could still run.
+		if !isDispatchProvenNoEffect(startErr) {
+			return Snapshot{}, startErr
 		}
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, startErr)
 		return failed, errors.Join(startErr, failErr)
