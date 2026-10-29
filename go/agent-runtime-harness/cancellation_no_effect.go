@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -17,6 +18,11 @@ type cancellationReadNoEffect struct{ cause error }
 
 func (failure cancellationReadNoEffect) Error() string { return failure.cause.Error() }
 func (failure cancellationReadNoEffect) Unwrap() error { return failure.cause }
+
+// noEffectCancellationRecoveryTimeout bounds independent verification and
+// durable intent completion after a request context is already cancelled.
+// The deadline applies to all of these operations as one recovery attempt.
+const noEffectCancellationRecoveryTimeout = 5 * time.Second
 
 // releaseNoEffectCancellation retires this attempt's cancellation intent
 // only after proof that the TARGET cancellation did not enter physical cleanup.
@@ -41,15 +47,21 @@ func (runner *Runner) releaseNoEffectCancellation(
 	if !nativeNoEffect && !customNoEffect {
 		return cause
 	}
-	ledger, err := runner.loadTurnBudget(ctx, turn)
+	// This cancellation attempt is known not to have entered a physical
+	// Store write/cleanup, but the request may now be cancelled or expired.
+	// Validate ALL remaining safety conditions on an independent, bounded
+	// context. Never use the detached context on an outcome-unknown error.
+	recoveryCtx, stopRecovery := context.WithTimeout(context.WithoutCancel(ctx), noEffectCancellationRecoveryTimeout)
+	defer stopRecovery()
+	ledger, err := runner.loadTurnBudget(recoveryCtx, turn)
 	if err != nil || ledger != nil {
 		return errors.Join(cause, err)
 	}
-	interactions, err := runner.store.ListInteractions(ctx, turn.ID)
+	interactions, err := runner.store.ListInteractions(recoveryCtx, turn.ID)
 	if err != nil || len(interactions) != 0 {
 		return errors.Join(cause, err)
 	}
-	run, err := runner.runtime.Load(ctx, runID)
+	run, err := runner.runtime.Load(recoveryCtx, runID)
 	if err != nil || run.Run.ID != runID || terminalRuntimeStatus(run.Run.Status) {
 		return errors.Join(cause, err)
 	}
@@ -63,7 +75,15 @@ func (runner *Runner) releaseNoEffectCancellation(
 		// accepting other statuses requires a native Kernel proof.
 		return cause
 	}
-	if closeErr := runner.finishCancellationFence(context.WithoutCancel(ctx), intent); closeErr != nil {
+	// A custom Store may ignore a Context deadline and return a late
+	// snapshot without an error. Do not treat that stale verification as
+	// authority to complete the cancellation intent.
+	if recoveryErr := recoveryCtx.Err(); recoveryErr != nil {
+		return errors.Join(cause, recoveryErr)
+	}
+	// Closing the intent is part of the SAME bounded recovery window as
+	// verification; an expired or rejected receipt never releases authority.
+	if closeErr := runner.finishCancellationFence(recoveryCtx, intent); closeErr != nil {
 		return errors.Join(cause, closeErr)
 	}
 	// Preserve the direct native proof for callers which need its exact
