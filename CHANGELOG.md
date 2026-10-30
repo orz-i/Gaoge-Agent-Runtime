@@ -5,6 +5,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Fence child Harness Invocation retries against terminal Kernel parents
+  and finished intermediate Invocation ancestry before Retry CAS, preserving
+  retry identity and valid Host-only Application children.
+
 - Remove top-level Harness RetryInvocation fallback to mutable Session
   identity; require exact frozen Actor and Kernel Thread before allocating
   another execution attempt, with negative persistence tests.

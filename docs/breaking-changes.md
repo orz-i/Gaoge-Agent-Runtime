@@ -2,6 +2,29 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Child retry parent liveness before Attempt CAS (beta.24 candidate)
+
+**Correction:** A failed/cancelled child `RetryInvocation` can no longer
+rotate its persisted `Attempt` / `ExecutionRefID` while its parent Kernel Run
+has already terminated, even when the product-level Turn still says Running.
+The exact Parent Item ancestry and owning Harness Invocations must also
+remain live: a terminal intermediate parent invalidates a descendant retry.
+
+Harness now validates that ancestry before Store `RetryInvocation`, not only
+later inside its durable physical-dispatch callback. A known-dead parent
+returns `harness.ErrConflict` without consuming an Attempt, creating an
+unreachable Accepted Invocation, or issuing a new physical Run. The
+existing **post-grant** ancestry fence still rejects parent cancellation
+racing the preflight; this separate Kernel/Host Store read is not asserted
+to be an atomic cross-database transaction.
+
+Application capabilities are Host effects without a Kernel Run. Child
+Application retries still validate their Host Invocation ancestors, but
+are **not** required to load an imaginary Application Runtime Run. Existing
+valid child Team/Workflow/Application retries retain their input, retry
+identity and parent relation contracts. No new public Driver, synthetic
+parent status, SQL DDL, Schema version or old-protocol fallback is added.
+
 ## 2026-10-30 — Frozen root retry execution identity (beta.24 candidate)
 
 **Removed:** Harness top-level `RetryInvocation` no longer reconstructs a missing

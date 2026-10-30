@@ -738,6 +738,20 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 		if _, _, err := frozenTopLevelInvocationIdentity(invocation); err != nil {
 			return Snapshot{}, err
 		}
+	} else {
+		// A child retry has no authority to rotate its Run when the parent
+		// Kernel Run or any intermediate Invocation has already terminated.
+		// Application children have no Kernel Run of their own and can be
+		// nested under an Application root, so only native Features require
+		// the root Runtime context in addition to the shared ancestry guard.
+		if invocation.ExecutionClass != ExecutionApplication {
+			if _, err := runner.childInvocationContext(ctx, turn.ID, invocation.ParentItemID); err != nil {
+				return Snapshot{}, err
+			}
+		}
+		if err := runner.requireLiveInvocationParents(ctx, invocation); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	return runner.startNextInvocationAttempt(ctx, turn, invocation)
 }
