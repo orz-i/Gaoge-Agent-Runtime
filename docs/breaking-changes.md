@@ -2,6 +2,75 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Application child post-claim ancestor fence (beta.24 candidate)
+
+**Independent PR #76 review correction:** In contrast to Team, Workflow or Agent,
+a Host-only Application capability does not have a Kernel Run and does not
+pass through the generic physical Feature dispatch grant. Consequently its
+parent-liveness check before `RetryInvocation` CAS was insufficient: the
+parent could terminate after the new Attempt was persisted, or after the
+Application's `Accepted -> Running` claim was committed, yet the Host
+Executor callback still ran under the stale child.
+
+The Application effect boundary now checks exact parent Item/Invocation/
+Kernel ancestry immediately before `Accepted -> Running` and **again after**
+that claim, immediately before calling `ExecuteApplicationCapability`.
+A pre-claim rejection leaves the original Accepted Attempt untouched;
+a post-claim rejection has affirmative proof that no Host callback was
+invoked, records that claimed Attempt as Failed with a no-effect cause,
+and does not fabricate a business receipt or reissue an effect.
+
+Two deterministic interleavings, paused after Retry Attempt CAS and
+after Application effect-claim CAS respectively, reproduce incorrect
+physical dispatch on the initial PR Head and pass with the correction.
+The post-claim, pre-callback check still cannot be atomic with an unrelated
+Kernel parent completing a moment later; Host policy must retain the
+already documented cancellation and reconciliation boundaries. No new
+Application protocol/SQL schema/Kernel status is introduced.
+
+## 2026-10-30 — Child retry parent liveness before Attempt CAS (beta.24 candidate)
+
+**Correction:** A failed/cancelled child `RetryInvocation` can no longer
+rotate its persisted `Attempt` / `ExecutionRefID` while its parent Kernel Run
+has already terminated, even when the product-level Turn still says Running.
+The exact Parent Item ancestry and owning Harness Invocations must also
+remain live: a terminal intermediate parent invalidates a descendant retry.
+
+Harness now validates that ancestry before Store `RetryInvocation`, not only
+later inside its durable physical-dispatch callback. A known-dead parent
+returns `harness.ErrConflict` without consuming an Attempt, creating an
+unreachable Accepted Invocation, or issuing a new physical Run. The
+existing **post-grant** ancestry fence still rejects parent cancellation
+racing the preflight; this separate Kernel/Host Store read is not asserted
+to be an atomic cross-database transaction.
+
+Application capabilities are Host effects without a Kernel Run. Child
+Application retries still validate their Host Invocation ancestors, but
+are **not** required to load an imaginary Application Runtime Run. Existing
+valid child Team/Workflow/Application retries retain their input, retry
+identity and parent relation contracts. No new public Driver, synthetic
+parent status, SQL DDL, Schema version or old-protocol fallback is added.
+
+## 2026-10-30 — Frozen root retry execution identity (beta.24 candidate)
+
+**Removed:** Harness top-level `RetryInvocation` no longer reconstructs a missing
+frozen Actor or Kernel Thread from `Session.Actor` / `Session.HostThread`.
+A Host Thread is a product-level identity, not permission to replace a
+persisted Kernel Thread during a new physical Run attempt.
+
+A retryable root Invocation (Agent, Team, GroupChat, Workflow or Application)
+must have valid, matching `Input`/`InputHash` evidence and a nonempty, valid
+Actor and Kernel Thread. Missing, malformed or mismatched frozen evidence
+fails closed with `harness.ErrConflict` **before** Store `RetryInvocation`
+rotates `ExecutionRefID` or reopens the Turn. The typed Feature dispatch path
+checks the same frozen fields after the attempt is accepted. A historical
+pre-hard-cut Invocation without that identity must be inspected and
+drained/quarantined; it is not silently upgraded from the Session.
+
+No new persisted fields, schema number, Session lookup or compatibility
+migration is introduced. Current valid typed root retries retain their
+existing deterministic Run identities and execution behavior.
+
 ## 2026-10-30 — Hosted Tool terminal receipts fail closed (beta.24 candidate)
 
 **Removed:** The empty string Hosted Tool status is no longer a legacy terminal
