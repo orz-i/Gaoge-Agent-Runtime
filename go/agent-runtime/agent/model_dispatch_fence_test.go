@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -246,6 +247,73 @@ func (*alternateNamedInvocationModel) ProviderName() string { return "other-prov
 func (client *alternateNamedInvocationModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	client.requests = append(client.requests, model.CloneRequest(request))
 	return model.Response{Content: "wrong provider"}, nil
+}
+
+// This replacement keeps the exact Provider name while changing only the
+// immutable binding fingerprint (endpoint/credentials/Host policy).
+type retargetedNamedInvocationModel struct{ invocationRecordingModel }
+
+func (*retargetedNamedInvocationModel) BindingFingerprintForRequest(model.Request) string {
+	return strings.Repeat("b", 64)
+}
+
+type missingNamedBindingInvocationModel struct{ invocationRecordingModel }
+
+func (*missingNamedBindingInvocationModel) BindingFingerprintForRequest(model.Request) string {
+	return ""
+}
+
+func TestPendingModelInvocationRejectsSameNamedChangedBindingFingerprint(t *testing.T) {
+	store := memory.NewStore()
+	faults := &modelInvocationFaultStore{Store: store, eventType: "agent.model_invocation.pending", afterCommit: true}
+	first, err := agent.NewRunner(agent.Dependencies{
+		Runtime: newModelInvocationRuntime(t, faults), Model: &invocationRecordingModel{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := startRequest("same-name-provider-binding", "same-name-provider-request", "complete")
+	_, err = first.StartRun(t.Context(), request)
+	if !errors.Is(err, errInjectedModelInvocationCrash) {
+		t.Fatalf("pending request was not committed before simulated crash: %v", err)
+	}
+	runtime := newModelInvocationRuntime(t, store)
+	pending := mustLoadModelInvocationRun(t, runtime, request.ID)
+	before := mustModelInvocationView(t, pending)
+	if len(before.ModelInvocations) != 1 || before.ModelInvocations[0].Provider != "fault-test-provider" ||
+		before.ModelInvocations[0].BindingFingerprint != strings.Repeat("a", 64) {
+		t.Fatalf("binding was not persisted: %+v", before.ModelInvocations)
+	}
+	for _, replacement := range []model.Client{&retargetedNamedInvocationModel{}, &missingNamedBindingInvocationModel{}} {
+		restarted, newErr := agent.NewRunner(agent.Dependencies{
+			Runtime: runtime, Model: replacement, Clock: modelInvocationClock{offset: 3 * time.Minute},
+		})
+		if newErr != nil {
+			t.Fatal(newErr)
+		}
+		_, resumeErr := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+		if !errors.Is(resumeErr, agent.ErrInvalidRequest) {
+			t.Fatalf("unverified binding was allowed to dispatch: %v", resumeErr)
+		}
+	}
+	unmodified := mustLoadModelInvocationRun(t, runtime, request.ID)
+	if unmodified.Run.Revision != pending.Run.Revision {
+		t.Fatalf("rejected binding mutated persisted pending work: before=%d after=%d", pending.Run.Revision, unmodified.Run.Revision)
+	}
+}
+
+func TestNamedProviderWithoutBindingFingerprintRejectsNewModelIntent(t *testing.T) {
+	provider := &missingNamedBindingInvocationModel{}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: newModelInvocationRuntime(t, memory.NewStore()), Model: provider,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.StartRun(t.Context(), startRequest("missing-binding", "missing-binding-request", "complete"))
+	if !errors.Is(err, agent.ErrInvalidRequest) || len(provider.callsCopy()) != 0 {
+		t.Fatalf("missing named binding authorized generation: err=%v calls=%+v", err, provider.callsCopy())
+	}
 }
 
 func TestPendingModelInvocationRejectsChangedProviderBinding(t *testing.T) {

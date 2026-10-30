@@ -44,8 +44,12 @@ type ModelInvocation struct {
 	// CatalogFingerprints bind each model-visible Tool to its original Catalog
 	// definition. Request.Tools may have a narrower Host projection, but replay
 	// still rejects Catalog changes. Entry order matches Request.Tools.
-	CatalogFingerprints []string              `json:"catalogFingerprints,omitempty"`
-	Provider            string                `json:"provider,omitempty"`
+	CatalogFingerprints []string `json:"catalogFingerprints,omitempty"`
+	Provider            string   `json:"provider,omitempty"`
+	// BindingFingerprint freezes the effective named Provider binding without
+	// persisting endpoint addresses or credentials. Unnamed local Model clients
+	// are not identified as external Provider bindings.
+	BindingFingerprint  string                `json:"bindingFingerprint,omitempty"`
 	Model               string                `json:"model,omitempty"`
 	Status              ModelInvocationStatus `json:"status"`
 	Request             model.Request         `json:"request,omitempty"`
@@ -82,11 +86,11 @@ func newModelInvocation(
 	run kernel.Run,
 	request model.Request,
 	catalogFingerprints []string,
-	provider string,
+	provider, bindingFingerprint string,
 	now time.Time,
 ) (ModelInvocation, error) {
 	request.InvocationID = ""
-	hash, err := modelRequestHash(request, catalogFingerprints)
+	hash, err := modelRequestHash(request, catalogFingerprints, provider, bindingFingerprint)
 	if err != nil {
 		return ModelInvocation{}, err
 	}
@@ -96,18 +100,21 @@ func newModelInvocation(
 	request.InvocationID = id
 	return ModelInvocation{
 		ID: id, RunID: run.ID, SourceRevision: run.Revision, RequestHash: hash,
-		Provider: strings.TrimSpace(provider), Model: strings.TrimSpace(request.Model),
-		Status: ModelInvocationPending, Request: model.CloneRequest(request),
+		Provider: strings.TrimSpace(provider), BindingFingerprint: bindingFingerprint,
+		Model: strings.TrimSpace(request.Model), Status: ModelInvocationPending, Request: model.CloneRequest(request),
 		CatalogFingerprints: append([]string(nil), catalogFingerprints...), CreatedAt: now.UTC(),
 	}, nil
 }
 
-func modelRequestHash(request model.Request, fingerprints []string) (string, error) {
+func modelRequestHash(request model.Request, fingerprints []string, provider, bindingFingerprint string) (string, error) {
 	request.InvocationID = ""
 	encoded, err := json.Marshal(struct {
 		Request             model.Request `json:"request"`
 		CatalogFingerprints []string      `json:"catalogFingerprints"`
-	}{Request: model.CloneRequest(request), CatalogFingerprints: fingerprints})
+		Provider            string        `json:"provider"`
+		BindingFingerprint  string        `json:"bindingFingerprint"`
+	}{Request: model.CloneRequest(request), CatalogFingerprints: fingerprints,
+		Provider: provider, BindingFingerprint: bindingFingerprint})
 	if err != nil {
 		return "", errors.Join(ErrInvalidRequest, err)
 	}
@@ -196,6 +203,11 @@ func validModelInvocations(values []ModelInvocation) bool {
 			invocation.CreatedAt.IsZero() {
 			return false
 		}
+		if (invocation.Status == ModelInvocationPending || invocation.Status == ModelInvocationCompleted) &&
+			(invocation.Provider != "" || invocation.BindingFingerprint != "") &&
+			!validBindingFingerprint(invocation.BindingFingerprint) {
+			return false
+		}
 		switch invocation.Status {
 		case ModelInvocationPending:
 			active++
@@ -212,7 +224,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 			if !validCatalogFingerprints(invocation.Request.Tools, invocation.CatalogFingerprints) {
 				return false
 			}
-			hash, err := modelRequestHash(invocation.Request, invocation.CatalogFingerprints)
+			hash, err := modelRequestHash(invocation.Request, invocation.CatalogFingerprints, invocation.Provider, invocation.BindingFingerprint)
 			if err != nil || hash != invocation.RequestHash {
 				return false
 			}
@@ -232,7 +244,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 			if !validCatalogFingerprints(invocation.Request.Tools, invocation.CatalogFingerprints) {
 				return false
 			}
-			hash, err := modelRequestHash(invocation.Request, invocation.CatalogFingerprints)
+			hash, err := modelRequestHash(invocation.Request, invocation.CatalogFingerprints, invocation.Provider, invocation.BindingFingerprint)
 			if err != nil || hash != invocation.RequestHash {
 				return false
 			}
@@ -274,6 +286,29 @@ func validModelInvocationReceipt(invocation ModelInvocation) bool {
 	return validModelResponse(invocation.Response)
 }
 
+func validBindingFingerprint(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && hex.EncodeToString(decoded) == value
+}
+
+func declaresProviderIdentity(client model.Client) bool {
+	if _, ok := client.(model.RequestProviderNamer); ok {
+		return true
+	}
+	_, ok := client.(model.ProviderNamer)
+	return ok
+}
+
+func modelBindingFingerprint(client model.Client, request model.Request) string {
+	if binder, ok := client.(model.RequestBindingFingerprinter); ok {
+		return binder.BindingFingerprintForRequest(request)
+	}
+	return ""
+}
+
 func providerName(client model.Client, request model.Request) string {
 	if namer, ok := client.(model.RequestProviderNamer); ok {
 		return strings.TrimSpace(namer.ProviderNameForRequest(request))
@@ -284,12 +319,32 @@ func providerName(client model.Client, request model.Request) string {
 	return ""
 }
 
+// matchesFrozenProviderBinding is evaluated before reclaiming a persisted
+// pending intent as well as at physical dispatch. A changed Host binding must
+// not acquire another durable Model execution attempt simply to be rejected.
+func matchesFrozenProviderBinding(client model.Client, invocation ModelInvocation) bool {
+	if invocation.Provider == "" && declaresProviderIdentity(client) {
+		return false
+	}
+	if providerName(client, invocation.Request) != invocation.Provider {
+		return false
+	}
+	if invocation.Provider == "" && invocation.BindingFingerprint == "" {
+		return true // No external Provider identity was declared by this Client.
+	}
+	return validBindingFingerprint(invocation.BindingFingerprint) &&
+		modelBindingFingerprint(client, invocation.Request) == invocation.BindingFingerprint
+}
+
 func (runner *Runner) ensureModelInvocation(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state runState,
 ) (kernel.Snapshot, runState, ModelInvocation, error) {
 	if invocation, ok := activeModelInvocation(state); ok {
+		if invocation.Status == ModelInvocationPending && !matchesFrozenProviderBinding(runner.model, *invocation) {
+			return snapshot, state, ModelInvocation{}, ErrInvalidRequest
+		}
 		return snapshot, state, cloneModelInvocation(*invocation), nil
 	}
 	request, fingerprints, err := runner.buildModelRequest(ctx, snapshot, state)
@@ -299,7 +354,15 @@ func (runner *Runner) ensureModelInvocation(
 		// obscures policy revocation as invalid Kernel input.
 		return snapshot, state, ModelInvocation{}, err
 	}
-	invocation, err := newModelInvocation(snapshot.Run, request, fingerprints, providerName(runner.model, request), runner.clock.Now())
+	provider := providerName(runner.model, request)
+	bindingFingerprint := modelBindingFingerprint(runner.model, request)
+	// A model that claims to be a Provider may not erase its name on an
+	// unsupported route. Every named external binding needs exact proof.
+	if provider == "" && declaresProviderIdentity(runner.model) ||
+		(provider != "" || bindingFingerprint != "") && !validBindingFingerprint(bindingFingerprint) {
+		return snapshot, state, ModelInvocation{}, ErrInvalidRequest
+	}
+	invocation, err := newModelInvocation(snapshot.Run, request, fingerprints, provider, bindingFingerprint, runner.clock.Now())
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
 	}
@@ -586,7 +649,7 @@ func (runner *Runner) executeModelInvocation(
 	}
 	// A restart may reconstruct a Router with a different default provider.
 	// The committed invocation must not silently cross that routing boundary.
-	if providerName(runner.model, invocation.Request) != invocation.Provider {
+	if !matchesFrozenProviderBinding(runner.model, invocation) {
 		return snapshot, state, ErrInvalidRequest
 	}
 	if err := runner.validatePendingModelToolDeclarations(ctx, snapshot, state, invocation); err != nil {

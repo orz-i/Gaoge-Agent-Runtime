@@ -4,6 +4,8 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,10 +15,13 @@ import (
 
 var ErrInvalidRouting = errors.New("invalid model provider routing")
 
-// Binding associates a stable provider name with a model.Client.
+// Binding associates a stable provider name with an explicit, immutable
+// Host-assigned binding identity. The identity must be rotated when a
+// custom Client's effective endpoint, transport or policy changes.
 type Binding struct {
-	Name   string
-	Client model.Client
+	Name     string
+	Identity string
+	Client   model.Client
 }
 
 // Router is an immutable, concurrency-safe collection of model providers.
@@ -24,22 +29,24 @@ type Binding struct {
 // use the explicit default provider; the provider receives only the model ID.
 type Router struct {
 	defaultName string
-	clients     map[string]model.Client
+	clients     map[string]Binding
 }
 
 func NewRouter(defaultName string, bindings ...Binding) (*Router, error) {
-	clients := make(map[string]model.Client, len(bindings))
+	clients := make(map[string]Binding, len(bindings))
 	for _, binding := range bindings {
 		name := strings.TrimSpace(binding.Name)
-		if !validName(name) || binding.Client == nil {
+		if !validName(name) || binding.Client == nil ||
+			binding.Identity == "" || binding.Identity != strings.TrimSpace(binding.Identity) ||
+			len(binding.Identity) > 128 {
 			return nil, ErrInvalidRouting
 		}
 		if _, exists := clients[name]; exists {
 			return nil, fmt.Errorf("%w: duplicate provider %s", ErrInvalidRouting, name)
 		}
-		clients[name] = binding.Client
+		clients[name] = binding
 	}
-	if !validName(defaultName) || clients[defaultName] == nil {
+	if !validName(defaultName) || clients[defaultName].Client == nil {
 		return nil, ErrInvalidRouting
 	}
 	return &Router{defaultName: defaultName, clients: clients}, nil
@@ -80,7 +87,7 @@ func (r *Router) route(request model.Request) (model.Client, model.Request, stri
 			return nil, model.Request{}, "", ErrInvalidRouting
 		}
 	}
-	client := r.clients[name]
+	client := r.clients[name].Client
 	if client == nil {
 		return nil, model.Request{}, "", fmt.Errorf("%w: unknown provider %q", ErrInvalidRouting, name)
 	}
@@ -130,6 +137,30 @@ func (r *Router) ProviderNameForRequest(request model.Request) string {
 	return name
 }
 
+// BindingFingerprintForRequest freezes both the selected route's Host-owned
+// identity and any more precise fingerprint provided by its concrete client.
+// A concrete Provider with an invalid binding proof must fail closed.
+func (r *Router) BindingFingerprintForRequest(request model.Request) string {
+	client, routed, name, err := r.route(request)
+	if err != nil {
+		return ""
+	}
+	identity := r.clients[name].Identity
+	component := ""
+	if bound, ok := client.(model.RequestBindingFingerprinter); ok {
+		component = bound.BindingFingerprintForRequest(routed)
+		if len(component) != sha256.Size*2 {
+			return ""
+		}
+		if decoded, decodeErr := hex.DecodeString(component); decodeErr != nil || hex.EncodeToString(decoded) != component {
+			return ""
+		}
+	}
+	digest := sha256.Sum256([]byte(name + "\x00" + identity + "\x00" + component))
+	return hex.EncodeToString(digest[:])
+}
+
+var _ model.RequestBindingFingerprinter = (*Router)(nil)
 var _ model.CapabilityProvider = (*Router)(nil)
 var _ model.Client = (*Router)(nil)
 var _ model.StreamingClient = (*Router)(nil)

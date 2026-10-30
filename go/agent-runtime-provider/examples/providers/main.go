@@ -39,7 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	router, err := provider.NewRouter(kind, provider.Binding{Name: kind, Client: client})
+	router, err := provider.NewRouter(kind, provider.Binding{Name: kind, Identity: "host-binding-v1", Client: client})
 	if err != nil {
 		log.Fatal(err)
 	}

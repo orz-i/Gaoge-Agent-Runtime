@@ -2,6 +2,35 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Provider binding identity hard cut (beta.24 candidate)
+
+**Named Provider binding:** Agent now freezes an opaque SHA-256
+`bindingFingerprint` into the durable ModelInvocation and `requestHash`.
+The unary `model.Client` interface is unchanged, but all named external
+Providers must implement `model.RequestBindingFingerprinter` with a
+deterministic, nonsecret lowercase SHA-256 fingerprint. A missing or malformed
+proof rejects a new intent before any physical dispatch. A changed Provider
+name or a changed/missing binding fingerprint rejects a persisted pending
+invocation before claim, then again immediately before dispatch.
+
+**Host Router/API break:** The standalone Router now requires a nonempty
+`provider.Binding.Identity`; two-field bindings can no longer construct a
+Router. OpenAI/Anthropic HMAC their actual Endpoint, authenticated identity,
+wire protocol and selected configuration. A custom `HTTPClient` must supply
+a Host-owned `Config.BindingScope`, rotated on any meaningful transport/policy
+change. Arbitrary custom Clients cannot be introspected: the Host is responsible
+for changing its explicit binding identity when the destination changes.
+
+**Upgrade:** Existing pending ModelInvocations use the previous request-hash
+format, without binding proof; they are intentionally **not accepted** for
+redispatch. Stop old workers, inventory all pending Agent Runs, drain or
+quarantine unknown remote outcomes, and do not fabricate fingerprints, reset
+attempts or retry physical effects. Historical consumed receipts remain
+readable. There is no SQL DDL, schema-number churn, old-hash fallback, or
+dynamic Provider registry. An unnamed local Client has no external binding
+attestation; production Provider-backed Clients must declare a name and proof.
+Published beta.23 tags remain unchanged; beta.24 is still unreleased.
+
 ## 2026-10-30 — Exact approval checkpoint required (beta.24 candidate)
 
 **Deleted:** A Turn-only Harness approval request is no longer authorized.

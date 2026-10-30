@@ -139,6 +139,7 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 	clientHTTP, observation := newPreflightHTTPClient(config.httpClient)
 	observation.captureWire = config.provider == "openai"
 	config.httpClient = clientHTTP
+	config.bindingScope = "task-agent-baseline-observer-v1"
 	var normalizedAnswer string
 	defer func() {
 		event.DurationMs = time.Since(started).Milliseconds()
@@ -314,6 +315,7 @@ func runBaseline(ctx context.Context, input io.Reader, output io.Writer) int {
 				observedHTTP, observation := newPreflightHTTPClient(config.httpClient)
 				sampleConfig := config
 				sampleConfig.httpClient = observedHTTP
+				sampleConfig.bindingScope = "task-agent-baseline-observer-v1"
 				report, _ := runTask(sampleCtx, sampleConfig, sampleConfig.newModel, item.source)
 				cancel()
 				sample := sampleMetrics(report, item.id, config.sampleID, repetition)

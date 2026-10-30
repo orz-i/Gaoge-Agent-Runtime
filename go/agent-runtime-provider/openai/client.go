@@ -21,6 +21,9 @@ type Config struct {
 	DefaultModel string
 	Endpoint     string
 	HTTPClient   *http.Client
+	// BindingScope identifies the Host's custom transport/policy revision.
+	// It is mandatory when HTTPClient is supplied and never persisted raw.
+	BindingScope string
 	// StructuredOutputModels opts explicitly named models/gateways into strict
 	// JSON Schema output. Unknown models otherwise fail closed.
 	StructuredOutputModels []string
@@ -28,10 +31,15 @@ type Config struct {
 type Client struct {
 	http                   *providerhttp.Client
 	defaultModel           string
+	bindingFingerprint     string
 	structuredOutputModels map[string]bool
 }
 
 func New(config Config) (*Client, error) {
+	if config.BindingScope != strings.TrimSpace(config.BindingScope) ||
+		len(config.BindingScope) > 128 || config.HTTPClient != nil && config.BindingScope == "" {
+		return nil, providerhttp.ErrConfig
+	}
 	httpClient, err := providerhttp.New(providerhttp.Config{
 		APIKey: config.APIKey, Endpoint: config.Endpoint, HTTPClient: config.HTTPClient,
 	}, endpoint, http.Header{"Authorization": {"Bearer " + config.APIKey}})
@@ -45,9 +53,20 @@ func New(config Config) (*Client, error) {
 		}
 		allowed[name] = true
 	}
-	return &Client{http: httpClient, defaultModel: strings.TrimSpace(config.DefaultModel), structuredOutputModels: allowed}, nil
+	actualEndpoint := config.Endpoint
+	if actualEndpoint == "" {
+		actualEndpoint = endpoint
+	}
+	fingerprint := providerhttp.FingerprintBinding(config.APIKey, providerhttp.BindingSpec{
+		Protocol: "openai.responses.v1", Endpoint: actualEndpoint,
+		DefaultModel: strings.TrimSpace(config.DefaultModel), BindingScope: config.BindingScope,
+		StructuredOutputModels: config.StructuredOutputModels,
+	})
+	return &Client{http: httpClient, defaultModel: strings.TrimSpace(config.DefaultModel),
+		bindingFingerprint: fingerprint, structuredOutputModels: allowed}, nil
 }
-func (*Client) ProviderName() string { return "openai" }
+func (*Client) ProviderName() string                                { return "openai" }
+func (c *Client) BindingFingerprintForRequest(model.Request) string { return c.bindingFingerprint }
 
 type outputItem struct {
 	Type    string  `json:"type"`
@@ -370,4 +389,5 @@ func streamFailure(code string) error {
 
 var _ model.Client = (*Client)(nil)
 var _ model.StreamingClient = (*Client)(nil)
+var _ model.RequestBindingFingerprinter = (*Client)(nil)
 var _ model.ProviderNamer = (*Client)(nil)

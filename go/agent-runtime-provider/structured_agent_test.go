@@ -101,7 +101,7 @@ func TestStructuredOutputProviderToolLoopEndToEnd(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			router, err := provider.NewRouter(vendor, provider.Binding{Name: vendor, Client: client})
+			router, err := provider.NewRouter(vendor, provider.Binding{Name: vendor, Identity: "host-binding-v1", Client: client})
 			if err != nil {
 				t.Fatal(err)
 			}

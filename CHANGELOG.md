@@ -5,6 +5,11 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Freeze a nonsecret Provider binding fingerprint in each named ModelInvocation
+  and its request hash; reject missing or changed bindings before another
+  Model attempt or physical dispatch. Require explicit Router Binding.Identity
+  and custom transport scope. No old request-hash compatibility fallback.
+
 - Require the exact displayed Harness approval checkpoint at Go/HTTP/TypeScript
   entry points; remove Turn-only approval and pre-binding Agent checkpoint
   inference. An incomplete older approval must be drained/quarantined, never

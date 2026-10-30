@@ -106,8 +106,12 @@ Trusted Harness projection may specialize the model-visible Tool schema before
 commit, but Agent also hashes the **original** registered Catalog fingerprint
 for each retained local Tool. A resumed pending invocation uses its frozen
 request and checks the current Catalog against those fingerprints before any
-physical dispatch. A recovered request also verifies the committed Provider
-name against the reconstructed provider/router binding when exposed. The executor always validates Tool arguments using the
+physical dispatch. A named Provider additionally commits a nonsecret `BindingFingerprint`
+(including the adapter endpoint, credential, protocol and Host binding
+identity) into the frozen ModelInvocation and request hash. Recovery rejects
+changed Provider names or binding fingerprints before claiming a physical
+attempt and checks again immediately before dispatch. Unnamed local Clients
+are not evidence of a verified external Provider binding. The executor always validates Tool arguments using the
 registered definition rather than the projected model-facing one.
 
 Dispatch-time `ModelMiddleware` may only observe, reject, meter or narrow a
