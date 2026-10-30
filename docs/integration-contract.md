@@ -31,6 +31,17 @@ Node version has been exercised.
 | Redis | Supply the client, queue/feed configuration and clock where applicable. Queue delivery is leased and may repeat; semantic feeds have finite retention. |
 | HTTP and protocol edges | The host resolves principals and object authorization and supplies provider credentials, outbound HTTP clients and endpoint policy. MCP/A2A protocol support is adapter-specific. |
 
+**P3 token-admission hard cut:** Hosts must call
+`context.Manager.AssessModelRequest(ctx, model.Request, window, policy)`
+after completing the canonical Model request. The previous public
+`AssessRequest(ctx, any, ...)` is deleted: it could estimate an
+arbitrary JSON map as text even when it contained remote media.
+Decode and validate external JSON/Host envelopes into `model.Request`
+before admission; there is no permissive generic overload. Media
+requires trusted exact provider-aware counting and fails closed if
+that count is unavailable. Text-only fallback is restricted to the
+canonical typed request.
+
 The checked external consumers live in [contracts/consumers/go](../contracts/consumers/go).
 They pin constructor signatures for all nine Go modules in the current Beta.11 release cohort and explicitly spell
 out the Kernel Store, Harness Store, model, tool, worker and Run-authorizer

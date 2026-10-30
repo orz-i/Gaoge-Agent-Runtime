@@ -5,6 +5,37 @@
 **Implementation/docs source Head:** `35154661edc301a6f227a655c87b36dcee2d46aa`
 **Local-only governance branch:** `governance/model-message-multimodal-hardcut-20261030`
 
+## Post-review P1 correction to PR #80 (2026-10-30)
+
+The independent review of the original final PR Head `b47ac4cc1bb1c401ed4985c818934ff8ecbf4ab0`
+found an additional **P1 token-budget bypass**. The public
+`Manager.AssessRequest(ctx, any, ...)` serialized generic maps/structs,
+but `requestContainsMedia` recognized only `model.Request` and
+`*model.Request`. Passing a map with the **same ordered User image**
+and no exact `TokenCounter` was therefore incorrectly classified as
+text-only: `AssessRequest` returned an estimated count and
+`WithinHardBudget=true`, while `AssessModelRequest` correctly returned
+`ErrModelWindowUnknown` for that image. This is a demonstrated
+Host-facing generic API bypass; the built-in Harness already used
+the typed entrypoint and was not shown to admit the bypass.
+
+The fix is a **hard cut**: remove `AssessRequest(any)` entirely, make
+`AssessModelRequest(model.Request)` the single canonical public
+sampling-boundary API, and scan the cloned typed request's content
+parts directly. There is no unknown-input path returning `false`,
+generic JSON fallback, migration shim or adapter. Existing text-only
+byte-budget tests now exercise canonical `model.Request`; regression
+tests cover input from generic map/struct JSON decoded into a typed
+request, rejection without exact counting, and successful exact
+counting. Custom hosts must update their call sites and validate
+external envelopes before invoking this typed admission API.
+
+**The old GO review is superseded for a changed Head.** This
+correction is not a new independent merge admission. Re-run strict
+release gates/CI on the pushed fix and obtain a separate exact-Head
+review before merging; the earlier local receipts below describe
+the original immutable source cohort, not the new correction.
+
 ## Baseline defect and architectural decision
 
 The previous `model.Message.Content string` could represent only

@@ -54,7 +54,19 @@ managed Context `AssessModelRequest` now requires a successful
 trusted, model/provider-aware exact `TokenCounter` for media.
 Unknown/failed counter gives `ErrModelWindowUnknown` rather than
 speculatively admitting the request. Text-only byte-based fallback
-remains unchanged.
+remains unchanged **only for the canonical typed request**.
+
+**P1 token admission API hard cut (PR #80 follow-up):**
+`context.Manager.AssessRequest(ctx, any, ...)` is removed. It
+accepted arbitrary JSON-serializable maps/structs but only detected
+media on `model.Request`, permitting a disguised image/PDF to reach
+the text-only byte fallback without a `TokenCounter`. The **only**
+admission API is now `AssessModelRequest(ctx, model.Request, ...)`.
+Host data arriving as JSON/maps must be decoded and validated as a
+canonical `model.Request` before assessment, not passed directly to a
+generic estimator. Existing consumers of `AssessRequest` must change
+their source to the typed entrypoint; there is no converter, `any`
+overload, legacy shim or exception for custom serialized requests.
 
 **Cutover:** Pause old workers and admissions, inventory **all**
 nonterminal Agent Runs / ModelInvocations and Context checkpoints
