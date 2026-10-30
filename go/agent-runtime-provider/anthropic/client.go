@@ -175,12 +175,19 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	messages := make([]map[string]any, 0, len(request.Messages))
 	seenNonSystem := false
 	for _, m := range request.Messages {
+		if err := model.ValidateMessage(m); err != nil {
+			return prepared{}, errors.Join(ErrUnsupported, err)
+		}
 		switch m.Role {
 		case model.RoleSystem:
 			if seenNonSystem || m.ToolCallID != "" || len(m.ToolCalls) != 0 {
 				return prepared{}, ErrUnsupported
 			}
-			systems = append(systems, m.Content)
+			text, textOnly := model.PlainText(m.Content)
+			if !textOnly {
+				return prepared{}, ErrUnsupported
+			}
+			systems = append(systems, text)
 		case model.RoleUser:
 			if m.ProviderReplay != nil {
 				return prepared{}, ErrUnsupported
@@ -189,7 +196,11 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 			if m.ToolCallID != "" || len(m.ToolCalls) != 0 {
 				return prepared{}, ErrUnsupported
 			}
-			messages = append(messages, map[string]any{"role": "user", "content": m.Content})
+			content, contentErr := inputContent(m.Content)
+			if contentErr != nil {
+				return prepared{}, contentErr
+			}
+			messages = append(messages, map[string]any{"role": "user", "content": content})
 		case model.RoleAssistant:
 			seenNonSystem = true
 			if m.ToolCallID != "" {
@@ -204,8 +215,12 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 				continue
 			}
 			blocks := make([]map[string]any, 0, len(m.ToolCalls)+1)
-			if m.Content != "" {
-				blocks = append(blocks, map[string]any{"type": "text", "text": m.Content})
+			text, textOnly := model.PlainText(m.Content)
+			if !textOnly {
+				return prepared{}, ErrUnsupported
+			}
+			if text != "" {
+				blocks = append(blocks, map[string]any{"type": "text", "text": text})
 			}
 			for _, call := range m.ToolCalls {
 				toolName := call.Name
@@ -231,7 +246,11 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 			if m.ToolCallID == "" || len(m.ToolCalls) != 0 {
 				return prepared{}, ErrUnsupported
 			}
-			block := map[string]any{"type": "tool_result", "tool_use_id": m.ToolCallID, "content": m.Content}
+			text, textOnly := model.PlainText(m.Content)
+			if !textOnly {
+				return prepared{}, ErrUnsupported
+			}
+			block := map[string]any{"type": "tool_result", "tool_use_id": m.ToolCallID, "content": text}
 			if len(messages) > 0 && messages[len(messages)-1]["role"] == "user" {
 				if blocks, ok := messages[len(messages)-1]["content"].([]map[string]any); ok {
 					messages[len(messages)-1]["content"] = append(blocks, block)

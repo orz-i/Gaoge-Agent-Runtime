@@ -49,7 +49,7 @@ func TestMemoryStoreConcurrentContextOwnerCommitsDetachFromMovedHead(t *testing.
 		SourcePath: []string{"message-root"}, Instructions: "sealed",
 		Entries: []runtimecontext.Entry{{
 			ID: "entry-root", SourceID: "message-root", TurnID: "turn-root",
-			Message: model.Message{Role: model.RoleUser, Content: "root"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("root")},
 		}},
 	})
 	if err != nil {
@@ -75,7 +75,7 @@ func TestMemoryStoreConcurrentContextOwnerCommitsDetachFromMovedHead(t *testing.
 			ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
 			SourcePath: []string{sourceID}, Entries: []runtimecontext.Entry{{
 				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: turnID,
-				Message: model.Message{Role: model.RoleUser, Content: content},
+				Message: model.Message{Role: model.RoleUser, Content: model.TextParts(content)},
 			}}, SourceDelta: true, Previous: &base,
 		})
 		if openErr != nil {
@@ -156,7 +156,7 @@ func TestMemoryStoreRejectsCrossScopeContextDependencies(t *testing.T) {
 		SourcePath: []string{"message-foreign-parent"}, Instructions: "stable",
 		Entries: []runtimecontext.Entry{{
 			ID: "entry-foreign-parent", SourceID: "message-foreign-parent", TurnID: "turn-foreign-parent",
-			Message: model.Message{Role: model.RoleUser, Content: "foreign parent"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("foreign parent")},
 		}},
 	})
 	if err != nil {
@@ -168,7 +168,7 @@ func TestMemoryStoreRejectsCrossScopeContextDependencies(t *testing.T) {
 		SourcePath: []string{"message-local-parent"}, Instructions: foreignParent.Window.Instructions,
 		Entries: []runtimecontext.Entry{{
 			ID: "entry-local-parent", SourceID: "message-local-parent", TurnID: "turn-local-parent",
-			Message: model.Message{Role: model.RoleUser, Content: "local child"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("local child")},
 		}}, Previous: &foreignParent,
 	})
 	if err != nil {
@@ -183,7 +183,7 @@ func TestMemoryStoreRejectsCrossScopeContextDependencies(t *testing.T) {
 		SourcePath: []string{"message-local-artifact"}, Instructions: "stable artifact",
 		Entries: []runtimecontext.Entry{{
 			ID: "entry-local-artifact", SourceID: "message-local-artifact", TurnID: "turn-local-artifact",
-			Message: model.Message{Role: model.RoleUser, Content: "local artifact base"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("local artifact base")},
 		}},
 	})
 	if err != nil {
@@ -220,7 +220,7 @@ func TestRestoreOrBuildContextReloadsDurableCheckpoint(t *testing.T) {
 		SourcePath: []string{"message-replay"}, Instructions: "sealed",
 		Entries: []runtimecontext.Entry{{
 			ID: "entry-replay", SourceID: "message-replay", TurnID: "turn-replay",
-			Message: model.Message{Role: model.RoleUser, Content: "replay request"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("replay request")},
 		}},
 	})
 	if err != nil {
@@ -250,7 +250,7 @@ func TestMemoryStoreFailedContextCommitDoesNotAdvanceHead(t *testing.T) {
 		SourcePath: []string{baseSourceID}, Instructions: "sealed",
 		Entries: []runtimecontext.Entry{{
 			ID: "entry-base", SourceID: baseSourceID, TurnID: "turn-base",
-			Message: model.Message{Role: model.RoleUser, Content: "base"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("base")},
 		}},
 	})
 	if err != nil {
@@ -273,7 +273,7 @@ func TestMemoryStoreFailedContextCommitDoesNotAdvanceHead(t *testing.T) {
 	entries := runtimecontext.CloneEntries(base.Window.Entries)
 	entries = append(entries, runtimecontext.Entry{
 		ID: "entry-next", SourceID: "message-next", TurnID: "turn-next",
-		Message: model.Message{Role: model.RoleAssistant, Content: "next"},
+		Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("next")},
 	})
 	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
 		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint,
@@ -311,7 +311,7 @@ func TestMemoryStoreContextCommitRejectsCrossLineageParent(t *testing.T) {
 			SourcePath: []string{sourceID}, Instructions: "sealed",
 			Entries: []runtimecontext.Entry{{
 				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: "turn-" + sourceID,
-				Message: model.Message{Role: model.RoleUser, Content: content},
+				Message: model.Message{Role: model.RoleUser, Content: model.TextParts(content)},
 			}},
 		})
 		if err != nil {
@@ -341,7 +341,7 @@ func TestMemoryStoreContextCommitRejectsCrossLineageParent(t *testing.T) {
 		ScopeID: base.ScopeID, StaticFingerprint: fingerprint, Instructions: "sealed",
 		SourcePath: []string{"message-other-child"}, Entries: []runtimecontext.Entry{{
 			ID: "entry-message-other-child", SourceID: "message-other-child", TurnID: "turn-other-child",
-			Message: model.Message{Role: model.RoleAssistant, Content: "other child"},
+			Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("other child")},
 		}}, SourceDelta: true, Previous: &other,
 	})
 	if err != nil {

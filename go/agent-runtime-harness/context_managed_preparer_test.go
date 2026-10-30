@@ -103,7 +103,7 @@ func TestManagedContextCompactsLongSessionAndPersistsExactArtifacts(t *testing.T
 		t.Fatalf("model was not sent the compacted request: %+v", provider.requests)
 	}
 	for _, message := range provider.requests[0].Messages {
-		if strings.Contains(message.Content, oldEvidence) {
+		if strings.Contains(model.TextValue(message.Content), oldEvidence) {
 			t.Fatal("uncompacted evidence leaked back into model request")
 		}
 	}
@@ -135,10 +135,10 @@ func TestManagedContextCompactsLongSessionAndPersistsExactArtifacts(t *testing.T
 	}
 	seenNew := false
 	for _, msg := range followupProvider.requests[0].Messages {
-		if strings.Contains(msg.Content, oldEvidence) {
+		if strings.Contains(model.TextValue(msg.Content), oldEvidence) {
 			t.Fatal("next Turn replayed archived transcript")
 		}
-		if msg.Content == "next question" {
+		if model.TextValue(msg.Content) == "next question" {
 			seenNew = true
 		}
 	}

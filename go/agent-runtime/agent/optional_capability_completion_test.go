@@ -27,11 +27,11 @@ func (client *deniedFreshNewsModel) Generate(_ context.Context, request model.Re
 	if request.RequireToolCall {
 		client.t.Fatal("unavailable news capability incorrectly forced more tool calls")
 	}
-	if !strings.Contains(strings.ToLower(request.Messages[0].Content), "truthful final answer") {
+	if !strings.Contains(strings.ToLower(model.TextValue(request.Messages[0].Content)), "truthful final answer") {
 		client.t.Fatal("missing honest completion guidance")
 	}
 	last := request.Messages[len(request.Messages)-1]
-	if last.Role != model.RoleTool || !strings.Contains(last.Content, `"retryable":false`) {
+	if last.Role != model.RoleTool || !strings.Contains(model.TextValue(last.Content), `"retryable":false`) {
 		client.t.Fatalf("nonretryable safe receipt missing: %+v", last)
 	}
 	return model.Response{Content: "Current news sources are unavailable; I cannot verify today's headlines."}, nil

@@ -93,7 +93,7 @@ func (fixtureModel) Generate(_ context.Context, request model.Request) (model.Re
 			continue
 		}
 		var checks releaseChecks
-		if err := json.Unmarshal([]byte(message.Content), &checks); err != nil {
+		if err := json.Unmarshal([]byte(model.TextValue(message.Content)), &checks); err != nil {
 			return model.Response{}, err
 		}
 		return model.Response{Content: fmt.Sprintf("Release checks: %d passed, %d failed.", checks.Passed, checks.Failed)}, nil

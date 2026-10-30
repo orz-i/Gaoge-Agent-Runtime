@@ -126,7 +126,7 @@ func TestRealPostgresPR72ConcurrentStartContextFailureDoesNotTerminalizeOriginal
 			SourcePath: []string{"pr72-source"},
 			Entries: []runtimecontext.Entry{{
 				ID: "pr72-entry", SourceID: "pr72-source", TurnID: "pr72-source-turn",
-				Message: model.Message{Role: model.RoleUser, Content: "answer directly"},
+				Message: model.Message{Role: model.RoleUser, Content: model.TextParts("answer directly")},
 			}},
 		},
 	}

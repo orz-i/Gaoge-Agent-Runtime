@@ -24,7 +24,7 @@ const completedAnswer = `{"id":"reason-answer","status":"completed","output":[{"
 func reasoningRequest() model.Request {
 	return model.Request{
 		Model:    "gpt-reasoning-fixture",
-		Messages: []model.Message{{Role: model.RoleUser, Content: "Use lookup to get x=1"}},
+		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("Use lookup to get x=1")}},
 		Tools:    []tools.Definition{definition},
 	}
 }
@@ -63,8 +63,8 @@ func TestStatelessReasoningFunctionRoundTrip(t *testing.T) {
 		t.Fatalf("reasoning tool item lost: %+v %v", first, err)
 	}
 	request.Messages = append(request.Messages, model.Message{
-		Role: model.RoleAssistant, Content: first.Content, ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay,
-	}, model.Message{Role: model.RoleTool, ToolCallID: first.ToolCalls[0].ID, Content: `{"ok":true}`})
+		Role: model.RoleAssistant, Content: model.TextParts(first.Content), ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay,
+	}, model.Message{Role: model.RoleTool, ToolCallID: first.ToolCalls[0].ID, Content: model.TextParts(`{"ok":true}`)})
 	second, err := client.Generate(context.Background(), request)
 	if err != nil || second.Content != "GAOGE_TOOL_OK" || second.ProviderReplay != nil || count != 2 {
 		t.Fatalf("stateless reasoning continuation failed: %+v err=%v calls=%d", second, err, count)
@@ -89,7 +89,7 @@ func TestStatelessReasoningRejectsTamperingAndUnavailableEncryption(t *testing.T
 	}
 	req.Messages = append(req.Messages, model.Message{
 		Role: model.RoleAssistant, ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay,
-	}, model.Message{Role: model.RoleTool, ToolCallID: "call_1", Content: `{"ok":true}`})
+	}, model.Message{Role: model.RoleTool, ToolCallID: "call_1", Content: model.TextParts(`{"ok":true}`)})
 	for _, testCase := range []struct {
 		name   string
 		mutate func(*model.Request)
@@ -98,7 +98,7 @@ func TestStatelessReasoningRejectsTamperingAndUnavailableEncryption(t *testing.T
 		{"changed-call-id", func(r *model.Request) { r.Messages[1].ToolCalls[0].ID = "forged" }},
 		{"changed-name", func(r *model.Request) { r.Messages[1].ToolCalls[0].Name = "forged" }},
 		{"foreign-provider", func(r *model.Request) { r.Messages[1].ProviderReplay.Provider = "anthropic" }},
-		{"changed-content", func(r *model.Request) { r.Messages[1].Content = "forged" }},
+		{"changed-content", func(r *model.Request) { r.Messages[1].Content = model.TextParts("forged") }},
 		{"missing-encryption", func(r *model.Request) {
 			r.Messages[1].ProviderReplay.Data = json.RawMessage(`[{"type":"reasoning","id":"rs_1"},{"type":"function_call","name":"lookup","call_id":"call_1","arguments":"{\"x\":1}"}]`)
 		}},
@@ -213,7 +213,7 @@ func TestTextOnlyDoesNotRequestUnnecessaryEncryptedReplay(t *testing.T) {
 		}
 		_, _ = fmt.Fprint(w, `{"id":"text-only","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":2,"output_tokens":1}}`)
 	})
-	response, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hi"}}})
+	response, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}})
 	if err != nil || response.Content != "ok" {
 		t.Fatalf("text-only request regressed: %+v %v", response, err)
 	}

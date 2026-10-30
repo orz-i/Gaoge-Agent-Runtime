@@ -30,11 +30,11 @@ func (capture *parentHostedAssignmentModel) Generate(_ context.Context, request 
 		capture.childCalls++
 		if capture.frozen {
 			if len(request.Messages) == 0 || request.Messages[0].Role != model.RoleSystem ||
-				strings.Count(request.Messages[0].Content, "You are a delegated specialist.") != 1 {
+				strings.Count(model.TextValue(request.Messages[0].Content), "You are a delegated specialist.") != 1 {
 				capture.t.Fatalf("specialist instruction not frozen exactly once: %+v", request.Messages)
 			}
 			for _, message := range request.Messages {
-				if strings.Contains(message.Content, "prior supervisor conversation") {
+				if strings.Contains(model.TextValue(message.Content), "prior supervisor conversation") {
 					capture.t.Fatal("delegated child inherited supervisor-only Context")
 				}
 			}
@@ -55,7 +55,7 @@ func (capture *parentHostedAssignmentModel) Generate(_ context.Context, request 
 	if capture.frozen {
 		found := false
 		for _, message := range request.Messages {
-			if message.Content == "prior supervisor conversation" {
+			if model.TextValue(message.Content) == "prior supervisor conversation" {
 				found = true
 			}
 		}

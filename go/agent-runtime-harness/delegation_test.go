@@ -64,7 +64,7 @@ func TestHarnessDelegationChildDoesNotInheritParentContextCheckpoint(t *testing.
 			SourcePath: []string{"message-delegation-context"},
 			Entries: []runtimecontext.Entry{{
 				ID: "entry-delegation-context", SourceID: "message-delegation-context", TurnID: delegationContextTurnID,
-				Message: model.Message{Role: model.RoleUser, Content: goal}, Required: true,
+				Message: model.Message{Role: model.RoleUser, Content: model.TextParts(goal)}, Required: true,
 			}},
 		},
 	})
@@ -73,7 +73,7 @@ func TestHarnessDelegationChildDoesNotInheritParentContextCheckpoint(t *testing.
 	}
 	assertDelegationCompleted(t, completed, relations, capture)
 	requests := capture.requestsCopy()
-	if len(requests) != 3 || requests[1].Messages[len(requests[1].Messages)-1].Content != "analyze the evidence" {
+	if len(requests) != 3 || model.TextValue(requests[1].Messages[len(requests[1].Messages)-1].Content) != "analyze the evidence" {
 		t.Fatalf("delegated child inherited parent context: %#v", requests)
 	}
 }
@@ -134,7 +134,7 @@ func TestHarnessDelegationPolicyPreparesActualChildGoal(t *testing.T) {
 	if len(requests) != 3 {
 		t.Fatalf("model requests = %#v", requests)
 	}
-	childGoal := requests[1].Messages[len(requests[1].Messages)-1].Content
+	childGoal := model.TextValue(requests[1].Messages[len(requests[1].Messages)-1].Content)
 	if childGoal != "analyze the evidence\n\nhost-frozen evidence" {
 		t.Fatalf("prepared child goal = %q", childGoal)
 	}
@@ -270,7 +270,7 @@ type mixedDelegationModel struct{ synthesized bool }
 
 func (client *mixedDelegationModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	if len(request.Tools) == 0 {
-		if strings.Contains(request.Messages[len(request.Messages)-1].Content, "risk") {
+		if strings.Contains(model.TextValue(request.Messages[len(request.Messages)-1].Content), "risk") {
 			return model.Response{}, errors.New("PRIVATE-specialist-provider-failure")
 		}
 		return model.Response{Content: "successful sibling research"}, nil
@@ -282,13 +282,13 @@ func (client *mixedDelegationModel) Generate(_ context.Context, request model.Re
 			continue
 		}
 		toolsReturned++
-		if strings.Contains(message.Content, "successful sibling research") {
+		if strings.Contains(model.TextValue(message.Content), "successful sibling research") {
 			success = true
 		}
-		if strings.Contains(message.Content, `"status":"failed"`) && strings.Contains(message.Content, "delegation.child_failed") {
+		if strings.Contains(model.TextValue(message.Content), `"status":"failed"`) && strings.Contains(model.TextValue(message.Content), "delegation.child_failed") {
 			failed = true
 		}
-		if strings.Contains(message.Content, "PRIVATE-specialist-provider-failure") {
+		if strings.Contains(model.TextValue(message.Content), "PRIVATE-specialist-provider-failure") {
 			return model.Response{}, errors.New("child private error leaked into parent transcript")
 		}
 	}

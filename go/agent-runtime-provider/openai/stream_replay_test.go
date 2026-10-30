@@ -94,9 +94,9 @@ func TestStreamingReplayUsesCompletedReasoningItemWhenFinalOmitsEncryption(t *te
 				t.Fatal("provider replay did not use the authoritative completed reasoning")
 			}
 			req.Messages = append(req.Messages, model.Message{
-				Role: model.RoleAssistant, Content: first.Content,
+				Role: model.RoleAssistant, Content: model.TextParts(first.Content),
 				ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay,
-			}, model.Message{Role: model.RoleTool, ToolCallID: first.ToolCalls[0].ID, Content: `{"ok":true}`})
+			}, model.Message{Role: model.RoleTool, ToolCallID: first.ToolCalls[0].ID, Content: model.TextParts(`{"ok":true}`)})
 			result, err := client.GenerateStream(t.Context(), req, nil)
 			if err != nil || result.Content != "GAOGE_TOOL_OK" || physicalRequests != 2 {
 				t.Fatalf("encrypted Tool context could not resume: response=%+v err=%v calls=%d", result, err, physicalRequests)
@@ -142,7 +142,7 @@ func TestStreamingSchemaAcceptsOptionalDoneCompletedStatus(t *testing.T) {
 	})
 	result, err := client.GenerateStream(t.Context(), model.Request{
 		Model:          "gpt-4.1",
-		Messages:       []model.Message{{Role: model.RoleUser, Content: "return strict JSON"}},
+		Messages:       []model.Message{{Role: model.RoleUser, Content: model.TextParts("return strict JSON")}},
 		OutputContract: &model.OutputContract{Name: "status_probe", Schema: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean","enum":[true]}},"required":["ok"],"additionalProperties":false}`)},
 	}, nil)
 	if err != nil || result.Content != `{"ok":true}` || result.Refused ||

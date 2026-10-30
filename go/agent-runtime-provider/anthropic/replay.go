@@ -102,7 +102,8 @@ func verifiedReplay(message model.Message) (json.RawMessage, error) {
 			return nil, ErrUnsupported
 		}
 	}
-	if strings.TrimSpace(text.String()) != strings.TrimSpace(message.Content) ||
+	visibleText, textOnly := model.PlainText(message.Content)
+	if !textOnly || strings.TrimSpace(text.String()) != strings.TrimSpace(visibleText) ||
 		len(calls) != len(message.ToolCalls) || len(calls) == 0 {
 		return nil, ErrUnsupported
 	}

@@ -145,7 +145,7 @@ func topologyFixtures(t *testing.T) topologyFixtureSet {
 	t.Helper()
 	agentSnapshot := topologySnapshot(
 		"agent-1", agent.RunKind, kernel.RunStatusCompleted, 2,
-		json.RawMessage(`{"messages":[{"role":"user","content":"draft"}],"model":"terra","toolKeys":[],"budget":{"limits":{"maxLLMCalls":8,"maxToolCalls":16},"usage":{"llmCalls":1}}}`),
+		json.RawMessage(`{"messages":[{"role":"user","content":[{"kind":"text","text":"draft"}]}],"model":"terra","toolKeys":[],"budget":{"limits":{"maxLLMCalls":8,"maxToolCalls":16},"usage":{"llmCalls":1}}}`),
 	)
 	teamSnapshot := topologySnapshot(
 		"team-1", team.RunKind, kernel.RunStatusRunning, 3,

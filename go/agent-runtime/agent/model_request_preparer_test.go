@@ -21,7 +21,7 @@ func TestContextProjectionIsSealedBeforeModelIntentAndNotRepeatedOnRestart(t *te
 		Runtime: newModelInvocationRuntime(t, faults), Model: provider,
 		PrepareModelRequest: func(_ context.Context, request model.Request) (model.Request, error) {
 			prepared++
-			request.Messages = append([]model.Message{{Role: model.RoleSystem, Content: "immutable prior conversation"}}, request.Messages...)
+			request.Messages = append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts("immutable prior conversation")}}, request.Messages...)
 			return request, nil
 		},
 	})
@@ -41,7 +41,7 @@ func TestContextProjectionIsSealedBeforeModelIntentAndNotRepeatedOnRestart(t *te
 	if err != nil || len(before.ModelInvocations) != 1 || before.ModelInvocations[0].Status != agent.ModelInvocationPending {
 		t.Fatalf("missing frozen pending intent: %+v, err=%v", before, err)
 	}
-	if got := before.ModelInvocations[0].Request.Messages; len(got) != 2 || got[0].Content != "immutable prior conversation" {
+	if got := before.ModelInvocations[0].Request.Messages; len(got) != 2 || model.TextValue(got[0].Content) != "immutable prior conversation" {
 		t.Fatalf("preparation missing from durable intent: %+v", got)
 	}
 	second, err := agent.NewRunner(agent.Dependencies{
@@ -59,7 +59,7 @@ func TestContextProjectionIsSealedBeforeModelIntentAndNotRepeatedOnRestart(t *te
 		t.Fatalf("resume: %v, status=%s", err, completed.Run.Status)
 	}
 	calls := provider.callsCopy()
-	if len(calls) != 1 || len(calls[0].Messages) != 2 || calls[0].Messages[0].Content != "immutable prior conversation" {
+	if len(calls) != 1 || len(calls[0].Messages) != 2 || model.TextValue(calls[0].Messages[0].Content) != "immutable prior conversation" {
 		t.Fatalf("resumed request changed: %+v", calls)
 	}
 }

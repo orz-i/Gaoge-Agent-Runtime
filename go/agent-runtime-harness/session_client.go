@@ -98,7 +98,7 @@ func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string)
 		return Snapshot{}, ErrInvalidRequest
 	}
 	last := normalized.Entries[len(normalized.Entries)-1].Message
-	if last.Role != model.RoleUser || strings.TrimSpace(last.Content) != strings.TrimSpace(prompt) {
+	if last.Role != model.RoleUser || strings.TrimSpace(model.TextValue(last.Content)) != strings.TrimSpace(prompt) {
 		return Snapshot{}, ErrInvalidRequest
 	}
 	return session.runner.StartAgentTurn(ctx, StartRequest{

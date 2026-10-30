@@ -146,7 +146,7 @@ func (runner *Runner) correctCompletion(
 	state.CompletionRepair = true
 	if content := strings.TrimSpace(response.Content); content != "" {
 		state.Messages = append(state.Messages, model.Message{
-			Role: model.RoleAssistant, Content: content, ProviderReplay: model.CloneProviderReplay(response.ProviderReplay),
+			Role: model.RoleAssistant, Content: model.TextParts(content), ProviderReplay: model.CloneProviderReplay(response.ProviderReplay),
 		})
 	}
 	state.Messages = withSystemGuidance(
@@ -613,7 +613,7 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		return nil, ErrInvalidRequest
 	}
 	state := runState{
-		Messages:         []model.Message{{Role: model.RoleUser, Content: strings.TrimSpace(request.Goal)}},
+		Messages:         []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.TrimSpace(request.Goal))}},
 		Model:            strings.TrimSpace(request.Model),
 		ModelOptions:     cloneRawJSON(request.ModelOptions),
 		OutputContract:   model.CloneOutputContract(request.OutputContract),
@@ -626,7 +626,7 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		AutoAllowance:    automaticAllowance,
 	}
 	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
-		state.Messages = append([]model.Message{{Role: model.RoleSystem, Content: instructions}}, state.Messages...)
+		state.Messages = append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(instructions)}}, state.Messages...)
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
@@ -1033,7 +1033,7 @@ func unproductiveToolKeys(messages []model.Message) []string {
 	lastKey, count := "", 0
 	for i := len(messages) - 1; i >= 0; i-- {
 		message := messages[i]
-		if message.Role == model.RoleAssistant && len(message.ToolCalls) == 0 && strings.TrimSpace(message.Content) != "" {
+		if message.Role == model.RoleAssistant && len(message.ToolCalls) == 0 && strings.TrimSpace(model.TextValue(message.Content)) != "" {
 			break
 		}
 		if message.Role != model.RoleTool {
@@ -1047,14 +1047,14 @@ func unproductiveToolKeys(messages []model.Message) []string {
 			var result struct {
 				ToolKeys []string `json:"toolKeys"`
 			}
-			if json.Unmarshal([]byte(message.Content), &result) != nil || len(result.ToolKeys) != 0 || !strings.Contains(message.Content, `"toolKeys"`) {
+			if json.Unmarshal([]byte(model.TextValue(message.Content)), &result) != nil || len(result.ToolKeys) != 0 || !strings.Contains(model.TextValue(message.Content), `"toolKeys"`) {
 				break
 			}
-		} else if !recoverableToolResult(message.Content) && !unavailableEvidenceToolResult(message.Content) {
+		} else if !recoverableToolResult(model.TextValue(message.Content)) && !unavailableEvidenceToolResult(model.TextValue(message.Content)) {
 			break
 		}
 		lastKey, count = key, count+1
-		if count >= 3 || count >= 2 && (key == ToolDiscoveryKey || unavailableEvidenceToolResult(message.Content)) {
+		if count >= 3 || count >= 2 && (key == ToolDiscoveryKey || unavailableEvidenceToolResult(model.TextValue(message.Content))) {
 			return []string{key}
 		}
 	}
@@ -1136,7 +1136,7 @@ func completedToolCalls(assistant model.Message, toolResults []model.Message) ([
 	}
 	results := make(map[string]string, len(toolResults))
 	for _, toolResult := range toolResults {
-		results[toolResult.ToolCallID] = strings.TrimSpace(toolResult.Content)
+		results[toolResult.ToolCallID] = strings.TrimSpace(model.TextValue(toolResult.Content))
 	}
 	completed := make([]completedToolCall, 0, len(assistant.ToolCalls))
 	for _, call := range assistant.ToolCalls {
@@ -1232,7 +1232,7 @@ func completedToolKeys(messages []model.Message) map[string]struct{} {
 	calls := toolCallKeysByID(messages)
 	completed := make(map[string]struct{})
 	for _, message := range messages {
-		if message.Role != model.RoleTool || toolResultRejectedOrRetryable(message.Content) {
+		if message.Role != model.RoleTool || toolResultRejectedOrRetryable(model.TextValue(message.Content)) {
 			continue
 		}
 		if key := calls[strings.TrimSpace(message.ToolCallID)]; key != "" {
@@ -1319,11 +1319,11 @@ func toolKeysExcept(toolKeys []string, keep []string) []string {
 func withSystemGuidance(messages []model.Message, guidance string) []model.Message {
 	for index := range messages {
 		if messages[index].Role == model.RoleSystem {
-			messages[index].Content = strings.TrimSpace(messages[index].Content) + "\n\n" + guidance
+			messages[index].Content = model.TextParts(strings.TrimSpace(model.TextValue(messages[index].Content)) + "\n\n" + guidance)
 			return messages
 		}
 	}
-	return append([]model.Message{{Role: model.RoleSystem, Content: guidance}}, messages...)
+	return append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(guidance)}}, messages...)
 }
 
 func withRepeatedToolGuidance(messages []model.Message, toolKeys []string) []model.Message {
@@ -1332,11 +1332,11 @@ func withRepeatedToolGuidance(messages []model.Message, toolKeys []string) []mod
 		"Do not repeat them now; continue from the existing results, choose a different action, or answer the user."
 	for index := range messages {
 		if messages[index].Role == model.RoleSystem {
-			messages[index].Content = strings.TrimSpace(messages[index].Content) + "\n\n" + guidance
+			messages[index].Content = model.TextParts(strings.TrimSpace(model.TextValue(messages[index].Content)) + "\n\n" + guidance)
 			return messages
 		}
 	}
-	return append([]model.Message{{Role: model.RoleSystem, Content: guidance}}, messages...)
+	return append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(guidance)}}, messages...)
 }
 
 func withBlockedToolGuidance(messages []model.Message, toolKeys []string) []model.Message {
@@ -1344,11 +1344,11 @@ func withBlockedToolGuidance(messages []model.Message, toolKeys []string) []mode
 		strings.Join(toolKeys, ", ") + ". Continue now using only the remaining Tools."
 	for index := range messages {
 		if messages[index].Role == model.RoleSystem {
-			messages[index].Content = strings.TrimSpace(messages[index].Content) + "\n\n" + guidance
+			messages[index].Content = model.TextParts(strings.TrimSpace(model.TextValue(messages[index].Content)) + "\n\n" + guidance)
 			return messages
 		}
 	}
-	return append([]model.Message{{Role: model.RoleSystem, Content: guidance}}, messages...)
+	return append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(guidance)}}, messages...)
 }
 
 func (runner *Runner) generateModel(
@@ -1520,7 +1520,7 @@ func (runner *Runner) queueToolCalls(
 		preparedCalls[index].Arguments = append(json.RawMessage(nil), call.Arguments...)
 	}
 	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleAssistant, Content: strings.TrimSpace(content),
+		Role: model.RoleAssistant, Content: model.TextParts(strings.TrimSpace(content)),
 		ToolCalls: cloneToolCalls(preparedCalls), ProviderReplay: model.CloneProviderReplay(providerReplay),
 	})
 	state.PendingCalls = cloneToolCalls(preparedCalls)
@@ -1869,7 +1869,7 @@ func (runner *Runner) persistCompletedToolCall(
 	state := execution.state
 	state.ToolWait = nil
 	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleTool, Content: string(result.Content), ToolCallID: execution.call.ID,
+		Role: model.RoleTool, Content: model.TextParts(string(result.Content)), ToolCallID: execution.call.ID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
 	state.PendingApproval = nil
@@ -1933,7 +1933,7 @@ func (runner *Runner) recordRecoverableToolError(
 	}
 	callID := call.ID
 	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleTool, Content: string(content), ToolCallID: callID,
+		Role: model.RoleTool, Content: model.TextParts(string(content)), ToolCallID: callID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
 	state.PendingApproval = nil
@@ -2010,7 +2010,7 @@ func (runner *Runner) resumeRejected(
 		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 	}
 	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleTool, Content: rejectedToolContent(response.Comment), ToolCallID: call.ID,
+		Role: model.RoleTool, Content: model.TextParts(rejectedToolContent(response.Comment)), ToolCallID: call.ID,
 	})
 	state.PendingCalls = remainingPendingCalls(state)
 	state.PendingApproval = nil
@@ -2061,7 +2061,7 @@ func (runner *Runner) complete(
 		)
 	}
 	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleAssistant, Content: response.Content, ProviderReplay: model.CloneProviderReplay(response.ProviderReplay),
+		Role: model.RoleAssistant, Content: model.TextParts(response.Content), ProviderReplay: model.CloneProviderReplay(response.ProviderReplay),
 	})
 	encodedState, err := encodeState(state)
 	if err != nil {

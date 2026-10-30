@@ -79,7 +79,7 @@ func (manager *Manager) CompactToolPressure(
 	artifacts := make([]Artifact, 0)
 	for index := range messages {
 		message := &messages[index]
-		if message.Role != model.RoleTool || strings.TrimSpace(message.ToolCallID) == "" || message.Content == "" {
+		if message.Role != model.RoleTool || strings.TrimSpace(message.ToolCallID) == "" || model.TextValue(message.Content) == "" {
 			continue
 		}
 		artifact, err := NewArtifact(
@@ -87,17 +87,17 @@ func (manager *Manager) CompactToolPressure(
 			previous.ScopeID,
 			previous.Generation+1,
 			strings.TrimSpace(message.ToolCallID),
-			message.Content,
+			model.TextValue(message.Content),
 			nil,
 		)
 		if err != nil {
 			return ToolPressureCompaction{}, err
 		}
 		marker := compactedToolResultMarker(artifact)
-		if len([]byte(marker)) >= len([]byte(message.Content)) {
+		if len([]byte(marker)) >= len([]byte(model.TextValue(message.Content))) {
 			continue
 		}
-		message.Content = marker
+		message.Content = model.TextParts(marker)
 		artifacts = append(artifacts, artifact)
 	}
 	if len(artifacts) == 0 {
@@ -143,7 +143,7 @@ func (manager *Manager) CompactToolResults(
 	result := ToolCompactionResult{Messages: model.CloneMessages(messages)}
 	for index := range result.Messages {
 		message := &result.Messages[index]
-		if message.Role != model.RoleTool || len([]byte(message.Content)) <= maxBytes {
+		if message.Role != model.RoleTool || len([]byte(model.TextValue(message.Content))) <= maxBytes {
 			continue
 		}
 		artifact, err := NewArtifact(
@@ -151,13 +151,13 @@ func (manager *Manager) CompactToolResults(
 			scopeID,
 			generation,
 			strings.TrimSpace(message.ToolCallID),
-			message.Content,
+			model.TextValue(message.Content),
 			nil,
 		)
 		if err != nil {
 			return ToolCompactionResult{}, err
 		}
-		message.Content = compactedToolResultReference(artifact, maxBytes)
+		message.Content = model.TextParts(compactedToolResultReference(artifact, maxBytes))
 		result.Artifacts = append(result.Artifacts, artifact)
 	}
 	return result, nil
@@ -166,7 +166,7 @@ func (manager *Manager) CompactToolResults(
 func splitWindowInstructions(instructions string, messages []model.Message) (string, []model.Message) {
 	instructions = strings.TrimSpace(instructions)
 	if instructions != "" && len(messages) > 0 && messages[0].Role == model.RoleSystem &&
-		strings.TrimSpace(messages[0].Content) == instructions {
+		strings.TrimSpace(model.TextValue(messages[0].Content)) == instructions {
 		return instructions, model.CloneMessages(messages[1:])
 	}
 	return instructions, model.CloneMessages(messages)
@@ -251,7 +251,16 @@ func portableCheckpointExtract(messages []model.Message, artifacts []Artifact, m
 
 func portableMessageExtract(message model.Message) string {
 	role := strings.TrimSpace(string(message.Role))
-	contentJSON, _ := json.Marshal(strings.TrimSpace(message.Content))
+	text, textOnly := model.PlainText(message.Content)
+	var contentJSON []byte
+	if textOnly {
+		contentJSON, _ = json.Marshal(strings.TrimSpace(text))
+	} else {
+		// Archived media remains in an immutable Context Artifact.
+		// Never promote a provider-scoped file ID or user-controlled URL
+		// into a synthetic system-message extract on rollover.
+		contentJSON, _ = json.Marshal("[media parts omitted]")
+	}
 	if message.Role == model.RoleAssistant && len(message.ToolCalls) > 0 {
 		calls := make([]string, 0, len(message.ToolCalls))
 		for _, call := range message.ToolCalls {
@@ -820,24 +829,17 @@ func (manager *Manager) BindModelWindow(
 	return next, nil
 }
 
-// AssessModelRequest accounts the exact request at a model sampling boundary.
+// AssessModelRequest accounts the final provider-neutral request at a model
+// sampling boundary. Only a typed model.Request can prove whether its messages
+// contain media; arbitrary serialized payloads cannot safely use the text-only
+// byte fallback. Call after model option/tool/hosted-tool materialization.
 func (manager *Manager) AssessModelRequest(
 	ctx stdcontext.Context,
 	request model.Request,
 	modelWindow ModelWindow,
 	policy Policy,
 ) (Assessment, error) {
-	return manager.AssessRequest(ctx, model.CloneRequest(request), modelWindow, policy)
-}
-
-// AssessRequest accounts the canonical provider-neutral request that will actually be sent at a
-// sampling boundary. Hosts should call this after model option/tool/hosted-tool materialization.
-func (manager *Manager) AssessRequest(
-	ctx stdcontext.Context,
-	request any,
-	modelWindow ModelWindow,
-	policy Policy,
-) (Assessment, error) {
+	request = model.CloneRequest(request)
 	policy = NormalizePolicy(policy)
 	hard, err := EffectiveInputLimit(modelWindow, policy.MaxInputTokens)
 	if err != nil {
@@ -853,6 +855,11 @@ func (manager *Manager) AssessRequest(
 	}
 	assessment := Assessment{HardInputTokens: hard, SoftInputTokens: soft, SerializedBytes: int64(len(serialized))}
 	countContext := normalizeTokenCountContext(modelWindow.TokenCountContext)
+	// A media URL/file reference is only a few serialized bytes, while
+	// decoded image/document/audio tokens are not bounded by those bytes.
+	// Never treat the text-only byte heuristic as proof of a multimodal
+	// hard context limit; require an exact Provider-aware token counter.
+	requiresExact := requestContainsMedia(request)
 	if manager != nil && manager.counter != nil && countContext.Protocol != "" && countContext.Model != "" {
 		countRequest := TokenCountRequest{
 			Context: countContext,
@@ -868,11 +875,25 @@ func (manager *Manager) AssessRequest(
 			return assessment, nil
 		}
 	}
+	if requiresExact {
+		return Assessment{}, ErrModelWindowUnknown
+	}
 	assessment.RawTokenEstimate = estimatedTokens(serialized)
 	assessment.AdjustedTokenEstimate = applySafetyMargin(assessment.RawTokenEstimate, policy.EstimateSafetyPercent)
 	assessment.HardTokenEstimate = hardTokenUpperBound(serialized, policy.EstimateSafetyPercent)
 	assessment.TokenCountSource = CountEstimated
 	return assessment, nil
+}
+
+func requestContainsMedia(request model.Request) bool {
+	for _, message := range request.Messages {
+		for _, part := range message.Content {
+			if part.Kind != model.ContentText {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // CompactPortable creates one explicit rollover candidate. Unlike the removed V1 deterministic
@@ -918,7 +939,7 @@ func (manager *Manager) CompactPortable(request PortableCompactionRequest) (Port
 	entries = append(entries, Entry{
 		ID:     stableID("ctxe", previous.ScopeID, strconv.Itoa(previous.Generation+1), archiveIdentity),
 		TurnID: "context_rollover", Required: true,
-		Message: model.Message{Role: model.RoleSystem, Content: projection.Marker},
+		Message: model.Message{Role: model.RoleSystem, Content: model.TextParts(projection.Marker)},
 	})
 	if strings.TrimSpace(projection.Extract) != "" {
 		entries = append(entries, Entry{
@@ -926,7 +947,7 @@ func (manager *Manager) CompactPortable(request PortableCompactionRequest) (Port
 				"ctxe", previous.ScopeID, strconv.Itoa(previous.Generation+1), archiveIdentity, "extract",
 			),
 			TurnID: "context_rollover", Required: true,
-			Message: model.Message{Role: model.RoleUser, Content: projection.Extract},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts(projection.Extract)},
 		})
 	}
 	for index, message := range retained {
@@ -988,7 +1009,7 @@ func Materialize(window Window) []model.Message {
 	window = normalizeWindow(window)
 	result := make([]model.Message, 0, len(window.Entries)+1)
 	if window.Instructions != "" {
-		result = append(result, model.Message{Role: model.RoleSystem, Content: window.Instructions})
+		result = append(result, model.Message{Role: model.RoleSystem, Content: model.TextParts(window.Instructions)})
 	}
 	for _, entry := range window.Entries {
 		result = append(result, cloneMessage(entry.Message))
@@ -1249,27 +1270,19 @@ func normalizeWindow(value Window) Window {
 }
 
 func validMessage(message model.Message) bool {
-	switch message.Role {
-	case model.RoleSystem, model.RoleUser:
-		return strings.TrimSpace(message.Content) != "" && len(message.ToolCalls) == 0 && message.ToolCallID == ""
-	case model.RoleAssistant:
-		// Native provider turns may contain only opaque thinking/server-tool
-		// replay. Agent continuation deliberately retains their empty assistant
-		// placeholder; removing it would shift replay identity on the next step.
-		if message.ToolCallID != "" {
-			return false
-		}
+	if model.ValidateMessage(message) != nil {
+		return false
+	}
+	if message.Role == model.RoleAssistant {
+		// Signed reasoning/server-tool placeholders can have no visible
+		// text; Tool calls remain an independent execution authority.
 		for _, call := range message.ToolCalls {
 			if strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.ToolKey) == "" || !json.Valid(call.Arguments) {
 				return false
 			}
 		}
-		return true
-	case model.RoleTool:
-		return strings.TrimSpace(message.ToolCallID) != "" && strings.TrimSpace(message.Content) != "" && len(message.ToolCalls) == 0
-	default:
-		return false
 	}
+	return true
 }
 
 func validToolTranscriptMessages(messages []model.Message) bool {

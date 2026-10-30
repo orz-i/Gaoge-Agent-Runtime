@@ -56,7 +56,7 @@ func TestPausedHostedModelResumesAfterRunnerRestart(t *testing.T) {
 				t.Fatalf("continuation failed: status=%s calls=%d err=%v", completed.Run.Status, len(client.requests), err)
 			}
 			first, second := client.requests[0], client.requests[1]
-			if first.InvocationID == second.InvocationID || len(second.Messages) != 2 || second.Messages[1].Role != runtimemodel.RoleAssistant || second.Messages[1].Content != text {
+			if first.InvocationID == second.InvocationID || len(second.Messages) != 2 || second.Messages[1].Role != runtimemodel.RoleAssistant || runtimemodel.TextValue(second.Messages[1].Content) != text {
 				t.Fatalf("paused receipt was replayed or lost: %+v", second)
 			}
 			resumedReplay := second.Messages[1].ProviderReplay

@@ -139,7 +139,7 @@ func sameCheckpointModelMessage(checkpoint runtimecontext.Checkpoint, left, righ
 	if strings.TrimSpace(checkpoint.ScopeID) == "" || checkpoint.Generation <= 0 ||
 		left.Role != model.RoleTool || right.Role != model.RoleTool ||
 		strings.TrimSpace(left.ToolCallID) != strings.TrimSpace(right.ToolCallID) ||
-		!strings.HasPrefix(strings.TrimSpace(left.Content), "[tool_result_compacted ") {
+		!strings.HasPrefix(strings.TrimSpace(model.TextValue(left.Content)), "[tool_result_compacted ") {
 		return false
 	}
 	artifact, err := runtimecontext.NewArtifact(
@@ -147,10 +147,10 @@ func sameCheckpointModelMessage(checkpoint runtimecontext.Checkpoint, left, righ
 		checkpoint.ScopeID,
 		checkpoint.Generation,
 		strings.TrimSpace(right.ToolCallID),
-		right.Content,
+		model.TextValue(right.Content),
 		nil,
 	)
-	return err == nil && strings.Contains(left.Content, "sha256="+artifact.ContentHash)
+	return err == nil && strings.Contains(model.TextValue(left.Content), "sha256="+artifact.ContentHash)
 }
 
 func sameContextModelMessage(left, right model.Message) bool {
@@ -173,8 +173,8 @@ func normalizeContextToolCalls(values []tools.Call) []tools.Call {
 func runtimeGuidanceMessages(messages []model.Message) []model.Message {
 	result := make([]model.Message, 0, len(messages))
 	for _, message := range messages {
-		if content := strings.TrimSpace(message.Content); content != "" {
-			result = append(result, model.Message{Role: model.RoleSystem, Content: content})
+		if content := strings.TrimSpace(model.TextValue(message.Content)); content != "" {
+			result = append(result, model.Message{Role: model.RoleSystem, Content: model.TextParts(content)})
 		}
 	}
 	return result

@@ -19,7 +19,7 @@ func persistedAssistant(t *testing.T) model.Message {
 	t.Helper()
 	history := []model.Message{{
 		Role:    model.RoleAssistant,
-		Content: `{"ok":true}`,
+		Content: model.TextParts(`{"ok":true}`),
 		ProviderReplay: &model.ProviderReplay{
 			Provider: "openai", Format: "responses.output.v1",
 			Data: json.RawMessage("[" + phaseCommentaryItem + "," + phaseFinalItem + "]"),
@@ -47,7 +47,7 @@ func TestRestoredPhaseHistoryRejectsLegacyFlatteningBeforeHTTP(t *testing.T) {
 		name string
 		edit func(*model.Message)
 	}{
-		{name: "old-flattened-content", edit: func(m *model.Message) { m.Content = "Working." + m.Content }},
+		{name: "old-flattened-content", edit: func(m *model.Message) { m.Content = model.TextParts("Working." + model.TextValue(m.Content)) }},
 		{name: "unrecognized-format", edit: func(m *model.Message) { m.ProviderReplay.Format = "responses.output.legacy" }},
 		{name: "phase-erased", edit: func(m *model.Message) {
 			m.ProviderReplay.Data = json.RawMessage(strings.Replace(string(m.ProviderReplay.Data), `"phase":"final_answer"`, `"phase":"commentary"`, 1))
@@ -62,7 +62,7 @@ func TestRestoredPhaseHistoryRejectsLegacyFlatteningBeforeHTTP(t *testing.T) {
 			test.edit(&msg)
 			req := model.Request{
 				Model:    "gpt-4.1",
-				Messages: []model.Message{{Role: model.RoleUser, Content: "first"}, msg, {Role: model.RoleUser, Content: "next"}},
+				Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("first")}, msg, {Role: model.RoleUser, Content: model.TextParts("next")}},
 			}
 			_, err := client.Generate(context.Background(), req)
 			if !errors.Is(err, openai.ErrUnsupported) || physicalCalls != 0 {
@@ -74,7 +74,7 @@ func TestRestoredPhaseHistoryRejectsLegacyFlatteningBeforeHTTP(t *testing.T) {
 	// zero fallback or wire-schema migration.
 	validReq := model.Request{
 		Model:    "gpt-4.1",
-		Messages: []model.Message{{Role: model.RoleUser, Content: "first"}, base, {Role: model.RoleUser, Content: "next"}},
+		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("first")}, base, {Role: model.RoleUser, Content: model.TextParts("next")}},
 	}
 	result, err := client.Generate(t.Context(), validReq)
 	if err != nil || result.Content != `{"ok":true}` || physicalCalls != 1 {

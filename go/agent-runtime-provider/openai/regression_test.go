@@ -22,7 +22,7 @@ func TestMissingOrIncompleteUsageIsNotZeroUsage(t *testing.T) {
 			client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = fmt.Fprintf(w, `{"id":"resp-usage","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"response"}]}],"usage":%s}`, usage)
 			})
-			result, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hello"}}})
+			result, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hello")}}})
 			if err != nil || result.Usage != nil {
 				t.Fatalf("missing usage fabricated a receipt: %+v %v", result, err)
 			}
@@ -31,7 +31,7 @@ func TestMissingOrIncompleteUsageIsNotZeroUsage(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"id":"ok","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"hello"}]}],"usage":{"input_tokens":0,"output_tokens":0}}`)
 	})
-	result, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hello"}}})
+	result, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hello")}}})
 	if err != nil || result.Usage == nil || result.Usage.InputTokens != 0 {
 		t.Fatalf("explicit zero usage lost: %+v %v", result, err)
 	}
@@ -49,7 +49,7 @@ func TestMissingUsageInSSEAndBudgetedAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := client.GenerateStream(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hello"}}}, nil)
+	result, err := client.GenerateStream(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hello")}}}, nil)
 	if err != nil || result.Usage != nil {
 		t.Fatalf("stream missing usage fabricated receipt: %+v %v", result, err)
 	}
@@ -78,7 +78,7 @@ func TestRefusalContentIsPreserved(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"id":"refusal-1","status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"I cannot assist."}]}],"usage":{"input_tokens":8,"output_tokens":4}}`)
 	})
-	response, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hello"}}})
+	response, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hello")}}})
 	if err != nil || response.Content != "I cannot assist." || response.Usage == nil {
 		t.Fatalf("refusal dropped: %+v %v", response, err)
 	}

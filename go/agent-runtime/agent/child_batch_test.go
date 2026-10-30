@@ -138,7 +138,7 @@ func (client *childBatchModel) Generate(_ context.Context, request model.Request
 	for _, message := range request.Messages {
 		if message.Role == model.RoleTool {
 			results++
-			failed = failed || message.Content == `{"status":"failed"}`
+			failed = failed || model.TextValue(message.Content) == `{"status":"failed"}`
 		}
 	}
 	if results != 3 || !failed {

@@ -141,7 +141,7 @@ func TestDeferredApprovalMissingBindingCannotBeReused(t *testing.T) {
 			t.Fatal(err)
 		}
 		messages = append(messages, runtimemodel.Message{
-			Role: runtimemodel.RoleTool, ToolCallID: "approval_call", Content: `{"previous":true}`,
+			Role: runtimemodel.RoleTool, ToolCallID: "approval_call", Content: runtimemodel.TextParts(`{"previous":true}`),
 		})
 		var err error
 		fields["messages"], err = json.Marshal(messages)

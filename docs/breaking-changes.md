@@ -2,6 +2,85 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — P3 canonical multimodal Model Message (beta.24 candidate)
+
+**Breaking normalized Go/persistence contract:** `model.Message.Content`
+is now exactly one **ordered `[]model.ContentPart`** rather than a
+`string`. The old JSON `"content":"text"` representation is **rejected**
+when unmarshalling `model.Message`; the new wire/storage representation
+is `"content":[{"kind":"text","text":"text"}]`. Host Model adapters, custom
+Model Clients, Context providers, persisted transcripts, fixture data and
+external Go consumers **must** update together. Use `model.TextParts(text)`
+to construct text-only messages, and `model.PlainText(parts)` only when
+the caller explicitly requires all-text evidence. There is no parallel
+`Images`/`Attachments` field, typed/string dual read, JSON converter,
+Schema version bump or compatibility bridge.
+
+**Closed media blocks:** The only valid `ContentPart.Kind` values are
+`text`, `image`, `file` (PDF) and `audio`. A media block has a single
+`MediaSource{Kind:"url"|"file_id"}` and a required allowlisted MIME:
+PNG/JPEG/WebP/GIF for images, PDF for documents, MPEG/WAV for audio.
+URL sources require exact HTTPS syntax, no embedded authentication,
+fragments, data URI or raw/base64 bytes. File IDs are **Provider-scoped
+Host-owned references**, not cross-provider execution grants. Only
+`RoleUser` can carry non-text media; System/Assistant/Tool content stays
+text-only, with Tool calls, ToolCallID and signed ProviderReplay retaining
+their independent authority. Unsupported or malformed media fails closed
+rather than being stringified or silently skipped.
+
+**Provider support is narrower than the Core shape:** OpenAI Responses
+maps ordered user blocks to `input_text`, `input_image` (`image_url`
+or `file_id`), and `input_file` (`file_url` or `file_id`). Anthropic
+Messages maps them to `text`, `image` or `document` with exact `url`
+or `file` sources. Both shipped adapters **reject referenced audio
+before HTTP dispatch**: no implicit network fetch, base64 conversion
+or transcription. Existing streaming output, Tool IDs and signed/
+encrypted ProviderReplay remain unchanged, and replayed assistant
+text is validated against the normalized ordered text blocks.
+Video, embedded binary media and multimodal Tool/Assistant output
+are outside this P3 contract. The high-level Harness/Agent Start
+Goal and public HTTP/TypeScript Start DTO remain text-only: this
+change does **not** claim media upload or a Host attachment API.
+
+**Frozen effects and token safety:** `CloneMessages`/`CloneRequest`
+deep-copy `MediaSource` pointers. The frozen `ModelInvocation` hash
+covers media Part kind, order, MIME and exact URL/FileID; post-intent
+changes fail before physical Provider dispatch. Context persisted
+checkpoints/portable artifacts retain ordered media and hash lineage.
+Archive system guidance never promotes historical raw URL/FileID
+values into synthetic system instructions. A remote media reference's
+JSON byte length is **not** a bound on decoded image/PDF/audio tokens:
+managed Context `AssessModelRequest` now requires a successful
+trusted, model/provider-aware exact `TokenCounter` for media.
+Unknown/failed counter gives `ErrModelWindowUnknown` rather than
+speculatively admitting the request. Text-only byte-based fallback
+remains unchanged **only for the canonical typed request**.
+
+**P1 token admission API hard cut (PR #80 follow-up):**
+`context.Manager.AssessRequest(ctx, any, ...)` is removed. It
+accepted arbitrary JSON-serializable maps/structs but only detected
+media on `model.Request`, permitting a disguised image/PDF to reach
+the text-only byte fallback without a `TokenCounter`. The **only**
+admission API is now `AssessModelRequest(ctx, model.Request, ...)`.
+Host data arriving as JSON/maps must be decoded and validated as a
+canonical `model.Request` before assessment, not passed directly to a
+generic estimator. Existing consumers of `AssessRequest` must change
+their source to the typed entrypoint; there is no converter, `any`
+overload, legacy shim or exception for custom serialized requests.
+
+**Cutover:** Pause old workers and admissions, inventory **all**
+nonterminal Agent Runs / ModelInvocations and Context checkpoints
+containing legacy string Content, then drain, reconcile or
+quarantine the old durable work before activating the next
+unreleased beta.24 cohort. Never manufacture new Model request
+hashes, transcode opaque ProviderReplay, or reissue an uncertain
+physical Model/Tool effect. Completed historical records can be
+retained for separate archival reads but old normalized transcript
+data is not automatically reinterpreted. Existing beta.23 tags
+are immutable. No Kernel status, SQL DDL, media byte ledger, new
+execution permit or backward compatibility adapter is added.
+See the [P3 independent audit](audits/2026-10-30-model-message-multimodal-hardcut.md).
+
 ## 2026-10-30 — Harness parent Item indexed Store reads (beta.24 candidate)
 
 **Breaking Host persistence contract:** `harness.Store` now requires

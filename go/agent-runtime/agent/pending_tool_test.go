@@ -121,7 +121,7 @@ func (model *pendingToolModel) Generate(_ context.Context, request runtimemodel.
 		model.t.Fatal("resumed request has no transcript")
 	}
 	last := request.Messages[len(request.Messages)-1]
-	if last.Role != runtimemodel.RoleTool || last.ToolCallID != "call_pending" || last.Content != `{"ok":true}` {
+	if last.Role != runtimemodel.RoleTool || last.ToolCallID != "call_pending" || runtimemodel.TextValue(last.Content) != `{"ok":true}` {
 		model.t.Fatalf("resumed Tool transcript = %#v", last)
 	}
 	return runtimemodel.Response{Content: "done"}, nil

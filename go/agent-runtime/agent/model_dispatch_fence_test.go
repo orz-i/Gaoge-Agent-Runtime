@@ -53,7 +53,7 @@ func TestModelDispatchRejectsPostIntentIdentityOrAuthorityMutation(t *testing.T)
 		}},
 		{name: "require_tool_escalation", change: func(r *model.Request) { r.RequireToolCall = true }},
 		{name: "negative_output_budget", change: func(r *model.Request) { r.MaxOutputTokens = -1 }},
-		{name: "message_rewrite_without_preparer", change: func(r *model.Request) { r.Messages[0].Content = "new message" }},
+		{name: "message_rewrite_without_preparer", change: func(r *model.Request) { r.Messages[0].Content = model.TextParts("new message") }},
 		{name: "tool_presentation_post_intent", change: func(r *model.Request) { r.Tools[0].Description = "not frozen" }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -123,7 +123,7 @@ func TestModelDispatchFenceSurvivesPendingIntentRestart(t *testing.T) {
 	first, err := agent.NewRunner(agent.Dependencies{
 		Runtime: newModelInvocationRuntime(t, faults), Model: provider,
 		PrepareModelRequest: func(_ context.Context, request model.Request) (model.Request, error) {
-			request.Messages = append([]model.Message{{Role: model.RoleSystem, Content: "frozen context"}}, request.Messages...)
+			request.Messages = append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts("frozen context")}}, request.Messages...)
 			return request, nil
 		},
 	})

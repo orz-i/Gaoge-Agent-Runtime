@@ -297,7 +297,7 @@ func assertRecoveredAgent(t *testing.T, snapshot kernel.Snapshot, invocationID s
 	}
 	answers := 0
 	for _, message := range view.Messages {
-		if message.Role == "assistant" && message.Content == "done" {
+		if message.Role == "assistant" && model.TextValue(message.Content) == "done" {
 			answers++
 		}
 	}

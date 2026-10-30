@@ -97,7 +97,7 @@ func TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart(t *testing.T) 
 	}
 	request := model.Request{
 		RunID: runID, InvocationID: "original-model-request",
-		Messages:    []model.Message{{Role: model.RoleUser, Content: "Verify only identified native calls"}},
+		Messages:    []model.Message{{Role: model.RoleUser, Content: model.TextParts("Verify only identified native calls")}},
 		HostedTools: []model.HostedTool{{Key: "native.search"}},
 	}
 	providerCalls := 0

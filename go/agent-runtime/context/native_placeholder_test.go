@@ -22,7 +22,7 @@ func TestCapturePreservesEmptyAssistantNativeContinuationAcrossRestart(t *testin
 		t.Fatal("native continuation placeholder corrupted the checkpoint")
 	}
 	restarted := runtimectx.NewManager(runtimectx.Dependencies{})
-	finalMessages := append(runtimectx.Materialize(captured.Window), model.Message{Role: model.RoleAssistant, Content: "finished using native evidence"})
+	finalMessages := append(runtimectx.Materialize(captured.Window), model.Message{Role: model.RoleAssistant, Content: model.TextParts("finished using native evidence")})
 	_, err = restarted.Capture(t.Context(), runtimectx.CaptureRequest{
 		Previous: captured, StaticFingerprint: captured.StaticFingerprint,
 		RunID: "native-run", Messages: finalMessages,

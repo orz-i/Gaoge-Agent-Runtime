@@ -59,7 +59,7 @@ func TestUnaryToolRoundTripAndNormalizedUsage(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"id":"resp-2","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}],"usage":{"input_tokens":20,"output_tokens":5}}`)
 		}
 	})
-	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "do lookup"}}, Tools: []tools.Definition{definition}, RequireToolCall: true}
+	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("do lookup")}}, Tools: []tools.Definition{definition}, RequireToolCall: true}
 	first, err := client.Generate(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestUnaryToolRoundTripAndNormalizedUsage(t *testing.T) {
 	}
 	request.RequireToolCall = false
 	request.Messages = append(request.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: first.ToolCalls},
-		model.Message{Role: model.RoleTool, ToolCallID: "call-1", Content: `{"ok":true}`})
+		model.Message{Role: model.RoleTool, ToolCallID: "call-1", Content: model.TextParts(`{"ok":true}`)})
 	second, err := client.Generate(context.Background(), request)
 	if err != nil || second.Content != "Done" || count != 2 {
 		t.Fatalf("second=%+v err=%v", second, err)
@@ -95,7 +95,7 @@ func TestStreamingTerminalAndPartialFailure(t *testing.T) {
 	})
 	var deltas, receipts int
 	run := func() (model.Response, error) {
-		return client.GenerateStream(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hi"}}}, func(e model.StreamEvent) error {
+		return client.GenerateStream(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}}, func(e model.StreamEvent) error {
 			if e.Delta != "" {
 				deltas++
 			}
@@ -121,7 +121,7 @@ func TestErrorClassificationAndUnsupported(t *testing.T) {
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(`{"error":{"code":"rate_limit_exceeded","message":"SENSITIVE"}}`))
 	})
-	req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hi"}}}
+	req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}}
 	_, err := client.Generate(context.Background(), req)
 	if !model.IsRetryableError(err) || strings.Contains(err.Error(), "SENSITIVE") {
 		t.Fatalf("bad retry/redaction: %v", err)

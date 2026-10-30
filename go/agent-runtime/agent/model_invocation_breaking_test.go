@@ -12,7 +12,7 @@ import (
 )
 
 func TestOldBetaPendingModelRequestHashIsNotAccepted(t *testing.T) {
-	request := model.Request{RunID: "prestable", InvocationID: "old-invocation", Model: "model", Messages: []model.Message{{Role: model.RoleUser, Content: "old pending"}}}
+	request := model.Request{RunID: "prestable", InvocationID: "old-invocation", Model: "model", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("old pending")}}}
 	before := model.CloneRequest(request)
 	before.InvocationID = ""
 	oldJSON, err := json.Marshal(before) // Pre-ADR 0010 request-only fingerprint.
@@ -34,7 +34,7 @@ func TestOldBetaPendingModelRequestHashIsNotAccepted(t *testing.T) {
 // retryable failure without persisting RetryAfter. Reject that state rather
 // than allowing it to bypass the new single retry-eligibility contract.
 func TestPrestableReleasedModelAttemptWithoutReadyAtIsRejected(t *testing.T) {
-	request := model.Request{RunID: "released-no-ready-at", InvocationID: "old-retry", Model: "model", Messages: []model.Message{{Role: model.RoleUser, Content: "retry"}}}
+	request := model.Request{RunID: "released-no-ready-at", InvocationID: "old-retry", Model: "model", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("retry")}}}
 	hash, err := modelRequestHash(request, nil, "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -49,7 +49,7 @@ func TestPrestableReleasedModelAttemptWithoutReadyAtIsRejected(t *testing.T) {
 
 func TestOldNamedPendingModelInvocationMissingBindingFingerprintIsRejected(t *testing.T) {
 	request := model.Request{RunID: "old-named", InvocationID: "old-invocation", Model: "openai/gpt-test",
-		Messages: []model.Message{{Role: model.RoleUser, Content: "please continue"}}}
+		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("please continue")}}}
 	for _, binding := range []string{"", "not-a-sha256", "ABCDEF" + strings.Repeat("a", 58)} {
 		hash, err := modelRequestHash(request, nil, "openai", binding)
 		if err != nil {

@@ -24,12 +24,23 @@ Node version has been exercised.
 | Boundary | Integration requirement |
 | --- | --- |
 | `kernel.Store` | Commit aggregate replacement, revision CAS, journal append and required transition outbox entries atomically. Keep journal reads bounded and outbox leases fenced. Run the public conformance suite for custom implementations. |
-| Model and Tool ports | Inject `model.Client`, `tools.Catalog` and `tools.Executor` explicitly. Preserve Run/invocation identity in provider adapters and apply the host's effect idempotency policy. A durable receipt is not a guarantee of exactly one physical provider request. |
+| Model and Tool ports | Inject `model.Client`, `tools.Catalog` and `tools.Executor` explicitly. **P3 breaking Go contract:** `model.Message.Content` is now ordered `[]model.ContentPart`, not a string; use `model.TextParts` and explicit strict `model.PlainText`. A User image/PDF `MediaSource` must be Host-authorized HTTPS URL or Provider-scoped `file_id`; media mutation after Model intent is denied. OpenAI/Anthropic map supported ordered blocks; referenced audio is not supported and fails before network dispatch. With managed Context, an exact Provider-aware TokenCounter is mandatory for media. Old persisted string-Content runs need drain/quarantine before beta.24 cutover; no bridge or dual-content API. Preserve Run/invocation identity, the host's Tool effect idempotency policy and independent ProviderReplay authority. A durable receipt is not exactly-one physical request. |
 | Features and workers | Compose declared `Requires`/`Provides` capabilities explicitly. The host owns worker startup, shutdown, delivery and reconciliation; installing a module does not start background recovery. |
 | Harness Store | Preserve revision checks, immutable configuration/context facts, atomic interaction resolution and Context checkpoint ownership. Clone values across persistence boundaries. **Required beta.24 hard cut:** implement `GetItem(ctx, id)` by globally unique immutable Item ID (`ErrNotFound` if absent, defensive payload copy) in addition to `AppendItem` and bounded `ListItems`. Parent-effect liveness fencing must not use an unbounded Turn scan or treat a foreign/missing Item as valid execution authority. Memory/SQL conformance and real PostgreSQL lookup tests are release gates. No compatibility shim or SQL migration. |
 | PostgreSQL | Supply `*gorm.DB`, run explicit migrations, then construct Kernel/relation/definition and Harness stores. Constructors do not migrate schemas. |
 | Redis | Supply the client, queue/feed configuration and clock where applicable. Queue delivery is leased and may repeat; semantic feeds have finite retention. |
 | HTTP and protocol edges | The host resolves principals and object authorization and supplies provider credentials, outbound HTTP clients and endpoint policy. MCP/A2A protocol support is adapter-specific. |
+
+**P3 token-admission hard cut:** Hosts must call
+`context.Manager.AssessModelRequest(ctx, model.Request, window, policy)`
+after completing the canonical Model request. The previous public
+`AssessRequest(ctx, any, ...)` is deleted: it could estimate an
+arbitrary JSON map as text even when it contained remote media.
+Decode and validate external JSON/Host envelopes into `model.Request`
+before admission; there is no permissive generic overload. Media
+requires trusted exact provider-aware counting and fails closed if
+that count is unavailable. Text-only fallback is restricted to the
+canonical typed request.
 
 The checked external consumers live in [contracts/consumers/go](../contracts/consumers/go).
 They pin constructor signatures for all nine Go modules in the current Beta.11 release cohort and explicitly spell

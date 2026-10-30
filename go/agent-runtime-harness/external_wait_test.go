@@ -30,7 +30,7 @@ func (client *localExternalDelegationModel) Generate(_ context.Context, request 
 	if last.Role == model.RoleTool {
 		return model.Response{Content: "child result received"}, nil
 	}
-	if last.Content == "compute child" {
+	if model.TextValue(last.Content) == "compute child" {
 		return model.Response{ToolCalls: []tools.Call{{ID: "child-external-call", ToolKey: "test.local_external", Arguments: json.RawMessage(`{}`)}}}, nil
 	}
 	return model.Response{ToolCalls: []tools.Call{{ID: "local-delegation-call", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"roleID":"researcher","goal":"compute child"}`)}}}, nil

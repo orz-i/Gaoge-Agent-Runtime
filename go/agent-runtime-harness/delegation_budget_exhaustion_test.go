@@ -137,7 +137,7 @@ func (client *childRunLimitModel) assertRecovered(t *testing.T) {
 		t.Fatalf("delegation remained callable after hard exhaustion: %#v", client.final)
 	}
 	last := client.final.Messages[len(client.final.Messages)-1]
-	if last.Role != model.RoleTool || !strings.Contains(last.Content, "delegation.child_runs_exhausted") {
+	if last.Role != model.RoleTool || !strings.Contains(model.TextValue(last.Content), "delegation.child_runs_exhausted") {
 		t.Fatalf("missing recoverable exhaustion guidance: %#v", last)
 	}
 }

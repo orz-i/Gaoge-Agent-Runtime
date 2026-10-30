@@ -41,7 +41,7 @@ func TestStreamErrorsRetryOnlyKnownTransientTypes(t *testing.T) {
 				_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", data)
 			})
 			_, err := client.GenerateStream(t.Context(), model.Request{
-				Messages: []model.Message{{Role: model.RoleUser, Content: "hi"}},
+				Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}},
 			}, nil)
 			if err == nil || model.IsRetryableError(err) != tc.retryable {
 				t.Fatalf("retryable=%v want=%v err=%v", model.IsRetryableError(err), tc.retryable, err)

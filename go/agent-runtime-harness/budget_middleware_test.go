@@ -101,7 +101,7 @@ func TestSharedBudgetBindsGroupChatSelectorModelCallToHarnessTurn(t *testing.T) 
 	}
 	request := model.Request{
 		RunID: "groupchat-run-budget", InvocationID: "selectorinv-budget-1",
-		Model: "selector-model", Messages: []model.Message{{Role: model.RoleUser, Content: "select"}},
+		Model: "selector-model", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("select")}},
 	}
 	response, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 		if bounded.MaxOutputTokens <= 0 {

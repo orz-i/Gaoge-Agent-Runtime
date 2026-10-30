@@ -64,13 +64,13 @@ func TestRealPostgresManagedSessionCompactionAcrossStoreRestart(t *testing.T) {
 	historic := strings.Repeat("verified old material ", 360)
 	seed := func(_ context.Context, _, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {
 		entries := []runtimecontext.Entry{
-			{ID: "old-u", SourceID: "source-old-u", TurnID: "old", Message: model.Message{Role: model.RoleUser, Content: "old question"}},
-			{ID: "old-a", SourceID: "source-old-a", TurnID: "old", Message: model.Message{Role: model.RoleAssistant, Content: historic}},
-			{ID: "current-u", SourceID: "source-current-u", TurnID: "first", Message: model.Message{Role: model.RoleUser, Content: "first prompt"}},
+			{ID: "old-u", SourceID: "source-old-u", TurnID: "old", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("old question")}},
+			{ID: "old-a", SourceID: "source-old-a", TurnID: "old", Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts(historic)}},
+			{ID: "current-u", SourceID: "source-current-u", TurnID: "first", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("first prompt")}},
 		}
 		if turn.ID == "second" {
-			entries = append(entries, runtimecontext.Entry{ID: "first-a", SourceID: "source-first-a", TurnID: "first", Message: model.Message{Role: model.RoleAssistant, Content: "verified answer"}})
-			entries = append(entries, runtimecontext.Entry{ID: "second-u", SourceID: "source-second-u", TurnID: "second", Required: true, Message: model.Message{Role: model.RoleUser, Content: prompt}})
+			entries = append(entries, runtimecontext.Entry{ID: "first-a", SourceID: "source-first-a", TurnID: "first", Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("verified answer")}})
+			entries = append(entries, runtimecontext.Entry{ID: "second-u", SourceID: "source-second-u", TurnID: "second", Required: true, Message: model.Message{Role: model.RoleUser, Content: model.TextParts(prompt)}})
 		} else if turn.ID != "first" {
 			return nil, harness.ErrNotFound
 		}
@@ -185,10 +185,10 @@ func TestRealPostgresManagedSessionCompactionAcrossStoreRestart(t *testing.T) {
 	}
 	newQuestion := false
 	for _, msg := range nextModel.requests[0].Messages {
-		if strings.Contains(msg.Content, historic) {
+		if strings.Contains(model.TextValue(msg.Content), historic) {
 			t.Fatal("archived history was replayed into model after reopening PostgreSQL")
 		}
-		if msg.Content == "second prompt" {
+		if model.TextValue(msg.Content) == "second prompt" {
 			newQuestion = true
 		}
 	}

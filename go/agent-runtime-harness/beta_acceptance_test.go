@@ -35,11 +35,11 @@ func TestContextV2BetaAcceptanceSurvivesApprovalCompactionAndRestart(t *testing.
 		Entries: []runtimecontext.Entry{
 			{
 				ID: "entry-old", SourceID: "message-old", TurnID: "turn-old",
-				Message: model.Message{Role: model.RoleAssistant, Content: "Earlier durable answer."},
+				Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("Earlier durable answer.")},
 			},
 			{
 				ID: "entry-current", SourceID: "message-current", TurnID: "turn-current", Required: true,
-				Message: model.Message{Role: model.RoleUser, Content: "Use the approved lookup."},
+				Message: model.Message{Role: model.RoleUser, Content: model.TextParts("Use the approved lookup.")},
 			},
 		},
 	}

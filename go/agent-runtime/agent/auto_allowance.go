@@ -218,7 +218,7 @@ func lastSettledWorkFingerprint(messages []model.Message) string {
 				Key     string `json:"key"`
 				Args    string `json:"args,omitempty"`
 				Content string `json:"content"`
-			}{Content: message.Content}
+			}{Content: model.TextValue(message.Content)}
 			for j := i - 1; j >= 0; j-- {
 				if messages[j].Role != model.RoleAssistant {
 					continue
@@ -238,14 +238,14 @@ func lastSettledWorkFingerprint(messages []model.Message) string {
 			sum := sha256.Sum256(raw)
 			return hex.EncodeToString(sum[:])
 		}
-		if message.Role == model.RoleAssistant && (strings.TrimSpace(message.Content) != "" || len(message.ToolCalls) != 0) {
+		if message.Role == model.RoleAssistant && (strings.TrimSpace(model.TextValue(message.Content)) != "" || len(message.ToolCalls) != 0) {
 			value := struct {
 				Content string `json:"content"`
 				Calls   []struct {
 					Key  string `json:"key"`
 					Args string `json:"args,omitempty"`
 				} `json:"calls,omitempty"`
-			}{Content: message.Content}
+			}{Content: model.TextValue(message.Content)}
 			for _, call := range message.ToolCalls {
 				value.Calls = append(value.Calls, struct {
 					Key  string `json:"key"`

@@ -300,7 +300,7 @@ func (client *approvalTestModel) Generate(_ context.Context, request model.Reque
 	if client.calls <= 2 {
 		if client.calls == 2 {
 			last := request.Messages[len(request.Messages)-1]
-			if last.Role != model.RoleTool || last.Content != `{"value":"ok"}` {
+			if last.Role != model.RoleTool || model.TextValue(last.Content) != `{"value":"ok"}` {
 				return model.Response{}, agent.ErrInvalidModelResponse
 			}
 		}

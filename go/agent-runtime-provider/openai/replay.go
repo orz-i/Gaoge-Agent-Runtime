@@ -57,7 +57,8 @@ func verifiedReplay(message model.Message) ([]json.RawMessage, error) {
 	}
 	// Agent normalizes outer whitespace before storing either a tool step or a
 	// final message. Compare that same projection without altering raw replay.
-	if strings.TrimSpace(projection.content) != strings.TrimSpace(message.Content) {
+	text, textOnly := model.PlainText(message.Content)
+	if !textOnly || strings.TrimSpace(projection.content) != strings.TrimSpace(text) {
 		return nil, ErrUnsupported
 	}
 	// Intermediate provider messages, like encrypted reasoning, are context

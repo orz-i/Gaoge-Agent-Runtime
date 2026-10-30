@@ -11,7 +11,7 @@ import (
 // content placeholder for the host's opaque provider replay. The next model
 // invocation has its own identity and consumes the ordinary call/token budget.
 func (runner *Runner) continueModel(ctx context.Context, snapshot kernel.Snapshot, state runState, response model.Response) (kernel.Snapshot, error) {
-	state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: response.Content, ProviderReplay: model.CloneProviderReplay(response.ProviderReplay)})
+	state.Messages = append(state.Messages, model.Message{Role: model.RoleAssistant, Content: model.TextParts(response.Content), ProviderReplay: model.CloneProviderReplay(response.ProviderReplay)})
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err

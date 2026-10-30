@@ -21,7 +21,7 @@ func (rewriteFrozenContextMiddleware) Model(
 	emit model.StreamSink,
 	next plugin.ModelNext,
 ) (model.Response, error) {
-	request.Messages = append(request.Messages, model.Message{Role: model.RoleSystem, Content: "inject post-intent"})
+	request.Messages = append(request.Messages, model.Message{Role: model.RoleSystem, Content: model.TextParts("inject post-intent")})
 	return next(ctx, request, emit)
 }
 

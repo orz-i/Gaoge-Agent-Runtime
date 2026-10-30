@@ -10,11 +10,11 @@ import (
 )
 
 func unsettledToolHistory(key string, outputs ...string) []model.Message {
-	messages := []model.Message{{Role: model.RoleUser, Content: "Verify AI news published during the last 24 hours"}}
+	messages := []model.Message{{Role: model.RoleUser, Content: model.TextParts("Verify AI news published during the last 24 hours")}}
 	for i, output := range outputs {
 		callID := "call-" + string(rune('a'+i))
 		args := json.RawMessage(`{"query":"AI news query ` + callID + `"}`)
-		messages = append(messages, model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: callID, ToolKey: key, Arguments: args}}}, model.Message{Role: model.RoleTool, ToolCallID: callID, Content: output})
+		messages = append(messages, model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: callID, ToolKey: key, Arguments: args}}}, model.Message{Role: model.RoleTool, ToolCallID: callID, Content: model.TextParts(output)})
 	}
 	return messages
 }
@@ -28,7 +28,7 @@ func TestUnproductiveToolKeysStopEmptySearchAcrossDifferentQueries(t *testing.T)
 	if got := unproductiveToolKeys(messages); !slices.Equal(got, []string{ToolDiscoveryKey}) {
 		t.Fatalf("repeated empty search not blocked: %v", got)
 	}
-	messages = append(messages, model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-c", ToolKey: "lookup", Arguments: json.RawMessage(`{}`)}}}, model.Message{Role: model.RoleTool, ToolCallID: "call-c", Content: `{"ok":true}`})
+	messages = append(messages, model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-c", ToolKey: "lookup", Arguments: json.RawMessage(`{}`)}}}, model.Message{Role: model.RoleTool, ToolCallID: "call-c", Content: model.TextParts(`{"ok":true}`)})
 	if got := unproductiveToolKeys(messages); len(got) != 0 {
 		t.Fatalf("valid tool success should end failed-search streak: %v", got)
 	}

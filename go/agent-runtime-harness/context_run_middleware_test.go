@@ -115,7 +115,7 @@ func TestContextRunMiddlewareReplacesStaleProcessCheckpointWithDurableTurnHead(t
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	messages := runtimecontext.Materialize(checkpoint.Window)
-	messages = append(messages, model.Message{Role: model.RoleAssistant, Content: "durable continuation"})
+	messages = append(messages, model.Message{Role: model.RoleAssistant, Content: model.TextParts("durable continuation")})
 	next, err := manager.Capture(t.Context(), runtimecontext.CaptureRequest{
 		Previous: checkpoint, StaticFingerprint: checkpoint.StaticFingerprint,
 		RunID: root.ExecutionRefID, Messages: messages,
@@ -157,7 +157,7 @@ func contextRunMiddlewareFixture(t *testing.T) (*MemoryStore, Turn, runtimeconte
 		SourcePath: []string{"message-context-resume"}, Instructions: "stable instructions",
 		Entries: []runtimecontext.Entry{{
 			ID: "entry-context-resume", SourceID: "message-context-resume", TurnID: "host-turn",
-			Message: model.Message{Role: model.RoleUser, Content: "persist this context"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("persist this context")},
 		}},
 	})
 	if err != nil {
