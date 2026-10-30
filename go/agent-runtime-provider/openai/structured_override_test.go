@@ -3,7 +3,7 @@ package openai_test
 import (
 	"testing"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/openai"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai"
 )
 
 func TestHostVerifiedGatewayStrictOutputCapability(t *testing.T) {

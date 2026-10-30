@@ -12,10 +12,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/anthropic"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/openai"
 )
 
 const serviceInputTokens int64 = 8192

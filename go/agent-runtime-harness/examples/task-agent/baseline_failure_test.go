@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/openai"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai"
 )
 
 func TestReplayFailureClassificationPrecedesGenericUnsupported(t *testing.T) {

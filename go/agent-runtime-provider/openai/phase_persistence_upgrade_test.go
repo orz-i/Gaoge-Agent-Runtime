@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/openai"
 )
 
 // Simulates the same JSON representation the Agent commits inside its opaque

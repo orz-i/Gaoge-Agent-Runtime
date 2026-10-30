@@ -2,6 +2,32 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Provider module extraction (beta.24 candidate)
+
+**Removed:** `github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider`,
+including `provider/openai`, `provider/anthropic` and the private HTTP
+support package, is no longer part of Core. The source and public Router API
+now live under `github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider`;
+the example also moves to `go/agent-runtime-provider/examples/providers`.
+The existing Harness task-agent example is isolated as a non-published nested
+module, so the public Harness module no longer requires the Provider dependency.
+There is no deprecated Go import, alias, re-export or fallback path.
+
+**Host action:** Replace imports with the standalone module path and add the
+Provider module dependency explicitly. Keep constructor-owned credentials and
+Host egress policy. Core and Kernel remain vendor-neutral. The serialized
+`model.Request`, `ModelInvocation`, and `ProviderReplay` format do not
+change in this extraction. A Run committed to an unavailable Provider or a
+changed route must continue to fail closed; do not silently select another
+Provider or retry an uncertain Tool/Model effect.
+
+**Release:** Existing beta.23 tags are immutable, so the new eleven-module
+source cohort and TypeScript client target beta.24. This is a prerelease
+candidate, **not** proof that the new module/version is remotely installable.
+Before deployment, stop and inventory in-flight Runs, drain/quarantine
+unreplayable ones, and require clean external consumer, recovery and full CI
+evidence. No new SQL DDL, Kernel state or migration bridge is introduced.
+
 ## 2026-10-29 — PR #72 second independent admission correction: Context and native Start preflight
 
 **Context recovery:** Once the frozen Turn and its root Invocation are committed, a failed Context rebuild/read **before any physical dispatch grant** is a request-local error, not authority to mark that shared Turn `failed`. The same applies to the first Start and to replayed direct Agent, Team, Workflow, GroupChat and Application roots. Other workers may be preparing the *same immutable admission* concurrently; a transient Context Store failure must not destroy their execution. The persisted Turn remains `accepted` (or at its independently committed status), so an authorized caller may retry with the **identical frozen request**. A changed ContextSeed/admission still conflicts; genuinely unknown physical effects remain fenced. Operators may explicitly inspect/cancel an admission that is permanently misconfigured, rather than relying on a failed read to fabricate a terminal execution. No new context state, lease or compatibility path is added.

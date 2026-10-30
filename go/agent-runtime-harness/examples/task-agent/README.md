@@ -6,6 +6,11 @@ dossier, recovers a deep fact from an archived tool result, saves one local
 draft, and returns a structured answer. The default mode is deterministic and
 requires no network, provider credentials, database or evaluator service.
 
+This is a **developer-only nested Go module**, not a published runtime
+dependency. This boundary keeps `go/agent-runtime-harness` independent of
+specific Model Provider implementations; the demo itself composes the
+standalone Provider module explicitly.
+
 From the repository root:
 
 ```sh
