@@ -73,7 +73,6 @@ a replacement snapshot when the server reports an expired cursor.
 | `workflows` | `start`, `resolveWait`, `cancel`, `trace` |
 | `workflows.definitions` | `compile`, `publish`, `list`, `get`, `setActivation` |
 | `runs` | `get`, `events`, `cancel`, `workbench`, `feed` |
-| `harness.commands` | `list` |
 | `harness.turns` | `get`, `feed`, `resolveApproval`, `resolveInteraction`, `retryInvocation`, `cancelSubtask`, `resolveSubtaskApproval` |
 
 Use the exported request types for each feature. Having a client method does not

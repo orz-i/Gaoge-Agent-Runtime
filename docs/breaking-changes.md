@@ -2,6 +2,43 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Host command presentation removed from Harness (beta.24 candidate)
+
+**Go public API hard cut:** `harness.CommandDescriptor` no longer carries
+`Trigger`, `Title`, or `Description`. `FirstPartyCommandDescriptors()` and
+`(*CommandCatalog).Resolve()` are deleted; no implicit `/team` or `/workflow`
+commands or Host-specific workflow-definition grammar ship with the SDK.
+Hosts must compose explicit capability descriptors, own command menus and
+slash triggers, and call the existing typed `StartAgentTurn`/
+`StartTeamTurn`/`StartGroupChatTurn`/`StartWorkflowTurn`/
+`StartApplicationTurn` entry points. The `CommandCatalog` remains only a
+frozen execution-authority set for `harness.invoke_capability`, not an
+intent classifier or dynamic plugin registry. Its first-party executable
+child contracts are closed to matched Team/Workflow class and key; custom
+Application commands require an explicit Application class and kind.
+
+**HTTP/TypeScript contract hard cut:** `GET /harness/commands`, its
+`listHarnessCommands` OpenAPI operation, `harnesshttp.Dependencies.Commands`,
+`harnesshttp.Handler.ListCommands`, the HTTP `CommandResponse`, the client
+`harness.commands.list()` and `HarnessCommandDTO` are **removed outright**.
+Hosts own discovery and presentation, including authorization-aware command
+menus, and call typed Runtime capability entries directly. The Runtime
+HTTP service does not expose a substitute command registry, compatibility
+route, renamed JSON payload or shim.
+
+**Frozen config/persistence impact:** Command descriptors are part of the
+hashed `ConfigSnapshot`. JSON decoding now rejects unexpected descriptor
+fields, including old Host presentation metadata, rather than accepting
+and silently losing them with the legacy ContentHash. This is a pre-stable
+breaking change to persisted Harness Turn configurations, even with no SQL
+DDL changes. Before upgrading, stop old workers, inventory Runs/Turns using
+old command descriptors, drain/reconcile/quarantine nonterminal work and
+restart only with compatible new Host descriptors. Never mutate immutable
+config hashes or replay an unknown physical Model/Tool effect. Existing
+`ExecutionClass`, Invocation/Run identity, Kernel six statuses, Tool
+receipts and `SessionClient.Prompt` are preserved. No bridge, schema bump
+or old-symbol forwarding aliases. See [ADR 0014](adr/0014-host-command-presentation-boundary.md).
+
 ## 2026-10-30 — P3 canonical multimodal Model Message (beta.24 candidate)
 
 **Breaking normalized Go/persistence contract:** `model.Message.Content`
