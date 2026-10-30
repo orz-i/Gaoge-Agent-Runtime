@@ -235,14 +235,6 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 	if invocation.ParentItemID == "" {
 		return nil
 	}
-	items, err := listAllItems(ctx, runner.store, invocation.TurnID)
-	if err != nil {
-		return err
-	}
-	byID := make(map[string]Item, len(items))
-	for _, item := range items {
-		byID[item.ID] = item
-	}
 	seen := make(map[string]struct{})
 	checked := make(map[string]struct{})
 	for id := invocation.ParentItemID; id != ""; {
@@ -250,8 +242,19 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 			return ErrConflict
 		}
 		seen[id] = struct{}{}
-		item, exists := byID[id]
-		if !exists || item.TurnID != invocation.TurnID {
+		// Fetch only the actual parent chain. Full Turn scans cost O(all
+		// Items) per effect boundary even when ancestry is one Item deep.
+		item, loadErr := runner.store.GetItem(ctx, id)
+		if errors.Is(loadErr, ErrNotFound) || errors.Is(loadErr, ErrInvalidRequest) {
+			return ErrConflict
+		}
+		if loadErr != nil {
+			return loadErr
+		}
+		if item.ID != id || item.TurnID != invocation.TurnID || item.Seq == 0 {
+			// A missing/foreign/corrupt parent cannot confer physical
+			// execution authority. The old full-page cursor required
+			// positive persisted Seq values as well.
 			return ErrConflict
 		}
 		if ownerID := item.InvocationID; ownerID != "" && ownerID != invocation.ID {

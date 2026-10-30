@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -782,6 +783,22 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 	return cloneItem(value), true, nil
 }
 
+// GetItem reads the same immutable indexed record that AppendItem uses for
+// global ID/replay enforcement. Copy mutable JSON before releasing the lock.
+func (store *MemoryStore) GetItem(_ context.Context, id string) (Item, error) {
+	id = strings.TrimSpace(id)
+	if store == nil || id == "" {
+		return Item{}, ErrInvalidRequest
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	item, ok := store.itemIDs[id]
+	if !ok {
+		return Item{}, ErrNotFound
+	}
+	return cloneItem(item), nil
+}
+
 func (store *MemoryStore) ListItems(_ context.Context, turnID string, afterSeq uint64, limit int) ([]Item, error) {
 	turnID = strings.TrimSpace(turnID)
 	if store == nil || turnID == "" || limit < 0 {
@@ -793,15 +810,13 @@ func (store *MemoryStore) ListItems(_ context.Context, turnID string, afterSeq u
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	values := store.items[turnID]
-	result := make([]Item, 0, min(limit, len(values)))
-	for _, value := range values {
-		if value.Seq <= afterSeq {
-			continue
-		}
-		result = append(result, cloneItem(value))
-		if len(result) == limit {
-			break
-		}
+	// AppendItem assigns monotonically increasing per-Turn Seq values.
+	// Cursor paging must not rescan all previously consumed Items.
+	start := sort.Search(len(values), func(i int) bool { return values[i].Seq > afterSeq })
+	end := min(start+limit, len(values))
+	result := make([]Item, 0, end-start)
+	for _, item := range values[start:end] {
+		result = append(result, cloneItem(item))
 	}
 	return result, nil
 }

@@ -95,6 +95,10 @@ type Store interface {
 	// Custom Stores must implement the hard-cut semantics; a loose
 	// append-only implementation is no longer a safe execution Store.
 	AppendItem(context.Context, Item) (Item, bool, error)
+	// GetItem retrieves one immutable Item by its globally unique ID.
+	// Child-effect ancestry checks must not scan full Turn histories.
+	// Missing IDs return ErrNotFound; callers still verify the Turn owner.
+	GetItem(context.Context, string) (Item, error)
 	ListItems(context.Context, string, uint64, int) ([]Item, error)
 }
 
