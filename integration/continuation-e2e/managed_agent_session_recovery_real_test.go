@@ -478,10 +478,14 @@ func (client managedRecoveryModel) Generate(_ context.Context, request model.Req
 		if message.Role != model.RoleTool {
 			continue
 		}
+		text, textOnly := model.PlainText(message.Content)
+		if !textOnly {
+			return model.Response{}, errors.New("managed recovery Tool reply was not text-only")
+		}
 		switch message.ToolCallID {
 		case managedRecoverySubtotalCall:
 			subtotal = &managedRecoveryEffect{}
-			if err := json.Unmarshal([]byte(message.Content), subtotal); err != nil {
+			if err := json.Unmarshal([]byte(text), subtotal); err != nil {
 				return model.Response{}, err
 			}
 		case managedRecoveryArchiveCall:
@@ -489,7 +493,7 @@ func (client managedRecoveryModel) Generate(_ context.Context, request model.Req
 				Content string `json:"content"`
 				Found   bool   `json:"found"`
 			}
-			if err := json.Unmarshal([]byte(message.Content), &page); err != nil {
+			if err := json.Unmarshal([]byte(text), &page); err != nil {
 				return model.Response{}, err
 			}
 			if !page.Found {
@@ -529,7 +533,15 @@ func managedRecoveryHasToolResult(messages []model.Message, callID string) bool 
 func requestMessages(request model.Request) string {
 	var content strings.Builder
 	for _, message := range request.Messages {
-		content.WriteString(message.Content)
+		text, textOnly := model.PlainText(message.Content)
+		if !textOnly {
+			// A diagnostic transcript comparison must never silently drop
+			// the frozen media evidence even when this fixture uses text.
+			raw, _ := json.Marshal(message.Content)
+			content.Write(raw)
+		} else {
+			content.WriteString(text)
+		}
 		content.WriteByte('\n')
 	}
 	return content.String()
