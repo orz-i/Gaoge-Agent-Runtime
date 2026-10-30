@@ -9,13 +9,17 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-func TestHostedReceiptWithoutIdentityPreservesTerminalCounts(t *testing.T) {
-	for status, want := range map[string]int{"completed": 2, "failed": 2} {
+func TestHostedReceiptWithoutIdentityRejectsTerminalCounts(t *testing.T) {
+	for _, status := range []string{"completed", "failed", "error", "cancelled", "canceled"} {
 		t.Run(status, func(t *testing.T) {
-			calls := []model.HostedToolCall{{ToolKey: "native.search", Status: status}, {ToolKey: "native.search", Status: status}}
+			calls := []model.HostedToolCall{
+				{ToolKey: "native.search", Status: status},
+				{ToolKey: "native.search", Status: status},
+			}
 			count, receipts, err := hostedReceiptTransfers(budget.Ledger{}, "root", calls)
-			if err != nil || count != want || len(receipts) != 0 {
-				t.Fatalf("anonymous terminal facts must not be deduplicated: count=%d receipts=%+v err=%v", count, receipts, err)
+			if !errors.Is(err, budget.ErrInvalidUsage) || count != 0 || len(receipts) != 0 {
+				t.Fatalf("anonymous terminal facts certified a duplicate charge: count=%d receipts=%+v err=%v",
+					count, receipts, err)
 			}
 		})
 	}

@@ -2,6 +2,52 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Hosted Tool anonymous terminal accounting hard cut (beta.24 candidate)
+
+**Removed:** A Provider Hosted Tool `completed`/`failed`/`error`/`cancelled`
+terminal status **without a stable Provider-owned Call ID** no longer
+certifies a separately chargeable execution. Previously two identical
+anonymous terminals each increased `HostedToolCalls` and `ToolCalls`
+despite having no cross-response deduplication identity. Both terminal
+and unfinished anonymous facts now return `budget.ErrInvalidUsage`
+when Harness shared-budget accounting is enabled; whitespace-only
+IDs are also anonymous. The original Model reservation and its native
+allowance stay **Dispatched + Held**, instead of settling guessed
+charges or silently refunding them. A response containing both named
+and anonymous Hosted Tool facts fails the entire atomic transfer:
+no partial related receipts or Model settlement are committed.
+
+**Valid continuation:** With a genuine stable Call ID, existing
+pending-to-terminal receipt promotion, replay deduplication and
+exact once-per-Call accounting stay unchanged. After an anonymous
+unknown result, the identical frozen Model Invocation cannot
+automatically reissue its physical request. Another independently
+authorized Model Invocation may provide a final **text-only** answer
+with zero NEW native Tool allowance while the old claim remains
+Held; it does not reconcile or refund the unidentified effect.
+
+**Historical reads:** Settled Model reservations written before this
+hard cut might contain anonymous terminal facts already charged as
+numeric usage. The read-only `ToolUsage.HostedCalls` retains those
+durable historical ledger totals rather than silently rewriting
+them, but `HostedCallsByKey` no longer attributes anonymous records
+using synthesized Model-response position IDs. `Incomplete` is true
+until the historical discrepancy is explicitly reconciled by the
+Host. This is a projection correction, not a Store mutation,
+automatic migration or new Provider identity.
+
+**Host adoption:** Provider adapters that want Hosted Tool budget
+settlement must expose the *actual* Call ID for every native effect
+they report, including failed/cancelled terminals. Never hash
+provider output, ToolKey, array index or response ID to stand in for
+the missing physical Call ID. Inspect, drain or explicitly quarantine
+old pending anonymous Model reservations before beta.24 activation;
+external billing invoices and Host-owned reconciliations remain
+separate from a guessed SDK count. There is **no** SQL migration,
+Kernel schema/status/version change, compatibility bridge or new
+Hosted receipt ledger. See the
+[anonymous-terminal accounting audit](audits/2026-10-30-hosted-anonymous-terminal-accounting.md).
+
 ## 2026-10-30 — PR #77 independent retry and receipt-disposition hard cut (beta.24 candidate)
 
 **Retryable is not a dispatch grant.** A Tool Handler's

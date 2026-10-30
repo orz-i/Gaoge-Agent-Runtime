@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -37,11 +38,16 @@ func toolUsageFromLedger(ledger budget.Ledger) *ToolUsage {
 			result.Incomplete = true
 			continue
 		}
-		for index, call := range model.CollapseHostedToolCalls(response.HostedToolCalls) {
-			identity, _ := json.Marshal([]any{reservation.RunID, call.ToolKey, call.ID})
-			if call.ID == "" {
-				identity, _ = json.Marshal([]any{reservation.ID, index})
+		for _, call := range model.CollapseHostedToolCalls(response.HostedToolCalls) {
+			if strings.TrimSpace(call.ID) == "" {
+				// Historical Model receipts may have been charged before
+				// the provider-owned Call ID hard cut. Their stored usage
+				// total remains accounting history, but no synthetic
+				// response-position identity can prove a per-key call.
+				result.Incomplete = true
+				continue
 			}
+			identity, _ := json.Marshal([]string{reservation.RunID, call.ToolKey, call.ID})
 			id := string(identity)
 			if !model.HostedToolTerminalStatus(call.Status) {
 				pending[id] = true
