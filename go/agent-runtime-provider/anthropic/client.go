@@ -22,10 +22,13 @@ const (
 )
 
 type Config struct {
-	APIKey                 string
-	DefaultModel           string
-	Endpoint               string
-	HTTPClient             *http.Client
+	APIKey       string
+	DefaultModel string
+	Endpoint     string
+	HTTPClient   *http.Client
+	// BindingScope identifies the Host's custom transport/policy revision.
+	// It is mandatory when HTTPClient is supplied and never persisted raw.
+	BindingScope           string
 	DefaultMaxOutputTokens int64
 	// StructuredOutputModels opts explicitly verified private/gateway model IDs
 	// into native strict JSON Schema output; unknown IDs otherwise fail closed.
@@ -35,6 +38,7 @@ type Client struct {
 	http                   *providerhttp.Client
 	defaultModel           string
 	maxTokens              int64
+	bindingFingerprint     string
 	structuredOutputModels map[string]bool
 }
 
@@ -45,6 +49,10 @@ var ErrUnsupported = errors.New("unsupported Anthropic model request or response
 var ErrIncomplete = errors.New("anthropic response ended at max_tokens")
 
 func New(config Config) (*Client, error) {
+	if config.BindingScope != strings.TrimSpace(config.BindingScope) ||
+		len(config.BindingScope) > 128 || config.HTTPClient != nil && config.BindingScope == "" {
+		return nil, providerhttp.ErrConfig
+	}
 	if config.DefaultMaxOutputTokens < 0 {
 		return nil, providerhttp.ErrConfig
 	}
@@ -65,9 +73,20 @@ func New(config Config) (*Client, error) {
 		}
 		allowed[name] = true
 	}
-	return &Client{http: h, defaultModel: strings.TrimSpace(config.DefaultModel), maxTokens: tokens, structuredOutputModels: allowed}, nil
+	actualEndpoint := config.Endpoint
+	if actualEndpoint == "" {
+		actualEndpoint = endpoint
+	}
+	fingerprint := providerhttp.FingerprintBinding(config.APIKey, providerhttp.BindingSpec{
+		Protocol: "anthropic.messages." + apiVersion, Endpoint: actualEndpoint,
+		DefaultModel: strings.TrimSpace(config.DefaultModel), BindingScope: config.BindingScope,
+		MaxOutputTokens: tokens, StructuredOutputModels: config.StructuredOutputModels,
+	})
+	return &Client{http: h, defaultModel: strings.TrimSpace(config.DefaultModel),
+		maxTokens: tokens, bindingFingerprint: fingerprint, structuredOutputModels: allowed}, nil
 }
-func (*Client) ProviderName() string { return "anthropic" }
+func (*Client) ProviderName() string                                { return "anthropic" }
+func (c *Client) BindingFingerprintForRequest(model.Request) string { return c.bindingFingerprint }
 
 type contentBlock struct {
 	Type      string          `json:"type"`
@@ -532,4 +551,5 @@ func streamFailure(errorType string) error {
 
 var _ model.Client = (*Client)(nil)
 var _ model.StreamingClient = (*Client)(nil)
+var _ model.RequestBindingFingerprinter = (*Client)(nil)
 var _ model.ProviderNamer = (*Client)(nil)

@@ -2,6 +2,100 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Hosted Tool terminal receipts fail closed (beta.24 candidate)
+
+**Removed:** The empty string Hosted Tool status is no longer a legacy terminal
+receipt. `model.HostedToolTerminalStatus("")` now returns false. Only known
+terminal states such as `completed`, `failed`, `error`, `cancelled` and
+`canceled` certify an ended provider-hosted effect; unknown and blank values
+are unfinished. Providers must send an explicit terminal status.
+
+**Durable budget safety:** With a stable provider-owned Tool Call ID, an
+unfinished fact keeps its existing held hosted Tool reservation; a later
+matching explicit terminal receipt may settle it. If an unfinished Tool has
+**no provider-owned Call ID**, automatic reconciliation is impossible.
+Harness does not mint a fake remote ID or silently refund quota. It rejects
+the attempted native accounting with `budget.ErrInvalidUsage`, suspends
+the dispatched Model reservation as unresolved and retains the original
+Host budget claim. Restart/retry cannot reissue that logical Model request.
+This intentionally sacrifices automated token settlement for unidentified
+native outcomes rather than fabricate a completion or spend quota twice.
+
+**Host action:** Drain or explicitly quarantine pending unnamed/unknown native
+Tool outcomes before upgrading. Adapt third-party Model clients to emit an
+actual terminal status and stable Call IDs for asynchronous native work.
+Historical receipts are not rewritten, no SQL migration/new ledger type or
+replay bridge is introduced, and published beta.23 tags remain immutable.
+
+## 2026-10-30 — Provider binding identity hard cut (beta.24 candidate)
+
+**Named Provider binding:** Agent now freezes an opaque SHA-256
+`bindingFingerprint` into the durable ModelInvocation and `requestHash`.
+The unary `model.Client` interface is unchanged, but all named external
+Providers must implement `model.RequestBindingFingerprinter` with a
+deterministic, nonsecret lowercase SHA-256 fingerprint. A missing or malformed
+proof rejects a new intent before any physical dispatch. A changed Provider
+name or a changed/missing binding fingerprint rejects a persisted pending
+invocation before claim, then again immediately before dispatch.
+
+**Pre-dispatch admission race closure (PR #75 independent review):**
+Revalidate the frozen Provider name and binding fingerprint inside the final
+Model dispatch guard **after** ModelMiddleware, Hosted Tool discovery and shared
+concurrency-permit waits, but before the physical Provider call. A changed
+binding now returns the distinct recoverable
+`agent.ErrProviderBindingMismatch` error, not the permanent
+`agent.model_dispatch_invalid` terminal Run status used for malformed
+post-intent requests. The committed Pending ModelInvocation, attempt identity
+and lease remain intact: only restoration of the exact original trusted
+binding (after its claim expires) or explicit quarantine may proceed.
+This avoids a changed Host configuration both silently dispatching to the new
+target and incorrectly terminalizing evidence needed for trusted recovery.
+
+**Host Router/API break:** The standalone Router now requires a nonempty
+`provider.Binding.Identity`; two-field bindings can no longer construct a
+Router. OpenAI/Anthropic HMAC their actual Endpoint, authenticated identity,
+wire protocol and selected configuration. A custom `HTTPClient` must supply
+a Host-owned `Config.BindingScope`, rotated on any meaningful transport/policy
+change. Arbitrary custom Clients cannot be introspected: the Host is responsible
+for changing its explicit binding identity when the destination changes.
+
+**Upgrade:** Existing pending ModelInvocations use the previous request-hash
+format, without binding proof; they are intentionally **not accepted** for
+redispatch. Stop old workers, inventory all pending Agent Runs, drain or
+quarantine unknown remote outcomes, and do not fabricate fingerprints, reset
+attempts or retry physical effects. Historical consumed receipts remain
+readable. There is no SQL DDL, schema-number churn, old-hash fallback, or
+dynamic Provider registry. An unnamed local Client has no external binding
+attestation; production Provider-backed Clients must declare a name and proof.
+Published beta.23 tags remain unchanged; beta.24 is still unreleased.
+
+## 2026-10-30 — Exact approval checkpoint required (beta.24 candidate)
+
+**Deleted:** A Turn-only Harness approval request is no longer authorized.
+`harness.ResolveApprovalRequest.CheckpointID` must contain the exact pending
+approval ID (1–128 non-whitespace-trimmed bytes). Missing/blank/oversized
+values fail before any physical dispatch; a changed ID returns a conflict.
+The HTTP v1 `ResolveHarnessApprovalRequest` now requires both `checkpointID`
+and `decision`. The TypeScript call is
+`harness.turns.resolveApproval(turnID, checkpointID, decision, comment?, options?)`.
+There is no deprecated Go entry point or optional TypeScript argument.
+
+**Persisted Agent state:** The old checkpoint-only approval inference in
+`agent.approvalForPendingCall` is deleted. The exact
+`pendingApproval` Tool-call/checkpoint/digest binding must already be
+committed; a resolved older checkpoint cannot grant execution merely by
+matching its Tool payload. Native Agent `ResolveApproval` retains the required
+Kernel Revision CAS binding; delegated Subtask approvals already require an
+explicit checkpoint ID and remain unchanged.
+
+**Adoption:** Stop old workers and inventory all unfinished approval Runs,
+Harness Turns and delegated Subtasks. Drain or explicitly quarantine older
+pending approvals that lack `pendingApproval`; do not invent a binding, reuse
+an unverified Tool decision, or automatically resume an uncertain Tool effect.
+New clients must read the displayed current `checkpointID`, send it with the
+approval and handle stale/replayed approval as Conflict. No SQL DDL, schema
+version churn or compatibility bridge.
+
 ## 2026-10-30 — Explicit Harness Agent entry (beta.24 candidate)
 
 **Removed:** `harness.Runner.Start(context.Context, StartRequest)` is no

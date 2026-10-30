@@ -41,6 +41,7 @@ func baselineToolReplayProbe(ctx context.Context, config settings) (probe toolPr
 	probe.Status, probe.Stage, probe.Usage = "failed", "tool_call", usageCoverage{Complete: true}
 	observedClient, observation := newPreflightHTTPClient(config.httpClient)
 	config.httpClient = observedClient
+	config.bindingScope = "task-agent-baseline-observer-v1"
 	defer func() {
 		probe.HTTPRequests = observation.dispatchedRequests()
 		if probe.Status != "passed" {

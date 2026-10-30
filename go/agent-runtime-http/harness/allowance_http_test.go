@@ -156,3 +156,31 @@ func TestBudgetGrantHTTPAuthorizesOwningTurnAndEnforcesCAS(t *testing.T) {
 		t.Fatalf("cumulative grant=%#v err=%v", state, err)
 	}
 }
+
+func TestHarnessHTTPApprovalRequiresCheckpointBeforeRuntimeControl(t *testing.T) {
+	host, runtime, paused, run, actor := newAllowanceHTTPFixture(t)
+	engine := newAllowanceHTTPEngine(host, actor)
+	send := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(stdhttp.MethodPost, "/v1/harness/turns/"+paused.Turn.ID+"/approval", bytes.NewBufferString(body))
+		request.Header.Set("Content-Type", "application/json")
+		engine.ServeHTTP(recorder, request)
+		return recorder
+	}
+	for _, invalid := range []string{
+		`{"decision":"approve"}`,
+		`{"checkpointID":"","decision":"approve"}`,
+		`{"checkpointID":" ","decision":"reject"}`,
+		fmt.Sprintf(`{"checkpointID":%q,"decision":"approve"}`, strings.Repeat("x", 129)),
+	} {
+		response := send(invalid)
+		if response.Code != stdhttp.StatusBadRequest {
+			t.Fatalf("malformed/unbound approval %s returned %d: %s", invalid, response.Code, response.Body.String())
+		}
+		current, err := runtime.Load(t.Context(), run.Run.ID)
+		if err != nil || current.Run.Status != kernel.RunStatusPausedBudget || current.Run.Revision != run.Run.Revision {
+			t.Fatalf("unbound HTTP approval dispatched an effect: run=%+v err=%v", current.Run, err)
+		}
+	}
+}

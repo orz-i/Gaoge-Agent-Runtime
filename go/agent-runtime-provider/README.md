@@ -8,8 +8,15 @@ without coupling Kernel, Agent, or Harness to vendor APIs:
 - `provider/anthropic`: Anthropic Messages client
 - `provider/internal/providerhttp`: private bounded HTTP/SSE transport
 
-Host code supplies credentials and authorized endpoints. There is no global
-registry, dynamic loader, generic MCP transport, or old Core import alias.
+Host code supplies credentials and authorized endpoints. Each Router
+`provider.Binding` now requires an explicit Host-selected, nonsecret
+`Identity`. OpenAI/Anthropic clients HMAC their actual Endpoint, authenticated
+identity, protocol and selected configuration into an opaque fingerprint.
+For a custom `HTTPClient`, the Host must supply and rotate
+`Config.BindingScope` when the transport policy changes. Named Agent
+ModelInvocations freeze the fingerprint and reject changes after restart.
+There is no global registry, dynamic loader, generic MCP transport, or old
+Core import alias.
 
 From the repository root, run the model/Tool example with explicit credentials:
 

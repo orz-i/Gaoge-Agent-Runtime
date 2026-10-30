@@ -21,11 +21,11 @@ import (
 const serviceInputTokens int64 = 8192
 
 type settings struct {
-	mode, provider, modelID     string
-	contextTokens, outputTokens int64
-	endpoint, apiKey, sampleID  string
-	allowUnknownStructuredModel bool
-	httpClient                  *http.Client
+	mode, provider, modelID                  string
+	contextTokens, outputTokens              int64
+	endpoint, apiKey, sampleID, bindingScope string
+	allowUnknownStructuredModel              bool
+	httpClient                               *http.Client
 }
 
 func main() {
@@ -122,14 +122,16 @@ func (config settings) newModel() (model.Client, error) {
 	var err error
 	switch config.provider {
 	case "openai":
-		client, err = openai.New(openai.Config{APIKey: key, Endpoint: config.endpoint, HTTPClient: config.httpClient, StructuredOutputModels: allowed})
+		client, err = openai.New(openai.Config{APIKey: key, Endpoint: config.endpoint, HTTPClient: config.httpClient,
+			BindingScope: config.bindingScope, StructuredOutputModels: allowed})
 	case "anthropic":
-		client, err = anthropic.New(anthropic.Config{APIKey: key, Endpoint: config.endpoint, HTTPClient: config.httpClient, StructuredOutputModels: allowed})
+		client, err = anthropic.New(anthropic.Config{APIKey: key, Endpoint: config.endpoint, HTTPClient: config.httpClient,
+			BindingScope: config.bindingScope, StructuredOutputModels: allowed})
 	default:
 		return nil, errors.New("unsupported provider")
 	}
 	if err != nil {
 		return nil, err
 	}
-	return provider.NewRouter(config.provider, provider.Binding{Name: config.provider, Client: client})
+	return provider.NewRouter(config.provider, provider.Binding{Name: config.provider, Identity: "host-binding-v1", Client: client})
 }

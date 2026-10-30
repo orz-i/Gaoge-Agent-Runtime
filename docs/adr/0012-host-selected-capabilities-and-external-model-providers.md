@@ -58,16 +58,29 @@ adapters shared the Core Go module with Kernel and Agent.
    would create an untested, unstable recovery protocol, not a safe
    extensibility gain.
 
-5. **Provider binding identity is Host-owned.** The Router freezes the
-   explicit binding *name* with the durable ModelInvocation through
-   `RequestProviderNamer`. A Host must assign a stable, unique name per
-   effective endpoint/credential-policy/implementation binding and rotate
-   it before a meaningful binding change; do not reuse a name to silently
-   retarget in-flight requests. The Runtime checks changed names on recovery
-   but cannot infer that a same-named custom binding has changed physical
-   destination. Unknown outcomes require reconciliation or quarantine, not
-   an automatic retry. A future automatic fingerprint would require
-   independent negative crash tests and a separately reviewed contract.
+5. **Provider binding identity is Host-owned and now frozen.** The Router
+   preserves the public Provider name but additionally requires an explicit,
+   nonsecret Host `Binding.Identity`. It combines this with the concrete
+   Client's fingerprint when provided. Native OpenAI/Anthropic adapters HMAC
+   the actual Endpoint, API credential, wire protocol and selected
+   configuration. Custom transports require Host-controlled binding scopes.
+   Agent freezes the SHA-256 fingerprint into its ModelInvocation and hash.
+   Named Providers without a valid proof are rejected before a new intent;
+   changed/missing proof on resume is rejected both before claim and before
+   physical dispatch. Hosts must still rotate their explicit identity if a
+   custom Client silently changes implementation/proxy semantics. Unknown
+   outcomes require reconciliation or quarantine, never blind retry.
+
+   **2026-10-30 implementation amendment:** the previously proposed
+   fingerprint is now supported by same-name Endpoint/credential/policy drift
+   tests, missing-proof tests and a committed-pending-intent crash scenario.
+   The PR #75 independent re-audit further closed a proven race after
+   ModelMiddleware/concurrency permit waiting: the final pre-dispatch guard
+   revalidates the binding just before the physical call. A changed binding
+   returns a distinct recoverable error and retains the committed pending Run;
+   malformed post-intent Tool/model request mutations remain terminal.
+   No dynamic registry, alternate provider state machine or SQL schema version
+   is introduced.
 
 ## Explicit exclusions and revision criteria
 

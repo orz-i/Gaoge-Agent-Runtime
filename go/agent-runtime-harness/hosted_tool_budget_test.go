@@ -51,7 +51,7 @@ func TestHostedBudgetExhaustionStillAllowsFinalModelResponse(t *testing.T) {
 			}
 			response := model.Response{Content: "final evidence"}
 			for call := range want {
-				response.HostedToolCalls = append(response.HostedToolCalls, model.HostedToolCall{ID: fmt.Sprintf("%d-%d", index, call), ToolKey: "native.search"})
+				response.HostedToolCalls = append(response.HostedToolCalls, model.HostedToolCall{ID: fmt.Sprintf("%d-%d", index, call), ToolKey: "native.search", Status: "completed"})
 			}
 			if want == 0 && (len(bounded.HostedTools) != 1 || len(bounded.Tools) != 0 || bounded.RequireToolCall) {
 				t.Fatalf("exhausted tools remain: %+v", bounded)
@@ -83,7 +83,7 @@ func TestHostedReservationLeavesNoLocalToolsInLastSharedSlot(t *testing.T) {
 			}
 			response := model.Response{Content: "completed from existing evidence"}
 			if want > 0 {
-				response.HostedToolCalls = []model.HostedToolCall{{ID: "last-search", ToolKey: "native.search"}}
+				response.HostedToolCalls = []model.HostedToolCall{{ID: "last-search", ToolKey: "native.search", Status: "completed"}}
 			}
 			return response, nil
 		})
@@ -142,7 +142,7 @@ func TestHostedBudgetConcurrentRequestsCannotOverReserve(t *testing.T) {
 			_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 				response := model.Response{Content: "evidence"}
 				for call := range *bounded.HostedToolCallLimit {
-					response.HostedToolCalls = append(response.HostedToolCalls, model.HostedToolCall{ID: fmt.Sprintf("%d-%d", index, call), ToolKey: "native.search"})
+					response.HostedToolCalls = append(response.HostedToolCalls, model.HostedToolCall{ID: fmt.Sprintf("%d-%d", index, call), ToolKey: "native.search", Status: "completed"})
 				}
 				return response, nil
 			})
@@ -168,7 +168,7 @@ func TestHostedBudgetIsOptIn(t *testing.T) {
 		if bounded.HostedToolCallLimit != nil || len(bounded.HostedTools) != 1 {
 			t.Fatalf("implicit system ceiling: %+v", bounded)
 		}
-		return model.Response{Content: "unchanged", HostedToolCalls: []model.HostedToolCall{{ID: "unlimited-search", ToolKey: "native.search"}}}, nil
+		return model.Response{Content: "unchanged", HostedToolCalls: []model.HostedToolCall{{ID: "unlimited-search", ToolKey: "native.search", Status: "completed"}}}, nil
 	})
 	if err != nil {
 		t.Fatal(err)

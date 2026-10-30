@@ -5,6 +5,22 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Treat a missing Hosted Tool status as unfinished, not proof of execution
+  completion. Preserve exact held native reservations for identified calls;
+  an unidentified unfinished call now keeps the physically dispatched Model
+  reservation held and requires explicit reconciliation instead of automatic
+  quota release or fake Provider IDs.
+
+- Freeze a nonsecret Provider binding fingerprint in each named ModelInvocation
+  and its request hash; reject missing or changed bindings before another
+  Model attempt or physical dispatch. Require explicit Router Binding.Identity
+  and custom transport scope. No old request-hash compatibility fallback.
+
+- Require the exact displayed Harness approval checkpoint at Go/HTTP/TypeScript
+  entry points; remove Turn-only approval and pre-binding Agent checkpoint
+  inference. An incomplete older approval must be drained/quarantined, never
+  automatically granted by matching its legacy Tool payload.
+
 - Extract the Provider Router, OpenAI Responses and Anthropic Messages adapters
   into independent `go/agent-runtime-provider`; delete the previous Core
   `provider` package without aliases or forwarding imports.

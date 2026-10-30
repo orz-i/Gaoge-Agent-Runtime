@@ -15,16 +15,31 @@ introduces no Kernel schema, runtime worker, or global registry.
 | `go/agent-runtime-provider/anthropic` | Anthropic **Messages API**, text + local tool-use/tool-result |
 | `go/agent-runtime-provider/internal/providerhttp` | Shared JSON/SSE HTTP framing, size bounds, safe classified errors, no redirects |
 
-To add another provider: implement the existing `model.Client` and optionally
-`model.StreamingClient` and `model.ProviderNamer`; register it through
-`provider.Binding`. Reuse `providerhttp` for a JSON/SSE HTTP provider.
-**Do not** put vendor types in `model`, Kernel, Agent or persisted records.
+To add another Provider: implement `model.Client` and, for external named
+Providers, `model.ProviderNamer` (or `RequestProviderNamer`) together with
+`model.RequestBindingFingerprinter`. The latter returns an immutable lowercase
+SHA-256 binding fingerprint; a named Provider without this proof fails before
+any new ModelInvocation intent or physical dispatch.
+
+Every `provider.Binding{Name, Identity, Client}` must include a nonsecret
+Host-selected `Identity`, rotated when a custom Client's physical binding
+changes. The Router combines it with the concrete adapter fingerprint when
+available. Unnamed injected local Models remain possible, but are not verified
+external Provider bindings. Reuse `providerhttp` for bounded JSON/SSE calls;
+**do not** put vendor types in `model`, Kernel, Agent or persisted records.
 
 The router supports a default provider for unqualified model IDs, but hosts
 should use explicitly qualified model IDs (such as `openai/gpt-4.1`) for durable
 Runs. Changing a provider's default model or swapping a registration can
-otherwise alter later calls or recovery semantics. Names are static lower-case
-identifiers. Only the first slash is the router delimiter, so a provider can use its own namespaced model IDs (for example `gateway/anthropic/claude-*`). Unknown provider prefixes and empty path segments are rejected.
+otherwise alter later calls or recovery semantics. The Agent now freezes the
+Provider name and `BindingFingerprint` in the ModelInvocation and request hash;
+recovery checks both before claiming another attempt and before physical
+dispatch. OpenAI/Anthropic HMAC their effective Endpoint, API credentials,
+protocol and configuration into a nonsecret fingerprint (never a raw URL/key).
+A custom `HTTPClient` requires a nonempty `Config.BindingScope` that the Host
+must rotate when its transport/policy changes. Reusing the same Host identity
+for a changed custom adapter is still unsafe and forbidden. Names are static
+lower-case identifiers. Only the first slash is the router delimiter, so a provider can use its own namespaced model IDs (for example `gateway/anthropic/claude-*`). Unknown provider prefixes and empty path segments are rejected.
 
 ## Running with real credentials
 
@@ -55,8 +70,8 @@ if err != nil { return err }
 anthropicClient, err := anthropic.New(anthropic.Config{APIKey: anthropicKey})
 if err != nil { return err }
 router, err := provider.NewRouter("openai",
-    provider.Binding{Name: "openai", Client: openaiClient},
-    provider.Binding{Name: "anthropic", Client: anthropicClient},
+    provider.Binding{Name: "openai", Identity: "host-openai-policy-v1", Client: openaiClient},
+    provider.Binding{Name: "anthropic", Identity: "host-anthropic-policy-v1", Client: anthropicClient},
 )
 // agent.NewRunner(agent.Dependencies{Runtime: rt, Model: router, ...})
 // agent.StartRequest{Model: "anthropic/<model-id>", ...}

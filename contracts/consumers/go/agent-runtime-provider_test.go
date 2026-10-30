@@ -23,12 +23,16 @@ var (
 )
 
 func TestStandaloneProviderModuleRoutesWithoutKernelVendorCoupling(t *testing.T) {
-	router, err := provider.NewRouter("stub", provider.Binding{Name: "stub", Client: stubModelProvider{}})
+	router, err := provider.NewRouter("stub", provider.Binding{Name: "stub", Identity: "host-binding-v1", Client: stubModelProvider{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	response, err := router.Generate(context.Background(), model.Request{Model: "stub/any-model"})
 	if err != nil || response.Content != "any-model" {
 		t.Fatalf("provider route and normalization: response=%+v err=%v", response, err)
+	}
+	binding := router.BindingFingerprintForRequest(model.Request{Model: "stub/any-model"})
+	if len(binding) != 64 || router.ProviderNameForRequest(model.Request{Model: "stub/any-model"}) != "stub" {
+		t.Fatalf("Host provider binding not exposed through the stable client contract: %q", binding)
 	}
 }

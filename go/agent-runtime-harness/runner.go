@@ -211,6 +211,10 @@ func (runner *Runner) ResolveApproval(
 	turnID string,
 	request ResolveApprovalRequest,
 ) (Snapshot, error) {
+	if request.CheckpointID == "" || strings.TrimSpace(request.CheckpointID) != request.CheckpointID ||
+		len(request.CheckpointID) > 128 {
+		return Snapshot{}, ErrInvalidRequest
+	}
 	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
@@ -228,7 +232,7 @@ func (runner *Runner) ResolveApproval(
 	if err != nil || !ok {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	if request.CheckpointID != "" && request.CheckpointID != pending.CheckpointID {
+	if request.CheckpointID != pending.CheckpointID {
 		return Snapshot{}, ErrConflict
 	}
 	decision, err := pluginApprovalDecision(request.Decision)

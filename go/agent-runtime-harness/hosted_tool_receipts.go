@@ -29,9 +29,13 @@ func hostedReceiptTransfers(ledger budget.Ledger, runID string, calls []model.Ho
 	for _, call := range model.CollapseHostedToolCalls(calls) {
 		pending := !model.HostedToolTerminalStatus(call.Status)
 		if call.ID == "" {
-			if !pending {
-				completed++
+			if pending {
+				// No Provider-owned call ID or terminal fact means there is
+				// nothing safe to reconcile. Preserve the original model's
+				// dispatched reservation instead of minting a fake Tool ID.
+				return 0, nil, budget.ErrInvalidUsage
 			}
+			completed++
 			continue
 		}
 		identity, err := json.Marshal([]string{runID, call.ToolKey, call.ID})

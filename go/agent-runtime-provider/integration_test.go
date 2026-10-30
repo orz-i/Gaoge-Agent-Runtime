@@ -76,7 +76,7 @@ func TestRealAgentWithBothProviderAdapters(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			routed, err := provider.NewRouter(kind, provider.Binding{Name: kind, Client: client})
+			routed, err := provider.NewRouter(kind, provider.Binding{Name: kind, Identity: "host-binding-v1", Client: client})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,9 +116,12 @@ func TestRealAgentWithBothProviderAdapters(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			fingerprint := routed.BindingFingerprintForRequest(model.Request{Model: kind + "/test-model"})
 			if len(view.ModelInvocations) != 2 || view.ModelInvocations[0].Provider != kind ||
-				view.ModelInvocations[1].Provider != kind {
-				t.Fatalf("durable provider identity: %+v", view.ModelInvocations)
+				view.ModelInvocations[1].Provider != kind ||
+				view.ModelInvocations[0].BindingFingerprint != fingerprint ||
+				view.ModelInvocations[1].BindingFingerprint != fingerprint {
+				t.Fatalf("durable provider name/binding identity: %+v", view.ModelInvocations)
 			}
 		})
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -448,6 +449,12 @@ type invocationRecordingModel struct {
 
 func (provider *invocationRecordingModel) ProviderName() string { return "fault-test-provider" }
 
+// Pure fixture binding identity: all reused instances target the same
+// synthetic Provider. Explicit negative cases use a changed fingerprint.
+func (*invocationRecordingModel) BindingFingerprintForRequest(runtimemodel.Request) string {
+	return strings.Repeat("a", 64)
+}
+
 func (provider *invocationRecordingModel) Generate(
 	_ context.Context,
 	request runtimemodel.Request,
@@ -515,6 +522,9 @@ func (provider *retryableInvocationModel) Generate(
 type streamingInvocationModel struct{}
 
 func (*streamingInvocationModel) ProviderName() string { return "fault-test-provider" }
+func (*streamingInvocationModel) BindingFingerprintForRequest(runtimemodel.Request) string {
+	return strings.Repeat("a", 64)
+}
 
 func (*streamingInvocationModel) Generate(
 	context.Context,

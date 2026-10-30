@@ -213,7 +213,10 @@ func assertPersistedModelHash(t *testing.T, runtime *kernel.Runtime, snapshot ha
 	encoded, err := json.Marshal(struct {
 		Request             model.Request `json:"request"`
 		CatalogFingerprints []string      `json:"catalogFingerprints"`
-	}{Request: sent, CatalogFingerprints: catalogFingerprints})
+		Provider            string        `json:"provider"`
+		BindingFingerprint  string        `json:"bindingFingerprint"`
+	}{Request: sent, CatalogFingerprints: catalogFingerprints,
+		Provider: view.ModelInvocations[0].Provider, BindingFingerprint: view.ModelInvocations[0].BindingFingerprint})
 	if err != nil {
 		t.Fatal(err)
 	}

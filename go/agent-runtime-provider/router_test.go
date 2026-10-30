@@ -17,7 +17,7 @@ func (f *recorder) Generate(_ context.Context, r model.Request) (model.Response,
 }
 func TestRouterRoutingAndImmutability(t *testing.T) {
 	a, b := &recorder{}, &recorder{}
-	r, err := provider.NewRouter("openai", provider.Binding{Name: "openai", Client: a}, provider.Binding{Name: "anthropic", Client: b})
+	r, err := provider.NewRouter("openai", provider.Binding{Name: "openai", Identity: "host-binding-v1", Client: a}, provider.Binding{Name: "anthropic", Identity: "host-binding-v1", Client: b})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,9 +41,11 @@ func TestInvalidRegistry(t *testing.T) {
 	f := &recorder{}
 	for _, bindings := range [][]provider.Binding{
 		nil,
-		{{Name: "OpenAI", Client: f}},
-		{{Name: "openai", Client: nil}},
-		{{Name: "openai", Client: f}, {Name: "openai", Client: f}},
+		{{Name: "openai", Client: f}}, // Missing mandatory Host binding identity.
+		{{Name: "openai", Identity: " ", Client: f}},
+		{{Name: "OpenAI", Identity: "scope", Client: f}},
+		{{Name: "openai", Identity: "scope", Client: nil}},
+		{{Name: "openai", Identity: "scope", Client: f}, {Name: "openai", Identity: "scope", Client: f}},
 	} {
 		if _, err := provider.NewRouter("openai", bindings...); err == nil {
 			t.Fatalf("invalid bindings accepted %+v", bindings)
@@ -53,7 +55,7 @@ func TestInvalidRegistry(t *testing.T) {
 
 func TestRouterAllowsProviderNamespacedModelIDsWithoutAmbiguity(t *testing.T) {
 	backend := &recorder{}
-	router, err := provider.NewRouter("gateway", provider.Binding{Name: "gateway", Client: backend})
+	router, err := provider.NewRouter("gateway", provider.Binding{Name: "gateway", Identity: "host-binding-v1", Client: backend})
 	if err != nil {
 		t.Fatal(err)
 	}

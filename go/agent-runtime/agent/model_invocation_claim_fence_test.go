@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -325,5 +326,141 @@ func TestSlowHostedCatalogRecheckCannotDispatchStaleClaim(t *testing.T) {
 	}
 	if calls := provider.callsCopy(); len(calls) != 1 {
 		t.Fatalf("stale Catalog path physically dispatched again: %+v", calls)
+	}
+}
+
+// Binding mutation after the claim but while the model request waits on the
+// shared limiter must be rejected at the final Provider boundary. The earlier
+// preclaim check is not sufficient, even for a previously frozen Provider name.
+type mutableBindingLimiterModel struct {
+	sharedLimiterModel
+	binding atomic.Value // immutable hex fingerprint for each observed revision
+}
+
+// The first invocation uses real wall clock. Reclaim after the outstanding
+// lease needs a compatible future clock, not an unrelated historical clock.
+type postBindingLeaseClock struct{}
+
+func (postBindingLeaseClock) Now() time.Time { return time.Now().UTC().Add(3 * time.Minute) }
+
+func (*mutableBindingLimiterModel) ProviderName() string { return "same-provider" }
+
+func (client *mutableBindingLimiterModel) BindingFingerprintForRequest(model.Request) string {
+	return client.binding.Load().(string)
+}
+
+func TestModelLimiterWaitCannotDispatchChangedProviderBinding(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &mutableBindingLimiterModel{sharedLimiterModel: sharedLimiterModel{
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}}
+	provider.binding.Store(strings.Repeat("a", 64))
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(provider.release) }) }
+	t.Cleanup(release)
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: provider,
+		Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{MaxConcurrency: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		snapshot kernel.Snapshot
+		err      error
+	}
+	holder := make(chan result, 1)
+	go func() {
+		snapshot, runErr := runner.StartRun(context.Background(),
+			startRequest("model-limiter-holder", "binding-holder", "first"))
+		holder <- result{snapshot, runErr}
+	}()
+	select {
+	case <-provider.entered:
+	case <-time.After(4 * time.Second):
+		t.Fatal("first Provider request never occupied the limiter")
+	}
+	waiter := make(chan result, 1)
+	go func() {
+		snapshot, runErr := runner.StartRun(context.Background(),
+			startRequest("model-limiter-waiter", "binding-waiter", "second"))
+		waiter <- result{snapshot, runErr}
+	}()
+	var claimed kernel.Snapshot
+	deadline := time.After(4 * time.Second)
+	for {
+		latest, loadErr := runtime.Load(t.Context(), "model-limiter-waiter")
+		if loadErr == nil {
+			view, viewErr := agent.ViewState(latest)
+			if viewErr == nil && len(view.ModelInvocations) == 1 &&
+				view.ModelInvocations[0].ExecutionLeaseUntil != nil {
+				claimed = latest
+				break
+			}
+		}
+		select {
+		case <-deadline:
+			t.Fatal("waiting invocation never acquired its durable claim")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if claimed.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("unexpected pending status %s", claimed.Run.Status)
+	}
+	// The name is stable; only the effective binding changes *after* the
+	// waiter has entered physical admission and blocked on the semaphore.
+	provider.binding.Store(strings.Repeat("b", 64))
+	release()
+	select {
+	case done := <-holder:
+		if done.err != nil || done.snapshot.Run.Status != kernel.RunStatusCompleted {
+			t.Fatalf("first request failed despite being physically in flight: %+v", done)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("first Provider request did not finish")
+	}
+	select {
+	case done := <-waiter:
+		if !errors.Is(done.err, agent.ErrProviderBindingMismatch) {
+			t.Fatalf("changed binding reached Provider after permit wait: err=%v status=%s",
+				done.err, done.snapshot.Run.Status)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("waiting request remained blocked after permit release")
+	}
+	provider.mu.Lock()
+	requests := append([]model.Request(nil), provider.requests...)
+	provider.mu.Unlock()
+	if len(requests) != 1 || requests[0].RunID != "model-limiter-holder" {
+		t.Fatalf("retargeted pending invocation physically sent: %+v", requests)
+	}
+	stale, err := runtime.Load(t.Context(), claimed.Run.ID)
+	if err != nil || stale.Run.Revision != claimed.Run.Revision ||
+		stale.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("denial changed committed pending work: %+v err=%v", stale.Run, err)
+	}
+	// A trusted operator can restore the original Host binding and reclaim
+	// the still-pending logical attempt after the old lease expires, without
+	// rewriting its intent or resurrecting the obsolete retargeted client.
+	provider.binding.Store(strings.Repeat("a", 64))
+	resumed, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: provider, Clock: postBindingLeaseClock{},
+		Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{MaxConcurrency: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := resumed.Resume(t.Context(), stale.Run.ID, stale.Run.Revision)
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("restored binding could not safely recover pending Run: status=%s err=%v", completed.Run.Status, err)
+	}
+	provider.mu.Lock()
+	requests = append([]model.Request(nil), provider.requests...)
+	provider.mu.Unlock()
+	if len(requests) != 2 || requests[1].RunID != "model-limiter-waiter" {
+		t.Fatalf("the original frozen request was not safely delivered after restoration: %+v", requests)
 	}
 }

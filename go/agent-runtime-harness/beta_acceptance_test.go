@@ -75,7 +75,7 @@ func TestContextV2BetaAcceptanceSurvivesApprovalCompactionAndRestart(t *testing.
 	secondModel := &betaAcceptanceModel{}
 	secondRunner := newBetaAcceptanceRunner(t, secondRuntime, harnessStore, secondModel, &executions)
 	completed, err := secondRunner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
-		Decision: harness.ApprovalApprove, Comment: "approved after restart",
+		CheckpointID: latestApprovalCheckpoint(t, waiting), Decision: harness.ApprovalApprove, Comment: "approved after restart",
 	})
 	if err != nil {
 		t.Fatalf("resume approval after reconstruction: %v", err)

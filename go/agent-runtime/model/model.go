@@ -182,6 +182,16 @@ type RequestProviderNamer interface {
 	ProviderNameForRequest(Request) string
 }
 
+// RequestBindingFingerprinter exposes an immutable, nonsecret SHA-256 binding
+// fingerprint for a model request. Named Providers MUST implement it to admit
+// a durable Agent ModelInvocation. It must be pure and deterministic across
+// process restarts, and change when the effective endpoint, credentials,
+// protocol or Host-selected transport/policy binding changes. Never persist
+// raw endpoints, credentials or mutable process-local pointers.
+type RequestBindingFingerprinter interface {
+	BindingFingerprintForRequest(Request) string
+}
+
 // RetryableError lets provider adapters distinguish transient invocation
 // failures without forcing Agent to fail the durable Run. The same logical
 // InvocationID is retried.

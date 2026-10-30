@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -59,46 +58,15 @@ func (binding *pendingToolApproval) matches(checkpoint *kernel.Checkpoint, call 
 	return err == nil && digest == binding.ArgumentsDigest
 }
 
-// approvalForPendingCall also recognizes pre-upgrade first-party checkpoints.
-// Unknown custom approval formats without a durable binding fail closed.
+// approvalForPendingCall requires the exact committed Tool/call/checkpoint
+// binding. A checkpoint without this persisted evidence cannot authorize a
+// Tool after restart, even when a legacy payload happens to match.
 func approvalForPendingCall(snapshot kernel.Snapshot, state runState) (*pendingToolApproval, bool) {
 	call, ok := nextPendingCall(state)
-	if !ok || snapshot.Checkpoint == nil {
+	if !ok || snapshot.Checkpoint == nil || state.PendingApproval == nil {
 		return nil, false
 	}
-	if state.PendingApproval != nil {
-		return state.PendingApproval, state.PendingApproval.matches(snapshot.Checkpoint, call)
-	}
-	if snapshot.Checkpoint.Kind != "tool_approval" {
-		return nil, false
-	}
-	// Older Agent states did not carry the binding. A matching checkpoint is
-	// only usable while the call remains unconsumed; older completed/rejected
-	// calls can leave resolved checkpoints behind and reuse the same call ID.
-	for _, message := range state.Messages {
-		if message.Role == model.RoleTool && message.ToolCallID == call.ID {
-			return nil, false
-		}
-	}
-	var legacy struct {
-		ToolCallID string          `json:"toolCallID"`
-		ToolKey    string          `json:"toolKey"`
-		Arguments  json.RawMessage `json:"arguments"`
-	}
-	if json.Unmarshal(snapshot.Checkpoint.Payload, &legacy) != nil ||
-		legacy.ToolCallID != call.ID || legacy.ToolKey != call.ToolKey {
-		return nil, false
-	}
-	legacyDigest, err := toolApprovalArgumentsDigest(legacy.Arguments)
-	if err != nil {
-		return nil, false
-	}
-	callDigest, err := toolApprovalArgumentsDigest(call.Arguments)
-	if err != nil || legacyDigest != callDigest {
-		return nil, false
-	}
-	binding, err := newPendingToolApproval(snapshot.Checkpoint, call)
-	return binding, err == nil
+	return state.PendingApproval, state.PendingApproval.matches(snapshot.Checkpoint, call)
 }
 
 func approvalDecision(checkpoint *kernel.Checkpoint) (plugin.ApprovalDecision, bool) {

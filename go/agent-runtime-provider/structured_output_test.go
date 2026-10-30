@@ -21,7 +21,7 @@ func (r *capableRecorder) Capabilities(_ context.Context, id string) (model.Capa
 func TestCapabilityRouterChecksExactRoutedModel(t *testing.T) {
 	supported := &capableRecorder{}
 	unsupported := &recorder{}
-	router, err := provider.NewRouter("a", provider.Binding{Name: "a", Client: unsupported}, provider.Binding{Name: "b", Client: supported})
+	router, err := provider.NewRouter("a", provider.Binding{Name: "a", Identity: "host-binding-v1", Client: unsupported}, provider.Binding{Name: "b", Identity: "host-binding-v1", Client: supported})
 	if err != nil {
 		t.Fatal(err)
 	}
