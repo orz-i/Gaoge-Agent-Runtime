@@ -49,7 +49,7 @@ func TestHarnessDelegationChildDoesNotInheritParentContextCheckpoint(t *testing.
 	capture := &delegationModel{}
 	runner, relations := newDelegationHarnessWithOptions(t, capture, 2, true)
 	goal := delegationTestRootGoal
-	completed, err := runner.Start(t.Context(), harness.StartRequest{
+	completed, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-context"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: delegationContextTurnID},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
@@ -81,7 +81,7 @@ func TestHarnessDelegationChildDoesNotInheritParentContextCheckpoint(t *testing.
 func TestHarnessDelegationToolStartsStableChildAndRecordsRelation(t *testing.T) {
 	t.Parallel()
 	runner, relations, capture := newDelegationHarness(t)
-	completed, err := runner.Start(t.Context(), harness.StartRequest{
+	completed, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
@@ -114,7 +114,7 @@ func TestHarnessDelegationPolicyPreparesActualChildGoal(t *testing.T) {
 	t.Parallel()
 	capture := &delegationModel{}
 	runner, relations := newDelegationHarnessWithModel(t, capture, 2, appendingDelegationPolicy{})
-	completed, err := runner.Start(t.Context(), harness.StartRequest{
+	completed, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-policy"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-policy"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
@@ -204,7 +204,7 @@ func TestHarnessDelegatesDifferentGoalsToSameMember(t *testing.T) {
 	t.Parallel()
 	client := &sameMemberDelegationModel{}
 	runner, relations := newDelegationHarnessWithModel(t, client, 4)
-	completed, err := runner.Start(t.Context(), harness.StartRequest{
+	completed, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-same-member"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-same-member"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
@@ -235,7 +235,7 @@ func TestHarnessIndependentDelegationsCollectMixedTerminalResults(t *testing.T) 
 	t.Parallel()
 	client := &mixedDelegationModel{}
 	runner, _, _ := newDelegationHarnessWithRuntime(t, client, 4, false)
-	snapshot, err := runner.Start(t.Context(), harness.StartRequest{
+	snapshot, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "mixed-delegation-thread"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "mixed-delegation-turn"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
@@ -331,7 +331,7 @@ func TestHarnessDelegationGuardRemovesBlockedToolFromLaterTurns(t *testing.T) {
 	capture := &delegationModel{}
 	policy := &blockingDelegationPolicy{}
 	runner, relations := newDelegationHarnessWithModel(t, capture, 2, policy)
-	completed, err := runner.Start(t.Context(), harness.StartRequest{
+	completed, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-delegation-guard"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-delegation-guard"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
@@ -379,7 +379,7 @@ func startBlockingDelegationHarness(
 	t.Helper()
 	result := make(chan delegationStartResult, 1)
 	go func() {
-		snapshot, err := runner.Start(t.Context(), harness.StartRequest{
+		snapshot, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 			HostThread: hostThread,
 			HostTurn:   hostTurn,
 			Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},

@@ -193,7 +193,7 @@ func newApprovalHarness(t *testing.T) (*harness.Runner, harness.ConfigSnapshot) 
 
 func startApprovalHarness(t *testing.T, runner *harness.Runner, config harness.ConfigSnapshot) harness.Snapshot {
 	t.Helper()
-	waiting, err := runner.Start(t.Context(), harness.StartRequest{
+	waiting, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-approval"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-approval"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},

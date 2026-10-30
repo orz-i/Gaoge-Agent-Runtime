@@ -45,7 +45,7 @@ func TestHarnessProjectsBudgetPauseAndGrantsOwnerBoundDirectRun(t *testing.T) {
 	}
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := host.Start(t.Context(), request)
+	paused, err := host.StartAgentTurn(t.Context(), request)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("Turn paused=%#v checks=%d err=%v", paused.Turn, completion.checks, err)
 	}

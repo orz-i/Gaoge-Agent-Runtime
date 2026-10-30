@@ -50,11 +50,11 @@ func TestAuditStartReplayRepairsHostMessageItems(t *testing.T) {
 	request := testStartRequest()
 	request.InputMessage = &harness.HostRef{Kind: testMessageKind, ID: "audit-user"}
 	request.OutputMessage = &harness.HostRef{Kind: testMessageKind, ID: "audit-assistant"}
-	_, err = newRunner(flaky).Start(t.Context(), request)
+	_, err = newRunner(flaky).StartAgentTurn(t.Context(), request)
 	if err == nil || !flaky.failed {
 		t.Fatalf("failed to inject before host item commit: %v", err)
 	}
-	recovered, err := newRunner(backing).Start(t.Context(), request)
+	recovered, err := newRunner(backing).StartAgentTurn(t.Context(), request)
 	if err != nil || recovered.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("restart could not finish: %+v / %v", recovered.Turn, err)
 	}
@@ -98,13 +98,13 @@ func TestAuditRootReplayRefusesChangedExecutionAllowance(t *testing.T) {
 	}
 	first := testStartRequest()
 	first.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	_, err = newRunner(flaky).Start(t.Context(), first)
+	_, err = newRunner(flaky).StartAgentTurn(t.Context(), first)
 	if err == nil || !flaky.failed {
 		t.Fatalf("failed to inject between Invocation and Agent Run: %v", err)
 	}
 	changed := first
 	changed.CallAllowance = nil // silently expands frozen execution segmentation if replay admitted
-	recovered, err := newRunner(backing).Start(t.Context(), changed)
+	recovered, err := newRunner(backing).StartAgentTurn(t.Context(), changed)
 	if !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("REPRO: same Turn accepted changed allowance, status=%s err=%v, want ErrConflict", recovered.Turn.Status, err)
 	}
@@ -143,7 +143,7 @@ func TestAuditRefreshRepairsTerminalProjectionCrash(t *testing.T) {
 		return result
 	}
 	request := testStartRequest()
-	_, err = newRunner(flaky).Start(t.Context(), request)
+	_, err = newRunner(flaky).StartAgentTurn(t.Context(), request)
 	if err == nil || !flaky.failed {
 		t.Fatalf("expected post-terminal projection crash, err=%v", err)
 	}
@@ -288,14 +288,14 @@ func TestAuditAcceptedTurnRejectsChangedContextSeed(t *testing.T) {
 	req.Actor = kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 	req.Config.Model = "fixture"
 	req.Context = contextSeed("original private instructions", contextEntry("same-source", "turn", model.RoleUser, "answer directly", true))
-	_, err := first.Start(t.Context(), req)
+	_, err := first.StartAgentTurn(t.Context(), req)
 	if err == nil || !flaky.failed {
 		t.Fatalf("expected fault before context commit, err=%v", err)
 	}
 	second, _ := newResumeTurnHarness(t, memory.NewStore(), store, provider, clock, nil)
 	// Kernel store must be shared across both launches, but there was no Run before fault.
 	req.Context = contextSeed("REPLACED private instructions", contextEntry("same-source", "turn", model.RoleUser, "answer directly", true))
-	_, err = second.Start(t.Context(), req)
+	_, err = second.StartAgentTurn(t.Context(), req)
 	if !errors.Is(err, harness.ErrConflict) || len(provider.requests) != 0 {
 		t.Fatalf("replayed changed Context seed: err=%v model_calls=%d", err, len(provider.requests))
 	}
@@ -316,7 +316,7 @@ func BenchmarkAuditTimelineReadScaling(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			snapshot, err := runner.Start(context.Background(), testStartRequest())
+			snapshot, err := runner.StartAgentTurn(context.Background(), testStartRequest())
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -461,7 +461,7 @@ func TestHardcutLoadStateAndPaginatedTimeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := runner.Start(t.Context(), testStartRequest())
+	first, err := runner.StartAgentTurn(t.Context(), testStartRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,7 +524,7 @@ func BenchmarkHardcutLoadStateScaling(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			first, err := runner.Start(context.Background(), testStartRequest())
+			first, err := runner.StartAgentTurn(context.Background(), testStartRequest())
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -645,7 +645,7 @@ func TestHardcutTerminalProjectionNeverRewritesAnotherTerminalOutcome(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	finished, err := host.Start(t.Context(), testStartRequest())
+	finished, err := host.StartAgentTurn(t.Context(), testStartRequest())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -75,7 +75,7 @@ func TestManagedContextCompactsLongSessionAndPersistsExactArtifacts(t *testing.T
 			ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 80}},
 		Context: contextSeed("session policy", entries...),
 	}
-	snapshot, err := runner.Start(t.Context(), request)
+	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("managed start: %v, status=%s", err, snapshot.Turn.Status)
 	}
@@ -126,7 +126,7 @@ func TestManagedContextCompactsLongSessionAndPersistsExactArtifacts(t *testing.T
 		contextEntry("a3", "current", model.RoleAssistant, "answer", false),
 		contextEntry("m4", "followup", model.RoleUser, "next question", true),
 	)...)
-	followupSnapshot, err := followupRunner.Start(t.Context(), followup)
+	followupSnapshot, err := followupRunner.StartAgentTurn(t.Context(), followup)
 	if err != nil || followupSnapshot.Turn.Status != harness.TurnCompleted || len(followupProvider.requests) != 1 {
 		t.Fatalf("followup after rollover: status=%s err=%v requests=%d", followupSnapshot.Turn.Status, err, len(followupProvider.requests))
 	}
@@ -169,7 +169,7 @@ func TestManagedContextRefusesLossyCompactionWithoutArtifactReader(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runner.Start(t.Context(), harness.StartRequest{
+	_, err = runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "no-reader"},
 		HostTurn:   harness.HostRef{Kind: "conversation_turn", ID: "current"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},

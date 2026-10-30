@@ -50,7 +50,7 @@ func TestHarnessBuildsAndInjectsContextCheckpoint(t *testing.T) {
 		contextEntry("message-2", "turn-old", model.RoleAssistant, "earlier answer", false),
 		contextEntry("message-current", "turn-current", model.RoleUser, testContextQuestion, true),
 	)
-	snapshot, err := runner.Start(t.Context(), harness.StartRequest{
+	snapshot, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "thread-context"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-context"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
@@ -103,7 +103,7 @@ func TestHarnessAppendsConversationDeltaAcrossTurnsWithoutChangingGeneration(t *
 	first.HostTurn = harness.HostRef{Kind: testContextHostKind, ID: "turn-1"}
 	first.Goal = "question one"
 	first.Context = contextSeed("", contextEntry("m1", "turn-1", model.RoleUser, first.Goal, true))
-	firstSnapshot, err := runner.Start(t.Context(), first)
+	firstSnapshot, err := runner.StartAgentTurn(t.Context(), first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestHarnessAppendsConversationDeltaAcrossTurnsWithoutChangingGeneration(t *
 		contextEntry("a1", "turn-1", model.RoleAssistant, "answer", false),
 		contextEntry("m2", "turn-2", model.RoleUser, second.Goal, true),
 	)
-	secondSnapshot, err := runner.Start(t.Context(), second)
+	secondSnapshot, err := runner.StartAgentTurn(t.Context(), second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func newSourceDeltaHarnessFixture(t *testing.T, threadID string) sourceDeltaHarn
 
 func startContextTurn(t *testing.T, runner *harness.Runner, request harness.StartRequest) harness.Snapshot {
 	t.Helper()
-	snapshot, err := runner.Start(t.Context(), request)
+	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func runToolResultContextHarness(t *testing.T) (harness.Snapshot, *toolResultCap
 		contextEntry("message-old", "turn-old", model.RoleAssistant, "earlier answer", false),
 		contextEntry("message-current", "turn-current", model.RoleUser, testContextQuestion, true),
 	)
-	snapshot, err := runner.Start(t.Context(), harness.StartRequest{
+	snapshot, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "thread-tool-context"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-tool-context"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},

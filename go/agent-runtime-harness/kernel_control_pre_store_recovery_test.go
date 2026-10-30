@@ -64,7 +64,7 @@ func TestKernelControlPreStoreReadFailureReleasesNativeDispatch(t *testing.T) {
 			}
 			request := testStartRequest()
 			request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-			paused, err := runner.Start(t.Context(), request)
+			paused, err := runner.StartAgentTurn(t.Context(), request)
 			if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 				t.Fatalf("setup paused status=%s err=%v", paused.Turn.Status, err)
 			}
@@ -156,7 +156,7 @@ func TestKernelStoreControlConflictNeverProvesNativeNoEffect(t *testing.T) {
 	}
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := runner.Start(t.Context(), request)
+	paused, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("setup paused status=%s err=%v", paused.Turn.Status, err)
 	}
@@ -226,7 +226,7 @@ func TestCommittedStoreCannotForwardUnrelatedNoEffectProof(t *testing.T) {
 	}
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := runner.Start(t.Context(), request)
+	paused, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("setup paused status=%s err=%v", paused.Turn.Status, err)
 	}

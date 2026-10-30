@@ -23,7 +23,7 @@ func BenchmarkHarnessStartDirectAgentMemory(b *testing.B) {
 		runner := benchmarkHarnessRunner(b)
 		request := benchmarkHarnessStartRequest()
 		b.StartTimer()
-		snapshot, err := runner.Start(context.Background(), request)
+		snapshot, err := runner.StartAgentTurn(context.Background(), request)
 		if err != nil || snapshot.Turn.Status != harness.TurnCompleted {
 			b.Fatalf("turn=%#v err=%v", snapshot.Turn, err)
 		}
@@ -32,7 +32,7 @@ func BenchmarkHarnessStartDirectAgentMemory(b *testing.B) {
 
 func BenchmarkHarnessLoadCompletedTurnMemory(b *testing.B) {
 	runner := benchmarkHarnessRunner(b)
-	snapshot, err := runner.Start(context.Background(), benchmarkHarnessStartRequest())
+	snapshot, err := runner.StartAgentTurn(context.Background(), benchmarkHarnessStartRequest())
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func BenchmarkHarnessContextPathLookupMemory(b *testing.B) {
 
 func BenchmarkHarnessLoadRelatedSubtasksMemory(b *testing.B) {
 	runner, runtime, relations := benchmarkHarnessRunnerWithRelations(b)
-	started, err := runner.Start(context.Background(), benchmarkHarnessStartRequest())
+	started, err := runner.StartAgentTurn(context.Background(), benchmarkHarnessStartRequest())
 	if err != nil || len(started.Invocations) != 1 {
 		b.Fatalf("start=%#v err=%v", started.Turn, err)
 	}

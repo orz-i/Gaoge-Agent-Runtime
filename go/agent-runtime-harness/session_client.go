@@ -53,7 +53,7 @@ type SessionClient struct {
 // OpenSession prepares a short Prompt/Load/Refresh/Resume API for text conversations.
 // Transcript may be omitted when reopening a Session only to read or resume
 // existing Turns. Prompt requires it; recovery uses committed Context instead.
-// Advanced orchestration continues to use Runner.Start directly.
+// Advanced orchestration uses explicitly chosen Runner.StartAgentTurn/StartTeamTurn/StartWorkflowTurn instead.
 func (runner *Runner) OpenSession(options SessionOptions) (*SessionClient, error) {
 	if runner == nil || runner.store == nil || runner.context == nil ||
 		!validActor(options.Actor) || strings.TrimSpace(options.Thread.Kind) == "" ||
@@ -101,7 +101,7 @@ func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string)
 	if last.Role != model.RoleUser || strings.TrimSpace(last.Content) != strings.TrimSpace(prompt) {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	return session.runner.Start(ctx, StartRequest{
+	return session.runner.StartAgentTurn(ctx, StartRequest{
 		HostThread: session.hostThread, HostTurn: hostTurn, Actor: session.actor,
 		Thread: session.thread, RequestID: strings.TrimSpace(turnID), Goal: prompt,
 		Config: cloneConfigSnapshot(session.config), Context: normalized,

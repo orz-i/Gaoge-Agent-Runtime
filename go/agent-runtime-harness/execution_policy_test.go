@@ -13,7 +13,7 @@ import (
 func TestHarnessFreezesRuntimeOwnedExecutionDefaultsForNewTurns(t *testing.T) {
 	runner := newExecutionPolicyHarness(t, harness.ExecutionPolicy{}, true)
 	request := testStartRequest()
-	snapshot, err := runner.Start(t.Context(), request)
+	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestHarnessTurnPolicyCanTightenButNotWidenDeploymentPolicy(t *testing.T) {
 		MaxConcurrentRuns: 40,
 	}
 	request.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 20}
-	snapshot, err := runner.Start(t.Context(), request)
+	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestHarnessTurnPolicyCanTightenButNotWidenDeploymentPolicy(t *testing.T) {
 func TestHarnessWithoutSharedLedgerStillFreezesDelegationSafety(t *testing.T) {
 	runner := newExecutionPolicyHarness(t, harness.ExecutionPolicy{}, false)
 	request := testStartRequest()
-	snapshot, err := runner.Start(t.Context(), request)
+	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestHarnessWithoutSharedLedgerStillFreezesDelegationSafety(t *testing.T) {
 	runner = newExecutionPolicyHarness(t, harness.ExecutionPolicy{}, false)
 	request = testStartRequest()
 	request.Config.SharedBudget = &budget.Limits{MaxChildRuns: 1}
-	if _, err = runner.Start(t.Context(), request); err == nil {
+	if _, err = runner.StartAgentTurn(t.Context(), request); err == nil {
 		t.Fatal("shared budget was accepted without BudgetMiddleware")
 	}
 }

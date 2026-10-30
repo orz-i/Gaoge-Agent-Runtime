@@ -2,6 +2,22 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Explicit Harness Agent entry (beta.24 candidate)
+
+**Removed:** `harness.Runner.Start(context.Context, StartRequest)` is no
+longer a public default-Agent selector. The single supported explicit Agent
+entry is `harness.Runner.StartAgentTurn(context.Context, StartRequest)`.
+Typed Team/GroupChat/Workflow/Application entry points remain separate.
+`SessionClient.Prompt` remains a deliberately Agent-specific convenience
+handle, internally calling `StartAgentTurn`; no automatic intent classifier
+or hidden capability router is installed in Kernel or Harness.
+
+**Scope:** Callsites must choose their capability before committing a Turn.
+Existing persisted `ExecutionClass`, `ModelInvocation`, cancellation intent,
+feature grant and receipt fields are **not** changed or silently reclassified.
+No compatibility alias or fallback exists. In-flight work follows the same
+failure-closed recovery rules as beta.23.
+
 ## 2026-10-30 — Provider module extraction (beta.24 candidate)
 
 **Removed:** `github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider`,

@@ -87,7 +87,7 @@ func TestHarnessAutomaticallyContinuesDirectAgentWithSameRunIdentity(t *testing.
 	request.AutoAllowance = &agent.AutoAllowancePolicy{
 		ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1,
 	}
-	done, err := host.Start(t.Context(), request)
+	done, err := host.StartAgentTurn(t.Context(), request)
 	if err == nil {
 		done = resumeAutoSegments(t, host, runtime, direct, done)
 	}
@@ -117,7 +117,7 @@ func TestHarnessAutomaticSegmentsExhaustToOriginalManualContinuation(t *testing.
 	request.AutoAllowance = &agent.AutoAllowancePolicy{
 		ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 2,
 	}
-	paused, err := host.Start(t.Context(), request)
+	paused, err := host.StartAgentTurn(t.Context(), request)
 	if err == nil {
 		paused = resumeAutoSegments(t, host, runtime, direct, paused)
 	}
@@ -166,7 +166,7 @@ func TestHarnessUnconfiguredAutoPolicyPreservesManualPause(t *testing.T) {
 	host, runtime, direct, client := testAutoHarness(t, 1)
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := host.Start(t.Context(), request)
+	paused, err := host.StartAgentTurn(t.Context(), request)
 	if err == nil {
 		paused = resumeAutoSegments(t, host, runtime, direct, paused)
 	}

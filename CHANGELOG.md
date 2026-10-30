@@ -8,6 +8,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 - Extract the Provider Router, OpenAI Responses and Anthropic Messages adapters
   into independent `go/agent-runtime-provider`; delete the previous Core
   `provider` package without aliases or forwarding imports.
+- Replace the implicit `harness.Runner.Start` default with explicit
+  `StartAgentTurn` selection, leaving durable intent and recovery evidence intact.
 - Move provider examples and Agent-vendor integration fixtures to the new
   module; retain vendor-neutral `model.Client` and its durable replay contract.
 - Expand the release cohort and consumer gates to eleven modules. Previously

@@ -146,7 +146,7 @@ func TestReauditTerminalRefreshDoesNotRepublishWhenTerminalBeyondFirstFeedPage(t
 			t.Fatal(err)
 		}
 	}
-	finished, err := runner.Start(context.Background(), req)
+	finished, err := runner.StartAgentTurn(context.Background(), req)
 	if err != nil || finished.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("start=%+v err=%v", finished.Turn, err)
 	}
@@ -352,7 +352,7 @@ func TestConcurrentTerminalRefreshPublishesOneRetainedTerminal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	finished, err := runner.Start(t.Context(), testStartRequest())
+	finished, err := runner.StartAgentTurn(t.Context(), testStartRequest())
 	if err != nil || finished.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("setup: %v status=%s", err, finished.Turn.Status)
 	}

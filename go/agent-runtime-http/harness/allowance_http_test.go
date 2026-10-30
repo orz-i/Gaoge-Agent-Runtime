@@ -65,7 +65,7 @@ func newAllowanceHTTPFixture(t *testing.T) (*harness.Runner, *kernel.Runtime, ha
 		t.Fatal(err)
 	}
 	actor := kernel.ActorRef{TenantID: "alice-tenant", ActorID: "alice"}
-	paused, err := host.Start(t.Context(), harness.StartRequest{
+	paused, err := host.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "private-thread"},
 		HostTurn:   harness.HostRef{Kind: "conversation_turn", ID: "private-turn"},
 		Actor:      actor, Thread: kernel.ThreadRef{Kind: "conversation", ID: "private-thread"},

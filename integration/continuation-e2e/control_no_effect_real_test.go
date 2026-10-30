@@ -119,7 +119,7 @@ func TestRealPostgresNativeControlNoEffectRecoveryAcrossConnections(t *testing.T
 				Goal:       "produce a second answer", Config: harness.ConfigSnapshot{Model: "fixture-control"},
 				CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 			}
-			paused, err := first.Start(t.Context(), request)
+			paused, err := first.StartAgentTurn(t.Context(), request)
 			if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 				t.Fatalf("initial Run not paused: status=%s err=%v", paused.Turn.Status, err)
 			}
@@ -257,7 +257,7 @@ func testRealPostgresNativeControlNoEffectSurvivesProcessCrash(t *testing.T, fai
 		Goal:       "continue after process termination", Config: harness.ConfigSnapshot{Model: "fixture-control"},
 		CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 	}
-	paused, err := first.Start(t.Context(), request)
+	paused, err := first.StartAgentTurn(t.Context(), request)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("parent could not create paused Run: status=%s err=%v", paused.Turn.Status, err)
 	}

@@ -79,7 +79,7 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 		ID: "researcher", Revision: 1, Name: "Researcher", Model: "specialist-model",
 	}}
 
-	snapshot, err := runner.Start(t.Context(), request)
+	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("turn=%#v err=%v", snapshot.Turn, err)
 	}

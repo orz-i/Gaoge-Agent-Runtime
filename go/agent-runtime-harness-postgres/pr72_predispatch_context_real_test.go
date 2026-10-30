@@ -135,13 +135,13 @@ func TestRealPostgresPR72ConcurrentStartContextFailureDoesNotTerminalizeOriginal
 		err      error
 	}
 	pending := make(chan outcome, 1)
-	go func() { s, e := first.Start(context.Background(), req); pending <- outcome{s, e} }()
+	go func() { s, e := first.StartAgentTurn(context.Background(), req); pending <- outcome{s, e} }()
 	select {
 	case <-blocking.entered:
 	case <-time.After(8 * time.Second):
 		t.Fatal("original Start did not reach Context preflight")
 	}
-	_, replayErr := second.Start(t.Context(), req)
+	_, replayErr := second.StartAgentTurn(t.Context(), req)
 	if !errors.Is(replayErr, errPR72RealContextTransient) {
 		t.Errorf("second connection Context fault lost: %v", replayErr)
 	}
