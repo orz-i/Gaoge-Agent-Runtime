@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- P3 canonical Model Message multi-modal hard cut: replace
+  `Message.Content string` with one ordered, closed
+  `[]ContentPart` (text, image, PDF, audio remote references).
+  OpenAI/Anthropic map ordered user image/PDF blocks to native
+  request formats; referenced audio and malformed/non-User
+  media fail before HTTP. Media URLs, MIME and part order are
+  frozen in durable ModelInvocation/Context state, and managed
+  media Context budgets require exact provider-aware counting.
+  No parallel attachment field, legacy text-string bridge,
+  raw binary storage or new SQL schema.
+
 - Hard-cut Harness Store `GetItem(ctx, id)` as a mandatory indexed,
   immutable global-Item-ID read. Physical child ancestry fencing no
   longer scans whole Turns; Memory Item cursor pages now use binary

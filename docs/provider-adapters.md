@@ -11,8 +11,8 @@ introduces no Kernel schema, runtime worker, or global registry.
 | --- | --- |
 | `model` | Existing `Client`, optional `StreamingClient`, `Request`/`Response`; per-request provider name and optional provider-owned replay envelope, signed/encrypted where required, for faithful continuation |
 | `go/agent-runtime-provider` | Immutable, explicitly composed `Router`: `provider/model-id` routes to registered providers |
-| `go/agent-runtime-provider/openai` | OpenAI **Responses API**, text + local function tools |
-| `go/agent-runtime-provider/anthropic` | Anthropic **Messages API**, text + local tool-use/tool-result |
+| `go/agent-runtime-provider/openai` | OpenAI **Responses API**, ordered text/image/PDF input + local function tools |
+| `go/agent-runtime-provider/anthropic` | Anthropic **Messages API**, ordered text/image/PDF input + local tool-use/tool-result |
 | `go/agent-runtime-provider/internal/providerhttp` | Shared JSON/SSE HTTP framing, size bounds, safe classified errors, no redirects |
 
 To add another Provider: implement `model.Client` and, for external named
@@ -85,8 +85,10 @@ multi-provider router.
 
 ## Supported model contract
 
-- Stateless multi-turn **text** messages and local JSON Tool calls with
-  stable Call IDs. Provider tool names map back to Gaoge Tool Keys.
+- Stateless multi-turn **ordered `model.ContentPart`** messages and local
+  JSON Tool calls with stable Call IDs. Image/PDF reference parts are
+  admitted only in user messages, not System/Assistant/Tool messages.
+  Provider tool names map back to Gaoge Tool Keys.
 - Synchronous `Generate` and SSE `GenerateStream`. A streaming terminal
   response is required; partial SSE delivery is **not** success.
 - OpenAI Responses assistant `phase` is preserved. When messages use phases,
@@ -179,12 +181,54 @@ multi-provider router.
   increasing a model deadline does not change those transport settings.
   Requests and SSE events have bounded sizes.
 
+## P3 ordered image/PDF input contract
+
+`model.Message.Content` is the sole ordered list of tagged
+`ContentPart` blocks. `model.TextParts(text)` replaces old
+`Message{Content:text}` literals; legacy JSON string Content
+is rejected. The closed Core union includes text, image
+(PNG/JPEG/WebP/GIF), PDF file, and audio (MPEG/WAV) remote
+references. Each media block has a required MIME and exactly
+one `MediaSource`: a Host-authorized HTTPS URL or a
+Provider-scoped uploaded File ID. No raw base64/data URI or
+implicit HTTP download is stored or performed in the Runtime.
+
+OpenAI Responses input emits ordered `input_text`,
+`input_image` (`image_url`/`file_id`), and `input_file`
+(`file_url`/`file_id`) items. Anthropic Messages emits
+ordered `text`, `image` and `document` parts with native
+`source.type=url`/`file`. In both adapters, media in
+System/Assistant/Tool, unknown parts and referenced audio
+fail before HTTP dispatch; neither a missing block nor
+a text surrogate is sent. HTTPS URL fetch policy, media
+retention, uploaded File IDs, tenant isolation and Provider
+binding identity belong to the Host. Preserve User-owned
+URLs/FileIDs exactly in frozen Context/Model state and do
+not reuse across Provider bindings.
+
+Multimodal messages participate in immutable ModelInvocation
+request hashes and Context lineage. Managed Context requires
+a trusted exact model/provider TokenCounter for image/PDF
+input; URI byte-size estimates cannot prove decoded media
+token limits. A signed/encrypted ProviderReplay remains
+separate from Content, with visible assistant Tool/text
+matching unchanged. No arbitrary video/hosted Tool media
+output, audio-reference transcription, embedded media bytes
+or media upload endpoint is provided by this limited P3
+contract. The higher-level Agent/Harness/HTTP Start Goal
+continues to accept text only.
+
+Source references: [OpenAI Responses input files](https://developers.openai.com/api/docs/guides/file-inputs),
+[Anthropic Files in Messages](https://platform.claude.com/docs/en/build-with-claude/files)
+and [Pi message content](https://pi.dev/docs/latest/message-types).
+
 ## Current explicit limitations
 
-- No images, audio, files, provider-hosted tools, native web search, or
-  automatic authentication/proxy discovery. `HostedTools` are rejected,
-  not downgraded silently.
-- The normalized `model.Message` remains text-first. Anthropic signed Thinking
+- No **embedded** image/audio/file bytes, referenced audio transcription,
+  video, provider-hosted tools, native web search, or automatic
+  authentication/proxy discovery. Image/PDF URL/FileID user inputs
+  are supported as above. `HostedTools` are rejected, not downgraded.
+- The normalized `model.Message` has an ordered ContentPart union. Anthropic signed Thinking
   is stored as a bounded, provider-opaque replay envelope only when a model
   makes local Tool calls; the SDK does **not** expose or interpret the private
   thinking content. Opaque replay is subject to the original provider's

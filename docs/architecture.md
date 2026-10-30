@@ -126,6 +126,33 @@ records atomically with Run state and journal events; the continuation
 projector converts those records into idempotent queue work. Runtime
 correctness must never depend on an in-memory callback or telemetry observer.
 
+### Ordered Model Message content (P3 breaking contract)
+
+The provider-neutral `model.Message` stores exactly one
+`Content []model.ContentPart` sequence; it no longer has a string
+Content or a secondary attachment list. Content parts are tagged
+`text`/`image`/`file`/`audio`, each media part referring to exactly
+one Provider-scoped `MediaSource` (HTTPS URL or File ID) rather
+than storing uploaded media bytes in Kernel/Context State. The
+Host must authorize outbound Provider bindings and access to
+each media reference. Only User messages may contain media;
+Tool calls and provider-encrypted replay are separate durable
+effect/continuation facts.
+
+Adapters project ordered User images/PDFs into their own
+Responses/Messages formats, or reject unsupported kinds before
+remote dispatch. Shipped OpenAI/Anthropic adapters explicitly
+do not transmit referenced audio. Frozen ModelInvocation
+requests hash each content part, source and order; Context
+checkpoints preserve them with deep clones and immutable
+artifact lineage. Managed Context cannot prove decoded media
+token cost from the URL/FileID byte count; media input requires
+an exact Provider-aware TokenCounter or admission fails
+`ErrModelWindowUnknown`. Synthetic system extracts omit old
+media URLs and File IDs while keeping the full archived
+transcript separately. Public Harness/HTTP Start Goals remain
+text-only in this scoped P3 change.
+
 ### Durable Model dispatch boundary (breaking Beta contract)
 
 Model-visible `Messages`, opaque Provider replay, local Tool descriptions and
