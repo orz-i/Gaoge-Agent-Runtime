@@ -37,6 +37,7 @@ type harnessStoreContract interface {
 	PutContextArtifact(context.Context, runtimecontext.Artifact) (runtimecontext.Artifact, bool, error)
 	GetContextArtifact(context.Context, string) (runtimecontext.Artifact, error)
 	AppendItem(context.Context, harness.Item) (harness.Item, bool, error)
+	GetItem(context.Context, string) (harness.Item, error)
 	ListItems(context.Context, string, uint64, int) ([]harness.Item, error)
 }
 

@@ -1328,6 +1328,23 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	return nil
 }
 
+// GetItem resolves a single globally unique immutable Item using the
+// existing primary-key index; no per-Turn materialization or extra schema.
+func (store *Store) GetItem(ctx context.Context, id string) (harness.Item, error) {
+	id = strings.TrimSpace(id)
+	if store == nil || store.db == nil || id == "" {
+		return harness.Item{}, harness.ErrInvalidRequest
+	}
+	item, found, err := findItem(store.db.WithContext(ctx), id)
+	if err != nil {
+		return harness.Item{}, err
+	}
+	if !found {
+		return harness.Item{}, harness.ErrNotFound
+	}
+	return item, nil
+}
+
 func (store *Store) ListItems(ctx context.Context, turnID string, afterSeq uint64, limit int) ([]harness.Item, error) {
 	turnID = strings.TrimSpace(turnID)
 	if turnID == "" || limit < 0 {

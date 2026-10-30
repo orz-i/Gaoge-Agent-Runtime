@@ -2,6 +2,49 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Harness parent Item indexed Store reads (beta.24 candidate)
+
+**Breaking Host persistence contract:** `harness.Store` now requires
+`GetItem(context.Context, string) (harness.Item, error)`. A Store
+implementation previously supplying only `AppendItem` and `ListItems`
+no longer compiles; update the concrete adapter and the explicit
+consumer interface. `GetItem` resolves one globally unique immutable
+Item ID, returning `ErrNotFound` when absent, `ErrInvalidRequest` for
+an empty ID, and a defensive copy of mutable JSON payloads. It must
+not invent an Item, return another Turn's Item, or scan a full Turn
+to satisfy a single lookup. Memory uses its existing `itemIDs` index;
+PostgreSQL uses the existing `agent_harness_items.id` primary key.
+No optional-interface detection, ListItems fallback, SQL DDL, schema
+version bump or alternate cache is introduced.
+
+**Effect safety preserved:** `requireLiveInvocationParents` no longer
+materializes all Turn Items just to validate one child. It follows
+the exact `ParentItemID` chain by indexed `GetItem` while retaining
+cycle detection, exact Turn ownership, positive persisted Seq, live
+parent Invocation checks and the original Kernel parent Run liveness
+checks. A missing/foreign/corrupt parent still fails closed before
+physical dispatch. Existing pre/post-claim and cancellation fences
+remain in place, with no new execution status or permission grant.
+
+**Paged Memory reads:** `MemoryStore.ListItems` still returns at most
+500 cloned Items with an exclusive `afterSeq` cursor, but now uses
+binary search on the immutable append-ordered per-Turn Seq instead
+of scanning every earlier page. The existing bounded PostgreSQL
+`ListItems` SQL query is unchanged. APIs that explicitly request
+full Turn/Timeline histories still materialize that history; this
+change does not claim all large-history reads are constant-time.
+
+**Measured admission:** An Apple M4 benchmark with a single
+live Host Application parent at 500/2,000/10,000 Turn Items showed
+the old parent fence at about 90 μs / 0.58 MB, 0.47 ms / 2.70 MB,
+and 2.50 ms / 15.29 MB per call, respectively. Indexed parent
+checks now take approximately 0.12 μs / 8 B for all three sizes.
+Real PostgreSQL two-connection tests confirm one primary-key SQL
+SELECT per Item lookup; 500-boundary cursor and nested/terminal
+parent guard regressions pass. These microbenchmarks are not
+end-to-end Host request latency guarantees. See the
+[parent Item lookup audit](audits/2026-10-30-harness-parent-item-indexed-reads.md).
+
 ## 2026-10-30 — Hosted Tool anonymous terminal accounting hard cut (beta.24 candidate)
 
 **Removed:** A Provider Hosted Tool `completed`/`failed`/`error`/`cancelled`
