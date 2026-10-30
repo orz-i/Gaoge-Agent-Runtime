@@ -829,24 +829,17 @@ func (manager *Manager) BindModelWindow(
 	return next, nil
 }
 
-// AssessModelRequest accounts the exact request at a model sampling boundary.
+// AssessModelRequest accounts the final provider-neutral request at a model
+// sampling boundary. Only a typed model.Request can prove whether its messages
+// contain media; arbitrary serialized payloads cannot safely use the text-only
+// byte fallback. Call after model option/tool/hosted-tool materialization.
 func (manager *Manager) AssessModelRequest(
 	ctx stdcontext.Context,
 	request model.Request,
 	modelWindow ModelWindow,
 	policy Policy,
 ) (Assessment, error) {
-	return manager.AssessRequest(ctx, model.CloneRequest(request), modelWindow, policy)
-}
-
-// AssessRequest accounts the canonical provider-neutral request that will actually be sent at a
-// sampling boundary. Hosts should call this after model option/tool/hosted-tool materialization.
-func (manager *Manager) AssessRequest(
-	ctx stdcontext.Context,
-	request any,
-	modelWindow ModelWindow,
-	policy Policy,
-) (Assessment, error) {
+	request = model.CloneRequest(request)
 	policy = NormalizePolicy(policy)
 	hard, err := EffectiveInputLimit(modelWindow, policy.MaxInputTokens)
 	if err != nil {
@@ -892,17 +885,8 @@ func (manager *Manager) AssessRequest(
 	return assessment, nil
 }
 
-func requestContainsMedia(request any) bool {
-	var messages []model.Message
-	switch value := request.(type) {
-	case model.Request:
-		messages = value.Messages
-	case *model.Request:
-		if value != nil {
-			messages = value.Messages
-		}
-	}
-	for _, message := range messages {
+func requestContainsMedia(request model.Request) bool {
+	for _, message := range request.Messages {
 		for _, part := range message.Content {
 			if part.Kind != model.ContentText {
 				return true

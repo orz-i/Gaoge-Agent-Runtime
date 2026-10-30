@@ -72,6 +72,54 @@ func TestMediaContextHardTokenBudgetRequiresExactProviderCounter(t *testing.T) {
 	}
 }
 
+// External JSON payloads must be decoded to the canonical model.Request
+// before token admission. Arbitrary map/struct JSON must never go directly to
+// a generic counting API and bypass detection of remote media references.
+func TestMediaTokenAdmissionSerializedPayloadRequiresTypedModelRequest(t *testing.T) {
+	media := model.Message{Role: model.RoleUser, Content: []model.ContentPart{{
+		Kind: model.ContentImage, MediaType: "image/jpeg", Source: &model.MediaSource{
+			Kind: model.MediaSourceURL, URL: "https://assets.example.test/large.jpg",
+		},
+	}}}
+	window := runtimectx.ModelWindow{ContextTokens: 4096,
+		TokenCountContext: runtimectx.TokenCountContext{Protocol: "openai_responses", Model: "gpt-test"},
+	}
+	inputs := []struct {
+		name  string
+		value any
+	}{
+		{name: "map", value: map[string]any{"runID": "media", "messages": []model.Message{media}}},
+		{name: "struct", value: struct {
+			RunID    string          `json:"runID"`
+			Messages []model.Message `json:"messages"`
+		}{RunID: "media", Messages: []model.Message{media}}},
+	}
+	for _, input := range inputs {
+		t.Run(input.name, func(t *testing.T) {
+			encoded, err := json.Marshal(input.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var request model.Request
+			if err := json.Unmarshal(encoded, &request); err != nil {
+				t.Fatal(err)
+			}
+			if len(request.Messages) != 1 || model.ValidateMessage(request.Messages[0]) != nil {
+				t.Fatalf("typed media request not preserved: %+v", request)
+			}
+			manager := runtimectx.NewManager(runtimectx.Dependencies{})
+			if assessment, err := manager.AssessModelRequest(t.Context(), request, window, runtimectx.Policy{}); !errors.Is(err, runtimectx.ErrModelWindowUnknown) {
+				t.Fatalf("unmetered media admitted from %s: assessment=%+v err=%v", input.name, assessment, err)
+			}
+			manager = runtimectx.NewManager(runtimectx.Dependencies{Counter: exactCounter{tokens: 220}})
+			assessment, err := manager.AssessModelRequest(t.Context(), request, window, runtimectx.Policy{})
+			if err != nil || assessment.TokenCountSource != runtimectx.CountExact || assessment.HardTokenEstimate != 220 {
+				t.Fatalf("exactly metered media rejected: assessment=%+v err=%v", assessment, err)
+			}
+		})
+	}
+}
+
 // An archived old user attachment is durable evidence, not system guidance.
 // Rolling over a long conversation must retain exact ordered media inside the
 // immutable artifact while preventing source URLs and provider IDs from being

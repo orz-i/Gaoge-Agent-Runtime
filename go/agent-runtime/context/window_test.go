@@ -684,15 +684,13 @@ func TestModelWindowFingerprintIgnoresTokenCounterRoutingMetadata(t *testing.T) 
 	}
 }
 
-func TestAssessRequestDoesNotTrustExactCounterWithoutRouteIdentity(t *testing.T) {
+func TestAssessModelRequestDoesNotTrustExactCounterWithoutRouteIdentity(t *testing.T) {
 	t.Parallel()
 	var counted runtimectx.TokenCountRequest
 	manager := runtimectx.NewManager(runtimectx.Dependencies{Counter: exactCounter{tokens: 1, seen: &counted}})
-	assessment, err := manager.AssessRequest(
+	assessment, err := manager.AssessModelRequest(
 		t.Context(),
-		struct {
-			Text string `json:"text"`
-		}{Text: "provider identity is required"},
+		model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("provider identity is required")}}},
 		runtimectx.ModelWindow{ContextTokens: 4096},
 		runtimectx.Policy{},
 	)
@@ -704,14 +702,12 @@ func TestAssessRequestDoesNotTrustExactCounterWithoutRouteIdentity(t *testing.T)
 	}
 }
 
-func TestAssessRequestUsesConservativeHardBoundWhenCounterIsUnavailable(t *testing.T) {
+func TestAssessModelRequestUsesConservativeHardBoundWhenCounterIsUnavailable(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
-	assessment, err := manager.AssessRequest(
+	assessment, err := manager.AssessModelRequest(
 		t.Context(),
-		struct {
-			Text string `json:"text"`
-		}{Text: strings.Repeat("界", 200)},
+		model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.Repeat("界", 200))}}},
 		runtimectx.ModelWindow{ContextTokens: 1000},
 		runtimectx.Policy{MaxInputTokens: 300, SoftLimitPercent: 80},
 	)
@@ -729,10 +725,10 @@ func TestAssessRequestUsesConservativeHardBoundWhenCounterIsUnavailable(t *testi
 	}
 }
 
-func TestAssessRequestZeroCounterFallsBackRatherThanClaimingExactCount(t *testing.T) {
+func TestAssessModelRequestZeroCounterFallsBackRatherThanClaimingExactCount(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{Counter: exactCounter{tokens: 0}})
-	assessment, err := manager.AssessRequest(t.Context(), strings.Repeat("🌱", 200), runtimectx.ModelWindow{
+	assessment, err := manager.AssessModelRequest(t.Context(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.Repeat("🌱", 200))}}}, runtimectx.ModelWindow{
 		ContextTokens: 300, TokenCountContext: runtimectx.TokenCountContext{Protocol: "openai_responses", Model: "MiniMax-M3.1-Flash-Preview"},
 	}, runtimectx.Policy{})
 	requireNoError(t, err)
@@ -742,14 +738,12 @@ func TestAssessRequestZeroCounterFallsBackRatherThanClaimingExactCount(t *testin
 	}
 }
 
-func TestAssessRequestHardFallbackChargesHighEntropyASCIIByByte(t *testing.T) {
+func TestAssessModelRequestHardFallbackChargesHighEntropyASCIIByByte(t *testing.T) {
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
-	assessment, err := manager.AssessRequest(
+	assessment, err := manager.AssessModelRequest(
 		t.Context(),
-		struct {
-			Text string `json:"text"`
-		}{Text: strings.Repeat("A7_z-9/", 32)},
+		model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.Repeat("A7_z-9/", 32))}}},
 		runtimectx.ModelWindow{ContextTokens: 220},
 		runtimectx.Policy{SoftLimitPercent: 80, EstimateSafetyPercent: 15},
 	)
