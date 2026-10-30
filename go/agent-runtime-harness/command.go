@@ -11,13 +11,11 @@ const (
 	CommandSourceApplication = "application"
 )
 
-// CommandDescriptor is a discoverable, data-only projection of one explicit
-// Harness capability entry point. It never contains an executable callback.
+// CommandDescriptor is a frozen authorization and input contract for one
+// explicitly host-selected child capability. Host presentation (slash
+// triggers, labels, descriptions and intent selection) is not Runtime state.
 type CommandDescriptor struct {
 	ID                string          `json:"id"`
-	Trigger           string          `json:"trigger"`
-	Title             string          `json:"title"`
-	Description       string          `json:"description,omitempty"`
 	CapabilityKey     string          `json:"capabilityKey"`
 	DefinitionVersion string          `json:"definitionVersion"`
 	ExecutionClass    ExecutionClass  `json:"executionClass"`
@@ -26,12 +24,35 @@ type CommandDescriptor struct {
 	InputSchema       json.RawMessage `json:"inputSchema"`
 }
 
-// CommandCatalog is an immutable static projection assembled by the bootstrap
-// composition root. Lookup is intentionally slice-based rather than a runtime
-// registration mechanism.
+// CommandCatalog is a frozen set of executable capability contracts, not a
+// Host command registry or user-intent router.
 type CommandCatalog struct{ descriptors []CommandDescriptor }
 
-// NewCommandCatalog validates and freezes the exact statically composed set.
+// UnmarshalJSON rejects legacy Host presentation fields rather than silently
+// stripping them when old persisted configs are loaded after the hard cut.
+// The authoritative frozen execution descriptor is not a display command.
+func (value *CommandDescriptor) UnmarshalJSON(raw []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return ErrInvalidRequest
+	}
+	for key := range fields {
+		switch key {
+		case "id", "capabilityKey", "definitionVersion", "executionClass", "source", "applicationKind", "inputSchema":
+		default:
+			return ErrInvalidRequest
+		}
+	}
+	type wire CommandDescriptor
+	var decoded wire
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return ErrInvalidRequest
+	}
+	*value = CommandDescriptor(decoded)
+	return nil
+}
+
+// NewCommandCatalog validates and freezes the exact host-selected set.
 func NewCommandCatalog(descriptors ...CommandDescriptor) (*CommandCatalog, error) {
 	values := make([]CommandDescriptor, len(descriptors))
 	for index, descriptor := range descriptors {
@@ -45,14 +66,14 @@ func NewCommandCatalog(descriptors ...CommandDescriptor) (*CommandCatalog, error
 		return strings.Compare(left.ID, right.ID)
 	})
 	for index := 1; index < len(values); index++ {
-		if values[index-1].ID == values[index].ID || values[index-1].Trigger == values[index].Trigger {
+		if values[index-1].ID == values[index].ID {
 			return nil, ErrConflict
 		}
 	}
 	return &CommandCatalog{descriptors: values}, nil
 }
 
-// List returns an isolated deterministic command projection.
+// List returns an isolated deterministic snapshot of execution contracts.
 func (catalog *CommandCatalog) List() []CommandDescriptor {
 	if catalog == nil {
 		return nil
@@ -64,45 +85,8 @@ func (catalog *CommandCatalog) List() []CommandDescriptor {
 	return result
 }
 
-// Resolve returns one exact descriptor by stable command ID.
-func (catalog *CommandCatalog) Resolve(id string) (CommandDescriptor, error) {
-	id = strings.TrimSpace(id)
-	if catalog == nil || id == "" {
-		return CommandDescriptor{}, ErrInvalidRequest
-	}
-	for _, descriptor := range catalog.descriptors {
-		if descriptor.ID == id {
-			return cloneCommandDescriptor(descriptor), nil
-		}
-	}
-	return CommandDescriptor{}, ErrNotFound
-}
-
-// FirstPartyCommandDescriptors declares the built-in executable capability
-// entries. Application contributions are appended explicitly by bootstrap
-// composition in later phases.
-func FirstPartyCommandDescriptors() []CommandDescriptor {
-	const noArguments = `{"type":"object","additionalProperties":false}`
-	const workflowArguments = `{"type":"object","properties":{"definitionReference":{"type":"object","required":["id"],"properties":{"id":{"type":"string","minLength":1},"revision":{"type":"integer","minimum":1},"hash":{"type":"string","minLength":1}},"additionalProperties":false},"input":{}},"additionalProperties":false}`
-	return []CommandDescriptor{
-		{
-			ID: "team", Trigger: "/team", Title: "Team", Description: "Run a small parallel specialist team",
-			CapabilityKey: CapabilityTeam, DefinitionVersion: RuntimeCapabilityVersion,
-			ExecutionClass: ExecutionTeam, Source: CommandSourceFirstParty, InputSchema: json.RawMessage(noArguments),
-		},
-		{
-			ID: "workflow", Trigger: "/workflow", Title: "Workflow", Description: "Run a bounded dynamic workflow",
-			CapabilityKey: CapabilityWorkflow, DefinitionVersion: RuntimeCapabilityVersion,
-			ExecutionClass: ExecutionWorkflow, Source: CommandSourceFirstParty, InputSchema: json.RawMessage(workflowArguments),
-		},
-	}
-}
-
 func normalizeCommandDescriptor(value CommandDescriptor) (CommandDescriptor, error) {
 	value.ID = strings.TrimSpace(value.ID)
-	value.Trigger = strings.TrimSpace(value.Trigger)
-	value.Title = strings.TrimSpace(value.Title)
-	value.Description = strings.TrimSpace(value.Description)
 	value.CapabilityKey = strings.TrimSpace(value.CapabilityKey)
 	value.DefinitionVersion = strings.TrimSpace(value.DefinitionVersion)
 	value.Source = strings.TrimSpace(value.Source)
@@ -115,17 +99,20 @@ func normalizeCommandDescriptor(value CommandDescriptor) (CommandDescriptor, err
 }
 
 func validCommandIdentity(value CommandDescriptor) bool {
-	return value.ID != "" && value.Title != "" && value.CapabilityKey != "" && value.DefinitionVersion != "" &&
-		strings.HasPrefix(value.Trigger, "/") && !strings.ContainsAny(value.Trigger, " \t\r\n")
+	return value.ID != "" && value.CapabilityKey != "" && value.DefinitionVersion != "" &&
+		!strings.ContainsAny(value.ID, " \t\r\n")
 }
 
 func validCommandExecution(value CommandDescriptor) bool {
-	if !validExecutionClass(value.ExecutionClass) {
-		return false
-	}
 	switch value.Source {
 	case CommandSourceFirstParty:
-		return value.ApplicationKind == ""
+		if value.ApplicationKind != "" {
+			return false
+		}
+		// These are the only first-party child capabilities supported by
+		// the typed materializer. Agent/GroupChat are not implicit routes.
+		return value.ExecutionClass == ExecutionTeam && value.CapabilityKey == CapabilityTeam ||
+			value.ExecutionClass == ExecutionWorkflow && value.CapabilityKey == CapabilityWorkflow
 	case CommandSourceApplication:
 		return value.ExecutionClass == ExecutionApplication && value.ApplicationKind != ""
 	default:

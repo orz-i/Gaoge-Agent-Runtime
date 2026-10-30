@@ -23,7 +23,7 @@ func TestPausedAllowanceLifecyclePersistsAcrossHarnessStoreReload(t *testing.T) 
 		t.Fatalf("session fresh=%v err=%v", fresh, err)
 	}
 	config, err := harness.SealConfigSnapshot("turn-paused", harness.ConfigSnapshot{
-		Model: "model", Commands: harness.FirstPartyCommandDescriptors(),
+		Model: "model", Commands: fixturePostgresCapabilityCommands(),
 	}, now)
 	if err != nil {
 		t.Fatal(err)

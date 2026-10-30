@@ -204,10 +204,6 @@ describe("RuntimeClient target API", () => {
   });
 
   it("uses Harness Turn identity for snapshot, semantic feed, and approval", async () => {
-    const harnessCommands = [{
-      id: "workflow", trigger: "/workflow", title: "Workflow", capabilityKey: "runtime.workflow",
-      definitionVersion: "v1", executionClass: "workflow", source: "first_party", inputSchema: { type: "object" },
-    }];
     const harnessSnapshot = {
       turn: {
         id: "ht/1", hostTurn: { kind: "conversation_turn", id: "client-turn-1" },
@@ -224,7 +220,6 @@ describe("RuntimeClient target API", () => {
       output: { contentType: "text", content: "done" },
     };
     const fetcher = vi.fn()
-      .mockResolvedValueOnce(json(harnessCommands))
       .mockResolvedValueOnce(json(harnessSnapshot))
       .mockResolvedValueOnce(new Response(
         `id: 1\ndata: {"seq":1,"turnID":"ht/1","type":"item.delta","itemID":"message-1","itemKind":"agent_message","delta":"hi","createdAt":"2026-08-17T00:00:00Z"}\n\n` +
@@ -237,7 +232,6 @@ describe("RuntimeClient target API", () => {
       .mockResolvedValueOnce(json(harnessSnapshot));
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
 
-    await expect(client.harness.commands.list()).resolves.toEqual(harnessCommands);
     await expect(client.harness.turns.get("ht/1")).resolves.toEqual(harnessSnapshot);
     const events = [];
     for await (const event of client.harness.turns.feed("ht/1", { reconnectDelayMS: 0 })) events.push(event);
@@ -251,7 +245,6 @@ describe("RuntimeClient target API", () => {
       [2, "turn.completed", undefined],
     ]);
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
-      "https://runtime.test/api/v1/harness/commands",
       "https://runtime.test/api/v1/harness/turns/ht%2F1",
       "https://runtime.test/api/v1/harness/turns/ht%2F1/feed?afterSeq=0",
       "https://runtime.test/api/v1/harness/turns/ht%2F1/approval",
@@ -259,7 +252,7 @@ describe("RuntimeClient target API", () => {
       "https://runtime.test/api/v1/harness/turns/ht%2F1/invocations/invocation%2F1/retry",
       "https://runtime.test/api/v1/harness/turns/ht%2F1/allowance",
     ]);
-    expect(JSON.parse(String(fetcher.mock.calls[6]?.[1]?.body))).toEqual({
+    expect(JSON.parse(String(fetcher.mock.calls[5]?.[1]?.body))).toEqual({
       expectedTurnRevision: 7, modelCalls: 2,
     });
     expect(fetcher.mock.calls.some((call) => String(call[0]).includes("/runs/"))).toBe(false);

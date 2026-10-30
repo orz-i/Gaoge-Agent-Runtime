@@ -67,7 +67,7 @@ func TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild(t *testing.T) 
 func TestRootAgentPreparesWorkflowWithScopedApplicationCommand(t *testing.T) {
 	fixture := newCapabilityToolFixture(t)
 	started := startCapabilityToolHarness(t, fixture, harness.CommandDescriptor{
-		ID: "scoped", Trigger: "/scoped", Title: "Scoped application",
+		ID:            "scoped",
 		CapabilityKey: "application.scoped", DefinitionVersion: "1", ExecutionClass: harness.ExecutionApplication,
 		Source: harness.CommandSourceApplication, ApplicationKind: "fixture",
 		InputSchema: json.RawMessage(`{"$id":"https://example.test/scoped-application","type":"object","$defs":{"value":{"type":"string"}},"properties":{"value":{"$ref":"#/$defs/value"}},"additionalProperties":false}`),
@@ -154,7 +154,7 @@ func newCapabilityToolFixture(t *testing.T, definitions ...workflow.Definition) 
 
 func startCapabilityToolHarness(t *testing.T, fixture capabilityToolFixture, additionalCommands ...harness.CommandDescriptor) harness.Snapshot {
 	t.Helper()
-	commands := append(harness.FirstPartyCommandDescriptors(), additionalCommands...)
+	commands := append(fixtureCapabilityCommands(), additionalCommands...)
 	started, err := fixture.runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "capability-thread"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "capability-turn"},

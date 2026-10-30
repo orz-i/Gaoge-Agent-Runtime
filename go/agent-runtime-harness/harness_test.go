@@ -337,7 +337,7 @@ func TestConfigSnapshotIsDeterministicAndIsolated(t *testing.T) {
 		Environment:  harness.VersionRef{ID: "general", Revision: 3},
 		ModelOptions: json.RawMessage(`{ "temperature": 0, "max_output_tokens": 512 }`),
 		ToolKeys:     []string{"lookup", "lookup", "artifact"},
-		Commands:     harness.FirstPartyCommandDescriptors(),
+		Commands:     fixtureCapabilityCommands(),
 		Skills: []harness.SkillSnapshot{
 			{ID: "writing", Revision: 2, Title: "Writing", Markdown: "# Writing\nWrite clearly."},
 			{ID: "analysis", Revision: 1, Title: "Analysis", Markdown: "# Analysis\nAnalyze carefully."},
@@ -355,9 +355,9 @@ func TestConfigSnapshotIsDeterministicAndIsolated(t *testing.T) {
 		len(first.Commands) != 2 || first.Commands[0].ID != "team" || first.Skills[0].ID != "analysis" {
 		t.Fatalf("config is not deterministic: first=%#v second=%#v", first, second)
 	}
-	input.Commands[0].Title = "mutated"
-	if first.Commands[0].Title == "mutated" {
-		t.Fatalf("sealed command descriptors alias caller input: %#v", first.Commands)
+	input.Commands[0].InputSchema[0] = 'x'
+	if first.Commands[0].InputSchema[0] == 'x' {
+		t.Fatalf("sealed command schemas alias caller input: %#v", first.Commands)
 	}
 }
 

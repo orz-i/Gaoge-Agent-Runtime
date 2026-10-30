@@ -18,6 +18,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// Host fixtures, not Runtime defaults. They exercise frozen capability
+// descriptors through the persistent adapter.
+func fixturePostgresCapabilityCommands() []harness.CommandDescriptor {
+	return []harness.CommandDescriptor{{
+		ID: "team", CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
+		ExecutionClass: harness.ExecutionTeam, Source: harness.CommandSourceFirstParty,
+		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
+	}}
+}
+
 const (
 	testHarnessExecutionRefID = "hr_pg"
 	testContextBaseSourceID   = "message-pg"
@@ -35,7 +45,7 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	assertSessionLifecycle(t, store, session)
 	config, err := harness.SealConfigSnapshot("ht_pg", harness.ConfigSnapshot{
 		Environment: harness.VersionRef{ID: "general", Revision: 7}, Model: "model",
-		Commands: harness.FirstPartyCommandDescriptors(),
+		Commands: fixturePostgresCapabilityCommands(),
 	}, now)
 	if err != nil {
 		t.Fatalf("seal config: %v", err)
@@ -60,6 +70,48 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	invocation := assertInvocationLifecycle(t, store, turn.ID, now)
 	assertInteractionLifecycle(t, store, turn.ID, invocation.ID, now)
 	assertItemLifecycle(t, store, turn.ID, invocation.ID, now)
+}
+
+func TestStoredLegacyCommandPresentationFailsClosedOnRead(t *testing.T) {
+	store, db := newStoreWithDB(t)
+	config, err := harness.SealConfigSnapshot("legacy-command-turn", harness.ConfigSnapshot{
+		Commands: fixturePostgresCapabilityCommands(),
+	}, time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.PutConfigSnapshot(t.Context(), config); err != nil {
+		t.Fatal(err)
+	}
+	var record struct {
+		PayloadJSON string `gorm:"column:payload_json"`
+	}
+	if err := db.Table("agent_harness_config_snapshots").Select("payload_json").Where("id = ?", config.ID).Take(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(record.PayloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	var commands []map[string]json.RawMessage
+	if err := json.Unmarshal(payload["commands"], &commands); err != nil || len(commands) != 1 {
+		t.Fatalf("decode commands: %#v, %v", commands, err)
+	}
+	commands[0]["trigger"] = json.RawMessage(`"/team"`)
+	payload["commands"], err = json.Marshal(commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Table("agent_harness_config_snapshots").Where("id = ?", config.ID).Update("payload_json", string(legacy)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetConfigSnapshot(t.Context(), config.ID); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("legacy Host command presentation did not fail closed: %v", err)
+	}
 }
 
 func TestStoreConcurrentContextOwnerCommitPersistsDetachedBranch(t *testing.T) {

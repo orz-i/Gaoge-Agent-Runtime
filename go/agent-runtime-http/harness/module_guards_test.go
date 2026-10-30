@@ -27,24 +27,18 @@ func TestRegisterRoutesAndNilComposition(t *testing.T) {
 	NewModule(handler).RegisterRoutes(group)
 
 	routes := engine.Routes()
-	if len(routes) != 12 {
+	if len(routes) != 11 {
 		t.Fatalf("route count = %d, routes = %#v", len(routes), routes)
+	}
+	for _, route := range routes {
+		if route.Path == "/v1/harness/commands" {
+			t.Fatal("Host-only command discovery still registered in Runtime HTTP")
+		}
 	}
 }
 
 func TestHandlerGuardsUnavailableAndMissingTurnID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-
-	t.Run("commands unavailable", func(t *testing.T) {
-		response := httptest.NewRecorder()
-		context, _ := gin.CreateTestContext(response)
-		context.Request = httptest.NewRequest(http.MethodGet, "/v1/harness/commands", nil)
-
-		NewHandler(Dependencies{}).ListCommands(context)
-		if response.Code != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d", response.Code)
-		}
-	})
 
 	t.Run("turn unavailable", func(t *testing.T) {
 		response := httptest.NewRecorder()
