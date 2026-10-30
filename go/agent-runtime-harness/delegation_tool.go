@@ -73,11 +73,15 @@ func (handler *DelegationToolHandler) Execute(
 	}
 	var input DelegateRequest
 	if err := json.Unmarshal(request.Call.Arguments, &input); err != nil {
-		return tools.ExecutionResult{}, tools.NewRecoverableCallError("delegation.invalid_input", "invalid delegation input", err)
+		return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallError(
+			"delegation.invalid_input", "invalid delegation input", err))
 	}
 	input, err := handler.prepareRequest(ctx, runner, request, input)
 	if err != nil {
-		return tools.ExecutionResult{}, err
+		// The Host policy rejected the delegation *before* a child Run
+		// was created or invoked. Only this pre-effect phase may certify
+		// a model-correctable, exact-ID no-effect receipt.
+		return tools.RecoverableNoEffectResult(request.Call.ID, err)
 	}
 	result, err := runner.DelegateByExecutionRefID(ctx, request.RunID, input)
 	// An independently delegated specialist is an observation, not a mandatory
@@ -89,13 +93,22 @@ func (handler *DelegationToolHandler) Execute(
 		err = nil
 	}
 	if err != nil {
+		if code, _, correctable := tools.RecoverableCallErrorInfo(err); correctable &&
+			(code == "delegation.tool_selection_denied" || code == "delegation.role_unavailable") {
+			// These two exact rejections originate in prepareDelegation,
+			// before child admission, relation writes, or physical effect.
+			return tools.RecoverableNoEffectResult(request.Call.ID, err)
+		}
 		if dimension, ok := budget.DeniedDimension(err); ok && dimension == budget.DimensionChildRuns {
-			return tools.ExecutionResult{}, tools.NewRecoverableCallErrorWithBlockedTools(
+			// The child-run coordinator denied admission before another
+			// physical child Run was allocated. Preserve a bounded
+			// model-correctable refusal with exact CallID no-effect proof.
+			return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallErrorWithBlockedTools(
 				"delegation.child_runs_exhausted",
 				"No more child runs are available for this task. Continue with the information already collected and finish without further delegation.",
 				err,
 				DelegationToolKey,
-			)
+			))
 		}
 		return tools.ExecutionResult{}, err
 	}

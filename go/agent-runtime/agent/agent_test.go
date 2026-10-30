@@ -1162,11 +1162,11 @@ func TestRunnerLetsModelCorrectExplicitRecoverableToolError(t *testing.T) {
 		) (tools.ExecutionResult, error) {
 			toolCalls++
 			if toolCalls == 1 {
-				return tools.ExecutionResult{}, tools.NewRecoverableCallError(
+				return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallError(
 					"story.invalid_arguments",
 					"remove unexpected",
 					errDomainRejected,
-				)
+				))
 			}
 			if request.Call.ID != callGood {
 				t.Fatalf("corrected tool call ID = %q", request.Call.ID)
@@ -1263,13 +1263,13 @@ func TestRunnerStopsOfferingToolsBlockedByRecoverableError(t *testing.T) {
 	) (tools.ExecutionResult, error) {
 		if request.Call.ToolKey != publishToolKey {
 			readCalls++
-			return tools.ExecutionResult{}, tools.NewRecoverableCallErrorWithBlockedTools(
+			return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallErrorWithBlockedTools(
 				"story.read_budget_exhausted",
 				"publish now",
 				errDomainRejected,
 				manifestToolKey,
 				selectionToolKey,
-			)
+			))
 		}
 		publishCalls++
 		return tools.ExecutionResult{

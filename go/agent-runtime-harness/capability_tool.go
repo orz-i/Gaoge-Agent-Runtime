@@ -110,7 +110,10 @@ func (handler *CapabilityInvocationToolHandler) Execute(
 		config, request.Call.Arguments,
 	)
 	if err != nil {
-		return tools.ExecutionResult{}, err
+		// The materializer validates a frozen command before any child
+		// invocation is started. An explicitly correctable rejection can
+		// therefore attest no physical child effect under the original ID.
+		return tools.RecoverableNoEffectResult(request.Call.ID, err)
 	}
 	parentItemID := stableID("hit", turn.ID, request.Call.ID, string(ItemStarted))
 	if _, err = runner.startMaterializedCapability(ctx, turn.ID, parentItemID, request.Call.ID, input.Goal, descriptor, spec); err != nil {

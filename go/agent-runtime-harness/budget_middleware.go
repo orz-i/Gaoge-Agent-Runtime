@@ -311,21 +311,30 @@ func (middleware *BudgetMiddleware) Tool(ctx context.Context, invocation plugin.
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	if value := ledger.Reservations[id]; value.Status == budget.ReservationSettled {
-		return decodeBudgetToolReceipt(value.Receipt)
+	current := ledger.Reservations[id]
+	if current.Status == budget.ReservationSettled {
+		return decodeBudgetToolReceipt(current.Receipt)
 	}
-	if !ledger.Reservations[id].Dispatched {
-		if _, err = middleware.coordinator().Dispatch(ctx, ledger.ID, id); err != nil {
-			return tools.ExecutionResult{}, err
-		}
+	if current.Dispatched {
+		// The prior Tool may have committed physically even if its receipt
+		// was lost. This held reservation is an unresolved effect, not an
+		// authorization to re-enter next(). Only a trusted provider lookup
+		// may settle it; a distinct Tool attempt needs a new Call ID.
+		return tools.ExecutionResult{}, budget.ErrWaiting
+	}
+	if _, err = middleware.coordinator().Dispatch(ctx, ledger.ID, id); err != nil {
+		return tools.ExecutionResult{}, err
 	}
 	result, callErr := next(ctx)
 	accountingCtx := context.WithoutCancel(ctx)
-	code, message, recoverable := tools.RecoverableCallErrorInfo(callErr)
-	if (callErr != nil && !recoverable) || result.Receipt.Disposition == tools.ReceiptDispositionPending {
+	if (callErr != nil && !tools.ValidRecoverableNoEffectReceipt(result, callErr, invocation.Request.Call.ID)) ||
+		result.Receipt.Disposition == tools.ReceiptDispositionPending {
+		// A bare recoverable error is not a budget receipt. Only exact
+		// terminal rejected-no-effect evidence can release this reservation.
 		updated, suspendErr := middleware.coordinator().Suspend(accountingCtx, ledger.ID, id)
 		return result, errors.Join(callErr, suspendErr, middleware.project(accountingCtx, updated))
 	}
+	code, message, _ := tools.RecoverableCallErrorInfo(callErr)
 	raw, err = json.Marshal(budgetToolReceipt{Result: result, ErrorCode: code, ErrorMessage: message, BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(callErr)})
 	if err != nil {
 		return result, err

@@ -1654,18 +1654,16 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return snapshot, true, ctxErr
 		}
-		// A trusted Tool may reject arguments/policy with an explicit
-		// model-correctable error certifying *no external effect*. Consume
-		// this failed call only in the same Kernel CAS that clears its
-		// dispatch identity; a crash beforehand remains unreconciled.
-		if _, _, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
+		// A typed correctable error alone is NOT no-effect proof. Only
+		// a trusted Handler's exact original-ID terminal rejection receipt
+		// allows correction without a new physical invocation of this Call.
+		if tools.ValidRecoverableNoEffectReceipt(result, err, execution.call.ID) {
 			state := execution.state
 			state.ToolDispatchID = ""
 			return runner.handlePendingToolExecutionError(ctx, snapshot, state, err)
 		}
-		// Unknown results do not prove the external Tool was absent.
-		// Keep the committed dispatch intent for trusted reconciliation
-		// in both direct and Store-leased execution modes.
+		// Any other error may follow a committed remote mutation. Keep
+		// its exact durable Call ID until read-only reconciliation.
 		return snapshot, true, errors.Join(ErrToolOutcomeUnknown, err)
 	}
 	if err = tools.ValidateExecutionResult(result); err != nil {

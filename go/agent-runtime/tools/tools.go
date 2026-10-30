@@ -300,6 +300,40 @@ type Receipt struct {
 // after its child execution changes state.
 const ReceiptDispositionPending = "pending"
 
+// ReceiptDispositionRejected is an authoritative, terminal certification by
+// the trusted Tool Handler that NO external effect was performed. It permits
+// model-correctable guidance only with the exact frozen Call ID; error types
+// alone cannot certify no-effect after the Tool/Middleware boundary.
+const ReceiptDispositionRejected = "rejected"
+
+func isModelCorrectableError(err error) bool {
+	_, _, ok := RecoverableCallErrorInfo(err)
+	return ok
+}
+
+// RecoverableNoEffectResult binds a pre-effect model-correctable refusal to
+// the original Tool Call ID. A Handler MUST use it only if it knows that no
+// external operation occurred. This is a trusted Handler attestation, not a
+// claim that the Agent can independently inspect remote side effects.
+func RecoverableNoEffectResult(callID string, cause error) (ExecutionResult, error) {
+	if strings.TrimSpace(callID) == "" || !isModelCorrectableError(cause) {
+		return ExecutionResult{}, cause
+	}
+	return ExecutionResult{
+		Content: json.RawMessage("{}"),
+		Receipt: Receipt{ExecutionID: callID, Disposition: ReceiptDispositionRejected},
+	}, cause
+}
+
+// ValidRecoverableNoEffectReceipt is the only post-dispatch exception to
+// fail-closed handling of errors. Both the Tool result and the typed refusal
+// must be present, with an exact Call ID and explicit no-effect disposition.
+func ValidRecoverableNoEffectReceipt(result ExecutionResult, cause error, callID string) bool {
+	return strings.TrimSpace(callID) != "" && isModelCorrectableError(cause) &&
+		validExecutionResult(result) && result.Receipt.ExecutionID == callID &&
+		result.Receipt.Disposition == ReceiptDispositionRejected && result.Pending == nil
+}
+
 // ExecutionResult is the JSON Tool output and its durable receipt.
 type ExecutionResult struct {
 	Content json.RawMessage   `json:"content"`
@@ -421,6 +455,9 @@ func (registry *Registry) Execute(ctx context.Context, request ExecutionRequest)
 	}
 	result, err := handler.Execute(ctx, request)
 	if err != nil {
+		if ValidRecoverableNoEffectReceipt(result, err, request.Call.ID) {
+			return CloneExecutionResult(result), err
+		}
 		return ExecutionResult{}, err
 	}
 	if !validExecutionResult(result) {
