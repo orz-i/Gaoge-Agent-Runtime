@@ -2,6 +2,45 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Uniform native Tool effect intent and original-ID receipts (beta.24 candidate)
+
+**Breaking Tool crash contract:** The direct Agent (without `RunExecution`)
+no longer treats a Tool Handler invocation as safe for automatic re-entry
+after a crash or an unknown return. All modes now persist `ToolDispatchID`
+before any physical Tool/Middleware dispatch and require the exact original
+`Call.ID` and terminal receipt before clearing it. Unexpected, malformed or
+mismatched terminal receipts and pending child/external outcomes remain
+blocked for trusted read-only reconciliation. `RunExecution` remains optional
+only for Store execution Epoch/lease ownership, not for Tool intent safety.
+
+**Breaking correctable Tool errors:** A bare `RecoverableCallError` returned
+after Tool/Middleware dispatch is **not proof** that the external Tool did
+nothing; it now returns `agent.ErrToolOutcomeUnknown` with the original
+intent retained. Only an exact-ID, trusted `ReceiptDispositionRejected`
+terminal result, alongside the correctable error, may request another Model
+step. Use `tools.RecoverableNoEffectResult(callID, err)` only from a Host
+Handler that has proven no external effect; it cannot be used after
+unverified remote calls, timeouts or cancellations. Pure argument JSON
+schema rejections before the physical Tool boundary remain correctable.
+Host Tool adapters must update their result production instead of keeping
+an implicit error-only no-effect compatibility path.
+
+**Durable budget safety:** A previously `Dispatched + Held` Tool budget
+reservation is not a grant to invoke the Handler again, even with the same
+Tool Call ID. The pending reservation stays held until verified receipt
+settlement. Capability Tool `Receipt.ExecutionID` now uses the original
+parent Call ID, not the child Harness Invocation ID. The child identity
+remains in the Tool JSON response. Built-in Capability/Delegation verifiers
+are read-only; the budget verifier composes exact CallID settlement without
+re-entering the Tool. All old caller assumptions must be updated.
+
+**Migration:** Drain/quarantine any pre-hard-cut in-flight Tool effect that
+could lack an intent and trustworthy receipt; do not manufacture an old
+`ToolDispatchID` or retry using a new physical Tool ID. Published beta.23
+tags remain immutable. No SQL DDL, Schema version, compatibility bridge,
+generic FeatureDriver or alternate effect ledger is introduced.
+See [ADR 0013](adr/0013-uniform-tool-effect-intent-and-receipts.md).
+
 ## 2026-10-30 — Application child post-claim ancestor fence (beta.24 candidate)
 
 **Independent PR #76 review correction:** In contrast to Team, Workflow or Agent,
