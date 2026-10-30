@@ -33,7 +33,7 @@ func newPausedAllowanceAdmissionFixture(t *testing.T) (*harness.Runner, *harness
 	}
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := runner.Start(t.Context(), request)
+	paused, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("start paused Agent: status=%s err=%v", paused.Turn.Status, err)
 	}

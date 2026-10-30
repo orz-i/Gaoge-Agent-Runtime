@@ -3,7 +3,7 @@ module github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite
 go 1.26.0
 
 require (
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.23
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.24
 	modernc.org/sqlite v1.60.1
 )
 

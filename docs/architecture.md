@@ -57,6 +57,25 @@ modules adapt contracts at the edge and are assembled by the host.
 | Object authorization and principal resolution | Host / HTTP edge | Kernel RBAC |
 | SQL, Redis, protocol, telemetry integration | Adapters | Feature correctness |
 
+## Host-owned selection and provider composition
+
+Before a Turn or Run is admitted, the Host chooses a concrete capability.
+Harness exposes `StartAgentTurn`, `StartTeamTurn`,
+`StartGroupChatTurn`, `StartWorkflowTurn` and `StartApplicationTurn`;
+there is no automatic user-intent classifier or default `Runner.Start`.
+The optional Agent `SessionClient.Prompt` is a deliberately Agent-specific
+facade. Runtime execution intents, receipts and control grants stay with their
+durable owning Feature rather than with Host policy.
+
+Core exports provider-neutral `model.Client`; the separate
+`go/agent-runtime-provider` module supplies optional Router/OpenAI/Anthropic
+adapters. Public Harness does not require any concrete Model Provider.
+The built-in `ExecutionClass` set remains closed because each class has
+specific recovery/approval/cancellation semantics. Product capabilities
+can use the existing Host-composed `ApplicationCapabilityExecutor`; there
+is no unverified generic FeatureDriver registry. See
+[ADR 0012](adr/0012-host-selected-capabilities-and-external-model-providers.md).
+
 ## Durable execution rule
 
 Externally visible effects follow this logical order:

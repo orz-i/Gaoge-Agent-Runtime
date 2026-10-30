@@ -6,21 +6,16 @@ interactions. Host application data and authorization remain owned by the host.
 
 ## Install a Beta
 
-```bash
-# Last confirmed published Beta, until the coordinated beta.23 release exists:
-pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.22/orz-i-agent-runtime-client-0.1.0-beta.22.tgz
-```
-
-After the root and all ten beta.23 Go module tags are published and the
-GitHub prerelease workflow passes, install the **coordinated beta.23** archive:
+Use the last published coordinated beta.23 archive:
 
 ```bash
 pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.23/orz-i-agent-runtime-client-0.1.0-beta.23.tgz
 ```
 
-The beta.23 link is **not available during release-candidate preparation**.
-Beta packages are GitHub Release archives, not npm registry releases. Registry
-publication is reserved for stable versions.
+The beta.24 archive is a development candidate and must not be installed
+until the root and all eleven module tags are published on the same commit,
+with the release workflow and no-replace consumers verified. Beta packages
+are GitHub Release archives, not npm registry releases.
 
 The package declares Node.js >=20 for consumers. The contributor and release
 gate baseline is Node.js 24 LTS+; the package engine range is not a release-test

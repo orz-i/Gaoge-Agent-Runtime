@@ -156,7 +156,7 @@ func newCapabilityToolFixture(t *testing.T, definitions ...workflow.Definition) 
 func startCapabilityToolHarness(t *testing.T, fixture capabilityToolFixture, additionalCommands ...harness.CommandDescriptor) harness.Snapshot {
 	t.Helper()
 	commands := append(harness.FirstPartyCommandDescriptors(), additionalCommands...)
-	started, err := fixture.runner.Start(t.Context(), harness.StartRequest{
+	started, err := fixture.runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "capability-thread"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "capability-turn"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},

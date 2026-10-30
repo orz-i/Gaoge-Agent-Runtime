@@ -194,7 +194,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 			contextEntry("current-user", "current", model.RoleUser, start.Goal, true),
 		)
 	}
-	snapshot, err := runner.Start(t.Context(), start)
+	snapshot, err := runner.StartAgentTurn(t.Context(), start)
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("delegation result=%s err=%v", snapshot.Turn.Status, err)
 	}
@@ -299,7 +299,7 @@ func TestRoleHostedToolCanUseExactInheritedParentModelWithoutParentActivation(t 
 	if err = handler.Bind(runner); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := runner.Start(t.Context(), harness.StartRequest{
+	snapshot, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "inherit-hosted-tool-thread"}, HostTurn: harness.HostRef{Kind: "message", ID: "inherit-hosted-tool-message"},
 		Actor: kernel.ActorRef{TenantID: "test", ActorID: "parent"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "inherit-hosted-tool-thread"},
 		Goal: "ask inheriting model role to research", Config: harness.ConfigSnapshot{

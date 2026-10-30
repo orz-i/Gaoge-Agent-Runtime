@@ -11,12 +11,12 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/anthropic"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/openai"
 )
 
 const (

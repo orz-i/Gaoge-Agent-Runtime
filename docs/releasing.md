@@ -74,14 +74,14 @@ node scripts/release-tags.mjs --version "$(cat VERSION)" --create
 # NEVER move existing immutable tags.
 ```
 
-The cohort now includes ten Go modules, including optional experimental SQLite.
+The next candidate cohort includes eleven Go modules, including the standalone Provider and experimental SQLite.
 `make check` validates local source consumers under `GOWORK=off` with
 *temporary test-module replacements*, not an independently published version.
-Once the root and all ten Go module tags have been pushed, the release
+Once the root and all eleven Go module tags have been pushed, the release
 workflow runs `node scripts/check-release.mjs --published` against the real
 tagged modules with **no replace directives**, before creating a GitHub Release.
 The SQLite adapter's `go.mod` must depend on the *same* Core release version;
-a mixed beta.22 Core + beta.23 SQLite installation is not supported.
+all active modules must use the same new beta.24 version; beta.23 tags remain immutable.
 
 GitHub does not create a push event when one push updates more than three tags.
 Because this repository deliberately pushes the complete tag set atomically,

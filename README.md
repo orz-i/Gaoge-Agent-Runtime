@@ -10,19 +10,19 @@ agents. It separates the deterministic run state machine from optional agent,
 harness, HTTP, protocol, and persistence capabilities.
 
 This repository is the canonical public source. The current development
-cohort targets **v0.1.0-beta.23**. The last locally verified published release is
-**v0.1.0-beta.22** until the new immutable tags and GitHub release are
-available; see the [beta.23 release-candidate notes](docs/releases/v0.1.0-beta.23.md).
+cohort targets **v0.1.0-beta.24** (unreleased). The last published cohort
+is **v0.1.0-beta.23**; see the [beta.24 upgrade notes](docs/releases/v0.1.0-beta.24.md).
 
 ## Packages
 
 | Package | Purpose | Beta support |
 | --- | --- | --- |
 | `go/agent-runtime` | Kernel, agent loop, tools, context, workflows, teams, queues, evaluation | Supported |
+| `go/agent-runtime-provider` | Optional OpenAI/Anthropic provider adapters and explicit router | Candidate (next prerelease) |
 | `go/agent-runtime-harness` | Durable turn orchestration, interactions, timelines, delegation | Supported |
 | `go/agent-runtime-http` | HTTP v1 handlers and SSE feeds | Supported |
 | `go/agent-runtime-postgres` | Kernel and run-relation stores | Supported |
-| `go/agent-runtime-sqlite` | Experimental embedded SQLite Kernel / RunRelation Store | beta.23 candidate; production/device NO-GO |
+| `go/agent-runtime-sqlite` | Experimental embedded SQLite Kernel / RunRelation Store | experimental; production/device NO-GO |
 | `go/agent-runtime-harness-postgres` | Harness and Context V2 store | Supported |
 | `go/agent-runtime-redis` | Durable continuation queue and run feed | Supported |
 | `go/agent-runtime-mcp` | MCP client, registry, and transport adapters | Supported |
@@ -34,8 +34,8 @@ available; see the [beta.23 release-candidate notes](docs/releases/v0.1.0-beta.2
 ## Install
 
 ```bash
-go get github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime@v0.1.0-beta.22
-pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.22/orz-i-agent-runtime-client-0.1.0-beta.22.tgz
+go get github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime@v0.1.0-beta.23
+pnpm add https://github.com/orz-i/Gaoge-Agent-Runtime/releases/download/v0.1.0-beta.23/orz-i-agent-runtime-client-0.1.0-beta.23.tgz
 ```
 
 Prereleases are distributed through Go module tags and GitHub Release archives.
@@ -88,7 +88,7 @@ The [TypeScript client guide](ts/agent-runtime-client/README.md),
 
 ### OpenAI / Anthropic Model Providers
 
-The optional `provider` packages implement the existing `model.Client` contract
+The independent `go/agent-runtime-provider` module implements the existing `model.Client` contract
 against OpenAI Responses and Anthropic Messages. `provider.NewRouter` selects
 explicitly registered vendors using names such as `openai/gpt-4.1` or
 `anthropic/<model-id>` without changing Kernel or Agent state ownership.
@@ -96,7 +96,7 @@ The adapters support local JSON Tool calls, response receipts and streaming.
 They require host-supplied API keys; no external credentials are bundled.
 
 ```bash
-cd go/agent-runtime
+cd go/agent-runtime-provider
 GAOGE_PROVIDER=openai GAOGE_MODEL=gpt-4.1 OPENAI_API_KEY="$OPENAI_API_KEY" \
   go run ./examples/providers "Echo hello and report the result"
 ```

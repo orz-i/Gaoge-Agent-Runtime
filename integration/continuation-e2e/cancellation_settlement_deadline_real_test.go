@@ -69,7 +69,7 @@ func TestRealPostgresCancellationSettlementReceiptHasBoundedRowLockWait(t *testi
 				t.Fatal(err)
 			}
 			first, store, runtime := newRealControlHost(t, db, nil)
-			started, err := first.Start(t.Context(), harness.StartRequest{
+			started, err := first.StartAgentTurn(t.Context(), harness.StartRequest{
 				HostThread:    harness.HostRef{Kind: "conversation", ID: "bounded-cancel-row-lock"},
 				HostTurn:      harness.HostRef{Kind: "conversation_turn", ID: "bounded-cancel-row-lock"},
 				Actor:         kernel.ActorRef{TenantID: "test", ActorID: "agent"},

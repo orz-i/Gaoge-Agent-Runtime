@@ -12,6 +12,7 @@ if (!/^\d+\.\d+\.\d+-beta\.\d+$/u.test(version)) throw new Error(`VERSION is not
 
 const moduleDirectories = [
   "go/agent-runtime",
+  "go/agent-runtime-provider",
   "go/agent-runtime-harness",
   "go/agent-runtime-harness-postgres",
   "go/agent-runtime-mcp",

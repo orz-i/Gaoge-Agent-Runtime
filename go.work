@@ -5,14 +5,18 @@ use (
 	./go/agent-runtime-a2a
 	./go/agent-runtime-harness
 	./go/agent-runtime-harness-postgres
+	./go/agent-runtime-harness/examples/task-agent
 	./go/agent-runtime-http
 	./go/agent-runtime-mcp
 	./go/agent-runtime-otel
 	./go/agent-runtime-postgres
+	./go/agent-runtime-provider
 	./go/agent-runtime-redis
 	./go/agent-runtime-sqlite
 )
 
-replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.23 => ./go/agent-runtime
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.24 => ./go/agent-runtime
 
-replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.23 => ./go/agent-runtime-harness
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.24 => ./go/agent-runtime-harness
+
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider v0.1.0-beta.24 => ./go/agent-runtime-provider

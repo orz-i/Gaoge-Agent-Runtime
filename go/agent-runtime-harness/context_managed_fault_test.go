@@ -104,7 +104,7 @@ func TestManagedContextResumeAfterRolloverBeforeModelIntentCommit(t *testing.T) 
 			contextEntry("m2", "current", model.RoleUser, "current question", true),
 		),
 	}
-	_, startErr := host.Start(t.Context(), request)
+	_, startErr := host.StartAgentTurn(t.Context(), request)
 	if !errors.Is(startErr, errBeforeModelIntentCommit) || !faulty.failed.Load() || len(provider.requests) != 0 {
 		t.Fatalf("expected crash after archival but before dispatch: %v, failed=%v model=%d", startErr, faulty.failed.Load(), len(provider.requests))
 	}

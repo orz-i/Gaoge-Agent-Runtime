@@ -28,7 +28,7 @@ func TestPR72NativeAgentPreCreateInputErrorRetiresGrant(t *testing.T) {
 	}
 	req := testStartRequest()
 	req.RequiredToolKeys = []string{"missing-authorized-tool"}
-	first, err := runner.Start(t.Context(), req)
+	first, err := runner.StartAgentTurn(t.Context(), req)
 	if !errors.Is(err, agent.ErrInvalidRequest) || errors.Is(err, harness.ErrExecutionOutcomeUnknown) ||
 		first.Turn.Status != harness.TurnFailed {
 		t.Fatalf("native pre-Create error permanently stranded start: status=%s err=%v", first.Turn.Status, err)
@@ -40,7 +40,7 @@ func TestPR72NativeAgentPreCreateInputErrorRetiresGrant(t *testing.T) {
 	if _, loadErr = rt.Load(t.Context(), first.Invocations[0].ExecutionRefID); !errors.Is(loadErr, kernel.ErrNotFound) {
 		t.Fatalf("native start created a Kernel Run despite invalid Tool: %v", loadErr)
 	}
-	again, replayErr := runner.Start(t.Context(), req)
+	again, replayErr := runner.StartAgentTurn(t.Context(), req)
 	if replayErr != nil || again.Turn.Status != harness.TurnFailed {
 		t.Fatalf("idempotent failed no-effect Start replay changed state: %s err=%v", again.Turn.Status, replayErr)
 	}
@@ -80,7 +80,7 @@ func TestPR72NativeAgentNoEffectReceiptLostACKDoesNotInferFailure(t *testing.T) 
 	}
 	req := testStartRequest()
 	req.RequiredToolKeys = []string{"unauthorized-native-tool"}
-	_, startErr := runner.Start(t.Context(), req)
+	_, startErr := runner.StartAgentTurn(t.Context(), req)
 	if !errors.Is(startErr, harness.ErrExecutionOutcomeUnknown) || !store.failed.Load() {
 		t.Fatalf("lost completion ACK silently failed or released authorization: %v", startErr)
 	}
@@ -105,7 +105,7 @@ func TestPR72NativeAgentNoEffectReceiptLostACKDoesNotInferFailure(t *testing.T) 
 	// The first caller did not infer a terminal failure from its lost ACK.
 	// Another identical, authorized request may use the durable receipt and
 	// the same native pre-Create validation to fail safely without a Run.
-	recovered, replayErr := runner.Start(t.Context(), req)
+	recovered, replayErr := runner.StartAgentTurn(t.Context(), req)
 	if !errors.Is(replayErr, agent.ErrInvalidRequest) || recovered.Turn.Status != harness.TurnFailed {
 		t.Fatalf("durable no-effect reconciliation failed: status=%s err=%v", recovered.Turn.Status, replayErr)
 	}
@@ -142,7 +142,7 @@ func TestPR72NativeAgentMiddlewareCannotForgePublicStartNoEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := testStartRequest()
-	_, startErr := runner.Start(t.Context(), request)
+	_, startErr := runner.StartAgentTurn(t.Context(), request)
 	if !errors.Is(startErr, harness.ErrExecutionOutcomeUnknown) || middleware.calls.Load() != 1 {
 		t.Fatalf("middleware public proof discharged native Agent: err=%v calls=%d", startErr, middleware.calls.Load())
 	}

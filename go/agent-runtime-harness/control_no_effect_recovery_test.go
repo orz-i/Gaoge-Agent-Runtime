@@ -69,7 +69,7 @@ func newReadFaultAllowanceHarness(t *testing.T) (*harness.Runner, *harness.Memor
 	}
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := runner.Start(t.Context(), request)
+	paused, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("failed to create paused Agent: status=%s err=%v", paused.Turn.Status, err)
 	}
@@ -228,7 +228,7 @@ func TestCustomAgentCannotForgeNativeNoEffectProof(t *testing.T) {
 	}
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := runner.Start(t.Context(), request)
+	paused, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("failed to create paused Agent: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestPostCommitLostControlReplyRemainsFailClosed(t *testing.T) {
 	}
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := runner.Start(t.Context(), request)
+	paused, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("failed to create paused Agent: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestLostNativeNoEffectReceiptRemainsFailClosed(t *testing.T) {
 	}
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := runner.Start(t.Context(), request)
+	paused, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("setup pause failed: status=%s err=%v", paused.Turn.Status, err)
 	}

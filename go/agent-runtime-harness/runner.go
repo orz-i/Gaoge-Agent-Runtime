@@ -639,9 +639,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return runner, nil
 }
 
-// Start starts the default direct-Agent capability as a durable top-level
-// Invocation after Session/Turn/Config creation.
-func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot, error) {
+// StartAgentTurn executes the explicitly selected Agent capability as a durable
+// top-level Invocation after Session/Turn/Config creation. Host code chooses
+// this entry point; Harness never classifies a user intent or routes implicitly.
+func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) (Snapshot, error) {
 	request, sessionID, turnID, err := normalizeStartRequest(request)
 	if err != nil {
 		return Snapshot{}, err

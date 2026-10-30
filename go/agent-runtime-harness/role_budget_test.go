@@ -87,7 +87,7 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 		ToolKeys: []string{harness.DelegationToolKey, roleEvidenceTool}, Limits: budget.Limits{MaxLLMCalls: 2},
 		Skills: []harness.SkillSnapshot{{ID: "skill-1", Revision: 2, Title: "Evidence", Markdown: "Quote the evidence."}},
 	}}
-	started, err := runner.Start(t.Context(), request)
+	started, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}

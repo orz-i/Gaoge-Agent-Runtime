@@ -328,7 +328,7 @@ func TestIndependentAuditRecoveredTerminalTurnFeedHasTerminalEvent(t *testing.T)
 		return r
 	}
 	req := testStartRequest()
-	_, err = mk(faulty).Start(t.Context(), req)
+	_, err = mk(faulty).StartAgentTurn(t.Context(), req)
 	if err == nil || !faulty.failed {
 		t.Fatalf("failed fault setup: %v", err)
 	}

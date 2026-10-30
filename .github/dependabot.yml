@@ -3,6 +3,7 @@ updates:
   - package-ecosystem: gomod
     directories:
       - /go/agent-runtime
+      - /go/agent-runtime-provider
       - /go/agent-runtime-harness
       - /go/agent-runtime-harness-postgres
       - /go/agent-runtime-http

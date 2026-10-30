@@ -43,7 +43,7 @@ func TestContextV2BetaAcceptanceSurvivesApprovalCompactionAndRestart(t *testing.
 			},
 		},
 	}
-	waiting, err := firstRunner.Start(t.Context(), harness.StartRequest{
+	waiting, err := firstRunner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "beta-thread"},
 		HostTurn:   harness.HostRef{Kind: "conversation_turn", ID: "beta-turn"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},

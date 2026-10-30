@@ -19,16 +19,16 @@ func TestStartRejectsAnotherRootRequestID(t *testing.T) {
 			runner := newHarnessRunnerWithModel(t, client)
 			request := testStartRequest()
 			request.RequestID = "original-root"
-			first, err := runner.Start(t.Context(), request)
+			first, err := runner.StartAgentTurn(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)
 			}
 			request.RequestID = "another-root"
-			if _, err = runner.Start(t.Context(), request); !errors.Is(err, harness.ErrConflict) {
+			if _, err = runner.StartAgentTurn(t.Context(), request); !errors.Is(err, harness.ErrConflict) {
 				t.Fatalf("different root request error=%v", err)
 			}
 			request.RequestID = "original-root"
-			replayed, err := runner.Start(t.Context(), request)
+			replayed, err := runner.StartAgentTurn(t.Context(), request)
 			if err != nil || len(replayed.Invocations) != 1 || replayed.Invocations[0].ID != first.Invocations[0].ID ||
 				replayed.Turn.Status != first.Turn.Status || client.calls.Load() != 1 {
 				t.Fatalf("root changed or redispatched: snapshot=%#v calls=%d err=%v", replayed, client.calls.Load(), err)
@@ -48,7 +48,7 @@ func TestConcurrentStartDispatchesOneRoot(t *testing.T) {
 			<-start
 			request := testStartRequest()
 			request.RequestID = fmt.Sprintf("competing-root-%d", index)
-			_, err := runner.Start(t.Context(), request)
+			_, err := runner.StartAgentTurn(t.Context(), request)
 			results <- err
 		}()
 	}

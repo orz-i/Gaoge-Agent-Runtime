@@ -9,13 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	provider "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/anthropic"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/openai"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 

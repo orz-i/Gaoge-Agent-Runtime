@@ -214,7 +214,7 @@ func (fixture *asyncDelegationFixture) compose(t *testing.T, canceller harness.R
 
 func (fixture *asyncDelegationFixture) start(t *testing.T, runner *harness.Runner) harness.Snapshot {
 	t.Helper()
-	snapshot, err := runner.Start(t.Context(), harness.StartRequest{
+	snapshot, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "async-thread"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "async-turn"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},

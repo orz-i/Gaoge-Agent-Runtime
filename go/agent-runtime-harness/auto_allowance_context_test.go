@@ -45,7 +45,7 @@ func TestHarnessAutomaticAllowanceDoesNotRewriteContextCheckpoint(t *testing.T) 
 	request.AutoAllowance = &agent.AutoAllowancePolicy{
 		ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1,
 	}
-	snapshot, err := host.Start(t.Context(), request)
+	snapshot, err := host.StartAgentTurn(t.Context(), request)
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted || correction.checks != 2 {
 		t.Fatalf("context-aware autonomous renewal: %#v err=%v checks=%d", snapshot.Turn, err, correction.checks)
 	}

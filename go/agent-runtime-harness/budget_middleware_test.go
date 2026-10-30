@@ -52,7 +52,7 @@ func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemorySto
 	}
 	request := testStartRequest()
 	request.Config.SharedBudget = &budget.Limits{MaxTotalTokens: 1000, MaxLLMCalls: 8, MaxConcurrentRuns: 2, MaxChildRuns: 3}
-	snapshot, err := runner.Start(t.Context(), request)
+	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil && !client.missing {
 		t.Fatal(err)
 	}

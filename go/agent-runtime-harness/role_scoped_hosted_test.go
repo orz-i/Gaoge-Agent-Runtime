@@ -144,7 +144,7 @@ func runRoleScopedHostedTool(t *testing.T, discovery bool) {
 	if discovery {
 		initial = []string{harness.DelegationToolKey}
 	}
-	started, err := runner.Start(t.Context(), harness.StartRequest{
+	started, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		InitialToolKeys: initial,
 		HostThread:      harness.HostRef{Kind: "conversation", ID: "thread-scoped-hosted"},
 		HostTurn:        harness.HostRef{Kind: "conversation", ID: "turn-scoped-hosted"},

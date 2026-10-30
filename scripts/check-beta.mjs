@@ -9,6 +9,7 @@ const boundary = JSON.parse(read("agent-runtime-boundary.json"));
 const packageJSON = JSON.parse(read("ts/agent-runtime-client/package.json"));
 const expectedModules = [
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime",
+  "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp",
@@ -32,7 +33,7 @@ const retiredPlanMarkers = [
   ["Capability", "Plan", "Execute"].join(""),
 ];
 
-if (version !== "0.1.0-beta.23") violations.push(`unexpected VERSION ${version}`);
+if (version !== "0.1.0-beta.24") violations.push(`unexpected VERSION ${version}`);
 if (boundary.version !== version) violations.push("boundary version does not match VERSION");
 if (JSON.stringify(boundary.goModules) !== JSON.stringify(expectedModules)) {
   violations.push("boundary Go module list is not the canonical ordered list");
@@ -109,6 +110,7 @@ for (const file of walk(root)) {
 }
 
 for (const retiredPath of [
+  "go/agent-runtime/provider",
   "go/agent-runtime/planexecute",
   "go/agent-runtime-http/planexecute",
   "contracts/agent-runtime/v1/capabilities/planexecute.json",

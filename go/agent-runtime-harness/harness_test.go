@@ -30,9 +30,9 @@ const (
 func TestMinimalModelOnlyHarnessCompletesDirectAgentTurn(t *testing.T) {
 	t.Parallel()
 	runner := newHarnessRunner(t)
-	snapshot, err := runner.Start(t.Context(), testStartRequest())
+	snapshot, err := runner.StartAgentTurn(t.Context(), testStartRequest())
 	assertCompletedHarnessSnapshot(t, snapshot, err)
-	replayed, err := runner.Start(t.Context(), testStartRequest())
+	replayed, err := runner.StartAgentTurn(t.Context(), testStartRequest())
 	assertHarnessReplay(t, snapshot, replayed, err)
 }
 
@@ -42,7 +42,7 @@ func TestConversationMessageItemsAndTurnFeedUseStableProductIdentity(t *testing.
 	request := testStartRequest()
 	request.InputMessage = &harness.HostRef{Kind: testMessageKind, ID: testUserMessage}
 	request.OutputMessage = &harness.HostRef{Kind: testMessageKind, ID: testAgentMessage}
-	snapshot, err := runner.Start(t.Context(), request)
+	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("start snapshot=%#v err=%v", snapshot.Turn, err)
 	}
@@ -171,7 +171,7 @@ func TestCancelWhileAgentIsRunningConvergesBothCallersToCancelled(t *testing.T) 
 	}
 	started := make(chan startResult, 1)
 	go func() {
-		snapshot, err := runner.Start(t.Context(), testStartRequest())
+		snapshot, err := runner.StartAgentTurn(t.Context(), testStartRequest())
 		started <- startResult{snapshot: snapshot, err: err}
 	}()
 

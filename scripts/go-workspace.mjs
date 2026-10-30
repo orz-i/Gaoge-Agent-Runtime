@@ -6,7 +6,9 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const modules = [
   "go/agent-runtime",
+  "go/agent-runtime-provider",
   "go/agent-runtime-harness",
+  "go/agent-runtime-harness/examples/task-agent",
   "go/agent-runtime-harness-postgres",
   "go/agent-runtime-mcp",
   "go/agent-runtime-otel",
@@ -77,13 +79,15 @@ function checkTidy(cwd, modulePath) {
   try {
     const core = "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime";
     const harness = "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness";
+    const provider = "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider";
     // Every optional module, including SQLite, must build against the
     // coordinated *source* Core until the next immutable module tags exist.
     // A real no-replace consumer is verified separately by --published.
     const replaceCore = modulePath !== "go/agent-runtime";
-    const replaceHarness = ["go/agent-runtime-harness-postgres", "go/agent-runtime-http"].includes(modulePath);
+    const replaceProvider = modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-provider";
+    const replaceHarness = ["go/agent-runtime-harness-postgres", "go/agent-runtime-http", "go/agent-runtime-harness/examples/task-agent"].includes(modulePath);
     const version = readFileSync(path.join(root, "VERSION"), "utf8").trim();
-    const localVersions = [replaceCore ? core : null, replaceHarness ? harness : null].filter(Boolean)
+    const localVersions = [replaceCore ? core : null, replaceHarness ? harness : null, replaceProvider ? provider : null].filter(Boolean)
       .flatMap((name) => [`${name} v${version} `, `${name} v${version}/go.mod `]);
     // go mod tidy with temporary source replaces drops genuine release-tag
     // hashes from go.sum. Preserve exact current-cohort pins for direct
@@ -92,13 +96,17 @@ function checkTidy(cwd, modulePath) {
       .filter((line) => !localVersions.some((prefix) => line.startsWith(prefix)))
       .join("\n");
     if (replaceCore) {
-      run("go", ["mod", "edit", `-replace=${core}=../agent-runtime`], cwd);
+      run("go", ["mod", "edit", `-replace=${core}=${path.relative(cwd, path.join(root, "go", "agent-runtime"))}`], cwd);
+    }
+    if (replaceProvider) {
+      run("go", ["mod", "edit", `-replace=${provider}=${path.relative(cwd, path.join(root, "go", "agent-runtime-provider"))}`], cwd);
     }
     if (replaceHarness) {
-      run("go", ["mod", "edit", `-replace=${harness}=../agent-runtime-harness`], cwd);
+      run("go", ["mod", "edit", `-replace=${harness}=${path.relative(cwd, path.join(root, "go", "agent-runtime-harness"))}`], cwd);
     }
     run("go", ["mod", "tidy"], cwd);
     if (replaceCore) run("go", ["mod", "edit", `-dropreplace=${core}`], cwd);
+    if (replaceProvider) run("go", ["mod", "edit", `-dropreplace=${provider}`], cwd);
     if (replaceHarness) {
       run("go", ["mod", "edit", `-dropreplace=${harness}`], cwd);
     }

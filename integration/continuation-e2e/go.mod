@@ -7,11 +7,11 @@ toolchain go1.27.3
 require (
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/uuid v1.6.0
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.23
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.23
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres v0.1.0-beta.23
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres v0.1.0-beta.23
-	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis v0.1.0-beta.23
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.24
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.24
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres v0.1.0-beta.24
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres v0.1.0-beta.24
+	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis v0.1.0-beta.24
 	gorm.io/driver/postgres v1.6.0
 	gorm.io/gorm v1.31.1
 )

@@ -351,7 +351,7 @@ func TestResumeTurnPreservesExecutionErrorAndReadableSnapshot(t *testing.T) {
 			host, runtime := newResumeTurnHarness(t, memory.NewStore(), store, resumeTurnModelFunc(func(context.Context, model.Request) (model.Response, error) {
 				return model.Response{Content: "pause", Continue: true}, nil
 			}), clock, nil)
-			pending, err := host.Start(t.Context(), testStartRequest())
+			pending, err := host.StartAgentTurn(t.Context(), testStartRequest())
 			if err != nil || pending.Turn.Status != harness.TurnRunning {
 				t.Fatalf("start: turn=%+v error=%v", pending.Turn, err)
 			}
@@ -385,7 +385,7 @@ func TestResumeTurnDoesNotResolveApprovalOrGrantBudget(t *testing.T) {
 		host, runtime, direct, provider := testAutoHarness(t, 1)
 		request := testStartRequest()
 		request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-		paused, err := host.Start(t.Context(), request)
+		paused, err := host.StartAgentTurn(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -456,7 +456,7 @@ func TestResumeTurnDrivesCommittedControlDespiteStaleProjection(t *testing.T) {
 		host, runtime, direct, provider := testAutoHarness(t, 1)
 		request := testStartRequest()
 		request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-		paused, err := host.Start(t.Context(), request)
+		paused, err := host.StartAgentTurn(t.Context(), request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -500,7 +500,7 @@ func TestResumeTurnHonorsDurableModelRetryAfter(t *testing.T) {
 		return model.Response{Content: "recovered"}, nil
 	})
 	host, runtime := newResumeTurnHarness(t, base, store, provider, clock, nil)
-	pending, _ := host.Start(t.Context(), testStartRequest())
+	pending, _ := host.StartAgentTurn(t.Context(), testStartRequest())
 	if pending.Turn.Status != harness.TurnRunning || calls != 1 {
 		t.Fatalf("retry was not left running: turn=%+v calls=%d", pending.Turn, calls)
 	}
@@ -558,7 +558,7 @@ func TestResumeTurnDoesNotReplayUnknownNativeToolOutcome(t *testing.T) {
 	first := makeHost("first-owner")
 	request := testStartRequest()
 	request.Config.ToolKeys = []string{"external"}
-	pending, err := first.Start(t.Context(), request)
+	pending, err := first.StartAgentTurn(t.Context(), request)
 	if err != nil || pending.Turn.Status != harness.TurnRunning || toolCalls != 1 {
 		t.Fatalf("external call did not pause: turn=%+v error=%v calls=%d", pending.Turn, err, toolCalls)
 	}

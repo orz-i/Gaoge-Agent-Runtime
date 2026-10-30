@@ -1,4 +1,4 @@
-package agent_test
+package provider_test
 
 import (
 	"context"
@@ -8,13 +8,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	provider "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/anthropic"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider/openai"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -125,7 +125,15 @@ func TestStructuredOutputProviderToolLoopEndToEnd(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := structuredRequest("structured-e2e-" + vendor)
+			req := agent.StartRequest{
+				ID:        "structured-e2e-" + vendor,
+				Actor:     kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+				Thread:    kernel.ThreadRef{Kind: "conversation", ID: "structured"},
+				RequestID: "structured-e2e-" + vendor + "-req",
+				Goal:      "Extract the answer", Model: "structured-model",
+				OutputContract: &model.OutputContract{Name: "answer", Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)},
+				Limits:         agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 4},
+			}
 			req.Model = vendor + "/" + modelID
 			req.ToolKeys = []string{"lookup:v1"}
 			completed, err := runner.StartRun(t.Context(), req)

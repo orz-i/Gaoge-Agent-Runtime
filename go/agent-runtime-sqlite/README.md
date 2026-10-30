@@ -8,13 +8,12 @@ experiments, plus a bounded **Stage 5 SQLite RunRelationStore** adapter.
 **Not a supported autonomous multi-worker Agent, complete durable
 Team/Workflow runtime or mobile durable runtime.**
 
-The module is included in the coordinated **beta.23 release candidate**;
-its direct `GOWORK=off` installation requires the matching Core
-`v0.1.0-beta.23` tag and the SQLite module tag to be published on the
-same commit. Source-cohort consumer tests may use temporary local
-replacements, but shipped modules must not. See the
-[beta.23 candidate notes](../../docs/releases/v0.1.0-beta.23.md).
-No production release is implied by `go.work`.
+The current development cohort is **beta.24** (unreleased); source consumers
+must use matching Core and SQLite modules. The already published beta.23
+tags are immutable. This module remains experimental; its exact release
+and profile restrictions are described in the
+[beta.24 upgrade notes](../../docs/releases/v0.1.0-beta.24.md).
+No production support is implied by `go.work`.
 
 ## Minimal desktop example
 
@@ -252,10 +251,10 @@ proof retention. See the [Stage 6 performance and safety audit](../../docs/audit
 The execution columns remain part of the still-**unreleased Schema v1**;
 no schema migration or version bump is implied. The older published Core
 `v0.1.0-beta.22` does not export the opt-in execution APIs. The coordinated
-**beta.23** candidate pins Core and SQLite to the same future release,
+**beta.24** candidate pins Core and SQLite to the same future release,
 and the repository tests both a `GOWORK=off` source cohort and a separate
 **no-replace versioned ZIP** cohort. Official standalone public consumption
-remains **unverified until immutable beta.23 tags are pushed**; the release
+remains **unverified until immutable beta.24 tags are pushed**; the release
 workflow must run the real no-replace consumer and read-only SQLite module
 gates before issuing a GitHub prerelease. See the
 [Stage 2 Phase 1 evidence](../../docs/audits/2026-10-16-minimal-runtime-stage2-phase1-execution-fencing.md).

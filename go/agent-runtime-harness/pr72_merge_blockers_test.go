@@ -56,13 +56,16 @@ func TestPR72ConcurrentStartReplayDoesNotTerminalizeActiveDispatch(t *testing.T)
 		err      error
 	}
 	first := make(chan result, 1)
-	go func() { snapshot, e := runner.Start(context.Background(), request); first <- result{snapshot, e} }()
+	go func() {
+		snapshot, e := runner.StartAgentTurn(context.Background(), request)
+		first <- result{snapshot, e}
+	}()
 	select {
 	case <-store.entered:
 	case <-time.After(5 * time.Second):
 		t.Fatal("original dispatch did not acquire grant")
 	}
-	second, secondErr := runner.Start(t.Context(), request)
+	second, secondErr := runner.StartAgentTurn(t.Context(), request)
 	if !errors.Is(secondErr, harness.ErrConflict) {
 		close(store.release)
 		t.Fatalf("concurrent replay must return a conflict, not a failure projection: turn=%s err=%v", second.Turn.Status, secondErr)
@@ -197,7 +200,7 @@ func TestPR72DispatchCompletionUsesBoundedIndependentContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := runner.Start(t.Context(), testStartRequest())
+	result, err := runner.StartAgentTurn(t.Context(), testStartRequest())
 	if err != nil || result.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("start: %s %v", result.Turn.Status, err)
 	}

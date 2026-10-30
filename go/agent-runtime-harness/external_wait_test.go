@@ -79,7 +79,7 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	if err = handler.Bind(runner); err != nil {
 		t.Fatal(err)
 	}
-	started, err := runner.Start(t.Context(), harness.StartRequest{
+	started, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "local-external-thread"}, HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "local-external-turn"},
 		Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "local-external-thread"}, Goal: "delegate calculation",
 		Config: harness.ConfigSnapshot{

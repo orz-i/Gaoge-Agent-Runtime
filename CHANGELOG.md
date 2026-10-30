@@ -3,6 +3,19 @@
 All notable changes are documented here. This project follows Semantic
 Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
+## [0.1.0-beta.24] — unreleased architecture hard cut
+
+- Extract the Provider Router, OpenAI Responses and Anthropic Messages adapters
+  into independent `go/agent-runtime-provider`; delete the previous Core
+  `provider` package without aliases or forwarding imports.
+- Replace the implicit `harness.Runner.Start` default with explicit
+  `StartAgentTurn` selection, leaving durable intent and recovery evidence intact.
+- Move provider examples and Agent-vendor integration fixtures to the new
+  module; retain vendor-neutral `model.Client` and its durable replay contract.
+- Expand the release cohort and consumer gates to eleven modules. Previously
+  published beta.23 tags are immutable; beta.24 is not published by these
+  commits. See [beta.24 upgrade notes](docs/releases/v0.1.0-beta.24.md).
+
 ## Unreleased
 
 - Preserve OpenAI Responses stateless encrypted reasoning from the completed SSE `response.output_item.done` when `response.completed` omits that field, but only after an output-index/ID/other-fields consistency check. An optional `status: "completed"` in the done item may be absent from the final response; other mismatches still fail closed. Never use partial added items or synthesize missing reasoning. Document the mandatory drain/quarantine and host TranscriptSource cutover for earlier incompatible phase/replay history, with no schema bump or compatibility shim.

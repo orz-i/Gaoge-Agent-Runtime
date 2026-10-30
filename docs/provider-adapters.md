@@ -1,19 +1,19 @@
-# Model Provider adapters — first governance round
+# Model Provider adapters — standalone module
 
-This feature is an **optional Core-module package**. The Kernel, Agent state
+This feature is an **independent optional Go module**. The Kernel, Agent state
 machine, Store and existing `model.Client` contract do not depend on any
-model vendor. No new Go module, schema, runtime worker, or global registry is
-created.
+model vendor. The standalone module has no compatibility alias in Core and
+introduces no Kernel schema, runtime worker, or global registry.
 
 ## Components and extension contract
 
 | Package | Responsibility |
 | --- | --- |
 | `model` | Existing `Client`, optional `StreamingClient`, `Request`/`Response`; per-request provider name and optional provider-owned replay envelope, signed/encrypted where required, for faithful continuation |
-| `provider` | Immutable, explicitly composed `Router`: `provider/model-id` routes to registered providers |
-| `provider/openai` | OpenAI **Responses API**, text + local function tools |
-| `provider/anthropic` | Anthropic **Messages API**, text + local tool-use/tool-result |
-| `provider/internal/providerhttp` | Shared JSON/SSE HTTP framing, size bounds, safe classified errors, no redirects |
+| `go/agent-runtime-provider` | Immutable, explicitly composed `Router`: `provider/model-id` routes to registered providers |
+| `go/agent-runtime-provider/openai` | OpenAI **Responses API**, text + local function tools |
+| `go/agent-runtime-provider/anthropic` | Anthropic **Messages API**, text + local tool-use/tool-result |
+| `go/agent-runtime-provider/internal/providerhttp` | Shared JSON/SSE HTTP framing, size bounds, safe classified errors, no redirects |
 
 To add another provider: implement the existing `model.Client` and optionally
 `model.StreamingClient` and `model.ProviderNamer`; register it through
@@ -32,7 +32,7 @@ Provider API keys must come from the host's secret manager or environment.
 Only pass them into constructors; do not persist them in ModelOptions, Run State,
 Tool arguments, or logs.
 
-From `go/agent-runtime`:
+From `go/agent-runtime-provider`:
 
 ```shell
 export GAOGE_PROVIDER=openai

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	provider "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/provider"
 )
 
 type capableRecorder struct {

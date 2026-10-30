@@ -67,13 +67,16 @@ func TestPR72DirectStartContextReplayReadFailureCannotTerminalizeOriginal(t *tes
 		err      error
 	}
 	first := make(chan outcome, 1)
-	go func() { snapshot, e := runner.Start(context.Background(), request); first <- outcome{snapshot, e} }()
+	go func() {
+		snapshot, e := runner.StartAgentTurn(context.Background(), request)
+		first <- outcome{snapshot, e}
+	}()
 	select {
 	case <-store.entered:
 	case <-time.After(5 * time.Second):
 		t.Fatal("original Start never reached Context preflight")
 	}
-	_, replayErr := runner.Start(t.Context(), request)
+	_, replayErr := runner.StartAgentTurn(t.Context(), request)
 	if !errors.Is(replayErr, errPR72TransientContextRead) {
 		t.Errorf("replay did not surface read failure: %v", replayErr)
 	}
@@ -192,7 +195,7 @@ func TestPR72OriginalContextReadFailureLeavesRetryableAdmission(t *testing.T) {
 	request := testStartRequest()
 	request.Context = contextSeed("instructions",
 		contextEntry("pr72-newcurrent", "pr72-newturn", model.RoleUser, "answer directly", true))
-	_, err = runner.Start(t.Context(), request)
+	_, err = runner.StartAgentTurn(t.Context(), request)
 	if !errors.Is(err, errPR72TransientContextRead) {
 		t.Fatalf("failed to inject first Context read: %v", err)
 	}
@@ -208,7 +211,7 @@ func TestPR72OriginalContextReadFailureLeavesRetryableAdmission(t *testing.T) {
 	if err != nil || accepted.Status != harness.TurnAccepted {
 		t.Fatalf("initial read failure made Turn irrecoverable: status=%s err=%v", accepted.Status, err)
 	}
-	recovered, err := runner.Start(t.Context(), request)
+	recovered, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || recovered.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("idempotent new Start recovery failed: status=%s err=%v", recovered.Turn.Status, err)
 	}

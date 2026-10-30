@@ -33,7 +33,7 @@ func TestHarnessTimelinePersistsTerminalFactsWithoutStreamingOrBodies(t *testing
 	t.Parallel()
 	runtime, agentRunner, store := newTimelineHarnessDependencies(t)
 	runner := newTimelineHarnessRunner(t, runtime, agentRunner, store)
-	completed, err := runner.Start(t.Context(), harness.StartRequest{
+	completed, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-timeline"},
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-timeline"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
@@ -214,7 +214,7 @@ func runHostedToolTimeline(t *testing.T, client model.Client, suffix string) (ha
 	request.HostThread.ID = "thread-hosted-tool-timeline-" + suffix
 	request.Thread.ID = request.HostThread.ID
 	request.HostTurn.ID = "turn-hosted-tool-timeline-" + suffix
-	snapshot, err := runner.Start(t.Context(), request)
+	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
 	}

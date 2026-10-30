@@ -55,7 +55,7 @@ func TestRealPostgresCancellationClaimCommittedLostReplyStaysFenced(t *testing.T
 		Goal:       "pause then wait for Host interaction", Config: harness.ConfigSnapshot{Model: "fixture-control"},
 		CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 	}
-	paused, err := first.Start(t.Context(), req)
+	paused, err := first.StartAgentTurn(t.Context(), req)
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("fixture did not pause: status=%s err=%v", paused.Turn.Status, err)
 	}

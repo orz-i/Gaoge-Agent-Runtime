@@ -16,7 +16,7 @@ The offline fixture calls a real registered Tool through `agent.Runner` and
 produces a final answer from its returned data. It demonstrates execution without
 credentials; its deterministic model is not a language-model quality benchmark.
 Replace the fixture with a configured `model.Client` for model-backed work. The
-[provider example](../go/agent-runtime/examples/providers/main.go) shows OpenAI
+[provider example](../go/agent-runtime-provider/examples/providers/main.go) shows OpenAI
 and Anthropic configuration.
 
 A bare `kernel.Create` only persists a Run record. The model/Tool loop belongs to
