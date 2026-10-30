@@ -257,10 +257,11 @@ func (middleware *BudgetMiddleware) settleModel(ctx context.Context, ledger budg
 	}
 	hostedCount, related, err := hostedReceiptTransfers(ledger, reservation.RunID, response.HostedToolCalls)
 	if err != nil {
-		// A provider-hosted effect with neither a terminal state nor a
-		// stable provider Call ID cannot be reconciled or safely charged.
-		// The physically dispatched model reservation must stay held,
-		// including its native allowance, until authoritative repair.
+		// A hosted Tool without a stable Provider-owned Call ID cannot
+		// certify an independent charge, even with terminal status.
+		// Unfinished calls additionally lack reconcilable identity.
+		// Keep the physically dispatched Model reservation held with
+		// its native allowance until authoritative Host repair.
 		updated, suspendErr := middleware.coordinator().Suspend(accountingCtx, ledger.ID, reservation.ID)
 		return response, errors.Join(err, suspendErr, middleware.project(accountingCtx, updated))
 	}

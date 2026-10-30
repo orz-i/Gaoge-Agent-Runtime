@@ -20,24 +20,26 @@ func pendingHostedAllowance(ledger budget.Ledger, runID string) int {
 	return count
 }
 
-// Model tokens are final even when native work pauses. Keep an independent
-// held receipt for each unresolved identity, and reconcile it only from an
-// explicit terminal provider fact. Completed calls remain on model receipts.
+// An identified native call can hold its own receipt while the Model's
+// token charge settles. A missing Provider Call ID cannot prove either an
+// independent terminal charge or a reconcilable unfinished effect: reject the
+// entire transfer and retain the dispatched Model reservation as unknown.
 func hostedReceiptTransfers(ledger budget.Ledger, runID string, calls []model.HostedToolCall) (int, []budget.Reservation, error) {
 	completed := 0
 	related := make([]budget.Reservation, 0, len(calls))
 	for _, call := range model.CollapseHostedToolCalls(calls) {
-		pending := !model.HostedToolTerminalStatus(call.Status)
-		if call.ID == "" {
-			if pending {
-				// No Provider-owned call ID or terminal fact means there is
-				// nothing safe to reconcile. Preserve the original model's
-				// dispatched reservation instead of minting a fake Tool ID.
-				return 0, nil, budget.ErrInvalidUsage
-			}
-			completed++
-			continue
+		if strings.TrimSpace(call.ID) == "" {
+			// A terminal status proves only the reported lifecycle, NOT
+			// a distinct provider-owned execution. Without an actual Call
+			// ID, duplicate terminal frames or replayed Model responses
+			// cannot be deduplicated. Keep the dispatched Model budget
+			// reservation held for explicit Host reconciliation.
+			//
+			// An anonymous unfinished result has the same limitation.
+			// Never invent an index-, response-, or ToolKey-based remote ID.
+			return 0, nil, budget.ErrInvalidUsage
 		}
+		pending := !model.HostedToolTerminalStatus(call.Status)
 		identity, err := json.Marshal([]string{runID, call.ToolKey, call.ID})
 		if err != nil {
 			return 0, nil, err
