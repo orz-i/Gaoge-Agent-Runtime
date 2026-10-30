@@ -12,6 +12,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -58,8 +59,8 @@ func TestAsyncDelegationSurvivesPendingPollsAndRunnerRecreation(t *testing.T) {
 	var output struct {
 		Result string `json:"result"`
 	}
-	if json.Unmarshal([]byte(last.Content), &output) != nil || output.Result != delegationTestSpecialistResult {
-		t.Fatalf("late child result missing from parent transcript: %s", last.Content)
+	if json.Unmarshal([]byte(runtimemodel.TextValue(last.Content)), &output) != nil || output.Result != delegationTestSpecialistResult {
+		t.Fatalf("late child result missing from parent transcript: %s", runtimemodel.TextValue(last.Content))
 	}
 }
 
@@ -95,11 +96,11 @@ func TestAsyncDelegationRecordsChildFailureAndCancellation(t *testing.T) {
 				Status    string `json:"status"`
 				ErrorCode string `json:"errorCode"`
 			}
-			if err := json.Unmarshal([]byte(last.Content), &receipt); err != nil || receipt.Status != string(status) || receipt.ErrorCode == "" {
-				t.Fatalf("child terminal receipt missing or unsafe: %s, err=%v", last.Content, err)
+			if err := json.Unmarshal([]byte(runtimemodel.TextValue(last.Content)), &receipt); err != nil || receipt.Status != string(status) || receipt.ErrorCode == "" {
+				t.Fatalf("child terminal receipt missing or unsafe: %s, err=%v", runtimemodel.TextValue(last.Content), err)
 			}
-			if strings.Contains(last.Content, "test.child.terminal") {
-				t.Fatalf("provider child detail leaked to root transcript: %s", last.Content)
+			if strings.Contains(runtimemodel.TextValue(last.Content), "test.child.terminal") {
+				t.Fatalf("provider child detail leaked to root transcript: %s", runtimemodel.TextValue(last.Content))
 			}
 		})
 	}

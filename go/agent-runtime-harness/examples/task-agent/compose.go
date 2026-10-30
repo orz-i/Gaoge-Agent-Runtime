@@ -164,7 +164,7 @@ func initialTranscript(_ context.Context, _ harness.HostRef, turn harness.HostRe
 		SourcePath: []string{sourceID},
 		Entries: []runtimecontext.Entry{{
 			ID: sourceID, SourceID: sourceID, TurnID: turn.ID, Required: true,
-			Message: model.Message{Role: model.RoleUser, Content: prompt},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts(prompt)},
 		}},
 	}, nil
 }

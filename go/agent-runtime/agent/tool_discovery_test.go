@@ -64,7 +64,7 @@ func (stub *searchThenUseModel) Generate(_ context.Context, request model.Reques
 		}
 		last := request.Messages[len(request.Messages)-1]
 		if last.Role != model.RoleTool || last.ToolCallID != "search-call-1" ||
-			last.Content != `{"toolKeys":["mcp.synthetic_02"]}` {
+			model.TextValue(last.Content) != `{"toolKeys":["mcp.synthetic_02"]}` {
 			stub.t.Fatalf("search receipt/transcript not durable: %+v", last)
 		}
 		bytes, _ := json.Marshal(request.Tools)
@@ -73,7 +73,7 @@ func (stub *searchThenUseModel) Generate(_ context.Context, request model.Reques
 			ID: "business-call-1", ToolKey: discoveryChosenToolKey, Arguments: json.RawMessage(`{}`),
 		}}}, nil
 	case 3:
-		if len(request.Tools) != 2 || request.Messages[len(request.Messages)-1].Content != `{"ok":true}` {
+		if len(request.Tools) != 2 || model.TextValue(request.Messages[len(request.Messages)-1].Content) != `{"ok":true}` {
 			stub.t.Fatalf("Tool output/replay failed: %+v", request)
 		}
 		return model.Response{Content: "answer based on retrieved documents"}, nil
@@ -529,7 +529,7 @@ func (client *changingEmptySearchModel) Generate(_ context.Context, request mode
 	if slices.ContainsFunc(request.Tools, func(item tools.Definition) bool { return item.Key == agent.ToolDiscoveryKey }) {
 		client.t.Fatal("empty discovery searches continued instead of stopping after two")
 	}
-	if len(request.Messages) == 0 || !strings.Contains(strings.ToLower(request.Messages[0].Content), "never invent citations") {
+	if len(request.Messages) == 0 || !strings.Contains(strings.ToLower(model.TextValue(request.Messages[0].Content)), "never invent citations") {
 		client.t.Fatal("no-evidence completion guidance not provided")
 	}
 	return model.Response{Content: "Unable to verify recent AI news without authorized sources."}, nil

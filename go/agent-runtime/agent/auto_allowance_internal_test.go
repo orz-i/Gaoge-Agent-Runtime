@@ -48,7 +48,7 @@ func TestAutoAllowanceFingerprintIgnoresTransientToolIDsAndJSONKeyOrder(t *testi
 				Role:      model.RoleAssistant,
 				ToolCalls: []tools.Call{{ID: callID, ToolKey: "read.manifest", Arguments: json.RawMessage(arguments)}},
 			},
-			{Role: model.RoleTool, Content: output, ToolCallID: callID},
+			{Role: model.RoleTool, Content: model.TextParts(output), ToolCallID: callID},
 		}
 	}
 	first := lastSettledWorkFingerprint(unchanged("call-a", `{"one":1,"two":2}`, `{"status":"unchanged"}`))
@@ -70,7 +70,7 @@ func TestAutoAllowanceFingerprintKeepsMeaningfulJSONStringWhitespace(t *testing.
 	messages := func(output string) []model.Message {
 		return []model.Message{
 			{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-1", ToolKey: "read.text", Arguments: json.RawMessage(`{}`)}}},
-			{Role: model.RoleTool, Content: output, ToolCallID: "call-1"},
+			{Role: model.RoleTool, Content: model.TextParts(output), ToolCallID: "call-1"},
 		}
 	}
 	left := lastSettledWorkFingerprint(messages(`{"content":"word  space"}`))
@@ -84,7 +84,7 @@ func TestAutoAllowanceFingerprintPreservesLargeJSONIntegerIdentity(t *testing.T)
 	build := func(arguments string) []model.Message {
 		return []model.Message{
 			{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-1", ToolKey: "read.id", Arguments: json.RawMessage(arguments)}}},
-			{Role: model.RoleTool, Content: `{"status":"same"}`, ToolCallID: "call-1"},
+			{Role: model.RoleTool, Content: model.TextParts(`{"status":"same"}`), ToolCallID: "call-1"},
 		}
 	}
 	first := lastSettledWorkFingerprint(build(`{"id":9007199254740992}`))
@@ -98,7 +98,7 @@ func TestAutoAllowanceFingerprintPreservesLeadingAndTrailingToolOutput(t *testin
 	build := func(output string) []model.Message {
 		return []model.Message{
 			{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-1", ToolKey: "read.text", Arguments: json.RawMessage(`{}`)}}},
-			{Role: model.RoleTool, Content: output, ToolCallID: "call-1"},
+			{Role: model.RoleTool, Content: model.TextParts(output), ToolCallID: "call-1"},
 		}
 	}
 	if lastSettledWorkFingerprint(build("  significant indentation")) ==

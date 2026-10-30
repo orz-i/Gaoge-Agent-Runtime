@@ -184,7 +184,7 @@ func toolMessage(messages []model.Message, key string) (string, bool) {
 			calls[call.ID] = call.ToolKey
 		}
 		if message.Role == model.RoleTool && calls[message.ToolCallID] == key {
-			content, found = message.Content, true
+			content, found = model.TextValue(message.Content), true
 		}
 	}
 	return content, found

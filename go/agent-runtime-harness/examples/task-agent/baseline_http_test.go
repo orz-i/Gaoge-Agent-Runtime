@@ -318,7 +318,7 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 				if err := json.Unmarshal(item.Content, &content); err != nil {
 					return request, err
 				}
-				request.Messages = append(request.Messages, model.Message{Role: item.Role, Content: content})
+				request.Messages = append(request.Messages, model.Message{Role: item.Role, Content: model.TextParts(content)})
 			case "message":
 				if item.Phase != "commentary" || item.Role != model.RoleAssistant || item.Status != "completed" ||
 					item.ID != baselineHTTPFakeKey+"_commentary" || item.Opaque != baselineHTTPFakeKey+"_opaque" {
@@ -332,7 +332,7 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 					content[0].Type != "output_text" || content[0].Text != baselineHTTPCommentary {
 					return request, errors.New("native phase replay changed its message content")
 				}
-				request.Messages = append(request.Messages, model.Message{Role: item.Role, Content: content[0].Text})
+				request.Messages = append(request.Messages, model.Message{Role: item.Role, Content: model.TextParts(content[0].Text)})
 				replayedPhase = true
 			case "function_call":
 				key, ok := baselineToolNames[item.Name]
@@ -343,7 +343,7 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 					ID: item.CallID, Name: item.Name, ToolKey: key, Arguments: json.RawMessage(item.Arguments),
 				}}})
 			case "function_call_output":
-				request.Messages = append(request.Messages, model.Message{Role: model.RoleTool, ToolCallID: item.CallID, Content: item.Output})
+				request.Messages = append(request.Messages, model.Message{Role: model.RoleTool, ToolCallID: item.CallID, Content: model.TextParts(item.Output)})
 			default:
 				return request, fmt.Errorf("unexpected Responses input type %q", item.Type)
 			}
@@ -360,7 +360,7 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 		if err := json.Unmarshal(payload["system"], &system); err != nil {
 			return request, err
 		}
-		request.Messages = append(request.Messages, model.Message{Role: model.RoleSystem, Content: system})
+		request.Messages = append(request.Messages, model.Message{Role: model.RoleSystem, Content: model.TextParts(system)})
 	}
 	var messages []struct {
 		Role    model.Role      `json:"role"`
@@ -372,7 +372,7 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 	for _, message := range messages {
 		var text string
 		if json.Unmarshal(message.Content, &text) == nil {
-			request.Messages = append(request.Messages, model.Message{Role: message.Role, Content: text})
+			request.Messages = append(request.Messages, model.Message{Role: message.Role, Content: model.TextParts(text)})
 			continue
 		}
 		var blocks []baselineAnthropicBlock
@@ -382,7 +382,7 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 		for _, block := range blocks {
 			switch block.Type {
 			case "text":
-				request.Messages = append(request.Messages, model.Message{Role: message.Role, Content: block.Text})
+				request.Messages = append(request.Messages, model.Message{Role: message.Role, Content: model.TextParts(block.Text)})
 			case "tool_use":
 				key, ok := baselineToolNames[block.Name]
 				if !ok {
@@ -392,7 +392,7 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 					ID: block.ID, Name: block.Name, ToolKey: key, Arguments: block.Input,
 				}}})
 			case "tool_result":
-				request.Messages = append(request.Messages, model.Message{Role: model.RoleTool, ToolCallID: block.ToolUseID, Content: block.Content})
+				request.Messages = append(request.Messages, model.Message{Role: model.RoleTool, ToolCallID: block.ToolUseID, Content: model.TextParts(block.Content)})
 			default:
 				return request, fmt.Errorf("unexpected Messages content type %q", block.Type)
 			}

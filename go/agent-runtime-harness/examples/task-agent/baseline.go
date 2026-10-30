@@ -167,7 +167,7 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 	}
 	response, err := client.Generate(probeCtx, model.Request{
 		RunID: "baseline-preflight", InvocationID: "baseline-preflight", Model: config.routedModel(),
-		Messages:        []model.Message{{Role: model.RoleUser, Content: preflightPrompt}},
+		Messages:        []model.Message{{Role: model.RoleUser, Content: model.TextParts(preflightPrompt)}},
 		OutputContract:  &model.OutputContract{Name: "baseline_probe", Schema: probeSchema},
 		MaxOutputTokens: config.outputTokens,
 	})

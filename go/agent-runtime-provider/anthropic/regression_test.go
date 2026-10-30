@@ -40,14 +40,14 @@ func TestSignedThinkingToolReplayAndTamperRejection(t *testing.T) {
 		}
 		_, _ = fmt.Fprint(w, `{"id":"thinking-2","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"","signature":"second-block"},{"type":"text","text":"done"}],"usage":{"input_tokens":15,"output_tokens":2}}`)
 	})
-	req := model.Request{Model: "claude-opus-5-5", Messages: []model.Message{{Role: model.RoleUser, Content: "lookup"}}, Tools: []tools.Definition{definition}}
+	req := model.Request{Model: "claude-opus-5-5", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}, Tools: []tools.Definition{definition}}
 	first, err := client.Generate(context.Background(), req)
 	if err != nil || first.ProviderReplay == nil || len(first.ToolCalls) != 1 {
 		t.Fatalf("thinking tool response rejected: %+v %v", first, err)
 	}
 	req.Messages = append(req.Messages, model.Message{
 		Role: model.RoleAssistant, ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay,
-	}, model.Message{Role: model.RoleTool, ToolCallID: "toolu-1", Content: `{"ok":true}`})
+	}, model.Message{Role: model.RoleTool, ToolCallID: "toolu-1", Content: model.TextParts(`{"ok":true}`)})
 	tampered := model.CloneRequest(req)
 	tampered.Messages[1].ToolCalls[0].Arguments = json.RawMessage(`{"x":2}`)
 	if _, err = client.Generate(context.Background(), tampered); !errors.Is(err, anthropic.ErrUnsupported) || attempts != 1 {
@@ -73,7 +73,7 @@ func TestForcedToolChoiceIsRejectedBeforeRequestOnUnsupportedModels(t *testing.T
 	for _, name := range []string{
 		"claude-opus-5-5", "claude-opus-5-5-20261001", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1",
 	} {
-		request := model.Request{Model: name, RequireToolCall: true, Tools: []tools.Definition{definition}, Messages: []model.Message{{Role: model.RoleUser, Content: "lookup"}}}
+		request := model.Request{Model: name, RequireToolCall: true, Tools: []tools.Definition{definition}, Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}}
 		if _, err := client.Generate(context.Background(), request); !errors.Is(err, anthropic.ErrUnsupported) {
 			t.Errorf("%s accepted unsupported forced tool mode: %v", name, err)
 		}
@@ -82,7 +82,7 @@ func TestForcedToolChoiceIsRejectedBeforeRequestOnUnsupportedModels(t *testing.T
 		t.Fatalf("provider dispatched incompatible request %d times", sent)
 	}
 	// An ordinary auto tool mode for modern models remains available.
-	request := model.Request{Model: "claude-opus-5-5", Tools: []tools.Definition{definition}, Messages: []model.Message{{Role: model.RoleUser, Content: "lookup"}}}
+	request := model.Request{Model: "claude-opus-5-5", Tools: []tools.Definition{definition}, Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}}
 	if _, err := client.Generate(context.Background(), request); err != nil || sent != 1 {
 		t.Fatalf("auto mode broken: %v sent=%d", err, sent)
 	}
@@ -188,7 +188,7 @@ func TestMissingAnthropicUsageRemainsUnknown(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"id":"no-usage","stop_reason":"end_turn","content":[{"type":"text","text":"hello"}],"usage":{}}`)
 	})
-	result, err := client.Generate(context.Background(), model.Request{Model: "claude-opus-5-5", Messages: []model.Message{{Role: model.RoleUser, Content: "hi"}}})
+	result, err := client.Generate(context.Background(), model.Request{Model: "claude-opus-5-5", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}})
 	if err != nil || result.Usage != nil {
 		t.Fatalf("incomplete usage fabricated: %+v err=%v", result, err)
 	}
@@ -215,7 +215,7 @@ func TestAnthropicStreamCannotTreatInitialUsageAsFinalReceipt(t *testing.T) {
 				write("message_stop", `{"type":"message_stop"}`)
 			})
 			response, err := client.GenerateStream(context.Background(), model.Request{
-				Messages: []model.Message{{Role: model.RoleUser, Content: "hi"}},
+				Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}},
 			}, nil)
 			if err != nil || response.Usage != nil {
 				t.Fatalf("partial streamed usage became settled receipt: %+v err=%v", response, err)
@@ -228,7 +228,7 @@ func TestUnsupportedAnthropicBlockFieldsNeverDisappearSilently(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, `{"id":"unknown","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":2},"content":[{"type":"text","text":"hi","citations":[{"type":"unsupported"}]}]}`)
 	})
-	_, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hi"}}})
+	_, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}})
 	if !errors.Is(err, anthropic.ErrUnsupported) {
 		t.Fatalf("content metadata silently dropped: %v", err)
 	}

@@ -53,13 +53,13 @@ func TestStrictJSONSchemaWireAndToolContinuation(t *testing.T) {
 		}
 	})
 	request := model.Request{Model: "gpt-4.1", OutputContract: model.CloneOutputContract(outputContract),
-		Messages: []model.Message{{Role: model.RoleUser, Content: "lookup"}}, Tools: []tools.Definition{{Key: "lookup:v1", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
+		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}, Tools: []tools.Definition{{Key: "lookup:v1", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
 	first, err := client.Generate(t.Context(), request)
 	if err != nil || len(first.ToolCalls) != 1 {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	request.Messages = append(request.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: first.ToolCalls},
-		model.Message{Role: model.RoleTool, ToolCallID: "c1", Content: "{}"})
+		model.Message{Role: model.RoleTool, ToolCallID: "c1", Content: model.TextParts("{}")})
 	second, err := client.Generate(t.Context(), request)
 	if err != nil || second.Content != `{"answer":"from tool"}` || calls != 2 {
 		t.Fatalf("second=%+v err=%v calls=%d", second, err, calls)
@@ -71,7 +71,7 @@ func TestStructuredOutputCapabilityFailsBeforeHTTPAndSupportsHostVerifiedOverrid
 		calls++
 		_, _ = w.Write([]byte(`{"id":"r","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{}"}]}]}`))
 	})
-	req := model.Request{Model: "unverified-gateway-model", Messages: []model.Message{{Role: model.RoleUser, Content: "answer"}}, OutputContract: outputContract}
+	req := model.Request{Model: "unverified-gateway-model", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}}, OutputContract: outputContract}
 	_, err := client.Generate(context.Background(), req)
 	if !errors.Is(err, model.ErrCapabilityUnavailable) || calls != 0 {
 		t.Fatalf("unknown model dispatched: %v, calls=%d", err, calls)
@@ -100,7 +100,7 @@ func TestStructuredOutputRefusalAndStreaming(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"id":"resp-refusal","status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"Cannot comply."}]}],"usage":{"input_tokens":1,"output_tokens":2}}`)
 		}
 	})
-	req := model.Request{Model: "gpt-4.1", OutputContract: outputContract, Messages: []model.Message{{Role: model.RoleUser, Content: "answer"}}}
+	req := model.Request{Model: "gpt-4.1", OutputContract: outputContract, Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}}}
 	refused, err := client.Generate(t.Context(), req)
 	if err != nil || !refused.Refused || refused.Content != "Cannot comply." {
 		t.Fatalf("refusal lost: %+v err=%v", refused, err)

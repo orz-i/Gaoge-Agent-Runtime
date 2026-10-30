@@ -37,7 +37,7 @@ func TestAgentPluginPipelinePreservesExplicitRunAndModelOrder(t *testing.T) {
 			pipelineRunMiddleware{name: "run", order: &order},
 		},
 		PrepareModelRequest: func(_ context.Context, request runtimemodel.Request) (runtimemodel.Request, error) {
-			request.Messages[0].Content = "augmented goal"
+			request.Messages[0].Content = runtimemodel.TextParts("augmented goal")
 			return request, nil
 		},
 		ModelMiddleware: []plugin.ModelMiddleware{
@@ -220,7 +220,7 @@ type pipelineModel struct {
 
 func (provider *pipelineModel) Generate(_ context.Context, request runtimemodel.Request) (runtimemodel.Response, error) {
 	*provider.order = append(*provider.order, "provider")
-	if len(request.Messages) != 1 || request.Messages[0].Content != provider.expectedContent {
+	if len(request.Messages) != 1 || runtimemodel.TextValue(request.Messages[0].Content) != provider.expectedContent {
 		return runtimemodel.Response{}, agent.ErrInvalidModelResponse
 	}
 	return runtimemodel.Response{Content: pipelineDoneContent}, nil

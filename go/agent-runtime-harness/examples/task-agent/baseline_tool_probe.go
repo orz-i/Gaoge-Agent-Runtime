@@ -68,7 +68,7 @@ func baselineToolReplayProbe(ctx context.Context, config settings) (probe toolPr
 	firstRequest := model.Request{
 		RunID: "baseline-tool-probe", InvocationID: "baseline-tool-probe-1",
 		Model: config.routedModel(), MaxOutputTokens: config.outputTokens,
-		Messages: []model.Message{{Role: model.RoleUser, Content: replayProbePrompt}},
+		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts(replayProbePrompt)}},
 		Tools:    []tools.Definition{definition}, RequireToolCall: true, OutputContract: contract,
 	}
 	callCtx, cancel := context.WithTimeout(ctx, modelTimeout)
@@ -106,8 +106,8 @@ func baselineToolReplayProbe(ctx context.Context, config settings) (probe toolPr
 		OutputContract: contract, Tools: []tools.Definition{definition},
 		Messages: []model.Message{
 			firstRequest.Messages[0],
-			{Role: model.RoleAssistant, Content: first.Content, ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay},
-			{Role: model.RoleTool, ToolCallID: call.ID, Content: `{"value":"probe"}`},
+			{Role: model.RoleAssistant, Content: model.TextParts(first.Content), ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay},
+			{Role: model.RoleTool, ToolCallID: call.ID, Content: model.TextParts(`{"value":"probe"}`)},
 		},
 	}
 	continuationCtx, continuationCancel := context.WithTimeout(ctx, modelTimeout)

@@ -3,6 +3,7 @@ package harness
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -41,13 +42,13 @@ func (catalog contextFingerprintCatalog) List(keys []string) ([]tools.Definition
 func TestMergeContextRuntimeMessagesDirectGoalDoesNotDuplicateCurrentTurn(t *testing.T) {
 	t.Parallel()
 	contextMessages := []model.Message{
-		{Role: model.RoleSystem, Content: "frozen instructions"},
-		{Role: model.RoleUser, Content: parentGoal},
+		{Role: model.RoleSystem, Content: model.TextParts("frozen instructions")},
+		{Role: model.RoleUser, Content: model.TextParts(parentGoal)},
 	}
 	runtimeMessages := []model.Message{
-		{Role: model.RoleSystem, Content: "runtime guidance"},
-		{Role: model.RoleUser, Content: parentGoal},
-		{Role: model.RoleAssistant, Content: "live continuation"},
+		{Role: model.RoleSystem, Content: model.TextParts("runtime guidance")},
+		{Role: model.RoleUser, Content: model.TextParts(parentGoal)},
+		{Role: model.RoleAssistant, Content: model.TextParts("live continuation")},
 	}
 
 	merged, err := mergeContextRuntimeMessagesForCheckpoint(runtimecontext.Checkpoint{}, contextMessages, runtimeMessages)
@@ -55,10 +56,10 @@ func TestMergeContextRuntimeMessagesDirectGoalDoesNotDuplicateCurrentTurn(t *tes
 		t.Fatalf("merge direct goal: %v", err)
 	}
 	want := []model.Message{
-		{Role: model.RoleSystem, Content: "frozen instructions"},
-		{Role: model.RoleUser, Content: parentGoal},
-		{Role: model.RoleSystem, Content: "runtime guidance"},
-		{Role: model.RoleAssistant, Content: "live continuation"},
+		{Role: model.RoleSystem, Content: model.TextParts("frozen instructions")},
+		{Role: model.RoleUser, Content: model.TextParts(parentGoal)},
+		{Role: model.RoleSystem, Content: model.TextParts("runtime guidance")},
+		{Role: model.RoleAssistant, Content: model.TextParts("live continuation")},
 	}
 	assertRuntimeMessagesEqual(t, merged, want)
 }
@@ -69,7 +70,7 @@ func TestContextStaticFingerprintIgnoresSamplingOnlyModelOptions(t *testing.T) {
 		SourcePath: []string{"message-1"},
 		Entries: []runtimecontext.Entry{{
 			ID: "entry-1", SourceID: "message-1", TurnID: contextFingerprintTestTurn,
-			Message: model.Message{Role: model.RoleUser, Content: "keep the immutable prefix stable"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("keep the immutable prefix stable")},
 		}},
 	}
 	base := ConfigSnapshot{
@@ -105,7 +106,7 @@ func TestContextStaticFingerprintIncludesProviderVisibleToolName(t *testing.T) {
 	seed := &ContextSeed{
 		SourcePath: []string{"message-tool"}, Entries: []runtimecontext.Entry{{
 			ID: "entry-tool", SourceID: "message-tool", TurnID: contextFingerprintTestTurn,
-			Message: model.Message{Role: model.RoleUser, Content: "use the configured tool"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("use the configured tool")},
 		}},
 	}
 	config := ConfigSnapshot{Model: "model-a", ToolKeys: []string{"lookup"}}
@@ -131,7 +132,7 @@ func TestContextStaticFingerprintUsesFrozenDefinitionVersionForHostedTool(t *tes
 	seed := &ContextSeed{
 		SourcePath: []string{"message-hosted"}, Entries: []runtimecontext.Entry{{
 			ID: "entry-hosted", SourceID: "message-hosted", TurnID: contextFingerprintTestTurn,
-			Message: model.Message{Role: model.RoleUser, Content: "use the hosted image tool"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("use the hosted image tool")},
 		}},
 	}
 	base := ConfigSnapshot{
@@ -162,7 +163,7 @@ func TestContextStaticFingerprintRejectsUnknownToolWithoutFrozenDefinition(t *te
 	seed := &ContextSeed{
 		SourcePath: []string{"message-missing"}, Entries: []runtimecontext.Entry{{
 			ID: "entry-missing", SourceID: "message-missing", TurnID: contextFingerprintTestTurn,
-			Message: model.Message{Role: model.RoleUser, Content: "use an unknown tool"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("use an unknown tool")},
 		}},
 	}
 	_, err := contextStaticFingerprint(
@@ -178,12 +179,12 @@ func TestContextStaticFingerprintRejectsUnknownToolWithoutFrozenDefinition(t *te
 func TestMergeContextRuntimeMessagesNestedGoalKeepsParentContextAndChildGoal(t *testing.T) {
 	t.Parallel()
 	contextMessages := []model.Message{
-		{Role: model.RoleSystem, Content: "frozen instructions"},
-		{Role: model.RoleUser, Content: "original conversation request"},
+		{Role: model.RoleSystem, Content: model.TextParts("frozen instructions")},
+		{Role: model.RoleUser, Content: model.TextParts("original conversation request")},
 	}
 	runtimeMessages := []model.Message{
-		{Role: model.RoleSystem, Content: "execute this bounded step"},
-		{Role: model.RoleUser, Content: "child plan step goal"},
+		{Role: model.RoleSystem, Content: model.TextParts("execute this bounded step")},
+		{Role: model.RoleUser, Content: model.TextParts("child plan step goal")},
 	}
 
 	merged, err := mergeContextRuntimeMessagesForCheckpoint(runtimecontext.Checkpoint{}, contextMessages, runtimeMessages)
@@ -191,10 +192,10 @@ func TestMergeContextRuntimeMessagesNestedGoalKeepsParentContextAndChildGoal(t *
 		t.Fatalf("merge nested goal: %v", err)
 	}
 	want := []model.Message{
-		{Role: model.RoleSystem, Content: "frozen instructions"},
-		{Role: model.RoleUser, Content: "original conversation request"},
-		{Role: model.RoleSystem, Content: "execute this bounded step"},
-		{Role: model.RoleUser, Content: "child plan step goal"},
+		{Role: model.RoleSystem, Content: model.TextParts("frozen instructions")},
+		{Role: model.RoleUser, Content: model.TextParts("original conversation request")},
+		{Role: model.RoleSystem, Content: model.TextParts("execute this bounded step")},
+		{Role: model.RoleUser, Content: model.TextParts("child plan step goal")},
 	}
 	assertRuntimeMessagesEqual(t, merged, want)
 }
@@ -202,8 +203,8 @@ func TestMergeContextRuntimeMessagesNestedGoalKeepsParentContextAndChildGoal(t *
 func TestMergeContextRuntimeMessagesStillRejectsRuntimeWithoutUserGoal(t *testing.T) {
 	t.Parallel()
 	_, err := mergeContextRuntimeMessagesForCheckpoint(runtimecontext.Checkpoint{},
-		[]model.Message{{Role: model.RoleUser, Content: parentGoal}},
-		[]model.Message{{Role: model.RoleSystem, Content: "guidance only"}},
+		[]model.Message{{Role: model.RoleUser, Content: model.TextParts(parentGoal)}},
+		[]model.Message{{Role: model.RoleSystem, Content: model.TextParts("guidance only")}},
 	)
 	if !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("expected invalid request, got %v", err)
@@ -218,7 +219,7 @@ func TestMergeContextRuntimeMessagesAfterRolloverDoesNotDuplicateToolTranscript(
 		ScopeID: "session-tool-overlap", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
 		SourcePath: []string{"m1"}, Instructions: "frozen instructions",
 		Entries: []runtimecontext.Entry{{
-			ID: "entry-m1", SourceID: "m1", TurnID: "turn-1", Message: model.Message{Role: model.RoleUser, Content: parentGoal},
+			ID: "entry-m1", SourceID: "m1", TurnID: "turn-1", Message: model.Message{Role: model.RoleUser, Content: model.TextParts(parentGoal)},
 		}},
 	})
 	if err != nil {
@@ -227,7 +228,7 @@ func TestMergeContextRuntimeMessagesAfterRolloverDoesNotDuplicateToolTranscript(
 	fullToolResult := strings.Repeat(`{"result":"large"}`, 64)
 	modelVisible := append(runtimecontext.Materialize(first.Window),
 		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{call}},
-		model.Message{Role: model.RoleTool, ToolCallID: call.ID, Content: fullToolResult},
+		model.Message{Role: model.RoleTool, ToolCallID: call.ID, Content: model.TextParts(fullToolResult)},
 	)
 	compacted, err := manager.CompactToolResults(first.ScopeID, first.Generation, modelVisible, 256)
 	if err != nil {
@@ -242,17 +243,17 @@ func TestMergeContextRuntimeMessagesAfterRolloverDoesNotDuplicateToolTranscript(
 	}
 	contextMessages := runtimecontext.Materialize(checkpoint.Window)
 	runtimeMessages := []model.Message{
-		{Role: model.RoleUser, Content: parentGoal},
+		{Role: model.RoleUser, Content: model.TextParts(parentGoal)},
 		{Role: model.RoleAssistant, ToolCalls: []tools.Call{call}},
-		{Role: model.RoleTool, ToolCallID: call.ID, Content: fullToolResult},
-		{Role: model.RoleAssistant, Content: "continue after Tool"},
+		{Role: model.RoleTool, ToolCallID: call.ID, Content: model.TextParts(fullToolResult)},
+		{Role: model.RoleAssistant, Content: model.TextParts("continue after Tool")},
 	}
 
 	merged, err := mergeContextRuntimeMessagesForCheckpoint(checkpoint, contextMessages, runtimeMessages)
 	if err != nil {
 		t.Fatalf("merge rollover Tool transcript: %v", err)
 	}
-	want := append(model.CloneMessages(contextMessages), model.Message{Role: model.RoleAssistant, Content: "continue after Tool"})
+	want := append(model.CloneMessages(contextMessages), model.Message{Role: model.RoleAssistant, Content: model.TextParts("continue after Tool")})
 	if len(merged) != len(want) {
 		t.Fatalf("rollover merge duplicated transcript: got=%#v want=%#v", merged, want)
 	}
@@ -270,7 +271,7 @@ func TestReplaceContextCheckpointUsesExecutionScopedCAS(t *testing.T) {
 		ScopeID: "session-cas", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
 		SourcePath: []string{"m1"},
 		Entries: []runtimecontext.Entry{{
-			ID: "entry-m1", SourceID: "m1", TurnID: "turn-1", Message: model.Message{Role: model.RoleUser, Content: parentGoal},
+			ID: "entry-m1", SourceID: "m1", TurnID: "turn-1", Message: model.Message{Role: model.RoleUser, Content: model.TextParts(parentGoal)},
 		}},
 	})
 	if err != nil {
@@ -302,7 +303,7 @@ func TestWithoutContextWindowRemovesCheckpointAndBinding(t *testing.T) {
 		ScopeID: "session-isolated", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
 		SourcePath: []string{"m1"}, Entries: []runtimecontext.Entry{{
 			ID: "entry-m1", SourceID: "m1", TurnID: "turn-1",
-			Message: model.Message{Role: model.RoleUser, Content: parentGoal},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts(parentGoal)},
 		}},
 	})
 	if err != nil {
@@ -327,7 +328,7 @@ func assertRuntimeMessagesEqual(t *testing.T, got, want []model.Message) {
 		t.Fatalf("message count = %d, want %d: %#v", len(got), len(want), got)
 	}
 	for index := range want {
-		if got[index].Role != want[index].Role || got[index].Content != want[index].Content {
+		if got[index].Role != want[index].Role || !reflect.DeepEqual(got[index].Content, want[index].Content) {
 			t.Fatalf("message[%d] = %#v, want %#v", index, got[index], want[index])
 		}
 	}

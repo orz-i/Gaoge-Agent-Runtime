@@ -65,7 +65,7 @@ func TestPhaseFinalProjectionAndManualReplayUnaryAndStreaming(t *testing.T) {
 				writePhaseResponse(w, phaseResponse(phaseFinalItem), stream)
 			})
 			request := model.Request{
-				Model: "gpt-4.1", Messages: []model.Message{{Role: model.RoleUser, Content: "answer"}},
+				Model: "gpt-4.1", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}},
 				OutputContract: &model.OutputContract{Name: "phase_probe",
 					Schema: json.RawMessage(`{"type":"object","properties":{"ok":{"type":"boolean","enum":[true]}},"required":["ok"],"additionalProperties":false}`)},
 			}
@@ -86,11 +86,11 @@ func TestPhaseFinalProjectionAndManualReplayUnaryAndStreaming(t *testing.T) {
 				t.Fatalf("message phase lost or unsigned reasoning promoted to replay: %s error=%v", first.ProviderReplay.Data, err)
 			}
 			request.Messages = append(request.Messages,
-				model.Message{Role: model.RoleAssistant, Content: first.Content, ProviderReplay: first.ProviderReplay},
-				model.Message{Role: model.RoleUser, Content: "confirm"})
+				model.Message{Role: model.RoleAssistant, Content: model.TextParts(first.Content), ProviderReplay: first.ProviderReplay},
+				model.Message{Role: model.RoleUser, Content: model.TextParts("confirm")})
 			for _, content := range []string{"forged", "Working." + first.Content} {
 				tampered := model.CloneRequest(request)
-				tampered.Messages[1].Content = content
+				tampered.Messages[1].Content = model.TextParts(content)
 				if _, err = generate(tampered); !errors.Is(err, openai.ErrUnsupported) || calls != 1 {
 					t.Fatalf("altered or legacy-flattened phase transcript dispatched: err=%v calls=%d", err, calls)
 				}
@@ -123,20 +123,20 @@ func TestPhaseToolReplayWithoutReasoningKeepsEveryCallBound(t *testing.T) {
 		}
 		writePhaseResponse(w, phaseResponse(phaseFinalItem), false)
 	})
-	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "lookup"}}, Tools: []tools.Definition{definition}}
+	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}, Tools: []tools.Definition{definition}}
 	first, err := client.Generate(t.Context(), request)
 	if err != nil || first.Content != "  Working.\n" || len(first.ToolCalls) != 2 || first.ProviderReplay == nil {
 		t.Fatalf("intermediate commentary or tool replay lost: response=%+v error=%v", first, err)
 	}
 	request.Messages = append(request.Messages,
-		model.Message{Role: model.RoleAssistant, Content: strings.TrimSpace(first.Content), ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay},
-		model.Message{Role: model.RoleTool, ToolCallID: "call-1", Content: "{}"},
-		model.Message{Role: model.RoleTool, ToolCallID: "call-2", Content: "{}"})
+		model.Message{Role: model.RoleAssistant, Content: model.TextParts(strings.TrimSpace(first.Content)), ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay},
+		model.Message{Role: model.RoleTool, ToolCallID: "call-1", Content: model.TextParts("{}")},
+		model.Message{Role: model.RoleTool, ToolCallID: "call-2", Content: model.TextParts("{}")})
 	for _, tc := range []struct {
 		name   string
 		mutate func(*model.Message)
 	}{
-		{"content", func(message *model.Message) { message.Content = "forged" }},
+		{"content", func(message *model.Message) { message.Content = model.TextParts("forged") }},
 		{"count", func(message *model.Message) { message.ToolCalls = message.ToolCalls[:1] }},
 		{"order", func(message *model.Message) {
 			message.ToolCalls[0], message.ToolCalls[1] = message.ToolCalls[1], message.ToolCalls[0]
@@ -181,7 +181,7 @@ func TestPhaseToolReplayStillRequiresEncryptedReasoning(t *testing.T) {
 				calls++
 				writePhaseResponse(w, phaseResponse(reasoning, phaseCommentaryItem, phaseCallOne), false)
 			})
-			request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "lookup"}}, Tools: []tools.Definition{definition}}
+			request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}, Tools: []tools.Definition{definition}}
 			response, err := client.Generate(t.Context(), request)
 			if !encrypted {
 				if !errors.Is(err, openai.ErrReplayUnavailable) {
@@ -194,7 +194,7 @@ func TestPhaseToolReplayStillRequiresEncryptedReasoning(t *testing.T) {
 			}
 			response.ProviderReplay.Data = json.RawMessage("[" + strings.Join([]string{phaseBareReasoning, phaseCommentaryItem, phaseCallOne}, ",") + "]")
 			request.Messages = append(request.Messages,
-				model.Message{Role: model.RoleAssistant, Content: response.Content, ToolCalls: response.ToolCalls, ProviderReplay: response.ProviderReplay})
+				model.Message{Role: model.RoleAssistant, Content: model.TextParts(response.Content), ToolCalls: response.ToolCalls, ProviderReplay: response.ProviderReplay})
 			if _, err = client.Generate(t.Context(), request); !errors.Is(err, openai.ErrReplayUnavailable) || calls != 1 {
 				t.Fatalf("phase bypassed reasoning evidence fence: error=%v calls=%d", err, calls)
 			}
@@ -224,7 +224,7 @@ func TestPhaseRejectsAmbiguousOrIntermediateOnlyOutput(t *testing.T) {
 				writePhaseResponse(w, phaseResponse(output...), false)
 			})
 			_, err := client.Generate(context.Background(), model.Request{
-				Messages: []model.Message{{Role: model.RoleUser, Content: "test"}}, Tools: []tools.Definition{definition},
+				Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("test")}}, Tools: []tools.Definition{definition},
 			})
 			if !errors.Is(err, openai.ErrUnsupported) {
 				t.Fatalf("ambiguous phase was silently repaired: error=%v", err)
@@ -238,7 +238,7 @@ func TestPhaseRefusalCannotHideBehindValidFinalJSON(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
 		writePhaseResponse(w, phaseResponse(refusal, phaseFinalItem), false)
 	})
-	response, err := client.Generate(t.Context(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "test"}}})
+	response, err := client.Generate(t.Context(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("test")}}})
 	if err != nil || !response.Refused || response.Content != `{"ok":true}` {
 		t.Fatalf("phase selection concealed a refusal: response=%+v err=%v", response, err)
 	}
@@ -251,7 +251,7 @@ func TestPhaseAbsenceAndNullPreserveLegacyProjection(t *testing.T) {
 				`{"type":"message",`+phase+`"content":[{"type":"output_text","text":"old "}]}`,
 				`{"type":"message",`+phase+`"content":[{"type":"output_text","text":"answer"}]}`), false)
 		})
-		response, err := client.Generate(t.Context(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "test"}}})
+		response, err := client.Generate(t.Context(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("test")}}})
 		if err != nil || response.Content != "old answer" || response.ProviderReplay != nil {
 			t.Fatalf("legacy projection changed: response=%+v error=%v", response, err)
 		}

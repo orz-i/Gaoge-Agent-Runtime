@@ -54,14 +54,14 @@ func TestDocumentedNullableContentFieldsAndDirectToolCaller(t *testing.T) {
 					_, _ = fmt.Fprint(w, `{"id":"msg-final","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":15,"output_tokens":2}}`)
 				}
 			})
-			request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "run lookup"}}, Tools: []tools.Definition{nullableMetadataDefinition}}
+			request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("run lookup")}}, Tools: []tools.Definition{nullableMetadataDefinition}}
 			first, err := client.Generate(context.Background(), request)
 			if err != nil || len(first.ToolCalls) != 1 || first.ProviderReplay == nil {
 				t.Fatalf("legal tool metadata rejected: %+v, err=%v", first, err)
 			}
 			request.Messages = append(request.Messages, model.Message{
-				Role: model.RoleAssistant, Content: first.Content, ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay,
-			}, model.Message{Role: model.RoleTool, ToolCallID: "toolu_1", Content: `{"ok":true}`})
+				Role: model.RoleAssistant, Content: model.TextParts(first.Content), ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay,
+			}, model.Message{Role: model.RoleTool, ToolCallID: "toolu_1", Content: model.TextParts(`{"ok":true}`)})
 			second, err := client.Generate(context.Background(), request)
 			if err != nil || second.Content != "Done" || n != 2 {
 				t.Fatalf("legal content not replayed: %+v err=%v n=%d", second, err, n)
@@ -110,14 +110,14 @@ func TestDocumentedDirectCallerStreamingBlockReplayed(t *testing.T) {
 		}
 		emit("message_stop", `{"type":"message_stop"}`)
 	})
-	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "run lookup"}}, Tools: []tools.Definition{nullableMetadataDefinition}}
+	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("run lookup")}}, Tools: []tools.Definition{nullableMetadataDefinition}}
 	first, err := client.GenerateStream(context.Background(), request, nil)
 	if err != nil || len(first.ToolCalls) != 1 || first.ProviderReplay == nil {
 		t.Fatalf("direct streaming caller rejected: %+v err=%v", first, err)
 	}
 	request.Messages = append(request.Messages, model.Message{
-		Role: model.RoleAssistant, Content: first.Content, ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay,
-	}, model.Message{Role: model.RoleTool, ToolCallID: "toolu_1", Content: `{"ok":true}`})
+		Role: model.RoleAssistant, Content: model.TextParts(first.Content), ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay,
+	}, model.Message{Role: model.RoleTool, ToolCallID: "toolu_1", Content: model.TextParts(`{"ok":true}`)})
 	second, err := client.GenerateStream(context.Background(), request, nil)
 	if err != nil || second.Content != "Done" || count != 2 {
 		t.Fatalf("stream direct caller not replayed: %+v err=%v calls=%d", second, err, count)
@@ -138,7 +138,7 @@ func TestRejectIndirectToolCallersAndUnrepresentableAnnotations(t *testing.T) {
 				_, _ = fmt.Fprintf(w, `{"id":"m","stop_reason":"tool_use","content":%s,"usage":{"input_tokens":8,"output_tokens":2}}`, test.content)
 			})
 			_, err := client.Generate(context.Background(), model.Request{
-				Messages: []model.Message{{Role: model.RoleUser, Content: "lookup"}}, Tools: []tools.Definition{nullableMetadataDefinition},
+				Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}, Tools: []tools.Definition{nullableMetadataDefinition},
 			})
 			if !errors.Is(err, anthropic.ErrUnsupported) {
 				t.Fatalf("unsafe metadata was accepted: %v", err)

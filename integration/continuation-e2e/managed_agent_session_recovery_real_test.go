@@ -417,9 +417,9 @@ func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bo
 			return &harness.ContextSeed{
 				SourcePath: []string{"old-user", "old-answer", "invoice-user"},
 				Entries: []runtimecontext.Entry{
-					{ID: "old-user", SourceID: "old-user", TurnID: "old", Message: model.Message{Role: model.RoleUser, Content: "Remember the invoice terms."}},
-					{ID: "old-answer", SourceID: "old-answer", TurnID: "old", Message: model.Message{Role: model.RoleAssistant, Content: strings.Repeat("archived invoice discussion; ", 1000) + "shipping_cents=700"}},
-					{ID: "invoice-user", SourceID: "invoice-user", TurnID: managedRecoveryTurn, Required: true, Message: model.Message{Role: model.RoleUser, Content: prompt}},
+					{ID: "old-user", SourceID: "old-user", TurnID: "old", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("Remember the invoice terms.")}},
+					{ID: "old-answer", SourceID: "old-answer", TurnID: "old", Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts(strings.Repeat("archived invoice discussion; ", 1000) + "shipping_cents=700")}},
+					{ID: "invoice-user", SourceID: "invoice-user", TurnID: managedRecoveryTurn, Required: true, Message: model.Message{Role: model.RoleUser, Content: model.TextParts(prompt)}},
 				},
 			}, nil
 		})

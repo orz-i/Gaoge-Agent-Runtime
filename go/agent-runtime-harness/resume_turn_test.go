@@ -191,7 +191,7 @@ func TestSessionResumeRestoresContextAndChecksOwnerWithoutTranscript(t *testing.
 		t.Fatalf("resume after pause: status=%s error=%v calls=%d", done.Turn.Status, err, len(provider.requests))
 	}
 	messages := provider.requests[0].Messages
-	if len(messages) < 2 || !strings.Contains(messages[0].Content, "frozen session instructions") || !strings.Contains(messages[0].Content, "frozen host evidence") {
+	if len(messages) < 2 || !strings.Contains(model.TextValue(messages[0].Content), "frozen session instructions") || !strings.Contains(model.TextValue(messages[0].Content), "frozen host evidence") {
 		t.Fatalf("persisted root Context was not restored: %+v", messages)
 	}
 }

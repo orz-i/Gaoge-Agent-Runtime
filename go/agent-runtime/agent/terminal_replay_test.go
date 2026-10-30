@@ -33,7 +33,7 @@ func assertTerminalReplayMessage(t *testing.T, snapshot kernel.Snapshot, content
 		t.Fatal(err)
 	}
 	for _, message := range state.Messages {
-		if message.Role == model.RoleAssistant && message.Content == content {
+		if message.Role == model.RoleAssistant && model.TextValue(message.Content) == content {
 			replay := message.ProviderReplay
 			if replay == nil || replay.Provider != want.Provider || replay.Format != want.Format || !bytes.Equal(replay.Data, want.Data) {
 				t.Fatal("trusted assistant message lost or changed its provider replay")
@@ -147,7 +147,7 @@ func TestRejectedCompletionReplaySurvivesRestartAndRepair(t *testing.T) {
 	}
 	var repairReplay *model.ProviderReplay
 	for _, message := range provider.requests[1].Messages {
-		if message.Role == model.RoleAssistant && message.Content == rejected {
+		if message.Role == model.RoleAssistant && model.TextValue(message.Content) == rejected {
 			repairReplay = message.ProviderReplay
 		}
 	}

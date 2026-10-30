@@ -38,7 +38,7 @@ func hostedBudgetFixture(t *testing.T, limits budget.Limits) (*MemoryStore, *Bud
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store, shared, model.Request{RunID: "hosted-run", InvocationID: "search-1", Messages: []model.Message{{Role: model.RoleUser, Content: "research"}}, HostedTools: []model.HostedTool{{Key: "native.search"}}, Tools: []tools.Definition{{Key: "local.read", Name: "read"}}}
+	return store, shared, model.Request{RunID: "hosted-run", InvocationID: "search-1", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("research")}}, HostedTools: []model.HostedTool{{Key: "native.search"}}, Tools: []tools.Definition{{Key: "local.read", Name: "read"}}}
 }
 
 func TestHostedBudgetExhaustionStillAllowsFinalModelResponse(t *testing.T) {

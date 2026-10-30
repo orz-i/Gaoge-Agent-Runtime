@@ -53,14 +53,14 @@ func TestStrictJSONSchemaNativeWireAndToolContinuation(t *testing.T) {
 		}
 	})
 	req := model.Request{Model: "claude-sonnet-5-5", OutputContract: model.CloneOutputContract(outputContract),
-		Messages: []model.Message{{Role: model.RoleUser, Content: "lookup"}},
+		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}},
 		Tools:    []tools.Definition{{Key: "lookup:v1", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}}}
 	first, err := client.Generate(t.Context(), req)
 	if err != nil || len(first.ToolCalls) != 1 {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	req.Messages = append(req.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: first.ToolCalls},
-		model.Message{Role: model.RoleTool, ToolCallID: "c1", Content: "{}"})
+		model.Message{Role: model.RoleTool, ToolCallID: "c1", Content: model.TextParts("{}")})
 	second, err := client.Generate(t.Context(), req)
 	if err != nil || second.Content != `{"answer":"from tool"}` || calls != 2 {
 		t.Fatalf("second=%+v err=%v calls=%d", second, err, calls)
@@ -80,7 +80,7 @@ func TestStructuredOutputKnownUnknownAndExplicitGatewayModel(t *testing.T) {
 	if err != nil || old.StructuredJSONSchema {
 		t.Fatalf("old model falsely admitted: %+v %v", old, err)
 	}
-	req := model.Request{Model: "gateway/private-model", Messages: []model.Message{{Role: model.RoleUser, Content: "answer"}}, OutputContract: outputContract}
+	req := model.Request{Model: "gateway/private-model", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}}, OutputContract: outputContract}
 	_, err = client.Generate(context.Background(), req)
 	if !errors.Is(err, model.ErrCapabilityUnavailable) || calls != 0 {
 		t.Fatalf("unsupported model dispatched: %v calls=%d", err, calls)
@@ -110,7 +110,7 @@ func TestStructuredOutputRefusalAndStreaming(t *testing.T) {
 		send("message_delta", map[string]any{"type": "message_delta", "delta": map[string]any{"stop_reason": "end_turn"}, "usage": map[string]any{"output_tokens": 3}})
 		send("message_stop", map[string]any{"type": "message_stop"})
 	})
-	req := model.Request{Model: "claude-sonnet-5-5", OutputContract: outputContract, Messages: []model.Message{{Role: model.RoleUser, Content: "answer"}}}
+	req := model.Request{Model: "claude-sonnet-5-5", OutputContract: outputContract, Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}}}
 	refused, err := client.Generate(t.Context(), req)
 	if err != nil || !refused.Refused {
 		t.Fatalf("refusal not explicit: %+v err=%v", refused, err)

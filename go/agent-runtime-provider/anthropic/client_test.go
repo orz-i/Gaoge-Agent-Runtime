@@ -65,14 +65,14 @@ func TestUnaryToolRoundTrip(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"id":"msg-2","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":20,"output_tokens":5}}`)
 		}
 	})
-	req := model.Request{Messages: []model.Message{{Role: model.RoleSystem, Content: "instructions"}, {Role: model.RoleUser, Content: "do lookup"}}, Tools: []tools.Definition{definition}, RequireToolCall: true}
+	req := model.Request{Messages: []model.Message{{Role: model.RoleSystem, Content: model.TextParts("instructions")}, {Role: model.RoleUser, Content: model.TextParts("do lookup")}}, Tools: []tools.Definition{definition}, RequireToolCall: true}
 	first, err := client.Generate(context.Background(), req)
 	if err != nil || len(first.ToolCalls) != 1 || first.ToolCalls[0].ToolKey != "lookup:v1" || first.Usage.InputTokens != 17 {
 		t.Fatalf("first=%+v err=%v", first, err)
 	}
 	req.RequireToolCall = false
 	req.Messages = append(req.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: first.ToolCalls},
-		model.Message{Role: model.RoleTool, ToolCallID: "toolu-1", Content: `{"ok":true}`})
+		model.Message{Role: model.RoleTool, ToolCallID: "toolu-1", Content: model.TextParts(`{"ok":true}`)})
 	second, err := client.Generate(context.Background(), req)
 	if err != nil || second.Content != "Done" || count != 2 {
 		t.Fatalf("second=%+v err=%v", second, err)
@@ -102,7 +102,7 @@ func TestStreamingTextToolAndTerminal(t *testing.T) {
 		}
 	})
 	deltas := 0
-	req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hi"}}, Tools: []tools.Definition{definition}}
+	req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}, Tools: []tools.Definition{definition}}
 	run := func() (model.Response, error) {
 		return client.GenerateStream(context.Background(), req, func(e model.StreamEvent) error {
 			if e.Delta != "" {
@@ -130,7 +130,7 @@ func TestTruncatedAndThinkingResponsesRejected(t *testing.T) {
 			_, _ = fmt.Fprint(w, `{"id":"m","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"opaque"},{"type":"tool_use","id":"t","name":"lookup","input":{}}]}`)
 		}
 	})
-	req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "hi"}}, Tools: []tools.Definition{definition}}
+	req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}, Tools: []tools.Definition{definition}}
 	if _, err := client.Generate(context.Background(), req); err == nil {
 		t.Fatal("max_tokens accepted")
 	}

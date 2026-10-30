@@ -15,8 +15,8 @@ func TestPortableCompactionSealsMultipleUnicodeArchivesAndRollsOver(t *testing.T
 	t.Parallel()
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
 	seed := openRequest("u1", "a1", "u2", "a2", "u3")
-	seed.Entries[0].Message.Content = "FIRST_ANCHOR\n" + strings.Repeat("🌱", 550_000)
-	seed.Entries[2].Message.Content = "SECOND_ANCHOR\n" + strings.Repeat("Ħ", 1_100_000)
+	seed.Entries[0].Message.Content = model.TextParts("FIRST_ANCHOR\n" + strings.Repeat("🌱", 550_000))
+	seed.Entries[2].Message.Content = model.TextParts("SECOND_ANCHOR\n" + strings.Repeat("Ħ", 1_100_000))
 	checkpoint, err := manager.Open(t.Context(), seed)
 	requireNoError(t, err)
 	request := runtimectx.PortableCompactionRequest{
@@ -34,7 +34,7 @@ func TestPortableCompactionSealsMultipleUnicodeArchivesAndRollsOver(t *testing.T
 		var part []model.Message
 		requireNoError(t, json.Unmarshal(artifact.ContentJSON, &part))
 		restored = append(restored, part...)
-		requireTrue(t, containsAll(compacted.Window.Entries[0].Message.Content, artifact.ID, artifact.ContentHash), "marker omitted archive identity")
+		requireTrue(t, containsAll(model.TextValue(compacted.Window.Entries[0].Message.Content), artifact.ID, artifact.ContentHash), "marker omitted archive identity")
 	}
 	restoredJSON, err := json.Marshal(restored)
 	requireNoError(t, err)
@@ -44,10 +44,10 @@ func TestPortableCompactionSealsMultipleUnicodeArchivesAndRollsOver(t *testing.T
 		t.Fatal("ordered artifacts did not restore the exact removed transcript")
 	}
 	active := runtimectx.Materialize(compacted.Window)
-	requireEqual(t, active[len(active)-1].Content, seed.Entries[4].Message.Content, "protected current input changed")
+	requireTrue(t, reflect.DeepEqual(active[len(active)-1].Content, seed.Entries[4].Message.Content), "protected current input changed")
 	requireEqual(t, compacted.Window.Entries[len(compacted.Window.Entries)-1].SourceID, "u3", "protected source identity lost")
 	for _, message := range active {
-		if message.Role == model.RoleSystem && strings.Contains(message.Content, "FIRST_ANCHOR") {
+		if message.Role == model.RoleSystem && strings.Contains(model.TextValue(message.Content), "FIRST_ANCHOR") {
 			t.Fatal("untrusted archived text was promoted to system instructions")
 		}
 	}
@@ -73,7 +73,7 @@ func TestPortableCompactionRejectsDivergentSourcePrefix(t *testing.T) {
 	checkpoint, err := manager.Open(t.Context(), openRequest("u1", "a1", "u2"))
 	requireNoError(t, err)
 	messages := runtimectx.Materialize(checkpoint.Window)
-	messages[1].Content = "different source fact"
+	messages[1].Content = model.TextParts("different source fact")
 	_, err = manager.CompactPortable(runtimectx.PortableCompactionRequest{
 		Previous: checkpoint, RunID: "run-divergent", Messages: messages,
 		Policy: runtimectx.Policy{PreserveRecentTurns: 1},
@@ -98,7 +98,7 @@ func TestMillionTokenInputBoundaryIncludesOutputReserve(t *testing.T) {
 	for _, count := range []int64{995_904, 995_905} {
 		manager := runtimectx.NewManager(runtimectx.Dependencies{Counter: exactCounter{tokens: count}})
 		assessment, err := manager.AssessModelRequest(t.Context(), model.Request{
-			Messages: []model.Message{{Role: model.RoleUser, Content: "counted boundary input"}},
+			Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("counted boundary input")}},
 		}, runtimectx.ModelWindow{
 			ContextTokens: 1_000_000, ReservedOutputTokens: 4096,
 			TokenCountContext: runtimectx.TokenCountContext{Protocol: "openai_responses", Model: "MiniMax-M3.1-Flash-Preview"},
@@ -117,10 +117,10 @@ func TestPortableArchivePayloadBoundary(t *testing.T) {
 			manager := runtimectx.NewManager(runtimectx.Dependencies{})
 			seed := openRequest("u1", "a1", "u2")
 			// Content is omitted when empty; account for its JSON field before filling it.
-			seed.Entries[0].Message.Content = "x"
+			seed.Entries[0].Message.Content = model.TextParts("x")
 			oneJSON, marshalErr := json.Marshal(seed.Entries[0].Message)
 			requireNoError(t, marshalErr)
-			seed.Entries[0].Message.Content = strings.Repeat("x", runtimectx.MaxArtifactPayloadBytes-len(oneJSON)+1-2+extra)
+			seed.Entries[0].Message.Content = model.TextParts(strings.Repeat("x", runtimectx.MaxArtifactPayloadBytes-len(oneJSON)+1-2+extra))
 			checkpoint, openErr := manager.Open(t.Context(), seed)
 			requireNoError(t, openErr)
 			compacted, compactErr := manager.CompactPortable(runtimectx.PortableCompactionRequest{

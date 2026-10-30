@@ -32,7 +32,7 @@ type ProviderReplay struct {
 // Message is one provider-neutral transcript item consumed by a model.
 type Message struct {
 	Role           Role            `json:"role"`
-	Content        string          `json:"content"`
+	Content        []ContentPart   `json:"content"`
 	ToolCalls      []tools.Call    `json:"toolCalls,omitempty"`
 	ToolCallID     string          `json:"toolCallID,omitempty"`
 	ProviderReplay *ProviderReplay `json:"providerReplay,omitempty"`
@@ -275,6 +275,7 @@ func CloneMessages(values []Message) []Message {
 	result := make([]Message, len(values))
 	for index, message := range values {
 		result[index] = message
+		result[index].Content = CloneContentParts(message.Content)
 		result[index].ToolCalls = cloneToolCalls(message.ToolCalls)
 		result[index].ProviderReplay = CloneProviderReplay(message.ProviderReplay)
 	}

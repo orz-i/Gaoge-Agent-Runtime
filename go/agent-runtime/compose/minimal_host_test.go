@@ -200,7 +200,7 @@ func (model *minimalModel) Generate(_ context.Context, request runtimemodel.Requ
 		}}}, nil
 	}
 	last := request.Messages[len(request.Messages)-1]
-	if last.Role != runtimemodel.RoleTool || last.Content != `{"value":"42"}` {
+	if last.Role != runtimemodel.RoleTool || runtimemodel.TextValue(last.Content) != `{"value":"42"}` {
 		return runtimemodel.Response{}, agent.ErrInvalidModelResponse
 	}
 	return runtimemodel.Response{Content: "The answer is 42."}, nil

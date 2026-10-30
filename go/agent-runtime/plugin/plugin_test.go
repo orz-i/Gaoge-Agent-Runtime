@@ -137,14 +137,14 @@ func TestModelChainClonesRequestAcrossMiddlewareBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: "original"}}}
+	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("original")}}}
 	response, err := chain.Invoke(t.Context(), request, nil, func(_ context.Context, next model.Request, _ model.StreamSink) (model.Response, error) {
-		if next.Messages[0].Content != "mutated" {
+		if model.TextValue(next.Messages[0].Content) != "mutated" {
 			t.Fatalf("next request = %#v", next)
 		}
 		return model.Response{Content: "done"}, nil
 	})
-	if err != nil || response.Content != "done" || request.Messages[0].Content != "original" {
+	if err != nil || response.Content != "done" || model.TextValue(request.Messages[0].Content) != "original" {
 		t.Fatalf("response=%#v request=%#v err=%v", response, request, err)
 	}
 }
@@ -189,7 +189,7 @@ func (middleware modelMiddleware) Model(
 	emit model.StreamSink,
 	next plugin.ModelNext,
 ) (model.Response, error) {
-	request.Messages[0].Content = "mutated"
+	request.Messages[0].Content = model.TextParts("mutated")
 	return next(ctx, request, emit)
 }
 

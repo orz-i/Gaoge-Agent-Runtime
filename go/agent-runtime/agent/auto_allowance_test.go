@@ -39,13 +39,13 @@ func TestAutoAllowanceCompletesMultipleModelSegmentsWithoutManualGrant(t *testin
 	}
 	for _, modelRequest := range model.requests {
 		if len(modelRequest.Messages) == 0 || modelRequest.Messages[0].Role != runtimemodel.RoleSystem ||
-			!strings.Contains(modelRequest.Messages[0].Content, "Runtime renewable soft allowance") ||
-			strings.Contains(modelRequest.Messages[0].Content, "increase the hard limit") {
+			!strings.Contains(runtimemodel.TextValue(modelRequest.Messages[0].Content), "Runtime renewable soft allowance") ||
+			strings.Contains(runtimemodel.TextValue(modelRequest.Messages[0].Content), "increase the hard limit") {
 			t.Fatalf("soft guidance must not assert privilege: %#v", modelRequest.Messages)
 		}
 	}
 	for _, persisted := range view.Messages {
-		if strings.Contains(persisted.Content, "Runtime renewable soft allowance") {
+		if strings.Contains(runtimemodel.TextValue(persisted.Content), "Runtime renewable soft allowance") {
 			t.Fatal("ephemeral model guidance must not pollute persisted transcript")
 		}
 	}

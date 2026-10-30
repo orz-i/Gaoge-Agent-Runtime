@@ -150,6 +150,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	}
 	input := make([]any, 0, len(request.Messages))
 	for _, m := range request.Messages {
+		if err := model.ValidateMessage(m); err != nil {
+			return prepared{}, errors.Join(ErrUnsupported, err)
+		}
 		if m.ProviderReplay != nil {
 			if m.Role != model.RoleAssistant || m.ToolCallID != "" {
 				return prepared{}, ErrUnsupported
@@ -168,13 +171,29 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 			if len(m.ToolCalls) != 0 || m.ToolCallID != "" {
 				return prepared{}, ErrUnsupported
 			}
-			input = append(input, map[string]any{"role": string(m.Role), "content": m.Content})
+			text, textOnly := model.PlainText(m.Content)
+			if m.Role == model.RoleSystem {
+				if !textOnly {
+					return prepared{}, ErrUnsupported
+				}
+				input = append(input, map[string]any{"role": "system", "content": text})
+				continue
+			}
+			content, contentErr := inputContent(m.Content)
+			if contentErr != nil {
+				return prepared{}, contentErr
+			}
+			input = append(input, map[string]any{"role": "user", "content": content})
 		case model.RoleAssistant:
 			if m.ToolCallID != "" {
 				return prepared{}, ErrUnsupported
 			}
-			if m.Content != "" {
-				input = append(input, map[string]any{"role": "assistant", "content": m.Content})
+			text, textOnly := model.PlainText(m.Content)
+			if !textOnly {
+				return prepared{}, ErrUnsupported
+			}
+			if text != "" {
+				input = append(input, map[string]any{"role": "assistant", "content": text})
 			}
 			for _, call := range m.ToolCalls {
 				toolName := call.Name
@@ -192,7 +211,11 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 			if m.ToolCallID == "" || len(m.ToolCalls) != 0 {
 				return prepared{}, ErrUnsupported
 			}
-			input = append(input, map[string]any{"type": "function_call_output", "call_id": m.ToolCallID, "output": m.Content})
+			text, textOnly := model.PlainText(m.Content)
+			if !textOnly {
+				return prepared{}, ErrUnsupported
+			}
+			input = append(input, map[string]any{"type": "function_call_output", "call_id": m.ToolCallID, "output": text})
 		default:
 			return prepared{}, ErrUnsupported
 		}

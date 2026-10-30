@@ -373,7 +373,7 @@ func (model *capabilityToolModel) Generate(_ context.Context, request runtimemod
 		arguments = json.RawMessage(`{"commandID":"workflow","goal":"child workflow","arguments":{"definitionReference":{"id":"fixture-workflow","revision":1}}}`)
 		if model.calls == invocationCall {
 			last := request.Messages[len(request.Messages)-1]
-			if last.Role != runtimemodel.RoleTool || last.ToolCallID != "invalid-revision" || !strings.Contains(last.Content, "/definitionReference/revision") || !strings.Contains(last.Content, "integer") {
+			if last.Role != runtimemodel.RoleTool || last.ToolCallID != "invalid-revision" || !strings.Contains(runtimemodel.TextValue(last.Content), "/definitionReference/revision") || !strings.Contains(runtimemodel.TextValue(last.Content), "integer") {
 				model.t.Fatalf("missing actionable type correction: %#v", last)
 			}
 		}
@@ -392,7 +392,7 @@ func (model *capabilityToolModel) Generate(_ context.Context, request runtimemod
 		}}}, nil
 	}
 	last := request.Messages[len(request.Messages)-1]
-	if last.Role != runtimemodel.RoleTool || last.ToolCallID != "invoke-workflow" || !strings.Contains(last.Content, "child complete") {
+	if last.Role != runtimemodel.RoleTool || last.ToolCallID != "invoke-workflow" || !strings.Contains(runtimemodel.TextValue(last.Content), "child complete") {
 		model.t.Fatalf("resumed capability transcript = %#v", last)
 	}
 	return runtimemodel.Response{Content: "root complete"}, nil

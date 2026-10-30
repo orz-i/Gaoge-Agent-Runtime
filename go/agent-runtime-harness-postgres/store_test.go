@@ -87,7 +87,7 @@ func TestStoreConcurrentContextOwnerCommitPersistsDetachedBranch(t *testing.T) {
 			ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
 			SourcePath: []string{sourceID}, Entries: []runtimecontext.Entry{{
 				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: turnID,
-				Message: model.Message{Role: model.RoleUser, Content: content},
+				Message: model.Message{Role: model.RoleUser, Content: model.TextParts(content)},
 			}}, SourceDelta: true, Previous: &base,
 		})
 		if openErr != nil {
@@ -182,7 +182,7 @@ func seedUnrelatedContextCheckpoints(
 			ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
 			SourcePath: []string{sourceID}, Entries: []runtimecontext.Entry{{
 				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: "turn-" + sourceID,
-				Message: model.Message{Role: model.RoleUser, Content: sourceID},
+				Message: model.Message{Role: model.RoleUser, Content: model.TextParts(sourceID)},
 			}},
 		})
 		if err != nil {
@@ -202,7 +202,7 @@ func newBranchContextCheckpoint(
 		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
 		SourcePath: []string{testContextBranchChildID}, Entries: []runtimecontext.Entry{{
 			ID: "entry-" + testContextBranchChildID, SourceID: testContextBranchChildID, TurnID: "turn-" + testContextBranchChildID,
-			Message: model.Message{Role: model.RoleAssistant, Content: "branch child"},
+			Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("branch child")},
 		}}, SourceDelta: true, Previous: &base,
 	})
 	if err != nil {
@@ -370,7 +370,7 @@ func TestStoreFailedContextCommitDoesNotAdvanceHeadOrPersistCheckpoint(t *testin
 	entries := runtimecontext.CloneEntries(base.Window.Entries)
 	entries = append(entries, runtimecontext.Entry{
 		ID: "entry-context-cas-next", SourceID: "message-cas-next", TurnID: "turn-cas-next",
-		Message: model.Message{Role: model.RoleAssistant, Content: "next context"},
+		Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("next context")},
 	})
 	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
 		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint,
@@ -406,7 +406,7 @@ func TestStoreContextCommitRejectsCrossLineageParent(t *testing.T) {
 		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
 		SourcePath: []string{"message-other-lineage"}, Entries: []runtimecontext.Entry{{
 			ID: "entry-other-lineage", SourceID: "message-other-lineage", TurnID: "turn-other-lineage",
-			Message: model.Message{Role: model.RoleUser, Content: "other lineage"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("other lineage")},
 		}},
 	})
 	if err != nil {
@@ -419,7 +419,7 @@ func TestStoreContextCommitRejectsCrossLineageParent(t *testing.T) {
 		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
 		SourcePath: []string{"message-other-child"}, Entries: []runtimecontext.Entry{{
 			ID: "entry-other-child", SourceID: "message-other-child", TurnID: "turn-other-child",
-			Message: model.Message{Role: model.RoleAssistant, Content: "other child"},
+			Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("other child")},
 		}}, SourceDelta: true, Previous: &other,
 	})
 	if err != nil {
@@ -452,7 +452,7 @@ func TestStoreFindContextCheckpointForPathChoosesNearestSourceAlignedAncestor(t 
 	branchA1, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
 		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
 		SourcePath: []string{"a1"}, Entries: []runtimecontext.Entry{{
-			ID: "entry-a1", SourceID: "a1", TurnID: "turn-a1", Message: model.Message{Role: model.RoleAssistant, Content: "a1"},
+			ID: "entry-a1", SourceID: "a1", TurnID: "turn-a1", Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("a1")},
 		}}, SourceDelta: true, Previous: &base,
 	})
 	if err != nil {
@@ -462,7 +462,7 @@ func TestStoreFindContextCheckpointForPathChoosesNearestSourceAlignedAncestor(t 
 	branchA2, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
 		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
 		SourcePath: []string{"a2"}, Entries: []runtimecontext.Entry{{
-			ID: "entry-a2", SourceID: "a2", TurnID: "turn-a2", Message: model.Message{Role: model.RoleUser, Content: "a2"},
+			ID: "entry-a2", SourceID: "a2", TurnID: "turn-a2", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("a2")},
 		}}, SourceDelta: true, Previous: &branchA1,
 	})
 	if err != nil {
@@ -472,7 +472,7 @@ func TestStoreFindContextCheckpointForPathChoosesNearestSourceAlignedAncestor(t 
 
 	runtimeTail, err := manager.Capture(t.Context(), runtimecontext.CaptureRequest{
 		Previous: branchA2, StaticFingerprint: branchA2.StaticFingerprint, RunID: "run-a2",
-		Messages: append(runtimecontext.Materialize(branchA2.Window), model.Message{Role: model.RoleAssistant, Content: "runtime tail"}),
+		Messages: append(runtimecontext.Materialize(branchA2.Window), model.Message{Role: model.RoleAssistant, Content: model.TextParts("runtime tail")}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -757,7 +757,7 @@ func newContextCheckpoint(t *testing.T, scopeID string) runtimecontext.Checkpoin
 		SourcePath: []string{testContextBaseSourceID}, Instructions: "sealed",
 		Entries: []runtimecontext.Entry{{
 			ID: "entry-pg-" + scopeID, SourceID: testContextBaseSourceID, TurnID: "turn-pg",
-			Message: model.Message{Role: model.RoleUser, Content: "postgres context"},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("postgres context")},
 		}},
 	})
 	if err != nil {

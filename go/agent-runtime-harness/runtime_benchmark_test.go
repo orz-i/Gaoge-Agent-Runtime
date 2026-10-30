@@ -57,7 +57,7 @@ func BenchmarkHarnessContextPathLookupMemory(b *testing.B) {
 		sourceID := "source-" + strconv.Itoa(index)
 		entry := runtimecontext.Entry{
 			ID: "entry-" + strconv.Itoa(index), SourceID: sourceID,
-			Message: model.Message{Role: model.RoleUser, Content: "message-" + strconv.Itoa(index)},
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("message-" + strconv.Itoa(index))},
 		}
 		request := runtimecontext.OpenRequest{
 			ScopeID: scopeID, StaticFingerprint: fingerprint,

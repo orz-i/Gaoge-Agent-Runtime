@@ -119,8 +119,8 @@ func (model *schemaCorrectionModel) Generate(
 			} `json:"error"`
 		}
 		if last.Role != runtimemodel.RoleTool || last.ToolCallID != "call_schema_bad" ||
-			json.Unmarshal([]byte(last.Content), &payload) != nil || !payload.Retryable || payload.Error.Code != "tool.arguments_schema" {
-			model.t.Fatalf("schema correction payload = %#v content=%q", last, last.Content)
+			json.Unmarshal([]byte(runtimemodel.TextValue(last.Content)), &payload) != nil || !payload.Retryable || payload.Error.Code != "tool.arguments_schema" {
+			model.t.Fatalf("schema correction payload = %#v content=%q", last, runtimemodel.TextValue(last.Content))
 		}
 		return runtimemodel.Response{ToolCalls: []tools.Call{{
 			ID: callGood, ToolKey: publishToolKey, Arguments: json.RawMessage(`{"title":"fixed"}`),
@@ -248,7 +248,7 @@ func (model *requiredPublisherModel) Generate(
 	case 2:
 		guidanceFound := false
 		for _, message := range request.Messages {
-			if message.Role == runtimemodel.RoleSystem && strings.Contains(message.Content, "Completion rejected") {
+			if message.Role == runtimemodel.RoleSystem && strings.Contains(runtimemodel.TextValue(message.Content), "Completion rejected") {
 				guidanceFound = true
 			}
 		}
@@ -359,10 +359,10 @@ func (model *correctingCompletionModel) Generate(
 	}
 	var sawInvalid, sawGuidance bool
 	for _, message := range request.Messages {
-		if message.Role == runtimemodel.RoleAssistant && message.Content == `{"ok":true,}` {
+		if message.Role == runtimemodel.RoleAssistant && runtimemodel.TextValue(message.Content) == `{"ok":true,}` {
 			sawInvalid = true
 		}
-		if message.Role == runtimemodel.RoleSystem && strings.Contains(message.Content, "return valid JSON without trailing commas") {
+		if message.Role == runtimemodel.RoleSystem && strings.Contains(runtimemodel.TextValue(message.Content), "return valid JSON without trailing commas") {
 			sawGuidance = true
 		}
 	}
@@ -459,7 +459,7 @@ func (model *repeatedReadModel) Generate(
 	}
 	guarded := false
 	for _, message := range request.Messages {
-		if message.Role == runtimemodel.RoleSystem && strings.Contains(message.Content, "same successful results twice") {
+		if message.Role == runtimemodel.RoleSystem && strings.Contains(runtimemodel.TextValue(message.Content), "same successful results twice") {
 			guarded = true
 		}
 	}
@@ -1115,7 +1115,7 @@ func correctionRetryResponse(t *testing.T, request runtimemodel.Request) (runtim
 	if toolResult.Role != runtimemodel.RoleTool || toolResult.ToolCallID != "call_bad" {
 		t.Fatalf("correction tool result = %#v", toolResult)
 	}
-	assertRecoverableCorrectionPayload(t, toolResult.Content)
+	assertRecoverableCorrectionPayload(t, runtimemodel.TextValue(toolResult.Content))
 	return runtimemodel.Response{ToolCalls: []tools.Call{{
 		ID: callGood, ToolKey: publishToolKey,
 		Arguments: json.RawMessage(`{"title":"fixed"}`),
@@ -1395,7 +1395,7 @@ func transcriptCompletionResponse(t *testing.T, request runtimemodel.Request) (r
 func assertAssistantToolBatch(t *testing.T, assistant runtimemodel.Message) {
 	t.Helper()
 	if assistant.Role != runtimemodel.RoleAssistant ||
-		assistant.Content != "I will inspect the frozen manifest and current units first." ||
+		runtimemodel.TextValue(assistant.Content) != "I will inspect the frozen manifest and current units first." ||
 		len(assistant.ToolCalls) != 2 ||
 		assistant.ToolCalls[0].ID != callOne || assistant.ToolCalls[0].ToolKey != manifestToolKey ||
 		assistant.ToolCalls[1].ID != callTwo || assistant.ToolCalls[1].ToolKey != manifestToolKey {
@@ -1408,7 +1408,7 @@ func assertOrderedToolResults(t *testing.T, messages []runtimemodel.Message) {
 	for index, callID := range []string{callOne, callTwo} {
 		toolResult := messages[index]
 		if toolResult.Role != runtimemodel.RoleTool || toolResult.ToolCallID != callID ||
-			toolResult.Content != `{"storyID":"story_1"}` {
+			runtimemodel.TextValue(toolResult.Content) != `{"storyID":"story_1"}` {
 			t.Fatalf("tool result turn %d = %#v", index, toolResult)
 		}
 	}

@@ -81,7 +81,7 @@ func TestSessionFacadeRestartsAcrossTurnsWithFrozenContextProjection(t *testing.
 		t.Fatalf("first prompt: status=%s err=%v requests=%d", one.Turn.Status, err, len(firstModel.requests))
 	}
 	assertPersistedModelHash(t, firstRuntime, one, firstModel.requests[0])
-	if len(firstModel.requests[0].Messages) != 2 || firstModel.requests[0].Messages[0].Content != "answer accurately\n\nworkspace instruction" {
+	if len(firstModel.requests[0].Messages) != 2 || model.TextValue(firstModel.requests[0].Messages[0].Content) != "answer accurately\n\nworkspace instruction" {
 		t.Fatalf("frozen first window: %+v", firstModel.requests[0].Messages)
 	}
 	secondModel := &multiContextCaptureModel{}
@@ -92,7 +92,7 @@ func TestSessionFacadeRestartsAcrossTurnsWithFrozenContextProjection(t *testing.
 	}
 	assertPersistedModelHash(t, secondRuntime, two, secondModel.requests[0])
 	messages := secondModel.requests[0].Messages
-	if len(messages) != 4 || messages[1].Content != "first prompt" || messages[2].Content != "answer" || messages[3].Content != "second prompt" {
+	if len(messages) != 4 || model.TextValue(messages[1].Content) != "first prompt" || model.TextValue(messages[2].Content) != "answer" || model.TextValue(messages[3].Content) != "second prompt" {
 		t.Fatalf("continued conversation was not projected: %+v", messages)
 	}
 	// Context source prefixes advance without a new generation; no second

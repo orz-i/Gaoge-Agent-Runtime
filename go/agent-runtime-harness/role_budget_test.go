@@ -193,7 +193,7 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 		if call.Model != "specialist-model" {
 			continue
 		}
-		if len(call.Tools) != 1 || call.Tools[0].Key != roleEvidenceTool || !strings.Contains(call.Messages[0].Content, "Quote the evidence.") {
+		if len(call.Tools) != 1 || call.Tools[0].Key != roleEvidenceTool || !strings.Contains(model.TextValue(call.Messages[0].Content), "Quote the evidence.") {
 			t.Fatalf("role escaped frozen configuration: %+v", call)
 		}
 	}

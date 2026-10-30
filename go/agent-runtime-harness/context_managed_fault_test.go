@@ -137,7 +137,7 @@ func TestManagedContextResumeAfterRolloverBeforeModelIntentCommit(t *testing.T) 
 		t.Fatalf("resume failed: status=%s err=%v calls=%d", completed.Run.Status, err, len(freshModel.requests))
 	}
 	for _, msg := range freshModel.requests[0].Messages {
-		if strings.Contains(msg.Content, original) {
+		if strings.Contains(model.TextValue(msg.Content), original) {
 			t.Fatal("committed rollover re-expanded archived history after crash")
 		}
 	}

@@ -42,8 +42,8 @@ func TestContextAndSemanticMemoryAreFrozenInModelIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(view.Messages) != 2 || view.Messages[0].Role != runtimemodel.RoleUser ||
-		view.Messages[0].Content != "answer from augmented context" ||
-		view.Messages[1].Role != runtimemodel.RoleAssistant || view.Messages[1].Content != pipelineDoneContent {
+		runtimemodel.TextValue(view.Messages[0].Content) != "answer from augmented context" ||
+		view.Messages[1].Role != runtimemodel.RoleAssistant || runtimemodel.TextValue(view.Messages[1].Content) != pipelineDoneContent {
 		t.Fatalf("middleware context leaked into durable Agent state: %#v", view.Messages)
 	}
 }
@@ -52,7 +52,7 @@ func TestContextAndSemanticMemoryAreFrozenInModelIntent(t *testing.T) {
 // than a dispatch-only prompt mutation invisible to recovery.
 func prependModelInstruction(content string) agent.ModelRequestPreparer {
 	return func(_ context.Context, request runtimemodel.Request) (runtimemodel.Request, error) {
-		request.Messages = append([]runtimemodel.Message{{Role: runtimemodel.RoleSystem, Content: content}}, request.Messages...)
+		request.Messages = append([]runtimemodel.Message{{Role: runtimemodel.RoleSystem, Content: runtimemodel.TextParts(content)}}, request.Messages...)
 		return request, nil
 	}
 }
@@ -67,8 +67,8 @@ func (provider *contextAwareModel) Generate(
 	if len(request.Messages) != 3 {
 		provider.t.Fatalf("augmented request messages = %#v", request.Messages)
 	}
-	if request.Messages[0].Role != runtimemodel.RoleSystem || request.Messages[0].Content != testMemoryMessage ||
-		request.Messages[1].Role != runtimemodel.RoleSystem || request.Messages[1].Content != testContextMessage ||
+	if request.Messages[0].Role != runtimemodel.RoleSystem || runtimemodel.TextValue(request.Messages[0].Content) != testMemoryMessage ||
+		request.Messages[1].Role != runtimemodel.RoleSystem || runtimemodel.TextValue(request.Messages[1].Content) != testContextMessage ||
 		request.Messages[2].Role != runtimemodel.RoleUser {
 		provider.t.Fatalf("unexpected augmented request: %#v", request.Messages)
 	}

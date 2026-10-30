@@ -33,7 +33,7 @@ func TestStructuredOutputTruncationDistinctFromRefusal(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"id": "truncated", "stop_reason": "max_tokens",
 			"content": []any{map[string]any{"type": "text", "text": "{"}}})
 	})
-	req := model.Request{Model: "claude-sonnet-5-5", OutputContract: outputContract, Messages: []model.Message{{Role: model.RoleUser, Content: "answer"}}}
+	req := model.Request{Model: "claude-sonnet-5-5", OutputContract: outputContract, Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}}}
 	_, err := client.Generate(t.Context(), req)
 	if !errors.Is(err, anthropic.ErrIncomplete) {
 		t.Fatalf("truncated JSON was not classified: %v", err)

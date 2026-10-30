@@ -12,7 +12,12 @@ func TestDispatchModelRequestHasOnlyMonotonicPermissions(t *testing.T) {
 	base := model.Request{
 		RunID: "frozen-run", InvocationID: "frozen-invocation", Model: "provider/model",
 		ModelOptions: json.RawMessage(`{"temperature":0.5}`),
-		Messages:     []model.Message{{Role: model.RoleUser, Content: "question"}},
+		Messages: []model.Message{{Role: model.RoleUser, Content: []model.ContentPart{
+			{Kind: model.ContentText, Text: "question"},
+			{Kind: model.ContentImage, MediaType: "image/png", Source: &model.MediaSource{
+				Kind: model.MediaSourceURL, URL: "https://assets.example.test/frozen.png",
+			}},
+		}}},
 		Tools: []tools.Definition{
 			{Key: "tool.one", Name: "tool_one", InputSchema: json.RawMessage(`{"type":"object"}`)},
 			{Key: "tool.two", Name: "tool_two", InputSchema: json.RawMessage(`{"type":"object"}`)},
@@ -58,7 +63,16 @@ func TestDispatchModelRequestHasOnlyMonotonicPermissions(t *testing.T) {
 			r.HostedToolCallLimit = &limit
 			r.RequireToolCall = false
 		}, wantAccept: true},
-		{name: "frozen_message_rewrite", change: func(r *model.Request) { r.Messages[0].Content = "not frozen" }},
+		{name: "frozen_message_rewrite", change: func(r *model.Request) { r.Messages[0].Content = model.TextParts("not frozen") }},
+		{name: "frozen_media_url_change", change: func(r *model.Request) {
+			r.Messages[0].Content[1].Source.URL = "https://assets.example.test/forged.png"
+		}},
+		{name: "frozen_media_type_change", change: func(r *model.Request) {
+			r.Messages[0].Content[1].MediaType = "image/jpeg"
+		}},
+		{name: "frozen_media_part_reorder", change: func(r *model.Request) {
+			r.Messages[0].Content[0], r.Messages[0].Content[1] = r.Messages[0].Content[1], r.Messages[0].Content[0]
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			frozen := model.CloneRequest(base)
@@ -101,7 +115,7 @@ func TestDispatchModelRequestCanIntroduceOnlyBoundedLimits(t *testing.T) {
 
 func TestPreIntentProjectionCannotExpandCatalogAuthority(t *testing.T) {
 	base := model.CloneRequest(model.Request{
-		RunID: "pre-intent-run", Model: "provider/model", Messages: []model.Message{{Role: model.RoleUser, Content: "question"}},
+		RunID: "pre-intent-run", Model: "provider/model", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("question")}},
 		Tools:       []tools.Definition{{Key: "fixed", Name: "fixed", InputSchema: json.RawMessage(`{"type":"object"}`)}},
 		HostedTools: []model.HostedTool{{Key: "native", DefinitionVersion: "1", Target: json.RawMessage(`{"allowed":true}`)}},
 	})
@@ -112,7 +126,7 @@ func TestPreIntentProjectionCannotExpandCatalogAuthority(t *testing.T) {
 	}{
 		{name: "unchanged", want: true},
 		{name: "project_history_and_schema", change: func(r *model.Request) {
-			r.Messages = append([]model.Message{{Role: model.RoleSystem, Content: "trusted history"}}, r.Messages...)
+			r.Messages = append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts("trusted history")}}, r.Messages...)
 			r.Tools[0].Description = "Visible frozen description"
 			r.Tools[0].InputSchema = json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 		}, want: true},

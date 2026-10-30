@@ -416,7 +416,7 @@ func contextSeed(instructions string, entries ...runtimecontext.Entry) *harness.
 func contextEntry(id, turnID string, role model.Role, content string, required bool) runtimecontext.Entry {
 	return runtimecontext.Entry{
 		ID: "entry-" + id, SourceID: id, TurnID: turnID, Required: required,
-		Message: model.Message{Role: role, Content: content},
+		Message: model.Message{Role: role, Content: model.TextParts(content)},
 	}
 }
 
@@ -439,7 +439,7 @@ func assertLiveToolTranscript(t *testing.T, messages []model.Message) {
 	if len(messages) != 6 || messages[4].Role != model.RoleAssistant ||
 		len(messages[4].ToolCalls) != 1 || messages[5].Role != model.RoleTool ||
 		messages[5].ToolCallID != "call-list-units" ||
-		messages[5].Content != `{"items":[{"id":"unit_placeholder","revision":1}]}` {
+		model.TextValue(messages[5].Content) != `{"items":[{"id":"unit_placeholder","revision":1}]}` {
 		t.Fatalf("live Tool transcript missing after context checkpoint: %#v", messages)
 	}
 }
@@ -459,7 +459,7 @@ func assertContextMessages(t *testing.T, messages []model.Message) {
 		t.Fatalf("context message count = %d, want %d: %#v", len(messages), len(want), messages)
 	}
 	for index, expected := range want {
-		if messages[index].Role != expected.role || messages[index].Content != expected.text {
+		if messages[index].Role != expected.role || model.TextValue(messages[index].Content) != expected.text {
 			t.Fatalf("context message[%d] = %#v, want role=%s text=%q", index, messages[index], expected.role, expected.text)
 		}
 	}
