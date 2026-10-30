@@ -43,9 +43,11 @@ type RecoverableCallError struct {
 	AllowCompletion bool
 }
 
-// RetryableExecutionError marks a transient executor failure that is safe to
-// retry with the same stable ExecutionRequest.Call.ID. Executors must only use
-// it when repeating the call cannot duplicate an externally visible effect.
+// RetryableExecutionError marks a transient executor failure that the
+// Handler considers safe to retry. The type alone MUST NOT authorize
+// another physical call: Agent also requires an exact original-Call-ID
+// rejected/no-effect receipt from the trusted Handler. An ordinary remote
+// error, timeout or unreadable outcome does not establish that guarantee.
 type RetryableExecutionError struct {
 	Cause error
 }

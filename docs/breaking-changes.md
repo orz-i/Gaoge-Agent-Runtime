@@ -2,6 +2,36 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — PR #77 independent retry and receipt-disposition hard cut (beta.24 candidate)
+
+**Retryable is not a dispatch grant.** A Tool Handler's
+`NewRetryableExecutionError` no longer authorizes another physical
+Tool/Middleware invocation by itself. The previous two-attempt default
+could duplicate an already-committed remote operation in the *same*
+logical Tool execution, before any restart. An explicit original-Call-ID
+`ReceiptDispositionRejected` no-effect result, paired with the typed
+retryable error (for example, `tools.RetryableNoEffectResult(callID, err)`),
+is required before each bounded physical retry. Unknown outcomes
+retain the Agent `ToolDispatchID`. A shared Tool budget may deny a second
+same-ID attempt while its first dispatched reservation remains Held;
+no speculative quota reset or synthetic second effect permit is introduced.
+
+**Closed Tool terminal receipt statuses.** Success results now accept only
+`read`, `committed` and `pending`. An explicit `rejected` is valid
+*only* alongside a trusted typed model-correctable or retryable no-effect
+error with the exact original Call ID. Unknown, missing, unrelated, or
+error-free `rejected` dispositions cannot be treated as successful
+completion or budget settlement. A malformed receipt leaves a
+dispatched Tool unresolved for trusted read-only reconciliation.
+
+**Migration:** Any custom Tool relying on a vendor-specific receipt
+disposition or bare `RetryableExecutionError` must update to the closed
+four-state receipt contract. Do not introduce a compatibility map from
+arbitrary vendor strings, relax Call-ID matching, or automatically
+reexecute old pending Tool identities. No new SQL Schema, Kernel
+execution state, second Tool ledger or retry permit is introduced.
+See [independent PR #77 correction audit](audits/2026-10-30-pr77-independent-tool-retry-disposition.md).
+
 ## 2026-10-30 — Uniform native Tool effect intent and original-ID receipts (beta.24 candidate)
 
 **Breaking Tool crash contract:** The direct Agent (without `RunExecution`)

@@ -17,6 +17,16 @@ Redis or memory generation stream adapter.
 
 ## Experimental direct-Agent execution lease (Stage 2B)
 
+**Tool retry/disposition contract:** Even an explicit
+`tools.NewRetryableExecutionError` requires a trusted, original-Call-ID
+`rejected` no-effect receipt before another physical Tool call.
+Use `tools.RetryableNoEffectResult(callID, err)` only when the Handler
+proves it did not send a remote effect. A normal Tool result must have
+`read`, `committed` or `pending` disposition; an error-free `rejected`
+is invalid. A previously dispatched shared budget reservation may
+still decline a same-ID retry. Unknown physical outcomes require
+authoritative read-only reconciliation rather than a second send.
+
 **Tool durability in every execution mode:** An external Tool effect now
 commits its exact original Call ID as an Agent dispatch intent **before**
 the Handler runs, even when `RunExecution` is not configured. Missing or

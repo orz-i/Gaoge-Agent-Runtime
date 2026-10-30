@@ -41,6 +41,24 @@ re-enter the physical Handler on a later call.
    Direct typed errors without this proof remain `ErrToolOutcomeUnknown`,
    retaining the committed intent. Pre-dispatch JSON Schema rejection
    remains model-correctable without physical execution.
+**Independent PR #77 hard-cut correction:** The same rule covers
+`RetryableExecutionError`, not only model-correctable refusal. A transient
+error **alone** cannot grant another physical Tool attempt even when the
+execution policy says `MaxAttempts > 1`. Only an exact original-ID terminal
+`rejected` no-effect receipt, returned with the typed retryable error, can
+authorize a bounded same-Call retry (`tools.RetryableNoEffectResult`).
+When a shared budget already holds a dispatched reservation it still cannot
+be reentered without existing authoritative settlement; safe retry may
+therefore be denied by the Host budget rather than minting a second
+effect-grant protocol.
+
+A successful Tool result must use exactly `read`, `committed`, or `pending`.
+`rejected` must appear **only with** a trusted typed no-effect error.
+Empty, unknown, vendor-defined or error-free `rejected` dispositions
+are malformed and never settle the Agent or shared Tool budget. A Provider
+or custom Tool needing additional status detail must put it into its
+validated Tool `Content`/Host receipt, not invent a new dispatch disposition.
+
 3. **Shared Tool budget follows the same evidence.** An already dispatched,
    unsettled `tool:<RunID>:<CallID>` reservation is not a second grant.
    It stays Held and disallows re-entry; only a trusted exact-ID terminal

@@ -40,9 +40,10 @@ var (
 	ErrToolPanic    = errors.New("agent tool invocation panic")
 )
 
-// CallPolicy bounds one class of external calls. MaxAttempts applies only to
-// explicitly retryable failures. Tool retries are opt-in because a timeout does
-// not prove that an external side effect did not commit.
+// CallPolicy bounds one class of external calls. Tool MaxAttempts is an
+// upper bound, not a permission to retry: even RetryableExecutionError
+// requires an original-Call-ID terminal no-effect attestation between
+// physical invocations. Timeout/unknown remote results cannot be retried.
 type CallPolicy struct {
 	Timeout        time.Duration
 	MaxAttempts    int
