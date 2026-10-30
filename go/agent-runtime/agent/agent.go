@@ -1662,6 +1662,17 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 			state.ToolDispatchID = ""
 			return runner.handlePendingToolExecutionError(ctx, snapshot, state, err)
 		}
+		if tools.ValidRetryableNoEffectReceipt(result, err, execution.call.ID) {
+			// The trusted Handler proved that no external operation
+			// occurred, but exhausted all bounded safe retries. The CAS
+			// terminalizes this failed Run without pretending a remote
+			// write completed or leaving a false unknown effect.
+			state := execution.state
+			state.ToolDispatchID = ""
+			failed, failErr := runner.fail(ctx, snapshot, state, "agent.tool_retry_exhausted",
+				errors.Join(ErrToolFailure, err))
+			return failed, false, failErr
+		}
 		// Any other error may follow a committed remote mutation. Keep
 		// its exact durable Call ID until read-only reconciliation.
 		return snapshot, true, errors.Join(ErrToolOutcomeUnknown, err)

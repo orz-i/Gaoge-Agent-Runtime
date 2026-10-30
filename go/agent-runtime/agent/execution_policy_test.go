@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -135,7 +136,8 @@ func TestToolPolicyRetriesOnlyExplicitRetryableFailures(t *testing.T) {
 	var calls atomic.Int32
 	result, attempts, err := runner.executeToolWithPolicy(t.Context(), "call-1", nil, func(context.Context) (tools.ExecutionResult, error) {
 		if calls.Add(1) == 1 {
-			return tools.ExecutionResult{}, tools.NewRetryableExecutionError(errors.New("temporary"))
+			return tools.RetryableNoEffectResult("call-1",
+				tools.NewRetryableExecutionError(errors.New("temporary")))
 		}
 		return tools.ExecutionResult{Receipt: tools.Receipt{ExecutionID: "call-1", Disposition: "committed"}}, nil
 	})
@@ -379,5 +381,54 @@ func (provider *concurrencyPolicyModel) Generate(ctx context.Context, _ model.Re
 		return model.Response{}, ctx.Err()
 	case <-time.After(15 * time.Millisecond):
 		return model.Response{Content: "ok"}, nil
+	}
+}
+
+// A typed retryable Tool error is not a physical no-effect receipt. An
+// external Handler can commit a write and THEN return "retryable". A second
+// physical call within the same execution policy would duplicate the effect
+// even though the durable ToolDispatchID prevents later Resume from replaying.
+func TestToolPolicyRetryableErrorWithoutNoEffectReceiptNeverReenters(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewRunner(Dependencies{
+		Runtime: runtime, Model: fixedPolicyModel{},
+		Execution: ExecutionPolicy{Tool: CallPolicy{
+			Timeout: time.Second, MaxAttempts: 3,
+			InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond, MaxConcurrency: 1,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct{ name, receiptID, disposition string }{
+		{name: "no-receipt"},
+		{name: "wrong-id", receiptID: "other-call", disposition: tools.ReceiptDispositionRejected},
+		{name: "no-proof", receiptID: "effect", disposition: "committed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			physical := 0
+			result, attempts, callErr := runner.executeToolWithPolicy(t.Context(), "effect", nil,
+				func(context.Context) (tools.ExecutionResult, error) {
+					physical++
+					if physical > 1 {
+						return tools.ExecutionResult{
+							Content: json.RawMessage(`{}`),
+							Receipt: tools.Receipt{ExecutionID: "effect", Disposition: "committed"},
+						}, nil
+					}
+					return tools.ExecutionResult{
+						Content: json.RawMessage(`{}`),
+						Receipt: tools.Receipt{ExecutionID: test.receiptID, Disposition: test.disposition},
+					}, tools.NewRetryableExecutionError(errors.New("remote write may have committed before failed response"))
+				})
+			if physical != 1 || attempts != 1 || !tools.IsRetryableExecutionError(callErr) ||
+				result.Receipt.Disposition == "committed" {
+				t.Fatalf("typed retryable error caused unverified second physical Tool call: attempts=%d physical=%d result=%+v err=%v",
+					attempts, physical, result, callErr)
+			}
+		})
 	}
 }

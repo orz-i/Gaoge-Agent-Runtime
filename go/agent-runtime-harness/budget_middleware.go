@@ -327,6 +327,14 @@ func (middleware *BudgetMiddleware) Tool(ctx context.Context, invocation plugin.
 	}
 	result, callErr := next(ctx)
 	accountingCtx := context.WithoutCancel(ctx)
+	// Unknown or unrecognized positive receipts are not an authority
+	// to charge a terminal Tool or release a held external effect.
+	if callErr == nil {
+		if receiptErr := tools.ValidateExecutionResult(result); receiptErr != nil {
+			updated, suspendErr := middleware.coordinator().Suspend(accountingCtx, ledger.ID, id)
+			return result, errors.Join(receiptErr, suspendErr, middleware.project(accountingCtx, updated))
+		}
+	}
 	if (callErr != nil && !tools.ValidRecoverableNoEffectReceipt(result, callErr, invocation.Request.Call.ID)) ||
 		result.Receipt.Disposition == tools.ReceiptDispositionPending {
 		// A bare recoverable error is not a budget receipt. Only exact

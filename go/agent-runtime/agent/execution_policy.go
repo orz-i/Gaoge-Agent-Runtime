@@ -462,15 +462,20 @@ func (runner *Runner) executeToolWithPolicy(
 			}
 			return tools.ExecutionResult{}, attempt, errors.Join(ErrToolTimeout, context.DeadlineExceeded)
 		}
-		// A trusted Handler's exact original-ID rejection is the one
-		// terminal no-effect receipt that can accompany a correctable error.
-		// Do not discard it when crossing the timeout/retry policy boundary.
-		// An ordinary error (or a mismatched receipt) remains ambiguous.
+		// Both correction and physical retry require explicit original-ID
+		// proof that the trusted Handler performed no external effect.
+		// Neither RecoverableCallError nor RetryableExecutionError alone
+		// grants another physical Tool invocation.
 		if tools.ValidRecoverableNoEffectReceipt(result, callErr, identity) {
 			return result, attempt, callErr
 		}
-		if !tools.IsRetryableExecutionError(callErr) || attempt >= policy.MaxAttempts {
+		if !tools.ValidRetryableNoEffectReceipt(result, callErr, identity) {
 			return tools.ExecutionResult{}, attempt, callErr
+		}
+		if attempt >= policy.MaxAttempts {
+			// No remote effect occurred, but the bounded retry budget is
+			// exhausted. Return the definitive no-effect receipt to Agent.
+			return result, attempt, callErr
 		}
 		if err := waitRetry(ctx, retryDelay(policy, attempt, identity)); err != nil {
 			return tools.ExecutionResult{}, attempt, err
