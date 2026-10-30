@@ -97,9 +97,25 @@ type InteractionResponseResult struct {
 	OutputRefs []HostRef
 }
 
+// This unexported execution-scope witness exists only after the host business
+// callback returned successfully. It lets the same call finish its Runtime
+// continuation while unrelated Refresh/Resume callers remain fail-closed.
+// It is never persisted or reconstructed from an ambiguous external result.
+type completedInteractionCallbackKey struct{}
+type completedInteractionCallback struct {
+	turnID       string
+	invocationID string
+}
+
+func interactionCallbackConfirmed(ctx context.Context, turnID, invocationID string) bool {
+	value, ok := ctx.Value(completedInteractionCallbackKey{}).(completedInteractionCallback)
+	return ok && value.turnID == turnID && value.invocationID == invocationID
+}
+
 // InteractionResponseHandler persists the application-owned meaning of one
 // resolved generic response. Implementations must be idempotent by Interaction
-// identity and response because crash recovery can invoke the handler again.
+// identity and response. An ambiguous outcome remains blocked until the host
+// reconciles it; an error alone never proves a side effect did not occur.
 type InteractionResponseHandler interface {
 	HandleInteractionResponse(context.Context, InteractionResponseContext) (InteractionResponseResult, error)
 }
@@ -141,6 +157,16 @@ type WorkflowWaitInteractionProjector interface {
 // ErrInteractionResponseHandlerUnavailable reports missing static application
 // composition for a response that has already been durably accepted.
 var ErrInteractionResponseHandlerUnavailable = errors.New("harness interaction response handler unavailable")
+
+// ErrInteractionOutcomeUnknown prevents a second physical dispatch of a
+// previously claimed Interaction business response. The host must reconcile
+// the outcome using the stable Interaction ID and its own durable business data.
+var ErrInteractionOutcomeUnknown = errors.New("harness interaction business outcome is unknown")
+
+// ErrInteractionNoEffect may be wrapped by the host response handler ONLY when
+// it can prove that absolutely no external effect was dispatched. This permits
+// a new explicit resolution attempt under the same frozen Interaction identity.
+var ErrInteractionNoEffect = errors.New("harness interaction response definitively performed no effect")
 
 // InteractionResolution is the atomically persisted response plus the still
 // waiting owners that may only resume after application handling succeeds.
@@ -233,6 +259,9 @@ func (runner *Runner) RequestInteraction(
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return Snapshot{}, err
+	}
 	if err = runner.validateParentItem(ctx, turn.ID, request.ParentItemID); err != nil {
 		return Snapshot{}, err
 	}
@@ -273,6 +302,13 @@ func (runner *Runner) ResolveInteraction(
 	if err != nil || interaction.TurnID != strings.TrimSpace(turnID) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
+	owner, err := runner.store.GetTurn(ctx, interaction.TurnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.requireFrozenAdmission(ctx, owner); err != nil {
+		return Snapshot{}, err
+	}
 	if interaction.Status == InteractionResolved {
 		if !bytes.Equal(interaction.Response, request.Response) {
 			return Snapshot{}, ErrConflict
@@ -302,6 +338,50 @@ func (runner *Runner) ResolveInteraction(
 }
 
 func (runner *Runner) replayResolvedInteraction(ctx context.Context, interaction Interaction) (Snapshot, error) {
+	// A prior successful callback may already have claimed exactly one
+	// physical Runtime continuation. Product response replay is read-only:
+	// neither replay the business callback nor re-enter the same Workflow
+	// Wait / Agent segment. An in-flight continuation with no newer visible
+	// projection remains unknown and must be reconciled explicitly.
+	claimed, err := runner.interactionContinuationClaimed(ctx, interaction)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if claimed {
+		turn, invocation, loadErr := runner.loadResolvedInteractionOwners(ctx, interaction)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		otherWaiting, waitErr := runner.hasOtherWaitingInteraction(ctx, interaction)
+		if waitErr != nil {
+			return Snapshot{}, waitErr
+		}
+		if terminalTurnStatus(turn.Status) || otherWaiting || terminalInvocationStatus(invocation.Status) {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+		items, itemErr := listAllItems(ctx, runner.store, turn.ID)
+		if itemErr != nil {
+			return Snapshot{}, itemErr
+		}
+		if hasCompletedInteractionContinuation(items, interaction, invocation) {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+		return Snapshot{}, ErrInteractionOutcomeUnknown
+	}
+	// A committed Running Invocation without a continuation claim might be
+	// executing the Host business callback, or it may have crashed after
+	// that callback and before any completion receipt. Neither case is a
+	// successful product replay. Require explicit read-only reconciliation.
+	owner, err := runner.store.GetInvocation(ctx, interaction.InvocationID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if owner.TurnID != interaction.TurnID {
+		return Snapshot{}, ErrConflict
+	}
+	if owner.Status == InvocationRunning {
+		return Snapshot{}, ErrInteractionOutcomeUnknown
+	}
 	return runner.continueResolvedInteraction(ctx, interaction)
 }
 
@@ -320,20 +400,98 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if invocation.Status == InvocationRunning {
+		// Running is the durable dispatch claim, NOT permission to re-enter
+		// the host callback. A second caller, including another process or a
+		// crash recovery attempt, must fail closed on an unknown outcome.
+		return Snapshot{}, ErrInteractionOutcomeUnknown
+	}
+	if invocation.Status != InvocationWaitingInput {
+		return Snapshot{}, ErrConflict
+	}
+	// This CAS grants the host business handler's effect across all
+	// owning execution classes. Cancellation must compete for the same
+	// Invocation revision while the Turn is waiting for input.
+	claimed := invocation
+	claimed.Status = InvocationRunning
+	claimed.UpdatedAt = runner.clock.Now().UTC()
+	invocation, err = runner.store.UpdateInvocation(ctx, claimed, invocation.Revision)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
+		return Snapshot{}, err
+	}
 	result, err := runner.interactions.HandleInteractionResponse(ctx, InteractionResponseContext{
 		Interaction: cloneInteraction(interaction), Invocation: cloneInvocation(invocation), Session: session,
 	})
 	if err != nil {
+		if errors.Is(err, ErrInteractionNoEffect) {
+			// Only a proven non-dispatch can safely release the durable
+			// claim. Generic callback errors leave it running/unknown.
+			noEffect := invocation
+			noEffect.Status = InvocationWaitingInput
+			noEffect.UpdatedAt = runner.clock.Now().UTC()
+			reset, resetErr := runner.store.UpdateInvocation(ctx, noEffect, invocation.Revision)
+			if resetErr != nil {
+				return Snapshot{}, errors.Join(err, resetErr)
+			}
+			if itemErr := runner.recordInvocationItem(ctx, reset); itemErr != nil {
+				return Snapshot{}, errors.Join(err, itemErr)
+			}
+			return Snapshot{}, err
+		}
+		return Snapshot{}, errors.Join(ErrInteractionOutcomeUnknown, err)
+	}
+	return runner.continueConfirmedInteraction(ctx, interaction, turn, invocation, result)
+}
+
+// An actual successful callback, or a positive read-only host reconciliation,
+// grants only this call stack permission to resume the owning Runtime. Neither
+// Refresh nor an unrelated retry may infer such a receipt from Running alone.
+func (runner *Runner) continueConfirmedInteraction(
+	ctx context.Context,
+	interaction Interaction,
+	turn Turn,
+	invocation Invocation,
+	result InteractionResponseResult,
+) (Snapshot, error) {
+	// Record the verified physical callback result BEFORE continuing Kernel
+	// execution. If this commit is lost, cancellation stays fenced until a
+	// read-only host reconciliation confirms the effect again.
+	if err := runner.recordVerifiedInteractionResponse(ctx, interaction, invocation); err != nil {
 		return Snapshot{}, err
 	}
+	ctx = context.WithValue(ctx, completedInteractionCallbackKey{}, completedInteractionCallback{
+		turnID: turn.ID, invocationID: invocation.ID,
+	})
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.finishResolvedApplicationInteraction(ctx, turn, invocation, result)
 	}
-	turn, invocation, snapshot, handled, err = runner.prepareResolvedInteractionContinuation(ctx, interaction)
+	turn, invocation, snapshot, handled, err := runner.prepareResolvedInteractionContinuation(ctx, interaction)
 	if err != nil || handled {
 		return snapshot, err
 	}
-	return runner.resumeResolvedInteractionOwner(ctx, turn, invocation, interaction)
+	// An already-terminal Kernel Run can be projected without another
+	// physical continuation; do not claim a dispatch for read-only repair.
+	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		return runner.finishResolvedInteractionOwner(ctx, turn, invocation, runtimeSnapshot)
+	}
+	if err = runner.claimInteractionContinuation(ctx, interaction, invocation); err != nil {
+		return Snapshot{}, err
+	}
+	continued, resumeErr := runner.resumeResolvedInteractionOwner(ctx, turn, invocation, interaction)
+	if resumeErr != nil {
+		return continued, resumeErr
+	}
+	if err = runner.recordCompletedInteractionContinuation(ctx, interaction, invocation); err != nil {
+		return continued, err
+	}
+	return continued, nil
 }
 
 func (runner *Runner) prepareResolvedInteractionContinuation(
@@ -352,7 +510,13 @@ func (runner *Runner) prepareResolvedInteractionContinuation(
 	if err != nil {
 		return Turn{}, Invocation{}, Snapshot{}, false, err
 	}
-	if (waiting || interactionOwnersRunning(turn, invocation)) && !runner.projectsWorkflowWaits(invocation) {
+	// A running owner alone does not prove that the resolved business
+	// response has been applied. Only the original successful callback or
+	// the read-only reconciler's verified witness may drive continuation.
+	// Unrelated replay/Refresh callers still observe without dispatching.
+	unconfirmedRunning := interactionOwnersRunning(turn, invocation) &&
+		!interactionCallbackConfirmed(ctx, turn.ID, invocation.ID)
+	if (waiting || unconfirmedRunning) && !runner.projectsWorkflowWaits(invocation) {
 		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
 		return turn, invocation, snapshot, true, loadErr
 	}
@@ -404,6 +568,115 @@ func interactionOwnersRunning(turn Turn, invocation Invocation) bool {
 	return turn.Status == TurnRunning && invocation.Status == InvocationRunning
 }
 
+// fenceInteractionCancellation competes with an accepted Interaction
+// response for the same durable Invocation revision. For a waiting owner,
+// cancellation wins by marking the Invocation cancelled before attempting
+// Kernel cancellation, so no later business callback can obtain a Running
+// dispatch claim. An already-running resolved response is an uncertain
+// external outcome: never report cancellation succeeded while it may execute.
+// A root cancellation fences every waiting Interaction owner in the Turn.
+// resolvedInteractionClaimPending reports an in-flight host business callback.
+// Kernel Run snapshots cannot project a waiting Turn to running while this
+// independent, persisted Harness effect boundary remains unresolved.
+func (runner *Runner) resolvedInteractionClaimPending(ctx context.Context, turnID string, invocationID string) (bool, error) {
+	interactions, err := runner.store.ListInteractions(ctx, turnID)
+	if err != nil {
+		return false, err
+	}
+	var items []Item
+	itemsLoaded := false
+	for _, interaction := range interactions {
+		if interaction.Status != InteractionResolved || (invocationID != "" && interaction.InvocationID != invocationID) {
+			continue
+		}
+		owner, loadErr := runner.store.GetInvocation(ctx, interaction.InvocationID)
+		if loadErr != nil {
+			return false, loadErr
+		}
+		if owner.TurnID != turnID {
+			return false, ErrConflict
+		}
+		if owner.Status != InvocationRunning {
+			continue
+		}
+		if !itemsLoaded {
+			items, err = listAllItems(ctx, runner.store, turnID)
+			if err != nil {
+				return false, err
+			}
+			itemsLoaded = true
+		}
+		if !hasVerifiedInteractionResponse(items, interaction, owner) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (runner *Runner) fenceInteractionCancellation(ctx context.Context, turn Turn, invocationID string, writeAttempted *bool) error {
+	return runner.fenceInteractionCancellationWithClaim(ctx, turn, invocationID, writeAttempted)
+}
+
+func (runner *Runner) checkInteractionCancellation(ctx context.Context, turn Turn, invocationID string) error {
+	return runner.fenceInteractionCancellationWithClaim(ctx, turn, invocationID, nil)
+}
+
+// The optional marker is present only during a post-intent claim. Reads do
+// not set it; the first write-capable Host CAS does, before calling Store.
+func (runner *Runner) fenceInteractionCancellationWithClaim(ctx context.Context, turn Turn, invocationID string, writeAttempted *bool) error {
+	// A parent Turn may be running while one of its child Invocations owns
+	// a resolved Interaction's physical business callback. The Invocation
+	// CAS, not the top-level Turn projection, arbitrates dispatch/cancel.
+	interactions, err := runner.store.ListInteractions(ctx, turn.ID)
+	if err != nil {
+		return err
+	}
+	var items []Item
+	itemsLoaded := false
+	for _, interaction := range interactions {
+		if invocationID != "" && interaction.InvocationID != invocationID {
+			continue
+		}
+		if interaction.Status != InteractionWaiting && interaction.Status != InteractionResolved {
+			continue
+		}
+		owner, loadErr := runner.store.GetInvocation(ctx, interaction.InvocationID)
+		if loadErr != nil {
+			return loadErr
+		}
+		switch owner.Status {
+		case InvocationRunning:
+			if interaction.Status == InteractionResolved {
+				if !itemsLoaded {
+					items, err = listAllItems(ctx, runner.store, turn.ID)
+					if err != nil {
+						return err
+					}
+					itemsLoaded = true
+				}
+				if !hasVerifiedInteractionResponse(items, interaction, owner) {
+					return ErrConflict
+				}
+			}
+		case InvocationWaitingInput:
+			if writeAttempted == nil {
+				continue
+			}
+			owner.Status = InvocationCancelled
+			owner.UpdatedAt = runner.clock.Now().UTC()
+			// Do not clear the cancellation intent if Store commits this
+			// CAS then drops its reply (or rejects without a snapshot).
+			*writeAttempted = true
+			if _, updateErr := runner.store.UpdateInvocation(ctx, owner, owner.Revision); updateErr != nil {
+				return updateErr
+			}
+		case InvocationAccepted, InvocationPausedBudget, InvocationCompleted, InvocationFailed, InvocationCancelled:
+			// These do not carry a dispatched response-handler claim.
+		}
+	}
+	return nil
+}
+
 func (runner *Runner) resumeResolvedInteractionOwner(
 	ctx context.Context,
 	turn Turn,
@@ -452,9 +725,11 @@ func (runner *Runner) resumeRuntimeInteractionOwner(
 		if invocation.ExecutionClass != ExecutionWorkflow || runner.workflows == nil || len(response) == 0 {
 			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 		}
-		resolved, resolveErr := runner.workflows.ResolveWait(
-			ctx, invocation.ExecutionRefID, runtimeSnapshot.Run.Revision, append(json.RawMessage(nil), response...),
-		)
+		resolved, resolveErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resolve-wait", func() (kernel.Snapshot, error) {
+			return runner.workflows.ResolveWait(
+				ctx, invocation.ExecutionRefID, runtimeSnapshot.Run.Revision, append(json.RawMessage(nil), response...),
+			)
+		})
 		if resolved.Run.ID == "" {
 			return Snapshot{}, resolveErr
 		}

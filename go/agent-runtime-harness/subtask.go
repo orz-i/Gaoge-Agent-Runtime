@@ -275,7 +275,7 @@ func (runner *Runner) findSubtask(ctx context.Context, turnID, taskID string) (T
 
 // CancelSubtask keeps cancellation intent/failure visible while a remote or
 // local canceller acknowledges cleanup. Retrying does not cancel siblings.
-func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason string) (Snapshot, error) {
+func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason string) (snapshot Snapshot, err error) {
 	turn, task, err := runner.findSubtask(ctx, turnID, taskID)
 	if err != nil {
 		return Snapshot{}, err
@@ -283,6 +283,26 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	if task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled" {
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
+	// CancelSubtask is another physical Runtime cancellation entrypoint. It
+	// must compete with any already-resolved business callback BEFORE
+	// revoking the shared budget or cancelling the target Run.
+	intent, err := runner.cancelPreflightWithIntent(ctx, turn, task.RunID,
+		func() error {
+			_, checkErr := runner.inspectRelatedCancellation(ctx, turn, task.RunID)
+			return checkErr
+		},
+		func(writeAttempted *bool) error {
+			return runner.fenceRelatedCancellation(ctx, turn, task.RunID, writeAttempted)
+		},
+	)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer func() {
+		if err == nil {
+			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
+		}
+	}()
 	task.CancelStatus, task.CancelError = "requested", ""
 	task.CancelAttempt++
 	if err = runner.recordSubtaskItem(ctx, turn.ID, task); err != nil {
@@ -298,6 +318,10 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 		fenced = true
 	}
 	_, found, cancelErr := runner.cancelRuntimeRun(ctx, task.RunID, reason)
+	// Only conflicts from the TARGET cancellation itself can prove that no
+	// physical cancellation began. A later descendant-cleanup conflict may
+	// follow already committed effects; it must retain the intent.
+	targetCancelErr := cancelErr
 	if cancelErr == nil && !found && fenced {
 		task.Status, task.CancelStatus = "cancelled", "confirmed"
 		if err = runner.recordSubtaskItem(ctx, turn.ID, task); err != nil {
@@ -309,8 +333,22 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	}
 	if cancelErr != nil {
 		task.CancelStatus, task.CancelError = "failed", cancelErr.Error()
-		if err = runner.recordSubtaskItem(context.WithoutCancel(ctx), turn.ID, task); err != nil {
-			return Snapshot{}, errors.Join(cancelErr, err)
+		// Keep the failed Subtask fact bounded even when the request has
+		// disconnected. A timeout or lost acknowledgement is not a
+		// no-effect receipt and must preserve the cancellation intent.
+		settlementCtx, stopSettlement := cancellationSettlementContext(ctx)
+		recordErr := runner.recordSubtaskItem(settlementCtx, turn.ID, task)
+		recordErr = errors.Join(recordErr, settlementCtx.Err())
+		stopSettlement()
+		if recordErr != nil {
+			return Snapshot{}, errors.Join(cancelErr, recordErr)
+		}
+		// The requested/failed Subtask timeline facts are observational:
+		// a proven no-effect Kernel CAS conflict, without budget or Host
+		// Interaction mutation, can release this attempt's admission
+		// intent and let the next cancellation compete normally.
+		if targetCancelErr != nil {
+			return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, task.RunID, targetCancelErr)
 		}
 		return Snapshot{}, cancelErr
 	}
@@ -330,6 +368,9 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	if task.Approval == nil || task.Approval.CheckpointID != checkpointID || terminalTurnStatus(turn.Status) {
 		return Snapshot{}, ErrConflict
 	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return Snapshot{}, err
+	}
 	decision, err := pluginApprovalDecision(request.Decision)
 	if err != nil {
 		return Snapshot{}, err
@@ -341,21 +382,29 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	if snapshot.Checkpoint == nil || snapshot.Checkpoint.ID != checkpointID {
 		return Snapshot{}, ErrConflict
 	}
-	resolved, resolveErr := runner.agent.ResolveApproval(ctx, task.RunID, snapshot.Run.Revision, plugin.ApprovalResponse{Decision: decision, Comment: request.Comment})
+	// Many Team/Workflow child Agent Runs have no dedicated Harness
+	// Invocation. Anchor their physical approval dispatch to the owning
+	// root Invocation while retaining the actual child Run ID in the grant
+	// for precise Subtask cancellation arbitration.
+	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, task.RunID)
+	hasChildInvocation := err == nil
+	if errors.Is(err, ErrNotFound) {
+		invocation, err = loadTopLevelInvocation(ctx, runner.store, turn.ID)
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	resolved, resolveErr := runner.withPhysicalInvocationDispatchFor(ctx, invocation, "resolve-subtask-approval", task.RunID, func() (kernel.Snapshot, error) {
+		return runner.agent.ResolveApproval(ctx, task.RunID, snapshot.Run.Revision, plugin.ApprovalResponse{Decision: decision, Comment: request.Comment})
+	})
 	if resolveErr != nil {
 		return Snapshot{}, resolveErr
 	}
-	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, task.RunID)
-	if errors.Is(err, ErrNotFound) {
-		// Team and Workflow retain their own child state machines;
-		// not every child Agent is a separate Harness capability invocation.
+	if !hasChildInvocation {
 		if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 			return Snapshot{}, err
 		}
 		return runner.loadSnapshot(ctx, turn, nil)
-	}
-	if err != nil {
-		return Snapshot{}, err
 	}
 	pending, _, err := approvalRequestFromSnapshot(snapshot)
 	if err != nil {

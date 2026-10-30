@@ -3,6 +3,8 @@ import type {
   CancelRunResponse,
   HarnessTurnFeedEventDTO,
   HarnessTurnSnapshotDTO,
+  HarnessTurnStateDTO,
+  HarnessTimelinePageDTO,
   HarnessCommandDTO,
   RunEventPageDTO,
   RunSnapshotDTO,
@@ -18,6 +20,7 @@ export type RuntimeHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersI
 export type RuntimeClientOptions = { baseURL: string; fetch?: typeof globalThis.fetch; headers?: RuntimeHeaders };
 export type RequestOptions = { signal?: AbortSignal };
 export type RunEventsOptions = RequestOptions & { afterSeq?: number; limit?: number };
+export type HarnessTimelineOptions = RequestOptions & { afterSeq?: number; limit?: number };
 type FeedOptions = RequestOptions & {
   afterSeq?: number;
   reconnectDelayMS?: number;
@@ -225,6 +228,16 @@ export class RuntimeClient {
       turns: {
         get: (turnID: string, request?: RequestOptions) =>
           this.request<HarnessTurnSnapshotDTO>(`/harness/turns/${pathPart(turnID)}`, {}, request),
+        /** Lightweight committed state; use get() when Host output ACK matters. */
+        state: (turnID: string, request?: RequestOptions) =>
+          this.request<HarnessTurnStateDTO>(`/harness/turns/${pathPart(turnID)}/state`, {}, request),
+        items: (turnID: string, options: HarnessTimelineOptions = {}) => {
+          const parameters = new URLSearchParams();
+          if (options.afterSeq !== undefined) parameters.set("afterSeq", String(options.afterSeq));
+          if (options.limit !== undefined) parameters.set("limit", String(options.limit));
+          const query = parameters.size > 0 ? `?${parameters.toString()}` : "";
+          return this.request<HarnessTimelinePageDTO>(`/harness/turns/${pathPart(turnID)}/items${query}`, {}, options);
+        },
         feed: (turnID: string, request?: HarnessTurnFeedOptions) => this.streamHarnessTurnFeed(turnID, request),
         grantCallAllowance: (
           turnID: string,

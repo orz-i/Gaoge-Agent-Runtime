@@ -76,8 +76,54 @@ func (store *Store) CreateInvocation(ctx context.Context, value harness.Invocati
 	if err != nil {
 		return harness.Invocation{}, false, err
 	}
-	return createOrReplay(ctx, store.db, &record, value,
-		func() (harness.Invocation, error) { return store.GetInvocation(ctx, value.ID) }, sameInvocation)
+	// Standalone persistence conformance permits an Invocation record before
+	// its Turn envelope exists. With no Turn there can be no cancellation
+	// intent; retain the direct root-unique INSERT in that isolated case.
+	var existingTurn turnRecord
+	loadTurnErr := store.db.WithContext(ctx).Select("id").Where("id = ?", value.TurnID).Take(&existingTurn).Error
+	if errors.Is(loadTurnErr, gorm.ErrRecordNotFound) {
+		return createOrReplay(ctx, store.db, &record, value,
+			func() (harness.Invocation, error) { return store.GetInvocation(ctx, value.ID) }, sameInvocation)
+	}
+	if loadTurnErr != nil {
+		return harness.Invocation{}, false, loadTurnErr
+	}
+	var saved harness.Invocation
+	fresh := false
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if lockErr := lockAdmissionTurn(tx, value.TurnID); lockErr != nil {
+			return lockErr
+		}
+		var existing invocationRecord
+		loadErr := tx.Where("id = ?", value.ID).Take(&existing).Error
+		if loadErr == nil {
+			loaded, convertErr := invocationFromRecord(existing)
+			if convertErr != nil {
+				return convertErr
+			}
+			if !sameInvocation(loaded, value) {
+				return harness.ErrConflict
+			}
+			saved = loaded
+			return nil
+		}
+		if !errors.Is(loadErr, gorm.ErrRecordNotFound) {
+			return loadErr
+		}
+		if checkErr := checkCancellationFenceTx(tx, value.TurnID); checkErr != nil {
+			return checkErr
+		}
+		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return harness.ErrConflict
+		}
+		saved, fresh = value, true
+		return nil
+	})
+	return saved, fresh, err
 }
 
 func (store *Store) GetInvocation(ctx context.Context, id string) (harness.Invocation, error) {
@@ -109,20 +155,46 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 		return harness.Invocation{}, err
 	}
 	record.Revision = expectedRevision + 1
-	result := store.db.WithContext(ctx).Model(&invocationRecord{}).
-		Where("id = ? AND revision = ? AND turn_id = ? AND parent_item_id = ? AND capability_key = ? AND definition_version = ? AND execution_class = ? AND input_json = ? AND input_hash = ? AND attempt = ? AND execution_ref_id = ?",
-			value.ID, expectedRevision, value.TurnID, value.ParentItemID, value.CapabilityKey, value.DefinitionVersion,
-			string(value.ExecutionClass), record.InputJSON, value.InputHash, value.Attempt, value.ExecutionRefID).
-		Updates(map[string]any{
-			"status": record.Status, "output_refs_json": record.OutputRefsJSON,
-			"error_code": record.ErrorCode, "error_detail": record.ErrorDetail,
-			"revision": record.Revision, "updated_at": record.UpdatedAt,
-		})
-	if result.Error != nil {
-		return harness.Invocation{}, result.Error
-	}
-	if result.RowsAffected != 1 {
-		return harness.Invocation{}, harness.ErrConflict
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if value.Status == harness.InvocationRunning || value.Status == harness.InvocationFailed {
+			// Failed projection must not outrun a new physical Start after
+			// the prior attempt's no-effect receipt closes its grant.
+			if lockErr := lockAdmissionTurn(tx, value.TurnID); lockErr != nil {
+				return lockErr
+			}
+			if value.Status == harness.InvocationRunning {
+				if checkErr := checkCancellationFenceTx(tx, value.TurnID); checkErr != nil {
+					return checkErr
+				}
+			} else {
+				pending, checkErr := pendingExecutionDispatchTx(tx, value.TurnID, value.ID)
+				if checkErr != nil {
+					return checkErr
+				}
+				if pending {
+					return harness.ErrConflict
+				}
+			}
+		}
+		result := tx.Model(&invocationRecord{}).
+			Where("id = ? AND revision = ? AND turn_id = ? AND parent_item_id = ? AND capability_key = ? AND definition_version = ? AND execution_class = ? AND input_json = ? AND input_hash = ? AND attempt = ? AND execution_ref_id = ?",
+				value.ID, expectedRevision, value.TurnID, value.ParentItemID, value.CapabilityKey, value.DefinitionVersion,
+				string(value.ExecutionClass), record.InputJSON, value.InputHash, value.Attempt, value.ExecutionRefID).
+			Updates(map[string]any{
+				"status": record.Status, "output_refs_json": record.OutputRefsJSON,
+				"error_code": record.ErrorCode, "error_detail": record.ErrorDetail,
+				"revision": record.Revision, "updated_at": record.UpdatedAt,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return harness.ErrConflict
+		}
+		return nil
+	})
+	if err != nil {
+		return harness.Invocation{}, err
 	}
 	value.Revision = record.Revision
 	return value, nil
@@ -148,6 +220,26 @@ func (store *Store) RetryInvocation(
 		return harness.Invocation{}, harness.ErrConflict
 	}
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if lockErr := lockAdmissionTurn(tx, current.TurnID); lockErr != nil {
+			return lockErr
+		}
+		if checkErr := checkCancellationFenceTx(tx, current.TurnID); checkErr != nil {
+			return checkErr
+		}
+		// A failed projection cannot rotate a Run identity whose physical
+		// Start/Resume is still outcome-unknown. The Turn lock serializes this
+		// check with grant append and completion on every SQL connection.
+		scopeID := current.ID
+		if strings.TrimSpace(current.ParentItemID) == "" {
+			scopeID = "" // Root retry owns every unfinished child dispatch.
+		}
+		pending, pendingErr := pendingExecutionDispatchTx(tx, current.TurnID, scopeID)
+		if pendingErr != nil {
+			return pendingErr
+		}
+		if pending {
+			return harness.ErrConflict
+		}
 		if strings.TrimSpace(current.ParentItemID) == "" {
 			result := tx.Model(&turnRecord{}).
 				Where("id = ? AND status IN ?", current.TurnID,
@@ -256,6 +348,9 @@ func createInteractionTransaction(
 		return existing, false, err
 	}
 	if err = lockInteractionOwners(tx, value, expectedTurnRevision, expectedInvocationRevision); err != nil {
+		return harness.Interaction{}, false, err
+	}
+	if err = checkCancellationFenceTx(tx, value.TurnID); err != nil {
 		return harness.Interaction{}, false, err
 	}
 	if err = ensureNoWaitingInteraction(tx, value.TurnID); err != nil {
@@ -413,6 +508,9 @@ func resolveInteractionTransaction(
 		tx, value, expectedRevision,
 	)
 	if err != nil {
+		return harness.InteractionResolution{}, err
+	}
+	if err = checkCancellationFenceTx(tx, value.TurnID); err != nil {
 		return harness.InteractionResolution{}, err
 	}
 	current, err := interactionFromRecord(currentRow)
@@ -1167,6 +1265,18 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	}
 	if err = lockTurn(tx, value.TurnID); err != nil {
 		return err
+	}
+	if value.Kind == harness.ItemDiagnostic && value.Status == harness.ItemStarted {
+		switch value.ParentItemID {
+		case harness.CancellationFenceParentItemID:
+			if err = checkCancellationFenceTx(tx, value.TurnID); err != nil {
+				return err
+			}
+		case harness.ExecutionDispatchParentItemID:
+			if err = checkExecutionDispatchGrantTx(tx, value); err != nil {
+				return err
+			}
+		}
 	}
 	// The first lookup happened before the Turn lock. A competing append
 	// may have committed while we waited; inspect the ID again before

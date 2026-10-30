@@ -107,6 +107,61 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	if _, err = runner.ResolveSubtaskApproval(t.Context(), started.Turn.ID, task.ID, "old-checkpoint", harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove}); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("stale approval=%v", err)
 	}
+	// A delegated Agent Run has no standalone Harness Invocation. Its approval
+	// must still compete with the same Turn-wide cancellation intent.
+	rootInvocation, ok := harness.TopLevelInvocation(started)
+	if !ok {
+		t.Fatal("missing owning Invocation")
+	}
+	now := fixedClock{}.Now()
+	intent := harness.Item{
+		ID: "role-cancellation-admission", TurnID: started.Turn.ID, RunID: rootInvocation.ExecutionRefID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
+		ParentItemID: harness.CancellationFenceParentItemID,
+		Payload:      json.RawMessage(`{"boundary":"cancel_scope_pending"}`),
+		CreatedAt:    now, UpdatedAt: now,
+	}
+	if _, fresh, appendErr := store.AppendItem(t.Context(), intent); appendErr != nil || !fresh {
+		t.Fatalf("create cancellation intent: fresh=%v err=%v", fresh, appendErr)
+	}
+	beforeApprovalCalls := len(meteredModel.requests)
+	if _, blockedErr := runner.ResolveSubtaskApproval(t.Context(), started.Turn.ID, task.ID, task.Approval.CheckpointID,
+		harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove}); !errors.Is(blockedErr, harness.ErrConflict) ||
+		len(meteredModel.requests) != beforeApprovalCalls {
+		t.Fatalf("delegated approval crossed cancellation intent: err=%v calls=%d->%d", blockedErr, beforeApprovalCalls, len(meteredModel.requests))
+	}
+	if _, _, closeErr := store.AppendItem(t.Context(), harness.Item{
+		ID: "role-cancellation-admission-closed", TurnID: started.Turn.ID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
+		ParentItemID: intent.ID, Payload: json.RawMessage(`{"boundary":"cancel_scope_settled"}`),
+		CreatedAt: now, UpdatedAt: now,
+	}); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	// The same physical grant identifies the delegated child Run even though
+	// its durable ownership is the root Invocation.
+	grant := harness.Item{
+		ID: "role-child-approval-grant", TurnID: started.Turn.ID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
+		InvocationID: rootInvocation.ID, RunID: rootInvocation.ExecutionRefID,
+		ParentItemID: harness.ExecutionDispatchParentItemID,
+		Payload:      json.RawMessage(`{"phase":"resolve-subtask-approval","physicalRunID":"` + task.RunID + `"}`),
+		CreatedAt:    now, UpdatedAt: now,
+	}
+	if _, fresh, appendErr := store.AppendItem(t.Context(), grant); appendErr != nil || !fresh {
+		t.Fatalf("create delegated grant: fresh=%v err=%v", fresh, appendErr)
+	}
+	if _, blockedErr := runner.CancelSubtask(t.Context(), started.Turn.ID, task.ID, "cancel during delegated approval"); !errors.Is(blockedErr, harness.ErrConflict) {
+		t.Fatalf("subtask cancellation ignored physical child Run grant: %v", blockedErr)
+	}
+	if _, _, closeErr := store.AppendItem(t.Context(), harness.Item{
+		ID: "role-child-approval-grant-closed", TurnID: started.Turn.ID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
+		ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),
+		CreatedAt: now, UpdatedAt: now,
+	}); closeErr != nil {
+		t.Fatal(closeErr)
+	}
 	approved, err := runner.ResolveSubtaskApproval(t.Context(), started.Turn.ID, task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove})
 	if err != nil || approved.Subtasks[0].Status != "completed" {
 		t.Fatalf("approval=%+v %v", approved.Subtasks, err)

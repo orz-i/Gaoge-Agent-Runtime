@@ -293,6 +293,36 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/HarnessTurnSnapshot'}
         default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/state:
+    get:
+      operationId: getHarnessTurnState
+      description: >-
+        Read persisted Session/Turn status without materializing the Timeline.
+        This committed status does not certify Host assistant-output projection
+        or independently synchronize an active Kernel Run.
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+      responses:
+        '200':
+          description: Bounded owner-scoped committed Harness state
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTurnState'}
+        default: {$ref: '#/components/responses/Error'}
+  /harness/turns/{turnID}/items:
+    get:
+      operationId: listHarnessTurnItems
+      parameters:
+        - $ref: '#/components/parameters/HarnessTurnID'
+        - $ref: '#/components/parameters/AfterSeq'
+        - $ref: '#/components/parameters/HarnessItemPageLimit'
+      responses:
+        '200':
+          description: Bounded, owner-scoped, redacted durable Timeline page
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HarnessTimelinePage'}
+        default: {$ref: '#/components/responses/Error'}
   /harness/turns/{turnID}/feed:
     get:
       operationId: streamHarnessTurnFeed
@@ -490,6 +520,11 @@ components:
       in: query
       required: false
       schema: {type: integer, minimum: 1, maximum: 1000, default: 100}
+    HarnessItemPageLimit:
+      name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 500, default: 100}
   responses:
     Error:
       description: Error
@@ -891,6 +926,21 @@ components:
         executionClass: {type: string, enum: [agent, team, group_chat, workflow, application]}
         source: {type: string, enum: [first_party, application]}
         inputSchema: {}
+    HarnessTurnState:
+      type: object
+      additionalProperties: false
+      required: [turn]
+      properties:
+        turn: {$ref: '#/components/schemas/HarnessTurn'}
+    HarnessTimelinePage:
+      type: object
+      additionalProperties: false
+      required: [items, nextAfterSeq]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/HarnessItem'}
+        nextAfterSeq: {type: integer, minimum: 0}
     HarnessTurnSnapshot:
       type: object
       additionalProperties: false

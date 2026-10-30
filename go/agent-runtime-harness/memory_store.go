@@ -47,6 +47,9 @@ func (store *MemoryStore) CreateInvocation(_ context.Context, value Invocation) 
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if _, replay := store.invocations[value.ID]; !replay && ActiveCancellationFence(store.items[value.TurnID]) {
+		return Invocation{}, false, ErrConflict
+	}
 	if value.ParentItemID == "" {
 		for _, existing := range store.invocations {
 			if existing.TurnID == value.TurnID && strings.TrimSpace(existing.ParentItemID) == "" && existing.ID != value.ID {
@@ -109,6 +112,16 @@ func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, 
 	if current.ExecutionRefID != value.ExecutionRefID {
 		return Invocation{}, ErrConflict
 	}
+	if current.Status != InvocationRunning && value.Status == InvocationRunning &&
+		ActiveCancellationFence(store.items[value.TurnID]) {
+		return Invocation{}, ErrConflict
+	}
+	// A verified no-effect Start can finish its grant just before another
+	// worker takes the next physical grant. Marking Failed must compete with
+	// that admission under the same mutex, not terminalize the new owner.
+	if value.Status == InvocationFailed && PendingExecutionDispatch(store.items[value.TurnID], value.ID) {
+		return Invocation{}, ErrConflict
+	}
 	value.Revision = expectedRevision + 1
 	store.invocations[value.ID] = cloneInvocation(value)
 	return cloneInvocation(value), nil
@@ -132,7 +145,13 @@ func (store *MemoryStore) RetryInvocation(
 	if !ok {
 		return Invocation{}, ErrNotFound
 	}
-	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 {
+	scopeID := current.ID
+	if current.ParentItemID == "" {
+		scopeID = "" // Root retry cannot invalidate unfinished descendant effects.
+	}
+	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
+		ActiveCancellationFence(store.items[current.TurnID]) ||
+		PendingExecutionDispatch(store.items[current.TurnID], scopeID) {
 		return Invocation{}, ErrConflict
 	}
 	var rootTurn Turn
@@ -194,6 +213,9 @@ func (store *MemoryStore) CreateInteraction(
 	defer store.mu.Unlock()
 	if replay, found, err := memoryInteractionReplay(store.interactions, value); found || err != nil {
 		return replay, false, err
+	}
+	if ActiveCancellationFence(store.items[value.TurnID]) {
+		return Interaction{}, false, ErrConflict
 	}
 	turn, turnFound := store.turns[value.TurnID]
 	invocation, invocationFound := store.invocations[value.InvocationID]
@@ -303,7 +325,8 @@ func (store *MemoryStore) ResolveInteraction(
 	if !interactionFound || !turnFound || !invocationFound {
 		return InteractionResolution{}, ErrConflict
 	}
-	if !memoryInteractionCanResolve(current, value, turn, invocation, expectedRevision) {
+	if !memoryInteractionCanResolve(current, value, turn, invocation, expectedRevision) ||
+		ActiveCancellationFence(store.items[value.TurnID]) {
 		return InteractionResolution{}, ErrConflict
 	}
 	value.Revision = expectedRevision + 1
@@ -732,6 +755,25 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 			return Item{}, false, ErrConflict
 		}
 		return cloneItem(existing), false, nil
+	}
+	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
+		switch value.ParentItemID {
+		case CancellationFenceParentItemID:
+			if ActiveCancellationFence(store.items[value.TurnID]) {
+				return Item{}, false, ErrConflict
+			}
+		case ExecutionDispatchParentItemID:
+			turn, turnFound := store.turns[value.TurnID]
+			owner, ownerFound := store.invocations[value.InvocationID]
+			if !turnFound || terminalTurnStatus(turn.Status) ||
+				!ownerFound || owner.TurnID != value.TurnID ||
+				owner.ExecutionRefID != value.RunID ||
+				terminalInvocationStatus(owner.Status) ||
+				ActiveCancellationFence(store.items[value.TurnID]) ||
+				PendingExecutionDispatch(store.items[value.TurnID], value.InvocationID) {
+				return Item{}, false, ErrConflict
+			}
+		}
 	}
 	value.Seq = uint64(len(store.items[value.TurnID]) + 1)
 	value = cloneItem(value)

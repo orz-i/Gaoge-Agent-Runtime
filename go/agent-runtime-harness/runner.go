@@ -114,18 +114,23 @@ func (runner *Runner) resumeDirectAgentStart(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	runtimeSnapshot, startErr := runner.agent.StartRun(runCtx, agent.StartRequest{
-		ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turn.ID), Goal: request.Goal,
-		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-		OutputContract: model.CloneOutputContract(config.OutputContract),
-		ToolKeys:       append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-		InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
-		Limits:          config.Limits,
-		CallAllowance:   request.CallAllowance,
-		AutoAllowance:   request.AutoAllowance,
+	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.agent.StartRun(runCtx, agent.StartRequest{
+			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turn.ID), Goal: request.Goal,
+			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+			OutputContract: model.CloneOutputContract(config.OutputContract),
+			ToolKeys:       append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
+			InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
+			Limits:          config.Limits,
+			CallAllowance:   request.CallAllowance,
+			AutoAllowance:   request.AutoAllowance,
+		})
 	})
 	if runtimeSnapshot.Run.ID == "" {
+		if !isDispatchProvenNoEffect(startErr) {
+			return Snapshot{}, startErr
+		}
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
 		return failed, errors.Join(startErr, failErr)
 	}
@@ -138,7 +143,7 @@ func (runner *Runner) replayDirectAgentStart(
 	invocation Invocation,
 ) (Snapshot, bool, error) {
 	if terminalTurnStatus(turn.Status) || terminalInvocationStatus(invocation.Status) {
-		snapshot, err := runner.loadSnapshot(ctx, turn, nil)
+		snapshot, err := runner.Refresh(ctx, turn.ID)
 		return snapshot, true, err
 	}
 	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
@@ -163,8 +168,11 @@ func (runner *Runner) resumeDirectAgentContext(
 	if err == nil {
 		return updated, withContextWindowBinding(runCtx, updated.ID, ContextWindowOwner), nil
 	}
-	_, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, err)
-	return Turn{}, nil, errors.Join(err, failErr)
+	// Context reconciliation has not obtained a physical dispatch grant.
+	// Even an invalid or transient read cannot elect this replay to mark the
+	// shared Invocation/Turn failed: another Start may be building the same
+	// context and will otherwise lose its valid execution authority.
+	return Turn{}, nil, err
 }
 
 func (runner *Runner) restoreOrBuildContext(
@@ -227,14 +235,19 @@ func (runner *Runner) ResolveApproval(
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return Snapshot{}, err
+	}
 	runCtx, err := runner.restoreInvocationContext(ctx, turn, invocation)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	resolved, resolveErr := runner.agent.ResolveApproval(
-		runCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
-		plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)},
-	)
+	resolved, resolveErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", func() (kernel.Snapshot, error) {
+		return runner.agent.ResolveApproval(
+			runCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
+			plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)},
+		)
+	})
 	if resolved.Run.ID == "" {
 		return Snapshot{}, resolveErr
 	}
@@ -638,6 +651,13 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	if err != nil {
 		return Snapshot{}, err
 	}
+	request, err = sealStartAdmission(request, &resolvedConfig, rootAdmission{
+		ExecutionClass: ExecutionAgent, CapabilityKey: CapabilityAgent,
+		DefinitionVersion: RuntimeCapabilityVersion,
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
 	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
 	if err != nil {
 		return Snapshot{}, err
@@ -664,6 +684,9 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		return Snapshot{}, err
 	}
 	if !created {
+		if err := runner.repairStartItems(ctx, createdTurn, invocation); err != nil {
+			return Snapshot{}, err
+		}
 		return runner.resumeDirectAgentStart(ctx, createdTurn, invocation, request, config)
 	}
 	if err = runner.recordHostMessageItems(ctx, createdTurn, request.InputMessage, request.OutputMessage); err != nil {
@@ -674,8 +697,10 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 	if request.Context != nil {
 		builtContext, buildErr := runner.buildContext(ctx, createdTurn.SessionID, config, request.Context)
 		if buildErr != nil {
-			failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, buildErr)
-			return failed, errors.Join(buildErr, failErr)
+			// No physical authority has been claimed. A concurrent admitted
+			// replay might still build Context and Start successfully; keep
+			// this read-only failure local and the Turn safely replayable.
+			return Snapshot{}, buildErr
 		}
 		createdTurn, runCtx, err = runner.attachContextCheckpoint(
 			ctx, createdTurn, builtContext.checkpoint, builtContext.expectedHeadID,
@@ -685,15 +710,17 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 		}
 		runCtx = withContextWindowBinding(runCtx, createdTurn.ID, ContextWindowOwner)
 	}
-	runtimeSnapshot, startErr := runner.agent.StartRun(runCtx, agent.StartRequest{
-		ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-		RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
-		Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-		OutputContract:   model.CloneOutputContract(config.OutputContract),
-		ToolKeys:         append([]string(nil), config.ToolKeys...),
-		RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-		InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
-		CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
+	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.agent.StartRun(runCtx, agent.StartRequest{
+			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
+			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+			OutputContract:   model.CloneOutputContract(config.OutputContract),
+			ToolKeys:         append([]string(nil), config.ToolKeys...),
+			RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
+			InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
+			CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
+		})
 	})
 	if runtimeSnapshot.Run.ID == "" {
 		if errors.Is(startErr, kernel.ErrConflict) {
@@ -701,6 +728,12 @@ func (runner *Runner) Start(ctx context.Context, request StartRequest) (Snapshot
 			if recoverErr == nil && recovered.Turn.Status == TurnCancelled {
 				return recovered, nil
 			}
+		}
+		// Another Start may hold the grant, or a physical feature may have
+		// returned an outcome-unknown error. Neither authorizes marking its
+		// Invocation/Turn Failed while the original effect could still run.
+		if !isDispatchProvenNoEffect(startErr) {
+			return Snapshot{}, startErr
 		}
 		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, startErr)
 		return failed, errors.Join(startErr, failErr)
@@ -790,19 +823,51 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
-	if terminalTurnStatus(turn.Status) {
-		return runner.loadSnapshot(ctx, turn, nil)
-	}
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
+		if terminalTurnStatus(turn.Status) {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
 		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if err = runner.repairStartItems(ctx, turn, invocation); err != nil {
+		return Snapshot{}, err
+	}
+	pending, pendingErr := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+	if pendingErr != nil {
+		return Snapshot{}, pendingErr
+	}
+	if pending {
+		// The parent Turn can be running while a child owns an unverified
+		// business callback. Never terminalize or resume through that claim.
+		return runner.loadSnapshot(ctx, turn, nil)
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.refreshApplicationInvocation(ctx, invocation, turn)
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+	if errors.Is(err, kernel.ErrNotFound) && terminalTurnStatus(turn.Status) && missingRuntimeSnapshotAllowed(turn, invocation) {
+		// A failed/cancelled admission can be terminal without ever creating
+		// a Kernel Run. Restore the final host message fact when safe, but do
+		// not create a synthetic execution or bypass host-output ACK.
+		pending, _, projectionErr := hostOutputProjectionState(ctx, runner.store, turn)
+		if projectionErr != nil {
+			return Snapshot{}, projectionErr
+		}
+		if !pending {
+			if projectionErr = runner.recordTerminalAgentMessageItem(ctx, turn, kernel.Snapshot{
+				Run: kernel.Run{ID: invocation.ExecutionRefID},
+			}); projectionErr != nil {
+				return Snapshot{}, projectionErr
+			}
+		}
+		return runner.loadSnapshot(ctx, turn, nil)
+	}
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if terminalTurnStatus(turn.Status) && !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		return Snapshot{}, ErrConflict
 	}
 	// Refresh races naturally with Runtime continuation callbacks: a Team member,
 	// Plan step, or Workflow effect can advance the same root between the initial
@@ -813,7 +878,7 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 
 // Cancel cancels the active top-level Invocation and persists the resulting
 // Harness Turn state. C2 extends dispatch to the other explicit Feature adapters.
-func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (Snapshot, error) {
+func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (snapshot Snapshot, err error) {
 	turnID = strings.TrimSpace(turnID)
 	turn, err := runner.store.GetTurn(ctx, turnID)
 	if err != nil {
@@ -822,19 +887,64 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
-	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
-		return Snapshot{}, err
-	}
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
-		return runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
+		cancelled, cancelErr := runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
+		if cancelErr != nil {
+			return cancelled, cancelErr
+		}
+		// Revoke the shared ledger only after an authoritative Application
+		// cancellation, never when its external effect is still uncertain.
+		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
+	}
+	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
+		func() error {
+			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
+				return checkErr
+			}
+			if checkErr := runner.checkInteractionCancellation(ctx, turn, ""); checkErr != nil {
+				return checkErr
+			}
+			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
+			if checkErr != nil {
+				return checkErr
+			}
+			if pending {
+				return ErrConflict
+			}
+			return nil
+		},
+		func(writeAttempted *bool) error {
+			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
+				return checkErr
+			}
+			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
+			if checkErr != nil {
+				return checkErr
+			}
+			if pending {
+				return ErrConflict
+			}
+			return runner.fenceInteractionCancellation(ctx, turn, "", writeAttempted)
+		},
+	)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	defer func() {
+		if err == nil {
+			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
+		}
+	}()
+	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
+		return Snapshot{}, err
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
 	if err != nil {
-		return Snapshot{}, err
+		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
 	}
 	if !found {
 		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
@@ -869,9 +979,6 @@ func (runner *Runner) syncRuntimeSnapshotWithRetry(
 		turn, err = runner.store.GetTurn(ctx, turn.ID)
 		if err != nil {
 			return Snapshot{}, err
-		}
-		if terminalTurnStatus(turn.Status) {
-			return runner.loadSnapshot(ctx, turn, nil)
 		}
 		invocation, err = runner.store.GetInvocation(ctx, invocation.ID)
 		if err != nil {
@@ -922,18 +1029,36 @@ func (runner *Runner) syncRuntimeSnapshot(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
+	// A callback claim may win its Invocation CAS after Refresh observes
+	// the Interaction but before the Runtime projection attempts its CAS.
+	// Recheck on *every* synchronization/retry, not only at the Refresh
+	// entrypoint, so a stale Kernel Run cannot reopen the Turn during a
+	// physical host business effect.
+	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if pending {
+		// Even a verified callback for this Invocation cannot bypass an
+		// independently claimed, still-unverified sibling effect.
+		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) {
+	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) ||
+		(terminalTurnStatus(turn.Status) && turn.Status != status) ||
+		(terminalInvocationStatus(invocation.Status) && invocation.Status != invocationStatusFromTurn(status)) {
+		// A lagging projection may be repaired, but a committed terminal
+		// outcome is never rewritten into another outcome or back to running.
 		return Snapshot{}, ErrConflict
 	}
 	invocation, err = runner.syncInvocationProjection(ctx, invocation, runtimeSnapshot, status)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	turn, turnChanged, err := runner.syncTurnProjection(ctx, turn, runtimeSnapshot, status)
+	turn, _, err = runner.syncTurnProjection(ctx, turn, runtimeSnapshot, status)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -948,7 +1073,7 @@ func (runner *Runner) syncRuntimeSnapshot(
 		return Snapshot{}, err
 	}
 	if err = runner.finalizeTerminalRuntimeProjection(
-		ctx, turn, runtimeSnapshot, turnChanged, deferTerminalProjection,
+		ctx, turn, runtimeSnapshot, deferTerminalProjection,
 	); err != nil {
 		return Snapshot{}, err
 	}
@@ -1029,7 +1154,6 @@ func (runner *Runner) finalizeTerminalRuntimeProjection(
 	ctx context.Context,
 	turn Turn,
 	runtimeSnapshot kernel.Snapshot,
-	turnChanged bool,
 	deferHostProjection bool,
 ) error {
 	if !terminalTurnStatus(turn.Status) {
@@ -1047,10 +1171,20 @@ func (runner *Runner) finalizeTerminalRuntimeProjection(
 	if err := runner.projectDelegationRelations(ctx, turn); err != nil {
 		return err
 	}
-	if turnChanged && !deferHostProjection {
-		runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
+	if !deferHostProjection {
+		runner.ensureTerminalTurnFeed(ctx, turn)
 	}
 	return nil
+}
+
+// Terminal Feed publication is best-effort; the Run/Turn and Item facts stay
+// authoritative. The shared Feed checks all retained pages under one local
+// publication lock. Host-output ACK must be checked by the caller first.
+func (runner *Runner) ensureTerminalTurnFeed(ctx context.Context, turn Turn) {
+	if runner == nil || runner.turnFeed == nil || !terminalTurnStatus(turn.Status) {
+		return
+	}
+	_ = runner.turnFeed.publishTerminalOnce(ctx, turn)
 }
 
 func (runner *Runner) terminalRuntimeSnapshot(ctx context.Context, turn Turn) (kernel.Snapshot, error) {
@@ -1096,6 +1230,9 @@ func (runner *Runner) FinalizeHostOutput(ctx context.Context, turnID string) (Sn
 		return Snapshot{}, err
 	}
 	if finalized {
+		// The Host ACK Item can commit just before Feed publication fails.
+		// Repeated finalization must repair only the missing notification.
+		runner.ensureTerminalTurnFeed(ctx, turn)
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
 	if !pending {
@@ -1108,7 +1245,7 @@ func (runner *Runner) FinalizeHostOutput(ctx context.Context, turnID string) (Sn
 	if err = runner.recordTerminalAgentMessageItem(ctx, turn, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
-	runner.publishTurnStatus(ctx, turn, turnEventTypeForStatus(turn.Status), true)
+	runner.ensureTerminalTurnFeed(ctx, turn)
 	return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 }
 
@@ -1272,7 +1409,7 @@ func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Tu
 		if err = runner.recordTerminalAgentMessageItem(ctx, updated, kernel.Snapshot{Run: kernel.Run{ID: invocation.ExecutionRefID}}); err != nil {
 			return Snapshot{}, err
 		}
-		runner.publishTurnStatus(ctx, updated, EventTurnFailed, true)
+		runner.ensureTerminalTurnFeed(ctx, updated)
 	}
 	return runner.loadSnapshot(ctx, updated, nil)
 }
@@ -1308,6 +1445,23 @@ func normalizeOptionalHostRef(value **HostRef) error {
 	}
 	*value = &normalized
 	return nil
+}
+
+// repairStartItems reconstructs committed, deterministic presentation facts
+// from the frozen Config and current Invocation. It never dispatches a Model,
+// Tool, or host capability. This is safe after any partial Item append.
+func (runner *Runner) repairStartItems(ctx context.Context, turn Turn, invocation Invocation) error {
+	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	if err != nil {
+		return err
+	}
+	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
+		return err
+	}
+	if err = runner.recordHostMessageItems(ctx, turn, config.InputMessage, config.OutputMessage); err != nil {
+		return err
+	}
+	return runner.recordContextItem(ctx, turn)
 }
 
 func (runner *Runner) recordHostMessageItems(

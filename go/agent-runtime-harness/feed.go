@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
@@ -57,7 +58,12 @@ type turnFeedEnvelope struct {
 
 // TurnFeed reuses the Runtime replay transport while replacing root Run
 // identity with the stable Harness Turn identity and semantic Item events.
-type TurnFeed struct{ feed *runfeed.Feed }
+type TurnFeed struct {
+	feed *runfeed.Feed
+	// Serialize best-effort terminal replay checks and publication for all
+	// Runners sharing this Feed; cross-process delivery remains at-least-once.
+	terminalMu sync.Mutex
+}
 
 func NewTurnFeed(feed *runfeed.Feed) (*TurnFeed, error) {
 	if feed == nil {
@@ -88,6 +94,87 @@ func (feed *TurnFeed) Publish(ctx context.Context, turnID string, draft TurnEven
 		return TurnEvent{}, err
 	}
 	return turnEventFromRunFeed(event)
+}
+
+// publishTerminalOnce deduplicates a terminal event across the *entire*
+// retained Feed, not just its first bounded replay page. It serializes local
+// publishers without introducing another persisted execution state machine.
+// Across processes the Feed remains at-least-once; consumers deduplicate.
+func (feed *TurnFeed) publishTerminalOnce(ctx context.Context, turn Turn) error {
+	if feed == nil || feed.feed == nil || !terminalTurnStatus(turn.Status) || strings.TrimSpace(turn.ID) == "" {
+		return ErrInvalidRequest
+	}
+	feed.terminalMu.Lock()
+	defer feed.terminalMu.Unlock()
+	// Long-running Turns can outlive the feed's progress-event retention.
+	// Find the earliest readable cursor without assuming the expired prefix
+	// includes (or excludes) a terminal event. Binary search uses only the
+	// existing monotonic cursor contract, then scans all retained pages.
+	after, err := feed.firstRetainedCursor(ctx, turn.ID)
+	if err != nil {
+		return err
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		page, err := feed.Replay(ctx, turn.ID, after)
+		if err != nil {
+			// Expiry can race a scan. Fail closed and let a later explicit
+			// Refresh/FinalizeHostOutput retry with a fresh cursor.
+			return err
+		}
+		if len(page) == 0 {
+			break
+		}
+		for _, event := range page {
+			if event.Seq <= after {
+				return ErrConflict
+			}
+			after = event.Seq
+			if event.Terminal && event.Type == turnEventTypeForStatus(turn.Status) {
+				return nil
+			}
+		}
+	}
+	_, err = feed.Publish(ctx, turn.ID, TurnEventDraft{
+		Type: turnEventTypeForStatus(turn.Status), Status: string(turn.Status),
+		Message: turn.ErrorDetail, Terminal: true,
+	})
+	return err
+}
+
+// firstRetainedCursor never guesses from HeadSeq that the terminal event was
+// absent. An expired prefix requires finding the first readable suffix, which
+// may still contain the terminal event (including after a process restart).
+// If no events remain, HeadSeq itself is the valid empty cursor and a new
+// terminal event may be appended to the same durable Turn.
+func (feed *TurnFeed) firstRetainedCursor(ctx context.Context, turnID string) (int64, error) {
+	_, err := feed.Replay(ctx, turnID, 0)
+	if err == nil {
+		return 0, nil
+	}
+	var expired *runfeed.CursorExpiredError
+	if !errors.As(err, &expired) || expired.HeadSeq <= 0 {
+		return 0, err
+	}
+	low, high := int64(0), expired.HeadSeq
+	for low+1 < high {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		mid := low + (high-low)/2
+		_, replayErr := feed.Replay(ctx, turnID, mid)
+		switch {
+		case replayErr == nil:
+			high = mid
+		case errors.Is(replayErr, runfeed.ErrCursorExpired):
+			low = mid
+		default:
+			return 0, replayErr
+		}
+	}
+	return high, nil
 }
 
 func (feed *TurnFeed) Replay(ctx context.Context, turnID string, afterSeq int64) ([]TurnEvent, error) {

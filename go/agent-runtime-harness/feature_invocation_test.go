@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -157,7 +158,7 @@ func TestWorkflowCanOwnTopLevelHarnessTurnWithoutAgentRoot(t *testing.T) {
 	}
 }
 
-func TestTopLevelFeatureReplayResumesPersistedRunningExecution(t *testing.T) {
+func TestTopLevelFeatureReplayCannotResumeBeforePhysicalStartSettles(t *testing.T) {
 	runner, feature := newBlockedWorkflowHarness(t, true)
 	request := blockedWorkflowTurnRequest("resume")
 	result := make(chan error, 1)
@@ -168,11 +169,14 @@ func TestTopLevelFeatureReplayResumesPersistedRunningExecution(t *testing.T) {
 	defer finishBlockedWorkflowStart(t, feature, result)
 	waitForBlockedWorkflowStart(t, feature)
 
-	replayed, err := runner.StartWorkflowTurn(t.Context(), request)
-	assertRunningWorkflowResumed(t, replayed, feature, err)
+	_, err := runner.StartWorkflowTurn(t.Context(), request)
+	if !errors.Is(err, harness.ErrConflict) || feature.resumeCalls.Load() != 0 {
+		t.Fatalf("physical Workflow Start grant must fence concurrent replay: err=%v resumeCalls=%d",
+			err, feature.resumeCalls.Load())
+	}
 }
 
-func TestTopLevelFeatureReplayTreatsConcurrentResumeConflictAsProgress(t *testing.T) {
+func TestTopLevelFeatureReplayDoesNotMisreportUnsettledStartAsProgress(t *testing.T) {
 	runner, feature := newConflictingResumeWorkflowHarness(t)
 	request := blockedWorkflowTurnRequest("concurrent-resume")
 	result := make(chan error, 1)
@@ -183,16 +187,14 @@ func TestTopLevelFeatureReplayTreatsConcurrentResumeConflictAsProgress(t *testin
 	defer finishBlockedWorkflowStart(t, feature, result)
 	waitForBlockedWorkflowStart(t, feature)
 
-	replayed, err := runner.StartWorkflowTurn(t.Context(), request)
-	if err != nil || replayed.Turn.Status != harness.TurnRunning || feature.resumeCalls.Load() != 1 {
-		t.Fatalf(
-			"concurrent workflow replay was not observed as progress: turn=%#v resumeCalls=%d err=%v",
-			replayed.Turn, feature.resumeCalls.Load(), err,
-		)
+	_, err := runner.StartWorkflowTurn(t.Context(), request)
+	if !errors.Is(err, harness.ErrConflict) || feature.resumeCalls.Load() != 0 {
+		t.Fatalf("unsettled Start must not authorize an independent Resume: resumeCalls=%d err=%v",
+			feature.resumeCalls.Load(), err)
 	}
 }
 
-func TestCancelAcceptedTopLevelInvocationWithoutRuntimeRunIsDurable(t *testing.T) {
+func TestCancelCannotClaimStoppedWhileAcceptedStartIsPhysicallyInFlight(t *testing.T) {
 	runner, feature := newBlockedWorkflowHarness(t, false)
 	request := blockedWorkflowTurnRequest("cancel-before-run")
 	result := make(chan error, 1)
@@ -204,10 +206,16 @@ func TestCancelAcceptedTopLevelInvocationWithoutRuntimeRunIsDurable(t *testing.T
 	waitForBlockedWorkflowStart(t, feature)
 
 	turnID := workflowTurnID(t, request)
-	cancelled, err := runner.Cancel(t.Context(), turnID, "cancel before runtime create")
-	assertDurableTopLevelCancellation(t, cancelled, err)
-	assertSyntheticCancellationLoadable(t, runner, turnID)
-	assertCancelledWorkflowDoesNotReplay(t, runner, request, feature)
+	_, err := runner.Cancel(t.Context(), turnID, "cancel before runtime create")
+	if !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("cancellation could not prove an in-flight StartRun was stopped: %v", err)
+	}
+	observed, loadErr := runner.Load(t.Context(), turnID)
+	if loadErr != nil || observed.Turn.Status != harness.TurnAccepted ||
+		feature.startCalls.Load() != 1 {
+		t.Fatalf("unsettled Start admission was rewritten: turn=%s calls=%d err=%v",
+			observed.Turn.Status, feature.startCalls.Load(), loadErr)
+	}
 }
 
 func TestTopLevelFeatureStartFailureWithoutRuntimeRunRemainsLoadable(t *testing.T) {
@@ -531,7 +539,8 @@ func seedFeatureInvocationEnvelope(
 	}); err != nil {
 		t.Fatal(err)
 	}
-	config, err := harness.SealConfigSnapshot(turnID, harness.ConfigSnapshot{}, now)
+	// Simulated already-admitted Turn must carry the current hard-cut proof.
+	config, err := harness.SealConfigSnapshot(turnID, harness.ConfigSnapshot{AdmissionHash: strings.Repeat("a", 64)}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,7 +657,9 @@ var errRejectedTopLevelWorkflow = errors.New("rejected before runtime create")
 type rejectedWorkflowFeature struct{}
 
 func (rejectedWorkflowFeature) StartRun(context.Context, workflow.StartRequest) (kernel.Snapshot, error) {
-	return kernel.Snapshot{}, errRejectedTopLevelWorkflow
+	// The fixture explicitly certifies pre-dispatch rejection; a bare Feature
+	// error is no longer proof that a remote execution never started.
+	return kernel.Snapshot{}, harness.FeatureStartNoEffect(errRejectedTopLevelWorkflow)
 }
 
 func (rejectedWorkflowFeature) Resume(context.Context, string, uint64) (kernel.Snapshot, error) {
@@ -810,50 +821,6 @@ func finishBlockedWorkflowStart(t *testing.T, feature *blockedWorkflowFeature, r
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("blocked workflow StartRun did not finish")
-	}
-}
-
-func assertRunningWorkflowResumed(
-	t *testing.T,
-	snapshot harness.Snapshot,
-	feature *blockedWorkflowFeature,
-	err error,
-) {
-	t.Helper()
-	if err != nil || snapshot.Turn.Status != harness.TurnRunning || feature.resumeCalls.Load() != 1 {
-		t.Fatalf("running workflow replay did not resume: turn=%#v resumeCalls=%d err=%v", snapshot.Turn, feature.resumeCalls.Load(), err)
-	}
-}
-
-func assertDurableTopLevelCancellation(t *testing.T, snapshot harness.Snapshot, err error) {
-	t.Helper()
-	if err != nil {
-		t.Fatalf("cancel accepted invocation without runtime run: %v", err)
-	}
-	invocation, ok := harness.TopLevelInvocation(snapshot)
-	if !ok || snapshot.Turn.Status != harness.TurnCancelled || invocation.Status != harness.InvocationCancelled {
-		t.Fatalf("missing durable cancellation: turn=%#v invocations=%#v", snapshot.Turn, snapshot.Invocations)
-	}
-}
-
-func assertSyntheticCancellationLoadable(t *testing.T, runner *harness.Runner, turnID string) {
-	t.Helper()
-	loaded, err := runner.Load(t.Context(), turnID)
-	if err != nil || loaded.Turn.Status != harness.TurnCancelled {
-		t.Fatalf("load synthetic cancellation: turn=%#v err=%v", loaded.Turn, err)
-	}
-}
-
-func assertCancelledWorkflowDoesNotReplay(
-	t *testing.T,
-	runner *harness.Runner,
-	request harness.WorkflowTurnRequest,
-	feature *blockedWorkflowFeature,
-) {
-	t.Helper()
-	replayed, err := runner.StartWorkflowTurn(t.Context(), request)
-	if err != nil || replayed.Turn.Status != harness.TurnCancelled || feature.startCalls.Load() != 1 {
-		t.Fatalf("cancelled start replayed execution: turn=%#v startCalls=%d err=%v", replayed.Turn, feature.startCalls.Load(), err)
 	}
 }
 

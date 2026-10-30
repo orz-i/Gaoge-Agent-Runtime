@@ -47,6 +47,12 @@ var (
 	ErrUsageUnavailable         = errors.New("agent model usage unavailable for configured token budget")
 	ErrApprovalRequired         = errors.New("agent run approval is required")
 	ErrRunTerminal              = errors.New("agent run is terminal")
+	// ErrControlNoEffect is returned by native Agent controls only when the
+	// current attempt failed BEFORE approval middleware/physical dispatch or
+	// Kernel ApplyControl. It proves nothing about earlier attempts or
+	// independently running external work. Never attach it to uncertain
+	// post-dispatch outcomes.
+	ErrControlNoEffect = errors.New("agent control did not dispatch an effect")
 )
 
 func (runner *Runner) completeWithToolResult(
@@ -511,46 +517,64 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 		// Native durability cannot recover an uncertain Create when the
 		// caller never knew the generated Run ID. RequestID alone is not a
 		// Store-enforced unique idempotency key.
-		return kernel.Snapshot{}, ErrInvalidRequest
+		return kernel.Snapshot{}, nativeStartNoEffect(ErrInvalidRequest)
+	}
+	// Resolve all Start inputs BEFORE Run Middleware or Kernel.Create. A
+	// failure at this boundary cannot have dispatched Model/Tool or entered
+	// arbitrary Run Middleware, so this concrete native result may be used
+	// by Harness to retire its own physical Start grant.
+	encoded, err := runner.prepareStartState(ctx, request)
+	if err != nil {
+		return kernel.Snapshot{}, nativeStartNoEffect(err)
 	}
 	invocation := plugin.RunInvocation{
 		Operation: plugin.RunStart, Kind: RunKind, RunID: strings.TrimSpace(request.ID),
 		Actor: request.Actor, Thread: request.Thread, Goal: strings.TrimSpace(request.Goal),
 	}
-	return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-		return runner.startRun(nextCtx, request, deferred)
+	snapshot, invokeErr := runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+		return runner.startPreparedRun(nextCtx, request, deferred, encoded)
 	})
+	// A custom middleware could return a private proof from an unrelated
+	// nested native Start after performing effects of its own. Only the
+	// direct pre-middleware return above carries this call's authority.
+	if IsNativeStartNoEffect(invokeErr) {
+		return snapshot, fmt.Errorf("agent Run Middleware outcome is not preflight proof: %w", invokeErr)
+	}
+	return snapshot, invokeErr
 }
 
-func (runner *Runner) startRun(ctx context.Context, request StartRequest, deferred bool) (kernel.Snapshot, error) {
+// prepareStartState is strictly pre-middleware and pre-Kernel.Create. Its
+// capability/catalog lookups are read-only by dependency contract. Failure
+// cannot create a Run, dispatch a Model/Tool, or execute Run Middleware.
+func (runner *Runner) prepareStartState(ctx context.Context, request StartRequest) (json.RawMessage, error) {
 	if err := runner.validateOutputCapability(ctx, request.Model, request.OutputContract); err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	local, hosted, err := runner.resolveSelectedTools(ctx, request.ToolKeys, request.Model, request.DeadlineAt)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	for _, definition := range local {
 		if definition.Key == ToolDiscoveryKey || definition.Name == discoveryToolName {
-			return kernel.Snapshot{}, ErrToolDiscoveryInvalid
+			return nil, ErrToolDiscoveryInvalid
 		}
 	}
 	for _, native := range hosted {
 		if native.Key == ToolDiscoveryKey {
 			// The reserved SDK control must never be shadowed by a provider
 			// Hosted Tool, including an Eager Run with fewer than 16 locals.
-			return kernel.Snapshot{}, ErrToolDiscoveryInvalid
+			return nil, ErrToolDiscoveryInvalid
 		}
 	}
 	grants, err := normalizedHostedToolGrants(request.HostedToolGrants)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	if !validHostedGrantSnapshot(grants, normalizedToolKeys(request.ToolKeys)) {
-		return kernel.Snapshot{}, ErrInvalidRequest
+		return nil, ErrInvalidRequest
 	}
 	if err = verifyHostedGrantVersions(grants, hosted); err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	// Initial tools must be actual authorized local definitions, not opaque
 	// Hosted grants or names supplied by the model/search adapter. Enforce
@@ -560,28 +584,28 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest, deferr
 		localKeys = append(localKeys, definition.Key)
 	}
 	if !toolKeysContainAll(normalizedToolKeys(localKeys), normalizedToolKeys(request.InitialToolKeys)) {
-		return kernel.Snapshot{}, ErrInvalidRequest
+		return nil, ErrInvalidRequest
 	}
 	discovery, err := runner.freezeToolDiscovery(request, local)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	limits, err := resolveRunLimits(runner.limits, request.Limits)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	allowance, err := resolvedCallAllowance(request.CallAllowance, limits)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	automaticAllowance, err := initialAutoAllowance(request.AutoAllowance, allowance, limits)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	toolKeys := normalizedToolKeys(request.ToolKeys)
 	requiredToolKeys := normalizedToolKeys(request.RequiredToolKeys)
 	if !toolKeysContainAll(toolKeys, requiredToolKeys) {
-		return kernel.Snapshot{}, ErrInvalidRequest
+		return nil, ErrInvalidRequest
 	}
 	state := runState{
 		Messages:         []model.Message{{Role: model.RoleUser, Content: strings.TrimSpace(request.Goal)}},
@@ -601,8 +625,13 @@ func (runner *Runner) startRun(ctx context.Context, request StartRequest, deferr
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
+
+	return encoded, nil
+}
+
+func (runner *Runner) startPreparedRun(ctx context.Context, request StartRequest, deferred bool, encoded json.RawMessage) (kernel.Snapshot, error) {
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		ExecutionRequired: runner.runExecution != nil,
@@ -639,18 +668,20 @@ func (runner *Runner) ResolveApproval(
 	response plugin.ApprovalResponse,
 ) (kernel.Snapshot, error) {
 	if runner == nil || runner.approvals == nil {
-		return kernel.Snapshot{}, ErrApprovalRequired
+		return kernel.Snapshot{}, agentControlNoEffect(ErrApprovalRequired)
 	}
 	snapshot, state, err := runner.loadState(ctx, runID)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return kernel.Snapshot{}, agentControlNoEffect(err)
 	}
 	if snapshot.Run.Revision != expectedRevision {
-		return kernel.Snapshot{}, kernel.ErrConflict
+		return kernel.Snapshot{}, agentControlNoEffect(kernel.ErrConflict)
 	}
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput || len(state.PendingCalls) == 0 {
-		return kernel.Snapshot{}, ErrApprovalRequired
+		return kernel.Snapshot{}, agentControlNoEffect(ErrApprovalRequired)
 	}
+	// From this boundary onward a Run middleware, approval handler or
+	// Model/Tool may perform effects; no generic return error proves no-effect.
 	invocation := runInvocation(plugin.RunResolveApproval, snapshot)
 	return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 		return runner.resolveApproval(nextCtx, snapshot, state, response)

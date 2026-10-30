@@ -113,15 +113,19 @@ completion validation never downgrade to prompt-only JSON. See
 ### Session and Context governance
 
 For text conversations, the optional Harness `OpenSession` facade exposes
-`Prompt`, `Load`, `Refresh`, and explicit `Resume` over the existing durable
+`Prompt`, complete `Load`, bounded `LoadState`, paged `Timeline`, `Refresh`,
+and explicit `Resume` over the existing durable
 Session/Turn Store. A reopened Session can resume its original Agent Turn from
 persisted state without reading the Host transcript again.
 A trusted pre-intent model request preparer can inject the Context Window
 without changing a persisted model intent on restart. A separately opt-in
 managed preparer estimates routed model-window pressure and archives removed
 history as durable, retrievable Context artifacts; unknown token limits and
-unsafe compaction fail closed. No additional Session authority or schema is
-introduced. See [Session and Context governance, composition and limits](docs/session-context-governance.md).
+unsafe compaction fail closed. Admitted Turn inputs, Context and execution
+allowances are frozen before persistence; Application capabilities with unknown
+external effects cannot be blindly replayed. No additional Session authority
+or database schema is introduced. See [Session and Context governance, composition and limits](docs/session-context-governance.md)
+and the [pre-stable hard-cut notes](docs/breaking-changes.md).
 
 ### Configuration-driven bootstrap
 

@@ -20,6 +20,25 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 });
 
 describe("RuntimeClient target API", () => {
+  it("uses bounded owner-scoped Harness status and Timeline endpoints", async () => {
+    const committed = {
+      turn: { id: "ht/1", hostTurn: { kind: "conversation_turn", id: "turn" },
+        status: "running", revision: 3, createdAt: "2026-10-26T00:00:00Z", updatedAt: "2026-10-26T00:00:01Z" },
+    };
+    const timeline = { items: [{ id: "item-5", turnID: "ht/1", seq: 5,
+      kind: "tool", status: "completed", createdAt: "2026-10-26T00:00:00Z",
+      updatedAt: "2026-10-26T00:00:01Z" }], nextAfterSeq: 5 };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json(committed))
+      .mockResolvedValueOnce(json(timeline));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+    await expect(client.harness.turns.state("ht/1")).resolves.toEqual(committed);
+    await expect(client.harness.turns.items("ht/1", { afterSeq: 4, limit: 1 })).resolves.toEqual(timeline);
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "https://runtime.test/api/v1/harness/turns/ht%2F1/state",
+      "https://runtime.test/api/v1/harness/turns/ht%2F1/items?afterSeq=4&limit=1",
+    ]);
+  });
+
   it.each([undefined, "checkpoint/1"])("binds a Harness approval to the optional checkpoint %s", async (checkpointID) => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({}));
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });

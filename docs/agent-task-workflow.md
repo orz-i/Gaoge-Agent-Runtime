@@ -68,13 +68,17 @@ turn, err := session.Prompt(ctx, stableTurnID, prompt)
 The host transcript includes the current user message last, stable source IDs and
 the conversation ancestry. Completed assistant output is still host-owned.
 Persist the stable Turn identity before submission. Retrying the same prompt uses
-the same ID; new user work uses a new ID.
+the same ID **and exactly the same admitted ContextSeed, configuration, host
+message bindings and execution allowances**. Harness hashes that admission
+before creating the Turn; changed inputs fail closed. New user work uses a new ID.
 
 | Operation | Purpose | Advances model/Tool work? |
 | --- | --- | --- |
 | `Prompt` | Start or idempotently reload the specified Turn | A new Turn starts work; an existing Run is reloaded |
-| `Load` | Read persisted Turn/output | No |
-| `Refresh` | Synchronize Harness projections from Runtime facts | No |
+| `Load` | Read the **complete** Turn/output and materialized history | No |
+| `LoadState` | Read bounded Session/Turn/config without scanning Timeline | No |
+| `Timeline` | Page durable Timeline Items by sequence cursor (limit 1–500) | No |
+| `Refresh` | Reconcile Harness projections from Runtime facts, including after terminal-Item crash | No |
 | `Resume` | Continue the existing direct-Agent Run | Only while the Runtime Run is running and Agent admits the continuation |
 
 ## 4. Recover the original task
@@ -98,6 +102,12 @@ The actor/session check runs before execution. Resume loads the existing root Ru
 and revision, restores its Context, delegates to Agent's execution path once, and
 synchronizes the root Invocation and Turn outcome. A completed Turn is safe to
 load or resume again without repeating the model or committed Tool effects.
+
+For status polling, use `LoadState` rather than repeatedly loading every Item.
+For detailed history, use `Timeline(ctx, turnID, afterSeq, limit)`; neither
+method drives Model or Tool execution. `LoadState` reads the committed Harness
+projection, which can lag the underlying Kernel until the host performs a
+`Refresh`/continuation reconciliation.
 
 Recovery respects existing control boundaries:
 

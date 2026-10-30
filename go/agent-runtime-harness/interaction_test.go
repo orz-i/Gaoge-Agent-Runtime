@@ -447,7 +447,7 @@ func assertHandlerFailureKeepsOwnerWaiting(
 	if err != nil || paused.Turn.Status != harness.TurnWaitingInput ||
 		invocationByID(t, paused, interactionParentInvocationID).Status != harness.InvocationWaitingInput ||
 		interactionByKey(t, paused, "handled-choice").Status != harness.InteractionResolved || fixture.agent.resumeCalls != 0 {
-		t.Fatalf("handler failure advanced owner: snapshot=%#v resumeCalls=%d err=%v", paused, fixture.agent.resumeCalls, err)
+		t.Fatalf("proven no-effect failure failed to release claim safely: turn=%s invocation=%s calls=%d err=%v", paused.Turn.Status, invocationByID(t, paused, interactionParentInvocationID).Status, fixture.agent.resumeCalls, err)
 	}
 }
 
@@ -519,7 +519,7 @@ func (handler *recordingInteractionResponseHandler) HandleInteractionResponse(
 	handler.actorID = response.Session.Actor.ActorID
 	if handler.failures > 0 {
 		handler.failures--
-		return harness.InteractionResponseResult{}, errInteractionHandlerFixture
+		return harness.InteractionResponseResult{}, errors.Join(harness.ErrInteractionNoEffect, errInteractionHandlerFixture)
 	}
 	return harness.InteractionResponseResult{}, nil
 }

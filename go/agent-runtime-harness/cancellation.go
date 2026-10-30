@@ -12,6 +12,9 @@ import (
 
 // RuntimeCanceller lets the host perform feature-owned cleanup, including
 // cancelling remote tasks, before projecting a Runtime Run as terminal.
+// IMPORTANT: kernel.ErrConflict from Cancel certifies that the rejected
+// attempt performed NO external cleanup. A canceller which might already
+// have changed remote state must return an outcome-unknown error instead.
 type RuntimeCanceller interface {
 	Cancel(context.Context, string, uint64, string) (kernel.Snapshot, error)
 }
@@ -25,24 +28,54 @@ func (runner *Runner) cancelRuntimeRun(
 	if runID == "" {
 		return kernel.Snapshot{}, false, ErrInvalidRequest
 	}
+	// A native Kernel control can distinguish a read-only/pre-Store rejection
+	// from a write-capable Store outcome. Custom cancellers retain their
+	// explicit contract that kernel.ErrConflict certifies zero external
+	// cleanup; never infer that guarantee from a native Store conflict.
+	_, nativeKernel := runner.cancellation.(*kernel.Runtime)
+	var lastNativeNoEffect error
 	for range maxRuntimeSyncRetryAttempts {
 		current, err := runner.runtime.Load(ctx, runID)
 		if errors.Is(err, kernel.ErrNotFound) {
 			return kernel.Snapshot{}, false, nil
 		}
 		if err != nil {
-			return kernel.Snapshot{}, false, err
+			// This is a Harness-owned read-only check before calling ANY
+			// RuntimeCanceller, native or custom. The private direct proof
+			// certifies only that no cancellation callback ran in this
+			// attempt; the underlying Store error proves nothing itself.
+			return kernel.Snapshot{}, false, cancellationReadNoEffect{cause: err}
 		}
 		if terminalRuntimeStatus(current.Run.Status) {
 			return current, true, nil
 		}
 		cancelled, err := runner.cancellation.Cancel(ctx, runID, current.Run.Revision, strings.TrimSpace(reason))
+		if nativeKernel {
+			if kernel.IsControlNoEffect(err) {
+				if errors.Is(err, kernel.ErrConflict) {
+					// A pre-Store CAS revision mismatch is safe to retry,
+					// but preserve its native proof if all retries exhaust.
+					lastNativeNoEffect = err
+					continue
+				}
+				return cancelled, true, err
+			}
+			// Even a native Store ErrConflict can follow an uncertain
+			// write-capable CAS. Never retry or release its intent blindly.
+			return cancelled, true, err
+		}
 		if errors.Is(err, kernel.ErrConflict) {
+			// The custom RuntimeCanceller contract reserves this error
+			// for attempts with absolutely no external cleanup.
 			continue
 		}
 		return cancelled, true, err
 	}
-	return kernel.Snapshot{}, false, ErrConflict
+	if nativeKernel && lastNativeNoEffect != nil {
+		return kernel.Snapshot{}, false, lastNativeNoEffect
+	}
+	// Every custom canceller conflict was contractually no-effect.
+	return kernel.Snapshot{}, false, kernel.ErrConflict
 }
 
 func (runner *Runner) syncTerminalDelegations(ctx context.Context, turn Turn, runs map[string]kernel.Snapshot) error {

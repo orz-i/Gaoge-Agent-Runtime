@@ -337,6 +337,19 @@ func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.Raw
 	if kind == harness.ItemApproval {
 		return publicApprovalItemPayload(payload)
 	}
+	if kind == harness.ItemDiagnostic {
+		// Diagnostic grant/fence metadata is persisted for authoritative
+		// recovery but not exposed as an internal Kernel execution identity.
+		// Apply to the shared Item projection used by full turns, paged
+		// timelines and streaming feed events.
+		filtered := runtimehttp.PublicDiagnosticPayload(payload)
+		var value any
+		if err := json.Unmarshal(filtered, &value); err != nil {
+			return nil, errors.Join(harness.ErrConflict, err)
+		}
+		stripDiagnosticRunRefs(value)
+		return json.Marshal(value)
+	}
 	if kind == harness.ItemSubtask {
 		var item harness.Subtask
 		if err := json.Unmarshal(payload, &item); err != nil {
@@ -370,6 +383,27 @@ func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.Raw
 	return runtimehttp.PublicDiagnosticPayload(encoded), nil
 }
 
+// Strip physical Kernel IDs from all nested diagnostic fields, rather than
+// relying on the narrower private schema of a particular diagnostic phase.
+// Business Tool/Model payloads are not modified by this diagnostic-only rule.
+func stripDiagnosticRunRefs(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			switch strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key)) {
+			case "runid", "physicalrunid", "executionrefid":
+				delete(typed, key)
+			default:
+				stripDiagnosticRunRefs(child)
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			stripDiagnosticRunRefs(child)
+		}
+	}
+}
+
 // Public approval items expose only the action and checkpoint identity needed
 // for owner decisions. Unknown fields and raw Tool arguments are private, even
 // when the payload was inserted by a host-owned timeline adapter.
@@ -401,6 +435,17 @@ func turnEventResponse(event harness.TurnEvent) (harness.TurnEvent, error) {
 	result := event
 	result.Message = runtimehttp.PublicEventMessage(event.Type, event.Status, event.Message)
 	result.Data = runtimehttp.PublicDiagnosticPayload(event.Data)
+	// Diagnostic progress/delta events do not carry the complete Item
+	// envelope and therefore skip itemResponse below. Apply the same
+	// internal-Run-ID filter to their data as to started/completed Items.
+	if event.ItemKind == harness.ItemDiagnostic &&
+		event.Type != harness.EventItemStarted && event.Type != harness.EventItemCompleted {
+		filtered, err := publicItemPayload(harness.ItemDiagnostic, event.Data)
+		if err != nil {
+			return harness.TurnEvent{}, err
+		}
+		result.Data = filtered
+	}
 	if event.ItemKind == harness.ItemApproval {
 		// Approval items have no public free-text event fields. The request
 		// payload is projected separately for started/completed events.
@@ -533,6 +578,8 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 	}
 	routes.GET("/harness/commands", module.Handler.ListCommands)
 	routes.GET("/harness/turns/:turn_id", module.Handler.GetTurn)
+	routes.GET("/harness/turns/:turn_id/state", module.Handler.GetTurnState)
+	routes.GET("/harness/turns/:turn_id/items", module.Handler.GetTurnItems)
 	routes.GET("/harness/turns/:turn_id/feed", module.Handler.StreamTurnFeed)
 	routes.POST("/harness/turns/:turn_id/approval", module.Handler.ResolveApproval)
 	routes.POST("/harness/turns/:turn_id/allowance", module.Handler.GrantCallAllowance)
@@ -557,7 +604,7 @@ func (handler *Handler) GetTurn(context *gin.Context) {
 }
 
 func (handler *Handler) StreamTurnFeed(context *gin.Context) {
-	snapshot, ok := handler.authorizedTurn(context)
+	state, ok := handler.authorizedState(context)
 	if !ok {
 		return
 	}
@@ -566,7 +613,7 @@ func (handler *Handler) StreamTurnFeed(context *gin.Context) {
 		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "harness.feed_invalid_request", "invalid Harness Turn feed cursor")
 		return
 	}
-	subscription, err := handler.runner.SubscribeTurnFeed(context.Request.Context(), snapshot.Turn.ID, afterSeq)
+	subscription, err := handler.runner.SubscribeTurnFeed(context.Request.Context(), state.Turn.ID, afterSeq)
 	if err != nil {
 		if writeTurnFeedCursorExpired(context, err) {
 			return
@@ -580,35 +627,26 @@ func (handler *Handler) StreamTurnFeed(context *gin.Context) {
 	if terminal {
 		return
 	}
-	if terminalHarnessTurn(snapshot.Turn.Status) && harness.TerminalFeedReady(snapshot) {
-		_ = writeTurnFeedEvent(context, terminalTurnSnapshotEvent(snapshot, lastSeq+1))
-		return
+	if terminalHarnessTurn(state.Turn.Status) {
+		// Only a terminal Turn needs the complete Timeline to prove the
+		// host-bound assistant message has been acknowledged.
+		snapshot, loadErr := handler.runner.Load(context.Request.Context(), state.Turn.ID)
+		if loadErr == nil && harness.TerminalFeedReady(snapshot) {
+			_ = writeTurnFeedEvent(context, terminalTurnSnapshotEvent(snapshot, lastSeq+1))
+			return
+		}
 	}
 	followTurnFeed(context, subscription)
 }
 
 func (handler *Handler) authorizedTurn(context *gin.Context) (harness.Snapshot, bool) {
-	if handler == nil || handler.runner == nil || handler.shared == nil {
-		runtimehttp.WriteError(context, stdhttp.StatusServiceUnavailable, "harness.unavailable", "Harness runtime is unavailable")
+	state, ok := handler.authorizedState(context)
+	if !ok {
 		return harness.Snapshot{}, false
 	}
-	turnID := strings.TrimSpace(context.Param("turn_id"))
-	if turnID == "" {
-		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "harness.invalid_request", "Harness Turn id is required")
-		return harness.Snapshot{}, false
-	}
-	snapshot, err := handler.runner.Load(context.Request.Context(), turnID)
+	snapshot, err := handler.runner.Load(context.Request.Context(), state.Turn.ID)
 	if err != nil {
 		writeHarnessError(context, err)
-		return harness.Snapshot{}, false
-	}
-	actor, err := handler.shared.ActorRef(context)
-	if err != nil {
-		runtimehttp.WriteError(context, stdhttp.StatusUnauthorized, "auth.unauthorized", err.Error())
-		return harness.Snapshot{}, false
-	}
-	if snapshot.Session.Actor != actor {
-		runtimehttp.WriteError(context, stdhttp.StatusNotFound, "harness.not_found", "Harness Turn not found")
 		return harness.Snapshot{}, false
 	}
 	return snapshot, true
@@ -627,6 +665,15 @@ func writeHarnessError(context *gin.Context, err error) {
 		runtimehttp.WriteError(context, stdhttp.StatusBadRequest, "harness.invalid_request", "invalid Harness request")
 	case errors.Is(err, harness.ErrNotFound):
 		runtimehttp.WriteError(context, stdhttp.StatusNotFound, "harness.not_found", "Harness Turn not found")
+	case errors.Is(err, harness.ErrExecutionOutcomeUnknown):
+		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.execution_outcome_unknown",
+			"Feature start outcome requires authoritative reconciliation before retry")
+	case errors.Is(err, harness.ErrApplicationOutcomeUnknown):
+		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.application_outcome_unknown",
+			"Application capability outcome requires external reconciliation before retry")
+	case errors.Is(err, harness.ErrInteractionOutcomeUnknown):
+		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.interaction_outcome_unknown",
+			"Interaction business response outcome requires host reconciliation before retry")
 	case errors.Is(err, harness.ErrConflict):
 		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.conflict", "Harness Turn state conflicts")
 	default:

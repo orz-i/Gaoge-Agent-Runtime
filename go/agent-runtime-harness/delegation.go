@@ -125,6 +125,9 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 	if err != nil || !runner.canDelegate(invocation) {
 		return DelegationResult{}, errors.Join(ErrInvalidRequest, err)
 	}
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return DelegationResult{}, err
+	}
 	delegation, parent, err := runner.prepareDelegation(ctx, turn, invocation, request)
 	if err != nil {
 		return DelegationResult{}, err

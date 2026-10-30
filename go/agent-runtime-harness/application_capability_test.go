@@ -257,7 +257,7 @@ func (executor *applicationCapabilityExecutorFixture) ExecuteApplicationCapabili
 	}
 	if executor.failures > 0 {
 		executor.failures--
-		return harness.ApplicationCapabilityResult{}, errApplicationCapabilityFixture
+		return harness.ApplicationCapabilityResult{}, errors.Join(harness.ErrApplicationNoEffect, errApplicationCapabilityFixture)
 	}
 	return harness.ApplicationCapabilityResult{
 		OutputRefs: append([]harness.HostRef(nil), executor.outputRefs...), Interaction: executor.interaction,
