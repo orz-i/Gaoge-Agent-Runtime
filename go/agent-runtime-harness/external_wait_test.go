@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -47,20 +48,33 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	ready, executions := false, 0
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(handler), {
 		Definition: tools.Definition{Key: "test.local_external", Name: "local_external", InputSchema: json.RawMessage(`{"type":"object"}`), Terminal: true},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			executions++
-			if ready {
-				return tools.ExecutionResult{Content: json.RawMessage(`42`), Receipt: tools.Receipt{ExecutionID: "local-operation", Disposition: "committed"}}, nil
+			if executions > 1 {
+				return tools.ExecutionResult{}, errors.New("external Tool polled again instead of verifying provider COMMIT")
 			}
 			deadline := clock.Now().Add(2 * time.Minute)
-			return tools.ExecutionResult{Content: json.RawMessage(`null`), Receipt: tools.Receipt{ExecutionID: "local-operation", Disposition: tools.ReceiptDispositionPending},
+			return tools.ExecutionResult{Content: json.RawMessage(`null`), Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: tools.ReceiptDispositionPending},
 				Pending: &tools.PendingExecution{Kind: tools.PendingExternalResult, OperationID: "local-operation", InputDigest: strings.Repeat("e", 64), DeadlineAt: &deadline}}, nil
 		}),
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, Catalog: registry, Executor: registry, Clock: clock})
+	direct, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: client, Catalog: registry, Executor: registry, Clock: clock,
+		ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			if request.Call.ToolKey == harness.DelegationToolKey {
+				return handler.VerifyCommittedTool(ctx, request)
+			}
+			if request.Call.ToolKey != "test.local_external" || !ready ||
+				request.Call.ID != "child-external-call" {
+				return tools.ExecutionResult{}, errors.New("local external provider has no trusted COMMIT")
+			}
+			return tools.ExecutionResult{Content: json.RawMessage(`42`),
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
+		}),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +116,7 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	for range 60 {
 		clock.now = clock.now.Add(time.Second)
 		unchanged, resumeErr := direct.Resume(t.Context(), rootID, root.Run.Revision)
-		if resumeErr != nil || unchanged.Run.Revision != root.Run.Revision || executions != 1 || client.calls != 2 {
+		if !errors.Is(resumeErr, agent.ErrToolOutcomeUnknown) || unchanged.Run.Revision != root.Run.Revision || executions != 1 || client.calls != 2 {
 			t.Fatalf("parent polled: %#v %v executions=%d model=%d", unchanged.Run, resumeErr, executions, client.calls)
 		}
 	}
@@ -111,12 +125,20 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err = direct.Resume(t.Context(), child.Run.ID, child.Run.Revision)
+	verifiedChild, err := direct.ReconcileToolOutcome(t.Context(), child.Run.ID, child.Run.Revision, "child-external-call")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child = verifiedChild
+	if child.Run.Status != kernel.RunStatusCompleted {
+		child, err = direct.Resume(t.Context(), verifiedChild.Run.ID, verifiedChild.Run.Revision)
+	}
 	if err != nil || child.Run.Status != kernel.RunStatusCompleted {
 		t.Fatalf("child=%#v, %v", child.Run, err)
 	}
-	completed, err := direct.Resume(t.Context(), rootID, root.Run.Revision)
-	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || client.calls != 3 || executions != 2 {
+	verifiedParent := reconcileDelegationRoot(t, direct, root)
+	completed, err := direct.Resume(t.Context(), rootID, verifiedParent.Run.Revision)
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || client.calls != 3 || executions != 1 {
 		t.Fatalf("parent=%#v, %v calls=%d/%d", completed.Run, err, client.calls, executions)
 	}
 	view, err := agent.ViewState(completed)

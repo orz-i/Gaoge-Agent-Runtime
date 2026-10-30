@@ -3,9 +3,11 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
+	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -39,13 +41,43 @@ func TestChildBatchStartsAllChildrenBeforeWaitingAndSurvivesRestart(t *testing.T
 	})
 	registry := mustRegistry(t, []tools.Registration{{Definition: tools.Definition{Key: pendingToolKey, Name: "batch_children", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: handler}})
 	client := &childBatchModel{t: t}
-	runner := mustRunner(t, runtime, approvals, client, registry)
+	lookups := 0
+	newRunner := func() *agent.Runner {
+		t.Helper()
+		runner, err := agent.NewRunner(agent.Dependencies{
+			Runtime: runtime, Model: client, Catalog: registry, Executor: registry,
+			Approvals: interactionadapter.New(approvals),
+			ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				lookups++
+				child, ok := children[request.Call.ID]
+				if !ok {
+					return tools.ExecutionResult{}, errors.New("unknown delegated child identity")
+				}
+				current, err := runtime.Load(ctx, child.Run.ID)
+				if err != nil {
+					return tools.ExecutionResult{}, err
+				}
+				if current.Run.Status == kernel.RunStatusRunning {
+					return tools.ExecutionResult{}, errors.New("delegated child not terminal")
+				}
+				return tools.ExecutionResult{
+					Content: json.RawMessage(fmt.Sprintf("{%q:%q}", "status", current.Run.Status)),
+					Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"},
+				}, nil
+			}),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return runner
+	}
+	runner := newRunner()
 	started, err := runner.StartRun(t.Context(), startRequest("batch_root", "batch_request", "research concurrently", pendingToolKey))
 	if err != nil || started.Run.Status != kernel.RunStatusRunning || starts != 3 {
 		t.Fatalf("all children must be prepared before the first join: starts=%d status=%s err=%v", starts, started.Run.Status, err)
 	}
 	// Recreate the parent runner while all three children are still in flight.
-	runner = mustRunner(t, runtime, approvals, client, registry)
+	runner = newRunner()
 	for callID, child := range children {
 		status := kernel.RunStatusCompleted
 		code := ""
@@ -60,9 +92,27 @@ func TestChildBatchStartsAllChildrenBeforeWaitingAndSurvivesRestart(t *testing.T
 			t.Fatal(err)
 		}
 	}
-	completed, err := runner.Resume(t.Context(), started.Run.ID, started.Run.Revision)
-	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || starts != 3 {
-		t.Fatalf("batch did not join after restart: starts=%d status=%s err=%v", starts, completed.Run.Status, err)
+	current := started
+	for count := 0; count < 3; count++ {
+		view, err := agent.ViewState(current)
+		if err != nil || view.PendingTool == nil {
+			t.Fatalf("missing original deferred child identity: %+v err=%v", current.Run, err)
+		}
+		verified, err := runner.ReconcileToolOutcome(t.Context(), current.Run.ID, current.Run.Revision, view.PendingTool.CallID)
+		if err != nil {
+			t.Fatalf("read-only child outcome verification failed: call=%s err=%v", view.PendingTool.CallID, err)
+		}
+		current, err = runner.Resume(t.Context(), verified.Run.ID, verified.Run.Revision)
+		if count < 2 && !errors.Is(err, agent.ErrToolOutcomeUnknown) {
+			t.Fatalf("deferred child resumed without verified receipt: iteration=%d err=%v", count, err)
+		}
+		if count == 2 && err != nil {
+			t.Fatalf("all verified children could not complete: %v", err)
+		}
+	}
+	completed := current
+	if completed.Run.Status != kernel.RunStatusCompleted || starts != 3 || lookups != 3 {
+		t.Fatalf("batch did not join from trusted receipts: starts=%d lookups=%d status=%s", starts, lookups, completed.Run.Status)
 	}
 	view, err := agent.ViewState(completed)
 	if err != nil || view.Budget.Usage.ToolCalls != 3 {

@@ -73,11 +73,15 @@ func (handler *DelegationToolHandler) Execute(
 	}
 	var input DelegateRequest
 	if err := json.Unmarshal(request.Call.Arguments, &input); err != nil {
-		return tools.ExecutionResult{}, tools.NewRecoverableCallError("delegation.invalid_input", "invalid delegation input", err)
+		return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallError(
+			"delegation.invalid_input", "invalid delegation input", err))
 	}
 	input, err := handler.prepareRequest(ctx, runner, request, input)
 	if err != nil {
-		return tools.ExecutionResult{}, err
+		// The Host policy rejected the delegation *before* a child Run
+		// was created or invoked. Only this pre-effect phase may certify
+		// a model-correctable, exact-ID no-effect receipt.
+		return tools.RecoverableNoEffectResult(request.Call.ID, err)
 	}
 	result, err := runner.DelegateByExecutionRefID(ctx, request.RunID, input)
 	// An independently delegated specialist is an observation, not a mandatory
@@ -89,13 +93,22 @@ func (handler *DelegationToolHandler) Execute(
 		err = nil
 	}
 	if err != nil {
+		if code, _, correctable := tools.RecoverableCallErrorInfo(err); correctable &&
+			(code == "delegation.tool_selection_denied" || code == "delegation.role_unavailable") {
+			// These two exact rejections originate in prepareDelegation,
+			// before child admission, relation writes, or physical effect.
+			return tools.RecoverableNoEffectResult(request.Call.ID, err)
+		}
 		if dimension, ok := budget.DeniedDimension(err); ok && dimension == budget.DimensionChildRuns {
-			return tools.ExecutionResult{}, tools.NewRecoverableCallErrorWithBlockedTools(
+			// The child-run coordinator denied admission before another
+			// physical child Run was allocated. Preserve a bounded
+			// model-correctable refusal with exact CallID no-effect proof.
+			return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallErrorWithBlockedTools(
 				"delegation.child_runs_exhausted",
 				"No more child runs are available for this task. Continue with the information already collected and finish without further delegation.",
 				err,
 				DelegationToolKey,
-			)
+			))
 		}
 		return tools.ExecutionResult{}, err
 	}
@@ -134,6 +147,97 @@ func (handler *DelegationToolHandler) Execute(
 		Content: content,
 		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: disposition},
 		Pending: pending,
+	}, nil
+}
+
+// VerifyCommittedTool is a trusted, READ-ONLY reconciliation port for an
+// already dispatched delegation. It consumes the exact Harness Delegation Item
+// owned by the frozen parent Call and the current child Kernel Run; it never
+// invokes Delegate/StartOrLoad, Host policy, or another Tool Handler.
+func (handler *DelegationToolHandler) VerifyCommittedTool(
+	ctx context.Context, request tools.ExecutionRequest,
+) (tools.ExecutionResult, error) {
+	if handler == nil || strings.TrimSpace(request.RunID) == "" ||
+		strings.TrimSpace(request.Call.ID) == "" || request.Call.ToolKey != DelegationToolKey ||
+		!json.Valid(request.Call.Arguments) {
+		return tools.ExecutionResult{}, tools.ErrInvalidCall
+	}
+	handler.mu.RLock()
+	runner := handler.runner
+	handler.mu.RUnlock()
+	if runner == nil {
+		return tools.ExecutionResult{}, ErrDelegationToolUnbound
+	}
+	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, request.RunID)
+	if err != nil || invocation.ExecutionClass != ExecutionAgent ||
+		invocation.ExecutionRefID != request.RunID {
+		return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
+	}
+	delegationID := delegationToolID(invocation, request.Call.ID)
+	startedID := stableID("hid", invocation.TurnID, delegationID, string(ItemStarted))
+	items, err := listAllItems(ctx, runner.store, invocation.TurnID)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	var stored *delegationItemPayload
+	for _, item := range items {
+		if item.ID != startedID || item.Kind != ItemDelegation || item.Status != ItemStarted ||
+			item.InvocationID != invocation.ID || item.RunID == "" {
+			continue
+		}
+		var payload delegationItemPayload
+		if err = json.Unmarshal(item.Payload, &payload); err != nil ||
+			payload.DelegationID != delegationID || payload.ParentRunID != request.RunID ||
+			payload.ChildRunID != item.RunID || payload.ChildRunID != stableID("hchild", request.RunID, delegationID) {
+			return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
+		}
+		stored = &payload
+		break
+	}
+	if stored == nil {
+		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
+	}
+	child, err := runner.runtime.Load(ctx, stored.ChildRunID)
+	if err != nil {
+		return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
+	}
+	// Handoff may compose a trusted custom child Runner rather than the
+	// first-party Agent. Its committed Kernel terminal fact, under this
+	// exact frozen ChildRunID, is authority for delegation completion.
+	// No external Handler or remote agent is invoked in this lookup.
+	if !terminalRuntimeStatus(child.Run.Status) {
+		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
+	}
+	status := handoff.Status(child.Run.Status)
+	delegation := handoff.Delegation{
+		ID: stored.DelegationID, ChildRunID: stored.ChildRunID,
+		Status: status, ErrorCode: child.Run.ErrorCode,
+	}
+	if child.Result != nil {
+		delegation.Result = append(json.RawMessage(nil), child.Result.Content...)
+	}
+	modelResult, err := runner.delegationModelResult(ctx, delegation)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	content, err := json.Marshal(struct {
+		DelegationID string          `json:"delegationID"`
+		ChildRunID   string          `json:"childRunID"`
+		Status       string          `json:"status"`
+		Result       json.RawMessage `json:"result,omitempty"`
+		ErrorCode    string          `json:"errorCode,omitempty"`
+	}{
+		DelegationID: delegation.ID,
+		ChildRunID:   delegation.ChildRunID,
+		Status:       string(status), Result: modelResult,
+		ErrorCode: delegationReceiptErrorCode(status),
+	})
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	return tools.ExecutionResult{
+		Content: content,
+		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"},
 	}, nil
 }
 

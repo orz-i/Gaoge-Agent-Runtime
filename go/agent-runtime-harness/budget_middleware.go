@@ -311,27 +311,103 @@ func (middleware *BudgetMiddleware) Tool(ctx context.Context, invocation plugin.
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	if value := ledger.Reservations[id]; value.Status == budget.ReservationSettled {
-		return decodeBudgetToolReceipt(value.Receipt)
+	current := ledger.Reservations[id]
+	if current.Status == budget.ReservationSettled {
+		return decodeBudgetToolReceipt(current.Receipt)
 	}
-	if !ledger.Reservations[id].Dispatched {
-		if _, err = middleware.coordinator().Dispatch(ctx, ledger.ID, id); err != nil {
-			return tools.ExecutionResult{}, err
-		}
+	if current.Dispatched {
+		// The prior Tool may have committed physically even if its receipt
+		// was lost. This held reservation is an unresolved effect, not an
+		// authorization to re-enter next(). Only a trusted provider lookup
+		// may settle it; a distinct Tool attempt needs a new Call ID.
+		return tools.ExecutionResult{}, budget.ErrWaiting
+	}
+	if _, err = middleware.coordinator().Dispatch(ctx, ledger.ID, id); err != nil {
+		return tools.ExecutionResult{}, err
 	}
 	result, callErr := next(ctx)
 	accountingCtx := context.WithoutCancel(ctx)
-	code, message, recoverable := tools.RecoverableCallErrorInfo(callErr)
-	if (callErr != nil && !recoverable) || result.Receipt.Disposition == tools.ReceiptDispositionPending {
+	// Unknown or unrecognized positive receipts are not an authority
+	// to charge a terminal Tool or release a held external effect.
+	if callErr == nil {
+		if receiptErr := tools.ValidateExecutionResult(result); receiptErr != nil {
+			updated, suspendErr := middleware.coordinator().Suspend(accountingCtx, ledger.ID, id)
+			return result, errors.Join(receiptErr, suspendErr, middleware.project(accountingCtx, updated))
+		}
+	}
+	if (callErr != nil && !tools.ValidRecoverableNoEffectReceipt(result, callErr, invocation.Request.Call.ID)) ||
+		result.Receipt.Disposition == tools.ReceiptDispositionPending {
+		// A bare recoverable error is not a budget receipt. Only exact
+		// terminal rejected-no-effect evidence can release this reservation.
 		updated, suspendErr := middleware.coordinator().Suspend(accountingCtx, ledger.ID, id)
 		return result, errors.Join(callErr, suspendErr, middleware.project(accountingCtx, updated))
 	}
+	code, message, _ := tools.RecoverableCallErrorInfo(callErr)
 	raw, err = json.Marshal(budgetToolReceipt{Result: result, ErrorCode: code, ErrorMessage: message, BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(callErr)})
 	if err != nil {
 		return result, err
 	}
 	updated, err := middleware.coordinator().Settle(accountingCtx, ledger.ID, id, budget.Usage{ToolCalls: 1}, raw)
 	return result, errors.Join(callErr, err, middleware.project(accountingCtx, updated))
+}
+
+// VerifiedToolOutcomeVerifier composes an already trusted, read-only Tool
+// verifier with the SAME durable Tool reservation used by ToolMiddleware.
+// Reconciliation must not re-enter ToolMiddleware (which can execute effects),
+// but it must charge a confirmed COMMIT exactly once. The budget settlement
+// can precede the Agent Kernel receipt CAS: a failed second commit retains
+// the pending Tool intent, and repeating this exact verification is idempotent.
+func (middleware *BudgetMiddleware) VerifiedToolOutcomeVerifier(
+	verifier agent.ToolOutcomeVerifier,
+) (agent.ToolOutcomeVerifier, error) {
+	if middleware == nil || verifier == nil {
+		return nil, ErrInvalidRequest
+	}
+	return agent.ToolOutcomeVerifierFunc(func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		verified, err := verifier.VerifyCommittedTool(ctx, tools.CloneExecutionRequest(request))
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		if tools.ValidateExecutionResult(verified) != nil ||
+			verified.Receipt.ExecutionID != request.Call.ID ||
+			verified.Receipt.Disposition != "committed" || verified.Pending != nil {
+			return tools.ExecutionResult{}, agent.ErrToolReceiptMismatch
+		}
+		ledger, err := middleware.bindRun(ctx, request.RunID)
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		if ledger.ID == "" {
+			return verified, nil // No shared ledger was configured by this Host.
+		}
+		rawRequest, err := json.Marshal(request)
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		id := "tool:" + request.RunID + ":" + request.Call.ID
+		current, found := ledger.Reservations[id]
+		if !found || current.RunID != request.RunID ||
+			current.RequestHash != hashInvocationBytes(rawRequest) ||
+			!current.Dispatched ||
+			(current.Status != budget.ReservationHeld && current.Status != budget.ReservationSettled) {
+			return tools.ExecutionResult{}, budget.ErrLedgerConflict
+		}
+		receipt, err := json.Marshal(budgetToolReceipt{Result: verified})
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		// Identical verified receipts are idempotent across Agent CAS loss.
+		accountingCtx := context.WithoutCancel(ctx)
+		updated, err := middleware.coordinator().Settle(accountingCtx, ledger.ID, id,
+			budget.Usage{ToolCalls: 1}, receipt)
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		if err = middleware.project(accountingCtx, updated); err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		return verified, nil
+	}), nil
 }
 
 type budgetToolReceipt struct {

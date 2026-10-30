@@ -356,10 +356,10 @@ func runToolResultContextHarness(t *testing.T) (harness.Snapshot, *toolResultCap
 			Key: testStoryListUnitsKey, Name: "story_list_units",
 			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"items":[{"id":"unit_placeholder","revision":1}]}`),
-				Receipt: tools.Receipt{ExecutionID: "read-units", Disposition: testCommittedDisposition},
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: testCommittedDisposition},
 			}, nil
 		}),
 	}})

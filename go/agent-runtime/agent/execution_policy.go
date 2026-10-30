@@ -40,9 +40,10 @@ var (
 	ErrToolPanic    = errors.New("agent tool invocation panic")
 )
 
-// CallPolicy bounds one class of external calls. MaxAttempts applies only to
-// explicitly retryable failures. Tool retries are opt-in because a timeout does
-// not prove that an external side effect did not commit.
+// CallPolicy bounds one class of external calls. Tool MaxAttempts is an
+// upper bound, not a permission to retry: even RetryableExecutionError
+// requires an original-Call-ID terminal no-effect attestation between
+// physical invocations. Timeout/unknown remote results cannot be retried.
 type CallPolicy struct {
 	Timeout        time.Duration
 	MaxAttempts    int
@@ -462,8 +463,20 @@ func (runner *Runner) executeToolWithPolicy(
 			}
 			return tools.ExecutionResult{}, attempt, errors.Join(ErrToolTimeout, context.DeadlineExceeded)
 		}
-		if !tools.IsRetryableExecutionError(callErr) || attempt >= policy.MaxAttempts {
+		// Both correction and physical retry require explicit original-ID
+		// proof that the trusted Handler performed no external effect.
+		// Neither RecoverableCallError nor RetryableExecutionError alone
+		// grants another physical Tool invocation.
+		if tools.ValidRecoverableNoEffectReceipt(result, callErr, identity) {
+			return result, attempt, callErr
+		}
+		if !tools.ValidRetryableNoEffectReceipt(result, callErr, identity) {
 			return tools.ExecutionResult{}, attempt, callErr
+		}
+		if attempt >= policy.MaxAttempts {
+			// No remote effect occurred, but the bounded retry budget is
+			// exhausted. Return the definitive no-effect receipt to Agent.
+			return result, attempt, callErr
 		}
 		if err := waitRetry(ctx, retryDelay(policy, attempt, identity)); err != nil {
 			return tools.ExecutionResult{}, attempt, err

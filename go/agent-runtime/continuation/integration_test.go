@@ -108,11 +108,11 @@ func newIntegrationToolRegistry(t *testing.T, executions *atomic.Int32) *tools.R
 			Key: integrationToolKey, Name: "test_publish",
 			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			executions.Add(1)
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"published":true}`),
-				Receipt: tools.Receipt{ExecutionID: "publish-1", Disposition: "committed"},
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"},
 			}, nil
 		}),
 	}})

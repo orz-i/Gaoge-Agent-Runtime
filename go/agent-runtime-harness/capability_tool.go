@@ -110,7 +110,10 @@ func (handler *CapabilityInvocationToolHandler) Execute(
 		config, request.Call.Arguments,
 	)
 	if err != nil {
-		return tools.ExecutionResult{}, err
+		// The materializer validates a frozen command before any child
+		// invocation is started. An explicitly correctable rejection can
+		// therefore attest no physical child effect under the original ID.
+		return tools.RecoverableNoEffectResult(request.Call.ID, err)
 	}
 	parentItemID := stableID("hit", turn.ID, request.Call.ID, string(ItemStarted))
 	if _, err = runner.startMaterializedCapability(ctx, turn.ID, parentItemID, request.Call.ID, input.Goal, descriptor, spec); err != nil {
@@ -120,7 +123,41 @@ func (handler *CapabilityInvocationToolHandler) Execute(
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	return runner.capabilityToolResult(ctx, descriptor.ID, invocationID)
+	return runner.capabilityToolResult(ctx, descriptor.ID, invocationID, request.Call.ID)
+}
+
+// VerifyCommittedTool reads the same frozen command and child identity as
+// Execute, but never materializes, starts, retries, or resumes a capability.
+// The authoritative child status is obtained read-only from its original
+// Invocation/Kernel Run and must be terminal before a COMMIT is accepted.
+func (handler *CapabilityInvocationToolHandler) VerifyCommittedTool(
+	ctx context.Context, request tools.ExecutionRequest,
+) (tools.ExecutionResult, error) {
+	runner, err := handler.boundRunner(request)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	turn, _, config, err := capabilityToolContext(ctx, runner, request.RunID)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	_, descriptor, err := decodeCapabilityToolInput(request.Call.Arguments, config.Commands)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	parentItemID := stableID("hit", turn.ID, request.Call.ID, string(ItemStarted))
+	invocationID, err := InvocationID(turn.ID, parentItemID, descriptor.CapabilityKey, request.Call.ID)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	result, err := runner.capabilityToolResult(ctx, descriptor.ID, invocationID, request.Call.ID)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	if result.Receipt.Disposition != "committed" {
+		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
+	}
+	return result, nil
 }
 
 func capabilityToolContext(
@@ -272,10 +309,26 @@ func (runner *Runner) startMaterializedCapability(
 	}
 }
 
-func (runner *Runner) capabilityToolResult(ctx context.Context, commandID, invocationID string) (tools.ExecutionResult, error) {
+func (runner *Runner) capabilityToolResult(ctx context.Context, commandID, invocationID, callID string) (tools.ExecutionResult, error) {
 	invocation, err := runner.store.GetInvocation(ctx, invocationID)
 	if err != nil {
 		return tools.ExecutionResult{}, err
+	}
+	// Projection may lag a terminal child Kernel fact after a restart.
+	// Read the child without mutating the Harness Store or reentering its
+	// physical Feature. The result is for Tool receipt verification only.
+	if invocation.ExecutionClass != ExecutionApplication &&
+		(invocation.Status == InvocationRunning || invocation.Status == InvocationWaitingInput ||
+			invocation.Status == InvocationPausedBudget) {
+		child, loadErr := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+		if loadErr != nil {
+			return tools.ExecutionResult{}, loadErr
+		}
+		if terminalRuntimeStatus(child.Run.Status) {
+			invocation.Status = InvocationStatus(child.Run.Status)
+			invocation.ErrorCode = child.Run.ErrorCode
+			invocation.ErrorDetail = child.Run.ErrorDetail
+		}
 	}
 	disposition := "committed"
 	payload := map[string]any{
@@ -315,7 +368,7 @@ func (runner *Runner) capabilityToolResult(ctx context.Context, commandID, invoc
 		}
 	}
 	return tools.ExecutionResult{
-		Content: content, Receipt: tools.Receipt{ExecutionID: invocation.ID, Disposition: disposition},
+		Content: content, Receipt: tools.Receipt{ExecutionID: callID, Disposition: disposition},
 		Pending: pending,
 	}, nil
 }

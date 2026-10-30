@@ -96,11 +96,11 @@ func executeAgentToolScenario(ctx context.Context) (evaluation.ScenarioObservati
 		Definition: tools.Definition{
 			Key: "feature.echo", Name: "feature_echo", InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			executions.Add(1)
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"ok":true}`),
-				Receipt: tools.Receipt{ExecutionID: "feature-tool-1", Disposition: "committed"},
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"},
 			}, nil
 		}),
 	}})

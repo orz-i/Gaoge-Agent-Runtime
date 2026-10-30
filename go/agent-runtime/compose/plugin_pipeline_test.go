@@ -103,7 +103,7 @@ func TestAgentToolMiddlewareCanBlockWithoutChangingToolDefinition(t *testing.T) 
 		Thread: kernel.ThreadRef{Kind: pipelineThreadKind, ID: pipelineThreadID},
 		Goal:   "block tool", ToolKeys: []string{pipelineToolKey},
 	})
-	if !errors.Is(err, errPipelineToolBlocked) || failed.Run.Status != kernel.RunStatusFailed {
+	if !errors.Is(err, agent.ErrToolOutcomeUnknown) || !errors.Is(err, errPipelineToolBlocked) || failed.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("failed=%#v err=%v", failed.Run, err)
 	}
 	if executions != 0 {
@@ -168,7 +168,7 @@ func TestAgentToolMiddlewareDoubleNextExecutesToolOnce(t *testing.T) {
 		Thread: kernel.ThreadRef{Kind: pipelineThreadKind, ID: pipelineThreadID},
 		Goal:   "use tool", ToolKeys: []string{pipelineToolKey},
 	})
-	if !errors.Is(err, plugin.ErrNextAlreadyCalled) || failed.Run.Status != kernel.RunStatusFailed {
+	if !errors.Is(err, agent.ErrToolOutcomeUnknown) || !errors.Is(err, plugin.ErrNextAlreadyCalled) || failed.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("failed=%#v err=%v", failed.Run, err)
 	}
 	if executions != 1 {

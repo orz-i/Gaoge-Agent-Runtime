@@ -43,9 +43,11 @@ type RecoverableCallError struct {
 	AllowCompletion bool
 }
 
-// RetryableExecutionError marks a transient executor failure that is safe to
-// retry with the same stable ExecutionRequest.Call.ID. Executors must only use
-// it when repeating the call cannot duplicate an externally visible effect.
+// RetryableExecutionError marks a transient executor failure that the
+// Handler considers safe to retry. The type alone MUST NOT authorize
+// another physical call: Agent also requires an exact original-Call-ID
+// rejected/no-effect receipt from the trusted Handler. An ordinary remote
+// error, timeout or unreadable outcome does not establish that guarantee.
 type RetryableExecutionError struct {
 	Cause error
 }
@@ -143,7 +145,10 @@ func CloneExecutionResult(result ExecutionResult) ExecutionResult {
 
 // ValidateExecutionResult validates the stable Tool result boundary.
 func ValidateExecutionResult(result ExecutionResult) error {
-	if !validExecutionResult(result) {
+	if !validExecutionResult(result) ||
+		result.Receipt.Disposition == ReceiptDispositionRejected {
+		// A rejected receipt must have an accompanying trusted typed
+		// no-effect error, never be consumed as ordinary Tool success.
 		return ErrInvalidCall
 	}
 	return nil
@@ -300,6 +305,68 @@ type Receipt struct {
 // after its child execution changes state.
 const ReceiptDispositionPending = "pending"
 
+// ReceiptDispositionRejected is an authoritative, terminal certification by
+// the trusted Tool Handler that NO external effect was performed. It permits
+// model-correctable guidance only with the exact frozen Call ID; error types
+// alone cannot certify no-effect after the Tool/Middleware boundary.
+const ReceiptDispositionRejected = "rejected"
+
+func isModelCorrectableError(err error) bool {
+	_, _, ok := RecoverableCallErrorInfo(err)
+	return ok
+}
+
+// RecoverableNoEffectResult binds a pre-effect model-correctable refusal to
+// the original Tool Call ID. A Handler MUST use it only if it knows that no
+// external operation occurred. This is a trusted Handler attestation, not a
+// claim that the Agent can independently inspect remote side effects.
+func RecoverableNoEffectResult(callID string, cause error) (ExecutionResult, error) {
+	if strings.TrimSpace(callID) == "" || !isModelCorrectableError(cause) {
+		return ExecutionResult{}, cause
+	}
+	return ExecutionResult{
+		Content: json.RawMessage("{}"),
+		Receipt: Receipt{ExecutionID: callID, Disposition: ReceiptDispositionRejected},
+	}, cause
+}
+
+// ValidRecoverableNoEffectReceipt is the only post-dispatch exception to
+// fail-closed handling of errors. Both the Tool result and the typed refusal
+// must be present, with an exact Call ID and explicit no-effect disposition.
+// validExactNoEffectReceipt is the one identity proof for a trusted Handler
+// rejection. The caller separately verifies the *kind* of refusal: a model
+// correction or a bounded immediate retry. The string status on its own is
+// never authorization to physically reexecute a Tool.
+func validExactNoEffectReceipt(result ExecutionResult, callID string) bool {
+	return strings.TrimSpace(callID) != "" &&
+		validExecutionResult(result) && result.Receipt.ExecutionID == callID &&
+		result.Receipt.Disposition == ReceiptDispositionRejected && result.Pending == nil
+}
+
+func ValidRecoverableNoEffectReceipt(result ExecutionResult, cause error, callID string) bool {
+	return isModelCorrectableError(cause) && validExactNoEffectReceipt(result, callID)
+}
+
+// RetryableNoEffectResult is the explicit original-CallID no-effect proof
+// required for a transient Handler result to authorize a bounded retry.
+// Merely returning RetryableExecutionError (including after a remote write)
+// MUST NOT execute the same Call a second time.
+func RetryableNoEffectResult(callID string, cause error) (ExecutionResult, error) {
+	if strings.TrimSpace(callID) == "" || !IsRetryableExecutionError(cause) {
+		return ExecutionResult{}, cause
+	}
+	return ExecutionResult{
+		Content: json.RawMessage("{}"),
+		Receipt: Receipt{ExecutionID: callID, Disposition: ReceiptDispositionRejected},
+	}, cause
+}
+
+// ValidRetryableNoEffectReceipt requires explicit original-ID evidence of
+// no physical effect, not just a typed error or a transient transport status.
+func ValidRetryableNoEffectReceipt(result ExecutionResult, cause error, callID string) bool {
+	return IsRetryableExecutionError(cause) && validExactNoEffectReceipt(result, callID)
+}
+
 // ExecutionResult is the JSON Tool output and its durable receipt.
 type ExecutionResult struct {
 	Content json.RawMessage   `json:"content"`
@@ -421,10 +488,17 @@ func (registry *Registry) Execute(ctx context.Context, request ExecutionRequest)
 	}
 	result, err := handler.Execute(ctx, request)
 	if err != nil {
+		if ValidRecoverableNoEffectReceipt(result, err, request.Call.ID) ||
+			ValidRetryableNoEffectReceipt(result, err, request.Call.ID) {
+			// Trusted Handler returned an exact no-effect attestation.
+			// Preserve it across this Executor boundary. A bare typed
+			// error still discards any unsupported or mismatched result.
+			return CloneExecutionResult(result), err
+		}
 		return ExecutionResult{}, err
 	}
-	if !validExecutionResult(result) {
-		return ExecutionResult{}, ErrInvalidCall
+	if err := ValidateExecutionResult(result); err != nil {
+		return ExecutionResult{}, err
 	}
 	return CloneExecutionResult(result), nil
 }
@@ -445,9 +519,20 @@ func validCall(call Call) bool {
 }
 
 func validExecutionResult(result ExecutionResult) bool {
-	return len(result.Content) <= MaxExecutionResultContentBytes && json.Valid(result.Content) && strings.TrimSpace(result.Receipt.ExecutionID) != "" &&
-		strings.TrimSpace(result.Receipt.Disposition) != "" && ValidPending(result.Pending) &&
-		(result.Pending == nil || result.Receipt.Disposition == ReceiptDispositionPending)
+	if len(result.Content) > MaxExecutionResultContentBytes ||
+		!json.Valid(result.Content) ||
+		strings.TrimSpace(result.Receipt.ExecutionID) == "" ||
+		!ValidPending(result.Pending) {
+		return false
+	}
+	switch result.Receipt.Disposition {
+	case "read", "committed", ReceiptDispositionPending, ReceiptDispositionRejected:
+		return result.Pending == nil || result.Receipt.Disposition == ReceiptDispositionPending
+	default:
+		// Unknown provider/client dispositions are NOT evidence of a
+		// terminal effect. Never clear a durable Agent ToolDispatchID.
+		return false
+	}
 }
 
 // PendingKind distinguishes scheduled retries from durable external/child waits.

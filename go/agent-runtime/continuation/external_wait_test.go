@@ -57,20 +57,30 @@ func newDurableWaitFixture(t *testing.T) *durableWaitFixture {
 	}
 	registry, err := tools.NewRegistry([]tools.Registration{{
 		Definition: tools.Definition{Key: "test.durable_wait", Name: "durable_wait", InputSchema: json.RawMessage(`{"type":"object"}`), Terminal: true},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			fixture.executions++
-			if fixture.ready {
-				return tools.ExecutionResult{Content: json.RawMessage(`42`), Receipt: tools.Receipt{ExecutionID: "wait-operation", Disposition: "committed"}}, nil
+			if fixture.executions > 1 {
+				return tools.ExecutionResult{}, errors.New("external Tool Handler was replayed instead of verifying COMMIT")
 			}
 			deadline := fixture.clock.Now().Add(2 * time.Minute)
-			return tools.ExecutionResult{Content: json.RawMessage(`null`), Receipt: tools.Receipt{ExecutionID: "wait-operation", Disposition: tools.ReceiptDispositionPending},
+			return tools.ExecutionResult{Content: json.RawMessage(`null`), Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: tools.ReceiptDispositionPending},
 				Pending: &tools.PendingExecution{Kind: tools.PendingExternalResult, OperationID: "wait-operation", InputDigest: strings.Repeat("c", 64), DeadlineAt: &deadline}}, nil
 		}),
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.agent, err = agent.NewRunner(agent.Dependencies{Runtime: fixture.runtime, Model: fixture.model, Catalog: registry, Executor: registry, Clock: fixture.clock})
+	fixture.agent, err = agent.NewRunner(agent.Dependencies{
+		Runtime: fixture.runtime, Model: fixture.model, Catalog: registry, Executor: registry, Clock: fixture.clock,
+		ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			if !fixture.ready || request.Call.ID != "wait-call" ||
+				request.Call.ToolKey != "test.durable_wait" {
+				return tools.ExecutionResult{}, errors.New("provider has no authoritative terminal receipt")
+			}
+			return tools.ExecutionResult{Content: json.RawMessage(`42`),
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
+		}),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +131,8 @@ func (fixture *durableWaitFixture) pump(t *testing.T) {
 			// Mirror the Worker: a changed Run revision without a proven
 			// Feature consumption must NACK and preserve the candidate, not
 			// make this test fixture silently ACK an unresolved wakeup.
-			if !errors.Is(dispatchErr, kernel.ErrConflict) {
+			if !errors.Is(dispatchErr, kernel.ErrConflict) &&
+				!errors.Is(dispatchErr, agent.ErrToolOutcomeUnknown) {
 				t.Fatalf("unrelated delivery failure: %v", dispatchErr)
 			}
 			if _, err = fixture.queue.Nack(t.Context(), queuecore.NackRequest{
@@ -158,8 +169,8 @@ func TestExternalWaitDeadlineSurvivesRevisionAndRejectsObsoleteGeneration(t *tes
 	fixture.clock.now = fixture.clock.now.Add(2 * time.Minute)
 	fixture.pump(t)
 	expired, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
-	if err != nil || expired.Run.Status != kernel.RunStatusFailed || expired.Run.ErrorCode != "agent.tool_deadline_exceeded" {
-		t.Fatalf("lost deadline after revision %d: %#v, %v", newer.Run.Revision, expired.Run, err)
+	if err != nil || expired.Run.Status != kernel.RunStatusRunning || expired.Run.Revision != newer.Run.Revision {
+		t.Fatalf("unverified external wait deadline fabricated terminal failure: %#v, %v", expired.Run, err)
 	}
 	// A consumed or stale wait generation must not run any executor.
 	if _, err = fixture.agent.ResumeToolWait(t.Context(), expired.Run.ID, expired.Run.Revision, query.Generation+1); err != nil {
@@ -268,8 +279,8 @@ func TestTeamExternalWaitSixtySecondsNoPollingThenDurableChildWakeup(t *testing.
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
 		t.Fatalf("parent lost child wakeup: %#v, %v", completed.Run, err)
 	}
-	if fixture.executions != 2 || fixture.model.calls != 1 {
-		t.Fatalf("duplicate work: %d/%d", fixture.executions, fixture.model.calls)
+	if fixture.executions != 1 || fixture.model.calls != 1 {
+		t.Fatalf("verified provider read incorrectly reexecuted Tool: %d/%d", fixture.executions, fixture.model.calls)
 	}
 }
 

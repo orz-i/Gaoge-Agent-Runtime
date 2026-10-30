@@ -88,6 +88,14 @@ Physical delivery can be at-least-once. Logical state consumption must be
 idempotent. Stable Run, invocation, tool-call, effect, and continuation
 identities are therefore correctness data rather than observability labels.
 
+Agent Tool effects persist an original CallID dispatch intent before physical
+execution **even in direct unleased mode**. Unknown outcomes remain blocked
+until a trusted read-only receipt is obtained. A post-dispatch model-correctable
+error requires an exact original-ID no-effect rejection receipt; error
+classification alone is not enough to assert a remote rollback. Shared Tool
+budget reservations already dispatched/held are not second execution permits.
+See [ADR 0013](adr/0013-uniform-tool-effect-intent-and-receipts.md).
+
 A committed transition that requires future autonomous progress must leave a
 durable wakeup source. The Kernel Store persists committed-transition outbox
 records atomically with Run state and journal events; the continuation

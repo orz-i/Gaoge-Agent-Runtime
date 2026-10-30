@@ -61,7 +61,11 @@ func TestRootAgentWaitsForWorkflowInteractionsAndResumesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completedRoot, err := fixture.agentRunner.Resume(t.Context(), root.ExecutionRefID, pendingRoot.Run.Revision)
+	verified := reconcileCapabilityRoot(t, fixture, root)
+	if verified.Run.Revision <= pendingRoot.Run.Revision {
+		t.Fatal("trusted workflow COMMIT did not advance the root")
+	}
+	completedRoot, err := fixture.agentRunner.Resume(t.Context(), root.ExecutionRefID, verified.Run.Revision)
 	if err != nil || completedRoot.Run.Status != kernel.RunStatusCompleted || fixture.model.calls != 2 {
 		t.Fatalf("root did not continue exactly once: status=%s calls=%d err=%v", completedRoot.Run.Status, fixture.model.calls, err)
 	}

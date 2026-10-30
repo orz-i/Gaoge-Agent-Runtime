@@ -75,7 +75,7 @@ func TestRunnerLetsModelCorrectToolSchemaViolationBeforeHandler(t *testing.T) {
 			}
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"changeSetID":"change_1"}`),
-				Receipt: tools.Receipt{ExecutionID: "schema-receipt", Disposition: committedDisposition},
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: committedDisposition},
 			}, nil
 		}),
 	}})
@@ -616,11 +616,11 @@ func TestRunnerSuppressesConsecutiveUnchangedToolLoopForOneModelStep(t *testing.
 			Key: manifestToolKey, Name: manifestToolName,
 			InputSchema: json.RawMessage(`{"type":"object"}`),
 		},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			toolCalls++
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"storyID":"story_1"}`),
-				Receipt: tools.Receipt{ExecutionID: "read", Disposition: committedDisposition},
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: committedDisposition},
 			}, nil
 		}),
 	}})
@@ -800,7 +800,7 @@ func TestRunnerCompletesImmediatelyAfterTerminalTool(t *testing.T) {
 			executions++
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"changeSetID":"change_1"}`),
-				Receipt: tools.Receipt{ExecutionID: "change_1", Disposition: committedDisposition},
+				Receipt: tools.Receipt{ExecutionID: "call_publish", Disposition: committedDisposition},
 			}, nil
 		}),
 	}})
@@ -877,7 +877,7 @@ func newDeferredApprovalFixture(t *testing.T) deferredApprovalFixture {
 			executions++
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"ok":true}`),
-				Receipt: tools.Receipt{ExecutionID: "approved", Disposition: committedDisposition},
+				Receipt: tools.Receipt{ExecutionID: "approval_call", Disposition: committedDisposition},
 			}, nil
 		}),
 	}})
@@ -1162,18 +1162,18 @@ func TestRunnerLetsModelCorrectExplicitRecoverableToolError(t *testing.T) {
 		) (tools.ExecutionResult, error) {
 			toolCalls++
 			if toolCalls == 1 {
-				return tools.ExecutionResult{}, tools.NewRecoverableCallError(
+				return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallError(
 					"story.invalid_arguments",
 					"remove unexpected",
 					errDomainRejected,
-				)
+				))
 			}
 			if request.Call.ID != callGood {
 				t.Fatalf("corrected tool call ID = %q", request.Call.ID)
 			}
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"changeSetID":"change_1"}`),
-				Receipt: tools.Receipt{ExecutionID: "receipt_good", Disposition: committedDisposition},
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: committedDisposition},
 			}, nil
 		}),
 	}})
@@ -1263,18 +1263,18 @@ func TestRunnerStopsOfferingToolsBlockedByRecoverableError(t *testing.T) {
 	) (tools.ExecutionResult, error) {
 		if request.Call.ToolKey != publishToolKey {
 			readCalls++
-			return tools.ExecutionResult{}, tools.NewRecoverableCallErrorWithBlockedTools(
+			return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallErrorWithBlockedTools(
 				"story.read_budget_exhausted",
 				"publish now",
 				errDomainRejected,
 				manifestToolKey,
 				selectionToolKey,
-			)
+			))
 		}
 		publishCalls++
 		return tools.ExecutionResult{
 			Content: json.RawMessage(`{"changeSetID":"change_ready"}`),
-			Receipt: tools.Receipt{ExecutionID: "change_ready", Disposition: committedDisposition},
+			Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: committedDisposition},
 		}, nil
 	})
 	registry := mustRegistry(t, []tools.Registration{
@@ -1347,7 +1347,7 @@ func TestRunnerStillFailsUnmarkedToolErrors(t *testing.T) {
 	snapshot, err := runner.StartRun(t.Context(), startRequest(
 		"run_fatal", "request_fatal", "publish a change set", publishToolKey,
 	))
-	if !errors.Is(err, agent.ErrToolFailure) || snapshot.Run.Status != kernel.RunStatusFailed || snapshot.Run.ErrorCode != "agent.tool_failed" {
+	if !errors.Is(err, agent.ErrToolOutcomeUnknown) || snapshot.Run.Status != kernel.RunStatusRunning || snapshot.Run.ErrorCode != "" {
 		t.Fatalf("snapshot = %#v, error = %v", snapshot.Run, err)
 	}
 }
@@ -1430,7 +1430,7 @@ func TestRunnerPreservesAssistantToolCallBatchBeforeOrderedResults(t *testing.T)
 			}
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"storyID":"story_1"}`),
-				Receipt: tools.Receipt{ExecutionID: "receipt_1", Disposition: committedDisposition},
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: committedDisposition},
 			}, nil
 		}),
 	}})

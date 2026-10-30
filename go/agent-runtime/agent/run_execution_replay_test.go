@@ -40,7 +40,8 @@ func TestNativeToolUnknownOutcomeBlocksReplayAfterExpiry(t *testing.T) {
 			attempts++
 			if attempts == 1 {
 				clock.Advance(100 * time.Second)
-				return tools.ExecutionResult{}, tools.NewRetryableExecutionError(errors.New("retry safe, no effect"))
+				return tools.RetryableNoEffectResult(req.Call.ID,
+					tools.NewRetryableExecutionError(errors.New("retry safe, no effect")))
 			}
 			if attempts == 2 {
 				clock.Advance(31 * time.Second)

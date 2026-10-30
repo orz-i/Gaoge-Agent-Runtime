@@ -58,9 +58,14 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	verifiedTool, err := shared.VerifiedToolOutcomeVerifier(delegation)
+	if err != nil {
+		t.Fatal(err)
+	}
 	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: meteredModel, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy},
-		RunMiddleware: []plugin.RunMiddleware{shared}, PrepareModelRequest: rolePreparer, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}})
+		ToolOutcomeVerifier: verifiedTool,
+		RunMiddleware:       []plugin.RunMiddleware{shared}, PrepareModelRequest: rolePreparer, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +175,8 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = direct.Resume(t.Context(), root.Run.ID, root.Run.Revision); err != nil {
+	verified := reconcileDelegationRoot(t, direct, root)
+	if _, err = direct.Resume(t.Context(), root.Run.ID, verified.Run.Revision); err != nil {
 		t.Fatal(err)
 	}
 	finished, err := runner.Refresh(t.Context(), started.Turn.ID)

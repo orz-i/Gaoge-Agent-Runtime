@@ -5,6 +5,19 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Independent PR #77 safety correction: require original Call-ID
+  `rejected` no-effect receipts before any retryable Tool error may
+  re-enter the physical Handler; accept only closed successful receipt
+  dispositions (`read`, `committed`, `pending`), keeping unknown or
+  error-free `rejected` results uncommitted and the budget Held.
+
+- Hard-cut Agent Tool dispatch intent and exact CallID terminal receipts
+  across direct/Store-leased execution. Missing, malformed or unknown Tool
+  outcomes no longer auto-replay. After physical Tool dispatch, a
+  model-correctable error requires explicit original-ID rejected/no-effect
+  evidence. Shared budget cannot redispatch Held effects; first-party
+  Capability/Delegation can verify COMMIT read-only without Handler reentry.
+
 - Recheck the full parent ancestry around Host-only Application effect
   claiming and immediately before its physical callback. A retired parent
   cannot dispatch a stale child; a known pre-effect rejection fails the

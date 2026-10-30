@@ -42,7 +42,7 @@ func TestAgentTelemetryExposesStructuralRunModelAndToolFacts(t *testing.T) {
 		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"secret":"TOOL_RESULT_SECRET"}`),
-				Receipt: tools.Receipt{ExecutionID: "telemetry-tool", Disposition: committedDisposition},
+				Receipt: tools.Receipt{ExecutionID: callOne, Disposition: committedDisposition},
 			}, nil
 		}),
 	}})

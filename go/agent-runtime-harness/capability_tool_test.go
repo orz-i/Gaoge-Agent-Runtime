@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func TestRootAgentInvokesFrozenCapabilityAndResumesSameToolCall(t *testing.T) {
 	}
 	for range 60 {
 		unchanged, resumeErr := fixture.agentRunner.Resume(t.Context(), root.ExecutionRefID, pendingRoot.Run.Revision)
-		if resumeErr != nil || unchanged.Run.Revision != pendingRoot.Run.Revision {
+		if !errors.Is(resumeErr, agent.ErrToolOutcomeUnknown) || unchanged.Run.Revision != pendingRoot.Run.Revision {
 			t.Fatalf("parent polled child: %#v, %v", unchanged.Run, resumeErr)
 		}
 	}
@@ -55,11 +56,8 @@ func TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild(t *testing.T) 
 		t.Fatalf("argument correction model calls=%d, child starts=%d", fixture.model.calls, fixture.workflowFeature.starts)
 	}
 	completeCapabilityChild(t, fixture.runtime, child)
-	rootRuntime, err := fixture.runtime.Load(t.Context(), root.ExecutionRefID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	completed, err := fixture.agentRunner.Resume(t.Context(), root.ExecutionRefID, rootRuntime.Run.Revision)
+	verified := reconcileCapabilityRoot(t, fixture, root)
+	completed, err := fixture.agentRunner.Resume(t.Context(), root.ExecutionRefID, verified.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || fixture.model.calls != 3 || fixture.workflowFeature.starts != 1 {
 		t.Fatalf("corrected execution = %#v, model calls=%d, child starts=%d, %v", completed.Run, fixture.model.calls, fixture.workflowFeature.starts, err)
 	}
@@ -123,6 +121,7 @@ func newCapabilityToolFixture(t *testing.T, definitions ...workflow.Definition) 
 		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
 		PrepareModelRequest: schemaPreparer,
 		ToolMiddleware:      []plugin.ToolMiddleware{timeline},
+		ToolOutcomeVerifier: toolHandler,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -203,13 +202,43 @@ func completeCapabilityChild(t *testing.T, runtime *kernel.Runtime, child harnes
 	}
 }
 
-func resumeCapabilityRoot(t *testing.T, fixture capabilityToolFixture, root harness.Invocation) {
+func reconcileCapabilityRoot(t *testing.T, fixture capabilityToolFixture, root harness.Invocation) kernel.Snapshot {
 	t.Helper()
 	rootRuntime, err := fixture.runtime.Load(t.Context(), root.ExecutionRefID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	completedRoot, err := fixture.agentRunner.Resume(t.Context(), root.ExecutionRefID, rootRuntime.Run.Revision)
+	view, err := agent.ViewState(rootRuntime)
+	if err != nil || view.PendingTool == nil {
+		t.Fatalf("missing exact pending capability Tool identity: %+v err=%v", rootRuntime.Run, err)
+	}
+	verified, err := fixture.agentRunner.ReconcileToolOutcome(t.Context(),
+		root.ExecutionRefID, rootRuntime.Run.Revision, view.PendingTool.CallID)
+	if err != nil {
+		t.Fatalf("read-only capability child result verification: %v", err)
+	}
+	// The trusted verifier observes the Kernel child without mutating
+	// Harness projection. The Host separately reconciles the finished
+	// child into its Invocation; it never repeats the Tool Handler to do so.
+	snapshot, err := fixture.runner.Load(t.Context(), root.TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, child := range snapshot.Invocations {
+		if child.ParentItemID == "" {
+			continue
+		}
+		if _, err = fixture.runner.RefreshInvocation(t.Context(), child.ID); err != nil {
+			t.Fatalf("child projection failed after verified COMMIT: %v", err)
+		}
+	}
+	return verified
+}
+
+func resumeCapabilityRoot(t *testing.T, fixture capabilityToolFixture, root harness.Invocation) {
+	t.Helper()
+	verified := reconcileCapabilityRoot(t, fixture, root)
+	completedRoot, err := fixture.agentRunner.Resume(t.Context(), root.ExecutionRefID, verified.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}

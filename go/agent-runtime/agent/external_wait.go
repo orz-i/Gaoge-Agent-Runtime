@@ -109,7 +109,7 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 			return snapshot, ErrToolNotPending
 		}
 		wait := state.ToolWait
-		if wait == nil && runner.runExecution != nil && state.ToolDispatchID == signal.CallID {
+		if wait == nil && state.ToolDispatchID == signal.CallID {
 			// An external provider can emit a ready signal synchronously from
 			// Tool.Execute, before its Pending descriptor has been committed.
 			// The existing ToolDispatchID proves the call was prepared but
@@ -222,7 +222,7 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	// Dispatch the remaining calls of this model-produced batch before joining
 	// independent local children. External effects and approval checkpoints keep
 	// their original serial receipt/fencing contract.
-	if pending.Kind == tools.PendingChildTerminal && runner.runExecution == nil &&
+	if pending.Kind == tools.PendingChildTerminal &&
 		len(state.PendingCalls) > 1 && snapshot.Checkpoint == nil && state.PendingApproval == nil && independentChildBatch(state) {
 		return runner.deferChildCall(ctx, snapshot, state, call)
 	}
@@ -275,13 +275,20 @@ func (runner *Runner) ResumeToolWait(ctx context.Context, runID string, expected
 	if snapshot.Run.Status != kernel.RunStatusRunning || state.ToolWait == nil || state.ToolWait.Generation != generation {
 		return snapshot, nil
 	}
-	if runner.runExecution != nil && state.ToolDispatchID != "" {
-		// A pending native Tool is already physically dispatched. For an
+	if state.ToolDispatchID != "" {
+		// A pending Tool is already physically dispatched. For an
 		// exact ready signal, use the trusted read-only Provider verifier.
 		// NEVER call its non-idempotent Tool Handler from a queue delivery.
 		if state.ToolWait.Kind == tools.PendingExternalResult && state.ToolWait.SignalID != "" {
 			verified, verifyErr := runner.ReconcileToolOutcome(ctx, runID, expectedRevision, state.ToolDispatchID)
 			if verifyErr == nil {
+				// A Ready wakeup carries no physical Tool authority. After
+				// a trusted read-only COMMIT is persisted, the original
+				// feature may advance its already-committed state in a new
+				// CAS/owner segment. The Tool Handler is never reinvoked.
+				if verified.Run.Status == kernel.RunStatusRunning {
+					return runner.Resume(ctx, runID, verified.Run.Revision)
+				}
 				return verified, nil
 			}
 			if state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {

@@ -42,9 +42,9 @@ func TestDeniedExternalNewsCapabilityCanFinishWithoutRepeatingTools(t *testing.T
 	count := 0
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{Key: "mcp.web_search", Name: "web_search", InputSchema: json.RawMessage(`{"type":"object"}`)},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, call tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			count++
-			return tools.ExecutionResult{}, tools.NewRecoverableCallErrorAllowCompletion("delegation.current_evidence_unavailable", "This role cannot access current news", tools.ErrInvalidCall)
+			return tools.RecoverableNoEffectResult(call.Call.ID, tools.NewRecoverableCallErrorAllowCompletion("delegation.current_evidence_unavailable", "This role cannot access current news", tools.ErrInvalidCall))
 		}),
 	}})
 	client := &deniedFreshNewsModel{t: t}
@@ -97,9 +97,9 @@ func TestRepeatedRecoverableNewsFailuresAllowExitWithoutExhaustingBudget(t *test
 	toolCalls := 0
 	registry := mustRegistry(t, []tools.Registration{
 		{Definition: tools.Definition{Key: "mcp.web_search", Name: "web_search", InputSchema: json.RawMessage(`{"type":"object"}`)},
-			Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			Handler: tools.HandlerFunc(func(_ context.Context, call tools.ExecutionRequest) (tools.ExecutionResult, error) {
 				toolCalls++
-				return tools.ExecutionResult{}, tools.NewRecoverableCallError("tool.upstream_unavailable", "News search failed; try a different search term", tools.ErrInvalidCall)
+				return tools.RecoverableNoEffectResult(call.Call.ID, tools.NewRecoverableCallError("tool.upstream_unavailable", "News search failed; try a different search term", tools.ErrInvalidCall))
 			})},
 		{Definition: tools.Definition{Key: "mcp.other", Name: "unrelated_tool", InputSchema: json.RawMessage(`{"type":"object"}`)},
 			Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -149,9 +149,9 @@ func TestRepeatedDeniedFreshEvidenceDelegationsStopAfterTwoAttempts(t *testing.T
 	toolCalls := 0
 	registry := mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{Key: "harness.delegate_agent", Name: "delegate_to_specialist_agent", InputSchema: json.RawMessage(`{"type":"object"}`)},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, call tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			toolCalls++
-			return tools.ExecutionResult{}, tools.NewRecoverableCallErrorAllowCompletion("delegation.current_evidence_unavailable", "No current-source authority for this member", tools.ErrInvalidCall)
+			return tools.RecoverableNoEffectResult(call.Call.ID, tools.NewRecoverableCallErrorAllowCompletion("delegation.current_evidence_unavailable", "No current-source authority for this member", tools.ErrInvalidCall))
 		}),
 	}})
 	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, Catalog: registry, Executor: registry})

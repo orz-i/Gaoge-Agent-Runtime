@@ -29,7 +29,7 @@ func TestAsyncDelegationSurvivesPendingPollsAndRunnerRecreation(t *testing.T) {
 			t.Fatal(err)
 		}
 		pending, err := direct.Resume(t.Context(), rootID, current.Run.Revision)
-		if err != nil || pending.Run.Status != kernel.RunStatusRunning {
+		if !errors.Is(err, agent.ErrToolOutcomeUnknown) || pending.Run.Status != kernel.RunStatusRunning {
 			t.Fatalf("pending resume = %#v, %v", pending.Run, err)
 		}
 		view, err := agent.ViewState(pending)
@@ -43,7 +43,8 @@ func TestAsyncDelegationSurvivesPendingPollsAndRunnerRecreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := direct.Resume(t.Context(), rootID, current.Run.Revision)
+	verified := reconcileDelegationRoot(t, direct, current)
+	completed, err := direct.Resume(t.Context(), verified.Run.ID, verified.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
 		t.Fatalf("completed resume = %#v, %v", completed.Run, err)
 	}
@@ -78,7 +79,8 @@ func TestAsyncDelegationRecordsChildFailureAndCancellation(t *testing.T) {
 			// The independently delegated child may fail, but the root must be
 			// able to synthesize the successes that remain in the transcript.
 			runner, direct := fixture.compose(t, nil)
-			completed, err := direct.Resume(t.Context(), root.Run.ID, root.Run.Revision)
+			verified := reconcileDelegationRoot(t, direct, root)
+			completed, err := direct.Resume(t.Context(), verified.Run.ID, verified.Run.Revision)
 			if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
 				t.Fatalf("child failure escaped as parent failure: %#v, %v", completed.Run, err)
 			}
@@ -175,6 +177,39 @@ func newAsyncDelegationFixture(t *testing.T) *asyncDelegationFixture {
 	}
 }
 
+// Recover the exact parent Tool through a trusted read-only child receipt.
+func reconcileDelegationRoot(t *testing.T, direct *agent.Runner, root kernel.Snapshot) kernel.Snapshot {
+	t.Helper()
+	view, err := agent.ViewState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callID := ""
+	if view.PendingTool != nil {
+		callID = view.PendingTool.CallID
+	} else {
+		// The Host may have returned a scheduled Pending receipt without a
+		// typed child wait descriptor. The original immutable assistant Tool
+		// call still owns the exact durable identity; it is not inferred from
+		// the current child or an arbitrary caller-supplied ID.
+		for _, message := range view.Messages {
+			for _, call := range message.ToolCalls {
+				if call.ToolKey == harness.DelegationToolKey {
+					callID = call.ID
+				}
+			}
+		}
+	}
+	if callID == "" {
+		t.Fatalf("missing frozen delegation Tool identity: status=%s", root.Run.Status)
+	}
+	verified, err := direct.ReconcileToolOutcome(t.Context(), root.Run.ID, root.Run.Revision, callID)
+	if err != nil {
+		t.Fatalf("trusted delegation receipt unavailable: %v", err)
+	}
+	return verified
+}
+
 func (fixture *asyncDelegationFixture) compose(t *testing.T, canceller harness.RuntimeCanceller) (*harness.Runner, *agent.Runner) {
 	t.Helper()
 	handler := harness.NewDelegationToolHandler(fixture.policy)
@@ -192,6 +227,7 @@ func (fixture *asyncDelegationFixture) compose(t *testing.T, canceller harness.R
 	}
 	dependencies := delegationAgentDependencies(fixture.runtime, fixture.model, registry, policy, 4, false)
 	dependencies.ToolMiddleware = []plugin.ToolMiddleware{timeline}
+	dependencies.ToolOutcomeVerifier = handler
 	direct, err := agent.NewRunner(dependencies)
 	if err != nil {
 		t.Fatal(err)
@@ -253,8 +289,18 @@ func (fixture *asyncDelegationFixture) assertTerminalItems(t *testing.T, runner 
 		t.Fatal(err)
 	}
 	items := itemsOfKind(snapshot.Items, harness.ItemDelegation)
-	if len(items) != 2 || items[0].Status != harness.ItemStarted || items[1].Status != status || items[1].ParentItemID != items[0].ID {
-		t.Fatalf("delegation lifecycle = %#v", items)
+	if len(items) < 1 || len(items) > 2 || items[0].Status != harness.ItemStarted {
+		t.Fatalf("missing frozen delegation Start fact: count=%d", len(items))
+	}
+	// Trusted reconciliation now reads the terminal child without reentering
+	// the delegation Tool. A Refresh projects its authoritative terminal
+	// status as a Subtask Item; it need not mint a second delegation Tool
+	// Item just to replace the original immutable start record.
+	if len(snapshot.Subtasks) != 1 || snapshot.Subtasks[0].Status != string(status) {
+		t.Fatalf("terminal child projection missing: tasks=%+v", snapshot.Subtasks)
+	}
+	if len(items) == 2 && (items[1].Status != status || items[1].ParentItemID != items[0].ID) {
+		t.Fatalf("inconsistent cancellation-side terminal delegation Item: %+v", items[1])
 	}
 }
 

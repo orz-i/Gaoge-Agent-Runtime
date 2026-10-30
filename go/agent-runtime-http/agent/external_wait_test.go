@@ -31,9 +31,9 @@ func TestPendingToolSnapshotPublicProjectionHasNoHostCorrelation(t *testing.T) {
 	}
 	registry, err := tools.NewRegistry([]tools.Registration{{
 		Definition: tools.Definition{Key: "test.http_wait", Name: "http_wait", InputSchema: json.RawMessage(`{"type":"object"}`)},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			deadline := time.Now().Add(time.Minute)
-			return tools.ExecutionResult{Content: json.RawMessage(`null`), Receipt: tools.Receipt{ExecutionID: "private-host-operation", Disposition: tools.ReceiptDispositionPending},
+			return tools.ExecutionResult{Content: json.RawMessage(`null`), Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: tools.ReceiptDispositionPending},
 				Pending: &tools.PendingExecution{Kind: tools.PendingExternalResult, OperationID: "private-host-operation", InputDigest: strings.Repeat("b", 64), DeadlineAt: &deadline}}, nil
 		}),
 	}})

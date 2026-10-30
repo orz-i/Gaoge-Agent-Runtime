@@ -17,6 +17,28 @@ Redis or memory generation stream adapter.
 
 ## Experimental direct-Agent execution lease (Stage 2B)
 
+**Tool retry/disposition contract:** Even an explicit
+`tools.NewRetryableExecutionError` requires a trusted, original-Call-ID
+`rejected` no-effect receipt before another physical Tool call.
+Use `tools.RetryableNoEffectResult(callID, err)` only when the Handler
+proves it did not send a remote effect. A normal Tool result must have
+`read`, `committed` or `pending` disposition; an error-free `rejected`
+is invalid. A previously dispatched shared budget reservation may
+still decline a same-ID retry. Unknown physical outcomes require
+authoritative read-only reconciliation rather than a second send.
+
+**Tool durability in every execution mode:** An external Tool effect now
+commits its exact original Call ID as an Agent dispatch intent **before**
+the Handler runs, even when `RunExecution` is not configured. Missing or
+unverified receipts block automatic replay and require a trusted read-only
+`ToolOutcomeVerifier`. Correctable errors from a Handler after dispatch
+are not automatically no-effect proof; they require an exact-ID rejected
+no-effect receipt via `tools.RecoverableNoEffectResult`. Shared Tool budgets
+also fence already-dispatched Held reservations. This does **not**
+certify concurrent multiworker use of the unleased path. See
+[ADR 0013](../../docs/adr/0013-uniform-tool-effect-intent-and-receipts.md)
+and the beta.24 breaking-change ledger.
+
 **Stage 2 governance:** The [final Stage 2 exit audit](../../docs/audits/2026-10-16-stage2-final-exit-audit.md) closes the previously demonstrated 2A/2B/2C experimental engineering increments, **not** ADR 0008's full production acceptance. A [subsequent hard-gate correction](../../docs/audits/2026-10-16-stage2-hard-gates-followup.md) adds Run Store quarantine and exact internal repair, self-wakeup source binding and partial Direct/Worker concurrency proof. A [subsequent terminal-DLQ handoff test](../../docs/audits/2026-10-16-stage2-terminal-dlq-handoff.md) now verifies protected Queue expiry and PG-quarantine-before-Redis-Nack ordering. Actual product host authorization/Provider identity, migration of old unprotected Jobs and full Direct/Pump/Hosted eligibility are **still not certified**. Do not treat this opt-in API as unattended production multi-worker certification.
 
 An opt-in `agent.Dependencies.RunExecution` configuration lets a Direct
