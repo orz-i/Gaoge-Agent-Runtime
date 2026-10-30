@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider"
+	provider "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
