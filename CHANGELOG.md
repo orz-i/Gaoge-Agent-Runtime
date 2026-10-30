@@ -5,6 +5,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Remove top-level Harness RetryInvocation fallback to mutable Session
+  identity; require exact frozen Actor and Kernel Thread before allocating
+  another execution attempt, with negative persistence tests.
+
 - Treat a missing Hosted Tool status as unfinished, not proof of execution
   completion. Preserve exact held native reservations for identified calls;
   an unidentified unfinished call now keeps the physically dispatched Model

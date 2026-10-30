@@ -2,6 +2,26 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Frozen root retry execution identity (beta.24 candidate)
+
+**Removed:** Harness top-level `RetryInvocation` no longer reconstructs a missing
+frozen Actor or Kernel Thread from `Session.Actor` / `Session.HostThread`.
+A Host Thread is a product-level identity, not permission to replace a
+persisted Kernel Thread during a new physical Run attempt.
+
+A retryable root Invocation (Agent, Team, GroupChat, Workflow or Application)
+must have valid, matching `Input`/`InputHash` evidence and a nonempty, valid
+Actor and Kernel Thread. Missing, malformed or mismatched frozen evidence
+fails closed with `harness.ErrConflict` **before** Store `RetryInvocation`
+rotates `ExecutionRefID` or reopens the Turn. The typed Feature dispatch path
+checks the same frozen fields after the attempt is accepted. A historical
+pre-hard-cut Invocation without that identity must be inspected and
+drained/quarantined; it is not silently upgraded from the Session.
+
+No new persisted fields, schema number, Session lookup or compatibility
+migration is introduced. Current valid typed root retries retain their
+existing deterministic Run identities and execution behavior.
+
 ## 2026-10-30 — Hosted Tool terminal receipts fail closed (beta.24 candidate)
 
 **Removed:** The empty string Hosted Tool status is no longer a legacy terminal

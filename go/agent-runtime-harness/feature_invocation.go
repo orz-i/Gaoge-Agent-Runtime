@@ -731,6 +731,14 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 	if !retryableInvocationStatus(invocation.Status) {
 		return Snapshot{}, ErrConflict
 	}
+	// A retry attempt commits a new physical Run identity. For a root,
+	// its Actor and Kernel Thread must already be sealed in the Invocation:
+	// never reconstruct missing authority from Session.HostThread/Actor.
+	if strings.TrimSpace(invocation.ParentItemID) == "" {
+		if _, _, err := frozenTopLevelInvocationIdentity(invocation); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	return runner.startNextInvocationAttempt(ctx, turn, invocation)
 }
 
@@ -814,7 +822,7 @@ func (runner *Runner) startRetriedTopLevelInvocation(
 	turn Turn,
 	invocation Invocation,
 ) (Snapshot, error) {
-	actor, thread, err := runner.topLevelInvocationIdentity(ctx, turn, invocation)
+	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -829,27 +837,25 @@ func (runner *Runner) startRetriedTopLevelInvocation(
 	return runner.finishTopLevelFeatureStart(ctx, turn, invocation, runtimeSnapshot, startErr)
 }
 
-func (runner *Runner) topLevelInvocationIdentity(
-	ctx context.Context,
-	turn Turn,
-	invocation Invocation,
-) (kernel.ActorRef, kernel.ThreadRef, error) {
+// frozenTopLevelInvocationIdentity reads the exact Actor/Thread committed in
+// the Invocation. The Session is NOT a fallback execution authority: its
+// HostThread can differ from the Kernel Thread, and reconstructing missing
+// fields during retry silently changes a previously frozen physical Run.
+func frozenTopLevelInvocationIdentity(invocation Invocation) (kernel.ActorRef, kernel.ThreadRef, error) {
+	if len(invocation.Input) == 0 || !json.Valid(invocation.Input) ||
+		hashInvocationBytes(invocation.Input) != invocation.InputHash {
+		return kernel.ActorRef{}, kernel.ThreadRef{}, ErrConflict
+	}
 	var input struct {
 		Actor  kernel.ActorRef  `json:"actor"`
 		Thread kernel.ThreadRef `json:"thread"`
 	}
-	if err := json.Unmarshal(invocation.Input, &input); err != nil {
+	if err := json.Unmarshal(invocation.Input, &input); err != nil ||
+		!validActor(input.Actor) || strings.TrimSpace(input.Thread.Kind) == "" ||
+		strings.TrimSpace(input.Thread.ID) == "" {
 		return kernel.ActorRef{}, kernel.ThreadRef{}, ErrConflict
 	}
-	if validActor(input.Actor) && strings.TrimSpace(input.Thread.Kind) != "" && strings.TrimSpace(input.Thread.ID) != "" {
-		return input.Actor, input.Thread, nil
-	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
-	if err != nil || !validActor(session.Actor) || strings.TrimSpace(session.HostThread.Kind) == "" ||
-		strings.TrimSpace(session.HostThread.ID) == "" {
-		return kernel.ActorRef{}, kernel.ThreadRef{}, errors.Join(ErrConflict, err)
-	}
-	return session.Actor, kernel.ThreadRef{Kind: session.HostThread.Kind, ID: session.HostThread.ID}, nil
+	return input.Actor, input.Thread, nil
 }
 
 func (runner *Runner) topLevelRetryContext(ctx context.Context, turn Turn) (context.Context, error) {
