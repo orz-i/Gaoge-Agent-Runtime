@@ -36,6 +36,7 @@ type externalFixture struct {
 	clock      *externalClock
 	ready      bool
 	executions int
+	lookups    int
 }
 
 func newExternalFixture(t *testing.T) *externalFixture {
@@ -43,14 +44,14 @@ func newExternalFixture(t *testing.T) *externalFixture {
 	fixture := &externalFixture{store: memory.NewStore(), model: &externalModel{}, clock: &externalClock{now: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)}}
 	fixture.registry = mustRegistry(t, []tools.Registration{{
 		Definition: tools.Definition{Key: "test.external", Name: "external", InputSchema: json.RawMessage(`{"type":"object"}`), Terminal: true},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			fixture.executions++
-			if fixture.ready {
-				return tools.ExecutionResult{Content: json.RawMessage(`{"answer":42}`), Receipt: tools.Receipt{ExecutionID: "external-operation", Disposition: "committed"}}, nil
+			if fixture.executions > 1 {
+				return tools.ExecutionResult{}, errors.New("external Tool was incorrectly reissued while waiting for receipt")
 			}
 			deadline := fixture.clock.Now().Add(2 * time.Minute)
 			return tools.ExecutionResult{
-				Content: json.RawMessage(`null`), Receipt: tools.Receipt{ExecutionID: "external-operation", Disposition: tools.ReceiptDispositionPending},
+				Content: json.RawMessage(`null`), Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: tools.ReceiptDispositionPending},
 				Pending: &tools.PendingExecution{Kind: tools.PendingExternalResult, OperationID: "external-operation", InputDigest: strings.Repeat("a", 64), DeadlineAt: &deadline},
 			}, nil
 		}),
@@ -66,7 +67,17 @@ func (fixture *externalFixture) restart(t *testing.T, store kernel.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.runner, err = agent.NewRunner(agent.Dependencies{Runtime: fixture.runtime, Model: fixture.model, Catalog: fixture.registry, Executor: fixture.registry, Clock: fixture.clock})
+	fixture.runner, err = agent.NewRunner(agent.Dependencies{
+		Runtime: fixture.runtime, Model: fixture.model, Catalog: fixture.registry, Executor: fixture.registry, Clock: fixture.clock,
+		ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			fixture.lookups++
+			if !fixture.ready || request.Call.ID != "external-call" || request.RunID != "external-run" {
+				return tools.ExecutionResult{}, errors.New("external provider has no verified COMMIT")
+			}
+			return tools.ExecutionResult{Content: json.RawMessage(`{"answer":42}`),
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
+		}),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +109,7 @@ func TestExternalWaitSixtySecondsDoesNotWriteInvokeOrConsume(t *testing.T) {
 	for second := 1; second <= 60; second++ {
 		fixture.clock.now = fixture.clock.now.Add(time.Second)
 		next, resumeErr := fixture.runner.Resume(t.Context(), waiting.Run.ID, waiting.Run.Revision)
-		if resumeErr != nil || next.Run.Revision != waiting.Run.Revision || next.EventHead != waiting.EventHead {
+		if !errors.Is(resumeErr, agent.ErrToolOutcomeUnknown) || next.Run.Revision != waiting.Run.Revision || next.EventHead != waiting.EventHead {
 			t.Fatalf("second %d wrote state or events: %#v, %v", second, next.Run, resumeErr)
 		}
 	}
@@ -142,7 +153,7 @@ func TestExternalSignalConcurrentDuplicateAndRestartConsumesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := fixture.runner.Resume(t.Context(), current.Run.ID, current.Run.Revision)
+	completed, err := fixture.runner.ReconcileToolOutcome(t.Context(), current.Run.ID, current.Run.Revision, "external-call")
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
 		t.Fatalf("completed=%#v, %v", completed.Run, err)
 	}
@@ -150,7 +161,7 @@ func TestExternalSignalConcurrentDuplicateAndRestartConsumesOnce(t *testing.T) {
 	if err != nil || view.Budget.Usage.ToolCalls != 1 || view.PendingTool != nil {
 		t.Fatalf("view=%#v, %v", view, err)
 	}
-	if fixture.executions != 2 || fixture.model.calls != 1 {
+	if fixture.executions != 1 || fixture.lookups != 1 || fixture.model.calls != 1 {
 		t.Fatalf("executions=%d model=%d", fixture.executions, fixture.model.calls)
 	}
 	duplicate, err := fixture.runner.NotifyExternalToolResultReady(t.Context(), externalSignal())
@@ -198,8 +209,9 @@ func TestExternalSignalRejectsWrongIdentityCancelAndDeadline(t *testing.T) {
 			}
 			if field == "deadline" {
 				expired, err := fixture.runner.ResumeToolWait(t.Context(), current.Run.ID, current.Run.Revision, waiting.Run.Revision)
-				if expired.Run.Status != kernel.RunStatusFailed || !errors.Is(err, kernel.ErrDeadline) {
-					t.Fatalf("expired=%#v, %v", expired.Run, err)
+				if expired.Run.Status != kernel.RunStatusRunning ||
+					!errors.Is(err, agent.ErrToolOutcomeUnknown) || !errors.Is(err, agent.ErrToolOutcomeOverdue) {
+					t.Fatalf("unverified provider expiry must retain original operation identity: expired=%#v err=%v", expired.Run, err)
 				}
 			}
 		})
@@ -228,7 +240,7 @@ func TestExternalCancellationAndDeadlineCannotBeRevivedBySignals(t *testing.T) {
 			if notifyErr != nil && !errors.Is(notifyErr, agent.ErrToolNotPending) && !errors.Is(notifyErr, kernel.ErrDeadline) {
 				t.Fatalf("notify race = %v", notifyErr)
 			}
-			if terminalErr != nil && !errors.Is(terminalErr, kernel.ErrConflict) && !errors.Is(terminalErr, kernel.ErrDeadline) {
+			if terminalErr != nil && !errors.Is(terminalErr, kernel.ErrConflict) && !errors.Is(terminalErr, agent.ErrToolOutcomeUnknown) {
 				t.Fatalf("terminal race = %v", terminalErr)
 			}
 			current, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
@@ -254,9 +266,10 @@ func TestExternalCancellationAndDeadlineCannotBeRevivedBySignals(t *testing.T) {
 			if err != nil || view.Budget.Usage.ToolCalls != 0 || fixture.executions != 1 || fixture.model.calls != 1 {
 				t.Fatalf("race consumed result: %#v, %v", view, err)
 			}
-			if outcome == "deadline" && final.Run.Status != kernel.RunStatusFailed {
-				t.Fatalf("deadline did not win: %#v", final.Run)
-			}
+			// A provider wait expiry without an external COMMIT is not
+			// definitive proof that its physical effect was absent. The
+			// explicit parent cancellation above may close the Run, but
+			// it must not replay or synthesize the external result.
 		})
 	}
 }
@@ -297,8 +310,8 @@ func TestExternalWaitCommitAndReadyCommitCrashesRecover(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			completed, err := fixture.runner.Resume(t.Context(), waiting.Run.ID, waiting.Run.Revision)
-			if err != nil || completed.Run.Status != kernel.RunStatusCompleted || fixture.executions != 2 {
+			completed, err := fixture.runner.ReconcileToolOutcome(t.Context(), waiting.Run.ID, waiting.Run.Revision, "external-call")
+			if err != nil || completed.Run.Status != kernel.RunStatusCompleted || fixture.executions != 1 {
 				t.Fatalf("recovery=%#v, executions=%d, %v", completed.Run, fixture.executions, err)
 			}
 		})

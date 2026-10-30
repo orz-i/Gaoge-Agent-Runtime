@@ -401,11 +401,27 @@ func TestLegacyRunCannotJoinNativeExecutionDuringTool(t *testing.T) {
 	}
 	native := mk(&agent.RunExecution{OwnerID: "native-worker", LeaseDuration: 2 * time.Minute})
 	next, nativeErr := native.Resume(ctx, ready.Run.ID, ready.Run.Revision)
+	// Every Tool dispatch now advances the Agent Revision to commit its
+	// immutable external-effect intent, even without a RunExecution lease.
+	// First prove the stale caller is rejected by CAS, then re-read under
+	// the same in-flight Legacy Tool and prove epoch-0 cannot be upgraded.
+	current, currentErr := rt.Load(ctx, ready.Run.ID)
+	if currentErr != nil {
+		t.Fatal(currentErr)
+	}
+	_, freshNativeErr := native.Resume(ctx, ready.Run.ID, current.Run.Revision)
+	_, forbiddenClaimErr := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
+		RunID: ready.Run.ID, OwnerID: "invalid-native-takeover", LeaseDuration: 2 * time.Minute,
+	})
 	close(unblockFirst)
 	oldErr := <-oldDone
 	t.Logf("AUDIT MIXED legacy epoch0 Tool already in flight; native claim accepted=%t status=%s physical_effects=%d stale_legacy_error=%v",
 		nativeErr == nil, next.Run.Status, physical.Load(), oldErr)
-	if !errors.Is(nativeErr, kernel.ErrExecutionRequired) || physical.Load() != 1 || oldErr != nil {
-		t.Fatalf("legacy Run was upgraded into concurrent native execution: effects=%d native=%v legacy=%v", physical.Load(), nativeErr, oldErr)
+	if !errors.Is(nativeErr, kernel.ErrConflict) ||
+		!errors.Is(freshNativeErr, agent.ErrToolOutcomeUnknown) ||
+		!errors.Is(forbiddenClaimErr, kernel.ErrExecutionRequired) ||
+		physical.Load() != 1 || oldErr != nil {
+		t.Fatalf("legacy Run was upgraded into concurrent native execution: effects=%d stale=%v fresh=%v storeClaim=%v legacy=%v",
+			physical.Load(), nativeErr, freshNativeErr, forbiddenClaimErr, oldErr)
 	}
 }

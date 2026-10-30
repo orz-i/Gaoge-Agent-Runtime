@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -36,15 +37,19 @@ func externalWaitStoreRecovery(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	store := NewKernelStore(db)
 	ready := false
+	effects, lookups := 0, 0
 	registry, err := tools.NewRegistry([]tools.Registration{{
 		Definition: tools.Definition{Key: "test.persisted_wait", Name: "persisted_wait", InputSchema: json.RawMessage(`{"type":"object"}`), Terminal: true},
-		Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
-			if ready {
-				return tools.ExecutionResult{Content: json.RawMessage(`42`), Receipt: tools.Receipt{ExecutionID: "persisted-operation", Disposition: "committed"}}, nil
+		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			effects++
+			if effects != 1 {
+				return tools.ExecutionResult{}, errors.New("external Tool reexecuted without trusted receipt")
 			}
 			deadline := time.Now().Add(time.Minute)
-			return tools.ExecutionResult{Content: json.RawMessage(`null`), Receipt: tools.Receipt{ExecutionID: "persisted-operation", Disposition: tools.ReceiptDispositionPending},
-				Pending: &tools.PendingExecution{Kind: tools.PendingExternalResult, OperationID: "persisted-operation", InputDigest: strings.Repeat("d", 64), DeadlineAt: &deadline}}, nil
+			return tools.ExecutionResult{Content: json.RawMessage("null"),
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: tools.ReceiptDispositionPending},
+				Pending: &tools.PendingExecution{Kind: tools.PendingExternalResult,
+					OperationID: "persisted-operation", InputDigest: strings.Repeat("d", 64), DeadlineAt: &deadline}}, nil
 		}),
 	}})
 	if err != nil {
@@ -56,7 +61,17 @@ func externalWaitStoreRecovery(t *testing.T, db *gorm.DB) {
 		if runtimeErr != nil {
 			t.Fatal(runtimeErr)
 		}
-		runner, runnerErr := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: persistedWaitModel{}, Catalog: registry, Executor: registry})
+		runner, runnerErr := agent.NewRunner(agent.Dependencies{
+			Runtime: runtime, Model: persistedWaitModel{}, Catalog: registry, Executor: registry,
+			ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				lookups++
+				if !ready || request.RunID != "persisted-wait" || request.Call.ID != "persisted-call" {
+					return tools.ExecutionResult{}, errors.New("provider COMMIT not yet verified")
+				}
+				return tools.ExecutionResult{Content: json.RawMessage("42"),
+					Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
+			}),
+		})
 		if runnerErr != nil {
 			t.Fatal(runnerErr)
 		}
@@ -95,13 +110,13 @@ func externalWaitStoreRecovery(t *testing.T, db *gorm.DB) {
 		t.Fatal(err)
 	}
 	restarted = compose()
-	completed, err := restarted.Resume(t.Context(), signalled.Run.ID, signalled.Run.Revision)
+	completed, err := restarted.ResumeToolWait(t.Context(), signalled.Run.ID, signalled.Run.Revision, wait.Generation)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
 		t.Fatalf("recovery=%#v, %v", completed.Run, err)
 	}
 	view, err := agent.ViewState(completed)
-	if err != nil || view.Budget.Usage.ToolCalls != 1 {
-		t.Fatalf("consumption=%#v, %v", view, err)
+	if err != nil || view.Budget.Usage.ToolCalls != 1 || effects != 1 || lookups != 1 {
+		t.Fatalf("trusted COMMIT consumption=%#v effects=%d reads=%d err=%v", view, effects, lookups, err)
 	}
 	duplicate, err := restarted.NotifyExternalToolResultReady(t.Context(), signal)
 	if err != nil || duplicate.Run.Revision != completed.Run.Revision {

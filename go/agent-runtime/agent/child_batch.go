@@ -22,17 +22,29 @@ func independentChildBatch(state runState) bool {
 }
 
 func (runner *Runner) deferChildCall(ctx context.Context, snapshot kernel.Snapshot, state runState, call tools.Call) (kernel.Snapshot, bool, error) {
+	if state.ToolDispatchID != call.ID || state.ToolWait == nil || state.ToolWait.CallID != call.ID {
+		return snapshot, true, ErrToolOutcomeUnknown
+	}
+	// The deferred record is now the durable unresolved effect identity.
+	// Transfer the active dispatch marker atomically with that record so
+	// independent children may start without re-executing earlier handlers.
 	state.DeferredChildren = append(state.DeferredChildren, deferredChildCall{Call: tools.CloneCall(call), Wait: *clonePendingTool(state.ToolWait)})
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ToolWait = nil
+	state.ToolDispatchID = ""
 	return runner.persistChildBatch(ctx, snapshot, state)
 }
 
 func (runner *Runner) activateDeferredChild(ctx context.Context, snapshot kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
+	if state.ToolDispatchID != "" || len(state.PendingCalls) != 0 || len(state.DeferredChildren) == 0 {
+		return snapshot, true, ErrToolOutcomeUnknown
+	}
 	next := state.DeferredChildren[0]
 	state.DeferredChildren = state.DeferredChildren[1:]
 	state.PendingCalls = []tools.Call{tools.CloneCall(next.Call)}
 	state.ToolWait = clonePendingTool(&next.Wait)
+	// Restore the original claim, not permission to re-run the Handler.
+	state.ToolDispatchID = next.Call.ID
 	return runner.persistChildBatch(ctx, snapshot, state)
 }
 

@@ -3,8 +3,10 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -13,7 +15,7 @@ import (
 
 const pendingToolKey = "test.pending"
 
-func TestPendingToolReceiptYieldsWithoutConsumingCallAndResumesIdempotently(t *testing.T) {
+func TestPendingToolReceiptRequiresVerifiedCOMMITInsteadOfReexecution(t *testing.T) {
 	fixture := newPendingToolFixture(t)
 	started, err := fixture.runner.StartRun(
 		t.Context(), startRequest("run_pending_tool", "request_pending_tool", "use the pending tool", pendingToolKey),
@@ -22,8 +24,16 @@ func TestPendingToolReceiptYieldsWithoutConsumingCallAndResumesIdempotently(t *t
 		t.Fatal(err)
 	}
 	assertPendingToolYield(t, started, fixture)
-
-	completed, err := fixture.runner.Resume(t.Context(), started.Run.ID, started.Run.Revision)
+	_, err = fixture.runner.Resume(t.Context(), started.Run.ID, started.Run.Revision)
+	if !errors.Is(err, agent.ErrToolOutcomeUnknown) || fixture.handler.executions != 1 {
+		t.Fatalf("pending Tool was reexecuted without provider receipt: err=%v effects=%d", err, fixture.handler.executions)
+	}
+	fixture.handler.ready = true // Verified outcome exists in independent provider store.
+	reconciled, err := fixture.runner.ReconcileToolOutcome(t.Context(), started.Run.ID, started.Run.Revision, "call_pending")
+	if err != nil || reconciled.Run.Revision <= started.Run.Revision {
+		t.Fatalf("exact read-only COMMIT was not accepted: run=%+v err=%v", reconciled.Run, err)
+	}
+	completed, err := fixture.runner.Resume(t.Context(), started.Run.ID, reconciled.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +57,22 @@ func newPendingToolFixture(t *testing.T) pendingToolFixture {
 		Handler: handler,
 	}})
 	model := &pendingToolModel{t: t}
-	return pendingToolFixture{runner: mustRunner(t, runtime, approvals, model, registry), model: model, handler: handler}
+	runner, err := agent.NewRunner(agent.Dependencies{
+		Runtime: runtime, Model: model, Catalog: registry, Executor: registry,
+		Approvals: interactionadapter.New(approvals),
+		ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			handler.verifiedReads++
+			if !handler.ready {
+				return tools.ExecutionResult{}, errors.New("provider does not yet confirm terminal Tool outcome")
+			}
+			return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`),
+				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pendingToolFixture{runner: runner, model: model, handler: handler}
 }
 
 func assertPendingToolYield(t *testing.T, snapshot kernel.Snapshot, fixture pendingToolFixture) {
@@ -59,12 +84,15 @@ func assertPendingToolYield(t *testing.T, snapshot kernel.Snapshot, fixture pend
 
 func assertPendingToolCompletion(t *testing.T, snapshot kernel.Snapshot, fixture pendingToolFixture) {
 	t.Helper()
-	if snapshot.Run.Status != kernel.RunStatusCompleted || fixture.handler.executions != 2 || fixture.model.calls != 2 || snapshot.Result == nil {
+	if snapshot.Run.Status != kernel.RunStatusCompleted || fixture.handler.executions != 1 || fixture.handler.verifiedReads != 1 || fixture.model.calls != 2 || snapshot.Result == nil {
 		t.Fatalf("resumed completion = %#v executions=%d modelCalls=%d", snapshot, fixture.handler.executions, fixture.model.calls)
 	}
 }
 
-type pendingToolHandler struct{ executions int }
+type pendingToolHandler struct {
+	executions, verifiedReads int
+	ready                     bool
+}
 
 func (handler *pendingToolHandler) Execute(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 	handler.executions++
@@ -74,10 +102,7 @@ func (handler *pendingToolHandler) Execute(_ context.Context, request tools.Exec
 			Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: tools.ReceiptDispositionPending},
 		}, nil
 	}
-	return tools.ExecutionResult{
-		Content: json.RawMessage(`{"ok":true}`),
-		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"},
-	}, nil
+	return tools.ExecutionResult{}, errors.New("pending Tool was physically retried instead of verified")
 }
 
 type pendingToolModel struct {

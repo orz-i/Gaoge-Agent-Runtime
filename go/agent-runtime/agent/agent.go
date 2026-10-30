@@ -747,9 +747,11 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 		// Store-fenced Resume obeys the same persisted Feature due time.
 		return snapshot, ErrModelInvocationBusy
 	}
-	if runner.runExecution != nil && state.ToolDispatchID != "" {
-		// Do not acquire/execute an unresolved physical Tool under a new
-		// Epoch. Distinguish an overdue provider wait without erasing its
+	if state.ToolDispatchID != "" {
+		// Every Agent execution mode preserves unresolved physical effects.
+		// A stored Tool dispatch identity is never permission to execute it
+		// again, including on direct Runs without a Kernel execution lease.
+		// Distinguish an overdue provider wait without erasing its
 		// persisted identity or asserting a physical COMMIT.
 		if state.ToolWait != nil && state.ToolWait.DeadlineAt != nil &&
 			!runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
@@ -1626,52 +1628,51 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if execution.call.ToolKey == ToolDiscoveryKey {
 		return runner.searchPendingTool(ctx, snapshot, execution)
 	}
-	if runner.runExecution != nil {
-		if execution.state.ToolDispatchID != "" {
-			return snapshot, true, ErrToolOutcomeUnknown
-		}
-		state := execution.state
-		state.ToolDispatchID = execution.call.ID
-		encoded, encodeErr := encodeState(state)
-		if encodeErr != nil {
-			return snapshot, true, encodeErr
-		}
-		// The CAS prepares an effect with a stable identity. A crash after
-		// this commit cannot be treated as permission to execute again.
-		staged, stageErr := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-			Events: []kernel.EventDraft{{Type: "tool.dispatch_intent", Message: execution.call.ID, Wakeup: true}},
-		})
-		if stageErr != nil {
-			return snapshot, true, stageErr
-		}
-		snapshot = staged
-		execution.state = state
+	if execution.state.ToolDispatchID != "" {
+		return snapshot, true, ErrToolOutcomeUnknown
 	}
+	state := execution.state
+	state.ToolDispatchID = execution.call.ID
+	encoded, encodeErr := encodeState(state)
+	if encodeErr != nil {
+		return snapshot, true, encodeErr
+	}
+	// The CAS prepares an effect with a stable identity. A crash after
+	// this commit cannot be treated as permission to execute again.
+	staged, stageErr := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+		Events: []kernel.EventDraft{{Type: "tool.dispatch_intent", Message: execution.call.ID, Wakeup: true}},
+	})
+	if stageErr != nil {
+		return snapshot, true, stageErr
+	}
+	snapshot = staged
+	execution.state = state
 	result, err := runner.invokePendingTool(ctx, snapshot, execution.call, execution.definition)
 	late := errors.Is(err, ErrToolLateResult)
 	if err != nil && !late {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return snapshot, true, ctxErr
 		}
-		// For an in-flight native Tool, a failed result does not authorize
-		// automatic retry after a new epoch. Keep dispatch intent durable.
-		if runner.runExecution != nil {
-			return snapshot, true, errors.Join(ErrToolOutcomeUnknown, err)
+		// A trusted Tool may reject arguments/policy with an explicit
+		// model-correctable error certifying *no external effect*. Consume
+		// this failed call only in the same Kernel CAS that clears its
+		// dispatch identity; a crash beforehand remains unreconciled.
+		if _, _, recoverable := tools.RecoverableCallErrorInfo(err); recoverable {
+			state := execution.state
+			state.ToolDispatchID = ""
+			return runner.handlePendingToolExecutionError(ctx, snapshot, state, err)
 		}
-		return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, err)
+		// Unknown results do not prove the external Tool was absent.
+		// Keep the committed dispatch intent for trusted reconciliation
+		// in both direct and Store-leased execution modes.
+		return snapshot, true, errors.Join(ErrToolOutcomeUnknown, err)
 	}
 	if err = tools.ValidateExecutionResult(result); err != nil {
-		if runner.runExecution != nil {
-			// The external handler may already have committed. Never
-			// terminalize/clear its durable dispatch marker on invalid
-			// receipts from the external system.
-			return snapshot, true, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch, err)
-		}
-		failed, failErr := runner.fail(ctx, snapshot, execution.state, "agent.tool_failed", errors.Join(ErrToolFailure, err))
-		return failed, false, failErr
+		// A malformed receipt may follow a successful external COMMIT.
+		return snapshot, true, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch, err)
 	}
-	if runner.runExecution != nil && result.Receipt.ExecutionID != execution.call.ID {
+	if result.Receipt.ExecutionID != execution.call.ID {
 		return snapshot, true, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch)
 	}
 	persisted, yielded, persistErr := runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(result))
@@ -1814,13 +1815,9 @@ func (runner *Runner) persistPendingToolResult(
 	ctx context.Context, snapshot kernel.Snapshot, execution pendingToolExecution,
 	result tools.ExecutionResult) (kernel.Snapshot, bool, error) {
 	if strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
-		// A Pending result is not a terminal external receipt. A native
-		// executor MUST preserve the durable dispatch marker: no later
-		// Resume may call the non-idempotent Handler again without a trusted
-		// provider lookup. Legacy unleased behavior remains unchanged.
-		if runner.runExecution == nil {
-			execution.state.ToolDispatchID = ""
-		}
+		// A Pending result is never proof of terminal execution. Preserve
+		// the same committed Tool dispatch identity in every execution mode
+		// so a later Resume cannot silently call its Handler again.
 		return runner.persistPendingToolYield(ctx, snapshot, execution.state, result)
 	}
 	// A terminal receipt and marker removal share the SAME revision CAS.

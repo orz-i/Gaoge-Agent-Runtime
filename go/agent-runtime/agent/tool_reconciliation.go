@@ -33,7 +33,7 @@ func (fn ToolOutcomeVerifierFunc) VerifyCommittedTool(ctx context.Context, reque
 // not accept an arbitrary result or "committed" flag from a client.
 func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 	expectedRevision uint64, callID string) (kernel.Snapshot, error) {
-	if runner == nil || runner.runExecution == nil || ctx == nil ||
+	if runner == nil || ctx == nil ||
 		strings.TrimSpace(callID) == "" || expectedRevision == 0 {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
@@ -61,11 +61,13 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 				if callbackErr == nil {
 					return
 				}
-				cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(nextCtx), 2*time.Second)
-				defer cancel()
-				releaseErr := scoped.runtime.ReleaseExecution(cleanupCtx, *scoped.activeRunLease)
-				if releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
-					callbackErr = errors.Join(callbackErr, releaseErr)
+				if scoped.activeRunLease != nil {
+					cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(nextCtx), 2*time.Second)
+					defer cancel()
+					releaseErr := scoped.runtime.ReleaseExecution(cleanupCtx, *scoped.activeRunLease)
+					if releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
+						callbackErr = errors.Join(callbackErr, releaseErr)
+					}
 				}
 			}()
 			fresh, freshState, loadErr := scoped.loadState(nextCtx, runID)

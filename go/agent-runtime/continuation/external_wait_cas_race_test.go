@@ -81,19 +81,19 @@ func TestExternalWaitDeadlineSurvivesCASConflictDuringDispatch(t *testing.T) {
 	loader := &interleavingWaitLoader{runtime: fixture.runtime, bumps: 1}
 	dispatcher := newInterleavedDispatcher(t, fixture, loader)
 	payload := interleavedWaitPayload(waiting, generation, continuation.TriggerToolWaitDeadline)
-	if err := dispatcher.Dispatch(t.Context(), payload); err != nil {
-		t.Fatal(err)
+	if err := dispatcher.Dispatch(t.Context(), payload); !errors.Is(err, agent.ErrToolOutcomeUnknown) {
+		t.Fatalf("unverified deadline must NACK rather than grant another Tool attempt: %v", err)
 	}
 	actual, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
-	if err != nil || actual.Run.Status != kernel.RunStatusFailed || actual.Run.ErrorCode != "agent.tool_deadline_exceeded" {
-		t.Fatalf("deadline delivery ACKed without expiring Run: %#v, %v", actual.Run, err)
+	if err != nil || actual.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("unknown effect deadline changed authoritative Run: %+v err=%v", actual.Run, err)
 	}
 	if fixture.executions != 1 || fixture.model.calls != 1 {
 		t.Fatalf("deadline re-executed work: executor=%d model=%d", fixture.executions, fixture.model.calls)
 	}
-	// A duplicate of the same generation must not revive a terminal Run.
-	if err := dispatcher.Dispatch(t.Context(), payload); err != nil {
-		t.Fatal(err)
+	// A duplicate generation still cannot complete an unverified effect.
+	if err := dispatcher.Dispatch(t.Context(), payload); !errors.Is(err, agent.ErrToolOutcomeUnknown) {
+		t.Fatalf("duplicate unknown deadline was incorrectly ACKed: %v", err)
 	}
 	again, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
 	if err != nil || again.Run.Revision != actual.Run.Revision {
@@ -126,14 +126,14 @@ func TestExternalResultReadySurvivesCASConflictDuringDispatch(t *testing.T) {
 	if err != nil || view.Budget.Usage.ToolCalls != 1 || view.PendingTool != nil {
 		t.Fatalf("result consumed incorrectly: %#v, %v", view, err)
 	}
-	if fixture.executions != 2 || fixture.model.calls != 1 {
+	if fixture.executions != 1 || fixture.model.calls != 1 {
 		t.Fatalf("result was duplicated: executor=%d model=%d", fixture.executions, fixture.model.calls)
 	}
 	if err := dispatcher.Dispatch(t.Context(), payload); err != nil {
 		t.Fatal(err)
 	}
 	again, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
-	if err != nil || again.Run.Revision != actual.Run.Revision || fixture.executions != 2 {
+	if err != nil || again.Run.Revision != actual.Run.Revision || fixture.executions != 1 {
 		t.Fatalf("duplicate ready signal changed terminal result: %#v, %v", again.Run, err)
 	}
 }
@@ -154,12 +154,14 @@ func TestExternalWaitCASConflictExhaustionMustNackAndRetry(t *testing.T) {
 	}
 	// A later redelivery can use the same immutable continuation payload.
 	loader.bumps = 0
-	if err := dispatcher.Dispatch(t.Context(), payload); err != nil {
-		t.Fatalf("stable-generation redelivery failed: %v", err)
+	if err := dispatcher.Dispatch(t.Context(), payload); !errors.Is(err, agent.ErrToolOutcomeUnknown) {
+		t.Fatalf("an unchanged generation cannot turn an unverified deadline into terminal proof: %v", err)
 	}
-	completed, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
-	if err != nil || completed.Run.Status != kernel.RunStatusFailed || completed.Run.ErrorCode != "agent.tool_deadline_exceeded" {
-		t.Fatalf("redelivered deadline was lost: %#v, %v", completed.Run, err)
+	preserved, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
+	if err != nil || preserved.Run.Status != kernel.RunStatusRunning ||
+		fixture.executions != 1 {
+		t.Fatalf("redelivered deadline replayed or erased unknown effect: %+v effects=%d err=%v",
+			preserved.Run, fixture.executions, err)
 	}
 }
 
@@ -179,7 +181,7 @@ func TestExternalWaitCASConflictNacksRealQueueBeforeRecovery(t *testing.T) {
 	delivery := queuecore.NewMemory(queuecore.Dependencies{Clock: fixture.clock})
 	enqueued, err := delivery.Enqueue(t.Context(), queuecore.EnqueueRequest{
 		Queue: continuation.QueueName, ClientJobID: "cas-retry", Kind: continuation.JobKind,
-		Payload: encoded, Policy: queuecore.Policy{MaxAttempts: 12, VisibilityTimeout: time.Second},
+		Payload: encoded, Policy: queuecore.Policy{MaxAttempts: 3, VisibilityTimeout: time.Second},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -207,12 +209,12 @@ func TestExternalWaitCASConflictNacksRealQueueBeforeRecovery(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if job.Status == queuecore.StatusCompleted {
+		if job.Status == queuecore.StatusDeadLetter {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("continuation not redelivered after CAS NACK: status=%s attempts=%d", job.Status, job.Attempt)
+			t.Fatalf("unknown external outcome was not surfaced for manual reconciliation: status=%s attempts=%d", job.Status, job.Attempt)
 		case <-time.After(2 * time.Millisecond):
 		}
 	}
@@ -220,12 +222,14 @@ func TestExternalWaitCASConflictNacksRealQueueBeforeRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	job, err := delivery.Get(t.Context(), enqueued.Job.ID)
-	if err != nil || job.Attempt != 2 || reportedConflicts != 1 {
-		t.Fatalf("queue must NACK then ACK: %#v, reports=%d, err=%v", job, reportedConflicts, err)
+	if err != nil || job.Attempt != 3 || reportedConflicts != 1 ||
+		job.Status != queuecore.StatusDeadLetter {
+		t.Fatalf("queue must NACK unknown effect to explicit owner recovery, not ACK: status=%s attempts=%d reports=%d err=%v",
+			job.Status, job.Attempt, reportedConflicts, err)
 	}
 	actual, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
-	if err != nil || actual.Run.Status != kernel.RunStatusFailed || actual.Run.ErrorCode != "agent.tool_deadline_exceeded" {
-		t.Fatalf("redelivery did not terminate Run: %#v, %v", actual.Run, err)
+	if err != nil || actual.Run.Status != kernel.RunStatusRunning || fixture.executions != 1 {
+		t.Fatalf("unverified external effect was lost or replayed: %+v effects=%d err=%v", actual.Run, fixture.executions, err)
 	}
 }
 
