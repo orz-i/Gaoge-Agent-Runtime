@@ -2,6 +2,32 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Application child post-claim ancestor fence (beta.24 candidate)
+
+**Independent PR #76 review correction:** In contrast to Team, Workflow or Agent,
+a Host-only Application capability does not have a Kernel Run and does not
+pass through the generic physical Feature dispatch grant. Consequently its
+parent-liveness check before `RetryInvocation` CAS was insufficient: the
+parent could terminate after the new Attempt was persisted, or after the
+Application's `Accepted -> Running` claim was committed, yet the Host
+Executor callback still ran under the stale child.
+
+The Application effect boundary now checks exact parent Item/Invocation/
+Kernel ancestry immediately before `Accepted -> Running` and **again after**
+that claim, immediately before calling `ExecuteApplicationCapability`.
+A pre-claim rejection leaves the original Accepted Attempt untouched;
+a post-claim rejection has affirmative proof that no Host callback was
+invoked, records that claimed Attempt as Failed with a no-effect cause,
+and does not fabricate a business receipt or reissue an effect.
+
+Two deterministic interleavings, paused after Retry Attempt CAS and
+after Application effect-claim CAS respectively, reproduce incorrect
+physical dispatch on the initial PR Head and pass with the correction.
+The post-claim, pre-callback check still cannot be atomic with an unrelated
+Kernel parent completing a moment later; Host policy must retain the
+already documented cancellation and reconciliation boundaries. No new
+Application protocol/SQL schema/Kernel status is introduced.
+
 ## 2026-10-30 — Child retry parent liveness before Attempt CAS (beta.24 candidate)
 
 **Correction:** A failed/cancelled child `RetryInvocation` can no longer

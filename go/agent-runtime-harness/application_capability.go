@@ -157,6 +157,18 @@ func (runner *Runner) executeApplicationInvocation(
 	if err != nil {
 		return Snapshot{}, err
 	}
+	// The parent can terminate after the pre-claim check while the
+	// Accepted->Running Store CAS or its Item projection is waiting.
+	// Application uses this CAS as its physical-effect intent rather than
+	// the Kernel-backed Feature dispatch grant. Recheck at the final safe
+	// boundary, AFTER the claim, BEFORE calling the Host executor.
+	if err := runner.requireLiveInvocationParents(ctx, invocation); err != nil {
+		// No Host callback has been invoked. Preserve definitive no-effect
+		// evidence by failing the claimed Attempt (not by leaving Running
+		// as a falsely ambiguous external effect). Parent termination and
+		// concurrent cancel still contend with the existing Invocation CAS.
+		return runner.failApplicationInvocation(ctx, turn, invocation, errors.Join(ErrApplicationNoEffect, err))
+	}
 	result, executeErr := runner.applications.ExecuteApplicationCapability(ctx, request)
 	if executeErr != nil {
 		if errors.Is(executeErr, ErrApplicationNoEffect) {
@@ -198,6 +210,16 @@ func (runner *Runner) prepareApplicationExecution(
 	if current.Revision != invocation.Revision || current.Status != InvocationAccepted ||
 		current.ExecutionRefID != invocation.ExecutionRefID {
 		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, ErrConflict
+	}
+	// Application execution does not enter the Kernel-backed physical
+	// Feature dispatch grant. Retry may have committed a new Attempt while
+	// the parent was still live, then waited before this Host effect claim.
+	// Check the complete Item/Invocation/Kernel parent chain again at the
+	// closest safe pre-effect admission boundary. A rejected Accepted
+	// attempt retains its durable identity for explicit recovery; a read
+	// cannot claim cross-Store atomicity with later parent termination.
+	if err := runner.requireLiveInvocationParents(ctx, current); err != nil {
+		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, err
 	}
 	current.Status = InvocationRunning
 	current.UpdatedAt = runner.clock.Now().UTC()

@@ -5,6 +5,11 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Recheck the full parent ancestry around Host-only Application effect
+  claiming and immediately before its physical callback. A retired parent
+  cannot dispatch a stale child; a known pre-effect rejection fails the
+  claimed Attempt without inventing an external effect receipt.
+
 - Fence child Harness Invocation retries against terminal Kernel parents
   and finished intermediate Invocation ancestry before Retry CAS, preserving
   retry identity and valid Host-only Application children.
