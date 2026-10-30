@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,10 +35,10 @@ func TestHarnessApprovalUsesFrozenToolPolicyAndPersistsDecisionItems(t *testing.
 
 	// Mutating the caller-owned Config after Start must not change the durable policy.
 	config.ToolPolicies[0].ApprovalMode = "never"
-	waitingAgain := resolveApproval(t, harnessRunner, waiting.Turn.ID, "first approved")
+	waitingAgain := resolveApproval(t, harnessRunner, waiting, "first approved")
 	assertHarnessApprovalWait(t, waitingAgain, 2)
 
-	completed := resolveApproval(t, harnessRunner, waitingAgain.Turn.ID, "second approved")
+	completed := resolveApproval(t, harnessRunner, waitingAgain, "second approved")
 	if completed.Turn.Status != harness.TurnCompleted || approvalItemCount(completed.Items, harness.ItemCompleted) != 2 {
 		t.Fatalf("approval lifecycle did not complete: turn=%#v items=%#v", completed.Turn, completed.Items)
 	}
@@ -71,6 +72,41 @@ func TestHarnessApprovalRejectsStaleCheckpointWithoutResolvingNextRequest(t *tes
 	})
 	if err != nil || completed.Turn.Status != harness.TurnCompleted || approvalItemCount(completed.Items, harness.ItemCompleted) != 2 {
 		t.Fatalf("the current approval did not remain actionable: turn=%#v err=%v", completed.Turn, err)
+	}
+}
+
+func TestHarnessApprovalRejectsMissingCheckpointBeforeEffects(t *testing.T) {
+	t.Parallel()
+	runner, config := newApprovalHarness(t)
+	waiting := startApprovalHarness(t, runner, config)
+	for _, invalid := range []string{"", " ", " checkpoint-with-space", strings.Repeat("x", 129)} {
+		if _, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
+			CheckpointID: invalid, Decision: harness.ApprovalApprove,
+		}); !errors.Is(err, harness.ErrInvalidRequest) {
+			t.Fatalf("unbound approval %q was admitted: %v", invalid, err)
+		}
+	}
+	still, err := runner.Load(t.Context(), waiting.Turn.ID)
+	if err != nil || still.Turn.Status != harness.TurnWaitingInput ||
+		latestApprovalCheckpoint(t, still) != latestApprovalCheckpoint(t, waiting) ||
+		approvalItemCount(still.Items, harness.ItemCompleted) != 0 {
+		t.Fatalf("unbound approvals mutated first checkpoint: %#v, err=%v", still, err)
+	}
+	next := resolveApproval(t, runner, waiting, "first exact approval")
+	assertHarnessApprovalWait(t, next, 2)
+	if _, err = runner.ResolveApproval(t.Context(), next.Turn.ID, harness.ResolveApprovalRequest{
+		Decision: harness.ApprovalReject,
+	}); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("replayed Turn-only approval acted on next checkpoint: %v", err)
+	}
+	still, err = runner.Load(t.Context(), waiting.Turn.ID)
+	if err != nil || still.Turn.Status != harness.TurnWaitingInput ||
+		latestApprovalCheckpoint(t, still) != latestApprovalCheckpoint(t, next) {
+		t.Fatalf("unbound replay changed second checkpoint: %#v, err=%v", still.Turn, err)
+	}
+	completed := resolveApproval(t, runner, next, "second exact approval")
+	if completed.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("exact approvals failed to complete: %#v", completed.Turn)
 	}
 }
 
@@ -206,10 +242,10 @@ func startApprovalHarness(t *testing.T, runner *harness.Runner, config harness.C
 	return waiting
 }
 
-func resolveApproval(t *testing.T, runner *harness.Runner, turnID string, comment string) harness.Snapshot {
+func resolveApproval(t *testing.T, runner *harness.Runner, waiting harness.Snapshot, comment string) harness.Snapshot {
 	t.Helper()
-	snapshot, err := runner.ResolveApproval(t.Context(), turnID, harness.ResolveApprovalRequest{
-		Decision: harness.ApprovalApprove, Comment: comment,
+	snapshot, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
+		CheckpointID: latestApprovalCheckpoint(t, waiting), Decision: harness.ApprovalApprove, Comment: comment,
 	})
 	if err != nil {
 		t.Fatalf("resolve approval: %v", err)

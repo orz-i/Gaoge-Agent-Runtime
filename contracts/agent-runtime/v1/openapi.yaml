@@ -603,13 +603,15 @@ components:
     ResolveHarnessApprovalRequest:
       type: object
       additionalProperties: false
-      required: [decision]
+      required: [checkpointID, decision]
       properties:
         decision: {type: string, enum: [approve, reject]}
         comment: {type: string}
         checkpointID:
           type: string
-          description: Optional displayed approval checkpoint. A different current checkpoint returns a conflict; omitted by legacy Turn-only clients.
+          minLength: 1
+          maxLength: 128
+          description: Exact displayed approval checkpoint; stale or mismatched IDs are rejected.
     GrantHarnessCallAllowanceRequest:
       type: object
       additionalProperties: false

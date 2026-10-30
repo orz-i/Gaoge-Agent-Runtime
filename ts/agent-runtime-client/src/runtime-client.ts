@@ -251,14 +251,20 @@ export class RuntimeClient {
         ),
         resolveApproval: (
           turnID: string,
+          checkpointID: string,
           decision: "approve" | "reject",
           comment = "",
-          request?: RequestOptions & { checkpointID?: string },
-        ) => this.request<HarnessTurnSnapshotDTO>(
-          `/harness/turns/${pathPart(turnID)}/approval`,
-          { method: "POST", body: JSON.stringify({ decision, comment, checkpointID: request?.checkpointID }) },
-          request,
-        ),
+          request?: RequestOptions,
+        ) => {
+          if (!checkpointID || checkpointID.trim() !== checkpointID || checkpointID.length > 128) {
+            throw new Error("an exact approval checkpointID is required");
+          }
+          return this.request<HarnessTurnSnapshotDTO>(
+            `/harness/turns/${pathPart(turnID)}/approval`,
+            { method: "POST", body: JSON.stringify({ checkpointID, decision, comment }) },
+            request,
+          );
+        },
         resolveInteraction: (
           turnID: string,
           interactionID: string,

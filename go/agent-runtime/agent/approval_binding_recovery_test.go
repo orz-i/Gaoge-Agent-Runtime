@@ -47,9 +47,9 @@ func newApprovalRecoveryRun(t *testing.T) (*agent.Runner, *kernel.Runtime, *inte
 	return runner, runtime, approvals, waiting, executions
 }
 
-// In-flight checkpoints written before the binding upgrade can still resume
-// if their first-party payload matches the exact pending Tool call.
-func TestDeferredApprovalLegacyCheckpointRecovery(t *testing.T) {
+// A pre-upgrade checkpoint without a persisted Tool approval binding must
+// NEVER authorize a Tool even if its resolved payload matches the pending call.
+func TestDeferredApprovalMissingBindingCannotRecoverGrantedTool(t *testing.T) {
 	runner, runtime, approvals, waiting, executions := newApprovalRecoveryRun(t)
 	legacyState := approvalStateEdit(t, waiting.State, func(state map[string]json.RawMessage) {
 		delete(state, "pendingApproval")
@@ -65,8 +65,9 @@ func TestDeferredApprovalLegacyCheckpointRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	done, err := runner.Resume(t.Context(), running.Run.ID, running.Run.Revision)
-	if err != nil || done.Run.Status != kernel.RunStatusCompleted || *executions != 1 || done.Checkpoint != nil {
-		t.Fatalf("legacy approved checkpoint: %+v, checkpoint=%+v executions=%d err=%v",
+	if err != nil || done.Run.Status != kernel.RunStatusWaitingInput || *executions != 0 ||
+		done.Checkpoint == nil || done.Checkpoint.Status != kernel.CheckpointPending {
+		t.Fatalf("missing binding authorized Tool instead of failing closed: %+v, checkpoint=%+v executions=%d err=%v",
 			done.Run, done.Checkpoint, *executions, err)
 	}
 }
@@ -129,9 +130,9 @@ func approvalStateEdit(t *testing.T, encoded json.RawMessage, edit func(map[stri
 	return updated
 }
 
-// A pre-upgrade resolved checkpoint left behind after a Tool result may not
-// grant another call that reuses its Tool ID, even with identical arguments.
-func TestDeferredApprovalLegacyCheckpointCannotBeReused(t *testing.T) {
+// A resolved checkpoint without its durable binding cannot authorize another
+// Tool, even when call ID and arguments are reused.
+func TestDeferredApprovalMissingBindingCannotBeReused(t *testing.T) {
 	runner, runtime, approvals, waiting, executions := newApprovalRecoveryRun(t)
 	legacyState := approvalStateEdit(t, waiting.State, func(fields map[string]json.RawMessage) {
 		delete(fields, "pendingApproval")

@@ -39,13 +39,19 @@ describe("RuntimeClient target API", () => {
     ]);
   });
 
-  it.each([undefined, "checkpoint/1"])("binds a Harness approval to the optional checkpoint %s", async (checkpointID) => {
+  it("requires an exact Harness approval checkpoint and never posts a missing binding", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(json({}));
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
     const controller = new AbortController();
-    await client.harness.turns.resolveApproval("ht/1", "reject", "Use the current evidence", { checkpointID, signal: controller.signal });
-    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ decision: "reject", comment: "Use the current evidence", ...(checkpointID ? { checkpointID } : {}) });
+    await client.harness.turns.resolveApproval("ht/1", "checkpoint/1", "reject", "Use the current evidence", { signal: controller.signal });
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+      checkpointID: "checkpoint/1", decision: "reject", comment: "Use the current evidence",
+    });
     expect(fetcher.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+    for (const invalid of ["", " ", " checkpoint/1", "x".repeat(129)]) {
+      expect(() => client.harness.turns.resolveApproval("ht/1", invalid, "approve")).toThrow("checkpointID");
+    }
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it("uses only published Runtime endpoints", async () => {
@@ -235,7 +241,7 @@ describe("RuntimeClient target API", () => {
     await expect(client.harness.turns.get("ht/1")).resolves.toEqual(harnessSnapshot);
     const events = [];
     for await (const event of client.harness.turns.feed("ht/1", { reconnectDelayMS: 0 })) events.push(event);
-    await client.harness.turns.resolveApproval("ht/1", "approve", "continue");
+    await client.harness.turns.resolveApproval("ht/1", "checkpoint-1", "approve", "continue");
     await client.harness.turns.resolveInteraction("ht/1", "interaction/1", { candidateID: "candidate-2" });
     await client.harness.turns.retryInvocation("ht/1", "invocation/1");
     await client.harness.turns.grantCallAllowance("ht/1", 7, { modelCalls: 2 });

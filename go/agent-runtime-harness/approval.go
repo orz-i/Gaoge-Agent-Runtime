@@ -138,8 +138,8 @@ const (
 type ResolveApprovalRequest struct {
 	Decision ApprovalDecision
 	Comment  string
-	// CheckpointID binds an owner action to the displayed approval. Empty keeps
-	// compatibility with clients that only identified the Harness Turn.
+	// CheckpointID is mandatory: an owner action must identify the exact
+	// displayed pending approval, not merely the Harness Turn.
 	CheckpointID string
 }
 

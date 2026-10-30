@@ -5,6 +5,11 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Require the exact displayed Harness approval checkpoint at Go/HTTP/TypeScript
+  entry points; remove Turn-only approval and pre-binding Agent checkpoint
+  inference. An incomplete older approval must be drained/quarantined, never
+  automatically granted by matching its legacy Tool payload.
+
 - Extract the Provider Router, OpenAI Responses and Anthropic Messages adapters
   into independent `go/agent-runtime-provider`; delete the previous Core
   `provider` package without aliases or forwarding imports.

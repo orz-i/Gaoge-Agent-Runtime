@@ -549,7 +549,7 @@ type SnapshotResponse struct {
 type ResolveApprovalRequest struct {
 	Decision     harness.ApprovalDecision `json:"decision" binding:"required"`
 	Comment      string                   `json:"comment,omitempty"`
-	CheckpointID string                   `json:"checkpointID,omitempty"`
+	CheckpointID string                   `json:"checkpointID" binding:"required,max=128"`
 }
 
 type Dependencies struct {

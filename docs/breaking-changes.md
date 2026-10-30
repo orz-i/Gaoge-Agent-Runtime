@@ -2,6 +2,33 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Exact approval checkpoint required (beta.24 candidate)
+
+**Deleted:** A Turn-only Harness approval request is no longer authorized.
+`harness.ResolveApprovalRequest.CheckpointID` must contain the exact pending
+approval ID (1–128 non-whitespace-trimmed bytes). Missing/blank/oversized
+values fail before any physical dispatch; a changed ID returns a conflict.
+The HTTP v1 `ResolveHarnessApprovalRequest` now requires both `checkpointID`
+and `decision`. The TypeScript call is
+`harness.turns.resolveApproval(turnID, checkpointID, decision, comment?, options?)`.
+There is no deprecated Go entry point or optional TypeScript argument.
+
+**Persisted Agent state:** The old checkpoint-only approval inference in
+`agent.approvalForPendingCall` is deleted. The exact
+`pendingApproval` Tool-call/checkpoint/digest binding must already be
+committed; a resolved older checkpoint cannot grant execution merely by
+matching its Tool payload. Native Agent `ResolveApproval` retains the required
+Kernel Revision CAS binding; delegated Subtask approvals already require an
+explicit checkpoint ID and remain unchanged.
+
+**Adoption:** Stop old workers and inventory all unfinished approval Runs,
+Harness Turns and delegated Subtasks. Drain or explicitly quarantine older
+pending approvals that lack `pendingApproval`; do not invent a binding, reuse
+an unverified Tool decision, or automatically resume an uncertain Tool effect.
+New clients must read the displayed current `checkpointID`, send it with the
+approval and handle stale/replayed approval as Conflict. No SQL DDL, schema
+version churn or compatibility bridge.
+
 ## 2026-10-30 — Explicit Harness Agent entry (beta.24 candidate)
 
 **Removed:** `harness.Runner.Start(context.Context, StartRequest)` is no
