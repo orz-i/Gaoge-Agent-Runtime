@@ -96,6 +96,14 @@ classification alone is not enough to assert a remote rollback. Shared Tool
 budget reservations already dispatched/held are not second execution permits.
 See [ADR 0013](adr/0013-uniform-tool-effect-intent-and-receipts.md).
 
+Hosted Tool settlement in a shared Harness budget also requires an
+actual Provider-owned Call ID for every charged physical call, including
+failed terminal outcomes. A Provider status without Call identity is
+not proof of an independently chargeable Tool invocation: the
+original dispatched Model/native reservation stays Held. Historical
+anonymous paid totals remain visible as incomplete ToolUsage, never
+as invented per-key receipt IDs.
+
 A committed transition that requires future autonomous progress must leave a
 durable wakeup source. The Kernel Store persists committed-transition outbox
 records atomically with Run state and journal events; the continuation

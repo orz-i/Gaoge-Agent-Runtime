@@ -5,6 +5,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Refuse to charge anonymous Hosted Tool terminal facts as independent
+  remote executions. Missing Provider Call IDs, even on completed/failed
+  outcomes, keep the dispatched Model/native budget reserved for explicit
+  reconciliation; mixed anonymous/named receipts cannot partially settle.
+  Historical anonymous charges remain visible as incomplete usage, with no
+  fabricated per-key identities or second ledger.
+
 - Independent PR #77 safety correction: require original Call-ID
   `rejected` no-effect receipts before any retryable Tool error may
   re-enter the physical Handler; accept only closed successful receipt
