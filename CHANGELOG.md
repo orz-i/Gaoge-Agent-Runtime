@@ -5,6 +5,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Hard-cut Harness Store `GetItem(ctx, id)` as a mandatory indexed,
+  immutable global-Item-ID read. Physical child ancestry fencing no
+  longer scans whole Turns; Memory Item cursor pages now use binary
+  search, retaining existing ownership/cycle/terminal safety guards.
+  Update custom Harness Store adapters; no SQL Schema changes, cache,
+  optional fallback or new execution state.
+
 - Refuse to charge anonymous Hosted Tool terminal facts as independent
   remote executions. Missing Provider Call IDs, even on completed/failed
   outcomes, keep the dispatched Model/native budget reserved for explicit

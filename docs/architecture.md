@@ -76,6 +76,22 @@ can use the existing Host-composed `ApplicationCapabilityExecutor`; there
 is no unverified generic FeatureDriver registry. See
 [ADR 0012](adr/0012-host-selected-capabilities-and-external-model-providers.md).
 
+## Indexed Harness parent liveness
+
+The Harness Store owns immutable, globally unique Item IDs. Every
+custom `harness.Store` now supplies `GetItem(ctx, id)`, alongside
+bounded `ListItems`. Parent-liveness fences walk only the actual
+`ParentItemID` chain, checking exact Turn identity, persisted Seq,
+acyclic ancestry, and each parent Invocation/Kernel Run status before
+a child reaches a physical dispatch boundary. Read speed does not
+weaken authorization or prevent a concurrent later parent cancellation;
+the existing pre/post-claim fences retain that responsibility.
+MemoryStore resolves global Item IDs from its existing map and
+positions sequential page cursors by binary search. PostgreSQL
+uses its existing Item primary key, without an extra index or
+migration. Full Timeline/Turn history remains an explicit,
+proportional materialization.
+
 ## Durable execution rule
 
 Externally visible effects follow this logical order:
