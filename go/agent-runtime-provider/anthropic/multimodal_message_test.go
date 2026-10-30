@@ -62,3 +62,64 @@ func TestAnthropicMessagesOrderedImageAndPDFSourcesAndNoAudioFallback(t *testing
 		t.Fatalf("unsupported audio crossed provider boundary: err=%v calls=%d", err, calls)
 	}
 }
+
+// A streaming Messages request must keep the FileID document part and still
+// require the original terminal SSE completion.
+func TestAnthropicMessagesMultimodalStreamingKeepsFrozenInput(t *testing.T) {
+	calls := 0
+	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		var body struct {
+			Stream   bool `json:"stream"`
+			Messages []struct {
+				Content []struct {
+					Type   string `json:"type"`
+					Source struct {
+						Type   string `json:"type"`
+						FileID string `json:"file_id"`
+					} `json:"source"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if !body.Stream || len(body.Messages) != 1 || len(body.Messages[0].Content) != 2 ||
+			body.Messages[0].Content[0].Type != "text" ||
+			body.Messages[0].Content[1].Type != "document" ||
+			body.Messages[0].Content[1].Source.Type != "file" ||
+			body.Messages[0].Content[1].Source.FileID != "file-stream" {
+			t.Fatalf("stream lost PDF media: %+v", body)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, event := range []struct{ kind, body string }{
+			{"message_start", `{"type":"message_start","message":{"id":"msg-stream","usage":{"input_tokens":40}}}`},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`},
+			{"message_stop", `{"type":"message_stop"}`},
+		} {
+			_, _ = fmt.Fprintln(w, "event: "+event.kind)
+			_, _ = fmt.Fprintln(w, "data: "+event.body)
+			_, _ = fmt.Fprintln(w)
+		}
+	})
+	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: []model.ContentPart{
+		{Kind: model.ContentText, Text: "before"},
+		{Kind: model.ContentFile, MediaType: "application/pdf", Source: &model.MediaSource{
+			Kind: model.MediaSourceFileID, FileID: "file-stream",
+		}},
+	}}}}
+	deltas := 0
+	answer, err := client.GenerateStream(t.Context(), request, func(event model.StreamEvent) error {
+		if event.Delta != "" {
+			deltas++
+		}
+		return nil
+	})
+	if err != nil || calls != 1 || answer.Content != "ok" || answer.ResponseID != "msg-stream" ||
+		answer.Usage == nil || answer.Usage.InputTokens != 40 || deltas != 1 {
+		t.Fatalf("terminal streaming PDF receipt invalid: answer=%+v calls=%d deltas=%d err=%v", answer, calls, deltas, err)
+	}
+}
