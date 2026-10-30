@@ -2,6 +2,31 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-30 — Hosted Tool terminal receipts fail closed (beta.24 candidate)
+
+**Removed:** The empty string Hosted Tool status is no longer a legacy terminal
+receipt. `model.HostedToolTerminalStatus("")` now returns false. Only known
+terminal states such as `completed`, `failed`, `error`, `cancelled` and
+`canceled` certify an ended provider-hosted effect; unknown and blank values
+are unfinished. Providers must send an explicit terminal status.
+
+**Durable budget safety:** With a stable provider-owned Tool Call ID, an
+unfinished fact keeps its existing held hosted Tool reservation; a later
+matching explicit terminal receipt may settle it. If an unfinished Tool has
+**no provider-owned Call ID**, automatic reconciliation is impossible.
+Harness does not mint a fake remote ID or silently refund quota. It rejects
+the attempted native accounting with `budget.ErrInvalidUsage`, suspends
+the dispatched Model reservation as unresolved and retains the original
+Host budget claim. Restart/retry cannot reissue that logical Model request.
+This intentionally sacrifices automated token settlement for unidentified
+native outcomes rather than fabricate a completion or spend quota twice.
+
+**Host action:** Drain or explicitly quarantine pending unnamed/unknown native
+Tool outcomes before upgrading. Adapt third-party Model clients to emit an
+actual terminal status and stable Call IDs for asynchronous native work.
+Historical receipts are not rewritten, no SQL migration/new ledger type or
+replay bridge is introduced, and published beta.23 tags remain immutable.
+
 ## 2026-10-30 — Provider binding identity hard cut (beta.24 candidate)
 
 **Named Provider binding:** Agent now freezes an opaque SHA-256

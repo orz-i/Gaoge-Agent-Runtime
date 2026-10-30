@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -9,12 +10,113 @@ import (
 )
 
 func TestHostedReceiptWithoutIdentityPreservesTerminalCounts(t *testing.T) {
-	for status, want := range map[string]int{"in_progress": 0, "requested": 0, "completed": 2, "failed": 2, "": 2} {
+	for status, want := range map[string]int{"completed": 2, "failed": 2} {
 		t.Run(status, func(t *testing.T) {
 			calls := []model.HostedToolCall{{ToolKey: "native.search", Status: status}, {ToolKey: "native.search", Status: status}}
 			count, receipts, err := hostedReceiptTransfers(budget.Ledger{}, "root", calls)
 			if err != nil || count != want || len(receipts) != 0 {
-				t.Fatalf("anonymous calls must not be deduplicated or given invented identities: count=%d receipts=%+v err=%v", count, receipts, err)
+				t.Fatalf("anonymous terminal facts must not be deduplicated: count=%d receipts=%+v err=%v", count, receipts, err)
+			}
+		})
+	}
+	for _, status := range []string{"", "in_progress", "requested", "provider_unknown"} {
+		calls := []model.HostedToolCall{{ToolKey: "native.search", Status: status}}
+		count, receipts, err := hostedReceiptTransfers(budget.Ledger{}, "root", calls)
+		if !errors.Is(err, budget.ErrInvalidUsage) || count != 0 || len(receipts) != 0 {
+			t.Fatalf("anonymous nonterminal %q fabricated a receipt: count=%d receipts=%+v err=%v", status, count, receipts, err)
+		}
+	}
+}
+
+func TestHostedEmptyStatusWithIdentityKeepsQuotaUntilExplicitTerminal(t *testing.T) {
+	store, shared, request := hostedBudgetFixture(t, budget.Limits{
+		MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3,
+	})
+	_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+			t.Fatalf("initial native allowance was not fenced: %+v", bounded)
+		}
+		return model.Response{Content: "pending native result", HostedToolCalls: []model.HostedToolCall{{
+			ID: "pending-native", ToolKey: "native.search", Status: "",
+		}}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := ledger.View("")
+	if view.Usage.HostedToolCalls != 0 || view.Reserved.HostedToolCalls != 1 ||
+		!view.UnknownUsage || !toolUsageFromLedger(ledger).Incomplete {
+		t.Fatalf("empty status was incorrectly paid or released: %+v", view)
+	}
+	restarted, err := NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: store, Clock: hostedBudgetClock{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.InvocationID = "reconcile-native"
+	_, err = restarted.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
+			t.Fatalf("restart turned unknown native effect into new authorization: %+v", bounded)
+		}
+		return model.Response{Content: "confirmed", HostedToolCalls: []model.HostedToolCall{{
+			ID: "pending-native", ToolKey: "native.search", Status: "completed",
+		}}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err = store.LoadBudget(t.Context(), "hosted-budget-turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	view = ledger.View("")
+	if view.Usage.HostedToolCalls != 1 || view.Reserved.HostedToolCalls != 0 ||
+		view.UnknownUsage || toolUsageFromLedger(ledger).Incomplete {
+		t.Fatalf("exact terminal receipt failed to reconcile pending native effect: %+v", view)
+	}
+}
+
+func TestHostedAnonymousUnfinishedStatusKeepsDispatchedModelReservation(t *testing.T) {
+	for _, status := range []string{"", "in_progress", "unknown-provider-state"} {
+		t.Run(status, func(t *testing.T) {
+			store, shared, request := hostedBudgetFixture(t, budget.Limits{
+				MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 2,
+			})
+			calls := 0
+			_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+				calls++
+				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
+					t.Fatalf("initial native allowance missing: %+v", bounded)
+				}
+				return model.Response{Content: "incomplete", HostedToolCalls: []model.HostedToolCall{{
+					ToolKey: "native.search", Status: status, // Missing provider-owned Call ID.
+				}}}, nil
+			})
+			if !errors.Is(err, budget.ErrInvalidUsage) || calls != 1 {
+				t.Fatalf("anonymous unverified native effect was not fenced: err=%v calls=%d", err, calls)
+			}
+			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil {
+				t.Fatal(err)
+			}
+			view := ledger.View("")
+			if view.Usage.HostedToolCalls != 0 || view.Reserved.HostedToolCalls != 1 ||
+				!view.UnknownUsage || !toolUsageFromLedger(ledger).Incomplete {
+				t.Fatalf("unidentified effect silently refunded native quota: %+v", view)
+			}
+			restarted, err := NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: store, Clock: hostedBudgetClock{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = restarted.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+				calls++
+				return model.Response{Content: "unsafe replay"}, nil
+			})
+			if !errors.Is(err, budget.ErrWaiting) || calls != 1 {
+				t.Fatalf("unidentified native effect was automatically retried: err=%v calls=%d", err, calls)
 			}
 		})
 	}

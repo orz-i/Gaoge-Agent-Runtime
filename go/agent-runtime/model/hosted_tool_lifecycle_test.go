@@ -11,8 +11,9 @@ func TestHostedToolTerminalStatusIsConservativeAndCaseInsensitive(t *testing.T) 
 		status   string
 		terminal bool
 	}{
-		{"", true},
+		{"", false},
 		{" completed ", true},
+		{"    ", false},
 		{"FAILED", true},
 		{"error", true},
 		{"cancelled", true},

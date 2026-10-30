@@ -3,11 +3,11 @@ package model
 import "strings"
 
 // HostedToolTerminalStatus is the provider-neutral boundary for authoritative
-// hosted Tool completion. Empty status is a legacy terminal receipt; unknown
-// nonempty statuses are conservatively unfinished, never a zero-risk charge.
+// hosted Tool completion. Missing or unrecognized statuses are unfinished;
+// an absent terminal fact cannot certify an external effect or release quota.
 func HostedToolTerminalStatus(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", "completed", "failed", "error", "cancelled", "canceled":
+	case "completed", "failed", "error", "cancelled", "canceled":
 		return true
 	default:
 		return false
