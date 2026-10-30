@@ -74,6 +74,11 @@ adapters shared the Core Go module with Kernel and Agent.
    **2026-10-30 implementation amendment:** the previously proposed
    fingerprint is now supported by same-name Endpoint/credential/policy drift
    tests, missing-proof tests and a committed-pending-intent crash scenario.
+   The PR #75 independent re-audit further closed a proven race after
+   ModelMiddleware/concurrency permit waiting: the final pre-dispatch guard
+   revalidates the binding just before the physical call. A changed binding
+   returns a distinct recoverable error and retains the committed pending Run;
+   malformed post-intent Tool/model request mutations remain terminal.
    No dynamic registry, alternate provider state machine or SQL schema version
    is introduced.
 

@@ -30,7 +30,12 @@ var (
 	ErrInvalidModelResponse = errors.New("invalid agent model response")
 	ErrModelFailure         = errors.New("agent model failure")
 	ErrModelInvocationBusy  = errors.New("agent model invocation execution is leased")
-	ErrToolFailure          = errors.New("agent tool failure")
+	// ErrProviderBindingMismatch means a previously committed named Provider
+	// cannot be dispatched by the current Host binding. It is recoverable
+	// through restoring the trusted original binding or quarantining the Run,
+	// never by rewriting the frozen ModelInvocation or switching targets.
+	ErrProviderBindingMismatch = errors.New("agent model provider binding does not match committed invocation")
+	ErrToolFailure             = errors.New("agent tool failure")
 	// ErrToolOutcomeUnknown indicates an external dispatch intent was
 	// committed but its terminal receipt is absent. Do not replay.
 	ErrToolOutcomeUnknown = errors.New("agent external tool result is uncertain")

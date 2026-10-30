@@ -110,8 +110,13 @@ physical dispatch. A named Provider additionally commits a nonsecret `BindingFin
 (including the adapter endpoint, credential, protocol and Host binding
 identity) into the frozen ModelInvocation and request hash. Recovery rejects
 changed Provider names or binding fingerprints before claiming a physical
-attempt and checks again immediately before dispatch. Unnamed local Clients
-are not evidence of a verified external Provider binding. The executor always validates Tool arguments using the
+attempt and checks again at the final physical Provider boundary **after
+middleware and concurrency-permit waits**. A mismatch produces
+`ErrProviderBindingMismatch` without terminating the Pending Run or
+consuming a new Model receipt. Restoring the original trusted binding after
+claim expiry or explicitly quarantining the Run are the recovery paths.
+Unnamed local Clients are not evidence of a verified external Provider
+binding. The executor always validates Tool arguments using the
 registered definition rather than the projected model-facing one.
 
 Dispatch-time `ModelMiddleware` may only observe, reject, meter or narrow a

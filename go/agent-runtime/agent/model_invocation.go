@@ -343,7 +343,7 @@ func (runner *Runner) ensureModelInvocation(
 ) (kernel.Snapshot, runState, ModelInvocation, error) {
 	if invocation, ok := activeModelInvocation(state); ok {
 		if invocation.Status == ModelInvocationPending && !matchesFrozenProviderBinding(runner.model, *invocation) {
-			return snapshot, state, ModelInvocation{}, ErrInvalidRequest
+			return snapshot, state, ModelInvocation{}, ErrProviderBindingMismatch
 		}
 		return snapshot, state, cloneModelInvocation(*invocation), nil
 	}
@@ -650,7 +650,7 @@ func (runner *Runner) executeModelInvocation(
 	// A restart may reconstruct a Router with a different default provider.
 	// The committed invocation must not silently cross that routing boundary.
 	if !matchesFrozenProviderBinding(runner.model, invocation) {
-		return snapshot, state, ErrInvalidRequest
+		return snapshot, state, ErrProviderBindingMismatch
 	}
 	if err := runner.validatePendingModelToolDeclarations(ctx, snapshot, state, invocation); err != nil {
 		return snapshot, state, err
@@ -674,6 +674,13 @@ func (runner *Runner) executeModelInvocation(
 			// after all such waits and immediately before Provider dispatch.
 			if err := runner.validatePendingModelToolDeclarations(dispatchCtx, snapshot, state, invocation); err != nil {
 				return err
+			}
+			// The named binding can change while ModelMiddleware, Tool
+			// discovery or the shared concurrency limiter holds this call.
+			// Recheck after every such wait, before the final claim/epoch
+			// guards and physical Provider dispatch.
+			if !matchesFrozenProviderBinding(runner.model, invocation) {
+				return ErrProviderBindingMismatch
 			}
 			if err := runner.validateModelInvocationClaim(dispatchCtx, snapshot, invocation); err != nil {
 				return err

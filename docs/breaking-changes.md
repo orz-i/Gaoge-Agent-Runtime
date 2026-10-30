@@ -38,6 +38,19 @@ proof rejects a new intent before any physical dispatch. A changed Provider
 name or a changed/missing binding fingerprint rejects a persisted pending
 invocation before claim, then again immediately before dispatch.
 
+**Pre-dispatch admission race closure (PR #75 independent review):**
+Revalidate the frozen Provider name and binding fingerprint inside the final
+Model dispatch guard **after** ModelMiddleware, Hosted Tool discovery and shared
+concurrency-permit waits, but before the physical Provider call. A changed
+binding now returns the distinct recoverable
+`agent.ErrProviderBindingMismatch` error, not the permanent
+`agent.model_dispatch_invalid` terminal Run status used for malformed
+post-intent requests. The committed Pending ModelInvocation, attempt identity
+and lease remain intact: only restoration of the exact original trusted
+binding (after its claim expires) or explicit quarantine may proceed.
+This avoids a changed Host configuration both silently dispatching to the new
+target and incorrectly terminalizing evidence needed for trusted recovery.
+
 **Host Router/API break:** The standalone Router now requires a nonempty
 `provider.Binding.Identity`; two-field bindings can no longer construct a
 Router. OpenAI/Anthropic HMAC their actual Endpoint, authenticated identity,

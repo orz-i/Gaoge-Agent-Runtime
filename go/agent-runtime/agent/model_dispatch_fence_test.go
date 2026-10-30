@@ -292,7 +292,7 @@ func TestPendingModelInvocationRejectsSameNamedChangedBindingFingerprint(t *test
 			t.Fatal(newErr)
 		}
 		_, resumeErr := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
-		if !errors.Is(resumeErr, agent.ErrInvalidRequest) {
+		if !errors.Is(resumeErr, agent.ErrProviderBindingMismatch) {
 			t.Fatalf("unverified binding was allowed to dispatch: %v", resumeErr)
 		}
 	}
@@ -345,7 +345,7 @@ func TestPendingModelInvocationRejectsChangedProviderBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
-	if !errors.Is(err, agent.ErrInvalidRequest) || len(replacement.requests) != 0 {
+	if !errors.Is(err, agent.ErrProviderBindingMismatch) || len(replacement.requests) != 0 {
 		t.Fatalf("provider changed after intent commit: %v %+v", err, replacement.requests)
 	}
 }
