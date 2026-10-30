@@ -137,6 +137,97 @@ func (handler *DelegationToolHandler) Execute(
 	}, nil
 }
 
+// VerifyCommittedTool is a trusted, READ-ONLY reconciliation port for an
+// already dispatched delegation. It consumes the exact Harness Delegation Item
+// owned by the frozen parent Call and the current child Kernel Run; it never
+// invokes Delegate/StartOrLoad, Host policy, or another Tool Handler.
+func (handler *DelegationToolHandler) VerifyCommittedTool(
+	ctx context.Context, request tools.ExecutionRequest,
+) (tools.ExecutionResult, error) {
+	if handler == nil || strings.TrimSpace(request.RunID) == "" ||
+		strings.TrimSpace(request.Call.ID) == "" || request.Call.ToolKey != DelegationToolKey ||
+		!json.Valid(request.Call.Arguments) {
+		return tools.ExecutionResult{}, tools.ErrInvalidCall
+	}
+	handler.mu.RLock()
+	runner := handler.runner
+	handler.mu.RUnlock()
+	if runner == nil {
+		return tools.ExecutionResult{}, ErrDelegationToolUnbound
+	}
+	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, request.RunID)
+	if err != nil || invocation.ExecutionClass != ExecutionAgent ||
+		invocation.ExecutionRefID != request.RunID {
+		return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
+	}
+	delegationID := delegationToolID(invocation, request.Call.ID)
+	startedID := stableID("hid", invocation.TurnID, delegationID, string(ItemStarted))
+	items, err := listAllItems(ctx, runner.store, invocation.TurnID)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	var stored *delegationItemPayload
+	for _, item := range items {
+		if item.ID != startedID || item.Kind != ItemDelegation || item.Status != ItemStarted ||
+			item.InvocationID != invocation.ID || item.RunID == "" {
+			continue
+		}
+		var payload delegationItemPayload
+		if err = json.Unmarshal(item.Payload, &payload); err != nil ||
+			payload.DelegationID != delegationID || payload.ParentRunID != request.RunID ||
+			payload.ChildRunID != item.RunID || payload.ChildRunID != stableID("hchild", request.RunID, delegationID) {
+			return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
+		}
+		stored = &payload
+		break
+	}
+	if stored == nil {
+		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
+	}
+	child, err := runner.runtime.Load(ctx, stored.ChildRunID)
+	if err != nil {
+		return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
+	}
+	// Handoff may compose a trusted custom child Runner rather than the
+	// first-party Agent. Its committed Kernel terminal fact, under this
+	// exact frozen ChildRunID, is authority for delegation completion.
+	// No external Handler or remote agent is invoked in this lookup.
+	if !terminalRuntimeStatus(child.Run.Status) {
+		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
+	}
+	status := handoff.Status(child.Run.Status)
+	delegation := handoff.Delegation{
+		ID: stored.DelegationID, ChildRunID: stored.ChildRunID,
+		Status: status, ErrorCode: child.Run.ErrorCode,
+	}
+	if child.Result != nil {
+		delegation.Result = append(json.RawMessage(nil), child.Result.Content...)
+	}
+	modelResult, err := runner.delegationModelResult(ctx, delegation)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	content, err := json.Marshal(struct {
+		DelegationID string          `json:"delegationID"`
+		ChildRunID   string          `json:"childRunID"`
+		Status       string          `json:"status"`
+		Result       json.RawMessage `json:"result,omitempty"`
+		ErrorCode    string          `json:"errorCode,omitempty"`
+	}{
+		DelegationID: delegation.ID,
+		ChildRunID:   delegation.ChildRunID,
+		Status:       string(status), Result: modelResult,
+		ErrorCode: delegationReceiptErrorCode(status),
+	})
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	return tools.ExecutionResult{
+		Content: content,
+		Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"},
+	}, nil
+}
+
 // A local Agent's terminal output includes full native search receipts for
 // auditing. Forward the actual answer, citations and artifact references to
 // its supervisor, plus receipt identities, rather than copying whole web pages

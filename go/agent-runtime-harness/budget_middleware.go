@@ -334,6 +334,65 @@ func (middleware *BudgetMiddleware) Tool(ctx context.Context, invocation plugin.
 	return result, errors.Join(callErr, err, middleware.project(accountingCtx, updated))
 }
 
+// VerifiedToolOutcomeVerifier composes an already trusted, read-only Tool
+// verifier with the SAME durable Tool reservation used by ToolMiddleware.
+// Reconciliation must not re-enter ToolMiddleware (which can execute effects),
+// but it must charge a confirmed COMMIT exactly once. The budget settlement
+// can precede the Agent Kernel receipt CAS: a failed second commit retains
+// the pending Tool intent, and repeating this exact verification is idempotent.
+func (middleware *BudgetMiddleware) VerifiedToolOutcomeVerifier(
+	verifier agent.ToolOutcomeVerifier,
+) (agent.ToolOutcomeVerifier, error) {
+	if middleware == nil || verifier == nil {
+		return nil, ErrInvalidRequest
+	}
+	return agent.ToolOutcomeVerifierFunc(func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		verified, err := verifier.VerifyCommittedTool(ctx, tools.CloneExecutionRequest(request))
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		if tools.ValidateExecutionResult(verified) != nil ||
+			verified.Receipt.ExecutionID != request.Call.ID ||
+			verified.Receipt.Disposition != "committed" || verified.Pending != nil {
+			return tools.ExecutionResult{}, agent.ErrToolReceiptMismatch
+		}
+		ledger, err := middleware.bindRun(ctx, request.RunID)
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		if ledger.ID == "" {
+			return verified, nil // No shared ledger was configured by this Host.
+		}
+		rawRequest, err := json.Marshal(request)
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		id := "tool:" + request.RunID + ":" + request.Call.ID
+		current, found := ledger.Reservations[id]
+		if !found || current.RunID != request.RunID ||
+			current.RequestHash != hashInvocationBytes(rawRequest) ||
+			!current.Dispatched ||
+			(current.Status != budget.ReservationHeld && current.Status != budget.ReservationSettled) {
+			return tools.ExecutionResult{}, budget.ErrLedgerConflict
+		}
+		receipt, err := json.Marshal(budgetToolReceipt{Result: verified})
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		// Identical verified receipts are idempotent across Agent CAS loss.
+		accountingCtx := context.WithoutCancel(ctx)
+		updated, err := middleware.coordinator().Settle(accountingCtx, ledger.ID, id,
+			budget.Usage{ToolCalls: 1}, receipt)
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		if err = middleware.project(accountingCtx, updated); err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		return verified, nil
+	}), nil
+}
+
 type budgetToolReceipt struct {
 	Result       tools.ExecutionResult `json:"result"`
 	ErrorCode    string                `json:"errorCode,omitempty"`
