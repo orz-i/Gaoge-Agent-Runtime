@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
@@ -18,6 +19,11 @@ import (
 type RuntimeCanceller interface {
 	Cancel(context.Context, string, uint64, string) (kernel.Snapshot, error)
 }
+
+// ErrHandoffCancellationUnverified means a delegated ChildRunner owns a Run
+// that the Harness-local Kernel cannot observe or cancel. No terminal status
+// may be projected without a verified, route-owned cancellation outcome.
+var ErrHandoffCancellationUnverified = errors.New("harness handoff child cancellation is unverified")
 
 func (runner *Runner) cancelRuntimeRun(
 	ctx context.Context,
@@ -37,6 +43,24 @@ func (runner *Runner) cancelRuntimeRun(
 	for range maxRuntimeSyncRetryAttempts {
 		current, err := runner.runtime.Load(ctx, runID)
 		if errors.Is(err, kernel.ErrNotFound) {
+			// A routed Handoff can be executing in another Kernel. Its
+			// absence from this Kernel is NOT proof that external cleanup
+			// succeeded, even when the Handoff Start grant is settled.
+			if runner.store != nil {
+				owner, ownerErr := runner.store.GetInvocationByExecutionRefID(ctx, runID)
+				if ownerErr != nil && !errors.Is(ownerErr, ErrNotFound) {
+					return kernel.Snapshot{}, false, ownerErr
+				}
+				if ownerErr == nil && isHandoffDelegationInvocation(owner) && !terminalInvocationStatus(owner.Status) {
+					possible, proofErr := runner.handoffPhysicalEffectPossible(ctx, owner)
+					if proofErr != nil {
+						return kernel.Snapshot{}, false, proofErr
+					}
+					if possible {
+						return kernel.Snapshot{}, false, fmt.Errorf("remote Handoff Run %q: %w", runID, ErrHandoffCancellationUnverified)
+					}
+				}
+			}
 			return kernel.Snapshot{}, false, nil
 		}
 		if err != nil {
@@ -139,7 +163,9 @@ func (runner *Runner) cancelTurnDescendants(
 	if err != nil {
 		return nil, err
 	}
-	addMissingInvocationCancellations(runs, invocations, rootInvocationID, reason)
+	if err := runner.addMissingInvocationCancellations(ctx, runs, invocations, rootInvocationID, reason); err != nil {
+		return nil, err
+	}
 	return runs, nil
 }
 
@@ -153,21 +179,68 @@ func childInvocationRunIDs(invocations []Invocation, rootInvocationID string) []
 	return result
 }
 
-func addMissingInvocationCancellations(
-	runs map[string]kernel.Snapshot,
+func (runner *Runner) addMissingInvocationCancellations(
+	ctx context.Context, runs map[string]kernel.Snapshot,
 	invocations []Invocation,
 	rootInvocationID string,
 	reason string,
-) {
+) error {
 	for _, invocation := range invocations {
 		if invocation.ID == rootInvocationID || terminalInvocationStatus(invocation.Status) {
 			continue
 		}
 		runID := strings.TrimSpace(invocation.ExecutionRefID)
 		if _, ok := runs[runID]; runID != "" && !ok {
+			if isHandoffDelegationInvocation(invocation) {
+				// A caller could omit a Run ID during traversal. Apply
+				// the same persisted physical-effect proof before emitting
+				// any synthetic no-Run cancellation.
+				possible, proofErr := runner.handoffPhysicalEffectPossible(ctx, invocation)
+				if proofErr != nil {
+					return proofErr
+				}
+				if possible {
+					return fmt.Errorf("remote Handoff Run %q: %w", runID, ErrHandoffCancellationUnverified)
+				}
+			}
 			runs[runID] = cancelledRuntimeSnapshot(runID, reason)
 		}
 	}
+	return nil
+}
+
+// An Accepted delegated child that never acquired a physical grant, or whose
+// only grants are durably marked rejected BEFORE HandoffStarter, provably did
+// not reach its external ChildRunner. Every other grant (including a settled
+// Handoff-start receipt) may already represent a running remote effect.
+// Cancellation intent is already persisted before this read, so no late
+// physical grant can race the no-effect proof.
+func (runner *Runner) handoffPhysicalEffectPossible(ctx context.Context, child Invocation) (bool, error) {
+	items, err := listAllItems(ctx, runner.store, child.TurnID)
+	if err != nil {
+		return false, err
+	}
+	noEffect := make(map[string]bool)
+	for _, item := range items {
+		if item.Kind != ItemDiagnostic || item.Status != ItemCompleted {
+			continue
+		}
+		var receipt struct {
+			Boundary string `json:"boundary"`
+		}
+		if json.Unmarshal(item.Payload, &receipt) == nil && receipt.Boundary == "physical_dispatch_rejected" {
+			noEffect[item.ParentItemID] = true
+		}
+	}
+	for _, item := range items {
+		if item.Kind == ItemDiagnostic && item.Status == ItemStarted &&
+			item.ParentItemID == ExecutionDispatchParentItemID && item.InvocationID == child.ID {
+			if item.RunID != child.ExecutionRefID || !noEffect[item.ID] {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 func (runner *Runner) delegatedRunIDs(ctx context.Context, turnID string) ([]string, error) {
