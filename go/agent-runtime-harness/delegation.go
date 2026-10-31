@@ -312,8 +312,7 @@ func (runner *Runner) dispatchHandoff(
 		return handoff.Delegation{}, err
 	}
 	started, startErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
-	if started.ID != delegation.ID || started.ChildRunID != delegation.ChildRunID ||
-		started.RoleID != delegation.RoleID ||
+	if !sameHandoffDispatchIdentity(delegation, started) ||
 		(started.Status != handoff.StatusRunning && started.Status != handoff.StatusCompleted &&
 			started.Status != handoff.StatusFailed && started.Status != handoff.StatusCancelled) {
 		// The call may already have reached an external ChildRunner. Keep
@@ -324,6 +323,16 @@ func (runner *Runner) dispatchHandoff(
 		return started, errors.Join(ErrExecutionOutcomeUnknown, startErr, receiptErr)
 	}
 	return started, startErr
+}
+
+// Only lifecycle and result fields may differ from the frozen Handoff
+// request. A response from another Member/Role revision or goal does not
+// certify that the delegated ChildRunner reached our requested execution.
+func sameHandoffDispatchIdentity(expected, returned handoff.Delegation) bool {
+	return returned.ID == expected.ID && returned.ChildRunID == expected.ChildRunID &&
+		returned.MemberID == expected.MemberID && returned.MemberRevision == expected.MemberRevision &&
+		returned.RoleID == expected.RoleID && returned.RoleRevision == expected.RoleRevision &&
+		returned.RoleName == expected.RoleName && returned.Goal == expected.Goal
 }
 
 func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn) error {

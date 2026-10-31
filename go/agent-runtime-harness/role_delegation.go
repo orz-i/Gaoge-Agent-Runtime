@@ -318,12 +318,25 @@ func NewRoleModelRequestPreparer(store Store) (agent.ModelRequestPreparer, error
 
 type roleModelRequestPreparer struct{ store Store }
 
-func isRoleDelegationInvocation(invocation Invocation, runID string) bool {
-	if invocation.ParentItemID == "" {
+// isHandoffDelegationInvocation identifies the original durable Handoff
+// admission by its frozen child identity, not by the optional RoleID. Both
+// MemberID-only and Role-selected delegations are owned by a routed
+// ChildRunner, never by the Harness native Agent starter. Keep recognizing
+// their original identity if an earlier Attempt already rotated its Run ID.
+func isHandoffDelegationInvocation(invocation Invocation) bool {
+	if invocation.ParentItemID == "" || invocation.ExecutionClass != ExecutionAgent ||
+		invocation.CapabilityKey != CapabilityAgent || len(invocation.Input) == 0 ||
+		hashInvocationBytes(invocation.Input) != invocation.InputHash {
 		return false
 	}
 	var delegation handoff.Delegation
-	return json.Unmarshal(invocation.Input, &delegation) == nil && delegation.RoleID != "" && delegation.ChildRunID == runID
+	if json.Unmarshal(invocation.Input, &delegation) != nil ||
+		strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
+		strings.TrimSpace(delegation.ChildRunID) == "" || strings.TrimSpace(delegation.Goal) == "" {
+		return false
+	}
+	id, err := InvocationID(invocation.TurnID, invocation.ParentItemID, CapabilityAgent, delegation.ID)
+	return err == nil && id == invocation.ID
 }
 
 // Only advertise keys that are both frozen on this Turn and actually visible

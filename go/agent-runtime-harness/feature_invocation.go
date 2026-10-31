@@ -682,7 +682,9 @@ func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if strings.TrimSpace(invocation.ParentItemID) == "" {
+	if strings.TrimSpace(invocation.ParentItemID) == "" || isHandoffDelegationInvocation(invocation) {
+		// A routed Handoff child has no native Feature Resume adapter.
+		// Reject before minting a physical dispatch grant.
 		return Snapshot{}, ErrInvalidRequest
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
@@ -725,7 +727,10 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if len(invocation.Input) == 0 {
+	if len(invocation.Input) == 0 || isHandoffDelegationInvocation(invocation) {
+		// A Handoff child was admitted through a frozen external route.
+		// Rotating its Attempt would break the original ChildRunID and
+		// must not fall through to the native Agent retry adapter.
 		return Snapshot{}, ErrConflict
 	}
 	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
@@ -922,9 +927,11 @@ func (runner *Runner) startInvocationAttempt(
 }
 
 func (runner *Runner) startRetriedAgent(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
-	var delegated handoff.Delegation
-	if json.Unmarshal(invocation.Input, &delegated) == nil && delegated.RoleID != "" {
-		return runner.startRetriedRole(ctx, invocation, child, requestID, delegated)
+	// A second defense at the physical entry: a delegated child is never
+	// a generic Agent retry, even if an earlier Store operation already
+	// rotated its identity. No implicit local replacement of the route.
+	if isHandoffDelegationInvocation(invocation) {
+		return kernel.Snapshot{}, ErrConflict
 	}
 	var input agentInvocationInput
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
@@ -1326,6 +1333,11 @@ func (runner *Runner) resumeInvocationExecution(
 	invocation Invocation,
 	expectedRevision uint64,
 ) (kernel.Snapshot, error) {
+	if isHandoffDelegationInvocation(invocation) {
+		// Interaction resolution also enters here. It may not turn a routed
+		// delegated child into a locally resumed native Agent Run.
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
 	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
 	if err != nil {
 		return kernel.Snapshot{}, err

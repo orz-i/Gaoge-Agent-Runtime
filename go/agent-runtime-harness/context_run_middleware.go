@@ -89,7 +89,7 @@ func (middleware contextRunMiddleware) hydrateRun(ctx context.Context, runID str
 	// instructions and an arbitrarily large search history. Rebuild exclusion
 	// from durable invocation facts, just as StartOrLoad excludes it initially.
 	if invocation, lookupErr := middleware.store.GetInvocationByExecutionRefID(ctx, runID); lookupErr == nil && invocation.ParentItemID != "" {
-		if isRoleDelegationInvocation(invocation, runID) {
+		if isHandoffDelegationInvocation(invocation) {
 			return withoutContextCheckpoint(ctx), nil
 		}
 	}
