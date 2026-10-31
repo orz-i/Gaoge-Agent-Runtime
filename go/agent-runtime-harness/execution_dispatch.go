@@ -156,19 +156,50 @@ func (runner *Runner) pendingExecutionDispatch(
 				continue
 			}
 		}
-		if phase.Phase == "start" || phase.Phase == "start-retry" {
-			// A Kernel Run that is already durably running/completed belongs
-			// to Kernel control, whose cancellation CAS can now fence it.
-			// Before the Run exists, the Feature may still be about to
-			// CREATE it, so the pending grant must block cancellation.
-			if started, loadErr := runner.runtime.Load(ctx, item.RunID); loadErr == nil &&
-				started.Run.ID == item.RunID {
-				continue
-			}
+		if (phase.Phase == "start" || phase.Phase == "start-retry") &&
+			runner.nativeAgentStartOwnedByKernel(ctx, item, phase.PhysicalRunID) {
+			// Only the exact first-party Agent with an authoritative
+			// Kernel Run can be cancelled before its Start receipt. Native
+			// Agent execution checks Kernel CAS (and Epoch when configured)
+			// before continuing; composite Features can still create children
+			// after their parent Kernel Run has been created.
+			continue
 		}
 		return true, nil
 	}
 	return false, nil
+}
+
+// nativeAgentStartOwnedByKernel is the sole exception to an outstanding
+// physical Start grant blocking cancellation. Run existence is not sufficient:
+// only a concrete first-party Agent, exact Root Invocation ownership and
+// native Agent Run can use Kernel cancellation CAS (and an acquired native
+// execution Epoch where present). A custom Agent, composite Feature or
+// delegated child never inherits this exception.
+func (runner *Runner) nativeAgentStartOwnedByKernel(ctx context.Context, grant Item, physicalRunID string) bool {
+	if runner == nil || runner.runtime == nil || runner.store == nil || physicalRunID == "" ||
+		physicalRunID != grant.RunID || grant.InvocationID == "" {
+		return false
+	}
+	if _, native := runner.agent.(*agent.Runner); !native {
+		return false
+	}
+	owner, err := runner.store.GetInvocation(ctx, grant.InvocationID)
+	if err != nil || owner.ID != grant.InvocationID || owner.TurnID != grant.TurnID ||
+		owner.ParentItemID != "" || owner.ExecutionClass != ExecutionAgent ||
+		owner.ExecutionRefID != grant.RunID {
+		return false
+	}
+	started, err := runner.runtime.Load(ctx, grant.RunID)
+	if err != nil || started.Run.ID != grant.RunID ||
+		started.Run.Kind != agent.RunKind || started.Run.Status != kernel.RunStatusRunning {
+		return false
+	}
+	// Native Agent Runs can be unleased (Kernel CAS) or require a bound
+	// Epoch (Kernel Store fencing). Either case has a first-party native
+	// continuation guard. Any other Store error gives no cancel authority.
+	proof := runner.runtime.RequireExecution(ctx, grant.RunID)
+	return proof == nil || errors.Is(proof, kernel.ErrExecutionRequired)
 }
 
 // withPhysicalInvocationDispatch is the single Harness physical Start/Resume
