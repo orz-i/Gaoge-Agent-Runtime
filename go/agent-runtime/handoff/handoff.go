@@ -306,11 +306,14 @@ func validParentOrigin(parent kernel.Run) bool {
 // VerifiedChildRun is the shared frozen task-and-origin check for Handoff
 // projections and Harness cancellation. A local Kernel Run with the same ID
 // is not proof of ChildRunner ownership without these exact identities.
+// Kernel Create canonicalizes ID, Goal and RequestID; compare against that
+// frozen request representation, without normalizing returned snapshots or
+// Actor/Thread identities (which Kernel preserves exactly).
 func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Snapshot) bool {
 	if !validParentOrigin(parent) || !validDelegation(delegation) ||
-		child.Run.ID != delegation.ChildRunID ||
+		child.Run.ID != strings.TrimSpace(delegation.ChildRunID) ||
 		child.Run.Actor != parent.Actor || child.Run.Thread != parent.Thread ||
-		child.Run.Goal != delegation.Goal || child.Run.RequestID != parent.ID+":"+delegation.ID ||
+		child.Run.Goal != strings.TrimSpace(delegation.Goal) || child.Run.RequestID != strings.TrimSpace(parent.ID+":"+delegation.ID) ||
 		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
 		return false
 	}
