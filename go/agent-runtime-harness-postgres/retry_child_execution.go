@@ -47,7 +47,7 @@ func retryChildEffectFenceTx(tx *gorm.DB, turnID string, rotating harness.Invoca
 	}
 	if len(ids) != 0 {
 		var receipts []itemRecord
-		if err := tx.Where("parent_item_id IN ? AND kind = ?", ids,
+		if err := tx.Where("turn_id = ? AND parent_item_id IN ? AND kind = ?", turnID, ids,
 			string(harness.ItemDiagnostic)).Find(&receipts).Error; err != nil {
 			return err
 		}

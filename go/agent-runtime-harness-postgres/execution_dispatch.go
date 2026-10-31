@@ -70,8 +70,10 @@ func checkExecutionDispatchCompletionTx(tx *gorm.DB, completion harness.Item) er
 		return harness.ErrConflict
 	}
 	var existing int64
-	if err := tx.Model(&itemRecord{}).Where("parent_item_id = ? AND kind = ?",
-		grant.ID, string(harness.ItemDiagnostic)).Count(&existing).Error; err != nil {
+	// The grant's TurnID is indexed; a different Turn cannot contribute a
+	// settlement, and cross-Turn attempts fail owner validation above.
+	if err := tx.Model(&itemRecord{}).Where("turn_id = ? AND parent_item_id = ? AND kind = ?",
+		grant.TurnID, grant.ID, string(harness.ItemDiagnostic)).Count(&existing).Error; err != nil {
 		return err
 	}
 	if existing != 0 {
@@ -97,8 +99,8 @@ func pendingExecutionDispatchTx(tx *gorm.DB, turnID, invocationID string) (bool,
 			return false, err
 		}
 		var records []itemRecord
-		if err := tx.Where("parent_item_id = ? AND kind = ?",
-			start.ID, string(harness.ItemDiagnostic)).Find(&records).Error; err != nil {
+		if err := tx.Where("turn_id = ? AND parent_item_id = ? AND kind = ?",
+			start.TurnID, start.ID, string(harness.ItemDiagnostic)).Find(&records).Error; err != nil {
 			return false, err
 		}
 		receipts := make([]harness.Item, 0, len(records))
