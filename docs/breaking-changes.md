@@ -140,6 +140,29 @@ explicitly quarantine unresolved child effects. Do not mark the child
 cancelled, close its intent, retry its Attempt, or redispatch its Handoff
 based on local absence alone.
 
+**Historical parent Item and Handoff Actor hard cut (subsequent P1 review):**
+An existing Item's immutable `RunID` is execution-attempt provenance,
+not permission to attach a new child to its stable Invocation owner after
+Retry. Admission and the final dispatch fence now reject Tool/Message/
+Artifact/Approval/Context/Diagnostic Items from previous physical Runs.
+A valid nested RunID can still be authorized by the existing indexed
+RunRelation `GetByChild` chain, but a missing relation fails closed.
+Delegation Items use their persisted `ParentRunID` and `ChildRunID`:
+`Item.RunID` points to the delegated child, not its owner. Missing or
+mismatched persisted Delegation provenance can no longer grant child
+admission. Host-owned no-Run Items remain unmodified.
+
+**Go API hard cut:** `handoff.Coordinator.Refresh` now requires
+`Refresh(ctx, parent kernel.Snapshot, delegation)`; callers must load
+and provide the authoritative parent Run, including nonempty TenantID,
+ActorID, Thread Kind and Thread ID. The same exact Actor/Thread comparison
+is mandatory for `StartOrLoad` (both Load and Start branches). A ChildRunner
+with the right ID, kind and status but different ownership is unverified;
+it cannot project a foreign result into a Delegation or settle the dispatch
+grant. A2A shadow Runs retain the owning local parent's identity. No
+legacy two-argument Refresh overload, inferred Actor mapping or fallback
+is maintained.
+
 No new persistence table, schema version, alternate router, or compatibility
 bridge is introduced. Reconcile or quarantine incomplete historical
 Handoff Invocations rather than guessing their execution provenance.

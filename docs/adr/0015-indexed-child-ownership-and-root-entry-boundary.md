@@ -217,6 +217,33 @@ instead found two narrower, testable defects in the public child boundary.
     cancel method, synthetic terminal proof, Store protocol, SQL schema or
     compatibility bridge is added; unknown external outcomes require
     read-only reconciliation or explicit quarantine.
+17. **Parent Item physical provenance is Attempt-specific.** The subsequent
+    independent P1 audit reproduced a new child admitted under root Attempt 2
+    from an immutable Tool Item emitted by root Attempt 1. Freezing the
+    *new* child's current root Attempt cannot correct an old parent Item's
+    source. Both child admission and the final pre-effect ancestor walk now
+    validate every Run-stamped owned Item against its owner Invocation's
+    exact frozen ExecutionRefID. Nested Workflow/Team/GroupChat Run IDs
+    require the existing indexed RunRelation `GetByChild` chain to reach
+    that exact Attempt; unknown/missing ownership fails closed. An ItemDelegation
+    uses its persisted payload's `ParentRunID` and `ChildRunID`, because
+    `Item.RunID` is the *delegated child* rather than its Invocation owner's
+    Run. Host-owned Items without a physical Run retain their explicit
+    no-Run semantics. No new Item field, Store API, DDL or compatibility
+    interpretation is introduced.
+18. **Child Handoff provenance includes Actor and Thread.** A matching
+    ChildRunID, Agent-compatible kind and recognized status are insufficient:
+    a misrouted ChildRunner may return another tenant's completed Run and
+    project its Result into the current Delegation. All Load/Start/Refresh
+    projections now require the returned child's exact TenantID, ActorID,
+    Thread Kind and Thread ID to match an authoritative parent Kernel Run.
+    The parent must carry all of these nonempty identities. The public
+    `handoff.Coordinator.Refresh` is now `Refresh(ctx, parent, delegation)`,
+    a deliberate pre-stable source break; no orphan-Delegation refresh or
+    implicit resolver lookup can supply missing parent authority. A host
+    using an external A2A shadow still passes its owning local parent Run
+    and the shadow retains the same Actor/Thread identity. Wrong provenance
+    returns `ErrChildRunUnverified` without projecting the foreign result.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -241,7 +268,12 @@ or explicitly quarantined before deployment**; they cannot be granted new
 physical dispatches, retried or resumed by reading a newer root Attempt.
 Pending Runs retain their original IDs and effects; do not fabricate
 a completion receipt, redo unknown external effects, or reclassify an
-existing Invocation. Published beta.23 tags remain unchanged.
+existing Invocation. Handoff Coordinator callers must now supply an
+explicit, authoritative parent Snapshot on read-only Refresh; returned
+ChildRunner Runs must preserve its exact Tenant/Actor/Thread identity.
+Old parent Items from a previous Attempt may not authorize new children,
+even when their stable Invocation owner ID still exists and is Running.
+Published beta.23 tags remain unchanged.
 
 ## Admission evidence
 
