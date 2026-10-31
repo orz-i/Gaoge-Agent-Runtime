@@ -514,6 +514,32 @@ instead found two narrower, testable defects in the public child boundary.
     No new persistence protocol, SQL DDL, schema/version bump, compatibility
     bridge, synthetic child receipt or alternate Host router is introduced.
 
+35. **A terminal parent is not descendant cancellation proof.** The next
+    independent final-Head audit reproduced three public cancellation
+    entrypoints reporting success despite a Running RunRelation child after
+    its owning Team/Root had already Failed: child `CancelInvocation` only
+    traversed descendants if the target was `Cancelled`; `CancelSubtask`
+    returned immediately for terminal Subtask status; root `Cancel` returned
+    immediately when Harness Turn was Failed/Completed. A real Parallel Team
+    FailFast ChildRunner also reproduced the root no-op after a completed
+    dispatch grant and an untracked (by Harness Invocations) running Member.
+    All three entrypoints now attempt the original bounded, durable cancel
+    intent and descendant cleanup for terminal Kernel parents. A locally
+    verifiable related Run is physically cancelled; an indexed RunRelation
+    child absent from the Harness Kernel has **unknown** physical fate and
+    cannot be silently treated as a no-effect child merely because its
+    ID is absent. It returns `ErrRuntimeCancellationUnverified` with the
+    original intent retained. An undispatched frozen Handoff whose child
+    grant independently proves no physical effect keeps its previous safe
+    no-effect exception. A failed terminal Turn whose direct Agent Run was
+    *never created* preserves its idempotent safe no-op, but only after
+    verifying there are no admitted child Invocations, Delegation Items,
+    RunRelation descendants or pending physical grants. Original parent
+    Failed/Completed status is never overwritten with fabricated Cancelled.
+    Unknown external cleanup requires route-owned reconciliation/quarantine;
+    no generic remote Cancel protocol, new Kernel state, Store schema or
+    compatibility bridge has been added.
+
 ## Breaking change, upgrade, and exclusions
 
 The Go `Runner.RefreshInvocation` and `Runner.ResumeInvocation` contract

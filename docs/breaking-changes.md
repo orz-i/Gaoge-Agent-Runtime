@@ -4,6 +4,24 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 terminal-parent / descendant cancellation completion hard cut:**
+A `Failed`, `Completed` or `Cancelled` parent Run/Invocation/Turn is **not**
+evidence that its Team/Workflow/GroupChat/remote ChildRunner descendants are
+terminal. `Runner.Cancel`, `CancelInvocation` and `CancelSubtask` no longer
+silently return a successful no-op or skip RunRelation traversal solely
+because the parent is terminal. They use the existing cancellation intent
+and physical descendant checks. Locally verifiable children are cancelled;
+related physical child IDs absent from the local Kernel return
+`ErrRuntimeCancellationUnverified` and retain the original intent for the
+execution owner to reconcile. Verified never-dispatched Handoff children
+remain no-effect; true pre-Create failed Agent admissions without child
+Invocations, Delegations, RunRelations or pending grants preserve their
+previous safe terminal replay. Kernel's original Failed/Completed outcome is
+not rewritten to `Cancelled`. This deliberately narrows the success contract
+without adding a remote Cancel RPC, new Store API, SQL DDL, schema version,
+state machine or compatibility fallback. See [terminal descendant cancellation
+remediation](audits/2026-10-31-pr82-terminal-descendant-cancellation-hardcut.md).
+
 **PR #82 subsequent independent P1 remediation (Subtask / custom Cancel / terminal recovery):**
 A Delegation Subtask no longer reads a coincidentally named local Kernel Run
 unless a fixed original Handoff ChildRunner explicitly certifies observation
