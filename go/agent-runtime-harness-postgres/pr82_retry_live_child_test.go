@@ -165,6 +165,16 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 					}
 				}
 				rotated, err = store.RetryInvocation(ctx, root.ID, failed.Revision, next, now.Add(time.Second))
+				if scenario.class == harness.ExecutionTeam && scenario.receipt != "physical_dispatch_rejected" {
+					// A Team can leave non-Invocation RunRelation members
+					// executing after its own Harness status becomes terminal.
+					// A terminal Team status without an atomic descendant-drain
+					// proof must not release a new parent Attempt.
+					if !errors.Is(err, harness.ErrConflict) {
+						t.Fatalf("terminal Team effect was treated as descendant completion: %+v %v", rotated, err)
+					}
+					return
+				}
 			}
 			if err != nil || rotated.Attempt != 2 || rotated.ExecutionRefID != next {
 				t.Fatalf("safely settled child should allow retry: %+v %v", rotated, err)

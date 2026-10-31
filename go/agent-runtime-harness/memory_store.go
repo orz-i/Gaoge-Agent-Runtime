@@ -164,7 +164,7 @@ func (store *MemoryStore) RetryInvocation(
 			children = append(children, child)
 		}
 	}
-	if err := RetryChildEffectFence(children, store.items[current.TurnID], current.ID); err != nil {
+	if err := RetryChildEffectFence(children, store.items[current.TurnID], current); err != nil {
 		return Invocation{}, err
 	}
 	var rootTurn Turn

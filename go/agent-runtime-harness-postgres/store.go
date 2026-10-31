@@ -244,7 +244,7 @@ func (store *Store) RetryInvocation(
 		// Accepted->Running claims and grant admission on every SQL connection.
 		// Accepted children without grants remain crash-recoverable, while an
 		// Accepted Handoff/native child with an effectful grant still fences retry.
-		if err := retryChildEffectFenceTx(tx, current.TurnID, current.ID); err != nil {
+		if err := retryChildEffectFenceTx(tx, current.TurnID, current); err != nil {
 			return err
 		}
 		if strings.TrimSpace(current.ParentItemID) == "" {
