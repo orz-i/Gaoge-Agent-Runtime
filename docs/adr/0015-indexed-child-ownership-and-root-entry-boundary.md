@@ -87,6 +87,26 @@ instead found two narrower, testable defects in the public child boundary.
    Application child without a fake Kernel load. A native Team/Workflow
    child under that same root remains forbidden because it lacks Kernel
    parent Actor/Thread and execution authority.
+8. **Freeze non-root parent Attempts, too.** The third independent PR #82
+   audit reproduced a grandchild being physically authorized after an
+   intermediate parent Invocation retried from Attempt 1 to Attempt 2,
+   while the root Attempt remained live and unchanged. `harnessRoot`
+   now carries `parents`: the exact IDs, ExecutionRefIDs and Attempts of
+   every non-root Invocation owner inherited from the child's immutable
+   Item ancestry and any previously frozen delegated parent chain.
+   Every final effect boundary verifies all frozen parents by indexed ID.
+   An unsealed owner, stale Attempt or terminal parent fails closed.
+9. **Retry cannot rotate unresolved child effects.** Application
+   `Accepted -> Running` is the durable Host external-effect claim, not
+   a Kernel dispatch grant. Both Memory and PostgreSQL stores now
+   reject any Invocation retry while a non-root Application Invocation
+   remains Running in the Turn; this check serializes with effect claims
+   on the same Turn lock. Unfinished Kernel physical grants also block
+   *every* retry within the Turn, including an intermediate parent's
+   rotation, until settled. The Turn-wide guard may delay an unrelated
+   sibling retry, but avoids guessing ancestry from a grant without a
+   transitive ownership snapshot. No second attempt is authorized from
+   an unknown external outcome.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -98,9 +118,11 @@ continuations use `ResumeTurn(turnID)`. There is no implicit redirect,
 old behavior shim, alternate root channel, or automatic Host routing.
 
 No new `Store` interface, SQL DDL, persistence version, Kernel Run status,
-retry semantics, Tool Call ID, ModelInvocation, admission hash or backfill.
-The existing child `Invocation.Input` **does change**: new typed and Role
-children include the hashed `harnessRoot` admission proof. Incomplete
+Tool Call ID, ModelInvocation, admission hash or backfill. The existing child
+`Invocation.Input` **does change**: new typed and Role children include the
+hashed `harnessRoot` admission proof, now with complete non-root `parents`
+Attempt identity. Retry is deliberately more restrictive while any child
+Application effect or Turn physical grant is still unresolved. Incomplete
 children from before this unpublished hard cut lack it and **must be drained
 or explicitly quarantined before deployment**; they cannot be granted new
 physical dispatches, retried or resumed by reading a newer root Attempt.
@@ -130,9 +152,14 @@ existing Invocation. Published beta.23 tags remain unchanged.
   admission, while native child admission under Host-only root is rejected.
 - The final fence has an exact-root-lookup test forbidding
   `ListInvocations` and a 500/2,000/10,000-Invocation memory benchmark.
+- Additional PR #82 independent remediation tests freeze intermediate parent
+  and transitive Role owner Attempts, reject their old descendants after Retry,
+  and fence root/intermediate retries against unresolved Application claims
+  and descendant physical grants in Memory, SQL and real PostgreSQL.
 - Complete Harness modules, race/quality, clean external consumers and
   real PostgreSQL/Redis recovery gates are needed for final acceptance.
 
 See [Breaking Changes](../breaking-changes.md), the original local
 acceptance record and the [second PR #82 cross-Attempt remediation](../audits/2026-10-31-pr82-child-root-attempt-hardcut-remediation.md)
+and [third independent PR #82 parent Attempt / Application claim remediation](../audits/2026-10-31-pr82-parent-attempt-and-application-claim-remediation.md)
 for exact evidence. Independent PR merge/release admission remains separate.

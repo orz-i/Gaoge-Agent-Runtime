@@ -33,9 +33,12 @@ an old Accepted child could otherwise replay under a new live root after
 or delegated Role Agent now seals a `harnessRoot` binding (root Invocation
 ID, exact execution Ref ID and Attempt) inside the existing hashed
 `Invocation.Input`. A replay or final physical dispatch must match the
-original root Attempt; no automatic rebinding is permitted. Final validation
-uses direct indexed `GetInvocation(rootID)` rather than materializing the
-whole Turn's Invocation list. Host Application roots use their durable root
+original root Attempt; no automatic rebinding is permitted. The third
+independent PR #82 audit additionally froze every *intermediate* parent
+Invocation's ID, ExecutionRefID and Attempt in `harnessRoot.parents`,
+including inherited Role delegation owners. Final pre-effect validation
+rejects stale or unsealed ancestor Attempts and uses direct indexed
+`GetInvocation` rather than materializing the whole Turn's Invocation list. Host Application roots use their durable root
 Invocation, without a synthetic Kernel Run; a claimed Application root can
 admit an Application child, never a native child lacking a Kernel parent.
 This is a fail-closed correction, not permission to retry ambiguous effects.
@@ -47,8 +50,13 @@ CAS, SQL tables and schema versions remain unchanged. **Child
 include the immutable hashed `harnessRoot` field. Incomplete
 children created before this candidate must be drained or explicitly
 isolated before rollout. Missing proof fails closed, including during
-retry/resume; do not backfill, rehash, infer a root from current state or
-replay unknown effects. There is no compatibility bridge, dual root path,
+retry/resume; children missing the full new parent chain also fail closed.
+Memory and PostgreSQL Retry now block on any unresolved Running child
+Application effect or unfinished Turn physical dispatch grant, even for an
+intermediate or unrelated sibling Attempt. This may conservatively delay
+retry until the previous effects have authoritative receipts; do not
+backfill, rehash, infer ancestor authority from current state or replay
+unknown effects. There is no compatibility bridge, dual root path,
 implicit Intent Router or version bump. Hosts with root-ID
 `RefreshInvocation`/`ResumeInvocation` callers must update their source.
 See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md).
