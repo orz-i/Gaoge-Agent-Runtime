@@ -268,8 +268,10 @@ instead found two narrower, testable defects in the public child boundary.
     with no grant, or only first-party, matching-owner
     `physical_dispatch_rejected` receipts, still permits recovery. A
     pre-hard-cut Handoff without frozen root provenance fails closed.
-    Only durable terminal child status and resolved grants may release
-    Retry. Conservatively fence the whole Turn instead of inferring
+    For leaf Invocations, durable terminal child status and resolved grants
+    may release Retry; composite Feature Runs need additional evidence that
+    their independently routed descendants did not execute (see §22).
+    Conservatively fence the whole Turn instead of inferring
     sibling ancestry from a grant; do not invent remote terminal receipts.
 21. **Indexed RunRelation ownership is an explicit composition contract.**
     `harness.Dependencies.Relations` now requires the exported
@@ -282,6 +284,41 @@ instead found two narrower, testable defects in the public child boundary.
     dependency remains possible for its non-relation capabilities; it
     cannot authorize a nested physical Run without proof. No new
     RunRelation Store, wire format, database table, or compatibility bridge.
+22. **Composite Feature Retry requires a complete pre-effect proof.**
+    The next independent P1 audit reproduced a real Parallel Team with
+    `FailureFailFast`: the Team Run, Harness Root Invocation and Turn were
+    Failed while a second Member Run remained Running in RunRelation/Kernel
+    without any Harness child Invocation. The root physical Start grant
+    was already settled; both Memory and SQL `RetryInvocation` nevertheless
+    rotated Root Attempt 1 to Attempt 2. The previous Turn-wide
+    `RetryChildEffectFence` examined only Harness child Invocation rows.
+    A Feature may create TeamMember, WorkflowEffect or GroupChatSpeaker
+    RunRelations directly, beyond that index.
+    **No unverified cross-store check is promoted to authority.**
+    RunRelation and Kernel are independent persistence owners; a lookup
+    before `Store.RetryInvocation` would race with a new relation/effect,
+    and a terminal parent Kernel Run is not transitive child completion.
+    Until a separately designed, atomic descendant-drain protocol exists,
+    Memory and SQL Store retries now conservatively reject **any terminal
+    Team, Workflow or GroupChat Invocation** that lacks a complete
+    matching-owner **no-physical-effect** dispatch history. This applies
+    both to the rotating Invocation itself (Root or intermediate parent)
+    and to terminal composite children in the same Turn; other nonterminal
+    Harness children remain subject to the earlier liveness fence.
+    A missing grant is *not* positive no-effect proof for a terminal
+    composite Invocation. Every persisted grant for it must have a
+    matching Invocation ID and Run ID receipt with boundary
+    `physical_dispatch_rejected` or `feature_start_no_effect`.
+    `physical_dispatch_returned`, unknown outcomes, malformed or mismatched
+    receipts fail closed even if the parent status is Failed/Cancelled/
+    Completed. The complete decision executes under the same existing
+    Memory Turn mutex or SQL Turn row lock as the retry CAS and grant
+    admission. The only supported composite retry today is one with
+    **verified pre-effect rejection**; after effectful composite execution,
+    an automatic new Attempt is deliberately unavailable rather than
+    silently replaying potentially active descendants. No new Store API,
+    relation schema, dual router, synthetic cleanup receipt, or compatibility
+    bridge is added.
 
 ## Breaking change, upgrade, and exclusions
 

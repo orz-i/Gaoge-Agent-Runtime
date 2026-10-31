@@ -195,6 +195,35 @@ There is no runtime type-assertion fallback. Hosts not composing a
 relation-dependent capability may still omit Relations, but then cannot
 authorize nested physical Run descent.
 
+**Further PR #82 P1 hard cut — non-Invocation RunRelation descendants:**
+A Failed/Cancelled Team, Workflow or GroupChat can still own a running
+TeamMember/WorkflowEffect/GroupChatSpeaker Run even when **no Harness child
+Invocation exists**. A FailFast Parallel Team with one failed and one
+Running Member reproduced this after the parent's physical Start grant
+had already settled. Root Retry rotated its Attempt and abandoned the
+remaining physical member. The prior Invocation-only retry fence was
+insufficient; querying a separately persisted RunRelation/Kernel before
+the retry CAS would not close the cross-store admission race.
+
+Memory and PostgreSQL/SQLite `Store.RetryInvocation` now fail closed on
+any terminal, previously effectful Team/Workflow/GroupChat, whether it
+is the rotating Invocation or another terminal child in the same Turn.
+A **missing physical grant** on a terminal composite is not proof that
+no Member/Effect/Speaker was created. To allow an explicit retry,
+**every** original composite physical dispatch grant must be paired with
+an exact same-owner, same-Run no-effect receipt
+(`physical_dispatch_rejected` or `feature_start_no_effect`). A
+`physical_dispatch_returned` receipt proves that the Feature ran, **not**
+that all of its independently routed descendants terminated. Such
+effectful automatic composite retries are deliberately unsupported
+until an atomic transitive cleanup/terminal proof contract exists;
+do not use a non-transactional relation scan as a compatibility bypass.
+Safe first-party pre-dispatch rejection retries continue to work.
+Previously supported optimistic retries of failed/cancelled composite
+features after actual physical execution will now return `ErrConflict`.
+This is a pre-stable Go behavioral hard cut, with no schema or wire
+migration and no compatibility adapter.
+
 No new persistence table, schema version, alternate router, or compatibility
 bridge is introduced. Reconcile or quarantine incomplete historical
 Handoff Invocations rather than guessing their execution provenance.
