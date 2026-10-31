@@ -4,6 +4,18 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 direct-target and Application subtree cancellation correction:**
+Direct `CancelSubtask` of an external RunRelation member now fails closed
+with `ErrRuntimeCancellationUnverified`, matching traversal-based cleanup.
+Revoking a budget or observing a terminal parent does not confirm subtree
+cancellation; clients must preserve the explicit `CancelStatus`/`CancelError`
+receipt. Root and intermediate Application cancellation now fence nested
+claims and reject unresolved effects with `ErrApplicationOutcomeUnknown`.
+Exact terminal Application Invocations can resume their own pending intent
+without a Kernel Run. No new Store API, SQL DDL, cancellation protocol or
+state enum is introduced. Handoff ID/Goal/RequestID checks use Kernel's
+canonical request values; Actor/Thread remain exact. See [independent audit](audits/2026-10-31-pr82-subtree-cancellation-and-canonical-identity.md).
+
 **PR #82 terminal-parent / descendant cancellation completion hard cut:**
 A `Failed`, `Completed` or `Cancelled` parent Run/Invocation/Turn is **not**
 evidence that its Team/Workflow/GroupChat/remote ChildRunner descendants are

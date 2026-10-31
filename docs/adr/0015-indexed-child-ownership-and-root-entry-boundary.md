@@ -540,6 +540,37 @@ instead found two narrower, testable defects in the public child boundary.
     no generic remote Cancel protocol, new Kernel state, Store schema or
     compatibility bridge has been added.
 
+36. **Direct Subtask targets and cancellation receipts use subtree proof.**
+    The missing-local-Run relation check lives at the shared physical cancel
+    boundary, so a directly targeted external RunRelation member cannot
+    bypass the descendant traversal check. Budget revocation is not a
+    physical cancellation acknowledgement. Subtask `CancelStatus` is an
+    explicit request outcome: Failed/Completed/Cancelled parent status never
+    overwrites a failed or unknown descendant cleanup with `confirmed`.
+    Only successful target and descendant verification records confirmation.
+
+37. **Application roots and intermediate owners fence descendant effects.**
+    Application cancellation uses the existing durable cancellation intent,
+    Turn admission lock and Interaction CAS before changing parent state.
+    Root cancellation checks every Application claim in its Turn, including
+    children admitted through ownerless Host Items. Child cancellation uses
+    the immutable frozen ancestor proof and Item ownership to select its
+    subtree without cancelling unrelated siblings. An unresolved Running
+    Application descendant returns `ErrApplicationOutcomeUnknown`; accepted
+    claims cannot enter after the intent. Safe children are cancelled and
+    physical native descendants require the normal verified cleanup path.
+    A terminal Application's exact persisted Invocation may resume its own
+    cancellation intent after settlement failure; no phantom Kernel Run is
+    created. Original Completed/Failed outcomes remain unchanged.
+
+38. **Handoff identity follows Kernel request canonicalization.** Verification
+    compares returned ID, Goal and RequestID with the canonical request
+    values Kernel Create persists (trimmed ID/Goal/composite RequestID).
+    Returned snapshots themselves are never normalized. Actor, Thread, Run
+    kind and all other frozen provenance checks remain exact. This accepts
+    valid whitespace-bearing requests without stranding a physically started
+    child; it does not permit a different task or execution route.
+
 ## Breaking change, upgrade, and exclusions
 
 The Go `Runner.RefreshInvocation` and `Runner.ResumeInvocation` contract
