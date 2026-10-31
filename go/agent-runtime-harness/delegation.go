@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -301,8 +302,16 @@ func (runner *Runner) dispatchHandoff(
 	child, err := runner.store.GetInvocationByExecutionRefID(ctx, delegation.ChildRunID)
 	if err != nil || child.TurnID != turn.ID || child.ParentItemID != parentItemID ||
 		child.ExecutionClass != ExecutionAgent || child.ExecutionRefID != delegation.ChildRunID ||
-		child.CapabilityKey != CapabilityAgent {
+		child.CapabilityKey != CapabilityAgent || !isHandoffDelegationInvocation(child) {
 		return handoff.Delegation{}, errors.Join(ErrConflict, err)
+	}
+	// The hashed child Input, not the caller's slice-backed Delegation, is
+	// the immutable execution authority. A ChildRunner can mutate a passed
+	// ToolKeys/HostedToolGrants backing array in place; comparing its reply
+	// with the original Go value would silently compare the same mutation.
+	var frozen handoff.Delegation
+	if json.Unmarshal(child.Input, &frozen) != nil || !sameHandoffFrozenExecution(frozen, delegation) {
+		return handoff.Delegation{}, ErrConflict
 	}
 	// Unlike a native Feature Start, Handoff may route to an independent
 	// child Runner. Its own observed outcome, not a fabricated local Kernel
@@ -312,7 +321,7 @@ func (runner *Runner) dispatchHandoff(
 		return handoff.Delegation{}, err
 	}
 	started, startErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
-	if !sameHandoffDispatchIdentity(delegation, started) ||
+	if !sameHandoffFrozenExecution(frozen, started) ||
 		(started.Status != handoff.StatusRunning && started.Status != handoff.StatusCompleted &&
 			started.Status != handoff.StatusFailed && started.Status != handoff.StatusCancelled) {
 		// The call may already have reached an external ChildRunner. Keep
@@ -325,14 +334,33 @@ func (runner *Runner) dispatchHandoff(
 	return started, startErr
 }
 
-// Only lifecycle and result fields may differ from the frozen Handoff
-// request. A response from another Member/Role revision or goal does not
-// certify that the delegated ChildRunner reached our requested execution.
-func sameHandoffDispatchIdentity(expected, returned handoff.Delegation) bool {
-	return returned.ID == expected.ID && returned.ChildRunID == expected.ChildRunID &&
-		returned.MemberID == expected.MemberID && returned.MemberRevision == expected.MemberRevision &&
-		returned.RoleID == expected.RoleID && returned.RoleRevision == expected.RoleRevision &&
-		returned.RoleName == expected.RoleName && returned.Goal == expected.Goal
+// A Handoff reply may project only outcome fields. Compare the full frozen
+// execution envelope, not a selected identity subset: any future Delegation
+// field is immutable by default until explicitly admitted as an outcome.
+// It preserves exact nonempty JSON bytes and ordered slice identity. Empty
+// slices and nil are equivalent: Handoff's cloneDelegation uses append(nil, ...)
+// and legitimately projects a previously allocated empty ToolKeys slice as nil.
+func sameHandoffFrozenExecution(expected, returned handoff.Delegation) bool {
+	returned.Status, returned.Result = expected.Status, expected.Result
+	returned.ErrorCode, returned.Error = expected.ErrorCode, expected.Error
+	normalizeEmptyHandoffFields(&expected)
+	normalizeEmptyHandoffFields(&returned)
+	return reflect.DeepEqual(expected, returned)
+}
+
+func normalizeEmptyHandoffFields(value *handoff.Delegation) {
+	if len(value.ModelOptions) == 0 {
+		value.ModelOptions = nil
+	}
+	if len(value.ToolKeys) == 0 {
+		value.ToolKeys = nil
+	}
+	if len(value.InitialToolKeys) == 0 {
+		value.InitialToolKeys = nil
+	}
+	if len(value.HostedToolGrants) == 0 {
+		value.HostedToolGrants = nil
+	}
 }
 
 func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn) error {
