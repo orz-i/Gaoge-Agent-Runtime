@@ -54,6 +54,13 @@ Start and Refresh. Empty, mismatched or invalid snapshots cannot be
 projected as a valid Delegation or complete the grant. Invalid observed
 snapshots return `ErrChildRunUnverified`; a StartRun failure without any
 snapshot preserves its original error and remains outcome-unknown.
+The sixth independent PR #82 audit additionally rejects a nested child
+whose non-root Application parent is still `InvocationAccepted`: its
+Host-effect claim has not committed, and a frozen Attempt alone is not
+execution authority. The same existing ancestor guard applies at child
+admission and after the child's own effect-claim CAS, before any Host
+callback. A claimed live Application parent remains eligible. No new
+persistence format, status or compatibility bridge is introduced.
 
 **Persisted JSON hard cut (no SQL migration):** The existing indexed
 `Store.GetItem` contract (PR #79), Kernel Run, statuses, IDs, receipts,

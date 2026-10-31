@@ -125,6 +125,17 @@ instead found two narrower, testable defects in the public child boundary.
     the Kernel status is recognized, before projecting LoadRun, StartRun or
     Refresh results. An unverified result cannot settle the child-owned
     physical grant.
+11. **Intermediate Host Application owners must claim their effect first.**
+    The sixth independent PR #82 audit reproduced an Accepted non-root
+    Application Invocation authorizing a grandchild's Host callback even
+    though the intermediate parent had not committed its own
+    `Accepted -> Running` effect claim. `requireLiveParentAttempt` now
+    refuses an Accepted Application ancestor in both child admission and
+    final pre-effect validation. Running and other valid nonterminal,
+    already-claimed Application parents remain eligible; terminal owners,
+    stale Attempts and unclaimed parents fail closed. Root Application
+    admission uses the same unclaimed-parent predicate. There is no new
+    effect receipt, status, Store contract or compatibility fallback.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -178,6 +189,11 @@ existing Invocation. Published beta.23 tags remain unchanged.
   parent terminalization, cancellation intent, ambiguous outcome/replay and
   successful receipt. PostgreSQL's cross-connection cancellation test also
   covers the new `handoff-start` grant phase.
+- An independent Accepted non-root Application parent reproducer is red
+  before correction and green after. Regression tests reject nested
+  admission before the parent's Host effect claim, allow a claimed live
+  intermediate parent, and reject a parent reverted to Accepted both at
+  the final fence and after the grandchild's own effect-claim CAS.
 - Complete Harness modules, race/quality, clean external consumers and
   real PostgreSQL/Redis recovery gates are needed for final acceptance.
 
@@ -186,4 +202,5 @@ acceptance record and the [second PR #82 cross-Attempt remediation](../audits/20
 and [third independent PR #82 parent Attempt / Application claim remediation](../audits/2026-10-31-pr82-parent-attempt-and-application-claim-remediation.md)
 and [fourth PR #82 Role Handoff physical-dispatch remediation](../audits/2026-10-31-pr82-role-handoff-dispatch-grant-remediation.md)
 and [fifth PR #82 child Run identity proof remediation](../audits/2026-10-31-pr82-handoff-child-run-proof-remediation.md)
+and [sixth PR #82 intermediate Application effect-claim correction](../audits/2026-10-31-pr82-unclaimed-application-parent-remediation.md)
 for exact evidence. Independent PR merge/release admission remains separate.
