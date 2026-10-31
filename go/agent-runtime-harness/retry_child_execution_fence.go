@@ -67,11 +67,13 @@ func RetryChildEffectFence(invocations []Invocation, items []Item, rotating Invo
 // atomic protocol; never infer that proof from a terminal parent Run.
 func compositeRunMayHaveDescendants(items []Item, invocation Invocation) bool {
 	switch invocation.ExecutionClass {
+	case ExecutionAgent, ExecutionApplication:
+		return false // These have their own Harness child/Host-effect fences.
 	case ExecutionTeam, ExecutionWorkflow, ExecutionGroupChat:
 		// These Runtime Features may start child Runs without Harness child
 		// Invocations; they require a complete no-effect grant history.
 	default:
-		return false
+		return true // An unknown execution implementation cannot grant Retry.
 	}
 	grants := 0
 	noEffect := map[string]string{}
