@@ -461,6 +461,59 @@ instead found two narrower, testable defects in the public child boundary.
     owned with authoritative parent provenance. No automatic remote refresh
     adapter, new Store API, SQL schema or compatibility route is introduced.
 
+32. **Subtask projection is not an independent route-owner lookup.**
+    Final PR #82 merge re-audit reproduced an actual remote Handoff child
+    remaining active while a foreign local Kernel Run with the same ID and
+    an unrelated Tenant, Kind, Thread and Goal was Cancelled. Public
+    `Runner.Load`/`Refresh` materialized that foreign Run as the Subtask,
+    including its terminal status and Goal; `CancelSubtask` subsequently
+    returned success without opening an intent or performing any external
+    cleanup. For a persisted Delegation, product Subtask reads now rely on
+    the immutable Handoff Item unless a frozen child Invocation exists and
+    a fixed `handoff.New` Coordinator explicitly attests to observing the
+    exact Harness Kernel. The observed local Run must independently pass
+    the frozen Delegation Item, parent Run and full child identity check.
+    An unproved, dynamic or remote child keeps its existing durable Handoff
+    status (possibly `queued` while the external effect is running), not a
+    coincidental local Run's terminal state. Cancellation cannot use that
+    foreign Run to bypass its normal physical-effect proof. A first-party
+    Agent with Host middleware may certify exact **read-only** Kernel
+    observation, separately from its deliberately stricter physical-cancel
+    proof: observational identity does not authorize unfenced callbacks.
+33. **A Host Canceller's nil error is not a terminal Kernel receipt.**
+    Two further P1 re-audit repros showed that a custom RuntimeCanceller
+    could return a Running result with `nil` (closing a cancellation intent
+    without cancelling anything), or return a foreign same-ID Cancelled
+    snapshot (falsely terminalizing the Harness Turn while its local root
+    remained Running). For any custom Canceller invoked on a local Run,
+    Harness now requires a terminal reply with exact immutable Run ID,
+    kind, Actor, Thread, Goal and RequestID, followed by a fresh authoritative
+    **local Kernel Load** confirming the same terminal Run/status. A wrong,
+    nonterminal or unobservable reply returns an explicit
+    `ErrRuntimeCancellationUnverified` (or Handoff's existing stronger
+    `ErrHandoffCancellationUnverified`) and retains the cancellation intent.
+    Host implementations responsible for remote cleanup must also commit an
+    authoritative matching local terminal Run projection before claiming a
+    successful Harness cancellation; an external-only claim is not that
+    proof. Errors from the post-callback read are never reclassified as a
+    custom Canceller's definitive no-effect `ErrConflict`.
+34. **A failed/completed root still owns descendant cancellation recovery.**
+    The final re-audit proved that an already-Failed native Root could enter
+    `Cancel` while its Harness Turn was Running, create an intent, and then
+    self-deadlock because the ordinary terminal projection rejected that
+    very active intent. Even a root with zero children became permanently
+    unrefreshable. After a definitive local terminal root observation
+    (`Cancelled`, `Failed`, or `Completed`), the owner `Cancel` now runs its
+    full descendant and Delegation cleanup before using its exclusive
+    terminal projection path and settling its intent. The projected Turn
+    retains the Kernel's actual terminal outcome, never a fabricated
+    `Cancelled`. An unresolved child keeps the original intent open;
+    a repeated cancel of the *same* terminal root is allowed to resume
+    that prior intent and retry child cleanup without rotating identity.
+    Read-only Refresh remains barred from claiming unknown external cleanup.
+    No new persistence protocol, SQL DDL, schema/version bump, compatibility
+    bridge, synthetic child receipt or alternate Host router is introduced.
+
 ## Breaking change, upgrade, and exclusions
 
 The Go `Runner.RefreshInvocation` and `Runner.ResumeInvocation` contract

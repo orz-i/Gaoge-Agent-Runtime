@@ -4,6 +4,31 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 subsequent independent P1 remediation (Subtask / custom Cancel / terminal recovery):**
+A Delegation Subtask no longer reads a coincidentally named local Kernel Run
+unless a fixed original Handoff ChildRunner explicitly certifies observation
+of the exact Harness Kernel and the frozen child/parent/Delegation identity
+matches. Remote/dynamic/unproven routes retain the last durable Handoff Item
+status; it can remain `queued` during unknown external work, but no foreign
+local status, Goal, approval or result may enter the product projection or
+short-circuit `CancelSubtask`. Middleware-bearing native Agents may attest
+only to read-only same-Kernel identity, not Kernel-fenced physical Cancel.
+
+Successful custom `RuntimeCanceller.Cancel` replies must have exact original
+Run identity, **terminal status**, and a fresh matching terminal observation
+in the Harness-owned Kernel. A nonterminal, foreign or unknown reply returns
+`ErrRuntimeCancellationUnverified` (Handoff retains
+`ErrHandoffCancellationUnverified`) and keeps the original cancel intent
+open. Hosts performing external cleanup must reconcile the corresponding
+local Kernel terminal state before claiming a successful Harness Cancel.
+A root Run already Failed/Completed can now finish full descendant cleanup
+and project its **actual** terminal result under its own cancellation intent;
+if remote cleanup remains unknown, a subsequent Cancel may resume the same
+intent under that exact terminal root. `Refresh` still cannot close it.
+This is a pre-stable behavior hard cut; no compatibility fallback, new
+schema/version, SQL DDL, or invented external cancellation receipt. See
+[final merge re-audit remediation](audits/2026-10-31-pr82-subtask-custom-cancel-and-terminal-root-hardcut.md).
+
 **PR #82 final independent merge-audit P1 corrections (native Cancel, Refresh):**
 The exact native `*kernel.Runtime` used for `harness.Dependencies.Cancellation`
 MUST be the same instance as `Dependencies.Runtime`, not a second Kernel
