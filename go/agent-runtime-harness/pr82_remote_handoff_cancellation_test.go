@@ -19,6 +19,13 @@ func pr82StartedRemoteHandoff(t *testing.T, role bool) (*pr82HandoffFixture, Inv
 	if !role {
 		delegation.RoleID = ""
 	}
+	// Use an actual frozen Started Item for either route. A generic
+	// fixture Role Item must not be treated as a Member-only admission.
+	startedID, err := f.runner.recordDelegationItem(t.Context(), f.turn, f.parent, delegation, ItemStarted, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.startedItemID = startedID
 	if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +169,7 @@ func TestPR82LocalHandoffChildStillUsesVerifiedKernelCancellation(t *testing.T) 
 	delegation := f.delegation()
 	f.handoff.result = func(d handoff.Delegation) (handoff.Delegation, error) {
 		_, err := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: d.ChildRunID, Kind: agent.RunKind,
-			Actor: f.parentRun.Run.Actor, Thread: f.parentRun.Run.Thread, RequestID: d.ID,
+			Actor: f.parentRun.Run.Actor, Thread: f.parentRun.Run.Thread, RequestID: f.parentRun.Run.ID + ":" + d.ID,
 			Goal: d.Goal, State: []byte(`{}`)})
 		if err != nil {
 			return handoff.Delegation{}, err
@@ -197,7 +204,7 @@ func TestPR82DefaultKernelCancellerCannotFalsifyA2AShadowCancellation(t *testing
 			f.handoff.result = func(d handoff.Delegation) (handoff.Delegation, error) {
 				_, err := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: d.ChildRunID,
 					Kind: handoff.RemoteAgentRunKind, Actor: f.parentRun.Run.Actor,
-					Thread: f.parentRun.Run.Thread, RequestID: d.ID, Goal: d.Goal, State: []byte(`{}`)})
+					Thread: f.parentRun.Run.Thread, RequestID: f.parentRun.Run.ID + ":" + d.ID, Goal: d.Goal, State: []byte(`{}`)})
 				if err != nil {
 					return handoff.Delegation{}, err
 				}

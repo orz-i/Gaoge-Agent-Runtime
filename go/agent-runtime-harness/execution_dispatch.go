@@ -181,7 +181,8 @@ func (runner *Runner) nativeAgentStartOwnedByKernel(ctx context.Context, grant I
 		physicalRunID != grant.RunID || grant.InvocationID == "" {
 		return false
 	}
-	if _, native := runner.agent.(*agent.Runner); !native {
+	native, ok := runner.agent.(*agent.Runner)
+	if !ok || !native.NativeStartCancellationFencedByKernel(runner.runtime) {
 		return false
 	}
 	// A custom or separately bound RuntimeCanceller cannot claim that

@@ -193,7 +193,7 @@ func (coordinator *Coordinator) StartOrLoad(
 	}
 	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err == nil {
-		if !verifiedChildRun(delegation, parent.Run, child) {
+		if !VerifiedChildRun(delegation, parent.Run, child) {
 			return Delegation{}, ErrChildRunUnverified
 		}
 		return projectChild(delegation, child), childStateError(child)
@@ -219,7 +219,7 @@ func (coordinator *Coordinator) StartOrLoad(
 	if child.Run.ID == "" && err != nil {
 		return Delegation{}, err
 	}
-	if !verifiedChildRun(delegation, parent.Run, child) {
+	if !VerifiedChildRun(delegation, parent.Run, child) {
 		return Delegation{}, errors.Join(ErrChildRunUnverified, err)
 	}
 	return projectChild(delegation, child), errors.Join(childStateError(child), err)
@@ -240,7 +240,7 @@ func (coordinator *Coordinator) Refresh(ctx context.Context, parent kernel.Snaps
 	if err != nil {
 		return Delegation{}, err
 	}
-	if !verifiedChildRun(delegation, parent.Run, child) {
+	if !VerifiedChildRun(delegation, parent.Run, child) {
 		return Delegation{}, ErrChildRunUnverified
 	}
 	return projectChild(delegation, child), childStateError(child)
@@ -255,8 +255,12 @@ func validParentOrigin(parent kernel.Run) bool {
 		strings.TrimSpace(parent.Thread.Kind) != "" && strings.TrimSpace(parent.Thread.ID) != ""
 }
 
-func verifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Snapshot) bool {
-	if child.Run.ID != delegation.ChildRunID ||
+// VerifiedChildRun is the shared frozen task-and-origin check for Handoff
+// projections and Harness cancellation. A local Kernel Run with the same ID
+// is not proof of ChildRunner ownership without these exact identities.
+func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Snapshot) bool {
+	if !validParentOrigin(parent) || !validDelegation(delegation) ||
+		child.Run.ID != delegation.ChildRunID ||
 		child.Run.Actor != parent.Actor || child.Run.Thread != parent.Thread ||
 		child.Run.Goal != delegation.Goal || child.Run.RequestID != parent.ID+":"+delegation.ID ||
 		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
