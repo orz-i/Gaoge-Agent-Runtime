@@ -258,6 +258,7 @@ func validParentOrigin(parent kernel.Run) bool {
 func verifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Snapshot) bool {
 	if child.Run.ID != delegation.ChildRunID ||
 		child.Run.Actor != parent.Actor || child.Run.Thread != parent.Thread ||
+		child.Run.Goal != delegation.Goal || child.Run.RequestID != parent.ID+":"+delegation.ID ||
 		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
 		return false
 	}

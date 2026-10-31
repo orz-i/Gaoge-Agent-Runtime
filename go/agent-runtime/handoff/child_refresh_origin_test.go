@@ -14,6 +14,7 @@ func TestPR82HandoffRefreshRequiresParentOriginProof(t *testing.T) {
 	valid := kernel.Snapshot{Run: kernel.Run{
 		ID: "child", Kind: agent.RunKind, Status: kernel.RunStatusCompleted,
 		Actor: parent.Run.Actor, Thread: parent.Run.Thread,
+		Goal: "inspect", RequestID: parent.Run.ID + ":delegate",
 	}, Result: &kernel.Result{ContentType: "application/json", Content: []byte(`{"answer":"correct"}`)}}
 	child := &unverifiedChildRunner{loadSnapshot: valid}
 	coordinator, err := handoff.New(child)

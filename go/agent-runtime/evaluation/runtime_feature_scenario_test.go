@@ -437,7 +437,7 @@ func (children *featureScenarioChildren) StartRun(_ context.Context, request age
 	snapshot := kernel.Snapshot{
 		Run: kernel.Run{
 			ID: request.ID, Kind: agent.RunKind, Actor: request.Actor, Thread: request.Thread,
-			Goal: request.Goal, Status: kernel.RunStatusCompleted, Revision: 2,
+			Goal: request.Goal, RequestID: request.RequestID, Status: kernel.RunStatusCompleted, Revision: 2,
 			CreatedAt: scenarioNow(), UpdatedAt: scenarioNow(),
 		},
 		State:     json.RawMessage(`{}`),
