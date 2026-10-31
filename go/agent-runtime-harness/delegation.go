@@ -276,7 +276,12 @@ func (runner *Runner) executeDelegation(
 			return DelegationResult{}, err
 		}
 	}
-	delegation, delegateErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
+	var delegateErr error
+	if delegation.RoleID != "" {
+		delegation, delegateErr = runner.dispatchRoleHandoff(ctx, turn, parent, delegation, startedItemID)
+	} else {
+		delegation, delegateErr = runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
+	}
 	status := delegationItemStatus(delegation.Status)
 	if status != ItemStarted {
 		if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, status, startedItemID); itemErr != nil {
@@ -284,10 +289,46 @@ func (runner *Runner) executeDelegation(
 		}
 	}
 	snapshot, loadErr := runner.Load(ctx, turn.ID)
-	if errors.Is(delegateErr, handoff.ErrChildPending) {
+	if errors.Is(delegateErr, handoff.ErrChildPending) && !errors.Is(delegateErr, ErrExecutionOutcomeUnknown) {
 		delegateErr = nil
 	}
 	return DelegationResult{Delegation: delegation, Snapshot: snapshot}, errors.Join(delegateErr, loadErr)
+}
+
+// dispatchRoleHandoff uses the same durable physical dispatch grant as native
+// Features, owned by the accepted Role Invocation rather than its running
+// parent Agent. The terminal/nonterminal child result is a Handoff-observed
+// Run outcome; a missing or mismatched result is NOT a no-effect receipt.
+func (runner *Runner) dispatchRoleHandoff(
+	ctx context.Context, turn Turn, parent kernel.Snapshot,
+	delegation handoff.Delegation, parentItemID string,
+) (handoff.Delegation, error) {
+	child, err := runner.store.GetInvocationByExecutionRefID(ctx, delegation.ChildRunID)
+	if err != nil || child.TurnID != turn.ID || child.ParentItemID != parentItemID ||
+		child.ExecutionClass != ExecutionAgent || child.ExecutionRefID != delegation.ChildRunID ||
+		child.CapabilityKey != CapabilityAgent {
+		return handoff.Delegation{}, errors.Join(ErrConflict, err)
+	}
+	// Unlike a native Feature Start, Handoff may route to an independent
+	// child Runner. Its own observed outcome, not a fabricated local Kernel
+	// snapshot, is the only evidence that its StartOrLoad finished.
+	grant, err := runner.beginPhysicalInvocationDispatch(ctx, child, "handoff-start", delegation.ChildRunID)
+	if err != nil {
+		return handoff.Delegation{}, err
+	}
+	started, startErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
+	if started.ID != delegation.ID || started.ChildRunID != delegation.ChildRunID ||
+		started.RoleID != delegation.RoleID ||
+		(started.Status != handoff.StatusRunning && started.Status != handoff.StatusCompleted &&
+			started.Status != handoff.StatusFailed && started.Status != handoff.StatusCancelled) {
+		// The call may already have reached an external ChildRunner. Keep
+		// the open grant/Attempt for explicit, read-only reconciliation.
+		return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr)
+	}
+	if receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "handoff_start_returned"); receiptErr != nil {
+		return started, errors.Join(ErrExecutionOutcomeUnknown, startErr, receiptErr)
+	}
+	return started, startErr
 }
 
 func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn) error {

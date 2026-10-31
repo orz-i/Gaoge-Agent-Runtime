@@ -145,40 +145,12 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 	ctx context.Context, invocation Invocation, phase, resultRunID string,
 	physical func() (kernel.Snapshot, error),
 ) (kernel.Snapshot, error) {
-	if runner == nil || runner.store == nil || strings.TrimSpace(invocation.ID) == "" ||
-		invocation.TurnID == "" || invocation.ExecutionRefID == "" || physical == nil {
+	if physical == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	identifier, err := runner.runtime.NewID("dispatch")
+	grant, err := runner.beginPhysicalInvocationDispatch(ctx, invocation, phase, resultRunID)
 	if err != nil {
 		return kernel.Snapshot{}, err
-	}
-	payload, err := json.Marshal(struct {
-		Phase         string `json:"phase"`
-		PhysicalRunID string `json:"physicalRunID,omitempty"`
-	}{Phase: phase, PhysicalRunID: resultRunID})
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	now := runner.clock.Now().UTC()
-	grant := Item{
-		ID:     stableID("hdispatch", invocation.ID, invocation.ExecutionRefID, identifier),
-		TurnID: invocation.TurnID, InvocationID: invocation.ID, RunID: invocation.ExecutionRefID,
-		Kind: ItemDiagnostic, Status: ItemStarted,
-		ParentItemID: ExecutionDispatchParentItemID, Payload: payload,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if _, fresh, appendErr := runner.store.AppendItem(ctx, grant); appendErr != nil || !fresh {
-		return kernel.Snapshot{}, errors.Join(ErrConflict, appendErr)
-	}
-	// The first-party relation may have been committed before the parent was
-	// cancelled, but a nested child can still be Accepted without a Kernel
-	// Run. Do not physically start it after its owning parent completed or
-	// was cancelled. This read occurs AFTER the durable grant: a concurrent
-	// cancel must now contend with the outstanding dispatch.
-	if parentErr := runner.requireLiveInvocationParents(ctx, invocation); parentErr != nil {
-		return kernel.Snapshot{}, errors.Join(parentErr,
-			runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected"))
 	}
 	snapshot, physicalErr := physical()
 	if snapshot.Run.ID == "" {
@@ -227,6 +199,48 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 		return snapshot, errors.Join(physicalErr, ErrConflict)
 	}
 	return snapshot, errors.Join(physicalErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_returned"))
+}
+
+// beginPhysicalInvocationDispatch is shared by Kernel Feature operations and
+// Role Handoff starts. Admission is serialized with cancellation and retry by
+// the Store; the frozen root/ancestor Attempt check happens after the grant,
+// before calling any physical executor. A failed pre-effect check settles the
+// grant as definitive no-effect, without ever invoking the executor.
+func (runner *Runner) beginPhysicalInvocationDispatch(
+	ctx context.Context, invocation Invocation, phase, physicalRunID string,
+) (Item, error) {
+	if runner == nil || runner.store == nil || runner.runtime == nil || runner.clock == nil ||
+		strings.TrimSpace(invocation.ID) == "" || invocation.TurnID == "" ||
+		invocation.ExecutionRefID == "" || strings.TrimSpace(physicalRunID) == "" {
+		return Item{}, ErrInvalidRequest
+	}
+	identifier, err := runner.runtime.NewID("dispatch")
+	if err != nil {
+		return Item{}, err
+	}
+	payload, err := json.Marshal(struct {
+		Phase         string `json:"phase"`
+		PhysicalRunID string `json:"physicalRunID,omitempty"`
+	}{Phase: phase, PhysicalRunID: physicalRunID})
+	if err != nil {
+		return Item{}, err
+	}
+	now := runner.clock.Now().UTC()
+	grant := Item{
+		ID:     stableID("hdispatch", invocation.ID, invocation.ExecutionRefID, identifier),
+		TurnID: invocation.TurnID, InvocationID: invocation.ID, RunID: invocation.ExecutionRefID,
+		Kind: ItemDiagnostic, Status: ItemStarted,
+		ParentItemID: ExecutionDispatchParentItemID, Payload: payload,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if _, fresh, appendErr := runner.store.AppendItem(ctx, grant); appendErr != nil || !fresh {
+		return Item{}, errors.Join(ErrConflict, appendErr)
+	}
+	if parentErr := runner.requireLiveInvocationParents(ctx, invocation); parentErr != nil {
+		return Item{}, errors.Join(parentErr,
+			runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected"))
+	}
+	return grant, nil
 }
 
 // The release is appended under the same immutable grant ID, including after
