@@ -244,6 +244,44 @@ instead found two narrower, testable defects in the public child boundary.
     using an external A2A shadow still passes its owning local parent Run
     and the shadow retains the same Actor/Thread identity. Wrong provenance
     returns `ErrChildRunUnverified` without projecting the foreign result.
+19. **The Handoff Child Run must belong to the exact delegated task.**
+    The next independent final-Head review reproduced a foreign completed
+    Agent Run with matching ChildRunID, Tenant/Actor/Thread, kind and status,
+    but a different Goal or RequestID. The Coordinator projected its Result
+    and Harness closed the physical Handoff grant. All Handoff Load/Start/
+    Refresh paths now require the exact frozen `Delegation.Goal` and the
+    deterministic `parent.Run.ID + ":" + Delegation.ID` RequestID in the
+    actual child Kernel Run. An absent or mismatched value fails with
+    `ErrChildRunUnverified`, leaves the original grant unresolved and never
+    projects that result. There is no alternate child-identity protocol.
+20. **A settled Start grant is not child completion.** The next independent
+    P1 audit reproduced a Root Retry rotating Attempt 1 to Attempt 2 while
+    a native Team child from Attempt 1 remained Running after its physical
+    grant had settled. Both Memory and SQL/real-PostgreSQL Store retry
+    decisions now enforce one Turn-locked nonterminal child barrier for
+    Root and intermediate-parent retries. Any Running, WaitingInput or
+    PausedBudget child blocks rotation; a Running Application child keeps
+    its existing `ErrApplicationOutcomeUnknown` return. An Accepted
+    child with a potentially effectful physical Start grant also blocks
+    rotation, including a remote Handoff whose child Invocation can remain
+    Accepted after a `handoff_start_returned` receipt. An Accepted child
+    with no grant, or only first-party, matching-owner
+    `physical_dispatch_rejected` receipts, still permits recovery. A
+    pre-hard-cut Handoff without frozen root provenance fails closed.
+    Only durable terminal child status and resolved grants may release
+    Retry. Conservatively fence the whole Turn instead of inferring
+    sibling ancestry from a grant; do not invent remote terminal receipts.
+21. **Indexed RunRelation ownership is an explicit composition contract.**
+    `harness.Dependencies.Relations` now requires the exported
+    `harness.RunRelationSource` interface: `Ensure`, `ListChildren`
+    and `GetByChild`. The previous `runrelation.Recorder`-only and
+    ListChildren-only composition is deleted, rather than silently
+    accepted and rejected when an actual nested Tool dispatch reaches
+    `requireRunDescendsFrom`. The type checker enforces this hard cut
+    when a relation provider is composed. A Harness with no RunRelation
+    dependency remains possible for its non-relation capabilities; it
+    cannot authorize a nested physical Run without proof. No new
+    RunRelation Store, wire format, database table, or compatibility bridge.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -261,7 +299,8 @@ delegated Agent children (including MemberID-only) include the hashed
 `harnessRoot` admission proof, now with complete non-root `parents`
 Attempt identity. Existing Host-defined ChildRunners returning a non-Agent
 Run kind must adopt an authorized Agent/A2A shadow kind or be rejected
-without a compatibility fallback. Retry is deliberately more restrictive while any child
+without a compatibility fallback. ChildRunner snapshots must also preserve
+the frozen delegated Goal and parent-Run-based RequestID. Retry is deliberately more restrictive while any child
 Application effect or Turn physical grant is still unresolved. Incomplete
 children from before this unpublished hard cut lack it and **must be drained
 or explicitly quarantined before deployment**; they cannot be granted new

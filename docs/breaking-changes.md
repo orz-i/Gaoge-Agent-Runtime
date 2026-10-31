@@ -163,6 +163,38 @@ grant. A2A shadow Runs retain the owning local parent's identity. No
 legacy two-argument Refresh overload, inferred Actor mapping or fallback
 is maintained.
 
+**PR #82 follow-up hard cut — task identity and retry liveness:**
+Handoff's accepted child Run must also have the exact
+`Run.Goal == Delegation.Goal` and
+`Run.RequestID == parent.Run.ID + ":" + Delegation.ID`. Matching Run ID,
+Actor/Thread, kind and terminal status alone cannot prove task identity.
+Load/Start/Refresh reject absent or altered values with
+`ErrChildRunUnverified`; Harness retains the Handoff grant and never
+projects a foreign Result. Hosts providing custom ChildRunners must
+persist and return the original StartRequest Goal and RequestID.
+
+A settled physical Start grant proves only that dispatch returned. It is
+not a terminal outcome. Store `RetryInvocation` now blocks Root and
+intermediate retries while any other child Invocation in the Turn is
+Running, WaitingInput or PausedBudget, or while an Accepted child has a
+possibly executed physical grant (including a settled remote Handoff Start).
+An Accepted child that never acquired a grant, or received only matching,
+first-party `physical_dispatch_rejected` receipts, remains eligible for
+the original crash-recovery semantics. This barrier is deliberately
+Turn-wide and executed under the same Memory mutex / SQL Turn row lock as
+grant and Host-effect admission; no inference from terminal parent status
+or from grant settlement can bypass it. Operators must reconcile or
+quarantine unresolved children before a new parent Attempt.
+
+**Go source hard cut — RunRelation composition:** The
+`harness.Dependencies.Relations` field requires
+`harness.RunRelationSource` (the existing `Ensure`, `ListChildren`
+and indexed `GetByChild` methods). A recorder-only or ListChildren-only
+adapter no longer compiles as an optional half-implemented dependency.
+There is no runtime type-assertion fallback. Hosts not composing a
+relation-dependent capability may still omit Relations, but then cannot
+authorize nested physical Run descent.
+
 No new persistence table, schema version, alternate router, or compatibility
 bridge is introduced. Reconcile or quarantine incomplete historical
 Handoff Invocations rather than guessing their execution provenance.
