@@ -146,14 +146,23 @@ func (store *MemoryStore) RetryInvocation(
 	if !ok {
 		return Invocation{}, ErrNotFound
 	}
-	scopeID := current.ID
-	if current.ParentItemID == "" {
-		scopeID = "" // Root retry cannot invalidate unfinished descendant effects.
-	}
+	// Retrying even an intermediate parent cannot outlive a descendant's
+	// pre-effect dispatch grant. Take the conservative Turn-wide barrier:
+	// grants do not encode a transactional transitive ownership snapshot.
 	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
 		ActiveCancellationFence(store.items[current.TurnID]) ||
-		PendingExecutionDispatch(store.items[current.TurnID], scopeID) {
+		PendingExecutionDispatch(store.items[current.TurnID], "") {
 		return Invocation{}, ErrConflict
+	}
+	// Application effects have no Kernel dispatch grant. An unresolved
+	// Running child may already be calling its Host executor; no Invocation
+	// retry in this Turn may rotate authority until that outcome is known.
+	for _, child := range store.invocations {
+		if child.TurnID == current.TurnID && child.ID != current.ID &&
+			child.ParentItemID != "" && child.ExecutionClass == ExecutionApplication &&
+			child.Status == InvocationRunning {
+			return Invocation{}, ErrApplicationOutcomeUnknown
+		}
 	}
 	var rootTurn Turn
 	if strings.TrimSpace(current.ParentItemID) == "" {

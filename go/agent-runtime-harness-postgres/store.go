@@ -229,16 +229,28 @@ func (store *Store) RetryInvocation(
 		// A failed projection cannot rotate a Run identity whose physical
 		// Start/Resume is still outcome-unknown. The Turn lock serializes this
 		// check with grant append and completion on every SQL connection.
-		scopeID := current.ID
-		if strings.TrimSpace(current.ParentItemID) == "" {
-			scopeID = "" // Root retry owns every unfinished child dispatch.
-		}
-		pending, pendingErr := pendingExecutionDispatchTx(tx, current.TurnID, scopeID)
+		// A child's unfinished physical grant must also fence an intermediate
+		// parent's Attempt rotation. Turn-wide is intentionally conservative;
+		// the grant alone does not freeze transitive ancestor ownership.
+		pending, pendingErr := pendingExecutionDispatchTx(tx, current.TurnID, "")
 		if pendingErr != nil {
 			return pendingErr
 		}
 		if pending {
 			return harness.ErrConflict
+		}
+		// UpdateInvocation(Accepted -> Running) takes the same Turn lock.
+		// A claimed Host Application effect has no Kernel dispatch grant,
+		// so check the durable child Invocations before rotating any Attempt.
+		var unresolved int64
+		if err := tx.Model(&invocationRecord{}).
+			Where("turn_id = ? AND id <> ? AND parent_item_id <> ? AND execution_class = ? AND status = ?",
+				current.TurnID, current.ID, "", string(harness.ExecutionApplication), string(harness.InvocationRunning)).
+			Count(&unresolved).Error; err != nil {
+			return err
+		}
+		if unresolved != 0 {
+			return harness.ErrApplicationOutcomeUnknown
 		}
 		if strings.TrimSpace(current.ParentItemID) == "" {
 			result := tx.Model(&turnRecord{}).
