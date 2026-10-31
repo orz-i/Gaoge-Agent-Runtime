@@ -178,6 +178,15 @@ func TestNestedChildInheritsFrozenParentAttemptsAcrossDelegationItem(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An earlier assertion on frozen parents now also has a Store-level
+	// guard: a Waiting child cannot survive an owner's Attempt rotation.
+	if _, err := store.RetryInvocation(t.Context(), owner.ID, failed.Revision, "owner-run-2", time.Now().UTC()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("retry crossed a Waiting descendant: %v", err)
+	}
+	delegator.Status = InvocationCompleted
+	if _, err := store.UpdateInvocation(t.Context(), delegator, delegator.Revision); err != nil {
+		t.Fatal(err)
+	}
 	retried, err := store.RetryInvocation(t.Context(), owner.ID, failed.Revision, "owner-run-2", time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)

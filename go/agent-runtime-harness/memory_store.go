@@ -154,15 +154,18 @@ func (store *MemoryStore) RetryInvocation(
 		PendingExecutionDispatch(store.items[current.TurnID], "") {
 		return Invocation{}, ErrConflict
 	}
-	// Application effects have no Kernel dispatch grant. An unresolved
-	// Running child may already be calling its Host executor; no Invocation
-	// retry in this Turn may rotate authority until that outcome is known.
+	// Check all potentially executing children, not just unclaimed Host
+	// Application callbacks. An acknowledged native/Handoff Start settles its
+	// grant while its child may still run; status and grant proof are inspected
+	// under this same Turn mutex before rotating any Attempt.
+	children := make([]Invocation, 0)
 	for _, child := range store.invocations {
-		if child.TurnID == current.TurnID && child.ID != current.ID &&
-			child.ParentItemID != "" && child.ExecutionClass == ExecutionApplication &&
-			child.Status == InvocationRunning {
-			return Invocation{}, ErrApplicationOutcomeUnknown
+		if child.TurnID == current.TurnID && child.ParentItemID != "" && child.ID != current.ID {
+			children = append(children, child)
 		}
+	}
+	if err := RetryChildEffectFence(children, store.items[current.TurnID], current.ID); err != nil {
+		return Invocation{}, err
 	}
 	var rootTurn Turn
 	if strings.TrimSpace(current.ParentItemID) == "" {

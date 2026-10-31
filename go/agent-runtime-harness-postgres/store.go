@@ -239,18 +239,13 @@ func (store *Store) RetryInvocation(
 		if pending {
 			return harness.ErrConflict
 		}
-		// UpdateInvocation(Accepted -> Running) takes the same Turn lock.
-		// A claimed Host Application effect has no Kernel dispatch grant,
-		// so check the durable child Invocations before rotating any Attempt.
-		var unresolved int64
-		if err := tx.Model(&invocationRecord{}).
-			Where("turn_id = ? AND id <> ? AND parent_item_id <> ? AND execution_class = ? AND status = ?",
-				current.TurnID, current.ID, "", string(harness.ExecutionApplication), string(harness.InvocationRunning)).
-			Count(&unresolved).Error; err != nil {
+		// The completed Start receipt proves dispatch, not child termination.
+		// The same Turn lock serializes this nonterminal-child check with
+		// Accepted->Running claims and grant admission on every SQL connection.
+		// Accepted children without grants remain crash-recoverable, while an
+		// Accepted Handoff/native child with an effectful grant still fences retry.
+		if err := retryChildEffectFenceTx(tx, current.TurnID, current.ID); err != nil {
 			return err
-		}
-		if unresolved != 0 {
-			return harness.ErrApplicationOutcomeUnknown
 		}
 		if strings.TrimSpace(current.ParentItemID) == "" {
 			result := tx.Model(&turnRecord{}).

@@ -171,8 +171,10 @@ func assertPendingDescendantGrantFencesRetry(t *testing.T, store harness.Store, 
 		t.Fatalf("parent retry crossed grandchild's still-open physical grant: %v", err)
 	}
 	settled := harness.Item{
-		ID: "settled-grandchild-" + turnID, TurnID: turnID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-		ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"verified_no_effect"}`),
+		ID: "settled-grandchild-" + turnID, TurnID: turnID,
+		InvocationID: child.ID, RunID: child.ExecutionRefID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
+		ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_rejected"}`),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, _, err := store.AppendItem(ctx, settled); err != nil {
