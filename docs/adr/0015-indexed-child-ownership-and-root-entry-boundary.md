@@ -377,6 +377,27 @@ instead found two narrower, testable defects in the public child boundary.
     concurrent Cancel, return `ErrConflict` while the original Start
     finishes; do not fabricate a cancelled physical child. No extra
     Store API, schema/version bump or compatibility bridge is introduced.
+26. **Middleware cannot inherit native Kernel cancellation.** The next
+    independent P1 race test proved that a direct `*agent.Runner` can enter
+    a Model call while a Host RunMiddleware has a later physical callback.
+    The former native exception could cancel the Kernel Run and Turn, then
+    allow that middleware callback to execute after cancellation returned.
+    Native Start cancellation now requires immutable composition proof that
+    the Agent uses the exact same Kernel Runtime and has **no Run, Model or
+    Tool middleware or Model request preparer** outside its native execution
+    boundary. With such extensions, its outstanding physical Start grant
+    remains authoritative until settlement and `Cancel` returns `ErrConflict`.
+    This narrows cancellation behavior without a compatibility fallback.
+27. **A local Handoff RunID is not cancellation ownership proof.** A routed
+    ChildRunner's Run ID may collide with an unrelated local Kernel Run.
+    Before native or custom Cancel, or any terminal Run projection, Harness
+    now validates the original immutable Delegation Item, frozen child Input,
+    exact parent Invocation and Kernel Run, then applies the shared Handoff
+    child verifier for Run kind, ID, Tenant/Actor/Thread, Goal and RequestID.
+    A matching ID with different origin or task returns
+    `ErrHandoffCancellationUnverified` without cancelling the foreign Run.
+    Custom cancellers must also return a verified Snapshot before their
+    result becomes a terminal fact. No new route protocol or schema.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -471,4 +492,5 @@ and [seventh PR #82 Member Handoff / Run-kind correction](../audits/2026-10-31-p
 and [eighth PR #82 Handoff provenance and receipt hard cut](../audits/2026-10-31-pr82-handoff-provenance-and-receipt-hardcut.md)
 and [ninth PR #82 Handoff frozen execution receipt correction](../audits/2026-10-31-pr82-handoff-frozen-execution-receipt-remediation.md)
 and [tenth PR #82 remote Handoff cancellation correction](../audits/2026-10-31-pr82-remote-handoff-cancellation-remediation.md)
+and [native middleware and local Handoff ownership correction](../audits/2026-10-31-pr82-native-middleware-and-local-handoff-cancellation-remediation.md)
 for exact evidence. Independent PR merge/release admission remains separate.

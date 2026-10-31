@@ -4,6 +4,23 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 final independent cancellation hard cut (two P1s):** A concrete
+native `*agent.Runner` is no longer sufficient proof that a running Start may
+hand cancellation to Kernel CAS. The exact Agent must use the same Kernel
+Runtime as Harness/Canceller **without Host Run/Model/Tool middleware or Model
+request preparer**. These extensions may execute physical callbacks after
+Kernel cancellation; their unsettled Start Grants now reject concurrent
+`Cancel` with `ErrConflict` until durable settlement. This is a deliberate
+pre-stable behavioral restriction; no implicit cancellation of Host-owned
+effects. For routed Handoff children, a locally present Run with the requested
+ID is not cancellation authority. The frozen Delegation/parent Run provenance
+and complete Handoff child identity (kind, Tenant/Actor/Thread, Goal and
+RequestID) must match before local Cancel or terminal projection; foreign
+collisions return `ErrHandoffCancellationUnverified`, leaving the original
+intent and external task untouched. A custom Canceller's returned snapshot
+must pass the same identity check. No new DDL, version, Store API, migration
+or compatibility bridge. See [independent P1 remediation](audits/2026-10-31-pr82-native-middleware-and-local-handoff-cancellation-remediation.md).
+
 **Go API behavior hard cut:** `Runner.RefreshInvocation` and
 `Runner.ResumeInvocation` are child-only APIs; passing a top-level
 Invocation ID (empty `ParentItemID`) now returns `ErrInvalidRequest`
