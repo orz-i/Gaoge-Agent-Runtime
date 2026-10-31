@@ -661,9 +661,24 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 		}
 		return runner.refreshApplicationInvocation(ctx, invocation, turn)
 	}
+	// A routed Handoff belongs to its original ChildRunner, not an arbitrary
+	// Run with the same ID in the Harness Kernel. Only an explicitly fixed
+	// same-Kernel route may be observed through the local Invocation reader.
+	// A remote/dynamic route needs its own ChildRunner-owned observation.
+	if isHandoffDelegationInvocation(invocation) {
+		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
+		if !ok || !coordinator.OwnsLocalKernelRunner(runner.runtime) {
+			return Snapshot{}, ErrHandoffCancellationUnverified
+		}
+	}
 	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if isHandoffDelegationInvocation(invocation) {
+		if _, _, err := runner.localHandoffCancellationAuthority(ctx, invocation, runtimeSnapshot); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
 	if err != nil {

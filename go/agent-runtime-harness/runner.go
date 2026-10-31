@@ -623,6 +623,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Cancellation == nil {
 		dependencies.Cancellation = dependencies.Runtime
 	}
+	// An unrelated native Kernel cannot cancel this Harness's Runs. Check
+	// composition up front and retain the operation-level fence as well.
+	if native, ok := dependencies.Cancellation.(*kernel.Runtime); ok && native != dependencies.Runtime {
+		return nil, ErrInvalidRequest
+	}
 	if dependencies.Interactions != nil {
 		if _, ok := dependencies.Agent.(agentResumer); !ok {
 			return nil, ErrInvalidRequest
@@ -971,7 +976,10 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if err = runner.syncTerminalDelegations(ctx, turn, descendants); err != nil {
 		return Snapshot{}, err
 	}
-	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	// Only this completed cancellation path has verified its descendants.
+	// Other callers (especially Refresh) may not promote the root Kernel's
+	// cancelled status while the remote cleanup intent is still unresolved.
+	return runner.syncRuntimeSnapshotWithRetryAfterCancellation(ctx, turn, invocation, runtimeSnapshot)
 }
 
 func (runner *Runner) syncRuntimeSnapshotWithRetry(
@@ -980,8 +988,23 @@ func (runner *Runner) syncRuntimeSnapshotWithRetry(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
+	return runner.syncRuntimeSnapshotWithRetryProof(ctx, turn, invocation, runtimeSnapshot, false)
+}
+
+// This path is reserved for Cancel after ALL descendants and delegation
+// receipts have been verified. It must never be used for read-only Refresh.
+func (runner *Runner) syncRuntimeSnapshotWithRetryAfterCancellation(
+	ctx context.Context, turn Turn, invocation Invocation, runtimeSnapshot kernel.Snapshot,
+) (Snapshot, error) {
+	return runner.syncRuntimeSnapshotWithRetryProof(ctx, turn, invocation, runtimeSnapshot, true)
+}
+
+func (runner *Runner) syncRuntimeSnapshotWithRetryProof(
+	ctx context.Context, turn Turn, invocation Invocation, runtimeSnapshot kernel.Snapshot,
+	verifiedCancellation bool,
+) (Snapshot, error) {
 	for range maxRuntimeSyncRetryAttempts {
-		snapshot, err := runner.syncRuntimeSnapshot(ctx, turn, invocation, runtimeSnapshot)
+		snapshot, err := runner.syncRuntimeSnapshotWithCancellationProof(ctx, turn, invocation, runtimeSnapshot, verifiedCancellation)
 		if !errors.Is(err, ErrConflict) {
 			return snapshot, err
 		}
@@ -1038,6 +1061,13 @@ func (runner *Runner) syncRuntimeSnapshot(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
+	return runner.syncRuntimeSnapshotWithCancellationProof(ctx, turn, invocation, runtimeSnapshot, false)
+}
+
+func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
+	ctx context.Context, turn Turn, invocation Invocation, runtimeSnapshot kernel.Snapshot,
+	verifiedCancellation bool,
+) (Snapshot, error) {
 	// A callback claim may win its Invocation CAS after Refresh observes
 	// the Interaction but before the Runtime projection attempts its CAS.
 	// Recheck on *every* synchronization/retry, not only at the Refresh
@@ -1051,6 +1081,20 @@ func (runner *Runner) syncRuntimeSnapshot(
 		// Even a verified callback for this Invocation cannot bypass an
 		// independently claimed, still-unverified sibling effect.
 		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+	}
+	// An active cancellation intent can outlive the parent Kernel's
+	// cancelled status while a remote child remains running. No generic
+	// Refresh/Resume/Start callback may turn that root observation into
+	// a terminal Harness Turn; only Cancel after verified descendant cleanup
+	// may complete the projection. Keep the intent for reconciliation.
+	if invocation.ParentItemID == "" && terminalRuntimeStatus(runtimeSnapshot.Run.Status) && !verifiedCancellation {
+		items, loadErr := listAllItems(ctx, runner.store, turn.ID)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		if ActiveCancellationFence(items) {
+			return Snapshot{}, ErrConflict
+		}
 	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {

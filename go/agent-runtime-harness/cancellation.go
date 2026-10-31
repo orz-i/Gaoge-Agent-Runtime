@@ -80,6 +80,14 @@ func (runner *Runner) cancelRuntimeRun(
 			return kernel.Snapshot{}, false, fmt.Errorf("routed Handoff Run %q has no local execution-owner/canceller proof: %w", runID, ErrHandoffCancellationUnverified)
 		}
 	}
+	// For ordinary Root/Feature Runs as well, a native Canceller must be
+	// exactly the Runtime whose Run was loaded. Keep Handoff's earlier
+	// route-specific check and safe never-dispatched case authoritative.
+	// A wrong native Runtime did no physical work; its rejection is a
+	// Harness-minted pre-callback proof for cancellation-intent recovery.
+	if native, ok := runner.cancellation.(*kernel.Runtime); ok && native != runner.runtime {
+		return kernel.Snapshot{}, false, cancellationReadNoEffect{cause: fmt.Errorf("native Canceller is not the Harness Kernel: %w", ErrConflict)}
+	}
 	var lastNativeNoEffect error
 	for range maxRuntimeSyncRetryAttempts {
 		current, err := runner.runtime.Load(ctx, runID)
