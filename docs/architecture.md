@@ -83,6 +83,18 @@ can use the existing Host-composed `ApplicationCapabilityExecutor`; there
 is no unverified generic FeatureDriver registry. See
 [ADR 0012](adr/0012-host-selected-capabilities-and-external-model-providers.md).
 
+## Indexed Harness child admission and parent liveness
+
+A child `Start*Invocation` must name an existing, same-Turn parent Item.
+The admission-time `validateParentItem` now uses a single indexed
+`Store.GetItem` read; it does not scan the entire Turn history. The
+physical-dispatch fence independently walks that Item's ancestor chain
+and rejects a terminated parent at the last authorized boundary.
+`RefreshInvocation` and `ResumeInvocation` are child-only; root execution
+is observed through `Refresh(turnID)` and native Agent continuation through
+`ResumeTurn(turnID)`. `RetryInvocation` retains its explicit frozen
+root/child retry semantics. See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md).
+
 ## Indexed Harness parent liveness
 
 The Harness Store owns immutable, globally unique Item IDs. Every

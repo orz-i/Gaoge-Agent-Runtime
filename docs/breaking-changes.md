@@ -2,6 +2,37 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
+
+**Go API behavior hard cut:** `Runner.RefreshInvocation` and
+`Runner.ResumeInvocation` are child-only APIs; passing a top-level
+Invocation ID (empty `ParentItemID`) now returns `ErrInvalidRequest`
+before any projection or physical dispatch. Root callers must use
+`Runner.Refresh(turnID)` (all root Features), `Runner.ResumeTurn(turnID)`
+(for the native Agent), or their explicitly selected root Feature's
+start/replay/Continuation path. The old root Application convenience read
+through child entrypoints is deleted rather than bridged. This does not
+change legitimate `RetryInvocation` handling for frozen root attempts.
+
+**Child admission and indexed lookup:** A child `Start*Invocation` now
+requires a nonempty `ParentItemID`, explicitly rejecting missing parent
+identity before creating child state. The shared optional Interaction
+parent remains optional. Existing parent ID validation uses one
+`Store.GetItem` call, verifying the global ID, exact owning Turn and
+positive persisted Seq; missing/foreign IDs are invalid, corrupt Items
+or Store errors fail closed. The independent final pre-dispatch ancestor
+liveness fence remains authoritative: admission lookup is not permission
+to execute after a parent terminates.
+
+**No persistence conversion:** The existing indexed `Store.GetItem`
+contract (PR #79), Kernel Run, Turn/Invocation statuses, execution IDs,
+receipts, CAS, SQL tables, schemas and retry protocols are unchanged.
+There is no compatibility alias, dual root path, implicit Intent Router
+or version bump. Hosts with root-ID `RefreshInvocation`/
+`ResumeInvocation` call sites must update source. No migration of
+in-flight Runs or rewriting old execution evidence is authorized.
+See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md).
+
 ## 2026-10-30 — Host command presentation removed from Harness (beta.24 candidate)
 
 **Go public API hard cut:** `harness.CommandDescriptor` no longer carries
