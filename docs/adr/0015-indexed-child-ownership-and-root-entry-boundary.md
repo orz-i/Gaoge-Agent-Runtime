@@ -172,14 +172,23 @@ instead found two narrower, testable defects in the public child boundary.
     safe ChildRunner-owned protocol, which this candidate does not invent.
     The same durable Handoff identity now excludes both Role and Member
     specialists from supervisor Context Window hydration on Run Resume.
-15. **Handoff completion receipts must match frozen destination identity.**
-    `dispatchHandoff` now compares returned `ID`, `ChildRunID`, `MemberID`,
-    `MemberRevision`, `RoleID`, `RoleRevision`, `RoleName`, and `Goal` with
-    the exact original delegation before closing its child-owned grant.
-    Only lifecycle status, result, and error fields may be projected as
-    execution outcomes. A wrong Member/Role revision or goal remains
-    outcome-unknown; the grant fences duplicate StartOrLoad until explicit
-    read-only reconciliation or quarantine. No invented completion receipt.
+15. **Handoff completion receipts must match the entire frozen execution envelope.**
+    Before dispatch, `dispatchHandoff` verifies the requested Delegation
+    against the child's immutable, hashed `Invocation.Input`. After physical
+    `StartOrLoad`, it compares the returned Delegation against an independent
+    decoded copy of that persisted proof: destination identity (`ID`,
+    `ChildRunID`, Member/Role IDs, revisions, name and Goal), Instructions,
+    Model, exact nonempty ModelOptions bytes, ordered ToolKeys/InitialToolKeys,
+    HostedToolGrants (including definition versions), and Limits all remain
+    frozen. Only `Status`, `Result`, `ErrorCode` and `Error` may change; empty
+    versus nil slices carry the same empty authority. A complete structural
+    comparison makes newly added Delegation fields immutable by default.
+    It must not compare against the slice-backed caller value, because a
+    custom HandoffStarter may mutate a passed ToolKey/HostedGrant slice in
+    place and thereby corrupt both sides of such a comparison. Any mismatch
+    remains outcome-unknown with the existing child grant held; replays cannot
+    redispatch. A changed request is rejected before the grant or remote
+    effect. No invented completion receipt or new persistence contract.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -258,4 +267,5 @@ and [fifth PR #82 child Run identity proof remediation](../audits/2026-10-31-pr8
 and [sixth PR #82 intermediate Application effect-claim correction](../audits/2026-10-31-pr82-unclaimed-application-parent-remediation.md)
 and [seventh PR #82 Member Handoff / Run-kind correction](../audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md)
 and [eighth PR #82 Handoff provenance and receipt hard cut](../audits/2026-10-31-pr82-handoff-provenance-and-receipt-hardcut.md)
+and [ninth PR #82 Handoff frozen execution receipt correction](../audits/2026-10-31-pr82-handoff-frozen-execution-receipt-remediation.md)
 for exact evidence. Independent PR merge/release admission remains separate.

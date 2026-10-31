@@ -106,15 +106,22 @@ the remote Member, Role policy, context, model or tool authorization to a
 local Agent. Both delegated forms also exclude supervisor Context Window
 rehydration on direct child Run Resume. Operators must observe/reconcile the
 original ChildRunner execution, not infer permission to start a new Run.
-Finally, a returned Handoff receipt must match the original Member ID and
-revision, Role ID and revision, Role name, child Run ID, delegation ID and
-Goal; a mismatch leaves the original grant unresolved and replay blocked.
+Finally, a returned Handoff receipt must preserve the complete execution
+policy sealed in the child Invocation's hashed Input: Member/Role destination,
+Goal, Instructions, Model and ModelOptions, ordered ToolKeys and InitialToolKeys,
+HostedToolGrants/versions, and Limits. Only Status, Result and ErrorCode/Error
+may change; nil and allocated-empty slices remain equivalent. The received
+reply is checked against an independently decoded persisted source, not the
+caller-owned slice backing arrays that a custom ChildRunner could mutate.
+A mismatched reply remains outcome-unknown with the original grant unresolved
+and replay blocked. A mismatched request is rejected before remote execution.
 No new persistence table, schema version, alternate router, or compatibility
 bridge is introduced. Reconcile or quarantine incomplete historical
 Handoff Invocations rather than guessing their execution provenance.
-See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
-and [PR #82 seventh remediation](audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md)
-and [eighth provenance/receipt correction](audits/2026-10-31-pr82-handoff-provenance-and-receipt-hardcut.md).
+See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md),
+[PR #82 seventh remediation](audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md),
+[eighth provenance/receipt correction](audits/2026-10-31-pr82-handoff-provenance-and-receipt-hardcut.md),
+and [ninth frozen-execution receipt correction](audits/2026-10-31-pr82-handoff-frozen-execution-receipt-remediation.md).
 
 ## 2026-10-30 — Host command presentation removed from Harness (beta.24 candidate)
 
