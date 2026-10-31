@@ -224,6 +224,29 @@ features after actual physical execution will now return `ErrConflict`.
 This is a pre-stable Go behavioral hard cut, with no schema or wire
 migration and no compatibility adapter.
 
+**Additional PR #82 P1 hard cut — authoritative Grant settlement and Item origin:**
+A physical Dispatch Grant now has exactly one verifiable completion fact.
+A Diagnostic Completion must reference the original Grant, have a later
+sequence, the exact same Turn/Invocation/Run, and one recognized physical
+boundary. Memory and PostgreSQL Store append reject foreign, duplicate and
+contradictory completion claims under the existing Turn lock. All
+`PendingExecutionDispatch`, Retry, native recovery and Handoff cancellation
+checks use this same closed-set verifier. Missing, conflicting, unknown or
+mismatched historical receipts retain the unsettled physical fence; neither
+an unrelated Completion nor a later `physical_dispatch_rejected` can cancel
+an earlier `physical_dispatch_returned` and grant an unsafe Retry.
+
+An Item with a nonempty `InvocationID` but no physical `RunID` cannot serve
+as child-execution parent authority. Prior to this hard cut, an old runless
+Tool Item still attached to a stable Root Invocation could create a new Team
+after Root Retry. Truly Host-owned Items with neither InvocationID nor RunID
+retain their no-Run semantics; owned Items must preserve their original Run
+provenance. Existing incorrectly stamped Items must be drained/quarantined
+rather than rebound to a new Attempt. This changes pre-stable behavior and
+test fixtures without adding Item columns, Store APIs, schema migrations or
+compatibility adapters. See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
+and [dispatch receipt and Item-origin remediation](audits/2026-10-31-pr82-dispatch-settlement-and-runless-origin-remediation.md).
+
 No new persistence table, schema version, alternate router, or compatibility
 bridge is introduced. Reconcile or quarantine incomplete historical
 Handoff Invocations rather than guessing their execution provenance.

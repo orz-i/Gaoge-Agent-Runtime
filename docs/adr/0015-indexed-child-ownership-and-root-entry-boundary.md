@@ -319,6 +319,37 @@ instead found two narrower, testable defects in the public child boundary.
     silently replaying potentially active descendants. No new Store API,
     relation schema, dual router, synthetic cleanup receipt, or compatibility
     bridge is added.
+23. **A physical Dispatch Grant has one owner-bound settlement.** The
+    next independent P1 review reproduced a diagnostic completion from an
+    unrelated Invocation/Run closing another Grant in both Memory and SQL,
+    allowing Failed projection and a new Agent Attempt despite the original
+    physical effect remaining unknown. It also reproduced a composite Team
+    Grant with *both* `physical_dispatch_returned` and
+    `physical_dispatch_rejected` receipts (different Item IDs); the previous
+    Retry helper trusted the latter while ignoring the contradictory effect.
+    Memory, PostgreSQL and all admission/Retry/cancellation/native recovery
+    readers now share `VerifiedExecutionDispatchReceipt`: exactly one
+    recognized Diagnostic Completion, the same Turn/Invocation/Run and
+    original Grant ID, with a later immutable sequence number. Missing,
+    duplicate, contradictory, foreign, invalid or pre-Grant facts never
+    settle a physical Grant. The Store's existing Turn-locked `AppendItem`
+    rejects a second or foreign settlement at write time; legacy malformed
+    records also fail closed on read. Both composite and Accepted-child
+    no-effect checks consume this same verified boundary instead of
+    independent maps of loosely matched receipt IDs. No extra DDL, journal
+    schema, remote completion claim or compatibility layer is introduced.
+24. **Runless owned Items cannot authorize a new Attempt.** A third
+    independent P1 test reproduced an old Tool Item with the previous
+    Invocation ID but no RunID being accepted under its owner's new
+    Attempt, issuing a fresh Team physical Start. The previous
+    `requireItemOwnerAttempt` treated an empty RunID as universally
+    Host-owned. It now rejects an Item whose `InvocationID` is nonempty
+    but whose `RunID` has no physical provenance when that Item is used
+    to authorize child execution. Only a genuinely Host-owned Item,
+    carrying *neither* InvocationID nor RunID, may use that explicit
+    no-Run path. Owned Host-created Items intended to authorize new
+    children must persist the originating Run identity. This is a
+    pre-stable behavioral hard cut with no heuristic backfill or bridge.
 
 ## Breaking change, upgrade, and exclusions
 
