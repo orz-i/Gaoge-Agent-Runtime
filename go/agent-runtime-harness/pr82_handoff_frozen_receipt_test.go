@@ -113,6 +113,42 @@ func TestPR82HandoffFrozenExecutionScopeAllowsEmptySliceProjection(t *testing.T)
 	}
 }
 
+// Admission through json.Marshal(Delegation) normalizes the RawMessage. The
+// originally supplied valid JSON can have different whitespace or escaping
+// without changing the frozen, canonical execution authority.
+func TestPR82HandoffFrozenExecutionScopeAcceptsCanonicalOptions(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  json.RawMessage
+	}{
+		{"compact", json.RawMessage(`{"temperature":0,"top_p":0.5}`)},
+		{"whitespace", json.RawMessage(`{ "temperature": 0, "top_p": 0.5 }`)},
+		{"escaping", json.RawMessage(`{"message":"<review>"}`)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPR82HandoffFixture(t)
+			requested := pr82FrozenReceiptDelegation(true)
+			requested.ModelOptions = tc.raw
+			if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, requested, f.startedItemID); err != nil {
+				t.Fatal(err)
+			}
+			f.handoff.result = func(d handoff.Delegation) (handoff.Delegation, error) {
+				d.Status = handoff.StatusRunning
+				return d, handoff.ErrChildPending
+			}
+			result, err := f.runner.dispatchHandoff(t.Context(), f.turn, f.parentRun, requested, f.startedItemID)
+			if !errors.Is(err, handoff.ErrChildPending) || errors.Is(err, ErrExecutionOutcomeUnknown) ||
+				result.Status != handoff.StatusRunning || f.handoff.calls != 1 {
+				t.Fatalf("valid canonical JSON rejected before physical dispatch: result=%+v err=%v calls=%d", result, err, f.handoff.calls)
+			}
+			items, loadErr := f.store.ListItems(t.Context(), f.turn.ID, 0, 500)
+			if loadErr != nil || PendingExecutionDispatch(items, "") {
+				t.Fatalf("valid Handoff left pending physical grant: %v", loadErr)
+			}
+		})
+	}
+}
+
 // Even a caller with a matching Run/Member ID cannot change the persisted
 // execution policy before dispatch. No grant or remote effect is admitted.
 func TestPR82HandoffFrozenExecutionScopeRejectsChangedRequestBeforeGrant(t *testing.T) {

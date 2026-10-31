@@ -337,20 +337,32 @@ func (runner *Runner) dispatchHandoff(
 // A Handoff reply may project only outcome fields. Compare the full frozen
 // execution envelope, not a selected identity subset: any future Delegation
 // field is immutable by default until explicitly admitted as an outcome.
-// It preserves exact nonempty JSON bytes and ordered slice identity. Empty
-// slices and nil are equivalent: Handoff's cloneDelegation uses append(nil, ...)
+// It preserves the exact persisted JSON representation and ordered slice
+// identity. encoding/json compacts and escapes RawMessage when persisting
+// Invocation.Input, so compare its canonical wire representation rather than
+// rejecting the original valid request's whitespace or escaping. Empty slices
+// and nil are equivalent: Handoff's cloneDelegation uses append(nil, ...)
 // and legitimately projects a previously allocated empty ToolKeys slice as nil.
 func sameHandoffFrozenExecution(expected, returned handoff.Delegation) bool {
 	returned.Status, returned.Result = expected.Status, expected.Result
 	returned.ErrorCode, returned.Error = expected.ErrorCode, expected.Error
-	normalizeEmptyHandoffFields(&expected)
-	normalizeEmptyHandoffFields(&returned)
+	if !normalizeHandoffForComparison(&expected) || !normalizeHandoffForComparison(&returned) {
+		return false
+	}
 	return reflect.DeepEqual(expected, returned)
 }
 
-func normalizeEmptyHandoffFields(value *handoff.Delegation) {
+func normalizeHandoffForComparison(value *handoff.Delegation) bool {
 	if len(value.ModelOptions) == 0 {
 		value.ModelOptions = nil
+	} else {
+		// json.Marshal(Delegation) applied this exact RawMessage
+		// normalization at admission. Invalid returned JSON fails closed.
+		canonical, err := json.Marshal(value.ModelOptions)
+		if err != nil {
+			return false
+		}
+		value.ModelOptions = canonical
 	}
 	if len(value.ToolKeys) == 0 {
 		value.ToolKeys = nil
@@ -361,6 +373,7 @@ func normalizeEmptyHandoffFields(value *handoff.Delegation) {
 	if len(value.HostedToolGrants) == 0 {
 		value.HostedToolGrants = nil
 	}
+	return true
 }
 
 func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn) error {
