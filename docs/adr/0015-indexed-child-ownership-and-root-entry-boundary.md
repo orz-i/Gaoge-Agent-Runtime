@@ -571,6 +571,26 @@ instead found two narrower, testable defects in the public child boundary.
     valid whitespace-bearing requests without stranding a physically started
     child; it does not permit a different task or execution route.
 
+39. **Cancellation scope closes over both ownership graphs.** Native
+    `CancelInvocation`, `CancelSubtask` and Application subtree cancellation
+    share the same closure of RunRelation and frozen/Item Invocation ancestry.
+    A completed Application intermediary cannot hide a live native grandchild
+    from physical cleanup. Discovery repeats across alternating graph edges,
+    so descendants of newly discovered native Runs are also fenced before
+    cancellation. Only precise owned descendants are physically changed;
+    conservative no-relation admission checks never authorize sibling cleanup
+    or a WaitingInput-to-Cancelled CAS on an unrelated Interaction owner.
+    Unknown child outcomes retain the original intent.
+
+40. **Interaction callbacks are child effects, not read-only recovery.** A
+    newly elected response callback checks frozen parent Attempts before its
+    WaitingInput-to-Running claim and again after the claim, immediately before
+    Host dispatch. If the final check rejects, the callback was not entered:
+    use the existing definitive no-effect reset. An already-Running unknown
+    callback is never reset or replayed merely because its parent terminated.
+    This is the same child authority boundary as initial Application dispatch,
+    with no new receipt format, state machine or persistence schema.
+
 ## Breaking change, upgrade, and exclusions
 
 The Go `Runner.RefreshInvocation` and `Runner.ResumeInvocation` contract

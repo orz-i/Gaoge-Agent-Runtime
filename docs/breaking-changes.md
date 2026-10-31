@@ -4,6 +4,16 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 mixed ownership and child Interaction correction:**
+Native child cancellation closes over both RunRelation and frozen/Item
+ancestry, including native grandchildren behind completed Application
+intermediaries. Unrelated siblings are not selected for physical cleanup.
+Child Interaction response callbacks require their frozen parent Attempts
+to remain live before and after the dispatch claim. A final pre-callback
+rejection returns the existing no-effect error and resets only that new,
+undispatched claim. Already-Running unknown callbacks remain unchanged.
+No new Store API, persisted receipt, schema or state enum. See [second audit](audits/2026-10-31-pr82-mixed-scope-and-interaction-parent-fence.md).
+
 **PR #82 direct-target and Application subtree cancellation correction:**
 Direct `CancelSubtask` of an external RunRelation member now fails closed
 with `ErrRuntimeCancellationUnverified`, matching traversal-based cleanup.
