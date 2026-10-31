@@ -187,7 +187,10 @@ func (runner *Runner) requireItemOwnerAttempt(
 		return ErrConflict
 	}
 	if item.RunID == "" {
-		return nil // Host-owned Items can have no physical Run.
+		if item.InvocationID != "" {
+			return ErrConflict // An owned Item without Run provenance cannot bind to a new Attempt.
+		}
+		return nil // A genuinely Host-owned Item has no Invocation or physical Run.
 	}
 	return runner.requireRunDescendsFrom(ctx, item.RunID, owner.ExecutionRefID)
 }

@@ -35,8 +35,8 @@ func TestRequireLiveInvocationParentsReadsOnlyAncestorItems(t *testing.T) {
 		}
 	}
 	for _, item := range []Item{
-		{ID: "root-owner-item", TurnID: turnID, InvocationID: "root-owner", Kind: ItemInvocation, Status: ItemStarted},
-		{ID: "middle-owner-item", TurnID: turnID, InvocationID: "middle-owner", ParentItemID: "root-owner-item",
+		{ID: "root-owner-item", TurnID: turnID, InvocationID: "root-owner", RunID: "host-root-owner", Kind: ItemInvocation, Status: ItemStarted},
+		{ID: "middle-owner-item", TurnID: turnID, InvocationID: "middle-owner", RunID: "host-middle-owner", ParentItemID: "root-owner-item",
 			Kind: ItemInvocation, Status: ItemStarted},
 	} {
 		if _, _, err := backing.AppendItem(t.Context(), item); err != nil {

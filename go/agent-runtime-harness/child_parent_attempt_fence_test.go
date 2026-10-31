@@ -9,8 +9,9 @@ import (
 
 // The original PR #82 root proof is insufficient for a grandchild whose
 // intermediate parent retries while the root remains on the same Attempt.
-// Test both Host artifacts (without a RunID) and delegation Items, whose
-// RunID refers to the child rather than the recorded Invocation owner.
+// Test Run-stamped artifacts and delegation Items, whose RunID refers
+// to the child rather than the recorded Invocation owner. A Run-less Item
+// claiming Invocation ownership cannot authorize a new physical child.
 func TestChildParentAttemptRemainsFrozenAfterIntermediateRetry(t *testing.T) {
 	for _, kind := range []ItemKind{ItemArtifact, ItemDelegation, ItemInvocation} {
 		t.Run(string(kind), func(t *testing.T) {
@@ -26,10 +27,10 @@ func TestChildParentAttemptRemainsFrozenAfterIntermediateRetry(t *testing.T) {
 				ParentItemID: parent.ParentItemID, InvocationID: parent.ID,
 				Kind: kind, Status: ItemCompleted,
 			}
-			parentItem.RunID = map[ItemKind]string{
-				ItemDelegation: "delegated-child-not-parent-run",
-				ItemInvocation: parent.ExecutionRefID,
-			}[kind]
+			parentItem.RunID = parent.ExecutionRefID
+			if kind == ItemDelegation {
+				parentItem.RunID = "delegated-child-not-parent-run"
+			}
 			if kind == ItemDelegation {
 				parentItem.Payload, err = json.Marshal(delegationItemPayload{
 					ParentRunID: parent.ExecutionRefID, ChildRunID: parentItem.RunID,
