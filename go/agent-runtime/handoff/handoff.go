@@ -184,7 +184,7 @@ func (coordinator *Coordinator) StartOrLoad(
 	parent kernel.Snapshot,
 	delegation Delegation,
 ) (Delegation, error) {
-	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || parent.Run.ID == "" {
+	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || !validParentOrigin(parent.Run) {
 		return Delegation{}, ErrInvalidDelegation
 	}
 	children, err := coordinator.resolveChild(ctx, delegation)
@@ -193,7 +193,7 @@ func (coordinator *Coordinator) StartOrLoad(
 	}
 	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err == nil {
-		if !verifiedChildRun(delegation, child) {
+		if !verifiedChildRun(delegation, parent.Run, child) {
 			return Delegation{}, ErrChildRunUnverified
 		}
 		return projectChild(delegation, child), childStateError(child)
@@ -219,15 +219,17 @@ func (coordinator *Coordinator) StartOrLoad(
 	if child.Run.ID == "" && err != nil {
 		return Delegation{}, err
 	}
-	if !verifiedChildRun(delegation, child) {
+	if !verifiedChildRun(delegation, parent.Run, child) {
 		return Delegation{}, errors.Join(ErrChildRunUnverified, err)
 	}
 	return projectChild(delegation, child), errors.Join(childStateError(child), err)
 }
 
-// Refresh projects the current Child Run into one Delegation without starting it.
-func (coordinator *Coordinator) Refresh(ctx context.Context, delegation Delegation) (Delegation, error) {
-	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) {
+// Refresh projects one Child Run without starting it. The caller must supply
+// the authoritative parent Run: the Delegation alone does not freeze an
+// Actor/Thread proof and cannot authorize an unrelated Run on lookup.
+func (coordinator *Coordinator) Refresh(ctx context.Context, parent kernel.Snapshot, delegation Delegation) (Delegation, error) {
+	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || !validParentOrigin(parent.Run) {
 		return Delegation{}, ErrInvalidDelegation
 	}
 	children, err := coordinator.resolveChild(ctx, delegation)
@@ -238,7 +240,7 @@ func (coordinator *Coordinator) Refresh(ctx context.Context, delegation Delegati
 	if err != nil {
 		return Delegation{}, err
 	}
-	if !verifiedChildRun(delegation, child) {
+	if !verifiedChildRun(delegation, parent.Run, child) {
 		return Delegation{}, ErrChildRunUnverified
 	}
 	return projectChild(delegation, child), childStateError(child)
@@ -247,8 +249,15 @@ func (coordinator *Coordinator) Refresh(ctx context.Context, delegation Delegati
 // A Delegation's ChildRunID comes from the request, not the ChildRunner's
 // snapshot. Never let projection copy that requested ID into a seemingly
 // verified receipt for another (or an invalid) physical Run.
-func verifiedChildRun(delegation Delegation, child kernel.Snapshot) bool {
+func validParentOrigin(parent kernel.Run) bool {
+	return strings.TrimSpace(parent.ID) != "" &&
+		strings.TrimSpace(parent.Actor.TenantID) != "" && strings.TrimSpace(parent.Actor.ActorID) != "" &&
+		strings.TrimSpace(parent.Thread.Kind) != "" && strings.TrimSpace(parent.Thread.ID) != ""
+}
+
+func verifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Snapshot) bool {
 	if child.Run.ID != delegation.ChildRunID ||
+		child.Run.Actor != parent.Actor || child.Run.Thread != parent.Thread ||
 		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
 		return false
 	}

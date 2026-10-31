@@ -61,7 +61,7 @@ func TestHandoffStartOrLoadRejectsUnverifiedChildSnapshots(t *testing.T) {
 				ID: "handoff", MemberID: "analyst", ChildRunID: wantedID,
 				Goal: "inspect", Status: handoff.StatusQueued,
 			}
-			parent := kernel.Snapshot{Run: kernel.Run{ID: "parent"}}
+			parent := verifiedHandoffParent()
 			observed, err := coordinator.StartOrLoad(t.Context(), parent, delegation)
 			if !errors.Is(err, handoff.ErrChildRunUnverified) || observed.ChildRunID != "" ||
 				observed.ID != "" || child.starts != tc.expectedStart {
@@ -91,7 +91,7 @@ func TestHandoffRefreshRejectsUnverifiedChildSnapshots(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			projected, err := coordinator.Refresh(t.Context(), handoff.Delegation{
+			projected, err := coordinator.Refresh(t.Context(), verifiedHandoffParent(), handoff.Delegation{
 				ID: "handoff", MemberID: "analyst", ChildRunID: "expected-child",
 				Goal: "inspect", Status: handoff.StatusRunning,
 			})

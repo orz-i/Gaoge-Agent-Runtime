@@ -87,7 +87,7 @@ func TestRoutedCoordinatorFailsClosedWithoutChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = coordinator.Refresh(t.Context(), handoff.Delegation{
+	_, err = coordinator.Refresh(t.Context(), verifiedHandoffParent(), handoff.Delegation{
 		ID: "handoff", MemberID: "unknown", ChildRunID: "run", Goal: "goal", Status: handoff.StatusRunning,
 	})
 	if !errors.Is(err, handoff.ErrChildUnavailable) {

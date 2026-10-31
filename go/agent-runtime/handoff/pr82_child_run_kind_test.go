@@ -35,11 +35,9 @@ func TestPR82HandoffRejectsWrongChildRunKind(t *testing.T) {
 				}
 				var result handoff.Delegation
 				if source == "refresh" {
-					result, err = coordinator.Refresh(t.Context(), delegation)
+					result, err = coordinator.Refresh(t.Context(), verifiedHandoffParent(), delegation)
 				} else {
-					result, err = coordinator.StartOrLoad(t.Context(), kernel.Snapshot{
-						Run: kernel.Run{ID: "parent"},
-					}, delegation)
+					result, err = coordinator.StartOrLoad(t.Context(), verifiedHandoffParent(), delegation)
 				}
 				if !errors.Is(err, handoff.ErrChildRunUnverified) || result.ID != "" {
 					t.Fatalf("accepted child Run kind %q from %s: result=%+v err=%v", kind, source, result, err)

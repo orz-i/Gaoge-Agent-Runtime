@@ -74,7 +74,7 @@ func TestShadowRunnerSatisfiesHandoffWithoutA2AImportsInParent(t *testing.T) {
 	assertShadowRemoteRequest(t, remote, delegation)
 	assertShadowChildRunning(t, runner, delegation.ChildRunID)
 	remote.task = completedTask()
-	assertShadowDelegationCompleted(t, coordinator, started)
+	assertShadowDelegationCompleted(t, coordinator, parent, started)
 }
 
 func newShadowCoordinator(t *testing.T, runner *ShadowRunner) *handoff.Coordinator {
@@ -115,9 +115,9 @@ func assertShadowChildRunning(t *testing.T, runner *ShadowRunner, runID string) 
 	}
 }
 
-func assertShadowDelegationCompleted(t *testing.T, coordinator *handoff.Coordinator, started handoff.Delegation) {
+func assertShadowDelegationCompleted(t *testing.T, coordinator *handoff.Coordinator, parent kernel.Snapshot, started handoff.Delegation) {
 	t.Helper()
-	completed, err := coordinator.Refresh(t.Context(), started)
+	completed, err := coordinator.Refresh(t.Context(), parent, started)
 	if err != nil || completed.Status != handoff.StatusCompleted || !json.Valid(completed.Result) {
 		t.Fatalf("completed=%#v err=%v", completed, err)
 	}
