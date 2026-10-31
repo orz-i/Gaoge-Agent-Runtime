@@ -15,7 +15,12 @@ import (
 // cancellation path. An unknown relation owner conservatively fences the
 // entire Turn rather than claim the cancellation was unrelated to an effect.
 func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, rootRunID string, writeAttempted *bool) error {
-	targets, err := runner.inspectRelatedCancellation(ctx, turn, rootRunID)
+	if _, err := runner.inspectRelatedCancellation(ctx, turn, rootRunID); err != nil {
+		return err
+	}
+	// Admission may conservatively inspect all owners when relations are
+	// unavailable. Its fallback is not authority to mutate waiting siblings.
+	_, targets, _, err := runner.collectCancellationScope(ctx, turn, rootRunID)
 	if err != nil {
 		return err
 	}
