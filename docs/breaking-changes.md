@@ -90,8 +90,31 @@ do not manually close the grant, rotate its ID, or repeat StartOrLoad.
 Hosts operating remote ChildRunners must return an authorized Agent or
 A2A shadow Run kind, not an arbitrary custom Kernel kind. There is no
 fallback to the prior unfenced MemberID path.
+
+**Handoff retry/resume and context hard cut (eighth PR #82 audit):**
+A Role-selected *or* MemberID-only delegated child is an externally routed
+Handoff Invocation, **not** a native Agent simply because its execution class
+is `agent`. The frozen, hashed Delegation Input and deterministic Invocation
+identity now distinguish both forms without consulting optional `RoleID`.
+`RetryInvocation` rejects Handoff children with `ErrConflict` **before**
+rotating their Attempt/ExecutionRefID; `ResumeInvocation` and the shared
+Interaction Agent continuation reject them with `ErrInvalidRequest`
+**before** recording any physical dispatch grant.
+The old `startRetriedRole` adapter (which used `runner.agent.StartRun` instead
+of the original Handoff route) is deleted. Neither method silently switches
+the remote Member, Role policy, context, model or tool authorization to a
+local Agent. Both delegated forms also exclude supervisor Context Window
+rehydration on direct child Run Resume. Operators must observe/reconcile the
+original ChildRunner execution, not infer permission to start a new Run.
+Finally, a returned Handoff receipt must match the original Member ID and
+revision, Role ID and revision, Role name, child Run ID, delegation ID and
+Goal; a mismatch leaves the original grant unresolved and replay blocked.
+No new persistence table, schema version, alternate router, or compatibility
+bridge is introduced. Reconcile or quarantine incomplete historical
+Handoff Invocations rather than guessing their execution provenance.
 See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
-and [PR #82 seventh remediation](audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md).
+and [PR #82 seventh remediation](audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md)
+and [eighth provenance/receipt correction](audits/2026-10-31-pr82-handoff-provenance-and-receipt-hardcut.md).
 
 ## 2026-10-30 — Host command presentation removed from Harness (beta.24 candidate)
 

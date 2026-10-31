@@ -153,6 +153,34 @@ instead found two narrower, testable defects in the public child boundary.
     LoadRun, StartRun and Refresh. The A2A adapter uses the shared
     constant rather than duplicating its value.
 
+14. **Handoff execution provenance also fences public retry and resume.**
+    A delegated child is not a generic native Agent Invocation just because
+    its `ExecutionClass` is `agent`. The eighth independent PR #82 review
+    reproduced `RetryInvocation` physically starting a *local* Agent instead
+    of the original Handoff ChildRunner for MemberID-only children, and
+    showed that the former Role retry adapter had the same provenance
+    problem. `isHandoffDelegationInvocation` now recognizes the immutable
+    hashed Handoff admission by its deterministic child Invocation identity,
+    required MemberID and original ChildRunID (never by optional RoleID).
+    **All** Handoff child retries fail with `ErrConflict` before Attempt CAS,
+    and public `ResumeInvocation` fails with `ErrInvalidRequest` before any
+    physical dispatch grant. The internal shared Agent continuation used by
+    resolved Interactions enforces the same source fence before native Resume.
+    The obsolete `startRetriedRole` local adapter is
+    removed rather than preserved as an implicit fallback. Read-only child
+    observation remains possible; physical continuation requires an explicit
+    safe ChildRunner-owned protocol, which this candidate does not invent.
+    The same durable Handoff identity now excludes both Role and Member
+    specialists from supervisor Context Window hydration on Run Resume.
+15. **Handoff completion receipts must match frozen destination identity.**
+    `dispatchHandoff` now compares returned `ID`, `ChildRunID`, `MemberID`,
+    `MemberRevision`, `RoleID`, `RoleRevision`, `RoleName`, and `Goal` with
+    the exact original delegation before closing its child-owned grant.
+    Only lifecycle status, result, and error fields may be projected as
+    execution outcomes. A wrong Member/Role revision or goal remains
+    outcome-unknown; the grant fences duplicate StartOrLoad until explicit
+    read-only reconciliation or quarantine. No invented completion receipt.
+
 ## Breaking change, upgrade, and exclusions
 
 The Go `Runner.RefreshInvocation` and `Runner.ResumeInvocation` contract
@@ -229,4 +257,5 @@ and [fourth PR #82 Role Handoff physical-dispatch remediation](../audits/2026-10
 and [fifth PR #82 child Run identity proof remediation](../audits/2026-10-31-pr82-handoff-child-run-proof-remediation.md)
 and [sixth PR #82 intermediate Application effect-claim correction](../audits/2026-10-31-pr82-unclaimed-application-parent-remediation.md)
 and [seventh PR #82 Member Handoff / Run-kind correction](../audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md)
+and [eighth PR #82 Handoff provenance and receipt hard cut](../audits/2026-10-31-pr82-handoff-provenance-and-receipt-hardcut.md)
 for exact evidence. Independent PR merge/release admission remains separate.
