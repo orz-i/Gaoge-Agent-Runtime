@@ -32,19 +32,54 @@ func TestTypedFeatureInvocationsShareHarnessTurnAndRecoverByTurnID(t *testing.T)
 	assertRecoveredFeatureInvocationTree(t, runner, turnID, relations, parentRunID)
 }
 
-func TestRetryInvocationAdvancesOneAttemptAndReplaysTerminalAttempt(t *testing.T) {
-	t.Parallel()
-	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
-	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
-		ParentItemID: parentItemID, RequestID: "retry-team", Goal: "retry this team",
-		Mode: team.ExecutionSequential, Members: []team.Member{{ID: retryTeamMemberID, Goal: retryTeamMemberGoal}},
+var errRetryTeamNoEffect = errors.New("retry Team was rejected before any physical effects")
+
+type retryNoEffectTeamFeature struct {
+	runtime *kernel.Runtime
+	starts  int
+}
+
+func (feature *retryNoEffectTeamFeature) StartRun(ctx context.Context, request team.StartRequest) (kernel.Snapshot, error) {
+	feature.starts++
+	if feature.starts == 1 {
+		return kernel.Snapshot{}, harness.FeatureStartNoEffect(errRetryTeamNoEffect)
+	}
+	return completedTeamFeature{runtime: feature.runtime}.StartRun(ctx, request)
+}
+
+func (feature *retryNoEffectTeamFeature) Resume(ctx context.Context, runID string, revision uint64) (kernel.Snapshot, error) {
+	return completedTeamFeature{runtime: feature.runtime}.Resume(ctx, runID, revision)
+}
+
+func newRetryNoEffectTeamHarness(t *testing.T) (*harness.Runner, string, string, *harness.MemoryStore, *retryNoEffectTeamFeature) {
+	t.Helper()
+	_, turnID, parentID, relations, _, store, runtime := newFeatureInvocationHarness(t)
+	feature := &retryNoEffectTeamFeature{runtime: runtime}
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store,
+		Clock: featureInvocationClock{}, Teams: feature, Relations: relations,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := teamChildInvocation(t, started)
-	failed := markInvocationFailed(t, store, first)
+	return runner, turnID, parentID, store, feature
+}
 
+func TestRetryInvocationAdvancesOneAttemptAndReplaysTerminalAttempt(t *testing.T) {
+	t.Parallel()
+	runner, turnID, parentItemID, _, _ := newRetryNoEffectTeamHarness(t)
+	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
+		ParentItemID: parentItemID, RequestID: "retry-team", Goal: "retry this team",
+		Mode: team.ExecutionSequential, Members: []team.Member{{ID: retryTeamMemberID, Goal: retryTeamMemberGoal}},
+	})
+	if !errors.Is(err, errRetryTeamNoEffect) {
+		t.Fatalf("first Team must provide definitive no-effect proof: %v", err)
+	}
+	failed := teamChildInvocation(t, started)
+	if failed.Status != harness.InvocationFailed {
+		t.Fatalf("no-effect Team did not fail durably: %+v", failed)
+	}
+	first := failed
 	retried, err := runner.RetryInvocation(t.Context(), failed.ID)
 	if err != nil {
 		t.Fatalf("retry invocation: %v", err)
@@ -53,7 +88,7 @@ func TestRetryInvocationAdvancesOneAttemptAndReplaysTerminalAttempt(t *testing.T
 	if second.Attempt != 2 || second.Status != harness.InvocationCompleted || second.ExecutionRefID == first.ExecutionRefID {
 		t.Fatalf("retry did not advance exactly one attempt: first=%#v second=%#v", first, second)
 	}
-	if got := invocationArtifactCount(retried.Items, second.ID); got != 2 {
+	if got := invocationArtifactCount(retried.Items, second.ID); got != 1 {
 		t.Fatalf("retry artifacts=%d items=%#v", got, retried.Items)
 	}
 
@@ -69,16 +104,15 @@ func TestRetryInvocationAdvancesOneAttemptAndReplaysTerminalAttempt(t *testing.T
 
 func TestRetryInvocationRecoversAcceptedAttemptWithoutAllocatingAnother(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, store, _ := newRetryNoEffectTeamHarness(t)
 	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
 		ParentItemID: parentItemID, RequestID: "retry-crash-team", Goal: "recover retry",
 		Mode: team.ExecutionSequential, Members: []team.Member{{ID: retryTeamMemberID, Goal: retryTeamMemberGoal}},
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errRetryTeamNoEffect) {
+		t.Fatalf("first Team did not certify no effect: %v", err)
 	}
-	first := teamChildInvocation(t, started)
-	failed := markInvocationFailed(t, store, first)
+	failed := teamChildInvocation(t, started)
 	accepted, err := store.RetryInvocation(t.Context(), failed.ID, failed.Revision, "retry-crash-execution", featureInvocationClock{}.Now())
 	if err != nil || accepted.Attempt != 2 || accepted.Status != harness.InvocationAccepted {
 		t.Fatalf("seed accepted retry: %#v err=%v", accepted, err)
@@ -476,6 +510,105 @@ func completedChildArtifactCount(items []harness.Item) int {
 	return count
 }
 
+func TestChildOnlyInvocationEntriesRejectRootAndMissingParent(t *testing.T) {
+	runner, turnID, _, _, _, store, runtime := newFeatureInvocationHarness(t)
+	invocations, err := store.ListInvocations(t.Context(), turnID)
+	if err != nil || len(invocations) != 1 || invocations[0].ParentItemID != "" {
+		t.Fatalf("expected single root Invocation, got %#v: %v", invocations, err)
+	}
+	root := invocations[0]
+	previousTurn, err := store.GetTurn(t.Context(), turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousRun, err := runtime.Load(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, invoke := range map[string]func() (harness.Snapshot, error){
+		"RefreshInvocation": func() (harness.Snapshot, error) {
+			return runner.RefreshInvocation(t.Context(), root.ID)
+		},
+		"ResumeInvocation": func() (harness.Snapshot, error) {
+			return runner.ResumeInvocation(t.Context(), root.ID)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := invoke(); !errors.Is(err, harness.ErrInvalidRequest) {
+				t.Fatalf("root incorrectly handled by child-only entry: %v", err)
+			}
+			nextTurn, loadErr := store.GetTurn(t.Context(), turnID)
+			if loadErr != nil || nextTurn.Revision != previousTurn.Revision || nextTurn.Status != previousTurn.Status {
+				t.Fatalf("child-only entry altered root Turn: before=%#v after=%#v err=%v", previousTurn, nextTurn, loadErr)
+			}
+			nextRun, loadErr := runtime.Load(t.Context(), root.ExecutionRefID)
+			if loadErr != nil || nextRun.Run.Revision != previousRun.Run.Revision {
+				t.Fatalf("child-only entry advanced root execution: before=%#v after=%#v err=%v", previousRun.Run, nextRun.Run, loadErr)
+			}
+		})
+	}
+	_, err = runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
+		RequestID: "missing-parent", Goal: "must be an explicit child",
+		Mode: team.ExecutionSequential, Members: []team.Member{{ID: "member", Goal: "task"}},
+	})
+	if !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("child admission with no parent Item did not reject explicitly: %v", err)
+	}
+}
+
+func TestResumeInvocationCannotGrantPhysicalRootWorkflow(t *testing.T) {
+	runtime := newFeatureInvocationRuntime(t)
+	store := harness.NewMemoryStore()
+	now := featureInvocationClock{}.Now()
+	hostThread := harness.HostRef{Kind: testThreadKind, ID: "root-workflow-scope"}
+	hostTurn := harness.HostRef{Kind: testContextHostKind, ID: "root-workflow-turn"}
+	sessionID, err := harness.SessionID(hostThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := harness.TurnID(sessionID, hostTurn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := kernel.ActorRef{TenantID: testTenant, ActorID: testActor}
+	thread := kernel.ThreadRef{Kind: testThreadKind, ID: "root-workflow-scope"}
+	seedFeatureInvocationEnvelope(t, store, sessionID, turnID, hostThread, hostTurn, actor, now)
+	created, err := runtime.Create(t.Context(), kernel.CreateRequest{
+		ID: "root-workflow-runtime", Kind: workflow.RunKind, Actor: actor, Thread: thread,
+		RequestID: "workflow-root", Goal: "root workflow", State: json.RawMessage("{}"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := harness.Invocation{
+		ID: "root-workflow-invocation", TurnID: turnID, CapabilityKey: harness.CapabilityWorkflow,
+		ExecutionClass: harness.ExecutionWorkflow, ExecutionRefID: created.Run.ID,
+		Status: harness.InvocationRunning, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if _, _, err = store.CreateInvocation(t.Context(), root); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
+		Store: store, Clock: featureInvocationClock{}, Workflows: completedWorkflowFeature{runtime},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runner.ResumeInvocation(t.Context(), root.ID); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("root Workflow entered child-only resume: %v", err)
+	}
+	loaded, err := runtime.Load(t.Context(), created.Run.ID)
+	if err != nil || loaded.Run.Revision != created.Run.Revision {
+		t.Fatalf("root Workflow physically advanced: before=%#v after=%#v err=%v", created.Run, loaded.Run, err)
+	}
+	items, err := store.ListItems(t.Context(), turnID, 0, 10)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("child resume minted a physical dispatch grant on root: items=%#v err=%v", items, err)
+	}
+}
+
 func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string, *runrelation.Registry, string, *harness.MemoryStore, *kernel.Runtime) {
 	t.Helper()
 	runtime := newFeatureInvocationRuntime(t)
@@ -827,14 +960,18 @@ func finishBlockedWorkflowStart(t *testing.T, feature *blockedWorkflowFeature, r
 var errRetryTopLevelWorkflow = errors.New("retry top-level workflow fixture")
 
 type retryTopLevelWorkflowFeature struct {
-	runtime *kernel.Runtime
-	starts  int
+	runtime         *kernel.Runtime
+	starts          int
+	failAfterCreate bool
 }
 
 func (feature *retryTopLevelWorkflowFeature) StartRun(ctx context.Context, request workflow.StartRequest) (kernel.Snapshot, error) {
 	feature.starts++
 	if feature.starts > 1 {
 		return completeFeatureRun(ctx, feature.runtime, request.ID, workflow.RunKind, request.Actor, request.Thread, request.RequestID, request.Goal)
+	}
+	if !feature.failAfterCreate {
+		return kernel.Snapshot{}, harness.FeatureStartNoEffect(errRetryTopLevelWorkflow)
 	}
 	started, err := feature.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: workflow.RunKind, Actor: request.Actor, Thread: request.Thread,

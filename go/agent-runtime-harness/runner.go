@@ -549,7 +549,7 @@ type Dependencies struct {
 	Context      *runtimecontext.Manager
 	Catalog      tools.Catalog
 	Handoffs     HandoffStarter
-	Relations    runrelation.Recorder
+	Relations    RunRelationSource
 	Cancellation RuntimeCanceller
 	Interactions InteractionResponseHandler
 	Applications ApplicationCapabilityExecutor
@@ -560,8 +560,14 @@ type Dependencies struct {
 	ManualDelegationPolicy DelegationToolPolicy
 }
 
-type runRelationReader interface {
+// RunRelationSource is the complete indexed ownership capability required
+// when Harness is composed with persisted Run relations. A recorder or
+// ListChildren-only adapter cannot prove an Item's physical parent Attempt.
+// This is a deliberate pre-stable source break, not an optional runtime cast.
+type RunRelationSource interface {
+	runrelation.Recorder
 	ListChildren(context.Context, string) ([]runrelation.Relation, error)
+	GetByChild(context.Context, string) (runrelation.Relation, error)
 }
 
 // Runner owns durable Harness Session/Turn/Invocation/Item lifecycle. Runtime
@@ -579,7 +585,7 @@ type Runner struct {
 	catalog                tools.Catalog
 	handoffs               HandoffStarter
 	relations              runrelation.Recorder
-	relationReader         runRelationReader
+	relationReader         RunRelationSource
 	cancellation           RuntimeCanceller
 	interactions           InteractionResponseHandler
 	applications           ApplicationCapabilityExecutor
@@ -617,6 +623,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Cancellation == nil {
 		dependencies.Cancellation = dependencies.Runtime
 	}
+	// An unrelated native Kernel cannot cancel this Harness's Runs. Check
+	// composition up front and retain the operation-level fence as well.
+	if native, ok := dependencies.Cancellation.(*kernel.Runtime); ok && native != dependencies.Runtime {
+		return nil, ErrInvalidRequest
+	}
 	if dependencies.Interactions != nil {
 		if _, ok := dependencies.Agent.(agentResumer); !ok {
 			return nil, ErrInvalidRequest
@@ -637,9 +648,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		execution:              execution,
 		manualDelegationPolicy: dependencies.ManualDelegationPolicy,
 	}
-	if reader, ok := dependencies.Relations.(runRelationReader); ok {
-		runner.relationReader = reader
-	}
+	runner.relationReader = dependencies.Relations
 	return runner, nil
 }
 
@@ -889,21 +898,46 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
-		return runner.loadSnapshot(ctx, turn, nil)
-	}
+	// A terminal Harness Turn is not evidence that all RunRelation children
+	// stopped. Even a Failed/Completed root may have a still-running Team
+	// member or remote ChildRunner; reconcile its descendants under the
+	// standard durable cancellation fence before returning success.
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	if invocation.ExecutionClass == ExecutionApplication {
-		cancelled, cancelErr := runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
-		if cancelErr != nil {
-			return cancelled, cancelErr
+	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled && invocation.ExecutionClass != ExecutionApplication {
+		// A Failed admission may have been rejected before its Kernel Run
+		// existed. Preserve the original no-effect terminal replay, but only
+		// when no child Invocation, RunRelation or delegation can be left
+		// running. A terminal Turn backed by a real Kernel Run must instead
+		// enter the normal descendant cleanup protocol below.
+		_, loadErr := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+		if errors.Is(loadErr, kernel.ErrNotFound) && missingRuntimeSnapshotAllowed(turn, invocation) {
+			children, childErr := runner.relatedChildRunIDs(ctx, invocation.ExecutionRefID)
+			if childErr != nil {
+				return Snapshot{}, childErr
+			}
+			invocations, invErr := runner.store.ListInvocations(ctx, turn.ID)
+			if invErr != nil {
+				return Snapshot{}, invErr
+			}
+			delegated, delegationErr := runner.delegatedRunIDs(ctx, turn.ID)
+			if delegationErr != nil {
+				return Snapshot{}, delegationErr
+			}
+			pending, pendingErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
+			if pendingErr != nil {
+				return Snapshot{}, pendingErr
+			}
+			if len(children) > 0 || len(invocations) != 1 || len(delegated) > 0 || pending {
+				return Snapshot{}, ErrRuntimeCancellationUnverified
+			}
+			return runner.loadSnapshot(ctx, turn, nil)
 		}
-		// Revoke the shared ledger only after an authoritative Application
-		// cancellation, never when its external effect is still uncertain.
-		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
 	}
 	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
 		func() error {
@@ -944,6 +978,36 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
+	if invocation.ExecutionClass == ExecutionApplication {
+		// Application roots have no Kernel Run, but own the same Turn-wide
+		// child claims and Interaction effects. Reconcile every Application
+		// child only after the shared admission fence blocks late claims.
+		children, loadErr := runner.store.ListInvocations(ctx, turn.ID)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		for _, child := range children {
+			if child.ID == invocation.ID {
+				continue
+			}
+			if child.ExecutionClass != ExecutionApplication {
+				return Snapshot{}, ErrConflict
+			}
+			if _, cancelErr := runner.cancelApplicationInvocation(ctx, turn, child, reason); cancelErr != nil {
+				return Snapshot{}, cancelErr
+			}
+		}
+		// Interaction fencing can already have cancelled a Waiting root.
+		current, loadErr := runner.store.GetInvocation(ctx, invocation.ID)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		cancelled, cancelErr := runner.cancelApplicationInvocation(ctx, turn, current, reason)
+		if cancelErr != nil {
+			return cancelled, cancelErr
+		}
+		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
+	}
 	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
@@ -954,9 +1018,15 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if !found {
 		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
 	}
-	if runtimeSnapshot.Run.Status != kernel.RunStatusCancelled {
-		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	if !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		// A custom Canceller cannot turn a nonterminal Kernel outcome into a
+		// successful cancellation receipt. Keep the intent for reconciliation.
+		return Snapshot{}, ErrRuntimeCancellationUnverified
 	}
+	// A root may have completed or failed in the physical Kernel before
+	// Harness projected it. This is not proof that its descendants stopped;
+	// run the same child cleanup before releasing the cancellation fence.
+	// Otherwise a newly committed intent deadlocks ordinary root Refresh.
 	descendants, err := runner.cancelTurnDescendants(ctx, turn.ID, invocation.ID, invocation.ExecutionRefID, reason)
 	if err != nil {
 		return Snapshot{}, err
@@ -967,7 +1037,11 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if err = runner.syncTerminalDelegations(ctx, turn, descendants); err != nil {
 		return Snapshot{}, err
 	}
-	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	// Only this completed cancellation path has verified its descendants.
+	// The root may be Cancelled, Failed or Completed; preserve its actual
+	// Kernel status instead of fabricating a successful Cancelled outcome.
+	// Other callers (especially Refresh) cannot bypass unresolved cleanup.
+	return runner.syncRuntimeSnapshotWithRetryAfterCancellation(ctx, turn, invocation, runtimeSnapshot)
 }
 
 func (runner *Runner) syncRuntimeSnapshotWithRetry(
@@ -976,8 +1050,24 @@ func (runner *Runner) syncRuntimeSnapshotWithRetry(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
+	return runner.syncRuntimeSnapshotWithRetryProof(ctx, turn, invocation, runtimeSnapshot, false)
+}
+
+// This path is reserved for Cancel after ALL descendants and delegation
+// receipts have been verified, including when the root was already Failed
+// or Completed before cancellation. Never use it for read-only Refresh.
+func (runner *Runner) syncRuntimeSnapshotWithRetryAfterCancellation(
+	ctx context.Context, turn Turn, invocation Invocation, runtimeSnapshot kernel.Snapshot,
+) (Snapshot, error) {
+	return runner.syncRuntimeSnapshotWithRetryProof(ctx, turn, invocation, runtimeSnapshot, true)
+}
+
+func (runner *Runner) syncRuntimeSnapshotWithRetryProof(
+	ctx context.Context, turn Turn, invocation Invocation, runtimeSnapshot kernel.Snapshot,
+	verifiedCancellation bool,
+) (Snapshot, error) {
 	for range maxRuntimeSyncRetryAttempts {
-		snapshot, err := runner.syncRuntimeSnapshot(ctx, turn, invocation, runtimeSnapshot)
+		snapshot, err := runner.syncRuntimeSnapshotWithCancellationProof(ctx, turn, invocation, runtimeSnapshot, verifiedCancellation)
 		if !errors.Is(err, ErrConflict) {
 			return snapshot, err
 		}
@@ -1034,6 +1124,13 @@ func (runner *Runner) syncRuntimeSnapshot(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
+	return runner.syncRuntimeSnapshotWithCancellationProof(ctx, turn, invocation, runtimeSnapshot, false)
+}
+
+func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
+	ctx context.Context, turn Turn, invocation Invocation, runtimeSnapshot kernel.Snapshot,
+	verifiedCancellation bool,
+) (Snapshot, error) {
 	// A callback claim may win its Invocation CAS after Refresh observes
 	// the Interaction but before the Runtime projection attempts its CAS.
 	// Recheck on *every* synchronization/retry, not only at the Refresh
@@ -1047,6 +1144,20 @@ func (runner *Runner) syncRuntimeSnapshot(
 		// Even a verified callback for this Invocation cannot bypass an
 		// independently claimed, still-unverified sibling effect.
 		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+	}
+	// An active cancellation intent can outlive the parent Kernel's
+	// cancelled status while a remote child remains running. No generic
+	// Refresh/Resume/Start callback may turn that root observation into
+	// a terminal Harness Turn; only Cancel after verified descendant cleanup
+	// may complete the projection. Keep the intent for reconciliation.
+	if invocation.ParentItemID == "" && terminalRuntimeStatus(runtimeSnapshot.Run.Status) && !verifiedCancellation {
+		items, loadErr := listAllItems(ctx, runner.store, turn.ID)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		if ActiveCancellationFence(items) {
+			return Snapshot{}, ErrConflict
+		}
 	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {

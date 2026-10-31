@@ -76,10 +76,10 @@ func (runner *Runner) beginCancellationFence(ctx context.Context, turn Turn, run
 	}
 	saved, created, err := runner.store.AppendItem(ctx, intent)
 	if errors.Is(err, ErrConflict) {
-		// A previous cancellation can have committed the parent Kernel
-		// terminal state and then failed a remote descendant cleanup. The
-		// same target may resume cleanup after that authoritative proof,
-		// but an uncommitted/running parent remains exclusively fenced.
+		// A previous cancellation may have observed an already-terminal
+		// Failed/Completed root or cancelled the running root, then failed
+		// remote descendant cleanup. Resume only after authoritative local
+		// terminal proof, never on an uncommitted/running parent.
 		resumed, resumeErr := runner.resumeCommittedCancellationFence(ctx, turn, runID)
 		return resumed, false, resumeErr
 	}
@@ -94,7 +94,16 @@ func (runner *Runner) beginCancellationFence(ctx context.Context, turn Turn, run
 
 func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn Turn, runID string) (Item, error) {
 	snapshot, err := runner.runtime.Load(ctx, runID)
-	if err != nil || snapshot.Run.Status != kernel.RunStatusCancelled {
+	terminal := err == nil && terminalRuntimeStatus(snapshot.Run.Status)
+	if errors.Is(err, kernel.ErrNotFound) {
+		// Application execution has no Kernel Run. Its exact durable
+		// Invocation is the authority after cancellation/projection committed
+		// but the cancellation settlement acknowledgement was lost.
+		owner, ownerErr := runner.store.GetInvocationByExecutionRefID(ctx, runID)
+		terminal = ownerErr == nil && owner.ExecutionRefID == runID && owner.TurnID == turn.ID &&
+			owner.ExecutionClass == ExecutionApplication && terminalInvocationStatus(owner.Status)
+	}
+	if !terminal {
 		return Item{}, ErrConflict
 	}
 	items, err := listAllItems(ctx, runner.store, turn.ID)

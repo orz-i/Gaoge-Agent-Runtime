@@ -54,13 +54,63 @@ func isDispatchProvenNoEffect(err error) bool {
 // claiming it stopped the Feature; a cancelled Turn cannot admit a late grant.
 const ExecutionDispatchParentItemID = "harness.execution.dispatch"
 
-func PendingExecutionDispatch(items []Item, invocationID string) bool {
-	closed := make(map[string]struct{})
+// executionDispatchReceiptIndex preserves every claimed settlement, including
+// malformed and conflicting ones. Dropping a second receipt or an incorrect
+// owner would turn inconsistent physical execution evidence into authority.
+func executionDispatchReceiptIndex(items []Item) map[string][]Item {
+	byGrant := make(map[string][]Item)
 	for _, item := range items {
-		if item.Kind == ItemDiagnostic && item.Status == ItemCompleted {
-			closed[item.ParentItemID] = struct{}{}
+		if item.Kind == ItemDiagnostic && item.ParentItemID != "" &&
+			item.ParentItemID != ExecutionDispatchParentItemID {
+			byGrant[item.ParentItemID] = append(byGrant[item.ParentItemID], item)
 		}
 	}
+	return byGrant
+}
+
+// VerifiedExecutionDispatchReceipt is the single durable grant-settlement
+// contract used by the Memory and SQL Stores, retry, cancellation and native
+// recovery. A physical grant has exactly ONE recognized completion fact,
+// committed later in the same Turn with the exact Invocation and Run owner.
+// A foreign/unknown/contradictory completion is NOT a settlement.
+func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool) {
+	if grant.ID == "" || grant.Seq == 0 || grant.Kind != ItemDiagnostic ||
+		grant.Status != ItemStarted || grant.ParentItemID != ExecutionDispatchParentItemID ||
+		grant.TurnID == "" || grant.InvocationID == "" || grant.RunID == "" {
+		return "", false
+	}
+	var receipt Item
+	count := 0
+	for _, item := range receipts {
+		if item.Kind != ItemDiagnostic || item.ParentItemID != grant.ID {
+			continue
+		}
+		count++
+		receipt = item
+	}
+	if count != 1 || receipt.ID == "" || receipt.Status != ItemCompleted ||
+		receipt.TurnID != grant.TurnID || receipt.InvocationID != grant.InvocationID ||
+		receipt.RunID != grant.RunID || receipt.Seq <= grant.Seq {
+		return "", false
+	}
+	var payload struct {
+		Boundary string `json:"boundary"`
+	}
+	if json.Unmarshal(receipt.Payload, &payload) != nil {
+		return "", false
+	}
+	switch payload.Boundary {
+	case "physical_dispatch_rejected", "feature_start_no_effect", "native_agent_start_no_effect",
+		"native_agent_control_no_effect", "physical_dispatch_returned", "handoff_start_returned",
+		"native_kernel_epoch_recovered":
+		return payload.Boundary, true
+	default:
+		return "", false
+	}
+}
+
+func PendingExecutionDispatch(items []Item, invocationID string) bool {
+	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
 		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
 			item.ParentItemID != ExecutionDispatchParentItemID {
@@ -69,7 +119,7 @@ func PendingExecutionDispatch(items []Item, invocationID string) bool {
 		if invocationID != "" && item.InvocationID != invocationID {
 			continue
 		}
-		if _, settled := closed[item.ID]; !settled {
+		if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); !settled {
 			return true
 		}
 	}
@@ -83,18 +133,13 @@ func (runner *Runner) pendingExecutionDispatch(
 	if err != nil {
 		return false, err
 	}
-	closed := make(map[string]struct{})
-	for _, item := range items {
-		if item.Kind == ItemDiagnostic && item.Status == ItemCompleted {
-			closed[item.ParentItemID] = struct{}{}
-		}
-	}
+	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
 		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
 			item.ParentItemID != ExecutionDispatchParentItemID {
 			continue
 		}
-		if _, done := closed[item.ID]; done {
+		if _, done := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); done {
 			continue
 		}
 		var phase struct {
@@ -111,19 +156,57 @@ func (runner *Runner) pendingExecutionDispatch(
 				continue
 			}
 		}
-		if phase.Phase == "start" || phase.Phase == "start-retry" {
-			// A Kernel Run that is already durably running/completed belongs
-			// to Kernel control, whose cancellation CAS can now fence it.
-			// Before the Run exists, the Feature may still be about to
-			// CREATE it, so the pending grant must block cancellation.
-			if started, loadErr := runner.runtime.Load(ctx, item.RunID); loadErr == nil &&
-				started.Run.ID == item.RunID {
-				continue
-			}
+		if (phase.Phase == "start" || phase.Phase == "start-retry") &&
+			runner.nativeAgentStartOwnedByKernel(ctx, item, phase.PhysicalRunID) {
+			// Only the exact first-party Agent with an authoritative
+			// Kernel Run can be cancelled before its Start receipt. Native
+			// Agent execution checks Kernel CAS (and Epoch when configured)
+			// before continuing; composite Features can still create children
+			// after their parent Kernel Run has been created.
+			continue
 		}
 		return true, nil
 	}
 	return false, nil
+}
+
+// nativeAgentStartOwnedByKernel is the sole exception to an outstanding
+// physical Start grant blocking cancellation. Run existence is not sufficient:
+// only a concrete first-party Agent, exact Root Invocation ownership and
+// native Agent Run can use Kernel cancellation CAS (and an acquired native
+// execution Epoch where present). A custom Agent, composite Feature or
+// delegated child never inherits this exception.
+func (runner *Runner) nativeAgentStartOwnedByKernel(ctx context.Context, grant Item, physicalRunID string) bool {
+	if runner == nil || runner.runtime == nil || runner.store == nil || physicalRunID == "" ||
+		physicalRunID != grant.RunID || grant.InvocationID == "" {
+		return false
+	}
+	native, ok := runner.agent.(*agent.Runner)
+	if !ok || !native.NativeStartCancellationFencedByKernel(runner.runtime) {
+		return false
+	}
+	// A custom or separately bound RuntimeCanceller cannot claim that
+	// cancelling this Kernel Run fences the native Agent's execution.
+	canceller, nativeCancel := runner.cancellation.(*kernel.Runtime)
+	if !nativeCancel || canceller != runner.runtime {
+		return false
+	}
+	owner, err := runner.store.GetInvocation(ctx, grant.InvocationID)
+	if err != nil || owner.ID != grant.InvocationID || owner.TurnID != grant.TurnID ||
+		owner.ParentItemID != "" || owner.ExecutionClass != ExecutionAgent ||
+		owner.ExecutionRefID != grant.RunID {
+		return false
+	}
+	started, err := runner.runtime.Load(ctx, grant.RunID)
+	if err != nil || started.Run.ID != grant.RunID ||
+		started.Run.Kind != agent.RunKind || started.Run.Status != kernel.RunStatusRunning {
+		return false
+	}
+	// Native Agent Runs can be unleased (Kernel CAS) or require a bound
+	// Epoch (Kernel Store fencing). Either case has a first-party native
+	// continuation guard. Any other Store error gives no cancel authority.
+	proof := runner.runtime.RequireExecution(ctx, grant.RunID)
+	return proof == nil || errors.Is(proof, kernel.ErrExecutionRequired)
 }
 
 // withPhysicalInvocationDispatch is the single Harness physical Start/Resume
@@ -145,40 +228,12 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 	ctx context.Context, invocation Invocation, phase, resultRunID string,
 	physical func() (kernel.Snapshot, error),
 ) (kernel.Snapshot, error) {
-	if runner == nil || runner.store == nil || strings.TrimSpace(invocation.ID) == "" ||
-		invocation.TurnID == "" || invocation.ExecutionRefID == "" || physical == nil {
+	if physical == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	identifier, err := runner.runtime.NewID("dispatch")
+	grant, err := runner.beginPhysicalInvocationDispatch(ctx, invocation, phase, resultRunID)
 	if err != nil {
 		return kernel.Snapshot{}, err
-	}
-	payload, err := json.Marshal(struct {
-		Phase         string `json:"phase"`
-		PhysicalRunID string `json:"physicalRunID,omitempty"`
-	}{Phase: phase, PhysicalRunID: resultRunID})
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	now := runner.clock.Now().UTC()
-	grant := Item{
-		ID:     stableID("hdispatch", invocation.ID, invocation.ExecutionRefID, identifier),
-		TurnID: invocation.TurnID, InvocationID: invocation.ID, RunID: invocation.ExecutionRefID,
-		Kind: ItemDiagnostic, Status: ItemStarted,
-		ParentItemID: ExecutionDispatchParentItemID, Payload: payload,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if _, fresh, appendErr := runner.store.AppendItem(ctx, grant); appendErr != nil || !fresh {
-		return kernel.Snapshot{}, errors.Join(ErrConflict, appendErr)
-	}
-	// The first-party relation may have been committed before the parent was
-	// cancelled, but a nested child can still be Accepted without a Kernel
-	// Run. Do not physically start it after its owning parent completed or
-	// was cancelled. This read occurs AFTER the durable grant: a concurrent
-	// cancel must now contend with the outstanding dispatch.
-	if parentErr := runner.requireLiveInvocationParents(ctx, invocation); parentErr != nil {
-		return kernel.Snapshot{}, errors.Join(parentErr,
-			runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected"))
 	}
 	snapshot, physicalErr := physical()
 	if snapshot.Run.ID == "" {
@@ -229,21 +284,70 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 	return snapshot, errors.Join(physicalErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_returned"))
 }
 
+// beginPhysicalInvocationDispatch is shared by Kernel Feature operations and
+// Role Handoff starts. Admission is serialized with cancellation and retry by
+// the Store; the frozen root/ancestor Attempt check happens after the grant,
+// before calling any physical executor. A failed pre-effect check settles the
+// grant as definitive no-effect, without ever invoking the executor.
+func (runner *Runner) beginPhysicalInvocationDispatch(
+	ctx context.Context, invocation Invocation, phase, physicalRunID string,
+) (Item, error) {
+	if runner == nil || runner.store == nil || runner.runtime == nil || runner.clock == nil ||
+		strings.TrimSpace(invocation.ID) == "" || invocation.TurnID == "" ||
+		invocation.ExecutionRefID == "" || strings.TrimSpace(physicalRunID) == "" {
+		return Item{}, ErrInvalidRequest
+	}
+	identifier, err := runner.runtime.NewID("dispatch")
+	if err != nil {
+		return Item{}, err
+	}
+	payload, err := json.Marshal(struct {
+		Phase         string `json:"phase"`
+		PhysicalRunID string `json:"physicalRunID,omitempty"`
+	}{Phase: phase, PhysicalRunID: physicalRunID})
+	if err != nil {
+		return Item{}, err
+	}
+	now := runner.clock.Now().UTC()
+	grant := Item{
+		ID:     stableID("hdispatch", invocation.ID, invocation.ExecutionRefID, identifier),
+		TurnID: invocation.TurnID, InvocationID: invocation.ID, RunID: invocation.ExecutionRefID,
+		Kind: ItemDiagnostic, Status: ItemStarted,
+		ParentItemID: ExecutionDispatchParentItemID, Payload: payload,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if _, fresh, appendErr := runner.store.AppendItem(ctx, grant); appendErr != nil || !fresh {
+		return Item{}, errors.Join(ErrConflict, appendErr)
+	}
+	if parentErr := runner.requireLiveInvocationParents(ctx, invocation); parentErr != nil {
+		return Item{}, errors.Join(parentErr,
+			runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected"))
+	}
+	return grant, nil
+}
+
 // The release is appended under the same immutable grant ID, including after
 // caller cancellation. A duplicate ACK has the same deterministic identity.
 func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocation Invocation) error {
 	if invocation.ParentItemID == "" {
 		return nil
 	}
+	// The Input was sealed at the first admission. A parent's stable ID
+	// becoming Running on Attempt 2 cannot authorize an older descendant.
+	proof, err := frozenChildRoot(invocation)
+	if err != nil {
+		return err
+	}
+	expected := make(map[string]childAttemptBinding, len(proof.Parents))
+	for _, bound := range proof.Parents {
+		expected[bound.InvocationID] = bound
+	}
 	seen := make(map[string]struct{})
-	checked := make(map[string]struct{})
 	for id := invocation.ParentItemID; id != ""; {
 		if _, cycle := seen[id]; cycle {
 			return ErrConflict
 		}
 		seen[id] = struct{}{}
-		// Fetch only the actual parent chain. Full Turn scans cost O(all
-		// Items) per effect boundary even when ancestry is one Item deep.
 		item, loadErr := runner.store.GetItem(ctx, id)
 		if errors.Is(loadErr, ErrNotFound) || errors.Is(loadErr, ErrInvalidRequest) {
 			return ErrConflict
@@ -252,28 +356,46 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 			return loadErr
 		}
 		if item.ID != id || item.TurnID != invocation.TurnID || item.Seq == 0 {
-			// A missing/foreign/corrupt parent cannot confer physical
-			// execution authority. The old full-page cursor required
-			// positive persisted Seq values as well.
 			return ErrConflict
 		}
 		if ownerID := item.InvocationID; ownerID != "" && ownerID != invocation.ID {
-			if _, checkedOwner := checked[ownerID]; !checkedOwner {
-				parent, loadErr := runner.store.GetInvocation(ctx, ownerID)
-				if loadErr != nil || parent.TurnID != invocation.TurnID ||
-					terminalInvocationStatus(parent.Status) {
-					return errors.Join(ErrConflict, loadErr)
+			bound := proof.attempt()
+			if ownerID != proof.InvocationID {
+				var found bool
+				bound, found = expected[ownerID]
+				if !found {
+					return ErrConflict // Unfrozen ancestor cannot grant authority.
 				}
-				if parent.ExecutionClass != ExecutionApplication && parent.ExecutionRefID != "" {
-					state, runtimeErr := runner.runtime.Load(ctx, parent.ExecutionRefID)
-					if runtimeErr != nil || terminalRuntimeStatus(state.Run.Status) {
-						return errors.Join(ErrConflict, runtimeErr)
-					}
-				}
-				checked[ownerID] = struct{}{}
+			}
+			if err := runner.requireItemOwnerAttempt(ctx, item, bound); err != nil {
+				return err
 			}
 		}
 		id = item.ParentItemID
+	}
+	// An Item ancestry may end at a Host delegation boundary. Validate ALL
+	// inherited owners even when no Item in this immediate chain names them.
+	for _, bound := range proof.Parents {
+		if err := runner.requireLiveParentAttempt(ctx, invocation.TurnID, bound); err != nil {
+			return err
+		}
+	}
+	root, err := runner.loadFrozenChildRoot(ctx, invocation)
+	if err != nil {
+		return err
+	}
+	if root.ExecutionClass == ExecutionApplication {
+		if unclaimedApplicationParent(root) {
+			return ErrConflict
+		}
+		return nil
+	}
+	if runner.runtime == nil || strings.TrimSpace(root.ExecutionRefID) == "" {
+		return ErrConflict
+	}
+	state, err := runner.runtime.Load(ctx, root.ExecutionRefID)
+	if err != nil || state.Run.ID != root.ExecutionRefID || terminalRuntimeStatus(state.Run.Status) {
+		return errors.Join(ErrConflict, err)
 	}
 	return nil
 }

@@ -86,8 +86,8 @@ func TestSQLPhysicalDispatchGrantCompetesWithCancellation(t *testing.T) {
 	}
 	for _, receipt := range []harness.Item{
 		{
-			ID: "sql_exec_grant_done", TurnID: turn.ID, Kind: harness.ItemDiagnostic,
-			Status: harness.ItemCompleted, ParentItemID: start.ID,
+			ID: "sql_exec_grant_done", TurnID: turn.ID, InvocationID: start.InvocationID, RunID: start.RunID,
+			Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: start.ID,
 			Payload:   json.RawMessage("{\"boundary\":\"physical_dispatch_returned\"}"),
 			CreatedAt: now, UpdatedAt: now,
 		},

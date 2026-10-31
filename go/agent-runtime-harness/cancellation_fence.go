@@ -15,7 +15,12 @@ import (
 // cancellation path. An unknown relation owner conservatively fences the
 // entire Turn rather than claim the cancellation was unrelated to an effect.
 func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, rootRunID string, writeAttempted *bool) error {
-	targets, err := runner.inspectRelatedCancellation(ctx, turn, rootRunID)
+	if _, err := runner.inspectRelatedCancellation(ctx, turn, rootRunID); err != nil {
+		return err
+	}
+	// Admission may conservatively inspect all owners when relations are
+	// unavailable. Its fallback is not authority to mutate waiting siblings.
+	_, targets, _, err := runner.collectCancellationScope(ctx, turn, rootRunID)
 	if err != nil {
 		return err
 	}
@@ -27,56 +32,74 @@ func (runner *Runner) fenceRelatedCancellation(ctx context.Context, turn Turn, r
 	return nil
 }
 
-func (runner *Runner) inspectRelatedCancellation(ctx context.Context, turn Turn, rootRunID string) (map[string]struct{}, error) {
+// collectCancellationScope closes over both physical RunRelation edges and
+// frozen/Item Invocation ownership. Neither graph alone describes a mixed
+// native -> Application -> native subtree. Preflight and cleanup share this
+// exact scope; conservative admission fallbacks never expand physical cleanup.
+func (runner *Runner) collectCancellationScope(ctx context.Context, turn Turn, rootRunID string) ([]Invocation, map[string]struct{}, map[string]struct{}, error) {
 	rootRunID = strings.TrimSpace(rootRunID)
 	if rootRunID == "" {
-		return nil, ErrInvalidRequest
-	}
-	affected := map[string]struct{}{rootRunID: {}}
-	if runner.relationReader != nil {
-		queue := []string{rootRunID}
-		for len(queue) > 0 {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
-			runID := queue[0]
-			queue = queue[1:]
-			children, err := runner.relatedChildRunIDs(ctx, runID)
-			if err != nil {
-				return nil, err
-			}
-			for _, childID := range children {
-				if _, seen := affected[childID]; seen {
-					continue
-				}
-				affected[childID] = struct{}{}
-				queue = append(queue, childID)
-			}
-		}
+		return nil, nil, nil, ErrInvalidRequest
 	}
 	invocations, err := runner.store.ListInvocations(ctx, turn.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
-	targetInvocations := make(map[string]struct{})
-	matchedRuns := make(map[string]struct{})
-	// If durable relations are unavailable, a partial subtree cannot be
-	// proven. Fence every Invocation in the Turn before cancellation.
-	allOwners := runner.relationReader == nil
-	for _, inv := range invocations {
-		if _, affectedRun := affected[inv.ExecutionRefID]; affectedRun {
-			targetInvocations[inv.ID] = struct{}{}
-			matchedRuns[inv.ExecutionRefID] = struct{}{}
-		} else if allOwners {
-			targetInvocations[inv.ID] = struct{}{}
+	affected := map[string]struct{}{rootRunID: {}}
+	targets := make(map[string]struct{})
+	visited := make(map[string]struct{})
+	for {
+		if err = ctx.Err(); err != nil {
+			return nil, nil, nil, err
+		}
+		oldRuns, oldTargets := len(affected), len(targets)
+		for runID := range affected {
+			if _, seen := visited[runID]; seen {
+				continue
+			}
+			visited[runID] = struct{}{}
+			children, readErr := runner.relatedChildRunIDs(ctx, runID)
+			if readErr != nil {
+				return nil, nil, nil, readErr
+			}
+			for _, child := range children {
+				affected[child] = struct{}{}
+			}
+		}
+		for _, invocation := range invocations {
+			if _, owned := affected[invocation.ExecutionRefID]; owned {
+				targets[invocation.ID] = struct{}{}
+			}
+		}
+		if err = runner.addItemOwnedCancellationDescendants(ctx, turn.ID, invocations, targets); err != nil {
+			return nil, nil, nil, err
+		}
+		for _, invocation := range invocations {
+			if _, owned := targets[invocation.ID]; owned && invocation.ExecutionRefID != "" {
+				affected[invocation.ExecutionRefID] = struct{}{}
+			}
+		}
+		if len(affected) == oldRuns && len(targets) == oldTargets {
+			return invocations, targets, affected, nil
 		}
 	}
-	if !allOwners {
-		// An Application child has no Kernel RunRelation by design. Trace
-		// its existing ParentItemID through immutable Timeline ownership
-		// instead of silently excluding its external physical effect.
-		if err = runner.addItemOwnedCancellationDescendants(ctx, turn.ID, invocations, targetInvocations); err != nil {
-			return nil, err
+}
+
+func (runner *Runner) inspectRelatedCancellation(ctx context.Context, turn Turn, rootRunID string) (map[string]struct{}, error) {
+	invocations, targetInvocations, affected, err := runner.collectCancellationScope(ctx, turn, rootRunID)
+	if err != nil {
+		return nil, err
+	}
+	matchedRuns := make(map[string]struct{})
+	// Missing relation capability may widen read-only admission checks, but
+	// never authorizes cancelling unrelated sibling execution.
+	allOwners := runner.relationReader == nil
+	for _, inv := range invocations {
+		if _, owned := affected[inv.ExecutionRefID]; owned {
+			matchedRuns[inv.ExecutionRefID] = struct{}{}
+		}
+		if allOwners {
+			targetInvocations[inv.ID] = struct{}{}
 		}
 	}
 	for _, inv := range invocations {
@@ -161,6 +184,21 @@ func (runner *Runner) addItemOwnedCancellationDescendants(
 		for _, invocation := range invocations {
 			if _, already := targets[invocation.ID]; already || invocation.ParentItemID == "" {
 				continue
+			}
+			// Frozen ancestry survives Host-owned Item boundaries where the
+			// immediate Item chain does not name every owning Invocation.
+			if binding, bindErr := frozenChildRoot(invocation); bindErr == nil {
+				_, owned := targets[binding.InvocationID]
+				for _, parent := range binding.Parents {
+					if _, matches := targets[parent.InvocationID]; matches {
+						owned = true
+					}
+				}
+				if owned {
+					targets[invocation.ID] = struct{}{}
+					changed = true
+					continue
+				}
 			}
 			seen := make(map[string]struct{})
 			for itemID := invocation.ParentItemID; itemID != ""; {

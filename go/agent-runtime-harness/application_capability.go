@@ -487,6 +487,27 @@ func (runner *Runner) finalizeApplicationTerminalProjection(ctx context.Context,
 	return nil
 }
 
+// cancelApplicationSubtree runs only under the shared cancellation intent.
+// Select real descendants by frozen ancestry/Items, not the conservative
+// all-owner preflight fallback, so unrelated siblings are never cancelled.
+func (runner *Runner) cancelApplicationSubtree(ctx context.Context, turn Turn, invocation Invocation, reason string) (Snapshot, error) {
+	runs, err := runner.cancelOwnedDescendants(ctx, turn, invocation.ExecutionRefID, reason)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.syncInvocationRuns(ctx, turn, runs); err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.syncTerminalDelegations(ctx, turn, runs); err != nil {
+		return Snapshot{}, err
+	}
+	current, err := runner.store.GetInvocation(ctx, invocation.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return runner.cancelApplicationInvocation(ctx, turn, current, reason)
+}
+
 func (runner *Runner) cancelApplicationInvocation(
 	ctx context.Context,
 	turn Turn,
@@ -494,7 +515,7 @@ func (runner *Runner) cancelApplicationInvocation(
 	reason string,
 ) (Snapshot, error) {
 	if terminalInvocationStatus(invocation.Status) {
-		return runner.loadSnapshot(ctx, turn, nil)
+		return runner.repairApplicationProjection(ctx, turn, invocation)
 	}
 	if invocation.Status == InvocationRunning {
 		// The first physical effect may already have been dispatched. A

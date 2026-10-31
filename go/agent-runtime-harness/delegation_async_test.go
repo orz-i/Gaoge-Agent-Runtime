@@ -130,6 +130,7 @@ func TestAsyncDelegationCancellationRetriesExternalCleanup(t *testing.T) {
 	canceller := &asyncDelegationCanceller{runtime: fixture.runtime}
 	runner, _ := fixture.compose(t, canceller)
 	started := fixture.start(t, runner)
+	canceller.childRunID = fixture.child.id
 	if _, err := runner.Cancel(t.Context(), started.Turn.ID, "stop"); !errors.Is(err, errAsyncCancelUnavailable) {
 		t.Fatalf("remote cancellation error was lost: %v", err)
 	}
@@ -137,8 +138,11 @@ func TestAsyncDelegationCancellationRetriesExternalCleanup(t *testing.T) {
 	if err != nil || child.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("failed remote cleanup cancelled local shadow: %#v, %v", child.Run, err)
 	}
-	if _, err = runner.Refresh(t.Context(), started.Turn.ID); err != nil {
-		t.Fatal(err)
+	// The parent Kernel is already cancelled, but remote child cleanup is
+	// unknown. Read-only Refresh must NOT terminate the Harness Turn until
+	// the original Cancel resumes and verifies the delegated child.
+	if _, err = runner.Refresh(t.Context(), started.Turn.ID); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("Refresh bypassed unresolved cancellation: %v", err)
 	}
 	runner, _ = fixture.compose(t, canceller)
 	for range 2 {
@@ -318,10 +322,16 @@ type asyncDelegationChild struct {
 	starts   int
 }
 
+// The explicit fixed ChildRunner owns this exact Kernel Runtime across
+// Start/Load/cancel. A merely matching Run ID would be insufficient.
+func (child *asyncDelegationChild) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
+	return child != nil && child.runtime != nil && child.runtime == runtime
+}
+
 func (child *asyncDelegationChild) StartRun(ctx context.Context, request agent.StartRequest) (kernel.Snapshot, error) {
 	child.starts++
 	child.id, child.goal = request.ID, request.Goal
-	return child.runtime.Create(ctx, kernel.CreateRequest{ID: request.ID, Kind: "test.async-child",
+	return child.runtime.Create(ctx, kernel.CreateRequest{ID: request.ID, Kind: agent.RunKind,
 		Actor: request.Actor, Thread: request.Thread, RequestID: request.RequestID, Goal: request.Goal, State: json.RawMessage(`{}`)})
 }
 
@@ -341,15 +351,19 @@ var errAsyncCancelUnavailable = errors.New("remote cancellation temporarily unav
 
 type asyncDelegationCanceller struct {
 	runtime    *kernel.Runtime
+	childRunID string
 	childCalls int
 }
 
+func (canceller *asyncDelegationCanceller) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
+	return canceller != nil && canceller.runtime != nil && canceller.runtime == runtime
+}
+
 func (canceller *asyncDelegationCanceller) Cancel(ctx context.Context, runID string, revision uint64, reason string) (kernel.Snapshot, error) {
-	snapshot, err := canceller.runtime.Load(ctx, runID)
-	if err != nil {
+	if _, err := canceller.runtime.Load(ctx, runID); err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if snapshot.Run.Kind == "test.async-child" {
+	if runID == canceller.childRunID {
 		canceller.childCalls++
 		if canceller.childCalls == 1 {
 			return kernel.Snapshot{}, errAsyncCancelUnavailable

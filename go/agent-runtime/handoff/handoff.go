@@ -13,14 +13,22 @@ import (
 
 const CapabilityCoordinator kernel.Capability = "handoff.coordinator"
 
+// RemoteAgentRunKind is the A2A remote-Agent shadow RunKind. Handoff may
+// consume an Agent Run or this explicitly bound remote Agent proxy, but never
+// an unrelated Workflow, Team or custom Kernel state machine.
+const RemoteAgentRunKind kernel.RunKind = "a2a.remote"
+
 var (
 	ErrInvalidDelegation = errors.New("invalid handoff delegation")
 	ErrChildUnavailable  = errors.New("handoff child runner is unavailable")
 	ErrInvalidJoin       = errors.New("invalid handoff join")
 	ErrChildPending      = errors.New("handoff child run is not terminal")
 	ErrChildFailed       = errors.New("handoff child run failed")
-	ErrJoinPending       = errors.New("handoff join is not ready")
-	ErrJoinFailed        = errors.New("handoff join failed")
+	// ErrChildRunUnverified means a ChildRunner snapshot does not prove the
+	// requested Run identity and a recognized Kernel lifecycle state.
+	ErrChildRunUnverified = errors.New("handoff child run snapshot is unverified")
+	ErrJoinPending        = errors.New("handoff join is not ready")
+	ErrJoinFailed         = errors.New("handoff join failed")
 )
 
 // Status is the durable lifecycle of one delegated Child Run.
@@ -104,6 +112,15 @@ type ChildRunner interface {
 	LoadRun(context.Context, string) (kernel.Snapshot, error)
 }
 
+// LocalKernelChildRunner is an explicit Host contract that its ChildRunner
+// executes directly in the supplied Kernel Runtime, not in a remote ChildRunner
+// or A2A shadow. Only a fixed New(children) Coordinator can use this proof;
+// custom route implementations must never claim it based on Run metadata.
+type LocalKernelChildRunner interface {
+	ChildRunner
+	OwnsKernelRuntime(*kernel.Runtime) bool
+}
+
 // ChildRunnerResolver selects one explicitly composed child capability for a
 // durable Delegation. It is a narrow routing port, not a service locator: the
 // host owns the finite routing policy and returns an already constructed
@@ -161,6 +178,45 @@ func NewRouted(resolver ChildRunnerResolver) (*Coordinator, error) {
 	return &Coordinator{resolver: resolver}, nil
 }
 
+// OwnsLocalKernelRunner is a narrow composition proof, not an identity
+// comparison of Kernel Runs. Only New's permanently bound ChildRunner may
+// certify ownership of the exact Kernel used by Harness. A dynamically
+// resolved route (NewRouted), a custom HandoffStarter or a ChildRunner that
+// cannot attest to its runtime must fail closed during local cancellation.
+// The Host remains responsible for keeping static routes stable for the
+// lifetime of admitted delegated children, including process recovery.
+func (coordinator *Coordinator) OwnsLocalKernelRunner(runtime *kernel.Runtime) bool {
+	if coordinator == nil || runtime == nil {
+		return false
+	}
+	fixed, ok := coordinator.resolver.(staticChildRunnerResolver)
+	if !ok {
+		return false
+	}
+	owner, ok := fixed.children.(LocalKernelChildRunner)
+	return ok && owner.OwnsKernelRuntime(runtime)
+}
+
+// ObservesLocalKernelRunner is read-only ownership evidence for the fixed
+// ChildRunner's LoadRun. Unlike cancellation ownership, a first-party Agent
+// may attest to its Kernel even with Host middleware: observation itself
+// does not allow Kernel cancellation or continued physical execution.
+// Dynamically resolved or custom routes do not have stable ownership proof.
+func (coordinator *Coordinator) ObservesLocalKernelRunner(runtime *kernel.Runtime) bool {
+	if coordinator == nil || runtime == nil {
+		return false
+	}
+	fixed, ok := coordinator.resolver.(staticChildRunnerResolver)
+	if !ok {
+		return false
+	}
+	if child, ok := fixed.children.(*agent.Runner); ok {
+		return child.ObservesKernelRuntime(runtime)
+	}
+	owner, ok := fixed.children.(LocalKernelChildRunner)
+	return ok && owner.OwnsKernelRuntime(runtime)
+}
+
 // Descriptor declares the reusable Handoff capability.
 func (coordinator *Coordinator) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{
@@ -176,7 +232,7 @@ func (coordinator *Coordinator) StartOrLoad(
 	parent kernel.Snapshot,
 	delegation Delegation,
 ) (Delegation, error) {
-	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || parent.Run.ID == "" {
+	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || !validParentOrigin(parent.Run) {
 		return Delegation{}, ErrInvalidDelegation
 	}
 	children, err := coordinator.resolveChild(ctx, delegation)
@@ -185,6 +241,9 @@ func (coordinator *Coordinator) StartOrLoad(
 	}
 	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err == nil {
+		if !VerifiedChildRun(delegation, parent.Run, child) {
+			return Delegation{}, ErrChildRunUnverified
+		}
 		return projectChild(delegation, child), childStateError(child)
 	}
 	if !errors.Is(err, kernel.ErrNotFound) {
@@ -205,15 +264,20 @@ func (coordinator *Coordinator) StartOrLoad(
 		InitialToolKeys:  append([]string(nil), delegation.InitialToolKeys...),
 		HostedToolGrants: append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...),
 	})
-	if child.Run.ID == "" {
+	if child.Run.ID == "" && err != nil {
 		return Delegation{}, err
+	}
+	if !VerifiedChildRun(delegation, parent.Run, child) {
+		return Delegation{}, errors.Join(ErrChildRunUnverified, err)
 	}
 	return projectChild(delegation, child), errors.Join(childStateError(child), err)
 }
 
-// Refresh projects the current Child Run into one Delegation without starting it.
-func (coordinator *Coordinator) Refresh(ctx context.Context, delegation Delegation) (Delegation, error) {
-	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) {
+// Refresh projects one Child Run without starting it. The caller must supply
+// the authoritative parent Run: the Delegation alone does not freeze an
+// Actor/Thread proof and cannot authorize an unrelated Run on lookup.
+func (coordinator *Coordinator) Refresh(ctx context.Context, parent kernel.Snapshot, delegation Delegation) (Delegation, error) {
+	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || !validParentOrigin(parent.Run) {
 		return Delegation{}, ErrInvalidDelegation
 	}
 	children, err := coordinator.resolveChild(ctx, delegation)
@@ -224,7 +288,42 @@ func (coordinator *Coordinator) Refresh(ctx context.Context, delegation Delegati
 	if err != nil {
 		return Delegation{}, err
 	}
+	if !VerifiedChildRun(delegation, parent.Run, child) {
+		return Delegation{}, ErrChildRunUnverified
+	}
 	return projectChild(delegation, child), childStateError(child)
+}
+
+// A Delegation's ChildRunID comes from the request, not the ChildRunner's
+// snapshot. Never let projection copy that requested ID into a seemingly
+// verified receipt for another (or an invalid) physical Run.
+func validParentOrigin(parent kernel.Run) bool {
+	return strings.TrimSpace(parent.ID) != "" &&
+		strings.TrimSpace(parent.Actor.TenantID) != "" && strings.TrimSpace(parent.Actor.ActorID) != "" &&
+		strings.TrimSpace(parent.Thread.Kind) != "" && strings.TrimSpace(parent.Thread.ID) != ""
+}
+
+// VerifiedChildRun is the shared frozen task-and-origin check for Handoff
+// projections and Harness cancellation. A local Kernel Run with the same ID
+// is not proof of ChildRunner ownership without these exact identities.
+// Kernel Create canonicalizes ID, Goal and RequestID; compare against that
+// frozen request representation, without normalizing returned snapshots or
+// Actor/Thread identities (which Kernel preserves exactly).
+func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Snapshot) bool {
+	if !validParentOrigin(parent) || !validDelegation(delegation) ||
+		child.Run.ID != strings.TrimSpace(delegation.ChildRunID) ||
+		child.Run.Actor != parent.Actor || child.Run.Thread != parent.Thread ||
+		child.Run.Goal != strings.TrimSpace(delegation.Goal) || child.Run.RequestID != strings.TrimSpace(parent.ID+":"+delegation.ID) ||
+		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
+		return false
+	}
+	switch child.Run.Status {
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget,
+		kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Delegation) (ChildRunner, error) {

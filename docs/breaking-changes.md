@@ -2,6 +2,408 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
+
+**PR #82 mixed ownership and child Interaction correction:**
+Native child cancellation closes over both RunRelation and frozen/Item
+ancestry, including native grandchildren behind completed Application
+intermediaries. Unrelated siblings are not selected for physical cleanup.
+Child Interaction response callbacks require their frozen parent Attempts
+to remain live before and after the dispatch claim. A final pre-callback
+rejection returns the existing no-effect error and resets only that new,
+undispatched claim. Already-Running unknown callbacks remain unchanged.
+No new Store API, persisted receipt, schema or state enum. See [second audit](audits/2026-10-31-pr82-mixed-scope-and-interaction-parent-fence.md).
+
+**PR #82 direct-target and Application subtree cancellation correction:**
+Direct `CancelSubtask` of an external RunRelation member now fails closed
+with `ErrRuntimeCancellationUnverified`, matching traversal-based cleanup.
+Revoking a budget or observing a terminal parent does not confirm subtree
+cancellation; clients must preserve the explicit `CancelStatus`/`CancelError`
+receipt. Root and intermediate Application cancellation now fence nested
+claims and reject unresolved effects with `ErrApplicationOutcomeUnknown`.
+Exact terminal Application Invocations can resume their own pending intent
+without a Kernel Run. No new Store API, SQL DDL, cancellation protocol or
+state enum is introduced. Handoff ID/Goal/RequestID checks use Kernel's
+canonical request values; Actor/Thread remain exact. See [independent audit](audits/2026-10-31-pr82-subtree-cancellation-and-canonical-identity.md).
+
+**PR #82 terminal-parent / descendant cancellation completion hard cut:**
+A `Failed`, `Completed` or `Cancelled` parent Run/Invocation/Turn is **not**
+evidence that its Team/Workflow/GroupChat/remote ChildRunner descendants are
+terminal. `Runner.Cancel`, `CancelInvocation` and `CancelSubtask` no longer
+silently return a successful no-op or skip RunRelation traversal solely
+because the parent is terminal. They use the existing cancellation intent
+and physical descendant checks. Locally verifiable children are cancelled;
+related physical child IDs absent from the local Kernel return
+`ErrRuntimeCancellationUnverified` and retain the original intent for the
+execution owner to reconcile. Verified never-dispatched Handoff children
+remain no-effect; true pre-Create failed Agent admissions without child
+Invocations, Delegations, RunRelations or pending grants preserve their
+previous safe terminal replay. Kernel's original Failed/Completed outcome is
+not rewritten to `Cancelled`. This deliberately narrows the success contract
+without adding a remote Cancel RPC, new Store API, SQL DDL, schema version,
+state machine or compatibility fallback. See [terminal descendant cancellation
+remediation](audits/2026-10-31-pr82-terminal-descendant-cancellation-hardcut.md).
+
+**PR #82 subsequent independent P1 remediation (Subtask / custom Cancel / terminal recovery):**
+A Delegation Subtask no longer reads a coincidentally named local Kernel Run
+unless a fixed original Handoff ChildRunner explicitly certifies observation
+of the exact Harness Kernel and the frozen child/parent/Delegation identity
+matches. Remote/dynamic/unproven routes retain the last durable Handoff Item
+status; it can remain `queued` during unknown external work, but no foreign
+local status, Goal, approval or result may enter the product projection or
+short-circuit `CancelSubtask`. Middleware-bearing native Agents may attest
+only to read-only same-Kernel identity, not Kernel-fenced physical Cancel.
+
+Successful custom `RuntimeCanceller.Cancel` replies must have exact original
+Run identity, **terminal status**, and a fresh matching terminal observation
+in the Harness-owned Kernel. A nonterminal, foreign or unknown reply returns
+`ErrRuntimeCancellationUnverified` (Handoff retains
+`ErrHandoffCancellationUnverified`) and keeps the original cancel intent
+open. Hosts performing external cleanup must reconcile the corresponding
+local Kernel terminal state before claiming a successful Harness Cancel.
+A root Run already Failed/Completed can now finish full descendant cleanup
+and project its **actual** terminal result under its own cancellation intent;
+if remote cleanup remains unknown, a subsequent Cancel may resume the same
+intent under that exact terminal root. `Refresh` still cannot close it.
+This is a pre-stable behavior hard cut; no compatibility fallback, new
+schema/version, SQL DDL, or invented external cancellation receipt. See
+[final merge re-audit remediation](audits/2026-10-31-pr82-subtask-custom-cancel-and-terminal-root-hardcut.md).
+
+**PR #82 final independent merge-audit P1 corrections (native Cancel, Refresh):**
+The exact native `*kernel.Runtime` used for `harness.Dependencies.Cancellation`
+MUST be the same instance as `Dependencies.Runtime`, not a second Kernel
+containing identically named Runs. `NewRunner` rejects wrong native composition
+with `ErrInvalidRequest`, and an operation-level guard refuses a foreign native
+Cancel with a no-effect `ErrConflict`. Handoff keeps its stronger route-owned
+`ErrHandoffCancellationUnverified` behavior. A root `Refresh` may now return
+`ErrConflict` when its Kernel Run is terminal but an unclosed cancellation
+intent still holds unknown remote child cleanup: only a completed owner
+`Cancel` may project the terminal Turn. Previously a Refresh could claim
+`TurnCancelled` while the remote Handoff remained running.
+
+`RefreshInvocation` of a Handoff child may no longer read arbitrary Harness-
+local Runs with the same ID. Only a fixed local `handoff.New` Coordinator with
+an explicitly same-Kernel `LocalKernelChildRunner`, plus exact frozen parent
+and delegated child identity, may project a local child snapshot. Remote,
+dynamic and custom Handoff routes fail closed with
+`ErrHandoffCancellationUnverified`; use the original ChildRunner-owned
+read-only reconciliation (with parent authority), not a local RunID lookup.
+This is a deliberate pre-stable behavior hard cut without fallback, DDL,
+schema version changes or reminted external outcomes. See
+[three P1 final-Head remediation](audits/2026-10-31-pr82-independent-final-merge-three-p1-remediation.md).
+
+**PR #82 further P1 Handoff cancellation hard cut — local execution owner:**
+Even an exact match on ChildRunID, Run kind, Tenant/Actor/Thread, Goal and
+RequestID does **not** prove the actual ChildRunner's Kernel: independent
+Kernel Stores can contain identical Agent Runs. Handoff physical-effect
+cancellation now requires both the original immutable parent/child/grant
+proof **and** explicit local composition identity: a fixed
+`handoff.New(child)` Coordinator whose `handoff.LocalKernelChildRunner`
+attests to the exact Harness `*kernel.Runtime`, paired with either the
+same native `*kernel.Runtime` Canceller or a trusted
+`harness.LocalKernelCanceller` attesting to that Runtime. A dynamically
+resolved `handoff.NewRouted` route, custom HandoffStarter, unproven
+ChildRunner/Canceller or foreign Kernel pointer can no longer cancel a
+Handoff merely because the Run fields match. Native `agent.Runner` only
+attests for a middleware/preparer-free Kernel-fenced composition. A custom
+Cancel returning a matching but nonterminal Run is not a cancellation receipt.
+Never-dispatched Handoffs may use existing synthetic no-effect cancellation,
+but it must not issue a physical Cancel against a coincidentally present Run.
+
+Hosts MUST preserve the fixed ChildRunner/Kernel binding for admitted work
+across restarts; for dynamically routed or remote work without proof, retain
+`ErrHandoffCancellationUnverified` and reconcile/quarantine explicitly.
+These changes narrow pre-stable cancellation behavior. New named proof
+interfaces replace heuristic inference; no Store API, persistence format,
+SQL DDL, schema version, duplicate cancellation protocol or compatibility
+bridge. See [final route ownership remediation](audits/2026-10-31-pr82-handoff-route-owned-cancellation-hardcut.md).
+
+**PR #82 final independent cancellation hard cut (two P1s):** A concrete
+native `*agent.Runner` is no longer sufficient proof that a running Start may
+hand cancellation to Kernel CAS. The exact Agent must use the same Kernel
+Runtime as Harness/Canceller **without Host Run/Model/Tool middleware or Model
+request preparer**. These extensions may execute physical callbacks after
+Kernel cancellation; their unsettled Start Grants now reject concurrent
+`Cancel` with `ErrConflict` until durable settlement. This is a deliberate
+pre-stable behavioral restriction; no implicit cancellation of Host-owned
+effects. For routed Handoff children, a locally present Run with the requested
+ID is not cancellation authority. The frozen Delegation/parent Run provenance
+and complete Handoff child identity (kind, Tenant/Actor/Thread, Goal and
+RequestID) must match before local Cancel or terminal projection; foreign
+collisions return `ErrHandoffCancellationUnverified`, leaving the original
+intent and external task untouched. A custom Canceller's returned snapshot
+must pass the same identity check. No new DDL, version, Store API, migration
+or compatibility bridge. See [independent P1 remediation](audits/2026-10-31-pr82-native-middleware-and-local-handoff-cancellation-remediation.md).
+
+**Go API behavior hard cut:** `Runner.RefreshInvocation` and
+`Runner.ResumeInvocation` are child-only APIs; passing a top-level
+Invocation ID (empty `ParentItemID`) now returns `ErrInvalidRequest`
+before any projection or physical dispatch. Root callers must use
+`Runner.Refresh(turnID)` (all root Features), `Runner.ResumeTurn(turnID)`
+(for the native Agent), or their explicitly selected root Feature's
+start/replay/Continuation path. The old root Application convenience read
+through child entrypoints is deleted rather than bridged. This does not
+change legitimate `RetryInvocation` handling for frozen root attempts.
+
+**Child admission and indexed lookup:** A child `Start*Invocation` now
+requires a nonempty `ParentItemID`, explicitly rejecting missing parent
+identity before creating child state. The shared optional Interaction
+parent remains optional. Existing parent ID validation uses one
+`Store.GetItem` call, verifying the global ID, exact owning Turn and
+positive persisted Seq; missing/foreign IDs are invalid, corrupt Items
+or Store errors fail closed. The independent final pre-dispatch ancestor
+liveness fence remains authoritative: admission lookup is not permission
+to execute after a parent terminates. The PR #82 independent P1 review
+also closed an ownerless-parent gap: after a durable child dispatch grant
+(or Application effect claim), the last pre-effect check always validates
+the root Invocation and, for Runtime roots, its exact Kernel Run status.
+A terminal/missing root rejects child effects even when the parent Item
+has no Invocation owner. A second PR #82 audit proved a cross-Attempt gap:
+an old Accepted child could otherwise replay under a new live root after
+`RetryInvocation` rotated the root `ExecutionRefID`. Every new typed Child
+or delegated Agent (RoleID or MemberID) now seals a `harnessRoot` binding (root Invocation
+ID, exact execution Ref ID and Attempt) inside the existing hashed
+`Invocation.Input`. A replay or final physical dispatch must match the
+original root Attempt; no automatic rebinding is permitted. The third
+independent PR #82 audit additionally froze every *intermediate* parent
+Invocation's ID, ExecutionRefID and Attempt in `harnessRoot.parents`,
+including inherited delegation owners. Final pre-effect validation
+rejects stale or unsealed ancestor Attempts and uses direct indexed
+`GetInvocation` rather than materializing the whole Turn's Invocation list. Host Application roots use their durable root
+Invocation, without a synthetic Kernel Run; a claimed Application root can
+admit an Application child, never a native child lacking a Kernel parent.
+This is a fail-closed correction, not permission to retry ambiguous effects.
+Every delegated Handoff (both RoleID and MemberID-only) now requires
+a standard, child-owned physical execution grant and post-grant frozen
+ancestor check before starting a remote ChildRunner. An active cancellation intent prevents that grant; a
+missing/uncertain child outcome keeps it unresolved and blocks a duplicate
+Handoff start. The existing append-only grant uses phase `handoff-start`,
+not a synthetic Kernel Run or alternate Store protocol. Handoff's direct
+`ChildRunner` observation now requires the returned Snapshot.Run.ID to
+match the requested ChildRunID, with a recognized Kernel status **and an
+authorized child Run kind**, on Load, Start and Refresh. Only a native
+Agent Run or an explicit `a2a.remote` shadow-Agent Run is eligible; an
+unrelated Workflow/Team/GroupChat/custom kind, even with the correct ID
+and a terminal status, cannot complete a Handoff grant. Empty,
+mismatched, untyped or invalid snapshots cannot be projected as a
+valid Delegation or complete the grant. Invalid observed
+snapshots return `ErrChildRunUnverified`; a StartRun failure without any
+snapshot preserves its original error and remains outcome-unknown.
+The sixth independent PR #82 audit additionally rejects a nested child
+whose non-root Application parent is still `InvocationAccepted`: its
+Host-effect claim has not committed, and a frozen Attempt alone is not
+execution authority. The same existing ancestor guard applies at child
+admission and after the child's own effect-claim CAS, before any Host
+callback. A claimed live Application parent remains eligible. No new
+persistence format, status or compatibility bridge is introduced.
+
+**Persisted JSON hard cut (no SQL migration):** The existing indexed
+`Store.GetItem` contract (PR #79), Kernel Run, statuses, IDs, receipts,
+CAS, SQL tables and schema versions remain unchanged. **Child
+`Invocation.Input` changes**: new child and *all* delegated Agent
+records, including MemberID-only, include the immutable hashed
+`harnessRoot` field. Incomplete
+children created before this candidate must be drained or explicitly
+isolated before rollout. Missing proof fails closed, including during
+retry/resume; children missing the full new parent chain also fail closed.
+Memory and PostgreSQL Retry now block on any unresolved Running child
+Application effect or unfinished Turn physical dispatch grant, even for an
+intermediate or unrelated sibling Attempt. This may conservatively delay
+retry until the previous effects have authoritative receipts; do not
+backfill, rehash, infer ancestor authority from current state or replay
+unknown effects. There is no compatibility bridge, dual root path,
+implicit Intent Router or version bump. Hosts with root-ID
+`RefreshInvocation`/`ResumeInvocation` callers must update their source.
+An unknown Handoff outcome retains its original child Attempt and pending
+physical grant until explicit **read-only** verification or quarantine.
+Neither a missing remote Run nor a transport error proves no effect;
+do not manually close the grant, rotate its ID, or repeat StartOrLoad.
+Hosts operating remote ChildRunners must return an authorized Agent or
+A2A shadow Run kind, not an arbitrary custom Kernel kind. There is no
+fallback to the prior unfenced MemberID path.
+
+**Handoff retry/resume and context hard cut (eighth PR #82 audit):**
+A Role-selected *or* MemberID-only delegated child is an externally routed
+Handoff Invocation, **not** a native Agent simply because its execution class
+is `agent`. The frozen, hashed Delegation Input and deterministic Invocation
+identity now distinguish both forms without consulting optional `RoleID`.
+`RetryInvocation` rejects Handoff children with `ErrConflict` **before**
+rotating their Attempt/ExecutionRefID; `ResumeInvocation` and the shared
+Interaction Agent continuation reject them with `ErrInvalidRequest`
+**before** recording any physical dispatch grant.
+The old `startRetriedRole` adapter (which used `runner.agent.StartRun` instead
+of the original Handoff route) is deleted. Neither method silently switches
+the remote Member, Role policy, context, model or tool authorization to a
+local Agent. Both delegated forms also exclude supervisor Context Window
+rehydration on direct child Run Resume. Operators must observe/reconcile the
+original ChildRunner execution, not infer permission to start a new Run.
+Finally, a returned Handoff receipt must preserve the complete execution
+policy sealed in the child Invocation's hashed Input: Member/Role destination,
+Goal, Instructions, Model and ModelOptions, ordered ToolKeys and InitialToolKeys,
+HostedToolGrants/versions, and Limits. Only Status, Result and ErrorCode/Error
+may change; nil and allocated-empty slices remain equivalent. The received
+reply is checked against an independently decoded persisted source, not the
+caller-owned slice backing arrays that a custom ChildRunner could mutate.
+A mismatched reply remains outcome-unknown with the original grant unresolved
+and replay blocked. A mismatched request is rejected before remote execution.
+ModelOptions compare after the same `encoding/json` wire canonicalization used
+to seal the Input, so harmless original whitespace/escaping is not mistaken
+for a changed policy; malformed or semantically altered options still fail.
+
+**Remote Handoff cancellation proof (tenth PR #82 audit):** Both root Turn
+cancellation and direct `CancelInvocation` must distinguish an external
+ChildRunner Run from a local Kernel Run. `kernel.ErrNotFound` in the Harness
+Kernel is not a remote cancellation receipt. If a frozen Role or Member-only
+Handoff child has any potentially effectful physical dispatch grant, the
+previous synthetic missing-Run `Cancelled` projection is forbidden.
+`ErrHandoffCancellationUnverified` preserves the original child Invocation
+and unresolved cancellation intent; a root may already be cancelled locally
+while its remote child remains unverified. Only an unissued grant or the
+existing definitive, matching-owner `physical_dispatch_rejected` receipt
+permits the no-Run/no-effect cancellation path. Old unsealed Handoff children
+lack trustworthy no-effect provenance and fail closed. A live `a2a.remote`
+shadow Run must not be cancelled through the default native Kernel Canceller:
+this would stop the local shadow without cancelling its remote A2A Task.
+A separately composed Host `RuntimeCanceller` owns the remote cleanup
+contract; ordinary local Agent Runs remain cancellable as before. Host operators
+must provide a separately proven remote cleanup/reconciliation route, or
+explicitly quarantine unresolved child effects. Do not mark the child
+cancelled, close its intent, retry its Attempt, or redispatch its Handoff
+based on local absence alone.
+
+**Historical parent Item and Handoff Actor hard cut (subsequent P1 review):**
+An existing Item's immutable `RunID` is execution-attempt provenance,
+not permission to attach a new child to its stable Invocation owner after
+Retry. Admission and the final dispatch fence now reject Tool/Message/
+Artifact/Approval/Context/Diagnostic Items from previous physical Runs.
+A valid nested RunID can still be authorized by the existing indexed
+RunRelation `GetByChild` chain, but a missing relation fails closed.
+Delegation Items use their persisted `ParentRunID` and `ChildRunID`:
+`Item.RunID` points to the delegated child, not its owner. Missing or
+mismatched persisted Delegation provenance can no longer grant child
+admission. Host-owned no-Run Items remain unmodified.
+
+**Go API hard cut:** `handoff.Coordinator.Refresh` now requires
+`Refresh(ctx, parent kernel.Snapshot, delegation)`; callers must load
+and provide the authoritative parent Run, including nonempty TenantID,
+ActorID, Thread Kind and Thread ID. The same exact Actor/Thread comparison
+is mandatory for `StartOrLoad` (both Load and Start branches). A ChildRunner
+with the right ID, kind and status but different ownership is unverified;
+it cannot project a foreign result into a Delegation or settle the dispatch
+grant. A2A shadow Runs retain the owning local parent's identity. No
+legacy two-argument Refresh overload, inferred Actor mapping or fallback
+is maintained.
+
+**PR #82 follow-up hard cut — task identity and retry liveness:**
+Handoff's accepted child Run must also have the exact
+`Run.Goal == Delegation.Goal` and
+`Run.RequestID == parent.Run.ID + ":" + Delegation.ID`. Matching Run ID,
+Actor/Thread, kind and terminal status alone cannot prove task identity.
+Load/Start/Refresh reject absent or altered values with
+`ErrChildRunUnverified`; Harness retains the Handoff grant and never
+projects a foreign Result. Hosts providing custom ChildRunners must
+persist and return the original StartRequest Goal and RequestID.
+
+A settled physical Start grant proves only that dispatch returned. It is
+not a terminal outcome. Store `RetryInvocation` now blocks Root and
+intermediate retries while any other child Invocation in the Turn is
+Running, WaitingInput or PausedBudget, or while an Accepted child has a
+possibly executed physical grant (including a settled remote Handoff Start).
+An Accepted child that never acquired a grant, or received only matching,
+first-party `physical_dispatch_rejected` receipts, remains eligible for
+the original crash-recovery semantics. This barrier is deliberately
+Turn-wide and executed under the same Memory mutex / SQL Turn row lock as
+grant and Host-effect admission; no inference from terminal parent status
+or from grant settlement can bypass it. Operators must reconcile or
+quarantine unresolved children before a new parent Attempt.
+
+**Go source hard cut — RunRelation composition:** The
+`harness.Dependencies.Relations` field requires
+`harness.RunRelationSource` (the existing `Ensure`, `ListChildren`
+and indexed `GetByChild` methods). A recorder-only or ListChildren-only
+adapter no longer compiles as an optional half-implemented dependency.
+There is no runtime type-assertion fallback. Hosts not composing a
+relation-dependent capability may still omit Relations, but then cannot
+authorize nested physical Run descent.
+
+**Further PR #82 P1 hard cut — non-Invocation RunRelation descendants:**
+A Failed/Cancelled Team, Workflow or GroupChat can still own a running
+TeamMember/WorkflowEffect/GroupChatSpeaker Run even when **no Harness child
+Invocation exists**. A FailFast Parallel Team with one failed and one
+Running Member reproduced this after the parent's physical Start grant
+had already settled. Root Retry rotated its Attempt and abandoned the
+remaining physical member. The prior Invocation-only retry fence was
+insufficient; querying a separately persisted RunRelation/Kernel before
+the retry CAS would not close the cross-store admission race.
+
+Memory and PostgreSQL/SQLite `Store.RetryInvocation` now fail closed on
+any terminal, previously effectful Team/Workflow/GroupChat, whether it
+is the rotating Invocation or another terminal child in the same Turn.
+A **missing physical grant** on a terminal composite is not proof that
+no Member/Effect/Speaker was created. To allow an explicit retry,
+**every** original composite physical dispatch grant must be paired with
+an exact same-owner, same-Run no-effect receipt
+(`physical_dispatch_rejected` or `feature_start_no_effect`). A
+`physical_dispatch_returned` receipt proves that the Feature ran, **not**
+that all of its independently routed descendants terminated. Such
+effectful automatic composite retries are deliberately unsupported
+until an atomic transitive cleanup/terminal proof contract exists;
+do not use a non-transactional relation scan as a compatibility bypass.
+Safe first-party pre-dispatch rejection retries continue to work.
+Previously supported optimistic retries of failed/cancelled composite
+features after actual physical execution will now return `ErrConflict`.
+This is a pre-stable Go behavioral hard cut, with no schema or wire
+migration and no compatibility adapter.
+
+**Additional PR #82 P1 hard cut — authoritative Grant settlement and Item origin:**
+A physical Dispatch Grant now has exactly one verifiable completion fact.
+A Diagnostic Completion must reference the original Grant, have a later
+sequence, the exact same Turn/Invocation/Run, and one recognized physical
+boundary. Memory and PostgreSQL Store append reject foreign, duplicate and
+contradictory completion claims under the existing Turn lock. All
+`PendingExecutionDispatch`, Retry, native recovery and Handoff cancellation
+checks use this same closed-set verifier. Missing, conflicting, unknown or
+mismatched historical receipts retain the unsettled physical fence; neither
+an unrelated Completion nor a later `physical_dispatch_rejected` can cancel
+an earlier `physical_dispatch_returned` and grant an unsafe Retry.
+
+An Item with a nonempty `InvocationID` but no physical `RunID` cannot serve
+as child-execution parent authority. Prior to this hard cut, an old runless
+Tool Item still attached to a stable Root Invocation could create a new Team
+after Root Retry. Truly Host-owned Items with neither InvocationID nor RunID
+retain their no-Run semantics; owned Items must preserve their original Run
+provenance. Existing incorrectly stamped Items must be drained/quarantined
+rather than rebound to a new Attempt. This changes pre-stable behavior and
+test fixtures without adding Item columns, Store APIs, schema migrations or
+compatibility adapters. See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
+and [dispatch receipt and Item-origin remediation](audits/2026-10-31-pr82-dispatch-settlement-and-runless-origin-remediation.md).
+
+**Further PR #82 P1 cancellation hard cut — composite Start in flight:**
+A Team/Workflow/GroupChat physical Start can create its parent Kernel Run
+before dispatching any Member/Effect/Speaker; its unsettled Harness
+Dispatch Grant is still in flight. Previously, Cancel saw the parent
+Kernel Run and allowed cancellation to finish, while the original
+Feature callback subsequently started a new external child. Root and
+subtree Cancel now reject that unfinished composite Start (`ErrConflict`)
+even if its Kernel Run already exists. The only Start-grant bypass is for
+a verified **concrete native Agent** with matching Invocation, physical
+Run and Agent kind, whose RuntimeCanceller is the exact same Kernel
+Runtime; Kernel CAS or a bound Epoch owns subsequent Agent dispatch. Custom Agents and other Runtime Features never acquire
+this privilege from Run existence alone. Callers must retry Cancel after
+the physical Start settles; no synthetic cancellation, implicit remote
+cleanup, legacy workaround, Store API or schema migration is added.
+See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
+and [independent composite-start cancellation remediation](audits/2026-10-31-pr82-composite-start-cancellation-fence-remediation.md).
+
+No new persistence table, schema version, alternate router, or compatibility
+bridge is introduced. Reconcile or quarantine incomplete historical
+Handoff Invocations rather than guessing their execution provenance.
+See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md),
+[PR #82 seventh remediation](audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md),
+[eighth provenance/receipt correction](audits/2026-10-31-pr82-handoff-provenance-and-receipt-hardcut.md),
+[ninth frozen-execution receipt correction](audits/2026-10-31-pr82-handoff-frozen-execution-receipt-remediation.md),
+and [tenth remote Handoff cancellation correction](audits/2026-10-31-pr82-remote-handoff-cancellation-remediation.md).
+
 ## 2026-10-30 — Host command presentation removed from Harness (beta.24 candidate)
 
 **Go public API hard cut:** `harness.CommandDescriptor` no longer carries

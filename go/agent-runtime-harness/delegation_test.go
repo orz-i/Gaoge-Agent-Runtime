@@ -156,7 +156,10 @@ func TestHarnessDelegationRelationsExistBeforeChildExecution(t *testing.T) {
 	assertTerminalDelegationRelations(t, relations, result)
 }
 
-func TestHarnessCancelCascadesThroughDurableDelegationOwnership(t *testing.T) {
+// Cancellation cannot certify that an in-flight Handoff Start had no
+// effect. It must fence that physical grant until StartOrLoad returns a
+// verified child Run, rather than report a false cancellation.
+func TestHarnessCancelRefusesUnsettledDelegationDispatch(t *testing.T) {
 	t.Parallel()
 	client := &blockingDelegationModel{
 		secondChildStarted: make(chan struct{}),
@@ -184,20 +187,21 @@ func TestHarnessCancelCascadesThroughDurableDelegationOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	activeChildRunID := activeDelegationRunID(t, runtime, before.Items)
-	cancelled, err := runner.Cancel(t.Context(), turnID, "operator request")
-	if err != nil || cancelled.Turn.Status != harness.TurnCancelled {
-		t.Fatalf("cancelled snapshot=%#v err=%v", cancelled.Turn, err)
+	if _, err := runner.Cancel(t.Context(), turnID, "operator request"); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("unsettled external child Start must fence cancellation: %v", err)
+	}
+	pending, err := runner.Load(t.Context(), turnID)
+	if err != nil ||
+		(pending.Turn.Status != harness.TurnAccepted && pending.Turn.Status != harness.TurnRunning) ||
+		!harness.PendingExecutionDispatch(pending.Items, "") {
+		t.Fatalf("unsettled Handoff lost its durable pending grant: %+v %v", pending.Turn, err)
+	}
+	activeChild, err := runtime.Load(t.Context(), activeChildRunID)
+	if err != nil || activeChild.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("a rejected cancellation mutated in-flight child: %#v %v", activeChild.Run, err)
 	}
 	release()
-	activeChild, err := runtime.Load(t.Context(), activeChildRunID)
-	if err != nil || activeChild.Run.Status != kernel.RunStatusCancelled {
-		t.Fatalf("delegated child=%#v err=%v", activeChild.Run, err)
-	}
-	select {
-	case <-result:
-	case <-time.After(time.Second):
-		t.Fatal("cancelled delegated Harness turn did not return")
-	}
+	assertTerminalDelegationRelations(t, relations, result)
 }
 
 func TestHarnessDelegatesDifferentGoalsToSameMember(t *testing.T) {

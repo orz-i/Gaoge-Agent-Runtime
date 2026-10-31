@@ -126,7 +126,12 @@ func TestReauditNestedSubtaskCancellationFencesDescendantBusinessCall(t *testing
 			nested := harness.Invocation{
 				ID: "hiv_nested", TurnID: turnID, ParentItemID: parentItemID,
 				CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
-				ExecutionClass: harness.ExecutionTeam, InputHash: "nested",
+				// Both Items are root-owned; the intermediate ownership is
+				// deliberately supplied only by RunRelation. Retain the valid
+				// root Attempt seal from the admitted Team rather than minting
+				// a legacy child with no immutable execution input.
+				ExecutionClass: harness.ExecutionTeam,
+				Input:          append(json.RawMessage(nil), parent.Input...), InputHash: parent.InputHash,
 				ExecutionRefID: nestedRun.Run.ID, Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
 				CreatedAt: featureInvocationClock{}.Now(), UpdatedAt: featureInvocationClock{}.Now(),
 			}
@@ -151,7 +156,13 @@ func TestReauditNestedSubtaskCancellationFencesDescendantBusinessCall(t *testing
 					harness.ResolveInteractionRequest{Response: json.RawMessage("{}")})
 				done <- e
 			}()
-			<-handler.start
+			select {
+			case <-handler.start:
+			case err := <-done:
+				t.Fatalf("business callback never started: %v", err)
+			case <-t.Context().Done():
+				t.Fatal(t.Context().Err())
+			}
 			var cancelErr error
 			switch mode {
 			case "CancelSubtask":

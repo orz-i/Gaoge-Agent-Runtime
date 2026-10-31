@@ -146,14 +146,26 @@ func (store *MemoryStore) RetryInvocation(
 	if !ok {
 		return Invocation{}, ErrNotFound
 	}
-	scopeID := current.ID
-	if current.ParentItemID == "" {
-		scopeID = "" // Root retry cannot invalidate unfinished descendant effects.
-	}
+	// Retrying even an intermediate parent cannot outlive a descendant's
+	// pre-effect dispatch grant. Take the conservative Turn-wide barrier:
+	// grants do not encode a transactional transitive ownership snapshot.
 	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
 		ActiveCancellationFence(store.items[current.TurnID]) ||
-		PendingExecutionDispatch(store.items[current.TurnID], scopeID) {
+		PendingExecutionDispatch(store.items[current.TurnID], "") {
 		return Invocation{}, ErrConflict
+	}
+	// Check all potentially executing children, not just unclaimed Host
+	// Application callbacks. An acknowledged native/Handoff Start settles its
+	// grant while its child may still run; status and grant proof are inspected
+	// under this same Turn mutex before rotating any Attempt.
+	children := make([]Invocation, 0)
+	for _, child := range store.invocations {
+		if child.TurnID == current.TurnID && child.ParentItemID != "" && child.ID != current.ID {
+			children = append(children, child)
+		}
+	}
+	if err := RetryChildEffectFence(children, store.items[current.TurnID], current); err != nil {
+		return Invocation{}, err
 	}
 	var rootTurn Turn
 	if strings.TrimSpace(current.ParentItemID) == "" {
@@ -777,6 +789,21 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 		}
 	}
 	value.Seq = uint64(len(store.items[value.TurnID]) + 1)
+	if grant, found := store.itemIDs[value.ParentItemID]; found &&
+		grant.Kind == ItemDiagnostic && grant.Status == ItemStarted &&
+		grant.ParentItemID == ExecutionDispatchParentItemID {
+		// Each physical grant can be settled exactly once, with the same
+		// durable owner and Run. An unrelated/contradictory completion never
+		// changes an unknown physical outcome into a trusted receipt.
+		if _, valid := VerifiedExecutionDispatchReceipt(grant, []Item{value}); !valid {
+			return Item{}, false, ErrConflict
+		}
+		for _, previous := range store.items[grant.TurnID] {
+			if previous.Kind == ItemDiagnostic && previous.ParentItemID == grant.ID {
+				return Item{}, false, ErrConflict
+			}
+		}
+	}
 	value = cloneItem(value)
 	store.items[value.TurnID] = append(store.items[value.TurnID], value)
 	store.itemIDs[value.ID] = value
