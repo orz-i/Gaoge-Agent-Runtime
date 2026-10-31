@@ -3,7 +3,7 @@
 - **Branch:** `governance/harness-child-owner-indexed-20261031`
 - **Base:** `main@2448bd1442c9a4ad5b451edf0d06efa6e4b40ae9` (PR #81 merged)
 - **Scope:** Existing Harness parent Item validation and child-only Invocation entrypoints
-- **Decision:** **Local GO for atomic commits and subsequent independent PR review.** This does not authorize merge, remote push or beta.24 publication.
+- **Original decision:** Local GO for the initial two-commit hard cut, **superseded for PR #82 merger admission** by the independent P1 root-liveness finding. See [PR #82 root fence remediation](2026-10-31-pr82-root-liveness-fence-remediation.md) for its correction and updated evidence. This original record does not authorize merge or beta.24 publication.
 - **Design:** [ADR 0015](../adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
 
 ## Verified defect and correction
@@ -15,8 +15,10 @@ the caller supplied one globally unique parent Item ID. A red test with
 `GetItem` but rejects `ListItems` demonstrated the dependency:
 the valid parent was rejected. Replacing the scan with one `GetItem`
 and checking exact ID/Turn/positive Seq made the test pass, including
-missing/foreign parent rejection. The separate last-moment physical
-dispatch ancestor liveness fence is unchanged.
+missing/foreign parent rejection. The original two-commit change left the separate last-moment physical
+dispatch ancestor liveness fence unchanged. The later independent audit
+found a missing root check for ownerless Items; that P1 is addressed in
+the subsequent remediation record.
 
 **2. Wrong root/child execution boundary.**
 `RefreshInvocation(rootID)` succeeded through child-only projection,

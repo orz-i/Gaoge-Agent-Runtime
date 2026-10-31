@@ -22,7 +22,14 @@ parent remains optional. Existing parent ID validation uses one
 positive persisted Seq; missing/foreign IDs are invalid, corrupt Items
 or Store errors fail closed. The independent final pre-dispatch ancestor
 liveness fence remains authoritative: admission lookup is not permission
-to execute after a parent terminates.
+to execute after a parent terminates. The PR #82 independent P1 review
+also closed an ownerless-parent gap: after a durable child dispatch grant
+(or Application effect claim), the last pre-effect check always validates
+the root Invocation and, for Runtime roots, its exact Kernel Run status.
+A terminal/missing root rejects child effects even when the parent Item
+has no Invocation owner. Host Application roots use their durable root
+Invocation, without a synthetic Kernel Run. This is a fail-closed behavior
+correction, not permission to retry ambiguous external side effects.
 
 **No persistence conversion:** The existing indexed `Store.GetItem`
 contract (PR #79), Kernel Run, Turn/Invocation statuses, execution IDs,

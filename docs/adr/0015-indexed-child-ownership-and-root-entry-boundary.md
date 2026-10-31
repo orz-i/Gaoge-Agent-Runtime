@@ -57,6 +57,18 @@ instead found two narrower, testable defects in the public child boundary.
    pre-dispatch `requireLiveInvocationParents` continues to walk the exact
    ancestor chain under the existing durable grant and cancellation fencing.
    Admission lookup does **not** claim to replace that check.
+5. **Root liveness is mandatory even for ownerless parent Items.** The
+   independent PR #82 audit found that an Item without an `InvocationID`
+   can pass the ancestor check after its root Kernel Run terminates in the
+   post-grant/pre-effect window. The final fence now resolves the one
+   top-level Invocation for the child Turn independently of parent Item
+   ownership and verifies its nonterminal status. For native Runtime roots,
+   it additionally loads the frozen `ExecutionRefID` from the authoritative
+   Kernel and rejects a missing, mismatched or terminal Run. For Application
+   roots, the persisted root Invocation is authoritative: no phantom
+   Kernel Run is created or required. Keep the existing ancestor and
+   cancellation fences; neither the Turn's possibly stale status nor an
+   arbitrary Host Item alone authorizes a physical child effect.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -82,6 +94,12 @@ existing Invocation. Published beta.23 tags remain unchanged.
   a physical dispatch grant or advance its Kernel Run.
 - Retain Application callback single-dispatch behavior through the actual
   root `Refresh(turnID)` path; the child-only methods fail before side effects.
+- PR #82's independent P1 repro injects root Kernel cancellation after a
+  child physical grant or an Application effect claim. Both were originally
+  red with ownerless parent Items; the root-aware final fence now rejects
+  them before Feature/Host callback execution. Direct tests verify that a
+  live Application root works without a Kernel Run and that terminal/missing
+  roots fail closed.
 - A 500/2,000/10,000-Item memory benchmark measures indexed parent
   admission independently of full Agent/Workflow execution.
 - Complete Harness modules, race/quality, clean external consumers and
