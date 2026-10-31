@@ -267,7 +267,9 @@ func (runner *Runner) admitRoleChild(ctx context.Context, turn Turn, parent Invo
 	return projectBudgetItem(ctx, runner.store, runner.turnFeed, runner.clock, ledger)
 }
 
-func (runner *Runner) prepareRoleChild(ctx context.Context, turn Turn, parent Invocation, delegation handoff.Delegation, parentItemID string) error {
+// prepareHandoffChild persists one exact frozen child Attempt for either a
+// Role-based or MemberID-only delegation before any external Handoff effect.
+func (runner *Runner) prepareHandoffChild(ctx context.Context, turn Turn, parent Invocation, delegation handoff.Delegation, parentItemID string) error {
 	input, inputHash, err := marshalInvocationValue(delegation)
 	if err != nil {
 		return err

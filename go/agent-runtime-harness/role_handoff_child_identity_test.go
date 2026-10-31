@@ -47,10 +47,10 @@ func TestPR82HandoffWrongChildRunKeepsDispatchGrant(t *testing.T) {
 			}
 			f.runner.handoffs = coordinator
 			delegation := f.delegation()
-			if err := f.runner.prepareRoleChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
+			if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
 				t.Fatal(err)
 			}
-			result, err := f.runner.dispatchRoleHandoff(t.Context(), f.turn, f.parentRun, delegation, f.startedItemID)
+			result, err := f.runner.dispatchHandoff(t.Context(), f.turn, f.parentRun, delegation, f.startedItemID)
 			if !errors.Is(err, ErrExecutionOutcomeUnknown) ||
 				!errors.Is(err, handoff.ErrChildRunUnverified) || result.ID != "" {
 				t.Fatalf("unverified child was certified: result=%+v err=%v", result, err)
@@ -62,7 +62,7 @@ func TestPR82HandoffWrongChildRunKeepsDispatchGrant(t *testing.T) {
 			if !PendingExecutionDispatch(items, "") {
 				t.Fatal("incorrect child identity closed the physical dispatch grant")
 			}
-			_, err = f.runner.dispatchRoleHandoff(t.Context(), f.turn, f.parentRun, delegation, f.startedItemID)
+			_, err = f.runner.dispatchHandoff(t.Context(), f.turn, f.parentRun, delegation, f.startedItemID)
 			if !errors.Is(err, ErrConflict) {
 				t.Fatalf("unreconciled grant allowed duplicate dispatch: %v", err)
 			}

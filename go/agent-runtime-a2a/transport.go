@@ -7,10 +7,12 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 )
 
-const RunKind kernel.RunKind = "a2a.remote"
+// The A2A shadow is an explicit delegated Agent-compatible child, not a
+// generic Kernel Run. Share the exact accepted kind with Handoff verification.
+const RunKind = handoff.RemoteAgentRunKind
 
 var ErrInvalidTransport = errors.New("invalid A2A transport")
 

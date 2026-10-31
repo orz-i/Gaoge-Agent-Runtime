@@ -130,6 +130,7 @@ func TestAsyncDelegationCancellationRetriesExternalCleanup(t *testing.T) {
 	canceller := &asyncDelegationCanceller{runtime: fixture.runtime}
 	runner, _ := fixture.compose(t, canceller)
 	started := fixture.start(t, runner)
+	canceller.childRunID = fixture.child.id
 	if _, err := runner.Cancel(t.Context(), started.Turn.ID, "stop"); !errors.Is(err, errAsyncCancelUnavailable) {
 		t.Fatalf("remote cancellation error was lost: %v", err)
 	}
@@ -321,7 +322,7 @@ type asyncDelegationChild struct {
 func (child *asyncDelegationChild) StartRun(ctx context.Context, request agent.StartRequest) (kernel.Snapshot, error) {
 	child.starts++
 	child.id, child.goal = request.ID, request.Goal
-	return child.runtime.Create(ctx, kernel.CreateRequest{ID: request.ID, Kind: "test.async-child",
+	return child.runtime.Create(ctx, kernel.CreateRequest{ID: request.ID, Kind: agent.RunKind,
 		Actor: request.Actor, Thread: request.Thread, RequestID: request.RequestID, Goal: request.Goal, State: json.RawMessage(`{}`)})
 }
 
@@ -341,15 +342,15 @@ var errAsyncCancelUnavailable = errors.New("remote cancellation temporarily unav
 
 type asyncDelegationCanceller struct {
 	runtime    *kernel.Runtime
+	childRunID string
 	childCalls int
 }
 
 func (canceller *asyncDelegationCanceller) Cancel(ctx context.Context, runID string, revision uint64, reason string) (kernel.Snapshot, error) {
-	snapshot, err := canceller.runtime.Load(ctx, runID)
-	if err != nil {
+	if _, err := canceller.runtime.Load(ctx, runID); err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if snapshot.Run.Kind == "test.async-child" {
+	if runID == canceller.childRunID {
 		canceller.childCalls++
 		if canceller.childCalls == 1 {
 			return kernel.Snapshot{}, errAsyncCancelUnavailable

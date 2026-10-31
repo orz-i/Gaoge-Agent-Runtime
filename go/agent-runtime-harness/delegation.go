@@ -271,17 +271,13 @@ func (runner *Runner) executeDelegation(
 	if err := runner.ensureDelegationRelation(ctx, invocation.ExecutionRefID, delegation); err != nil {
 		return DelegationResult{}, err
 	}
-	if delegation.RoleID != "" {
-		if err := runner.prepareRoleChild(ctx, turn, invocation, delegation, startedItemID); err != nil {
-			return DelegationResult{}, err
-		}
+	// Every delegated child, whether selected by RoleID or MemberID, owns
+	// one frozen Invocation and the same cancellation-fenced physical grant.
+	// A member-only Handoff must not bypass this boundary.
+	if err := runner.prepareHandoffChild(ctx, turn, invocation, delegation, startedItemID); err != nil {
+		return DelegationResult{}, err
 	}
-	var delegateErr error
-	if delegation.RoleID != "" {
-		delegation, delegateErr = runner.dispatchRoleHandoff(ctx, turn, parent, delegation, startedItemID)
-	} else {
-		delegation, delegateErr = runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
-	}
+	delegation, delegateErr := runner.dispatchHandoff(ctx, turn, parent, delegation, startedItemID)
 	status := delegationItemStatus(delegation.Status)
 	if status != ItemStarted {
 		if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, status, startedItemID); itemErr != nil {
@@ -295,11 +291,10 @@ func (runner *Runner) executeDelegation(
 	return DelegationResult{Delegation: delegation, Snapshot: snapshot}, errors.Join(delegateErr, loadErr)
 }
 
-// dispatchRoleHandoff uses the same durable physical dispatch grant as native
-// Features, owned by the accepted Role Invocation rather than its running
-// parent Agent. The terminal/nonterminal child result is a Handoff-observed
-// Run outcome; a missing or mismatched result is NOT a no-effect receipt.
-func (runner *Runner) dispatchRoleHandoff(
+// dispatchHandoff uses the native Feature dispatch grant for every delegated
+// child, owned by its frozen child Invocation rather than its parent Agent.
+// Only a matching Handoff-observed Run outcome can settle that grant.
+func (runner *Runner) dispatchHandoff(
 	ctx context.Context, turn Turn, parent kernel.Snapshot,
 	delegation handoff.Delegation, parentItemID string,
 ) (handoff.Delegation, error) {

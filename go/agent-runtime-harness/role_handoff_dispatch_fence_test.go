@@ -238,10 +238,10 @@ func TestPR82RoleHandoffSettlesVerifiedOutcome(t *testing.T) {
 		return delegation, handoff.ErrChildPending
 	}
 	delegation := f.delegation()
-	if err := f.runner.prepareRoleChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
+	if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
 		t.Fatal(err)
 	}
-	result, err := f.runner.dispatchRoleHandoff(t.Context(), f.turn, f.parentRun, delegation, f.startedItemID)
+	result, err := f.runner.dispatchHandoff(t.Context(), f.turn, f.parentRun, delegation, f.startedItemID)
 	if !errors.Is(err, handoff.ErrChildPending) || result.Status != handoff.StatusRunning {
 		t.Fatalf("legitimate Handoff failed: result=%+v err=%v", result, err)
 	}

@@ -13,6 +13,11 @@ import (
 
 const CapabilityCoordinator kernel.Capability = "handoff.coordinator"
 
+// RemoteAgentRunKind is the A2A remote-Agent shadow RunKind. Handoff may
+// consume an Agent Run or this explicitly bound remote Agent proxy, but never
+// an unrelated Workflow, Team or custom Kernel state machine.
+const RemoteAgentRunKind kernel.RunKind = "a2a.remote"
+
 var (
 	ErrInvalidDelegation = errors.New("invalid handoff delegation")
 	ErrChildUnavailable  = errors.New("handoff child runner is unavailable")
@@ -243,7 +248,8 @@ func (coordinator *Coordinator) Refresh(ctx context.Context, delegation Delegati
 // snapshot. Never let projection copy that requested ID into a seemingly
 // verified receipt for another (or an invalid) physical Run.
 func verifiedChildRun(delegation Delegation, child kernel.Snapshot) bool {
-	if child.Run.ID != delegation.ChildRunID {
+	if child.Run.ID != delegation.ChildRunID ||
+		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
 		return false
 	}
 	switch child.Run.Status {
