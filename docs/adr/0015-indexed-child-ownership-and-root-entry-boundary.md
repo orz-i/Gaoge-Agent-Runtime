@@ -350,6 +350,31 @@ instead found two narrower, testable defects in the public child boundary.
     no-Run path. Owned Host-created Items intended to authorize new
     children must persist the originating Run identity. This is a
     pre-stable behavioral hard cut with no heuristic backfill or bridge.
+25. **A composite Feature's parent Kernel Run is not a cancellation
+    handoff.** The subsequent independent P1 audit parked a real Team
+    Start after its parent Kernel Run was created but before the first
+    member's RunRelation/ChildRunner dispatch. The prior
+    `pendingExecutionDispatch` treated any Start grant whose Run already
+    existed as safe to ignore during cancellation; `Cancel` successfully
+    terminalized the parent Turn, then the pending Team callback started
+    an external child **after** successful cancellation. The same Race
+    reproducer failed three consecutive times. The physical Start grant
+    must remain outstanding until the entire Team/Workflow/GroupChat
+    Feature callback returns and persists its one authoritative receipt.
+    Both root and subtree cancellation must reject a still-unsettled
+    composite Start grant instead of relying on Kernel CAS for future
+    Feature-owned RunRelation children. The existing `Turn` admission
+    fence prevents a late **new** grant; this rule covers already admitted
+    grants where physical execution remains in progress. A narrowly
+    verified direct first-party `*agent.Runner` can still hand off to
+    Kernel cancellation: both the Invocation and created Run must have
+    exact matching origin, the Run kind must be `agent`, and the native
+    Kernel execution check must be valid or require a bound Epoch.
+    Custom Agents, delegated children, and composite Features cannot
+    inherit that exception by manufacturing a Kernel Run. For unsafe
+    concurrent Cancel, return `ErrConflict` while the original Start
+    finishes; do not fabricate a cancelled physical child. No extra
+    Store API, schema/version bump or compatibility bridge is introduced.
 
 ## Breaking change, upgrade, and exclusions
 

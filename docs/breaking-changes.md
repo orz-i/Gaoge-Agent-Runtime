@@ -247,6 +247,23 @@ test fixtures without adding Item columns, Store APIs, schema migrations or
 compatibility adapters. See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
 and [dispatch receipt and Item-origin remediation](audits/2026-10-31-pr82-dispatch-settlement-and-runless-origin-remediation.md).
 
+**Further PR #82 P1 cancellation hard cut — composite Start in flight:**
+A Team/Workflow/GroupChat physical Start can create its parent Kernel Run
+before dispatching any Member/Effect/Speaker; its unsettled Harness
+Dispatch Grant is still in flight. Previously, Cancel saw the parent
+Kernel Run and allowed cancellation to finish, while the original
+Feature callback subsequently started a new external child. Root and
+subtree Cancel now reject that unfinished composite Start (`ErrConflict`)
+even if its Kernel Run already exists. The only Start-grant bypass is for
+a verified **concrete native Agent** with matching Invocation, physical
+Run and Agent kind, where Kernel CAS or a bound Epoch owns all subsequent
+Agent dispatch. Custom Agents and other Runtime Features never acquire
+this privilege from Run existence alone. Callers must retry Cancel after
+the physical Start settles; no synthetic cancellation, implicit remote
+cleanup, legacy workaround, Store API or schema migration is added.
+See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
+and [independent composite-start cancellation remediation](audits/2026-10-31-pr82-composite-start-cancellation-fence-remediation.md).
+
 No new persistence table, schema version, alternate router, or compatibility
 bridge is introduced. Reconcile or quarantine incomplete historical
 Handoff Invocations rather than guessing their execution provenance.
