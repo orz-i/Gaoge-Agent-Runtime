@@ -789,6 +789,21 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 		}
 	}
 	value.Seq = uint64(len(store.items[value.TurnID]) + 1)
+	if grant, found := store.itemIDs[value.ParentItemID]; found &&
+		grant.Kind == ItemDiagnostic && grant.Status == ItemStarted &&
+		grant.ParentItemID == ExecutionDispatchParentItemID {
+		// Each physical grant can be settled exactly once, with the same
+		// durable owner and Run. An unrelated/contradictory completion never
+		// changes an unknown physical outcome into a trusted receipt.
+		if _, valid := VerifiedExecutionDispatchReceipt(grant, []Item{value}); !valid {
+			return Item{}, false, ErrConflict
+		}
+		for _, previous := range store.items[grant.TurnID] {
+			if previous.Kind == ItemDiagnostic && previous.ParentItemID == grant.ID {
+				return Item{}, false, ErrConflict
+			}
+		}
+	}
 	value = cloneItem(value)
 	store.items[value.TurnID] = append(store.items[value.TurnID], value)
 	store.itemIDs[value.ID] = value

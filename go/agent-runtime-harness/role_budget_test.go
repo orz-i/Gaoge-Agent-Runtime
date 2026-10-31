@@ -161,6 +161,7 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	}
 	if _, _, closeErr := store.AppendItem(t.Context(), harness.Item{
 		ID: "role-child-approval-grant-closed", TurnID: started.Turn.ID,
+		InvocationID: grant.InvocationID, RunID: grant.RunID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
 		ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),
 		CreatedAt: now, UpdatedAt: now,

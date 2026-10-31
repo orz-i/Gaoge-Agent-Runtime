@@ -108,6 +108,7 @@ func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role
 		t.Fatal(err)
 	}
 	if _, _, err := store.AppendItem(ctx, harness.Item{ID: "pr82-handoff-verified-start", TurnID: turnID,
+		InvocationID: grant.InvocationID, RunID: grant.RunID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: grant.ID,
 		Payload: json.RawMessage(`{"boundary":"handoff_start_returned"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)

@@ -107,7 +107,20 @@ func assertCompositeRootRetryFence(t *testing.T, store harness.Store, prefix str
 				receipt := harness.Item{ID: "done-" + turnID, TurnID: turnID, InvocationID: receiptOwner, RunID: receiptRun,
 					Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: grantID,
 					Payload: payload, CreatedAt: now, UpdatedAt: now}
-				if _, _, err = store.AppendItem(ctx, receipt); err != nil {
+				_, _, err = store.AppendItem(ctx, receipt)
+				if tc.receipt == "wrong-owner" || tc.receipt == "wrong-run" {
+					if !errors.Is(err, harness.ErrConflict) {
+						t.Fatalf("foreign dispatch receipt was accepted: %v", err)
+					}
+					// The invalid completion did not close the original grant;
+					// neither terminal Failed projection nor Retry is authorized.
+					inv.Status = harness.InvocationFailed
+					if _, err := store.UpdateInvocation(ctx, inv, inv.Revision); !errors.Is(err, harness.ErrConflict) {
+						t.Fatalf("unknown grant permitted failed projection: %v", err)
+					}
+					return
+				}
+				if err != nil {
 					t.Fatal(err)
 				}
 			}

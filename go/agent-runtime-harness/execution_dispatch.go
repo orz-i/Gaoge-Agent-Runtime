@@ -54,13 +54,63 @@ func isDispatchProvenNoEffect(err error) bool {
 // claiming it stopped the Feature; a cancelled Turn cannot admit a late grant.
 const ExecutionDispatchParentItemID = "harness.execution.dispatch"
 
-func PendingExecutionDispatch(items []Item, invocationID string) bool {
-	closed := make(map[string]struct{})
+// executionDispatchReceiptIndex preserves every claimed settlement, including
+// malformed and conflicting ones. Dropping a second receipt or an incorrect
+// owner would turn inconsistent physical execution evidence into authority.
+func executionDispatchReceiptIndex(items []Item) map[string][]Item {
+	byGrant := make(map[string][]Item)
 	for _, item := range items {
-		if item.Kind == ItemDiagnostic && item.Status == ItemCompleted {
-			closed[item.ParentItemID] = struct{}{}
+		if item.Kind == ItemDiagnostic && item.ParentItemID != "" &&
+			item.ParentItemID != ExecutionDispatchParentItemID {
+			byGrant[item.ParentItemID] = append(byGrant[item.ParentItemID], item)
 		}
 	}
+	return byGrant
+}
+
+// VerifiedExecutionDispatchReceipt is the single durable grant-settlement
+// contract used by the Memory and SQL Stores, retry, cancellation and native
+// recovery. A physical grant has exactly ONE recognized completion fact,
+// committed later in the same Turn with the exact Invocation and Run owner.
+// A foreign/unknown/contradictory completion is NOT a settlement.
+func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool) {
+	if grant.ID == "" || grant.Seq == 0 || grant.Kind != ItemDiagnostic ||
+		grant.Status != ItemStarted || grant.ParentItemID != ExecutionDispatchParentItemID ||
+		grant.TurnID == "" || grant.InvocationID == "" || grant.RunID == "" {
+		return "", false
+	}
+	var receipt Item
+	count := 0
+	for _, item := range receipts {
+		if item.Kind != ItemDiagnostic || item.ParentItemID != grant.ID {
+			continue
+		}
+		count++
+		receipt = item
+	}
+	if count != 1 || receipt.ID == "" || receipt.Status != ItemCompleted ||
+		receipt.TurnID != grant.TurnID || receipt.InvocationID != grant.InvocationID ||
+		receipt.RunID != grant.RunID || receipt.Seq <= grant.Seq {
+		return "", false
+	}
+	var payload struct {
+		Boundary string `json:"boundary"`
+	}
+	if json.Unmarshal(receipt.Payload, &payload) != nil {
+		return "", false
+	}
+	switch payload.Boundary {
+	case "physical_dispatch_rejected", "feature_start_no_effect", "native_agent_start_no_effect",
+		"native_agent_control_no_effect", "physical_dispatch_returned", "handoff_start_returned",
+		"native_kernel_epoch_recovered":
+		return payload.Boundary, true
+	default:
+		return "", false
+	}
+}
+
+func PendingExecutionDispatch(items []Item, invocationID string) bool {
+	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
 		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
 			item.ParentItemID != ExecutionDispatchParentItemID {
@@ -69,7 +119,7 @@ func PendingExecutionDispatch(items []Item, invocationID string) bool {
 		if invocationID != "" && item.InvocationID != invocationID {
 			continue
 		}
-		if _, settled := closed[item.ID]; !settled {
+		if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); !settled {
 			return true
 		}
 	}
@@ -83,18 +133,13 @@ func (runner *Runner) pendingExecutionDispatch(
 	if err != nil {
 		return false, err
 	}
-	closed := make(map[string]struct{})
-	for _, item := range items {
-		if item.Kind == ItemDiagnostic && item.Status == ItemCompleted {
-			closed[item.ParentItemID] = struct{}{}
-		}
-	}
+	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
 		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
 			item.ParentItemID != ExecutionDispatchParentItemID {
 			continue
 		}
-		if _, done := closed[item.ID]; done {
+		if _, done := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); done {
 			continue
 		}
 		var phase struct {

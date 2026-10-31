@@ -1,7 +1,5 @@
 package harness
 
-import "encoding/json"
-
 // RetryChildEffectFence is the shared Store-side retry decision. Callers MUST
 // hold the same owning Turn admission lock used by Invocation status updates
 // and physical dispatch grants. A settled Start receipt proves only that the
@@ -76,32 +74,15 @@ func compositeRunMayHaveDescendants(items []Item, invocation Invocation) bool {
 		return true // An unknown execution implementation cannot grant Retry.
 	}
 	grants := 0
-	noEffect := map[string]string{}
-	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemCompleted ||
-			item.InvocationID != invocation.ID {
-			continue
-		}
-		var payload struct {
-			Boundary string `json:"boundary"`
-		}
-		if json.Unmarshal(item.Payload, &payload) != nil {
-			continue
-		}
-		switch payload.Boundary {
-		case "physical_dispatch_rejected", "feature_start_no_effect":
-			if item.ParentItemID != "" && item.RunID != "" {
-				noEffect[item.ParentItemID] = item.RunID
-			}
-		}
-	}
+	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
 		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
 			item.InvocationID != invocation.ID || item.ParentItemID != ExecutionDispatchParentItemID {
 			continue
 		}
 		grants++
-		if item.RunID == "" || noEffect[item.ID] != item.RunID {
+		boundary, verified := VerifiedExecutionDispatchReceipt(item, receipts[item.ID])
+		if !verified || (boundary != "physical_dispatch_rejected" && boundary != "feature_start_no_effect") {
 			return true
 		}
 	}
@@ -109,23 +90,12 @@ func compositeRunMayHaveDescendants(items []Item, invocation Invocation) bool {
 }
 
 func acceptedChildPhysicalEffectPossible(items []Item, child Invocation) bool {
-	rejected := make(map[string]bool)
-	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemCompleted ||
-			item.InvocationID != child.ID || item.RunID != child.ExecutionRefID {
-			continue
-		}
-		var proof struct {
-			Boundary string `json:"boundary"`
-		}
-		if json.Unmarshal(item.Payload, &proof) == nil && proof.Boundary == "physical_dispatch_rejected" {
-			rejected[item.ParentItemID] = true
-		}
-	}
+	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
 		if item.Kind == ItemDiagnostic && item.Status == ItemStarted &&
 			item.ParentItemID == ExecutionDispatchParentItemID && item.InvocationID == child.ID {
-			if item.RunID != child.ExecutionRefID || !rejected[item.ID] {
+			boundary, verified := VerifiedExecutionDispatchReceipt(item, receipts[item.ID])
+			if item.RunID != child.ExecutionRefID || !verified || boundary != "physical_dispatch_rejected" {
 				return true
 			}
 		}

@@ -51,6 +51,35 @@ func checkExecutionDispatchGrantTx(tx *gorm.DB, value harness.Item) error {
 	return nil
 }
 
+// Physical Dispatch settlement is a single, owner-bound fact. Serialize
+// validation and admission with the same Turn row lock as Retry and new
+// grants. Existing ID replay is handled before this check by AppendItem.
+func checkExecutionDispatchCompletionTx(tx *gorm.DB, completion harness.Item) error {
+	if completion.Kind != harness.ItemDiagnostic || completion.ParentItemID == "" {
+		return nil
+	}
+	grant, found, err := findItem(tx, completion.ParentItemID)
+	if err != nil {
+		return err
+	}
+	if !found || grant.Kind != harness.ItemDiagnostic || grant.Status != harness.ItemStarted ||
+		grant.ParentItemID != harness.ExecutionDispatchParentItemID {
+		return nil
+	}
+	if _, valid := harness.VerifiedExecutionDispatchReceipt(grant, []harness.Item{completion}); !valid {
+		return harness.ErrConflict
+	}
+	var existing int64
+	if err := tx.Model(&itemRecord{}).Where("parent_item_id = ? AND kind = ?",
+		grant.ID, string(harness.ItemDiagnostic)).Count(&existing).Error; err != nil {
+		return err
+	}
+	if existing != 0 {
+		return harness.ErrConflict
+	}
+	return nil
+}
+
 func pendingExecutionDispatchTx(tx *gorm.DB, turnID, invocationID string) (bool, error) {
 	query := tx.Where("turn_id = ? AND kind = ? AND status = ? AND parent_item_id = ?",
 		turnID, string(harness.ItemDiagnostic), string(harness.ItemStarted),
@@ -63,13 +92,24 @@ func pendingExecutionDispatchTx(tx *gorm.DB, turnID, invocationID string) (bool,
 		return false, err
 	}
 	for _, start := range starts {
-		var settled int64
-		if err := tx.Model(&itemRecord{}).Where("turn_id = ? AND parent_item_id = ? AND kind = ? AND status = ?",
-			turnID, start.ID, string(harness.ItemDiagnostic), string(harness.ItemCompleted)).
-			Count(&settled).Error; err != nil {
+		grant, err := itemFromRecord(start)
+		if err != nil {
 			return false, err
 		}
-		if settled == 0 {
+		var records []itemRecord
+		if err := tx.Where("parent_item_id = ? AND kind = ?",
+			start.ID, string(harness.ItemDiagnostic)).Find(&records).Error; err != nil {
+			return false, err
+		}
+		receipts := make([]harness.Item, 0, len(records))
+		for _, record := range records {
+			receipt, err := itemFromRecord(record)
+			if err != nil {
+				return false, err
+			}
+			receipts = append(receipts, receipt)
+		}
+		if _, settled := harness.VerifiedExecutionDispatchReceipt(grant, receipts); !settled {
 			return true, nil
 		}
 	}

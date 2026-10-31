@@ -232,26 +232,8 @@ func (runner *Runner) handoffPhysicalEffectPossible(ctx context.Context, child I
 	if err != nil {
 		return false, err
 	}
-	noEffect := make(map[string]bool)
-	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemCompleted ||
-			item.InvocationID != child.ID || item.RunID != child.ExecutionRefID {
-			continue
-		}
-		var receipt struct {
-			Boundary string `json:"boundary"`
-		}
-		if json.Unmarshal(item.Payload, &receipt) == nil && receipt.Boundary == "physical_dispatch_rejected" {
-			noEffect[item.ParentItemID] = true
-		}
-	}
-	for _, item := range items {
-		if item.Kind == ItemDiagnostic && item.Status == ItemStarted &&
-			item.ParentItemID == ExecutionDispatchParentItemID && item.InvocationID == child.ID {
-			if item.RunID != child.ExecutionRefID || !noEffect[item.ID] {
-				return true, nil
-			}
-		}
+	if acceptedChildPhysicalEffectPossible(items, child) {
+		return true, nil
 	}
 	return false, nil
 }

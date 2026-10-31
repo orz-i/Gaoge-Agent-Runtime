@@ -1304,6 +1304,9 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 		return err
 	}
 	value.Seq = seq
+	if err := checkExecutionDispatchCompletionTx(tx, value); err != nil {
+		return err
+	}
 	record, err := itemToRecord(value)
 	if err != nil {
 		return err
