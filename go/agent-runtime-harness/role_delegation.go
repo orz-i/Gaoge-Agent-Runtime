@@ -279,9 +279,13 @@ func (runner *Runner) prepareRoleChild(ctx context.Context, turn Turn, parent In
 			return err
 		}
 	}
-	// Delegated Role Agents are also persisted child Invocations. They must
-	// carry the same immutable root Attempt as typed Team/Workflow children.
-	input, inputHash, err = sealChildRootInput(input, inputHash, root)
+	// Delegate Items may stop at the immediate Invocation owner, so inherit
+	// the already-frozen intermediate owners as well as the root Attempt.
+	parentAttempts, err := runner.freezeChildParentAttempts(ctx, turn.ID, parentItemID, root)
+	if err != nil {
+		return err
+	}
+	input, inputHash, err = sealChildRootInput(input, inputHash, root, parentAttempts...)
 	if err != nil {
 		return err
 	}

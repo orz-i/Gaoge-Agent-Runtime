@@ -556,6 +556,7 @@ type WorkflowInvocationRequest struct {
 type childInvocationContext struct {
 	turn                 Turn
 	root                 Invocation
+	parentAttempts       []childAttemptBinding
 	parentExecutionRefID string
 	actor                kernel.ActorRef
 	thread               kernel.ThreadRef
@@ -1057,7 +1058,7 @@ func (runner *Runner) beginChildInvocation(
 	}
 	// Freeze the root Attempt in the child's first durable admission. A
 	// replay against a later root Attempt must never revive an older child.
-	input, inputHash, err = sealChildRootInput(input, inputHash, child.root)
+	input, inputHash, err = sealChildRootInput(input, inputHash, child.root, child.parentAttempts...)
 	if err != nil {
 		return Invocation{}, childInvocationContext{}, false, err
 	}
@@ -1117,13 +1118,17 @@ func (runner *Runner) childInvocationContext(
 		!validInvocationStatus(parent.Status) || terminalInvocationStatus(parent.Status) {
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
 	}
+	parentAttempts, err := runner.freezeChildParentAttempts(ctx, turn.ID, parentItemID, parent)
+	if err != nil {
+		return childInvocationContext{}, err
+	}
 	if parent.ExecutionClass == ExecutionApplication {
 		// A Host Application has no Kernel Run. Only another Application
 		// child can use its Invocation as the durable execution owner.
 		if executionClass != ExecutionApplication || parent.Status == InvocationAccepted {
 			return childInvocationContext{}, ErrConflict
 		}
-		return childInvocationContext{turn: turn, root: parent}, nil
+		return childInvocationContext{turn: turn, root: parent, parentAttempts: parentAttempts}, nil
 	}
 	if runner.runtime == nil {
 		return childInvocationContext{}, ErrConflict
@@ -1133,7 +1138,7 @@ func (runner *Runner) childInvocationContext(
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
 	}
 	return childInvocationContext{
-		turn: turn, root: parent, parentExecutionRefID: parent.ExecutionRefID,
+		turn: turn, root: parent, parentAttempts: parentAttempts, parentExecutionRefID: parent.ExecutionRefID,
 		actor: runtimeSnapshot.Run.Actor, thread: runtimeSnapshot.Run.Thread,
 	}, nil
 }

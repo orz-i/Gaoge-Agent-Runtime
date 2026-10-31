@@ -235,15 +235,22 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 	if invocation.ParentItemID == "" {
 		return nil
 	}
+	// The Input was sealed at the first admission. A parent's stable ID
+	// becoming Running on Attempt 2 cannot authorize an older descendant.
+	proof, err := frozenChildRoot(invocation)
+	if err != nil {
+		return err
+	}
+	expected := make(map[string]childAttemptBinding, len(proof.Parents))
+	for _, bound := range proof.Parents {
+		expected[bound.InvocationID] = bound
+	}
 	seen := make(map[string]struct{})
-	checked := make(map[string]struct{})
 	for id := invocation.ParentItemID; id != ""; {
 		if _, cycle := seen[id]; cycle {
 			return ErrConflict
 		}
 		seen[id] = struct{}{}
-		// Fetch only the actual parent chain. Full Turn scans cost O(all
-		// Items) per effect boundary even when ancestry is one Item deep.
 		item, loadErr := runner.store.GetItem(ctx, id)
 		if errors.Is(loadErr, ErrNotFound) || errors.Is(loadErr, ErrInvalidRequest) {
 			return ErrConflict
@@ -252,41 +259,38 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 			return loadErr
 		}
 		if item.ID != id || item.TurnID != invocation.TurnID || item.Seq == 0 {
-			// A missing/foreign/corrupt parent cannot confer physical
-			// execution authority. The old full-page cursor required
-			// positive persisted Seq values as well.
 			return ErrConflict
 		}
 		if ownerID := item.InvocationID; ownerID != "" && ownerID != invocation.ID {
-			if _, checkedOwner := checked[ownerID]; !checkedOwner {
-				parent, loadErr := runner.store.GetInvocation(ctx, ownerID)
-				if loadErr != nil || parent.TurnID != invocation.TurnID ||
-					terminalInvocationStatus(parent.Status) {
-					return errors.Join(ErrConflict, loadErr)
+			bound := proof.attempt()
+			if ownerID != proof.InvocationID {
+				var found bool
+				bound, found = expected[ownerID]
+				if !found {
+					return ErrConflict // Unfrozen ancestor cannot grant authority.
 				}
-				if parent.ExecutionClass != ExecutionApplication && parent.ExecutionRefID != "" {
-					state, runtimeErr := runner.runtime.Load(ctx, parent.ExecutionRefID)
-					if runtimeErr != nil || terminalRuntimeStatus(state.Run.Status) {
-						return errors.Join(ErrConflict, runtimeErr)
-					}
-				}
-				checked[ownerID] = struct{}{}
+			}
+			// A lifecycle Item binds to its Invocation's physical Attempt.
+			// Delegation Items instead carry the *child* RunID.
+			if item.Kind == ItemInvocation && item.RunID != "" &&
+				item.RunID != bound.ExecutionRefID {
+				return ErrConflict
 			}
 		}
 		id = item.ParentItemID
 	}
-	// An Item is allowed to describe Host-owned work without an InvocationID.
-	// Such a parent does not prove that the owning root execution is live.
-	// Recheck the one authoritative root regardless of which ancestor Items
-	// carried an Invocation owner; this is the last pre-effect fence after
-	// the physical grant (or the Application external-effect claim) commits.
+	// An Item ancestry may end at a Host delegation boundary. Validate ALL
+	// inherited owners even when no Item in this immediate chain names them.
+	for _, bound := range proof.Parents {
+		if err := runner.requireLiveParentAttempt(ctx, invocation.TurnID, bound); err != nil {
+			return err
+		}
+	}
 	root, err := runner.loadFrozenChildRoot(ctx, invocation)
 	if err != nil {
 		return err
 	}
 	if root.ExecutionClass == ExecutionApplication {
-		// Host-only Application roots have no Kernel Run. Their frozen
-		// Invocation and Attempt, not a fabricated Run, are authority.
 		if root.Status == InvocationAccepted {
 			return ErrConflict
 		}
