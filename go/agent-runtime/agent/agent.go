@@ -515,6 +515,13 @@ func (runner *Runner) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
 	return runner.NativeStartCancellationFencedByKernel(runtime)
 }
 
+// ObservesKernelRuntime proves only the immutable Kernel used by LoadRun.
+// Unlike OwnsKernelRuntime it does not authorize physical cancellation:
+// Host middleware/preparers can perform side effects outside Kernel CAS.
+func (runner *Runner) ObservesKernelRuntime(runtime *kernel.Runtime) bool {
+	return runner != nil && runtime != nil && runner.runtime == runtime
+}
+
 // Descriptor declares the explicit Agent capability graph.
 func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
 	requires := []kernel.Capability{kernel.CapabilityRuntime}

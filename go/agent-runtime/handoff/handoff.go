@@ -197,6 +197,26 @@ func (coordinator *Coordinator) OwnsLocalKernelRunner(runtime *kernel.Runtime) b
 	return ok && owner.OwnsKernelRuntime(runtime)
 }
 
+// ObservesLocalKernelRunner is read-only ownership evidence for the fixed
+// ChildRunner's LoadRun. Unlike cancellation ownership, a first-party Agent
+// may attest to its Kernel even with Host middleware: observation itself
+// does not allow Kernel cancellation or continued physical execution.
+// Dynamically resolved or custom routes do not have stable ownership proof.
+func (coordinator *Coordinator) ObservesLocalKernelRunner(runtime *kernel.Runtime) bool {
+	if coordinator == nil || runtime == nil {
+		return false
+	}
+	fixed, ok := coordinator.resolver.(staticChildRunnerResolver)
+	if !ok {
+		return false
+	}
+	if child, ok := fixed.children.(*agent.Runner); ok {
+		return child.ObservesKernelRuntime(runtime)
+	}
+	owner, ok := fixed.children.(LocalKernelChildRunner)
+	return ok && owner.OwnsKernelRuntime(runtime)
+}
+
 // Descriptor declares the reusable Handoff capability.
 func (coordinator *Coordinator) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{

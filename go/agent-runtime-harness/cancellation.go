@@ -34,6 +34,12 @@ type LocalKernelCanceller interface {
 // may be projected without a verified, route-owned cancellation outcome.
 var ErrHandoffCancellationUnverified = errors.New("harness handoff child cancellation is unverified")
 
+// ErrRuntimeCancellationUnverified means a Host RuntimeCanceller returned a
+// result that cannot be reconciled with the owning local Kernel Run. The
+// callback may already have performed effects: retain the cancellation
+// intent and never interpret this error as a definitive no-effect conflict.
+var ErrRuntimeCancellationUnverified = errors.New("harness runtime cancellation outcome is unverified")
+
 func (runner *Runner) cancelRuntimeRun(
 	ctx context.Context,
 	runID string,
@@ -142,6 +148,21 @@ func (runner *Runner) cancelRuntimeRun(
 			// Running has not confirmed cancellation. Do not close the intent.
 			return kernel.Snapshot{}, true, ErrHandoffCancellationUnverified
 		}
+		if !nativeKernel && err == nil {
+			// A Host's returned Snapshot is not a Kernel control receipt merely
+			// because Cancel returned nil. Require the exact original Run and
+			// a matching, locally committed terminal fact before any Turn or
+			// child projection. In particular a fabricated foreign Cancelled
+			// snapshot or a still-Running reply cannot settle the intent.
+			verified, verifyErr := runner.verifiedCustomCancellationOutcome(ctx, current, cancelled)
+			if verifyErr != nil {
+				if delegatedChild != nil {
+					return kernel.Snapshot{}, true, ErrHandoffCancellationUnverified
+				}
+				return kernel.Snapshot{}, true, ErrRuntimeCancellationUnverified
+			}
+			cancelled = verified
+		}
 		if nativeKernel {
 			if kernel.IsControlNoEffect(err) {
 				if errors.Is(err, kernel.ErrConflict) {
@@ -168,6 +189,34 @@ func (runner *Runner) cancelRuntimeRun(
 	}
 	// Every custom canceller conflict was contractually no-effect.
 	return kernel.Snapshot{}, false, kernel.ErrConflict
+}
+
+// A custom Canceller's claimed terminal state must be observed in the same
+// Kernel that Harness owns. Caller-supplied metadata is insufficient: a
+// foreign Kernel can have an identical Run ID and even identical task fields.
+// Do not wrap arbitrary Load errors (especially kernel.ErrConflict) in this
+// unknown-outcome proof; they must not become a custom no-effect receipt.
+func (runner *Runner) verifiedCustomCancellationOutcome(
+	ctx context.Context, before, returned kernel.Snapshot,
+) (kernel.Snapshot, error) {
+	if !sameCancellationRunOrigin(before.Run, returned.Run) ||
+		!terminalRuntimeStatus(returned.Run.Status) {
+		return kernel.Snapshot{}, ErrRuntimeCancellationUnverified
+	}
+	observed, err := runner.runtime.Load(ctx, before.Run.ID)
+	if err != nil || !sameCancellationRunOrigin(before.Run, observed.Run) ||
+		observed.Run.Status != returned.Run.Status ||
+		!terminalRuntimeStatus(observed.Run.Status) {
+		return kernel.Snapshot{}, ErrRuntimeCancellationUnverified
+	}
+	return observed, nil
+}
+
+func sameCancellationRunOrigin(expected, candidate kernel.Run) bool {
+	return expected.ID != "" && candidate.ID == expected.ID &&
+		candidate.Kind == expected.Kind && candidate.Actor == expected.Actor &&
+		candidate.Thread == expected.Thread && candidate.Goal == expected.Goal &&
+		candidate.RequestID == expected.RequestID
 }
 
 // A correct ChildRunner alone cannot authorize cancellation when the Host

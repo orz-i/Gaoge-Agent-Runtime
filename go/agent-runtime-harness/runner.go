@@ -963,9 +963,15 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if !found {
 		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
 	}
-	if runtimeSnapshot.Run.Status != kernel.RunStatusCancelled {
-		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	if !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		// A custom Canceller cannot turn a nonterminal Kernel outcome into a
+		// successful cancellation receipt. Keep the intent for reconciliation.
+		return Snapshot{}, ErrRuntimeCancellationUnverified
 	}
+	// A root may have completed or failed in the physical Kernel before
+	// Harness projected it. This is not proof that its descendants stopped;
+	// run the same child cleanup before releasing the cancellation fence.
+	// Otherwise a newly committed intent deadlocks ordinary root Refresh.
 	descendants, err := runner.cancelTurnDescendants(ctx, turn.ID, invocation.ID, invocation.ExecutionRefID, reason)
 	if err != nil {
 		return Snapshot{}, err
@@ -977,8 +983,9 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		return Snapshot{}, err
 	}
 	// Only this completed cancellation path has verified its descendants.
-	// Other callers (especially Refresh) may not promote the root Kernel's
-	// cancelled status while the remote cleanup intent is still unresolved.
+	// The root may be Cancelled, Failed or Completed; preserve its actual
+	// Kernel status instead of fabricating a successful Cancelled outcome.
+	// Other callers (especially Refresh) cannot bypass unresolved cleanup.
 	return runner.syncRuntimeSnapshotWithRetryAfterCancellation(ctx, turn, invocation, runtimeSnapshot)
 }
 
@@ -992,7 +999,8 @@ func (runner *Runner) syncRuntimeSnapshotWithRetry(
 }
 
 // This path is reserved for Cancel after ALL descendants and delegation
-// receipts have been verified. It must never be used for read-only Refresh.
+// receipts have been verified, including when the root was already Failed
+// or Completed before cancellation. Never use it for read-only Refresh.
 func (runner *Runner) syncRuntimeSnapshotWithRetryAfterCancellation(
 	ctx context.Context, turn Turn, invocation Invocation, runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
