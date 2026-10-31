@@ -487,6 +487,48 @@ func (runner *Runner) finalizeApplicationTerminalProjection(ctx context.Context,
 	return nil
 }
 
+// cancelApplicationSubtree runs only under the shared cancellation intent.
+// Select real descendants by frozen ancestry/Items, not the conservative
+// all-owner preflight fallback, so unrelated siblings are never cancelled.
+func (runner *Runner) cancelApplicationSubtree(ctx context.Context, turn Turn, invocation Invocation, reason string) (Snapshot, error) {
+	invocations, err := runner.store.ListInvocations(ctx, turn.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	targets := map[string]struct{}{invocation.ID: {}}
+	if err = runner.addItemOwnedCancellationDescendants(ctx, turn.ID, invocations, targets); err != nil {
+		return Snapshot{}, err
+	}
+	var seeds []string
+	for _, child := range invocations {
+		if _, targeted := targets[child.ID]; !targeted || child.ID == invocation.ID {
+			continue
+		}
+		if child.ExecutionClass == ExecutionApplication {
+			if _, err = runner.cancelApplicationInvocation(ctx, turn, child, reason); err != nil {
+				return Snapshot{}, err
+			}
+		} else {
+			seeds = append(seeds, child.ExecutionRefID)
+		}
+	}
+	runs, err := runner.cancelRelatedRuns(ctx, invocation.ExecutionRefID, seeds, reason)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.syncInvocationRuns(ctx, turn, runs); err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.syncTerminalDelegations(ctx, turn, runs); err != nil {
+		return Snapshot{}, err
+	}
+	current, err := runner.store.GetInvocation(ctx, invocation.ID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return runner.cancelApplicationInvocation(ctx, turn, current, reason)
+}
+
 func (runner *Runner) cancelApplicationInvocation(
 	ctx context.Context,
 	turn Turn,
@@ -494,7 +536,7 @@ func (runner *Runner) cancelApplicationInvocation(
 	reason string,
 ) (Snapshot, error) {
 	if terminalInvocationStatus(invocation.Status) {
-		return runner.loadSnapshot(ctx, turn, nil)
+		return runner.repairApplicationProjection(ctx, turn, invocation)
 	}
 	if invocation.Status == InvocationRunning {
 		// The first physical effect may already have been dispatched. A

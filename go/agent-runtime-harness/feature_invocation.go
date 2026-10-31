@@ -1021,9 +1021,6 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if invocation.ExecutionClass == ExecutionApplication {
-		return runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
-	}
 	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
 		func() error {
 			_, checkErr := runner.inspectRelatedCancellation(ctx, turn, invocation.ExecutionRefID)
@@ -1041,6 +1038,9 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
+	if invocation.ExecutionClass == ExecutionApplication {
+		return runner.cancelApplicationSubtree(ctx, turn, invocation, reason)
+	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
 	if err != nil {
 		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)

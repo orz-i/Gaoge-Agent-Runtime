@@ -906,15 +906,12 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
+	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled && invocation.ExecutionClass != ExecutionApplication {
 		// A Failed admission may have been rejected before its Kernel Run
 		// existed. Preserve the original no-effect terminal replay, but only
 		// when no child Invocation, RunRelation or delegation can be left
 		// running. A terminal Turn backed by a real Kernel Run must instead
 		// enter the normal descendant cleanup protocol below.
-		if invocation.ExecutionClass == ExecutionApplication {
-			return runner.loadSnapshot(ctx, turn, nil)
-		}
 		_, loadErr := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 		if errors.Is(loadErr, kernel.ErrNotFound) && missingRuntimeSnapshotAllowed(turn, invocation) {
 			children, childErr := runner.relatedChildRunIDs(ctx, invocation.ExecutionRefID)
@@ -941,15 +938,6 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
-	}
-	if invocation.ExecutionClass == ExecutionApplication {
-		cancelled, cancelErr := runner.cancelApplicationInvocation(ctx, turn, invocation, reason)
-		if cancelErr != nil {
-			return cancelled, cancelErr
-		}
-		// Revoke the shared ledger only after an authoritative Application
-		// cancellation, never when its external effect is still uncertain.
-		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
 	}
 	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
 		func() error {
@@ -990,6 +978,36 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
+	if invocation.ExecutionClass == ExecutionApplication {
+		// Application roots have no Kernel Run, but own the same Turn-wide
+		// child claims and Interaction effects. Reconcile every Application
+		// child only after the shared admission fence blocks late claims.
+		children, loadErr := runner.store.ListInvocations(ctx, turn.ID)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		for _, child := range children {
+			if child.ID == invocation.ID {
+				continue
+			}
+			if child.ExecutionClass != ExecutionApplication {
+				return Snapshot{}, ErrConflict
+			}
+			if _, cancelErr := runner.cancelApplicationInvocation(ctx, turn, child, reason); cancelErr != nil {
+				return Snapshot{}, cancelErr
+			}
+		}
+		// Interaction fencing can already have cancelled a Waiting root.
+		current, loadErr := runner.store.GetInvocation(ctx, invocation.ID)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		cancelled, cancelErr := runner.cancelApplicationInvocation(ctx, turn, current, reason)
+		if cancelErr != nil {
+			return cancelled, cancelErr
+		}
+		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
+	}
 	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}

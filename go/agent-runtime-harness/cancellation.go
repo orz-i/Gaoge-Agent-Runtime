@@ -111,7 +111,7 @@ func (runner *Runner) cancelRuntimeRun(
 					return kernel.Snapshot{}, false, fmt.Errorf("remote Handoff Run %q: %w", runID, ErrHandoffCancellationUnverified)
 				}
 			}
-			return kernel.Snapshot{}, false, nil
+			return kernel.Snapshot{}, false, runner.verifyMissingRelatedCancellation(ctx, runID)
 		}
 		if err != nil {
 			// This is a Harness-owned read-only check before calling ANY
@@ -490,9 +490,13 @@ func (runner *Runner) cancelDescendantRun(
 	if runID == rootRunID {
 		return kernel.Snapshot{}, false, nil
 	}
-	snapshot, found, err := runner.cancelRuntimeRun(ctx, runID, reason)
-	if err != nil || found || runner.relationReader == nil {
-		return snapshot, found, err
+	return runner.cancelRuntimeRun(ctx, runID, reason)
+}
+
+// Apply the same missing-Run proof to direct targets and traversed children.
+func (runner *Runner) verifyMissingRelatedCancellation(ctx context.Context, runID string) error {
+	if runner.relationReader == nil {
+		return nil
 	}
 	// An indexed RunRelation records execution ownership, not local Kernel
 	// residence. Team Members, Workflow Effects and GroupChat speakers can
@@ -502,13 +506,13 @@ func (runner *Runner) cancelDescendantRun(
 	// for the original execution owner to reconcile or quarantine.
 	relation, relationErr := runner.relationReader.GetByChild(ctx, runID)
 	if errors.Is(relationErr, runrelation.ErrNotFound) {
-		return snapshot, found, nil // A non-relation seed uses its own admission proof.
+		return nil // A non-relation seed uses its own admission proof.
 	}
 	if relationErr != nil {
-		return kernel.Snapshot{}, false, relationErr
+		return relationErr
 	}
 	if relation.ChildRunID != runID || strings.TrimSpace(relation.ParentRunID) == "" {
-		return kernel.Snapshot{}, false, ErrConflict
+		return ErrConflict
 	}
 	// A frozen Handoff child whose grant proves physical dispatch never
 	// entered its ChildRunner retains the existing synthetic no-effect case.
@@ -517,16 +521,16 @@ func (runner *Runner) cancelDescendantRun(
 		if isHandoffDelegationInvocation(owner) {
 			possible, proofErr := runner.handoffPhysicalEffectPossible(ctx, owner)
 			if proofErr != nil {
-				return kernel.Snapshot{}, false, proofErr
+				return proofErr
 			}
 			if !possible {
-				return kernel.Snapshot{}, false, nil
+				return nil
 			}
 		}
 	} else if !errors.Is(ownerErr, ErrNotFound) {
-		return kernel.Snapshot{}, false, ownerErr
+		return ownerErr
 	}
-	return kernel.Snapshot{}, false, fmt.Errorf("RunRelation descendant %q has no local physical cancellation receipt: %w", runID, ErrRuntimeCancellationUnverified)
+	return fmt.Errorf("RunRelation child %q has no local physical cancellation receipt: %w", runID, ErrRuntimeCancellationUnverified)
 }
 
 func (runner *Runner) relatedChildRunIDs(ctx context.Context, runID string) ([]string, error) {

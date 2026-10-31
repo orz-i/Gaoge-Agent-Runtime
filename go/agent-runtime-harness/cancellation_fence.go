@@ -162,6 +162,21 @@ func (runner *Runner) addItemOwnedCancellationDescendants(
 			if _, already := targets[invocation.ID]; already || invocation.ParentItemID == "" {
 				continue
 			}
+			// Frozen ancestry survives Host-owned Item boundaries where the
+			// immediate Item chain does not name every owning Invocation.
+			if binding, bindErr := frozenChildRoot(invocation); bindErr == nil {
+				_, owned := targets[binding.InvocationID]
+				for _, parent := range binding.Parents {
+					if _, matches := targets[parent.InvocationID]; matches {
+						owned = true
+					}
+				}
+				if owned {
+					targets[invocation.ID] = struct{}{}
+					changed = true
+					continue
+				}
+			}
 			seen := make(map[string]struct{})
 			for itemID := invocation.ParentItemID; itemID != ""; {
 				if _, cycle := seen[itemID]; cycle {

@@ -229,9 +229,8 @@ func mergeSubtaskCancellation(value Subtask, items []Item) Subtask {
 		}
 		break
 	}
-	if value.Status == string(kernel.RunStatusCancelled) || value.CancelStatus != "" && (value.Status == "completed" || value.Status == "failed") {
-		value.CancelStatus, value.CancelError = "confirmed", ""
-	}
+	// A terminal parent Run is not a receipt for its entire subtree.
+	// Preserve the explicit cancellation outcome, including unknown cleanup.
 	return value
 }
 
@@ -339,26 +338,18 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	if err = runner.recordSubtaskItem(ctx, turn.ID, task); err != nil {
 		return Snapshot{}, err
 	}
-	fenced := false
 	if ledger, loadErr := runner.loadTurnBudget(ctx, turn); loadErr != nil {
 		return Snapshot{}, loadErr
 	} else if ledger != nil {
 		if _, err = runner.budgets.coordinator().CancelRun(ctx, turn.ID, task.RunID); err != nil {
 			return Snapshot{}, err
 		}
-		fenced = true
 	}
 	_, found, cancelErr := runner.cancelRuntimeRun(ctx, task.RunID, reason)
 	// Only conflicts from the TARGET cancellation itself can prove that no
 	// physical cancellation began. A later descendant-cleanup conflict may
 	// follow already committed effects; it must retain the intent.
 	targetCancelErr := cancelErr
-	if cancelErr == nil && !found && fenced {
-		task.Status, task.CancelStatus = "cancelled", "confirmed"
-		if err = runner.recordSubtaskItem(ctx, turn.ID, task); err != nil {
-			return Snapshot{}, err
-		}
-	}
 	if cancelErr == nil {
 		_, cancelErr = runner.cancelRelatedRuns(ctx, task.RunID, nil, reason)
 	}
@@ -382,6 +373,15 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 			return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, task.RunID, targetCancelErr)
 		}
 		return Snapshot{}, cancelErr
+	}
+	// Only successful target AND descendant verification may confirm cleanup.
+	// An absent target reaches here only with affirmative no-effect proof.
+	if !found {
+		task.Status = "cancelled"
+	}
+	task.CancelStatus, task.CancelError = "confirmed", ""
+	if err = runner.recordSubtaskItem(ctx, turn.ID, task); err != nil {
+		return Snapshot{}, err
 	}
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
