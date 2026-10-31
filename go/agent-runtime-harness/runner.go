@@ -898,12 +898,49 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
-		return runner.loadSnapshot(ctx, turn, nil)
-	}
+	// A terminal Harness Turn is not evidence that all RunRelation children
+	// stopped. Even a Failed/Completed root may have a still-running Team
+	// member or remote ChildRunner; reconcile its descendants under the
+	// standard durable cancellation fence before returning success.
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
+		// A Failed admission may have been rejected before its Kernel Run
+		// existed. Preserve the original no-effect terminal replay, but only
+		// when no child Invocation, RunRelation or delegation can be left
+		// running. A terminal Turn backed by a real Kernel Run must instead
+		// enter the normal descendant cleanup protocol below.
+		if invocation.ExecutionClass == ExecutionApplication {
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+		_, loadErr := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+		if errors.Is(loadErr, kernel.ErrNotFound) && missingRuntimeSnapshotAllowed(turn, invocation) {
+			children, childErr := runner.relatedChildRunIDs(ctx, invocation.ExecutionRefID)
+			if childErr != nil {
+				return Snapshot{}, childErr
+			}
+			invocations, invErr := runner.store.ListInvocations(ctx, turn.ID)
+			if invErr != nil {
+				return Snapshot{}, invErr
+			}
+			delegated, delegationErr := runner.delegatedRunIDs(ctx, turn.ID)
+			if delegationErr != nil {
+				return Snapshot{}, delegationErr
+			}
+			pending, pendingErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
+			if pendingErr != nil {
+				return Snapshot{}, pendingErr
+			}
+			if len(children) > 0 || len(invocations) != 1 || len(delegated) > 0 || pending {
+				return Snapshot{}, ErrRuntimeCancellationUnverified
+			}
+			return runner.loadSnapshot(ctx, turn, nil)
+		}
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
 		cancelled, cancelErr := runner.cancelApplicationInvocation(ctx, turn, invocation, reason)

@@ -106,6 +106,29 @@ func TestPR82FailedTeamRootCannotRetryWithLiveRunRelationMember(t *testing.T) {
 	if err != nil || harness.PendingExecutionDispatch(items, "") {
 		t.Fatalf("root dispatch grant did not settle: %v", err)
 	}
+	// Independent live Team repro: the Harness root is Failed while its
+	// real physical ChildRunner still has a Running member.
+	_, cancelledRootErr := runner.Cancel(t.Context(), failed.Turn.ID, "stop remaining Team members")
+	children.mu.Lock()
+	stillRunning := 0
+	for _, member := range children.runs {
+		if member.Run.Status == kernel.RunStatusRunning {
+			stillRunning++
+		}
+	}
+	children.mu.Unlock()
+	if !errors.Is(cancelledRootErr, harness.ErrRuntimeCancellationUnverified) || stillRunning != 1 {
+		t.Fatalf("unverified remote Member must preserve failed root cleanup: err=%v running=%d", cancelledRootErr, stillRunning)
+	}
+	items, err = store.ListItems(t.Context(), failed.Turn.ID, 0, 500)
+	if err != nil || !harness.ActiveCancellationFence(items) {
+		t.Fatalf("unknown external cleanup lost durable cancellation intent: %v", err)
+	}
+	// A Failed root is terminal in Kernel, so the same unresolved cancellation
+	// intent must be resumable without allocating another execution Attempt.
+	if _, retryErr := runner.Cancel(t.Context(), failed.Turn.ID, "retry remote Member cleanup"); !errors.Is(retryErr, harness.ErrRuntimeCancellationUnverified) {
+		t.Fatalf("failed root did not resume cleanup under original intent: %v", retryErr)
+	}
 	_, err = store.RetryInvocation(t.Context(), root.ID, root.Revision, "new-root-run-must-not-start", featureInvocationClock{}.Now())
 	if !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("old physical member continued after root retry: %v", err)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 // RuntimeCanceller lets the host perform feature-owned cleanup, including
@@ -489,7 +490,43 @@ func (runner *Runner) cancelDescendantRun(
 	if runID == rootRunID {
 		return kernel.Snapshot{}, false, nil
 	}
-	return runner.cancelRuntimeRun(ctx, runID, reason)
+	snapshot, found, err := runner.cancelRuntimeRun(ctx, runID, reason)
+	if err != nil || found || runner.relationReader == nil {
+		return snapshot, found, err
+	}
+	// An indexed RunRelation records execution ownership, not local Kernel
+	// residence. Team Members, Workflow Effects and GroupChat speakers can
+	// run on an independent ChildRunner without a Harness Invocation. A
+	// missing local Run is therefore NOT an authoritative no-effect or
+	// terminal receipt for a related physical child. Preserve the intent
+	// for the original execution owner to reconcile or quarantine.
+	relation, relationErr := runner.relationReader.GetByChild(ctx, runID)
+	if errors.Is(relationErr, runrelation.ErrNotFound) {
+		return snapshot, found, nil // A non-relation seed uses its own admission proof.
+	}
+	if relationErr != nil {
+		return kernel.Snapshot{}, false, relationErr
+	}
+	if relation.ChildRunID != runID || strings.TrimSpace(relation.ParentRunID) == "" {
+		return kernel.Snapshot{}, false, ErrConflict
+	}
+	// A frozen Handoff child whose grant proves physical dispatch never
+	// entered its ChildRunner retains the existing synthetic no-effect case.
+	// RunRelation alone does not override a stronger child-owned grant proof.
+	if owner, ownerErr := runner.store.GetInvocationByExecutionRefID(ctx, runID); ownerErr == nil {
+		if isHandoffDelegationInvocation(owner) {
+			possible, proofErr := runner.handoffPhysicalEffectPossible(ctx, owner)
+			if proofErr != nil {
+				return kernel.Snapshot{}, false, proofErr
+			}
+			if !possible {
+				return kernel.Snapshot{}, false, nil
+			}
+		}
+	} else if !errors.Is(ownerErr, ErrNotFound) {
+		return kernel.Snapshot{}, false, ownerErr
+	}
+	return kernel.Snapshot{}, false, fmt.Errorf("RunRelation descendant %q has no local physical cancellation receipt: %w", runID, ErrRuntimeCancellationUnverified)
 }
 
 func (runner *Runner) relatedChildRunIDs(ctx context.Context, runID string) ([]string, error) {

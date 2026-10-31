@@ -311,9 +311,9 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled" {
-		return runner.loadSnapshot(ctx, turn, nil)
-	}
+	// A terminal Subtask is only the parent's execution status. A composite
+	// Team/Workflow/GroupChat can still own Running RunRelation children;
+	// never treat the displayed parent status as proof of descendant cleanup.
 	// CancelSubtask is another physical Runtime cancellation entrypoint. It
 	// must compete with any already-resolved business callback BEFORE
 	// revoking the shared budget or cancelling the target Run.
