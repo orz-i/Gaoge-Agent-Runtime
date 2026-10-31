@@ -184,6 +184,12 @@ func (runner *Runner) nativeAgentStartOwnedByKernel(ctx context.Context, grant I
 	if _, native := runner.agent.(*agent.Runner); !native {
 		return false
 	}
+	// A custom or separately bound RuntimeCanceller cannot claim that
+	// cancelling this Kernel Run fences the native Agent's execution.
+	canceller, nativeCancel := runner.cancellation.(*kernel.Runtime)
+	if !nativeCancel || canceller != runner.runtime {
+		return false
+	}
 	owner, err := runner.store.GetInvocation(ctx, grant.InvocationID)
 	if err != nil || owner.ID != grant.InvocationID || owner.TurnID != grant.TurnID ||
 		owner.ParentItemID != "" || owner.ExecutionClass != ExecutionAgent ||
