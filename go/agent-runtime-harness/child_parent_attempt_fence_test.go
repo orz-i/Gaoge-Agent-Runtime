@@ -25,11 +25,10 @@ func TestChildParentAttemptRemainsFrozenAfterIntermediateRetry(t *testing.T) {
 				ParentItemID: parent.ParentItemID, InvocationID: parent.ID,
 				Kind: kind, Status: ItemCompleted,
 			}
-			if kind == ItemDelegation {
-				parentItem.RunID = "delegated-child-not-parent-run"
-			} else if kind == ItemInvocation {
-				parentItem.RunID = parent.ExecutionRefID
-			}
+			parentItem.RunID = map[ItemKind]string{
+				ItemDelegation: "delegated-child-not-parent-run",
+				ItemInvocation: parent.ExecutionRefID,
+			}[kind]
 			if _, _, err := store.AppendItem(t.Context(), parentItem); err != nil {
 				t.Fatal(err)
 			}
