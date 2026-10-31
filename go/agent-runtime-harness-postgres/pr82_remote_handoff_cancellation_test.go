@@ -21,7 +21,7 @@ import (
 // These are persisted Store facts, not mocked return values. A Handoff can
 // have a settled physical Start receipt while its ChildRunner's Run lives in
 // an independent Kernel and cannot be cancelled by Harness's local Kernel.
-func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role bool, rootCancel bool) {
+func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role, rootCancel, shadow bool) {
 	t.Helper()
 	ctx := t.Context()
 	now := time.Now().UTC()
@@ -92,6 +92,15 @@ func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role
 	if _, _, err := store.CreateInvocation(ctx, child); err != nil {
 		t.Fatal(err)
 	}
+	if shadow {
+		// A2A's local shadow cannot be cancelled using only the native
+		// Kernel: remote Task cancellation must be performed by A2A itself.
+		if _, err := rt.Create(ctx, kernel.CreateRequest{ID: childRunID, Kind: handoff.RemoteAgentRunKind,
+			Actor: actor, Thread: thread, RequestID: delegation.ID, Goal: delegation.Goal,
+			State: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	grant := harness.Item{ID: "pr82-handoff-grant", TurnID: turnID, InvocationID: child.ID, RunID: childRunID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.ExecutionDispatchParentItemID,
 		Payload: json.RawMessage(`{"phase":"handoff-start","physicalRunID":"pr82-remote-child-run"}`), CreatedAt: now, UpdatedAt: now}
@@ -138,6 +147,12 @@ func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role
 	if !rootCancel && rootSnapshot.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("child-only cancellation touched root: %s", rootSnapshot.Run.Status)
 	}
+	if shadow {
+		local, err := rt.Load(ctx, childRunID)
+		if err != nil || local.Run.Status != kernel.RunStatusRunning {
+			t.Fatalf("default Kernel cancelled A2A shadow without a remote receipt: %+v %v", local.Run, err)
+		}
+	}
 }
 
 func TestPR82RemoteHandoffCancellationUsesDurableProofAcrossStores(t *testing.T) {
@@ -145,18 +160,23 @@ func TestPR82RemoteHandoffCancellationUsesDurableProofAcrossStores(t *testing.T)
 		t.Run(name, func(t *testing.T) {
 			for _, role := range []bool{false, true} {
 				for _, rootCancel := range []bool{false, true} {
-					mode := "member"
-					if role {
-						mode = "role"
+					for _, shadow := range []bool{false, true} {
+						mode := "member"
+						if role {
+							mode = "role"
+						}
+						if rootCancel {
+							mode += "-turn"
+						} else {
+							mode += "-child"
+						}
+						if shadow {
+							mode += "-a2a-shadow"
+						}
+						t.Run(mode, func(t *testing.T) {
+							assertPR82RemoteCancellationOnStore(t, create(t), role, rootCancel, shadow)
+						})
 					}
-					if rootCancel {
-						mode += "-turn"
-					} else {
-						mode += "-child"
-					}
-					t.Run(mode, func(t *testing.T) {
-						assertPR82RemoteCancellationOnStore(t, create(t), role, rootCancel)
-					})
 				}
 			}
 		})
@@ -170,15 +190,17 @@ func TestRealPostgresPR82RemoteHandoffCancellationRequiresReceipt(t *testing.T) 
 	}
 	for _, role := range []bool{false, true} {
 		for _, rootCancel := range []bool{false, true} {
-			db, _ := openIsolatedHarnessPostgres(t, dsn)
-			if err := harnesspostgres.Migrate(db); err != nil {
-				t.Fatal(err)
+			for _, shadow := range []bool{false, true} {
+				db, _ := openIsolatedHarnessPostgres(t, dsn)
+				if err := harnesspostgres.Migrate(db); err != nil {
+					t.Fatal(err)
+				}
+				store, err := harnesspostgres.New(db)
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertPR82RemoteCancellationOnStore(t, store, role, rootCancel, shadow)
 			}
-			store, err := harnesspostgres.New(db)
-			if err != nil {
-				t.Fatal(err)
-			}
-			assertPR82RemoteCancellationOnStore(t, store, role, rootCancel)
 		}
 	}
 }

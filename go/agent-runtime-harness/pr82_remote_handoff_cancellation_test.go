@@ -96,6 +96,37 @@ func TestPR82NeverDispatchedHandoffCanBeCancelled(t *testing.T) {
 	}
 }
 
+// Older incomplete child records lack the frozen root/Attempt proof and
+// cannot establish that there was no prior external Handoff dispatch.
+// Hard-cut them closed rather than infer a no-effect cancellation.
+func TestPR82UnsealedHandoffCannotClaimNoExternalEffect(t *testing.T) {
+	f := newPR82HandoffFixture(t)
+	d := f.delegation()
+	d.RoleID = ""
+	input, hash, err := marshalInvocationValue(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := InvocationID(f.turn.ID, f.startedItemID, CapabilityAgent, d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := Invocation{ID: id, TurnID: f.turn.ID, ParentItemID: f.startedItemID,
+		CapabilityKey: CapabilityAgent, ExecutionClass: ExecutionAgent,
+		ExecutionRefID: d.ChildRunID, Input: input, InputHash: hash,
+		Status: InvocationAccepted, Attempt: 1, Revision: 1,
+		OutputRefs: []HostRef{}, CreatedAt: f.parent.CreatedAt, UpdatedAt: f.parent.UpdatedAt}
+	if _, _, err := f.store.CreateInvocation(t.Context(), child); err != nil {
+		t.Fatal(err)
+	}
+	if !isHandoffDelegationInvocation(child) {
+		t.Fatal("test did not create a legacy Handoff child identity")
+	}
+	if _, err := f.runner.cancelTurnDescendants(t.Context(), f.turn.ID, f.parent.ID, f.parent.ExecutionRefID, "stop"); !errors.Is(err, ErrHandoffCancellationUnverified) {
+		t.Fatalf("unsealed Handoff was treated as no effect: %v", err)
+	}
+}
+
 // A grant rejected by the final parent-liveness check explicitly proves
 // that no HandoffStarter call happened. The durable no-effect receipt allows
 // ordinary no-Run cancellation instead of permanently fencing it.
@@ -149,6 +180,63 @@ func TestPR82LocalHandoffChildStillUsesVerifiedKernelCancellation(t *testing.T) 
 	snapshot, found, err := f.runner.cancelRuntimeRun(t.Context(), delegation.ChildRunID, "stop")
 	if err != nil || !found || snapshot.Run.ID != delegation.ChildRunID || snapshot.Run.Status != kernel.RunStatusCancelled {
 		t.Fatalf("legitimate local Kernel cancellation lost: %+v found=%t err=%v", snapshot.Run, found, err)
+	}
+}
+
+// A2A has a local shadow with a2a.remote RunKind. Default Kernel Cancel
+// would terminate only that shadow and never call the remote A2A CancelTask.
+// A Host-supplied RuntimeCanceller must own verified external cleanup.
+func TestPR82DefaultKernelCancellerCannotFalsifyA2AShadowCancellation(t *testing.T) {
+	for _, role := range []bool{false, true} {
+		for _, rootCancel := range []bool{false, true} {
+			f := newPR82HandoffFixture(t)
+			delegation := f.delegation()
+			if !role {
+				delegation.RoleID = ""
+			}
+			f.handoff.result = func(d handoff.Delegation) (handoff.Delegation, error) {
+				_, err := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: d.ChildRunID,
+					Kind: handoff.RemoteAgentRunKind, Actor: f.parentRun.Run.Actor,
+					Thread: f.parentRun.Run.Thread, RequestID: d.ID, Goal: d.Goal, State: []byte(`{}`)})
+				if err != nil {
+					return handoff.Delegation{}, err
+				}
+				d.Status = handoff.StatusRunning
+				return d, handoff.ErrChildPending
+			}
+			if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.runner.dispatchHandoff(t.Context(), f.turn, f.parentRun, delegation, f.startedItemID); !errors.Is(err, handoff.ErrChildPending) {
+				t.Fatal(err)
+			}
+			f.runner.cancellation = f.runtime
+			var err error
+			if rootCancel {
+				_, err = f.runner.Cancel(t.Context(), f.turn.ID, "stop")
+			} else {
+				child, loadErr := f.store.GetInvocationByExecutionRefID(t.Context(), delegation.ChildRunID)
+				if loadErr != nil {
+					t.Fatal(loadErr)
+				}
+				_, err = f.runner.CancelInvocation(t.Context(), child.ID, "stop")
+			}
+			if !errors.Is(err, ErrHandoffCancellationUnverified) {
+				t.Fatalf("role=%t rootCancel=%t: local shadow cancellation falsely succeeded: %v", role, rootCancel, err)
+			}
+			shadow, loadErr := f.runtime.Load(t.Context(), delegation.ChildRunID)
+			if loadErr != nil || shadow.Run.Status != kernel.RunStatusRunning {
+				t.Fatalf("local shadow was terminated without remote cleanup: %+v %v", shadow.Run, loadErr)
+			}
+			child, loadErr := f.store.GetInvocationByExecutionRefID(t.Context(), delegation.ChildRunID)
+			if loadErr != nil || child.Status != InvocationAccepted {
+				t.Fatalf("child falsely terminalized: %+v %v", child, loadErr)
+			}
+			items, loadErr := f.store.ListItems(t.Context(), f.turn.ID, 0, 500)
+			if loadErr != nil || !ActiveCancellationFence(items) {
+				t.Fatalf("remote cleanup attempt was not retained: %v", loadErr)
+			}
+		}
 	}
 }
 

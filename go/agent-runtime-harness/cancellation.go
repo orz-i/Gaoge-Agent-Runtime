@@ -73,6 +73,13 @@ func (runner *Runner) cancelRuntimeRun(
 		if terminalRuntimeStatus(current.Run.Status) {
 			return current, true, nil
 		}
+		// An A2A shadow Run is local evidence of a remote task, not the
+		// task itself. The default native Kernel Cancel has no A2A RPC;
+		// only an explicitly composed RuntimeCanceller can own remote
+		// cleanup and its verified terminal outcome.
+		if nativeKernel && current.Run.Kind == handoff.RemoteAgentRunKind {
+			return kernel.Snapshot{}, true, fmt.Errorf("A2A shadow Run %q: %w", runID, ErrHandoffCancellationUnverified)
+		}
 		cancelled, err := runner.cancellation.Cancel(ctx, runID, current.Run.Revision, strings.TrimSpace(reason))
 		if nativeKernel {
 			if kernel.IsControlNoEffect(err) {
@@ -216,13 +223,19 @@ func (runner *Runner) addMissingInvocationCancellations(
 // Cancellation intent is already persisted before this read, so no late
 // physical grant can race the no-effect proof.
 func (runner *Runner) handoffPhysicalEffectPossible(ctx context.Context, child Invocation) (bool, error) {
+	if _, err := frozenChildRoot(child); err != nil {
+		// Pre-hard-cut records lack an authoritative root/Attempt proof.
+		// Never infer a safe no-effect outcome from their missing grant.
+		return true, errors.Join(ErrHandoffCancellationUnverified, err)
+	}
 	items, err := listAllItems(ctx, runner.store, child.TurnID)
 	if err != nil {
 		return false, err
 	}
 	noEffect := make(map[string]bool)
 	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemCompleted {
+		if item.Kind != ItemDiagnostic || item.Status != ItemCompleted ||
+			item.InvocationID != child.ID || item.RunID != child.ExecutionRefID {
 			continue
 		}
 		var receipt struct {
