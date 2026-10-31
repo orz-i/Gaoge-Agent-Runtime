@@ -30,28 +30,32 @@ A terminal/missing root rejects child effects even when the parent Item
 has no Invocation owner. A second PR #82 audit proved a cross-Attempt gap:
 an old Accepted child could otherwise replay under a new live root after
 `RetryInvocation` rotated the root `ExecutionRefID`. Every new typed Child
-or delegated Role Agent now seals a `harnessRoot` binding (root Invocation
+or delegated Agent (RoleID or MemberID) now seals a `harnessRoot` binding (root Invocation
 ID, exact execution Ref ID and Attempt) inside the existing hashed
 `Invocation.Input`. A replay or final physical dispatch must match the
 original root Attempt; no automatic rebinding is permitted. The third
 independent PR #82 audit additionally froze every *intermediate* parent
 Invocation's ID, ExecutionRefID and Attempt in `harnessRoot.parents`,
-including inherited Role delegation owners. Final pre-effect validation
+including inherited delegation owners. Final pre-effect validation
 rejects stale or unsealed ancestor Attempts and uses direct indexed
 `GetInvocation` rather than materializing the whole Turn's Invocation list. Host Application roots use their durable root
 Invocation, without a synthetic Kernel Run; a claimed Application root can
 admit an Application child, never a native child lacking a Kernel parent.
 This is a fail-closed correction, not permission to retry ambiguous effects.
-Delegated Role Handoff now also requires a standard, child-owned physical
-execution grant and post-grant frozen ancestor check before starting a
-remote ChildRunner. An active cancellation intent prevents that grant; a
+Every delegated Handoff (both RoleID and MemberID-only) now requires
+a standard, child-owned physical execution grant and post-grant frozen
+ancestor check before starting a remote ChildRunner. An active cancellation intent prevents that grant; a
 missing/uncertain child outcome keeps it unresolved and blocks a duplicate
 Handoff start. The existing append-only grant uses phase `handoff-start`,
 not a synthetic Kernel Run or alternate Store protocol. Handoff's direct
 `ChildRunner` observation now requires the returned Snapshot.Run.ID to
-match the requested ChildRunID, with a recognized Kernel status, on Load,
-Start and Refresh. Empty, mismatched or invalid snapshots cannot be
-projected as a valid Delegation or complete the grant. Invalid observed
+match the requested ChildRunID, with a recognized Kernel status **and an
+authorized child Run kind**, on Load, Start and Refresh. Only a native
+Agent Run or an explicit `a2a.remote` shadow-Agent Run is eligible; an
+unrelated Workflow/Team/GroupChat/custom kind, even with the correct ID
+and a terminal status, cannot complete a Handoff grant. Empty,
+mismatched, untyped or invalid snapshots cannot be projected as a
+valid Delegation or complete the grant. Invalid observed
 snapshots return `ErrChildRunUnverified`; a StartRun failure without any
 snapshot preserves its original error and remains outcome-unknown.
 The sixth independent PR #82 audit additionally rejects a nested child
@@ -65,8 +69,9 @@ persistence format, status or compatibility bridge is introduced.
 **Persisted JSON hard cut (no SQL migration):** The existing indexed
 `Store.GetItem` contract (PR #79), Kernel Run, statuses, IDs, receipts,
 CAS, SQL tables and schema versions remain unchanged. **Child
-`Invocation.Input` changes**: new child and Role-delegation records
-include the immutable hashed `harnessRoot` field. Incomplete
+`Invocation.Input` changes**: new child and *all* delegated Agent
+records, including MemberID-only, include the immutable hashed
+`harnessRoot` field. Incomplete
 children created before this candidate must be drained or explicitly
 isolated before rollout. Missing proof fails closed, including during
 retry/resume; children missing the full new parent chain also fail closed.
@@ -78,7 +83,15 @@ backfill, rehash, infer ancestor authority from current state or replay
 unknown effects. There is no compatibility bridge, dual root path,
 implicit Intent Router or version bump. Hosts with root-ID
 `RefreshInvocation`/`ResumeInvocation` callers must update their source.
-See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md).
+An unknown Handoff outcome retains its original child Attempt and pending
+physical grant until explicit **read-only** verification or quarantine.
+Neither a missing remote Run nor a transport error proves no effect;
+do not manually close the grant, rotate its ID, or repeat StartOrLoad.
+Hosts operating remote ChildRunners must return an authorized Agent or
+A2A shadow Run kind, not an arbitrary custom Kernel kind. There is no
+fallback to the prior unfenced MemberID path.
+See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
+and [PR #82 seventh remediation](audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md).
 
 ## 2026-10-30 — Host command presentation removed from Harness (beta.24 candidate)
 

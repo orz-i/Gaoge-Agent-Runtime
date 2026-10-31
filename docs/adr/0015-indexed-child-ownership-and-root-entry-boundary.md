@@ -136,6 +136,22 @@ instead found two narrower, testable defects in the public child boundary.
     stale Attempts and unclaimed parents fail closed. Root Application
     admission uses the same unclaimed-parent predicate. There is no new
     effect receipt, status, Store contract or compatibility fallback.
+12. **MemberID-only Handoff has no separate execution path.** The final
+    independent review of Head `5ab968e` proved that a legal MemberID-only
+    delegation still called `HandoffStarter.StartOrLoad` directly after its
+    parent terminalized or cancellation intent committed. RoleID had the
+    child-owned grant, but MemberID did not. Both entry forms now persist
+    exactly one sealed delegated child Invocation, then use the same
+    `handoff-start` durable grant and post-grant frozen ancestor check.
+    There is no legacy unfenced member route or parallel dispatcher.
+13. **A child Run must have an authorized execution kind.** Matching the
+    requested Run ID and a recognized status alone is insufficient: a
+    Workflow/Team Run with the same ID was projected as a completed Agent
+    Delegation. Handoff accepts only the concrete Agent `RunKind` or
+    the explicitly shared `a2a.remote` shadow-Agent kind; missing,
+    unrelated, or unknown kinds return `ErrChildRunUnverified` on
+    LoadRun, StartRun and Refresh. The A2A adapter uses the shared
+    constant rather than duplicating its value.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -148,9 +164,12 @@ old behavior shim, alternate root channel, or automatic Host routing.
 
 No new `Store` interface, SQL DDL, persistence version, Kernel Run status,
 Tool Call ID, ModelInvocation, admission hash or backfill. The existing child
-`Invocation.Input` **does change**: new typed and Role children include the
-hashed `harnessRoot` admission proof, now with complete non-root `parents`
-Attempt identity. Retry is deliberately more restrictive while any child
+`Invocation.Input` **does change**: new typed children and **all**
+delegated Agent children (including MemberID-only) include the hashed
+`harnessRoot` admission proof, now with complete non-root `parents`
+Attempt identity. Existing Host-defined ChildRunners returning a non-Agent
+Run kind must adopt an authorized Agent/A2A shadow kind or be rejected
+without a compatibility fallback. Retry is deliberately more restrictive while any child
 Application effect or Turn physical grant is still unresolved. Incomplete
 children from before this unpublished hard cut lack it and **must be drained
 or explicitly quarantined before deployment**; they cannot be granted new
@@ -194,6 +213,12 @@ existing Invocation. Published beta.23 tags remain unchanged.
   admission before the parent's Host effect claim, allow a claimed live
   intermediate parent, and reject a parent reverted to Accepted both at
   the final fence and after the grandchild's own effect-claim CAS.
+- A further independent final-Head review of MemberID-only Handoff uses
+  public `Runner.Delegate` and post-child-Create failure injection: parent
+  terminalization and cancellation intent must cause zero external
+  StartOrLoad calls. Missing/mismatched child outcomes must retain the
+  original grant and fence replay. Load/Start/Refresh tests reject unrelated
+  Run kinds while the actual A2A shadow runner remains accepted.
 - Complete Harness modules, race/quality, clean external consumers and
   real PostgreSQL/Redis recovery gates are needed for final acceptance.
 
@@ -203,4 +228,5 @@ and [third independent PR #82 parent Attempt / Application claim remediation](..
 and [fourth PR #82 Role Handoff physical-dispatch remediation](../audits/2026-10-31-pr82-role-handoff-dispatch-grant-remediation.md)
 and [fifth PR #82 child Run identity proof remediation](../audits/2026-10-31-pr82-handoff-child-run-proof-remediation.md)
 and [sixth PR #82 intermediate Application effect-claim correction](../audits/2026-10-31-pr82-unclaimed-application-parent-remediation.md)
+and [seventh PR #82 Member Handoff / Run-kind correction](../audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md)
 for exact evidence. Independent PR merge/release admission remains separate.

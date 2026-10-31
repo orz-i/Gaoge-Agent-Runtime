@@ -92,7 +92,7 @@ physical-dispatch fence independently walks that Item's ancestor chain,
 then performs a direct indexed root lookup against the child's **frozen**
 root Invocation ID, ExecutionRefID and Attempt. A root Retry must never
 rebind an old Accepted child, whether or not its parent Item names an owner.
-Typed children and delegated Role Agents persist that identity inside the
+Typed children and all delegated Agent children (RoleID or MemberID) persist that identity inside the
 existing hashed `Invocation.Input`, together with every transitive
 non-root parent Invocation's exact ExecutionRefID and Attempt in
 `harnessRoot.parents`; missing or stale authority fails closed.
@@ -103,7 +103,13 @@ child-only; root execution is observed through `Refresh(turnID)` and
 native Agent continuation through
 `ResumeTurn(turnID)`. Before `RetryInvocation` rotates any Attempt,
 the Store Turn lock rejects unresolved Running Application child effects
-and unfinished Turn physical grants, including nested descendants. See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md).
+and unfinished Turn physical grants, including nested descendants.
+Every delegated Agent Handoff commits a child-owned `handoff-start` grant
+and rechecks frozen ancestry before external ChildRunner execution. The
+Handoff Coordinator accepts only an Agent or explicitly bound
+`a2a.remote` Run kind with matching Run ID and recognized state; unknown
+results remain fenced rather than granting duplicate dispatch.
+See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md).
 
 ## Indexed Harness parent liveness
 
