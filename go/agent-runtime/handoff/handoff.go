@@ -19,8 +19,11 @@ var (
 	ErrInvalidJoin       = errors.New("invalid handoff join")
 	ErrChildPending      = errors.New("handoff child run is not terminal")
 	ErrChildFailed       = errors.New("handoff child run failed")
-	ErrJoinPending       = errors.New("handoff join is not ready")
-	ErrJoinFailed        = errors.New("handoff join failed")
+	// ErrChildRunUnverified means a ChildRunner snapshot does not prove the
+	// requested Run identity and a recognized Kernel lifecycle state.
+	ErrChildRunUnverified = errors.New("handoff child run snapshot is unverified")
+	ErrJoinPending        = errors.New("handoff join is not ready")
+	ErrJoinFailed         = errors.New("handoff join failed")
 )
 
 // Status is the durable lifecycle of one delegated Child Run.
@@ -185,6 +188,9 @@ func (coordinator *Coordinator) StartOrLoad(
 	}
 	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err == nil {
+		if !verifiedChildRun(delegation, child) {
+			return Delegation{}, ErrChildRunUnverified
+		}
 		return projectChild(delegation, child), childStateError(child)
 	}
 	if !errors.Is(err, kernel.ErrNotFound) {
@@ -205,8 +211,11 @@ func (coordinator *Coordinator) StartOrLoad(
 		InitialToolKeys:  append([]string(nil), delegation.InitialToolKeys...),
 		HostedToolGrants: append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...),
 	})
-	if child.Run.ID == "" {
+	if child.Run.ID == "" && err != nil {
 		return Delegation{}, err
+	}
+	if !verifiedChildRun(delegation, child) {
+		return Delegation{}, errors.Join(ErrChildRunUnverified, err)
 	}
 	return projectChild(delegation, child), errors.Join(childStateError(child), err)
 }
@@ -224,7 +233,26 @@ func (coordinator *Coordinator) Refresh(ctx context.Context, delegation Delegati
 	if err != nil {
 		return Delegation{}, err
 	}
+	if !verifiedChildRun(delegation, child) {
+		return Delegation{}, ErrChildRunUnverified
+	}
 	return projectChild(delegation, child), childStateError(child)
+}
+
+// A Delegation's ChildRunID comes from the request, not the ChildRunner's
+// snapshot. Never let projection copy that requested ID into a seemingly
+// verified receipt for another (or an invalid) physical Run.
+func verifiedChildRun(delegation Delegation, child kernel.Snapshot) bool {
+	if child.Run.ID != delegation.ChildRunID {
+		return false
+	}
+	switch child.Run.Status {
+	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget,
+		kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Delegation) (ChildRunner, error) {
