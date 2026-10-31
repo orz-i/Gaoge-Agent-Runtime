@@ -119,7 +119,12 @@ instead found two narrower, testable defects in the public child boundary.
     the `handoff-start` phase is not the native Kernel `start` phase and may
     not bypass cancellation checks merely because a local child Run exists.
     No synthetic Kernel snapshot, second Store protocol or compatibility
-    route is introduced.
+    route is introduced. The subsequent independent P1 audit also requires
+    the Handoff Coordinator to verify that its ChildRunner's *actual*
+    returned Snapshot.Run.ID equals the frozen requested ChildRunID and that
+    the Kernel status is recognized, before projecting LoadRun, StartRun or
+    Refresh results. An unverified result cannot settle the child-owned
+    physical grant.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -180,4 +185,5 @@ See [Breaking Changes](../breaking-changes.md), the original local
 acceptance record and the [second PR #82 cross-Attempt remediation](../audits/2026-10-31-pr82-child-root-attempt-hardcut-remediation.md)
 and [third independent PR #82 parent Attempt / Application claim remediation](../audits/2026-10-31-pr82-parent-attempt-and-application-claim-remediation.md)
 and [fourth PR #82 Role Handoff physical-dispatch remediation](../audits/2026-10-31-pr82-role-handoff-dispatch-grant-remediation.md)
+and [fifth PR #82 child Run identity proof remediation](../audits/2026-10-31-pr82-handoff-child-run-proof-remediation.md)
 for exact evidence. Independent PR merge/release admission remains separate.

@@ -47,7 +47,13 @@ execution grant and post-grant frozen ancestor check before starting a
 remote ChildRunner. An active cancellation intent prevents that grant; a
 missing/uncertain child outcome keeps it unresolved and blocks a duplicate
 Handoff start. The existing append-only grant uses phase `handoff-start`,
-not a synthetic Kernel Run or alternate Store protocol.
+not a synthetic Kernel Run or alternate Store protocol. Handoff's direct
+`ChildRunner` observation now requires the returned Snapshot.Run.ID to
+match the requested ChildRunID, with a recognized Kernel status, on Load,
+Start and Refresh. Empty, mismatched or invalid snapshots cannot be
+projected as a valid Delegation or complete the grant. Invalid observed
+snapshots return `ErrChildRunUnverified`; a StartRun failure without any
+snapshot preserves its original error and remains outcome-unknown.
 
 **Persisted JSON hard cut (no SQL migration):** The existing indexed
 `Store.GetItem` contract (PR #79), Kernel Run, statuses, IDs, receipts,
