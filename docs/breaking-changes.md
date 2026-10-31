@@ -42,6 +42,12 @@ rejects stale or unsealed ancestor Attempts and uses direct indexed
 Invocation, without a synthetic Kernel Run; a claimed Application root can
 admit an Application child, never a native child lacking a Kernel parent.
 This is a fail-closed correction, not permission to retry ambiguous effects.
+Delegated Role Handoff now also requires a standard, child-owned physical
+execution grant and post-grant frozen ancestor check before starting a
+remote ChildRunner. An active cancellation intent prevents that grant; a
+missing/uncertain child outcome keeps it unresolved and blocks a duplicate
+Handoff start. The existing append-only grant uses phase `handoff-start`,
+not a synthetic Kernel Run or alternate Store protocol.
 
 **Persisted JSON hard cut (no SQL migration):** The existing indexed
 `Store.GetItem` contract (PR #79), Kernel Run, statuses, IDs, receipts,

@@ -107,6 +107,19 @@ instead found two narrower, testable defects in the public child boundary.
    sibling retry, but avoids guessing ancestry from a grant without a
    transitive ownership snapshot. No second attempt is authorized from
    an unknown external outcome.
+10. **Role Handoff has the same pre-effect dispatch fence.** An independent
+    final-Head review reproduced a Role `StartOrLoad` after the parent
+    Invocation terminalized or cancellation intent committed between Role
+    child `CreateInvocation` and external dispatch. A delegated Role now
+    acquires a standard physical dispatch grant owned by its frozen child
+    Invocation, checks every frozen ancestor after that grant, and only then
+    enters `HandoffStarter.StartOrLoad`. The grant's existing receipt closes
+    on a matching, non-queued Handoff-observed child Run outcome. Missing or
+    mismatched outcomes keep the grant unresolved and reject repeated Start;
+    the `handoff-start` phase is not the native Kernel `start` phase and may
+    not bypass cancellation checks merely because a local child Run exists.
+    No synthetic Kernel snapshot, second Store protocol or compatibility
+    route is introduced.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -156,10 +169,15 @@ existing Invocation. Published beta.23 tags remain unchanged.
   and transitive Role owner Attempts, reject their old descendants after Retry,
   and fence root/intermediate retries against unresolved Application claims
   and descendant physical grants in Memory, SQL and real PostgreSQL.
+- Role Handoff after child Create and after dispatch grant is tested against
+  parent terminalization, cancellation intent, ambiguous outcome/replay and
+  successful receipt. PostgreSQL's cross-connection cancellation test also
+  covers the new `handoff-start` grant phase.
 - Complete Harness modules, race/quality, clean external consumers and
   real PostgreSQL/Redis recovery gates are needed for final acceptance.
 
 See [Breaking Changes](../breaking-changes.md), the original local
 acceptance record and the [second PR #82 cross-Attempt remediation](../audits/2026-10-31-pr82-child-root-attempt-hardcut-remediation.md)
 and [third independent PR #82 parent Attempt / Application claim remediation](../audits/2026-10-31-pr82-parent-attempt-and-application-claim-remediation.md)
+and [fourth PR #82 Role Handoff physical-dispatch remediation](../audits/2026-10-31-pr82-role-handoff-dispatch-grant-remediation.md)
 for exact evidence. Independent PR merge/release admission remains separate.
