@@ -4,6 +4,32 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 further P1 Handoff cancellation hard cut — local execution owner:**
+Even an exact match on ChildRunID, Run kind, Tenant/Actor/Thread, Goal and
+RequestID does **not** prove the actual ChildRunner's Kernel: independent
+Kernel Stores can contain identical Agent Runs. Handoff physical-effect
+cancellation now requires both the original immutable parent/child/grant
+proof **and** explicit local composition identity: a fixed
+`handoff.New(child)` Coordinator whose `handoff.LocalKernelChildRunner`
+attests to the exact Harness `*kernel.Runtime`, paired with either the
+same native `*kernel.Runtime` Canceller or a trusted
+`harness.LocalKernelCanceller` attesting to that Runtime. A dynamically
+resolved `handoff.NewRouted` route, custom HandoffStarter, unproven
+ChildRunner/Canceller or foreign Kernel pointer can no longer cancel a
+Handoff merely because the Run fields match. Native `agent.Runner` only
+attests for a middleware/preparer-free Kernel-fenced composition. A custom
+Cancel returning a matching but nonterminal Run is not a cancellation receipt.
+Never-dispatched Handoffs may use existing synthetic no-effect cancellation,
+but it must not issue a physical Cancel against a coincidentally present Run.
+
+Hosts MUST preserve the fixed ChildRunner/Kernel binding for admitted work
+across restarts; for dynamically routed or remote work without proof, retain
+`ErrHandoffCancellationUnverified` and reconcile/quarantine explicitly.
+These changes narrow pre-stable cancellation behavior. New named proof
+interfaces replace heuristic inference; no Store API, persistence format,
+SQL DDL, schema version, duplicate cancellation protocol or compatibility
+bridge. See [final route ownership remediation](audits/2026-10-31-pr82-handoff-route-owned-cancellation-hardcut.md).
+
 **PR #82 final independent cancellation hard cut (two P1s):** A concrete
 native `*agent.Runner` is no longer sufficient proof that a running Start may
 hand cancellation to Kernel CAS. The exact Agent must use the same Kernel

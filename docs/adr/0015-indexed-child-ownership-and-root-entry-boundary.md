@@ -398,6 +398,30 @@ instead found two narrower, testable defects in the public child boundary.
     `ErrHandoffCancellationUnverified` without cancelling the foreign Run.
     Custom cancellers must also return a verified Snapshot before their
     result becomes a terminal fact. No new route protocol or schema.
+28. **Exact child task identity is not proof of the execution owner's Kernel.**
+    The subsequent independent PR #82 audit reproduced two separate Kernel
+    Stores holding Agent Runs with identical ID, Kind, Actor/Thread, Goal and
+    RequestID. Both direct-child and root Turn Cancel changed the unrelated
+    local Run while the actual remote ChildRunner remained Running. Another
+    red test proved that even a valid fixed local ChildRunner can be paired
+    with a different native RuntimeCanceller that cancels a foreign Run.
+    Handoff now checks its existing durable physical Start grant *before*
+    consulting local Run status; a definitely undisbursed child needs no
+    local physical Cancel. For a potentially effectful Handoff, the only
+    local cancellation authority is a concrete fixed `handoff.New` Coordinator
+    with an explicit `handoff.LocalKernelChildRunner` proving the exact
+    Harness Kernel Runtime, **and** a Canceller that is the same native
+    Kernel or an explicit `harness.LocalKernelCanceller` for that Runtime.
+    Dynamic `NewRouted`, custom HandoffStarter and uncertified cancellers
+    fail closed. A native `agent.Runner` only certifies local ownership when
+    its Host middleware/preparer configuration cannot outlive Kernel CAS.
+    The prior immutable Delegation/child provenance check remains mandatory;
+    a successful custom cancellation reply must also have an authoritative
+    *terminal* Run status. Missing route proof preserves cancellation intent
+    and returns `ErrHandoffCancellationUnverified`, never a synthetic
+    remote terminal receipt. The Host must keep fixed route/Kernel composition
+    stable across recovery; no DDL, schema version, backfill or parallel
+    cancellation router is introduced.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -493,4 +517,5 @@ and [eighth PR #82 Handoff provenance and receipt hard cut](../audits/2026-10-31
 and [ninth PR #82 Handoff frozen execution receipt correction](../audits/2026-10-31-pr82-handoff-frozen-execution-receipt-remediation.md)
 and [tenth PR #82 remote Handoff cancellation correction](../audits/2026-10-31-pr82-remote-handoff-cancellation-remediation.md)
 and [native middleware and local Handoff ownership correction](../audits/2026-10-31-pr82-native-middleware-and-local-handoff-cancellation-remediation.md)
+and [subsequent Handoff route-owned cancellation hard cut](../audits/2026-10-31-pr82-handoff-route-owned-cancellation-hardcut.md)
 for exact evidence. Independent PR merge/release admission remains separate.
