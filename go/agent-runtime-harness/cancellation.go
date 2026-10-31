@@ -335,6 +335,44 @@ func (runner *Runner) syncTerminalDelegations(ctx context.Context, turn Turn, ru
 	return nil
 }
 
+// cancelOwnedDescendants uses the same mixed ownership closure as preflight.
+// A completed Application intermediary is not a boundary that drops native
+// grandchildren, and absent RunRelation capability never selects siblings.
+func (runner *Runner) cancelOwnedDescendants(ctx context.Context, turn Turn, rootRunID, reason string) (map[string]kernel.Snapshot, error) {
+	invocations, targets, _, err := runner.collectCancellationScope(ctx, turn, rootRunID)
+	if err != nil {
+		return nil, err
+	}
+	var selected []Invocation
+	var seeds []string
+	rootInvocationID := ""
+	for _, invocation := range invocations {
+		if _, owned := targets[invocation.ID]; !owned {
+			continue
+		}
+		selected = append(selected, invocation)
+		if invocation.ExecutionRefID == rootRunID {
+			rootInvocationID = invocation.ID
+			continue
+		}
+		if invocation.ExecutionClass == ExecutionApplication {
+			if _, err = runner.cancelApplicationInvocation(ctx, turn, invocation, reason); err != nil {
+				return nil, err
+			}
+		} else {
+			seeds = append(seeds, invocation.ExecutionRefID)
+		}
+	}
+	runs, err := runner.cancelRelatedRuns(ctx, rootRunID, seeds, reason)
+	if err != nil {
+		return nil, err
+	}
+	if err = runner.addMissingInvocationCancellations(ctx, runs, selected, rootInvocationID, reason); err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
 func (runner *Runner) cancelTurnDescendants(
 	ctx context.Context,
 	turnID string,

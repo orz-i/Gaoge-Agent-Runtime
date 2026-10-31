@@ -491,28 +491,7 @@ func (runner *Runner) finalizeApplicationTerminalProjection(ctx context.Context,
 // Select real descendants by frozen ancestry/Items, not the conservative
 // all-owner preflight fallback, so unrelated siblings are never cancelled.
 func (runner *Runner) cancelApplicationSubtree(ctx context.Context, turn Turn, invocation Invocation, reason string) (Snapshot, error) {
-	invocations, err := runner.store.ListInvocations(ctx, turn.ID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	targets := map[string]struct{}{invocation.ID: {}}
-	if err = runner.addItemOwnedCancellationDescendants(ctx, turn.ID, invocations, targets); err != nil {
-		return Snapshot{}, err
-	}
-	var seeds []string
-	for _, child := range invocations {
-		if _, targeted := targets[child.ID]; !targeted || child.ID == invocation.ID {
-			continue
-		}
-		if child.ExecutionClass == ExecutionApplication {
-			if _, err = runner.cancelApplicationInvocation(ctx, turn, child, reason); err != nil {
-				return Snapshot{}, err
-			}
-		} else {
-			seeds = append(seeds, child.ExecutionRefID)
-		}
-	}
-	runs, err := runner.cancelRelatedRuns(ctx, invocation.ExecutionRefID, seeds, reason)
+	runs, err := runner.cancelOwnedDescendants(ctx, turn, invocation.ExecutionRefID, reason)
 	if err != nil {
 		return Snapshot{}, err
 	}

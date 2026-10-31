@@ -1053,7 +1053,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	// Workflow, GroupChat or Handoff descendants in RunRelation. Only a
 	// proven terminal subtree may settle this child's cancellation intent.
 	if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
-		descendants, cancelErr := runner.cancelRelatedRuns(ctx, invocation.ExecutionRefID, nil, reason)
+		descendants, cancelErr := runner.cancelOwnedDescendants(ctx, turn, invocation.ExecutionRefID, reason)
 		if cancelErr != nil {
 			return Snapshot{}, cancelErr
 		}

@@ -351,7 +351,14 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	// follow already committed effects; it must retain the intent.
 	targetCancelErr := cancelErr
 	if cancelErr == nil {
-		_, cancelErr = runner.cancelRelatedRuns(ctx, task.RunID, nil, reason)
+		var descendants map[string]kernel.Snapshot
+		descendants, cancelErr = runner.cancelOwnedDescendants(ctx, turn, task.RunID, reason)
+		if cancelErr == nil {
+			cancelErr = runner.syncInvocationRuns(ctx, turn, descendants)
+		}
+		if cancelErr == nil {
+			cancelErr = runner.syncTerminalDelegations(ctx, turn, descendants)
+		}
 	}
 	if cancelErr != nil {
 		task.CancelStatus, task.CancelError = "failed", cancelErr.Error()
