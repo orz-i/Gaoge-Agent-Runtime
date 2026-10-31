@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 // childRootKey reserves the immutable root and ancestor Attempt authority
@@ -166,6 +168,65 @@ func (runner *Runner) requireLiveParentAttempt(ctx context.Context, turnID strin
 	return nil
 }
 
+// requireItemOwnerAttempt verifies the physical origin recorded in each
+// immutable Item, not merely its owner's stable Invocation ID. Retry changes
+// the owner's ExecutionRefID while prior Tool/Message/Artifact facts remain.
+// Delegation Items are special: RunID names the child, and the parent Run is
+// separately frozen in the payload.
+func (runner *Runner) requireItemOwnerAttempt(
+	ctx context.Context, item Item, owner childAttemptBinding,
+) error {
+	if item.Kind == ItemDelegation {
+		var payload delegationItemPayload
+		if err := json.Unmarshal(item.Payload, &payload); err != nil ||
+			payload.ChildRunID == "" || payload.ChildRunID != item.RunID ||
+			strings.TrimSpace(payload.ParentRunID) == "" {
+			return ErrConflict
+		}
+		return runner.requireRunDescendsFrom(ctx, payload.ParentRunID, owner.ExecutionRefID)
+	}
+	if item.Kind == ItemInvocation && item.RunID != "" && item.RunID != owner.ExecutionRefID {
+		return ErrConflict
+	}
+	if item.RunID == "" {
+		return nil // Host-owned Items can have no physical Run.
+	}
+	return runner.requireRunDescendsFrom(ctx, item.RunID, owner.ExecutionRefID)
+}
+
+// Workflow/Team/GroupChat Items can reference a legitimate nested Runtime
+// Run instead of their owning Invocation's top-level Run. The immutable
+// child->parent RunRelation index proves the exact originating Attempt;
+// a missing index/edge may never silently turn a foreign Run into authority.
+func (runner *Runner) requireRunDescendsFrom(ctx context.Context, runID, ownerRunID string) error {
+	if strings.TrimSpace(runID) == "" || strings.TrimSpace(ownerRunID) == "" {
+		return ErrConflict
+	}
+	if runID == ownerRunID {
+		return nil
+	}
+	reader, ok := runner.relationReader.(interface {
+		GetByChild(context.Context, string) (runrelation.Relation, error)
+	})
+	if !ok {
+		return ErrConflict
+	}
+	seen := make(map[string]struct{})
+	for current := runID; current != ownerRunID; {
+		if _, repeated := seen[current]; repeated {
+			return ErrConflict
+		}
+		seen[current] = struct{}{}
+		relation, err := reader.GetByChild(ctx, current)
+		if err != nil || relation.ChildRunID != current ||
+			strings.TrimSpace(relation.ParentRunID) == "" {
+			return errors.Join(ErrConflict, err)
+		}
+		current = relation.ParentRunID
+	}
+	return nil
+}
+
 // freezeChildParentAttempts traverses only indexed parent Items. Each owned
 // Invocation carries its own inherited ancestor proof: a Host delegation
 // Item may end its Item chain without losing the transitive owner Attempts.
@@ -203,10 +264,8 @@ func (runner *Runner) freezeChildParentAttempts(
 			if loadErr != nil || owner.ID != item.InvocationID || owner.TurnID != turnID {
 				return nil, errors.Join(ErrConflict, loadErr)
 			}
-			// Only Invocation lifecycle Items use RunID as the owner's Run.
-			// Delegation Items instead record the delegated child RunID.
-			if item.Kind == ItemInvocation && item.RunID != "" && item.RunID != owner.ExecutionRefID {
-				return nil, ErrConflict
+			if err := runner.requireItemOwnerAttempt(ctx, item, invocationAttempt(owner)); err != nil {
+				return nil, err
 			}
 			if owner.ID != root.ID {
 				proof, proofErr := frozenChildRoot(owner)

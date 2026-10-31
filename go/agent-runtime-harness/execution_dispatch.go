@@ -284,11 +284,8 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 					return ErrConflict // Unfrozen ancestor cannot grant authority.
 				}
 			}
-			// A lifecycle Item binds to its Invocation's physical Attempt.
-			// Delegation Items instead carry the *child* RunID.
-			if item.Kind == ItemInvocation && item.RunID != "" &&
-				item.RunID != bound.ExecutionRefID {
-				return ErrConflict
+			if err := runner.requireItemOwnerAttempt(ctx, item, bound); err != nil {
+				return err
 			}
 		}
 		id = item.ParentItemID

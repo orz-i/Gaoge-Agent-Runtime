@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -29,6 +30,14 @@ func TestChildParentAttemptRemainsFrozenAfterIntermediateRetry(t *testing.T) {
 				ItemDelegation: "delegated-child-not-parent-run",
 				ItemInvocation: parent.ExecutionRefID,
 			}[kind]
+			if kind == ItemDelegation {
+				parentItem.Payload, err = json.Marshal(delegationItemPayload{
+					ParentRunID: parent.ExecutionRefID, ChildRunID: parentItem.RunID,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
 			if _, _, err := store.AppendItem(t.Context(), parentItem); err != nil {
 				t.Fatal(err)
 			}
@@ -130,9 +139,16 @@ func TestNestedChildInheritsFrozenParentAttemptsAcrossDelegationItem(t *testing.
 	if _, _, err := store.CreateInvocation(t.Context(), delegator); err != nil {
 		t.Fatal(err)
 	}
+	delegationPayload, err := json.Marshal(delegationItemPayload{
+		ParentRunID: delegator.ExecutionRefID, ChildRunID: "a-different-delegated-run",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, _, err := store.AppendItem(t.Context(), Item{
 		ID: "delegation-boundary", TurnID: owner.TurnID, InvocationID: delegator.ID,
 		RunID: "a-different-delegated-run", Kind: ItemDelegation, Status: ItemStarted,
+		Payload: delegationPayload,
 	}); err != nil {
 		t.Fatal(err)
 	}

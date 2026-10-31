@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -110,8 +111,14 @@ func newPR82HandoffFixture(t *testing.T) *pr82HandoffFixture {
 	if _, _, err = store.CreateInvocation(ctx, root); err != nil {
 		t.Fatal(err)
 	}
+	startedPayload, err := json.Marshal(delegationItemPayload{DelegationID: "pr82-delegation", MemberID: "analyst",
+		ChildRunID: "pr82-delegated-run", ParentRunID: root.ExecutionRefID, Goal: "review", Status: handoff.StatusQueued})
+	if err != nil {
+		t.Fatal(err)
+	}
 	started := Item{ID: "pr82-delegation-started", TurnID: turn.ID, InvocationID: root.ID,
-		RunID: "pr82-delegated-run", Kind: ItemDelegation, Status: ItemStarted, CreatedAt: now, UpdatedAt: now}
+		RunID: "pr82-delegated-run", Kind: ItemDelegation, Status: ItemStarted, Payload: startedPayload,
+		CreatedAt: now, UpdatedAt: now}
 	if _, _, err = store.AppendItem(ctx, started); err != nil {
 		t.Fatal(err)
 	}
