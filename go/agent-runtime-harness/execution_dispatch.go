@@ -305,7 +305,7 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 		return err
 	}
 	if root.ExecutionClass == ExecutionApplication {
-		if root.Status == InvocationAccepted {
+		if unclaimedApplicationParent(root) {
 			return ErrConflict
 		}
 		return nil

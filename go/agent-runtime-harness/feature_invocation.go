@@ -1125,7 +1125,7 @@ func (runner *Runner) childInvocationContext(
 	if parent.ExecutionClass == ExecutionApplication {
 		// A Host Application has no Kernel Run. Only another Application
 		// child can use its Invocation as the durable execution owner.
-		if executionClass != ExecutionApplication || parent.Status == InvocationAccepted {
+		if executionClass != ExecutionApplication || unclaimedApplicationParent(parent) {
 			return childInvocationContext{}, ErrConflict
 		}
 		return childInvocationContext{turn: turn, root: parent, parentAttempts: parentAttempts}, nil
