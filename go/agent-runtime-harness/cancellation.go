@@ -20,6 +20,15 @@ type RuntimeCanceller interface {
 	Cancel(context.Context, string, uint64, string) (kernel.Snapshot, error)
 }
 
+// LocalKernelCanceller is the Host's explicit claim that its custom
+// Canceller acts on this exact Kernel. Handoff never infers that authority
+// from identical Run IDs or matching public task fields. An arbitrary
+// RuntimeCanceller without this proof cannot cancel a delegated local Run.
+type LocalKernelCanceller interface {
+	RuntimeCanceller
+	OwnsKernelRuntime(*kernel.Runtime) bool
+}
+
 // ErrHandoffCancellationUnverified means a delegated ChildRunner owns a Run
 // that the Harness-local Kernel cannot observe or cancel. No terminal status
 // may be projected without a verified, route-owned cancellation outcome.
@@ -47,6 +56,28 @@ func (runner *Runner) cancelRuntimeRun(
 		}
 		if ownerErr == nil && isHandoffDelegationInvocation(owner) {
 			delegatedChild = &owner
+		}
+	}
+	if delegatedChild != nil {
+		// Run IDs, Actor/Thread and even full frozen Goal/RequestID prove
+		// task identity but not which Kernel/ChildRunner owns its effect.
+		// A remote Run may have an exact metadata twin in this Kernel.
+		// Reuse the existing immutable grant ledger first: an undisbursed
+		// Handoff is safe to mark cancelled without touching any local Run.
+		possible, proofErr := runner.handoffPhysicalEffectPossible(ctx, *delegatedChild)
+		if proofErr != nil {
+			return kernel.Snapshot{}, false, proofErr
+		}
+		if !possible {
+			return kernel.Snapshot{}, false, nil
+		}
+		// Only the fixed original ChildRunner's explicit same-Kernel
+		// composition proof can authorize a local physical Cancel. No
+		// heuristic fallback for custom/dynamic Handoff routes.
+		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
+		if !ok || !coordinator.OwnsLocalKernelRunner(runner.runtime) ||
+			!runner.localHandoffCancellerOwnsKernel() {
+			return kernel.Snapshot{}, false, fmt.Errorf("routed Handoff Run %q has no local execution-owner/canceller proof: %w", runID, ErrHandoffCancellationUnverified)
 		}
 	}
 	var lastNativeNoEffect error
@@ -96,9 +127,11 @@ func (runner *Runner) cancelRuntimeRun(
 			return kernel.Snapshot{}, true, fmt.Errorf("A2A shadow Run %q: %w", runID, ErrHandoffCancellationUnverified)
 		}
 		cancelled, err := runner.cancellation.Cancel(ctx, runID, current.Run.Revision, strings.TrimSpace(reason))
-		if delegatedChild != nil && err == nil && !handoff.VerifiedChildRun(delegation, parentRun, cancelled) {
-			// A custom remote canceller's returned Snapshot is also untrusted.
-			// The effect may have happened; preserve the original intent.
+		if delegatedChild != nil && err == nil &&
+			(!handoff.VerifiedChildRun(delegation, parentRun, cancelled) ||
+				!terminalRuntimeStatus(cancelled.Run.Status)) {
+			// A custom canceller returning the correct identity but still
+			// Running has not confirmed cancellation. Do not close the intent.
 			return kernel.Snapshot{}, true, ErrHandoffCancellationUnverified
 		}
 		if nativeKernel {
@@ -127,6 +160,21 @@ func (runner *Runner) cancelRuntimeRun(
 	}
 	// Every custom canceller conflict was contractually no-effect.
 	return kernel.Snapshot{}, false, kernel.ErrConflict
+}
+
+// A correct ChildRunner alone cannot authorize cancellation when the Host
+// composed a different Kernel (or an unproven custom route) as Canceller.
+// Only exact native Kernel identity or an explicit Host-owned local Kernel
+// contract may close the second half of Handoff cancellation ownership.
+func (runner *Runner) localHandoffCancellerOwnsKernel() bool {
+	if runner == nil || runner.runtime == nil {
+		return false
+	}
+	if native, ok := runner.cancellation.(*kernel.Runtime); ok {
+		return native == runner.runtime
+	}
+	owner, ok := runner.cancellation.(LocalKernelCanceller)
+	return ok && owner.OwnsKernelRuntime(runner.runtime)
 }
 
 // localHandoffCancellationAuthority proves that a coincidentally present

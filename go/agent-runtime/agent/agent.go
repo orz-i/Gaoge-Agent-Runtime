@@ -507,6 +507,14 @@ func (runner *Runner) NativeStartCancellationFencedByKernel(runtime *kernel.Runt
 	return runner != nil && runner.runtime == runtime && runner.kernelOwnedStartCancellation
 }
 
+// OwnsKernelRuntime certifies that a statically routed native child executes
+// only under the exact Kernel's CAS/Epoch fence. An Agent with arbitrary Host
+// middleware/preparers cannot make this claim: those callbacks may continue
+// after the Kernel Run is cancelled. Run metadata is not ownership proof.
+func (runner *Runner) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
+	return runner.NativeStartCancellationFencedByKernel(runtime)
+}
+
 // Descriptor declares the explicit Agent capability graph.
 func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
 	requires := []kernel.Capability{kernel.CapabilityRuntime}

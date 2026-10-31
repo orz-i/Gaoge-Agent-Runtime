@@ -112,6 +112,15 @@ type ChildRunner interface {
 	LoadRun(context.Context, string) (kernel.Snapshot, error)
 }
 
+// LocalKernelChildRunner is an explicit Host contract that its ChildRunner
+// executes directly in the supplied Kernel Runtime, not in a remote ChildRunner
+// or A2A shadow. Only a fixed New(children) Coordinator can use this proof;
+// custom route implementations must never claim it based on Run metadata.
+type LocalKernelChildRunner interface {
+	ChildRunner
+	OwnsKernelRuntime(*kernel.Runtime) bool
+}
+
 // ChildRunnerResolver selects one explicitly composed child capability for a
 // durable Delegation. It is a narrow routing port, not a service locator: the
 // host owns the finite routing policy and returns an already constructed
@@ -167,6 +176,25 @@ func NewRouted(resolver ChildRunnerResolver) (*Coordinator, error) {
 		return nil, ErrInvalidDelegation
 	}
 	return &Coordinator{resolver: resolver}, nil
+}
+
+// OwnsLocalKernelRunner is a narrow composition proof, not an identity
+// comparison of Kernel Runs. Only New's permanently bound ChildRunner may
+// certify ownership of the exact Kernel used by Harness. A dynamically
+// resolved route (NewRouted), a custom HandoffStarter or a ChildRunner that
+// cannot attest to its runtime must fail closed during local cancellation.
+// The Host remains responsible for keeping static routes stable for the
+// lifetime of admitted delegated children, including process recovery.
+func (coordinator *Coordinator) OwnsLocalKernelRunner(runtime *kernel.Runtime) bool {
+	if coordinator == nil || runtime == nil {
+		return false
+	}
+	fixed, ok := coordinator.resolver.(staticChildRunnerResolver)
+	if !ok {
+		return false
+	}
+	owner, ok := fixed.children.(LocalKernelChildRunner)
+	return ok && owner.OwnsKernelRuntime(runtime)
 }
 
 // Descriptor declares the reusable Handoff capability.

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -167,16 +166,13 @@ func TestPR82RejectedHandoffDispatchAllowsNoEffectCancellation(t *testing.T) {
 func TestPR82LocalHandoffChildStillUsesVerifiedKernelCancellation(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	delegation := f.delegation()
-	f.handoff.result = func(d handoff.Delegation) (handoff.Delegation, error) {
-		_, err := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: d.ChildRunID, Kind: agent.RunKind,
-			Actor: f.parentRun.Run.Actor, Thread: f.parentRun.Run.Thread, RequestID: f.parentRun.Run.ID + ":" + d.ID,
-			Goal: d.Goal, State: []byte(`{}`)})
-		if err != nil {
-			return handoff.Delegation{}, err
-		}
-		d.Status = handoff.StatusRunning
-		return d, handoff.ErrChildPending
+	// Explicitly compose the exact fixed ChildRunner that creates the local
+	// Kernel Run. A mock Handoff returning matching metadata is NOT proof.
+	coordinator, err := handoff.New(&pr82BoundKernelChild{runtime: f.runtime})
+	if err != nil {
+		t.Fatal(err)
 	}
+	f.runner.handoffs = coordinator
 	if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
 		t.Fatal(err)
 	}

@@ -21,7 +21,7 @@ import (
 // These are persisted Store facts, not mocked return values. A Handoff can
 // have a settled physical Start receipt while its ChildRunner's Run lives in
 // an independent Kernel and cannot be cancelled by Harness's local Kernel.
-func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role, rootCancel, shadow bool) {
+func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role, rootCancel, shadow, matchingLocalCollision bool) {
 	t.Helper()
 	ctx := t.Context()
 	now := time.Now().UTC()
@@ -92,6 +92,15 @@ func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role
 	if _, _, err := store.CreateInvocation(ctx, child); err != nil {
 		t.Fatal(err)
 	}
+	if matchingLocalCollision {
+		// Two independently owned Agent Runs may legitimately share every
+		// public task field. Persist the local one before the Handoff Grant.
+		if _, err := rt.Create(ctx, kernel.CreateRequest{ID: childRunID, Kind: agent.RunKind,
+			Actor: actor, Thread: thread, RequestID: rootRunID + ":" + delegation.ID,
+			Goal: delegation.Goal, State: []byte(`{}`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if shadow {
 		// A2A's local shadow cannot be cancelled using only the native
 		// Kernel: remote Task cancellation must be performed by A2A itself.
@@ -148,10 +157,10 @@ func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role
 	if !rootCancel && rootSnapshot.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("child-only cancellation touched root: %s", rootSnapshot.Run.Status)
 	}
-	if shadow {
+	if shadow || matchingLocalCollision {
 		local, err := rt.Load(ctx, childRunID)
 		if err != nil || local.Run.Status != kernel.RunStatusRunning {
-			t.Fatalf("default Kernel cancelled A2A shadow without a remote receipt: %+v %v", local.Run, err)
+			t.Fatalf("default Kernel cancelled a remote-owned/shadow Run without route proof: %+v %v", local.Run, err)
 		}
 	}
 }
@@ -175,7 +184,7 @@ func TestPR82RemoteHandoffCancellationUsesDurableProofAcrossStores(t *testing.T)
 							mode += "-a2a-shadow"
 						}
 						t.Run(mode, func(t *testing.T) {
-							assertPR82RemoteCancellationOnStore(t, create(t), role, rootCancel, shadow)
+							assertPR82RemoteCancellationOnStore(t, create(t), role, rootCancel, shadow, false)
 						})
 					}
 				}
@@ -200,8 +209,52 @@ func TestRealPostgresPR82RemoteHandoffCancellationRequiresReceipt(t *testing.T) 
 				if err != nil {
 					t.Fatal(err)
 				}
-				assertPR82RemoteCancellationOnStore(t, store, role, rootCancel, shadow)
+				assertPR82RemoteCancellationOnStore(t, store, role, rootCancel, shadow, false)
 			}
+		}
+	}
+}
+
+// The exact same run/task identity in the Harness-local Kernel must not be
+// treated as a route-owned cancel receipt. Exercise the persisted grant and
+// cancellation intent on both Memory and SQL Store compositions.
+func TestPR82MatchingLocalRunCollisionFencedAcrossStores(t *testing.T) {
+	for name, create := range rootInvocationStores() {
+		t.Run(name, func(t *testing.T) {
+			for _, role := range []bool{false, true} {
+				for _, rootCancel := range []bool{false, true} {
+					mode := "member-child"
+					if role {
+						mode = "role-child"
+					}
+					if rootCancel {
+						mode += "-root"
+					}
+					t.Run(mode, func(t *testing.T) {
+						assertPR82RemoteCancellationOnStore(t, create(t), role, rootCancel, false, true)
+					})
+				}
+			}
+		})
+	}
+}
+
+func TestRealPostgresPR82MatchingLocalRunCollisionRemainsUnverified(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	for _, role := range []bool{false, true} {
+		for _, rootCancel := range []bool{false, true} {
+			db, _ := openIsolatedHarnessPostgres(t, dsn)
+			if err := harnesspostgres.Migrate(db); err != nil {
+				t.Fatal(err)
+			}
+			store, err := harnesspostgres.New(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertPR82RemoteCancellationOnStore(t, store, role, rootCancel, false, true)
 		}
 	}
 }

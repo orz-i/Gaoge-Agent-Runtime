@@ -319,6 +319,12 @@ type asyncDelegationChild struct {
 	starts   int
 }
 
+// The explicit fixed ChildRunner owns this exact Kernel Runtime across
+// Start/Load/cancel. A merely matching Run ID would be insufficient.
+func (child *asyncDelegationChild) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
+	return child != nil && child.runtime != nil && child.runtime == runtime
+}
+
 func (child *asyncDelegationChild) StartRun(ctx context.Context, request agent.StartRequest) (kernel.Snapshot, error) {
 	child.starts++
 	child.id, child.goal = request.ID, request.Goal
@@ -344,6 +350,10 @@ type asyncDelegationCanceller struct {
 	runtime    *kernel.Runtime
 	childRunID string
 	childCalls int
+}
+
+func (canceller *asyncDelegationCanceller) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
+	return canceller != nil && canceller.runtime != nil && canceller.runtime == runtime
 }
 
 func (canceller *asyncDelegationCanceller) Cancel(ctx context.Context, runID string, revision uint64, reason string) (kernel.Snapshot, error) {
