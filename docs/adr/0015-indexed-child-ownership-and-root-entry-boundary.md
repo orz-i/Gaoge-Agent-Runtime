@@ -423,6 +423,44 @@ instead found two narrower, testable defects in the public child boundary.
     stable across recovery; no DDL, schema version, backfill or parallel
     cancellation router is introduced.
 
+29. **Native cancellation ownership applies to all Runs, including root Agents.**
+    The independent final-Head PR #82 audit reproduced an ordinary root Agent
+    with a foreign `*kernel.Runtime` native Canceller. Two independent Kernel
+    Stores contained identical Run identities: `Runner.Cancel` cancelled the
+    foreign Run and terminalized its Harness Turn while the true local root
+    remained Running. `NewRunner` now rejects a foreign native Kernel Canceller
+    at composition, and `cancelRuntimeRun` checks exact pointer ownership
+    immediately before invoking native Cancel (including for existing mutable
+    compositions). Ordinary root Runs return direct, no-effect `ErrConflict`
+    instead of projecting the foreign outcome; a Handoff retains its earlier
+    route-specific `ErrHandoffCancellationUnverified` contract and the valid
+    never-dispatched synthetic no-effect path. Host custom cancellers retain
+    their explicit cleanup/receipt contract, not implicit native ownership.
+30. **Root observation cannot settle an unresolved cancellation intent.**
+    A root Kernel Run can already be Cancelled while its delegated external
+    ChildRunner remains active and the Harness cancellation intent is still
+    open. The independent audit reproduced `Runner.Refresh` incorrectly
+    projecting a successful terminal Turn from that partial Kernel fact.
+    Generic root terminal projection now refuses an active cancellation fence
+    with `ErrConflict`. Only `Runner.Cancel`, after its complete descendant
+    and delegation cancellation verification, may synchronize that root
+    terminal state while closing its original intent. Read-only Refresh and
+    unrelated continuation callbacks cannot claim successful remote cleanup.
+    The original intent, child identity and unknown outcome remain durable
+    for explicit cancellation retry or reconciliation; no fabricated receipt.
+31. **A child Refresh must prove its original Handoff route.** An exact
+    ChildRunID is not sufficient to read local Kernel state: a remote Handoff
+    may collide with a foreign local Run (even of another Tenant and RunKind).
+    `Runner.RefreshInvocation` now refuses read-only Handoff projection unless
+    the fixed original Coordinator's `LocalKernelChildRunner` certifies the
+    *same* Harness Kernel. That locally bound path must also pass the existing
+    frozen Delegation Item, parent Run and `handoff.VerifiedChildRun` checks
+    before changing child Invocation status. Dynamic/external ChildRunners
+    return `ErrHandoffCancellationUnverified` instead of accepting a local
+    collision; their read-only observation remains ChildRunner/Coordinator-
+    owned with authoritative parent provenance. No automatic remote refresh
+    adapter, new Store API, SQL schema or compatibility route is introduced.
+
 ## Breaking change, upgrade, and exclusions
 
 The Go `Runner.RefreshInvocation` and `Runner.ResumeInvocation` contract

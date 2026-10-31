@@ -4,6 +4,29 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 final independent merge-audit P1 corrections (native Cancel, Refresh):**
+The exact native `*kernel.Runtime` used for `harness.Dependencies.Cancellation`
+MUST be the same instance as `Dependencies.Runtime`, not a second Kernel
+containing identically named Runs. `NewRunner` rejects wrong native composition
+with `ErrInvalidRequest`, and an operation-level guard refuses a foreign native
+Cancel with a no-effect `ErrConflict`. Handoff keeps its stronger route-owned
+`ErrHandoffCancellationUnverified` behavior. A root `Refresh` may now return
+`ErrConflict` when its Kernel Run is terminal but an unclosed cancellation
+intent still holds unknown remote child cleanup: only a completed owner
+`Cancel` may project the terminal Turn. Previously a Refresh could claim
+`TurnCancelled` while the remote Handoff remained running.
+
+`RefreshInvocation` of a Handoff child may no longer read arbitrary Harness-
+local Runs with the same ID. Only a fixed local `handoff.New` Coordinator with
+an explicitly same-Kernel `LocalKernelChildRunner`, plus exact frozen parent
+and delegated child identity, may project a local child snapshot. Remote,
+dynamic and custom Handoff routes fail closed with
+`ErrHandoffCancellationUnverified`; use the original ChildRunner-owned
+read-only reconciliation (with parent authority), not a local RunID lookup.
+This is a deliberate pre-stable behavior hard cut without fallback, DDL,
+schema version changes or reminted external outcomes. See
+[three P1 final-Head remediation](audits/2026-10-31-pr82-independent-final-merge-three-p1-remediation.md).
+
 **PR #82 further P1 Handoff cancellation hard cut — local execution owner:**
 Even an exact match on ChildRunID, Run kind, Tenant/Actor/Thread, Goal and
 RequestID does **not** prove the actual ChildRunner's Kernel: independent
