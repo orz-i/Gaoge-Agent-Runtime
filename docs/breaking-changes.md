@@ -115,13 +115,39 @@ reply is checked against an independently decoded persisted source, not the
 caller-owned slice backing arrays that a custom ChildRunner could mutate.
 A mismatched reply remains outcome-unknown with the original grant unresolved
 and replay blocked. A mismatched request is rejected before remote execution.
+ModelOptions compare after the same `encoding/json` wire canonicalization used
+to seal the Input, so harmless original whitespace/escaping is not mistaken
+for a changed policy; malformed or semantically altered options still fail.
+
+**Remote Handoff cancellation proof (tenth PR #82 audit):** Both root Turn
+cancellation and direct `CancelInvocation` must distinguish an external
+ChildRunner Run from a local Kernel Run. `kernel.ErrNotFound` in the Harness
+Kernel is not a remote cancellation receipt. If a frozen Role or Member-only
+Handoff child has any potentially effectful physical dispatch grant, the
+previous synthetic missing-Run `Cancelled` projection is forbidden.
+`ErrHandoffCancellationUnverified` preserves the original child Invocation
+and unresolved cancellation intent; a root may already be cancelled locally
+while its remote child remains unverified. Only an unissued grant or the
+existing definitive, matching-owner `physical_dispatch_rejected` receipt
+permits the no-Run/no-effect cancellation path. Old unsealed Handoff children
+lack trustworthy no-effect provenance and fail closed. A live `a2a.remote`
+shadow Run must not be cancelled through the default native Kernel Canceller:
+this would stop the local shadow without cancelling its remote A2A Task.
+A separately composed Host `RuntimeCanceller` owns the remote cleanup
+contract; ordinary local Agent Runs remain cancellable as before. Host operators
+must provide a separately proven remote cleanup/reconciliation route, or
+explicitly quarantine unresolved child effects. Do not mark the child
+cancelled, close its intent, retry its Attempt, or redispatch its Handoff
+based on local absence alone.
+
 No new persistence table, schema version, alternate router, or compatibility
 bridge is introduced. Reconcile or quarantine incomplete historical
 Handoff Invocations rather than guessing their execution provenance.
 See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md),
 [PR #82 seventh remediation](audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md),
 [eighth provenance/receipt correction](audits/2026-10-31-pr82-handoff-provenance-and-receipt-hardcut.md),
-and [ninth frozen-execution receipt correction](audits/2026-10-31-pr82-handoff-frozen-execution-receipt-remediation.md).
+[ninth frozen-execution receipt correction](audits/2026-10-31-pr82-handoff-frozen-execution-receipt-remediation.md),
+and [tenth remote Handoff cancellation correction](audits/2026-10-31-pr82-remote-handoff-cancellation-remediation.md).
 
 ## 2026-10-30 — Host command presentation removed from Harness (beta.24 candidate)
 

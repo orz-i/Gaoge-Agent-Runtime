@@ -178,7 +178,7 @@ instead found two narrower, testable defects in the public child boundary.
     `StartOrLoad`, it compares the returned Delegation against an independent
     decoded copy of that persisted proof: destination identity (`ID`,
     `ChildRunID`, Member/Role IDs, revisions, name and Goal), Instructions,
-    Model, exact nonempty ModelOptions bytes, ordered ToolKeys/InitialToolKeys,
+    Model, canonical nonempty ModelOptions wire bytes, ordered ToolKeys/InitialToolKeys,
     HostedToolGrants (including definition versions), and Limits all remain
     frozen. Only `Status`, `Result`, `ErrorCode` and `Error` may change; empty
     versus nil slices carry the same empty authority. A complete structural
@@ -188,7 +188,35 @@ instead found two narrower, testable defects in the public child boundary.
     place and thereby corrupt both sides of such a comparison. Any mismatch
     remains outcome-unknown with the existing child grant held; replays cannot
     redispatch. A changed request is rejected before the grant or remote
-    effect. No invented completion receipt or new persistence contract.
+    effect. `encoding/json` canonicalizes RawMessage whitespace/escaping in
+    the persisted Input; compare equivalent canonical wire bytes, rejecting
+    invalid or changed options instead of requiring the caller's original
+    pre-encoding layout. No invented completion receipt or new persistence
+    contract.
+16. **Remote Handoff cancellation requires a route-owned terminal proof.**
+    The tenth independent PR #82 audit reproduced a Member-only delegated
+    child still running on a separate ChildRunner being persisted as
+    `InvocationCancelled` because the Harness-local Kernel had no Run with
+    that ID. The root `cancelTurnDescendants` synthetic missing-Run fallback
+    and direct `CancelInvocation` both made the same unauthorized claim.
+    The final cancel path now recognizes the exact frozen Handoff origin and
+    checks the existing child physical grant and receipt ledger after
+    a local `kernel.ErrNotFound`. An admitted Handoff effect (including a
+    settled `handoff_start_returned` receipt) cannot be cancelled merely
+    by local absence. `ErrHandoffCancellationUnverified` preserves the
+    unresolved cancellation intent and original child state. A Handoff
+    without any grant, or with only definitive `physical_dispatch_rejected`
+    receipts, has provably not entered its ChildRunner; the normal no-Run
+    cancellation fallback remains allowed for that no-effect case. Incomplete
+    pre-hard-cut Handoff records without a frozen root Attempt cannot prove
+    no effect and fail closed. A live `a2a.remote` shadow in the local Kernel
+    likewise must not be cancelled by the default native Kernel Canceller:
+    it cannot perform A2A network cleanup. An explicitly composed Host
+    RuntimeCanceller owns remote cancellation and its authoritative receipt;
+    ordinary local Agent cancellation remains unchanged. No new remote
+    cancel method, synthetic terminal proof, Store protocol, SQL schema or
+    compatibility bridge is added; unknown external outcomes require
+    read-only reconciliation or explicit quarantine.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -256,6 +284,14 @@ existing Invocation. Published beta.23 tags remain unchanged.
   StartOrLoad calls. Missing/mismatched child outcomes must retain the
   original grant and fence replay. Load/Start/Refresh tests reject unrelated
   Run kinds while the actual A2A shadow runner remains accepted.
+- A separate remote-Handoff cancellation reproducer is red on the prior
+  Head for Member-only delegated children, then green for both Member/Role
+  after repair. Tests cover root Turn and direct child cancellation, repeated
+  intents, durable pending grants/receipts, never-started and proven
+  pre-effect-rejected dispatch, unsealed legacy children, live A2A shadow
+  Runs without remote cleanup, a valid local Kernel child and Store-backed
+  Memory/SQLite/real PostgreSQL paths. Canonical ModelOptions tests allow
+  valid wire-equivalent JSON but still reject changed authority.
 - Complete Harness modules, race/quality, clean external consumers and
   real PostgreSQL/Redis recovery gates are needed for final acceptance.
 
@@ -268,4 +304,5 @@ and [sixth PR #82 intermediate Application effect-claim correction](../audits/20
 and [seventh PR #82 Member Handoff / Run-kind correction](../audits/2026-10-31-pr82-member-handoff-run-kind-remediation.md)
 and [eighth PR #82 Handoff provenance and receipt hard cut](../audits/2026-10-31-pr82-handoff-provenance-and-receipt-hardcut.md)
 and [ninth PR #82 Handoff frozen execution receipt correction](../audits/2026-10-31-pr82-handoff-frozen-execution-receipt-remediation.md)
+and [tenth PR #82 remote Handoff cancellation correction](../audits/2026-10-31-pr82-remote-handoff-cancellation-remediation.md)
 for exact evidence. Independent PR merge/release admission remains separate.
