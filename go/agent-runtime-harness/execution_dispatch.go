@@ -275,6 +275,29 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 		}
 		id = item.ParentItemID
 	}
+	// An Item is allowed to describe Host-owned work without an InvocationID.
+	// Such a parent does not prove that the owning root execution is live.
+	// Recheck the one authoritative root regardless of which ancestor Items
+	// carried an Invocation owner; this is the last pre-effect fence after
+	// the physical grant (or the Application external-effect claim) commits.
+	root, err := loadTopLevelInvocation(ctx, runner.store, invocation.TurnID)
+	if err != nil || root.ID == invocation.ID || root.TurnID != invocation.TurnID ||
+		strings.TrimSpace(root.ParentItemID) != "" || !validExecutionClass(root.ExecutionClass) ||
+		!validInvocationStatus(root.Status) || terminalInvocationStatus(root.Status) {
+		return errors.Join(ErrConflict, err)
+	}
+	if root.ExecutionClass == ExecutionApplication {
+		// Host-only Application roots have no Kernel Run. Their frozen
+		// Invocation is the execution authority, not a fabricated Run.
+		return nil
+	}
+	if runner.runtime == nil || strings.TrimSpace(root.ExecutionRefID) == "" {
+		return ErrConflict
+	}
+	state, err := runner.runtime.Load(ctx, root.ExecutionRefID)
+	if err != nil || state.Run.ID != root.ExecutionRefID || terminalRuntimeStatus(state.Run.Status) {
+		return errors.Join(ErrConflict, err)
+	}
 	return nil
 }
 
