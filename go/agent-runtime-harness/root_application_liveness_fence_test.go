@@ -28,8 +28,16 @@ func TestRootApplicationParentFenceUsesInvocationNotKernelRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	input, inputHash, err := marshalInvocationValue(struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, inputHash, err = sealChildRootInput(input, inputHash, root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	runner := &Runner{store: store} // no Kernel Runtime; Application has no Run
-	child := Invocation{ID: "app-child", TurnID: root.TurnID, ParentItemID: "unowned-host-item"}
+	child := Invocation{ID: "app-child", TurnID: root.TurnID, ParentItemID: "unowned-host-item", Input: input, InputHash: inputHash}
 	if err = runner.requireLiveInvocationParents(t.Context(), child); err != nil {
 		t.Fatalf("live Application root wrongly required a Kernel Run: %v", err)
 	}
@@ -53,9 +61,21 @@ func TestMissingRootCannotAuthorizeOwnerlessChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	input, inputHash, err := marshalInvocationValue(struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, inputHash, err = sealChildRootInput(input, inputHash, Invocation{
+		ID: "missing-root", ExecutionRefID: "missing-execution", Attempt: 1,
+		ExecutionClass: ExecutionApplication, Status: InvocationRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	runner := &Runner{store: store}
 	if err := runner.requireLiveInvocationParents(t.Context(), Invocation{
 		ID: "orphaned-child", TurnID: "orphaned-turn", ParentItemID: "orphaned-parent",
+		Input: input, InputHash: inputHash,
 	}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("orphaned parent was allowed to authorize child effect: %v", err)
 	}

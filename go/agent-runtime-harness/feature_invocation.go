@@ -555,6 +555,7 @@ type WorkflowInvocationRequest struct {
 
 type childInvocationContext struct {
 	turn                 Turn
+	root                 Invocation
 	parentExecutionRefID string
 	actor                kernel.ActorRef
 	thread               kernel.ThreadRef
@@ -753,7 +754,7 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 		// nested under an Application root, so only native Features require
 		// the root Runtime context in addition to the shared ancestry guard.
 		if invocation.ExecutionClass != ExecutionApplication {
-			if _, err := runner.childInvocationContext(ctx, turn.ID, invocation.ParentItemID); err != nil {
+			if _, err := runner.childInvocationContext(ctx, turn.ID, invocation.ParentItemID, invocation.ExecutionClass); err != nil {
 				return Snapshot{}, err
 			}
 		}
@@ -823,7 +824,7 @@ func (runner *Runner) startRetriedInvocation(
 	if strings.TrimSpace(invocation.ParentItemID) == "" {
 		return runner.startRetriedTopLevelInvocation(ctx, turn, invocation)
 	}
-	child, err := runner.childInvocationContext(ctx, turn.ID, invocation.ParentItemID)
+	child, err := runner.childInvocationContext(ctx, turn.ID, invocation.ParentItemID, invocation.ExecutionClass)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1050,7 +1051,13 @@ func (runner *Runner) beginChildInvocation(
 	input json.RawMessage,
 	inputHash string,
 ) (Invocation, childInvocationContext, bool, error) {
-	child, err := runner.childInvocationContext(ctx, turnID, parentItemID)
+	child, err := runner.childInvocationContext(ctx, turnID, parentItemID, executionClass)
+	if err != nil {
+		return Invocation{}, childInvocationContext{}, false, err
+	}
+	// Freeze the root Attempt in the child's first durable admission. A
+	// replay against a later root Attempt must never revive an older child.
+	input, inputHash, err = sealChildRootInput(input, inputHash, child.root)
 	if err != nil {
 		return Invocation{}, childInvocationContext{}, false, err
 	}
@@ -1087,6 +1094,7 @@ func (runner *Runner) beginChildInvocation(
 func (runner *Runner) childInvocationContext(
 	ctx context.Context,
 	turnID, parentItemID string,
+	executionClass ExecutionClass,
 ) (childInvocationContext, error) {
 	// Child admission cannot silently become a second root by omitting its
 	// parent. The Store root-uniqueness constraint is not a routing policy.
@@ -1104,15 +1112,28 @@ func (runner *Runner) childInvocationContext(
 		return childInvocationContext{}, err
 	}
 	parent, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	if err != nil || strings.TrimSpace(parent.ExecutionRefID) == "" {
+	if err != nil || strings.TrimSpace(parent.ExecutionRefID) == "" ||
+		strings.TrimSpace(parent.ParentItemID) != "" || !validExecutionClass(parent.ExecutionClass) ||
+		!validInvocationStatus(parent.Status) || terminalInvocationStatus(parent.Status) {
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
 	}
+	if parent.ExecutionClass == ExecutionApplication {
+		// A Host Application has no Kernel Run. Only another Application
+		// child can use its Invocation as the durable execution owner.
+		if executionClass != ExecutionApplication || parent.Status == InvocationAccepted {
+			return childInvocationContext{}, ErrConflict
+		}
+		return childInvocationContext{turn: turn, root: parent}, nil
+	}
+	if runner.runtime == nil {
+		return childInvocationContext{}, ErrConflict
+	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, parent.ExecutionRefID)
-	if err != nil || terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+	if err != nil || runtimeSnapshot.Run.ID != parent.ExecutionRefID || terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
 	}
 	return childInvocationContext{
-		turn: turn, parentExecutionRefID: parent.ExecutionRefID,
+		turn: turn, root: parent, parentExecutionRefID: parent.ExecutionRefID,
 		actor: runtimeSnapshot.Run.Actor, thread: runtimeSnapshot.Run.Thread,
 	}, nil
 }

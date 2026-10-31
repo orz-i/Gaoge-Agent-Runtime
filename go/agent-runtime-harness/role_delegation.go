@@ -267,8 +267,21 @@ func (runner *Runner) admitRoleChild(ctx context.Context, turn Turn, parent Invo
 	return projectBudgetItem(ctx, runner.store, runner.turnFeed, runner.clock, ledger)
 }
 
-func (runner *Runner) prepareRoleChild(ctx context.Context, turn Turn, _ Invocation, delegation handoff.Delegation, parentItemID string) error {
+func (runner *Runner) prepareRoleChild(ctx context.Context, turn Turn, parent Invocation, delegation handoff.Delegation, parentItemID string) error {
 	input, inputHash, err := marshalInvocationValue(delegation)
+	if err != nil {
+		return err
+	}
+	root := parent
+	if strings.TrimSpace(parent.ParentItemID) != "" {
+		root, err = runner.loadFrozenChildRoot(ctx, parent)
+		if err != nil {
+			return err
+		}
+	}
+	// Delegated Role Agents are also persisted child Invocations. They must
+	// carry the same immutable root Attempt as typed Team/Workflow children.
+	input, inputHash, err = sealChildRootInput(input, inputHash, root)
 	if err != nil {
 		return err
 	}

@@ -46,11 +46,20 @@ func TestRequireLiveInvocationParentsReadsOnlyAncestorItems(t *testing.T) {
 	for _, id := range []string{"root-owner", "middle-owner"} {
 		backing.invocations[id] = Invocation{
 			ID: id, TurnID: turnID, Status: InvocationRunning, ExecutionClass: ExecutionApplication,
+			ExecutionRefID: "host-" + id, Attempt: 1,
 		}
+	}
+	original, inputHash, err := marshalInvocationValue(struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, inputHash, err := sealChildRootInput(original, inputHash, backing.invocations["root-owner"])
+	if err != nil {
+		t.Fatal(err)
 	}
 	spy := &indexOnlyParentStore{Store: backing}
 	runner := &Runner{store: spy}
-	child := Invocation{ID: "grandchild", TurnID: turnID, ParentItemID: "middle-owner-item"}
+	child := Invocation{ID: "grandchild", TurnID: turnID, ParentItemID: "middle-owner-item", Input: input, InputHash: inputHash}
 	if err := runner.requireLiveInvocationParents(t.Context(), child); err != nil {
 		t.Fatalf("live direct ancestry was rejected: %v", err)
 	}

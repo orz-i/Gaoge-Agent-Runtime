@@ -280,15 +280,16 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 	// Recheck the one authoritative root regardless of which ancestor Items
 	// carried an Invocation owner; this is the last pre-effect fence after
 	// the physical grant (or the Application external-effect claim) commits.
-	root, err := loadTopLevelInvocation(ctx, runner.store, invocation.TurnID)
-	if err != nil || root.ID == invocation.ID || root.TurnID != invocation.TurnID ||
-		strings.TrimSpace(root.ParentItemID) != "" || !validExecutionClass(root.ExecutionClass) ||
-		!validInvocationStatus(root.Status) || terminalInvocationStatus(root.Status) {
-		return errors.Join(ErrConflict, err)
+	root, err := runner.loadFrozenChildRoot(ctx, invocation)
+	if err != nil {
+		return err
 	}
 	if root.ExecutionClass == ExecutionApplication {
 		// Host-only Application roots have no Kernel Run. Their frozen
-		// Invocation is the execution authority, not a fabricated Run.
+		// Invocation and Attempt, not a fabricated Run, are authority.
+		if root.Status == InvocationAccepted {
+			return ErrConflict
+		}
 		return nil
 	}
 	if runner.runtime == nil || strings.TrimSpace(root.ExecutionRefID) == "" {
