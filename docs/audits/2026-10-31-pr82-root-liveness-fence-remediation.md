@@ -6,7 +6,7 @@
 - **Original PR Head:** `36d428aaf662d9daf609fe645c456686a80a667d`
 - **Finding:** Independent P1 audit, GitHub Review `5720141932`
 - **Contract:** [ADR 0015](../adr/0015-indexed-child-ownership-and-root-entry-boundary.md)
-- **Disposition:** Fixed in source with deterministic red/green tests. Independent merge-admission review must use the new pushed PR Head; no automatic merge or beta.24 tag.
+- **Disposition:** First ownerless-root P1 fixed on `05e7cf7`, but a second independent audit found a further cross-Root-Attempt P1 on that Head. See [subsequent frozen-Attempt hard cut](2026-10-31-pr82-child-root-attempt-hardcut-remediation.md). Independent merge-admission review must use the final pushed PR Head; no automatic merge or beta.24 tag.
 
 ## Root cause
 

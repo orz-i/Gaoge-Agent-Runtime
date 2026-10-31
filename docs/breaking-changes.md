@@ -27,17 +27,30 @@ also closed an ownerless-parent gap: after a durable child dispatch grant
 (or Application effect claim), the last pre-effect check always validates
 the root Invocation and, for Runtime roots, its exact Kernel Run status.
 A terminal/missing root rejects child effects even when the parent Item
-has no Invocation owner. Host Application roots use their durable root
-Invocation, without a synthetic Kernel Run. This is a fail-closed behavior
-correction, not permission to retry ambiguous external side effects.
+has no Invocation owner. A second PR #82 audit proved a cross-Attempt gap:
+an old Accepted child could otherwise replay under a new live root after
+`RetryInvocation` rotated the root `ExecutionRefID`. Every new typed Child
+or delegated Role Agent now seals a `harnessRoot` binding (root Invocation
+ID, exact execution Ref ID and Attempt) inside the existing hashed
+`Invocation.Input`. A replay or final physical dispatch must match the
+original root Attempt; no automatic rebinding is permitted. Final validation
+uses direct indexed `GetInvocation(rootID)` rather than materializing the
+whole Turn's Invocation list. Host Application roots use their durable root
+Invocation, without a synthetic Kernel Run; a claimed Application root can
+admit an Application child, never a native child lacking a Kernel parent.
+This is a fail-closed correction, not permission to retry ambiguous effects.
 
-**No persistence conversion:** The existing indexed `Store.GetItem`
-contract (PR #79), Kernel Run, Turn/Invocation statuses, execution IDs,
-receipts, CAS, SQL tables, schemas and retry protocols are unchanged.
-There is no compatibility alias, dual root path, implicit Intent Router
-or version bump. Hosts with root-ID `RefreshInvocation`/
-`ResumeInvocation` call sites must update source. No migration of
-in-flight Runs or rewriting old execution evidence is authorized.
+**Persisted JSON hard cut (no SQL migration):** The existing indexed
+`Store.GetItem` contract (PR #79), Kernel Run, statuses, IDs, receipts,
+CAS, SQL tables and schema versions remain unchanged. **Child
+`Invocation.Input` changes**: new child and Role-delegation records
+include the immutable hashed `harnessRoot` field. Incomplete
+children created before this candidate must be drained or explicitly
+isolated before rollout. Missing proof fails closed, including during
+retry/resume; do not backfill, rehash, infer a root from current state or
+replay unknown effects. There is no compatibility bridge, dual root path,
+implicit Intent Router or version bump. Hosts with root-ID
+`RefreshInvocation`/`ResumeInvocation` callers must update their source.
 See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md).
 
 ## 2026-10-30 — Host command presentation removed from Harness (beta.24 candidate)

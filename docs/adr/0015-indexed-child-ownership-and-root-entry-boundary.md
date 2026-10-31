@@ -60,15 +60,33 @@ instead found two narrower, testable defects in the public child boundary.
 5. **Root liveness is mandatory even for ownerless parent Items.** The
    independent PR #82 audit found that an Item without an `InvocationID`
    can pass the ancestor check after its root Kernel Run terminates in the
-   post-grant/pre-effect window. The final fence now resolves the one
-   top-level Invocation for the child Turn independently of parent Item
-   ownership and verifies its nonterminal status. For native Runtime roots,
-   it additionally loads the frozen `ExecutionRefID` from the authoritative
-   Kernel and rejects a missing, mismatched or terminal Run. For Application
+   post-grant/pre-effect window. The final fence verifies the one root
+   Invocation for the child Turn independently of parent Item ownership.
+   For native Runtime roots, it also loads the authoritative Kernel Run
+   and rejects a missing, mismatched or terminal result. For Application
    roots, the persisted root Invocation is authoritative: no phantom
    Kernel Run is created or required. Keep the existing ancestor and
-   cancellation fences; neither the Turn's possibly stale status nor an
-   arbitrary Host Item alone authorizes a physical child effect.
+   cancellation fences; neither the possibly stale Turn status nor an
+   arbitrary Host Item alone authorizes physical child effects.
+6. **Freeze the exact root Attempt at child admission.** The second independent
+   PR #82 audit proved that merely checking the *current* root lets an old
+   Accepted child cross a root Retry: the root Invocation retains its ID
+   while its `ExecutionRefID` and `Attempt` rotate. Both ownerless and
+   Invocation-owned parent Items reproduce the bug. Every typed child and
+   delegated Role Agent now persists a `harnessRoot` binding containing
+   root `InvocationID`, `ExecutionRefID` and `Attempt` inside its existing
+   immutable, hashed `Invocation.Input`. Replays must exactly match those
+   bytes. Every physical child dispatch, retry and Application effect claim
+   verifies the binding against a direct `Store.GetInvocation(rootID)` read
+   before rechecking the exact Kernel root Run where applicable. Old children
+   without this binding fail closed; no guessing from the current root or
+   reconstructing a supposedly equivalent Attempt. This also removes the
+   newly introduced full-`ListInvocations` cost from the final fence.
+7. **Application root admission is explicit.** `ExecutionApplication` roots
+   have no Kernel Run. A live, claimed Application root may admit an
+   Application child without a fake Kernel load. A native Team/Workflow
+   child under that same root remains forbidden because it lacks Kernel
+   parent Actor/Thread and execution authority.
 
 ## Breaking change, upgrade, and exclusions
 
@@ -81,7 +99,11 @@ old behavior shim, alternate root channel, or automatic Host routing.
 
 No new `Store` interface, SQL DDL, persistence version, Kernel Run status,
 retry semantics, Tool Call ID, ModelInvocation, admission hash or backfill.
-This is a source/behavior break, not a stored-data format migration.
+The existing child `Invocation.Input` **does change**: new typed and Role
+children include the hashed `harnessRoot` admission proof. Incomplete
+children from before this unpublished hard cut lack it and **must be drained
+or explicitly quarantined before deployment**; they cannot be granted new
+physical dispatches, retried or resumed by reading a newer root Attempt.
 Pending Runs retain their original IDs and effects; do not fabricate
 a completion receipt, redo unknown external effects, or reclassify an
 existing Invocation. Published beta.23 tags remain unchanged.
@@ -102,9 +124,15 @@ existing Invocation. Published beta.23 tags remain unchanged.
   roots fail closed.
 - A 500/2,000/10,000-Item memory benchmark measures indexed parent
   admission independently of full Agent/Workflow execution.
+- A separate deterministic crash-after-Create-ACK test covers ownerless and
+  root-owned Items, root Attempt rotation, replay and retry rejection.
+  Another true-entry test proves Application-root-to-Application-child
+  admission, while native child admission under Host-only root is rejected.
+- The final fence has an exact-root-lookup test forbidding
+  `ListInvocations` and a 500/2,000/10,000-Invocation memory benchmark.
 - Complete Harness modules, race/quality, clean external consumers and
   real PostgreSQL/Redis recovery gates are needed for final acceptance.
 
-See [Breaking Changes](../breaking-changes.md) and the subsequent local
-acceptance record for exact evidence. Independent PR merge/release admission
-remains separate.
+See [Breaking Changes](../breaking-changes.md), the original local
+acceptance record and the [second PR #82 cross-Attempt remediation](../audits/2026-10-31-pr82-child-root-attempt-hardcut-remediation.md)
+for exact evidence. Independent PR merge/release admission remains separate.

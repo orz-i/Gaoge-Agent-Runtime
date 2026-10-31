@@ -88,10 +88,17 @@ is no unverified generic FeatureDriver registry. See
 A child `Start*Invocation` must name an existing, same-Turn parent Item.
 The admission-time `validateParentItem` now uses a single indexed
 `Store.GetItem` read; it does not scan the entire Turn history. The
-physical-dispatch fence independently walks that Item's ancestor chain
-and rejects a terminated parent at the last authorized boundary.
-`RefreshInvocation` and `ResumeInvocation` are child-only; root execution
-is observed through `Refresh(turnID)` and native Agent continuation through
+physical-dispatch fence independently walks that Item's ancestor chain,
+then performs a direct indexed root lookup against the child's **frozen**
+root Invocation ID, ExecutionRefID and Attempt. A root Retry must never
+rebind an old Accepted child, whether or not its parent Item names an owner.
+Typed children and delegated Role Agents persist that identity inside the
+existing hashed `Invocation.Input`; missing binding fails closed.
+Application roots authorize Application children via their Invocation,
+without a phantom Kernel Run; native Kernel children still require a
+Kernel-backed root. `RefreshInvocation` and `ResumeInvocation` remain
+child-only; root execution is observed through `Refresh(turnID)` and
+native Agent continuation through
 `ResumeTurn(turnID)`. `RetryInvocation` retains its explicit frozen
 root/child retry semantics. See [ADR 0015](adr/0015-indexed-child-ownership-and-root-entry-boundary.md).
 
