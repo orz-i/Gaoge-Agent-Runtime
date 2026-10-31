@@ -102,9 +102,10 @@ func TestAmbiguousInteractionResponseCannotBeReplayedWithoutReconciliation(t *te
 	}
 }
 
-// RefreshInvocation and ResumeInvocation for an Application child/root are also
-// read-only reconciliation paths. A running Interaction callback is not an
-// invitation to reconcile the original Application executor or dispatch again.
+// Refresh is the authoritative root Application reconciliation path.
+// Child-only Invocation entry points reject this root rather than accidentally
+// offering a second root projection protocol. A running business callback
+// must never reenter the original Application executor.
 func TestApplicationInvocationRefreshCannotBypassBusinessCallbackClaim(t *testing.T) {
 	handler := &interactionDuplicateDispatchHandler{
 		started: make(chan struct{}), release: make(chan struct{}),
@@ -121,14 +122,18 @@ func TestApplicationInvocationRefreshCannotBypassBusinessCallbackClaim(t *testin
 		done <- err
 	}()
 	<-handler.started
-	for _, observed := range []func(context.Context, string) (harness.Snapshot, error){
+	snapshot, err := runner.Refresh(t.Context(), waiting.Turn.ID)
+	if err != nil || snapshot.Turn.Status != harness.TurnWaitingInput || handler.calls.Load() != 1 {
+		close(handler.release)
+		t.Fatalf("root refresh crossed claimed business effect: turn=%s calls=%d err=%v",
+			snapshot.Turn.Status, handler.calls.Load(), err)
+	}
+	for _, rejected := range []func(context.Context, string) (harness.Snapshot, error){
 		runner.RefreshInvocation, runner.ResumeInvocation,
 	} {
-		snapshot, err := observed(t.Context(), owner.ID)
-		if err != nil || snapshot.Turn.Status != harness.TurnWaitingInput || handler.calls.Load() != 1 {
+		if _, err := rejected(t.Context(), owner.ID); !errors.Is(err, harness.ErrInvalidRequest) || handler.calls.Load() != 1 {
 			close(handler.release)
-			t.Fatalf("Invocation observation crossed claimed business effect: turn=%s calls=%d err=%v",
-				snapshot.Turn.Status, handler.calls.Load(), err)
+			t.Fatalf("root Application entered child-only route or redispatched callback: calls=%d err=%v", handler.calls.Load(), err)
 		}
 	}
 	close(handler.release)

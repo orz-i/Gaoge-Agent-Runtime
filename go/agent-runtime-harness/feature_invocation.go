@@ -643,10 +643,14 @@ func (runner *Runner) StartWorkflowInvocation(
 }
 
 // RefreshInvocation reconciles one child Runtime execution into its durable Harness Invocation.
+// Root Invocations belong to Refresh, which also synchronizes the owning Turn.
 func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string) (Snapshot, error) {
 	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if strings.TrimSpace(invocation.ParentItemID) == "" {
+		return Snapshot{}, ErrInvalidRequest
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
 		turn, loadErr := runner.store.GetTurn(ctx, invocation.TurnID)
@@ -670,10 +674,14 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 }
 
 // ResumeInvocation resumes a running child Feature through the exact typed adapter selected at creation.
+// Root Agent continuations must use ResumeTurn; other roots remain Feature-owned.
 func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string) (Snapshot, error) {
 	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if strings.TrimSpace(invocation.ParentItemID) == "" {
+		return Snapshot{}, ErrInvalidRequest
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
 		turn, loadErr := runner.store.GetTurn(ctx, invocation.TurnID)
@@ -1080,6 +1088,11 @@ func (runner *Runner) childInvocationContext(
 	ctx context.Context,
 	turnID, parentItemID string,
 ) (childInvocationContext, error) {
+	// Child admission cannot silently become a second root by omitting its
+	// parent. The Store root-uniqueness constraint is not a routing policy.
+	if strings.TrimSpace(parentItemID) == "" {
+		return childInvocationContext{}, ErrInvalidRequest
+	}
 	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
 	if err != nil || terminalTurnStatus(turn.Status) {
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
@@ -1107,18 +1120,27 @@ func (runner *Runner) childInvocationContext(
 func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItemID string) error {
 	parentItemID = strings.TrimSpace(parentItemID)
 	if parentItemID == "" {
-		return nil
+		return nil // An Interaction can target its Invocation directly.
 	}
-	items, err := listAllItems(ctx, runner.store, turnID)
+	if runner == nil || runner.store == nil || strings.TrimSpace(turnID) == "" {
+		return ErrInvalidRequest
+	}
+	// Admission and dispatch must use the same globally indexed Item
+	// identity, not independently interpret a full Turn Timeline.
+	item, err := runner.store.GetItem(ctx, parentItemID)
+	if errors.Is(err, ErrNotFound) {
+		return ErrInvalidRequest
+	}
 	if err != nil {
 		return err
 	}
-	for _, item := range items {
-		if item.ID == parentItemID {
-			return nil
-		}
+	if item.ID != parentItemID || item.Seq == 0 {
+		return ErrConflict
 	}
-	return ErrInvalidRequest
+	if item.TurnID != strings.TrimSpace(turnID) {
+		return ErrInvalidRequest
+	}
+	return nil
 }
 
 func (runner *Runner) replayChildInvocationStart(

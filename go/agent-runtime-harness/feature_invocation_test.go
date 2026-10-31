@@ -476,6 +476,105 @@ func completedChildArtifactCount(items []harness.Item) int {
 	return count
 }
 
+func TestChildOnlyInvocationEntriesRejectRootAndMissingParent(t *testing.T) {
+	runner, turnID, _, _, _, store, runtime := newFeatureInvocationHarness(t)
+	invocations, err := store.ListInvocations(t.Context(), turnID)
+	if err != nil || len(invocations) != 1 || invocations[0].ParentItemID != "" {
+		t.Fatalf("expected single root Invocation, got %#v: %v", invocations, err)
+	}
+	root := invocations[0]
+	previousTurn, err := store.GetTurn(t.Context(), turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousRun, err := runtime.Load(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, invoke := range map[string]func() (harness.Snapshot, error){
+		"RefreshInvocation": func() (harness.Snapshot, error) {
+			return runner.RefreshInvocation(t.Context(), root.ID)
+		},
+		"ResumeInvocation": func() (harness.Snapshot, error) {
+			return runner.ResumeInvocation(t.Context(), root.ID)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := invoke(); !errors.Is(err, harness.ErrInvalidRequest) {
+				t.Fatalf("root incorrectly handled by child-only entry: %v", err)
+			}
+			nextTurn, loadErr := store.GetTurn(t.Context(), turnID)
+			if loadErr != nil || nextTurn.Revision != previousTurn.Revision || nextTurn.Status != previousTurn.Status {
+				t.Fatalf("child-only entry altered root Turn: before=%#v after=%#v err=%v", previousTurn, nextTurn, loadErr)
+			}
+			nextRun, loadErr := runtime.Load(t.Context(), root.ExecutionRefID)
+			if loadErr != nil || nextRun.Run.Revision != previousRun.Run.Revision {
+				t.Fatalf("child-only entry advanced root execution: before=%#v after=%#v err=%v", previousRun.Run, nextRun.Run, loadErr)
+			}
+		})
+	}
+	_, err = runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
+		RequestID: "missing-parent", Goal: "must be an explicit child",
+		Mode: team.ExecutionSequential, Members: []team.Member{{ID: "member", Goal: "task"}},
+	})
+	if !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("child admission with no parent Item did not reject explicitly: %v", err)
+	}
+}
+
+func TestResumeInvocationCannotGrantPhysicalRootWorkflow(t *testing.T) {
+	runtime := newFeatureInvocationRuntime(t)
+	store := harness.NewMemoryStore()
+	now := featureInvocationClock{}.Now()
+	hostThread := harness.HostRef{Kind: testThreadKind, ID: "root-workflow-scope"}
+	hostTurn := harness.HostRef{Kind: testContextHostKind, ID: "root-workflow-turn"}
+	sessionID, err := harness.SessionID(hostThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnID, err := harness.TurnID(sessionID, hostTurn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := kernel.ActorRef{TenantID: testTenant, ActorID: testActor}
+	thread := kernel.ThreadRef{Kind: testThreadKind, ID: "root-workflow-scope"}
+	seedFeatureInvocationEnvelope(t, store, sessionID, turnID, hostThread, hostTurn, actor, now)
+	created, err := runtime.Create(t.Context(), kernel.CreateRequest{
+		ID: "root-workflow-runtime", Kind: workflow.RunKind, Actor: actor, Thread: thread,
+		RequestID: "workflow-root", Goal: "root workflow", State: json.RawMessage("{}"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := harness.Invocation{
+		ID: "root-workflow-invocation", TurnID: turnID, CapabilityKey: harness.CapabilityWorkflow,
+		ExecutionClass: harness.ExecutionWorkflow, ExecutionRefID: created.Run.ID,
+		Status: harness.InvocationRunning, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if _, _, err = store.CreateInvocation(t.Context(), root); err != nil {
+		t.Fatal(err)
+	}
+	runner, err := harness.NewRunner(harness.Dependencies{
+		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
+		Store: store, Clock: featureInvocationClock{}, Workflows: completedWorkflowFeature{runtime},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runner.ResumeInvocation(t.Context(), root.ID); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("root Workflow entered child-only resume: %v", err)
+	}
+	loaded, err := runtime.Load(t.Context(), created.Run.ID)
+	if err != nil || loaded.Run.Revision != created.Run.Revision {
+		t.Fatalf("root Workflow physically advanced: before=%#v after=%#v err=%v", created.Run, loaded.Run, err)
+	}
+	items, err := store.ListItems(t.Context(), turnID, 0, 10)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("child resume minted a physical dispatch grant on root: items=%#v err=%v", items, err)
+	}
+}
+
 func newFeatureInvocationHarness(t *testing.T) (*harness.Runner, string, string, *runrelation.Registry, string, *harness.MemoryStore, *kernel.Runtime) {
 	t.Helper()
 	runtime := newFeatureInvocationRuntime(t)
