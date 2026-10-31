@@ -9,6 +9,23 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
+// The Host chooses these tool contracts; Runtime does not install slash
+// commands or a default workflow-reference syntax.
+func fixtureCapabilityArgumentCommands() []CommandDescriptor {
+	return []CommandDescriptor{
+		{
+			ID: "team", CapabilityKey: CapabilityTeam, DefinitionVersion: RuntimeCapabilityVersion,
+			ExecutionClass: ExecutionTeam, Source: CommandSourceFirstParty,
+			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
+		},
+		{
+			ID: "workflow", CapabilityKey: CapabilityWorkflow, DefinitionVersion: RuntimeCapabilityVersion,
+			ExecutionClass: ExecutionWorkflow, Source: CommandSourceFirstParty,
+			InputSchema: json.RawMessage(`{"type":"object","properties":{"definitionReference":{"type":"object","required":["id"],"properties":{"id":{"type":"string","minLength":1},"revision":{"type":"integer","minimum":1},"hash":{"type":"string","minLength":1}},"additionalProperties":false},"input":{}},"additionalProperties":false}`),
+		},
+	}
+}
+
 func TestCapabilityArgumentsRejectInvalidTypesBeforeMaterialization(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -28,7 +45,7 @@ func TestCapabilityArgumentsRejectInvalidTypesBeforeMaterialization(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _, err = decodeCapabilityToolInput(raw, FirstPartyCommandDescriptors())
+			_, _, err = decodeCapabilityToolInput(raw, fixtureCapabilityArgumentCommands())
 			code, message, recoverable := tools.RecoverableCallErrorInfo(err)
 			if !recoverable || code != "tool.arguments_schema" || !strings.Contains(message, test.path) {
 				t.Fatalf("invalid argument correction = %q, %q, %v", code, message, err)
@@ -43,17 +60,17 @@ func TestCapabilityArgumentsPreserveValidJSONAndAuthorization(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		input, _, err := decodeCapabilityToolInput(raw, FirstPartyCommandDescriptors())
+		input, _, err := decodeCapabilityToolInput(raw, fixtureCapabilityArgumentCommands())
 		if err != nil || string(input.Arguments) != arguments {
 			t.Fatalf("valid arguments changed: %s, %v", input.Arguments, err)
 		}
 	}
-	_, _, err := decodeCapabilityToolInput(json.RawMessage(`{"commandID":"unauthorized","goal":"fixture","arguments":{"revision":"1"}}`), FirstPartyCommandDescriptors())
+	_, _, err := decodeCapabilityToolInput(json.RawMessage(`{"commandID":"unauthorized","goal":"fixture","arguments":{"revision":"1"}}`), fixtureCapabilityArgumentCommands())
 	code, _, recoverable := tools.RecoverableCallErrorInfo(err)
 	if !recoverable || code != "capability.not_authorized" {
 		t.Fatalf("authorization error = %v", err)
 	}
-	commands := FirstPartyCommandDescriptors()
+	commands := fixtureCapabilityArgumentCommands()
 	commands[1].InputSchema = json.RawMessage(`{"type":"invalid"}`)
 	_, _, err = decodeCapabilityToolInput(json.RawMessage(`{"commandID":"workflow","goal":"fixture"}`), commands)
 	if _, _, recoverable = tools.RecoverableCallErrorInfo(err); recoverable || !errors.Is(err, tools.ErrInvalidDefinition) {
@@ -62,7 +79,7 @@ func TestCapabilityArgumentsPreserveValidJSONAndAuthorization(t *testing.T) {
 }
 
 func TestCapabilitySchemaExposesNestedTypesAndRetainsCommandConstraints(t *testing.T) {
-	schema, err := capabilityInvocationToolSchema(FirstPartyCommandDescriptors())
+	schema, err := capabilityInvocationToolSchema(fixtureCapabilityArgumentCommands())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +119,7 @@ func TestCapabilitySchemaExposesNestedTypesAndRetainsCommandConstraints(t *testi
 
 func TestCapabilitySchemaPreservesOpenCommandArguments(t *testing.T) {
 	for _, inputSchema := range []string{`{"type":"object"}`, `true`, `{"type":"object","patternProperties":{"^definition":{}},"additionalProperties":false}`} {
-		commands := append(FirstPartyCommandDescriptors(), CommandDescriptor{ID: "application", InputSchema: json.RawMessage(inputSchema)})
+		commands := append(fixtureCapabilityArgumentCommands(), CommandDescriptor{ID: "application", InputSchema: json.RawMessage(inputSchema)})
 		schema, err := capabilityInvocationToolSchema(commands)
 		if err != nil {
 			t.Fatal(err)
@@ -118,7 +135,7 @@ func TestCapabilitySchemaPreservesOpenCommandArguments(t *testing.T) {
 }
 
 func TestCapabilitySchemaPreservesCommandReferenceScopes(t *testing.T) {
-	commands := append(FirstPartyCommandDescriptors(),
+	commands := append(fixtureCapabilityArgumentCommands(),
 		CommandDescriptor{ID: "string-value", InputSchema: json.RawMessage(`{"$id":"https://example.test/string-command","type":"object","$defs":{"value":{"type":"string"}},"properties":{"value":{"$ref":"#/$defs/value"}},"required":["value"],"additionalProperties":false}`)},
 		CommandDescriptor{ID: "integer-value", InputSchema: json.RawMessage(`{"$id":"https://example.test/integer-command","type":"object","$defs":{"value":{"type":"integer"}},"properties":{"value":{"$ref":"#/$defs/value"}},"required":["value"],"additionalProperties":false}`)},
 		CommandDescriptor{ID: "nested-resource", InputSchema: json.RawMessage(`{"type":"object","properties":{"nested":{"type":"array","items":{"$id":"https://example.test/nested-value","$defs":{"value":{"type":"boolean"}},"$ref":"#/$defs/value"}}},"additionalProperties":false}`)},

@@ -3,11 +3,6 @@
   "operations": [
     {
       "method": "get",
-      "path": "/harness/commands",
-      "operationId": "listHarnessCommands"
-    },
-    {
-      "method": "get",
       "path": "/harness/turns/{turnID}",
       "operationId": "getHarnessTurn"
     },

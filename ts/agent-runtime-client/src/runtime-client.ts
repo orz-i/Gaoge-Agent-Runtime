@@ -5,7 +5,6 @@ import type {
   HarnessTurnSnapshotDTO,
   HarnessTurnStateDTO,
   HarnessTimelinePageDTO,
-  HarnessCommandDTO,
   RunEventPageDTO,
   RunSnapshotDTO,
   RunFeedEventDTO,
@@ -222,9 +221,6 @@ export class RuntimeClient {
     this.workflows = createWorkflowsCapability(capabilityRequest);
     this.teams = createTeamsCapability(capabilityRequest);
     this.harness = {
-      commands: {
-        list: (request?: RequestOptions) => this.request<HarnessCommandDTO[]>("/harness/commands", {}, request),
-      },
       turns: {
         get: (turnID: string, request?: RequestOptions) =>
           this.request<HarnessTurnSnapshotDTO>(`/harness/turns/${pathPart(turnID)}`, {}, request),

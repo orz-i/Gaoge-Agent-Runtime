@@ -88,7 +88,6 @@ func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 	}
 	sort.Strings(operations)
 	expected := []string{
-		"get /harness/commands",
 		"get /harness/turns/{turnID}",
 		"get /harness/turns/{turnID}/feed",
 		"get /harness/turns/{turnID}/items",

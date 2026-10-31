@@ -52,7 +52,7 @@ modules adapt contracts at the edge and are assembled by the host.
 | Model/tool loop and durable model receipts | Agent | HTTP or provider SDK configuration |
 | Definitions, waits, effects, compensation | Workflow | Generic Kernel policy |
 | Multi-member execution and speaker routing | Team / Group Chat | Persistence implementation details |
-| Turns, commands, interactions, delegation, shared execution policy | Harness | Provider-specific execution |
+| Turns, frozen capability execution contracts, interactions, delegation, shared execution policy | Harness | Slash commands, UI presentation, user-intent routing and Provider-specific execution |
 | Wakeup projection and retry delivery | Continuation | Feature state transitions |
 | Object authorization and principal resolution | Host / HTTP edge | Kernel RBAC |
 | SQL, Redis, protocol, telemetry integration | Adapters | Feature correctness |
@@ -64,8 +64,15 @@ Harness exposes `StartAgentTurn`, `StartTeamTurn`,
 `StartGroupChatTurn`, `StartWorkflowTurn` and `StartApplicationTurn`;
 there is no automatic user-intent classifier or default `Runner.Start`.
 The optional Agent `SessionClient.Prompt` is a deliberately Agent-specific
-facade. Runtime execution intents, receipts and control grants stay with their
-durable owning Feature rather than with Host policy.
+facade that delegates to `StartAgentTurn`, not a second model/Tool loop.
+The Host owns all slash commands, triggers, labels, descriptions and intent
+routing. The Harness `CommandCatalog` freezes only explicit child-capability
+execution authorization (`ID`, `CapabilityKey`, version, class, source,
+application kind and `InputSchema`) into the Turn config for replay safety.
+It does not create default `/team` or `/workflow` commands, classify user
+text, select a Feature or expose a Host command discovery HTTP endpoint.
+`ExecutionClass` is a recovery discriminator, not an intent router. Runtime execution intents, receipts and control grants
+stay with their durable owning Feature rather than with Host policy.
 
 Core exports provider-neutral `model.Client`; the separate
 `go/agent-runtime-provider` module supplies optional Router/OpenAI/Anthropic
