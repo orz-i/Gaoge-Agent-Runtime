@@ -549,7 +549,7 @@ type Dependencies struct {
 	Context      *runtimecontext.Manager
 	Catalog      tools.Catalog
 	Handoffs     HandoffStarter
-	Relations    runrelation.Recorder
+	Relations    RunRelationSource
 	Cancellation RuntimeCanceller
 	Interactions InteractionResponseHandler
 	Applications ApplicationCapabilityExecutor
@@ -560,8 +560,14 @@ type Dependencies struct {
 	ManualDelegationPolicy DelegationToolPolicy
 }
 
-type runRelationReader interface {
+// RunRelationSource is the complete indexed ownership capability required
+// when Harness is composed with persisted Run relations. A recorder or
+// ListChildren-only adapter cannot prove an Item's physical parent Attempt.
+// This is a deliberate pre-stable source break, not an optional runtime cast.
+type RunRelationSource interface {
+	runrelation.Recorder
 	ListChildren(context.Context, string) ([]runrelation.Relation, error)
+	GetByChild(context.Context, string) (runrelation.Relation, error)
 }
 
 // Runner owns durable Harness Session/Turn/Invocation/Item lifecycle. Runtime
@@ -579,7 +585,7 @@ type Runner struct {
 	catalog                tools.Catalog
 	handoffs               HandoffStarter
 	relations              runrelation.Recorder
-	relationReader         runRelationReader
+	relationReader         RunRelationSource
 	cancellation           RuntimeCanceller
 	interactions           InteractionResponseHandler
 	applications           ApplicationCapabilityExecutor
@@ -637,9 +643,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		execution:              execution,
 		manualDelegationPolicy: dependencies.ManualDelegationPolicy,
 	}
-	if reader, ok := dependencies.Relations.(runRelationReader); ok {
-		runner.relationReader = reader
-	}
+	runner.relationReader = dependencies.Relations
 	return runner, nil
 }
 

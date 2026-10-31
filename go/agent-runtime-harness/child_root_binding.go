@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 // childRootKey reserves the immutable root and ancestor Attempt authority
@@ -205,10 +203,7 @@ func (runner *Runner) requireRunDescendsFrom(ctx context.Context, runID, ownerRu
 	if runID == ownerRunID {
 		return nil
 	}
-	reader, ok := runner.relationReader.(interface {
-		GetByChild(context.Context, string) (runrelation.Relation, error)
-	})
-	if !ok {
+	if runner.relationReader == nil {
 		return ErrConflict
 	}
 	seen := make(map[string]struct{})
@@ -217,7 +212,7 @@ func (runner *Runner) requireRunDescendsFrom(ctx context.Context, runID, ownerRu
 			return ErrConflict
 		}
 		seen[current] = struct{}{}
-		relation, err := reader.GetByChild(ctx, current)
+		relation, err := runner.relationReader.GetByChild(ctx, current)
 		if err != nil || relation.ChildRunID != current ||
 			strings.TrimSpace(relation.ParentRunID) == "" {
 			return errors.Join(ErrConflict, err)

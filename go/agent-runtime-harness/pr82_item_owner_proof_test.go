@@ -9,6 +9,11 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
+// A RunRelation recorder must expose indexed child lookup at composition
+// time; an adapter implementing only Ensure/ListChildren no longer satisfies
+// the Runner dependency contract and cannot fail mid-physical-dispatch.
+var _ RunRelationSource = (*runrelation.Registry)(nil)
+
 func TestPR82ExecutionItemOriginFencesStaleAttemptsAndAllowsNestedRun(t *testing.T) {
 	const ownerRunID = "root-attempt-2"
 	owner := childAttemptBinding{InvocationID: "root", ExecutionRefID: ownerRunID, Attempt: 2}
