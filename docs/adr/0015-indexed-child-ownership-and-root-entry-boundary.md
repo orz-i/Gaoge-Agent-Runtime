@@ -368,8 +368,10 @@ instead found two narrower, testable defects in the public child boundary.
     grants where physical execution remains in progress. A narrowly
     verified direct first-party `*agent.Runner` can still hand off to
     Kernel cancellation: both the Invocation and created Run must have
-    exact matching origin, the Run kind must be `agent`, and the native
-    Kernel execution check must be valid or require a bound Epoch.
+    exact matching origin, the Run kind must be `agent`, the composed
+    RuntimeCanceller must be that **same** Kernel Runtime (not a Host
+    wrapper), and the native Kernel execution check must be valid or
+    require a bound Epoch.
     Custom Agents, delegated children, and composite Features cannot
     inherit that exception by manufacturing a Kernel Run. For unsafe
     concurrent Cancel, return `ErrConflict` while the original Start

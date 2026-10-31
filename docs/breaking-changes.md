@@ -256,8 +256,8 @@ Feature callback subsequently started a new external child. Root and
 subtree Cancel now reject that unfinished composite Start (`ErrConflict`)
 even if its Kernel Run already exists. The only Start-grant bypass is for
 a verified **concrete native Agent** with matching Invocation, physical
-Run and Agent kind, where Kernel CAS or a bound Epoch owns all subsequent
-Agent dispatch. Custom Agents and other Runtime Features never acquire
+Run and Agent kind, whose RuntimeCanceller is the exact same Kernel
+Runtime; Kernel CAS or a bound Epoch owns subsequent Agent dispatch. Custom Agents and other Runtime Features never acquire
 this privilege from Run existence alone. Callers must retry Cancel after
 the physical Start settles; no synthetic cancellation, implicit remote
 cleanup, legacy workaround, Store API or schema migration is added.
