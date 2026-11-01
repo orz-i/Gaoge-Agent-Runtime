@@ -24,7 +24,28 @@ import (
 
 const roleEvidenceTool = "role.evidence"
 
+type pr82WrongApprovalRoute struct {
+	*agent.Runner
+	calls int
+}
+
+func (r *pr82WrongApprovalRoute) ResolveApproval(ctx context.Context, id string, revision uint64, response plugin.ApprovalResponse) (kernel.Snapshot, error) {
+	r.calls++
+	return r.Runner.ResolveApproval(ctx, id, revision, response)
+}
+
 func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
+	for _, wrongRoute := range []bool{false, true} {
+		name := "original-child"
+		if wrongRoute {
+			name = "substitute-root"
+		}
+		t.Run(name, func(t *testing.T) { testRoleDelegationChildApproval(t, wrongRoute) })
+	}
+}
+
+func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool) {
+	t.Helper()
 	store := harness.NewMemoryStore()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -73,7 +94,12 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{},
+	wrong := &pr82WrongApprovalRoute{Runner: direct}
+	var rootAgent harness.AgentStarter = direct
+	if wrongRoute {
+		rootAgent = wrong
+	}
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: rootAgent, Store: store, Clock: fixedClock{},
 		Handoffs: handoffs, Relations: relations, Budget: shared})
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +194,18 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	}); closeErr != nil {
 		t.Fatal(closeErr)
 	}
+	beforeItems, err := store.ListItems(t.Context(), started.Turn.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
 	approved, err := runner.ResolveSubtaskApproval(t.Context(), started.Turn.ID, task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove})
+	if wrongRoute {
+		afterItems, listErr := store.ListItems(t.Context(), started.Turn.ID, 0, 500)
+		if !errors.Is(err, harness.ErrConflict) || wrong.calls != 0 || listErr != nil || len(afterItems) != len(beforeItems) {
+			t.Fatalf("substitute approval route dispatched or minted grant: calls=%d err=%v items=%d->%d listErr=%v", wrong.calls, err, len(beforeItems), len(afterItems), listErr)
+		}
+		return
+	}
 	if err != nil || approved.Subtasks[0].Status != "completed" {
 		t.Fatalf("approval=%+v %v", approved.Subtasks, err)
 	}

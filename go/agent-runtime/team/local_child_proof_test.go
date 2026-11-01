@@ -8,6 +8,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
@@ -21,6 +22,44 @@ func (proofChildRunner) LoadRun(context.Context, string) (kernel.Snapshot, error
 }
 func (proofChildRunner) StartRun(context.Context, agent.StartRequest) (kernel.Snapshot, error) {
 	return kernel.Snapshot{}, kernel.ErrNotFound
+}
+
+type proofModel struct{}
+
+func (proofModel) Generate(context.Context, model.Request) (model.Response, error) {
+	return model.Response{}, nil
+}
+
+func TestApprovalUsesOriginalFixedAgent(t *testing.T) {
+	runtime := &kernel.Runtime{}
+	original, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: proofModel{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: proofModel{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed, err := handoff.New(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &Runner{runtime: runtime, handoffs: fixed}
+	if !runner.UsesLocalAgentRunner(runtime, original) || runner.UsesLocalAgentRunner(runtime, other) || runner.UsesLocalAgentRunner(&kernel.Runtime{}, original) || runner.UsesLocalAgentRunner(runtime, nil) {
+		t.Fatal("approval route equality not enforced")
+	}
+	dynamic, err := handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) { return original, nil }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.handoffs = dynamic
+	if runner.UsesLocalAgentRunner(runtime, original) {
+		t.Fatal("dynamic route authorized approval")
+	}
+	var absent *Runner
+	if absent.UsesLocalAgentRunner(runtime, original) {
+		t.Fatal("nil runner authorized approval")
+	}
 }
 
 func TestVerifyLocalChildRequiresRouteAndFrozenIdentity(t *testing.T) {

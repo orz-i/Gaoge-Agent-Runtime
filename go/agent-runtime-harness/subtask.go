@@ -426,7 +426,7 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	}
 	// Approval resumes through the Agent (including its middleware), rather
 	// than bypassing the execution owner via direct Kernel cancellation.
-	if err = runner.verifyLocalRelationRun(ctx, snapshot, false); err != nil {
+	if err = runner.verifyLocalApprovalRun(ctx, snapshot); err != nil {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	if snapshot.Checkpoint == nil || snapshot.Checkpoint.ID != checkpointID {

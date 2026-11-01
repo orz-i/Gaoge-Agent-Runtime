@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
@@ -16,6 +17,54 @@ import (
 // distinguish identical Runs in independent Kernels.
 type localRelationVerifier interface {
 	VerifyLocalChild(*kernel.Runtime, kernel.Snapshot, runrelation.Relation, kernel.Snapshot, bool) bool
+}
+
+type localAgentRouteVerifier interface {
+	UsesLocalAgentRunner(*kernel.Runtime, *agent.Runner) bool
+}
+
+// Approval is physical Agent continuation, not merely a same-Kernel read.
+// Native Invocation owners use their configured Agent; delegated/raw Feature
+// children must retain the original fixed Agent object and all its hooks.
+func (runner *Runner) verifyLocalApprovalRun(ctx context.Context, candidate kernel.Snapshot) error {
+	if err := runner.verifyLocalRelationRun(ctx, candidate, false); err != nil {
+		return err
+	}
+	var feature any
+	if runner.relationReader != nil {
+		relation, err := runner.relationReader.GetByChild(ctx, candidate.Run.ID)
+		if err != nil && !errors.Is(err, runrelation.ErrNotFound) {
+			return err
+		}
+		if err == nil {
+			switch relation.Kind {
+			case runrelation.KindTeamMember:
+				feature = runner.teams
+			case runrelation.KindGroupChatSpeaker:
+				feature = runner.groupChats
+			case runrelation.KindWorkflowEffect:
+				feature = runner.workflows
+			case runrelation.KindDelegation, runrelation.KindCapability:
+				// Dedicated Invocation below owns these Harness routes.
+			}
+		}
+	}
+	if feature == nil {
+		owner, err := runner.store.GetInvocationByExecutionRefID(ctx, candidate.Run.ID)
+		if err != nil {
+			return err
+		}
+		if !isHandoffDelegationInvocation(owner) {
+			return nil
+		}
+		feature = runner.handoffs
+	}
+	original, ok := runner.agent.(*agent.Runner)
+	verifier, verified := feature.(localAgentRouteVerifier)
+	if !ok || !verified || !verifier.UsesLocalAgentRunner(runner.runtime, original) {
+		return ErrRuntimeCancellationUnverified
+	}
+	return nil
 }
 
 func (runner *Runner) verifyLocalRelationRun(ctx context.Context, candidate kernel.Snapshot, control bool) error {

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // childRootKey reserves the immutable root and ancestor Attempt authority
@@ -157,7 +159,16 @@ func (runner *Runner) requireLiveParentAttempt(ctx context.Context, turnID strin
 		if runner.runtime == nil {
 			return ErrConflict
 		}
-		snapshot, loadErr := runner.runtime.Load(ctx, parent.ExecutionRefID)
+		var snapshot kernel.Snapshot
+		var loadErr error
+		if isHandoffDelegationInvocation(parent) {
+			// A frozen Attempt does not prove that its physical child lives
+			// in this Kernel. A remote parent's same-ID local twin cannot
+			// authorize nested effects at admission or the final claim fence.
+			snapshot, _, loadErr = runner.localDelegationObservation(ctx, parent.ExecutionRefID)
+		} else {
+			snapshot, loadErr = runner.runtime.Load(ctx, parent.ExecutionRefID)
+		}
 		if loadErr != nil || snapshot.Run.ID != parent.ExecutionRefID ||
 			terminalRuntimeStatus(snapshot.Run.Status) {
 			return errors.Join(ErrConflict, loadErr)

@@ -217,6 +217,21 @@ func (coordinator *Coordinator) ObservesLocalKernelRunner(runtime *kernel.Runtim
 	return ok && owner.OwnsKernelRuntime(runtime)
 }
 
+// UsesLocalAgentRunner proves physical continuation will use the original
+// fixed first-party Agent, not another runner sharing its Kernel. Read-only
+// ownership alone cannot authorize a substitute Model/Tool/middleware route.
+func (coordinator *Coordinator) UsesLocalAgentRunner(runtime *kernel.Runtime, candidate *agent.Runner) bool {
+	if coordinator == nil || runtime == nil || candidate == nil {
+		return false
+	}
+	fixed, ok := coordinator.resolver.(staticChildRunnerResolver)
+	if !ok {
+		return false
+	}
+	original, ok := fixed.children.(*agent.Runner)
+	return ok && original == candidate && candidate.ObservesKernelRuntime(runtime)
+}
+
 // Descriptor declares the reusable Handoff capability.
 func (coordinator *Coordinator) Descriptor() kernel.FeatureDescriptor {
 	return kernel.FeatureDescriptor{

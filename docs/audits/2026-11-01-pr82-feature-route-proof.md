@@ -69,3 +69,38 @@ execution, preserving positive-path coverage rather than weakening the proof.
 Exact pushed-Head CI and subsequent independent audit are separate merge gates,
 recorded in the completion report. This record does not authorize merging,
 tagging or releasing.
+
+## Post-CI independent audit: additional ownership boundaries
+
+After all required checks passed on `c283579`, two fresh reviewers found three
+additional gaps and reproduced them independently:
+
+- A routed Handoff ancestor's same-ID local twin could satisfy the frozen
+  parent liveness check and authorize a nested Host Application callback.
+  The shared admission/final-claim check now requires fixed route-owned,
+  frozen task observation for Handoff ancestors. Member/Role, foreign and
+  identical twins, dynamic routes, and late route changes are covered, while
+  a genuine fixed-local ancestor remains valid.
+- An unrelated Accepted Handoff Invocation with no physical grant could lend
+  no-effect proof to a raw Team child before the relation check. The shared
+  no-effect helper now verifies any existing relation belongs to that original
+  delegation. Missing Runs, same-/other-Turn owners and terminal twins retain
+  unverified cleanup instead of claiming success.
+- Subtask approval proved only local readability, then invoked the root
+  AgentStarter. A distinct root wrapper was observed to execute the delegated
+  approval callback. Physical approval now additionally requires the exact
+  fixed first-party Agent object used by Handoff/Team/GroupChat. Sharing a
+  Kernel or providing a currently matching dynamic route is insufficient.
+  Unknown/substitute routes reject before a dispatch grant. Native Invocation
+  approval retains its configured Agent; the original fixed child path passes.
+
+Both reviewers validated the repairs against their reproductions and permanent
+positive/negative regressions with `-race -count=3`, finding no further
+substantiated issue in those changes. These deliberate pre-stable behavioral
+hard cuts add no remote continuation bridge or persisted migration. Hosts must
+retain original static composition across recovery, and route approvals through
+the actual owner rather than substituting another local Agent.
+
+The second-cycle final code passed complete `make check`, `make coverage`, and
+Docker PostgreSQL/Redis `make integration` (all exit 0; integration cleanup
+complete). The next pushed SHA still requires its own CI and fresh audit.

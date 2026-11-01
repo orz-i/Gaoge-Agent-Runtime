@@ -452,6 +452,27 @@ func (runner *Runner) addMissingInvocationCancellations(
 // Cancellation intent is already persisted before this read, so no late
 // physical grant can race the no-effect proof.
 func (runner *Runner) handoffPhysicalEffectPossible(ctx context.Context, child Invocation) (bool, error) {
+	// An unrelated Invocation's empty grant ledger is not no-effect proof
+	// for a raw Feature edge occupying the same Run ID. Even this early
+	// shortcut must establish that the relation belongs to this Handoff.
+	if runner.relationReader != nil {
+		relation, err := runner.relationReader.GetByChild(ctx, child.ExecutionRefID)
+		if err != nil && !errors.Is(err, runrelation.ErrNotFound) {
+			return true, err
+		}
+		if err == nil {
+			item, itemErr := runner.store.GetItem(ctx, child.ParentItemID)
+			var payload delegationItemPayload
+			if itemErr != nil || json.Unmarshal(item.Payload, &payload) != nil ||
+				item.Kind != ItemDelegation || item.TurnID != child.TurnID ||
+				relation.Kind != runrelation.KindDelegation ||
+				relation.ChildRunID != child.ExecutionRefID ||
+				relation.ParentRunID != payload.ParentRunID || relation.OwnerNodeID != payload.DelegationID ||
+				payload.ChildRunID != child.ExecutionRefID {
+				return true, errors.Join(ErrRuntimeCancellationUnverified, itemErr)
+			}
+		}
+	}
 	if _, err := frozenChildRoot(child); err != nil {
 		// Pre-hard-cut records lack an authoritative root/Attempt proof.
 		// Never infer a safe no-effect outcome from their missing grant.

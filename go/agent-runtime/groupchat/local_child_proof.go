@@ -1,10 +1,20 @@
 package groupchat
 
 import (
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
+
+// UsesLocalAgentRunner proves approval continues through the fixed child Agent.
+func (runner *Runner) UsesLocalAgentRunner(runtime *kernel.Runtime, candidate *agent.Runner) bool {
+	if runner == nil || runner.runtime != runtime {
+		return false
+	}
+	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
+	return ok && coordinator.UsesLocalAgentRunner(runtime, candidate)
+}
 
 // VerifyLocalChild proves the fixed execution route and persisted speaker task.
 // The caller must independently establish the parent's ownership chain.

@@ -10,7 +10,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   A same-ID local Run or unrelated Harness Invocation cannot replace this
   proof. Delegation Tool recovery/waits likewise require frozen local ownership;
   built-in subworkflows verify immutable origin before resume or receipt use.
-  Remote/unproven outcomes retain existing reconciliation fences. See the
+  Handoff parent liveness and no-effect exceptions also require original
+  route/edge authority. Physical Subtask approvals must use the exact fixed
+  child Agent rather than a substitute root AgentStarter. Remote/unproven
+  outcomes retain existing reconciliation fences. See the
   [PR #82 route-proof audit](docs/audits/2026-11-01-pr82-feature-route-proof.md).
 
 - P3 canonical Model Message multi-modal hard cut: replace

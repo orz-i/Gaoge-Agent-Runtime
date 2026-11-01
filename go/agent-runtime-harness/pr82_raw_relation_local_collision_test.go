@@ -1,7 +1,11 @@
 package harness_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -13,7 +17,7 @@ import (
 
 func TestPR82RawRelationCollisionPreservesRootIntent(t *testing.T) {
 	for _, mode := range []string{"foreign", "identical", "terminal-identical"} {
-		for _, ownerScope := range []string{"none", "other-turn", "same-turn"} {
+		for _, ownerScope := range []string{"none", "other-turn", "same-turn", "other-handoff", "same-handoff"} {
 			t.Run(mode+"/"+ownerScope, func(t *testing.T) { pr82RawRelationRootCollision(t, mode, ownerScope) })
 		}
 	}
@@ -115,7 +119,7 @@ func pr82RawRelationRootCollision(t *testing.T, mode, ownerScope string) {
 	if ownerScope != "none" {
 		for _, relation := range descendants {
 			foreignTurn := failed.Turn
-			if ownerScope == "other-turn" {
+			if strings.HasPrefix(ownerScope, "other-") {
 				foreignTurn.ID = "foreign-turn-" + relation.ChildRunID
 				foreignTurn.Status = harness.TurnRunning
 				if _, _, err := store.CreateTurn(t.Context(), foreignTurn); err != nil {
@@ -129,8 +133,23 @@ func pr82RawRelationRootCollision(t *testing.T, mode, ownerScope string) {
 			foreignInvocation.ExecutionClass = harness.ExecutionAgent
 			foreignInvocation.CapabilityKey = harness.CapabilityAgent
 			foreignInvocation.Status = harness.InvocationRunning
-			if ownerScope == "same-turn" {
+			if strings.HasPrefix(ownerScope, "same-") {
 				foreignInvocation.ParentItemID = "unrelated-local-parent"
+			}
+			if strings.HasSuffix(ownerScope, "-handoff") {
+				foreignInvocation.ParentItemID = "foreign-handoff-item-" + relation.ChildRunID
+				delegationID := "foreign-delegation-" + relation.ChildRunID
+				foreignInvocation.ID, err = harness.InvocationID(foreignTurn.ID, foreignInvocation.ParentItemID, harness.CapabilityAgent, delegationID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				foreignInvocation.Status = harness.InvocationAccepted
+				foreignInvocation.Input, err = json.Marshal(map[string]any{"id": delegationID, "memberID": "foreign-member", "childRunID": relation.ChildRunID, "goal": "unrelated accepted Handoff", "harnessRoot": map[string]any{"invocationID": "foreign-root", "executionRefID": "foreign-root-run", "attempt": 1}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				digest := sha256.Sum256(foreignInvocation.Input)
+				foreignInvocation.InputHash = hex.EncodeToString(digest[:])
 			}
 			if _, _, err := store.CreateInvocation(t.Context(), foreignInvocation); err != nil {
 				t.Fatal(err)
