@@ -23,6 +23,21 @@ A bare `kernel.Create` only persists a Run record. The model/Tool loop belongs t
 `agent.Runner.StartRun`. Allocate a stable Run ID before a fenced Start, or use
 Harness's stable HostThread/HostTurn identities to derive the execution identity.
 
+For a conversation without archival/compaction policy, start with the
+[small Session example](../go/agent-runtime-harness/examples/session/README.md):
+
+```sh
+go run ./go/agent-runtime-harness/examples/session
+```
+
+It adds exactly one Harness Store and one pure Context Manager to the same
+Kernel/Agent. The Host supplies immutable source-message ancestry; the existing
+`MaterializeContextWindowRequest` injects it **before** the one frozen
+ModelInvocation. A basic Harness `Clock` is optional and defaults to the system
+clock, but a persistent Store's execution clock remains authoritative for
+leases. Neither Context nor the provider is selected implicitly. Memory-only
+examples do not survive a process exit.
+
 ## 2. Assemble bounded, retrievable Context
 
 The [task-agent example](../go/agent-runtime-harness/examples/task-agent/README.md)
@@ -71,6 +86,16 @@ Persist the stable Turn identity before submission. Retrying the same prompt use
 the same ID **and exactly the same admitted ContextSeed, configuration, host
 message bindings and execution allowances**. Harness hashes that admission
 before creating the Turn; changed inputs fail closed. New user work uses a new ID.
+
+**Historical read is not a new Prompt.** Once the Host has appended another
+Assistant response or subsequent Turn, its current transcript is no longer the
+original submission for an old Turn. Calling `Prompt` for that old ID with
+current history must reject the changed admission (`ErrConflict`), not rerun
+Model/Tool work. Use `session.Load(ctx, oldTurnID)` to read a committed
+historical result, `LoadState` for bounded status, or retain the *original*
+immutable ContextSeed if an exact `Prompt` submission retry is required.
+The [small Session example](../go/agent-runtime-harness/examples/session/README.md)
+checks this distinction after both Turns have completed.
 
 | Operation | Purpose | Advances model/Tool work? |
 | --- | --- | --- |

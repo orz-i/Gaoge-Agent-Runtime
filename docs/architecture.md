@@ -44,6 +44,18 @@ The dependency direction is inward. Kernel does not import HTTP, provider SDKs,
 PostgreSQL, Redis, MCP, A2A, or OpenTelemetry. Protocol and infrastructure
 modules adapt contracts at the edge and are assembled by the host.
 
+**Single-Agent minimum:** a Host may compose `kernel.New` + `agent.NewRunner`
+and call `StartRun` directly; Harness, Context, Session, Team, Workflow and
+Continuation are not prerequisites for the Agent Loop. Add Harness only when
+Host Turn identity, shared interactions, delegation or Context checkpoints are
+needed. For the simple text Session path, manually supply the same Kernel,
+Agent, a Harness Store, a pure Context Manager, and the existing pre-commit
+`MaterializeContextWindowRequest`; `Dependencies.Clock` may be omitted for a
+system timestamp clock. Neither omission bypasses the Kernel Store's execution
+lease or Tool intent/receipt gates. No automatic feature routing or provider
+selection follows from this convenience. See the
+[minimal Session example](../go/agent-runtime-harness/examples/session/README.md).
+
 ## Ownership
 
 | Area | Owner | Must not own |
