@@ -7,6 +7,12 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
+// OwnsKernelRuntime proves native Team execution uses the exact Harness
+// Kernel. Shared RunRelation indexes alone do not attest physical residence.
+func (runner *Runner) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
+	return runner != nil && runtime != nil && runner.runtime == runtime
+}
+
 // RecordsRelationsTo proves this Team writes every member edge to the same
 // durable index that Harness reads during cancellation. A separate registry
 // with an empty result cannot certify that no physical children exist.

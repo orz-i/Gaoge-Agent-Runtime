@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #82 independent cancellation follow-up: reject Host composite Feature wrappers
+  without BOTH exact Kernel ownership and RunRelation recorder proof. Merely
+  implementing the public Start/Resume adapter or sharing the registry cannot
+  authorize local cancellation. Built-in Team, GroupChat and Workflow runners
+  now attest their exact Kernel; Harness rejects a foreign native Runtime at
+  composition. Unknown Host routes fail closed before physical cancellation,
+  retaining any committed intent for explicit reconciliation. The original
+  no-effect/retry receipts remain unchanged. No parallel routing bridge, Store
+  change or SQL migration.
+
 - PR #82 cancellation follow-up: a composite Team/GroupChat/Workflow Run
   without a verified original child-relation index cannot claim that an empty
   child lookup proves cleanup. Built-in Features must record to the exact

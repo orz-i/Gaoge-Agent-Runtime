@@ -676,6 +676,25 @@ Published beta.23 tags remain unchanged.
 
 ## PR #82 follow-up — composite cancellation requires its original relation index
 
+**Independent final-Head route hard cut:** A public Host Feature wrapper that
+forwards Start/Resume without the optional `RecordsRelationsTo` certificate
+previously bypassed the recorder check entirely. A separate native Workflow
+using the exact same recorder as Harness but a different Kernel could likewise
+produce a successful synthetic local cancellation while its real remote Run
+remained WaitingInput. Both failures were reproduced 3/3 under `go test -race`.
+Cancellation now requires BOTH the original feature's
+`OwnsKernelRuntime(*kernel.Runtime)` and `RecordsRelationsTo` proofs; a missing
+method is fail-closed, not an implicit grant. The concrete native Team,
+GroupChat and Workflow constructors expose both proofs, and Harness
+`NewRunner` rejects any of those native Feature objects bound to a different
+Kernel before work starts. Host-defined adapters must explicitly attest their
+unchanged execution route if they expect locally verified cancellation.
+Without it, the earlier durable unknown-cancellation contract applies; no
+second router, automatic Host compatibility shim, inferred remote result or
+schema version is introduced. The exact same first-party Kernel/recorder path
+remains supported. Existing pre-effect rejected or undispatched Accepted
+children retain their no-effect proof; unverified physical effects do not.
+
 A missing `RunRelationSource` does not mean a Team, GroupChat or Workflow
 never created physical children: independently routed members can survive a
 Running or Failed parent Run. Before accepting an empty descendant traversal,

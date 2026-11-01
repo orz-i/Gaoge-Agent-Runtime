@@ -4,6 +4,26 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 independent original composite route ownership correction (2026-11-01):**
+For a Harness-owned Team/GroupChat/Workflow, successful local cancellation
+requires a feature adapter that explicitly implements BOTH
+`OwnsKernelRuntime(*kernel.Runtime) bool` and
+`RecordsRelationsTo(runrelation.Recorder) bool`. Absent methods are **not**
+implicit permission. The built-in native runners expose both attestations;
+`NewRunner` rejects a concrete native Feature bound to a different Kernel
+before admitting any Turn. A Host wrapper forwarding only Start/Resume (or a
+Workflow's ResolveWait) can still be assembled, but its local cancellation
+fails closed with `ErrRuntimeCancellationUnverified` unless it also provides
+truthful original route/recorder proof. Merely sharing a recorder while
+executing in another Kernel is not sufficient. Existing unprovable in-flight
+runs require actual execution-owner reconciliation or quarantine, never a
+fabricated local terminal receipt. A definitively rejected pre-effect Start
+and an undispatched Accepted child retain the existing no-effect path.
+A cancellation fence may now remain open while the parent Kernel is still
+Running; a repeated Cancel may report `ErrConflict` until ownership is
+reconciled. No new persisted schema, SQL DDL, router, recovery bridge or
+automatic compatibility fallback is introduced.
+
 **PR #82 composite cancellation index-ownership correction (2026-11-01):**
 A root or nested Team/GroupChat/Workflow with an existing physical Kernel Run
 can no longer report successful cancellation from an empty or absent

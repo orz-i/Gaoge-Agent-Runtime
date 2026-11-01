@@ -5,6 +5,12 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
+// OwnsKernelRuntime proves the built-in Workflow creates and resumes Runs
+// in the exact Kernel the Harness controls, rather than a foreign Runtime.
+func (runner *Runner) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
+	return runner != nil && runtime != nil && runner.runtime == runtime
+}
+
 // RecordsRelationsTo proves the original Workflow indexes physical effect
 // descendants in the exact registry Harness reads for cancellation.
 func (runner *Runner) RecordsRelationsTo(recorder runrelation.Recorder) bool {

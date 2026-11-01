@@ -55,6 +55,13 @@ func (runner *Runner) cancelRuntimeRun(
 	// explicit contract that kernel.ErrConflict certifies zero external
 	// cleanup; never infer that guarantee from a native Store conflict.
 	_, nativeKernel := runner.cancellation.(*kernel.Runtime)
+	// A Host-composed Feature may run in a different Kernel even when a
+	// matching relation registry or a same-ID local Run exists. Check the
+	// original Invocation's route before native/custom Cancel, terminal
+	// acceptance or the synthetic missing-Run no-effect path.
+	if err := runner.requireCompositeRelationIndex(ctx, runID); err != nil {
+		return kernel.Snapshot{}, false, err
+	}
 	var delegatedChild *Invocation
 	if runner.store != nil {
 		owner, ownerErr := runner.store.GetInvocationByExecutionRefID(ctx, runID)

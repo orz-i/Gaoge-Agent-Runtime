@@ -1,6 +1,7 @@
 package harnesspostgres_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"strings"
@@ -16,9 +17,20 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
+// A legal Host wrapper can delegate physical execution without forwarding
+// the original Feature's proof of Kernel/index ownership.
+type pr82OpaqueSQLTeam struct{ child *team.Runner }
+
+func (f pr82OpaqueSQLTeam) StartRun(ctx context.Context, req team.StartRequest) (kernel.Snapshot, error) {
+	return f.child.StartRun(ctx, req)
+}
+func (f pr82OpaqueSQLTeam) Resume(ctx context.Context, id string, rev uint64) (kernel.Snapshot, error) {
+	return f.child.Resume(ctx, id, rev)
+}
+
 func TestPR82UnindexedCompositeCancellationPersistsUnknownAcrossStores(t *testing.T) {
 	for name, create := range rootInvocationStores() {
-		for _, mode := range []string{"absent", "different"} {
+		for _, mode := range []string{"absent", "different", "opaque"} {
 			t.Run(name+"/"+mode, func(t *testing.T) {
 				assertPR82UnindexedCompositeCancellation(t, create(t), mode)
 			})
@@ -39,7 +51,7 @@ func TestRealPostgresPR82UnindexedCompositeCancellationPersistsUnknown(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"absent", "different"} {
+	for _, mode := range []string{"absent", "different", "opaque"} {
 		t.Run(mode, func(t *testing.T) {
 			// The Turn/Run identities are distinct between cases.
 			assertPR82UnindexedCompositeCancellation(t, store, mode)
@@ -59,14 +71,19 @@ func assertPR82UnindexedCompositeCancellation(t *testing.T, store harness.Store,
 	}
 	var featureRelations runrelation.Recorder
 	var harnessRelations harness.RunRelationSource
-	if mode == "different" {
+	if mode == "different" || mode == "opaque" {
 		featureRelations, err = runrelation.New(memory.NewRunRelationStore(), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		harnessRelations, err = runrelation.New(memory.NewRunRelationStore(), nil)
-		if err != nil {
-			t.Fatal(err)
+		if mode == "opaque" {
+			// Identical recorder instance is not an execution-route receipt.
+			harnessRelations = featureRelations.(harness.RunRelationSource)
+		} else {
+			harnessRelations, err = runrelation.New(memory.NewRunRelationStore(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	children := &pr82PhysicalMemberRunner{}
@@ -78,8 +95,12 @@ func assertPR82UnindexedCompositeCancellation(t *testing.T, store harness.Store,
 	if err != nil {
 		t.Fatal(err)
 	}
+	var routed harness.TeamFeature = feature
+	if mode == "opaque" {
+		routed = pr82OpaqueSQLTeam{child: feature}
+	}
 	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: rt, Agent: ag, Teams: feature, Store: store,
+		Runtime: rt, Agent: ag, Teams: routed, Store: store,
 		Clock: pr72RealContextClock{}, Relations: harnessRelations,
 	})
 	if err != nil {

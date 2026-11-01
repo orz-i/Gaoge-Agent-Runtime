@@ -7,6 +7,12 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
+// OwnsKernelRuntime proves native GroupChat execution uses this exact
+// Kernel; sharing a relation recorder cannot replace physical ownership.
+func (runner *Runner) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
+	return runner != nil && runtime != nil && runner.runtime == runtime
+}
+
 // RecordsRelationsTo proves every speaker edge is indexed by the same
 // registry Harness uses to discover descendants during cancellation.
 func (runner *Runner) RecordsRelationsTo(recorder runrelation.Recorder) bool {

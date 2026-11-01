@@ -9,17 +9,24 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
-// Composite Features can start physical Runs without Harness child Invocations.
-// An empty ListChildren result is not proof of no descendants when Harness
-// has no index, or a built-in composite Feature records to a different index.
-// Resolve the original Invocation identity, not a same-ID local Run's Kind:
-// a foreign local twin cannot become the owner of a remote Handoff or raw
-// Feature edge just because it happens to be a Team/Workflow Kernel Run.
+// A composite Feature can own physical descendants without any Harness child
+// Invocation. An empty relation index, a coincidentally present local Run or a
+// matching registry pointer is not a physical execution-owner receipt.
+type localCompositeExecutionOwner interface {
+	OwnsKernelRuntime(*kernel.Runtime) bool
+	RecordsRelationsTo(runrelation.Recorder) bool
+}
+
+// requireCompositeRelationIndex proves the original composite Invocation's
+// execution route, Kernel residence and indexed child ownership BEFORE any
+// local cancellation callback, terminal projection or descendant traversal.
+// Host-defined Feature wrappers must attest BOTH facts; an absent optional
+// method is never permission to report successful physical cleanup.
 func (runner *Runner) requireCompositeRelationIndex(ctx context.Context, runID string) error {
 	original, err := runner.store.GetInvocationByExecutionRefID(ctx, runID)
 	if errors.Is(err, ErrNotFound) {
-		// Raw Feature children without a Harness Invocation keep their
-		// separate RunRelation/route ownership proof.
+		// Raw Feature edges without a Harness Invocation have a separate
+		// fixed-route/RunRelation proof in verifyLocalRelationRun.
 		return nil
 	}
 	if err != nil {
@@ -36,43 +43,56 @@ func (runner *Runner) requireCompositeRelationIndex(ctx context.Context, runID s
 	case ExecutionAgent, ExecutionApplication:
 		return nil
 	default:
-		return ErrConflict // Unknown persisted execution class has no owner proof.
+		return ErrConflict
 	}
 	unverified := func() error {
-		return fmt.Errorf("composite Run %q has no verified child relation index: %w",
+		return fmt.Errorf("composite Run %q has no verified original local execution owner/child index: %w",
 			runID, ErrRuntimeCancellationUnverified)
 	}
-	if runner.relationReader == nil {
-		// A definitively never-created Run (e.g. a proven no-effect
-		// Feature Start) has no physical composite descendants. All
-		// locally existing composite Runs require an index.
-		if _, loadErr := runner.runtime.Load(ctx, runID); errors.Is(loadErr, kernel.ErrNotFound) {
-			return nil
-		} else if loadErr != nil {
-			return loadErr
-		}
-		return unverified()
-	}
-	if recorder, ok := feature.(interface {
-		RecordsRelationsTo(runrelation.Recorder) bool
-	}); ok && !recorder.RecordsRelationsTo(runner.relationReader) {
-		// A remote raw Feature child may collide with an unrelated Harness
-		// composite Invocation in the same or another Turn. Its actual
-		// incoming Team/GroupChat/Workflow edge wins over the local twin;
-		// the separate route-proof path remains responsible for cleanup.
+	if runner.relationReader != nil {
+		// An incoming raw Feature relation takes precedence over an
+		// unrelated Harness Invocation using the same physical Run ID.
+		// The actual raw route is independently checked before a callback.
 		relation, readErr := runner.relationReader.GetByChild(ctx, runID)
+		if readErr != nil && !errors.Is(readErr, runrelation.ErrNotFound) {
+			return errors.Join(unverified(), readErr)
+		}
 		if readErr == nil && (relation.Kind == runrelation.KindTeamMember ||
 			relation.Kind == runrelation.KindGroupChatSpeaker ||
 			relation.Kind == runrelation.KindWorkflowEffect) {
 			return nil
 		}
-		if readErr != nil && !errors.Is(readErr, runrelation.ErrNotFound) {
-			return errors.Join(unverified(), readErr)
+	}
+	// A known native or explicitly attested Host adapter owns both the
+	// original Kernel and its indexed child graph. Do not add an extra
+	// physical Store read here: it changes pre-Store cancellation no-effect
+	// boundaries and can race the Kernel's own revision/CAS probe.
+	owner, ok := feature.(localCompositeExecutionOwner)
+	if runner.relationReader != nil && ok &&
+		owner.OwnsKernelRuntime(runner.runtime) &&
+		owner.RecordsRelationsTo(runner.relationReader) {
+		return nil
+	}
+	_, loadErr := runner.runtime.Load(ctx, runID)
+	if errors.Is(loadErr, kernel.ErrNotFound) {
+		// A definitively rejected physical Start did not enter any
+		// execution route. A failed or missing local Run alone does not
+		// prove this: an acknowledged remote Start can have no local Run.
+		items, itemErr := listAllItems(ctx, runner.store, original.TurnID)
+		if itemErr != nil {
+			return errors.Join(unverified(), itemErr)
 		}
-		// Built-in features attest the exact recorder instance. Other
-		// Host-composed Feature adapters remain responsible for their
-		// established RunRelation contract.
+		if (original.Status == InvocationAccepted &&
+			!acceptedChildPhysicalEffectPossible(items, original)) ||
+			!compositeRunMayHaveDescendants(items, original) {
+			return nil
+		}
 		return unverified()
 	}
-	return nil
+	if loadErr != nil {
+		return errors.Join(unverified(), loadErr)
+	}
+	// An existing local Run still cannot stand in for an unverified
+	// external route or a Feature that wrote to another registry.
+	return unverified()
 }

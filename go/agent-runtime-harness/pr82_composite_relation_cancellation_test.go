@@ -125,8 +125,18 @@ func TestPR82CompositeCancellationNeedsOriginalRelationIndex(t *testing.T) {
 				t.Fatal("unknown cleanup closed the cancellation intent")
 			}
 			_, retryErr := runner.Cancel(t.Context(), started.Turn.ID, "retry unresolved cleanup")
-			if !errors.Is(retryErr, harness.ErrRuntimeCancellationUnverified) {
+			// The first attempt now refuses the unverified physical route
+			// BEFORE cancelling the Kernel parent. An unresolved fence cannot
+			// be resumed while that parent is still Running, so a repeated
+			// request may return ErrConflict instead of ErrRuntimeCancellationUnverified.
+			// Both are fail-closed; neither certifies remote cleanup.
+			if !errors.Is(retryErr, harness.ErrRuntimeCancellationUnverified) &&
+				!errors.Is(retryErr, harness.ErrConflict) {
 				t.Fatalf("repeated cancellation inferred success: %v", retryErr)
+			}
+			items, err = store.ListItems(t.Context(), started.Turn.ID, 0, 500)
+			if err != nil || !harness.ActiveCancellationFence(items) {
+				t.Fatalf("repeated cancellation released unresolved intent: %v", err)
 			}
 			current, err := store.GetTurn(t.Context(), started.Turn.ID)
 			if err != nil || current.Status == harness.TurnCancelled {

@@ -147,3 +147,47 @@ PostgreSQL test runs when `TEST_POSTGRES_DSN` is available. This correction
 changes no Store API, SQL DDL, Kernel state, physical retry protocol or
 compatibility path. Its own exact-Head CI and independent review remain
 required before PR merge.
+
+## Next independent review: optional proof bypass and cross-Kernel native route
+
+Review of pushed Head `796a202` found two new P1 cancellation-receipt
+failures. Both were independently reproduced with temporary Go Overlays,
+`go test -race -count=3` (3/3 reproductions each), without changing tracked
+code:
+
+1. A public Host TeamFeature wrapper forwarded StartRun/Resume to a Team
+   without forwarding its optional `RecordsRelationsTo` method. Harness had a
+   different empty relation index, yet `Cancel` succeeded and closed the
+   cancellation intent while an actual remote member stayed Running. The
+   `if ok && !proof` condition treated a missing method as positive authority.
+2. A native Workflow runner and Harness shared one exact relation Registry,
+   but executed through two independent Kernel instances. The Workflow
+   remained WaitingInput in the foreign Kernel while Harness returned
+   `TurnCancelled`, released the intent, and never cancelled that physical
+   Run. Registry identity was incorrectly used as a substitute for Kernel
+   residence.
+
+**Correction:** The original composite Feature must attest both its exact
+physical Kernel via `OwnsKernelRuntime` and its exact relation recorder via
+`RecordsRelationsTo`. An absent method, false proof or different Kernel
+fails closed before physical cancellation and preserves the committed
+cancellation intent. Concrete built-in Team, GroupChat and Workflow runners
+expose the two narrow proofs, and `NewRunner` rejects a foreign concrete
+native composite Kernel at composition. Raw Feature edges with unrelated
+Harness Invocation collisions keep their separate incoming relation and
+fixed-route verification. A missing local Run can discharge an original
+composite only with a definitive pre-effect rejection or an Accepted child
+with no physical grant; a failed/terminal parent or settled physical Start
+is not no-effect proof. No schema, Store protocol, new router or compatibility
+branch was added.
+
+Permanent tests cover both original scenarios, all three native constructor
+paths, the exposed Host wrapper routes, and retained cancellation fences on
+Memory/SQL/PostgreSQL. Existing native and custom Kernel no-effect read
+boundaries remain unchanged; the test-only Team fixture explicitly attests
+its true same-Kernel and no-descendant contract. A repeated Cancel on a
+still-Running parent with unresolved intent may legitimately return
+`ErrConflict`, never a successful cancellation.
+
+The patch requires fresh final-SHA CI and an independent post-fix merge
+admission review. No merge or beta.24 release is authorized by this record.

@@ -9,11 +9,14 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 const (
@@ -618,6 +621,19 @@ type StartRequest struct {
 // NewRunner constructs a minimal first-party Harness composition layer.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil || dependencies.Clock == nil {
+		return nil, ErrInvalidRequest
+	}
+	// Concrete first-party composite runners have fixed Kernel residence.
+	// Reject a foreign Kernel at Host composition, before any Turn or
+	// physical feature dispatch can be admitted. Custom Feature adapters
+	// require explicit authority at cancellation/recovery boundaries.
+	if native, ok := dependencies.Teams.(*team.Runner); ok && !native.OwnsKernelRuntime(dependencies.Runtime) {
+		return nil, ErrInvalidRequest
+	}
+	if native, ok := dependencies.GroupChats.(*groupchat.Runner); ok && !native.OwnsKernelRuntime(dependencies.Runtime) {
+		return nil, ErrInvalidRequest
+	}
+	if native, ok := dependencies.Workflows.(*workflow.Runner); ok && !native.OwnsKernelRuntime(dependencies.Runtime) {
 		return nil, ErrInvalidRequest
 	}
 	if dependencies.Cancellation == nil {
