@@ -9,7 +9,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// RunExecution is an opt-in, Stage 2B direct-Agent executor identity.
+// RunExecution binds one Agent Run to the opt-in Kernel execution lease.
 // It uses the existing Store ExecutionLease; no extra scheduler, progress
 // record, queue, or ActiveSegment table is introduced. The Store owns time.
 type RunExecution struct {

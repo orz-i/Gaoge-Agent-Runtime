@@ -54,7 +54,7 @@ func TestUnleasedToolReceiptLossCannotDispatchExternalEffectAgain(t *testing.T) 
 	}
 }
 
-// A direct Agent without RunExecution must use the SAME trusted, read-only
+// An Agent Run without RunExecution must use the SAME trusted, read-only
 // verifier and exact Call ID as a lease-backed Agent. No external Tool handler
 // execution occurs during recovery, even if the owner reopens after a crash.
 func TestUnleasedToolReceiptLossReconcilesExactVerifiedCommit(t *testing.T) {

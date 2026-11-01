@@ -80,7 +80,7 @@ func resumeAutoSegments(t *testing.T, host *harness.Runner, runtime *kernel.Runt
 	return snapshot
 }
 
-func TestHarnessAutomaticallyContinuesDirectAgentWithSameRunIdentity(t *testing.T) {
+func TestHarnessAutomaticallyContinuesAgentWithSameRunIdentity(t *testing.T) {
 	host, runtime, direct, client := testAutoHarness(t, 1)
 	request := testStartRequest()
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}

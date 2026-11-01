@@ -11,7 +11,7 @@ import (
 )
 
 // CallAllowance is the cumulative, renewable allowance for logical model and
-// local Tool calls in one direct Agent Run. Zero omits segmentation for that
+// local Tool calls in one Agent Run. Zero omits segmentation for that
 // dimension; its frozen absolute budget.Limits still applies.
 type CallAllowance struct {
 	LLMCalls  int `json:"llmCalls,omitempty"`

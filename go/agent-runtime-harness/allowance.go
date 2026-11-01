@@ -16,7 +16,7 @@ type agentCallAllowanceGranter interface {
 	GrantCallAllowance(context.Context, string, uint64, agent.CallAllowance) (kernel.Snapshot, error)
 }
 
-// GrantCallAllowance renews a paused direct top-level Agent within a frozen
+// GrantCallAllowance renews a paused top-level Agent within a frozen
 // Harness Turn. It uses the same Run ID and existing Turn budget ledger.
 // External callers MUST authorize Turn ownership (the HTTP adapter does so
 // using the authenticated Session Actor); this SDK method accepts no user ID.

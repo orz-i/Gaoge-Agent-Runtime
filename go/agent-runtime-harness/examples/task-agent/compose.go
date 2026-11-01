@@ -92,7 +92,7 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 	if err != nil {
 		return nil, err
 	}
-	direct, err := agent.NewRunner(agent.Dependencies{
+	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: rt, Model: client, Catalog: registry, Executor: registry, Clock: state.clock,
 		// Add any host schema projections BEFORE managed, which must be last.
 		PrepareModelRequest: agent.ChainModelRequestPreparers(managed),
@@ -109,7 +109,7 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 		return nil, err
 	}
 	host, err := harness.NewRunner(harness.Dependencies{
-		Runtime: rt, Agent: direct, Store: state.store, Clock: state.clock, Context: manager, Catalog: registry,
+		Runtime: rt, Agent: agentRunner, Store: state.store, Clock: state.clock, Context: manager, Catalog: registry,
 	})
 	if err != nil {
 		return nil, err

@@ -10,7 +10,7 @@ import (
 
 // QuarantinedTransition is an intact, non-ACKed projection with a stable
 // diagnosis. This is a **transport-only** Stage 1 isolation mechanism;
-// it does not authorize direct Agent.Resume or implement the Stage 2
+// it does not authorize Agent.Resume or implement the Stage 2
 // authoritative Run Store quarantine fence.
 type QuarantinedTransition struct {
 	WorkID        string

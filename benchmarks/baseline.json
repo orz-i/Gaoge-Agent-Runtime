@@ -41,7 +41,7 @@
       "bytesPerOp": 218393,
       "allocsPerOp": 1165
     },
-    "BenchmarkHarnessStartDirectAgentMemory": {
+    "BenchmarkHarnessStartAgentTurnMemory": {
       "samples": 5,
       "nsPerOp": 47976,
       "bytesPerOp": 62257,

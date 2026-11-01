@@ -13,7 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-// AutoAllowancePolicy opts one direct Agent Run into bounded renewal at the
+// AutoAllowancePolicy opts one Agent Run into bounded renewal at the
 // P1 safe dispatch boundary. It never raises the frozen hard Budget limits.
 // Omit the policy to preserve the exact P1 manual continuation behavior.
 type AutoAllowancePolicy struct {

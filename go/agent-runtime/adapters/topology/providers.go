@@ -37,7 +37,7 @@ type RelationSource interface {
 	ListChildren(context.Context, string) ([]runrelation.Relation, error)
 }
 
-// NewAgentTopologyProvider projects the direct Agent root without inventing
+// NewAgentTopologyProvider projects the Agent root without inventing
 // Tool or sub-agent nodes that are not durable topology facts.
 func NewAgentTopologyProvider() workbench.TopologyProvider { return agentTopologyProvider{} }
 

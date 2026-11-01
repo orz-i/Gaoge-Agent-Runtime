@@ -16,7 +16,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
-func BenchmarkHarnessStartDirectAgentMemory(b *testing.B) {
+func BenchmarkHarnessStartAgentTurnMemory(b *testing.B) {
 	b.ReportAllocs()
 	for range b.N {
 		b.StopTimer()

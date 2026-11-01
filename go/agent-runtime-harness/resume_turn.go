@@ -9,7 +9,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// ResumeTurn continues an existing direct-Agent root without creating a Run or
+// ResumeTurn continues an existing top-level Agent Run without creating a Run or
 // starting another attempt. The host must authorize the Turn before calling.
 // SessionClient.Resume supplies the corresponding Session identity check.
 //
