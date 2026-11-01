@@ -7,7 +7,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -25,12 +27,12 @@ type releaseChecks struct {
 }
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Stdout); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run() error {
+func run(output io.Writer) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	registry, err := tools.NewRegistry([]tools.Registration{{
@@ -77,8 +79,13 @@ func run() error {
 	if snapshot.Run.Status != kernel.RunStatusCompleted || len(view.Messages) == 0 {
 		return fmt.Errorf("agent did not complete: %s", snapshot.Run.Status)
 	}
-	fmt.Println(view.Messages[len(view.Messages)-1].Content)
-	fmt.Printf("Run %s: %s\n", snapshot.Run.ID, snapshot.Run.Status)
+	if _, err = fmt.Fprintln(output, model.TextValue(view.Messages[len(view.Messages)-1].Content)); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(output, "Run %s: %s\n", snapshot.Run.ID, snapshot.Run.Status)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
