@@ -1231,6 +1231,13 @@ func (runner *Runner) syncInvocationProjection(
 	status TurnStatus,
 ) (Invocation, error) {
 	nextStatus := invocationStatusFromTurn(status)
+	// Root projection already fences terminal outcomes, but child callbacks
+	// enter here directly. A stale Runtime snapshot must not reopen or replace
+	// a settled Invocation within its frozen Attempt. Only RetryInvocation
+	// may rotate the execution identity and return to Accepted.
+	if terminalInvocationStatus(invocation.Status) && invocation.Status != nextStatus {
+		return Invocation{}, ErrConflict
+	}
 	if nextStatus == invocation.Status && invocation.ErrorCode == runtimeSnapshot.Run.ErrorCode &&
 		invocation.ErrorDetail == runtimeSnapshot.Run.ErrorDetail {
 		if err := runner.recordInvocationItem(ctx, invocation); err != nil {

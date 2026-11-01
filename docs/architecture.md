@@ -69,6 +69,27 @@ selection follows from this convenience. See the
 | Object authorization and principal resolution | Host / HTTP edge | Kernel RBAC |
 | SQL, Redis, protocol, telemetry integration | Adapters | Feature correctness |
 
+## Run / Invocation / Turn / Item lifecycle authority
+
+Kernel owns the authoritative physical Run and its six-state execution
+contract; Harness owns separate root Turn and per-capability Invocation
+admission, while immutable Items record the observable lifecycle. These
+statuses are **not** interchangeable and do not create another execution
+loop. Refresh may project a newer Kernel result into a nonterminal Invocation
+or repair missing Items, but cannot replace a terminal Invocation outcome
+within its original Attempt. A terminal Run projection cannot reopen a child
+merely because a stale callback reports `running`, nor convert a committed
+`completed` into `failed`.
+
+The shared Harness projector checks this before writing. Both Memory and SQL
+Harness Stores additionally fence terminal-status rewrites in the same
+`UpdateInvocation` Revision CAS. An exact `RetryInvocation` is a distinct,
+explicitly authorized operation: it rotates Attempt and Run identity only
+after original parent/child/effect safeguards. Same-terminal metadata repair
+is permitted. Custom Stores must implement that atomic contract; no Kernel
+status or SQL schema change is needed. See the
+[round 2 lifecycle audit](audits/2026-11-01-invocation-terminal-projection-governance.md).
+
 ## Host-owned selection and provider composition
 
 Before a Turn or Run is admitted, the Host chooses a concrete capability.

@@ -2,6 +2,31 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-01 — Invocation terminal projection CAS hard cut (beta.24 candidate)
+
+**Store contract correction:** `harness.Store.UpdateInvocation` must reject
+any transition from a terminal `InvocationCompleted`, `InvocationFailed` or
+`InvocationCancelled` into a **different** status for the same immutable
+Attempt, even when the caller supplies the current expected Revision.
+`harness.ErrConflict` is the required result. The predicate belongs in the
+same atomic CAS as the update, not in a pre-read. Same-status terminal
+metadata repair remains supported. `Store.RetryInvocation`, with its existing
+original parent/child/effect/no-effect fences and fresh Run identity, is the
+only legitimate path back to `InvocationAccepted` for a retryable failure.
+
+The Harness root projection already guarded terminal transitions. Child
+`RefreshInvocation` / callback synchronization reached the shared
+`syncInvocationProjection` without an equivalent guard. Memory and SQL
+stores previously allowed terminal child rewrites, so both the shared
+projector and the persistence boundary now fail closed. Hosts supplying
+custom Harness Store implementations must adopt this stricter atomic
+`UpdateInvocation` invariant before upgrading. Existing persisted terminal
+records are left unchanged; audit any historical inconsistent records instead
+of silently rewriting them. No Run status enum, SQL DDL, persisted schema
+version, compatibility fallback or new state authority is added.
+
+See [round 2 lifecycle audit](audits/2026-11-01-invocation-terminal-projection-governance.md).
+
 ## 2026-11-01 — Remove obsolete Direct/PrepareIntent mode terminology (beta.24 candidate)
 
 **No Host intent router in SDK:** The currently maintained Runtime exposes
