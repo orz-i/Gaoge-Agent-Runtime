@@ -30,7 +30,31 @@ func (runner *Runner) executeSubworkflowEffect(
 	if !verifiedSubworkflowChildOrigin(request, child) {
 		return EffectResult{}, ErrInvalidExecution
 	}
+	if err := runner.ensureSubworkflowRelation(ctx, request, childID); err != nil {
+		return EffectResult{}, err
+	}
 	return runner.advanceSubworkflowChild(ctx, child)
+}
+
+// The parent Effect intent is already durable. Its deterministic child must
+// have an immutable ownership edge before native Create, Resume or receipt.
+// Reuse the exact same owner and Attempt rules as the post-dispatch observer,
+// including node-owned fan-out relations during recovery. If the write fails,
+// no new child may be started; an already-existing child is not advanced.
+func (runner *Runner) ensureSubworkflowRelation(ctx context.Context, request EffectRequest, childID string) error {
+	if runner.relations == nil {
+		return nil // Standalone Workflow callers without an index; Harness fails closed.
+	}
+	intent := Effect{
+		ID: request.EffectID, NodeID: request.NodeID,
+		ChildRunID: childID, Attempt: request.Attempt,
+		OutputKey: request.OutputKey, Mapped: request.Mapped,
+	}
+	if strings.TrimSpace(request.RunID) == "" || strings.TrimSpace(request.OwnerNodeID) == "" ||
+		effectRelationOwnerID(intent) != request.OwnerNodeID {
+		return ErrInvalidExecution
+	}
+	return runner.ensureEffectRelation(ctx, request.RunID, intent)
 }
 
 func (runner *Runner) startSubworkflowChild(
@@ -42,6 +66,9 @@ func (runner *Runner) startSubworkflowChild(
 		Kind: DefinitionScopeActor, TenantID: request.Actor.TenantID, ActorID: request.Actor.ActorID,
 	}, *request.Definition)
 	if err != nil {
+		return EffectResult{}, err
+	}
+	if err := runner.ensureSubworkflowRelation(ctx, request, childID); err != nil {
 		return EffectResult{}, err
 	}
 	child, err := runner.StartRun(ctx, StartRequest{

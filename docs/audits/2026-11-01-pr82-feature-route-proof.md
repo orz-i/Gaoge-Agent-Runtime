@@ -191,3 +191,41 @@ still-Running parent with unresolved intent may legitimately return
 
 The patch requires fresh final-SHA CI and an independent post-fix merge
 admission review. No merge or beta.24 release is authorized by this record.
+
+## Subsequent independent Head audit — native Subworkflow relation-after-start P1
+
+At `f95e035`, the reviewer independently injected a durable
+`KindWorkflowEffect` write failure into the original native Workflow's
+RunRelation registry. A registered Subworkflow child was **physically
+created first**, persisted as `WaitingInput` and then the relation insert
+failed. The parent transitioned to `Failed` with no child edge, and Harness
+`Cancel` returned `nil` without a durable active cancellation fence while
+the child remained `WaitingInput` (3/3 runs under `-race`). A matching registry
+object only proves where writers send their relations; it cannot establish
+that the native writer committed the relation before the physical effect.
+
+**Correction:** The native Subworkflow executor now derives the child ID
+from its persisted Effect and commits the exact immutable parent/child
+relation before creating a child, resuming an existing child or trusting its
+terminal receipt. The shared `ensureEffectRelation` writer preserves the
+original Effect's Attempt/fan-out ownership. `EffectRequest.Mapped` explicitly
+carries the frozen mapping flag instead of inferring it from `MapIndex` or
+owner IDs. Invalid or missing definitions do not reserve orphan relations
+before the definition is resolved for a new child. A rejected pre-dispatch
+Ensure starts no child. A persist-success/lost-reply Ensure also starts no
+child but retains conservative unknown-cancellation handling for any
+committed orphan edge; it is never treated as proof that a physical child
+stopped. A retry with a successful durable edge reuses the same child ID.
+
+Permanent Memory/Harness tests assert the relation is visible inside the
+physical Kernel Store `Create`, including successful pending child
+cancellation, replay idempotence, rejected inserts, committed-lost replies,
+reconstructed Harness cancellation and retained intent. A real PostgreSQL
+Kernel+RunRelation test covers the same three cases and reconstructs both
+readers using a fresh PostgreSQL connection. PostgreSQL/Redis integration and
+exact-Head full quality checks are required again. Neither an automatic
+backfill for candidate-era orphaned children nor a new Store/SQL protocol
+was introduced; legacy orphans must be reconciled explicitly by the
+original execution owner before treating cancellation as complete.
+
+This audit record does not grant PR merge or beta.24 publication.

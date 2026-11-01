@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #82 independent Workflow sub-run orphan correction: the built-in
+  Subworkflow effect commits its deterministic child RunRelation *before*
+  physically creating or advancing the child, using the original persisted
+  effect ID/Attempt and fan-out owner semantics. If relation persistence
+  fails, no child is dispatched; a committed relation with a lost response
+  remains conservatively unverified rather than becoming a fabricated
+  successful cancellation. Add exact `EffectRequest.Mapped` propagation and
+  Memory/SQL/PostgreSQL crash/recovery regressions. No Store/DDL version or
+  compatibility router is introduced.
+
 - PR #82 independent cancellation follow-up: reject Host composite Feature wrappers
   without BOTH exact Kernel ownership and RunRelation recorder proof. Merely
   implementing the public Start/Resume adapter or sharing the registry cannot

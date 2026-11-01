@@ -676,6 +676,24 @@ Published beta.23 tags remain unchanged.
 
 ## PR #82 follow-up — composite cancellation requires its original relation index
 
+**Subworkflow physical child relation precommit:** Independent final-Head
+fault injection on `f95e035` proved the same first-party Workflow Kernel
+could create a child waiting for input, then fail `ensureEffectRelation`,
+mark its parent `Failed` and still let Harness Cancel return success without
+an active fence. A shared relation registry is not sufficient when the
+executor publishes the edge *after* the physical child Start. The built-in
+Subworkflow now writes the immutable child edge using the original persisted
+Effect intent **before** its first physical Start/Resume or result receipt.
+It reuses the same `ensureEffectRelation` owner/Attempt logic on replay,
+including the exact `Mapped` flag propagated through `EffectRequest`. A
+rejected edge write starts no child; a committed edge with lost reply starts
+no child but retains conservative unverified cancellation until recovered.
+New tests assert relation existence inside the Kernel child Create boundary,
+no child on rejected/lost replies, idempotent replay, durable cancel fences
+and PostgreSQL fresh-connection recovery. Already orphaned candidate data is
+not implicitly backfilled. No new Kernel Store method, SQL schema, parallel
+router or rollback bridge is introduced.
+
 **Independent final-Head route hard cut:** A public Host Feature wrapper that
 forwards Start/Resume without the optional `RecordsRelationsTo` certificate
 previously bypassed the recorder check entirely. A separate native Workflow

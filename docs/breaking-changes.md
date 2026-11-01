@@ -4,6 +4,26 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 native Subworkflow child-ownership hard cut (2026-11-01):**
+The built-in Workflow Subworkflow executor now persists the immutable
+`KindWorkflowEffect` relation for its deterministic child before the child
+can physically Start, Resume or supply a terminal receipt. The shared
+`ensureEffectRelation` path uses the persisted `EffectID`, `Attempt`,
+`OwnerNodeID` and explicit `EffectRequest.Mapped` (new public request field)
+to retain exact fan-out ownership. A failed relation write aborts child
+dispatch instead of creating an unindexed live child and allowing a later
+false-positive Harness cancellation. If a relation was committed but its
+acknowledgement was lost, it remains indexed while the child is not started;
+subsequent cancellation without an authoritative child receipt stays
+`ErrRuntimeCancellationUnverified` with a durable fence. Reconstructed
+readers use the original index; unknown work must be explicitly reconciled.
+Previously orphaned pre-fix children have no automatic backfill: their
+physical ownership must be audited before considering cancellation complete.
+Standalone Workflows without a relation registry retain their existing
+unindexed mode, but Harness refuses to certify their composite cancellation.
+This is an unreleased beta hard cut: no SQL DDL, persisted version bump,
+legacy bridge or implicit fallback is added.
+
 **PR #82 independent original composite route ownership correction (2026-11-01):**
 For a Harness-owned Team/GroupChat/Workflow, successful local cancellation
 requires a feature adapter that explicitly implements BOTH

@@ -215,6 +215,7 @@ type EffectRequest struct {
 	Definition   *DefinitionReference
 	OutputKey    string
 	MapIndex     int
+	Mapped       bool
 	Compensation bool
 	Input        json.RawMessage
 	MaxCostUnits int64
