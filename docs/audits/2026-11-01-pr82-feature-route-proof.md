@@ -104,3 +104,20 @@ the actual owner rather than substituting another local Agent.
 The second-cycle final code passed complete `make check`, `make coverage`, and
 Docker PostgreSQL/Redis `make integration` (all exit 0; integration cleanup
 complete). The next pushed SHA still requires its own CI and fresh audit.
+
+## Second post-CI audit: raw Feature Canceller ownership
+
+After required CI passed on `1ff509f`, another fresh full-boundary review found
+that raw Feature cancellation proved the ChildRunner's Kernel but still called
+an arbitrary custom Canceller. A public `CancelSubtask` reproduction invoked a
+Canceller explicitly bound to another Kernel and cancelled its unrelated twin;
+post-callback receipt validation was too late to prevent that effect.
+
+Raw Feature control now requires the same exact local Canceller ownership proof
+as direct Handoff cancellation, before any callback. Unknown/custom foreign
+ownership preserves unresolved cleanup. The unchanged independent reproduction
+and permanent foreign-Kernel/unproven-local/owned-local positive tests passed
+`-race -count=3`; full Harness tests and lint also passed. No additional
+admission/Store issue was found in that round. The reviewer independently
+validated this repair, and final-code `make check` plus real PostgreSQL/Redis
+`make integration` both passed (exit 0, integration cleanup complete).

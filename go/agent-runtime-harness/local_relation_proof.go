@@ -92,6 +92,11 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 	}
 	rawFeatureChild := relationErr == nil && (relation.Kind == runrelation.KindTeamMember ||
 		relation.Kind == runrelation.KindGroupChatSpeaker || relation.Kind == runrelation.KindWorkflowEffect)
+	if rawFeatureChild && control && !runner.localHandoffCancellerOwnsKernel() {
+		// A local ChildRunner does not authorize a different physical
+		// Canceller. Reject before any callback, not after its foreign effect.
+		return unverified()
+	}
 	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, candidate.Run.ID)
 	if err == nil && !rawFeatureChild {
 		if isHandoffDelegationInvocation(owner) {
