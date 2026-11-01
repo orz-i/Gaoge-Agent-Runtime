@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Round 2 Harness lifecycle authority hard cut: root and child Invocation
+  projections cannot rewrite a terminal status within the same Attempt.
+  Memory and SQL Store `UpdateInvocation` now atomically reject completed,
+  failed or cancelled status rewrites, even with the current Revision; only
+  explicit `RetryInvocation` can rotate the Attempt and execution identity.
+  Same-terminal metadata repair remains allowed. Replace two legacy tests
+  that fabricated retries by rewriting completed Invocations with legitimate
+  no-effect failure fixtures. No new Run status, SQL DDL, schema version,
+  compatibility bridge or automatic retry.
+
 - First-round single-Agent minimization: omit `harness.Dependencies.Clock` to
   use an explicit internal wall clock for Harness timestamps, retaining
   injected deterministic clocks and Store-owned execution lease authority.
