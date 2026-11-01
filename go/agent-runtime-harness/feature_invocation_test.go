@@ -139,19 +139,6 @@ func teamChildInvocation(t *testing.T, snapshot harness.Snapshot) harness.Invoca
 	return harness.Invocation{}
 }
 
-func markInvocationFailed(t *testing.T, store *harness.MemoryStore, invocation harness.Invocation) harness.Invocation {
-	t.Helper()
-	invocation.Status = harness.InvocationFailed
-	invocation.ErrorCode = "fixture.failed"
-	invocation.ErrorDetail = "retry fixture"
-	invocation.UpdatedAt = featureInvocationClock{}.Now()
-	updated, err := store.UpdateInvocation(t.Context(), invocation, invocation.Revision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return updated
-}
-
 func invocationArtifactCount(items []harness.Item, invocationID string) int {
 	count := 0
 	for _, item := range items {

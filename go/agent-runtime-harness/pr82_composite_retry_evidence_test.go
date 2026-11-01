@@ -53,10 +53,10 @@ func TestPR82EffectfulFailedWorkflowRootCannotRetryWithoutDrainProof(t *testing.
 	}
 }
 
-// A terminal Harness Team child can still own live physical Team members.
-// Its observed Kernel result must not be mistaken for transitive cleanup
-// simply because the child Invocation is terminal.
-func TestPR82TerminalTeamChildStillBlocksRootRetry(t *testing.T) {
+// A completed child Team can still own live physical members. Its terminal
+// Harness Invocation must not be made retryable by rewriting the same Attempt
+// as Failed, even when its parent Turn remains active.
+func TestPR82TerminalTeamChildCannotBeRewrittenIntoRetryableFailure(t *testing.T) {
 	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
 		ParentItemID: parentItemID, RequestID: "pr82-terminal-team-child", Goal: "complete team",
@@ -69,10 +69,18 @@ func TestPR82TerminalTeamChildStillBlocksRootRetry(t *testing.T) {
 	if child.Status != harness.InvocationCompleted {
 		t.Fatalf("expected terminal Harness child: %+v", child)
 	}
-	// The older SDK allowed direct rewriting of a terminal child to Failed.
-	// Retry must now refuse to rotate it without transitive no-effect proof.
-	failed := markInvocationFailed(t, store, child)
-	if _, err := runner.RetryInvocation(t.Context(), failed.ID); !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("terminal-but-effectful Team child obtained new Attempt: %v", err)
+	failed := child
+	failed.Status = harness.InvocationFailed
+	failed.UpdatedAt = featureInvocationClock{}.Now()
+	if _, err = store.UpdateInvocation(t.Context(), failed, child.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("terminal child was rewritten into retryable Failed: %v", err)
+	}
+	if _, err = runner.RetryInvocation(t.Context(), child.ID); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("completed Team child obtained new Attempt: %v", err)
+	}
+	persisted, err := store.GetInvocation(t.Context(), child.ID)
+	if err != nil || persisted.Status != harness.InvocationCompleted || persisted.Revision != child.Revision ||
+		persisted.ExecutionRefID != child.ExecutionRefID || persisted.Attempt != child.Attempt {
+		t.Fatalf("completed child lost its original Attempt: before=%+v after=%+v err=%v", child, persisted, err)
 	}
 }

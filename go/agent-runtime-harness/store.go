@@ -70,6 +70,12 @@ type Store interface {
 	CreateInvocation(context.Context, Invocation) (Invocation, bool, error)
 	GetInvocation(context.Context, string) (Invocation, error)
 	GetInvocationByExecutionRefID(context.Context, string) (Invocation, error)
+	// UpdateInvocation uses a revision-bound CAS and must never rewrite a
+	// terminal status (completed/failed/cancelled) into a different status
+	// within one immutable Attempt. The terminal check must be atomic with
+	// the CAS. Metadata repair with the same terminal status remains allowed.
+	// RetryInvocation is the sole Store operation authorized to rotate an
+	// Attempt and its execution reference back into Accepted.
 	UpdateInvocation(context.Context, Invocation, uint64) (Invocation, error)
 	RetryInvocation(context.Context, string, uint64, string, time.Time) (Invocation, error)
 	ListInvocations(context.Context, string) ([]Invocation, error)

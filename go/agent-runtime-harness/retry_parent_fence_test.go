@@ -17,21 +17,37 @@ import (
 // child attempt, not leave it permanently stuck Accepted when the start
 // preflight later discovers that no parent execution can own it.
 func TestRetryChildAfterParentTerminalDoesNotRotate(t *testing.T) {
-	runner, turnID, parentItemID, _, parentRunID, store, runtime := newFeatureInvocationHarness(t)
+	runner, turnID, parentItemID, store, feature := newRetryNoEffectTeamHarness(t)
 	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
 		ParentItemID: parentItemID, RequestID: "terminated-parent-child",
 		Goal: "retry after parent", Mode: team.ExecutionSequential,
 		Members: []team.Member{{ID: retryTeamMemberID, Goal: retryTeamMemberGoal}},
 	})
+	if !errors.Is(err, errRetryTeamNoEffect) {
+		t.Fatalf("child did not fail with original no-effect receipt: %v", err)
+	}
+	failed := teamChildInvocation(t, started)
+	if failed.Status != harness.InvocationFailed {
+		t.Fatalf("expected committed first-attempt failure: %+v", failed)
+	}
+	invocations, err := store.ListInvocations(t.Context(), turnID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	failed := markInvocationFailed(t, store, teamChildInvocation(t, started))
-	parent, err := runtime.Load(t.Context(), parentRunID)
+	var parentRunID string
+	for _, invocation := range invocations {
+		if invocation.ParentItemID == "" {
+			parentRunID = invocation.ExecutionRefID
+		}
+	}
+	if parentRunID == "" {
+		t.Fatal("root Kernel Run ID was not persisted")
+	}
+	parent, err := feature.runtime.Load(t.Context(), parentRunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runtime.Cancel(t.Context(), parentRunID, parent.Run.Revision, "parent ended")
+	_, err = feature.runtime.Cancel(t.Context(), parentRunID, parent.Run.Revision, "parent ended")
 	if err != nil {
 		t.Fatal(err)
 	}

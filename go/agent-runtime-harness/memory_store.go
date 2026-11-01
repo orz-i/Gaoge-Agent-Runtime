@@ -113,6 +113,12 @@ func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, 
 	if current.ExecutionRefID != value.ExecutionRefID {
 		return Invocation{}, ErrConflict
 	}
+	// A terminal Invocation cannot return to an active state or switch to
+	// another terminal outcome within the same Attempt. RetryInvocation owns
+	// explicit Attempt and Run-ID rotation under the Store's separate fences.
+	if terminalInvocationStatus(current.Status) && current.Status != value.Status {
+		return Invocation{}, ErrConflict
+	}
 	if current.Status != InvocationRunning && value.Status == InvocationRunning &&
 		ActiveCancellationFence(store.items[value.TurnID]) {
 		return Invocation{}, ErrConflict
