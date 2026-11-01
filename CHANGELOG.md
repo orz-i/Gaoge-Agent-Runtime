@@ -5,6 +5,46 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #82 independent Workflow sub-run orphan correction: the built-in
+  Subworkflow effect commits its deterministic child RunRelation *before*
+  physically creating or advancing the child, using the original persisted
+  effect ID/Attempt and fan-out owner semantics. If relation persistence
+  fails, no child is dispatched; a committed relation with a lost response
+  remains conservatively unverified rather than becoming a fabricated
+  successful cancellation. Add exact `EffectRequest.Mapped` propagation and
+  Memory/SQL/PostgreSQL crash/recovery regressions. No Store/DDL version or
+  compatibility router is introduced.
+
+- PR #82 independent cancellation follow-up: reject Host composite Feature wrappers
+  without BOTH exact Kernel ownership and RunRelation recorder proof. Merely
+  implementing the public Start/Resume adapter or sharing the registry cannot
+  authorize local cancellation. Built-in Team, GroupChat and Workflow runners
+  now attest their exact Kernel; Harness rejects a foreign native Runtime at
+  composition. Unknown Host routes fail closed before physical cancellation,
+  retaining any committed intent for explicit reconciliation. The original
+  no-effect/retry receipts remain unchanged. No parallel routing bridge, Store
+  change or SQL migration.
+
+- PR #82 cancellation follow-up: a composite Team/GroupChat/Workflow Run
+  without a verified original child-relation index cannot claim that an empty
+  child lookup proves cleanup. Built-in Features must record to the exact
+  RunRelation recorder Harness reads; missing or different registries return
+  `ErrRuntimeCancellationUnverified`, retaining any committed cancellation
+  intent after physical cancellation. Running/Failed parents and Memory/SQL
+  regression tests cover the previously false-positive cancellation receipt.
+  No new Store protocol or SQL schema.
+
+- Require Feature-owned fixed local route and persisted task proofs before
+  observing, approving or cancelling raw Team/GroupChat/Workflow descendants.
+  A same-ID local Run or unrelated Harness Invocation cannot replace this
+  proof. Delegation Tool recovery/waits likewise require frozen local ownership;
+  built-in subworkflows verify immutable origin before resume or receipt use.
+  Handoff parent liveness and no-effect exceptions also require original
+  route/edge authority. Physical Subtask approvals must use the exact fixed
+  child Agent rather than a substitute root AgentStarter. Remote/unproven
+  outcomes retain existing reconciliation fences. See the
+  [PR #82 route-proof audit](docs/audits/2026-11-01-pr82-feature-route-proof.md).
+
 - P3 canonical Model Message multi-modal hard cut: replace
   `Message.Content string` with one ordered, closed
   `[]ContentPart` (text, image, PDF, audio remote references).

@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -18,13 +17,25 @@ type contextRunRelationFixture map[string]runrelation.Relation
 
 func TestDelegatedSpecialistResumeDoesNotRehydrateSupervisorContext(t *testing.T) {
 	store, turn, _, root := contextRunMiddlewareFixture(t)
-	input, err := json.Marshal(handoff.Delegation{RoleID: "researcher", ChildRunID: "specialist-child"})
+	delegation := handoff.Delegation{
+		ID: "researcher-delegation", MemberID: "researcher", RoleID: "researcher",
+		ChildRunID: "specialist-child", Goal: "independent task", Status: handoff.StatusQueued,
+	}
+	input, inputHash, err := marshalInvocationValue(delegation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, inputHash, err = sealChildRootInput(input, inputHash, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := InvocationID(turn.ID, "parent-delegation", CapabilityAgent, delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	child := root
-	child.ID, child.ExecutionRefID, child.ParentItemID, child.Input = "specialist-invocation", "specialist-child", "parent-delegation", input
-	child.InputHash = hashInvocationBytes(input)
+	child.ID, child.ExecutionRefID, child.ParentItemID, child.Input = id, "specialist-child", "parent-delegation", input
+	child.InputHash = inputHash
 	if _, _, err = store.CreateInvocation(t.Context(), child); err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ package runrelation
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -96,6 +97,22 @@ type ReconciliationProvider interface {
 // Recorder is the narrow capability consumed by parent Runtime features.
 type Recorder interface {
 	Ensure(context.Context, Draft) (Relation, error)
+}
+
+// SameRecorder proves that Feature admission and Harness cancellation use
+// the same fixed index object. A different recorder (even one with identical
+// values) cannot establish ownership of physical child Runs. Uncomparable
+// or non-pointer custom recorders have no stable instance-identity proof.
+// Pointers to zero-sized types are also excluded: distinct Go zero-sized
+// allocations are permitted to share an address.
+func SameRecorder(left, right Recorder) bool {
+	if left == nil || right == nil {
+		return false
+	}
+	first, second := reflect.ValueOf(left), reflect.ValueOf(right)
+	return first.Kind() == reflect.Pointer && second.Kind() == reflect.Pointer &&
+		first.Type() == second.Type() && first.Type().Elem().Size() > 0 &&
+		!first.IsNil() && !second.IsNil() && first.Pointer() == second.Pointer()
 }
 
 // Registry validates and timestamps immutable Run relations.

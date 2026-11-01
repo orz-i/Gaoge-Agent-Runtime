@@ -351,7 +351,7 @@ func buildEffectRequest(run kernel.Run, definition Definition, effect Effect) Ef
 		DefinitionID: definition.ID, DefinitionHash: definition.Hash,
 		EffectID: effect.ID, NodeID: effect.NodeID, OwnerNodeID: effectRelationOwnerID(effect), Class: effect.Class, Kind: effect.Kind,
 		Revision: effect.Revision, Definition: cloneDefinitionReference(effect.Definition),
-		OutputKey: effect.OutputKey, MapIndex: effect.MapIndex, Compensation: effect.Compensation,
+		OutputKey: effect.OutputKey, MapIndex: effect.MapIndex, Mapped: effect.Mapped, Compensation: effect.Compensation,
 		Input: cloneJSON(effect.Input), MaxCostUnits: effect.MaxCostUnits,
 		NestedDepth: effect.NestedDepth,
 		Attempt:     effect.Attempt, MaxAttempts: effect.Retry.MaxAttempts,

@@ -68,8 +68,9 @@ func TestPR72RetryCASPreservesPendingPhysicalExecutionInMemoryAndSQL(t *testing.
 			if err != nil || unchanged.Status != harness.InvocationAccepted || unchanged.ExecutionRefID != grant.RunID || unchanged.Attempt != 1 || unchanged.Revision != child.Revision {
 				t.Fatalf("failed rotation changed persisted state: %+v err=%v", unchanged, err)
 			}
-			settled := harness.Item{ID: "settled-grant", TurnID: turn.ID, Kind: harness.ItemDiagnostic,
-				Status: harness.ItemCompleted, ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"verified_no_effect"}`),
+			settled := harness.Item{ID: "settled-grant", TurnID: turn.ID, InvocationID: child.ID, RunID: child.ExecutionRefID,
+				Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
+				ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_rejected"}`),
 				CreatedAt: now, UpdatedAt: now}
 			if _, fresh, err := store.AppendItem(t.Context(), settled); err != nil || !fresh {
 				t.Fatalf("settle: %t %v", fresh, err)
@@ -163,6 +164,7 @@ func TestRealPostgresPR72PendingGrantPreventsFailureAndRetryAcrossConnections(t 
 		t.Fatalf("state altered across handles: %+v %v", current, e)
 	}
 	settled := harness.Item{ID: "pr72-original-dispatch-settled", TurnID: turn.ID,
+		InvocationID: inv.ID, RunID: inv.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: grant.ID,
 		Payload: json.RawMessage(`{"boundary":"feature_start_no_effect"}`), CreatedAt: now, UpdatedAt: now}
 	if _, created, e := first.AppendItem(t.Context(), settled); e != nil || !created {

@@ -409,6 +409,11 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 	if invocation.Status != InvocationWaitingInput {
 		return Snapshot{}, ErrConflict
 	}
+	// A response callback is a new physical Host effect, not read-only
+	// recovery. The child's immutable parent Attempts must still be live.
+	if err := runner.requireLiveInvocationParents(ctx, invocation); err != nil {
+		return Snapshot{}, err
+	}
 	// This CAS grants the host business handler's effect across all
 	// owning execution classes. Cancellation must compete for the same
 	// Invocation revision while the Turn is waiting for input.
@@ -422,9 +427,18 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
 		return Snapshot{}, err
 	}
-	result, err := runner.interactions.HandleInteractionResponse(ctx, InteractionResponseContext{
-		Interaction: cloneInteraction(interaction), Invocation: cloneInvocation(invocation), Session: session,
-	})
+	var result InteractionResponseResult
+	// The parent can terminate while the claim or its Item projection is
+	// committing. Recheck at the final pre-callback boundary. Only this
+	// newly elected, undispatched claim may use the no-effect reset below;
+	// an existing Running claim remains outcome-unknown.
+	if parentErr := runner.requireLiveInvocationParents(ctx, invocation); parentErr != nil {
+		err = errors.Join(ErrInteractionNoEffect, parentErr)
+	} else {
+		result, err = runner.interactions.HandleInteractionResponse(ctx, InteractionResponseContext{
+			Interaction: cloneInteraction(interaction), Invocation: cloneInvocation(invocation), Session: session,
+		})
+	}
 	if err != nil {
 		if errors.Is(err, ErrInteractionNoEffect) {
 			// Only a proven non-dispatch can safely release the durable

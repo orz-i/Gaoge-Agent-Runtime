@@ -77,7 +77,7 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 	if _, err = second.UpdateInvocation(t.Context(), invocation, invocation.Revision); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("remote callback CAS accepted across fence: %v", err)
 	}
-	for _, phase := range []string{"resolve-approval", "resolve-subtask-approval", "grant-call-allowance"} {
+	for _, phase := range []string{"resolve-approval", "resolve-subtask-approval", "grant-call-allowance", "handoff-start"} {
 		// The distinct DB handle must never commit a physical control
 		// authorization while the other process owns cancellation.
 		grant := harness.Item{

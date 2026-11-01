@@ -708,8 +708,8 @@ func createTopLevelRetryFixture(
 	input := json.RawMessage(`{"goal":"retry root"}`)
 	hash := sha256.Sum256(input)
 	invocation := harness.Invocation{
-		ID: "hiv_retry_root_pg", TurnID: turn.ID, CapabilityKey: harness.CapabilityWorkflow,
-		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionWorkflow,
+		ID: "hiv_retry_root_pg", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent,
+		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent,
 		Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_root_pg_1",
 		Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
@@ -745,8 +745,8 @@ func createRetryInvocationFixture(
 	input := json.RawMessage(`{"goal":"retry"}`)
 	hash := sha256.Sum256(input)
 	value := harness.Invocation{
-		ID: "hiv_retry_pg", TurnID: "turn_retry_pg", ParentItemID: "parent-item", CapabilityKey: harness.CapabilityTeam,
-		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionTeam,
+		ID: "hiv_retry_pg", TurnID: "turn_retry_pg", ParentItemID: "parent-item", CapabilityKey: harness.CapabilityAgent,
+		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent,
 		Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_pg_1",
 		Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,

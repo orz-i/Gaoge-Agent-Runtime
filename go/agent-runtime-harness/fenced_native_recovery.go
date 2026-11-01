@@ -45,12 +45,7 @@ func (runner *Runner) resumeNativeFencedAgentAfterInterruptedStart(
 	if err != nil || ActiveCancellationFence(items) {
 		return kernel.Snapshot{}, errors.Join(grantErr, err)
 	}
-	closed := make(map[string]struct{})
-	for _, item := range items {
-		if item.Kind == ItemDiagnostic && item.Status == ItemCompleted {
-			closed[item.ParentItemID] = struct{}{}
-		}
-	}
+	receipts := executionDispatchReceiptIndex(items)
 	var interruptedStart Item
 	for _, item := range items {
 		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
@@ -60,7 +55,7 @@ func (runner *Runner) resumeNativeFencedAgentAfterInterruptedStart(
 		if item.RunID != invocation.ExecutionRefID {
 			return kernel.Snapshot{}, ErrConflict
 		}
-		if _, settled := closed[item.ID]; settled {
+		if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); settled {
 			continue
 		}
 		var phase struct {

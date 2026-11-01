@@ -87,7 +87,7 @@ func TestRoutedCoordinatorFailsClosedWithoutChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = coordinator.Refresh(t.Context(), handoff.Delegation{
+	_, err = coordinator.Refresh(t.Context(), verifiedHandoffParent(), handoff.Delegation{
 		ID: "handoff", MemberID: "unknown", ChildRunID: "run", Goal: "goal", Status: handoff.StatusRunning,
 	})
 	if !errors.Is(err, handoff.ErrChildUnavailable) {
@@ -173,7 +173,7 @@ func (children *fakeChildren) StartRun(
 	children.starts++
 	snapshot := kernel.Snapshot{Run: kernel.Run{
 		ID: request.ID, Kind: agent.RunKind, Actor: request.Actor,
-		Thread: request.Thread, Goal: request.Goal, Status: kernel.RunStatusRunning, Revision: 1,
+		Thread: request.Thread, Goal: request.Goal, RequestID: request.RequestID, Status: kernel.RunStatusRunning, Revision: 1,
 	}}
 	children.runs[request.ID] = snapshot
 	return snapshot, nil

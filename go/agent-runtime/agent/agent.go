@@ -332,6 +332,10 @@ type Runner struct {
 	modelLimiter        *callLimiter
 	toolLimiter         *callLimiter
 	deferResume         bool
+
+	// Frozen at composition: Host middleware/preparers may issue effects
+	// after Kernel Cancel, even when the native Run is already terminal.
+	kernelOwnedStartCancellation bool
 }
 
 type runState struct {
@@ -486,9 +490,36 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		modelLimiter:        newCallLimiter(execution.Model.MaxConcurrency),
 		toolLimiter:         newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:            runChain, modelChain: modelChain, toolChain: toolChain,
+		kernelOwnedStartCancellation: len(dependencies.RunMiddleware) == 0 &&
+			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
+			dependencies.PrepareModelRequest == nil,
 		prepareModelRequest: dependencies.PrepareModelRequest,
 		deferResume:         dependencies.DeferResumption,
 	}, nil
+}
+
+// NativeStartCancellationFencedByKernel is a narrow first-party proof for
+// Harness cancellation of an unsettled Start grant. Only this exact Agent
+// Runtime, with no Host Run/Model/Tool middleware or Model request preparer,
+// may hand cancellation off to the Kernel CAS/Execution fence. A concrete
+// *Runner type alone does not prove the absence of unfenced Host effects.
+func (runner *Runner) NativeStartCancellationFencedByKernel(runtime *kernel.Runtime) bool {
+	return runner != nil && runner.runtime == runtime && runner.kernelOwnedStartCancellation
+}
+
+// OwnsKernelRuntime certifies that a statically routed native child executes
+// only under the exact Kernel's CAS/Epoch fence. An Agent with arbitrary Host
+// middleware/preparers cannot make this claim: those callbacks may continue
+// after the Kernel Run is cancelled. Run metadata is not ownership proof.
+func (runner *Runner) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
+	return runner.NativeStartCancellationFencedByKernel(runtime)
+}
+
+// ObservesKernelRuntime proves only the immutable Kernel used by LoadRun.
+// Unlike OwnsKernelRuntime it does not authorize physical cancellation:
+// Host middleware/preparers can perform side effects outside Kernel CAS.
+func (runner *Runner) ObservesKernelRuntime(runtime *kernel.Runtime) bool {
+	return runner != nil && runtime != nil && runner.runtime == runtime
 }
 
 // Descriptor declares the explicit Agent capability graph.

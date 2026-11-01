@@ -35,8 +35,8 @@ func TestRequireLiveInvocationParentsReadsOnlyAncestorItems(t *testing.T) {
 		}
 	}
 	for _, item := range []Item{
-		{ID: "root-owner-item", TurnID: turnID, InvocationID: "root-owner", Kind: ItemInvocation, Status: ItemStarted},
-		{ID: "middle-owner-item", TurnID: turnID, InvocationID: "middle-owner", ParentItemID: "root-owner-item",
+		{ID: "root-owner-item", TurnID: turnID, InvocationID: "root-owner", RunID: "host-root-owner", Kind: ItemInvocation, Status: ItemStarted},
+		{ID: "middle-owner-item", TurnID: turnID, InvocationID: "middle-owner", RunID: "host-middle-owner", ParentItemID: "root-owner-item",
 			Kind: ItemInvocation, Status: ItemStarted},
 	} {
 		if _, _, err := backing.AppendItem(t.Context(), item); err != nil {
@@ -46,11 +46,23 @@ func TestRequireLiveInvocationParentsReadsOnlyAncestorItems(t *testing.T) {
 	for _, id := range []string{"root-owner", "middle-owner"} {
 		backing.invocations[id] = Invocation{
 			ID: id, TurnID: turnID, Status: InvocationRunning, ExecutionClass: ExecutionApplication,
+			ExecutionRefID: "host-" + id, Attempt: 1,
 		}
+	}
+	middle := backing.invocations["middle-owner"]
+	middle.ParentItemID = "root-owner-item"
+	backing.invocations[middle.ID] = middle
+	original, inputHash, err := marshalInvocationValue(struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input, inputHash, err := sealChildRootInput(original, inputHash, backing.invocations["root-owner"], invocationAttempt(middle))
+	if err != nil {
+		t.Fatal(err)
 	}
 	spy := &indexOnlyParentStore{Store: backing}
 	runner := &Runner{store: spy}
-	child := Invocation{ID: "grandchild", TurnID: turnID, ParentItemID: "middle-owner-item"}
+	child := Invocation{ID: "grandchild", TurnID: turnID, ParentItemID: "middle-owner-item", Input: input, InputHash: inputHash}
 	if err := runner.requireLiveInvocationParents(t.Context(), child); err != nil {
 		t.Fatalf("live direct ancestry was rejected: %v", err)
 	}
@@ -106,10 +118,23 @@ func TestIndexedAncestorWalkFailsClosedOnCyclesAndForeignTurns(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			// Supply valid root proof so the guard actually reaches the
+			// malformed Item ancestry, rather than rejecting missing proof.
+			root := Invocation{ID: "walk-root", TurnID: "turn", ExecutionClass: ExecutionApplication,
+				ExecutionRefID: "walk-root-attempt", Attempt: 1, Status: InvocationRunning}
+			backing.invocations[root.ID] = root
+			raw, hash, err := marshalInvocationValue(struct{}{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			input, hash, err := sealChildRootInput(raw, hash, root)
+			if err != nil {
+				t.Fatal(err)
+			}
 			spy := &indexOnlyParentStore{Store: backing}
 			runner := &Runner{store: spy}
-			err := runner.requireLiveInvocationParents(t.Context(), Invocation{
-				ID: "child", TurnID: "turn", ParentItemID: tc.parent,
+			err = runner.requireLiveInvocationParents(t.Context(), Invocation{
+				ID: "child", TurnID: "turn", ParentItemID: tc.parent, Input: input, InputHash: hash,
 			})
 			if !errors.Is(err, ErrConflict) || spy.listCalls != 0 {
 				t.Fatalf("cycle/foreign Item bypassed fail-closed ancestry: err=%v scans=%d",

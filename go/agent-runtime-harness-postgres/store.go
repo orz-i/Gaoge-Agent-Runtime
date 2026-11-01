@@ -229,16 +229,23 @@ func (store *Store) RetryInvocation(
 		// A failed projection cannot rotate a Run identity whose physical
 		// Start/Resume is still outcome-unknown. The Turn lock serializes this
 		// check with grant append and completion on every SQL connection.
-		scopeID := current.ID
-		if strings.TrimSpace(current.ParentItemID) == "" {
-			scopeID = "" // Root retry owns every unfinished child dispatch.
-		}
-		pending, pendingErr := pendingExecutionDispatchTx(tx, current.TurnID, scopeID)
+		// A child's unfinished physical grant must also fence an intermediate
+		// parent's Attempt rotation. Turn-wide is intentionally conservative;
+		// the grant alone does not freeze transitive ancestor ownership.
+		pending, pendingErr := pendingExecutionDispatchTx(tx, current.TurnID, "")
 		if pendingErr != nil {
 			return pendingErr
 		}
 		if pending {
 			return harness.ErrConflict
+		}
+		// The completed Start receipt proves dispatch, not child termination.
+		// The same Turn lock serializes this nonterminal-child check with
+		// Accepted->Running claims and grant admission on every SQL connection.
+		// Accepted children without grants remain crash-recoverable, while an
+		// Accepted Handoff/native child with an effectful grant still fences retry.
+		if err := retryChildEffectFenceTx(tx, current.TurnID, current); err != nil {
+			return err
 		}
 		if strings.TrimSpace(current.ParentItemID) == "" {
 			result := tx.Model(&turnRecord{}).
@@ -1297,6 +1304,9 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 		return err
 	}
 	value.Seq = seq
+	if err := checkExecutionDispatchCompletionTx(tx, value); err != nil {
+		return err
+	}
 	record, err := itemToRecord(value)
 	if err != nil {
 		return err

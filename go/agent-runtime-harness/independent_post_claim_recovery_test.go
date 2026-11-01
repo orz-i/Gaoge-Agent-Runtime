@@ -12,6 +12,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
@@ -184,6 +185,14 @@ func TestIndependentAuditedLongRunningTurnTerminalEventSurvivesFeedRetention(t *
 }
 
 type auditRunningTeamFeature struct{ runtime *kernel.Runtime }
+
+// This test-only Team runner never launches a child; zero relation writes
+// are complete. Explicitly attest its Kernel and no-descendant contract so
+// cancellation arbitration tests still reach their intended Host barriers.
+func (f auditRunningTeamFeature) OwnsKernelRuntime(rt *kernel.Runtime) bool {
+	return f.runtime != nil && f.runtime == rt
+}
+func (auditRunningTeamFeature) RecordsRelationsTo(runrelation.Recorder) bool { return true }
 
 func (f auditRunningTeamFeature) StartRun(ctx context.Context, req team.StartRequest) (kernel.Snapshot, error) {
 	return f.runtime.Create(ctx, kernel.CreateRequest{

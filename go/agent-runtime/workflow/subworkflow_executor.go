@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,7 +27,34 @@ func (runner *Runner) executeSubworkflowEffect(
 	if err != nil {
 		return EffectResult{}, err
 	}
+	if !verifiedSubworkflowChildOrigin(request, child) {
+		return EffectResult{}, ErrInvalidExecution
+	}
+	if err := runner.ensureSubworkflowRelation(ctx, request, childID); err != nil {
+		return EffectResult{}, err
+	}
 	return runner.advanceSubworkflowChild(ctx, child)
+}
+
+// The parent Effect intent is already durable. Its deterministic child must
+// have an immutable ownership edge before native Create, Resume or receipt.
+// Reuse the exact same owner and Attempt rules as the post-dispatch observer,
+// including node-owned fan-out relations during recovery. If the write fails,
+// no new child may be started; an already-existing child is not advanced.
+func (runner *Runner) ensureSubworkflowRelation(ctx context.Context, request EffectRequest, childID string) error {
+	if runner.relations == nil {
+		return nil // Standalone Workflow callers without an index; Harness fails closed.
+	}
+	intent := Effect{
+		ID: request.EffectID, NodeID: request.NodeID,
+		ChildRunID: childID, Attempt: request.Attempt,
+		OutputKey: request.OutputKey, Mapped: request.Mapped,
+	}
+	if strings.TrimSpace(request.RunID) == "" || strings.TrimSpace(request.OwnerNodeID) == "" ||
+		effectRelationOwnerID(intent) != request.OwnerNodeID {
+		return ErrInvalidExecution
+	}
+	return runner.ensureEffectRelation(ctx, request.RunID, intent)
 }
 
 func (runner *Runner) startSubworkflowChild(
@@ -40,6 +68,9 @@ func (runner *Runner) startSubworkflowChild(
 	if err != nil {
 		return EffectResult{}, err
 	}
+	if err := runner.ensureSubworkflowRelation(ctx, request, childID); err != nil {
+		return EffectResult{}, err
+	}
 	child, err := runner.StartRun(ctx, StartRequest{
 		ID: childID, Actor: request.Actor, Thread: request.Thread, RequestID: request.EffectID,
 		Goal: "subworkflow:" + published.Definition.ID, Definition: published.Definition,
@@ -51,7 +82,31 @@ func (runner *Runner) startSubworkflowChild(
 	if err != nil && !isWorkflowProgressError(err) {
 		return EffectResult{}, err
 	}
+	if !verifiedSubworkflowChildOrigin(request, child) {
+		return EffectResult{}, ErrInvalidExecution
+	}
 	return subworkflowEffectResult(child)
+}
+
+// A deterministic ID identifies the desired task, not every Run occupying it.
+// Validate before Resume or accepting a terminal receipt, including recovery
+// from a concurrent Create conflict. Definition and input are immutable origin.
+func verifiedSubworkflowChildOrigin(request EffectRequest, child kernel.Snapshot) bool {
+	if request.Definition == nil || !validDefinitionReference(*request.Definition) ||
+		strings.TrimSpace(request.EffectID) == "" || request.NestedDepth <= 0 ||
+		!json.Valid(request.Input) || child.Run.Kind != RunKind ||
+		child.Run.ID != strings.TrimSpace(request.EffectID)+"-child" ||
+		child.Run.Actor != request.Actor || child.Run.Thread != request.Thread ||
+		child.Run.RequestID != strings.TrimSpace(request.EffectID) ||
+		child.Run.Goal != strings.TrimSpace("subworkflow:"+request.Definition.ID) {
+		return false
+	}
+	state, err := decodeExecutionState(child.State)
+	return err == nil && state.Definition.ID == request.Definition.ID &&
+		state.Definition.Revision == request.Definition.Revision &&
+		state.Definition.Hash == request.Definition.Hash &&
+		state.NestedDepth == request.NestedDepth &&
+		bytes.Equal(normalizeJSON(state.Input), normalizeJSON(request.Input))
 }
 
 func (runner *Runner) advanceSubworkflowChild(
