@@ -5,6 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Require Feature-owned fixed local route and persisted task proofs before
+  observing, approving or cancelling raw Team/GroupChat/Workflow descendants.
+  A same-ID local Run or unrelated Harness Invocation cannot replace this
+  proof. Delegation Tool recovery/waits likewise require frozen local ownership;
+  built-in subworkflows verify immutable origin before resume or receipt use.
+  Remote/unproven outcomes retain existing reconciliation fences. See the
+  [PR #82 route-proof audit](docs/audits/2026-11-01-pr82-feature-route-proof.md).
+
 - P3 canonical Model Message multi-modal hard cut: replace
   `Message.Content string` with one ordered, closed
   `[]ContentPart` (text, image, PDF, audio remote references).

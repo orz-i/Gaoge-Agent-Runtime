@@ -1,13 +1,11 @@
 package harness_test
 
 import (
-	"encoding/json"
+	"errors"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
@@ -18,35 +16,17 @@ func TestAuditPR82FailedChildInvocationCannotSkipLiveRelationDescendantCancellat
 	_, turnID, parentItemID, relations, _, store, rt := newFeatureInvocationHarness(t)
 	runner, err := harness.NewRunner(harness.Dependencies{
 		Runtime: rt, Agent: loadingFeatureAgent{runtime: rt}, Store: store,
-		Clock: featureInvocationClock{}, Teams: auditRunningTeamFeature{runtime: rt}, Relations: relations,
+		Clock: featureInvocationClock{}, Teams: pr82LocalTeam(t, rt, relations), Relations: relations,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
-		ParentItemID: parentItemID, RequestID: "audit-child-failed-owner", Goal: "team with active member",
-		Mode: team.ExecutionSequential, Members: []team.Member{{ID: "member", Goal: "remain running"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	child := teamChildInvocation(t, started)
+	child := pr82StartLocalTeamChild(t, runner, turnID, parentItemID)
 	parent, err := rt.Load(t.Context(), child.ExecutionRefID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	member, err := rt.Create(t.Context(), kernel.CreateRequest{
-		ID: "audit-child-grandchild-still-running", Kind: agent.RunKind, Actor: parent.Run.Actor,
-		Thread: parent.Run.Thread, RequestID: "related-member", Goal: "do not skip cancellation", State: json.RawMessage(`{}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: child.ExecutionRefID,
-		ChildRunID: member.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "member"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	member := pr82LocalMember(t, rt, parent)
 	failed, err := rt.Apply(t.Context(), parent.Run.ID, parent.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusFailed, State: parent.State, ErrorCode: "feature.failed", ErrorDetail: "failure while member remains running",
 	})
@@ -76,35 +56,17 @@ func TestAuditPR82CancelSubtaskFailedCompositeDoesNotSkipLiveMember(t *testing.T
 	_, turnID, parentItemID, relations, _, store, rt := newFeatureInvocationHarness(t)
 	runner, err := harness.NewRunner(harness.Dependencies{
 		Runtime: rt, Agent: loadingFeatureAgent{runtime: rt}, Store: store,
-		Clock: featureInvocationClock{}, Teams: auditRunningTeamFeature{runtime: rt}, Relations: relations,
+		Clock: featureInvocationClock{}, Teams: pr82LocalTeam(t, rt, relations), Relations: relations,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
-		ParentItemID: parentItemID, RequestID: "audit-subtask-failed-owner", Goal: "failed team still owns member",
-		Mode: team.ExecutionSequential, Members: []team.Member{{ID: "member", Goal: "still running"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	child := teamChildInvocation(t, started)
+	child := pr82StartLocalTeamChild(t, runner, turnID, parentItemID)
 	parent, err := rt.Load(t.Context(), child.ExecutionRefID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	member, err := rt.Create(t.Context(), kernel.CreateRequest{
-		ID: "audit-subtask-member-still-running", Kind: agent.RunKind, Actor: parent.Run.Actor,
-		Thread: parent.Run.Thread, RequestID: "related-member", Goal: "must be cancelled", State: json.RawMessage(`{}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: child.ExecutionRefID,
-		ChildRunID: member.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "member"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	member := pr82LocalMember(t, rt, parent)
 	if _, err = rt.Apply(t.Context(), parent.Run.ID, parent.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusFailed, State: parent.State, ErrorCode: "feature.failed", ErrorDetail: "member still running",
 	}); err != nil {
@@ -143,23 +105,28 @@ func TestAuditPR82CancelSubtaskFailedCompositeDoesNotSkipLiveMember(t *testing.T
 // Parent Kernel and Harness Turn are both Failed, but RunRelation still owns
 // a live Kernel child. Root Cancel must not silently return the cached Turn.
 func TestAuditPR82FailedRootTurnCannotSkipLiveRunRelationDescendant(t *testing.T) {
-	runner, turnID, _, relations, rootRunID, store, rt := newFeatureInvocationHarness(t)
+	rt := newFeatureInvocationRuntime(t)
+	store := harness.NewMemoryStore()
+	relations := newFeatureInvocationRelations(t)
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: loadingFeatureAgent{runtime: rt}, Store: store, Clock: featureInvocationClock{}, Teams: pr82LocalTeam(t, rt, relations), Relations: relations})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := runner.StartTeamTurn(t.Context(), harness.TeamTurnRequest{StartRequest: harness.StartRequest{
+		HostThread: harness.HostRef{Kind: testThreadKind, ID: "local-root-thread"}, HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "local-root-turn"}, Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "local-root-thread"}, RequestID: "local-root", Goal: "local root", Config: harness.ConfigSnapshot{Model: "fixture-model"}}, Mode: team.ExecutionSequential, Members: []team.Member{{ID: "member", Goal: "continues"}}})
+	if err != nil && !errors.Is(err, team.ErrMemberPending) {
+		t.Fatal(err)
+	}
+	rootInvocation, ok := harness.TopLevelInvocation(started)
+	if !ok {
+		t.Fatal("no root")
+	}
+	turnID, rootRunID := started.Turn.ID, rootInvocation.ExecutionRefID
 	root, err := rt.Load(t.Context(), rootRunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	member, err := rt.Create(t.Context(), kernel.CreateRequest{
-		ID: "audit-root-failed-member-still-running", Kind: agent.RunKind, Actor: root.Run.Actor,
-		Thread: root.Run.Thread, RequestID: "related-member", Goal: "root failed but member active", State: json.RawMessage(`{}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: rootRunID,
-		ChildRunID: member.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "member"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	member := pr82LocalMember(t, rt, root)
 	if _, err = rt.Apply(t.Context(), rootRunID, root.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusFailed, State: root.State, ErrorCode: "root.failed", ErrorDetail: "member remains active",
 	}); err != nil {

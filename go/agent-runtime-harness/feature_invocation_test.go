@@ -293,28 +293,17 @@ func TestTopLevelFeatureStartFailureWithoutRuntimeRunRemainsLoadable(t *testing.
 
 func TestCancelCascadesAcrossCapabilityRunTree(t *testing.T) {
 	t.Parallel()
-	runner, turnID, parentItemID, relations, parentRunID, store, runtime := newFeatureInvocationHarness(t)
-	now := featureInvocationClock{}.Now()
-	childRun := createRunningFeatureRun(t, runtime, "cancel-child-run", team.RunKind)
-	nestedRun := createRunningFeatureRun(t, runtime, "cancel-nested-run", agent.RunKind)
-	childInvocation := harness.Invocation{
-		ID: "hiv_cancel_child", TurnID: turnID, ParentItemID: parentItemID,
-		CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionTeam, InputHash: "cancel-child", ExecutionRefID: childRun.Run.ID,
-		Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if _, _, err := store.CreateInvocation(t.Context(), childInvocation); err != nil {
+	_, turnID, parentItemID, relations, parentRunID, store, runtime := newFeatureInvocationHarness(t)
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{}, Teams: pr82LocalTeam(t, runtime, relations), Relations: relations})
+	if err != nil {
 		t.Fatal(err)
 	}
-	for _, draft := range []runrelation.Draft{
-		{ParentRunID: parentRunID, ChildRunID: childRun.Run.ID, Kind: runrelation.KindCapability, OwnerNodeID: childInvocation.ID},
-		{ParentRunID: childRun.Run.ID, ChildRunID: nestedRun.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "writer"},
-	} {
-		if _, err := relations.Ensure(t.Context(), draft); err != nil {
-			t.Fatal(err)
-		}
+	childInvocation := pr82StartLocalTeamChild(t, runner, turnID, parentItemID)
+	childRun, err := runtime.Load(t.Context(), childInvocation.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	nestedRun := pr82LocalMember(t, runtime, childRun)
 
 	cancelled, err := runner.Cancel(t.Context(), turnID, "operator request")
 	if err != nil || cancelled.Turn.Status != harness.TurnCancelled {
@@ -1019,20 +1008,6 @@ func completeFeatureRun(
 		Status: kernel.RunStatusCompleted, State: started.State,
 		Result: &kernel.Result{ContentType: "application/json", Content: json.RawMessage(`{"ok":true}`)},
 	})
-}
-
-func createRunningFeatureRun(t *testing.T, runtime *kernel.Runtime, id string, kind kernel.RunKind) kernel.Snapshot {
-	t.Helper()
-	created, err := runtime.Create(t.Context(), kernel.CreateRequest{
-		ID: id, Kind: kind,
-		Actor:     kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
-		Thread:    kernel.ThreadRef{Kind: testThreadKind, ID: "feature-thread"},
-		RequestID: id, Goal: id, State: json.RawMessage(`{}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return created
 }
 
 type featureInvocationClock struct{}

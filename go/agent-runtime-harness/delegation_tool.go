@@ -197,22 +197,23 @@ func (handler *DelegationToolHandler) VerifyCommittedTool(
 	if stored == nil {
 		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 	}
-	child, err := runner.runtime.Load(ctx, stored.ChildRunID)
+	child, frozen, err := runner.localDelegationObservation(ctx, stored.ChildRunID)
 	if err != nil {
 		return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
 	}
-	// Handoff may compose a trusted custom child Runner rather than the
-	// first-party Agent. Its committed Kernel terminal fact, under this
-	// exact frozen ChildRunID, is authority for delegation completion.
-	// No external Handler or remote agent is invoked in this lookup.
+	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, stored.ChildRunID)
+	if err != nil || owner.ParentItemID != startedID || frozen.ID != delegationID {
+		return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
+	}
+	// The original fixed route and frozen task, not a same-ID local Run,
+	// authorize this read-only terminal receipt. Never consult a dynamic or
+	// remote route's coincidentally present local Kernel twin.
 	if !terminalRuntimeStatus(child.Run.Status) {
 		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 	}
 	status := handoff.Status(child.Run.Status)
-	delegation := handoff.Delegation{
-		ID: stored.DelegationID, ChildRunID: stored.ChildRunID,
-		Status: status, ErrorCode: child.Run.ErrorCode,
-	}
+	delegation := frozen
+	delegation.Status, delegation.ErrorCode = status, child.Run.ErrorCode
 	if child.Result != nil {
 		delegation.Result = append(json.RawMessage(nil), child.Result.Content...)
 	}
@@ -241,6 +242,29 @@ func (handler *DelegationToolHandler) VerifyCommittedTool(
 	}, nil
 }
 
+// localDelegationObservation is read-only route authority shared by Tool
+// recovery, autonomous waits and native-result projection. A persisted child
+// ID (even with matching public metadata) does not establish Kernel residence.
+func (runner *Runner) localDelegationObservation(ctx context.Context, runID string) (kernel.Snapshot, handoff.Delegation, error) {
+	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
+	if !ok || !coordinator.ObservesLocalKernelRunner(runner.runtime) {
+		return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
+	}
+	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, runID)
+	if err != nil || !isHandoffDelegationInvocation(owner) || owner.ExecutionRefID != runID {
+		return kernel.Snapshot{}, handoff.Delegation{}, errors.Join(ErrHandoffCancellationUnverified, err)
+	}
+	child, err := runner.runtime.Load(ctx, runID)
+	if err != nil {
+		return kernel.Snapshot{}, handoff.Delegation{}, err
+	}
+	frozen, _, err := runner.localHandoffCancellationAuthority(ctx, owner, child)
+	if err != nil {
+		return kernel.Snapshot{}, handoff.Delegation{}, err
+	}
+	return child, frozen, nil
+}
+
 // A local Agent's terminal output includes full native search receipts for
 // auditing. Forward the actual answer, citations and artifact references to
 // its supervisor, plus receipt identities, rather than copying whole web pages
@@ -250,7 +274,10 @@ func (runner *Runner) delegationModelResult(ctx context.Context, delegation hand
 	if delegation.Status != handoff.StatusCompleted || len(raw) == 0 || raw[0] != '{' {
 		return raw, nil
 	}
-	child, err := runner.runtime.Load(ctx, delegation.ChildRunID)
+	child, _, err := runner.localDelegationObservation(ctx, delegation.ChildRunID)
+	if errors.Is(err, ErrHandoffCancellationUnverified) || errors.Is(err, kernel.ErrNotFound) {
+		return raw, nil // Remote output must not borrow a local twin's type.
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -286,14 +313,14 @@ func delegationReceiptErrorCode(status handoff.Status) string {
 // Only the local SDK Agent has an autonomous committed-transition contract.
 // Custom/remote runners retain their existing scheduled observation behavior.
 func (runner *Runner) localDelegationWait(ctx context.Context, delegation handoff.Delegation) (*tools.PendingExecution, error) {
-	child, err := runner.runtime.Load(ctx, delegation.ChildRunID)
-	if errors.Is(err, kernel.ErrNotFound) {
-		return nil, nil
+	child, frozen, err := runner.localDelegationObservation(ctx, delegation.ChildRunID)
+	if errors.Is(err, kernel.ErrNotFound) || errors.Is(err, ErrHandoffCancellationUnverified) {
+		return nil, nil // No local autonomous wait for an unproven route.
 	}
 	if err != nil {
 		return nil, err
 	}
-	if child.Run.Kind != agent.RunKind {
+	if child.Run.Kind != agent.RunKind || !sameHandoffFrozenExecution(frozen, delegation) {
 		return nil, nil
 	}
 	return &tools.PendingExecution{

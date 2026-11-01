@@ -131,6 +131,11 @@ func (runner *Runner) cancelRuntimeRun(
 				return kernel.Snapshot{}, true, err
 			}
 		}
+		// RunRelation children may belong to a remote Feature executor even
+		// when this Kernel contains a same-ID Run (including a terminal twin).
+		if err = runner.verifyLocalRelationRun(ctx, current, true); err != nil {
+			return kernel.Snapshot{}, true, err
+		}
 		if terminalRuntimeStatus(current.Run.Status) {
 			return current, true, nil
 		}

@@ -179,6 +179,13 @@ func (runner *Runner) materializeSubtask(ctx context.Context, value Subtask, led
 			return value, nil //nolint:nilerr // Deliberately retain persisted source on failed local proof.
 		}
 	}
+	if proofErr := runner.verifyLocalRelationRun(ctx, snapshot, false); proofErr != nil {
+		if !errors.Is(proofErr, ErrRuntimeCancellationUnverified) {
+			return value, proofErr
+		}
+		// Keep only persisted relation/delegation facts, never a foreign Run.
+		return value, nil
+	}
 	value.Status = string(snapshot.Run.Status)
 	value.Goal = snapshot.Run.Goal
 	value.StartedAt, value.UpdatedAt = &snapshot.Run.CreatedAt, &snapshot.Run.UpdatedAt
@@ -416,6 +423,11 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	snapshot, err := runner.runtime.Load(ctx, task.RunID)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	// Approval resumes through the Agent (including its middleware), rather
+	// than bypassing the execution owner via direct Kernel cancellation.
+	if err = runner.verifyLocalRelationRun(ctx, snapshot, false); err != nil {
+		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	if snapshot.Checkpoint == nil || snapshot.Checkpoint.ID != checkpointID {
 		return Snapshot{}, ErrConflict

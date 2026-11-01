@@ -1,0 +1,33 @@
+package groupchat
+
+import (
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+)
+
+// VerifyLocalChild proves the fixed execution route and persisted speaker task.
+// The caller must independently establish the parent's ownership chain.
+// control requires cancellation ownership, not merely read-only observation.
+func (runner *Runner) VerifyLocalChild(runtime *kernel.Runtime, parent kernel.Snapshot, relation runrelation.Relation, child kernel.Snapshot, control bool) bool {
+	if runner == nil || runtime == nil || runner.runtime != runtime || parent.Run.Kind != RunKind ||
+		relation.Kind != runrelation.KindGroupChatSpeaker || relation.ParentRunID != parent.Run.ID ||
+		relation.ChildRunID != child.Run.ID || relation.OwnerNodeID == "" {
+		return false
+	}
+	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
+	if !ok || (control && !coordinator.OwnsLocalKernelRunner(runtime)) ||
+		(!control && !coordinator.ObservesLocalKernelRunner(runtime)) {
+		return false
+	}
+	state, err := decodeState(parent.State)
+	if err != nil {
+		return false
+	}
+	for _, speaker := range state.Speakers {
+		if speaker.Delegation.ID == relation.OwnerNodeID && speaker.Delegation.ChildRunID == relation.ChildRunID {
+			return handoff.VerifiedChildRun(speaker.Delegation, parent.Run, child)
+		}
+	}
+	return false
+}

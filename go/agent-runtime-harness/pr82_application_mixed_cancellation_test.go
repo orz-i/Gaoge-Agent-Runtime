@@ -6,8 +6,9 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
 func auditMixedNativeChild(t *testing.T, f *pr82HandoffFixture, parentItem, id string) Invocation {
@@ -35,16 +36,44 @@ func TestAuditPR82ApplicationMixedDescendantCancellationPreservesSibling(t *test
 	f, parent, parentItem, _ := newPR82NestedApplicationParent(t, InvocationRunning)
 	f.runner.cancellation = f.runtime
 	f.runner.relationReader = f.runner.relations.(RunRelationSource)
-	child := auditMixedNativeChild(t, f, parentItem, "mixed-native-child")
+	coordinator, e := handoff.New(&pr82BoundKernelChild{runtime: f.runtime})
+	if e != nil {
+		t.Fatal(e)
+	}
+	feature, e := team.NewRunner(team.Dependencies{Runtime: f.runtime, Handoffs: coordinator, Relations: f.runner.relations})
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.runner.teams = feature
+	started, e := f.runner.StartTeamInvocation(t.Context(), f.turn.ID, TeamInvocationRequest{
+		ParentItemID: parentItem, RequestID: "mixed-native-child", Goal: "real local Team", Mode: team.ExecutionSequential,
+		Members: []team.Member{{ID: "leaf", Goal: "leaf"}},
+	})
+	if e != nil && !errors.Is(e, team.ErrMemberPending) {
+		t.Fatal(e)
+	}
+	var child Invocation
+	for _, inv := range started.Invocations {
+		if inv.ExecutionClass == ExecutionTeam {
+			child = inv
+		}
+	}
+	if child.ID == "" {
+		t.Fatal("missing real Team child")
+	}
+	teamRun, e := f.runtime.Load(t.Context(), child.ExecutionRefID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	view, e := team.ViewState(teamRun)
+	if e != nil || len(view.Members) != 1 {
+		t.Fatalf("member view: %+v %v", view, e)
+	}
+	leaf, e := f.runtime.Load(t.Context(), view.Members[0].Delegation.ChildRunID)
+	if e != nil {
+		t.Fatal(e)
+	}
 	sibling := auditMixedNativeChild(t, f, f.startedItemID, "unrelated-native-sibling")
-	leaf, e := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: "mixed-native-leaf", Kind: agent.RunKind, Actor: f.parentRun.Run.Actor, Thread: f.parentRun.Run.Thread, RequestID: "mixed-leaf", Goal: "leaf", State: []byte(`{}`)})
-	if e != nil {
-		t.Fatal(e)
-	}
-	_, e = f.runner.relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: child.ExecutionRefID, ChildRunID: leaf.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "leaf"})
-	if e != nil {
-		t.Fatal(e)
-	}
 	_, e = f.runner.completeApplicationInvocation(t.Context(), f.turn, parent, nil)
 	if e != nil {
 		t.Fatal(e)

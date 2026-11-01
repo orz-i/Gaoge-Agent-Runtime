@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,9 @@ func (runner *Runner) executeSubworkflowEffect(
 	}
 	if err != nil {
 		return EffectResult{}, err
+	}
+	if !verifiedSubworkflowChildOrigin(request, child) {
+		return EffectResult{}, ErrInvalidExecution
 	}
 	return runner.advanceSubworkflowChild(ctx, child)
 }
@@ -51,7 +55,31 @@ func (runner *Runner) startSubworkflowChild(
 	if err != nil && !isWorkflowProgressError(err) {
 		return EffectResult{}, err
 	}
+	if !verifiedSubworkflowChildOrigin(request, child) {
+		return EffectResult{}, ErrInvalidExecution
+	}
 	return subworkflowEffectResult(child)
+}
+
+// A deterministic ID identifies the desired task, not every Run occupying it.
+// Validate before Resume or accepting a terminal receipt, including recovery
+// from a concurrent Create conflict. Definition and input are immutable origin.
+func verifiedSubworkflowChildOrigin(request EffectRequest, child kernel.Snapshot) bool {
+	if request.Definition == nil || !validDefinitionReference(*request.Definition) ||
+		strings.TrimSpace(request.EffectID) == "" || request.NestedDepth <= 0 ||
+		!json.Valid(request.Input) || child.Run.Kind != RunKind ||
+		child.Run.ID != strings.TrimSpace(request.EffectID)+"-child" ||
+		child.Run.Actor != request.Actor || child.Run.Thread != request.Thread ||
+		child.Run.RequestID != strings.TrimSpace(request.EffectID) ||
+		child.Run.Goal != strings.TrimSpace("subworkflow:"+request.Definition.ID) {
+		return false
+	}
+	state, err := decodeExecutionState(child.State)
+	return err == nil && state.Definition.ID == request.Definition.ID &&
+		state.Definition.Revision == request.Definition.Revision &&
+		state.Definition.Hash == request.Definition.Hash &&
+		state.NestedDepth == request.NestedDepth &&
+		bytes.Equal(normalizeJSON(state.Input), normalizeJSON(request.Input))
 }
 
 func (runner *Runner) advanceSubworkflowChild(

@@ -134,27 +134,16 @@ func TestIndependentPR82CancelledSubtaskUnknownDescendantsPostFix(t *testing.T) 
 
 func TestIndependentPR82LocalDescendantsConfirmedPostFix(t *testing.T) {
 	_, turnID, parentItemID, relations, _, store, rt := newFeatureInvocationHarness(t)
-	runner, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: loadingFeatureAgent{runtime: rt}, Store: store, Clock: featureInvocationClock{}, Teams: auditRunningTeamFeature{runtime: rt}, Relations: relations})
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: loadingFeatureAgent{runtime: rt}, Store: store, Clock: featureInvocationClock{}, Teams: pr82LocalTeam(t, rt, relations), Relations: relations})
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{ParentItemID: parentItemID, RequestID: "independent-failed-parent", Goal: "failed team", Mode: team.ExecutionSequential, Members: []team.Member{{ID: "member", Goal: "continues"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	child := teamChildInvocation(t, started)
+	child := pr82StartLocalTeamChild(t, runner, turnID, parentItemID)
 	parent, err := rt.Load(t.Context(), child.ExecutionRefID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	remote, err := rt.Create(t.Context(), kernel.CreateRequest{ID: "independent-local-descendant", Kind: agent.RunKind, Actor: parent.Run.Actor, Thread: parent.Run.Thread, RequestID: "local-child", Goal: "continues", State: parent.State})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: parent.Run.ID, ChildRunID: remote.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "remote-member"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	remote := pr82LocalMember(t, rt, parent)
 	_, err = rt.Apply(t.Context(), parent.Run.ID, parent.Run.Revision, kernel.Mutation{Status: kernel.RunStatusFailed, State: parent.State, ErrorCode: "team.failed", ErrorDetail: "remote member still running"})
 	if err != nil {
 		t.Fatal(err)
@@ -258,19 +247,18 @@ func TestIndependentPR82BudgetRemoteSubtaskPostFix(t *testing.T) {
 
 func TestIndependentPR82BudgetLocalSubtaskPostFix(t *testing.T) {
 	var runner *harness.Runner
-	_, turnID, _, relations, rootRunID, store, rt := newFeatureInvocationHarness(t)
-	root, err := rt.Load(t.Context(), rootRunID)
+	_, turnID, parentItemID, relations, rootRunID, store, rt := newFeatureInvocationHarness(t)
+	feature := pr82LocalTeam(t, rt, relations)
+	localRunner, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: loadingFeatureAgent{runtime: rt}, Store: store, Clock: featureInvocationClock{}, Teams: feature, Relations: relations})
 	if err != nil {
 		t.Fatal(err)
 	}
-	remote, err := rt.Create(t.Context(), kernel.CreateRequest{ID: "independent-local-direct-target", Kind: agent.RunKind, Actor: root.Run.Actor, Thread: root.Run.Thread, RequestID: "local-target", Goal: "continues", State: root.State})
+	child := pr82StartLocalTeamChild(t, localRunner, turnID, parentItemID)
+	parent, err := rt.Load(t.Context(), child.ExecutionRefID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: rootRunID, ChildRunID: remote.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "remote-member"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	remote := pr82LocalMember(t, rt, parent)
 	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: store, Clock: featureInvocationClock{}, Relations: relations})
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +273,7 @@ func TestIndependentPR82BudgetLocalSubtaskPostFix(t *testing.T) {
 	if _, err = coordinator.RegisterRun(t.Context(), turnID, remote.Run.ID, budget.RunBudget{ParentRunID: rootRunID}); err != nil {
 		t.Fatal(err)
 	}
-	runner, err = harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: loadingFeatureAgent{runtime: rt}, Store: store, Clock: featureInvocationClock{}, Relations: relations, Budget: shared})
+	runner, err = harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: loadingFeatureAgent{runtime: rt}, Store: store, Clock: featureInvocationClock{}, Relations: relations, Budget: shared, Teams: feature})
 	if err != nil {
 		t.Fatal(err)
 	}
