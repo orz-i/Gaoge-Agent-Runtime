@@ -180,6 +180,12 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 			Where("id = ? AND revision = ? AND turn_id = ? AND parent_item_id = ? AND capability_key = ? AND definition_version = ? AND execution_class = ? AND input_json = ? AND input_hash = ? AND attempt = ? AND execution_ref_id = ?",
 				value.ID, expectedRevision, value.TurnID, value.ParentItemID, value.CapabilityKey, value.DefinitionVersion,
 				string(value.ExecutionClass), record.InputJSON, value.InputHash, value.Attempt, value.ExecutionRefID).
+			// Enforce terminal immutability in the SAME atomic CAS as the state
+			// update, including across independent SQL connections. Explicit
+			// RetryInvocation is the only operation that rotates the Attempt.
+			Where("(status NOT IN ? OR status = ?)",
+				[]string{string(harness.InvocationCompleted), string(harness.InvocationFailed), string(harness.InvocationCancelled)},
+				string(value.Status)).
 			Updates(map[string]any{
 				"status": record.Status, "output_refs_json": record.OutputRefsJSON,
 				"error_code": record.ErrorCode, "error_detail": record.ErrorDetail,
