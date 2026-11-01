@@ -121,3 +121,29 @@ and permanent foreign-Kernel/unproven-local/owned-local positive tests passed
 admission/Store issue was found in that round. The reviewer independently
 validated this repair, and final-code `make check` plus real PostgreSQL/Redis
 `make integration` both passed (exit 0, integration cleanup complete).
+
+## Subsequent PR #82 independent audit: unindexed composite cancellation P1
+
+At PR Head `532b9a6`, independent Go Overlay probes reproduced two outcomes
+three times each with the race detector: a Running Team or already-Failed Team
+could physically start a remote ChildRunner member without `Relations`, then
+`Runner.Cancel` returned success and released the cancellation fence while
+that remote member remained Running. A second configuration split (Team writes
+to one recorder; Harness reads another) had the same empty-index ambiguity.
+
+The repair makes `relatedChildRunIDs` reject any **Harness-owned composite**
+with an existing Kernel Run if the Harness index is absent, or if a first-party
+Team/GroupChat/Workflow runner is not connected to the identical recorder.
+Original Invocation execution class, not a same-ID local foreign Run kind,
+determines which composite source is relevant; raw Feature and Handoff children
+keep their existing separate route proof. A definitively absent Kernel Run
+retains the original no-effect boundary. Custom Feature adapters still own
+their Host-supplied relation-writing contract.
+
+Permanent regressions cover Running/Failed, absent/divergent index, repeated
+Cancel, original remote member liveness, and retained durable intent. Memory
+and SQL Store tests cover the identical cancellation-fence semantics; the real
+PostgreSQL test runs when `TEST_POSTGRES_DSN` is available. This correction
+changes no Store API, SQL DDL, Kernel state, physical retry protocol or
+compatibility path. Its own exact-Head CI and independent review remain
+required before PR merge.

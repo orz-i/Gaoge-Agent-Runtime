@@ -7,6 +7,12 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
+// RecordsRelationsTo proves every speaker edge is indexed by the same
+// registry Harness uses to discover descendants during cancellation.
+func (runner *Runner) RecordsRelationsTo(recorder runrelation.Recorder) bool {
+	return runner != nil && runrelation.SameRecorder(runner.relations, recorder)
+}
+
 // UsesLocalAgentRunner proves approval continues through the fixed child Agent.
 func (runner *Runner) UsesLocalAgentRunner(runtime *kernel.Runtime, candidate *agent.Runner) bool {
 	if runner == nil || runner.runtime != runtime {

@@ -598,6 +598,12 @@ func (runner *Runner) verifyMissingRelatedCancellation(ctx context.Context, runI
 }
 
 func (runner *Runner) relatedChildRunIDs(ctx context.Context, runID string) ([]string, error) {
+	// An absent or mismatched RunRelation index is not proof that a Team,
+	// GroupChat or Workflow did not dispatch physical children. Check the
+	// original composite Feature before traversing its indexed edges.
+	if err := runner.requireCompositeRelationIndex(ctx, runID); err != nil {
+		return nil, err
+	}
 	if runner.relationReader == nil {
 		return nil, nil
 	}

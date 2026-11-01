@@ -674,6 +674,24 @@ Published beta.23 tags remain unchanged.
 - Complete Harness modules, race/quality, clean external consumers and
   real PostgreSQL/Redis recovery gates are needed for final acceptance.
 
+## PR #82 follow-up — composite cancellation requires its original relation index
+
+A missing `RunRelationSource` does not mean a Team, GroupChat or Workflow
+never created physical children: independently routed members can survive a
+Running or Failed parent Run. Before accepting an empty descendant traversal,
+Harness checks the original composite Invocation class and requires an indexed
+relation source for every existing composite Kernel Run. Built-in composite
+runners additionally certify that their actual recording registry is the same
+instance Harness reads; two distinct registry objects are not interchangeable
+proof. A foreign same-ID local Run cannot change the original Handoff or raw
+Feature execution class. A definitive missing-Run/no-effect admission keeps
+its existing path, and Host-defined Feature adapters retain their explicit
+relation-writer responsibility. Unknown physical descendants cause
+`ErrRuntimeCancellationUnverified` and retain any previously committed
+cancellation fence; no new Index/Store API, SQL version, fallback or state
+machine is introduced. Reproduce Running/Failed and absent/divergent
+index cases under the Memory and SQL Stores before releasing beta.24.
+
 See [Breaking Changes](../breaking-changes.md), the original local
 acceptance record and the [second PR #82 cross-Attempt remediation](../audits/2026-10-31-pr82-child-root-attempt-hardcut-remediation.md)
 and [third independent PR #82 parent Attempt / Application claim remediation](../audits/2026-10-31-pr82-parent-attempt-and-application-claim-remediation.md)

@@ -7,6 +7,13 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
+// RecordsRelationsTo proves this Team writes every member edge to the same
+// durable index that Harness reads during cancellation. A separate registry
+// with an empty result cannot certify that no physical children exist.
+func (runner *Runner) RecordsRelationsTo(recorder runrelation.Recorder) bool {
+	return runner != nil && runrelation.SameRecorder(runner.relations, recorder)
+}
+
 // UsesLocalAgentRunner proves approval continues through the fixed child Agent.
 func (runner *Runner) UsesLocalAgentRunner(runtime *kernel.Runtime, candidate *agent.Runner) bool {
 	if runner == nil || runner.runtime != runtime {

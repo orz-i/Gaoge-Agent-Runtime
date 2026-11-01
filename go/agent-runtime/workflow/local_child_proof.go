@@ -5,6 +5,12 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
+// RecordsRelationsTo proves the original Workflow indexes physical effect
+// descendants in the exact registry Harness reads for cancellation.
+func (runner *Runner) RecordsRelationsTo(recorder runrelation.Recorder) bool {
+	return runner != nil && runrelation.SameRecorder(runner.relations, recorder)
+}
+
 // VerifyLocalChild proves only built-in subworkflows executed by this Kernel.
 // Arbitrary EffectExecutor children have no inferred local authority, even if
 // a local Run has identical metadata. The caller must prove the parent chain.

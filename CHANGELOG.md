@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #82 cancellation follow-up: a composite Team/GroupChat/Workflow Run
+  without a verified original child-relation index cannot claim that an empty
+  child lookup proves cleanup. Built-in Features must record to the exact
+  RunRelation recorder Harness reads; missing or different registries return
+  `ErrRuntimeCancellationUnverified`, retaining any committed cancellation
+  intent after physical cancellation. Running/Failed parents and Memory/SQL
+  regression tests cover the previously false-positive cancellation receipt.
+  No new Store protocol or SQL schema.
+
 - Require Feature-owned fixed local route and persisted task proofs before
   observing, approving or cancelling raw Team/GroupChat/Workflow descendants.
   A same-ID local Run or unrelated Harness Invocation cannot replace this

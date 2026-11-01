@@ -4,6 +4,24 @@
 
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
+**PR #82 composite cancellation index-ownership correction (2026-11-01):**
+A root or nested Team/GroupChat/Workflow with an existing physical Kernel Run
+can no longer report successful cancellation from an empty or absent
+`RunRelationSource`. The original Harness Invocation execution class—not an
+unrelated same-ID local Kernel Run—selects the composite ownership boundary.
+The native composite Feature must have the *exact* original recorder instance
+that Harness reads. Missing/mismatched native recorder identity returns
+`ErrRuntimeCancellationUnverified` and does not close an already committed
+cancellation intent after the parent physical Cancel. Host-defined Feature
+adapters retain responsibility for accurately recording all physical children
+in their supplied index. Hosts must wire one shared, durable relation source
+before relying on composite cancellation; for existing unindexed work,
+reconcile the actual ChildRunner first instead of manufacturing empty child
+proof or marking the Turn cancelled. A never-created physical composite Run
+retains its separate definitive no-effect recovery. This narrows the successful
+cancellation contract but introduces no SQL DDL, persisted version, new Host
+router, implicit fallback or compatibility bridge. See the [post-CI audit](audits/2026-11-01-pr82-feature-route-proof.md).
+
 **PR #82 mixed ownership and child Interaction correction:**
 Native child cancellation closes over both RunRelation and frozen/Item
 ancestry, including native grandchildren behind completed Application
