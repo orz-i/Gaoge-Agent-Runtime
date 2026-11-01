@@ -71,8 +71,14 @@ execution authorization (`ID`, `CapabilityKey`, version, class, source,
 application kind and `InputSchema`) into the Turn config for replay safety.
 It does not create default `/team` or `/workflow` commands, classify user
 text, select a Feature or expose a Host command discovery HTTP endpoint.
-`ExecutionClass` is a recovery discriminator, not an intent router. Runtime execution intents, receipts and control grants
-stay with their durable owning Feature rather than with Host policy.
+`ExecutionClass` is a recovery discriminator, not an intent router.
+Runtime execution intents, receipts and control grants stay with their
+owning Feature rather than with Host policy. There is one Agent model/Tool
+loop, not separate Direct/Agent modes. `PrepareModelRequest` constructs the
+model-visible request before the durable `ModelInvocation` commit;
+`PrepareRun` durably admits the same Agent Run for deferred continuation.
+Neither prepares or routes a product user intent. See
+[ADR 0016](adr/0016-agent-loop-and-intent-boundary.md).
 
 Core exports provider-neutral `model.Client`; the separate
 `go/agent-runtime-provider` module supplies optional Router/OpenAI/Anthropic
@@ -192,7 +198,7 @@ text-only in this scoped P3 change.
 
 Model-visible `Messages`, opaque Provider replay, local Tool descriptions and
 input schemas, immutable Provider/Model identity, output contract, and Tool
-authority are projected by **one** pre-intent `PrepareModelRequest` pipeline and
+authority are projected by **one** pre-commit `PrepareModelRequest` pipeline and
 then sealed in the persisted Agent `ModelInvocation`. No post-intent prompt,
 Tool Schema, or model identity rewrites are permitted, including text-only Runs.
 
@@ -256,8 +262,8 @@ Invocation can then retry after a fresh Claim. This cannot refund unknown
 physical Provider outcomes, and an intervening ledger write blocks this
 reversal rather than risking double spend. See [ADR 0011](adr/0011-model-invocation-lease-and-retry-governance.md).
 
-All direct Agent retryable failures now persist `RetryAfter`, regardless of
-`RunExecution` opt-in. Direct `Resume` before that due time returns busy
+All Agent retryable Model failures now persist `RetryAfter`, regardless of
+`RunExecution` opt-in. Calling `Agent.Resume` before that due time returns busy
 without a second Provider attempt. Released old-Beta retries lacking this
 durable due fact are **invalid state**, not a migration fallback.
 See [ADR 0011](adr/0011-model-invocation-lease-and-retry-governance.md).

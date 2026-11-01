@@ -3,7 +3,7 @@
 An opt-in local SQLite adapter for the current
 [Gaoge Agent Runtime](../agent-runtime) **six-state** Kernel API.
 
-**Status:** Stage 1 Direct Agent and opt-in Stage 2 execution-fencing
+**Status:** Agent Run persistence and opt-in execution-fencing
 experiments, plus a bounded **Stage 5 SQLite RunRelationStore** adapter.
 **Not a supported autonomous multi-worker Agent, complete durable
 Team/Workflow runtime or mobile durable runtime.**
@@ -204,7 +204,7 @@ when `DeferResumption=false`. Regression tests cover three-process
 Tool approval/rejection, two-process budget grants, expired gates,
 and atomic rollback after injected ReadyWork failures.
 
-**Stage 2B native Direct Agent (experimental):** opt in with
+**Stage 2B native Agent execution lease (experimental):** opt in with
 `agent.Dependencies.RunExecution = &agent.RunExecution{OwnerID: ...,
 LeaseDuration: ...}`. `StartRun`/`Resume` then claim Store execution
 ownership themselves, carry that same epoch through the Agent loop,

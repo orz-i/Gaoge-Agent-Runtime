@@ -100,7 +100,7 @@ For storage and crash evidence, use the existing integration gates:
   `TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash`, uses separate
   processes and actual PostgreSQL Kernel/Harness stores.
 - `go/agent-runtime-sqlite/recovery_test.go`,
-  `TestAgentCrashAndResumeInNewProcess`, covers direct Agent crash points with
+  `TestAgentCrashAndResumeInNewProcess`, covers Agent crash points with
   SQLite.
 
 This example interrupts **after a known committed Tool receipt**. It does not

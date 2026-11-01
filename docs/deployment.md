@@ -24,7 +24,7 @@ A production host is responsible for composing and deploying:
   per-Run, frozen Role, or Turn-level values may tighten but not widen them.
 
 The Runtime defaults are intentionally safe without requiring product resources
-to carry execution budgets. Direct Agent defaults bound model/Tool loops; a
+to carry execution budgets. Agent defaults bound model/Tool loops; a
 Harness composed with shared Budget middleware defaults to 32 descendant Runs,
 8 active execution slots, and delegation depth 4 while leaving shared
 model/Tool/token ceilings unset. Hosts may replace those deployment defaults at

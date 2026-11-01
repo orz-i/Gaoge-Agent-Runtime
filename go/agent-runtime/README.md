@@ -15,7 +15,7 @@ runtime, err := kernel.New(kernel.Dependencies{Store: store})
 Production hosts normally pair Core with the PostgreSQL Store and either the
 Redis or memory generation stream adapter.
 
-## Experimental direct-Agent execution lease (Stage 2B)
+## Optional Agent Run execution lease (original Stage 2B)
 
 **Tool retry/disposition contract:** Even an explicit
 `tools.NewRetryableExecutionError` requires a trusted, original-Call-ID
@@ -41,8 +41,8 @@ and the beta.24 breaking-change ledger.
 
 **Stage 2 governance:** The [final Stage 2 exit audit](../../docs/audits/2026-10-16-stage2-final-exit-audit.md) closes the previously demonstrated 2A/2B/2C experimental engineering increments, **not** ADR 0008's full production acceptance. A [subsequent hard-gate correction](../../docs/audits/2026-10-16-stage2-hard-gates-followup.md) adds Run Store quarantine and exact internal repair, self-wakeup source binding and partial Direct/Worker concurrency proof. A [subsequent terminal-DLQ handoff test](../../docs/audits/2026-10-16-stage2-terminal-dlq-handoff.md) now verifies protected Queue expiry and PG-quarantine-before-Redis-Nack ordering. Actual product host authorization/Provider identity, migration of old unprotected Jobs and full Direct/Pump/Hosted eligibility are **still not certified**. Do not treat this opt-in API as unattended production multi-worker certification.
 
-An opt-in `agent.Dependencies.RunExecution` configuration lets a Direct
-Agent `StartRun` or `Resume` claim the existing Store execution lease
+An opt-in `agent.Dependencies.RunExecution` configuration lets the Agent
+`StartRun` or `Resume` claim the existing Store execution lease
 before its Model/Tool loop. It is **not** a workflow scheduler or a new
 state machine. For example:
 
@@ -60,7 +60,7 @@ old executors may still be running. The first native owner claims Epoch 2.
 The lease must cover the configured Tool retry/backoff window, though
 external calls may still ignore Context deadlines. In opt-in Native mode,
 a retryable Model error persists `ModelInvocation.RetryAfter` in existing
-Agent State alongside the committed Outbox `WakeupAt`. A Direct `Resume`
+Agent State alongside the committed Outbox `WakeupAt`. Calling `Resume`
 before the due time returns `ErrModelInvocationBusy` **without claiming a
 new Store Epoch or calling the Model**; due recovery reuses the same
 invocation identity. The host must provide a trusted consistent Model
