@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- First-round single-Agent minimization: omit `harness.Dependencies.Clock` to
+  use an explicit internal wall clock for Harness timestamps, retaining
+  injected deterministic clocks and Store-owned execution lease authority.
+  Add a minimal optional Harness Session example (Host transcript + pre-commit
+  Context projection + stable Turn replay) alongside the existing Core Agent
+  quickstart; print the quickstart's plain text result instead of a content-part
+  representation. The Session example now also checks that an old Turn is read
+  with `Load` after Host history advances; changed historical `Prompt` input
+  remains rejected without a second model call. No additional Agent loop,
+  runtime factory, persisted state, schema version or compatibility bridge.
+
 - Clarify the one Agent model/Tool loop and remove obsolete private `Direct Agent`
   replay/admission helper names. SDK user-intent selection remains wholly in
   Host code; no `IntentRouter`, `PrepareIntent`, `DirectMode` or generic Start

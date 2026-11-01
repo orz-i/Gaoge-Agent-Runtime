@@ -74,9 +74,20 @@ snapshot, err := runner.StartRun(ctx, agent.StartRequest{
 
 A Kernel `Create` call only persists a Run; `agent.Runner` executes the model and
 Tool loop. See the [complete quickstart](go/agent-runtime/examples/quickstart/main.go).
-For a Session with bounded Context, retrievable archives and explicit recovery,
-follow the [single-Agent task guide](docs/agent-task-workflow.md) and
-[task-agent example](go/agent-runtime-harness/examples/task-agent/README.md).
+
+For stable Host Turn IDs and a simple text conversation, run the separate
+[small Session example](go/agent-runtime-harness/examples/session/README.md):
+
+```bash
+go run ./go/agent-runtime-harness/examples/session
+```
+
+It uses the **same** Agent Loop with optional Harness, a Host-owned transcript,
+and explicit Context projection; no Workflow, Team, scheduler, or intent router
+is involved. A basic Harness `Clock` defaults to the system clock. For bounded
+Context, retrievable archives and interrupted-execution recovery, follow the
+[single-Agent task guide](docs/agent-task-workflow.md) and
+[advanced task-agent example](go/agent-runtime-harness/examples/task-agent/README.md).
 For an interactive real-model baseline, run
 `python3 scripts/run-agent-baseline.py`; enter the endpoint, model and hidden
 API key locally. The [baseline guide](docs/agent-model-baseline.md) explains

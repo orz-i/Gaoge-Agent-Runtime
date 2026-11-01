@@ -25,10 +25,16 @@ const (
 	capabilityStartFailedCode   = "harness.capability_start_failed"
 )
 
-// Clock supplies Harness orchestration time.
+// Clock supplies Harness orchestration timestamps. A nil Dependencies.Clock
+// uses the system clock; injected clocks remain useful for deterministic tests.
+// Execution leases and expiry are still enforced by the Kernel Store clock.
 type Clock interface {
 	Now() time.Time
 }
+
+type systemClock struct{}
+
+func (systemClock) Now() time.Time { return time.Now().UTC() }
 
 // ResolveContextSourceBoundaryForPath resolves the nearest reusable source-aligned checkpoint on
 // an explicit complete host ancestry identity path. Hosts use this for branch resets where the
@@ -546,7 +552,7 @@ type Dependencies struct {
 	GroupChats   GroupChatFeature
 	Workflows    WorkflowFeature
 	Store        Store
-	Clock        Clock
+	Clock        Clock // optional; defaults to the system clock
 	TurnFeed     *TurnFeed
 	Context      *runtimecontext.Manager
 	Catalog      tools.Catalog
@@ -619,8 +625,11 @@ type StartRequest struct {
 
 // NewRunner constructs a minimal first-party Harness composition layer.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
-	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil || dependencies.Clock == nil {
+	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil {
 		return nil, ErrInvalidRequest
+	}
+	if dependencies.Clock == nil {
+		dependencies.Clock = systemClock{}
 	}
 	// Concrete first-party composite runners have fixed Kernel residence.
 	// Reject a foreign Kernel at Host composition, before any Turn or
