@@ -27,7 +27,7 @@ const (
 	testAgentMessage = "message_assistant_1"
 )
 
-func TestMinimalModelOnlyHarnessCompletesDirectAgentTurn(t *testing.T) {
+func TestMinimalModelOnlyHarnessCompletesAgentTurn(t *testing.T) {
 	t.Parallel()
 	runner := newHarnessRunner(t)
 	snapshot, err := runner.StartAgentTurn(t.Context(), testStartRequest())

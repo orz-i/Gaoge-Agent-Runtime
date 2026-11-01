@@ -17,7 +17,7 @@ The first portable benchmark set covers the in-memory hot paths that are most us
 - deterministic Agent loop with a fake model
 - deterministic Workflow return execution
 - authorized HTTP Run snapshot and event-page handlers
-- Harness direct-Agent Turn start and completed-Turn reload
+- Harness explicitly selected Agent Turn start and completed-Turn reload
 - Harness source-aligned Context checkpoint lookup and 100-related-subtask Turn projection
 
 Every benchmark reports `ns/op`, `B/op`, and `allocs/op`. The portable suite remains memory/local-process only so ordinary PR smoke stays fast and network-free.

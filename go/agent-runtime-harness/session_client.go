@@ -157,7 +157,7 @@ func (session *SessionClient) Refresh(ctx context.Context, turnID string) (Snaps
 	return session.runner.Refresh(ctx, id)
 }
 
-// Resume continues one admitted direct-Agent Turn from its committed Context.
+// Resume continues one admitted Agent Turn from its committed Context.
 // It neither reads TranscriptSource nor creates a new execution attempt. A
 // waiting or terminal Turn is returned without resolving approval or budget.
 func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapshot, error) {

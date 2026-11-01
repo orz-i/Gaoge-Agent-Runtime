@@ -35,7 +35,7 @@ existing components directly:
    A single root Agent needs no child-relation resolver.
 3. A ConfigSnapshot that explicitly authorizes the selected Tool keys, including
    `harness.read_context_artifact`, and freezes their policy snapshots.
-4. `NewManagedContextPreparer` as the final pre-intent request preparer, plus
+4. `NewManagedContextPreparer` as the final Model request projection before the durable commit, plus
    `NewContextRunMiddleware` to rehydrate persisted Context on a fresh runner.
 5. A host-supplied resolver for the exact model's context capacity and output
    reservation. Unknown capacities fail closed.
@@ -79,7 +79,7 @@ before creating the Turn; changed inputs fail closed. New user work uses a new I
 | `LoadState` | Read bounded Session/Turn/config without scanning Timeline | No |
 | `Timeline` | Page durable Timeline Items by sequence cursor (limit 1–500) | No |
 | `Refresh` | Reconcile Harness projections from Runtime facts, including after terminal-Item crash | No |
-| `Resume` | Continue the existing direct-Agent Run | Only while the Runtime Run is running and Agent admits the continuation |
+| `Resume` | Continue the existing Agent Run | Only while the Runtime Run is running and Agent admits the continuation |
 
 ## 4. Recover the original task
 

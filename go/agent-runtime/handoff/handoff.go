@@ -106,7 +106,7 @@ type Join struct {
 	Error         string        `json:"error,omitempty"`
 }
 
-// ChildRunner is the narrow direct Agent capability consumed by Handoff.
+// ChildRunner is the narrow Agent Run capability consumed by Handoff.
 type ChildRunner interface {
 	StartRun(context.Context, agent.StartRequest) (kernel.Snapshot, error)
 	LoadRun(context.Context, string) (kernel.Snapshot, error)

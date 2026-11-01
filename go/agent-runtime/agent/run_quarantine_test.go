@@ -10,10 +10,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 )
 
-// A poisoned current recovery obligation must prevent Direct Agent Model/Tool
+// A poisoned current recovery obligation must prevent Agent Model/Tool
 // dispatch even after an existing execution lease is forcefully revoked.
 // Repair is trusted-only and does not revive the previous owner.
-func TestNativeDirectAgentCannotBypassRunQuarantine(t *testing.T) {
+func TestNativeAgentCannotBypassRunQuarantine(t *testing.T) {
 	base := memory.NewStore()
 	plain, err := kernel.New(kernel.Dependencies{Store: base})
 	if err != nil {

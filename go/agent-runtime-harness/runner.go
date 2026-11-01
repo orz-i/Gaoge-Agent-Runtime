@@ -103,17 +103,17 @@ func (runner *Runner) recordInvocationItem(ctx context.Context, invocation Invoc
 	return err
 }
 
-func (runner *Runner) resumeDirectAgentStart(
+func (runner *Runner) resumeAgentStart(
 	ctx context.Context,
 	turn Turn,
 	invocation Invocation,
 	request StartRequest,
 	config ConfigSnapshot,
 ) (Snapshot, error) {
-	if snapshot, replayed, err := runner.replayDirectAgentStart(ctx, turn, invocation); replayed || err != nil {
+	if snapshot, replayed, err := runner.replayAgentStart(ctx, turn, invocation); replayed || err != nil {
 		return snapshot, err
 	}
-	turn, runCtx, err := runner.resumeDirectAgentContext(ctx, turn, invocation, request.Context, config)
+	turn, runCtx, err := runner.resumeAgentContext(ctx, turn, request.Context, config)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -140,7 +140,7 @@ func (runner *Runner) resumeDirectAgentStart(
 	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
 }
 
-func (runner *Runner) replayDirectAgentStart(
+func (runner *Runner) replayAgentStart(
 	ctx context.Context,
 	turn Turn,
 	invocation Invocation,
@@ -160,10 +160,9 @@ func (runner *Runner) replayDirectAgentStart(
 	return Snapshot{}, false, err
 }
 
-func (runner *Runner) resumeDirectAgentContext(
+func (runner *Runner) resumeAgentContext(
 	ctx context.Context,
 	turn Turn,
-	invocation Invocation,
 	seed *ContextSeed,
 	config ConfigSnapshot,
 ) (Turn, context.Context, error) {
@@ -529,7 +528,7 @@ func sliceContextSeedAfter(seed *ContextSeed, index int) *ContextSeed {
 	}
 }
 
-// AgentStarter is the narrow direct Agent capability required by Harness.
+// AgentStarter is the explicit Agent Run capability required by Harness.
 type AgentStarter interface {
 	StartRun(context.Context, agent.StartRequest) (kernel.Snapshot, error)
 	ResolveApproval(context.Context, string, uint64, plugin.ApprovalResponse) (kernel.Snapshot, error)
@@ -611,9 +610,9 @@ type StartRequest struct {
 	InitialToolKeys  []string
 	Config           ConfigSnapshot
 	Context          *ContextSeed
-	// Only the direct Agent Run may request a renewable, hard-bounded allowance.
+	// Only the selected top-level Agent Run may request a renewable, hard-bounded allowance.
 	CallAllowance *agent.CallAllowance
-	// AutoAllowance opts the direct Run into bounded P2 renewals; the SDK
+	// AutoAllowance opts that Agent Run into bounded renewals; the SDK
 	// Agent owns its frozen policy, ledger and no-progress decisions.
 	AutoAllowance *agent.AutoAllowancePolicy
 }
@@ -696,7 +695,7 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	invocation, err := newDirectAgentInvocation(
+	invocation, err := newAgentInvocation(
 		turnID, firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), request.Goal,
 		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys, now,
 	)
@@ -717,7 +716,7 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 		if err := runner.repairStartItems(ctx, createdTurn, invocation); err != nil {
 			return Snapshot{}, err
 		}
-		return runner.resumeDirectAgentStart(ctx, createdTurn, invocation, request, config)
+		return runner.resumeAgentStart(ctx, createdTurn, invocation, request, config)
 	}
 	if err = runner.recordHostMessageItems(ctx, createdTurn, request.InputMessage, request.OutputMessage); err != nil {
 		return Snapshot{}, err

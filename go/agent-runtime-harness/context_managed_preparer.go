@@ -53,7 +53,7 @@ func (preparer managedContextPreparer) prepare(ctx context.Context, incoming mod
 	binding, bound := CurrentContextWindowBinding(ctx)
 	checkpoint, hasCheckpoint := CurrentContextCheckpoint(ctx)
 	if !hasCheckpoint {
-		// A direct non-Harness run may use the same preparer harmlessly.
+		// An Agent Run without Harness can use the same projection.
 		return request, nil
 	}
 	if !bound {

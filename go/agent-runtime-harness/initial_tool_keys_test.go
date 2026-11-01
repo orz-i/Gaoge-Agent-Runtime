@@ -9,12 +9,12 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-func TestDirectAgentInvocationFreezesInitialToolsForRetry(t *testing.T) {
+func TestAgentInvocationFreezesInitialToolsForRetry(t *testing.T) {
 	t.Parallel()
 	// Initial means visible in the first model request, not mandatory to
 	// execute. The original Invocation input must carry this distinction
 	// across a failed Agent start and Harness invocation retry.
-	invocation, err := newDirectAgentInvocation(
+	invocation, err := newAgentInvocation(
 		"turn-initial-tools", "request-initial-tools", "summarize",
 		kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		kernel.ThreadRef{Kind: "conversation", ID: "thread-initial-tools"},

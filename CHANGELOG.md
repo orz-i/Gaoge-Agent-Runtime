@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Clarify the one Agent model/Tool loop and remove obsolete private `Direct Agent`
+  replay/admission helper names. SDK user-intent selection remains wholly in
+  Host code; no `IntentRouter`, `PrepareIntent`, `DirectMode` or generic Start
+  API. Model request projection and durable Model/Tool/cancellation intents
+  retain their existing execution safety authority. New event diagnostic text
+  says `Agent loop` (event types unchanged); rekey the unchanged portable
+  performance baseline under `BenchmarkHarnessStartAgentTurnMemory`.
+  See [ADR 0016](docs/adr/0016-agent-loop-and-intent-boundary.md).
+
 - PR #82 independent Workflow sub-run orphan correction: the built-in
   Subworkflow effect commits its deterministic child RunRelation *before*
   physically creating or advancing the child, using the original persisted

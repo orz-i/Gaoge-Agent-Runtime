@@ -79,7 +79,7 @@ func CapabilityExecutionRefID(invocationID string) string {
 	return stableID("hcr", invocationID)
 }
 
-// AgentExecutionRefID deterministically derives the direct Agent Runtime Run
+// AgentExecutionRefID deterministically derives the Agent Runtime Run
 // identity owned by one already-created Agent Invocation. It is used only by
 // host composition that must bind Tool state before the Agent begins.
 func AgentExecutionRefID(invocationID string) string {
@@ -136,7 +136,7 @@ func TopLevelInvocation(snapshot Snapshot) (Invocation, bool) {
 	return topLevelInvocation(snapshot.Invocations)
 }
 
-// AgentInvocationID derives the first-party direct Agent Invocation identity
+// AgentInvocationID derives the first-party Agent Invocation identity
 // without exposing the Harness-owned capability key to host code.
 func AgentInvocationID(turnID, requestID string) (string, error) {
 	return InvocationID(turnID, "", CapabilityAgent, requestID)
@@ -150,7 +150,7 @@ type agentInvocationInput struct {
 	InitialToolKeys  []string         `json:"initialToolKeys,omitempty"`
 }
 
-func newDirectAgentInvocation(
+func newAgentInvocation(
 	turnID, requestID, goal string,
 	actor kernel.ActorRef,
 	thread kernel.ThreadRef,

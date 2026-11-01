@@ -2,6 +2,36 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-01 — Remove obsolete Direct/PrepareIntent mode terminology (beta.24 candidate)
+
+**No Host intent router in SDK:** The currently maintained Runtime exposes
+no `IntentRouter`, `PrepareIntent`, `DirectMode` or generic `Runner.Start`
+API. The Host must explicitly choose one typed Feature before admission.
+There is only one Agent model/Tool loop, regardless of optional Kernel
+execution leasing. No new adapter, enum, field, classifier, dynamic
+routing registry or compatibility entry is introduced.
+
+**Internal naming and operator artifacts:** Internal Go helpers formerly
+named `newDirectAgentInvocation`, `resumeDirectAgentStart`,
+`replayDirectAgentStart` and `resumeDirectAgentContext` are renamed for the
+Agent loop, with no forwarding aliases. Their names are unexported; public
+`StartAgentTurn`, `SessionClient`, `PrepareRun`, `PrepareModelRequest` and
+`ModelRequestPreparer` retain their signatures. New `agent.started` and
+`agent.completed` events use the human-readable messages `Agent loop started`
+and `Agent loop completed` rather than `Direct Agent loop ...`;
+event **types**, wakeup/receipt facts and historical journal messages do
+not change. The portable benchmark label is renamed to
+`BenchmarkHarnessStartAgentTurnMemory` and the reviewed baseline is rekeyed
+with the **same numerical reference values**, not silently rebaselined.
+
+**Preserved execution safety boundary:** `PrepareModelRequest` projects
+Context/Role/Tool schemas before the one immutable `ModelInvocation` commit.
+`PrepareRun` is deferred creation of the same Agent Run, not a Host task
+intent. Model/Tool durable intents, ProviderReplay, original Call ID,
+cancellation grants, Kernel CAS/epoch, and physical no-effect/unknown-effect
+recovery are unchanged. No SQL/schema version bump, data conversion or
+compatibility bridge. See [ADR 0016](adr/0016-agent-loop-and-intent-boundary.md).
+
 ## 2026-10-31 — Indexed child parent admission and strict root/child entry (beta.24 candidate)
 
 **PR #82 native Subworkflow child-ownership hard cut (2026-11-01):**

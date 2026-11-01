@@ -216,20 +216,21 @@ type HostedToolCatalog interface {
 	Resolve(context.Context, string, string) (model.HostedTool, bool, error)
 }
 
-// Limits are the common hard ceilings configured for one direct Agent loop.
+// Limits are the common hard ceilings configured for one Agent model/Tool loop.
 // The alias keeps Agent composition concise while the vocabulary is shared by
 // other feature-owned budget projections.
 type Limits = runtimebudget.Limits
 
-// ModelRequestPreparer projects messages and Host-scoped Tool presentation
-// before the logical ModelInvocation intent is committed. It must not call a
+// ModelRequestPreparer projects the model-visible request before the durable
+// ModelInvocation is committed. This is a request-construction stage, not a
+// user-intent classifier or a Host execution-mode router. It must not call a
 // provider or expand Tool authority, modify model identity or execution limits.
-// The complete request is frozen; recovery never invokes a preparer for a
-// previously committed pending intent.
+// The complete request is frozen; recovery never reruns this projection for
+// an already-committed pending ModelInvocation.
 type ModelRequestPreparer func(context.Context, model.Request) (model.Request, error)
 
-// ChainModelRequestPreparers composes trusted pre-intent projections in order.
-// Every stage runs before the single ModelInvocation intent is persisted.
+// ChainModelRequestPreparers composes trusted Model request projections in
+// order, strictly before the single durable ModelInvocation commit.
 func ChainModelRequestPreparers(preparers ...ModelRequestPreparer) ModelRequestPreparer {
 	stages := append([]ModelRequestPreparer(nil), preparers...)
 	return func(ctx context.Context, request model.Request) (model.Request, error) {
@@ -247,7 +248,7 @@ func ChainModelRequestPreparers(preparers ...ModelRequestPreparer) ModelRequestP
 	}
 }
 
-// Dependencies explicitly provide the direct Agent loop capabilities.
+// Dependencies explicitly provide the Agent model/Tool loop capabilities.
 type Dependencies struct {
 	Runtime          *kernel.Runtime
 	Model            model.Client
@@ -262,14 +263,14 @@ type Dependencies struct {
 	Telemetry        []observability.Recorder
 	RunMiddleware    []plugin.RunMiddleware
 	ModelMiddleware  []plugin.ModelMiddleware
-	// PrepareModelRequest is the only pre-intent message/Tool schema projection
-	// boundary. ModelMiddleware cannot rewrite persisted model-visible input.
+	// PrepareModelRequest is the only pre-commit message/Tool schema projection.
+	// It does not choose an Agent mode. ModelMiddleware cannot rewrite frozen input.
 	PrepareModelRequest ModelRequestPreparer
 	ToolMiddleware      []plugin.ToolMiddleware
 	CompletionPolicies  []CompletionPolicy
 	Limits              Limits
 	Execution           ExecutionPolicy
-	// RunExecution opts the direct Agent StartRun/Resume path into the existing
+	// RunExecution opts this Agent StartRun/Resume path into the existing
 	// authoritative Store epoch/lease. Nil retains the legacy behavior.
 	RunExecution *RunExecution
 	// ToolOutcomeVerifier is a trusted provider-side lookup, used only
@@ -280,7 +281,7 @@ type Dependencies struct {
 	DeferResumption bool
 }
 
-// StartRequest starts one direct Agent Run.
+// StartRequest starts one explicitly selected Agent Run.
 type StartRequest struct {
 	ID               string
 	Actor            kernel.ActorRef
@@ -306,7 +307,7 @@ type StartRequest struct {
 	AutoAllowance *AutoAllowancePolicy
 }
 
-// Runner owns only the direct Agent model and Tool loop.
+// Runner owns only the Agent model and Tool loop, not Host intent routing.
 type Runner struct {
 	runtime             *kernel.Runtime
 	model               model.Client
@@ -357,7 +358,7 @@ type runState struct {
 	PendingApproval  *pendingToolApproval   `json:"pendingApproval,omitempty"`
 	ToolWait         *PendingTool           `json:"toolWait,omitempty"`
 	DeferredChildren []deferredChildCall    `json:"deferredChildren,omitempty"`
-	// A fenced Direct Agent commits its Tool dispatch ID before invoking
+	// A fenced Agent Run commits its Tool dispatch ID before invoking
 	// external effects. A missing receipt requires explicit reconciliation.
 	ToolDispatchID   string                     `json:"toolDispatchID,omitempty"`
 	ExternalSignals  []ExternalToolResultSignal `json:"externalSignals,omitempty"`
@@ -421,7 +422,7 @@ func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
 	return invocations
 }
 
-// NewRunner constructs a direct Agent feature without planning or automatic routing.
+// NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Model == nil ||
 		(dependencies.Catalog == nil) != (dependencies.Executor == nil) {
@@ -535,14 +536,15 @@ func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
 	}
 }
 
-// StartRun creates and drives one direct Agent Run until terminal or approval wait.
+// StartRun creates and drives one Agent Run until terminal or approval wait.
 func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
 	return runner.startRunWithMiddleware(ctx, request, false)
 }
 
-// PrepareRun durably creates a Run without executing a model or Tool. A host
-// using this method must compose a continuation worker for its wakeup event.
-// It keeps a delegated child's lifetime outside the parent's Tool timeout.
+// PrepareRun durably creates an explicit Agent Run without dispatching a Model
+// or Tool call. This is deferred execution admission, not a user Intent router
+// or a distinct Agent mode. The Host must compose a continuation worker for
+// the wakeup; delegation may outlive the parent's Tool timeout.
 func (runner *Runner) PrepareRun(ctx context.Context, request StartRequest) (kernel.Snapshot, error) {
 	return runner.startRunWithMiddleware(ctx, request, true)
 }
@@ -673,7 +675,7 @@ func (runner *Runner) startPreparedRun(ctx context.Context, request StartRequest
 		ExecutionRequired: runner.runExecution != nil,
 		RequestID:         request.RequestID, Goal: request.Goal, DeadlineAt: request.DeadlineAt, State: encoded,
 		Events: []kernel.EventDraft{{
-			Type: "agent.started", Message: "Direct Agent loop started", Wakeup: true,
+			Type: "agent.started", Message: "Agent loop started", Wakeup: true,
 			WakeupAt: agentWakeupAt(runner.clock.Now()),
 		}},
 	})
@@ -774,14 +776,14 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	}
 	if invocation, active := activeModelInvocation(state); active && invocation.RetryAfter != nil &&
 		runner.clock.Now().UTC().Before(invocation.RetryAfter.UTC()) {
-		// A Queue WakeupAt is not an execution grant. Every direct or
+		// A Queue WakeupAt is not an execution grant. Every Agent or
 		// Store-fenced Resume obeys the same persisted Feature due time.
 		return snapshot, ErrModelInvocationBusy
 	}
 	if state.ToolDispatchID != "" {
 		// Every Agent execution mode preserves unresolved physical effects.
 		// A stored Tool dispatch identity is never permission to execute it
-		// again, including on direct Runs without a Kernel execution lease.
+		// again, including on Agent Runs without a Kernel execution lease.
 		// Distinguish an overdue provider wait without erasing its
 		// persisted identity or asserting a physical COMMIT.
 		if state.ToolWait != nil && state.ToolWait.DeadlineAt != nil &&
@@ -2101,7 +2103,7 @@ func (runner *Runner) complete(
 	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encodedState, Checkpoint: snapshot.Checkpoint,
 		Result: result,
-		Events: []kernel.EventDraft{{Type: "agent.completed", Message: "Direct Agent loop completed"}},
+		Events: []kernel.EventDraft{{Type: "agent.completed", Message: "Agent loop completed"}},
 	})
 	if err == nil {
 		runner.publishRunEvent(ctx, completed, EventRunCompleted, true)
