@@ -91,8 +91,19 @@ whose explicit `role` is not `assistant`, or whose explicit `status` is not
 values also reject. Only genuinely omitted legacy fields remain supported.
 An independently completed response with verifiable Usage preserves only a
 sanitized ID/Usage rejected receipt; no Tool handler, text, replay or terminal
-SSE success can escape. No retry/status/SQL schema, Host route or compatibility
-bridge is added.
+SSE success can escape.
+
+**Physical Tool Call ID identity hard cut:** OpenAI `function_call.call_id` and
+Anthropic `tool_use.id` must be nonempty and identical before/after
+`strings.TrimSpace`. Previously a whitespace-only ID reached Agent, which
+replaced it with a locally generated ID; leading/trailing whitespace also
+changed the physical Tool identity during Agent queuing. Both cases could
+actually execute a Tool despite the absence of an authorized stable Provider
+Call ID. Both unary and SSE adapters now reject these physical IDs before
+Tool authorization, including during stateless replay. Completed responses
+with independently verified final Usage retain only the original ID/Usage as
+a typed paid rejection; missing/invalid Usage remains unreceipted. No
+retry/status/SQL schema, Host route or compatibility bridge is added.
 
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,

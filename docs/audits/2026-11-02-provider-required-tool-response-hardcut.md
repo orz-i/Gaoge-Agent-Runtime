@@ -921,3 +921,82 @@ to merge or publish beta.24.
 - Two preexisting untracked OpenAI probe files were excluded and remain
   hash-identical. No live third-party gateway/provider credentials were used.
   New GitHub CI and independent immutable-Head merge gate remain required.
+
+## PR #87 next independent P1 — physical Tool Call IDs must survive Agent normalization
+
+**Immutable reviewed Head:** `f177172aef0c168d47aacd656d070b29d236cf3b`.
+The full applicable GitHub CI/security check cohort passed on that Head.
+
+**Independent RED, OpenAI and Anthropic:** a physically completed response
+with valid Tool name/arguments/Usage but a `function_call.call_id` or
+`tool_use.id` consisting only of a space, tab or Unicode nonbreaking space
+was accepted as an executable local Tool. IDs with leading/trailing spaces
+were also accepted. The public Agent's `queueToolCalls` uses
+`strings.TrimSpace(call.ID)`, and even creates a fresh local Tool ID when
+trimming yields empty. Thus a missing stable physical Provider identity
+was silently promoted to a new Tool authorization, or an original ID was
+changed before continuation. This bypass also occurred on *optional*
+Tools and in both unary/SSE Provider modes.
+
+Read-only `/tmp` Go `-overlay -race` tests confirmed the gap before any
+repository edit. The original Head executed the local OpenAI Tool Handler
+**once per invalid-ID case** (`effects=1`, `requests=2`), and Anthropic
+Unary/SSE accepted the same invalid local Tool calls with `err=nil` and
+ProviderReplay. The later permanent Anthropic public Agent test explicitly
+removed all other malformed siblings and again demonstrated **one actual
+Tool Handler execution** in both whitespace-only and padded-ID cases when
+the original Provider source was restored via a separate mutation overlay.
+No real Provider credentials or business Tool handlers were used.
+
+**Minimal repair:** OpenAI rejects `function_call.call_id` when it is empty
+or `strings.TrimSpace(id) != id` both in its completed physical Tool item
+fence and in the shared output projection used for replay verification.
+Anthropic enforces the same invariant at `parseContentBlock` for `tool_use`
+so direct decoded content, bounded SSE reconstruction and signed replay
+share one fail-closed rule. A known outer completion with final, valid Usage
+returns only the existing sanitized `ResponseRejectedError` receipt with
+`model.post_generation_failed`: exact original ResponseID/Usage but no Tool,
+text, replay or successful SSE terminal event. Incomplete/missing/negative
+Usage cannot mint completed billing evidence. Legitimate stable ID requests
+remain executable; no Agent/Kernel, Store schema, Host, retry mechanism,
+ID-rewrite compatibility shim or additional abstraction was introduced.
+
+**Permanent RED→GREEN regression coverage:**
+
+- `openai/tool_id_identity_test.go`: direct unary and SSE, optional and
+  forced Tool, valid-control and whitespace/leading/trailing/Unicode invalid
+  IDs, missing Usage and precise rejected receipt semantics.
+- `anthropic/completed_tool_receipt_test.go`: direct Unary and SSE identity
+  failures, with final Usage present and checked.
+- `completed_tool_receipt_test.go` and
+  `completed_anthropic_mixed_tool_receipt_test.go`: real public Agent → mock
+  Provider SSE → Kernel persistent Store, requiring two consumed physical
+  invocations, **34 input + 10 output = 44** tokens, zero Tool effects,
+  no executable calls/ProviderReplay and classified `model.post_generation_failed`.
+- A post-fix mutation test replacing only OpenAI `client.go`/`phase.go` and
+  Anthropic `replay.go` with the original immutable-Head sources made the
+  new tests fail again with `effects=1` in both Agent paths. Corrected
+  Provider tests were GREEN under Go Race, retaining legitimate Tool output
+  behavior and exactly-once billing.
+
+This local repair evidence is not independent new-Head merge admission.
+Fresh GitHub CI/security checks and an independent code/security review on
+an immutable new PR Head are still required before merge or beta.24 release.
+
+**Final local gates for exact physical Tool ID validation:**
+
+- **PASS, exit 0:** entire `make check` with Go unit/Race/vet/lint,
+  TypeScript lint/typecheck/**46 tests**/build, benchmarks, OTel/A2A,
+  beta.24 clean-consumer local-cohort release gates.
+- **PASS, exit 0:** real isolated Docker PostgreSQL/Redis integration via
+  `node scripts/run-integration.mjs`, including cross-connection cancellation,
+  restart/recovery, continuation and budgets; test containers/network removed.
+- **PASS:** complete Provider Race; focused ID-integrity and public Agent
+  regression suites repeated **10** Race runs; independent restoration of the
+  original immutable-Head Provider source turns them RED with actual local
+  Tool Handler execution; corrected sources GREEN. `gofmt` and diff checks
+  passed.
+- **Excluded:** live Provider/gateway credential checks, Host integration,
+  beta.24 publication, and the two pre-existing untracked OpenAI probe scripts
+  (which remain SHA-256-identical). Required GitHub CI and an independent
+  immutable-Head merge gate are separate from this local repair.

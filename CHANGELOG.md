@@ -68,6 +68,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   Verified final ID/Usage remain as a sanitized rejected receipt; no local
   Tool effects, replay or terminal SSE success are permitted. Truly omitted
   legacy fields and valid completed assistant messages remain supported.
+  Another independently reproduced P1 rejects physical OpenAI
+  `function_call.call_id` and Anthropic `tool_use.id` values that would
+  change under Agent's whitespace normalization. Empty/whitespace-only and
+  padded IDs can no longer execute a local Tool or create synthetic Call IDs;
+  verified completed Usage is settled as a minimal rejection receipt, with
+  no ProviderReplay or terminal SSE success. No compatibility rewrite.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 

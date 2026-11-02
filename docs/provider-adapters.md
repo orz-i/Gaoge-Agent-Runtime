@@ -148,6 +148,15 @@ multi-provider router.
   cumulative Usage retain only the original ResponseID/Usage under a typed
   post-generation rejection. This applies to OpenAI physical function-call
   item verification and Anthropic Tool-block decoding/final SSE reconstruction.
+  Both adapters also require every physical Tool Call ID to be **nonempty and
+  unchanged by `strings.TrimSpace`**. Agent normalizes a Call ID before Tool
+  dispatch (and can generate one if it becomes empty), so whitespace-only or
+  padded Provider IDs must never become executable local Tool identities.
+  This boundary applies to OpenAI `function_call.call_id` during both early
+  item verification and replay projection, and Anthropic `tool_use.id`
+  during content-block parsing/replay. A completed response with proven
+  cumulative Usage retains only its minimal paid rejection receipt, never
+  normalized arguments, a synthetic Call ID, replay or terminal SSE success.
   For OpenAI, completed local Tool output mixed with a contradictory
   refusal/final answer, unsupported sibling item, or oversized replay is
   also a post-completion Tool rejection: only independently verified
