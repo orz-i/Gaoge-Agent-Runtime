@@ -41,9 +41,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   receipt when a valid physical `tool_use` appears anywhere in a completed
   message beside an unsupported text/Thinking/redacted block, or final SSE
   block reconstruction fails. A malformed sibling cannot silently drop known
-  cumulative Usage; incomplete streams and unknown Usage remain unreceipted.
-  No new ModelInvocation state, API shape, adapter fallback, schema migration
-  or automatic retry.
+  cumulative Usage. The next P1 correction separates Anthropic SSE early
+  semantic block rejection from transport/framing failures: unsupported
+  citations or content types are never authorized, but a bounded, well-framed
+  stream can still supply `message_stop` and final cumulative Usage for a
+  Tool-bearing paid rejection. Incomplete, malformed (including
+  noncontiguous block indices) or unknown-Usage streams remain
+  unreceipted. No new ModelInvocation state, API shape, adapter fallback,
+  schema migration or automatic retry.
 
 - Round 3 Harness output provenance hard cut: child Invocation results
   cannot appear as top-level Turn `Snapshot.Output` during unresolved Host

@@ -542,3 +542,71 @@ OpenAI probe scripts were excluded and remained hash-identical.
 This is a repair candidate, **not independent approval of the new Head**.
 GitHub CI, independent immutable-Head review, merge and beta.24 release
 remain separate explicit gates.
+
+## PR #87 independent P1 — Anthropic SSE preterminal semantic rejection
+
+An additional [read-only independent BLOCK audit of `79080f3`](https://github.com/orz-i/Gaoge-Agent-Runtime/pull/87#issuecomment-6572384691)
+identified a remaining gap in Anthropic `GenerateStream`. The previous
+repair only retained paid Tool receipts when validation failed during
+post-`message_stop` reconstruction. A structurally valid
+`content_block_start` with unsupported rich `citations` or an unknown
+content type instead returned immediately from `parseContentBlock`,
+before subsequent completed `message_delta` and `message_stop`. The
+independent read-only Race overlays reproduced both Tool→rich Text and
+rich Text→Tool orders. The public Agent→Anthropic SSE→Kernel Store path
+recorded two completed physical calls but only one consumed invocation,
+**22 tokens instead of 44**, with the second left Pending and no Tool
+side effects.
+
+**Bounded correction:** The streaming adapter now separates content
+semantics from SSE transport/framing. When a content block's JSON
+envelope has a structurally readable nonempty type but its content
+violates the supported local profile, it irreversibly marks the response
+semantically rejected, retains *only* a block type for physical Tool
+detection, and continues validating start/delta/stop framing and
+aggregate size. Subsequent deltas are not emitted or interpreted as
+authorized content. A completed `message_stop`, supported final stop
+reason, original response ID and final verified cumulative Usage are
+required before returning **only** a sanitized
+`model.post_generation_failed` ResponseID/Usage receipt, and only when
+a physical `tool_use` was present. This never emits terminal SSE
+success, replay or executable ToolCalls. Missing final Usage, negative
+Usage, premature EOF/stop, malformed framing (including noncontiguous
+content block indices) and oversized streams still fail closed with no
+invented completion. The correction is in
+the Anthropic Provider only; no Agent/Kernel/Host changes, migration,
+alternate route, retry mechanism or compatibility bridge.
+
+**Permanent RED → GREEN regression evidence:**
+- `anthropic/completed_mixed_tool_receipt_test.go` extends the SSE matrix
+  with unsupported cited text and unknown blocks on both sides of a
+  physical Tool. Known final Usage now produces a minimal typed paid
+  rejection; missing/negative final Usage, `max_tokens`,
+  missing `message_stop`, mismatched frame event/type, gapped block
+  indices and text-only semantic rejection never mint it. Further
+  rejected text deltas cannot be emitted as authorized content.
+- `completed_anthropic_mixed_tool_receipt_test.go` adds both cited-text
+  orders through real mock HTTP/SSE, Router, public Agent and the in-memory
+  Kernel Store. Initially RED with one Pending paid invocation, now
+  verifies exactly two consumed invocations and **34 input + 10 output =
+  44 tokens**, two Provider calls, zero Tool side effects, with
+  `model.post_generation_failed` on the second.
+- Focused Provider and Agent Race checks run repeatedly; the existing
+  Anthropic signed replay, valid Tool, streaming and OpenAI regressions
+  remain included in the repository-wide quality gates.
+
+**Final-source verification:** `make check` passed (exit 0)
+including Go workspace unit/Race/Vet/Lint, TypeScript lint/typecheck/
+46 tests/build, benchmark smoke, OTel/A2A and beta.24 clean-consumer
+release checks. Isolated real PostgreSQL/Redis integration via
+`node scripts/run-integration.mjs` passed (exit 0), including
+cross-connection cancellation/restart and continuation, with test
+containers/network removed. Targeted Anthropic Provider and public
+Agent/Kernel regressions passed repeated `go test -race -count=10`
+and complete Provider Race tests passed. `gofmt` and
+`git diff --check` passed; the two preexisting untracked OpenAI probes
+were excluded and remained unchanged.
+
+Local passing tests are repair evidence only, **not independent merge
+approval**. After push, GitHub CI and a separate immutable-Head
+merge-admission review must be completed before merge or beta.24 release.

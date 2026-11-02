@@ -139,6 +139,14 @@ multi-provider router.
   original completed `tool_use` is mixed with an invalid text/Thinking/
   redacted sibling or when post-completion SSE block reconstruction/replay
   fails: an earlier malformed block cannot hide a later physical Tool.
+  For Anthropic SSE, an unsupported but structurally valid block at
+  `content_block_start` irreversibly rejects the content, but the adapter
+  may continue consuming strictly bounded SSE framing to verify final
+  `message_stop`, outer stop reason, identity and cumulative Usage.
+  All later content deltas are suppressed. Only a completed stream containing
+  a physical Tool may return minimal paid rejection evidence; malformed
+  framing (including gapped block indices), transport errors and
+  incomplete/unknown-Usage streams cannot.
   Missing encrypted reasoning replay and unsupported responses without a
   physical Tool retain their existing Provider classifications.
   Partial/truncated/unknown-Usage responses still cannot invent a receipt;
