@@ -26,8 +26,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   authorizing Tool execution, for both optional and mandatory calls.
   Explicit unfinished/invalid items cannot be dispatched; a complete
   billable response preserves only its ResponseID/Usage rejection receipt,
-  even if the unfinished arguments are malformed. No new ModelInvocation
-  state, API shape, adapter fallback, schema migration or automatic retry.
+  even if the unfinished arguments are malformed. The subsequent PR #87
+  paid-receipt fix also accounts a completed OpenAI/Anthropic message whose
+  Tool arguments or identifiers fail post-completion Tool-item validation:
+  only ResponseID/valid cumulative Usage survive as a rejected completion;
+  no Tool effects or terminal SSE success are authorized. Unknown final
+  Usage remains unreceipted. No new ModelInvocation state, API shape,
+  adapter fallback, schema migration or automatic retry.
 
 - Round 3 Harness output provenance hard cut: child Invocation results
   cannot appear as top-level Turn `Snapshot.Output` during unresolved Host

@@ -126,6 +126,15 @@ multi-provider router.
   the original completed ResponseID/Usage. If Usage is verifiable, return
   only a minimal `ResponseRejectedError` completion receipt (no ToolCalls,
   content or replay); otherwise fail closed without creating a receipt.
+  A second, post-completion validation fence covers **completed but malformed**
+  Tool arguments or identifiers as well: a trustworthy finished envelope and
+  cumulative Usage retain only the original ResponseID/Usage under a typed
+  post-generation rejection. This applies to OpenAI physical function-call
+  item verification and Anthropic Tool-block decoding/final SSE reconstruction.
+  Independent replay errors and unsupported non-Tool output retain their
+  existing Provider error classification.
+  Partial/truncated/unknown-Usage responses still cannot invent a receipt;
+  no invalid Tool, content or replay is authorized for execution.
   Normal text-only requests and valid Tool calls are unchanged. Interim
   SSE text deltas are observational and may already have been emitted;
   they never constitute a successful terminal Tool-required receipt.

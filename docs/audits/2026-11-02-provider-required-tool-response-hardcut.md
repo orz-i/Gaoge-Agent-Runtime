@@ -377,3 +377,58 @@ These require separate explicit live compatibility acceptance.
 `scripts/probe_openai_responses.py` and
 `scripts/test_probe_openai_responses.py` are excluded from this work.
 No commit/push/PR is part of this local governance slice.
+
+## PR #87 independent post-CI P1: completed malformed Tool still loses paid Usage
+
+A later independent read-only merge gate reproduced a remaining P1 despite
+all required GitHub checks passing. On PR Head `51390b5`, a completed OpenAI
+Responses envelope with valid ID and cumulative Usage, and a physical
+`function_call` whose own status was `completed` but arguments were malformed
+JSON, failed downstream `projectOutput()` parsing. The adapter returned an
+empty response and plain `ErrUnsupported`, leaving a paid ModelInvocation
+pending. A public Agent + mock SSE + real in-memory Kernel Store test observed
+two completed physical model calls but only the first consumed and accounted:
+17 input/5 output (22 total) rather than 34 input/10 output (44 total).
+The invalid local Tool did not execute. See the superseding
+[blocking PR audit](https://github.com/orz-i/Gaoge-Agent-Runtime/pull/87#issuecomment-6570010105).
+
+**Follow-up fix on the same PR branch:** After validating an independently
+completed outer provider response and its cumulative Usage, a shared internal
+post-generation rejection helper now sanitizes **invalid physical Tool items**
+to original `ResponseID` plus cloned Usage only, with typed
+`model.post_generation_failed`. OpenAI catches completed malformed Tool
+arguments and unrecognized Tool names **before** output projection. Other
+non-Tool and encrypted replay errors retain their previous classification.
+Anthropic analogs were independently reproduced for malformed Tool IDs and
+unknown Tool names: completed unary/SSE messages must preserve their known
+billing even when final stream block reconstruction fails. The Anthropic
+adapter now retains minimal receipts across these post-completion failures.
+Unknown Usage, unfinished envelopes, malformed pre-completion SSE and invalid
+final Usage never mint a completed receipt. No ToolCalls, arguments, content,
+replay or successful SSE terminal event are emitted on these rejections.
+
+**Permanent RED→GREEN evidence:**
+
+- `TestCompletedMalformedToolStillConsumesPaidAgentInvocation`: 2 physical
+  OpenAI model completions; exactly 2 consumed durable ModelInvocations and
+  34/10/44 token totals, zero Tool effects, rejected failure code.
+- OpenAI `TestUnfinishedFunctionItemWithMalformedArgumentsNeverExecutesOrLosesReceipt`:
+  completed malformed item with and without Usage, unary and SSE. The
+  before-fix test failed for both transports; corrected implementations pass.
+- Anthropic `TestCompletedMalformedToolRetainsAnthropicUsageReceipt`: missing
+  Tool ID and unknown Tool name in unary/SSE, with and without cumulative
+  Usage; before-fix known-Usage cases failed, corrected implementations pass.
+- Shared `TestRejectCompletedResponseNeverExposesInvalidProviderOutput`:
+  only valid final identity/Usage survive; no invented completion or
+  mutable Usage alias.
+
+**Final-source quality gates:** Full `make check` passed (exit 0), including
+Go workspace unit/Race/Vet/Lint, 46 TypeScript tests, benchmark, A2A, OTel
+smoke and beta.24 clean-consumer tests. Real PostgreSQL/Redis integration via
+`node scripts/run-integration.mjs` passed (exit 0), including independent
+connections, cancellation, recovery and Redis continuation; the dedicated
+Docker Compose containers and network were removed after verification.
+
+Any subsequent pushed Head requires a fresh independent merge-admission audit
+and GitHub required checks on that exact Head. This repair is not permission
+to merge or publish beta.24.

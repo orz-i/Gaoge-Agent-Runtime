@@ -46,6 +46,21 @@ single consumption/billing. The check runs before parsing potentially
 unfinished JSON arguments. Hosts must not rely on a completed envelope as
 proof that every physical Tool item is executable.
 
+**Completed but malformed Tool item accounting correction (PR #87):**
+An explicit `status=completed` does not certify an item's arguments, name,
+CallID as executable. When the enclosing OpenAI response or final
+Anthropic message is independently completed and its cumulative Usage valid,
+post-completion **Tool-item** validation failures now retain only the original
+ResponseID/Usage as `model.post_generation_failed` rejected evidence. This
+includes completed function calls with malformed JSON and malformed Anthropic
+Tool blocks reconstructed after final SSE Usage. Agent consumes exactly one
+billed invocation without Tool side effects or terminal SSE success. Missing
+or unverified final Usage, truncated responses and pre-completion stream errors
+remain fail-closed without a fabricated receipt. Missing encrypted reasoning
+replay and unsupported non-Tool output retain their previous Provider failure
+classification. No retry/status/SQL schema,
+Host route or compatibility bridge is added.
+
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,
 provider fallback, silent request rewrite or legacy bridge is introduced.
