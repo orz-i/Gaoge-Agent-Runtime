@@ -328,17 +328,14 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 	if err != nil {
 		return model.Response{}, err
 	}
+	// Keep the original completed receipt independent of progressively decoded
+	// content. A malformed sibling must not erase billing for a physical Tool.
+	receipt := result
 	var output strings.Builder
 	for _, raw := range body.Content {
 		block, err := parseContentBlock(raw)
 		if err != nil {
-			var kind struct {
-				Type string `json:"type"`
-			}
-			if json.Unmarshal(raw, &kind) == nil && kind.Type == "tool_use" {
-				return providerhttp.RejectCompletedResponse(result, err)
-			}
-			return model.Response{}, err
+			return rejectCompletedToolOutput(receipt, body.Content, err)
 		}
 		switch block.Type {
 		case "text":
@@ -346,21 +343,21 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 		case "tool_use":
 			key := names[block.Name]
 			if key == "" || block.ID == "" || !json.Valid(block.Input) {
-				return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
+				return rejectCompletedToolOutput(receipt, body.Content, ErrUnsupported)
 			}
 			result.ToolCalls = append(result.ToolCalls, tools.Call{
 				ID: block.ID, ToolKey: key, Name: block.Name, Arguments: append(json.RawMessage(nil), block.Input...),
 			})
 		case "thinking":
 			if block.Signature == "" {
-				return model.Response{}, ErrUnsupported
+				return rejectCompletedToolOutput(receipt, body.Content, ErrUnsupported)
 			}
 		case "redacted_thinking":
 			if block.Data == "" {
-				return model.Response{}, ErrUnsupported
+				return rejectCompletedToolOutput(receipt, body.Content, ErrUnsupported)
 			}
 		default:
-			return model.Response{}, ErrUnsupported
+			return rejectCompletedToolOutput(receipt, body.Content, ErrUnsupported)
 		}
 	}
 	result.Content = output.String()
@@ -370,11 +367,11 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 		}
 		serializedBlocks, err := normalizedContentForReplay(body.Content)
 		if err != nil {
-			return model.Response{}, err
+			return providerhttp.RejectCompletedResponse(receipt, err)
 		}
 		serialized, err := json.Marshal(serializedBlocks)
 		if err != nil || len(serialized) > 16<<20 {
-			return model.Response{}, ErrUnsupported
+			return providerhttp.RejectCompletedResponse(receipt, ErrUnsupported)
 		}
 		result.ProviderReplay = &model.ProviderReplay{Provider: "anthropic", Format: "messages.content.v1", Data: serialized}
 	}
@@ -382,6 +379,23 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 		return model.Response{}, ErrUnsupported
 	}
 	return result, nil
+}
+
+// A completed Anthropic message can contain a valid physical tool_use *after*
+// an invalid sibling block. Check the entire original output, not just the
+// first failing block or the partially decoded ToolCalls. Only the minimal
+// verified completion receipt survives; no partial Tool, text or signed replay
+// becomes authorized on any post-completion semantic rejection.
+func rejectCompletedToolOutput(receipt model.Response, content []json.RawMessage, cause error) (model.Response, error) {
+	for _, raw := range content {
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(raw, &kind) == nil && kind.Type == "tool_use" {
+			return providerhttp.RejectCompletedResponse(receipt, cause)
+		}
+	}
+	return model.Response{}, cause
 }
 
 func (c *Client) Generate(ctx context.Context, request model.Request) (model.Response, error) {
@@ -560,20 +574,11 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	for index := 0; index < len(blocks); index++ {
 		b := blocks[index]
 		if b == nil {
-			return model.Response{}, providerhttp.ErrProtocol
+			return rejectCompletedStreamToolOutput(body, blocks)
 		}
 		encoded, err := marshalStreamBlock(b)
 		if err != nil {
-			if b.Type != "tool_use" {
-				return model.Response{}, providerhttp.ErrProtocol
-			}
-			// The final message/Usage were observed. An invalid Tool block
-			// cannot execute, but needs a minimal billed rejection receipt.
-			receipt, receiptErr := completedMessageReceipt(body)
-			if receiptErr != nil {
-				return model.Response{}, providerhttp.ErrProtocol
-			}
-			return providerhttp.RejectCompletedResponse(receipt, ErrUnsupported)
+			return rejectCompletedStreamToolOutput(body, blocks)
 		}
 		body.Content = append(body.Content, encoded)
 	}
@@ -593,6 +598,23 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		}
 	}
 	return result, err
+}
+
+// Stream block reconstruction runs only after message_stop and final cumulative
+// Usage checks. All observed blocks are available, so an invalid sibling
+// before a valid Tool cannot hide a paid physical Tool response. Earlier
+// streaming/protocol failures do not use this completed-response receipt path.
+func rejectCompletedStreamToolOutput(body messageBody, blocks map[int]*contentBlock) (model.Response, error) {
+	for _, block := range blocks {
+		if block != nil && block.Type == "tool_use" {
+			receipt, err := completedMessageReceipt(body)
+			if err != nil {
+				return model.Response{}, providerhttp.ErrProtocol
+			}
+			return providerhttp.RejectCompletedResponse(receipt, ErrUnsupported)
+		}
+	}
+	return model.Response{}, providerhttp.ErrProtocol
 }
 
 // A gateway may ignore tool_choice=any and return text instead of a required
