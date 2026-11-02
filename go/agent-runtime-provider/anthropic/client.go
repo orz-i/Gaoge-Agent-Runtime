@@ -435,6 +435,9 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	var chunks = map[int]*strings.Builder{}
 	var closed = map[int]bool{}
 	var resultBytes int
+	// Unsupported content is never authorized. Drain only a bounded,
+	// well-framed stream to establish final completion and paid Usage.
+	var rejectedContent bool
 	var initialUsagePresent bool
 	var finalOutputUsageObserved bool
 	err = providerhttp.Stream(resp, func(event string, data []byte) error {
@@ -476,12 +479,22 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			}
 			b, err := parseContentBlock(frame.ContentBlock)
 			if err != nil {
-				return err
+				// A structurally valid content block with unsupported rich
+				// citations/metadata is a semantic rejection, not yet proof
+				// of an incomplete physical Provider response. Keep only its
+				// type for Tool evidence, never its untrusted payload.
+				var kind struct {
+					Type string `json:"type"`
+				}
+				if json.Unmarshal(frame.ContentBlock, &kind) != nil || kind.Type == "" {
+					return providerhttp.ErrProtocol
+				}
+				rejectedContent = true
+				b = contentBlock{Type: kind.Type}
+				resultBytes += len(frame.ContentBlock)
+			} else {
+				resultBytes += len(b.Text) + len(b.Input) + len(b.Thinking) + len(b.Signature) + len(b.Data)
 			}
-			if b.Type != "text" && b.Type != "tool_use" && b.Type != "thinking" && b.Type != "redacted_thinking" {
-				return ErrUnsupported
-			}
-			resultBytes += len(b.Text) + len(b.Input) + len(b.Thinking) + len(b.Signature) + len(b.Data)
 			if resultBytes > 16<<20 {
 				return providerhttp.ErrProtocol
 			}
@@ -489,8 +502,17 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			chunks[frame.Index] = &strings.Builder{}
 		case "content_block_delta":
 			b := blocks[frame.Index]
-			if b == nil || closed[frame.Index] {
+			if b == nil || closed[frame.Index] || frame.Delta.Type == "" {
 				return providerhttp.ErrProtocol
+			}
+			if rejectedContent {
+				// After irreversible semantic rejection, later deltas are
+				// framing evidence only. Bound raw bytes; never emit content.
+				resultBytes += len(data)
+				if resultBytes > 16<<20 {
+					return providerhttp.ErrProtocol
+				}
+				break
 			}
 			resultBytes += len(frame.Delta.Text) + len(frame.Delta.PartialJSON) + len(frame.Delta.Thinking) + len(frame.Delta.Signature)
 			if resultBytes > 16<<20 {
@@ -549,6 +571,14 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			if !started || len(blocks) != len(closed) {
 				return providerhttp.ErrProtocol
 			}
+			// Completion proof requires a contiguous sequence of closed
+			// blocks. Matching map lengths alone can conceal index gaps,
+			// which must not certify even a minimal rejected receipt.
+			for index := 0; index < len(blocks); index++ {
+				if blocks[index] == nil || !closed[index] {
+					return providerhttp.ErrProtocol
+				}
+			}
 			stopped = true
 		case "ping":
 		case "error":
@@ -571,14 +601,19 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	if !initialUsagePresent || !finalOutputUsageObserved {
 		body.Usage = nil
 	}
+	if rejectedContent {
+		// Only after message_stop: never reconstruct or trust rejected
+		// content, even if another block contains a legitimate local Tool.
+		return rejectCompletedStreamToolOutput(body, blocks, ErrUnsupported)
+	}
 	for index := 0; index < len(blocks); index++ {
 		b := blocks[index]
 		if b == nil {
-			return rejectCompletedStreamToolOutput(body, blocks)
+			return model.Response{}, providerhttp.ErrProtocol
 		}
 		encoded, err := marshalStreamBlock(b)
 		if err != nil {
-			return rejectCompletedStreamToolOutput(body, blocks)
+			return rejectCompletedStreamToolOutput(body, blocks, providerhttp.ErrProtocol)
 		}
 		body.Content = append(body.Content, encoded)
 	}
@@ -604,7 +639,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 // Usage checks. All observed blocks are available, so an invalid sibling
 // before a valid Tool cannot hide a paid physical Tool response. Earlier
 // streaming/protocol failures do not use this completed-response receipt path.
-func rejectCompletedStreamToolOutput(body messageBody, blocks map[int]*contentBlock) (model.Response, error) {
+func rejectCompletedStreamToolOutput(body messageBody, blocks map[int]*contentBlock, noToolCause error) (model.Response, error) {
 	for _, block := range blocks {
 		if block != nil && block.Type == "tool_use" {
 			receipt, err := completedMessageReceipt(body)
@@ -614,7 +649,7 @@ func rejectCompletedStreamToolOutput(body messageBody, blocks map[int]*contentBl
 			return providerhttp.RejectCompletedResponse(receipt, ErrUnsupported)
 		}
 	}
-	return model.Response{}, providerhttp.ErrProtocol
+	return model.Response{}, noToolCause
 }
 
 // A gateway may ignore tool_choice=any and return text instead of a required

@@ -22,11 +22,14 @@ import (
 // when a sibling signed block is invalid, nor lose known final paid Usage.
 func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 	for _, tc := range []struct {
-		name         string
-		invalidFirst bool
+		name          string
+		invalidFirst  bool
+		richCitations bool
 	}{
 		{name: "invalid_thinking_then_tool", invalidFirst: true},
 		{name: "tool_then_invalid_thinking"},
+		{name: "rich_citations_then_tool", invalidFirst: true, richCitations: true},
+		{name: "tool_then_rich_citations", richCitations: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls, effects atomic.Int32
@@ -59,6 +62,9 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 				} else {
 					tool := `{"type":"tool_use","id":"toolu-1","name":"lookup","input":{}}`
 					invalid := `{"type":"thinking","thinking":"opaque","signature":""}`
+					if tc.richCitations {
+						invalid = `{"type":"text","text":"unrepresentable","citations":[{"type":"char_location","cited_text":"source"}]}`
+					}
 					if tc.invalidFirst {
 						tool, invalid = invalid, tool
 					}

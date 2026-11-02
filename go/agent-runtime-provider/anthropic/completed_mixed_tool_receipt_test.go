@@ -73,8 +73,18 @@ func TestCompletedMixedAnthropicToolStreamKeepsPaidReceipt(t *testing.T) {
 		{"invalid_thinking_then_tool", []string{mixedThinking, mixedValidTool}, "tool_use", true},
 		{"tool_then_invalid_thinking", []string{mixedValidTool, mixedThinking}, "tool_use", true},
 		{"tool_then_invalid_redacted", []string{mixedValidTool, mixedRedacted}, "tool_use", true},
+		// These fail at content_block_start, before final cumulative Usage.
+		{"rich_citations_then_tool", []string{mixedRichText, mixedValidTool}, "tool_use", true},
+		{"tool_then_rich_citations", []string{mixedValidTool, mixedRichText}, "tool_use", true},
+		{"unknown_block_then_tool", []string{mixedUnknown, mixedValidTool}, "tool_use", true},
+		{"tool_then_unknown_block", []string{mixedValidTool, mixedUnknown}, "tool_use", true},
+		{"rich_text_without_tool", []string{mixedRichText}, "end_turn", false},
 		{"invalid_thinking_without_tool", []string{mixedThinking}, "end_turn", false},
 		{"truncated_outer_with_tool", []string{mixedThinking, mixedValidTool}, "max_tokens", true},
+		{"truncated_rich_text_with_tool", []string{mixedRichText, mixedValidTool}, "max_tokens", true},
+		{"missing_message_stop_with_tool", []string{mixedRichText, mixedValidTool}, "tool_use", true},
+		{"malformed_frame_after_rich_text", []string{mixedValidTool, mixedRichText}, "tool_use", true},
+		{"noncontiguous_indices_after_rich_text", []string{mixedRichText, mixedValidTool}, "tool_use", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, usage := range []struct {
@@ -100,9 +110,23 @@ func TestCompletedMixedAnthropicToolStreamKeepsPaidReceipt(t *testing.T) {
 						send("message_start", map[string]any{"type": "message_start",
 							"message": map[string]any{"id": "paid-anthropic-mixed", "usage": map[string]any{"input_tokens": 17, "output_tokens": 0}}})
 						for i, block := range tc.blocks {
+							index := i
+							if tc.name == "noncontiguous_indices_after_rich_text" && i == 1 {
+								index = 2 // The missing index 1 is invalid SSE framing.
+							}
 							send("content_block_start", map[string]any{"type": "content_block_start",
-								"index": i, "content_block": json.RawMessage(block)})
-							send("content_block_stop", map[string]any{"type": "content_block_stop", "index": i})
+								"index": index, "content_block": json.RawMessage(block)})
+							if block == mixedRichText {
+								send("content_block_delta", map[string]any{"type": "content_block_delta", "index": index,
+									"delta": map[string]any{"type": "text_delta", "text": "untrusted delta"}})
+							}
+							send("content_block_stop", map[string]any{"type": "content_block_stop", "index": index})
+						}
+						if tc.name == "malformed_frame_after_rich_text" {
+							// Event/type mismatch is a protocol failure, even after
+							// a recognized semantic rejection and physical Tool.
+							send("content_block_stop", map[string]any{"type": "message_stop"})
+							return
 						}
 						var final map[string]any
 						if err := json.Unmarshal([]byte("{"+usage.final+"}"), &final); err != nil {
@@ -111,9 +135,11 @@ func TestCompletedMixedAnthropicToolStreamKeepsPaidReceipt(t *testing.T) {
 						final["type"] = "message_delta"
 						final["delta"] = map[string]any{"stop_reason": tc.stop}
 						send("message_delta", final)
-						send("message_stop", map[string]any{"type": "message_stop"})
+						if tc.name != "missing_message_stop_with_tool" {
+							send("message_stop", map[string]any{"type": "message_stop"})
+						}
 					})
-					var terminal int
+					var terminal, rejectedDelta int
 					response, err := client.GenerateStream(t.Context(), model.Request{
 						Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}},
 						Tools:    []tools.Definition{definition}, RequireToolCall: true,
@@ -121,9 +147,18 @@ func TestCompletedMixedAnthropicToolStreamKeepsPaidReceipt(t *testing.T) {
 						if event.ResponseID != "" {
 							terminal++
 						}
+						if event.Delta == "untrusted delta" {
+							rejectedDelta++
+						}
 						return nil
 					})
-					assertMixedAnthropicRejection(t, response, err, tc.hasTool && tc.stop == "tool_use" && usage.known, terminal != 0)
+					if rejectedDelta != 0 {
+						t.Fatalf("semantically rejected content leaked via SSE: count=%d", rejectedDelta)
+					}
+					assertMixedAnthropicRejection(t, response, err, tc.hasTool && tc.stop == "tool_use" &&
+						tc.name != "missing_message_stop_with_tool" && tc.name != "malformed_frame_after_rich_text" &&
+						tc.name != "noncontiguous_indices_after_rich_text" &&
+						usage.known, terminal != 0)
 				})
 			}
 		})
