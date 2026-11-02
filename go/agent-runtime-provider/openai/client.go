@@ -268,7 +268,7 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 	// item with partially formed arguments. Fence that item before decoding
 	// executable calls so known final Usage is not lost to an argument parse
 	// error and no incomplete Tool can enter an Agent dispatch intent.
-	result, err := verifyCompletedFunctionCallItems(result, body.Output)
+	result, err := verifyCompletedFunctionCallItems(result, body.Output, names)
 	if err != nil {
 		return result, err
 	}
@@ -428,28 +428,38 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 // would otherwise queue and execute an explicitly unfinished Tool.
 // Preserve only verifiable billable completion evidence, never an executable
 // ToolCall, its arguments, unrelated text or replay payload on rejection.
-func verifyCompletedFunctionCallItems(result model.Response, output []json.RawMessage) (model.Response, error) {
+func verifyCompletedFunctionCallItems(result model.Response, output []json.RawMessage, names map[string]string) (model.Response, error) {
 	for _, raw := range output {
-		var item struct {
-			Type   string          `json:"type"`
-			Status json.RawMessage `json:"status"`
+		var kind struct {
+			Type string `json:"type"`
 		}
-		if json.Unmarshal(raw, &item) != nil {
+		if json.Unmarshal(raw, &kind) != nil {
 			return model.Response{}, ErrUnsupported
 		}
-		if item.Type != "function_call" || len(item.Status) == 0 {
-			continue // A genuinely omitted status retains the legacy contract.
-		}
-		var status string
-		if json.Unmarshal(item.Status, &status) == nil && status == "completed" {
+		if kind.Type != "function_call" {
 			continue
 		}
-		if !providerhttp.ValidCompletedUsage(result.Usage) {
-			return model.Response{}, ErrUnsupported
+		var item struct {
+			Status    json.RawMessage `json:"status"`
+			CallID    string          `json:"call_id"`
+			Name      string          `json:"name"`
+			Arguments string          `json:"arguments"`
 		}
-		return model.Response{
-			ResponseID: result.ResponseID, Usage: model.CloneUsage(result.Usage),
-		}, model.NewResponseRejectedError(model.NewClassifiedError(ErrUnsupported, "model.post_generation_failed"))
+		if json.Unmarshal(raw, &item) != nil {
+			return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
+		}
+		// Only omitted status preserves the legacy contract. Every explicit
+		// status must be completed, and even a completed item still needs
+		// valid executable arguments and a declared local Tool identity.
+		if len(item.Status) != 0 {
+			var status string
+			if json.Unmarshal(item.Status, &status) != nil || status != "completed" {
+				return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
+			}
+		}
+		if item.CallID == "" || item.Name == "" || names[item.Name] == "" || !json.Valid([]byte(item.Arguments)) {
+			return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
+		}
 	}
 	return result, nil
 }

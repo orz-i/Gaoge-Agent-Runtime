@@ -360,6 +360,7 @@ func TestUnfinishedFunctionItemWithMalformedArgumentsNeverExecutesOrLosesReceipt
 		{name: "partial_arguments_missing_usage"},
 		{name: "valid_first_then_partial_known_usage", validFirst: true, withUsage: true},
 		{name: "completed_item_malformed_arguments", completed: true, withUsage: true},
+		{name: "completed_item_malformed_arguments_without_usage", completed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, mode := range []string{"unary", "stream"} {
@@ -417,7 +418,7 @@ func TestUnfinishedFunctionItemWithMalformedArgumentsNeverExecutesOrLosesReceipt
 					if !errors.Is(err, openai.ErrUnsupported) || len(result.ToolCalls) != 0 || terminal != 0 || result.ProviderReplay != nil {
 						t.Fatalf("incomplete/malformed call authorized execution: result=%+v err=%v terminal=%d", result, err, terminal)
 					}
-					if tc.completed || !tc.withUsage {
+					if !tc.withUsage {
 						if model.IsResponseRejectedError(err) || result.ResponseID != "" || result.Usage != nil {
 							t.Fatalf("uncertified completed output invented receipt: result=%+v err=%v", result, err)
 						}

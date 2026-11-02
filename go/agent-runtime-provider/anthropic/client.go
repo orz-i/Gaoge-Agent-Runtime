@@ -293,7 +293,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	return prepared{body: payload, names: byName}, nil
 }
 
-func decodeResponse(body messageBody, names map[string]string) (model.Response, error) {
+// completedMessageReceipt validates the final Anthropic completion envelope
+// and normalizes cumulative Usage independently of Tool-block semantics.
+func completedMessageReceipt(body messageBody) (model.Response, error) {
 	if body.StopReason == "max_tokens" {
 		return model.Response{}, errors.Join(ErrUnsupported, ErrIncomplete)
 	}
@@ -318,10 +320,24 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 			OutputTokens: output, CacheReadTokens: read, CacheWriteTokens: write,
 		}
 	}
+	return result, nil
+}
+
+func decodeResponse(body messageBody, names map[string]string) (model.Response, error) {
+	result, err := completedMessageReceipt(body)
+	if err != nil {
+		return model.Response{}, err
+	}
 	var output strings.Builder
 	for _, raw := range body.Content {
 		block, err := parseContentBlock(raw)
 		if err != nil {
+			var kind struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(raw, &kind) == nil && kind.Type == "tool_use" {
+				return providerhttp.RejectCompletedResponse(result, err)
+			}
 			return model.Response{}, err
 		}
 		switch block.Type {
@@ -330,7 +346,7 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 		case "tool_use":
 			key := names[block.Name]
 			if key == "" || block.ID == "" || !json.Valid(block.Input) {
-				return model.Response{}, ErrUnsupported
+				return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
 			}
 			result.ToolCalls = append(result.ToolCalls, tools.Call{
 				ID: block.ID, ToolKey: key, Name: block.Name, Arguments: append(json.RawMessage(nil), block.Input...),
@@ -350,7 +366,7 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 	result.Content = output.String()
 	if len(result.ToolCalls) != 0 {
 		if body.StopReason != "tool_use" {
-			return model.Response{}, ErrUnsupported
+			return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
 		}
 		serializedBlocks, err := normalizedContentForReplay(body.Content)
 		if err != nil {
@@ -384,7 +400,7 @@ func (c *Client) Generate(ctx context.Context, request model.Request) (model.Res
 	}
 	result, err := decodeResponse(body, prepared.names)
 	if err != nil {
-		return model.Response{}, err
+		return result, err
 	}
 	return verifyRequiredToolResponse(request, result)
 }
@@ -548,13 +564,22 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		}
 		encoded, err := marshalStreamBlock(b)
 		if err != nil {
-			return model.Response{}, providerhttp.ErrProtocol
+			if b.Type != "tool_use" {
+				return model.Response{}, providerhttp.ErrProtocol
+			}
+			// The final message/Usage were observed. An invalid Tool block
+			// cannot execute, but needs a minimal billed rejection receipt.
+			receipt, receiptErr := completedMessageReceipt(body)
+			if receiptErr != nil {
+				return model.Response{}, providerhttp.ErrProtocol
+			}
+			return providerhttp.RejectCompletedResponse(receipt, ErrUnsupported)
 		}
 		body.Content = append(body.Content, encoded)
 	}
 	result, err := decodeResponse(body, prepared.names)
 	if err != nil {
-		return model.Response{}, err
+		return result, err
 	}
 	result, err = verifyRequiredToolResponse(request, result)
 	if err != nil {

@@ -2,6 +2,7 @@ package providerhttp
 
 import (
 	"math"
+	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
@@ -20,4 +21,18 @@ func ValidCompletedUsage(usage *model.Usage) bool {
 		return false
 	}
 	return usage.InputTokens <= math.MaxInt64-usage.OutputTokens
+}
+
+// RejectCompletedResponse consumes a known completed but semantically invalid
+// provider response without authorizing its content, Tool calls or replay.
+// Invalid/missing cumulative Usage cannot certify an already-billed receipt.
+// Only call this after validating the provider's outer completion status.
+func RejectCompletedResponse(response model.Response, cause error) (model.Response, error) {
+	if strings.TrimSpace(response.ResponseID) == "" || !ValidCompletedUsage(response.Usage) {
+		return model.Response{}, cause
+	}
+	return model.Response{
+		ResponseID: response.ResponseID,
+		Usage:      model.CloneUsage(response.Usage),
+	}, model.NewResponseRejectedError(model.NewClassifiedError(cause, "model.post_generation_failed"))
 }
