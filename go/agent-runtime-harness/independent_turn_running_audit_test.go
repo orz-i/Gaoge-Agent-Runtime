@@ -119,7 +119,7 @@ func TestIndependentVerifiedInteractionReceiptResumesRunningAgentTurn(t *testing
 	seedFeatureInvocationEnvelope(t, store, sid, tid, hostThread, hostTurn, actor, now)
 	_, parentItemID := seedFeatureInvocationParent(t, runtime, store, tid, actor, thread, now)
 	waiting, err := runner.RequestInteraction(t.Context(), tid, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(tid), ParentItemID: parentItemID,
 		Key: "running-turn-receipt", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 	})
 	if err != nil || len(waiting.Interactions) != 1 {
@@ -136,7 +136,7 @@ func TestIndependentVerifiedInteractionReceiptResumesRunningAgentTurn(t *testing
 	if _, err = store.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := store.GetInvocation(t.Context(), interactionParentInvocationID)
+	inv, err := store.GetInvocation(t.Context(), featureParentInvocationID(tid))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestIndependentRootRefreshCannotTerminalizeInFlightChildCallback(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := store.GetInvocation(t.Context(), interactionParentInvocationID)
+	root, err := store.GetInvocation(t.Context(), featureParentInvocationID(turnID))
 	if err != nil {
 		t.Fatal(err)
 	}

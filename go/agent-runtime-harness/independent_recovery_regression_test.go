@@ -220,12 +220,12 @@ func TestIndependentAuditLegacyInteractionCannotApplyHostEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending := harness.Interaction{
-		ID: "historical-interaction", TurnID: tid, InvocationID: "hiv_parent",
+		ID: "historical-interaction", TurnID: tid, InvocationID: featureParentInvocationID(tid),
 		ParentItemID: parentItemID, Key: "old-approval",
 		Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 		Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	parent, err := store.GetInvocation(t.Context(), "hiv_parent")
+	parent, err := store.GetInvocation(t.Context(), featureParentInvocationID(tid))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -39,7 +39,10 @@ func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role
 	}
 	turnID := "pr82-remote-cancel"
 	rootRunID := "pr82-local-root-run"
-	rootID := "pr82-root-invocation"
+	rootID, err := harness.InvocationID(turnID, "", harness.CapabilityAgent, "root")
+	if err != nil {
+		t.Fatal(err)
+	}
 	childRunID := "pr82-remote-child-run"
 	parentItemID := "pr82-delegation-parent"
 	turn := harness.Turn{ID: turnID, SessionID: "pr82-session", HostTurn: harness.HostRef{Kind: "message", ID: turnID},
@@ -54,8 +57,21 @@ func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role
 		RequestID: "root", Goal: "delegate", State: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
+	// This fixture represents a real admitted root Agent. Its RequestID,
+	// Invocation ID and frozen Input must match the physical Kernel Run;
+	// arbitrary test IDs are not a valid execution owner receipt.
+	rootInput, err := json.Marshal(struct {
+		Goal   string           `json:"goal"`
+		Actor  kernel.ActorRef  `json:"actor"`
+		Thread kernel.ThreadRef `json:"thread"`
+	}{Goal: "delegate", Actor: actor, Thread: thread})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootDigest := sha256.Sum256(rootInput)
 	root := harness.Invocation{ID: rootID, TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
-		ExecutionClass: harness.ExecutionAgent, ExecutionRefID: rootRunID, Status: harness.InvocationRunning,
+		ExecutionClass: harness.ExecutionAgent, Input: rootInput, InputHash: hex.EncodeToString(rootDigest[:]),
+		ExecutionRefID: rootRunID, Status: harness.InvocationRunning,
 		Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
 	if _, _, err := store.CreateInvocation(ctx, root); err != nil {
 		t.Fatal(err)

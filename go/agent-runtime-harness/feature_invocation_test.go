@@ -2,8 +2,10 @@ package harness_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -664,6 +666,16 @@ func seedFeatureInvocationEnvelope(
 	}
 }
 
+// A previously admitted root uses the same deterministic identity as
+// public StartAgentTurn; arbitrary test IDs are not frozen RequestID proof.
+func featureParentInvocationID(turnID string) string {
+	id, err := harness.InvocationID(turnID, "", harness.CapabilityAgent, "parent")
+	if err != nil {
+		panic(err)
+	}
+	return id
+}
+
 func seedFeatureInvocationParent(
 	t *testing.T,
 	runtime *kernel.Runtime,
@@ -680,9 +692,20 @@ func seedFeatureInvocationParent(
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// This fixture represents an already-admitted real Agent Run: freeze the
+	// original physical owner instead of using an unverified legacy hash.
+	parentInput, err := json.Marshal(struct {
+		Goal   string           `json:"goal"`
+		Actor  kernel.ActorRef  `json:"actor"`
+		Thread kernel.ThreadRef `json:"thread"`
+	}{Goal: "coordinate", Actor: actor, Thread: thread})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentHash := sha256.Sum256(parentInput)
 	parent := harness.Invocation{
-		ID: "hiv_parent", TurnID: turnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1",
-		ExecutionClass: harness.ExecutionAgent, InputHash: "parent", ExecutionRefID: parentRunID,
+		ID: featureParentInvocationID(turnID), TurnID: turnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1",
+		ExecutionClass: harness.ExecutionAgent, Input: parentInput, InputHash: fmt.Sprintf("%x", parentHash), ExecutionRefID: parentRunID,
 		Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
 	}

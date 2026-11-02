@@ -106,7 +106,7 @@ type recheckAcceptedBeforeCancelStore struct {
 }
 
 func (s *recheckAcceptedBeforeCancelStore) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	if s.armed.Load() && item.Kind == harness.ItemInvocation && item.InvocationID != interactionParentInvocationID && s.stopped.CompareAndSwap(false, true) {
+	if s.armed.Load() && item.Kind == harness.ItemInvocation && item.InvocationID != featureParentInvocationID(item.TurnID) && s.stopped.CompareAndSwap(false, true) {
 		close(s.entered)
 		<-s.release
 	}

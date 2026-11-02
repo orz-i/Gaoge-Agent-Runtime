@@ -43,7 +43,7 @@ func TestCancellationClaimCommittedHostCASLostReplyKeepsIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: "hiv_parent", ParentItemID: parentItem,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItem,
 		Key: "partial-cancel-claim-response", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 	})
 	if err != nil || len(waiting.Interactions) != 1 {
@@ -54,7 +54,7 @@ func TestCancellationClaimCommittedHostCASLostReplyKeepsIntent(t *testing.T) {
 	if !errors.Is(firstErr, errCancellationClaimLostACK) || store.completedWrites.Load() != 1 {
 		t.Fatalf("failed to inject after committed Host Invocation CAS: err=%v writes=%d", firstErr, store.completedWrites.Load())
 	}
-	owner, err := backing.GetInvocation(t.Context(), "hiv_parent")
+	owner, err := backing.GetInvocation(t.Context(), featureParentInvocationID(turnID))
 	if err != nil || owner.Status != harness.InvocationCancelled {
 		t.Fatalf("committed mutation missing: status=%s err=%v", owner.Status, err)
 	}
@@ -290,7 +290,7 @@ func TestRejectedHostCancellationCASStillKeepsIntent(t *testing.T) {
 		t.Fatal(err)
 	}
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: "hiv_parent", ParentItemID: parentItem,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItem,
 		Key: "reject-host-cas-before-write", Kind: harness.InteractionChoice,
 		Schema: json.RawMessage("{}"),
 	})
@@ -301,7 +301,7 @@ func TestRejectedHostCancellationCASStillKeepsIntent(t *testing.T) {
 	if !errors.Is(err, harness.ErrConflict) || store.attempts.Load() != 1 {
 		t.Fatalf("Host CAS rejection not exercised: err=%v attempts=%d", err, store.attempts.Load())
 	}
-	owner, err := backing.GetInvocation(t.Context(), "hiv_parent")
+	owner, err := backing.GetInvocation(t.Context(), featureParentInvocationID(turnID))
 	if err != nil || owner.Status != harness.InvocationWaitingInput {
 		t.Fatalf("fixture unexpectedly changed Host Invocation: status=%s err=%v", owner.Status, err)
 	}

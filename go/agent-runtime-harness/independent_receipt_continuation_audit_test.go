@@ -43,7 +43,7 @@ func TestReauditVerifiedInteractionReconcileIdempotency(t *testing.T) {
 	seedFeatureInvocationEnvelope(t, store, sid, tid, hostThread, hostTurn, actor, now)
 	_, parentItemID := seedFeatureInvocationParent(t, runtime, store, tid, actor, thread, now)
 	waiting, err := runner.RequestInteraction(t.Context(), tid, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(tid), ParentItemID: parentItemID,
 		Key: "recoverable-idempotence", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 	})
 	if err != nil || len(waiting.Interactions) != 1 {
@@ -58,7 +58,7 @@ func TestReauditVerifiedInteractionReconcileIdempotency(t *testing.T) {
 	if _, err = store.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := store.GetInvocation(t.Context(), interactionParentInvocationID)
+	inv, err := store.GetInvocation(t.Context(), featureParentInvocationID(tid))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +236,7 @@ func TestReauditConcurrentVerifiedReconcileDoubleResumesRootAgent(t *testing.T) 
 	seedFeatureInvocationEnvelope(t, store, sid, tid, hostThread, hostTurn, actor, now)
 	_, parentItemID := seedFeatureInvocationParent(t, runtime, store, tid, actor, thread, now)
 	waiting, err := runner.RequestInteraction(t.Context(), tid, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(tid), ParentItemID: parentItemID,
 		Key: "reconcile-dual-run", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 	})
 	if err != nil {
@@ -251,7 +251,7 @@ func TestReauditConcurrentVerifiedReconcileDoubleResumesRootAgent(t *testing.T) 
 	if _, err = store.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := store.GetInvocation(t.Context(), interactionParentInvocationID)
+	inv, err := store.GetInvocation(t.Context(), featureParentInvocationID(tid))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -371,7 +371,7 @@ func TestReauditRunningApplicationChildFencesAncestorCancellation(t *testing.T) 
 func TestReauditRunningResolvedResponseReplayRequiresBusinessReceipt(t *testing.T) {
 	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "ambiguous-replay", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 	})
 	if err != nil {
@@ -386,7 +386,7 @@ func TestReauditRunningResolvedResponseReplayRequiresBusinessReceipt(t *testing.
 	if _, err = store.UpdateInteraction(t.Context(), interaction, interaction.Revision); err != nil {
 		t.Fatal(err)
 	}
-	invocation, err := store.GetInvocation(t.Context(), interactionParentInvocationID)
+	invocation, err := store.GetInvocation(t.Context(), featureParentInvocationID(turnID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestReauditLostContinuationClaimACKCannotReenterAgent(t *testing.T) {
 	seedFeatureInvocationEnvelope(t, backing, sid, tid, hostThread, hostTurn, actor, now)
 	_, parentItemID := seedFeatureInvocationParent(t, runtime, backing, tid, actor, thread, now)
 	waiting, err := runner.RequestInteraction(t.Context(), tid, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(tid), ParentItemID: parentItemID,
 		Key: "lost-ack", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 	})
 	if err != nil {
@@ -462,7 +462,7 @@ func TestReauditLostContinuationClaimACKCannotReenterAgent(t *testing.T) {
 	if _, err = backing.UpdateInteraction(t.Context(), interaction, interaction.Revision); err != nil {
 		t.Fatal(err)
 	}
-	invocation, err := backing.GetInvocation(t.Context(), interactionParentInvocationID)
+	invocation, err := backing.GetInvocation(t.Context(), featureParentInvocationID(tid))
 	if err != nil {
 		t.Fatal(err)
 	}

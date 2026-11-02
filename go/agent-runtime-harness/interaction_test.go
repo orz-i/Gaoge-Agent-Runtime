@@ -10,14 +10,12 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-const interactionParentInvocationID = "hiv_parent"
-
 func TestGenericInteractionWaitResolveAndReplay(t *testing.T) {
 	t.Parallel()
 	runner, turnID, parentItemID, _, _, _, _ := newFeatureInvocationHarness(t)
 
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "candidate-choice", Kind: harness.InteractionChoice,
 		Schema:       json.RawMessage(`{"type":"object","required":["candidateID"]}`),
 		Presentation: json.RawMessage(`{"title":"Choose a candidate"}`),
@@ -93,7 +91,7 @@ func TestResolveInteractionHandlesApplicationResponseBeforeResumingOwner(t *test
 func TestResolveInteractionAfterCancellationLeavesInteractionWaiting(t *testing.T) {
 	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "cancelled-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
 	})
 	if err != nil {
@@ -130,7 +128,7 @@ func TestGenericInteractionAllowsOnlyOneWaitingInputPerTurn(t *testing.T) {
 	t.Parallel()
 	runner, turnID, parentItemID, _, _, _, _ := newFeatureInvocationHarness(t)
 	first, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "first", Kind: harness.InteractionConfirmation, Schema: json.RawMessage(`{"type":"boolean"}`),
 	})
 	if err != nil {
@@ -140,7 +138,7 @@ func TestGenericInteractionAllowsOnlyOneWaitingInputPerTurn(t *testing.T) {
 		t.Fatalf("first interaction snapshot = %#v", first.Interactions)
 	}
 	_, err = runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "second", Kind: harness.InteractionInput, Schema: json.RawMessage(`{"type":"string"}`),
 	})
 	if !errors.Is(err, harness.ErrConflict) {
@@ -158,7 +156,7 @@ func TestGenericInteractionAllowsOnlyOneWaitingInputPerTurn(t *testing.T) {
 		t.Fatalf("resolve first interaction: %v", err)
 	}
 	if _, err = runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "third", Kind: harness.InteractionInput, Schema: json.RawMessage(`{"type":"string"}`),
 	}); err != nil {
 		t.Fatalf("request interaction after resolution: %v", err)
@@ -169,7 +167,7 @@ func TestResolvedInteractionReplayDoesNotRewindLaterWait(t *testing.T) {
 	t.Parallel()
 	runner, turnID, parentItemID, _, _, _, _ := newFeatureInvocationHarness(t)
 	first, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "first-replay", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
 	})
 	if err != nil {
@@ -182,7 +180,7 @@ func TestResolvedInteractionReplayDoesNotRewindLaterWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "second-wait", Kind: harness.InteractionInput, Schema: json.RawMessage(`{"type":"string"}`),
 	})
 	if err != nil {
@@ -196,7 +194,7 @@ func TestResolvedInteractionReplayDoesNotRewindLaterWait(t *testing.T) {
 		t.Fatalf("replay earlier resolution: %v", err)
 	}
 	if replayed.Turn.Status != harness.TurnWaitingInput ||
-		invocationByID(t, replayed, interactionParentInvocationID).Status != harness.InvocationWaitingInput {
+		invocationByID(t, replayed, featureParentInvocationID(turnID)).Status != harness.InvocationWaitingInput {
 		t.Fatalf("earlier replay rewound owner state: turn=%#v invocations=%#v", replayed.Turn, replayed.Invocations)
 	}
 	persistedSecond := interactionByKey(t, replayed, "second-wait")
@@ -209,7 +207,7 @@ func TestResolvedInteractionReplayPreservesTerminalTurn(t *testing.T) {
 	t.Parallel()
 	runner, turnID, parentItemID, _, _, _, _ := newFeatureInvocationHarness(t)
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "terminal-replay", Kind: harness.InteractionConfirmation, Schema: json.RawMessage(`{"type":"boolean"}`),
 	})
 	if err != nil {
@@ -236,7 +234,7 @@ func TestInteractionRequestReplayRepairsPartialWaitingProjection(t *testing.T) {
 	t.Parallel()
 	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	request := harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "repair-wait", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
 	}
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, request)
@@ -257,7 +255,7 @@ func TestInteractionResolutionReplayRepairsPartialOwnerProjection(t *testing.T) 
 	t.Parallel()
 	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "repair-resolve", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
 	})
 	if err != nil {
@@ -281,7 +279,7 @@ func TestInteractionResolutionReplayRepairsPartialOwnerProjection(t *testing.T) 
 
 func forceInteractionOwnersRunning(t *testing.T, store *harness.MemoryStore, turnID string) {
 	t.Helper()
-	invocation, err := store.GetInvocation(t.Context(), interactionParentInvocationID)
+	invocation, err := store.GetInvocation(t.Context(), featureParentInvocationID(turnID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,11 +303,11 @@ func assertWaitingInteraction(t *testing.T, snapshot harness.Snapshot) harness.I
 		t.Fatalf("waiting interaction snapshot = %#v", snapshot)
 	}
 	interaction := snapshot.Interactions[0]
-	if interaction.Status != harness.InteractionWaiting || interaction.InvocationID != interactionParentInvocationID ||
+	if interaction.Status != harness.InteractionWaiting || interaction.InvocationID != featureParentInvocationID(snapshot.Turn.ID) ||
 		len(interaction.Response) != 0 {
 		t.Fatalf("waiting interaction = %#v", interaction)
 	}
-	invocation := invocationByID(t, snapshot, interactionParentInvocationID)
+	invocation := invocationByID(t, snapshot, featureParentInvocationID(snapshot.Turn.ID))
 	if invocation.Status != harness.InvocationWaitingInput {
 		t.Fatalf("waiting invocation = %#v", invocation)
 	}
@@ -328,7 +326,7 @@ func assertResolvedInteraction(t *testing.T, snapshot harness.Snapshot, response
 	if interaction.Status != harness.InteractionResolved || string(interaction.Response) != string(response) {
 		t.Fatalf("resolved interaction = %#v", interaction)
 	}
-	invocation := invocationByID(t, snapshot, interactionParentInvocationID)
+	invocation := invocationByID(t, snapshot, featureParentInvocationID(snapshot.Turn.ID))
 	if invocation.Status != harness.InvocationRunning {
 		t.Fatalf("resolved invocation = %#v", invocation)
 	}
@@ -419,7 +417,7 @@ func newInteractionResumeFixture(t *testing.T) interactionResumeFixture {
 func requestHandledInteraction(t *testing.T, fixture interactionResumeFixture) harness.Interaction {
 	t.Helper()
 	waiting, err := fixture.runner.RequestInteraction(t.Context(), fixture.turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: fixture.parent,
+		InvocationID: featureParentInvocationID(fixture.turnID), ParentItemID: fixture.parent,
 		ApplicationRef: &harness.HostRef{Kind: "story", ID: "story_1"},
 		ArtifactRefs:   []harness.HostRef{{Kind: "story_candidate_portfolio", ID: "portfolio_1"}},
 		Key:            "handled-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
@@ -445,9 +443,9 @@ func assertHandlerFailureKeepsOwnerWaiting(
 	}
 	paused, err := fixture.runner.Load(t.Context(), fixture.turnID)
 	if err != nil || paused.Turn.Status != harness.TurnWaitingInput ||
-		invocationByID(t, paused, interactionParentInvocationID).Status != harness.InvocationWaitingInput ||
+		invocationByID(t, paused, featureParentInvocationID(fixture.turnID)).Status != harness.InvocationWaitingInput ||
 		interactionByKey(t, paused, "handled-choice").Status != harness.InteractionResolved || fixture.agent.resumeCalls != 0 {
-		t.Fatalf("proven no-effect failure failed to release claim safely: turn=%s invocation=%s calls=%d err=%v", paused.Turn.Status, invocationByID(t, paused, interactionParentInvocationID).Status, fixture.agent.resumeCalls, err)
+		t.Fatalf("proven no-effect failure failed to release claim safely: turn=%s invocation=%s calls=%d err=%v", paused.Turn.Status, invocationByID(t, paused, featureParentInvocationID(fixture.turnID)).Status, fixture.agent.resumeCalls, err)
 	}
 }
 

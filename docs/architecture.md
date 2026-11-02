@@ -90,6 +90,63 @@ is permitted. Custom Stores must implement that atomic contract; no Kernel
 status or SQL schema change is needed. See the
 [round 2 lifecycle audit](audits/2026-11-01-invocation-terminal-projection-governance.md).
 
+**Turn output provenance and physical owner:** `Snapshot.Output` is only
+the original top-level Kernel-backed Invocation's physical Result, not the
+latest observed child. Child `RefreshInvocation` / `ResumeInvocation`
+cannot substitute their own Run output when a Host callback is unverified.
+Every physical root observation that can change Invocation/Turn status or
+write lifecycle Items must verify original frozen Run ID,
+ExecutionClass/Run Kind, Actor, Kernel Thread and Goal, **including when
+Result is nil**. The same validator runs before `FinalizeHostOutput`
+persists a terminal Host message and before `ResumeTurn` dispatches Agent
+continuation. Application has **no** Kernel Run and always uses durable Host
+`OutputRefs`, even if a foreign physical Run shares its execution ID.
+Historical result-free, read-only state inspection remains possible, but
+it cannot authorize physical state changes or Host ACK without frozen
+proof. An absent Run with documented no-effect admission may still use its
+original synthetic terminal projection; no fake physical proof is minted.
+Root cancellation additionally checks this proof against the original
+Turn's Invocation just before any physical Kernel/Host Cancel, while a
+root Feature Start replay verifies it before calling Team/Workflow/GroupChat
+Resume. A first-attempt Run RequestID must reproduce the immutable root
+Invocation ID through existing `InvocationID` derivation. A retry Run must
+have exactly `stableID("hretry", invocation.ID, Attempt)` as its RequestID,
+matching the original `RetryInvocation` protocol; no new persisted request
+field or heuristic fallback is introduced. Root Cancel's existing Host
+intent and no-effect receipt sequencing is retained, with a second
+pre-control verification to reject foreign effects without disturbing
+cancellation failure recovery. **Child native execution provenance** is
+also required: a child freezes its original root and intermediate parent
+Attempts in the existing `Invocation.Input` and must verify that immutable
+ancestry, original Kernel-backed root Run, child Run Kind, Actor, Thread,
+Goal, RequestID and current child Attempt before any native Feature Resume,
+Invocation status CAS or Result Artifact. Parent admission and the final
+physical dispatch claim both check the actual root's frozen identity;
+intermediate native parents are checked before granting nested execution.
+A proven no-Run child cancellation is projected only by the already verified
+cancellation route, never by ordinary Refresh/Resume. Handoff continues to
+require its original ChildRunner/route receipts instead of borrowing this
+native Feature proof. The existing local RunRelation verifier now also
+checks the original root or native child Invocation's frozen physical owner
+before authorizing Kernel Cancel/approval or exposing a Run-backed Subtask
+Goal, state or Result. A matching indexed Invocation ID alone is not
+sufficient; Handoff/remote and raw Feature route precedence is unchanged.
+Read-only Subtask materialization may read the original root for this
+proof, including in the CancelSubtask lookup. A `KindCapability` RunRelation
+may be used as physical authority only when its `ChildRunID` matches the
+original native child ExecutionRefID, its `OwnerNodeID` equals the child
+Invocation/Attempt owner ID, and its `ParentRunID` equals the child's frozen
+original root Run. The root and child must belong to the same Harness Turn.
+`CancelSubtask` checks this immutable Store metadata against its **requested
+Turn before creating any cancellation intent**; the final local physical
+Cancel/Run-backed Subtask reader checks it again. An invalid edge can
+remain a durable read-only relation fact but cannot lend another Turn's
+Kernel Result or physical control. Raw Feature edge precedence and remote
+Handoff ChildRunner proof remain unchanged. Original cancellation-intent
+and Kernel pre-Store no-effect test boundaries remain intact. No new
+ledger, status machine or Host authority. See the
+[round 3 provenance audit](audits/2026-11-01-root-output-provenance-governance.md).
+
 ## Host-owned selection and provider composition
 
 Before a Turn or Run is admitted, the Host chooses a concrete capability.

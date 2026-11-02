@@ -13,6 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 // Subtask is a product projection of a durable execution relation, folded by
@@ -317,6 +318,28 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	if err != nil {
 		return Snapshot{}, err
 	}
+	// A KindCapability Subtask is an indexed child, not evidence that its
+	// physical Run belongs to this Turn. Verify the original frozen parent
+	// edge before creating a cancellation intent or revoking any budget.
+	// This is Store metadata only; no extra Kernel read changes the existing
+	// post-intent pre-Store cancellation recovery boundary.
+	if task.Kind == string(runrelation.KindCapability) {
+		if runner.relationReader == nil {
+			return Snapshot{}, ErrConflict
+		}
+		relation, relationErr := runner.relationReader.GetByChild(ctx, task.RunID)
+		if relationErr != nil || relation.ChildRunID != task.RunID ||
+			relation.ParentRunID != task.ParentRunID {
+			return Snapshot{}, errors.Join(ErrConflict, relationErr)
+		}
+		owner, ownerErr := runner.store.GetInvocationByExecutionRefID(ctx, task.RunID)
+		if ownerErr != nil || owner.TurnID != turn.ID {
+			return Snapshot{}, errors.Join(ErrConflict, ownerErr)
+		}
+		if err := runner.verifyCapabilityRelationOwner(ctx, relation, owner); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	// A terminal Subtask is only the parent's execution status. A composite
 	// Team/Workflow/GroupChat can still own Running RunRelation children;
 	// never treat the displayed parent status as proof of descendant cleanup.
@@ -352,7 +375,7 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 			return Snapshot{}, err
 		}
 	}
-	_, found, cancelErr := runner.cancelRuntimeRun(ctx, task.RunID, reason)
+	_, found, cancelErr := runner.cancelRuntimeRun(ctx, task.RunID, reason, nil)
 	// Only conflicts from the TARGET cancellation itself can prove that no
 	// physical cancellation began. A later descendant-cleanup conflict may
 	// follow already committed effects; it must retain the intent.

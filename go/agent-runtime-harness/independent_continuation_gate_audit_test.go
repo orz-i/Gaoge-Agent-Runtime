@@ -38,7 +38,7 @@ func TestNewIndependentCommittedContinuationClaimDoesNotReportSuccessWithoutRunt
 	seedFeatureInvocationEnvelope(t, backing, sid, tid, hostThread, hostTurn, actor, now)
 	_, parentItem := seedFeatureInvocationParent(t, runtime, backing, tid, actor, thread, now)
 	waiting, err := runner.RequestInteraction(t.Context(), tid, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItem,
+		InvocationID: featureParentInvocationID(tid), ParentItemID: parentItem,
 		Key: "business-callback-known", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 	})
 	if err != nil || len(waiting.Interactions) != 1 {
@@ -50,7 +50,7 @@ func TestNewIndependentCommittedContinuationClaimDoesNotReportSuccessWithoutRunt
 	if _, err = backing.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := backing.GetInvocation(t.Context(), interactionParentInvocationID)
+	inv, err := backing.GetInvocation(t.Context(), featureParentInvocationID(tid))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestNewIndependentVerifiedClaimBypassedByResumeTurn(t *testing.T) {
 	seedFeatureInvocationEnvelope(t, backing, sid, tid, hostThread, hostTurn, actor, now)
 	_, parentItem := seedFeatureInvocationParent(t, runtime, backing, tid, actor, thread, now)
 	waiting, err := runner.RequestInteraction(t.Context(), tid, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItem,
+		InvocationID: featureParentInvocationID(tid), ParentItemID: parentItem,
 		Key: "business-callback-known", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 	})
 	if err != nil || len(waiting.Interactions) != 1 {
@@ -119,7 +119,7 @@ func TestNewIndependentVerifiedClaimBypassedByResumeTurn(t *testing.T) {
 	if _, err = backing.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := backing.GetInvocation(t.Context(), interactionParentInvocationID)
+	inv, err := backing.GetInvocation(t.Context(), featureParentInvocationID(tid))
 	if err != nil {
 		t.Fatal(err)
 	}

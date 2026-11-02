@@ -173,6 +173,11 @@ func (runner *Runner) requireLiveParentAttempt(ctx context.Context, turnID strin
 			terminalRuntimeStatus(snapshot.Run.Status) {
 			return errors.Join(ErrConflict, loadErr)
 		}
+		if !isHandoffDelegationInvocation(parent) {
+			if err := runner.validateChildRuntimeOwnership(ctx, parent, snapshot); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

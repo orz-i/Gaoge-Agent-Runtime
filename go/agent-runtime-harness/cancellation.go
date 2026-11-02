@@ -45,6 +45,7 @@ func (runner *Runner) cancelRuntimeRun(
 	ctx context.Context,
 	runID string,
 	reason string,
+	root *Invocation,
 ) (kernel.Snapshot, bool, error) {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
@@ -126,6 +127,21 @@ func (runner *Runner) cancelRuntimeRun(
 			// certifies only that no cancellation callback ran in this
 			// attempt; the underlying Store error proves nothing itself.
 			return kernel.Snapshot{}, false, cancellationReadNoEffect{cause: err}
+		}
+		// Root cancellation is also physical execution authority. Verify the
+		// original frozen root before any native/custom Cancel callback or
+		// acceptance of a coincidentally terminal same-ID Run. This direct
+		// pre-effect proof permits safe cancellation-intent retirement.
+		if root != nil {
+			// Only the original root Turn's caller can supply root authority.
+			// A foreign same-ID Invocation from a DIFFERENT Turn cannot lend
+			// its identity to a remotely owned RunRelation descendant.
+			if root.ParentItemID != "" || root.ExecutionRefID != runID {
+				return kernel.Snapshot{}, true, cancellationReadNoEffect{cause: ErrConflict}
+			}
+			if err := validateRootRuntimeOwnership(*root, current); err != nil {
+				return kernel.Snapshot{}, true, cancellationReadNoEffect{cause: err}
+			}
 		}
 		// A RunID collision in the local Kernel is not authority to cancel
 		// a routed Handoff. Verify the full frozen child task and parent
@@ -561,7 +577,7 @@ func (runner *Runner) cancelDescendantRun(
 	if runID == rootRunID {
 		return kernel.Snapshot{}, false, nil
 	}
-	return runner.cancelRuntimeRun(ctx, runID, reason)
+	return runner.cancelRuntimeRun(ctx, runID, reason, nil)
 }
 
 // Apply the same missing-Run proof to direct targets and traversed children.
@@ -660,7 +676,7 @@ func (runner *Runner) syncChildInvocationWithRetry(
 		if terminalInvocationStatus(invocation.Status) {
 			return nil
 		}
-		_, err = runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
+		_, err = runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot, true)
 		if !errors.Is(err, ErrConflict) {
 			return err
 		}

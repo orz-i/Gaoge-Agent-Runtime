@@ -129,7 +129,7 @@ func TestIndependentCancellationIntentPreventsLateChildAdmission(t *testing.T) {
 func TestIndependentCancellationIntentFencesInteractionAndInvocationStore(t *testing.T) {
 	runner, turnID, parentItemID, _, _, store, _ := newFeatureInvocationHarness(t)
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: interactionParentInvocationID, ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "pre-existing-wait", Kind: harness.InteractionChoice,
 		Schema: json.RawMessage("{}"),
 	})
@@ -152,7 +152,7 @@ func TestIndependentCancellationIntentFencesInteractionAndInvocationStore(t *tes
 	}); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("response dispatch escaped cancellation intent: %v", err)
 	}
-	inv, err := store.GetInvocation(t.Context(), interactionParentInvocationID)
+	inv, err := store.GetInvocation(t.Context(), featureParentInvocationID(turnID))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -141,11 +141,12 @@ func TestNativeCancellationPreStoreReadAllowsRetryForRootAndChildren(t *testing.
 						return runner.Cancel(t.Context(), turnID, "native no-effect cancellation")
 					}
 				}
-				// CancelSubtask reads its Subtask's Kernel Run during lookup,
-				// before cancelRuntimeRun's own two pre-Store reads.
+				// CancelSubtask now verifies the child Run and frozen root
+				// during read-only Subtask lookup before the cancellation intent.
+				// Target the same native post-intent pre-Store read as before.
 				failAt := int32(3)
 				if operation == "CancelSubtask" {
-					failAt = 4
+					failAt = 5
 				}
 				kernelStore.failAt.Store(failAt)
 				kernelStore.armed.Store(true)
@@ -295,7 +296,7 @@ func TestNativeNoEffectDoesNotReleaseInteractionMutatedCancellation(t *testing.T
 	}
 	runner, store, _, turnID, parentItemID, rootRunID := newNativeCancellationSeededHarness(t, runtime)
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: "hiv_parent", ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "cancel-intent-audit-interaction", Kind: harness.InteractionChoice,
 		Schema: json.RawMessage("{}"),
 	})
@@ -317,7 +318,7 @@ func TestNativeNoEffectDoesNotReleaseInteractionMutatedCancellation(t *testing.T
 	if !harness.ActiveCancellationFence(items) {
 		t.Fatal("Interaction mutation was incorrectly treated as no-effect")
 	}
-	owner, err := store.GetInvocation(t.Context(), "hiv_parent")
+	owner, err := store.GetInvocation(t.Context(), featureParentInvocationID(turnID))
 	if err != nil || owner.Status != harness.InvocationCancelled {
 		t.Fatalf("Interaction CAS not committed: status=%s err=%v", owner.Status, err)
 	}
