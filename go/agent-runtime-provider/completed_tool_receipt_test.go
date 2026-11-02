@@ -51,6 +51,36 @@ func TestCompletedRequiredToolFreeRejectionConsumesPaidAgentInvocation(t *testin
 	}
 }
 
+// A completed function_call never authorizes a foreign-role or unfinished
+// sibling message, regardless of output order. Even when the Provider has
+// already supplied final Usage, the entire Tool batch is rejected and
+// consumed exactly once without executing its local handler.
+func TestCompletedOpenAIInvalidMessageSiblingNeverExecutesTool(t *testing.T) {
+	tool := map[string]any{"type": "function_call", "status": "completed",
+		"call_id": "valid-but-unauthorized", "name": "lookup", "arguments": "{}"}
+	for _, tc := range []struct {
+		name   string
+		role   any
+		status any
+	}{
+		{name: "foreign_user_role", role: "user", status: "completed"},
+		{name: "foreign_system_role", role: "system", status: "completed"},
+		{name: "foreign_tool_role", role: "tool", status: "completed"},
+		{name: "explicit_null_role", status: "completed"},
+		{name: "in_progress_status", role: "assistant", status: "in_progress"},
+		{name: "incomplete_status", role: "assistant", status: "incomplete"},
+		{name: "explicit_null_status", role: "assistant"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := map[string]any{"type": "message", "role": tc.role, "status": tc.status,
+				"content": []any{map[string]any{"type": "output_text", "text": "untrusted sibling"}}}
+			for _, output := range [][]any{{message, tool}, {tool, message}} {
+				assertCompletedRejectedToolReceipt(t, output)
+			}
+		})
+	}
+}
+
 // Mixed valid Tool and invalid output cannot execute a partial Tool batch, but
 // its completed physical Provider invocation must still be accounted once.
 func TestCompletedMixedOutputStillConsumesPaidAgentInvocation(t *testing.T) {

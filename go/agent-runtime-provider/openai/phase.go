@@ -36,8 +36,29 @@ func projectOutput(outputs []json.RawMessage) (outputProjection, error) {
 		}
 		switch item.Type {
 		case "message":
-			if item.Phase != nil && item.Role != "" && item.Role != string(model.RoleAssistant) {
+			// A completed outer Responses envelope does not certify that
+			// every physical message is a completed assistant output. An
+			// explicit foreign role or unfinished status must invalidate
+			// the entire candidate, including any sibling Tool calls.
+			// Only genuinely omitted legacy fields remain supported.
+			var authority struct {
+				Role   json.RawMessage `json:"role"`
+				Status json.RawMessage `json:"status"`
+			}
+			if json.Unmarshal(raw, &authority) != nil {
 				return outputProjection{}, ErrUnsupported
+			}
+			if len(authority.Role) != 0 {
+				var role string
+				if json.Unmarshal(authority.Role, &role) != nil || role != string(model.RoleAssistant) {
+					return outputProjection{}, ErrUnsupported
+				}
+			}
+			if len(authority.Status) != 0 {
+				var status string
+				if json.Unmarshal(authority.Status, &status) != nil || status != "completed" {
+					return outputProjection{}, ErrUnsupported
+				}
 			}
 			text, refused, err := projectMessageText(item)
 			if err != nil {
