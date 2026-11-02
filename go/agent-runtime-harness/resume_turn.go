@@ -56,6 +56,12 @@ func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, 
 	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) || runtimeSnapshot.Run.Kind != agent.RunKind || runtimeSnapshot.Run.Actor != session.Actor {
 		return Snapshot{}, ErrConflict
 	}
+	// Matching Run ID, Kind and Session Actor do not authorize a physical
+	// continuation from another frozen Thread or Goal. Verify the original
+	// root execution before granting Agent.Resume any work.
+	if err = validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
+	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)

@@ -1035,7 +1035,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
-	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
+	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
 	if err != nil {
 		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
 	}
@@ -1168,6 +1168,14 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 		// Even a verified callback for this Invocation cannot bypass an
 		// independently claimed, still-unverified sibling effect.
 		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+	}
+	// Every physical root observation can drive status or lifecycle facts,
+	// even with no Result (failed, cancelled, waiting, etc.). Validate its
+	// original frozen owner before allowing any Invocation/Turn CAS or Item.
+	if invocation.ParentItemID == "" {
+		if err := validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	// An active cancellation intent can outlive the parent Kernel's
 	// cancelled status while a remote child remains running. No generic
@@ -1344,11 +1352,18 @@ func (runner *Runner) terminalRuntimeSnapshot(ctx context.Context, turn Turn) (k
 	}
 	result := kernel.Snapshot{Run: kernel.Run{ID: invocation.ExecutionRefID}}
 	executionRefID := strings.TrimSpace(invocation.ExecutionRefID)
-	if executionRefID == "" {
+	// Application outputs are Host-owned references, never physical Kernel
+	// results. A coincident Kernel Run ID must not supply the message hash.
+	if executionRefID == "" || invocation.ExecutionClass == ExecutionApplication {
 		return result, nil
 	}
 	loaded, err := runner.runtime.Load(ctx, executionRefID)
 	if err == nil {
+		// Even a result-free terminal Run determines the durable Host ACK
+		// identity. Never finalize from an unverified physical owner.
+		if err = validateRootRuntimeOwnership(invocation, loaded); err != nil {
+			return kernel.Snapshot{}, err
+		}
 		return loaded, nil
 	}
 	if errors.Is(err, kernel.ErrNotFound) && missingRuntimeSnapshotAllowed(turn, invocation) {
@@ -1433,6 +1448,64 @@ func (runner *Runner) recordTerminalAgentMessageItem(
 		CreatedAt: now, UpdatedAt: now,
 	})
 	return err
+}
+
+// validateRootRuntimeOwnership binds presentation of a physical Result to
+// the original frozen root execution owner. Equal Run IDs are insufficient:
+// an unrelated Kernel Run can occupy that ID while an Application has no Run
+// or an admitted Agent has not created its Run yet.
+func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapshot) error {
+	var kind kernel.RunKind
+	switch invocation.ExecutionClass {
+	case ExecutionAgent:
+		kind = agent.RunKind
+	case ExecutionTeam:
+		kind = team.RunKind
+	case ExecutionGroupChat:
+		kind = groupchat.RunKind
+	case ExecutionWorkflow:
+		kind = workflow.RunKind
+	case ExecutionApplication:
+		// Host-owned Application must not read Kernel results at all.
+		return ErrConflict
+	default:
+		return ErrConflict
+	}
+	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)
+	if err != nil {
+		return err
+	}
+	// Every current root admission freezes Goal in the hash-validated
+	// Invocation Input. RequestID intentionally differs on explicit retries;
+	// do not derive or guess its first-attempt value for this check.
+	var input struct {
+		Goal string `json:"goal"`
+	}
+	if err := json.Unmarshal(invocation.Input, &input); err != nil || strings.TrimSpace(input.Goal) == "" {
+		return ErrConflict
+	}
+	if strings.TrimSpace(invocation.ExecutionRefID) == "" ||
+		snapshot.Run.ID != invocation.ExecutionRefID || snapshot.Run.Kind != kind ||
+		snapshot.Run.Actor != actor || snapshot.Run.Thread != thread ||
+		snapshot.Run.Goal != input.Goal {
+		return ErrConflict
+	}
+	// The first physical RequestID is the one hashed into the immutable
+	// Invocation ID. On explicit RetryInvocation, a new Attempt and Run ID
+	// use the existing hretry derivation instead. No new persisted request
+	// field, inferred first-attempt ID or compatibility bypass is needed.
+	if invocation.Attempt == 1 {
+		invocationID, err := InvocationID(invocation.TurnID, "", invocation.CapabilityKey, snapshot.Run.RequestID)
+		if err != nil || invocationID != invocation.ID {
+			return ErrConflict
+		}
+	} else {
+		expected := stableID("hretry", invocation.ID, attemptString(invocation.Attempt))
+		if snapshot.Run.RequestID != expected {
+			return ErrConflict
+		}
+	}
+	return nil
 }
 
 func runtimeSnapshotConflicts(invocation Invocation, snapshot kernel.Snapshot) bool {
@@ -1720,7 +1793,19 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	}
 	runtimeSnapshot := provided
 	rootInvocation, hasRootInvocation := topLevelInvocation(invocations)
-	if runtimeSnapshot == nil && hasRootInvocation && strings.TrimSpace(rootInvocation.ExecutionRefID) != "" {
+	// The output of a Harness Turn belongs to its top-level Invocation only.
+	// A child Refresh/Resume may pass its observed Runtime snapshot while a
+	// Host callback claim remains unresolved. That child snapshot must never
+	// become the Turn Output; reload the authoritative root instead. Keep
+	// the check here so future child observation paths cannot bypass it.
+	if runtimeSnapshot != nil && (!hasRootInvocation ||
+		rootInvocation.ExecutionClass == ExecutionApplication ||
+		strings.TrimSpace(rootInvocation.ExecutionRefID) == "" ||
+		runtimeSnapshot.Run.ID != rootInvocation.ExecutionRefID) {
+		runtimeSnapshot = nil
+	}
+	if runtimeSnapshot == nil && hasRootInvocation && rootInvocation.ExecutionClass != ExecutionApplication &&
+		strings.TrimSpace(rootInvocation.ExecutionRefID) != "" {
 		loaded, loadErr := runner.runtime.Load(ctx, rootInvocation.ExecutionRefID)
 		if loadErr != nil {
 			if !errors.Is(loadErr, kernel.ErrNotFound) || !missingRuntimeSnapshotAllowed(turn, rootInvocation) {
@@ -1731,6 +1816,12 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 		}
 	}
 	if runtimeSnapshot != nil && runtimeSnapshot.Result != nil {
+		// The result content is display data; require frozen Kind, Actor
+		// and Thread authority before exposing any physical root output.
+		if err = validateRootRuntimeOwnership(rootInvocation, *runtimeSnapshot); err != nil {
+			return Snapshot{}, err
+		}
+
 		result.Output = &Output{
 			ContentType: strings.TrimSpace(runtimeSnapshot.Result.ContentType),
 			Content:     append(json.RawMessage(nil), runtimeSnapshot.Result.Content...),

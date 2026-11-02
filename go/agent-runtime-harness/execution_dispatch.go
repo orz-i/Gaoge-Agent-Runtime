@@ -397,7 +397,9 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 	if err != nil || state.Run.ID != root.ExecutionRefID || terminalRuntimeStatus(state.Run.Status) {
 		return errors.Join(ErrConflict, err)
 	}
-	return nil
+	// Admission and this final post-grant check both prove the frozen root
+	// before a child may physically start or resume after a concurrent change.
+	return validateRootRuntimeOwnership(root, state)
 }
 
 func (runner *Runner) finishPhysicalDispatchGrant(ctx context.Context, grant Item, boundary string) error {

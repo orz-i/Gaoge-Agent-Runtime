@@ -473,6 +473,12 @@ func (runner *Runner) replayTopLevelFeatureStart(
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, prepared.invocation.ExecutionRefID)
 	if err == nil {
+		// Replay must prove the original physical owner before invoking any
+		// Feature Resume. A later projection ErrConflict cannot undo effects
+		// that a foreign same-ID Team/Workflow/GroupChat already executed.
+		if err = validateRootRuntimeOwnership(prepared.invocation, runtimeSnapshot); err != nil {
+			return Snapshot{}, true, err
+		}
 		if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
 			snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, prepared.turn, prepared.invocation, runtimeSnapshot)
 			return snapshot, true, syncErr
@@ -722,6 +728,9 @@ func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string)
 	}
 	if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
 		return runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
+	}
+	if err = runner.validateChildRuntimeOwnership(ctx, invocation, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
 	}
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
 		return Snapshot{}, err
@@ -1041,7 +1050,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.cancelApplicationSubtree(ctx, turn, invocation, reason)
 	}
-	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason)
+	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, nil)
 	if err != nil {
 		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
 	}
@@ -1161,6 +1170,12 @@ func (runner *Runner) childInvocationContext(
 	runtimeSnapshot, err := runner.runtime.Load(ctx, parent.ExecutionRefID)
 	if err != nil || runtimeSnapshot.Run.ID != parent.ExecutionRefID || terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
+	}
+	// A same-ID physical root is not a parent execution grant. Prove its
+	// frozen Kind, Actor, Thread, Goal and Attempt-bound RequestID before
+	// using that Run's identity for any child admission or physical Start.
+	if err := validateRootRuntimeOwnership(parent, runtimeSnapshot); err != nil {
+		return childInvocationContext{}, err
 	}
 	return childInvocationContext{
 		turn: turn, root: parent, parentAttempts: parentAttempts, parentExecutionRefID: parent.ExecutionRefID,
@@ -1321,6 +1336,18 @@ func (runner *Runner) resumeFeature(
 	if err := runner.requireUnclaimedInteractionContinuation(ctx, invocation.TurnID, invocation.ID); err != nil {
 		return kernel.Snapshot{}, err
 	}
+	if invocation.ParentItemID != "" {
+		// The public ResumeInvocation and verified Interaction continuation
+		// converge here. Verify a fresh physical snapshot immediately before
+		// any Team/GroupChat/Workflow Resume, not after its effects.
+		observed, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+		if err := runner.validateChildRuntimeOwnership(ctx, invocation, observed); err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
 	return runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func() (kernel.Snapshot, error) {
 		switch invocation.ExecutionClass {
 		case ExecutionTeam:
@@ -1375,6 +1402,17 @@ func (runner *Runner) resumeInvocationExecution(
 		if !ok {
 			return kernel.Snapshot{}, ErrInvalidRequest
 		}
+		if invocation.ParentItemID != "" {
+			// Verified Host callback continuations also resume native Agent
+			// children. Prove the original child before any physical effect.
+			observed, loadErr := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+			if loadErr != nil {
+				return kernel.Snapshot{}, loadErr
+			}
+			if err := runner.validateChildRuntimeOwnership(ctx, invocation, observed); err != nil {
+				return kernel.Snapshot{}, err
+			}
+		}
 		resumed, resumeErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func() (kernel.Snapshot, error) {
 			return resumer.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
 		})
@@ -1395,6 +1433,7 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	turn Turn,
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
+	verifiedNoRunCancel ...bool,
 ) (Snapshot, error) {
 	// Feature callbacks can also synchronize an independently advancing
 	// Kernel Run. Do not overwrite a claimed, unverified business response
@@ -1408,6 +1447,24 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	}
 	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) {
 		return Snapshot{}, ErrConflict
+	}
+	// Reject a foreign child observation before status CAS and Artifact or
+	// diagnostic output. Delegated Handoff children retain their separate
+	// explicit physical-owner and receipt validation instead of this local
+	// native Feature proof.
+	// Only a verified Cancel/CancelInvocation descendant cleanup may
+	// synthesize a cancelled child whose Kernel Run never existed. Public
+	// Refresh/Resume and all real physical snapshots must prove the original
+	// frozen owner even when the Run has no Result.
+	noRunProven := len(verifiedNoRunCancel) == 1 && verifiedNoRunCancel[0] &&
+		runtimeSnapshot.Run.ID == invocation.ExecutionRefID &&
+		runtimeSnapshot.Run.Kind == "" && runtimeSnapshot.Result == nil &&
+		runtimeSnapshot.Run.Status == kernel.RunStatusCancelled &&
+		runtimeSnapshot.Run.ErrorCode == "run.cancelled"
+	if !isHandoffDelegationInvocation(invocation) && !noRunProven {
+		if err := runner.validateChildRuntimeOwnership(ctx, invocation, runtimeSnapshot); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {
