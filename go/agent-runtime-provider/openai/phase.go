@@ -99,6 +99,59 @@ func projectOutput(outputs []json.RawMessage) (outputProjection, error) {
 	return result, nil
 }
 
+// terminalSafetyRefusal is deliberately narrower than the global
+// Response.Refused flag: projection marks refusals in *any* assistant phase
+// to prevent hiding safety evidence, but only a refusal-only selected final
+// message can waive a mandatory Tool call. projectOutput already validated
+// phase ordering and the shape of every item before this check runs.
+// For unphased legacy output, the last visible message is the final one.
+func terminalSafetyRefusal(outputs []json.RawMessage) bool {
+	var terminal outputItem
+	var terminalRaw json.RawMessage
+	for _, raw := range outputs {
+		var item outputItem
+		if json.Unmarshal(raw, &item) != nil {
+			return false
+		}
+		if item.Type == "message" && (item.Phase == nil || *item.Phase == phaseFinalAnswer) {
+			terminal = item
+			terminalRaw = raw
+		}
+	}
+	if len(terminal.Content) == 0 {
+		return false
+	}
+	// Role and status are *presence-sensitive* for the required-Tool safety
+	// exception. Only omitted fields retain legacy behavior; explicit null,
+	// empty, foreign roles or unfinished statuses cannot certify a terminal
+	// assistant refusal. Keep the ordinary projection semantics unchanged.
+	var authority struct {
+		Role   json.RawMessage `json:"role"`
+		Status json.RawMessage `json:"status"`
+	}
+	if json.Unmarshal(terminalRaw, &authority) != nil {
+		return false
+	}
+	if len(authority.Role) != 0 {
+		var role string
+		if json.Unmarshal(authority.Role, &role) != nil || role != string(model.RoleAssistant) {
+			return false
+		}
+	}
+	if len(authority.Status) != 0 {
+		var status string
+		if json.Unmarshal(authority.Status, &status) != nil || status != "completed" {
+			return false
+		}
+	}
+	for _, part := range terminal.Content {
+		if part.Type != "refusal" || strings.TrimSpace(part.Refusal) == "" {
+			return false
+		}
+	}
+	return true
+}
+
 func projectMessageText(item outputItem) (string, bool, error) {
 	var text strings.Builder
 	var refused bool

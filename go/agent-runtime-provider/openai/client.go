@@ -264,6 +264,14 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 			CacheReadTokens: body.Usage.InputDetails.Cached, ReasoningTokens: body.Usage.OutputDetails.Reasoning,
 		}
 	}
+	// A completed outer response can still contain an unfinished function
+	// item with partially formed arguments. Fence that item before decoding
+	// executable calls so known final Usage is not lost to an argument parse
+	// error and no incomplete Tool can enter an Agent dispatch intent.
+	result, err := verifyCompletedFunctionCallItems(result, body.Output)
+	if err != nil {
+		return result, err
+	}
 	projection, err := projectOutput(body.Output)
 	if err != nil {
 		return model.Response{}, err
@@ -307,7 +315,11 @@ func (c *Client) Generate(ctx context.Context, request model.Request) (model.Res
 	if err := providerhttp.ReadJSON(resp, &body); err != nil {
 		return model.Response{}, err
 	}
-	return decodeResponse(body, prepared.names)
+	result, err := decodeResponse(body, prepared.names)
+	if err != nil {
+		return result, err
+	}
+	return verifyRequiredToolResponse(request, result, body.Output)
 }
 func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit func(model.StreamEvent) error) (model.Response, error) {
 	prepared, err := c.prepare(request, true)
@@ -391,12 +403,75 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		return model.Response{}, providerhttp.ErrProtocol
 	}
 	result, err := decodeResponse(*final, prepared.names)
-	if err == nil && emit != nil {
+	if err != nil {
+		// An unfinished Tool item can carry a completed rejection receipt,
+		// but never executable Calls or a successful terminal SSE event.
+		return result, err
+	}
+	result, err = verifyRequiredToolResponse(request, result, final.Output)
+	if err != nil {
+		// Completed but rejected responses still carry their trusted Usage
+		// to Agent for one durable receipt; never emit SSE terminal success.
+		return result, err
+	}
+	if emit != nil {
 		if emitErr := emit(model.StreamEvent{ResponseID: result.ResponseID, Usage: model.CloneUsage(result.Usage)}); emitErr != nil {
 			return model.Response{}, emitErr
 		}
 	}
 	return result, err
+}
+
+// verifyCompletedFunctionCallItems fences physical Tool execution even when
+// the caller did not require a Tool. A completed response envelope is not
+// proof that every function_call item was completed: downstream Agent code
+// would otherwise queue and execute an explicitly unfinished Tool.
+// Preserve only verifiable billable completion evidence, never an executable
+// ToolCall, its arguments, unrelated text or replay payload on rejection.
+func verifyCompletedFunctionCallItems(result model.Response, output []json.RawMessage) (model.Response, error) {
+	for _, raw := range output {
+		var item struct {
+			Type   string          `json:"type"`
+			Status json.RawMessage `json:"status"`
+		}
+		if json.Unmarshal(raw, &item) != nil {
+			return model.Response{}, ErrUnsupported
+		}
+		if item.Type != "function_call" || len(item.Status) == 0 {
+			continue // A genuinely omitted status retains the legacy contract.
+		}
+		var status string
+		if json.Unmarshal(item.Status, &status) == nil && status == "completed" {
+			continue
+		}
+		if !providerhttp.ValidCompletedUsage(result.Usage) {
+			return model.Response{}, ErrUnsupported
+		}
+		return model.Response{
+			ResponseID: result.ResponseID, Usage: model.CloneUsage(result.Usage),
+		}, model.NewResponseRejectedError(model.NewClassifiedError(ErrUnsupported, "model.post_generation_failed"))
+	}
+	return result, nil
+}
+
+// A provider's tool_choice=required hint is not proof that a gateway actually
+// returned a Tool call. Preserve genuine completed response identity and
+// cumulative Usage so Agent can consume a post-generation contract rejection
+// exactly once. Missing/invalid Usage cannot mint a known-completion receipt.
+func verifyRequiredToolResponse(request model.Request, result model.Response, output []json.RawMessage) (model.Response, error) {
+	if !request.RequireToolCall || len(result.ToolCalls) > 0 {
+		return result, nil
+	}
+	// A refusal in earlier commentary remains part of the global safety
+	// observation, but cannot authorize a different ordinary final_answer
+	// to bypass a mandatory Tool call. Prove the selected terminal message.
+	if result.Refused && terminalSafetyRefusal(output) {
+		return result, nil
+	}
+	if !providerhttp.ValidCompletedUsage(result.Usage) {
+		return model.Response{}, ErrUnsupported
+	}
+	return result, model.NewResponseRejectedError(model.NewClassifiedError(ErrUnsupported, "model.post_generation_failed"))
 }
 
 // Only documented transient codes opt into durable retries. Never retain the

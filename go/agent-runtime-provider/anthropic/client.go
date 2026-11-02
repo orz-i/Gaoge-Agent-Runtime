@@ -382,7 +382,11 @@ func (c *Client) Generate(ctx context.Context, request model.Request) (model.Res
 	if err := providerhttp.ReadJSON(resp, &body); err != nil {
 		return model.Response{}, err
 	}
-	return decodeResponse(body, prepared.names)
+	result, err := decodeResponse(body, prepared.names)
+	if err != nil {
+		return model.Response{}, err
+	}
+	return verifyRequiredToolResponse(request, result)
 }
 
 func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit func(model.StreamEvent) error) (model.Response, error) {
@@ -549,12 +553,35 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		body.Content = append(body.Content, encoded)
 	}
 	result, err := decodeResponse(body, prepared.names)
-	if err == nil && emit != nil {
+	if err != nil {
+		return model.Response{}, err
+	}
+	result, err = verifyRequiredToolResponse(request, result)
+	if err != nil {
+		// Return trusted completion/usage for Agent's durable rejected
+		// receipt, without signaling a successful terminal SSE event.
+		return result, err
+	}
+	if emit != nil {
 		if emitErr := emit(model.StreamEvent{ResponseID: result.ResponseID, Usage: model.CloneUsage(result.Usage)}); emitErr != nil {
 			return model.Response{}, emitErr
 		}
 	}
 	return result, err
+}
+
+// A gateway may ignore tool_choice=any and return text instead of a required
+// Tool call. Known cumulative Usage proves a completed but locally rejected
+// response, which Agent must account once without retrying a billed request.
+// An unknown/invalid Usage cannot be promoted to a completed receipt.
+func verifyRequiredToolResponse(request model.Request, result model.Response) (model.Response, error) {
+	if !request.RequireToolCall || len(result.ToolCalls) > 0 || result.Refused {
+		return result, nil
+	}
+	if !providerhttp.ValidCompletedUsage(result.Usage) {
+		return model.Response{}, ErrUnsupported
+	}
+	return result, model.NewResponseRejectedError(model.NewClassifiedError(ErrUnsupported, "model.post_generation_failed"))
 }
 
 // Error events can follow HTTP 200. Retry only documented transient types,
