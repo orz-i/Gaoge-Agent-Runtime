@@ -479,3 +479,66 @@ Redis continuation; temporary Docker containers/network were removed.
 Formatting and `git diff --check` passed. These local results are not GitHub
 checks or an independent immutable-Head merge-admission review; neither
 merging nor beta.24 publication is authorized by this repair.
+
+## PR #87 independent P1 repair — Anthropic mixed completed Tool receipt
+
+A fresh [independent BLOCK audit of Head `93e29ba`](https://github.com/orz-i/Gaoge-Agent-Runtime/pull/87#issuecomment-6571870290)
+identified an analogous Anthropic Messages problem. A completed response
+with a valid physical `tool_use` and separately invalid content (rich text
+citations, missing Thinking signature/redacted data, or unsupported blocks)
+returned an empty Response whenever the invalid sibling was decoded first
+or after a Tool. The prior code only preserved a paid rejection receipt if
+the **failing** block itself had type `tool_use`. During final SSE
+reconstruction, an invalid Thinking block alongside a valid Tool returned
+plain `ErrProtocol`, losing original ID and final cumulative Usage.
+
+Independent read-only Unary/SSE Race overlays reproduced the bug; the
+public Agent → Anthropic HTTP/SSE → Kernel Store repro observed two
+completed Provider requests but only the first `consumed`: budget
+incorrectly recorded **1 LLM call / 22 tokens** instead of **2 / 44**.
+The second invocation remained `pending` without Usage and no local Tool
+side effects occurred.
+
+**Bounded implementation:** Preserve a separate, trusted outer
+`completedMessageReceipt`. On a post-completion decode or replay failure,
+scan the *original* content for a physical `tool_use`, independent of
+partially decoded calls and content ordering. Reject Tool-bearing candidates
+with `providerhttp.RejectCompletedResponse`, retaining only original ID
+and validated cloned Usage; never authorize content, ToolCalls, refusal
+flags, replay, or SSE terminal success. For SSE, perform the same check
+across all already-observed blocks after `message_stop` and final Usage
+validation, including block reconstruction/index failures. Earlier
+incomplete/invalid streams, non-Tool responses and unverified cumulative
+Usage cannot mint a completed receipt. No Kernel/Agent/Host, persisted schema,
+retry policy, compatibility bridge or second execution loop was added.
+
+**Permanent RED → GREEN tests:**
+
+- `anthropic/completed_mixed_tool_receipt_test.go`: Unary both orders
+  of valid Tool and invalid text/Thinking/redacted/unknown sibling; SSE
+  invalid signed blocks before and after a valid Tool; known, missing,
+  negative and overflowing Usage; text-only and truncated completion
+  exclusions. Tests were RED on the previously reviewed Head and GREEN
+  after the narrowly scoped provider correction, under `go test -race`.
+- `completed_anthropic_mixed_tool_receipt_test.go`: public Agent/Router/
+  Anthropic-SSE/Kernel Store path for both block orders. Initially RED
+  with `agent.model_failed` and one pending paid invocation; after the
+  correction it asserts two consumed durable ModelInvocations, exactly
+  34 input + 10 output = **44** tokens, two physical requests, zero Tool
+  side effects, and `model.post_generation_failed` on the second.
+- Existing OpenAI/Anthropic valid Tool, refusal, forced-Tool, missing
+  Usage and signed/reasoning replay regressions remain required gates.
+
+**Final source verification:** `make check` passed (exit 0), covering Go
+workspace unit/Race/Vet/Lint, TypeScript lint/typecheck/46 tests/build,
+benchmark smoke, OTel/A2A, and beta.24 clean-consumer release checks.
+`node scripts/run-integration.mjs` also passed (exit 0) with real
+PostgreSQL/Redis cross-connection, cancellation/restart and continuation
+checks; isolated test containers and network were cleaned. The focused
+new Anthropic Provider and public Agent/Kernel tests passed 10 successive
+Race runs. `gofmt` and `git diff --check` passed. Existing untracked
+OpenAI probe scripts were excluded and remained hash-identical.
+
+This is a repair candidate, **not independent approval of the new Head**.
+GitHub CI, independent immutable-Head review, merge and beta.24 release
+remain separate explicit gates.

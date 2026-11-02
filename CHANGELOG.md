@@ -37,8 +37,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   unencodable replay retains only its verified ResponseID/Usage as a
   rejected completion. No partial Tool batch or terminal SSE success is
   authorized; missing encrypted reasoning replay keeps its existing error
-  classification. No new ModelInvocation state, API shape, adapter
-  fallback, schema migration or automatic retry.
+  classification. Anthropic now also retains the minimal paid rejection
+  receipt when a valid physical `tool_use` appears anywhere in a completed
+  message beside an unsupported text/Thinking/redacted block, or final SSE
+  block reconstruction fails. A malformed sibling cannot silently drop known
+  cumulative Usage; incomplete streams and unknown Usage remain unreceipted.
+  No new ModelInvocation state, API shape, adapter fallback, schema migration
+  or automatic retry.
 
 - Round 3 Harness output provenance hard cut: child Invocation results
   cannot appear as top-level Turn `Snapshot.Output` during unresolved Host

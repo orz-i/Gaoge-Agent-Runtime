@@ -135,8 +135,12 @@ multi-provider router.
   refusal/final answer, unsupported sibling item, or oversized replay is
   also a post-completion Tool rejection: only independently verified
   ResponseID/Usage survive, never partial Tool execution or terminal SSE
-  success. Missing encrypted reasoning replay and unsupported responses
-  without a physical Tool retain their existing Provider classifications.
+  success. Anthropic applies the same minimal paid-rejection rule when any
+  original completed `tool_use` is mixed with an invalid text/Thinking/
+  redacted sibling or when post-completion SSE block reconstruction/replay
+  fails: an earlier malformed block cannot hide a later physical Tool.
+  Missing encrypted reasoning replay and unsupported responses without a
+  physical Tool retain their existing Provider classifications.
   Partial/truncated/unknown-Usage responses still cannot invent a receipt;
   no invalid Tool, content or replay is authorized for execution.
   Normal text-only requests and valid Tool calls are unchanged. Interim
