@@ -432,3 +432,50 @@ Docker Compose containers and network were removed after verification.
 Any subsequent pushed Head requires a fresh independent merge-admission audit
 and GitHub required checks on that exact Head. This repair is not permission
 to merge or publish beta.24.
+
+## PR #87 follow-up P1 — completed mixed Tool output still loses paid receipt
+
+An [independent review of Head `1f4ee3a`](https://github.com/orz-i/Gaoge-Agent-Runtime/pull/87#issuecomment-6571095423)
+found a separate paid completion gap. OpenAI `decodeResponse` correctly
+validated a completed physical `function_call` with valid ID/name/JSON but
+then returned an **empty** Response for `projectOutput` failures caused by a
+contradictory sibling message (refusal or `final_answer`) or unrecognized
+output item. For the completed second Provider request with 17 input/5
+output tokens, the public Agent stored only the first consumed invocation
+(22 tokens), leaving the second already-paid invocation pending and its
+Usage uncharged. The independent temporary Unary/SSE and Agent/Kernel
+fixtures reproduced this under Race without modifying the PR source.
+
+**Repair:** Keep the independently completed outer ID and cumulative Usage
+separate from untrusted projected content. After an error in physical
+Tool verification, output projection or replay serialization, reject a
+Tool-bearing candidate using the existing shared
+`providerhttp.RejectCompletedResponse` helper: only the cloned, valid
+ResponseID/Usage can survive, classified `model.post_generation_failed`.
+No Tool call, partial arguments, content, refusal state, ProviderReplay or
+successful terminal SSE event becomes authoritative. If final Usage is
+missing/negative/overflowing, the response remains empty with ordinary
+`ErrUnsupported`. Text-only unsupported output and missing encrypted
+reasoning evidence retain their original Provider error classifications.
+This is restricted to OpenAI Provider; no Agent/Kernel, persisted schema,
+Host route, bridge or retry mechanism changes.
+
+**Permanent regression evidence:** `openai/completed_mixed_tool_receipt_test.go`
+includes both Unary/SSE for completed Tool+refusal (both orders), Tool+final,
+Tool+unknown/ill-typed output item, Tool+invalid text part, unknown/invalid
+Usage, unchanged text-only classification and missing-encrypted-replay
+classification. It also proves an oversized physical Tool replay cannot
+silently discard known paid Usage. `completed_tool_receipt_test.go` adds five
+public Agent→HTTP/SSE Provider→Kernel tests with persisted consumed
+invocations, exactly two Provider requests, 34/10/44 tokens and zero Tool
+side effects. Independent tests were RED before the fix (including the
+Agent pending-receipt case) and GREEN after. Focused Provider/Agent tests
+passed repeated Race runs. **Final-source quality gates:** `make check`
+passed (exit 0), including Go unit/Race/Vet/Lint, TypeScript tests/build,
+benchmarks, OTel/A2A and beta.24 clean-consumer tests. Isolated real
+PostgreSQL 16/Redis 8 integration via `node scripts/run-integration.mjs`
+passed (exit 0), including cross-connection cancellation, recovery and
+Redis continuation; temporary Docker containers/network were removed.
+Formatting and `git diff --check` passed. These local results are not GitHub
+checks or an independent immutable-Head merge-admission review; neither
+merging nor beta.24 publication is authorized by this repair.

@@ -56,9 +56,14 @@ includes completed function calls with malformed JSON and malformed Anthropic
 Tool blocks reconstructed after final SSE Usage. Agent consumes exactly one
 billed invocation without Tool side effects or terminal SSE success. Missing
 or unverified final Usage, truncated responses and pre-completion stream errors
-remain fail-closed without a fabricated receipt. Missing encrypted reasoning
-replay and unsupported non-Tool output retain their previous Provider failure
-classification. No retry/status/SQL schema,
+remain fail-closed without a fabricated receipt. The subsequent independent
+mixed-output P1 correction also treats a completed OpenAI response with a
+valid physical Tool item plus contradictory final/refusal message, unsupported
+sibling item or unencodable replay as a rejected paid completion. No partial
+Tool batch, content, replay or SSE terminal success can escape; a verified
+ResponseID/Usage is consumed once. Missing encrypted reasoning replay and
+unsupported output without a physical Tool retain their original Provider
+failure classifications. No retry/status/SQL schema,
 Host route or compatibility bridge is added.
 
 This deliberately drops the former permissive acceptance of gateway

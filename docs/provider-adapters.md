@@ -131,8 +131,12 @@ multi-provider router.
   cumulative Usage retain only the original ResponseID/Usage under a typed
   post-generation rejection. This applies to OpenAI physical function-call
   item verification and Anthropic Tool-block decoding/final SSE reconstruction.
-  Independent replay errors and unsupported non-Tool output retain their
-  existing Provider error classification.
+  For OpenAI, completed local Tool output mixed with a contradictory
+  refusal/final answer, unsupported sibling item, or oversized replay is
+  also a post-completion Tool rejection: only independently verified
+  ResponseID/Usage survive, never partial Tool execution or terminal SSE
+  success. Missing encrypted reasoning replay and unsupported responses
+  without a physical Tool retain their existing Provider classifications.
   Partial/truncated/unknown-Usage responses still cannot invent a receipt;
   no invalid Tool, content or replay is authorized for execution.
   Normal text-only requests and valid Tool calls are unchanged. Interim

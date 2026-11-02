@@ -31,8 +31,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   Tool arguments or identifiers fail post-completion Tool-item validation:
   only ResponseID/valid cumulative Usage survive as a rejected completion;
   no Tool effects or terminal SSE success are authorized. Unknown final
-  Usage remains unreceipted. No new ModelInvocation state, API shape,
-  adapter fallback, schema migration or automatic retry.
+  Usage remains unreceipted. A further independent P1 fix ensures a
+  completed OpenAI response containing a valid local Tool item alongside a
+  contradictory refusal/final answer, malformed/unknown output item, or
+  unencodable replay retains only its verified ResponseID/Usage as a
+  rejected completion. No partial Tool batch or terminal SSE success is
+  authorized; missing encrypted reasoning replay keeps its existing error
+  classification. No new ModelInvocation state, API shape, adapter
+  fallback, schema migration or automatic retry.
 
 - Round 3 Harness output provenance hard cut: child Invocation results
   cannot appear as top-level Turn `Snapshot.Output` during unresolved Host
