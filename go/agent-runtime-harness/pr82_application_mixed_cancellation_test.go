@@ -13,7 +13,11 @@ import (
 
 func auditMixedNativeChild(t *testing.T, f *pr82HandoffFixture, parentItem, id string) Invocation {
 	t.Helper()
-	raw, hash, e := marshalInvocationValue(struct{}{})
+	// A physical native child always freezes its own original Goal; an
+	// empty synthetic Input cannot prove a same-ID Kernel Run belongs here.
+	raw, hash, e := marshalInvocationValue(struct {
+		Goal string `json:"goal"`
+	}{Goal: id})
 	if e != nil {
 		t.Fatal(e)
 	}

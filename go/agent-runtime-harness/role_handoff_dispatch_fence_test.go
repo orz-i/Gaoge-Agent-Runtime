@@ -105,8 +105,21 @@ func newPR82HandoffFixture(t *testing.T) *pr82HandoffFixture {
 	if _, _, err = store.CreateTurn(ctx, turn); err != nil {
 		t.Fatal(err)
 	}
-	root := Invocation{ID: "pr82-root", TurnID: turn.ID, CapabilityKey: CapabilityAgent,
-		ExecutionClass: ExecutionAgent, ExecutionRefID: run.Run.ID, Status: InvocationRunning, Attempt: 1,
+	// The physical root represents the frozen Agent execution from admission.
+	// This verified fixture must not rely on an empty legacy Input.
+	input, inputHash, err := marshalInvocationValue(agentInvocationInput{
+		Goal: "delegate", Actor: actor, Thread: thread,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootID, err := InvocationID(turn.ID, "", CapabilityAgent, "pr82-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := Invocation{ID: rootID, TurnID: turn.ID, CapabilityKey: CapabilityAgent,
+		ExecutionClass: ExecutionAgent, Input: input, InputHash: inputHash,
+		ExecutionRefID: run.Run.ID, Status: InvocationRunning, Attempt: 1,
 		Revision: 1, OutputRefs: []HostRef{}, CreatedAt: now, UpdatedAt: now}
 	if _, _, err = store.CreateInvocation(ctx, root); err != nil {
 		t.Fatal(err)

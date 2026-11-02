@@ -100,7 +100,7 @@ func TestPR82RawFeatureCannotBorrowUndispatchedHandoffProof(t *testing.T) {
 	if err = f.runner.verifyMissingRelatedCancellation(t.Context(), d.ChildRunID); !errors.Is(err, ErrRuntimeCancellationUnverified) {
 		t.Fatalf("missing raw child borrowed Handoff proof: %v", err)
 	}
-	if _, _, err = f.runner.cancelRuntimeRun(t.Context(), d.ChildRunID, "stop"); !errors.Is(err, ErrRuntimeCancellationUnverified) {
+	if _, _, err = f.runner.cancelRuntimeRun(t.Context(), d.ChildRunID, "stop", nil); !errors.Is(err, ErrRuntimeCancellationUnverified) {
 		t.Fatalf("direct cancel borrowed Handoff proof: %v", err)
 	}
 }

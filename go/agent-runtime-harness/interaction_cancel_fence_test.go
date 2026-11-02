@@ -51,7 +51,7 @@ func TestInteractionDispatchClaimSurvivesConcurrentRefresh(t *testing.T) {
 	seedFeatureInvocationEnvelope(t, store, sessionID, turnID, hostThread, hostTurn, actor, now)
 	_, parentItemID := seedFeatureInvocationParent(t, runtime, store, turnID, actor, thread, now)
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: "hiv_parent", ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItemID,
 		Key: "interaction-fence", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{}`),
 	})
 	if err != nil || len(waiting.Interactions) != 1 {
@@ -111,7 +111,7 @@ func TestGenericInteractionCancellationDoesNotFollowCommittedResponse(t *testing
 	seedFeatureInvocationEnvelope(t, backing, sid, tid, thread, turnref, actor, now)
 	_, parentItemID := seedFeatureInvocationParent(t, runtime, backing, tid, actor, tref, now)
 	waiting, err := runner.RequestInteraction(context.Background(), tid, harness.RequestInteraction{
-		InvocationID: "hiv_parent", ParentItemID: parentItemID,
+		InvocationID: featureParentInvocationID(tid), ParentItemID: parentItemID,
 		Key: "generic-response", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
 	})
 	if err != nil || len(waiting.Interactions) < 1 {

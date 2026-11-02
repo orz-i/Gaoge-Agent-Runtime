@@ -180,7 +180,7 @@ func TestPR82LocalHandoffChildStillUsesVerifiedKernelCancellation(t *testing.T) 
 		t.Fatal(err)
 	}
 	f.runner.cancellation = f.runtime
-	snapshot, found, err := f.runner.cancelRuntimeRun(t.Context(), delegation.ChildRunID, "stop")
+	snapshot, found, err := f.runner.cancelRuntimeRun(t.Context(), delegation.ChildRunID, "stop", nil)
 	if err != nil || !found || snapshot.Run.ID != delegation.ChildRunID || snapshot.Run.Status != kernel.RunStatusCancelled {
 		t.Fatalf("legitimate local Kernel cancellation lost: %+v found=%t err=%v", snapshot.Run, found, err)
 	}

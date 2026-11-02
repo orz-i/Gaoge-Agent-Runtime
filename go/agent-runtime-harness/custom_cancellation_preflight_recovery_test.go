@@ -133,7 +133,10 @@ func TestCustomCancellerPreflightReadFailureAllowsSafeRetry(t *testing.T) {
 				physical.cancel = abort
 				physical.failAt = 1
 				if operation == "CancelSubtask" {
-					physical.failAt = 2 // findSubtask loads before acquiring its intent.
+					// findSubtask now verifies both the physical child and its
+					// original frozen root before acquiring the intent. Inject
+					// at the same intended post-intent, pre-Cancel read boundary.
+					physical.failAt = 3
 				}
 				physical.armed.Store(true)
 				firstErr := cancel(disconnected)
@@ -248,7 +251,7 @@ func TestCustomCancellerPreflightAfterInteractionMutationRemainsFenced(t *testin
 		t.Fatal(err)
 	}
 	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: "hiv_parent", ParentItemID: parentItem,
+		InvocationID: featureParentInvocationID(turnID), ParentItemID: parentItem,
 		Key: "custom-noeffect-partial-interaction", Kind: harness.InteractionChoice,
 		Schema: json.RawMessage("{}"),
 	})
@@ -274,7 +277,7 @@ func TestCustomCancellerPreflightAfterInteractionMutationRemainsFenced(t *testin
 	if !harness.ActiveCancellationFence(items) {
 		t.Fatal("a previously modified Host Interaction was misclassified as no-effect")
 	}
-	owner, err := store.GetInvocation(t.Context(), "hiv_parent")
+	owner, err := store.GetInvocation(t.Context(), featureParentInvocationID(turnID))
 	if err != nil || owner.Status != harness.InvocationCancelled {
 		t.Fatalf("Interaction cancellation mutation missing: status=%s err=%v", owner.Status, err)
 	}

@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -60,7 +62,7 @@ func TestChildAdmissionAndRetryCannotRebindToNewRootAttempt(t *testing.T) {
 			const oldRunID = "root-run-attempt-1"
 			firstRun, err := runtime.Create(t.Context(), kernel.CreateRequest{
 				ID: oldRunID, Kind: agent.RunKind, Actor: actor, Thread: thread,
-				RequestID: "root-1", Goal: "first attempt", State: json.RawMessage(`{}`),
+				RequestID: "root-1", Goal: "root goal", State: json.RawMessage(`{}`),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -74,8 +76,12 @@ func TestChildAdmissionAndRetryCannotRebindToNewRootAttempt(t *testing.T) {
 				t.Fatal(err)
 			}
 			hash := sha256.Sum256(rootInput)
+			rootID, err := harness.InvocationID(turnID, "", harness.CapabilityAgent, "root-1")
+			if err != nil {
+				t.Fatal(err)
+			}
 			root := harness.Invocation{
-				ID: "root-invocation", TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
+				ID: rootID, TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
 				DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent,
 				Input: rootInput, InputHash: hex.EncodeToString(hash[:]), ExecutionRefID: oldRunID,
 				Status: harness.InvocationRunning, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
@@ -146,7 +152,7 @@ func TestChildAdmissionAndRetryCannotRebindToNewRootAttempt(t *testing.T) {
 			}
 			if _, err := runtime.Create(t.Context(), kernel.CreateRequest{
 				ID: newRunID, Kind: agent.RunKind, Actor: actor, Thread: thread,
-				RequestID: "root-2", Goal: "second attempt", State: json.RawMessage(`{}`),
+				RequestID: frozenRetryRequestID(root.ID, 2), Goal: "root goal", State: json.RawMessage(`{}`),
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -250,4 +256,15 @@ func TestApplicationRootAdmitsApplicationChildWithoutKernelRun(t *testing.T) {
 	}); !errors.Is(err, harness.ErrConflict) || teams.calls.Load() != 0 {
 		t.Fatalf("Host-only root admitted a native Kernel child: calls=%d err=%v", teams.calls.Load(), err)
 	}
+}
+
+// Match the original production RetryInvocation RequestID derivation in this
+// synthetic test without adding exported identity helpers or compatibility.
+func frozenRetryRequestID(invocationID string, attempt int) string {
+	hash := sha256.New()
+	for _, part := range []string{invocationID, strconv.Itoa(attempt)} {
+		_, _ = hash.Write([]byte(strings.TrimSpace(part)))
+		_, _ = hash.Write([]byte{0})
+	}
+	return "hretry_" + hex.EncodeToString(hash.Sum(nil))[:24]
 }

@@ -49,8 +49,12 @@ func TestPR82RootRetryCannotOverlapLiveNativeChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(input)
+	rootID, err := harness.InvocationID(turnID, "", harness.CapabilityAgent, "root-first")
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := harness.Invocation{
-		ID: "pr82-native-root", TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
+		ID: rootID, TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
 		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent,
 		Input: input, InputHash: hex.EncodeToString(hash[:]), ExecutionRefID: rootRun.Run.ID,
 		Status: harness.InvocationRunning, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
