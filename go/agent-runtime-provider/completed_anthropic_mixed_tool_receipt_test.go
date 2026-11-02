@@ -57,7 +57,7 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 					_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
 				}
 				send("message_start", fmt.Sprintf(
-					`{"type":"message_start","message":{"id":"paid-%d","usage":{"input_tokens":17,"output_tokens":0}}}`, n))
+					`{"type":"message_start","message":{"type":"message","role":"assistant","id":"paid-%d","usage":{"input_tokens":17,"output_tokens":0}}}`, n))
 				if n == 1 {
 					send("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"answer without required Tool"}}`)
 					send("content_block_stop", `{"type":"content_block_stop","index":0}`)

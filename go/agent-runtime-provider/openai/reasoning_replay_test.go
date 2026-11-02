@@ -18,8 +18,8 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-const encryptedToolResponse = `{"id":"reason-tool","status":"completed","output":[{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque-fixture"},{"type":"function_call","id":"fc_1","status":"completed","name":"lookup","call_id":"call_1","arguments":"{\"x\":1}"}],"usage":{"input_tokens":8,"output_tokens":5}}`
-const completedAnswer = `{"id":"reason-answer","status":"completed","output":[{"type":"reasoning","id":"rs_2","summary":[]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"GAOGE_TOOL_OK"}]}],"usage":{"input_tokens":11,"output_tokens":3}}`
+const encryptedToolResponse = `{"object":"response","id":"reason-tool","status":"completed","output":[{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque-fixture"},{"type":"function_call","id":"fc_1","status":"completed","name":"lookup","call_id":"call_1","arguments":"{\"x\":1}"}],"usage":{"input_tokens":8,"output_tokens":5}}`
+const completedAnswer = `{"object":"response","id":"reason-answer","status":"completed","output":[{"type":"reasoning","id":"rs_2","summary":[]},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"GAOGE_TOOL_OK"}]}],"usage":{"input_tokens":11,"output_tokens":3}}`
 
 func reasoningRequest() model.Request {
 	return model.Request{
@@ -79,7 +79,7 @@ func TestStatelessReasoningRejectsTamperingAndUnavailableEncryption(t *testing.T
 		if encrypted {
 			_, _ = fmt.Fprint(w, encryptedToolResponse)
 		} else {
-			_, _ = fmt.Fprint(w, `{"id":"no-encryption","status":"completed","output":[{"type":"reasoning","id":"rs_1","summary":[]},{"type":"function_call","name":"lookup","call_id":"call_1","arguments":"{\"x\":1}"}],"usage":{"input_tokens":8,"output_tokens":5}}`)
+			_, _ = fmt.Fprint(w, `{"object":"response","id":"no-encryption","status":"completed","output":[{"type":"reasoning","id":"rs_1","summary":[]},{"type":"function_call","name":"lookup","call_id":"call_1","arguments":"{\"x\":1}"}],"usage":{"input_tokens":8,"output_tokens":5}}`)
 		}
 	})
 	req := reasoningRequest()
@@ -211,7 +211,7 @@ func TestTextOnlyDoesNotRequestUnnecessaryEncryptedReplay(t *testing.T) {
 		if _, found := payload["include"]; found {
 			t.Error("text-only request unnecessarily changed provider include capabilities")
 		}
-		_, _ = fmt.Fprint(w, `{"id":"text-only","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":2,"output_tokens":1}}`)
+		_, _ = fmt.Fprint(w, `{"object":"response","id":"text-only","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":2,"output_tokens":1}}`)
 	})
 	response, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}})
 	if err != nil || response.Content != "ok" {
@@ -221,7 +221,7 @@ func TestTextOnlyDoesNotRequestUnnecessaryEncryptedReplay(t *testing.T) {
 
 func TestIncompleteReasoningResponseClassifiedWithoutLeakingRawProviderBody(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = fmt.Fprint(w, `{"id":"partial","status":"incomplete","incomplete_details":{"reason":"max_output_tokens","other":"SECRET_PROVIDER_CONTENT"},"output":[]}`)
+		_, _ = fmt.Fprint(w, `{"object":"response","id":"partial","status":"incomplete","incomplete_details":{"reason":"max_output_tokens","other":"SECRET_PROVIDER_CONTENT"},"output":[]}`)
 	})
 	_, err := client.Generate(context.Background(), reasoningRequest())
 	if !errors.Is(err, openai.ErrIncomplete) || strings.Contains(err.Error(), "SECRET_PROVIDER_CONTENT") {

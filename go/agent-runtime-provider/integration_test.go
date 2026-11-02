@@ -48,16 +48,16 @@ func TestRealAgentWithBothProviderAdapters(t *testing.T) {
 				}
 				if kind == "openai" {
 					if requests == 1 {
-						emit("response.completed", `{"type":"response.completed","response":{"id":"resp-1","status":"completed","output":[{"type":"function_call","name":"lookup","call_id":"call-1","arguments":"{\"x\":1}"}],"usage":{"input_tokens":9,"output_tokens":3}}}`)
+						emit("response.completed", `{"type":"response.completed","response":{"object":"response","id":"resp-1","status":"completed","output":[{"type":"function_call","name":"lookup","call_id":"call-1","arguments":"{\"x\":1}"}],"usage":{"input_tokens":9,"output_tokens":3}}}`)
 					} else {
-						emit("response.completed", `{"type":"response.completed","response":{"id":"resp-2","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}],"usage":{"input_tokens":11,"output_tokens":2}}}`)
+						emit("response.completed", `{"type":"response.completed","response":{"object":"response","id":"resp-2","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}],"usage":{"input_tokens":11,"output_tokens":2}}}`)
 					}
 				} else {
 					id, block, stop := "msg-1", `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"lookup","id":"call-1","input":{"x":1}}}`, "tool_use"
 					if requests != 1 {
 						id, block, stop = "msg-2", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Done"}}`, "end_turn"
 					}
-					emit("message_start", fmt.Sprintf(`{"type":"message_start","message":{"id":%q,"usage":{"input_tokens":10}}}`, id))
+					emit("message_start", fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"assistant","id":%q,"usage":{"input_tokens":10}}}`, id))
 					emit("content_block_start", block)
 					emit("content_block_stop", `{"type":"content_block_stop","index":0}`)
 					emit("message_delta", fmt.Sprintf(`{"type":"message_delta","delta":{"stop_reason":%q},"usage":{"output_tokens":3}}`, stop))

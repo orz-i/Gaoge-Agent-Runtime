@@ -70,7 +70,7 @@ func TestCompletedMixedToolOutputRetainsMinimalRejectionReceipt(t *testing.T) {
 								if sent.Stream != streaming {
 									t.Errorf("transport mismatch: %+v", sent)
 								}
-								body := `{"id":"paid-mixed","status":"completed","output":` + tc.output + usage.value + "}"
+								body := `{"object":"response","id":"paid-mixed","status":"completed","output":` + tc.output + usage.value + "}"
 								if streaming {
 									w.Header().Set("Content-Type", "text/event-stream")
 									_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", body)
@@ -144,7 +144,7 @@ func TestCompletedReplaySizeFailureRetainsPaidToolReceipt(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 				payload, err := json.Marshal(map[string]any{
-					"id": "paid-replay-limit", "status": "completed",
+					"object": "response", "id": "paid-replay-limit", "status": "completed",
 					"output": output, "usage": map[string]any{"input_tokens": 17, "output_tokens": 5},
 				})
 				if err != nil {

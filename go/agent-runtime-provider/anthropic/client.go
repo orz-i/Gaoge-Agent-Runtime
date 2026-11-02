@@ -118,6 +118,8 @@ func tokenCount(value *int64) int64 {
 
 type messageBody struct {
 	ID         string            `json:"id"`
+	Type       string            `json:"type"`
+	Role       string            `json:"role"`
 	StopReason string            `json:"stop_reason"`
 	Content    []json.RawMessage `json:"content"`
 	Usage      *usage            `json:"usage"`
@@ -296,6 +298,12 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 // completedMessageReceipt validates the final Anthropic completion envelope
 // and normalizes cumulative Usage independently of Tool-block semantics.
 func completedMessageReceipt(body messageBody) (model.Response, error) {
+	// A content block is not an independent Tool execution authority. Only
+	// a real assistant Message can authorize its tool_use or a safety refusal;
+	// absent, null, foreign and malformed ownership evidence fails closed.
+	if body.Type != "message" || body.Role != string(model.RoleAssistant) {
+		return model.Response{}, ErrUnsupported
+	}
 	if body.StopReason == "max_tokens" {
 		return model.Response{}, errors.Join(ErrUnsupported, ErrIncomplete)
 	}
@@ -485,7 +493,8 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		}
 		switch frame.Type {
 		case "message_start":
-			if started {
+			if started || frame.Message.Type != "message" ||
+				frame.Message.Role != string(model.RoleAssistant) {
 				return providerhttp.ErrProtocol
 			}
 			started, body = true, frame.Message

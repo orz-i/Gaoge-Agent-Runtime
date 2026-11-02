@@ -56,13 +56,13 @@ func TestUnaryToolRoundTrip(t *testing.T) {
 			if body.ToolChoice.Type != "any" {
 				t.Error("required tool mode ignored")
 			}
-			_, _ = fmt.Fprint(w, `{"id":"msg-1","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu-1","name":"lookup","input":{"x":1}}],"usage":{"input_tokens":10,"output_tokens":3,"cache_read_input_tokens":5,"cache_creation_input_tokens":2}}`)
+			_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"msg-1","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu-1","name":"lookup","input":{"x":1}}],"usage":{"input_tokens":10,"output_tokens":3,"cache_read_input_tokens":5,"cache_creation_input_tokens":2}}`)
 		} else {
 			if len(body.Messages) != 3 || body.Messages[2].Role != "user" || !strings.Contains(string(body.Messages[2].Content), "tool_result") ||
 				!strings.Contains(string(body.Messages[1].Content), "tool_use") {
 				t.Errorf("bad tool replay: %+v", body.Messages)
 			}
-			_, _ = fmt.Fprint(w, `{"id":"msg-2","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":20,"output_tokens":5}}`)
+			_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"msg-2","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":20,"output_tokens":5}}`)
 		}
 	})
 	req := model.Request{Messages: []model.Message{{Role: model.RoleSystem, Content: model.TextParts("instructions")}, {Role: model.RoleUser, Content: model.TextParts("do lookup")}}, Tools: []tools.Definition{definition}, RequireToolCall: true}
@@ -83,7 +83,7 @@ func TestStreamingTextToolAndTerminal(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, item := range []struct{ event, data string }{
-			{"message_start", `{"type":"message_start","message":{"id":"msg-3","usage":{"input_tokens":10,"cache_read_input_tokens":3}}}`},
+			{"message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"msg-3","usage":{"input_tokens":10,"cache_read_input_tokens":3}}}`},
 			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
 			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}`},
 			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
@@ -125,9 +125,9 @@ func TestTruncatedAndThinkingResponsesRejected(t *testing.T) {
 	stop := "max_tokens"
 	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if stop == "max_tokens" {
-			_, _ = fmt.Fprint(w, `{"id":"m","stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}]}`)
+			_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"m","stop_reason":"max_tokens","content":[{"type":"text","text":"partial"}]}`)
 		} else {
-			_, _ = fmt.Fprint(w, `{"id":"m","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"opaque"},{"type":"tool_use","id":"t","name":"lookup","input":{}}]}`)
+			_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"m","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"opaque"},{"type":"tool_use","id":"t","name":"lookup","input":{}}]}`)
 		}
 	})
 	req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}, Tools: []tools.Definition{definition}}

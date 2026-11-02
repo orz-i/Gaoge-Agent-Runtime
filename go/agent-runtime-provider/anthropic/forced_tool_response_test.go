@@ -60,7 +60,7 @@ func TestForcedToolResponseMustActuallyContainToolCall(t *testing.T) {
 					write := func(event, data string) {
 						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
 					}
-					write("message_start", `{"type":"message_start","message":{"id":"msg-no-tool","usage":{"input_tokens":2,"output_tokens":0}}}`)
+					write("message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"msg-no-tool","usage":{"input_tokens":2,"output_tokens":0}}}`)
 					if tt.toolCall {
 						write("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-1","name":"lookup","input":{}}}`)
 						write("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"x\":1}"}}`)
@@ -77,7 +77,7 @@ func TestForcedToolResponseMustActuallyContainToolCall(t *testing.T) {
 						content = []any{map[string]any{"type": "tool_use", "id": "call-1", "name": "lookup", "input": map[string]any{"x": 1}}}
 					}
 					response, err := json.Marshal(map[string]any{
-						"id": "msg-no-tool", "stop_reason": stopReason,
+						"type": "message", "role": "assistant", "id": "msg-no-tool", "stop_reason": stopReason,
 						"content": content,
 						"usage":   map[string]any{"input_tokens": 2, "output_tokens": 2},
 					})
@@ -132,7 +132,7 @@ func TestForcedToolResponseMustActuallyContainToolCall(t *testing.T) {
 // and its consumption evidence rather than look like a lost/unknown Model call.
 func TestIndependentRequiredToolRejectionRetainsKnownUsageReceipt(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"paid-anthropic-reply","stop_reason":"end_turn","content":[{"type":"text","text":"no tool call"}],"usage":{"input_tokens":17,"output_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"type":"message","role":"assistant","id":"paid-anthropic-reply","stop_reason":"end_turn","content":[{"type":"text","text":"no tool call"}],"usage":{"input_tokens":17,"output_tokens":5}}`))
 	})
 	request := model.Request{
 		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("must call lookup")}},
@@ -167,14 +167,14 @@ func TestForcedToolUnknownUsageNeverMintsCompletedReceipt(t *testing.T) {
 				if req.Stream {
 					w.Header().Set("Content-Type", "text/event-stream")
 					write := func(event, data string) { _, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data) }
-					write("message_start", `{"type":"message_start","message":{"id":"unknown-usage"`+tc.streamInput+`}}`)
+					write("message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"unknown-usage"`+tc.streamInput+`}}`)
 					write("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`)
 					write("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"no required Tool"}}`)
 					write("content_block_stop", `{"type":"content_block_stop","index":0}`)
 					write("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"}`+tc.streamOutput+`}`)
 					write("message_stop", `{"type":"message_stop"}`)
 				} else {
-					_, _ = fmt.Fprint(w, `{"id":"unknown-usage","stop_reason":"end_turn","content":[{"type":"text","text":"no required Tool"}]`+tc.usage+`}`)
+					_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"unknown-usage","stop_reason":"end_turn","content":[{"type":"text","text":"no required Tool"}]`+tc.usage+`}`)
 				}
 			})
 			req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("must use lookup")}}, Tools: []tools.Definition{definition}, RequireToolCall: true}

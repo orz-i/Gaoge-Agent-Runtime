@@ -36,7 +36,7 @@ func TestOpenAIToolReplayAdmissionFailsBeforeAnyTaskWhenEncryptionAbsent(t *test
 		if !req.Stream {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "plain-schema", "status": "completed", "output": []any{
+				"object": "response", "id": "plain-schema", "status": "completed", "output": []any{
 					map[string]any{"type": "message", "role": "assistant", "content": []any{
 						map[string]string{"type": "output_text", "text": `{"ok":true}`},
 					}},
@@ -51,7 +51,7 @@ func TestOpenAIToolReplayAdmissionFailsBeforeAnyTaskWhenEncryptionAbsent(t *test
 			t.Errorf("tool replay request not enforcing its stated contract: %+v", req)
 		}
 		reply := map[string]any{
-			"id": "unsupported-replay", "status": "completed", "output": []any{
+			"object": "response", "id": "unsupported-replay", "status": "completed", "output": []any{
 				map[string]any{"type": "reasoning", "id": "reason-1", "summary": []any{}},
 				map[string]any{"type": "function_call", "call_id": "call1", "name": replayProbeToolName,
 					"arguments": `{"value":"probe"}`},

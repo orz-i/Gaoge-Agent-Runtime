@@ -67,7 +67,7 @@ func TestRequiredToolFreeAnthropicSemanticRejectionRetainsOnlyPaidReceipt(t *tes
 							send := func(kind, data string) {
 								_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", kind, data)
 							}
-							send("message_start", `{"type":"message_start","message":{"id":"paid-anthropic-no-tool","usage":{"input_tokens":17,"output_tokens":0}}}`)
+							send("message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"paid-anthropic-no-tool","usage":{"input_tokens":17,"output_tokens":0}}}`)
 							send("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":0,"content_block":%s}`, tc.block))
 							send("content_block_stop", `{"type":"content_block_stop","index":0}`)
 							usage := ""
@@ -81,7 +81,7 @@ func TestRequiredToolFreeAnthropicSemanticRejectionRetainsOnlyPaidReceipt(t *tes
 							if tc.knownUsage {
 								usage = `,"usage":{"input_tokens":17,"output_tokens":5}`
 							}
-							_, _ = fmt.Fprintf(w, `{"id":"paid-anthropic-no-tool","stop_reason":%q,"content":[%s]%s}`, stop, tc.block, usage)
+							_, _ = fmt.Fprintf(w, `{"type":"message","role":"assistant","id":"paid-anthropic-no-tool","stop_reason":%q,"content":[%s]%s}`, stop, tc.block, usage)
 						}
 					})
 					request := model.Request{

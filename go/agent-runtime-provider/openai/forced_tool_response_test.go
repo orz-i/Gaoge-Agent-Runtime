@@ -55,7 +55,7 @@ func TestForcedToolResponseMustActuallyContainToolCall(t *testing.T) {
 					output = []any{map[string]any{"type": "function_call", "call_id": "call-1", "name": "lookup", "arguments": `{"x":1}`}}
 				}
 				response, err := json.Marshal(map[string]any{
-					"id": "response-missing-required-tool", "status": "completed",
+					"object": "response", "id": "response-missing-required-tool", "status": "completed",
 					"output": output,
 					"usage":  map[string]any{"input_tokens": 1, "output_tokens": 2},
 				})
@@ -115,7 +115,7 @@ func TestForcedToolResponseMustActuallyContainToolCall(t *testing.T) {
 // and its consumption evidence rather than look like a lost/unknown Model call.
 func TestIndependentRequiredToolRejectionRetainsKnownUsageReceipt(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"paid-openai-reply","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"no function call"}]}],"usage":{"input_tokens":17,"output_tokens":5}}`))
+		_, _ = w.Write([]byte(`{"object":"response","id":"paid-openai-reply","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"no function call"}]}],"usage":{"input_tokens":17,"output_tokens":5}}`))
 	})
 	request := model.Request{
 		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("must call lookup")}},
@@ -148,7 +148,7 @@ func TestForcedToolUnknownUsageNeverMintsCompletedReceipt(t *testing.T) {
 				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 					t.Error(err)
 				}
-				body := `{"id":"unknown-usage","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"no required Tool"}]}]` + tc.usage + `}`
+				body := `{"object":"response","id":"unknown-usage","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"no required Tool"}]}]` + tc.usage + `}`
 				if req.Stream {
 					w.Header().Set("Content-Type", "text/event-stream")
 					_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", body)
@@ -220,7 +220,7 @@ func TestIndependentForcedToolCannotExecuteUnfinishedFunctionCallItem(t *testing
 						if tc.status != "" {
 							status = `,"status":` + tc.status
 						}
-						response := `{"id":"unfinished-tool-item","status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{\"x\":1}"` + status + `}],"usage":{"input_tokens":11,"output_tokens":3}}`
+						response := `{"object":"response","id":"unfinished-tool-item","status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{\"x\":1}"` + status + `}],"usage":{"input_tokens":11,"output_tokens":3}}`
 						if stream {
 							w.Header().Set("Content-Type", "text/event-stream")
 							_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":"+response+"}\n\n")
@@ -300,7 +300,7 @@ func TestIndependentOptionalToolCannotExecuteUnfinishedFunctionCallItem(t *testi
 						if tc.status != "" {
 							status = `,"status":` + tc.status
 						}
-						response := `{"id":"unfinished-tool-item","status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{\"x\":1}"` + status + `}],"usage":{"input_tokens":11,"output_tokens":3}}`
+						response := `{"object":"response","id":"unfinished-tool-item","status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{\"x\":1}"` + status + `}],"usage":{"input_tokens":11,"output_tokens":3}}`
 						if stream {
 							w.Header().Set("Content-Type", "text/event-stream")
 							_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":"+response+"}\n\n")
@@ -385,7 +385,7 @@ func TestUnfinishedFunctionItemWithMalformedArgumentsNeverExecutesOrLosesReceipt
 						}
 						output = append(output, map[string]any{"type": "function_call", "status": status,
 							"call_id": "call-broken", "name": "lookup", "arguments": "{"})
-						response := map[string]any{"id": "partially-encoded-response", "status": "completed", "output": output}
+						response := map[string]any{"object": "response", "id": "partially-encoded-response", "status": "completed", "output": output}
 						if tc.withUsage {
 							response["usage"] = map[string]any{"input_tokens": 11, "output_tokens": 3}
 						}

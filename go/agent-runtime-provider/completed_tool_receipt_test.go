@@ -89,7 +89,7 @@ func assertCompletedRejectedToolReceipt(t *testing.T, rejectedOutput []any) {
 			output = rejectedOutput
 		}
 		frame, err := json.Marshal(map[string]any{"type": "response.completed", "response": map[string]any{
-			"id": fmt.Sprintf("paid-response-%d", n), "status": "completed",
+			"object": "response", "id": fmt.Sprintf("paid-response-%d", n), "status": "completed",
 			"output": output, "usage": map[string]any{"input_tokens": 17, "output_tokens": 5},
 		}})
 		if err != nil {

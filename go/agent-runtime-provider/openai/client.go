@@ -84,6 +84,7 @@ type outputItem struct {
 }
 type responseBody struct {
 	ID     string            `json:"id"`
+	Object string            `json:"object"`
 	Status string            `json:"status"`
 	Output []json.RawMessage `json:"output"`
 	Usage  *struct {
@@ -251,6 +252,11 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	return prepared{body: payload, names: byName}, nil
 }
 func decodeResponse(body responseBody, names map[string]string, required bool) (model.Response, error) {
+	// An outer object from a different API cannot authorize any local
+	// function_call, even if it copied the Responses output/usage shape.
+	if body.Object != "response" {
+		return model.Response{}, ErrUnsupported
+	}
 	if body.Status == "incomplete" {
 		return model.Response{}, errors.Join(ErrUnsupported, ErrIncomplete)
 	}

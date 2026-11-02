@@ -50,7 +50,7 @@ func TestCompletedMixedAnthropicToolUnaryKeepsPaidReceipt(t *testing.T) {
 			} {
 				t.Run(usage.name, func(t *testing.T) {
 					client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
-						_, _ = fmt.Fprintf(w, `{"id":"paid-anthropic-mixed","stop_reason":"tool_use","content":[%s],%s}`, tc.content, usage.json)
+						_, _ = fmt.Fprintf(w, `{"type":"message","role":"assistant","id":"paid-anthropic-mixed","stop_reason":"tool_use","content":[%s],%s}`, tc.content, usage.json)
 					})
 					response, err := client.Generate(t.Context(), model.Request{
 						Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}},
@@ -108,7 +108,7 @@ func TestCompletedMixedAnthropicToolStreamKeepsPaidReceipt(t *testing.T) {
 							_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", typ, buf)
 						}
 						send("message_start", map[string]any{"type": "message_start",
-							"message": map[string]any{"id": "paid-anthropic-mixed", "usage": map[string]any{"input_tokens": 17, "output_tokens": 0}}})
+							"message": map[string]any{"type": "message", "role": "assistant", "id": "paid-anthropic-mixed", "usage": map[string]any{"input_tokens": 17, "output_tokens": 0}}})
 						for i, block := range tc.blocks {
 							index := i
 							if tc.name == "noncontiguous_indices_after_rich_text" && i == 1 {

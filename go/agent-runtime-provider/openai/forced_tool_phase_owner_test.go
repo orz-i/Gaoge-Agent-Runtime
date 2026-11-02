@@ -32,7 +32,7 @@ func TestIndependentForcedToolCommentaryRefusalCannotAuthorizeTextFinal(t *testi
 				if req.Stream != (mode == "stream") {
 					t.Fatal("wrong stream mode")
 				}
-				body := `{"id":"refusal-in-commentary-only","status":"completed","output":[` +
+				body := `{"object":"response","id":"refusal-in-commentary-only","status":"completed","output":[` +
 					`{"type":"message","role":"assistant","phase":"commentary","content":[{"type":"refusal","refusal":"Cannot comply."}]},` +
 					`{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"ordinary final answer WITHOUT Tool"}]}],` +
 					`"usage":{"input_tokens":17,"output_tokens":5}}`
@@ -87,7 +87,7 @@ func TestIndependentForcedToolFinalRefusalRemainsAllowed(t *testing.T) {
 				if req.Stream != (mode == "stream") {
 					t.Fatal("wrong stream mode")
 				}
-				body := `{"id":"refusal-in-commentary-only","status":"completed","output":[` +
+				body := `{"object":"response","id":"refusal-in-commentary-only","status":"completed","output":[` +
 					`{"type":"message","role":"assistant","phase":"commentary","content":[{"type":"output_text","text":"Working"}]},` +
 					`{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"refusal","refusal":"Cannot comply."}]}],` +
 					`"usage":{"input_tokens":17,"output_tokens":5}}`
@@ -248,7 +248,7 @@ func TestIndependentForcedToolNonAssistantRoleCannotGrantSafetyRefusal(t *testin
 						} else if tc.role != "" {
 							role = `,"role":` + fmt.Sprintf("%q", tc.role)
 						}
-						body := `{"id":"output-role-rejected","status":"completed","output":[{"type":"message"` + role + `,"content":[{"type":"refusal","refusal":"Cannot comply."}]}],"usage":{"input_tokens":17,"output_tokens":5}}`
+						body := `{"object":"response","id":"output-role-rejected","status":"completed","output":[{"type":"message"` + role + `,"content":[{"type":"refusal","refusal":"Cannot comply."}]}],"usage":{"input_tokens":17,"output_tokens":5}}`
 						if stream {
 							w.Header().Set("Content-Type", "text/event-stream")
 							_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":"+body+"}\n\n")
@@ -310,7 +310,7 @@ func TestIndependentRequiredToolCannotUseIncompleteRefusalItemAsTerminal(t *test
 							data += `,"status":` + fmt.Sprintf("%q", caseStatus.status)
 						}
 						data += `}`
-						body := `{"id":"incomplete-item-refusal","status":"completed","output":[` + data + `],"usage":{"input_tokens":13,"output_tokens":2}}`
+						body := `{"object":"response","id":"incomplete-item-refusal","status":"completed","output":[` + data + `],"usage":{"input_tokens":13,"output_tokens":2}}`
 						if stream {
 							w.Header().Set("Content-Type", "text/event-stream")
 							_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":"+body+"}\n\n")

@@ -48,14 +48,14 @@ func TestBaselineReportsActualTaskResponseWhenEncryptedReplayMissing(t *testing.
 				t.Error("preflight unexpectedly included tool/replay input")
 			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"id":"probe1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":10,"output_tokens":3}}`)
+			_, _ = fmt.Fprint(w, `{"object":"response","id":"probe1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":10,"output_tokens":3}}`)
 			return
 		}
 		tasks.Add(1)
 		if len(request.Include) != 1 || request.Include[0] != "reasoning.encrypted_content" || len(request.Tools) != 3 {
 			t.Error("task request omitted requested encrypted replay or tools")
 		}
-		response := `{"id":"task1","status":"completed","output":[{"type":"reasoning","id":"reason1","summary":[{"type":"summary_text","text":"TOOL_REPLAY_MISSING"}]},{"type":"function_call","call_id":"call1","name":"lookup_release","arguments":"{}"}],"usage":{"input_tokens":14,"output_tokens":5}}`
+		response := `{"object":"response","id":"task1","status":"completed","output":[{"type":"reasoning","id":"reason1","summary":[{"type":"summary_text","text":"TOOL_REPLAY_MISSING"}]},{"type":"function_call","call_id":"call1","name":"lookup_release","arguments":"{}"}],"usage":{"input_tokens":14,"output_tokens":5}}`
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", response)
 	}))
@@ -108,7 +108,7 @@ func TestBaselineReportsSecondTaskHTTPResponseAfterSuccessfulLookup(t *testing.T
 		}
 		if !req.Stream {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprint(w, `{"id":"probe","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":10,"output_tokens":2}}`)
+			_, _ = fmt.Fprint(w, `{"object":"response","id":"probe","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":10,"output_tokens":2}}`)
 			return
 		}
 		tasks.Add(1)
@@ -128,14 +128,14 @@ func TestBaselineReportsSecondTaskHTTPResponseAfterSuccessfulLookup(t *testing.T
 			if len(req.Include) != 1 || req.Include[0] != "reasoning.encrypted_content" {
 				t.Error("first tool call omitted replay inclusion")
 			}
-			response := `{"id":"lookup","status":"completed","output":[{"type":"reasoning","id":"reason1","encrypted_content":"encrypted-fixture","summary":[]},{"type":"function_call","name":"lookup_release","call_id":"lookup1","arguments":"{\"release\":\"R-17\"}"}],"usage":{"input_tokens":12,"output_tokens":8}}`
+			response := `{"object":"response","id":"lookup","status":"completed","output":[{"type":"reasoning","id":"reason1","encrypted_content":"encrypted-fixture","summary":[]},{"type":"function_call","name":"lookup_release","call_id":"lookup1","arguments":"{\"release\":\"R-17\"}"}],"usage":{"input_tokens":12,"output_tokens":8}}`
 			_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", response)
 			return
 		}
 		if !seenEncryptedReasoning {
 			t.Error("stateless continuation dropped encrypted reasoning evidence")
 		}
-		response := `{"id":"unsupported-final","status":"completed","output":[{"type":"UNSUPPORTED_SECOND_RESPONSE_MARKER"}],"usage":{"input_tokens":15,"output_tokens":4}}`
+		response := `{"object":"response","id":"unsupported-final","status":"completed","output":[{"type":"UNSUPPORTED_SECOND_RESPONSE_MARKER"}],"usage":{"input_tokens":15,"output_tokens":4}}`
 		_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", response)
 	}))
 	defer server.Close()

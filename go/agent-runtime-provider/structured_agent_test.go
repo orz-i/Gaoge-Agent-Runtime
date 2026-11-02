@@ -48,7 +48,7 @@ func TestStructuredOutputProviderToolLoopEndToEnd(t *testing.T) {
 					} else {
 						output = []any{map[string]any{"type": "message", "content": []any{map[string]any{"type": "output_text", "text": `{"answer":"verified"}`}}}}
 					}
-					complete := map[string]any{"id": fmt.Sprintf("response-%d", hits), "status": "completed", "output": output,
+					complete := map[string]any{"object": "response", "id": fmt.Sprintf("response-%d", hits), "status": "completed", "output": output,
 						"usage": map[string]any{"input_tokens": 4, "output_tokens": 3}}
 					w.Header().Set("Content-Type", "text/event-stream")
 					payloadBytes, _ := json.Marshal(map[string]any{"type": "response.completed", "response": complete})
@@ -72,7 +72,7 @@ func TestStructuredOutputProviderToolLoopEndToEnd(t *testing.T) {
 					_, _ = fmt.Fprintln(w, "data: "+string(raw))
 					_, _ = fmt.Fprintln(w)
 				}
-				send("message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": fmt.Sprintf("msg-%d", hits), "usage": map[string]any{"input_tokens": 4}}})
+				send("message_start", map[string]any{"type": "message_start", "message": map[string]any{"type": "message", "role": "assistant", "id": fmt.Sprintf("msg-%d", hits), "usage": map[string]any{"input_tokens": 4}}})
 				if hits == 1 {
 					send("content_block_start", map[string]any{"type": "content_block_start", "index": 0,
 						"content_block": map[string]any{"type": "tool_use", "id": "call-e2e", "name": "lookup", "input": map[string]any{}}})
@@ -177,10 +177,10 @@ func TestIndependentPaidRequiredToolResponseMustHaveDurableAgentReceipt(t *testi
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				if vendor == "openai" {
-					_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"paid-openai\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer without required Tool\"}]}],\"usage\":{\"input_tokens\":17,\"output_tokens\":5}}}\n\n")
+					_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"object\":\"response\",\"id\":\"paid-openai\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer without required Tool\"}]}],\"usage\":{\"input_tokens\":17,\"output_tokens\":5}}}\n\n")
 				} else {
 					frames := [][2]string{
-						{"message_start", `{"type":"message_start","message":{"id":"paid-anthropic","usage":{"input_tokens":17,"output_tokens":0}}}`},
+						{"message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"paid-anthropic","usage":{"input_tokens":17,"output_tokens":0}}}`},
 						{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
 						{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"answer without required Tool"}}`},
 						{"content_block_stop", `{"type":"content_block_stop","index":0}`},
@@ -285,7 +285,7 @@ func TestIndependentUnfinishedOpenAIToolCallCannotExecuteThroughAgent(t *testing
 					output = []any{map[string]any{"type": "message", "content": []any{map[string]any{"type": "output_text", "text": "answer without verified call"}}}}
 				}
 				body, _ := json.Marshal(map[string]any{"type": "response.completed", "response": map[string]any{
-					"id": fmt.Sprintf("response-%d", n), "status": "completed", "output": output,
+					"object": "response", "id": fmt.Sprintf("response-%d", n), "status": "completed", "output": output,
 					"usage": map[string]any{"input_tokens": 17, "output_tokens": 5},
 				}})
 				_, _ = fmt.Fprintf(w, "event: response.completed\ndata: %s\n\n", body)

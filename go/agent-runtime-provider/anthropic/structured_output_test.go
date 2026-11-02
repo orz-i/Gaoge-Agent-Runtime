@@ -41,13 +41,13 @@ func TestStrictJSONSchemaNativeWireAndToolContinuation(t *testing.T) {
 		}
 		if calls == 1 {
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "msg-tool", "stop_reason": "tool_use", "content": []any{
+				"type": "message", "role": "assistant", "id": "msg-tool", "stop_reason": "tool_use", "content": []any{
 					map[string]any{"type": "tool_use", "id": "c1", "name": "lookup", "input": map[string]any{}},
 				}, "usage": map[string]any{"input_tokens": 3, "output_tokens": 2},
 			})
 		} else {
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"id": "msg-json", "stop_reason": "end_turn", "content": []any{map[string]any{"type": "text", "text": `{"answer":"from tool"}`}},
+				"type": "message", "role": "assistant", "id": "msg-json", "stop_reason": "end_turn", "content": []any{map[string]any{"type": "text", "text": `{"answer":"from tool"}`}},
 				"usage": map[string]any{"input_tokens": 4, "output_tokens": 3},
 			})
 		}
@@ -70,7 +70,7 @@ func TestStructuredOutputKnownUnknownAndExplicitGatewayModel(t *testing.T) {
 	calls := 0
 	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "m", "stop_reason": "end_turn", "content": []any{map[string]any{"type": "text", "text": `{"answer":"ok"}`}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"type": "message", "role": "assistant", "id": "m", "stop_reason": "end_turn", "content": []any{map[string]any{"type": "text", "text": `{"answer":"ok"}`}}})
 	})
 	known, err := client.Capabilities(t.Context(), "claude-sonnet-5-5")
 	if err != nil || !known.StructuredJSONSchema {
@@ -93,7 +93,7 @@ func TestStructuredOutputRefusalAndStreaming(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if !body.Stream {
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": "refused", "stop_reason": "refusal", "content": []any{map[string]any{"type": "text", "text": "Cannot comply."}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"type": "message", "role": "assistant", "id": "refused", "stop_reason": "refusal", "content": []any{map[string]any{"type": "text", "text": "Cannot comply."}}})
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -103,7 +103,7 @@ func TestStructuredOutputRefusalAndStreaming(t *testing.T) {
 			_, _ = fmt.Fprintln(w, "data: "+string(raw))
 			_, _ = fmt.Fprintln(w)
 		}
-		send("message_start", map[string]any{"type": "message_start", "message": map[string]any{"id": "sse-structured", "usage": map[string]any{"input_tokens": 2}}})
+		send("message_start", map[string]any{"type": "message_start", "message": map[string]any{"type": "message", "role": "assistant", "id": "sse-structured", "usage": map[string]any{"input_tokens": 2}}})
 		send("content_block_start", map[string]any{"type": "content_block_start", "index": 0, "content_block": map[string]any{"type": "text", "text": ""}})
 		send("content_block_delta", map[string]any{"type": "content_block_delta", "index": 0, "delta": map[string]any{"type": "text_delta", "text": `{"answer":"streamed"}`}})
 		send("content_block_stop", map[string]any{"type": "content_block_stop", "index": 0})

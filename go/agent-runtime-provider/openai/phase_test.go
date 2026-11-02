@@ -24,7 +24,7 @@ const (
 )
 
 func phaseResponse(items ...string) string {
-	return `{"id":"response-phase","status":"completed","output":[` + strings.Join(items, ",") +
+	return `{"object":"response","id":"response-phase","status":"completed","output":[` + strings.Join(items, ",") +
 		`],"usage":{"input_tokens":31,"output_tokens":13}}`
 }
 

@@ -65,7 +65,7 @@ func TestRequiredToolFreeSemanticRejectionRetainsOnlyPaidReceipt(t *testing.T) {
 						if status == "" {
 							status = "completed"
 						}
-						body := fmt.Sprintf(`{"id":"paid-no-tool","status":%q,"output":%s%s}`, status, tc.output, tc.usage)
+						body := fmt.Sprintf(`{"object":"response","id":"paid-no-tool","status":%q,"output":%s%s}`, status, tc.output, tc.usage)
 						if streaming {
 							w.Header().Set("Content-Type", "text/event-stream")
 							_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", body)

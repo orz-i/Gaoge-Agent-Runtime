@@ -35,7 +35,7 @@ func TestCompletedMalformedToolRetainsAnthropicUsageReceipt(t *testing.T) {
 					client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 						if !streaming {
 							reply := map[string]any{
-								"id": "paid-anthropic-invalid-tool", "stop_reason": "tool_use",
+								"type": "message", "role": "assistant", "id": "paid-anthropic-invalid-tool", "stop_reason": "tool_use",
 								"content": []any{map[string]any{"type": "tool_use", "id": tc.toolID,
 									"name": tc.toolName, "input": map[string]any{}}},
 							}
@@ -51,7 +51,7 @@ func TestCompletedMalformedToolRetainsAnthropicUsageReceipt(t *testing.T) {
 							b, _ := json.Marshal(value)
 							_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
 						}
-						initial := map[string]any{"id": "paid-anthropic-invalid-tool"}
+						initial := map[string]any{"type": "message", "role": "assistant", "id": "paid-anthropic-invalid-tool"}
 						if tc.knownUsage {
 							initial["usage"] = map[string]any{"input_tokens": 17, "output_tokens": 0}
 						}

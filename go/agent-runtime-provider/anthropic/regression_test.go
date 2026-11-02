@@ -31,14 +31,14 @@ func TestSignedThinkingToolReplayAndTamperRejection(t *testing.T) {
 			t.Error(err)
 		}
 		if attempts == 1 {
-			_, _ = fmt.Fprint(w, `{"id":"thinking-1","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"","signature":"signed-hidden-block"},{"type":"tool_use","id":"toolu-1","name":"lookup","input":{"x":1}}],"usage":{"input_tokens":12,"output_tokens":5}}`)
+			_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"thinking-1","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"","signature":"signed-hidden-block"},{"type":"tool_use","id":"toolu-1","name":"lookup","input":{"x":1}}],"usage":{"input_tokens":12,"output_tokens":5}}`)
 			return
 		}
 		if len(envelope.Messages) != 3 || !strings.Contains(string(envelope.Messages[1].Content), `"signature":"signed-hidden-block"`) ||
 			!strings.Contains(string(envelope.Messages[1].Content), `"thinking":""`) {
 			t.Errorf("required original thinking not replayed: %+v", envelope)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"thinking-2","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"","signature":"second-block"},{"type":"text","text":"done"}],"usage":{"input_tokens":15,"output_tokens":2}}`)
+		_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"thinking-2","stop_reason":"end_turn","content":[{"type":"thinking","thinking":"","signature":"second-block"},{"type":"text","text":"done"}],"usage":{"input_tokens":15,"output_tokens":2}}`)
 	})
 	req := model.Request{Model: "claude-opus-5-5", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}, Tools: []tools.Definition{definition}}
 	first, err := client.Generate(context.Background(), req)
@@ -68,7 +68,7 @@ func TestForcedToolChoiceIsRejectedBeforeRequestOnUnsupportedModels(t *testing.T
 	sent := 0
 	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 		sent++
-		_, _ = fmt.Fprint(w, `{"id":"reply","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":2,"output_tokens":1}}`)
+		_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"reply","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":2,"output_tokens":1}}`)
 	})
 	for _, name := range []string{
 		"claude-opus-5-5", "claude-opus-5-5-20261001", "claude-sonnet-5-5", "claude-fable-5-1", "claude-mythos-5-1",
@@ -111,7 +111,7 @@ func TestThinkingSSERecoveryAcrossRealAgentRun(t *testing.T) {
 			_, _ = fmt.Fprintln(w, "data: "+data)
 			_, _ = fmt.Fprintln(w)
 		}
-		emit("message_start", fmt.Sprintf(`{"type":"message_start","message":{"id":"stream-%d","usage":{"input_tokens":12,"output_tokens":0}}}`, attempts))
+		emit("message_start", fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"assistant","id":"stream-%d","usage":{"input_tokens":12,"output_tokens":0}}}`, attempts))
 		if attempts == 1 {
 			emit("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`)
 			emit("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}}`)
@@ -186,7 +186,7 @@ func TestThinkingSSERecoveryAcrossRealAgentRun(t *testing.T) {
 
 func TestMissingAnthropicUsageRemainsUnknown(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprint(w, `{"id":"no-usage","stop_reason":"end_turn","content":[{"type":"text","text":"hello"}],"usage":{}}`)
+		_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"no-usage","stop_reason":"end_turn","content":[{"type":"text","text":"hello"}],"usage":{}}`)
 	})
 	result, err := client.Generate(context.Background(), model.Request{Model: "claude-opus-5-5", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}})
 	if err != nil || result.Usage != nil {
@@ -208,7 +208,7 @@ func TestAnthropicStreamCannotTreatInitialUsageAsFinalReceipt(t *testing.T) {
 					_, _ = fmt.Fprintln(w, "data: "+data)
 					_, _ = fmt.Fprintln(w)
 				}
-				write("message_start", fmt.Sprintf(`{"type":"message_start","message":{"id":"s","usage":%s}}`, testCase.initial))
+				write("message_start", fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"assistant","id":"s","usage":%s}}`, testCase.initial))
 				write("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"hi"}}`)
 				write("content_block_stop", `{"type":"content_block_stop","index":0}`)
 				write("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"}`+testCase.final+`}`)
@@ -226,7 +226,7 @@ func TestAnthropicStreamCannotTreatInitialUsageAsFinalReceipt(t *testing.T) {
 
 func TestUnsupportedAnthropicBlockFieldsNeverDisappearSilently(t *testing.T) {
 	client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprint(w, `{"id":"unknown","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":2},"content":[{"type":"text","text":"hi","citations":[{"type":"unsupported"}]}]}`)
+		_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"unknown","stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":2},"content":[{"type":"text","text":"hi","citations":[{"type":"unsupported"}]}]}`)
 	})
 	_, err := client.Generate(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}}})
 	if !errors.Is(err, anthropic.ErrUnsupported) {

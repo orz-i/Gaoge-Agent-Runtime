@@ -47,9 +47,9 @@ func TestStrictJSONSchemaWireAndToolContinuation(t *testing.T) {
 			t.Errorf("tool+strict JSON contract missing replay requirements: %+v", body)
 		}
 		if calls == 1 {
-			_, _ = fmt.Fprint(w, `{"id":"resp-tool","status":"completed","output":[{"type":"function_call","call_id":"c1","name":"lookup","arguments":"{}"}],"usage":{"input_tokens":3,"output_tokens":2}}`)
+			_, _ = fmt.Fprint(w, `{"object":"response","id":"resp-tool","status":"completed","output":[{"type":"function_call","call_id":"c1","name":"lookup","arguments":"{}"}],"usage":{"input_tokens":3,"output_tokens":2}}`)
 		} else {
-			_, _ = fmt.Fprint(w, `{"id":"resp-json","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"answer\":\"from tool\"}"}]}],"usage":{"input_tokens":4,"output_tokens":3}}`)
+			_, _ = fmt.Fprint(w, `{"object":"response","id":"resp-json","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"answer\":\"from tool\"}"}]}],"usage":{"input_tokens":4,"output_tokens":3}}`)
 		}
 	})
 	request := model.Request{Model: "gpt-4.1", OutputContract: model.CloneOutputContract(outputContract),
@@ -69,7 +69,7 @@ func TestStructuredOutputCapabilityFailsBeforeHTTPAndSupportsHostVerifiedOverrid
 	calls := 0
 	client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		_, _ = w.Write([]byte(`{"id":"r","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{}"}]}]}`))
+		_, _ = w.Write([]byte(`{"object":"response","id":"r","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{}"}]}]}`))
 	})
 	req := model.Request{Model: "unverified-gateway-model", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}}, OutputContract: outputContract}
 	_, err := client.Generate(context.Background(), req)
@@ -94,10 +94,10 @@ func TestStructuredOutputRefusalAndStreaming(t *testing.T) {
 		if body.Stream {
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = fmt.Fprintln(w, "event: response.completed")
-			_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp-sse","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"answer\":\"streamed\"}"}]}],"usage":{"input_tokens":2,"output_tokens":3}}}`)
+			_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"object":"response","id":"resp-sse","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"answer\":\"streamed\"}"}]}],"usage":{"input_tokens":2,"output_tokens":3}}}`)
 			_, _ = fmt.Fprintln(w)
 		} else {
-			_, _ = fmt.Fprint(w, `{"id":"resp-refusal","status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"Cannot comply."}]}],"usage":{"input_tokens":1,"output_tokens":2}}`)
+			_, _ = fmt.Fprint(w, `{"object":"response","id":"resp-refusal","status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"Cannot comply."}]}],"usage":{"input_tokens":1,"output_tokens":2}}`)
 		}
 	})
 	req := model.Request{Model: "gpt-4.1", OutputContract: outputContract, Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}}}

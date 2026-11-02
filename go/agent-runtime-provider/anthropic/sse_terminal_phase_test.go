@@ -15,8 +15,8 @@ import (
 // Multiple consistent message_delta usage observations remain legal.
 func TestAnthropicSSEFinalPhaseCannotAuthorizeLateOrMalformedTool(t *testing.T) {
 	type frame struct{ event, json string }
-	start := frame{"message_start", `{"type":"message_start","message":{"id":"msg-terminal-proof","usage":{"input_tokens":17,"output_tokens":0}}}`}
-	startWithReason := frame{"message_start", `{"type":"message_start","message":{"id":"msg-terminal-proof","stop_reason":"tool_use","usage":{"input_tokens":17,"output_tokens":0}}}`}
+	start := frame{"message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"msg-terminal-proof","usage":{"input_tokens":17,"output_tokens":0}}}`}
+	startWithReason := frame{"message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"msg-terminal-proof","stop_reason":"tool_use","usage":{"input_tokens":17,"output_tokens":0}}}`}
 	tool0 := frame{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-0","name":"lookup","input":{}}}`}
 	tool1 := frame{"content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"tool-1","name":"lookup","input":{}}}`}
 	stop0 := frame{"content_block_stop", `{"type":"content_block_stop","index":0}`}
