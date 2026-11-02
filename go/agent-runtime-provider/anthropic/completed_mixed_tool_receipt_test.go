@@ -56,7 +56,7 @@ func TestCompletedMixedAnthropicToolUnaryKeepsPaidReceipt(t *testing.T) {
 						Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}},
 						Tools:    []tools.Definition{definition}, RequireToolCall: true,
 					})
-					assertMixedAnthropicRejection(t, response, err, tc.tool && usage.known, false)
+					assertMixedAnthropicRejection(t, response, err, usage.known, false)
 				})
 			}
 		})
@@ -155,7 +155,7 @@ func TestCompletedMixedAnthropicToolStreamKeepsPaidReceipt(t *testing.T) {
 					if rejectedDelta != 0 {
 						t.Fatalf("semantically rejected content leaked via SSE: count=%d", rejectedDelta)
 					}
-					assertMixedAnthropicRejection(t, response, err, tc.hasTool && tc.stop == "tool_use" &&
+					assertMixedAnthropicRejection(t, response, err, tc.stop != "max_tokens" &&
 						tc.name != "missing_message_stop_with_tool" && tc.name != "malformed_frame_after_rich_text" &&
 						tc.name != "noncontiguous_indices_after_rich_text" &&
 						usage.known, terminal != 0)
@@ -165,15 +165,15 @@ func TestCompletedMixedAnthropicToolStreamKeepsPaidReceipt(t *testing.T) {
 	}
 }
 
-func assertMixedAnthropicRejection(t *testing.T, response model.Response, err error, knownTool, emittedTerminal bool) {
+func assertMixedAnthropicRejection(t *testing.T, response model.Response, err error, knownCompletion, emittedTerminal bool) {
 	t.Helper()
 	if err == nil || response.Content != "" || len(response.ToolCalls) != 0 ||
 		response.ProviderReplay != nil || response.Refused || emittedTerminal {
 		t.Fatalf("invalid Tool-bearing completion leaked content, execution or terminal success: response=%+v err=%v terminal=%v", response, err, emittedTerminal)
 	}
-	if !knownTool {
+	if !knownCompletion {
 		if model.IsResponseRejectedError(err) || response.ResponseID != "" || response.Usage != nil {
-			t.Fatalf("invented receipt for unknown/invalid or Tool-free completion: response=%+v err=%v", response, err)
+			t.Fatalf("invented receipt for unknown/invalid completion: response=%+v err=%v", response, err)
 		}
 		return
 	}

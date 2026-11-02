@@ -26,6 +26,31 @@ func TestCompletedMalformedToolStillConsumesPaidAgentInvocation(t *testing.T) {
 	}})
 }
 
+// A completed mandatory-Tool response with no physical Tool still has paid
+// final Usage, even when its text cannot be projected into a local Message.
+// Rejected but otherwise valid text must not leak into the durable receipt.
+func TestCompletedRequiredToolFreeRejectionConsumesPaidAgentInvocation(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		output []any
+	}{
+		{"unsupported_text_part", []any{map[string]any{
+			"type": "message", "role": "assistant", "status": "completed",
+			"content": []any{map[string]any{"type": "unsupported_part", "text": "unprojectable"}},
+		}}},
+		{"valid_plain_text", []any{map[string]any{
+			"type": "message", "role": "assistant", "status": "completed",
+			"content": []any{map[string]any{"type": "output_text", "text": "unauthorized final"}},
+		}}},
+		{"valid_phased_text", []any{map[string]any{
+			"type": "message", "phase": "final_answer", "role": "assistant", "status": "completed",
+			"content": []any{map[string]any{"type": "output_text", "text": "unauthorized phased final"}},
+		}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) { assertCompletedRejectedToolReceipt(t, tc.output) })
+	}
+}
+
 // Mixed valid Tool and invalid output cannot execute a partial Tool batch, but
 // its completed physical Provider invocation must still be accounted once.
 func TestCompletedMixedOutputStillConsumesPaidAgentInvocation(t *testing.T) {

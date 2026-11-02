@@ -250,7 +250,7 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	}
 	return prepared{body: payload, names: byName}, nil
 }
-func decodeResponse(body responseBody, names map[string]string) (model.Response, error) {
+func decodeResponse(body responseBody, names map[string]string, required bool) (model.Response, error) {
 	if body.Status == "incomplete" {
 		return model.Response{}, errors.Join(ErrUnsupported, ErrIncomplete)
 	}
@@ -276,17 +276,17 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 		if model.IsResponseRejectedError(err) {
 			return result, err
 		}
-		return rejectCompletedToolOutput(receipt, body.Output, err)
+		return rejectCompletedToolOutput(receipt, body.Output, required, err)
 	}
 	projection, err := projectOutput(body.Output)
 	if err != nil {
-		return rejectCompletedToolOutput(receipt, body.Output, err)
+		return rejectCompletedToolOutput(receipt, body.Output, required, err)
 	}
 	result.Content, result.Refused = projection.content, projection.refused
 	for _, item := range projection.calls {
 		key := names[item.Name]
 		if key == "" {
-			return rejectCompletedToolOutput(receipt, body.Output, ErrUnsupported)
+			return rejectCompletedToolOutput(receipt, body.Output, required, ErrUnsupported)
 		}
 		result.ToolCalls = append(result.ToolCalls, tools.Call{
 			ID: item.CallID, ToolKey: key, Name: item.Name, Arguments: json.RawMessage(item.Arguments),
@@ -301,7 +301,7 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 		}
 		replay, err := encodeReplay(outputs)
 		if err != nil {
-			return rejectCompletedToolOutput(receipt, body.Output, err)
+			return rejectCompletedToolOutput(receipt, body.Output, required, err)
 		}
 		result.ProviderReplay = replay
 	}
@@ -321,7 +321,7 @@ func (c *Client) Generate(ctx context.Context, request model.Request) (model.Res
 	if err := providerhttp.ReadJSON(resp, &body); err != nil {
 		return model.Response{}, err
 	}
-	result, err := decodeResponse(body, prepared.names)
+	result, err := decodeResponse(body, prepared.names, request.RequireToolCall)
 	if err != nil {
 		return result, err
 	}
@@ -408,7 +408,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	if final == nil {
 		return model.Response{}, providerhttp.ErrProtocol
 	}
-	result, err := decodeResponse(*final, prepared.names)
+	result, err := decodeResponse(*final, prepared.names, request.RequireToolCall)
 	if err != nil {
 		// An unfinished Tool item can carry a completed rejection receipt,
 		// but never executable Calls or a successful terminal SSE event.
@@ -428,14 +428,20 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	return result, err
 }
 
-// rejectCompletedToolOutput handles post-completion semantic/encoding errors
-// involving a physical local Tool. The entire output remains unauthorized,
-// but a completed Provider response with verifiable Usage must be durably
-// consumed exactly once. Keep unrelated text-only errors and missing encrypted
-// reasoning evidence in their previous Provider failure class.
-func rejectCompletedToolOutput(receipt model.Response, output []json.RawMessage, cause error) (model.Response, error) {
+// rejectCompletedToolOutput settles post-completion semantic/encoding
+// errors involving a physical Tool or a missing mandatory Tool. The output
+// remains unauthorized; a known completed, billable response must be consumed
+// exactly once. Optional text-only failures and unavailable encrypted replay
+// retain their original Provider error classification.
+func rejectCompletedToolOutput(receipt model.Response, output []json.RawMessage, required bool, cause error) (model.Response, error) {
 	if errors.Is(cause, ErrReplayUnavailable) {
 		return model.Response{}, cause
+	}
+	// The mandatory Tool obligation is also violated when an already
+	// completed response contains only unprojectable non-Tool content.
+	// Preserve its verified billing without authorizing any payload.
+	if required {
+		return providerhttp.RejectCompletedResponse(receipt, cause)
 	}
 	for _, raw := range output {
 		var item struct {
@@ -507,7 +513,10 @@ func verifyRequiredToolResponse(request model.Request, result model.Response, ou
 	if !providerhttp.ValidCompletedUsage(result.Usage) {
 		return model.Response{}, ErrUnsupported
 	}
-	return result, model.NewResponseRejectedError(model.NewClassifiedError(ErrUnsupported, "model.post_generation_failed"))
+	// A rejected required-Tool response is not an assistant Message.
+	// Persist only its trusted physical receipt, never projected text,
+	// a global refusal flag or phase replay.
+	return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
 }
 
 // Only documented transient codes opt into durable retries. Never retain the

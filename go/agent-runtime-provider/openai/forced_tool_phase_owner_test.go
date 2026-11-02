@@ -57,10 +57,10 @@ func TestIndependentForcedToolCommentaryRefusalCannotAuthorizeTextFinal(t *testi
 			} else {
 				response, err = client.Generate(t.Context(), request)
 			}
-			// Even if Refused is true to preserve evidence, the ordinary final
-			// non-refusal answer is not an explicit safety refusal of that answer.
+			// The rejected completion retains only billing evidence; even a
+			// commentary refusal cannot authorize any persisted final text.
 			if !errors.Is(err, openai.ErrUnsupported) || !model.IsResponseRejectedError(err) ||
-				response.Content != "ordinary final answer WITHOUT Tool" || !response.Refused ||
+				response.Content != "" || response.Refused || response.ProviderReplay != nil ||
 				response.ResponseID != "refusal-in-commentary-only" || response.Usage == nil ||
 				response.Usage.InputTokens != 17 || response.Usage.OutputTokens != 5 ||
 				len(response.ToolCalls) != 0 || terminal != 0 {
@@ -195,7 +195,7 @@ func TestIndependentForcedToolRequiresRefusalOnlySelectedTerminalMessage(t *test
 						return
 					}
 					if !errors.Is(err, openai.ErrUnsupported) || !model.IsResponseRejectedError(err) ||
-						!response.Refused || response.Usage == nil || response.ResponseID != "response-phase" ||
+						response.Refused || response.Content != "" || response.ProviderReplay != nil || response.Usage == nil || response.ResponseID != "response-phase" ||
 						len(response.ToolCalls) != 0 || terminal != 0 {
 						t.Fatalf("non-refusal terminal escaped forced Tool check: response=%+v err=%v final=%d", response, err, terminal)
 					}

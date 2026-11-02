@@ -25,11 +25,14 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 		name          string
 		invalidFirst  bool
 		richCitations bool
+		toolFreeBlock string
 	}{
 		{name: "invalid_thinking_then_tool", invalidFirst: true},
 		{name: "tool_then_invalid_thinking"},
 		{name: "rich_citations_then_tool", invalidFirst: true, richCitations: true},
 		{name: "tool_then_rich_citations", richCitations: true},
+		{name: "required_tool_unsupported_text_only", toolFreeBlock: `{"type":"text","text":"cited","citations":[{"type":"char_location","cited_text":"source"}]}`},
+		{name: "required_tool_valid_text_only", toolFreeBlock: `{"type":"text","text":"unauthorized final"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls, effects atomic.Int32
@@ -57,6 +60,11 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 					`{"type":"message_start","message":{"id":"paid-%d","usage":{"input_tokens":17,"output_tokens":0}}}`, n))
 				if n == 1 {
 					send("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"answer without required Tool"}}`)
+					send("content_block_stop", `{"type":"content_block_stop","index":0}`)
+					send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`)
+				} else if tc.toolFreeBlock != "" {
+					send("content_block_start", fmt.Sprintf(
+						`{"type":"content_block_start","index":0,"content_block":%s}`, tc.toolFreeBlock))
 					send("content_block_stop", `{"type":"content_block_stop","index":0}`)
 					send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`)
 				} else {
