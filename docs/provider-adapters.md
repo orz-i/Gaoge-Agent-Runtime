@@ -91,6 +91,45 @@ multi-provider router.
   Provider tool names map back to Gaoge Tool Keys.
 - Synchronous `Generate` and SSE `GenerateStream`. A streaming terminal
   response is required; partial SSE delivery is **not** success.
+- `model.Request.RequireToolCall` is a **verified terminal contract** for
+  local functions: both adapters send the provider's mandatory Tool choice,
+  then independently require at least one decoded `ToolCall` before returning
+  success or emitting a terminal SSE `ResponseID`/usage receipt. An upstream
+  proxy may silently ignore Tool choice; its completed text-only reply is
+  rejected (`errors.Is(err, ErrUnsupported)`), never a successful Agent
+  answer. If trustworthy cumulative Usage is present, the adapter returns
+  that completed response's original `ResponseID` and Usage **with**
+  `model.ResponseRejectedError`, classified `model.post_generation_failed`;
+  Agent persists and consumes the exact rejected ModelInvocation and charges
+  the original tokens once, without dispatching a local Tool or blindly
+  retrying. Missing, partial, negative or overflowing cumulative Usage
+  remains unverified: a plain `ErrUnsupported` and empty Response cannot
+  mint known-completion evidence. A recognizable provider safety refusal
+  (`Response.Refused`) is preserved rather than forged into a Tool call.
+  For OpenAI phased responses, the global `Response.Refused` continues to
+  report safety evidence from any phase, but **does not alone authorize a
+  forced Tool bypass**: the selected `final_answer` message must itself
+  contain only explicit refusal blocks. Earlier commentary refusal followed
+  by an ordinary final answer, or a final message mixing refusal and normal
+  text, is a completed contract rejection, not a successful response. For
+  unphased legacy output the last message is tested as the terminal one.
+  The final message must have role `assistant` and status `completed` when
+  these optional fields are explicitly present. A foreign `user`/`system`/
+  `tool` role, `in_progress`/`incomplete` status, or explicitly null/empty
+  role/status cannot grant the exception. Omitted legacy role/status fields
+  remain supported. **Every OpenAI function_call** (mandatory or optional)
+  is separately gated on item-level completion before it becomes an
+  executable Tool Call: `status=completed` or genuinely omitted legacy
+  status is permitted; `in_progress`, `incomplete`, explicit null/empty
+  and unknown statuses are rejected. The fence runs before executable
+  argument parsing so an unfinished item with malformed JSON cannot lose
+  the original completed ResponseID/Usage. If Usage is verifiable, return
+  only a minimal `ResponseRejectedError` completion receipt (no ToolCalls,
+  content or replay); otherwise fail closed without creating a receipt.
+  Normal text-only requests and valid Tool calls are unchanged. Interim
+  SSE text deltas are observational and may already have been emitted;
+  they never constitute a successful terminal Tool-required receipt.
+  See [required Tool response audit](audits/2026-11-02-provider-required-tool-response-hardcut.md).
 - OpenAI Responses assistant `phase` is preserved. When messages use phases,
   only the single `final_answer` message supplies terminal `Response.Content`;
   preceding `commentary` does not become part of a structured final answer.

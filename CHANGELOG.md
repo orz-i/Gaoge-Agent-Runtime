@@ -5,6 +5,30 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- OpenAI Responses and Anthropic Messages forced-Tool response hard cut:
+  `RequireToolCall` now verifies the final provider result actually contains
+  a local Tool call, not just that `tool_choice` was sent. An upstream proxy's
+  completed text-only reply is rejected in unary and SSE modes without a
+  successful terminal receipt. If the response carries valid cumulative
+  Usage, preserve its ResponseID/Usage under the existing typed
+  ResponseRejectedError (`model.post_generation_failed`) so Agent consumes
+  and bills exactly once; missing or invalid Usage still fails closed with
+  no invented receipt. For OpenAI phased output, a commentary-only refusal
+  cannot waive the required Tool when `final_answer` is ordinary text; only
+  the selected terminal message's explicit refusal qualifies. Global
+  `Response.Refused` continues to retain commentary safety evidence.
+  The final refusal must come from an `assistant` message with a
+  `completed` status when those fields are present. Explicit foreign
+  roles, incomplete statuses, null and empty field values cannot claim
+  the exception; omitted legacy fields remain supported. Explicit terminal
+  refusals, ordinary text requests and valid Tool calls remain supported.
+  OpenAI additionally checks each physical `function_call.status` before
+  authorizing Tool execution, for both optional and mandatory calls.
+  Explicit unfinished/invalid items cannot be dispatched; a complete
+  billable response preserves only its ResponseID/Usage rejection receipt,
+  even if the unfinished arguments are malformed. No new ModelInvocation
+  state, API shape, adapter fallback, schema migration or automatic retry.
+
 - Round 3 Harness output provenance hard cut: child Invocation results
   cannot appear as top-level Turn `Snapshot.Output` during unresolved Host
   callbacks. Every physical root status/Item projection (including failed or

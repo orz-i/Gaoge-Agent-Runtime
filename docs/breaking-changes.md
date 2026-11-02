@@ -2,6 +2,60 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
+
+`model.Request.RequireToolCall` now requires an actual decoded local
+`ToolCall` on successful final OpenAI Responses and Anthropic Messages
+responses, including SSE. Merely sending `tool_choice=required` or
+`tool_choice={"type":"any"}` does not prove a gateway obeyed it. A
+provider reply containing only ordinary text is now rejected (matching
+`ErrUnsupported`); streaming does not emit a final `ResponseID`/usage
+**success event** for that reply. If the provider supplied trustworthy
+cumulative Usage on a complete response, the adapter returns the original
+`ResponseID` and Usage **with** a `model.ResponseRejectedError` classified
+`model.post_generation_failed`, allowing Agent to durably complete/consume
+that exact billed ModelInvocation once. Missing, incomplete, invalid or
+overflowing Usage cannot establish known completion: only plain
+`ErrUnsupported` and an empty Response are returned, with no invented
+usage/terminal receipt. An explicit safety refusal remains a
+`Response.Refused` result, not a synthetic Tool call, while normal
+non-forced text and valid local Tool calls remain unchanged. For OpenAI
+phased responses, `Response.Refused=true` still records a refusal from
+**any** message, including commentary, but only a refusal-only selected
+`final_answer` qualifies for the mandatory Tool exception. A commentary
+refusal followed by ordinary final text, or mixed refusal and ordinary
+final text, is now rejected; for unphased legacy output only the final
+message may prove the exception. The final refusal must also have
+**assistant** ownership and a **completed** message status, when these
+fields are explicitly present. Non-assistant roles, unfinished statuses
+and explicit null/empty values cannot provide the mandatory Tool exception;
+omitted fields retain the original legacy interpretation. This closes the
+additional P1 where a foreign-role or unfinished message could authorize
+a Tool-free completion by borrowing the global refusal flag.
+
+**OpenAI function_call execution hard cut:** Even if the enclosing Responses
+object is `completed`, any local function item explicitly marked
+`in_progress`, `incomplete`, null/empty or otherwise not `completed`
+invalidates the entire candidate Tool execution, for both mandatory and
+optional Tool calls. Genuinely omitted item status continues to follow the
+existing legacy contract. The adapter returns no executable ToolCalls, no
+Tool arguments or replay and emits no terminal SSE success. When the outer
+response completed with trustworthy Usage, it preserves only the completed
+ResponseID/Usage and typed `model.post_generation_failed` rejection for
+single consumption/billing. The check runs before parsing potentially
+unfinished JSON arguments. Hosts must not rely on a completed envelope as
+proof that every physical Tool item is executable.
+
+This deliberately drops the former permissive acceptance of gateway
+nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,
+provider fallback, silent request rewrite or legacy bridge is introduced.
+Transitory SSE deltas may already have been observed before a final
+violation; only the terminal response/receipt is rejected. Any impacted
+Host should configure a compatible endpoint/model instead of interpreting
+unverified text as successful mandatory Tool execution. Live endpoint
+compatibility still requires explicit provider/gateway verification.
+See [independent regression evidence](audits/2026-11-02-provider-required-tool-response-hardcut.md).
+
 ## 2026-11-01 — Root Turn output provenance and physical-owner P1 hard cut (beta.24 candidate)
 
 `Harness.Snapshot.Output` must represent the physical result of the
