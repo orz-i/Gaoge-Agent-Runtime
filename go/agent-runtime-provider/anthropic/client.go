@@ -439,6 +439,11 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	defer func() { _ = resp.Body.Close() }()
 	var body messageBody
 	var started, stopped bool
+	// Content blocks precede final message deltas. Keep an explicit active
+	// block, so late/interleaved Tool events cannot be reconstructed as a
+	// legitimate executable response after the final stop boundary.
+	activeBlock := -1
+	var finalDeltaSeen, finalStopReasonSeen bool
 	var blocks = map[int]*contentBlock{}
 	var chunks = map[int]*strings.Builder{}
 	var closed = map[int]bool{}
@@ -455,7 +460,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				Type string `json:"type"`
 			} `json:"error"`
 			Message      messageBody     `json:"message"`
-			Index        int             `json:"index"`
+			Index        *int            `json:"index"`
 			ContentBlock json.RawMessage `json:"content_block"`
 			Delta        struct {
 				Type        string `json:"type"`
@@ -473,6 +478,11 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		if stopped {
 			return providerhttp.ErrProtocol
 		}
+		// An absent or null index must not silently become block 0.
+		index := -1
+		if frame.Index != nil {
+			index = *frame.Index
+		}
 		switch frame.Type {
 		case "message_start":
 			if started {
@@ -482,7 +492,8 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			initialUsagePresent = body.Usage != nil && body.Usage.Input != nil
 			body.Content = nil
 		case "content_block_start":
-			if !started || blocks[frame.Index] != nil || frame.Index < 0 || frame.Index > 1024 {
+			if !started || finalDeltaSeen || activeBlock != -1 ||
+				index != len(blocks) || index > 1024 {
 				return providerhttp.ErrProtocol
 			}
 			b, err := parseContentBlock(frame.ContentBlock)
@@ -506,11 +517,13 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			if resultBytes > 16<<20 {
 				return providerhttp.ErrProtocol
 			}
-			blocks[frame.Index] = &b
-			chunks[frame.Index] = &strings.Builder{}
+			blocks[index] = &b
+			chunks[index] = &strings.Builder{}
+			activeBlock = index
 		case "content_block_delta":
-			b := blocks[frame.Index]
-			if b == nil || closed[frame.Index] || frame.Delta.Type == "" {
+			b := blocks[index]
+			if !started || finalDeltaSeen || activeBlock != index ||
+				b == nil || closed[index] || frame.Delta.Type == "" {
 				return providerhttp.ErrProtocol
 			}
 			if rejectedContent {
@@ -549,34 +562,48 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				if b.Type != "tool_use" {
 					return providerhttp.ErrProtocol
 				}
-				if _, err := chunks[frame.Index].WriteString(frame.Delta.PartialJSON); err != nil {
+				if _, err := chunks[index].WriteString(frame.Delta.PartialJSON); err != nil {
 					return providerhttp.ErrProtocol
 				}
 			default:
 				return ErrUnsupported
 			}
 		case "content_block_stop":
-			b := blocks[frame.Index]
-			if b == nil || closed[frame.Index] {
+			b := blocks[index]
+			if !started || finalDeltaSeen || activeBlock != index ||
+				b == nil || closed[index] {
 				return providerhttp.ErrProtocol
 			}
-			closed[frame.Index] = true
-			if b.Type == "tool_use" && chunks[frame.Index].Len() > 0 {
-				b.Input = json.RawMessage(chunks[frame.Index].String())
+			closed[index] = true
+			activeBlock = -1
+			if b.Type == "tool_use" && chunks[index].Len() > 0 {
+				b.Input = json.RawMessage(chunks[index].String())
 			}
 		case "message_delta":
-			if !started {
+			if !started || activeBlock != -1 {
 				return providerhttp.ErrProtocol
 			}
+			// Claude may send multiple message_delta events with cumulative
+			// Usage. Never accept a conflicting final stop reason or declining
+			// token count; both would undermine the final Tool/Usage proof.
+			finalDeltaSeen = true
 			if frame.Delta.StopReason != "" {
+				if body.StopReason != "" && body.StopReason != frame.Delta.StopReason {
+					return providerhttp.ErrProtocol
+				}
 				body.StopReason = frame.Delta.StopReason
+				finalStopReasonSeen = true
 			}
 			if frame.Usage != nil && frame.Usage.Output != nil && initialUsagePresent {
+				if body.Usage.Output != nil && *frame.Usage.Output < *body.Usage.Output {
+					return providerhttp.ErrProtocol
+				}
 				body.Usage.Output = frame.Usage.Output
 				finalOutputUsageObserved = true
 			}
 		case "message_stop":
-			if !started || len(blocks) != len(closed) {
+			if !started || !finalDeltaSeen || !finalStopReasonSeen || activeBlock != -1 ||
+				len(blocks) != len(closed) {
 				return providerhttp.ErrProtocol
 			}
 			// Completion proof requires a contiguous sequence of closed
