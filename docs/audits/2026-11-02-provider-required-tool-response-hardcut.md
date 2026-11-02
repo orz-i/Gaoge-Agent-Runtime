@@ -759,3 +759,104 @@ Head and an independent merge-admission audit.
 - Original two untracked OpenAI probe scripts excluded and SHA-256-identical.
   Live Provider/gateway compatibility, GitHub required CI on the newly
   pushed Head, merge approval and beta.24 publication remain unverified.
+
+## PR #87 independent P1 — outer Provider Message/Responses ownership before local Tool authorization
+
+**Reviewed immutable PR Head:** `5dd19ec2011aa0c276845295360490ae03ed20bb`.
+The GitHub required unit/race, coverage, CodeQL and other applicable checks
+were green, but a new read-only independent audit identified an unverified
+provider-owner boundary in **both** standalone HTTP adapters.
+
+**Anthropic Messages:** The adapter decoded `id`, `stop_reason`, Usage and
+`tool_use` without checking the enclosing Message `type` and `role`. A
+complete unary Message or SSE `message_start` with explicit `role=user`,
+`role=system` or `role=tool`, or `type=tool_result`, was accepted as an
+assistant's own local Tool call, with `err=nil`, ProviderReplay and an
+SSE terminal success event. Absent, null, empty or wrong-typed role/type
+also silently omitted authority evidence while still authorizing a Tool.
+
+**OpenAI Responses:** The parallel `decodeResponse` boundary accepted any
+outer resource with `status=completed`, supported function-call output and
+valid Usage. Its documented invariant `object="response"` was never checked.
+A foreign `object="chat.completion"` or `object="image"`, absent/null/empty
+object or unsupported scalar could therefore reach the same Tool execution
+path, despite not representing an OpenAI Responses resource.
+
+These are protocol-owner validations, not assumptions about provider model
+text, tool names or Host routing. The official wire schemas identify
+[Anthropic output Messages](https://platform.claude.com/docs/en/build-with-claude/working-with-messages)
+as `type=message`, `role=assistant`, and
+[OpenAI Responses resources](https://developers.openai.com/api/reference/typescript/resources/responses/methods/create)
+as `object=response`. Their fields are mandatory, not optional legacy
+compatibility flags.
+
+**Independent RED before source edits:** Read-only `/tmp` Go `-overlay` tests
+against the exact original Head reproduced successful unary/SSE local
+ToolCalls and SSE success receipts for explicit foreign owner fields. Two
+permanent Provider-level test matrices
+(`anthropic/message_owner_test.go`, `openai/response_owner_test.go`) then
+reproduced failures for foreign, absent, null, empty and nonstring identities.
+A public Agent → HTTP/SSE → Kernel Store mutation audit restoring the old
+Provider source confirmed **one actual local Tool Handler effect** for
+foreign Anthropic user/tool/type/missing-owner envelopes and foreign OpenAI
+chat/image/missing-object envelopes. No real provider credentials or
+external business Tools were used.
+
+**Minimal hard cut:** Anthropic `messageBody` now carries its outer `type`
+and `role`, verified at the unary completed-message receipt boundary and at
+SSE `message_start` **before any content block can create Tool evidence**.
+OpenAI `responseBody` carries `object`, verified as `response` at the
+single shared unary/SSE final decode boundary. Invalid/missing authority
+returns a nonretryable Provider/protocol error and **no** local ToolCall,
+ProviderReplay, SSE terminal success, synthetic billable completion or
+Agent Tool side effect. A malformed outer resource is not proof of a
+settled assistant response, even if it contains an ID and apparent Usage.
+
+All offline HTTP fixture envelopes across the Provider tests were updated
+to actual provider wire shapes (the prior simplified mock objects omitted
+mandatory fields); no runtime compatibility adapter, mode branch, schema
+migration, Store/Kernel/Agent change, retry change or Host-owned route was
+added. Positive ordinary text, genuine assistant Tool, safety refusal,
+stateless reasoning replay, incomplete response and required-Tool rejection
+paths remain covered.
+
+**Permanent RED → GREEN evidence:**
+
+- Provider unary/SSE negative matrices reject all invalid owner values;
+  valid `message/assistant` and `object=response` controls still authorize
+  their legitimate local Tools.
+- Public Agent durable Run regressions reject forged owner envelopes with
+  zero Tool effects, zero completed second ModelInvocation/Usage receipts
+  and no persisted or emitted ProviderReplay, while the genuine optional
+  first response is consumed normally.
+- The old-Head source mapped through isolated Go test overlays turned the
+  exact new tests RED again, including the public Agent handler effects
+  `effects=1`; corrected source passed the complete Provider Race and
+  targeted owner/Agent Race checks in ten consecutive runs.
+
+This local repair evidence does not approve the new PR Head. Full release
+and PostgreSQL/Redis integration gates, GitHub CI, a fresh independent
+immutable-Head merge admission review and beta.24 publication remain
+separate explicit stages.
+
+**Final local gates after this ownership hard cut:**
+
+- **PASS, exit 0:** full `make check` after correcting all affected
+  offline Provider and task-agent baseline fixture envelopes; includes Go
+  unit/Race/vet/Lint, TypeScript lint/typecheck/**46 tests**/build,
+  benchmark/evaluation smoke, OTel/A2A and beta.24 clean-consumer local
+  cohort. The first pass exposed only outdated ownerless task-agent mock
+  responses; the real production validation remained strict, and the
+  corrected test fixtures passed on the second complete run.
+- **PASS, exit 0:** `node scripts/run-integration.mjs` against isolated real
+  PostgreSQL/Redis, with cross-connection cancellation, recovery and
+  continuation; all test Docker resources were removed.
+- **PASS:** full Provider Race, focused Provider owner and public Agent
+  side-effect regressions under Race `-count=10`, isolated original-Head
+  production-source mutation RED, gofmt and diff checks.
+- Two preexisting untracked OpenAI probe scripts remain unchanged and are
+  explicitly excluded from every commit. No live OpenAI/Anthropic/gateway
+  credentials or published beta.24 tag were used.
+
+Fresh GitHub-required CI on the **new** PR Head and independent merge-admission
+review remain separate gates; this repair does not authorize merge or release.

@@ -75,8 +75,16 @@ non-overlapping content indices and an explicit final stop reason, and
 rejects conflicting stop reasons or decreasing cumulative output Usage.
 Multiple consistent cumulative `message_delta` events remain supported.
 Invalid event order must never mint a local Tool intent, completion receipt
-or successful terminal event. No retry/status/SQL schema,
-Host route or compatibility bridge is added.
+or successful terminal event. A subsequent **outer response authority** P1
+hard cut now requires OpenAI `object="response"` and Anthropic
+`type="message", role="assistant"` on completed unary/SSE replies,
+with Anthropic SSE identity proven at `message_start`. Previously, a
+non-assistant Anthropic envelope or non-Responses OpenAI resource carrying
+otherwise valid Tool output could authorize executable local Tool calls.
+Omitted, null, malformed or foreign owner fields now fail closed with no
+Tool, replay or completed billing receipt. The old ownerless fixture shape
+was updated to the real provider protocol; no compatibility bridge remains.
+No retry/status/SQL schema, Host route or compatibility bridge is added.
 
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,

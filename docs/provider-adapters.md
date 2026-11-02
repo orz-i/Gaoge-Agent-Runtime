@@ -91,6 +91,17 @@ multi-provider router.
   Provider tool names map back to Gaoge Tool Keys.
 - Synchronous `Generate` and SSE `GenerateStream`. A streaming terminal
   response is required; partial SSE delivery is **not** success.
+- The provider's **outer response owner is mandatory**, independently of
+  content and Tool IDs. OpenAI Responses accepts only `object="response"`
+  for unary responses and completed SSE envelopes. Anthropic Messages
+  requires both `type="message"` and `role="assistant"`, on unary replies
+  and the initial `message_start` envelope. Missing, null, nonstring or
+  foreign owner fields fail closed before authorizing ToolCalls, replay,
+  terminal SSE success or any completed-response usage receipt. A gateway
+  cannot promote a response-shaped object from a different API or a
+  non-assistant Message into local Tool execution authority. Previous
+  simplified test fixtures lacking these mandatory wire fields were corrected
+  rather than accommodated with a compatibility fallback.
 - `model.Request.RequireToolCall` is a **verified terminal contract** for
   local functions: both adapters send the provider's mandatory Tool choice,
   then independently require at least one decoded `ToolCall` before returning

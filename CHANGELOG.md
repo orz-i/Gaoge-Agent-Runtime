@@ -56,7 +56,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   sequential Tool blocks finish before message deltas, block indices must
   be explicit, final stop reason must be observed, and cumulative output
   token counts cannot regress. Malformed late Tool frames never dispatch
-  local Tool handlers; valid multiple final deltas still work.
+  local Tool handlers; valid multiple final deltas still work. A further
+  independently reproduced P1 binds Anthropic unary/SSE messages to
+  `type="message", role="assistant"` and OpenAI Responses unary/SSE to
+  `object="response"` before any Tool, replay or terminal receipt can be
+  trusted. Unknown or missing outer ownership now fails closed, with
+  cross-provider Agent side-effect tests and no ownerless wire fallback.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 
