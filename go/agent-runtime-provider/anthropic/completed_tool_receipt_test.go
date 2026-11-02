@@ -22,6 +22,9 @@ func TestCompletedMalformedToolRetainsAnthropicUsageReceipt(t *testing.T) {
 	}{
 		{name: "missing_tool_id", toolName: "lookup", knownUsage: true},
 		{name: "unknown_tool_name", toolID: "call-1", toolName: "foreign", knownUsage: true},
+		{name: "whitespace_only_tool_id", toolID: " ", toolName: "lookup", knownUsage: true},
+		{name: "padded_tool_id", toolID: " call-padded ", toolName: "lookup", knownUsage: true},
+		{name: "nonbreaking_space_tool_id", toolID: "\u00a0", toolName: "lookup", knownUsage: true},
 		{name: "missing_tool_id_unknown_usage", toolName: "lookup"},
 		{name: "unknown_tool_name_unknown_usage", toolID: "call-1", toolName: "foreign"},
 	} {

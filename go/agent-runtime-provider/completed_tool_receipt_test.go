@@ -26,6 +26,26 @@ func TestCompletedMalformedToolStillConsumesPaidAgentInvocation(t *testing.T) {
 	}})
 }
 
+// Whitespace-only or padded physical Call IDs are not stable Tool identities.
+// Agent would normalize or replace them; a Provider must instead account the
+// physical paid response and reject the entire unauthorized Tool execution.
+func TestCompletedOpenAIPhysicalToolCallIDCannotBeNormalizedIntoExecution(t *testing.T) {
+	for _, tc := range []struct{ name, callID string }{
+		{name: "space_only", callID: " "},
+		{name: "tab_only", callID: "\t"},
+		{name: "leading_space", callID: " local-call"},
+		{name: "trailing_space", callID: "local-call "},
+		{name: "nonbreaking_space", callID: "\u00a0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertCompletedRejectedToolReceipt(t, []any{map[string]any{
+				"type": "function_call", "status": "completed", "call_id": tc.callID,
+				"name": "lookup", "arguments": "{}",
+			}})
+		})
+	}
+}
+
 // A completed mandatory-Tool response with no physical Tool still has paid
 // final Usage, even when its text cannot be projected into a local Message.
 // Rejected but otherwise valid text must not leak into the durable receipt.

@@ -26,6 +26,7 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 		invalidFirst  bool
 		richCitations bool
 		toolFreeBlock string
+		toolID        string
 	}{
 		{name: "invalid_thinking_then_tool", invalidFirst: true},
 		{name: "tool_then_invalid_thinking"},
@@ -33,6 +34,8 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 		{name: "tool_then_rich_citations", richCitations: true},
 		{name: "required_tool_unsupported_text_only", toolFreeBlock: `{"type":"text","text":"cited","citations":[{"type":"char_location","cited_text":"source"}]}`},
 		{name: "required_tool_valid_text_only", toolFreeBlock: `{"type":"text","text":"unauthorized final"}`},
+		{name: "whitespace_only_physical_tool_id", toolID: " "},
+		{name: "padded_physical_tool_id", toolID: " toolu-1 "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls, effects atomic.Int32
@@ -68,21 +71,34 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 					send("content_block_stop", `{"type":"content_block_stop","index":0}`)
 					send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`)
 				} else {
-					tool := `{"type":"tool_use","id":"toolu-1","name":"lookup","input":{}}`
-					invalid := `{"type":"thinking","thinking":"opaque","signature":""}`
-					if tc.richCitations {
-						invalid = `{"type":"text","text":"unrepresentable","citations":[{"type":"char_location","cited_text":"source"}]}`
+					toolID := tc.toolID
+					if toolID == "" {
+						toolID = "toolu-1"
 					}
-					if tc.invalidFirst {
-						tool, invalid = invalid, tool
+					tool := fmt.Sprintf(`{"type":"tool_use","id":%q,"name":"lookup","input":{}}`, toolID)
+					if tc.toolID != "" {
+						// This is a well-formed, single-tool response except for
+						// its physical ID: no invalid sibling may hide the bug.
+						send("content_block_start", fmt.Sprintf(
+							`{"type":"content_block_start","index":0,"content_block":%s}`, tool))
+						send("content_block_stop", `{"type":"content_block_stop","index":0}`)
+						send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}`)
+					} else {
+						invalid := `{"type":"thinking","thinking":"opaque","signature":""}`
+						if tc.richCitations {
+							invalid = `{"type":"text","text":"unrepresentable","citations":[{"type":"char_location","cited_text":"source"}]}`
+						}
+						if tc.invalidFirst {
+							tool, invalid = invalid, tool
+						}
+						send("content_block_start", fmt.Sprintf(
+							`{"type":"content_block_start","index":0,"content_block":%s}`, tool))
+						send("content_block_stop", `{"type":"content_block_stop","index":0}`)
+						send("content_block_start", fmt.Sprintf(
+							`{"type":"content_block_start","index":1,"content_block":%s}`, invalid))
+						send("content_block_stop", `{"type":"content_block_stop","index":1}`)
+						send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}`)
 					}
-					send("content_block_start", fmt.Sprintf(
-						`{"type":"content_block_start","index":0,"content_block":%s}`, tool))
-					send("content_block_stop", `{"type":"content_block_stop","index":0}`)
-					send("content_block_start", fmt.Sprintf(
-						`{"type":"content_block_start","index":1,"content_block":%s}`, invalid))
-					send("content_block_stop", `{"type":"content_block_stop","index":1}`)
-					send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}`)
 				}
 				send("message_stop", `{"type":"message_stop"}`)
 			}))

@@ -495,7 +495,11 @@ func verifyCompletedFunctionCallItems(result model.Response, output []json.RawMe
 				return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
 			}
 		}
-		if item.CallID == "" || item.Name == "" || names[item.Name] == "" || !json.Valid([]byte(item.Arguments)) {
+		// Agent trims Call IDs and generates a replacement when trimming
+		// produces an empty string. That normalization must never turn an
+		// unverified physical provider ID into an executable local Tool.
+		if item.CallID == "" || strings.TrimSpace(item.CallID) != item.CallID ||
+			item.Name == "" || names[item.Name] == "" || !json.Valid([]byte(item.Arguments)) {
 			return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
 		}
 	}

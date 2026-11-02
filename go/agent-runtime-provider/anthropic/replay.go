@@ -185,6 +185,12 @@ func parseContentBlock(raw json.RawMessage) (contentBlock, error) {
 		}
 	case "tool_use":
 		allowed["id"], allowed["name"], allowed["input"] = true, true, true
+		// Tool IDs are physical Provider authority, not user-facing text.
+		// Reject IDs that Agent would trim or replace before dispatch,
+		// including whitespace-only identifiers. This also fences replay.
+		if block.ID == "" || strings.TrimSpace(block.ID) != block.ID {
+			return contentBlock{}, ErrUnsupported
+		}
 		allowed["caller"], allowed["toolset_name"] = true, true
 		// Modern Claude responses may include caller:null or a direct
 		// caller. Server-delegated callers must not be executed as local Tools.

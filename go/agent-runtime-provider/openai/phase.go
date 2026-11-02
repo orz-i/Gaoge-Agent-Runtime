@@ -87,7 +87,10 @@ func projectOutput(outputs []json.RawMessage) (outputProjection, error) {
 				return outputProjection{}, ErrUnsupported
 			}
 		case "function_call":
-			if item.CallID == "" || item.Name == "" || !json.Valid([]byte(item.Arguments)) {
+			// Preserve exact physical Call ID identity even when projecting
+			// replay evidence without the earlier response-item fence.
+			if item.CallID == "" || strings.TrimSpace(item.CallID) != item.CallID ||
+				item.Name == "" || !json.Valid([]byte(item.Arguments)) {
 				return outputProjection{}, ErrUnsupported
 			}
 			result.calls = append(result.calls, item)
