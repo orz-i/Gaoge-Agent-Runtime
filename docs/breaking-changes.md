@@ -2,6 +2,98 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-01 — Root Turn output provenance and physical-owner P1 hard cut (beta.24 candidate)
+
+`Harness.Snapshot.Output` must represent the physical result of the
+**top-level Kernel-backed Invocation**, never an arbitrary child result.
+Previously, an unresolved Host Interaction could make child
+`RefreshInvocation` / `ResumeInvocation` return the child's completed
+Result in the parent Turn output while ordinary `Load` returned no output.
+The shared assembler now ignores child snapshots and reloads the real root.
+
+**Root physical owner authority:** A coincident Run ID is insufficient.
+Any real physical root Run used by `Refresh`, `ResumeTurn`, native root
+synchronization or terminal `FinalizeHostOutput` must match the frozen
+Invocation's Run ID, Kind, Actor, Kernel Thread **and Goal**, even if its
+`Result` is nil. Conflicts return `ErrConflict` **before** changing the
+root Turn/Invocation status, writing runtime/terminal Items or resuming
+Agent effects. Physical `Result` returned by read-only `Load` must pass
+the same ownership proof. Pre-hard-cut roots with no verifiable frozen
+Actor/Thread/Goal may be inspected read-only when no physical Result
+exists; they cannot authorize status changes, output or Host ACK by
+inferring identity from Session/HostThread. A truly missing Kernel Run with
+documented rejected admission/no-effect still follows the original
+synthetic terminal-read/Host-ACK recovery contract. Current verified
+retry Attempts retain the same frozen Goal and owner but receive a new
+Run ID and RequestID. For Attempt 1, the physical RequestID must reproduce
+the original immutable Invocation ID via `InvocationID(TurnID, "",
+CapabilityKey, physicalRequestID)`. For Attempt 2+, its physical
+RequestID must equal `stableID("hretry", InvocationID, Attempt)`, as already
+used by the first-party retry executor. This verifies the original request
+without inventing an unpersisted ID or changing the wire schema. Root Cancel
+rechecks this identity **before physical Kernel/Host Cancel**, and replayed
+top-level Feature Start checks it before physical Resume. The original
+Host cancellation intent and no-effect recovery sequencing remains intact.
+Tests representing truly admitted roots now use canonical Invocation IDs,
+frozen Inputs and original physical RequestIDs rather than arbitrary fake
+identities. Missing original proof fails closed on effectful paths.
+
+**Native child physical-owner correction:** A child Invocation's original
+`Input` already freezes the root and intermediate parent Attempts. When a
+Team, GroupChat, Workflow or Agent child observes a physical Kernel Run,
+its Run ID, Kind, Actor, Thread, Goal and Attempt-bound RequestID must match
+that frozen child/root authority before status projection, Artifact output
+or native Resume. Admission and final pre-dispatch checks now validate the
+real root Run rather than deriving an authoritative child Actor/Thread from
+an unverified physical root. Real intermediate native parent Runs are also
+checked before granting nested execution. Existing remote Handoff children
+continue through their fixed ChildRunner/receipt protocol, not a generic
+local Run heuristic. Only a **verified cancellation** of a never-created
+child Run may project a synthetic Cancelled receipt; ordinary Refresh/Resume
+cannot use it. Some earlier test fixtures with manually fabricated child
+Goals, root Invocation IDs or retry RequestIDs were corrected to match
+real admission, without adding a production legacy bridge or migration.
+
+**Local RunRelation / Subtask reader hard cut:** A persisted local native
+Invocation matching a Kernel Run ID is no longer sufficient physical
+execution-owner proof. The existing local owner verifier now applies the
+same frozen root/child ID, Kind, Actor, Thread, Goal, RequestID and Attempt
+validation before native `CancelInvocation`/`CancelSubtask` callbacks,
+physical approval or Run-backed Subtask projection. Unverified physical
+results are not surfaced as Subtask Goal/status/Result; the existing
+persisted relation/delegation facts remain readable. No alternate Handoff
+route is inferred: fixed ChildRunner and independently verified raw Feature
+relations keep precedence. Read-only Subtask lookup checks the frozen root,
+so cancellation read-fault tests target their original **post-intent**
+pre-Store boundary after that extra provenance read. The original
+bounded cancellation no-effect recovery contract is unchanged; no DB
+schema, public wire shape or backwards-compatibility bridge is added.
+
+**Cross-Turn KindCapability relation owner fence:** The physical Run may
+be valid for some other Invocation and still be forbidden as a Subtask of
+the requesting Turn. `KindCapability` edges must now match the exact
+original native child `ExecutionRefID`, frozen root `ParentRunID` and
+`invocationRelationOwnerID` (including Retry Attempt), with root and child
+bound to the same Turn. Misbound relations do not confer physical Subtask
+Goal/status/Result read authority, even if the other tenant's Run passes
+its own frozen identity check. `CancelSubtask` rejects the target against
+the requested Turn **before** recording a cancellation intent or touching
+the physical Canceller. It still preserves persisted relation metadata
+without substituting a foreign Kernel result. Legitimate native child
+relations continue working, and raw Feature/Handoff routes retain their
+original separate proofs. No schema migration, new Store method, synthetic
+compatibility branch or runtime authority was added.
+
+**Application ownership:** `ExecutionApplication` has no Kernel Run. It
+must not query the Kernel for a result, even when another tenant's Run
+occupies its deterministic execution reference. Application outputs remain
+Host-owned `Invocation.OutputRefs`, with existing Host ACK/Item semantics.
+No new `Snapshot`, Output, Run, Store schema, DDL, status, compatibility
+shim or automatic physical retry is introduced. The behavior is a beta
+contract correction: Hosts that treated a child/foreign Result as root
+output must read its original owned Item/Artifact instead. See
+[round 3 audit](audits/2026-11-01-root-output-provenance-governance.md).
+
 ## 2026-11-01 — Invocation terminal projection CAS hard cut (beta.24 candidate)
 
 **Store contract correction:** `harness.Store.UpdateInvocation` must reject

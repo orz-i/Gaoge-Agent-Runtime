@@ -5,6 +5,31 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Round 3 Harness output provenance hard cut: child Invocation results
+  cannot appear as top-level Turn `Snapshot.Output` during unresolved Host
+  callbacks. Every physical root status/Item projection (including failed or
+  cancelled Runs without Result), Host-message ACK, and Agent Resume requires
+  the original frozen Run ID, Kind, Actor, Thread, Goal and Attempt-bound
+  RequestID, not just matching IDs. Root Cancel proves ownership before
+  physical control; top-level Feature Start replay proves it before Resume.
+  Native child Agent/Team/Workflow/GroupChat Invocations now prove their
+  immutable root and ancestor Attempts and original Kind/Actor/Thread/Goal/
+  RequestID before physical dispatch, Resume, status CAS or result Artifact.
+  Local native RunRelation/Invocation ownership checks now require the
+  same frozen root/child proof before any Kernel Cancel or Subtask result
+  read, preventing same-ID foreign cancellation and cross-tenant disclosure.
+  KindCapability RunRelation now additionally binds ParentRunID, ChildRunID
+  and OwnerNodeID to the original frozen child/root Attempt. Cross-Turn
+  edges cannot lend read or physical-cancel authority; CancelSubtask proves
+  that owner before persisting a cancellation intent. Remote Handoff keeps
+  separate ChildRunner/receipt ownership; verified
+  no-Run cancellation keeps its existing no-effect projection. Application
+  roots never read Kernel Results; their output remains
+  Host-owned OutputRefs. Preserve result-free legacy *read-only* inspection,
+  explicitly fail closed on unverified mutation, and keep original no-Run
+  admission failure recovery. No new output Store, status, automatic retry,
+  SQL migration or compatibility shim.
+
 - Round 2 Harness lifecycle authority hard cut: root and child Invocation
   projections cannot rewrite a terminal status within the same Attempt.
   Memory and SQL Store `UpdateInvocation` now atomically reject completed,
