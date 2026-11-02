@@ -686,3 +686,76 @@ immutable-Head review and GitHub-required checks remain separate merge gates.
   preexisting untracked OpenAI probe scripts remain hash-identical and are
   excluded from commits. Required GitHub CI and a new independent Head
   merge-admission review remain separate gates.
+
+## PR #87 independent follow-up P1 — Anthropic SSE terminal-phase Tool injection
+
+**Reviewed immutable PR Head:** `363797338e28ea0e5f4bf7d35e4cb66ad15b226f`
+(after the prior Tool-free billing and sanitization repair). The full GitHub
+check set, including CI/CodeQL, was green. This follow-up review independently
+identified a **new P1** in Anthropic `GenerateStream` event ordering.
+
+**RED before correction:** The adapter accepted `content_block_start` and
+`content_block_stop` even after a final `message_delta` with
+`stop_reason=tool_use` and cumulative Usage. A syntactically complete
+`message_stop` therefore authorized a physically *late* local ToolCall,
+ProviderReplay and successful SSE terminal event. It also accepted
+interleaved/out-of-order blocks, missing block index (defaulting to index 0),
+no actual `message_delta` when an initial envelope claimed a stop reason,
+contradictory final stop reasons and decreasing cumulative `output_tokens`.
+The last case could undercount a completed provider response. This violated
+the official [Anthropic streaming event order](https://platform.claude.com/docs/en/build-with-claude/streaming):
+content blocks precede one or more top-level `message_delta` events, then
+`message_stop`; final token observations are cumulative.
+
+Read-only `/tmp` Go test overlays initially reproduced the late Tool start,
+late Tool stop and duplicate terminal state acceptance under Race, without
+modifying the immutable review Head. Permanent
+`anthropic/sse_terminal_phase_test.go` added a wider 17-case unary-independent
+SSE matrix that **failed before** the Provider edit: actual executable
+ToolCalls, ProviderReplay and a terminal success event were observed for
+late Tool events, while a missing `message_delta` or missing index was still
+accepted. A second public Agent → Anthropic SSE → Kernel Store test reproduced
+this under an independent `go test -overlay -race` mutation restoring the
+original Provider file: with either late Tool order, the registered local
+Tool Handler **actually executed once** (`effects=1`) despite malformed SSE.
+No external Provider credentials or real business Tools were used.
+
+**Minimal correction:** The Anthropic adapter now tracks the one active
+content block and whether the final `message_delta` phase began. Content
+blocks must have an explicit index, be contiguous in start order and close
+without overlap *before* the first final message delta. No later content
+start/stop/delta may be reconstructed into an executable Tool. At least one
+`message_delta` must explicitly provide the final stop reason, and all
+observed final stop reasons must agree. Multiple final deltas remain valid
+per the upstream protocol; cumulative output Usage can only stay equal or
+increase. `message_stop` must follow that verified phase. Malformed streams
+fail the existing Provider protocol boundary with no ToolCalls, replay,
+trusted completed Usage receipt, or successful terminal SSE event. Already
+supported valid Tool calls, bounded post-completion semantic rejection and
+normal cumulative Usage remain unchanged. This adds no Agent/Kernel code,
+retry behavior, persistence schema, host router or compatibility shim.
+
+**Verification before delivery:** The direct 17-case terminal-phase suite,
+public Agent side-effect test and the existing Anthropic/OpenAI/Provider
+regressions passed `go test -race`; focused negative/positive and public
+Agent tests passed ten consecutive Race runs. A code-overlay mutation with
+the original Head reproduced RED again, including the real Agent Tool
+Handler execution; the corrected Provider passed GREEN. This is repair
+evidence, **not merge approval**. Merge requires checks on the new immutable
+Head and an independent merge-admission audit.
+
+**Final P1 source verification on the repaired branch:**
+
+- **PASS, exit 0:** full `make check`, including Go workspace unit/Race/
+  vet/Lint, TypeScript lint/typecheck/**46** tests/build, benchmark/evaluation
+  smoke, OTel/A2A and beta.24 clean-consumer local-cohort gate.
+- **PASS, exit 0:** real PostgreSQL/Redis Docker integration via
+  `node scripts/run-integration.mjs`, including cancellation, restart,
+  cross-connection recovery and continuation; temporary containers/network
+  removed after completion.
+- **PASS:** full Provider Race; direct terminal-phase and public Agent
+  side-effect regressions repeated **10** Race runs; independent old-Head
+  code-overlay mutation remains RED; gofmt and `git diff --check`.
+- Original two untracked OpenAI probe scripts excluded and SHA-256-identical.
+  Live Provider/gateway compatibility, GitHub required CI on the newly
+  pushed Head, merge approval and beta.24 publication remain unverified.

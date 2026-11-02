@@ -52,6 +52,11 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   only ResponseID/Usage (not text, refusal flags or replay) for all
   rejected required-Tool responses. Optional unsupported text, missing
   Usage, incomplete responses and broken SSE framing remain fail-closed.
+  A subsequent independent P1 closes Anthropic SSE phase confusion:
+  sequential Tool blocks finish before message deltas, block indices must
+  be explicit, final stop reason must be observed, and cumulative output
+  token counts cannot regress. Malformed late Tool frames never dispatch
+  local Tool handlers; valid multiple final deltas still work.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 

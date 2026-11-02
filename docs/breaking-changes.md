@@ -69,7 +69,13 @@ completion/Usage: its original ResponseID/Usage are consumed exactly once.
 No Tool-free text, refusal flag or phase replay is stored on a rejected
 mandatory-Tool completion, including otherwise-valid plain text. Missing
 final Usage, incomplete envelopes and malformed SSE framing still cannot
-mint a receipt. No retry/status/SQL schema,
+mint a receipt. A subsequent Anthropic SSE phase hard cut prevents Tool
+blocks from appearing after the first `message_delta`, enforces sequential
+non-overlapping content indices and an explicit final stop reason, and
+rejects conflicting stop reasons or decreasing cumulative output Usage.
+Multiple consistent cumulative `message_delta` events remain supported.
+Invalid event order must never mint a local Tool intent, completion receipt
+or successful terminal event. No retry/status/SQL schema,
 Host route or compatibility bridge is added.
 
 This deliberately drops the former permissive acceptance of gateway

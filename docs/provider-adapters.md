@@ -148,6 +148,13 @@ multi-provider router.
   contains a physical Tool **or** fails the mandatory Tool obligation after
   unsupported text-only output. Malformed framing (including gapped block
   indices), transport errors and incomplete/unknown-Usage streams cannot.
+  Anthropic SSE must receive sequential, non-overlapping, explicitly indexed
+  content blocks **before** `message_delta`. No Tool start/stop/delta may
+  follow that final message phase, even if `message_stop` eventually arrives.
+  At least one final `message_delta` must explicitly establish stop reason;
+  multiple deltas are supported, but conflicting stop reasons or decreasing
+  cumulative output Usage invalidate the stream. Otherwise the adapter may
+  authorize a local Tool from an out-of-phase event or undercount its tokens.
   Missing encrypted reasoning replay and unsupported **optional** Tool-free
   responses retain their existing Provider classifications. A mandatory
   Tool-free reply, even if otherwise valid plain text, persists only
