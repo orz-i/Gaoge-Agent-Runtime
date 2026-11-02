@@ -143,12 +143,15 @@ multi-provider router.
   `content_block_start` irreversibly rejects the content, but the adapter
   may continue consuming strictly bounded SSE framing to verify final
   `message_stop`, outer stop reason, identity and cumulative Usage.
-  All later content deltas are suppressed. Only a completed stream containing
-  a physical Tool may return minimal paid rejection evidence; malformed
-  framing (including gapped block indices), transport errors and
-  incomplete/unknown-Usage streams cannot.
-  Missing encrypted reasoning replay and unsupported responses without a
-  physical Tool retain their existing Provider classifications.
+  All later content deltas are suppressed. An independently completed stream
+  with verified final Usage may return minimal paid rejection evidence if it
+  contains a physical Tool **or** fails the mandatory Tool obligation after
+  unsupported text-only output. Malformed framing (including gapped block
+  indices), transport errors and incomplete/unknown-Usage streams cannot.
+  Missing encrypted reasoning replay and unsupported **optional** Tool-free
+  responses retain their existing Provider classifications. A mandatory
+  Tool-free reply, even if otherwise valid plain text, persists only
+  ResponseID/Usage on rejection: never text, refusal flags or phase replay.
   Partial/truncated/unknown-Usage responses still cannot invent a receipt;
   no invalid Tool, content or replay is authorized for execution.
   Normal text-only requests and valid Tool calls are unchanged. Interim

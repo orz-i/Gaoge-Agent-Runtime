@@ -610,3 +610,79 @@ were excluded and remained unchanged.
 Local passing tests are repair evidence only, **not independent merge
 approval**. After push, GitHub CI and a separate immutable-Head
 merge-admission review must be completed before merge or beta.24 release.
+
+## PR #87 subsequent independent immutable-Head P1/P2 — mandatory Tool-free receipts
+
+The [independent BLOCK audit of `c9fe284`](https://github.com/orz-i/Gaoge-Agent-Runtime/pull/87#issuecomment-6573721016)
+confirmed two additional gaps across OpenAI Responses and Anthropic Messages.
+Both were reproduced without editing the reviewed Head, using isolated
+`go test -overlay -race` public Agent → mock HTTP/SSE Provider → Kernel Store
+fixtures. The code change below remains on the existing PR branch and is
+not a separate merge approval.
+
+**P1 — completed mandatory Tool-free unsupported output loses billed Usage.**
+A provider can ignore `tool_choice` and return a completed response with
+verified cumulative Usage but only unsupported text/content. OpenAI
+`projectOutput` failed before mandatory Tool verification; Anthropic
+`parseContentBlock`, preterminal semantic SSE rejection and final stream
+reconstruction likewise required a physical Tool before recording a paid
+rejection. Two real physical requests (17 input + 5 output each) became only
+one `consumed` ModelInvocation and **22 instead of 44** stored tokens, with
+the second already-paid request left `pending` and the Run classified
+`agent.model_failed`. No Tool handler executed.
+
+**P2 — rejected mandatory Tool-free *valid text* survived in durable state.**
+The final forced-Tool verifier returned the original decoded Response with
+`ResponseRejectedError`. Agent correctly consumed the charged completion
+but persisted its rejected `Response.Content` (and potentially phase replay)
+in `ModelInvocation.Response`. A rejected completion must contain only
+billing evidence, not unauthorized model text.
+
+**Bounded repair:** Both adapters now pass the frozen `RequireToolCall`
+obligation into their completed-response decode boundary. After valid outer
+completion, any semantic decode failure on a mandatory Tool request uses
+`providerhttp.RejectCompletedResponse` with only original ResponseID and
+validated cumulative Usage; this includes a Tool-free unsupported message.
+The Anthropic bounded, well-framed post-`message_stop` SSE semantic rejection
+path makes the same distinction. Fully decoded responses with no required
+Tool likewise use that sanitizer rather than returning their text/refusal/
+replay. The genuine selected terminal safety-refusal exception and executable
+valid local Tools retain their prior behavior. Missing/invalid final Usage,
+truncated responses, malformed SSE framing, unavailable encrypted reasoning
+replay and optional Tool-free unsupported output remain fail-closed under
+their existing classifications. No Agent/Kernel/Host changes, persistence
+schema, retry policy or compatibility path were added.
+
+**Permanent regression evidence:** `openai/required_tool_semantic_receipt_test.go`
+and `anthropic/required_tool_semantic_receipt_test.go` test unary/SSE
+completed unsupported text, plain text, omitted/negative Usage, incomplete
+outer responses, optional Tool-free errors and legitimate terminal refusals.
+`completed_tool_receipt_test.go` and
+`completed_anthropic_mixed_tool_receipt_test.go` assert the public Agent
+reloads exactly **two consumed ModelInvocations**, **34 input + 10 output =
+44** tokens and **zero Tool effects**, with rejected `Response.Content`,
+ToolCalls and ProviderReplay all empty. Prior phase-refusal and Anthropic
+rich-text regressions were updated to require sanitized paid rejection
+receipts, rather than persisting rejected content or silently dropping
+verified completed Tool-free Usage. The new public Agent cases were **RED
+before the production repair** and **GREEN after** under Go Race. The
+Provider direct tests and full Provider/Agent Race suites passed; focused
+regressions passed ten consecutive Race executions. A fresh independent
+immutable-Head review and GitHub-required checks remain separate merge gates.
+
+**Final local quality gates after the P1/P2 correction:**
+
+- **PASS, exit 0:** full repository `make check`, including Go
+  unit/Race/vet/Lint, TypeScript lint/typecheck/46 tests/build, benchmark,
+  OTel/A2A and beta.24 clean-consumer local-cohort release gates.
+- **PASS, exit 0:** `node scripts/run-integration.mjs` with isolated real
+  Docker PostgreSQL/Redis, covering cross-connection cancellation,
+  continuation, budgeting and restart/recovery. Test containers and network
+  were removed.
+- **PASS:** full Provider Race, focused Provider/Agent Race repetitions (10),
+  Agent Race, `gofmt` and `git diff --check`.
+- **Exclusions:** no real external OpenAI/Anthropic/gateway credentials,
+  hosted production deployment, PR merge or beta.24 publication. Both
+  preexisting untracked OpenAI probe scripts remain hash-identical and are
+  excluded from commits. Required GitHub CI and a new independent Head
+  merge-admission review remain separate gates.

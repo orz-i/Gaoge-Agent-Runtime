@@ -47,7 +47,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   stream can still supply `message_stop` and final cumulative Usage for a
   Tool-bearing paid rejection. Incomplete, malformed (including
   noncontiguous block indices) or unknown-Usage streams remain
-  unreceipted. No new ModelInvocation state, API shape, adapter fallback,
+  unreceipted. A further P1/P2 repair consumes valid-Usage completed
+  **Tool-free unsupported** replies under `RequireToolCall`, and persists
+  only ResponseID/Usage (not text, refusal flags or replay) for all
+  rejected required-Tool responses. Optional unsupported text, missing
+  Usage, incomplete responses and broken SSE framing remain fail-closed.
+  No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 
 - Round 3 Harness output provenance hard cut: child Invocation results

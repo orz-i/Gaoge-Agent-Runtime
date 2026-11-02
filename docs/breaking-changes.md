@@ -62,8 +62,14 @@ valid physical Tool item plus contradictory final/refusal message, unsupported
 sibling item or unencodable replay as a rejected paid completion. No partial
 Tool batch, content, replay or SSE terminal success can escape; a verified
 ResponseID/Usage is consumed once. Missing encrypted reasoning replay and
-unsupported output without a physical Tool retain their original Provider
-failure classifications. No retry/status/SQL schema,
+**optional** unsupported output without a physical Tool retain their original
+Provider failure classifications. For a **mandatory** Tool request, even
+unsupported text-only output is a known paid rejection after verified outer
+completion/Usage: its original ResponseID/Usage are consumed exactly once.
+No Tool-free text, refusal flag or phase replay is stored on a rejected
+mandatory-Tool completion, including otherwise-valid plain text. Missing
+final Usage, incomplete envelopes and malformed SSE framing still cannot
+mint a receipt. No retry/status/SQL schema,
 Host route or compatibility bridge is added.
 
 This deliberately drops the former permissive acceptance of gateway
