@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	provider "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider"
@@ -146,6 +147,211 @@ func TestStructuredOutputProviderToolLoopEndToEnd(t *testing.T) {
 			view, err := agent.ViewState(completed)
 			if err != nil || len(view.ModelInvocations) != 2 || view.Budget.Usage.LLMCalls != 2 || view.Budget.Usage.ToolCalls != 1 {
 				t.Fatalf("durable usage/receipt wrong: view=%+v err=%v", view, err)
+			}
+		})
+	}
+}
+
+// Independent public Agent+real-adapter regression using offline mock HTTP.
+// A completed but invalid Tool-required Provider response is billable and
+// must have its ModelInvocation receipt persisted and consumed exactly once.
+func TestIndependentPaidRequiredToolResponseMustHaveDurableAgentReceipt(t *testing.T) {
+	for _, vendor := range []string{"openai", "anthropic"} {
+		t.Run(vendor, func(t *testing.T) {
+			calls := 0
+			endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				var req map[string]json.RawMessage
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("decode: %v", err)
+					return
+				}
+				if string(req["stream"]) != "true" {
+					t.Error("native Agent should use SSE")
+				}
+				if calls == 1 && len(req["tool_choice"]) != 0 {
+					t.Error("first answer is the ordinary optional Tool stage")
+				}
+				if calls >= 2 && len(req["tool_choice"]) == 0 {
+					t.Error("required Tool choice not dispatched after rejected completion")
+				}
+				w.Header().Set("Content-Type", "text/event-stream")
+				if vendor == "openai" {
+					_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"paid-openai\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer without required Tool\"}]}],\"usage\":{\"input_tokens\":17,\"output_tokens\":5}}}\n\n")
+				} else {
+					frames := [][2]string{
+						{"message_start", `{"type":"message_start","message":{"id":"paid-anthropic","usage":{"input_tokens":17,"output_tokens":0}}}`},
+						{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+						{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"answer without required Tool"}}`},
+						{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+						{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`},
+						{"message_stop", `{"type":"message_stop"}`},
+					}
+					for _, fr := range frames {
+						_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", fr[0], fr[1])
+					}
+				}
+			}))
+			defer endpoint.Close()
+			var client model.Client
+			var err error
+			modelName := "gpt-audit"
+			if vendor == "openai" {
+				client, err = openai.New(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
+			}
+			if vendor == "anthropic" {
+				modelName = "claude-test"
+				client, err = anthropic.New(anthropic.Config{APIKey: "test", Endpoint: endpoint.URL})
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			router, err := provider.NewRouter(vendor, provider.Binding{Name: vendor, Identity: "audit-binding", Client: client})
+			if err != nil {
+				t.Fatal(err)
+			}
+			registry, err := tools.NewRegistry([]tools.Registration{{
+				Definition: tools.Definition{Key: "lookup:v1", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)},
+				Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+					t.Fatal("foreign Tool dispatched")
+					return tools.ExecutionResult{}, nil
+				}),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: router, Catalog: registry, Executor: registry})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, callErr := runner.StartRun(t.Context(), agent.StartRequest{
+				ID:     "audit-paid-" + vendor,
+				Actor:  kernel.ActorRef{TenantID: "audit", ActorID: "operator"},
+				Thread: kernel.ThreadRef{Kind: "conversation", ID: "paid-tool-" + vendor},
+				Goal:   "must invoke lookup", Model: vendor + "/" + modelName,
+				ToolKeys: []string{"lookup:v1"}, RequiredToolKeys: []string{"lookup:v1"},
+				Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 2},
+			})
+			// Re-read the physical Kernel Store: the receipt must be durable,
+			// not merely returned in the caller's transient Run snapshot.
+			stored, loadErr := rt.Load(t.Context(), run.Run.ID)
+			if loadErr != nil || stored.Run.Revision != run.Run.Revision {
+				t.Fatalf("durable Run missing: err=%v stored=%+v returned=%+v", loadErr, stored.Run, run.Run)
+			}
+			view, viewErr := agent.ViewState(stored)
+			if viewErr != nil {
+				t.Fatalf("Agent State unreadable: run=%+v err=%v, modelErr=%v", stored.Run, viewErr, callErr)
+			}
+			if calls != 2 || run.Run.Status != kernel.RunStatusFailed || run.Run.ErrorCode != "model.post_generation_failed" ||
+				callErr == nil || view.Budget.Usage.LLMCalls != 2 || view.Budget.Usage.InputTokens != 34 ||
+				view.Budget.Usage.OutputTokens != 10 || view.Budget.Usage.TotalTokens != 44 ||
+				view.Budget.Usage.ToolCalls != 0 || len(view.ModelInvocations) != 2 {
+				t.Fatalf("PAID PROVIDER COMPLETION NOT ACCOUNTED ONCE: vendor=%s httpCalls=%d runStatus=%s err=%v budget=%+v invocations=%+v", vendor, calls, run.Run.Status, callErr, view.Budget.Usage, view.ModelInvocations)
+			}
+			for index, invocation := range view.ModelInvocations {
+				if invocation.Status != agent.ModelInvocationConsumed || invocation.ExecutionAttempt != 1 ||
+					invocation.Usage == nil || invocation.Usage.InputTokens != 17 || invocation.Usage.OutputTokens != 5 ||
+					invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.ProviderResponseID == "" ||
+					invocation.ExecutionLeaseUntil != nil ||
+					(index == 1 && invocation.ErrorCode != "model.post_generation_failed") {
+					t.Fatalf("physical attempt %d not durably consumed: %+v", index, invocation)
+				}
+			}
+		})
+	}
+}
+
+// Independent public Agent audit: a tool_call explicitly in_progress or
+// incomplete cannot be converted into a durable executable Tool intent.
+// A gateway may present a completed response envelope with an unfinished
+// per-item status; the physical local tool MUST NOT execute side effects.
+func TestIndependentUnfinishedOpenAIToolCallCannotExecuteThroughAgent(t *testing.T) {
+	for _, itemStatus := range []string{"in_progress", "incomplete"} {
+		t.Run(itemStatus, func(t *testing.T) {
+			var modelRequests atomic.Int32
+			var toolEffects atomic.Int32
+			endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := modelRequests.Add(1)
+				w.Header().Set("Content-Type", "text/event-stream")
+				var output any
+				if n == 2 {
+					output = []any{map[string]any{"type": "function_call", "status": itemStatus,
+						"call_id": "call-audit", "name": "lookup", "arguments": "{}"}}
+				} else {
+					output = []any{map[string]any{"type": "message", "content": []any{map[string]any{"type": "output_text", "text": "answer without verified call"}}}}
+				}
+				body, _ := json.Marshal(map[string]any{"type": "response.completed", "response": map[string]any{
+					"id": fmt.Sprintf("response-%d", n), "status": "completed", "output": output,
+					"usage": map[string]any{"input_tokens": 17, "output_tokens": 5},
+				}})
+				_, _ = fmt.Fprintf(w, "event: response.completed\ndata: %s\n\n", body)
+			}))
+			defer endpoint.Close()
+			client, err := openai.New(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			router, err := provider.NewRouter("openai", provider.Binding{Name: "openai", Identity: "audit-binding", Client: client})
+			if err != nil {
+				t.Fatal(err)
+			}
+			registry, err := tools.NewRegistry([]tools.Registration{{
+				Definition: tools.Definition{Key: "lookup:v1", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)},
+				Handler: tools.HandlerFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
+					toolEffects.Add(1)
+					return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`), Receipt: tools.Receipt{
+						ExecutionID: req.Call.ID, Disposition: "committed",
+					}}, nil
+				}),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: router, Catalog: registry, Executor: registry})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, callErr := runner.StartRun(t.Context(), agent.StartRequest{
+				ID: "audit-unfinished-tool-" + itemStatus, RequestID: "audit-unfinished-tool-" + itemStatus + "-req",
+				Actor:  kernel.ActorRef{TenantID: "audit", ActorID: "operator"},
+				Thread: kernel.ThreadRef{Kind: "conversation", ID: "audit-unfinished-tool-" + itemStatus},
+				Goal:   "must call lookup", Model: "openai/gpt-audit", ToolKeys: []string{"lookup:v1"}, RequiredToolKeys: []string{"lookup:v1"},
+				Limits: agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 2},
+			})
+			if toolEffects.Load() != 0 {
+				t.Fatalf("UNFINISHED TOOL CALL EXECUTED REAL LOCAL HANDLER: status=%q effects=%d requests=%d run=%s error=%v", itemStatus, toolEffects.Load(), modelRequests.Load(), run.Run.Status, callErr)
+			}
+			stored, loadErr := rt.Load(t.Context(), run.Run.ID)
+			if loadErr != nil || stored.Run.Revision != run.Run.Revision {
+				t.Fatalf("no durable final snapshot: stored=%+v returned=%+v err=%v", stored.Run, run.Run, loadErr)
+			}
+			view, viewErr := agent.ViewState(stored)
+			if viewErr != nil {
+				t.Fatalf("no durable Agent receipt: %v", viewErr)
+			}
+			if callErr == nil || run.Run.Status != kernel.RunStatusFailed ||
+				run.Run.ErrorCode != "model.post_generation_failed" || modelRequests.Load() != 2 ||
+				view.Budget.Usage.LLMCalls != 2 || view.Budget.Usage.ToolCalls != 0 ||
+				view.Budget.Usage.InputTokens != 34 || view.Budget.Usage.OutputTokens != 10 ||
+				view.Budget.Usage.TotalTokens != 44 || len(view.ModelInvocations) != 2 {
+				t.Fatalf("unfinished Tool response failed durable accounting: err=%v run=%s requests=%d budget=%+v invocations=%+v", callErr, run.Run.Status, modelRequests.Load(), view.Budget.Usage, view.ModelInvocations)
+			}
+			last := view.ModelInvocations[1]
+			if last.Status != agent.ModelInvocationConsumed || last.ExecutionAttempt != 1 ||
+				last.ProviderResponseID != "response-2" || last.ErrorCode != "model.post_generation_failed" ||
+				last.CompletedAt == nil || last.ConsumedAt == nil || last.ExecutionLeaseUntil != nil ||
+				last.Usage == nil || last.Usage.InputTokens != 17 || last.Usage.OutputTokens != 5 ||
+				last.Response.Content != "" || len(last.Response.ToolCalls) != 0 ||
+				last.Response.ProviderReplay != nil {
+				t.Fatalf("unsafe/non-durable rejected Tool receipt: %+v", last)
 			}
 		})
 	}
