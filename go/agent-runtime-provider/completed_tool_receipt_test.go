@@ -20,6 +20,39 @@ import (
 // A completed, billed response whose Tool arguments are malformed must be
 // durably consumed exactly once, without ever executing the local Tool.
 func TestCompletedMalformedToolStillConsumesPaidAgentInvocation(t *testing.T) {
+	assertCompletedRejectedToolReceipt(t, []any{map[string]any{
+		"type": "function_call", "status": "completed",
+		"call_id": "paid-but-malformed", "name": "lookup", "arguments": "{",
+	}})
+}
+
+// Mixed valid Tool and invalid output cannot execute a partial Tool batch, but
+// its completed physical Provider invocation must still be accounted once.
+func TestCompletedMixedOutputStillConsumesPaidAgentInvocation(t *testing.T) {
+	tool := map[string]any{"type": "function_call", "status": "completed",
+		"call_id": "paid-valid-tool", "name": "lookup", "arguments": "{}"}
+	refusal := map[string]any{"type": "message", "role": "assistant", "status": "completed",
+		"content": []any{map[string]any{"type": "refusal", "refusal": "Cannot comply."}}}
+	final := map[string]any{"type": "message", "phase": "final_answer", "role": "assistant", "status": "completed",
+		"content": []any{map[string]any{"type": "output_text", "text": "not a Tool response"}}}
+	for _, tc := range []struct {
+		name   string
+		output []any
+	}{
+		{"tool_then_refusal", []any{tool, refusal}},
+		{"refusal_then_tool", []any{refusal, tool}},
+		{"tool_then_final_answer", []any{tool, final}},
+		{"tool_then_unknown_item", []any{tool, map[string]any{"type": "unknown"}}},
+		{"invalid_type_then_tool", []any{map[string]any{"type": 123}, tool}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertCompletedRejectedToolReceipt(t, tc.output)
+		})
+	}
+}
+
+func assertCompletedRejectedToolReceipt(t *testing.T, rejectedOutput []any) {
+	t.Helper()
 	var requests, effects atomic.Int32
 	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n := requests.Add(1)
@@ -28,8 +61,7 @@ func TestCompletedMalformedToolStillConsumesPaidAgentInvocation(t *testing.T) {
 			"type": "output_text", "text": "ordinary answer",
 		}}}}
 		if n == 2 {
-			output = []any{map[string]any{"type": "function_call", "status": "completed",
-				"call_id": "paid-but-malformed", "name": "lookup", "arguments": "{"}}
+			output = rejectedOutput
 		}
 		frame, err := json.Marshal(map[string]any{"type": "response.completed", "response": map[string]any{
 			"id": fmt.Sprintf("paid-response-%d", n), "status": "completed",

@@ -264,23 +264,29 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 			CacheReadTokens: body.Usage.InputDetails.Cached, ReasoningTokens: body.Usage.OutputDetails.Reasoning,
 		}
 	}
+	// Keep the physical completion receipt separate from decoded content:
+	// any later rejection must not leak valid Tool output or discard paid Usage.
+	receipt := result
 	// A completed outer response can still contain an unfinished function
 	// item with partially formed arguments. Fence that item before decoding
 	// executable calls so known final Usage is not lost to an argument parse
 	// error and no incomplete Tool can enter an Agent dispatch intent.
 	result, err := verifyCompletedFunctionCallItems(result, body.Output, names)
 	if err != nil {
-		return result, err
+		if model.IsResponseRejectedError(err) {
+			return result, err
+		}
+		return rejectCompletedToolOutput(receipt, body.Output, err)
 	}
 	projection, err := projectOutput(body.Output)
 	if err != nil {
-		return model.Response{}, err
+		return rejectCompletedToolOutput(receipt, body.Output, err)
 	}
 	result.Content, result.Refused = projection.content, projection.refused
 	for _, item := range projection.calls {
 		key := names[item.Name]
 		if key == "" {
-			return model.Response{}, ErrUnsupported
+			return rejectCompletedToolOutput(receipt, body.Output, ErrUnsupported)
 		}
 		result.ToolCalls = append(result.ToolCalls, tools.Call{
 			ID: item.CallID, ToolKey: key, Name: item.Name, Arguments: json.RawMessage(item.Arguments),
@@ -295,7 +301,7 @@ func decodeResponse(body responseBody, names map[string]string) (model.Response,
 		}
 		replay, err := encodeReplay(outputs)
 		if err != nil {
-			return model.Response{}, err
+			return rejectCompletedToolOutput(receipt, body.Output, err)
 		}
 		result.ProviderReplay = replay
 	}
@@ -420,6 +426,26 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		}
 	}
 	return result, err
+}
+
+// rejectCompletedToolOutput handles post-completion semantic/encoding errors
+// involving a physical local Tool. The entire output remains unauthorized,
+// but a completed Provider response with verifiable Usage must be durably
+// consumed exactly once. Keep unrelated text-only errors and missing encrypted
+// reasoning evidence in their previous Provider failure class.
+func rejectCompletedToolOutput(receipt model.Response, output []json.RawMessage, cause error) (model.Response, error) {
+	if errors.Is(cause, ErrReplayUnavailable) {
+		return model.Response{}, cause
+	}
+	for _, raw := range output {
+		var item struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(raw, &item) == nil && item.Type == "function_call" {
+			return providerhttp.RejectCompletedResponse(receipt, cause)
+		}
+	}
+	return model.Response{}, cause
 }
 
 // verifyCompletedFunctionCallItems fences physical Tool execution even when
