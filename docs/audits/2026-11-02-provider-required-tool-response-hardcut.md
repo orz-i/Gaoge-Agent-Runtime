@@ -860,3 +860,64 @@ separate explicit stages.
 
 Fresh GitHub-required CI on the **new** PR Head and independent merge-admission
 review remain separate gates; this repair does not authorize merge or release.
+
+## PR #87 next independent P1 — unphased OpenAI message ownership and status
+
+**Immutable audited Head:** `83a00b88b9ab302db21bd3eab7666863ae91158f`.
+All applicable GitHub required checks were green. A fresh read-only audit
+found a separate local Tool authorization gap after the outer Responses
+`object=response` repair: `openai/projectOutput` checked an explicit foreign
+`message.role` only when `phase != nil`, and did not fence explicit
+`message.status` at all. A completed response with a fully valid physical
+`function_call` plus a sibling unphased `role=user/system/tool` message, or an
+assistant message with `status=in_progress/incomplete`, was treated as a
+successful executable Tool batch. The resulting final ResponseID/Usage and
+ToolCalls were accepted in both unary and SSE.
+
+**Independent RED:** an isolated `/tmp` Go `-overlay` on the unmodified Head
+added public Agent→HTTP/SSE→Kernel cases for the four primary scenarios.
+Each scenario triggered exactly one *real local Tool Handler execution*
+(`effects=1`) despite the invalid sibling, instead of settling a rejected
+paid completion. No external provider or business handler was involved.
+
+**Bounded repair:** `projectOutput` now validates physical `message` role and
+status with presence-sensitive `json.RawMessage` before processing the rest
+of the output. If present, `role` must equal `assistant` and `status` must
+equal `completed`, whether the message is phased/unphased, comes before/after
+a local Tool, or Tool choice was optional/mandatory. Explicit null, empty,
+foreign, unknown or nonstring values invalidate the entire response. Truly
+omitted legacy fields remain supported. An independently completed envelope
+with verified final Usage and any physical `function_call` returns only the
+existing sanitized `model.post_generation_failed` ID/Usage rejection: zero
+executable ToolCalls, text, phase replay or successful SSE terminal event.
+No second dispatch loop, retry, Host routing, Agent/Kernel, Store schema or
+compatibility bridge changed.
+
+**Permanent RED→GREEN tests:** `openai/message_item_authority_test.go` covers
+positive legacy/explicitly-completed assistant messages and negative role/
+status combinations for optional and forced Tool, unary and SSE, and both
+sibling orders. `completed_tool_receipt_test.go` adds public Agent → OpenAI
+SSE → Kernel Store cases proving two consumed ModelInvocations, correct
+34/10/44 cumulative tokens, zero Tool side effects and a minimal rejected
+response. Replacing only `openai/phase.go` with the original immutable-Head
+file via isolated `go test -overlay -race` turns these same tests RED,
+including `effects=1` in the public Agent Handler; the repaired source is
+GREEN. Focused and full Provider Race tests pass.
+
+Fresh GitHub CI on the newly pushed Head and an independent immutable-Head
+merge admission audit are still required. This repair is **not approval**
+to merge or publish beta.24.
+
+**Final local source gates for the OpenAI message-item P1 repair:**
+
+- **PASS, exit 0:** full repository `make check` on the repaired source
+  (Go unit/Race/vet/Lint, TypeScript lint/typecheck/46 tests/build,
+  benchmark/evaluation, OTel/A2A, beta.24 clean-consumer gate).
+- **PASS, exit 0:** `node scripts/run-integration.mjs` against isolated
+  real PostgreSQL/Redis with cancellation, cross-connection recovery and
+  continuation; test Docker resources were removed.
+- **PASS:** focused Provider/Agent Race `-count=10`, complete Provider Race,
+  mutation against the immutable original Head RED, gofmt and diff checks.
+- Two preexisting untracked OpenAI probe files were excluded and remain
+  hash-identical. No live third-party gateway/provider credentials were used.
+  New GitHub CI and independent immutable-Head merge gate remain required.

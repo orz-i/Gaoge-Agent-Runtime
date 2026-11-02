@@ -84,7 +84,15 @@ otherwise valid Tool output could authorize executable local Tool calls.
 Omitted, null, malformed or foreign owner fields now fail closed with no
 Tool, replay or completed billing receipt. The old ownerless fixture shape
 was updated to the real provider protocol; no compatibility bridge remains.
-No retry/status/SQL schema, Host route or compatibility bridge is added.
+**OpenAI output-message hard cut:** even with a valid `object=response` and a
+completed physical `function_call`, a sibling `message` (phased or unphased)
+whose explicit `role` is not `assistant`, or whose explicit `status` is not
+`completed`, now invalidates the whole Tool batch. Null, empty and malformed
+values also reject. Only genuinely omitted legacy fields remain supported.
+An independently completed response with verifiable Usage preserves only a
+sanitized ID/Usage rejected receipt; no Tool handler, text, replay or terminal
+SSE success can escape. No retry/status/SQL schema, Host route or compatibility
+bridge is added.
 
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,

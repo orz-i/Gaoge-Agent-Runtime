@@ -62,6 +62,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   `object="response"` before any Tool, replay or terminal receipt can be
   trusted. Unknown or missing outer ownership now fails closed, with
   cross-provider Agent side-effect tests and no ownerless wire fallback.
+  A further independent P1 closes the unphased OpenAI output-message gap:
+  an explicit foreign role or unfinished `message.status` now rejects the
+  entire completed output, including any otherwise-valid sibling Tool call.
+  Verified final ID/Usage remain as a sanitized rejected receipt; no local
+  Tool effects, replay or terminal SSE success are permitted. Truly omitted
+  legacy fields and valid completed assistant messages remain supported.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 

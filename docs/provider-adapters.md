@@ -127,8 +127,14 @@ multi-provider router.
   The final message must have role `assistant` and status `completed` when
   these optional fields are explicitly present. A foreign `user`/`system`/
   `tool` role, `in_progress`/`incomplete` status, or explicitly null/empty
-  role/status cannot grant the exception. Omitted legacy role/status fields
-  remain supported. **Every OpenAI function_call** (mandatory or optional)
+  role/status cannot grant the exception. **All** OpenAI physical `message`
+  output items (phased or unphased, with or without sibling Tool calls) must
+  also prove assistant ownership and completion whenever `role`/`status` is
+  present. A foreign, null, empty, unfinished or malformed message sibling
+  rejects the entire candidate *before* Tool authorization; verified final
+  ResponseID/Usage are settled as a sanitized `model.post_generation_failed`
+  rejection if a physical local Tool was present. Truly omitted legacy
+  role/status fields remain supported. **Every OpenAI function_call** (mandatory or optional)
   is separately gated on item-level completion before it becomes an
   executable Tool Call: `status=completed` or genuinely omitted legacy
   status is permitted; `in_progress`, `incomplete`, explicit null/empty
