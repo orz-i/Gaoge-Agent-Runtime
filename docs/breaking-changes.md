@@ -105,6 +105,20 @@ with independently verified final Usage retain only the original ID/Usage as
 a typed paid rejection; missing/invalid Usage remains unreceipted. No
 retry/status/SQL schema, Host route or compatibility bridge is added.
 
+**OpenAI SSE completed output-item consistency hard cut:** Previously,
+`response.output_item.done` for a local `function_call` or assistant `message`
+was ignored, allowing a gateway's subsequent `response.completed` to replace
+an incomplete Tool item, change its ID/name/arguments, move its index or
+reuse its position as a different output type while returning executable
+Tools and a successful SSE completion. Observed done items now reconcile
+against their final physical output entry, including any explicit completed
+status. Duplicates, missing/wrong indices, unknown item types and mismatches
+fail closed without a Tool, ProviderReplay, completed billing receipt or
+terminal SSE success. A final-only completed response and legitimately omitted
+`completed` item status on Tool/Message remain accepted. Existing Reasoning
+encrypted replay requirements remain unchanged. No retry, migration, Host
+router or compatibility shim is introduced.
+
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,
 provider fallback, silent request rewrite or legacy bridge is introduced.

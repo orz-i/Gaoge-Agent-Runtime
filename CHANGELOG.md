@@ -74,6 +74,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   padded IDs can no longer execute a local Tool or create synthetic Call IDs;
   verified completed Usage is settled as a minimal rejection receipt, with
   no ProviderReplay or terminal SSE success. No compatibility rewrite.
+  A further independently reproduced P1 protects OpenAI SSE `output_item.done`
+  authority: completed Tool and Message items now reconcile with the final
+  `response.completed` output before local Tool execution. Contradictory,
+  incomplete, missing-index or duplicated done evidence fails closed; no
+  Tool, replay or synthetic completed Usage receipt can be created. Existing
+  Reasoning continuation and final-only completion remain supported.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 

@@ -222,9 +222,20 @@ multi-provider router.
   completed `response.output_item.done` item if its index, ID and all
   other fields match `response.completed`, except that the terminal response
   may omit the done item's optional `status: "completed"`.
-  Partial `output_item.added` data is never authoritative. A mismatched item
-  beyond that narrow exception is a protocol
-  error. Missing encryption from both completed events fails explicitly as
+  The same reconciliation now covers every observed completed `message`
+  and `function_call` output item: their physical type, absolute index,
+  ID, status, Tool name/Call ID, arguments and other represented fields
+  must agree with the final response before local Tool authorization.
+  Optional `status: "completed"` may be omitted on either side for these
+  two types; explicit incomplete, in-progress, null, conflicting, duplicated,
+  wrong-index or unknown `output_item.done` events are protocol failures.
+  A final-only SSE completion remains supported when no done item was
+  observed. Partial `output_item.added` data is never authoritative.
+  Contradictory completion evidence is a **framing/protocol failure**, not
+  a trusted post-generation rejection: no ToolCall, replay, terminal SSE
+  success or fabricated billing receipt can escape. The existing, narrower
+  Reasoning status/encryption contract is unchanged. Missing encryption
+  from both completed events fails explicitly as
   `openai.ErrReplayUnavailable`, never by silently dropping reasoning
   or enabling server-side storage.
   Phased assistant messages also retain provider-opaque replay even without a

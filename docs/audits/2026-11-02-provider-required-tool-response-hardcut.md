@@ -1000,3 +1000,92 @@ an immutable new PR Head are still required before merge or beta.24 release.
   beta.24 publication, and the two pre-existing untracked OpenAI probe scripts
   (which remain SHA-256-identical). Required GitHub CI and an independent
   immutable-Head merge gate are separate from this local repair.
+
+## 2026-11-03 — PR #87 independent P1: OpenAI SSE done-item substitution
+
+**Reviewed immutable PR Head:** `94910b66540eb2fb5c9a8392cbebfd8919248641`.
+All applicable GitHub required CI/security checks were green on this Head.
+
+**Independently reproduced P1:** OpenAI `GenerateStream` originally treated
+`response.output_item.done` as trusted evidence **only** for reasoning
+items. It ignored the same terminal event for a physically generated
+`function_call` or assistant `message`, and later authorized whatever local
+Tool appeared in `response.completed`. A gateway could send a Tool done
+item with `status=incomplete` or `in_progress`, or a different Call ID,
+name, arguments, output index or item type, then replace it with an
+apparently completed valid Tool in the final response. The adapter returned
+`err=nil`, an executable local Tool and terminal SSE ID/Usage. A duplicated
+completed item was likewise ignored. A completed final envelope alone did
+not reconcile previously observed physical completion evidence.
+
+The [OpenAI Responses SSE event schema](https://developers.openai.com/api/reference/resources/responses/streaming-events)
+labels `response.output_item.done` as the event for an item marked done,
+with its absolute output index and physical item. Such a frame is not an
+ignorable progress hint when authorizing an external Tool effect.
+
+**READ-ONLY RED:** A temporary Go `-overlay` test against the unchanged
+review Head showed six contradictory Tool cases accepted, while matching
+done and final-only positive controls passed. Permanent test matrices then
+reproduced this across incomplete/in-progress/null statuses, differing
+physical Call IDs, Tool names/arguments/item IDs, wrong or omitted indices,
+duplicate done events, a message done substituted with a Tool, conflicting
+message role/status, and an unknown/null done item. On the original source
+these cases returned unauthorized successful ToolCall responses.
+
+The public Agent → actual mocked HTTP/SSE Provider → Kernel Memory Store
+regression was also tested by restoring only the original
+`openai/client.go` and `openai/stream_replay.go` into an isolated Go overlay.
+**Five** contradictory SSE scenarios each resulted in **one actual local
+Tool Handler execution** (`effects=1`, `requests=2`) instead of rejecting
+the untrusted completion, while the repaired implementation executed **zero**.
+The old source did this despite previously green CI. No external Provider
+credentials or real business Tools were involved.
+
+**Bounded hard-cut repair:** `completedReasoningItems` becomes
+`completedOutputItems`: the same bounded, absolute-indexed collector now
+also observes completed local `function_call` and `message` output items.
+Observed done items reconcile against the final response on type, exact
+identity, content/arguments, index and completion status before Tool
+execution or ProviderReplay authorization. Repeated, missing-index,
+unknown or contradictory done events are Provider protocol failures, not
+paid semantic rejections. Consequently the Agent persists **no second
+completed ModelInvocation/Usage receipt** and executes no Tool when that
+SSE completion is untrustworthy. The original completed first invocation
+and its Usage remain intact. Genuinely final-only response streams,
+matching done/final frames and missing optional completed status for Tool/
+Message remain accepted. Existing narrower Reasoning encryption/status
+reconciliation is unchanged; `response.output_item.added` still grants no
+authority. No Agent/Kernel, database schema, Host router, automatic retry,
+or compatibility rewrite was introduced.
+
+**Permanent regression coverage:**
+
+- `openai/stream_tool_done_authority_test.go` — **21-case** direct SSE
+  verification with valid final-only and consistent-done controls, optional
+  status omissions, and malformed/conflicting done identity/status/content.
+- `openai_sse_done_agent_test.go` — **five** public Agent→Provider→Kernel
+  side-effect and persistence cases, each requiring no Tool effects, no
+  fabricated second billing receipt, no authorized replay and no terminal
+  success. Genuine first invocation still consumes exactly 17/5 tokens.
+- Source mutation restores only the two original Provider files and turns
+  the exact tests RED, including actual Agent Tool Handler `effects=1`;
+  corrected source is GREEN. Focused suites and complete Provider Race
+  pass. Required checks on the new PR Head and independent merge admission
+  are still separate gates; this repair is **not merge or release approval**.
+
+**Final source verification for the 2026-11-03 SSE item-completion hard cut:**
+
+- **PASS, exit 0:** complete `make check` including all Go unit/Race/vet/lint,
+  TypeScript lint/typecheck/46 tests/build, benchmark/evaluation smoke,
+  OTel/A2A and beta.24 clean-consumer local-cohort release checks.
+- **PASS, exit 0:** actual isolated Docker PostgreSQL/Redis integration using
+  `node scripts/run-integration.mjs`, covering cancellation, recovery,
+  restart and continuation; all test containers and network removed.
+- **PASS:** focused direct SSE/Agent regression Race **10 consecutive runs**;
+  complete Provider Race; original immutable-Head two-file source mutation
+  RED (actual local Tool Handler `effects=1`), repaired source GREEN;
+  `gofmt` and diff integrity checks.
+- Preexisting two untracked OpenAI probe scripts excluded from all commits
+  and SHA-256-unchanged. No external OpenAI/Anthropic/gateway credential
+  probes were performed. GitHub CI on the **new** Head and a fresh independent
+  merge-admission review remain mandatory; no merge/release is approved.
