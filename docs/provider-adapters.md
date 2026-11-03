@@ -390,6 +390,14 @@ is permitted. See the [P1 frame audit](audits/2026-11-03-pr87-anthropic-sse-reje
   wrong-index or unknown `output_item.done` events are protocol failures.
   A final-only SSE completion remains supported when no done item was
   observed. Partial `output_item.added` data is never authoritative.
+  Earlier `response.created`/`response.in_progress` frames may establish
+  response identity but must not claim terminal success, failure or
+  truncation before `response.completed`. Explicit `queued` is valid only
+  at creation; `in_progress` is valid at creation or progress. Non-null
+  error/incomplete-details fields, invalid statuses and physical lifecycle
+  contradictions fail as protocol errors with no Tool authorization or
+  completed receipt. Omitted legacy status and absent/null error fields
+  retain the existing contract.
   Contradictory completion evidence is a **framing/protocol failure**, not
   a trusted post-generation rejection: no ToolCall, replay, terminal SSE
   success or fabricated billing receipt can escape. The existing, narrower

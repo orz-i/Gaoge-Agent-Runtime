@@ -399,10 +399,27 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		switch frame.Type {
 		case "response.created", "response.in_progress":
 			var identity struct {
-				ID     string `json:"id"`
-				Object string `json:"object"`
+				ID                string          `json:"id"`
+				Object            string          `json:"object"`
+				Status            json.RawMessage `json:"status"`
+				Error             json.RawMessage `json:"error"`
+				IncompleteDetails json.RawMessage `json:"incomplete_details"`
 			}
 			if json.Unmarshal(frame.Response, &identity) != nil || identity.Object != "response" || identity.ID == "" || strings.TrimSpace(identity.ID) != identity.ID || (observedResponseID != "" && observedResponseID != identity.ID) {
+				return providerhttp.ErrProtocol
+			}
+			// Intermediate physical response observations may not already
+			// assert completion, failure or truncation. A later completed
+			// frame cannot erase that contradictory terminal evidence.
+			if len(identity.Status) != 0 {
+				var status string
+				if json.Unmarshal(identity.Status, &status) != nil ||
+					status != "in_progress" && !(frame.Type == "response.created" && status == "queued") {
+					return providerhttp.ErrProtocol
+				}
+			}
+			if len(identity.Error) != 0 && !bytes.Equal(bytes.TrimSpace(identity.Error), []byte("null")) ||
+				len(identity.IncompleteDetails) != 0 && !bytes.Equal(bytes.TrimSpace(identity.IncompleteDetails), []byte("null")) {
 				return providerhttp.ErrProtocol
 			}
 			if frame.Type == "response.created" {

@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 independent OpenAI SSE lifecycle audit: early
+  `response.created`/`response.in_progress` observations must not claim a
+  terminal failure, truncation or completion, or carry non-null error/
+  incomplete details, before a later successful Tool-bearing completion.
+  Reproduced executable ToolCalls and terminal SSE success on the prior
+  Head; protocol checks now fail closed. Existing omitted status and
+  absent/null details remain valid. See
+  [SSE lifecycle audit](docs/audits/2026-11-03-pr87-openai-sse-lifecycle-status.md).
+
 - OpenAI completed or replayed message items must contain an actual content
   array before sibling Tools are accepted. Null or missing content fails
   closed; an explicit empty array remains supported. The durable timeout
