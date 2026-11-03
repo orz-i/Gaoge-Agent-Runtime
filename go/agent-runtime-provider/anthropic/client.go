@@ -462,6 +462,11 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	var initialUsagePresent bool
 	var finalOutputUsageObserved bool
 	err = providerhttp.Stream(resp, func(event string, data []byte) error {
+		// Duplicate keys could silently overwrite physical assistant role,
+		// stop reason or a Tool ID before frame/content validation.
+		if err := providerhttp.ValidateUniqueJSONKeys(data); err != nil {
+			return err
+		}
 		var frame struct {
 			Type  string `json:"type"`
 			Error struct {

@@ -352,6 +352,11 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		if final != nil {
 			return providerhttp.ErrProtocol
 		}
+		// Never decode ambiguous SSE authority fields with last-key-wins
+		// semantics, even when the final response appears valid.
+		if err := providerhttp.ValidateUniqueJSONKeys(data); err != nil {
+			return err
+		}
 		var frame struct {
 			Type        string          `json:"type"`
 			Code        string          `json:"code"`
