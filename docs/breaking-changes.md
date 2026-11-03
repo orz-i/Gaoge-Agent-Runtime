@@ -4,6 +4,17 @@
 
 ## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
 
+**OpenAI persisted Tool replay status hard cut (PR #87 independent audit):**
+Previously the normal completed response decoder rejected explicitly
+unfinished `function_call.status`, but the stateless persisted replay path
+validated Tool identity/arguments without the same completion-status check.
+A replayed Tool item must now have either no physical `status` field (legacy)
+or exactly `"completed"`. Explicit `in_progress`, `incomplete`, `failed`,
+null, empty, unknown or incorrectly typed statuses fail before sending another
+Provider request. Signed/encrypted reasoning and the original Agent transcript
+are not used to repair contradictory Tool status. No replay format change,
+Kernel/Store migration, Host shim or fallback is introduced.
+
 **OpenAI SSE added-item physical identity hard cut (PR #87 follow-up P1):**
 When `response.output_item.added` is observed, its original output index,
 item type and ID, local function `call_id`/name or assistant message role

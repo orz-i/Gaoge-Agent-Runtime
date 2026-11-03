@@ -5,6 +5,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 independent replay audit: OpenAI persisted function-call evidence
+  now rejects an explicitly non-completed `status` before any continuation
+  HTTP dispatch. Previously a stored replay with `in_progress`, `incomplete`,
+  `failed`, null, or malformed Tool status could pass transcript identity
+  checks and be resent as a completed Tool. Omitted legacy status and
+  `completed` remain supported; no replay format or Store migration.
+
 - OpenAI SSE response.created and response.in_progress now establish a
   stable response identity that must match completion. Conflicting or
   malformed outer identity cannot authorize a Tool or paid receipt.

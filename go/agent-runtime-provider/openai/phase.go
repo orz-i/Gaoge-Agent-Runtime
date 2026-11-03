@@ -88,6 +88,21 @@ func projectOutput(outputs []json.RawMessage) (outputProjection, error) {
 				return outputProjection{}, ErrUnsupported
 			}
 		case "function_call":
+			// Persisted replay passes through this projection without the
+			// final-response item fence. An explicit unfinished/null Tool
+			// status cannot be reintroduced as completed Provider evidence.
+			var authority struct {
+				Status json.RawMessage `json:"status"`
+			}
+			if json.Unmarshal(raw, &authority) != nil {
+				return outputProjection{}, ErrUnsupported
+			}
+			if len(authority.Status) != 0 {
+				var status string
+				if json.Unmarshal(authority.Status, &status) != nil || status != "completed" {
+					return outputProjection{}, ErrUnsupported
+				}
+			}
 			// Preserve exact physical Call ID identity even when projecting
 			// replay evidence without the earlier response-item fence.
 			if item.CallID == "" || strings.TrimSpace(item.CallID) != item.CallID ||

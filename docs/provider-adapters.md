@@ -367,7 +367,10 @@ is permitted. See the [P1 frame audit](audits/2026-11-03-pr87-anthropic-sse-reje
   output items are stored in an optional `model.ProviderReplay` envelope.
   Follow-up requests replay those items before `function_call_output`, and
   validate Tool IDs, names, arguments and visible text against the Agent's
-  committed transcript. No raw reasoning text is interpreted or exposed.
+  committed transcript. Replay additionally requires each physically present
+  `function_call.status` to equal `completed`; an omitted status retains
+  legacy support, but a stored unfinished/null/malformed status fails before
+  the next Provider dispatch. No raw reasoning text is interpreted or exposed.
   During SSE streaming, the adapter uses the encrypted reasoning from a
   completed `response.output_item.done` item if its index, ID and all
   other fields match `response.completed`, except that the terminal response
