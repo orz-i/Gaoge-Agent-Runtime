@@ -157,6 +157,16 @@ multi-provider router.
   during content-block parsing/replay. A completed response with proven
   cumulative Usage retains only its minimal paid rejection receipt, never
   normalized arguments, a synthetic Call ID, replay or terminal SSE success.
+  OpenAI physical `reasoning` output items are also completion-gated even
+  when they contain nonempty encrypted replay evidence. A genuinely omitted
+  `reasoning.status` retains its existing legacy meaning; an explicitly
+  present status must be `completed`. `in_progress`, `incomplete`, `failed`,
+  null, empty, unknown or nonstring statuses reject the entire response,
+  including any otherwise-valid sibling local Tool. If the outer response
+  and cumulative Usage are independently completed and a physical Tool is
+  present, only a minimal paid rejection receipt survives; no Tool execution,
+  text, encrypted replay or successful SSE terminal event is authorized.
+  The same rule applies to Unary, SSE and stateless replay verification.
   For OpenAI, completed local Tool output mixed with a contradictory
   refusal/final answer, unsupported sibling item, or oversized replay is
   also a post-completion Tool rejection: only independently verified

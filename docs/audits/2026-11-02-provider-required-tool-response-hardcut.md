@@ -1089,3 +1089,77 @@ or compatibility rewrite was introduced.
   and SHA-256-unchanged. No external OpenAI/Anthropic/gateway credential
   probes were performed. GitHub CI on the **new** Head and a fresh independent
   merge-admission review remain mandatory; no merge/release is approved.
+
+## 2026-11-03 — PR #87 independent P1: unfinished OpenAI reasoning item can dispatch a local Tool
+
+**Reviewed immutable PR Head:** `4f9862b669bc049de70df4521a4de8784448cc10`.
+All applicable GitHub required CI/security checks had completed successfully
+on that immutable Head before this independent audit.
+
+**Independently reproduced P1:** OpenAI `projectOutput` had presence-sensitive
+completion checks for physical `message` and `function_call` items, but
+accepted *any* physical `reasoning` item without verifying its own explicit
+`status`. A `response.completed` outer envelope could contain an inner
+`reasoning` item with `status=in_progress`, `incomplete`, `failed`, `null`,
+empty, unknown or nonstring status, plus nonempty `encrypted_content` and
+a valid completed local `function_call`. The Provider returned an executable
+ToolCall and authorized encrypted replay despite the unfinished reasoning
+item. The gateway's outer completion did not establish that this physical
+reasoning item was complete.
+
+**Read-only RED on original Head:** A fresh temporary `/tmp` Go test overlay
+added a public Agent → mocked HTTP/SSE OpenAI response → Kernel Store
+regression for five abnormal statuses. All five cases produced exactly
+**one real registered local Tool Handler execution** (`effects=1`,
+`requests=2`), while the expected minimal paid rejection did not occur.
+No external provider credentials or real business side effects were used.
+
+**Minimal hard cut:** In the shared OpenAI `projectOutput` projection,
+validate reasoning-item status using presence-sensitive `json.RawMessage`.
+If genuinely omitted, retain the existing stateless Responses legacy path;
+if present, only the exact string `completed` is permitted. A foreign,
+unfinished, null, empty or nonstring status invalidates the whole output
+before any ToolCall, replay or SSE terminal event may be authorized. An
+independently completed outer response with verified final cumulative Usage
+and a physical Tool retains **only** the original ResponseID/Usage via the
+existing typed `model.post_generation_failed` rejected receipt. An unknown
+final Usage cannot mint a completed receipt. The same projection is used
+for unary, SSE and durable stateless ProviderReplay verification.
+
+**Permanent RED→GREEN coverage:**
+
+- `openai/reasoning_item_status_test.go` checks positive omitted/explicitly
+  completed statuses and eight invalid/unknown-Usage cases, in optional and
+  mandatory Tool modes and both Unary/SSE transport modes. Valid responses
+  still provide their original encrypted ProviderReplay and ToolCall.
+- `completed_tool_receipt_test.go` tests six abnormal reasoning statuses
+  in both sibling orders through the real public Agent → mock OpenAI SSE →
+  Kernel Store. On a completed but semantically rejected second response,
+  the Agent consumes exactly two ModelInvocations and **34 input + 10 output
+  = 44 total tokens**, with **zero local Tool Handler executions** and no
+  leaked ToolCalls, content or replay.
+- Replacing *only* production `openai/phase.go` with the exact immutable
+  original-Head source via isolated `go test -overlay -race` turns these
+  permanent tests RED again, including actual Agent `effects=1` in every
+  invalid status case. The fixed source passes the same tests, with all
+  previous OpenAI/Anthropic Provider Race checks remaining GREEN.
+
+This repair does not alter Agent/Kernel, schema, middleware, Host routing,
+retry policy, provider-side storage or compatibility shims. GitHub CI and
+an independent merge-admission audit must be repeated on the **new actual
+PR Head**; this evidence is not merge or beta.24 publication approval.
+
+**Final local gates for OpenAI Reasoning-item completion hard cut:**
+
+- **PASS, exit 0:** full repository `make check` on the repaired source,
+  including all Go unit/Race/vet/lint, TypeScript lint/typecheck/46 tests/build,
+  evaluation/benchmark smoke, OTel/A2A and beta.24 clean-consumer cohort.
+- **PASS, exit 0:** isolated real Docker PostgreSQL/Redis integration via
+  `node scripts/run-integration.mjs`; containers and test network cleaned.
+- **PASS:** complete Provider Race; focused Provider and public Agent Race
+  `-count=10`, original immutable-Head production `phase.go` overlay RED
+  (`effects=1`), corrected source GREEN; `gofmt` and `git diff --check`.
+- The preexisting two untracked OpenAI probe scripts were excluded and their
+  SHA-256 remain unchanged. No live external gateway/provider credentials
+  were tested. Fresh GitHub checks and independent merge-admission audit
+  on the **new** PR Head remain separate gates, not automatically approved.

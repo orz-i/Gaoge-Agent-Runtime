@@ -80,6 +80,11 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   incomplete, missing-index or duplicated done evidence fails closed; no
   Tool, replay or synthetic completed Usage receipt can be created. Existing
   Reasoning continuation and final-only completion remain supported.
+  A further independent P1 fences explicit unfinished, null and malformed
+  OpenAI `reasoning.status` even when `encrypted_content` and a valid physical
+  Tool item are present. Only absent legacy status or `completed` is allowed;
+  a known paid response retains sanitized ID/Usage without dispatching local
+  Tools or replaying unfinished encrypted reasoning. No compatibility shim.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 

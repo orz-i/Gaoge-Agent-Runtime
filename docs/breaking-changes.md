@@ -119,6 +119,19 @@ terminal SSE success. A final-only completed response and legitimately omitted
 encrypted replay requirements remain unchanged. No retry, migration, Host
 router or compatibility shim is introduced.
 
+**OpenAI reasoning item status hard cut:** The final `response.completed`
+status and nonempty `reasoning.encrypted_content` do not certify that a
+physical `reasoning` output item is complete. Previously a final reasoning
+item carrying an explicit `status=in_progress`, `incomplete`, null or other
+invalid status could accompany a completed local `function_call` and execute
+the Tool. Physical `reasoning.status` is now checked in shared output
+projection: when present it must equal `completed`. Only genuinely omitted
+legacy status is allowed. A trustworthy outer completion and final cumulative
+Usage with a physical Tool retain only the sanitized ID/Usage as a typed
+post-generation rejection; no Tool, text, encrypted replay or terminal SSE
+success can escape. The contract also applies to replay validation. No new
+schema, retry, Host route or compatibility bridge is added.
+
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,
 provider fallback, silent request rewrite or legacy bridge is introduced.
