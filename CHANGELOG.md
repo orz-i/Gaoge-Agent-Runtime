@@ -106,6 +106,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   colliding names at every JSON object level before authorizing Tool or
   replay, including nested JSON input. Distinct sibling objects remain
   supported; case-distinct keys in the *same* object deliberately fail closed.
+  Another independent P1 prevents ambiguous *persisted* ProviderReplay from
+  bypassing that inbound-response check. Both OpenAI Responses raw output
+  replay and Anthropic signed Thinking/Tool content now prove whole replay
+  JSON member uniqueness before any outbound continuation request; forged
+  case-folded role/status/phase or duplicate Tool/signature fields cannot
+  be resent even if normalized Agent Tool identity still matches. Opaque
+  valid replay bytes remain unchanged, without a new replay format or shim.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 

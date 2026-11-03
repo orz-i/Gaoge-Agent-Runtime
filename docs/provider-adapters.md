@@ -132,7 +132,15 @@ multi-provider router.
   shared projection/replay (including SSE completed-item evidence) validate
   the decoded argument JSON; Anthropic validates the reconstructed
   `tool_use.input` in its common content-block parser before Tool or replay
-  authorization. Duplicate inner object members, including Unicode-escaped
+  authorization. **Persisted `model.ProviderReplay.Data` is validated as a
+  whole again on every outbound continuation**, before unmarshalling the
+  raw output array or signed blocks: otherwise duplicate/case-folded
+  owner, phase, Tool ID/name or signed-Thinking fields can be introduced
+  into durable replay and sent upstream even when the normalized Agent
+  transcript still matches. Ambiguous replay now fails before the Provider
+  HTTP request, never by sanitizing or reserializing opaque signed bytes.
+  Original valid phased messages and encrypted/signed Tool continuity remain
+  supported. Duplicate inner object members, including Unicode-escaped
   aliases, are a post-completion Tool rejection with only a minimal original
   ResponseID/Usage receipt when final cumulative Usage is verifiable. No
   handler, replay or terminal SSE success may escape; unverified Usage still

@@ -175,6 +175,21 @@ objects may reuse the same names. Rejected physical Provider framing yields
 no ToolCall, ProviderReplay, forged billing receipt or SSE terminal success;
 no Agent/Kernel schema, Host route, retry or compatibility bridge is added.
 
+**Persisted ProviderReplay authority hard cut:** Previous JSON uniqueness
+checks covered incoming physical OpenAI/Anthropic responses but not raw
+`model.ProviderReplay.Data` restored from a durable transcript. A mutated
+OpenAI replay could contain `Role=user,role=assistant`, conflicting phase or
+Tool type/status, while Anthropic replay could include duplicate Tool
+ID/name/type or a duplicated signed Thinking `signature`. The last-value
+struct decoder and normalized Tool transcript checks could approve the
+replayed content and physically resend ambiguous raw bytes to the upstream
+Provider. Both replay verification entries now validate the entire bounded
+raw JSON envelope using the shared strict field-uniqueness contract **before
+any outbound HTTP request**. Ambiguous replay returns unsupported without
+Tool execution, model request or fabricated billing; valid opaque signed/
+encrypted content retains its exact original bytes. No replay-format version,
+SQL schema, Host route, automatic retry or compatibility bridge is added.
+
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,
 provider fallback, silent request rewrite or legacy bridge is introduced.

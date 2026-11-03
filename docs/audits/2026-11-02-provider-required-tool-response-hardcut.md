@@ -1436,3 +1436,88 @@ a separate immutable-Head merge-admission audit remain required; this is
   Fresh GitHub CI/security checks and a new independent immutable-Head
   merge-admission audit are still required; no merge or beta.24 publication
   has been authorized by this source-level review.
+
+## 2026-11-03 — PR #87 independent P1: ambiguous persisted ProviderReplay re-emitted upstream
+
+**Immutable PR Head independently reviewed:**
+`2159b85af690d03b5c13ec420bdc6f56c1135b52`. All relevant GitHub
+CI/security/coverage checks on this Head were green when auditing began.
+
+**Independent read-only RED:** The existing strict JSON uniqueness guard
+covered incoming physical OpenAI/Anthropic response/SSE frames and
+newly decoded Tool input but did **not** validate the raw persisted
+`model.ProviderReplay.Data` before outbound continuation. Go's struct
+unmarshalling can interpret a mutated message with `"Role":"user"` followed
+by `"role":"assistant"` as an assistant replay, just as it can interpret
+contradictory `Status`/`status`, `Phase`/`phase` or `Type`/`type`. The
+OpenAI replay projector compared its **last-key-wins normalized** result
+against the approved Agent transcript and returned the original ambiguous
+bytes unchanged. Anthropic signed replay suffered the same gap for exact
+duplicate Tool type/ID/name or signature fields: `parseContentBlock` decoded
+only the final field, verified against the Agent transcript, and then
+returned the original conflicting signed/Tool JSON for retransmission.
+
+On the unchanged reviewed Head, two independent temporary `go test -overlay
+-race` test suites first generated valid ProviderReplay through public
+`Generate` and then mutated only the stored raw replay bytes. In **four
+OpenAI** phase/owner/status/item-type cases and **four Anthropic** Tool/
+signed-Thinking cases, the Provider adapters accepted the tampered replay,
+**sent a second physical HTTP request** to the upstream mock and returned
+`err=nil`. This is an outbound authority/provenance integrity failure;
+these tests did **not** assert new local Tool Handler effects, because
+there was no subsequent Agent Tool dispatch. No live Provider or business
+actions were performed.
+
+**Minimal hard cut:** At each of the two existing stateless
+`verifiedReplay` entrypoints, validate the entire bounded replay JSON with
+the already-shared `providerhttp.ValidateUniqueJSONKeys` **before**
+`json.Unmarshal`, any projection or signed-block parsing, and prior to
+physical `Provider.Post` dispatch. That same validator rejects exact,
+Unicode-escape and simple-fold equivalent duplicate keys at every nesting
+level. The Agent transcript remains the authority for visible text and
+Tool ID/name/arguments; the new guard additionally certifies that the raw
+serialized evidence has only one JSON interpretation. Invalid persisted
+replay returns `ErrUnsupported` with **no physical model request, no new
+Tool or billing receipt, no replay and no automatic retry**. Authentic
+phased assistant messages and signed/encrypted thinking/tool replay retain
+their original opaque bytes and normal continuation behavior. No durable
+format/schema bump, migration, Host route, new adapter or compatibility
+bridge is introduced.
+
+**Permanent RED→GREEN evidence:**
+
+- `openai/phase_test.go`: direct response → stored phase replay mutation
+  covering contradictory role, status, phase and item type. Each tampering
+  attempt must fail **before** a second Provider HTTP request. Existing
+  positive phased final/tool replay tests remain unchanged.
+- `anthropic/regression_test.go`: actual signed Thinking + local Tool replay
+  mutation covering duplicate block type, Tool ID/name and thinking
+  signature, all rejected before second HTTP request. Existing valid
+  signed replay and Tool continuation tests remain unchanged.
+- A separate isolated Go `-overlay -race` restored **only** the original
+  reviewed Head's `openai/replay.go` and `anthropic/replay.go`, leaving these
+  permanent tests in place; all eight tampered replay cases turn RED and
+  dispatch upstream. Corrected source is GREEN. Focused tests passed
+  **10 consecutive Race repetitions**, full Provider Race and strict
+  Provider lint **0 issues**.
+
+This is not approval to merge PR #87 or publish beta.24. New actual Head
+GitHub CI/security and fresh independent merge admission remain required;
+no live gateway replay compatibility is claimed.
+
+**Final local gates for persisted replay JSON integrity P1:**
+
+- **PASS, exit 0:** full repository `make check` including Go
+  unit/Race/vet/lint, TypeScript lint/typecheck/**46 tests**/build,
+  evaluation/benchmarks, A2A/MCP/OTel and beta.24 clean-consumer.
+- **PASS, exit 0:** real isolated Docker PostgreSQL/Redis integration with
+  `node scripts/run-integration.mjs`; all test containers/network removed.
+- **PASS:** focused direct replay Race `-count=10`, full Provider Race and
+  strict Provider `golangci-lint` (0 issues), original two-file source
+  mutation RED (8 upstream replay dispatches), repaired source GREEN;
+  gofmt/git diff --check.
+- The two preexisting untracked OpenAI probe scripts are excluded from all
+  commits, with unchanged SHA-256. No external live gateway/Provider
+  credentials or tools were used. Fresh GitHub CI/security and immutable-
+  Head merge admission still required; the repair itself approves neither
+  merge nor beta.24 release.
