@@ -462,8 +462,10 @@ func (provider *invocationRecordingModel) Generate(
 	provider.mu.Lock()
 	provider.calls = append(provider.calls, runtimemodel.CloneRequest(request))
 	provider.mu.Unlock()
+	// One logical invocation has a stable physical response identity across
+	// recovery, but distinct invocations must not reuse an already billed ID.
 	return runtimemodel.Response{
-		Content: "done", ResponseID: "resp_unary_1",
+		Content: "done", ResponseID: "resp_" + request.InvocationID,
 		Usage: &runtimemodel.Usage{InputTokens: 7, OutputTokens: 3, ReasoningTokens: 2},
 	}, nil
 }

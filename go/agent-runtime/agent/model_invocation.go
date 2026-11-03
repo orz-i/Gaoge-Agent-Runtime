@@ -631,6 +631,30 @@ func dispatchHostedToolsWithinIntent(frozen, candidate []model.HostedTool) bool 
 	return true
 }
 
+// Reusing one physical Provider completion ID for a different durable
+// ModelInvocation cannot prove a second generation or authorize a new local
+// Tool side effect. Retries of the *same* pending invocation are unaffected.
+// Scope this check to the same named Provider binding: independent providers
+// and changed Host bindings may legitimately issue colliding opaque IDs.
+func duplicatePhysicalProviderResponseID(state runState, current ModelInvocation, responseID string) bool {
+	responseID = strings.TrimSpace(responseID)
+	if current.Provider == "" || current.BindingFingerprint == "" || responseID == "" {
+		return false
+	}
+	for _, previous := range state.ModelInvocations {
+		if previous.ID == current.ID ||
+			(previous.Status != ModelInvocationCompleted && previous.Status != ModelInvocationConsumed) {
+			continue
+		}
+		if previous.Provider == current.Provider &&
+			previous.BindingFingerprint == current.BindingFingerprint &&
+			previous.ProviderResponseID == responseID {
+			return true
+		}
+	}
+	return false
+}
+
 func (runner *Runner) executeModelInvocation(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
@@ -694,6 +718,12 @@ func (runner *Runner) executeModelInvocation(
 		err = model.NewResponseRejectedError(ErrInvalidModelResponse)
 	}
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
+	// A gateway can reply with a different Tool payload under an already
+	// consumed physical response ID. Do not count it as a new billable
+	// completion or dispatch its Tools, even if the new Call ID is distinct.
+	if (err == nil || knownRejection) && duplicatePhysicalProviderResponseID(state, invocation, response.ResponseID) {
+		return snapshot, state, ErrInvalidModelResponse
+	}
 	var denied modelPreDispatchDenied
 	if errors.As(err, &denied) {
 		// Nothing reached the Provider. Keep the committed pending Claim

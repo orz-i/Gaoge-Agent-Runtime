@@ -83,6 +83,9 @@ func (fixture *baselineHTTPFixture) ServeHTTP(w http.ResponseWriter, r *http.Req
 	} else {
 		fixture.probes++
 	}
+	// A deterministic baseline can still invoke the Provider multiple
+	// times; each physical completion needs a unique opaque response ID.
+	physicalOrdinal := fixture.streams + fixture.probes
 	fixture.mu.Unlock()
 
 	response := model.Response{Content: `{"ok":true}`}
@@ -120,7 +123,7 @@ func (fixture *baselineHTTPFixture) ServeHTTP(w http.ResponseWriter, r *http.Req
 			}
 		}
 	}
-	fixture.writeResponse(w, response, stream)
+	fixture.writeResponse(w, response, stream, physicalOrdinal)
 }
 
 func (fixture *baselineHTTPFixture) respondToolReplayProbe(w http.ResponseWriter, request map[string]json.RawMessage) {
@@ -418,8 +421,9 @@ func baselineOpenAIPhaseMessage(phase, content string) map[string]any {
 	}
 }
 
-func (fixture *baselineHTTPFixture) writeResponse(w http.ResponseWriter, response model.Response, stream bool) {
+func (fixture *baselineHTTPFixture) writeResponse(w http.ResponseWriter, response model.Response, stream bool, ordinal int) {
 	usage := map[string]int{"input_tokens": 31, "output_tokens": 13}
+	physicalID := fmt.Sprintf("%s_%s_%d", baselineHTTPFakeKey, fixture.protocol, ordinal)
 	if !stream {
 		w.Header().Set("Content-Type", "application/json")
 	}
@@ -434,7 +438,7 @@ func (fixture *baselineHTTPFixture) writeResponse(w http.ResponseWriter, respons
 		if response.Content != "" {
 			output = append(output, baselineOpenAIPhaseMessage("final_answer", response.Content))
 		}
-		body := map[string]any{"object": "response", "id": baselineHTTPFakeKey + "_response", "status": "completed", "output": output, "usage": usage}
+		body := map[string]any{"object": "response", "id": physicalID, "status": "completed", "output": output, "usage": usage}
 		if !stream {
 			_ = json.NewEncoder(w).Encode(body)
 			return
@@ -457,11 +461,11 @@ func (fixture *baselineHTTPFixture) writeResponse(w http.ResponseWriter, respons
 		stop = "tool_use"
 	}
 	if !stream {
-		_ = json.NewEncoder(w).Encode(map[string]any{"type": "message", "role": "assistant", "id": baselineHTTPFakeKey + "_message", "stop_reason": stop, "content": content, "usage": usage})
+		_ = json.NewEncoder(w).Encode(map[string]any{"type": "message", "role": "assistant", "id": physicalID, "stop_reason": stop, "content": content, "usage": usage})
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	baselineSSE(fixture.t, w, "message_start", map[string]any{"type": "message_start", "message": map[string]any{"type": "message", "role": "assistant", "id": baselineHTTPFakeKey + "_message", "usage": usage}})
+	baselineSSE(fixture.t, w, "message_start", map[string]any{"type": "message_start", "message": map[string]any{"type": "message", "role": "assistant", "id": physicalID, "usage": usage}})
 	for index, block := range content {
 		baselineSSE(fixture.t, w, "content_block_start", map[string]any{"type": "content_block_start", "index": index, "content_block": block})
 		baselineSSE(fixture.t, w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": index})

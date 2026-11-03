@@ -177,10 +177,11 @@ func TestIndependentPaidRequiredToolResponseMustHaveDurableAgentReceipt(t *testi
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
 				if vendor == "openai" {
-					_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"object\":\"response\",\"id\":\"paid-openai\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer without required Tool\"}]}],\"usage\":{\"input_tokens\":17,\"output_tokens\":5}}}\n\n")
+					physical := fmt.Sprintf(`{"object":"response","id":"paid-openai-%d","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"answer without required Tool"}]}],"usage":{"input_tokens":17,"output_tokens":5}}`, calls)
+					_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", physical)
 				} else {
 					frames := [][2]string{
-						{"message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"paid-anthropic","usage":{"input_tokens":17,"output_tokens":0}}}`},
+						{"message_start", fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"assistant","id":"paid-anthropic-%d","usage":{"input_tokens":17,"output_tokens":0}}}`, calls)},
 						{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
 						{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"answer without required Tool"}}`},
 						{"content_block_stop", `{"type":"content_block_stop","index":0}`},
