@@ -27,6 +27,18 @@ func TestRejectDuplicateAnthropicAuthorityKeysBeforeToolExecution(t *testing.T) 
 		valid         bool
 	}{
 		{name: "valid_control", valid: true},
+		{name: "folded_role", unary: replacement{`"role":"assistant"`, `"Role":"user","role":"assistant"`},
+			stream: replacement{`"role":"assistant"`, `"Role":"user","role":"assistant"`}, target: "start"},
+		{name: "folded_stop_reason", unary: replacement{`"stop_reason":"tool_use"`, `"Stop_Reason":"max_tokens","stop_reason":"tool_use"`},
+			stream: replacement{`"stop_reason":"tool_use"`, `"Stop_Reason":"max_tokens","stop_reason":"tool_use"`}, target: "delta"},
+		{name: "unicode_folded_stop_reason", unary: replacement{`"stop_reason":"tool_use"`, `"ſtop_reason":"max_tokens","stop_reason":"tool_use"`},
+			stream: replacement{`"stop_reason":"tool_use"`, `"ſtop_reason":"max_tokens","stop_reason":"tool_use"`}, target: "delta"},
+		{name: "folded_tool_name", unary: replacement{`"name":"lookup"`, `"Name":"forged","name":"lookup"`},
+			stream: replacement{`"name":"lookup"`, `"Name":"forged","name":"lookup"`}, target: "block"},
+		{name: "folded_tool_id", unary: replacement{`"id":"call-1"`, `"ID":"forged","id":"call-1"`},
+			stream: replacement{`"id":"call-1"`, `"ID":"forged","id":"call-1"`}, target: "block"},
+		{name: "folded_usage", unary: replacement{`"input_tokens":17`, `"Input_Tokens":1,"input_tokens":17`},
+			stream: replacement{`"input_tokens":17`, `"Input_Tokens":1,"input_tokens":17`}, target: "start"},
 		{name: "duplicate_role", unary: replacement{`"role":"assistant"`, `"role":"user","role":"assistant"`},
 			stream: replacement{`"role":"assistant"`, `"role":"user","role":"assistant"`}, target: "start"},
 		{name: "duplicate_stop_reason", unary: replacement{`"stop_reason":"tool_use"`, `"stop_reason":"max_tokens","stop_reason":"tool_use"`},

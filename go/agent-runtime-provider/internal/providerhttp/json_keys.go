@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"strings"
+	"unicode"
 )
 
 // ValidateUniqueJSONKeys rejects ambiguous provider-authored JSON before any
-// authority-bearing field is decoded. encoding/json otherwise silently accepts
-// duplicate object members, retaining the last owner/status/Tool identity.
+// authority-bearing field is decoded. encoding/json accepts case-folded member
+// aliases when decoding structs, as well as exact duplicate object members;
+// both can overwrite the original owner/status/Tool identity.
 // Input sizes are already bounded by ReadJSON and the adapters' SSE framing.
 func ValidateUniqueJSONKeys(data []byte) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
@@ -49,10 +52,14 @@ func readUniqueJSONValue(decoder *json.Decoder, depth int) error {
 			if !ok {
 				return ErrProtocol
 			}
-			if _, duplicate := seen[key]; duplicate {
+			// Go's struct field decoder matches folded names even if the
+			// physical JSON keys are distinct (e.g. "Role" / "role").
+			// Reject aliases at the same object level before unmarshalling.
+			folded := foldJSONMemberName(key)
+			if _, duplicate := seen[folded]; duplicate {
 				return ErrProtocol
 			}
-			seen[key] = struct{}{}
+			seen[folded] = struct{}{}
 			if err := readUniqueJSONValue(decoder, depth+1); err != nil {
 				return err
 			}
@@ -75,4 +82,22 @@ func readUniqueJSONValue(decoder *json.Decoder, depth int) error {
 		return ErrProtocol
 	}
 	return nil
+}
+
+// Use the same Unicode simple-fold equivalence as encoding/json's struct
+// field matching, not just ASCII lowercasing. The smallest rune in each
+// fold cycle is a stable canonical key, keeping validation linear in bytes.
+func foldJSONMemberName(name string) string {
+	var folded strings.Builder
+	folded.Grow(len(name))
+	for _, original := range name {
+		canonical := original
+		for next := unicode.SimpleFold(original); next != original; next = unicode.SimpleFold(next) {
+			if next < canonical {
+				canonical = next
+			}
+		}
+		folded.WriteRune(canonical)
+	}
+	return folded.String()
 }

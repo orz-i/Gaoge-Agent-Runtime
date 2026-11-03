@@ -23,6 +23,12 @@ func TestRejectDuplicateOpenAIAuthorityKeysBeforeToolExecution(t *testing.T) {
 	}{
 		{name: "valid_control", reply: valid, valid: true},
 		{name: "same_type_in_sibling_objects", reply: `{"object":"response","id":"paid-tool","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"working"}]},{"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{}"}],"usage":{"input_tokens":17,"output_tokens":5}}`, valid: true},
+		{name: "folded_outer_object", reply: `{"Object":"chat.completion","object":"response","id":"paid-tool","status":"completed","output":` + output + `,"usage":{"input_tokens":17,"output_tokens":5}}`},
+		{name: "folded_outer_status", reply: `{"object":"response","id":"paid-tool","Status":"incomplete","status":"completed","output":` + output + `,"usage":{"input_tokens":17,"output_tokens":5}}`},
+		{name: "folded_item_type", reply: `{"object":"response","id":"paid-tool","status":"completed","output":[{"Type":"message","type":"function_call","call_id":"call-1","name":"lookup","arguments":"{}"}],"usage":{"input_tokens":17,"output_tokens":5}}`},
+		{name: "folded_function_call_id", reply: `{"object":"response","id":"paid-tool","status":"completed","output":[{"type":"function_call","Call_ID":"foreign","call_id":"call-1","name":"lookup","arguments":"{}"}],"usage":{"input_tokens":17,"output_tokens":5}}`},
+		{name: "folded_usage", reply: `{"object":"response","id":"paid-tool","status":"completed","output":` + output + `,"usage":{"Input_Tokens":1,"input_tokens":17,"output_tokens":5}}`},
+		{name: "unicode_folded_status", reply: `{"object":"response","id":"paid-tool","ſtatus":"incomplete","status":"completed","output":` + output + `,"usage":{"input_tokens":17,"output_tokens":5}}`},
 		{name: "duplicate_outer_object", reply: `{"object":"chat.completion","object":"response","id":"paid-tool","status":"completed","output":` + output + `,"usage":{"input_tokens":17,"output_tokens":5}}`},
 		{name: "duplicate_outer_status", reply: `{"object":"response","id":"paid-tool","status":"incomplete","status":"completed","output":` + output + `,"usage":{"input_tokens":17,"output_tokens":5}}`},
 		{name: "duplicate_call_id", reply: `{"object":"response","id":"paid-tool","status":"completed","output":[{"type":"function_call","call_id":"forged","call_id":"call-1","name":"lookup","arguments":"{}"}],"usage":{"input_tokens":17,"output_tokens":5}}`},
@@ -76,16 +82,21 @@ func TestRejectDuplicateOpenAIAuthorityKeysBeforeToolExecution(t *testing.T) {
 			}
 		})
 	}
-	t.Run("duplicate_sse_event_type", func(t *testing.T) {
-		client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/event-stream")
-			_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"error\",\"type\":\"response.completed\",\"response\":%s}\n\n", valid)
+	for _, tc := range []struct{ name, frameType string }{
+		{"duplicate", `"type":"error","type":"response.completed"`},
+		{"folded", `"Type":"error","type":"response.completed"`},
+	} {
+		t.Run(tc.name+"_sse_event_type", func(t *testing.T) {
+			client := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {%s,\"response\":%s}\n\n", tc.frameType, valid)
+			})
+			req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}},
+				Tools: []tools.Definition{definition}, RequireToolCall: true}
+			got, err := client.GenerateStream(t.Context(), req, nil)
+			if !errors.Is(err, providerhttp.ErrProtocol) || len(got.ToolCalls) != 0 || got.ResponseID != "" {
+				t.Fatalf("ambiguous SSE event type promoted to completed Tool: response=%+v err=%v", got, err)
+			}
 		})
-		req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}},
-			Tools: []tools.Definition{definition}, RequireToolCall: true}
-		got, err := client.GenerateStream(t.Context(), req, nil)
-		if !errors.Is(err, providerhttp.ErrProtocol) || len(got.ToolCalls) != 0 || got.ResponseID != "" {
-			t.Fatalf("duplicate SSE event type promoted to completed Tool: response=%+v err=%v", got, err)
-		}
-	})
+	}
 }

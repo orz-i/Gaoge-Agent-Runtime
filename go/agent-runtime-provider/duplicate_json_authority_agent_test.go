@@ -30,6 +30,12 @@ func TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool(t *testing.T) {
 		{name: "anthropic_outer_role", provider: "anthropic", mutation: "owner"},
 		{name: "anthropic_stop_reason", provider: "anthropic", mutation: "status"},
 		{name: "anthropic_tool_name", provider: "anthropic", mutation: "tool"},
+		{name: "openai_folded_outer_owner", provider: "openai", mutation: "owner_folded"},
+		{name: "openai_folded_outer_status", provider: "openai", mutation: "status_folded"},
+		{name: "openai_folded_tool_type", provider: "openai", mutation: "tool_type_folded"},
+		{name: "anthropic_folded_outer_role", provider: "anthropic", mutation: "owner_folded"},
+		{name: "anthropic_folded_stop_reason", provider: "anthropic", mutation: "status_folded"},
+		{name: "anthropic_folded_usage", provider: "anthropic", mutation: "usage_folded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests, effects atomic.Int32
@@ -50,8 +56,14 @@ func TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool(t *testing.T) {
 						switch tc.mutation {
 						case "owner":
 							object = `"object":"chat.completion","object":"response",`
+						case "owner_folded":
+							object = `"Object":"chat.completion","object":"response",`
 						case "status":
 							status = `"status":"incomplete","status":"completed",`
+						case "status_folded":
+							status = `"Status":"incomplete","status":"completed",`
+						case "tool_type_folded":
+							output = `[{"Type":"message","type":"function_call","status":"completed","call_id":"call-1","name":"lookup","arguments":"{}"}]`
 						case "tool":
 							output = `[{"type":"function_call","status":"completed","call_id":"foreign","call_id":"call-1","name":"lookup","arguments":"{}"}]`
 						}
@@ -62,8 +74,15 @@ func TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool(t *testing.T) {
 					return
 				}
 				start := fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"assistant","id":"paid-%d","usage":{"input_tokens":17,"output_tokens":0}}}`, n)
-				if n == 2 && tc.mutation == "owner" {
-					start = fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"user","role":"assistant","id":"paid-%d","usage":{"input_tokens":17,"output_tokens":0}}}`, n)
+				if n == 2 {
+					switch tc.mutation {
+					case "owner":
+						start = fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"user","role":"assistant","id":"paid-%d","usage":{"input_tokens":17,"output_tokens":0}}}`, n)
+					case "owner_folded":
+						start = fmt.Sprintf(`{"type":"message_start","message":{"type":"message","Role":"user","role":"assistant","id":"paid-%d","usage":{"input_tokens":17,"output_tokens":0}}}`, n)
+					case "usage_folded":
+						start = fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"assistant","id":"paid-%d","usage":{"Input_Tokens":1,"input_tokens":17,"output_tokens":0}}}`, n)
+					}
 				}
 				send("message_start", start)
 				block := `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"ordinary answer"}}`
@@ -78,8 +97,11 @@ func TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool(t *testing.T) {
 				reason := `"stop_reason":"end_turn"`
 				if n == 2 {
 					reason = `"stop_reason":"tool_use"`
-					if tc.mutation == "status" {
+					switch tc.mutation {
+					case "status":
 						reason = `"stop_reason":"max_tokens","stop_reason":"tool_use"`
+					case "status_folded":
+						reason = `"Stop_Reason":"max_tokens","stop_reason":"tool_use"`
 					}
 				}
 				send("message_delta", `{"type":"message_delta","delta":{`+reason+`},"usage":{"output_tokens":5}}`)

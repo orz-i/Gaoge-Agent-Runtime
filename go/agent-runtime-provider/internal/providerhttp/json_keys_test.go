@@ -9,7 +9,7 @@ import (
 )
 
 // Provider-owned role/status/Tool keys are authority-bearing. Reject duplicate
-// object members at every depth, including equivalent Unicode-escaped names,
+// object members at every depth, including case-folded and Unicode-escaped aliases,
 // before encoding/json can overwrite the earlier physical evidence.
 func TestValidateUniqueJSONKeys(t *testing.T) {
 	for _, tc := range []struct {
@@ -18,12 +18,20 @@ func TestValidateUniqueJSONKeys(t *testing.T) {
 	}{
 		{name: "simple", raw: `{"role":"assistant","content":[{"type":"tool_use","id":"t1","input":{"x":1}}]}`, valid: true},
 		{name: "same_member_in_distinct_objects", raw: `{"output":[{"type":"message"},{"type":"function_call"}]}`, valid: true},
+		{name: "case_variations_in_distinct_objects", raw: `{"output":[{"Role":"user"},{"role":"assistant"}]}`, valid: true},
 		{name: "escaped_text_is_not_object_member", raw: `{"role":"assistant","text":"\\\"role\\\":\\\"user\\\"","escape":"\\u0061"}`, valid: true},
 		{name: "scalars_and_empty_objects", raw: `[{},{"items":[null,1,2,true,false,"x"]}]`, valid: true},
 		{name: "duplicate_outer_owner", raw: `{"role":"user","role":"assistant"}`},
 		{name: "duplicate_same_value", raw: `{"role":"assistant","role":"assistant"}`},
 		{name: "duplicate_nested_tool", raw: `{"content":[{"type":"tool_use","id":"bad","id":"good"}]}`},
 		{name: "duplicate_escaped_name", raw: `{"role":"user","\u0072ole":"assistant"}`},
+		{name: "folded_outer_role", raw: `{"Role":"user","role":"assistant"}`},
+		{name: "folded_outer_status", raw: `{"Status":"incomplete","status":"completed"}`},
+		{name: "folded_same_value", raw: `{"Object":"response","object":"response"}`},
+		{name: "folded_nested_tool", raw: `{"output":[{"Call_ID":"forged","call_id":"trusted"}]}`},
+		{name: "folded_unicode_kelvin", raw: `{"Key":"first","Key":"second"}`},
+		{name: "folded_unicode_long_s", raw: `{"status":"incomplete","ſtatus":"completed"}`},
+		{name: "folded_unicode_escaped_long_s", raw: `{"status":"incomplete","\u017Ftatus":"completed"}`},
 		{name: "repeated_object_members_deeper", raw: `{"a":[{"b":{"status":"incomplete","status":"completed"}}]}`},
 		{name: "non_json", raw: `garbage`},
 		{name: "trailing_json", raw: `{}{}`},
@@ -54,6 +62,8 @@ func TestReadJSONRejectsAmbiguousOwnerBeforeUnmarshal(t *testing.T) {
 		{name: "clean", raw: `{"object":"response","id":"clean"}`},
 		{name: "duplicate", raw: `{"object":"chat.completion","object":"response","id":"ambiguous"}`, reject: true},
 		{name: "nested_duplicate", raw: `{"object":"response","output":[{"call_id":"x","call_id":"y"}]}`, reject: true},
+		{name: "folded_owner", raw: `{"Object":"image","object":"response"}`, reject: true},
+		{name: "folded_nested", raw: `{"object":"response","output":[{"Call_ID":"x","call_id":"y"}]}`, reject: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := &http.Response{Body: io.NopCloser(bytes.NewBufferString(tc.raw))}
