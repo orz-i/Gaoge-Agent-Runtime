@@ -71,6 +71,34 @@ func TestCompletedRequiredToolFreeRejectionConsumesPaidAgentInvocation(t *testin
 	}
 }
 
+// An encrypted reasoning item is not executable authority when it explicitly
+// reports an unfinished, null, malformed or foreign completion status.
+// The completed Tool sibling still yields a known paid rejection receipt,
+// but Agent cannot execute it or replay unfinished reasoning.
+func TestCompletedOpenAIUnfinishedReasoningCannotDispatchTool(t *testing.T) {
+	tool := map[string]any{"type": "function_call", "status": "completed", "call_id": "call-allowed",
+		"name": "lookup", "arguments": "{}"}
+	for _, tc := range []struct {
+		name   string
+		status any
+	}{
+		{name: "in_progress", status: "in_progress"},
+		{name: "incomplete", status: "incomplete"},
+		{name: "failed", status: "failed"},
+		{name: "null"},
+		{name: "empty", status: ""},
+		{name: "nonstring", status: 42},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reasoning := map[string]any{"type": "reasoning", "id": "rs_1", "summary": []any{},
+				"encrypted_content": "sealed", "status": tc.status}
+			for _, output := range [][]any{{reasoning, tool}, {tool, reasoning}} {
+				assertCompletedRejectedToolReceipt(t, output)
+			}
+		})
+	}
+}
+
 // A completed function_call never authorizes a foreign-role or unfinished
 // sibling message, regardless of output order. Even when the Provider has
 // already supplied final Usage, the entire Tool batch is rejected and

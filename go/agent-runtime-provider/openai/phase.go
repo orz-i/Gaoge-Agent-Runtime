@@ -95,6 +95,22 @@ func projectOutput(outputs []json.RawMessage) (outputProjection, error) {
 			}
 			result.calls = append(result.calls, item)
 		case "reasoning":
+			// Final response completion cannot certify an explicitly unfinished
+			// physical reasoning item. An encrypted blob is replay evidence,
+			// not an override for its own status; such an item must never
+			// accompany an executable local function_call.
+			var authority struct {
+				Status json.RawMessage `json:"status"`
+			}
+			if json.Unmarshal(raw, &authority) != nil {
+				return outputProjection{}, ErrUnsupported
+			}
+			if len(authority.Status) != 0 {
+				var status string
+				if json.Unmarshal(authority.Status, &status) != nil || status != "completed" {
+					return outputProjection{}, ErrUnsupported
+				}
+			}
 			result.reasoning = true
 			missingEncrypted = missingEncrypted || item.EncryptedContent == ""
 		default:
