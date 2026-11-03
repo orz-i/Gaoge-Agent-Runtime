@@ -132,6 +132,20 @@ with independently verified final Usage retain only the original ID/Usage as
 a typed paid rejection; missing/invalid Usage remains unreceipted. No
 retry/status/SQL schema, Host route or compatibility bridge is added.
 
+**Physical completed Provider response ID hard cut:** OpenAI Responses
+`response.id` and Anthropic Messages `message.id` must be nonempty and
+identical before/after `strings.TrimSpace`. Previously a gateway could
+supply a padded OpenAI ID or a blank/padded Anthropic ID with a valid local
+Tool item and final Usage. Agent persisted a normalized/empty response ID
+while the Provider still authorized the local Tool. Both Unary and SSE now
+reject invalid physical completion identity **before** building an executable
+ToolCall, provider replay or final billing receipt. Even verified Usage does
+not certify a completion whose physical identity is untrustworthy. Valid
+unchanged IDs are supported; no automatic ID repair, Host/Kernel change,
+SQL schema migration or compatibility bridge is introduced. Public Agent→
+Provider SSE→Kernel tests prove a real local Handler executed under the old
+code and zero effects after repair.
+
 **OpenAI SSE completed output-item consistency hard cut:** Previously,
 `response.output_item.done` for a local `function_call` or assistant `message`
 was ignored, allowing a gateway's subsequent `response.completed` to replace

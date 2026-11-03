@@ -87,6 +87,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   padded IDs can no longer execute a local Tool or create synthetic Call IDs;
   verified completed Usage is settled as a minimal rejection receipt, with
   no ProviderReplay or terminal SSE success. No compatibility rewrite.
+  Another independent P1 binds the **outer completed Provider response ID**
+  to its physical bytes: OpenAI `response.id` and Anthropic `message.id`
+  may not be blank or padded. Agent previously trimmed that ID when storing
+  its ModelInvocation while the Provider authorized a local Tool under the
+  inconsistent original identity. Both Unary and SSE now fail closed before
+  Tool dispatch, replay or fabricated Usage; actual public Agent/Kernel Tool
+  effects on the original Head are absent after correction. No bridge.
   A further independently reproduced P1 protects OpenAI SSE `output_item.done`
   authority: completed Tool and Message items now reconcile with the final
   `response.completed` output before local Tool execution. Contradictory,

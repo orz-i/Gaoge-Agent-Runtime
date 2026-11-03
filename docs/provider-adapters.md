@@ -200,6 +200,15 @@ multi-provider router.
   during content-block parsing/replay. A completed response with proven
   cumulative Usage retains only its minimal paid rejection receipt, never
   normalized arguments, a synthetic Call ID, replay or terminal SSE success.
+  **Completed Provider response identity is equally physical authority:**
+  OpenAI `response.id` and Anthropic `message.id` must be nonempty and
+  unchanged by `strings.TrimSpace` in both Unary and SSE. Agent persists
+  a trimmed `ProviderResponseID` and cannot recover an original blank or
+  padded upstream identity. The Provider therefore rejects the entire
+  invalid completion before authorizing any Tool, replay, final SSE event
+  or cumulative Usage receipt, even when the envelope's status and tokens
+  otherwise appear valid. Genuine unpadded response IDs remain supported;
+  no local ID synthesis, trimming bridge or automatic retry is added.
   OpenAI physical `reasoning` output items are also completion-gated even
   when they contain nonempty encrypted replay evidence. A genuinely omitted
   `reasoning.status` retains its existing legacy meaning; an explicitly

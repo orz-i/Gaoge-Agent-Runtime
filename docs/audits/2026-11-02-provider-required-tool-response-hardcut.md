@@ -1693,3 +1693,91 @@ beta.24.
   gateway credentials were tested. GitHub checks on the **new actual PR Head**
   and a separate immutable-Head merge-admission audit remain mandatory.
   Neither merging PR #87 nor publishing beta.24 is authorized by this fix.
+
+## 2026-11-03 — PR #87 independent P1: completed Provider response ID identity normalization
+
+**Independently audited immutable PR Head:**
+`a0a2281e912c4e879f092c460caf853246e647a2`. All relevant GitHub
+CI/security/coverage checks on this exact Head were green at audit start.
+The only preexisting untracked files were two user OpenAI probe scripts,
+which were not modified or included.
+
+**Physical authority gap, proven RED:** Agent persists
+`ModelInvocation.ProviderResponseID` using `strings.TrimSpace` and discards
+blank terminal event IDs. While physical Tool Call IDs were already
+protected against such normalization, the outer completed Provider reply
+ID was not. Anthropic Messages `completedMessageReceipt` previously required
+only `body.ID != ""`, so whitespace-only/tab-only or padded physical
+`message.id` could authorize executable local ToolCalls, signed replay and
+final Usage. OpenAI Responses checked only that the ID was not blank after
+trimming; padded `response.id` similarly authorized ToolCalls while Agent
+recorded a different, normalized receipt identity.
+
+An independent read-only `/tmp` Go `-overlay -race` audit on the **unchanged
+reviewed Head** proved Anthropic whitespace/tab/padded IDs and OpenAI padded
+IDs were accepted by the public Provider Generate entrypoint with `err=nil`,
+executable ToolCalls and cumulative Usage. An additional isolated public
+**Agent → mocked Provider HTTP/SSE → Kernel Memory Store** test sent a valid
+first model response, then a physically invalid response ID accompanying
+an otherwise complete local Tool. Three cases — OpenAI padded ID, Anthropic
+blank ID, Anthropic padded ID — each **actually executed one registered
+local Tool Handler** (`effects=1`, `requests=2`), despite the lack of a
+stable original Provider completion identity. All handlers and endpoints
+were synthetic local fixtures; no upstream live gateway or production Tool
+was involved.
+
+**Minimal hard cut:** Require completed OpenAI `response.id` and Anthropic
+`message.id` to be nonempty and **byte-for-byte unchanged by
+`strings.TrimSpace`** before constructing a completed Model response.
+The same existing decoding function handles both Unary and SSE, so the
+check is enforced before local Tool authorization, ProviderReplay,
+terminal SSE success or usage settlement. A physically invalid completed
+reply cannot mint a durable ProviderResponseID or completed paid receipt
+under a different normalized identity, even if final Usage appears valid.
+Real unpadded opaque IDs remain supported; no synthetic ID replacement,
+retry, Host router, Agent/Kernel logic, database Schema, new durable field,
+replay-version change or compatibility bridge was introduced.
+
+**Permanent RED→GREEN regressions:**
+
+- `openai/response_id_identity_test.go` and
+  `anthropic/response_id_identity_test.go` cover valid and invalid physical
+  completed IDs across Unary and SSE, including empty, spaces, tabs, leading/
+  trailing whitespace and Unicode nonbreaking spaces; invalid replies must
+  never produce ToolCalls, ResponseID, Usage, replay or terminal SSE success.
+- `duplicate_json_authority_agent_test.go` extends the public Agent→Provider
+  SSE→Kernel Store regression with the three unsafe physical response ID
+  cases. Repaired code proves **zero real Tool Handler effects**, only the
+  first valid ModelInvocation consumed (**17 input + 5 output tokens**),
+  and the second left without a fabricated completed ProviderResponseID,
+  ToolCall, replay or Usage receipt.
+- An isolated read-only original source mutation via `go test -overlay -race`
+  restored **only** the exact original Head's `openai/client.go` and
+  `anthropic/client.go` while retaining all permanent tests. Both adapter
+  direct tests turned RED, and all three public Agent cases executed their
+  synthetic Tool Handler (`effects=1`). The patched code passed those
+  suites and focused Race **10** consecutive repetitions; full Provider
+  Race and strict Provider lint had zero issues.
+
+Live third-party Provider/gateway compatibility was not tested. Fresh
+GitHub CI/security checks and a separate independent immutable-Head merge
+admission are still required after pushing. This does **not** authorize
+merging PR #87 or releasing beta.24.
+
+**Final local gates for completed Provider response-ID authority P1:**
+
+- **PASS, exit 0:** complete repository `make check` on corrected source:
+  all Go unit/Race/vet/lint, TypeScript lint/typecheck/**46 tests**/build,
+  evaluation/benchmarks, MCP/A2A/OTel and beta.24 clean-consumer cohort.
+- **PASS, exit 0:** isolated real PostgreSQL/Redis integration via
+  `node scripts/run-integration.mjs` including cross-connection recovery;
+  temporary test containers and network removed.
+- **PASS:** direct Provider/Agent focused Race **10** successive repetitions,
+  complete Provider Race, strict Provider lint **0 issues** and original
+  immutable-Head source mutation RED (`effects=1` in 3 public Agent cases)
+  against corrected-source GREEN, with `gofmt` and `git diff --check` clean.
+- Both preexisting untracked OpenAI probe scripts remain SHA-256 identical
+  and excluded from all commits. No live external Provider/gateway credentials
+  or production Tools were used. CI/security on the new PR Head and an
+  independent immutable-Head merge admission remain necessary; no PR merge
+  or beta.24 publication has been authorized.
