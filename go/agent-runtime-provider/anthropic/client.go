@@ -458,6 +458,10 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	var blocks = map[int]*contentBlock{}
 	var chunks = map[int]*strings.Builder{}
 	var closed = map[int]bool{}
+	// Keep only framing metadata after semantic rejection; never retain
+	// discarded Tool JSON or signed Thinking payloads for replay.
+	var rejectedToolDelta = map[int]bool{}
+	var rejectedSignatureDelta = map[int]bool{}
 	var resultBytes int
 	// Unsupported content is never authorized. Drain only a bounded,
 	// well-framed stream to establish final completion and paid Usage.
@@ -538,13 +542,19 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				// of an incomplete physical Provider response. Keep only its
 				// type for Tool evidence, never its untrusted payload.
 				var kind struct {
-					Type string `json:"type"`
+					Type  string          `json:"type"`
+					Input json.RawMessage `json:"input"`
 				}
 				if json.Unmarshal(frame.ContentBlock, &kind) != nil || kind.Type == "" {
 					return providerhttp.ErrProtocol
 				}
 				rejectedContent = true
+				// Keep only structural Tool input for delta/initial-input
+				// conflict detection; it is never decoded or replayed.
 				b = contentBlock{Type: kind.Type}
+				if kind.Type == "tool_use" {
+					b.Input = kind.Input
+				}
 				resultBytes += len(frame.ContentBlock)
 			} else {
 				resultBytes += len(b.Text) + len(b.Input) + len(b.Thinking) + len(b.Signature) + len(b.Data)
@@ -562,8 +572,40 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				return providerhttp.ErrProtocol
 			}
 			if rejectedContent {
-				// After irreversible semantic rejection, later deltas are
-				// framing evidence only. Bound raw bytes; never emit content.
+				// Even when content is already semantically rejected, each
+				// physical delta must still belong to its active block. Never
+				// mint a completed paid receipt from mismatched SSE framing.
+				// Unknown future block types remain safely unprojected.
+				switch b.Type {
+				case "text":
+					if frame.Delta.Type != "text_delta" {
+						return providerhttp.ErrProtocol
+					}
+				case "tool_use":
+					if frame.Delta.Type != "input_json_delta" {
+						return providerhttp.ErrProtocol
+					}
+					if frame.Delta.PartialJSON != "" {
+						rejectedToolDelta[index] = true
+					}
+				case "thinking":
+					switch frame.Delta.Type {
+					case "thinking_delta":
+						if b.Signature != "" || rejectedSignatureDelta[index] {
+							return providerhttp.ErrProtocol
+						}
+					case "signature_delta":
+						if b.Signature != "" || rejectedSignatureDelta[index] || frame.Delta.Signature == "" {
+							return providerhttp.ErrProtocol
+						}
+						rejectedSignatureDelta[index] = true
+					default:
+						return providerhttp.ErrProtocol
+					}
+				case "redacted_thinking":
+					return providerhttp.ErrProtocol
+				}
+				// Bound raw bytes and suppress every rejected content delta.
 				resultBytes += len(data)
 				if resultBytes > 16<<20 {
 					return providerhttp.ErrProtocol
@@ -611,7 +653,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			}
 			closed[index] = true
 			activeBlock = -1
-			if b.Type == "tool_use" && chunks[index].Len() > 0 {
+			if b.Type == "tool_use" && (chunks[index].Len() > 0 || rejectedToolDelta[index]) {
 				// A streamed Tool argument delta may populate the initial empty
 				// input object, but must never replace physical arguments already
 				// present in content_block_start (including explicit null).
@@ -620,7 +662,9 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				if json.Unmarshal(b.Input, &initial) != nil || initial == nil || len(initial) != 0 {
 					return providerhttp.ErrProtocol
 				}
-				b.Input = json.RawMessage(chunks[index].String())
+				if !rejectedContent {
+					b.Input = json.RawMessage(chunks[index].String())
+				}
 			}
 		case "message_delta":
 			if !started || activeBlock != -1 {
