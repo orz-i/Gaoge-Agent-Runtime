@@ -236,7 +236,13 @@ is permitted. See the [P1 frame audit](audits/2026-11-03-pr87-anthropic-sse-reje
   rejects the entire candidate *before* Tool authorization; verified final
   ResponseID/Usage are settled as a sanitized `model.post_generation_failed`
   rejection if a physical local Tool was present. Truly omitted legacy
-  role/status fields remain supported. **Every OpenAI function_call** (mandatory or optional)
+  role/status fields remain supported. Each `output_text` content part must
+  contain a physical JSON string `text`, not null or a missing member; an
+  incomplete text sibling rejects the completed response even if a local
+  Tool item is otherwise valid. Trusted cumulative Usage is retained only
+  in a sanitized rejection; bad persisted message evidence is rejected
+  before a replay continuation. Legacy omitted or null `phase` remains valid.
+  **Every OpenAI function_call** (mandatory or optional)
   is separately gated on item-level completion before it becomes an
   executable Tool Call: `status=completed` or genuinely omitted legacy
   status is permitted; `in_progress`, `incomplete`, explicit null/empty

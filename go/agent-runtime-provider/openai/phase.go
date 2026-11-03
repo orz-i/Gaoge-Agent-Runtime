@@ -43,11 +43,24 @@ func projectOutput(outputs []json.RawMessage) (outputProjection, error) {
 			// the entire candidate, including any sibling Tool calls.
 			// Only genuinely omitted legacy fields remain supported.
 			var authority struct {
-				Role   json.RawMessage `json:"role"`
-				Status json.RawMessage `json:"status"`
+				Role    json.RawMessage `json:"role"`
+				Status  json.RawMessage `json:"status"`
+				Content []struct {
+					Type    string  `json:"type"`
+					Text    *string `json:"text"`
+					Refusal *string `json:"refusal"`
+				} `json:"content"`
 			}
 			if json.Unmarshal(raw, &authority) != nil {
 				return outputProjection{}, ErrUnsupported
+			}
+			// Missing/null output_text is not physical text evidence. A
+			// valid sibling Tool cannot authorize a partially decoded message.
+			for _, part := range authority.Content {
+				if part.Type == "output_text" && part.Text == nil ||
+					part.Type == "refusal" && part.Refusal == nil {
+					return outputProjection{}, ErrUnsupported
+				}
 			}
 			if len(authority.Role) != 0 {
 				var role string

@@ -5,6 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 independent message-payload audit: OpenAI `output_text` now requires
+  a physically present string `text`. Previously explicit null or omitted
+  text could be silently flattened when followed by valid text and a local
+  Tool; unary/SSE then authorized the Tool and SSE success. Both paths now
+  return only a verified rejected completion receipt; malformed persisted
+  replay is refused before continuation. Unphased legacy `phase: null` and
+  genuinely omitted phases remain supported, without protocol migration.
+
 - PR #87 independent replay audit: OpenAI persisted function-call evidence
   now rejects an explicitly non-completed `status` before any continuation
   HTTP dispatch. Previously a stored replay with `in_progress`, `incomplete`,

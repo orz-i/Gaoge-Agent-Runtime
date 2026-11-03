@@ -4,6 +4,20 @@
 
 ## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
 
+**OpenAI physical output_text payload hard cut (PR #87 independent audit):**
+A `message.content` part of type `output_text` must contain an actual JSON
+string `text` field. Previously an explicitly null or absent `text` could
+become an empty Go string and be silently ignored when a sibling contained
+valid text. With a valid sibling `function_call` this incorrectly authorized
+local Tool execution (unary and SSE) and a successful terminal stream receipt.
+Now the entire completed response is rejected before a local Tool is exposed,
+with only a trustworthy original ResponseID/Usage returned as a sanitized
+`model.post_generation_failed` receipt; missing/invalid Usage still fails
+closed without an invented bill. A forged persisted replay with such a part
+also fails before continuation HTTP. This **does not change** the established
+legacy behavior for omitted or explicit-null `message.phase`; no Store/Kernel
+migration, replay format bump, Host fallback or compatibility bridge.
+
 **OpenAI persisted Tool replay status hard cut (PR #87 independent audit):**
 Previously the normal completed response decoder rejected explicitly
 unfinished `function_call.status`, but the stateless persisted replay path
