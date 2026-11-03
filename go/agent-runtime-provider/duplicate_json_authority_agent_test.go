@@ -36,6 +36,9 @@ func TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool(t *testing.T) {
 		{name: "anthropic_folded_outer_role", provider: "anthropic", mutation: "owner_folded"},
 		{name: "anthropic_folded_stop_reason", provider: "anthropic", mutation: "status_folded"},
 		{name: "anthropic_folded_usage", provider: "anthropic", mutation: "usage_folded"},
+		{name: "openai_padded_physical_response_id", provider: "openai", mutation: "response_id_padded"},
+		{name: "anthropic_blank_physical_message_id", provider: "anthropic", mutation: "response_id_blank"},
+		{name: "anthropic_padded_physical_message_id", provider: "anthropic", mutation: "response_id_padded"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests, effects atomic.Int32
@@ -68,12 +71,25 @@ func TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool(t *testing.T) {
 							output = `[{"type":"function_call","status":"completed","call_id":"foreign","call_id":"call-1","name":"lookup","arguments":"{}"}]`
 						}
 					}
-					body := fmt.Sprintf(`{%s"id":"paid-%d",%s"output":%s,"usage":{"input_tokens":17,"output_tokens":5}}`,
-						object, n, status, output)
+					physicalID := fmt.Sprintf("paid-%d", n)
+					if n == 2 && tc.mutation == "response_id_padded" {
+						physicalID = " paid-2 "
+					}
+					body := fmt.Sprintf(`{%s"id":%q,%s"output":%s,"usage":{"input_tokens":17,"output_tokens":5}}`,
+						object, physicalID, status, output)
 					send("response.completed", `{"type":"response.completed","response":`+body+`}`)
 					return
 				}
-				start := fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"assistant","id":"paid-%d","usage":{"input_tokens":17,"output_tokens":0}}}`, n)
+				physicalID := fmt.Sprintf("paid-%d", n)
+				if n == 2 {
+					switch tc.mutation {
+					case "response_id_blank":
+						physicalID = " "
+					case "response_id_padded":
+						physicalID = " paid-2 "
+					}
+				}
+				start := fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"assistant","id":%q,"usage":{"input_tokens":17,"output_tokens":0}}}`, physicalID)
 				if n == 2 {
 					switch tc.mutation {
 					case "owner":

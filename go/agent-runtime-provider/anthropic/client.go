@@ -312,7 +312,10 @@ func completedMessageReceipt(body messageBody) (model.Response, error) {
 	default:
 		return model.Response{}, ErrUnsupported
 	}
-	if body.ID == "" {
+	// Physical message identity is an exact Provider-owned completion
+	// receipt. Agent trims ResponseID when persisting the ModelInvocation;
+	// never authorize a Tool whose original ID would be changed or lost.
+	if body.ID == "" || strings.TrimSpace(body.ID) != body.ID {
 		return model.Response{}, ErrUnsupported
 	}
 	result := model.Response{ResponseID: body.ID, Refused: body.StopReason == "refusal"}

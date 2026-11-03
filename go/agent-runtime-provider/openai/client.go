@@ -260,7 +260,10 @@ func decodeResponse(body responseBody, names map[string]string, required bool) (
 	if body.Status == "incomplete" {
 		return model.Response{}, errors.Join(ErrUnsupported, ErrIncomplete)
 	}
-	if body.Status != "completed" || strings.TrimSpace(body.ID) == "" {
+	// Agent normalizes ProviderResponseID for durable receipts. A padded
+	// physical response identity cannot be used to authorize local Tools:
+	// its recorded identifier would differ from the one the Provider sent.
+	if body.Status != "completed" || body.ID == "" || strings.TrimSpace(body.ID) != body.ID {
 		return model.Response{}, ErrUnsupported
 	}
 	result := model.Response{ResponseID: body.ID}
