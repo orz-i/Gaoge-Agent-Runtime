@@ -344,7 +344,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var final *responseBody
-	var completedReasoning completedReasoningItems
+	var completedItems completedOutputItems
 	err = providerhttp.Stream(resp, func(event string, data []byte) error {
 		if string(data) == "[DONE]" && final != nil {
 			return nil
@@ -379,7 +379,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				}})
 			}
 		case "response.output_item.done":
-			if err := completedReasoning.observe(frame.OutputIndex, frame.Item); err != nil {
+			if err := completedItems.observe(frame.OutputIndex, frame.Item); err != nil {
 				return err
 			}
 		case "response.completed":
@@ -387,7 +387,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			if final != nil || json.Unmarshal(frame.Response, &result) != nil {
 				return providerhttp.ErrProtocol
 			}
-			if err := completedReasoning.reconcile(&result); err != nil {
+			if err := completedItems.reconcile(&result); err != nil {
 				return err
 			}
 			final = &result
