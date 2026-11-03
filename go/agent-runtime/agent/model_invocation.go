@@ -711,6 +711,19 @@ func (runner *Runner) executeModelInvocation(
 			}
 			return runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID)
 		},
+		func(response model.Response, err error) (model.Response, error) {
+			known := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
+			if (err == nil || known) && duplicatePhysicalProviderResponseID(state, invocation, response.ResponseID) {
+				return model.Response{}, ErrInvalidModelResponse
+			}
+			if known {
+				if invocation.Provider != "" && invocation.BindingFingerprint != "" && (response.ResponseID == "" || strings.TrimSpace(response.ResponseID) != response.ResponseID) {
+					return model.Response{}, ErrInvalidModelResponse
+				}
+				return response, err
+			}
+			return response, err
+		},
 	)
 	late := errors.Is(err, ErrModelLateResult)
 	response.Content = strings.TrimSpace(response.Content)
@@ -728,7 +741,7 @@ func (runner *Runner) executeModelInvocation(
 	// A gateway can reply with a different Tool payload under an already
 	// consumed physical response ID. Do not count it as a new billable
 	// completion or dispatch its Tools, even if the new Call ID is distinct.
-	if (err == nil || knownRejection) && duplicatePhysicalProviderResponseID(state, invocation, response.ResponseID) {
+	if (err == nil || late || knownRejection) && duplicatePhysicalProviderResponseID(state, invocation, response.ResponseID) {
 		return snapshot, state, ErrInvalidModelResponse
 	}
 	if knownRejection {

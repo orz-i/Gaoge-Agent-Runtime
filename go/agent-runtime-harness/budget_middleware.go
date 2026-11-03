@@ -164,6 +164,7 @@ func (middleware *BudgetMiddleware) Model(ctx context.Context, request model.Req
 		return model.Response{}, err
 	}
 	response, callErr := next(ctx, request, emit)
+	response, callErr = agent.ValidateModelResponseAuthority(ctx, response, callErr)
 	if agent.IsModelPreDispatchDenied(callErr) {
 		// Dispatch reserved the upper bound BEFORE entering downstream Model
 		// middleware. The Agent's private final-boundary proof is the only
@@ -268,6 +269,10 @@ func (middleware *BudgetMiddleware) settleModel(ctx context.Context, ledger budg
 	usage.HostedToolCalls = hostedCount
 	usage.ToolCalls = usage.HostedToolCalls
 	_, hostedLimited := remainingHostedCalls(ledger, reservation.RunID)
+	if knownRejection {
+		// Rejected payloads are not authoritative transcript or Tool receipts.
+		response = model.Response{ResponseID: response.ResponseID, Usage: model.CloneUsage(response.Usage)}
+	}
 	raw, err := encodeBudgetModelReceipt(response, callErr)
 	if err != nil {
 		return response, err

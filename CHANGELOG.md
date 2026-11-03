@@ -5,6 +5,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 final audit hardening: duplicate physical response IDs are checked
+  before shared-budget settlement, including late results and downstream
+  middleware, and rejected receipt payloads are not stored in the shared
+  ledger. OpenAI finalized argument, text, refusal and content-part events
+  must agree with the final response. Anthropic rejected Thinking blocks
+  retain signature sequencing evidence. Regressions cover these boundaries.
+
 - PR #87 independent Agent rejected-completion receipt hard cut: a named
   Provider's typed post-generation rejection cannot establish paid
   completion without an exact nonempty physical ResponseID, even with

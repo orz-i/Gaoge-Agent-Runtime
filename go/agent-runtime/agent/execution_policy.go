@@ -322,6 +322,7 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 	request model.Request,
 	deadlineAt *time.Time,
 	beforeDispatch func(context.Context) error,
+	afterProvider ...func(model.Response, error) (model.Response, error),
 ) (model.Response, error) {
 	release, err := runner.acquireCallPermit(ctx, runner.modelLimiter, deadlineAt)
 	if err != nil {
@@ -337,7 +338,7 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 	response, callErr := safeModelCall(func() (model.Response, error) {
 		// Validation must run after every ModelMiddleware and concurrency
 		// wait, at the final physical Provider boundary, not here.
-		return runner.generateModel(callCtx, request, beforeDispatch)
+		return runner.generateModel(callCtx, request, beforeDispatch, afterProvider...)
 	})
 	callContextErr := callCtx.Err()
 	cancel()
@@ -351,6 +352,11 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 	if errors.As(callErr, &denied) {
 		// No physical request was sent. A cancellation/deadline racing with
 		// the final guard cannot turn it into a retryable Provider timeout.
+		return model.Response{}, callErr
+	}
+	// A completed response that failed the physical-identity fence is not a
+	// transport timeout and must never be retried as a fresh paid call.
+	if errors.Is(callErr, ErrInvalidModelResponse) {
 		return model.Response{}, callErr
 	}
 	if callErr == nil {

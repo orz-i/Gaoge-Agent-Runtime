@@ -3,6 +3,7 @@ package openai
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp"
@@ -124,7 +125,7 @@ func (items *completedOutputItems) reconcile(final *responseBody) error {
 			return providerhttp.ErrProtocol
 		}
 		completeBase, err := json.Marshal(complete)
-		if err != nil || !bytes.Equal(doneBase, completeBase) {
+		if err != nil || !equalJSON(doneBase, completeBase) {
 			return providerhttp.ErrProtocol
 		}
 		if doneIdentity.Type != "reasoning" {
@@ -153,4 +154,169 @@ func (items *completedOutputItems) reconcile(final *responseBody) error {
 		final.Output[index] = merged
 	}
 	return nil
+}
+
+// completedToolArguments records finalized argument evidence independently of
+// output_item.done, then reconciles it before any executable call is emitted.
+type completedToolArguments struct {
+	byIndex map[int]struct{ id, arguments string }
+	size    int
+}
+
+func (a *completedToolArguments) observe(index *int, id string, arguments *string) error {
+	if index == nil || *index < 0 || *index >= maxReplayItems || id == "" || strings.TrimSpace(id) != id || arguments == nil || a.size+len(id)+len(*arguments) > maxReplayBytes {
+		return providerhttp.ErrProtocol
+	}
+	if a.byIndex == nil {
+		a.byIndex = make(map[int]struct{ id, arguments string })
+	}
+	if _, exists := a.byIndex[*index]; exists {
+		return providerhttp.ErrProtocol
+	}
+	a.byIndex[*index] = struct{ id, arguments string }{id, *arguments}
+	a.size += len(id) + len(*arguments)
+	return nil
+}
+func (a *completedToolArguments) reconcile(final *responseBody) error {
+	for index, evidence := range a.byIndex {
+		if index >= len(final.Output) {
+			return providerhttp.ErrProtocol
+		}
+		var item struct {
+			Type      string  `json:"type"`
+			ID        string  `json:"id"`
+			Arguments *string `json:"arguments"`
+		}
+		if json.Unmarshal(final.Output[index], &item) != nil || item.Type != "function_call" || item.ID != evidence.id || item.Arguments == nil || *item.Arguments != evidence.arguments {
+			return providerhttp.ErrProtocol
+		}
+	}
+	return nil
+}
+
+// Completed message-part and refusal events are independent terminal evidence.
+type contentKey struct{ output, content int }
+type contentEvidence struct {
+	id      string
+	part    json.RawMessage
+	refusal *string
+	text    *string
+}
+type completedMessageContent struct {
+	byKey map[contentKey]contentEvidence
+	size  int
+}
+
+func (c *completedMessageContent) entry(output, content *int, id string) (contentKey, contentEvidence, error) {
+	if output == nil || content == nil || *output < 0 || *output >= maxReplayItems || *content < 0 || *content >= maxReplayItems || id == "" || strings.TrimSpace(id) != id {
+		return contentKey{}, contentEvidence{}, providerhttp.ErrProtocol
+	}
+	if c.byKey == nil {
+		c.byKey = make(map[contentKey]contentEvidence)
+	}
+	key := contentKey{*output, *content}
+	e := c.byKey[key]
+	if e.id != "" && e.id != id {
+		return key, e, providerhttp.ErrProtocol
+	}
+	e.id = id
+	return key, e, nil
+}
+func (c *completedMessageContent) observeRefusal(output, content *int, id string, refusal *string) error {
+	key, e, err := c.entry(output, content, id)
+	if err != nil || refusal == nil || e.refusal != nil {
+		return providerhttp.ErrProtocol
+	}
+	c.size += len(id) + len(*refusal)
+	if c.size > maxReplayBytes {
+		return providerhttp.ErrProtocol
+	}
+	e.refusal = refusal
+	c.byKey[key] = e
+	return nil
+}
+func (c *completedMessageContent) observeText(output, content *int, id string, text *string) error {
+	key, e, err := c.entry(output, content, id)
+	if err != nil || text == nil || e.text != nil {
+		return providerhttp.ErrProtocol
+	}
+	c.size += len(id) + len(*text)
+	if c.size > maxReplayBytes {
+		return providerhttp.ErrProtocol
+	}
+	e.text = text
+	c.byKey[key] = e
+	return nil
+}
+func (c *completedMessageContent) observePart(output, content *int, id string, part json.RawMessage) error {
+	key, e, err := c.entry(output, content, id)
+	if err != nil || len(part) == 0 || e.part != nil || string(part) == "null" {
+		return providerhttp.ErrProtocol
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(part, &obj) != nil || obj == nil {
+		return providerhttp.ErrProtocol
+	}
+	c.size += len(id) + len(part)
+	if c.size > maxReplayBytes {
+		return providerhttp.ErrProtocol
+	}
+	e.part = append(json.RawMessage(nil), part...)
+	c.byKey[key] = e
+	return nil
+}
+func (c *completedMessageContent) reconcile(final *responseBody) error {
+	for key, e := range c.byKey {
+		if key.output >= len(final.Output) {
+			return providerhttp.ErrProtocol
+		}
+		var item struct {
+			Type    string            `json:"type"`
+			ID      string            `json:"id"`
+			Content []json.RawMessage `json:"content"`
+		}
+		if json.Unmarshal(final.Output[key.output], &item) != nil || item.Type != "message" || item.ID != e.id || key.content >= len(item.Content) {
+			return providerhttp.ErrProtocol
+		}
+		var part map[string]json.RawMessage
+		if json.Unmarshal(item.Content[key.content], &part) != nil || part == nil {
+			return providerhttp.ErrProtocol
+		}
+		if e.part != nil {
+			var done map[string]json.RawMessage
+			if json.Unmarshal(e.part, &done) != nil {
+				return providerhttp.ErrProtocol
+			}
+			x, err := json.Marshal(done)
+			if err != nil {
+				return providerhttp.ErrProtocol
+			}
+			y, err := json.Marshal(part)
+			if err != nil || !equalJSON(x, y) {
+				return providerhttp.ErrProtocol
+			}
+		}
+		if e.text != nil {
+			var typ, text string
+			if json.Unmarshal(part["type"], &typ) != nil || typ != "output_text" || json.Unmarshal(part["text"], &text) != nil || text != *e.text {
+				return providerhttp.ErrProtocol
+			}
+		}
+		if e.refusal != nil {
+			var typ, refusal string
+			if json.Unmarshal(part["type"], &typ) != nil || typ != "refusal" || json.Unmarshal(part["refusal"], &refusal) != nil || refusal != *e.refusal {
+				return providerhttp.ErrProtocol
+			}
+		}
+	}
+	return nil
+}
+
+// equalJSON ignores object key order at every depth while preserving numeric text.
+func equalJSON(a, b []byte) bool {
+	var left, right any
+	da, db := json.NewDecoder(bytes.NewReader(a)), json.NewDecoder(bytes.NewReader(b))
+	da.UseNumber()
+	db.UseNumber()
+	return da.Decode(&left) == nil && db.Decode(&right) == nil && reflect.DeepEqual(left, right)
 }

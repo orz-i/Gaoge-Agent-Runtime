@@ -1384,8 +1384,22 @@ func withBlockedToolGuidance(messages []model.Message, toolKeys []string) []mode
 	return append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(guidance)}}, messages...)
 }
 
+// ValidateModelResponseAuthority lets accounting middleware apply the Agent's
+// frozen invocation authority before persisting a downstream model receipt.
+// Contexts outside an Agent invocation have no additional authority guard.
+type modelResponseAuthorityKey struct{}
+
+func ValidateModelResponseAuthority(ctx context.Context, response model.Response, err error) (model.Response, error) {
+	guard, _ := ctx.Value(modelResponseAuthorityKey{}).(func(model.Response, error) (model.Response, error))
+	if guard != nil {
+		return guard(response, err)
+	}
+	return response, err
+}
+
 func (runner *Runner) generateModel(
 	ctx context.Context, request model.Request, beforeProvider func(context.Context) error,
+	afterProvider ...func(model.Response, error) (model.Response, error),
 ) (model.Response, error) {
 	emit := func(event model.StreamEvent) error {
 		runner.publishValue(ctx, request.RunID, plugin.Event{
@@ -1410,7 +1424,14 @@ func (runner *Runner) generateModel(
 				return model.Response{}, modelPreDispatchDenied{cause: err}
 			}
 		}
-		return runner.generateProviderModel(callCtx, candidate, sink)
+		response, err := runner.generateProviderModel(callCtx, candidate, sink)
+		if len(afterProvider) != 0 && afterProvider[0] != nil {
+			return afterProvider[0](response, err)
+		}
+		return response, err
+	}
+	if len(afterProvider) != 0 && afterProvider[0] != nil {
+		ctx = context.WithValue(ctx, modelResponseAuthorityKey{}, afterProvider[0])
 	}
 	return runner.modelChain.Invoke(ctx, request, emit, terminal)
 }

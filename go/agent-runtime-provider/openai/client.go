@@ -359,6 +359,8 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	defer func() { _ = resp.Body.Close() }()
 	var final *responseBody
 	var completedItems completedOutputItems
+	var completedArguments completedToolArguments
+	var completedContent completedMessageContent
 	err = providerhttp.Stream(resp, func(event string, data []byte) error {
 		if string(data) == "[DONE]" && final != nil {
 			return nil
@@ -372,13 +374,18 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			return err
 		}
 		var frame struct {
-			Type        string          `json:"type"`
-			Code        string          `json:"code"`
-			Delta       string          `json:"delta"`
-			ItemID      string          `json:"item_id"`
-			OutputIndex *int            `json:"output_index"`
-			Item        json.RawMessage `json:"item"`
-			Response    json.RawMessage `json:"response"`
+			Type         string          `json:"type"`
+			Code         string          `json:"code"`
+			Delta        string          `json:"delta"`
+			ItemID       string          `json:"item_id"`
+			Arguments    *string         `json:"arguments"`
+			ContentIndex *int            `json:"content_index"`
+			Refusal      *string         `json:"refusal"`
+			Text         *string         `json:"text"`
+			Part         json.RawMessage `json:"part"`
+			OutputIndex  *int            `json:"output_index"`
+			Item         json.RawMessage `json:"item"`
+			Response     json.RawMessage `json:"response"`
 		}
 		if err := json.Unmarshal(data, &frame); err != nil {
 			return providerhttp.ErrProtocol
@@ -397,6 +404,22 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 					EventType: frame.Type, ItemID: frame.ItemID, Kind: "summary", Text: frame.Delta,
 				}})
 			}
+		case "response.output_text.done":
+			if err := completedContent.observeText(frame.OutputIndex, frame.ContentIndex, frame.ItemID, frame.Text); err != nil {
+				return err
+			}
+		case "response.refusal.done":
+			if err := completedContent.observeRefusal(frame.OutputIndex, frame.ContentIndex, frame.ItemID, frame.Refusal); err != nil {
+				return err
+			}
+		case "response.content_part.done":
+			if err := completedContent.observePart(frame.OutputIndex, frame.ContentIndex, frame.ItemID, frame.Part); err != nil {
+				return err
+			}
+		case "response.function_call_arguments.done":
+			if err := completedArguments.observe(frame.OutputIndex, frame.ItemID, frame.Arguments); err != nil {
+				return err
+			}
 		case "response.output_item.done":
 			if err := completedItems.observe(frame.OutputIndex, frame.Item); err != nil {
 				return err
@@ -405,6 +428,12 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			var result responseBody
 			if final != nil || json.Unmarshal(frame.Response, &result) != nil {
 				return providerhttp.ErrProtocol
+			}
+			if err := completedContent.reconcile(&result); err != nil {
+				return err
+			}
+			if err := completedArguments.reconcile(&result); err != nil {
+				return err
 			}
 			if err := completedItems.reconcile(&result); err != nil {
 				return err

@@ -542,8 +542,9 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				// of an incomplete physical Provider response. Keep only its
 				// type for Tool evidence, never its untrusted payload.
 				var kind struct {
-					Type  string          `json:"type"`
-					Input json.RawMessage `json:"input"`
+					Type      string          `json:"type"`
+					Input     json.RawMessage `json:"input"`
+					Signature string          `json:"signature"`
 				}
 				if json.Unmarshal(frame.ContentBlock, &kind) != nil || kind.Type == "" {
 					return providerhttp.ErrProtocol
@@ -552,8 +553,12 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				// Keep only structural Tool input for delta/initial-input
 				// conflict detection; it is never decoded or replayed.
 				b = contentBlock{Type: kind.Type}
-				if kind.Type == "tool_use" {
+				switch kind.Type {
+				case "tool_use":
 					b.Input = kind.Input
+				case "thinking":
+					// Preserve only the signature-presence evidence needed to fence later deltas.
+					b.Signature = kind.Signature
 				}
 				resultBytes += len(frame.ContentBlock)
 			} else {

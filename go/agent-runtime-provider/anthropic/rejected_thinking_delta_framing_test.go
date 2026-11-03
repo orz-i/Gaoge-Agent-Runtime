@@ -45,6 +45,18 @@ func TestRejectedAnthropicSSEStillEnforcesThinkingDeltaSequence(t *testing.T) {
 			invalid: true,
 		},
 		{
+			name:    "unsupported_pre_signed_thinking_then_signature",
+			block:   `{"type":"thinking","thinking":"","signature":"original","unsupported":true}`,
+			deltas:  []string{`{"type":"signature_delta","signature":"second"}`},
+			invalid: true,
+		},
+		{
+			name:    "unsupported_pre_signed_thinking_then_thinking",
+			block:   `{"type":"thinking","thinking":"","signature":"original","unsupported":true}`,
+			deltas:  []string{`{"type":"thinking_delta","thinking":"late"}`},
+			invalid: true,
+		},
+		{
 			name:    "redacted_thinking_delta_forbidden",
 			block:   `{"type":"redacted_thinking","data":"opaque"}`,
 			deltas:  []string{`{"type":"text_delta","text":"not allowed"}`},
