@@ -146,6 +146,25 @@ SQL schema migration or compatibility bridge is introduced. Public Agent→
 Provider SSE→Kernel tests prove a real local Handler executed under the old
 code and zero effects after repair.
 
+**Physical Tool argument JSON root hard cut (PR #87 follow-up P1):**
+OpenAI `function_call.arguments` decodes from its string into a JSON
+**object**; Anthropic `tool_use.input` must likewise be an object.
+A permissive registered local JSON Schema (for example `{}`) cannot
+override the Provider's physical function-argument wire contract.
+Previously arrays, `null` and boolean values were valid JSON and reached
+real Agent local Tool execution in both Unary and SSE. Shared Provider
+validation now enforces the root shape at completed Tool decoding, SSE
+item/block proof, replay validation and outbound Tool history. Unsupported
+roots never authorize a Tool or successful terminal event; verified
+completed Usage survives only as a minimal paid rejection receipt.
+Initial Anthropic `input:null` combined with a conflicting later
+`input_json_delta` remains a protocol/framing failure with no fabricated
+completed receipt. Real object input and nested objects remain supported;
+no legacy coercion of nonobject JSON, Host/Agent/Kernel change, migration or
+replay schema version bump. Public Agent→SSE→Kernel tests reproduce actual
+Tool Handler side effects on original Head and prove zero after repair.
+See [independent P1 audit](audits/2026-11-03-pr87-tool-argument-root-hardcut.md).
+
 **OpenAI SSE completed output-item consistency hard cut:** Previously,
 `response.output_item.done` for a local `function_call` or assistant `message`
 was ignored, allowing a gateway's subsequent `response.completed` to replace

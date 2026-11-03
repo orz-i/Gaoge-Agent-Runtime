@@ -5,6 +5,21 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 independent Provider P1 hard cut: OpenAI function-call arguments
+  (JSON encoded as a string) and Anthropic `tool_use.input` must physically
+  decode to a **JSON object**, even if the local Tool has a permissive JSON
+  Schema. Previously valid but nonobject JSON (arrays, `null`, booleans)
+  authorized actual local Tool Handler execution in both Unary and SSE.
+  A shared bounded uniqueness/object-root validator now guards Tool decoding,
+  SSE completion evidence, replay validation and outbound Tool history.
+  Known completed invalid Tool replies retain only verified ResponseID/Usage
+  under typed post-generation rejection, never executable calls, replay or
+  terminal SSE success. Contradictory Anthropic start/delta frames remain
+  protocol failures without fabricated billing. Direct RED→GREEN tests and
+  public Agent→SSE→Kernel side-effect tests cover both adapters. No Host,
+  Agent/Kernel, persistence migration or legacy bridge. See
+  [independent P1 audit](docs/audits/2026-11-03-pr87-tool-argument-root-hardcut.md).
+
 - OpenAI Responses and Anthropic Messages forced-Tool response hard cut:
   `RequireToolCall` now verifies the final provider result actually contains
   a local Tool call, not just that `tool_choice` was sent. An upstream proxy's

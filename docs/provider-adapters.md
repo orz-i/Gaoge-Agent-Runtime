@@ -191,6 +191,19 @@ multi-provider router.
   cumulative Usage retain only the original ResponseID/Usage under a typed
   post-generation rejection. This applies to OpenAI physical function-call
   item verification and Anthropic Tool-block decoding/final SSE reconstruction.
+  **Physical Tool argument root is Provider authority:** valid JSON alone
+  is not sufficient. OpenAI's string-encoded `function_call.arguments` and
+  Anthropic's `tool_use.input` must decode to a non-null JSON **object**,
+  independently of any permissive registered local Tool Schema. Shared
+  uniqueness plus object-root validation is applied to physical Tool item
+  decoding, OpenAI SSE done-item completion, Anthropic final SSE block
+  reconstruction, replay verification and outbound Tool-call history.
+  Arrays, `null` and scalar JSON are rejected before Tool execution or
+  successful terminal SSE; valid completed Usage retains only the minimal
+  rejected ResponseID/Usage receipt. The earlier Anthropic SSE
+  initial-input/delta conflict still fails as unreceipted framing, not
+  a new paid completion. See the
+  [independent object-root P1 audit](audits/2026-11-03-pr87-tool-argument-root-hardcut.md).
   Both adapters also require every physical Tool Call ID to be **nonempty and
   unchanged by `strings.TrimSpace`**. Agent normalizes a Call ID before Tool
   dispatch (and can generate one if it becomes empty), so whitespace-only or
