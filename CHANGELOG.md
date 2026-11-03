@@ -5,6 +5,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- OpenAI SSE response.created and response.in_progress now establish a
+  stable response identity that must match completion. Conflicting or
+  malformed outer identity cannot authorize a Tool or paid receipt.
+
 - PR #87 OpenAI SSE P1 follow-up: bind immutable output-item identity from
   `response.output_item.added` to the completed item before authorizing
   local Tools or replay. Added/done/final conflicts, duplicate or late added

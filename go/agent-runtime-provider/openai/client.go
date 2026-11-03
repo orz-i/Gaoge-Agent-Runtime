@@ -358,6 +358,8 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var final *responseBody
+	var observedResponseID string
+	var createdSeen bool
 	var addedItems addedOutputItems
 	var completedItems completedOutputItems
 	var completedArguments completedToolArguments
@@ -395,6 +397,21 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			return providerhttp.ErrProtocol
 		}
 		switch frame.Type {
+		case "response.created", "response.in_progress":
+			var identity struct {
+				ID     string `json:"id"`
+				Object string `json:"object"`
+			}
+			if json.Unmarshal(frame.Response, &identity) != nil || identity.Object != "response" || identity.ID == "" || strings.TrimSpace(identity.ID) != identity.ID || (observedResponseID != "" && observedResponseID != identity.ID) {
+				return providerhttp.ErrProtocol
+			}
+			if frame.Type == "response.created" {
+				if createdSeen || observedResponseID != "" {
+					return providerhttp.ErrProtocol
+				}
+				createdSeen = true
+			}
+			observedResponseID = identity.ID
 		case "response.output_text.delta", "response.refusal.delta":
 			if emit != nil {
 				return emit(model.StreamEvent{Delta: frame.Delta})
@@ -436,7 +453,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			}
 		case "response.completed":
 			var result responseBody
-			if final != nil || json.Unmarshal(frame.Response, &result) != nil {
+			if final != nil || json.Unmarshal(frame.Response, &result) != nil || (observedResponseID != "" && result.ID != observedResponseID) {
 				return providerhttp.ErrProtocol
 			}
 			if err := completedContent.reconcile(&result); err != nil {
