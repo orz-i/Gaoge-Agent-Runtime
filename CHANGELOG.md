@@ -85,6 +85,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   Tool item are present. Only absent legacy status or `completed` is allowed;
   a known paid response retains sanitized ID/Usage without dispatching local
   Tools or replaying unfinished encrypted reasoning. No compatibility shim.
+  Another independent P1 fences duplicate JSON object keys in OpenAI/Anthropic
+  unary/SSE responses, including escaped equivalent names and nested Tool/
+  Usage authority. Previously Go's last-key-wins decoding could promote a
+  foreign or incomplete physical response to an executable local Tool.
+  Ambiguous response framing now fails closed without Tool execution,
+  replay or invented completed billing; normal JSON remains supported.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 

@@ -102,6 +102,18 @@ multi-provider router.
   non-assistant Message into local Tool execution authority. Previous
   simplified test fixtures lacking these mandatory wire fields were corrected
   rather than accommodated with a compatibility fallback.
+- **Unambiguous Provider JSON is mandatory:** both adapters reject duplicate
+  object keys at every JSON nesting level before decoding unary responses or
+  SSE event frames. Go's usual last-key-wins decode would otherwise allow
+  contradictory `object`/`role`, stop/completion status, local Tool name/ID
+  or Usage fields to be overwritten into a successful Tool execution. JSON
+  escape-equivalent member names are duplicates too. The shared bounded
+  Provider HTTP decoder enforces this for Unary; both SSE adapters validate
+  each JSON event before examining its type or authorizing content. Generic
+  SSE framing remains transport-only, and OpenAI's terminal `[DONE]` remains
+  supported. Ambiguous JSON is a **protocol failure**, not completed billing
+  proof: no local Tool, replay, terminal SSE success or fabricated Usage
+  receipt may escape. Valid sibling objects can reuse member names.
 - `model.Request.RequireToolCall` is a **verified terminal contract** for
   local functions: both adapters send the provider's mandatory Tool choice,
   then independently require at least one decoded `ToolCall` before returning

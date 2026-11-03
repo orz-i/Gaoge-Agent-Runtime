@@ -132,6 +132,19 @@ post-generation rejection; no Tool, text, encrypted replay or terminal SSE
 success can escape. The contract also applies to replay validation. No new
 schema, retry, Host route or compatibility bridge is added.
 
+**Provider JSON duplicate-member hard cut:** OpenAI Responses and Anthropic
+Messages previously accepted conflicting JSON object fields because standard
+Go unmarshalling silently retained the final value. A foreign `object`/`role`,
+incomplete/foreign status, Tool ID/name or altered Usage could be overwritten
+by a second same-named member and still authorize a local Tool. Unary bodies
+and SSE JSON event frames now reject **all duplicate object keys**, including
+nested and Unicode escape-equivalent names, before authority decoding. A
+contradictory response is a protocol failure, not a trustworthy completed
+billing receipt: no Tool, replay or terminal SSE success is certified.
+Legitimate nonduplicate JSON, member reuse in different objects and OpenAI's
+terminal `[DONE]` remain supported. No Host route, schema, retry policy,
+provider fallback or compatibility rewrite is added.
+
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,
 provider fallback, silent request rewrite or legacy bridge is introduced.

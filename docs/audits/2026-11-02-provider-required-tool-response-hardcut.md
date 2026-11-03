@@ -1163,3 +1163,86 @@ PR Head**; this evidence is not merge or beta.24 publication approval.
   SHA-256 remain unchanged. No live external gateway/provider credentials
   were tested. Fresh GitHub checks and independent merge-admission audit
   on the **new** PR Head remain separate gates, not automatically approved.
+
+## PR #87 independent P1 — ambiguous Provider JSON owner/Tool fields
+
+**Immutable audited PR Head:** `22b6d40459792b68b0021e2b73cce4a1f78c81ab`.
+All applicable GitHub CI, security and coverage checks were green on that
+Head before this audit began.
+
+**Independent RED on unchanged Head:** Standard Go `encoding/json` accepts
+repeated members of one JSON object and silently applies a last-key-wins
+interpretation. Both Provider adapters decoded the physical JSON first, then
+validated the overwritten value. A gateway could send an OpenAI Responses
+body with `object="chat.completion", object="response"`, outer
+`status="incomplete", status="completed"`, duplicated local
+`function_call.call_id`/status, or inconsistent token Usage; the adapter
+returned an executable Tool and successful terminal receipt. Equivalent
+Anthropic Messages failures included a physical `role="user",role="assistant"`
+owner, conflicting stop reasons and a duplicate `tool_use.name`/ID.
+
+An isolated read-only Go `-overlay -race` of the immutable original Head
+reproduced **7 direct Tool-admission failures** across the two Provider
+adapters. After introducing permanent tests, a second mutation restored
+only the original three Provider/HTTP source files (without reverting the
+new tests) and turned the exact test suites RED. In six real public
+**Agent → mocked Provider SSE HTTP → Kernel Memory Store** cases,
+**one actual local Tool Handler executed** for each ambiguous response
+(`effects=1`, `requests=2`). This was a real local side effect in a synthetic
+test handler; no external gateway, credentials or business effects were used.
+
+**Bounded hard cut:** The shared Provider HTTP boundary now validates
+object-member uniqueness at every level of bounded JSON before a unary
+response is unmarshalled. Each OpenAI/Anthropic SSE callback performs the
+same check on its bounded JSON event **before** type/role/status/Tool parsing.
+Unicode JSON escape-equivalent names are treated as duplicates. Repeated
+names in *different* objects and ordinary escaped content strings are valid.
+A bounded nesting limit protects the structural walk. The generic SSE
+framer remains data-agnostic, preserving non-JSON transport event support;
+OpenAI's permitted `[DONE]` terminator is unaffected. A duplicated member
+is **`providerhttp.ErrProtocol`**, not verified completed billing evidence:
+no ToolCall, ProviderReplay, SSE final ResponseID/Usage or second completed
+ModelInvocation is authorized. The first genuine ModelInvocation and its
+Usage remain untouched. No Provider-specific compatibility bridge, new
+Agent/Kernel schema, retry policy, Host router or additional dispatch state
+is introduced.
+
+**Permanent RED→GREEN regressions:**
+
+- `internal/providerhttp/json_keys_test.go` verifies distinct sibling
+  objects, escaped content and scalar arrays are accepted; duplicate outer,
+  nested and escape-equivalent names, malformed JSON, trailing documents,
+  overly deep nesting and ambiguous `ReadJSON` are rejected.
+- `openai/duplicate_authority_test.go` and
+  `anthropic/duplicate_authority_test.go` verify positive/negative unary/SSE
+  responses for foreign owners, stop/completion state, duplicated local
+  Tool identity, nested input/Usage and SSE event type.
+- `duplicate_json_authority_agent_test.go` proves six real public
+  Agent→Provider SSE→Kernel Store failures with **zero** Tool effects,
+  **two** physical Provider requests but **only one** completed and charged
+  ModelInvocation (17 input + 5 output tokens), and no forged second Tool,
+  ProviderReplay or completed billing receipt.
+- Read-only mutation restored the three original source files via Go
+  `-overlay -race`, turning these same tests RED with `effects=1` in all
+  six Agent paths; the corrected source runs GREEN. Focused suites repeated
+  ten times under Race, and complete Provider Race passed.
+
+No live provider/gateway compatibility is claimed. Independent CI on the
+new actual PR Head and immutable-Head merge admission remain separate gates.
+
+**Final local gates for duplicate Provider JSON authority P1:**
+
+- **PASS, exit 0:** full repository `make check` on repaired source
+  (Go unit/Race/vet/lint, TS lint/typecheck/**46 tests**/build,
+  evaluation/benchmark, OTel/A2A and beta.24 clean-consumer local cohort).
+- **PASS, exit 0:** isolated real PostgreSQL/Redis integration with
+  `node scripts/run-integration.mjs`; temporary Docker containers and test
+  network were cleaned.
+- **PASS:** complete Provider Race and focused direct/Agent Race suites
+  `-count=10`; original three-file immutable-Head mutation RED with actual
+  local Tool `effects=1` across all six public Agent paths; fixed source
+  GREEN; `gofmt` and diff checks.
+- Two existing untracked OpenAI probe scripts were excluded from commits
+  and remain SHA-256 identical. No live upstream Provider/gateway credentials
+  were tested. Fresh GitHub CI and independent new-Head merge-admission audit
+  are still required; **no merge or beta.24 publication is approved**.
