@@ -1335,3 +1335,104 @@ necessary. External live gateway/Provider compatibility was not tested.
   excluded from commits. No external live Provider/gateway credentials used.
   Fresh GitHub checks and independent merge-admission review on the new PR
   Head are required; this is not authorization to merge or publish beta.24.
+
+## 2026-11-03 — PR #87 independent P1: case-folded JSON aliases bypass exact-member uniqueness
+
+**Immutable independently audited PR Head:** `16ea6116ffe6c719a64c6dc7816e1a5366b62dcb`.
+All applicable GitHub CI/security/coverage checks were green when this
+review began. The worktree contained only two known, excluded untracked
+OpenAI probe scripts.
+
+**Independent READ-ONLY RED:** The preceding JSON transport hard cut rejected
+repeated object keys *only when their strings were identical*. However,
+Go's `encoding/json` matches JSON object member names to struct fields using
+case-insensitive Unicode simple folding. Therefore an outer OpenAI Responses
+object with `"Object":"chat.completion","object":"response"`, or
+`"Status":"incomplete","status":"completed"`, could pass the exact-key
+check and be decoded as a valid response with an executable local Tool.
+The same bypass applied to `"Type":"message","type":"function_call"`
+inside OpenAI output; Anthropic Messages accepted both `Role`/`role` and
+`Stop_Reason`/`stop_reason` with contradictory identities or stop reasons.
+The distinction was not safely preserved by the subsequent struct decoder.
+
+A temporary `/tmp` Go `-overlay -race` added direct tests without changing
+the reviewed Head. **Four OpenAI** Unary/SSE cases and **two Anthropic**
+Unary cases were proven to return `err=nil` and executable ToolCalls despite
+conflicting physical JSON keys. The initial candidate patch then added
+permanent direct/Agent tests. A second isolated source mutation restoring
+*only* the original Head's `internal/providerhttp/json_keys.go` with those
+new tests left in place turned them all RED again. Six public
+**Agent → mocked Provider HTTP/SSE → Kernel Memory Store** cases each
+executed **one actual local Tool Handler** (`effects=1`, `requests=2`)
+under the original code: three OpenAI and three Anthropic casefolded
+owner/status/Tool type or Usage aliases. This was a local synthetic Handler;
+no live Provider/gateway or production business Tool was invoked.
+
+**Minimal hard cut:** Extend the existing bounded shared JSON uniqueness
+walk, without creating another transport layer, by Unicode simple-folding
+all member names to a deterministic canonical representative before checking
+one object's seen-name set. Go's Unicode simple-fold equivalences include
+ASCII uppercase/lowercase, long-s `ſ`/`s`, Kelvin `K`/`K` and JSON Unicode
+escape-equivalent names. Hash-based per-object validation retains linear
+work in input size; recursion depth remains bounded. The checks already run
+in the shared unary `ReadJSON`, both Providers' SSE JSON frame consumers,
+OpenAI's double-encoded `function_call.arguments` and Anthropic's final
+reconstructed `tool_use.input`/replay paths. Thus a physical owner, stop
+reason, item type, Tool identity or Usage cannot be silently overwritten
+via case aliases before local Tool authorization.
+
+**Intentional breaking boundary:** Although general JSON objects distinguish
+case-sensitive names such as `x` and `X`, the Provider wire/Tool input
+contract now rejects **case-fold equivalent keys in the same object** to
+avoid decoding ambiguity. Sibling objects may reuse those names freely.
+There is no silent casing rewrite, automatic retry or legacy compatibility
+bridge. Ambiguous physical Provider responses fail `providerhttp.ErrProtocol`
+before producing any ToolCall, ProviderReplay, terminal SSE success or
+invented completed ModelInvocation/Usage receipt. The original first
+unambiguous ModelInvocation and its token accounting remain intact.
+No Agent/Kernel logic, database schema, Host route or Tool execution engine
+is changed.
+
+**Permanent RED→GREEN tests:**
+
+- `internal/providerhttp/json_keys_test.go` covers ASCII and Unicode casefold
+  collisions (including escaped Unicode and nested fields), case-alias
+  response ownership, distinct sibling objects, malformed/trailing JSON and
+  existing depth guards.
+- `openai/duplicate_authority_test.go` and
+  `anthropic/duplicate_authority_test.go` cover valid and conflicting
+  physical role/resource, type/status, Tool Call ID/name and Usage in both
+  Unary and SSE; the OpenAI SSE frame event `Type`/`type` alias is included.
+- `duplicate_json_authority_agent_test.go` adds six real public Agent→SSE→
+  Kernel cases with **zero physical Tool effects**, **only one consumed
+  ModelInvocation / 17 input + 5 output tokens** and a second pending
+  invocation without fabricated usage, ToolCalls or ProviderReplay.
+- A read-only source mutation against the actual immutable old Head makes
+  these new tests RED with `effects=1` in all six public Agent scenarios;
+  the corrected candidate passes the same tests and complete Provider Race.
+
+No live upstream compatibility is claimed. New Head GitHub CI/security and
+a separate immutable-Head merge-admission audit remain required; this is
+**not merge or beta.24 release authorization**.
+
+**Final local gates for case-folded JSON alias P1:**
+
+- **PASS, exit 0:** full repository `make check` on the repaired source
+  (Go unit/Race/vet/lint, TypeScript lint/typecheck/**46 tests**/build,
+  evaluation/benchmarks, OTel/A2A and beta.24 clean-consumer local-cohort
+  release gates).
+- **PASS, exit 0:** real isolated Docker PostgreSQL/Redis integration via
+  `node scripts/run-integration.mjs` including cross-connection recovery,
+  cancellation and continuation; all temporary containers/network removed.
+- **PASS:** focused direct Provider/Agent Race **10** repetitions; full
+  Provider Race; isolated restoration of immutable original Head's
+  `internal/providerhttp/json_keys.go` turns new tests RED with real local
+  Agent Handler `effects=1` in all six scenarios; corrected source GREEN.
+  Strict Provider `golangci-lint` returned **0 issues**, `gofmt` and diff
+  checks passed. A test-only `staticcheck` suggestion about switch
+  formatting was corrected before committing; no runtime behavior changed.
+- Two preexisting untracked OpenAI probe scripts were excluded and remain
+  SHA-256-identical. No live upstream Provider/gateway credentials tested.
+  Fresh GitHub CI/security checks and a new independent immutable-Head
+  merge-admission audit are still required; no merge or beta.24 publication
+  has been authorized by this source-level review.

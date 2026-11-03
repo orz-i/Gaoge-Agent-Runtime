@@ -99,6 +99,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   Usage survives only as a sanitized rejected response receipt. The original
   Head executed one real Tool Handler in either bypass; repaired Race and
   Agent/Kernel tests prove zero effects. No compatibility shim is added.
+  Another independently confirmed P1 rejects case-folded JSON member
+  aliases (`Object`/`object`, `Role`/`role`, Unicode `ſ`/`s`, `K`/`K`),
+  which Go's struct decoding otherwise treats as one authority field even
+  without identical keys. The shared bounded uniqueness check now rejects
+  colliding names at every JSON object level before authorizing Tool or
+  replay, including nested JSON input. Distinct sibling objects remain
+  supported; case-distinct keys in the *same* object deliberately fail closed.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 

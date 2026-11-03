@@ -160,6 +160,21 @@ ResponseID/Usage receipt. Incomplete or unknown Usage, invalid framing and
 transport failures do not mint billing evidence. No Agent/Kernel, schema,
 Host route, retry or legacy compatibility bridge is added.
 
+**Case-folded Provider JSON field alias hard cut:** An exact-spelling
+repeated-key check was insufficient because Go also case-folds JSON names
+when matching struct fields. OpenAI `Object`/`object`, `Status`/`status` and
+`Type`/`type`, or Anthropic `Role`/`role` and `Stop_Reason`/`stop_reason`,
+previously allowed contradictory physical evidence to authorize local Tools.
+The existing bounded Provider JSON uniqueness check now treats Unicode
+simple-fold equivalent keys as ambiguous at **every object level**, including
+SSE frames and encoded Tool inputs. Non-ASCII equivalents such as `ſ`/`s`
+and `K`/`K` are covered. This deliberately rejects keys differing only by
+case inside the same object (including otherwise case-sensitive JSON Tool
+arguments); producers must choose unambiguous member names. Different
+objects may reuse the same names. Rejected physical Provider framing yields
+no ToolCall, ProviderReplay, forged billing receipt or SSE terminal success;
+no Agent/Kernel schema, Host route, retry or compatibility bridge is added.
+
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,
 provider fallback, silent request rewrite or legacy bridge is introduced.

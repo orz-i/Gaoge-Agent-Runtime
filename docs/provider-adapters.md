@@ -114,6 +114,16 @@ multi-provider router.
   supported. Ambiguous JSON is a **protocol failure**, not completed billing
   proof: no local Tool, replay, terminal SSE success or fabricated Usage
   receipt may escape. Valid sibling objects can reuse member names.
+  JSON names differing only by case or Unicode simple-fold alias are now
+  **also ambiguous within one object**. Go's struct decoder matches
+  `Object`/`object`, `Status`/`status`, `Role`/`role` and Unicode equivalents
+  as one field, so an exact-spelling duplicate check alone cannot protect
+  Provider ownership. The same bounded uniqueness walker canonicalizes
+  each member using Unicode simple folding before checking repetition;
+  it covers outer envelopes, nested Tool fields and double-encoded input.
+  This intentionally rejects case-distinct keys within one object, even
+  when a generic JSON map might distinguish them. Different sibling objects
+  can still reuse those keys; there is no casing rewrite or retry fallback.
   **Double-encoded Tool input is checked separately:** OpenAI's
   `function_call.arguments` is a JSON string inside a validated response,
   and Anthropic SSE `input_json_delta.partial_json` is a JSON string within
