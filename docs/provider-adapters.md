@@ -85,6 +85,17 @@ multi-provider router.
 
 ## Supported model contract
 
+**OpenAI outer terminal proof:** A physical `response` with
+`status=completed` is not trustworthy if `error` or
+`incomplete_details` is non-null. Check both original fields before
+any physical function-call execution, persisted response ID/Usage,
+encrypted replay or terminal SSE success. Absent fields and JSON `null`
+are supported. Contradictory values (including empty objects or
+wrong-type scalars) are unreceipted `ErrUnsupported`, not completed
+paid semantic rejections. This protects both Unary and SSE, including
+the Agent/Kernel's durable ModelInvocation. See the
+[independent P1 audit](audits/2026-11-03-pr87-openai-terminal-evidence-contradiction.md).
+
 **Anthropic SSE completion proof after content rejection:** Unsupported
 content may be drained to a genuine `message_stop` with final cumulative
 Usage, but every later delta for a known block must still match that

@@ -4,6 +4,19 @@
 
 ## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
 
+**OpenAI completed response contradictory terminal evidence hard cut
+(PR #87 independent P1):** OpenAI Responses `status=completed` must
+not coexist with non-null `error` or `incomplete_details`. Those fields
+declare failure or truncation and cannot be discarded while the completed
+envelope's local Tools, Usage and response ID are accepted. Both Unary
+and SSE previously executed a real registered local Tool in isolated
+Agent/Kernel tests on an unchanged contradictory original Head. Both
+fields must now be absent or literal JSON `null`; any non-null value
+fails closed without Tool, replay or completed billing receipt, even
+if `status` claims completion. No field synthesis, fallback, migration,
+retry-policy or Host/Agent/Kernel change. See
+[independent audit](audits/2026-11-03-pr87-openai-terminal-evidence-contradiction.md).
+
 **Anthropic post-rejection SSE delta framing hard cut (PR #87 P1):**
 A previously unsupported content block may be drained for verified final
 Usage, but does not suspend the transport protocol. Known active block

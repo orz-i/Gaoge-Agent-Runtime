@@ -5,6 +5,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 further OpenAI Responses P1 hard cut: a physical
+  `status=completed` envelope must not simultaneously carry non-null
+  `error` (generation failure) or `incomplete_details` (truncation).
+  Previously both Unary and SSE authorized local `function_call` output
+  and completed billing despite contradictory terminal evidence; public
+  Agent→SSE→Kernel tests executed a registered Tool Handler (`effects=1`)
+  on the original Head in two cases. The shared decoding boundary now
+  refuses these envelopes without Tool, replay, completed Usage/ID or
+  terminal SSE success. Real absent/null fields remain valid; no
+  Agent/Kernel, Host, persistence or compatibility rewrite. See
+  [independent audit](docs/audits/2026-11-03-pr87-openai-terminal-evidence-contradiction.md).
+
 - PR #87 additional Anthropic SSE P1: an earlier semantic content rejection
   must not disable physical `content_block_delta` ownership, Tool input
   consistency or Thinking-signature sequencing. Mismatched delta types and
