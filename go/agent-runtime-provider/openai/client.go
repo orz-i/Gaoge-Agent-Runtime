@@ -413,8 +413,12 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			// frame cannot erase that contradictory terminal evidence.
 			if len(identity.Status) != 0 {
 				var status string
-				if json.Unmarshal(identity.Status, &status) != nil ||
-					status != "in_progress" && !(frame.Type == "response.created" && status == "queued") {
+				if json.Unmarshal(identity.Status, &status) != nil {
+					return providerhttp.ErrProtocol
+				}
+				validStatus := status == "in_progress" ||
+					frame.Type == "response.created" && status == "queued"
+				if !validStatus {
 					return providerhttp.ErrProtocol
 				}
 			}
