@@ -234,6 +234,15 @@ multi-provider router.
   that may be discarded and replaced by later `content_block_*` events.
   Such a stream fails before local Tool authorization, signed replay,
   successful terminal SSE evidence or completed Usage accounting.
+  **Anthropic SSE Tool argument delta ownership:** the original
+  `content_block_start.content_block.input` is physical Tool input evidence.
+  When any nonempty `input_json_delta.partial_json` is received, initial
+  `input` must be an **empty JSON object**. A populated input, `null` or
+  a nonobject cannot be silently discarded and replaced by a later JSON
+  fragment: conflicting physical Tool parameters are invalid SSE framing,
+  with no executable Tool, replay, terminal success or billing receipt.
+  An empty initial object followed by fragments and a complete initial
+  object with **no** fragments remain supported, including nested JSON.
   Anthropic SSE must receive sequential, non-overlapping, explicitly indexed
   content blocks **before** `message_delta`. No Tool start/stop/delta may
   follow that final message phase, even if `message_stop` eventually arrives.

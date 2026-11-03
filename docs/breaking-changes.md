@@ -97,6 +97,20 @@ Public Agent→HTTP SSE→Kernel Store regression tests prove the original code
 executed a real Tool Handler and the corrected code never does. No new
 Host route, retry, persistence schema or compatibility fallback is added.
 
+**Anthropic SSE Tool input delta substitution hard cut:** An otherwise
+well-formed stream could previously supply `tool_use.input={"x":1}` in
+`content_block_start`, then send `input_json_delta.partial_json={"x":2}`;
+the final block-stop handler silently replaced the first physical argument
+value with the second and authorized a local Tool. The reconstructed Tool
+input now requires the initial `input` to be an empty JSON object **if any
+nonempty Tool JSON delta was received**. A populated initial object or
+`null` with later fragments fails as an untrusted SSE framing conflict;
+no Tool executes, no replay is saved and no verified completed billing
+receipt is fabricated. Legitimate `{}` plus streamed JSON and complete
+initial input **without** deltas continue to work. Tests independently
+reproduce real Agent→SSE→Kernel Tool effects on the original PR Head and
+prove zero effects after repair. No schema/Host/Kernel change or fallback.
+
 **OpenAI output-message hard cut:** even with a valid `object=response` and a
 completed physical `function_call`, a sibling `message` (phased or unphased)
 whose explicit `role` is not `assistant`, or whose explicit `status` is not

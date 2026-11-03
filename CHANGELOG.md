@@ -68,6 +68,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   cannot be replaced by a different executable Tool or grant terminal billing
   proof. Valid empty/omitted initial content remains supported; original
   Head Agent/Kernel mutation reproduces actual Tool effects, fixed source zero.
+  A further Anthropic SSE P1 prevents nonempty/null Tool input already
+  present at `content_block_start` from being silently overwritten by later
+  `input_json_delta` fragments. Only an empty initial input object may be
+  populated by streamed arguments; complete initial Tool input without
+  deltas remains valid. Read-only original-Head mutation reproduces real
+  Tool Handler execution, while repaired Provider/Agent tests prove zero
+  effects and no invented completion receipt.
   A further independent P1 closes the unphased OpenAI output-message gap:
   an explicit foreign role or unfinished `message.status` now rejects the
   entire completed output, including any otherwise-valid sibling Tool call.

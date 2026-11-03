@@ -1606,3 +1606,90 @@ merging PR #87 or publishing beta.24.
   exercised. New actual-Head GitHub CI/security plus a separate independent
   merge-admission audit remain required; no merge/beta.24 publication is
   authorized by this local repair.
+
+## 2026-11-03 — PR #87 independent P1: Anthropic SSE Tool input delta substituted physical start arguments
+
+**Immutable audited PR Head:** `ad65aba8265d6315a7fa8d3548bb45e33f4fefae`.
+All applicable GitHub CI, security and coverage checks were completed
+successfully when this independent review began. The only preexisting
+untracked files were two OpenAI probe scripts, excluded from this change.
+
+**Read-only RED on the unchanged Head:** The existing Anthropic SSE
+`content_block_start` handler preserved the physical `tool_use.input` on
+its parsed block. However, if later `input_json_delta` frames arrived,
+`content_block_stop` unconditionally replaced that original input with
+`chunks[index].String()`. Thus a gateway could send a nonempty original
+Tool input `{"x":1}` followed by a later `partial_json` encoding
+`{"x":2}`, or a nested input `{"nested":{"approved":false}}` followed
+by `{"nested":{"approved":true}}`, and the adapter would accept and
+authorize the latter as the executable local Tool's arguments. An initial
+`input:null` followed by a valid Tool JSON fragment was likewise silently
+replaced. The outer SSE framing, Provider identity and final Usage remained
+valid, so none of the prior uniqueness/Role/Tool ID checks noticed the
+conflicting physical Tool argument evidence.
+
+An isolated `/tmp` Go `-overlay -race` test on the original Head confirmed
+**three invalid argument substitutions** returned `err=nil`, an executable
+ToolCall, ProviderReplay and completed ResponseID/Usage. Two positive
+controls already passed: physical initial `input:{}` plus later JSON delta,
+and a populated initial JSON object **with no later delta**.
+
+**Minimal repair:** In the existing `content_block_stop` Tool reconstruction,
+when a nonempty accumulated `input_json_delta` is present, require the
+initial physical `tool_use.input` to be a valid **empty JSON object**.
+If initial input has members, is `null`, or is not an object, fail as
+`providerhttp.ErrProtocol` **before** replacing any Tool input, returning
+local Tool authorization, saved replay or successful terminal SSE Usage.
+An empty JSON object plus a streamed fragment and a complete object with no
+fragment remain supported, including nested JSON. This treats conflicting
+initial/final physical Tool arguments as a malformed SSE stream, not a
+completed paid response; the untrusted stream does not mint completion or
+billing evidence. No new provider adapter, Agent/Kernel logic, Host route,
+persistence schema, migration, automatic retry or compatibility bridge was
+added.
+
+**Permanent regression and independent source mutation evidence:**
+
+- `anthropic/tool_input_delta_authority_test.go`: direct Anthropic SSE tests
+  exercise 3 conflicting Tool input substitutions with valid final Usage,
+  plus 2 positive cases preserving legitimate empty-input streaming and
+  complete initial input without deltas.
+- `anthropic_sse_start_content_agent_test.go`: extends the public
+  **Agent → mocked Anthropic SSE HTTP → Kernel Memory Store** regression
+  with the 3 conflicting input cases alongside prior message-start content
+  checks. Corrected source proves **zero local Tool Handler effects**,
+  **two** physical Provider requests and only the **first** unambiguous
+  ModelInvocation consumed (17 input + 5 output tokens); no unverified
+  second completion/Usage receipt or Tool replay is fabricated.
+- Isolated original-Head mutation using `go test -overlay -race` restored
+  only `anthropic/client.go`, leaving all permanent tests in place. The
+  three direct invalid cases turned RED, and **all three public Agent cases
+  actually executed a registered local Tool Handler once** (`effects=1`,
+  `requests=2`). This was a synthetic local handler, never an external
+  business Tool or live Provider. Valid controls remained GREEN.
+- On repaired source both direct and public Agent suites passed 10
+  consecutive Race repetitions; full Provider Race and strict Provider
+  golangci-lint (0 issues) passed.
+
+Live gateway/provider compatibility was not tested. Fresh GitHub CI and
+separate independent merge-admission audit on the new actual Head remain
+required. This repair is **not** authorization to merge PR #87 or publish
+beta.24.
+
+**Final local quality gates for Anthropic SSE Tool input substitution P1:**
+
+- **PASS, exit 0:** full repository `make check` on the repaired source
+  (all Go unit/Race/vet/lint, TypeScript lint/typecheck/**46 tests**/build,
+  evaluation/benchmarks, A2A/MCP/OTel and beta.24 clean-consumer cohort).
+- **PASS, exit 0:** real isolated PostgreSQL/Redis integration via
+  `node scripts/run-integration.mjs`, with all test containers and network
+  removed after the run.
+- **PASS:** focused direct/Agent Race `-count=10`, full Provider Race,
+  strict Provider lint **0 issues**, original reviewed-Head source mutation
+  RED with **three actual Tool Handler executions** in the public Agent
+  negative paths, repaired source GREEN. `gofmt` and `git diff --check` passed.
+- Both previously existing untracked OpenAI probe scripts remain SHA-256
+  identical and were excluded from commits. No live upstream Provider or
+  gateway credentials were tested. GitHub checks on the **new actual PR Head**
+  and a separate immutable-Head merge-admission audit remain mandatory.
+  Neither merging PR #87 nor publishing beta.24 is authorized by this fix.
