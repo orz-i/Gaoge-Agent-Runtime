@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -90,7 +91,7 @@ func projectOutput(outputs []json.RawMessage) (outputProjection, error) {
 			// Preserve exact physical Call ID identity even when projecting
 			// replay evidence without the earlier response-item fence.
 			if item.CallID == "" || strings.TrimSpace(item.CallID) != item.CallID ||
-				item.Name == "" || !json.Valid([]byte(item.Arguments)) {
+				item.Name == "" || providerhttp.ValidateUniqueJSONKeys([]byte(item.Arguments)) != nil {
 				return outputProjection{}, ErrUnsupported
 			}
 			result.calls = append(result.calls, item)

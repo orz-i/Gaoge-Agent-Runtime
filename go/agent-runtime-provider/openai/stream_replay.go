@@ -45,7 +45,7 @@ func (items *completedOutputItems) observe(index *int, raw json.RawMessage) erro
 		}
 		if json.Unmarshal(raw, &call) != nil || call.CallID == "" ||
 			strings.TrimSpace(call.CallID) != call.CallID || call.Name == "" ||
-			!json.Valid([]byte(call.Arguments)) {
+			providerhttp.ValidateUniqueJSONKeys([]byte(call.Arguments)) != nil {
 			return providerhttp.ErrProtocol
 		}
 		if len(call.Status) != 0 {

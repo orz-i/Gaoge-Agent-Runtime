@@ -26,6 +26,24 @@ func TestCompletedMalformedToolStillConsumesPaidAgentInvocation(t *testing.T) {
 	}})
 }
 
+// OpenAI's function_call.arguments field is itself an encoded JSON string.
+// Even a strictly validated outer response cannot certify repeated fields
+// within that string as a deterministic local Tool invocation.
+func TestCompletedOpenAIDuplicateEncodedArgumentsNeverExecuteTool(t *testing.T) {
+	for _, tc := range []struct{ name, arguments string }{
+		{name: "duplicate_root", arguments: `{"x":1,"x":2}`},
+		{name: "duplicate_nested", arguments: `{"nested":{"flag":false,"flag":true}}`},
+		{name: "escaped_equivalent", arguments: `{"x":1,"\u0078":2}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertCompletedRejectedToolReceipt(t, []any{map[string]any{
+				"type": "function_call", "status": "completed",
+				"call_id": "valid-physical-id", "name": "lookup", "arguments": tc.arguments,
+			}})
+		})
+	}
+}
+
 // Whitespace-only or padded physical Call IDs are not stable Tool identities.
 // Agent would normalize or replace them; a Provider must instead account the
 // physical paid response and reject the entire unauthorized Tool execution.

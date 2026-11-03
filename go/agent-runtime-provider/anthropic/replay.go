@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -185,6 +186,12 @@ func parseContentBlock(raw json.RawMessage) (contentBlock, error) {
 		}
 	case "tool_use":
 		allowed["id"], allowed["name"], allowed["input"] = true, true, true
+		// Anthropic SSE partial_json is a JSON string within a well-formed
+		// event. Validate its reconstructed Tool input separately: outer
+		// frame uniqueness cannot see duplicate object members inside it.
+		if providerhttp.ValidateUniqueJSONKeys(block.Input) != nil {
+			return contentBlock{}, ErrUnsupported
+		}
 		// Tool IDs are physical Provider authority, not user-facing text.
 		// Reject IDs that Agent would trim or replace before dispatch,
 		// including whitespace-only identifiers. This also fences replay.

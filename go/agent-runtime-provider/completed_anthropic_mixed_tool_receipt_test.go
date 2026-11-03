@@ -27,6 +27,7 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 		richCitations bool
 		toolFreeBlock string
 		toolID        string
+		partialJSON   string
 	}{
 		{name: "invalid_thinking_then_tool", invalidFirst: true},
 		{name: "tool_then_invalid_thinking"},
@@ -36,6 +37,9 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 		{name: "required_tool_valid_text_only", toolFreeBlock: `{"type":"text","text":"unauthorized final"}`},
 		{name: "whitespace_only_physical_tool_id", toolID: " "},
 		{name: "padded_physical_tool_id", toolID: " toolu-1 "},
+		{name: "duplicate_encoded_delta_root", partialJSON: `{"x":1,"x":2}`},
+		{name: "duplicate_encoded_delta_nested", partialJSON: `{"nested":{"flag":false,"flag":true}}`},
+		{name: "duplicate_encoded_delta_escaped", partialJSON: `{"x":1,"\u0078":2}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var calls, effects atomic.Int32
@@ -76,11 +80,15 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 						toolID = "toolu-1"
 					}
 					tool := fmt.Sprintf(`{"type":"tool_use","id":%q,"name":"lookup","input":{}}`, toolID)
-					if tc.toolID != "" {
-						// This is a well-formed, single-tool response except for
-						// its physical ID: no invalid sibling may hide the bug.
+					if tc.toolID != "" || tc.partialJSON != "" {
+						// No invalid sibling should mask malformed physical
+						// Tool identity or double-encoded input evidence.
 						send("content_block_start", fmt.Sprintf(
 							`{"type":"content_block_start","index":0,"content_block":%s}`, tool))
+						if tc.partialJSON != "" {
+							send("content_block_delta", fmt.Sprintf(
+								`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":%q}}`, tc.partialJSON))
+						}
 						send("content_block_stop", `{"type":"content_block_stop","index":0}`)
 						send("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}`)
 					} else {

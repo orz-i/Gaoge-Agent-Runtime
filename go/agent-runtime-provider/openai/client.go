@@ -504,7 +504,8 @@ func verifyCompletedFunctionCallItems(result model.Response, output []json.RawMe
 		// produces an empty string. That normalization must never turn an
 		// unverified physical provider ID into an executable local Tool.
 		if item.CallID == "" || strings.TrimSpace(item.CallID) != item.CallID ||
-			item.Name == "" || names[item.Name] == "" || !json.Valid([]byte(item.Arguments)) {
+			item.Name == "" || names[item.Name] == "" ||
+			providerhttp.ValidateUniqueJSONKeys([]byte(item.Arguments)) != nil {
 			return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
 		}
 	}
