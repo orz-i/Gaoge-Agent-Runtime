@@ -85,6 +85,18 @@ multi-provider router.
 
 ## Supported model contract
 
+**Agent-level typed rejection receipt:** Provider adapters sanitize a
+completed but semantically invalid Tool response to physical ResponseID
+and verifiable cumulative Usage. Agent enforces the same minimal
+persistence boundary even if a custom named Provider or Model middleware
+returns a rejected response with extra text/Tools/replay fields. Named
+Providers must have an exact nonempty physical ResponseID before
+Agent accepts a known paid rejection. An ID-less rejection cannot
+authorize a completed ModelInvocation or charge known Usage; a valid
+one never persists its rejected payload. Unnamed local Models keep
+their prior optional physical response ID contract. See the
+[P1/P2 independent audit](audits/2026-11-03-pr87-rejected-receipt-agent-authority.md).
+
 **Cross-invocation physical completion-ID authority:** OpenAI Responses
 and Anthropic Messages adapters require exact, nonblank Provider-owned IDs.
 Agent additionally rejects a *new* completed or known-billed rejected

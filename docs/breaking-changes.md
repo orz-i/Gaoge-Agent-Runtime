@@ -4,6 +4,21 @@
 
 ## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
 
+**Agent rejected-completion receipt proof and payload isolation hard cut
+(PR #87 P1/P2):** A typed `model.ResponseRejectedError` and Usage do not
+by themselves establish a **named Provider's** paid completion when its
+original `ResponseID` is absent or would be changed by whitespace
+normalization. Such a reply fails without a completed/billed
+ModelInvocation. For valid known rejected completions, Agent persists
+only original ResponseID and cloned Usage, never rejected Content,
+local/hosted ToolCalls, ProviderReplay, citations, artifacts or other
+payload fields. The former Agent code durably persisted untrusted
+rejected Tools and text supplied by custom Providers/middleware;
+pre-stable fail-closed enforcement now matches Provider adapter semantics.
+Unnamed local Models retain their original optional ID contract.
+No Kernel/Store schema, migration, new replay version or legacy bridge.
+See [independent audit](audits/2026-11-03-pr87-rejected-receipt-agent-authority.md).
+
 **Repeated physical Provider completion ID hard cut (PR #87 independent P1):**
 A named Provider's `ProviderResponseID` is a physical completion identity,
 not a reusable label. Agent now rejects any successful or known-billed

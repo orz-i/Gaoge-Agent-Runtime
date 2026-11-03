@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 independent Agent rejected-completion receipt hard cut: a named
+  Provider's typed post-generation rejection cannot establish paid
+  completion without an exact nonempty physical ResponseID, even with
+  apparently valid Usage. Previously an ID-less rejection was billed.
+  The Agent now also persists **only ResponseID and valid Usage** for
+  known rejected completions: custom Provider/middleware errors previously
+  persisted untrusted rejected text and unauthorized ToolCalls inside
+  durable ModelInvocation receipts. Correction/restart and normal billing
+  remain unchanged. No Host/Kernel migration or compatibility bridge.
+  See [independent P1/P2 audit](docs/audits/2026-11-03-pr87-rejected-receipt-agent-authority.md).
+
 - PR #87 further independent P1: Agent now rejects a completed physical
   Provider response ID that has already been consumed by a different
   ModelInvocation under the same named Provider/binding in the same Run.
