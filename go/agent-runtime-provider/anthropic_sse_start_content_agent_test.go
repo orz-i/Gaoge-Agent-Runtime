@@ -21,10 +21,13 @@ import (
 // local Tool authorization. Exercise public Agent -> actual mock SSE HTTP ->
 // Kernel persistence and a registered Tool Handler, not just JSON parsing.
 func TestAnthropicSSEInitialPhysicalContentCannotDispatchTool(t *testing.T) {
-	for _, tc := range []struct{ name, startContent string }{
+	for _, tc := range []struct{ name, startContent, startInput, delta string }{
 		{name: "foreign_tool", startContent: `[{"type":"tool_use","id":"other-call","name":"lookup","input":{}}]`},
 		{name: "conflicting_text", startContent: `[{"type":"text","text":"other answer"}]`},
 		{name: "explicit_null", startContent: "null"},
+		{name: "tool_arguments_replaced", startContent: "[]", startInput: `{"x":1}`, delta: `{"x":2}`},
+		{name: "nested_tool_arguments_replaced", startContent: "[]", startInput: `{"nested":{"approved":false}}`, delta: `{"nested":{"approved":true}}`},
+		{name: "null_tool_arguments_replaced", startContent: "[]", startInput: "null", delta: `{"x":2}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var requests, effects atomic.Int32
@@ -44,7 +47,21 @@ func TestAnthropicSSEInitialPhysicalContentCannotDispatchTool(t *testing.T) {
 				if n == 1 {
 					send("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"not a Tool"}}`)
 				} else {
-					send("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-one","name":"lookup","input":{}}}`)
+					initial := "{}"
+					if tc.startInput != "" {
+						initial = tc.startInput
+					}
+					send("content_block_start", fmt.Sprintf(
+						`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call-one","name":"lookup","input":%s}}`, initial))
+					if tc.delta != "" {
+						encoded, encodeErr := json.Marshal(tc.delta)
+						if encodeErr != nil {
+							t.Error(encodeErr)
+							return
+						}
+						send("content_block_delta", fmt.Sprintf(
+							`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":%s}}`, encoded))
+					}
 				}
 				send("content_block_stop", `{"type":"content_block_stop","index":0}`)
 				stop := "end_turn"

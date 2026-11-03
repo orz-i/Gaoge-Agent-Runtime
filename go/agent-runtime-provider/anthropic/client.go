@@ -609,6 +609,14 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			closed[index] = true
 			activeBlock = -1
 			if b.Type == "tool_use" && chunks[index].Len() > 0 {
+				// A streamed Tool argument delta may populate the initial empty
+				// input object, but must never replace physical arguments already
+				// present in content_block_start (including explicit null).
+				// Otherwise conflicting upstream evidence becomes executable.
+				var initial map[string]json.RawMessage
+				if json.Unmarshal(b.Input, &initial) != nil || initial == nil || len(initial) != 0 {
+					return providerhttp.ErrProtocol
+				}
 				b.Input = json.RawMessage(chunks[index].String())
 			}
 		case "message_delta":
