@@ -4,6 +4,24 @@
 
 ## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
 
+**Repeated physical Provider completion ID hard cut (PR #87 independent P1):**
+A named Provider's `ProviderResponseID` is a physical completion identity,
+not a reusable label. Agent now rejects any successful or known-billed
+rejection whose physical ID was already persisted by a different
+completed/consumed ModelInvocation in the **same Run** under the same
+Provider and `BindingFingerprint`. Previously two independent SSE
+replies with the same physical ID but distinct Tool Call IDs could execute
+a local Tool twice; a second rejected reply could also charge duplicate
+Usage. A duplicate is a permanent invalid Model response, not a second
+completed/billable receipt, Tool authorization, or retry fallback.
+Recovery retries of the **same** pending invocation remain valid; a
+changed Host binding, separate named Provider, or unverified local Model
+does not collide. No SQL/Kernel schema, HTTP Provider contract, global ID
+index, compatibility shim or legacy ID rewrite. Existing synthetic
+Provider fixtures that returned the same physical ID for distinct
+invocations are corrected to derive it from stable `InvocationID`.
+See [independent audit](audits/2026-11-03-pr87-provider-response-id-reuse-guard.md).
+
 **OpenAI completed response contradictory terminal evidence hard cut
 (PR #87 independent P1):** OpenAI Responses `status=completed` must
 not coexist with non-null `error` or `incomplete_details`. Those fields

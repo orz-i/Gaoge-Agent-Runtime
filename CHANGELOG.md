@@ -5,6 +5,19 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 further independent P1: Agent now rejects a completed physical
+  Provider response ID that has already been consumed by a different
+  ModelInvocation under the same named Provider/binding in the same Run.
+  Previously an upstream reply could reuse an old response ID with a fresh
+  Tool ID and execute a registered local Tool (OpenAI and Anthropic each
+  reproduced `effects=1`), or mint a second rejected paid receipt
+  (34/10 rather than 17/5 tokens). A minimal Agent-owned receipt fence
+  fails closed before Tool dispatch or billing. Retries of one invocation,
+  independent Provider/binding identities and unnamed local models remain
+  unaffected; no Kernel/Store schema or compatibility bridge. Synthetic
+  fault-test Provider IDs now derive from their stable InvocationID.
+  See [independent P1 audit](docs/audits/2026-11-03-pr87-provider-response-id-reuse-guard.md).
+
 - PR #87 further OpenAI Responses P1 hard cut: a physical
   `status=completed` envelope must not simultaneously carry non-null
   `error` (generation failure) or `incomplete_details` (truncation).

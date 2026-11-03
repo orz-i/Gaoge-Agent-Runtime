@@ -85,6 +85,19 @@ multi-provider router.
 
 ## Supported model contract
 
+**Cross-invocation physical completion-ID authority:** OpenAI Responses
+and Anthropic Messages adapters require exact, nonblank Provider-owned IDs.
+Agent additionally rejects a *new* completed or known-billed rejected
+response when a **different consumed/completed invocation in the same Run**
+already recorded that ID under the exact same named Provider and immutable
+`BindingFingerprint`. A second Tool Call ID or Usage counter does not
+make a reused physical response a new billable generation. Rejected reuse
+does not authorize Tools, replay, a completed ledger record or a second
+token charge. Retries of the same pending invocation retain their stable
+identity; unrelated Provider/Host bindings are independent. This requires
+no Provider-side state, cross-Run global index or database migration.
+See [independent P1 audit](audits/2026-11-03-pr87-provider-response-id-reuse-guard.md).
+
 **OpenAI outer terminal proof:** A physical `response` with
 `status=completed` is not trustworthy if `error` or
 `incomplete_details` is non-null. Check both original fields before
