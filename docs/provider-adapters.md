@@ -114,6 +114,19 @@ multi-provider router.
   supported. Ambiguous JSON is a **protocol failure**, not completed billing
   proof: no local Tool, replay, terminal SSE success or fabricated Usage
   receipt may escape. Valid sibling objects can reuse member names.
+  **Double-encoded Tool input is checked separately:** OpenAI's
+  `function_call.arguments` is a JSON string inside a validated response,
+  and Anthropic SSE `input_json_delta.partial_json` is a JSON string within
+  valid event framing. These inner strings are not objects visible to the
+  outer uniqueness check. The OpenAI completed function-call fence and
+  shared projection/replay (including SSE completed-item evidence) validate
+  the decoded argument JSON; Anthropic validates the reconstructed
+  `tool_use.input` in its common content-block parser before Tool or replay
+  authorization. Duplicate inner object members, including Unicode-escaped
+  aliases, are a post-completion Tool rejection with only a minimal original
+  ResponseID/Usage receipt when final cumulative Usage is verifiable. No
+  handler, replay or terminal SSE success may escape; unverified Usage still
+  cannot mint a receipt. Unambiguous nested objects remain supported.
 - `model.Request.RequireToolCall` is a **verified terminal contract** for
   local functions: both adapters send the provider's mandatory Tool choice,
   then independently require at least one decoded `ToolCall` before returning

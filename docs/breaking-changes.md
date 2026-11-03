@@ -145,6 +145,21 @@ Legitimate nonduplicate JSON, member reuse in different objects and OpenAI's
 terminal `[DONE]` remain supported. No Host route, schema, retry policy,
 provider fallback or compatibility rewrite is added.
 
+**Double-encoded Tool arguments uniqueness hard cut:** Strict outer JSON/SSE
+frame validation alone does not inspect strings containing another JSON
+value. Previously OpenAI `function_call.arguments` containing
+`{"x":1,"x":2}` and Anthropic SSE `input_json_delta.partial_json`
+reconstructing a repeated-key `tool_use.input` could still authorize a
+local Tool Handler. OpenAI now checks decoded argument JSON during physical
+function-item verification, output projection and SSE done-item validation.
+Anthropic validates the reconstructed Tool input in its existing content
+block parser, also protecting stateless replay. Duplicate keys at any depth,
+including escaped aliases, reject the Tool; completed responses with verified
+final Usage retain only a sanitized `model.post_generation_failed`
+ResponseID/Usage receipt. Incomplete or unknown Usage, invalid framing and
+transport failures do not mint billing evidence. No Agent/Kernel, schema,
+Host route, retry or legacy compatibility bridge is added.
+
 This deliberately drops the former permissive acceptance of gateway
 nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,
 provider fallback, silent request rewrite or legacy bridge is introduced.

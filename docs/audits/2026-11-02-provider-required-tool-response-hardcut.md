@@ -1246,3 +1246,92 @@ new actual PR Head and immutable-Head merge admission remain separate gates.
   and remain SHA-256 identical. No live upstream Provider/gateway credentials
   were tested. Fresh GitHub CI and independent new-Head merge-admission audit
   are still required; **no merge or beta.24 publication is approved**.
+
+## 2026-11-03 — PR #87 independent P1: duplicate-key JSON inside encoded Tool input
+
+**Immutable reviewed Head:** `805bca134173f29f862741f3e4f76114b3888835`.
+All relevant GitHub CI/security/coverage checks were green at audit start.
+
+**Independent RED, both providers:** The preceding shared Provider HTTP JSON
+uniqueness fence validates outer OpenAI/Anthropic JSON and SSE frames, but
+cannot inspect another JSON value stored **as a string** inside those frames.
+OpenAI `function_call.arguments` is a string containing complete JSON;
+Anthropic SSE `content_block_delta.delta.partial_json` is a string whose
+fragments reconstruct `tool_use.input`. Both were accepted using
+`json.Valid`, so duplicate keys such as `{"x":1,"x":2}`, nested duplicate
+keys and Unicode escape-equivalent member names could still produce a local
+executable ToolCall. The model/Tool schema check cannot itself certify that
+a duplicate-name object has unambiguous physical meaning.
+
+Two isolated `/tmp` test-only overlays of the unchanged Head proved that
+OpenAI's ambiguous encoded arguments led to **one actual local Tool Handler
+execution** (`effects=1`, `requests=2`) on the public Agent→Provider SSE→
+Kernel Store path; Anthropic accepted a ToolCall from an SSE `partial_json`
+reconstruction containing duplicate keys. Neither used a live Provider or
+production business handler. The full permanent regression suites were
+subsequently tested via read-only `go test -overlay -race` with only the four
+original Provider source files restored. Both Provider suites turned RED;
+**both** public Agent paths executed exactly one real test Tool Handler
+(`effects=1`) for duplicate root, nested and escaped-equivalent JSON keys.
+Valid controls remained GREEN.
+
+**Minimal repair:** Reuse the existing bounded
+`providerhttp.ValidateUniqueJSONKeys` directly on the physical inner JSON.
+OpenAI rejects ambiguous `function_call.arguments` before execution in
+`verifyCompletedFunctionCallItems`; the shared `projectOutput` and SSE
+completed-item observer also require the same property, protecting stateless
+ProviderReplay and all streaming states. Anthropic enforces the invariant
+when parsing the reconstructed `tool_use.input` content block, so unary,
+SSE final reconstruction and signed replay share one unambiguous input rule.
+For an otherwise verified completed Provider response with cumulative Usage,
+a physical Tool is settled only as a sanitized `model.post_generation_failed`
+ResponseID/Usage receipt. No ToolCall, content, ProviderReplay or successful
+terminal SSE event survives; absent/invalid final Usage still cannot mint a
+completed billing receipt. Valid nested JSON with fields of the same name
+in separate sibling objects remains supported. No Agent/Kernel, Store schema,
+Host route, retry mechanism or compatibility bridge changed.
+
+**Permanent RED→GREEN regressions:**
+
+- `openai/encoded_tool_arguments_test.go` checks valid/invalid JSON strings
+  under optional and required Tool choice, Unary and SSE, nested and escaped
+  duplicate keys, known Usage and unknown Usage.
+- `anthropic/encoded_tool_input_delta_test.go` exercises valid reconstructed
+  SSE `input_json_delta`, optional/required Tool use, nested/escaped repeated
+  fields, full and missing final Usage.
+- `completed_tool_receipt_test.go` adds public Agent→OpenAI SSE→Kernel Store
+  duplicate-key Tool payloads. `completed_anthropic_mixed_tool_receipt_test.go`
+  covers the same physical Handler path with Anthropic `partial_json`.
+  Invalid completed Tool invocation is consumed once with the original
+  trusted Usage: two ModelInvocations / 34 input + 10 output = 44 tokens,
+  **zero Tool effects** and no executable replay.
+- Focused direct/Agent Race passed **10 consecutive runs** and full Provider
+  Race passed. Restoring the exact original Head Provider implementation with
+  a read-only overlay turns the same new tests RED (`effects=1` in both
+  Agent paths); repaired source is GREEN.
+
+This local repair is **not approval** to merge PR #87 or publish beta.24.
+Fresh checks and independent merge admission on the new actual PR Head remain
+necessary. External live gateway/Provider compatibility was not tested.
+
+**Final local source gates (double-encoded Tool input P1):**
+
+- **PASS, exit 0:** complete repository `make check` on the final code
+  commit including all Go unit/Race/vet/lint, TypeScript lint/typecheck/
+  **46 tests**/build, evaluation/benchmark, OTel/A2A and beta.24
+  clean-consumer local-cohort release gates.
+- **PASS, exit 0:** isolated real PostgreSQL/Redis integration via
+  `node scripts/run-integration.mjs`; test containers and network removed.
+- **PASS:** full Provider Race and focused direct/Agent Race for both
+  Provider adapters, `-count=10`; exact original-Head Provider source mutation
+  RED with `effects=1` in both public Agent paths, corrected source GREEN.
+- The initial local `make check` found two `goimports` format issues in new
+  tests, corrected before final code commit. The first full recheck hit one
+  A2A scenario corpus threshold failure under Race outside changed Provider
+  code; isolated A2A Race **10/10 passed**, and the subsequent full
+  repository `make check` passed. No A2A code or baseline was changed to
+  conceal the intermittent observation.
+- Existing two untracked OpenAI probe scripts remain SHA-256-identical and
+  excluded from commits. No external live Provider/gateway credentials used.
+  Fresh GitHub checks and independent merge-admission review on the new PR
+  Head are required; this is not authorization to merge or publish beta.24.

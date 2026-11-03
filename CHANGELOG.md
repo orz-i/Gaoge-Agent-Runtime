@@ -91,6 +91,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   foreign or incomplete physical response to an executable local Tool.
   Ambiguous response framing now fails closed without Tool execution,
   replay or invented completed billing; normal JSON remains supported.
+  A further independent P1 now checks **double-encoded Tool input** too:
+  OpenAI `function_call.arguments` and Anthropic SSE `partial_json` are
+  strings not covered by outer JSON-frame uniqueness. Their reconstructed
+  Tool arguments must contain no duplicate keys (including escaped aliases)
+  before any local Tool or provider replay is authorized; valid completed
+  Usage survives only as a sanitized rejected response receipt. The original
+  Head executed one real Tool Handler in either bypass; repaired Race and
+  Agent/Kernel tests prove zero effects. No compatibility shim is added.
   No new ModelInvocation state, API shape, adapter fallback,
   schema migration or automatic retry.
 
