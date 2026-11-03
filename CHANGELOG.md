@@ -5,6 +5,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 OpenAI SSE P1 follow-up: bind immutable output-item identity from
+  `response.output_item.added` to the completed item before authorizing
+  local Tools or replay. Added/done/final conflicts, duplicate or late added
+  events now fail as protocol errors with no trusted terminal receipt;
+  partial arguments and encrypted reasoning remain non-authoritative.
+  Original-Head regression cases failed before the correction and pass after.
+
 - PR #87 final audit hardening: duplicate physical response IDs are checked
   before shared-budget settlement, including late results and downstream
   middleware, and rejected receipt payloads are not stored in the shared

@@ -9,6 +9,72 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp"
 )
 
+// addedOutputItems records immutable item identity from response.output_item.added.
+// An added item is not completion proof: arguments and encrypted reasoning may
+// still be partial. Its type, item ID, Tool call ID/name and message role cannot
+// change on the way to output_item.done or response.completed.
+type addedOutputItem struct {
+	Type   string `json:"type"`
+	ID     string `json:"id"`
+	CallID string `json:"call_id"`
+	Name   string `json:"name"`
+	Role   string `json:"role"`
+}
+
+type addedOutputItems struct {
+	byIndex map[int]addedOutputItem
+	size    int
+}
+
+func (items *addedOutputItems) observe(index *int, raw json.RawMessage) error {
+	var item addedOutputItem
+	if index == nil || *index < 0 || *index >= maxReplayItems || len(raw) == 0 ||
+		items.size+len(raw) > maxReplayBytes || json.Unmarshal(raw, &item) != nil ||
+		item.ID == "" || strings.TrimSpace(item.ID) != item.ID {
+		return providerhttp.ErrProtocol
+	}
+	switch item.Type {
+	case "reasoning":
+	case "message":
+		if item.Role != "assistant" {
+			return providerhttp.ErrProtocol
+		}
+	case "function_call":
+		if item.CallID == "" || strings.TrimSpace(item.CallID) != item.CallID || item.Name == "" {
+			return providerhttp.ErrProtocol
+		}
+	default:
+		return providerhttp.ErrProtocol
+	}
+	if items.byIndex == nil {
+		items.byIndex = make(map[int]addedOutputItem)
+	}
+	if _, exists := items.byIndex[*index]; exists {
+		return providerhttp.ErrProtocol
+	}
+	items.byIndex[*index] = item
+	items.size += len(raw)
+	return nil
+}
+
+func (items *addedOutputItems) reconcile(final *responseBody) error {
+	for index, added := range items.byIndex {
+		if index >= len(final.Output) {
+			return providerhttp.ErrProtocol
+		}
+		var done addedOutputItem
+		if json.Unmarshal(final.Output[index], &done) != nil ||
+			added.Type != done.Type || added.ID != done.ID ||
+			added.Type == "function_call" && (added.CallID != done.CallID || added.Name != done.Name) ||
+			// Legacy final messages may omit the role. When present it
+			// must agree with the assistant owner established at addition.
+			added.Type == "message" && done.Role != "" && added.Role != done.Role {
+			return providerhttp.ErrProtocol
+		}
+	}
+	return nil
+}
+
 // completedOutputItems collects finished reasoning, message and local Tool
 // items from response.output_item.done. The final response must reconcile
 // with those events before granting Tool authority or replay. Earlier added

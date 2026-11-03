@@ -358,6 +358,7 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	}
 	defer func() { _ = resp.Body.Close() }()
 	var final *responseBody
+	var addedItems addedOutputItems
 	var completedItems completedOutputItems
 	var completedArguments completedToolArguments
 	var completedContent completedMessageContent
@@ -420,6 +421,15 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 			if err := completedArguments.observe(frame.OutputIndex, frame.ItemID, frame.Arguments); err != nil {
 				return err
 			}
+		case "response.output_item.added":
+			if err := addedItems.observe(frame.OutputIndex, frame.Item); err != nil {
+				return err
+			}
+			// Once an item was physically completed, a later added frame
+			// cannot retroactively establish its start or replace its owner.
+			if _, finished := completedItems.byIndex[*frame.OutputIndex]; finished {
+				return providerhttp.ErrProtocol
+			}
 		case "response.output_item.done":
 			if err := completedItems.observe(frame.OutputIndex, frame.Item); err != nil {
 				return err
@@ -436,6 +446,9 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				return err
 			}
 			if err := completedItems.reconcile(&result); err != nil {
+				return err
+			}
+			if err := addedItems.reconcile(&result); err != nil {
 				return err
 			}
 			final = &result

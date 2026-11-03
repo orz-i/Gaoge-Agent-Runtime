@@ -4,6 +4,19 @@
 
 ## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
 
+**OpenAI SSE added-item physical identity hard cut (PR #87 follow-up P1):**
+When `response.output_item.added` is observed, its original output index,
+item type and ID, local function `call_id`/name or assistant message role
+must agree with the same item in `response.completed`. Duplicate added
+frames, a missing item identity, or an added frame after the same item's
+`response.output_item.done` now fail as malformed protocol **before**
+Tool execution, replay, or a completed ResponseID/Usage receipt.
+`added` is not completion evidence: streamed argument contents, message
+text and encrypted reasoning may still be incomplete and remain sourced
+from final/done events. Final-only and done-only gateway streams remain
+supported. No Kernel/Store schema, replay format, compatibility bridge or
+new Hosted Tool authority is introduced.
+
 **Agent rejected-completion receipt proof and payload isolation hard cut
 (PR #87 P1/P2):** A typed `model.ResponseRejectedError` and Usage do not
 by themselves establish a **named Provider's** paid completion when its

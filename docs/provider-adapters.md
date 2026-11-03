@@ -85,6 +85,16 @@ multi-provider router.
 
 ## Supported model contract
 
+**OpenAI streaming item identity:** An observed `response.output_item.added`
+fixes its index, item ID, type and (for local functions) physical `call_id`
+and function name, or assistant role for message items. An inconsistent
+`response.output_item.done` or `response.completed`, duplicate added event,
+or added event arriving after completion is a protocol error without
+billable-completion acknowledgement or executable Tool authority. Only
+identity is frozen at addition: arguments, text and encrypted reasoning may
+arrive later and must be verified from completed evidence. Gateways that
+emit only final or done events remain supported.
+
 **Agent-level typed rejection receipt:** Provider adapters sanitize a
 completed but semantically invalid Tool response to physical ResponseID
 and verifiable cumulative Usage. Agent enforces the same minimal
