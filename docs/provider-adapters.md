@@ -227,6 +227,13 @@ multi-provider router.
   contains a physical Tool **or** fails the mandatory Tool obligation after
   unsupported text-only output. Malformed framing (including gapped block
   indices), transport errors and incomplete/unknown-Usage streams cannot.
+  Anthropic SSE `message_start.message.content` must be empty while the
+  provider is still generating content blocks. An omitted legacy field or
+  an explicit empty `[]` is accepted; an explicit `null`, object or nonempty
+  array (including a Tool/text item) is **invalid framing**, not content
+  that may be discarded and replaced by later `content_block_*` events.
+  Such a stream fails before local Tool authorization, signed replay,
+  successful terminal SSE evidence or completed Usage accounting.
   Anthropic SSE must receive sequential, non-overlapping, explicitly indexed
   content blocks **before** `message_delta`. No Tool start/stop/delta may
   follow that final message phase, even if `message_stop` eventually arrives.

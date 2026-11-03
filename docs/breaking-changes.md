@@ -84,6 +84,19 @@ otherwise valid Tool output could authorize executable local Tool calls.
 Omitted, null, malformed or foreign owner fields now fail closed with no
 Tool, replay or completed billing receipt. The old ownerless fixture shape
 was updated to the real provider protocol; no compatibility bridge remains.
+
+**Anthropic SSE initial content authority hard cut:** The initial
+`message_start.message.content` is only an empty not-yet-generated collection.
+Previously the adapter silently cleared a nonempty initial Tool/text array
+(or explicit null), allowing later `content_block_*` events to substitute
+a different executable local Tool and mint terminal billing evidence. The
+adapter now accepts genuinely omitted content or an explicit empty `[]`,
+but rejects nonempty arrays, `null` and other shapes as **unverified SSE
+framing**, with zero Tool effects and no invented completed Usage receipt.
+Public Agent→HTTP SSE→Kernel Store regression tests prove the original code
+executed a real Tool Handler and the corrected code never does. No new
+Host route, retry, persistence schema or compatibility fallback is added.
+
 **OpenAI output-message hard cut:** even with a valid `object=response` and a
 completed physical `function_call`, a sibling `message` (phased or unphased)
 whose explicit `role` is not `assistant`, or whose explicit `status` is not

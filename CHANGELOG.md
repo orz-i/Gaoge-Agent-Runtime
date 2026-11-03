@@ -62,6 +62,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   `object="response"` before any Tool, replay or terminal receipt can be
   trusted. Unknown or missing outer ownership now fails closed, with
   cross-provider Agent side-effect tests and no ownerless wire fallback.
+  Another independent P1 refuses nonempty or explicit-null Anthropic SSE
+  `message_start.message.content`, which had been silently erased before
+  later Tool blocks were accepted. A malformed initial content collection
+  cannot be replaced by a different executable Tool or grant terminal billing
+  proof. Valid empty/omitted initial content remains supported; original
+  Head Agent/Kernel mutation reproduces actual Tool effects, fixed source zero.
   A further independent P1 closes the unphased OpenAI output-message gap:
   an explicit foreign role or unfinished `message.status` now rejects the
   entire completed output, including any otherwise-valid sibling Tool call.
