@@ -502,6 +502,24 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				frame.Message.Role != string(model.RoleAssistant) {
 				return providerhttp.ErrProtocol
 			}
+			// The initial Anthropic SSE message has no completed content.
+			// Never discard a physical Tool or text item supplied here and
+			// replace it with a later, different content_block_* sequence.
+			// Absent content remains valid; when present it must be [].
+			var start struct {
+				Message struct {
+					Content json.RawMessage `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal(data, &start) != nil {
+				return providerhttp.ErrProtocol
+			}
+			if len(start.Message.Content) != 0 {
+				var items []json.RawMessage
+				if json.Unmarshal(start.Message.Content, &items) != nil || items == nil || len(items) != 0 {
+					return providerhttp.ErrProtocol
+				}
+			}
 			started, body = true, frame.Message
 			initialUsagePresent = body.Usage != nil && body.Usage.Input != nil
 			body.Content = nil
