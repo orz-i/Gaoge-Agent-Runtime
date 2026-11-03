@@ -718,11 +718,25 @@ func (runner *Runner) executeModelInvocation(
 		err = model.NewResponseRejectedError(ErrInvalidModelResponse)
 	}
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
+	// Named external Providers must prove the physical completion identity,
+	// not just claim billable Usage in a typed rejection. Reject absent or
+	// normalized IDs before recording a second paid ModelInvocation.
+	if knownRejection && invocation.Provider != "" && invocation.BindingFingerprint != "" &&
+		(response.ResponseID == "" || strings.TrimSpace(response.ResponseID) != response.ResponseID) {
+		return snapshot, state, ErrInvalidModelResponse
+	}
 	// A gateway can reply with a different Tool payload under an already
 	// consumed physical response ID. Do not count it as a new billable
 	// completion or dispatch its Tools, even if the new Call ID is distinct.
 	if (err == nil || knownRejection) && duplicatePhysicalProviderResponseID(state, invocation, response.ResponseID) {
 		return snapshot, state, ErrInvalidModelResponse
+	}
+	if knownRejection {
+		// The rejected assistant reply is NOT an authorized transcript or
+		// executable Tool payload. Persist only the verified billing receipt
+		// even for custom named clients and Model middleware that return
+		// an unsanitized rejected Response.
+		response = model.Response{ResponseID: response.ResponseID, Usage: model.CloneUsage(response.Usage)}
 	}
 	var denied modelPreDispatchDenied
 	if errors.As(err, &denied) {
