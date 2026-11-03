@@ -69,7 +69,8 @@ func normalizedContentForReplay(blocks []json.RawMessage) ([]json.RawMessage, er
 func verifiedReplay(message model.Message) (json.RawMessage, error) {
 	replay := message.ProviderReplay
 	if replay == nil || replay.Provider != "anthropic" || replay.Format != replayFormat ||
-		len(replay.Data) == 0 || len(replay.Data) > 16<<20 {
+		len(replay.Data) == 0 || len(replay.Data) > 16<<20 ||
+		providerhttp.ValidateUniqueJSONKeys(replay.Data) != nil {
 		return nil, ErrUnsupported
 	}
 	var blocks []json.RawMessage

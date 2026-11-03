@@ -257,3 +257,36 @@ func TestPhaseAbsenceAndNullPreserveLegacyProjection(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenAIStoredReplayRejectsAmbiguousPhysicalOutput(t *testing.T) {
+	for _, tc := range []struct{ name, original, replacement string }{
+		{"role", `"role":"assistant"`, `"Role":"user","role":"assistant"`},
+		{"status", `"status":"completed"`, `"Status":"incomplete","status":"completed"`},
+		{"phase", `"phase":"commentary"`, `"Phase":"final_answer","phase":"commentary"`},
+		{"message_type", `"type":"message"`, `"Type":"function_call","type":"message"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requests := 0
+			c := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				writePhaseResponse(w, phaseResponse(phaseBareReasoning, phaseCommentaryItem, phaseFinalItem), false)
+			})
+			req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}}}
+			first, err := c.Generate(t.Context(), req)
+			if err != nil || first.ProviderReplay == nil || first.Content != `{"ok":true}` || requests != 1 {
+				t.Fatalf("invalid positive response first=%+v err=%v requests=%d", first, err, requests)
+			}
+			req.Messages = append(req.Messages, model.Message{Role: model.RoleAssistant, Content: model.TextParts(first.Content), ProviderReplay: first.ProviderReplay}, model.Message{Role: model.RoleUser, Content: model.TextParts("again")})
+			tampered := model.CloneRequest(req)
+			changed := strings.Replace(string(tampered.Messages[1].ProviderReplay.Data), tc.original, tc.replacement, 1)
+			if changed == string(tampered.Messages[1].ProviderReplay.Data) {
+				t.Fatal("test mutation absent")
+			}
+			tampered.Messages[1].ProviderReplay.Data = json.RawMessage(changed)
+			_, err = c.Generate(t.Context(), tampered)
+			if !errors.Is(err, openai.ErrUnsupported) || requests != 1 {
+				t.Errorf("DUPLICATE REPLAY AUTHORITY DISPATCHED UPSTREAM: err=%v requests=%d replay=%s", err, requests, tampered.Messages[1].ProviderReplay.Data)
+			}
+		})
+	}
+}

@@ -233,3 +233,37 @@ func TestUnsupportedAnthropicBlockFieldsNeverDisappearSilently(t *testing.T) {
 		t.Fatalf("content metadata silently dropped: %v", err)
 	}
 }
+
+func TestAnthropicStoredReplayRejectsAmbiguousSignedContent(t *testing.T) {
+	for _, tc := range []struct{ name, original, replacement string }{
+		{"duplicate_tool_type", `"type":"tool_use"`, `"type":"text","type":"tool_use"`},
+		{"duplicate_tool_id", `"id":"toolu-1"`, `"id":"forged","id":"toolu-1"`},
+		{"duplicate_tool_name", `"name":"lookup"`, `"name":"forged","name":"lookup"`},
+		{"duplicate_signed_thinking", `"signature":"signed-hidden-block"`, `"signature":"unsigned","signature":"signed-hidden-block"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			attempts := 0
+			c := newClient(t, func(w http.ResponseWriter, r *http.Request) {
+				attempts++
+				_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"thinking-1","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"","signature":"signed-hidden-block"},{"type":"tool_use","id":"toolu-1","name":"lookup","input":{"x":1}}],"usage":{"input_tokens":12,"output_tokens":5}}`)
+			})
+			req := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}, Tools: []tools.Definition{definition}}
+			first, err := c.Generate(t.Context(), req)
+			if err != nil || first.ProviderReplay == nil || len(first.ToolCalls) != 1 || attempts != 1 {
+				t.Fatalf("invalid positive response %+v err=%v attempts=%d", first, err, attempts)
+			}
+			req.Messages = append(req.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: first.ToolCalls, ProviderReplay: first.ProviderReplay}, model.Message{Role: model.RoleTool, ToolCallID: "toolu-1", Content: model.TextParts(`{"ok":true}`)})
+			tampered := model.CloneRequest(req)
+			before := string(tampered.Messages[1].ProviderReplay.Data)
+			after := strings.Replace(before, tc.original, tc.replacement, 1)
+			if before == after {
+				t.Fatal("test mutation absent")
+			}
+			tampered.Messages[1].ProviderReplay.Data = json.RawMessage(after)
+			_, err = c.Generate(t.Context(), tampered)
+			if !errors.Is(err, anthropic.ErrUnsupported) || attempts != 1 {
+				t.Errorf("ANTHROPIC DUPLICATE REPLAY DISPATCHED UPSTREAM: err=%v attempts=%d replay=%s", err, attempts, after)
+			}
+		})
+	}
+}
