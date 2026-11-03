@@ -3,6 +3,7 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -83,11 +84,13 @@ type outputItem struct {
 	EncryptedContent string `json:"encrypted_content"`
 }
 type responseBody struct {
-	ID     string            `json:"id"`
-	Object string            `json:"object"`
-	Status string            `json:"status"`
-	Output []json.RawMessage `json:"output"`
-	Usage  *struct {
+	ID                string            `json:"id"`
+	Object            string            `json:"object"`
+	Status            string            `json:"status"`
+	Error             json.RawMessage   `json:"error"`
+	IncompleteDetails json.RawMessage   `json:"incomplete_details"`
+	Output            []json.RawMessage `json:"output"`
+	Usage             *struct {
 		Input        *int64 `json:"input_tokens"`
 		Output       *int64 `json:"output_tokens"`
 		InputDetails struct {
@@ -259,6 +262,14 @@ func decodeResponse(body responseBody, names map[string]string, required bool) (
 	}
 	if body.Status == "incomplete" {
 		return model.Response{}, errors.Join(ErrUnsupported, ErrIncomplete)
+	}
+	// A physically completed Responses envelope cannot also carry error
+	// or truncation evidence. Do not authorize local Tools or manufacture
+	// completed billing from contradictory gateway terminal fields. Absent
+	// and explicit-null fields remain compatible with valid Responses.
+	if len(body.Error) != 0 && !bytes.Equal(bytes.TrimSpace(body.Error), []byte("null")) ||
+		len(body.IncompleteDetails) != 0 && !bytes.Equal(bytes.TrimSpace(body.IncompleteDetails), []byte("null")) {
+		return model.Response{}, ErrUnsupported
 	}
 	// Agent normalizes ProviderResponseID for durable receipts. A padded
 	// physical response identity cannot be used to authorize local Tools:
