@@ -85,6 +85,19 @@ multi-provider router.
 
 ## Supported model contract
 
+**Anthropic SSE completion proof after content rejection:** Unsupported
+content may be drained to a genuine `message_stop` with final cumulative
+Usage, but every later delta for a known block must still match that
+block's physical type. Rejected Thinking blocks retain signature ordering
+checks, and a rejected stream cannot overwrite a populated initial
+`tool_use.input` with later `input_json_delta` fragments. Only well-framed
+completed responses can retain minimal paid ResponseID/Usage rejection
+receipts. Mismatched deltas or conflicting Tool input are protocol
+failures with **no** durable completion or terminal SSE success, even
+when Usage appears in the last message. This applies to real Agent
+ModelInvocation accounting; no normalization or compatibility rewrite
+is permitted. See the [P1 frame audit](audits/2026-11-03-pr87-anthropic-sse-rejected-delta-framing.md).
+
 - Stateless multi-turn **ordered `model.ContentPart`** messages and local
   JSON Tool calls with stable Call IDs. Image/PDF reference parts are
   admitted only in user messages, not System/Assistant/Tool messages.

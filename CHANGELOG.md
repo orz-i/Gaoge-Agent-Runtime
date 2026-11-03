@@ -5,6 +5,19 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 additional Anthropic SSE P1: an earlier semantic content rejection
+  must not disable physical `content_block_delta` ownership, Tool input
+  consistency or Thinking-signature sequencing. Mismatched delta types and
+  populated initial Tool inputs followed by contradictory JSON deltas
+  previously minted a completed paid ResponseID/Usage receipt despite
+  invalid framing. Known malformed frames now fail with no completed
+  receipt, replay or local Tool; well-framed unsupported content retains
+  its minimal verified paid rejection. Original-Head read-only mutation
+  reproduced double ModelInvocation billing; repaired public Agent/Kernel
+  regressions and Provider Race are green. No Agent, Kernel, Host, DB
+  migration or compatibility bridge. See
+  [independent P1 audit](docs/audits/2026-11-03-pr87-anthropic-sse-rejected-delta-framing.md).
+
 - PR #87 independent Provider P1 hard cut: OpenAI function-call arguments
   (JSON encoded as a string) and Anthropic `tool_use.input` must physically
   decode to a **JSON object**, even if the local Tool has a permissive JSON

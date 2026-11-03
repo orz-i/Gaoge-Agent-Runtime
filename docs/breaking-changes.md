@@ -4,6 +4,21 @@
 
 ## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
 
+**Anthropic post-rejection SSE delta framing hard cut (PR #87 P1):**
+A previously unsupported content block may be drained for verified final
+Usage, but does not suspend the transport protocol. Known active block
+types still require matching deltas, including text, Tool JSON and
+Thinking/signature sequencing. Even after a rich-text rejection, a later
+Tool JSON delta may not replace nonempty physical input. The previous
+behavior falsely completed and billed an untrustworthy second
+ModelInvocation when its delta frames contradicted the physical owner.
+Malformed streams now return a protocol error **without** a completed
+ResponseID/Usage receipt; valid well-framed but unsupported content can
+still settle only its verified paid rejection. Public Agent/Kernel
+read-only original-Head RED and corrected-source GREEN tests cover this.
+No Host/Agent/Kernel change, migration or fallback is introduced.
+See [independent audit](audits/2026-11-03-pr87-anthropic-sse-rejected-delta-framing.md).
+
 `model.Request.RequireToolCall` now requires an actual decoded local
 `ToolCall` on successful final OpenAI Responses and Anthropic Messages
 responses, including SSE. Merely sending `tool_choice=required` or
