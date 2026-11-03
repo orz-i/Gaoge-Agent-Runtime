@@ -51,3 +51,20 @@ func TestStoredOpenAIReplayRequiresPhysicalOutputText(t *testing.T) {
 		})
 	}
 }
+
+func TestStoredOpenAIReplayRejectsMissingMessageContent(t *testing.T) {
+	for _, message := range []string{`{"type":"message","phase":"commentary"}`, `{"type":"message","phase":"commentary","content":null}`} {
+		requests := 0
+		client := newClient(t, func(w http.ResponseWriter, _ *http.Request) { requests++; _, _ = w.Write([]byte(`{}`)) })
+		replay := `[` + message + `,{"type":"function_call","status":"completed","call_id":"call-1","name":"lookup","arguments":"{}"}]`
+		req := model.Request{Messages: []model.Message{
+			{Role: model.RoleUser, Content: model.TextParts("lookup")},
+			{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call-1", Name: "lookup", ToolKey: definition.Key, Arguments: json.RawMessage(`{}`)}}, ProviderReplay: &model.ProviderReplay{Provider: "openai", Format: "responses.output.v1", Data: json.RawMessage(replay)}},
+			{Role: model.RoleTool, ToolCallID: "call-1", Content: model.TextParts(`{}`)},
+		}, Tools: []tools.Definition{definition}}
+		response, err := client.Generate(t.Context(), req)
+		if !errors.Is(err, openai.ErrUnsupported) || requests != 0 || response.ResponseID != "" {
+			t.Fatalf("invalid replay dispatched: %+v %v requests=%d", response, err, requests)
+		}
+	}
+}

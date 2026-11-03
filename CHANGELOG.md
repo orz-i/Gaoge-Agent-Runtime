@@ -5,6 +5,11 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- OpenAI completed or replayed message items must contain an actual content
+  array before sibling Tools are accepted. Null or missing content fails
+  closed; an explicit empty array remains supported. The durable timeout
+  retry test now allows enough dispatch time under CI coverage load.
+
 - PR #87 independent message-payload audit: OpenAI `output_text` now requires
   a physically present string `text`. Previously explicit null or omitted
   text could be silently flattened when followed by valid text and a local

@@ -51,7 +51,7 @@ func projectOutput(outputs []json.RawMessage) (outputProjection, error) {
 					Refusal *string `json:"refusal"`
 				} `json:"content"`
 			}
-			if json.Unmarshal(raw, &authority) != nil {
+			if json.Unmarshal(raw, &authority) != nil || authority.Content == nil {
 				return outputProjection{}, ErrUnsupported
 			}
 			// Missing/null output_text is not physical text evidence. A

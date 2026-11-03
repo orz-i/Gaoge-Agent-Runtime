@@ -23,6 +23,9 @@ func TestCompletedMessagePhysicalPhaseAndTextEvidence(t *testing.T) {
 		required     bool
 		valid        bool
 	}{
+		{"empty_content_with_tool", `{"type":"message","content":[]},` + tool, false, true},
+		{"null_content_with_tool", `{"type":"message","content":null},` + tool, true, false},
+		{"missing_content_with_tool", `{"type":"message"},` + tool, false, false},
 		{"null_phase_legacy_valid_tool", `{"type":"message","phase":null,"content":[{"type":"output_text","text":"Working"}]},` + tool, false, true},
 		{"null_text_optional_tool_sibling", `{"type":"message","content":[{"type":"output_text","text":null},{"type":"output_text","text":"Working"}]},` + tool, false, false},
 		{"null_text_required_tool_sibling", `{"type":"message","content":[{"type":"output_text","text":null},{"type":"output_text","text":"Working"}]},` + tool, true, false},
