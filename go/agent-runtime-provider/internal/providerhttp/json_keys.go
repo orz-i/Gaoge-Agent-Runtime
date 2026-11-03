@@ -24,6 +24,22 @@ func ValidateUniqueJSONKeys(data []byte) error {
 	return nil
 }
 
+// ValidateUniqueJSONObject enforces the physical Provider Tool argument
+// contract independently of the local Tool's JSON Schema. A permissive
+// registered schema may accept scalars or arrays, but the upstream function
+// call protocol never grants execution authority with such a root value.
+// Preserve the duplicate-key and depth fence inside otherwise valid objects.
+func ValidateUniqueJSONObject(data []byte) error {
+	if err := ValidateUniqueJSONKeys(data); err != nil {
+		return err
+	}
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(data, &object); err != nil || object == nil {
+		return ErrProtocol
+	}
+	return nil
+}
+
 // Bound structural nesting independently of input byte limits. A legitimate
 // provider response does not require thousands of recursively nested objects.
 const maxProviderJSONDepth = 256

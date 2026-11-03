@@ -54,6 +54,31 @@ func TestValidateUniqueJSONKeys(t *testing.T) {
 	})
 }
 
+func TestValidateUniqueJSONObject(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw string
+		valid     bool
+	}{
+		{name: "empty_object", raw: `{}`, valid: true},
+		{name: "nested_object", raw: ` {"args":{"x":[1,true]}} `, valid: true},
+		{name: "array", raw: `[]`},
+		{name: "null", raw: `null`},
+		{name: "number", raw: `1`},
+		{name: "boolean", raw: `false`},
+		{name: "string", raw: `"text"`},
+		{name: "duplicate_object_key", raw: `{"x":1,"x":2}`},
+		{name: "folded_object_key", raw: `{"X":1,"x":2}`},
+		{name: "trailing_json", raw: `{}{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateUniqueJSONObject([]byte(tc.raw))
+			if tc.valid && err != nil || !tc.valid && !errors.Is(err, ErrProtocol) {
+				t.Fatalf("unexpected physical object classification: valid=%t err=%v", tc.valid, err)
+			}
+		})
+	}
+}
+
 func TestReadJSONRejectsAmbiguousOwnerBeforeUnmarshal(t *testing.T) {
 	for _, tc := range []struct {
 		name, raw string

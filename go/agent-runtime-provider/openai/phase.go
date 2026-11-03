@@ -91,7 +91,7 @@ func projectOutput(outputs []json.RawMessage) (outputProjection, error) {
 			// Preserve exact physical Call ID identity even when projecting
 			// replay evidence without the earlier response-item fence.
 			if item.CallID == "" || strings.TrimSpace(item.CallID) != item.CallID ||
-				item.Name == "" || providerhttp.ValidateUniqueJSONKeys([]byte(item.Arguments)) != nil {
+				item.Name == "" || providerhttp.ValidateUniqueJSONObject([]byte(item.Arguments)) != nil {
 				return outputProjection{}, ErrUnsupported
 			}
 			result.calls = append(result.calls, item)

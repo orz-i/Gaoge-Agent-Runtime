@@ -88,7 +88,7 @@ func verifiedReplay(message model.Message) (json.RawMessage, error) {
 		case "text":
 			text.WriteString(block.Text)
 		case "tool_use":
-			if block.ID == "" || block.Name == "" || !json.Valid(block.Input) {
+			if block.ID == "" || block.Name == "" || providerhttp.ValidateUniqueJSONObject(block.Input) != nil {
 				return nil, ErrUnsupported
 			}
 			calls = append(calls, block)
@@ -138,7 +138,7 @@ func marshalStreamBlock(block *contentBlock) (json.RawMessage, error) {
 			output["citations"] = block.Citations
 		}
 	case "tool_use":
-		if block.Name == "" || block.ID == "" || !json.Valid(block.Input) {
+		if block.Name == "" || block.ID == "" || providerhttp.ValidateUniqueJSONObject(block.Input) != nil {
 			return nil, ErrUnsupported
 		}
 		output = map[string]any{"type": "tool_use", "id": block.ID,
@@ -188,8 +188,10 @@ func parseContentBlock(raw json.RawMessage) (contentBlock, error) {
 	case "tool_use":
 		allowed["id"], allowed["name"], allowed["input"] = true, true, true
 		// Anthropic SSE partial_json is a JSON string within a well-formed
-		// event. Validate its reconstructed Tool input separately: outer
-		// frame uniqueness cannot see duplicate object members inside it.
+		// event. Check decoded/reconstructed member uniqueness here, but
+		// defer the *root object* gate until block_stop/final decoding.
+		// Otherwise initial input:null followed by a conflicting delta
+		// becomes a paid semantic rejection instead of a framing failure.
 		if providerhttp.ValidateUniqueJSONKeys(block.Input) != nil {
 			return contentBlock{}, ErrUnsupported
 		}

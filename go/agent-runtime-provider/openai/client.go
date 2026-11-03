@@ -201,7 +201,7 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 				if toolName == "" {
 					toolName = byKey[call.ToolKey]
 				}
-				if call.ID == "" || toolName == "" || !json.Valid(call.Arguments) {
+				if call.ID == "" || toolName == "" || providerhttp.ValidateUniqueJSONObject(call.Arguments) != nil {
 					return prepared{}, ErrUnsupported
 				}
 				input = append(input, map[string]any{
@@ -508,7 +508,7 @@ func verifyCompletedFunctionCallItems(result model.Response, output []json.RawMe
 		// unverified physical provider ID into an executable local Tool.
 		if item.CallID == "" || strings.TrimSpace(item.CallID) != item.CallID ||
 			item.Name == "" || names[item.Name] == "" ||
-			providerhttp.ValidateUniqueJSONKeys([]byte(item.Arguments)) != nil {
+			providerhttp.ValidateUniqueJSONObject([]byte(item.Arguments)) != nil {
 			return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
 		}
 	}

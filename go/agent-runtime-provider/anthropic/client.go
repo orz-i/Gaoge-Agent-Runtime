@@ -229,7 +229,7 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 				if toolName == "" {
 					toolName = byKey[call.ToolKey]
 				}
-				if call.ID == "" || toolName == "" || !json.Valid(call.Arguments) {
+				if call.ID == "" || toolName == "" || providerhttp.ValidateUniqueJSONObject(call.Arguments) != nil {
 					return prepared{}, ErrUnsupported
 				}
 				blocks = append(blocks, map[string]any{
@@ -353,7 +353,7 @@ func decodeResponse(body messageBody, names map[string]string, required bool) (m
 			output.WriteString(block.Text)
 		case "tool_use":
 			key := names[block.Name]
-			if key == "" || block.ID == "" || !json.Valid(block.Input) {
+			if key == "" || block.ID == "" || providerhttp.ValidateUniqueJSONObject(block.Input) != nil {
 				return rejectCompletedToolOutput(receipt, body.Content, required, ErrUnsupported)
 			}
 			result.ToolCalls = append(result.ToolCalls, tools.Call{
