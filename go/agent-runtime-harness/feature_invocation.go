@@ -71,7 +71,7 @@ type topLevelFeatureStart struct {
 	replayed   bool
 }
 
-type topLevelFeatureEnvelope struct {
+type topLevelStartEnvelope struct {
 	request StartRequest
 	turn    Turn
 	config  ConfigSnapshot
@@ -336,7 +336,7 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 	input json.RawMessage,
 	inputHash string,
 ) (topLevelFeatureStart, error) {
-	envelope, err := runner.prepareTopLevelFeatureEnvelope(ctx, request, rootAdmission{
+	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{
 		ExecutionClass: executionClass, CapabilityKey: capabilityKey,
 		DefinitionVersion: definitionVersion, InputHash: inputHash,
 	})
@@ -371,38 +371,38 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 	return topLevelFeatureStart{turn: turn, invocation: invocation, runContext: runCtx}, nil
 }
 
-func (runner *Runner) prepareTopLevelFeatureEnvelope(
+func (runner *Runner) prepareTopLevelStartEnvelope(
 	ctx context.Context,
 	request StartRequest,
 	root rootAdmission,
-) (topLevelFeatureEnvelope, error) {
+) (topLevelStartEnvelope, error) {
 	request, sessionID, turnID, err := normalizeStartRequest(request)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
 	now := runner.clock.Now().UTC()
 	resolvedConfig, err := runner.resolveConfigExecutionPolicy(request.Config)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
 	request, err = sealStartAdmission(request, &resolvedConfig, root)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
 	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
 	turn, created, err := runner.persistStartEnvelope(ctx, request, sessionID, turnID, config, now)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
-	return topLevelFeatureEnvelope{request: request, turn: turn, config: config, created: created, now: now}, nil
+	return topLevelStartEnvelope{request: request, turn: turn, config: config, created: created, now: now}, nil
 }
 
 func (runner *Runner) prepareTopLevelFeatureInvocation(
 	ctx context.Context,
-	envelope topLevelFeatureEnvelope,
+	envelope topLevelStartEnvelope,
 	capabilityKey string,
 	definitionVersion string,
 	executionClass ExecutionClass,
@@ -435,7 +435,7 @@ func (runner *Runner) prepareTopLevelFeatureInvocation(
 
 func (runner *Runner) prepareTopLevelFeatureContext(
 	ctx context.Context,
-	envelope topLevelFeatureEnvelope,
+	envelope topLevelStartEnvelope,
 	invocation Invocation,
 ) (Turn, context.Context, error) {
 	turn := envelope.turn

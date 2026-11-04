@@ -680,33 +680,17 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 // top-level Invocation after Session/Turn/Config creation. Host code chooses
 // this entry point; Harness never classifies a user intent or routes implicitly.
 func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) (Snapshot, error) {
-	request, sessionID, turnID, err := normalizeStartRequest(request)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	now := runner.clock.Now().UTC()
-	resolvedConfig, err := runner.resolveConfigExecutionPolicy(request.Config)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	request, err = sealStartAdmission(request, &resolvedConfig, rootAdmission{
+	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{
 		ExecutionClass: ExecutionAgent, CapabilityKey: CapabilityAgent,
 		DefinitionVersion: RuntimeCapabilityVersion,
 	})
 	if err != nil {
 		return Snapshot{}, err
 	}
-	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	createdTurn, created, err := runner.persistStartEnvelope(ctx, request, sessionID, turnID, config, now)
-	if err != nil {
-		return Snapshot{}, err
-	}
+	request, createdTurn, config := envelope.request, envelope.turn, envelope.config
 	invocation, err := newAgentInvocation(
-		turnID, firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), request.Goal,
-		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys, now,
+		createdTurn.ID, firstNonEmpty(strings.TrimSpace(request.RequestID), createdTurn.ID), request.Goal,
+		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys, envelope.now,
 	)
 	if err != nil {
 		return Snapshot{}, err
@@ -715,13 +699,13 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if created && !invocationCreated {
+	if envelope.created && !invocationCreated {
 		return Snapshot{}, ErrConflict
 	}
 	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
 		return Snapshot{}, err
 	}
-	if !created {
+	if !envelope.created {
 		if err := runner.repairStartItems(ctx, createdTurn, invocation); err != nil {
 			return Snapshot{}, err
 		}
@@ -751,7 +735,7 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "start", func() (kernel.Snapshot, error) {
 		return runner.agent.StartRun(runCtx, agent.StartRequest{
 			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
+			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), createdTurn.ID), Goal: request.Goal,
 			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
 			OutputContract:   model.CloneOutputContract(config.OutputContract),
 			ToolKeys:         append([]string(nil), config.ToolKeys...),
