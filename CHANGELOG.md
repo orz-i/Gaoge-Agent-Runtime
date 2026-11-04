@@ -5,6 +5,20 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 independent Agent P1 audit: successful replies from named Provider
+  bindings must carry an exact original physical response ID, just as known
+  rejected replies do. Missing or whitespace-normalized IDs previously
+  bypassed the physical completion deduplication fence and authorized an
+  actual local Tool (`effects=1`). Agent now rejects these replies before
+  shared-budget settlement and again after downstream middleware; SSE
+  terminal identity is not trimmed, and contradictory event/final IDs fail
+  closed even if a faulty StreamingClient ignores callback errors. Durable
+  completed/consumed named-Provider receipts also require identical original
+  and persisted IDs on restart; 20 previously accepted invalid state cases
+  now fail closed. Synthetic fixtures now supply stable completion IDs.
+  Unnamed local Models remain compatible; no Kernel/Store or replay migration.
+  See [independent P1 audit](docs/audits/2026-11-03-pr87-named-provider-success-identity.md).
+
 - PR #87 added-item status audit: OpenAI SSE rejects explicit incomplete or
   malformed added-item states before local Tools or terminal receipts.
   Already-completed added items retain full terminal evidence, preventing

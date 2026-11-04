@@ -2,6 +2,26 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-03 — Exact physical ID required for successful named Provider completions (PR #87 P1)
+
+A named external Provider binding must return a **nonempty, exact** physical
+`ResponseID` for every accepted successful completion, not only for typed
+post-generation rejections. Previously empty/padded IDs were consumed and
+could authorize local Tools without a stable deduplication identity.
+Streaming terminal IDs must retain their original bytes, agree across
+successive events, and match a nonempty final Provider response ID; a
+mismatch fails closed before any Tool execution or durable receipt.
+Middleware cannot erase/normalize an otherwise valid ID after the Provider
+callback; even a StreamingClient ignoring sink errors cannot erase a
+contradictory SSE ID. Completed/consumed persisted named-Provider receipts
+are subject to the same exact-ID check on recovery; unsafe legacy Beta
+receipts now fail state validation rather than being grandfathered.
+This changes the contract for custom named Provider adapters that previously
+omitted IDs. Unnamed local Model clients keep optional IDs.
+No persistence migration, protocol version bump, compatibility bridge or
+legacy fallback. See the
+[successful completion identity audit](audits/2026-11-03-pr87-named-provider-success-identity.md).
+
 ## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
 
 **OpenAI physical output_text payload hard cut (PR #87 independent audit):**
