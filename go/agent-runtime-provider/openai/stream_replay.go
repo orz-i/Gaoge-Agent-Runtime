@@ -10,20 +10,22 @@ import (
 )
 
 // addedOutputItems records immutable item identity from response.output_item.added.
-// An added item is not completion proof: arguments and encrypted reasoning may
-// still be partial. Its type, item ID, Tool call ID/name and message role cannot
-// change on the way to output_item.done or response.completed.
+// In-progress arguments and encrypted reasoning may still be partial. Its
+// identity cannot change, and an explicitly completed added item supplies
+// terminal evidence that must agree with later done/final output.
 type addedOutputItem struct {
-	Type   string `json:"type"`
-	ID     string `json:"id"`
-	CallID string `json:"call_id"`
-	Name   string `json:"name"`
-	Role   string `json:"role"`
+	Type   string          `json:"type"`
+	ID     string          `json:"id"`
+	CallID string          `json:"call_id"`
+	Name   string          `json:"name"`
+	Role   string          `json:"role"`
+	Status json.RawMessage `json:"status"`
 }
 
 type addedOutputItems struct {
-	byIndex map[int]addedOutputItem
-	size    int
+	byIndex   map[int]addedOutputItem
+	size      int
+	completed completedOutputItems
 }
 
 func (items *addedOutputItems) observe(index *int, raw json.RawMessage) error {
@@ -46,6 +48,26 @@ func (items *addedOutputItems) observe(index *int, raw json.RawMessage) error {
 	default:
 		return providerhttp.ErrProtocol
 	}
+	// Only an omitted legacy status or a valid non-failed lifecycle state
+	// may precede final completion. Do not erase explicit incomplete,
+	// null or unknown evidence just because a later frame looks valid.
+	if len(item.Status) != 0 {
+		var status string
+		if json.Unmarshal(item.Status, &status) != nil {
+			return providerhttp.ErrProtocol
+		}
+		switch status {
+		case "in_progress":
+		case "completed":
+			// Keep a separate evidence set so the normal subsequent done
+			// event is not mistaken for a duplicate physical event.
+			if err := items.completed.observe(index, raw); err != nil {
+				return err
+			}
+		default:
+			return providerhttp.ErrProtocol
+		}
+	}
 	if items.byIndex == nil {
 		items.byIndex = make(map[int]addedOutputItem)
 	}
@@ -58,6 +80,9 @@ func (items *addedOutputItems) observe(index *int, raw json.RawMessage) error {
 }
 
 func (items *addedOutputItems) reconcile(final *responseBody) error {
+	if err := items.completed.reconcile(final); err != nil {
+		return err
+	}
 	for index, added := range items.byIndex {
 		if index >= len(final.Output) {
 			return providerhttp.ErrProtocol
@@ -77,8 +102,8 @@ func (items *addedOutputItems) reconcile(final *responseBody) error {
 
 // completedOutputItems collects finished reasoning, message and local Tool
 // items from response.output_item.done. The final response must reconcile
-// with those events before granting Tool authority or replay. Earlier added
-// items are not completion proof: encrypted reasoning may still be partial.
+// with those events before granting Tool authority or replay. In-progress
+// added items are not completion proof: encrypted reasoning may be partial.
 type completedOutputItems struct {
 	byIndex map[int]json.RawMessage
 	size    int

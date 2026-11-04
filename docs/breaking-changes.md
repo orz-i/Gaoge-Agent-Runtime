@@ -36,10 +36,15 @@ must agree with the same item in `response.completed`. Duplicate added
 frames, a missing item identity, or an added frame after the same item's
 `response.output_item.done` now fail as malformed protocol **before**
 Tool execution, replay, or a completed ResponseID/Usage receipt.
-`added` is not completion evidence: streamed argument contents, message
-text and encrypted reasoning may still be incomplete and remain sourced
-from final/done events. Final-only and done-only gateway streams remain
-supported. No Kernel/Store schema, replay format, compatibility bridge or
+An omitted legacy or `in_progress` added-item status is not completion
+evidence: arguments, text and encrypted reasoning may still evolve.
+Explicit incomplete, failed, null, empty, unknown or wrong-type statuses
+now fail as protocol errors. An explicitly `completed` added item instead
+fixes its full terminal payload, which must agree with later done/final
+evidence; matching subsequent done events remain valid. This closes local
+Tool execution and payload-substitution gaps described in the
+[added-item status audit](audits/2026-11-03-pr87-openai-added-item-status.md).
+Final-only and done-only gateway streams remain supported. No Kernel/Store schema, replay format, compatibility bridge or
 new Hosted Tool authority is introduced.
 
 **Agent rejected-completion receipt proof and payload isolation hard cut

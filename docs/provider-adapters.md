@@ -90,10 +90,15 @@ fixes its index, item ID, type and (for local functions) physical `call_id`
 and function name, or assistant role for message items. An inconsistent
 `response.output_item.done` or `response.completed`, duplicate added event,
 or added event arriving after completion is a protocol error without
-billable-completion acknowledgement or executable Tool authority. Only
-identity is frozen at addition: arguments, text and encrypted reasoning may
-arrive later and must be verified from completed evidence. Gateways that
-emit only final or done events remain supported.
+billable-completion acknowledgement or executable Tool authority.
+Omitted legacy and `in_progress` added-item statuses permit partial
+arguments, text and encrypted reasoning to evolve. Explicit incomplete,
+null or other invalid statuses fail closed. An added item already marked
+`completed` supplies full terminal evidence: arguments, message content
+and encrypted reasoning must reconcile with later done/final payloads.
+Matching subsequent done events remain valid; completed reasoning evidence
+may supply encrypted bytes omitted from final output. Gateways that emit
+only final or done events remain supported.
 
 **Agent-level typed rejection receipt:** Provider adapters sanitize a
 completed but semantically invalid Tool response to physical ResponseID

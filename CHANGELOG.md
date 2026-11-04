@@ -5,6 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 added-item status audit: OpenAI SSE rejects explicit incomplete or
+  malformed added-item states before local Tools or terminal receipts.
+  Already-completed added items retain full terminal evidence, preventing
+  later argument, text, refusal or encrypted-reasoning substitution while
+  allowing matching done/final events. Legacy omitted and in-progress
+  states remain supported. See the
+  [added-item status audit](docs/audits/2026-11-03-pr87-openai-added-item-status.md).
+
 - PR #87 independent OpenAI SSE lifecycle audit: early
   `response.created`/`response.in_progress` observations must not claim a
   terminal failure, truncation or completion, or carry non-null error/
