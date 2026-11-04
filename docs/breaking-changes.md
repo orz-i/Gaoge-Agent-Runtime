@@ -2,6 +2,78 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-04 — Context Run must prove durable Turn ownership (beta.24 candidate)
+
+`NewContextRunMiddleware` no longer accepts a process-local `ContextWindowBinding`
+as sufficient proof that the current Agent Run owns its Turn or writable
+Context checkpoint. A RunID must resolve to its persisted Harness Invocation
+or proven parent relation before any owner/read-only Context is rehydrated.
+An inherited binding for another Turn is discarded; descendant Runs cannot
+borrow a parent's `owner` access. A nonexistent or unresolvable Run does not
+inherit any caller checkpoint, and an actual Turn without a durable checkpoint
+clears stale Context. Explicit same-Turn `read_only` scope remains narrowed.
+Handoff Specialists **and all their relation-indexed descendants** remain
+excluded from Supervisor Context even when the original Go context was
+passed to them or a nested child is resumed with a new Go context. A transient
+Invocation owner-index read failure must propagate instead of allowing the
+same Specialist to be treated as an ordinary read-only child. A returned
+RunRelation must have the exact requested `ChildRunID` and a nonblank,
+non-padded, non-self parent RunID; contradictory records fail with
+`ErrConflict` before any unrelated Turn can be loaded.
+
+**Context isolation is one proof, not two potentially inconsistent reads.**
+The Context Middleware now selects the durable Turn and Handoff ancestry
+from a single traversal, reading each RunRelation key at most once. A
+relation that becomes visible between independent ownership checks can no
+longer expose a Supervisor checkpoint without rechecking the Specialist
+boundary. The optional `harness.read_context_artifact` Handler enforces the
+same proof: an isolated Handoff Specialist or descendant cannot fetch the
+Supervisor's archived Context even with an exact artifact ID and explicit
+Host-provided Tool registration. Such requests return `ErrConflict`, not
+archived bytes. Ordinary authorized Root and read-only non-Handoff child
+reads are unchanged. No new Context schema, Kernel state or compatibility
+bridge is introduced.
+
+**Cached Context and frozen Invocation integrity:** a same-Turn process
+Checkpoint is reused only when its actual content passes `ValidCheckpoint`
+and its scope and durable reference match; otherwise the current Turn head
+is reloaded from the Store. Matching header metadata alone cannot authorize
+modified transcript bytes. Each persisted Invocation returned as Context
+ownership evidence must satisfy `validInvocation`, including the original
+InputHash and lifecycle invariants. Corrupt Handoff payloads fail with
+`ErrConflict` rather than being treated as ordinary children of a Supervisor.
+The final read-side integrity audit also requires full content-hash
+validation when a Checkpoint is loaded from the Store (not only for a cached
+copy), and rejects an Invocation that has a nonempty `InputHash` without
+its Input or a child Agent Invocation with its frozen Input entirely absent.
+Relations used to grant Context must pass the full existing `runrelation.Prepare`
+contract (valid Kind, nonempty OwnerNodeID and timestamp, canonical identity),
+not just match ChildRunID and parent ID. Inconsistent Store results fail with
+`ErrConflict` before any downstream Agent or Artifact read. This deliberately
+tightens pre-stable behavior without a new persisted status, database migration
+or legacy fallback.
+
+**One authority boundary for Context, Artifact and Budget:** an independent
+post-fix audit found that the earlier separate budget resolver could accept an
+unverified Invocation-to-Turn mapping and misattribute a physical Run's charge;
+Context could accept a mismatched Turn returned by the Store. Both now consume
+one ancestry/ownership proof. Indexed Invocations are cross-checked against
+their canonical immutable records, and returned Turns must match the requested
+identity and existing Turn invariants. For Handoff descendants, Context and
+Artifact remain isolated while legitimate Supervisor shared-budget ancestry
+remains active. The exact requested Artifact ID and `ValidArtifact` content
+hash are checked before exposing bytes. `WithoutContextWindow` is a sticky
+exclusion at hydration and Context getter boundaries, even after an internal
+process-local rebind. Contradictory results fail closed; this introduces no
+schema, status, compatibility bridge or additional public API.
+
+This intentionally drops an unsafe pre-stable implicit binding fallback.
+Hosts that need standalone Agent prefix injection should supply explicit
+pre-intent materialization; they cannot rely on a stale Harness binding for
+a different physical Run. No SQL DDL, Kernel schema, compatibility bridge
+or new persisted Context field is introduced. See the
+[Context Run owner audit](audits/2026-11-04-context-run-owner-provenance.md).
+
 ## 2026-11-04 — Immutable named Provider completion authority (PR #87)
 
 Named Provider middleware must preserve the original physical response ID,

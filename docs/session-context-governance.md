@@ -83,6 +83,36 @@ hostRunner, err := harness.NewRunner(harness.Dependencies{
 ```
 
 `resolveModelWindow`, `catalog`, `executor`, `clock` and `relationReader` are host-provided collaborators. The `RunMiddleware` rehydrates persisted Context when an Agent is resumed by a new process.
+A process-local Context checkpoint or `ContextWindowBinding` is **never**
+a substitute for the *current* physical Run's durable Invocation/Turn ownership:
+root Agent Runs may own their Turn Context; descendant Runs inherit only
+read-only access; independently delegated Handoff Specialists **and nested
+Agent children reachable through RunRelation** retain their own transcript
+and cannot inherit Supervisor history. An uncertain owner lookup or a
+RunRelation whose `ChildRunID` contradicts the requested RunID fails closed.
+Handoff isolation and Turn selection share one ancestry scan to prevent a
+concurrent new relation from appearing between separate authority checks.
+The `harness.read_context_artifact` Handler uses this same proof and never
+returns archived Supervisor content to a Specialist or its descendants,
+even when the Host explicitly provides the Tool and artifact ID.
+Same-Turn cached Checkpoints must also pass their own content-hash validation
+before reuse, otherwise the middleware reloads the durable Turn head.
+Malformed persisted Invocations cannot serve as ownership evidence or
+silently downgrade isolated Specialists to ordinary child Runs. The final
+read boundary also recomputes loaded Checkpoint content hashes, rejects
+missing frozen Handoff child inputs (with or without their hash), and validates
+complete RunRelation metadata through the existing writer contract.
+The same ownership proof also governs Artifact reads and shared-budget Turn
+attribution, with immutable Invocation lookup cross-checking and exact Turn
+identity validation; a Handoff subtree is excluded from Supervisor Context,
+not from its legitimate Supervisor shared budget. Archive reads validate the
+requested Artifact ID and complete content hash. `WithoutContextWindow`
+exclusion remains effective even if an internal caller reattaches a stale
+in-process checkpoint. A different Run's binding is discarded and the correct durable Context rehydrated; an
+unresolvable Run uses no inherited Harness Context. A caller's explicit
+same-Turn read-only restriction is not silently elevated. This pre-stable
+hard cut requires no new Store schema or API; see the
+[Context Run provenance audit](audits/2026-11-04-context-run-owner-provenance.md).
 
 The managed preparer uses the sealed `ConfigSnapshot.ContextPolicy`, conservative token/byte assessment, and Context Manager's existing `CompactPortable` / `CompactToolPressure` algorithms. When the request passes the soft limit, it leaves it untouched. Under hard pressure it **fails closed** unless a safe candidate fits the model window.
 

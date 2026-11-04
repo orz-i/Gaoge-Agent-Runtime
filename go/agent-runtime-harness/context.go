@@ -195,7 +195,15 @@ func withoutContextCheckpoint(ctx context.Context) context.Context {
 }
 
 // CurrentContextWindowBinding returns the execution access contract for the active Context Window.
+func contextWindowExcluded(ctx context.Context) bool {
+	excluded, _ := ctx.Value(contextWindowExcludedKey{}).(bool)
+	return excluded
+}
+
 func CurrentContextWindowBinding(ctx context.Context) (ContextWindowBinding, bool) {
+	if contextWindowExcluded(ctx) {
+		return ContextWindowBinding{}, false
+	}
 	binding, ok := ctx.Value(contextWindowBindingKey{}).(ContextWindowBinding)
 	if !ok || strings.TrimSpace(binding.TurnID) == "" ||
 		(binding.Access != ContextWindowOwner && binding.Access != ContextWindowReadOnly) {
@@ -207,6 +215,9 @@ func CurrentContextWindowBinding(ctx context.Context) (ContextWindowBinding, boo
 
 // CurrentContextCheckpoint returns the execution-scoped active Context Window checkpoint.
 func CurrentContextCheckpoint(ctx context.Context) (runtimecontext.Checkpoint, bool) {
+	if contextWindowExcluded(ctx) {
+		return runtimecontext.Checkpoint{}, false
+	}
 	state, ok := ctx.Value(contextCheckpointKey{}).(*contextWindowState)
 	if !ok || state == nil {
 		return runtimecontext.Checkpoint{}, false
@@ -232,7 +243,7 @@ func WithoutContextWindow(ctx context.Context) context.Context {
 // The expected checkpoint identity provides an in-memory CAS for parallel/continuation safety.
 func ReplaceContextCheckpoint(ctx context.Context, expectedCheckpointID string, next runtimecontext.Checkpoint) error {
 	state, ok := ctx.Value(contextCheckpointKey{}).(*contextWindowState)
-	if !ok || state == nil || !runtimecontext.ValidCheckpoint(next) {
+	if !ok || state == nil || contextWindowExcluded(ctx) || !runtimecontext.ValidCheckpoint(next) {
 		return ErrInvalidRequest
 	}
 	state.mu.Lock()

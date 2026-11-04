@@ -5,6 +5,37 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Context Run owner hard cut: process-local Context Window bindings cannot
+  authorize a different Agent Run's Session/Turn or elevate a descendant to
+  Context `owner`. Rebuild the active Context from durable Invocation/RunRelation
+  ownership before trusting any inherited checkpoint. Unknown Runs lose stale
+  inherited Context, explicit `read_only` grants remain narrowed, and Handoff
+  Specialists **and their nested Agent descendants** remain excluded from
+  Supervisor transcripts. Uncertain owner lookups and inconsistent
+  RunRelation child identities now fail closed before Context rehydration.
+  A final independent audit closed a TOCTOU gap by merging Handoff isolation
+  and Turn selection into a single physical ancestry scan; the Context
+  Artifact Tool reuses that proof and refuses to expose a Supervisor archive
+  to isolated Specialists or their descendants, even if the Host explicitly
+  supplies the Tool and a known artifact ID. Final integrity hardening
+  validates the actual cached Checkpoint contents before reusing a matching
+  durable reference, rehydrating from Store on mismatch; corrupt frozen
+  Invocations no longer supply Context ownership or downgrade a Specialist
+  into an ordinary child. A later independent follow-up closed three
+  conditional Store-read integrity gaps: full content-hash verification for
+  reloaded Checkpoints, consistent frozen Invocation Input/InputHash pairs
+  (including absent Handoff child payloads), and complete RunRelation
+  writer-contract validation before granting Context ownership. A subsequent
+  invariant-driven audit found independent failures in Turn identity, indexed
+  Invocation provenance, exact Artifact identity, sticky Context exclusion and
+  shared-budget Turn attribution. Context, Artifact and Budget now share one
+  Run-ancestry authority proof, which corroborates indexed Invocations against
+  their canonical immutable records and verifies returned Turn IDs. Artifact
+  payloads are checked against their requested IDs and content hashes, and
+  explicit Context exclusion cannot be reopened by process-local rebinding.
+  No persisted state or public API change. See
+  [Context Run owner audit](docs/audits/2026-11-04-context-run-owner-provenance.md).
+
 - PR #87 completion-authority audit: bind each named Provider invocation to
   one physical or verified settled-replay receipt. Middleware cannot replace
   its exact ID or Usage, promote a rejected/failed call to success, or fabricate
