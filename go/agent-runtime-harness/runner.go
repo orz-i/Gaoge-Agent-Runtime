@@ -760,19 +760,38 @@ func (runner *Runner) persistStartEnvelope(
 		ID: sessionID, HostThread: request.HostThread, Actor: request.Actor,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if _, _, err := runner.store.CreateSession(ctx, session); err != nil {
+	storedSession, _, err := runner.store.CreateSession(ctx, session)
+	if err != nil {
 		return Turn{}, false, err
 	}
-	if _, _, err := runner.store.PutConfigSnapshot(ctx, config); err != nil {
+	if !validSession(storedSession) || !sameSessionIdentity(storedSession, session) {
+		return Turn{}, false, ErrConflict
+	}
+	storedConfig, _, err := runner.store.PutConfigSnapshot(ctx, config)
+	if err != nil {
 		return Turn{}, false, err
+	}
+	if !validConfigSnapshot(storedConfig) || storedConfig.ID != config.ID ||
+		storedConfig.TurnID != config.TurnID || storedConfig.ContentHash != config.ContentHash {
+		return Turn{}, false, ErrConflict
 	}
 	turn := Turn{
 		ID: turnID, SessionID: sessionID, HostTurn: request.HostTurn,
 		ConfigSnapshotID: config.ID, Status: TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	created, fresh, err := runner.store.CreateTurn(ctx, turn)
-	if err != nil || config.SharedBudget == nil {
-		return created, fresh, err
+	if err != nil {
+		return Turn{}, false, err
+	}
+	// A Store return is not authority to rebind this Host-selected Turn to
+	// another Session, HostTurn, or Config. Check before creating an
+	// Invocation, reserving budget, or dispatching any physical Feature.
+	if !validTurn(created) || !sameTurnIdentity(created, turn) ||
+		(fresh && (created.Status != TurnAccepted || created.Revision != turn.Revision)) {
+		return Turn{}, false, ErrConflict
+	}
+	if config.SharedBudget == nil {
+		return created, fresh, nil
 	}
 	ledger, err := runner.budgets.coordinator().Ensure(ctx, turn.ID, *config.SharedBudget)
 	if err != nil {
