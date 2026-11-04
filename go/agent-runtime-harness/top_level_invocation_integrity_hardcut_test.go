@@ -9,7 +9,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
@@ -112,6 +111,26 @@ func TestHardcutCreateInvocationReceiptCannotSubstituteExecutionAuthority(t *tes
 	}
 }
 
+type countedTeamPhysicalStart struct {
+	completedTeamFeature
+	calls int
+}
+
+func (feature *countedTeamPhysicalStart) StartRun(ctx context.Context, request team.StartRequest) (kernel.Snapshot, error) {
+	feature.calls++
+	return feature.completedTeamFeature.StartRun(ctx, request)
+}
+
+type countedWorkflowPhysicalStart struct {
+	completedWorkflowFeature
+	calls int
+}
+
+func (feature *countedWorkflowPhysicalStart) StartRun(ctx context.Context, request workflow.StartRequest) (kernel.Snapshot, error) {
+	feature.calls++
+	return feature.completedWorkflowFeature.StartRun(ctx, request)
+}
+
 func TestHardcutForeignInvocationReceiptBlocksCompositeStart(t *testing.T) {
 	for _, name := range []string{"Team", "Workflow"} {
 		t.Run(name, func(t *testing.T) {
@@ -124,8 +143,10 @@ func TestHardcutForeignInvocationReceiptBlocksCompositeStart(t *testing.T) {
 				t.Fatal(err)
 			}
 			store := &forgedInvocationReceiptStore{Store: harness.NewMemoryStore(), mutation: "foreign-persisted"}
+			teams := &countedTeamPhysicalStart{completedTeamFeature: completedTeamFeature{runtime: runtime}}
+			workflows := &countedWorkflowPhysicalStart{completedWorkflowFeature: completedWorkflowFeature{runtime: runtime}}
 			runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loop, Store: store,
-				Teams: completedTeamFeature{runtime}, Workflows: completedWorkflowFeature{runtime}})
+				Teams: teams, Workflows: workflows})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,12 +157,10 @@ func TestHardcutForeignInvocationReceiptBlocksCompositeStart(t *testing.T) {
 				_, err = runner.StartWorkflowTurn(t.Context(), harness.WorkflowTurnRequest{StartRequest: testStartRequest(),
 					Definition: workflow.Definition{}})
 			}
-			if !errors.Is(err, harness.ErrConflict) {
-				t.Fatalf("foreign Invocation accepted for %s: %v", name, err)
+			if !errors.Is(err, harness.ErrConflict) || teams.calls != 0 || workflows.calls != 0 {
+				t.Fatalf("foreign Invocation reached %s physical execution: err=%v team_calls=%d workflow_calls=%d",
+					name, err, teams.calls, workflows.calls)
 			}
 		})
 	}
 }
-
-// Suppress unused direct import when this test is compiled in isolation.
-var _ model.Client = directModel{}
