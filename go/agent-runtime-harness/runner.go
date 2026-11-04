@@ -906,7 +906,10 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 // Harness Turn state. C2 extends dispatch to the other explicit Feature adapters.
 func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (snapshot Snapshot, err error) {
 	turnID = strings.TrimSpace(turnID)
-	turn, err := loadVerifiedTurn(ctx, runner.store, turnID)
+	// A protective stop must not depend on Config or Session presentation
+	// reads. The exact Turn key and Host derivation remain mandatory; the
+	// frozen root Invocation and physical Run are checked below before effect.
+	turn, err := loadVerifiedTurnIdentity(ctx, runner.store, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -915,7 +918,8 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	// member or remote ChildRunner; reconcile its descendants under the
 	// standard durable cancellation fence before returning success.
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
+	if err != nil || !validInvocation(invocation) || invocation.TurnID != turn.ID ||
+		strings.TrimSpace(invocation.ParentItemID) != "" || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled && invocation.ExecutionClass != ExecutionApplication {

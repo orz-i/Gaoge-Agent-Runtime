@@ -1030,14 +1030,19 @@ func (runner *Runner) startRetriedWorkflow(ctx context.Context, invocation Invoc
 
 // CancelInvocation cancels one child Runtime Feature by its durable Invocation identity.
 func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason string) (snapshot Snapshot, err error) {
-	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
+	invocationID = strings.TrimSpace(invocationID)
+	invocation, err := runner.store.GetInvocation(ctx, invocationID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if strings.TrimSpace(invocation.ParentItemID) == "" {
+	if !validInvocation(invocation) || invocation.ID != invocationID ||
+		strings.TrimSpace(invocation.ParentItemID) == "" {
 		return Snapshot{}, ErrConflict
 	}
-	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
+	// A protective child stop uses only the original Turn identity here.
+	// The existing related-Run and ancestry fences must still prove ownership
+	// before any physical cancellation; ancillary Config reads can fail.
+	turn, err := loadVerifiedTurnIdentity(ctx, runner.store, invocation.TurnID)
 	if err != nil {
 		return Snapshot{}, err
 	}

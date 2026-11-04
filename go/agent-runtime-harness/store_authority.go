@@ -32,10 +32,12 @@ func loadVerifiedSession(ctx context.Context, store Store, sessionID string) (Se
 	return value, nil
 }
 
-// loadVerifiedTurn binds every Store GetTurn response to the exact requested
-// Turn key. A different, otherwise valid Turn may never stand in for the
-// original owner before execution, recovery or Host-visible projection.
-func loadVerifiedTurn(ctx context.Context, store Store, turnID string) (Turn, error) {
+// loadVerifiedTurnIdentity proves the exact requested Turn and its original
+// Host-derived Session/HostTurn binding without requiring ancillary Session or
+// Config reads. Only protective cancellation may consume this narrower proof:
+// it must still verify the frozen Invocation and physical Run before acting.
+// All new execution, recovery and Host-visible reads use loadVerifiedTurn.
+func loadVerifiedTurnIdentity(ctx context.Context, store Store, turnID string) (Turn, error) {
 	if store == nil || strings.TrimSpace(turnID) == "" {
 		return Turn{}, ErrInvalidRequest
 	}
@@ -46,17 +48,24 @@ func loadVerifiedTurn(ctx context.Context, store Store, turnID string) (Turn, er
 	if !validTurn(value) || value.ID != turnID {
 		return Turn{}, ErrConflict
 	}
-	// The Host-derived Turn ID binds both its Session and HostTurn. Merely
-	// preserving the returned Turn.ID is not enough if a Store substitutes
-	// another Session or HostTurn while keeping the same ID.
 	if hostDerivedID(turnID, "ht") {
 		derived, deriveErr := TurnID(value.SessionID, value.HostTurn)
 		if deriveErr != nil || derived != turnID {
 			return Turn{}, ErrConflict
 		}
-		// A valid Turn ID alone is insufficient authority to use a foreign
-		// Session or Config. Verify both durable links here, before callers
-		// may reconcile, cancel, retry or dispatch any physical work.
+	}
+	return value, nil
+}
+
+// loadVerifiedTurn additionally proves the Session and frozen Config links.
+// A different, otherwise valid Turn may never stand in for the original owner
+// before new execution, recovery or Host-visible projection.
+func loadVerifiedTurn(ctx context.Context, store Store, turnID string) (Turn, error) {
+	value, err := loadVerifiedTurnIdentity(ctx, store, turnID)
+	if err != nil {
+		return Turn{}, err
+	}
+	if hostDerivedID(turnID, "ht") {
 		if _, err := loadVerifiedSession(ctx, store, value.SessionID); err != nil {
 			return Turn{}, err
 		}
@@ -71,11 +80,20 @@ func loadVerifiedTurn(ctx context.Context, store Store, turnID string) (Turn, er
 	return value, nil
 }
 
-// Only Host-derived IDs have the deterministic 24-hex-digest form. The
-// Store interface also supports standalone caller-defined IDs, which can be
-// checked against their exact read keys but have no Host-derived seal.
+// Only IDs with the exact lowercase 24-hex digest form belong to the
+// Host-derived namespace. Standalone callers may use similarly prefixed IDs
+// containing non-hex characters; they still require exact key/shape checks.
 func hostDerivedID(value, prefix string) bool {
-	return len(value) == len(prefix)+1+24 && strings.HasPrefix(value, prefix+"_")
+	if len(value) != len(prefix)+1+24 || !strings.HasPrefix(value, prefix+"_") {
+		return false
+	}
+	for i := len(prefix) + 1; i < len(value); i++ {
+		c := value[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // canonicalSealedConfig never trusts a persisted ContentHash by itself. It
