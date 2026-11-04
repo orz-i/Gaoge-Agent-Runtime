@@ -279,6 +279,18 @@ func validCatalogFingerprints(definitions []tools.Definition, fingerprints []str
 }
 
 func validModelInvocationReceipt(invocation ModelInvocation) bool {
+	// Restarted Runs must not trust legacy completed/consumed named Provider
+	// receipts whose original physical identity was never established. Agent
+	// normalizes ProviderResponseID when writing it; insist that the stored
+	// ID still exactly matches the unmodified Provider response evidence.
+	if invocation.Provider != "" || invocation.BindingFingerprint != "" {
+		if invocation.Provider == "" || !validBindingFingerprint(invocation.BindingFingerprint) ||
+			invocation.ProviderResponseID == "" ||
+			strings.TrimSpace(invocation.ProviderResponseID) != invocation.ProviderResponseID ||
+			invocation.ProviderResponseID != invocation.Response.ResponseID {
+			return false
+		}
+	}
 	if invocation.ErrorCode != "" {
 		return invocation.Usage != nil && invocation.Response.Usage != nil &&
 			validModelUsage(invocation.Usage) && *invocation.Usage == *invocation.Response.Usage
@@ -713,14 +725,15 @@ func (runner *Runner) executeModelInvocation(
 		},
 		func(response model.Response, err error) (model.Response, error) {
 			known := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
-			if (err == nil || known) && duplicatePhysicalProviderResponseID(state, invocation, response.ResponseID) {
+			// An accepted physical completion needs the same exact named
+			// Provider identity as a known rejected completion. Otherwise a
+			// successful Tool result can bypass response-ID deduplication.
+			if (err == nil || known) && invocation.Provider != "" && invocation.BindingFingerprint != "" &&
+				(response.ResponseID == "" || strings.TrimSpace(response.ResponseID) != response.ResponseID) {
 				return model.Response{}, ErrInvalidModelResponse
 			}
-			if known {
-				if invocation.Provider != "" && invocation.BindingFingerprint != "" && (response.ResponseID == "" || strings.TrimSpace(response.ResponseID) != response.ResponseID) {
-					return model.Response{}, ErrInvalidModelResponse
-				}
-				return response, err
+			if (err == nil || known) && duplicatePhysicalProviderResponseID(state, invocation, response.ResponseID) {
+				return model.Response{}, ErrInvalidModelResponse
 			}
 			return response, err
 		},
@@ -731,10 +744,11 @@ func (runner *Runner) executeModelInvocation(
 		err = model.NewResponseRejectedError(ErrInvalidModelResponse)
 	}
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
-	// Named external Providers must prove the physical completion identity,
-	// not just claim billable Usage in a typed rejection. Reject absent or
-	// normalized IDs before recording a second paid ModelInvocation.
-	if knownRejection && invocation.Provider != "" && invocation.BindingFingerprint != "" &&
+	// Named external Providers must prove exact physical completion identity
+	// for success, late success and verified rejection alike. Middleware may
+	// change the response after the private Provider guard, so recheck here
+	// before any durable receipt or local Tool execution is authorized.
+	if (err == nil || late || knownRejection) && invocation.Provider != "" && invocation.BindingFingerprint != "" &&
 		(response.ResponseID == "" || strings.TrimSpace(response.ResponseID) != response.ResponseID) {
 		return snapshot, state, ErrInvalidModelResponse
 	}

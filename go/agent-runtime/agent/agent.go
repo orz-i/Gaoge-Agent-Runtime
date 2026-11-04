@@ -1446,10 +1446,19 @@ func (runner *Runner) generateProviderModel(
 		return runner.model.Generate(ctx, request)
 	}
 	var responseID string
+	var streamIdentityConflict bool
 	var usage *model.Usage
 	response, err := streaming.GenerateStream(ctx, request, func(event model.StreamEvent) error {
-		if strings.TrimSpace(event.ResponseID) != "" {
-			responseID = strings.TrimSpace(event.ResponseID)
+		if event.ResponseID != "" {
+			// Preserve exact physical evidence rather than normalizing an
+			// invalid ID into an apparently valid durable completion.
+			if responseID != "" && responseID != event.ResponseID {
+				// A faulty custom StreamingClient may ignore callback errors.
+				// Retain this contradiction through its final return anyway.
+				streamIdentityConflict = true
+				return ErrInvalidModelResponse
+			}
+			responseID = event.ResponseID
 		}
 		if event.Usage != nil {
 			usage = model.CloneUsage(event.Usage)
@@ -1459,10 +1468,18 @@ func (runner *Runner) generateProviderModel(
 		}
 		return emit(event)
 	})
+	if streamIdentityConflict {
+		return model.Response{}, ErrInvalidModelResponse
+	}
 	if err != nil {
 		return response, err
 	}
-	if strings.TrimSpace(response.ResponseID) == "" {
+	// A successful streamed response cannot assert a different terminal ID
+	// from the one it previously emitted, regardless of which is nonempty.
+	if response.ResponseID != "" && responseID != "" && response.ResponseID != responseID {
+		return model.Response{}, ErrInvalidModelResponse
+	}
+	if response.ResponseID == "" {
 		response.ResponseID = responseID
 	}
 	if response.Usage == nil {

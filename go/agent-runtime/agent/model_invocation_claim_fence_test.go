@@ -345,6 +345,16 @@ func (postBindingLeaseClock) Now() time.Time { return time.Now().UTC().Add(3 * t
 
 func (*mutableBindingLimiterModel) ProviderName() string { return "same-provider" }
 
+// This named Provider fixture must return a real physical completion ID,
+// independently of a concurrent binding change that should fence the waiter.
+func (client *mutableBindingLimiterModel) Generate(ctx context.Context, request model.Request) (model.Response, error) {
+	response, err := client.sharedLimiterModel.Generate(ctx, request)
+	if err == nil {
+		response.ResponseID = "binding-limiter-" + request.RunID
+	}
+	return response, err
+}
+
 func (client *mutableBindingLimiterModel) BindingFingerprintForRequest(model.Request) string {
 	return client.binding.Load().(string)
 }
