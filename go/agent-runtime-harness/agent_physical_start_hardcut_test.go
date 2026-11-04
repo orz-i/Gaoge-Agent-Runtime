@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -24,6 +25,7 @@ func (m *physicalStartCaptureModel) Generate(_ context.Context, request model.Re
 // request construction as first admission. Neither path gets a second tool
 // loop, a changed model binding, or an extra model call on exact replay.
 func TestHardcutAgentPhysicalStartEqualsPreRunRecovery(t *testing.T) {
+	var initialPhysicalRequest model.Request
 	for _, loseInvocationItem := range []bool{false, true} {
 		name := "first-admission"
 		if loseInvocationItem {
@@ -72,6 +74,11 @@ func TestHardcutAgentPhysicalStartEqualsPreRunRecovery(t *testing.T) {
 			if visible.RunID == "" || visible.Model != "selected-model" ||
 				string(visible.ModelOptions) != string(request.Config.ModelOptions) {
 				t.Fatalf("physical request lost frozen model identity or options: %+v", visible)
+			}
+			if !loseInvocationItem {
+				initialPhysicalRequest = model.CloneRequest(visible)
+			} else if !reflect.DeepEqual(visible, initialPhysicalRequest) {
+				t.Fatalf("pre-Run recovery changed physical model request: first=%+v recovered=%+v", initialPhysicalRequest, visible)
 			}
 			replayed, err := runner.StartAgentTurn(t.Context(), request)
 			if err != nil || replayed.Turn.ID != started.Turn.ID || len(modelClient.requests) != 1 {

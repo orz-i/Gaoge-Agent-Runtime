@@ -742,27 +742,7 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 		runCtx = withContextWindowBinding(runCtx, createdTurn.ID, ContextWindowOwner)
 	}
 	runtimeSnapshot, startErr := runner.startAgentPhysical(runCtx, invocation, request, config)
-	if runtimeSnapshot.Run.ID == "" {
-		if errors.Is(startErr, kernel.ErrConflict) {
-			recovered, recoverErr := runner.Refresh(ctx, createdTurn.ID)
-			if recoverErr == nil && recovered.Turn.Status == TurnCancelled {
-				return recovered, nil
-			}
-		}
-		// Another Start may hold the grant, or a physical feature may have
-		// returned an outcome-unknown error. Neither authorizes marking its
-		// Invocation/Turn Failed while the original effect could still run.
-		if !isDispatchProvenNoEffect(startErr) {
-			return Snapshot{}, startErr
-		}
-		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, startErr)
-		return failed, errors.Join(startErr, failErr)
-	}
-	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, createdTurn, invocation, runtimeSnapshot)
-	if snapshot.Turn.Status == TurnCancelled && errors.Is(startErr, kernel.ErrConflict) {
-		startErr = nil
-	}
-	return snapshot, errors.Join(startErr, syncErr)
+	return runner.finishTopLevelStart(ctx, createdTurn, invocation, runtimeSnapshot, startErr)
 }
 
 func (runner *Runner) persistStartEnvelope(

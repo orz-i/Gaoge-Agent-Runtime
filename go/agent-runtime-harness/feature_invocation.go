@@ -144,7 +144,7 @@ func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest
 			Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
 		})
 	})
-	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
 
 // StartGroupChatTurn starts Group Chat without creating a placeholder Agent root.
@@ -189,7 +189,7 @@ func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatT
 	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func() (kernel.Snapshot, error) {
 		return runner.groupChats.StartRun(prepared.runContext, runtimeRequest)
 	})
-	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
 
 func materializeGroupChatPolicy(
@@ -324,7 +324,7 @@ func (runner *Runner) StartWorkflowTurn(ctx context.Context, request WorkflowTur
 			Definition: frozen.Definition, Input: frozen.Input,
 		})
 	})
-	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
 
 func (runner *Runner) prepareTopLevelFeatureStart(
@@ -509,7 +509,7 @@ func (runner *Runner) replayTopLevelFeatureStart(
 	return Snapshot{}, true, err
 }
 
-func (runner *Runner) finishTopLevelFeatureStart(
+func (runner *Runner) finishTopLevelStart(
 	ctx context.Context,
 	turn Turn,
 	invocation Invocation,
@@ -530,6 +530,13 @@ func (runner *Runner) finishTopLevelFeatureStart(
 		return failed, errors.Join(startErr, failErr)
 	}
 	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	// Agent cancellation may win a competing native Kernel Start. Its
+	// original caller observes the committed cancelled Turn, not a stale
+	// Kernel revision conflict. Composite Features retain their own errors.
+	if invocation.ExecutionClass == ExecutionAgent && snapshot.Turn.Status == TurnCancelled &&
+		errors.Is(startErr, kernel.ErrConflict) {
+		startErr = nil
+	}
 	return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, runtimeSnapshot, startErr, syncErr)
 }
 
@@ -887,7 +894,7 @@ func (runner *Runner) startRetriedTopLevelInvocation(
 	runtimeSnapshot, startErr := runner.startInvocationAttempt(runCtx, invocation, childInvocationContext{
 		turn: turn, actor: actor, thread: thread,
 	})
-	return runner.finishTopLevelFeatureStart(ctx, turn, invocation, runtimeSnapshot, startErr)
+	return runner.finishTopLevelStart(ctx, turn, invocation, runtimeSnapshot, startErr)
 }
 
 // frozenTopLevelInvocationIdentity reads the exact Actor/Thread committed in
