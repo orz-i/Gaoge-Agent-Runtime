@@ -143,6 +143,36 @@ func sameFrozenInvocationAuthority(candidate, returned Invocation) bool {
 		returned.Attempt == candidate.Attempt
 }
 
+// verifyProtectiveInvocation matches the exact frozen Run/Attempt owner
+// across both durable Invocation indexes. The current returned record may
+// contain malformed Host-visible OutputRefs; they cannot block an already
+// authorized physical stop, but neither can a substituted execution identity
+// authorize cancellation of a different Run or an obsolete Attempt.
+// This is an identity proof, not a second cancellation grant or an alternate
+// Kernel state authority. The existing cancellation intent/CAS still governs
+// the actual physical stop.
+func verifyProtectiveInvocation(ctx context.Context, store Store, returned Invocation) error {
+	if store == nil || !validInvocationExecutionAuthority(returned) ||
+		strings.TrimSpace(returned.ExecutionRefID) == "" {
+		return ErrConflict
+	}
+	byID, err := store.GetInvocation(ctx, returned.ID)
+	if err != nil {
+		return err
+	}
+	if !validInvocationExecutionAuthority(byID) || !sameFrozenInvocationAuthority(returned, byID) {
+		return ErrConflict
+	}
+	byRun, err := store.GetInvocationByExecutionRefID(ctx, returned.ExecutionRefID)
+	if err != nil {
+		return err
+	}
+	if !validInvocationExecutionAuthority(byRun) || !sameFrozenInvocationAuthority(returned, byRun) {
+		return ErrConflict
+	}
+	return nil
+}
+
 // createVerifiedInvocation never treats a Store's Create result as a new
 // execution-identity source. Verify the returned receipt AND the canonical
 // indexed record before any Item/Grant, budget attribution or physical effect.

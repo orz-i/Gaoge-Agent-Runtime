@@ -918,9 +918,12 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	// member or remote ChildRunner; reconcile its descendants under the
 	// standard durable cancellation fence before returning success.
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	if err != nil || !validInvocation(invocation) || invocation.TurnID != turn.ID ||
+	if err != nil || !validInvocationExecutionAuthority(invocation) || invocation.TurnID != turn.ID ||
 		strings.TrimSpace(invocation.ParentItemID) != "" || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
+		return Snapshot{}, err
 	}
 	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled && invocation.ExecutionClass != ExecutionApplication {
 		// A Failed admission may have been rejected before its Kernel Run

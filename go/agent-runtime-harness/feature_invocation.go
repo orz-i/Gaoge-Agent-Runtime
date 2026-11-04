@@ -1035,9 +1035,12 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if !validInvocation(invocation) || invocation.ID != invocationID ||
-		strings.TrimSpace(invocation.ParentItemID) == "" {
+	if !validInvocationExecutionAuthority(invocation) || invocation.ID != invocationID ||
+		strings.TrimSpace(invocation.ParentItemID) == "" || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, ErrConflict
+	}
+	if err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
+		return Snapshot{}, err
 	}
 	// A protective child stop uses only the original Turn identity here.
 	// The existing related-Run and ancestry fences must still prove ownership
