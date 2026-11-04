@@ -164,7 +164,7 @@ func (runner *Runner) prepareDelegation(
 	invocation Invocation,
 	request DelegateRequest,
 ) (handoff.Delegation, kernel.Snapshot, error) {
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return handoff.Delegation{}, kernel.Snapshot{}, err
 	}

@@ -66,7 +66,7 @@ func (preparer managedContextPreparer) prepare(ctx context.Context, incoming mod
 	if turn.ContextCheckpointID != checkpoint.ID || !sameContextCheckpointRef(checkpoint, turn.ContextRef) {
 		return model.Request{}, ErrConflict
 	}
-	config, err := preparer.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, preparer.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return model.Request{}, err
 	}

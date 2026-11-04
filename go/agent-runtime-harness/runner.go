@@ -704,7 +704,7 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	invocation, invocationCreated, err := runner.store.CreateInvocation(ctx, invocation)
+	invocation, invocationCreated, err := runner.createVerifiedInvocation(ctx, invocation)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -771,8 +771,15 @@ func (runner *Runner) persistStartEnvelope(
 	if err != nil {
 		return Turn{}, false, err
 	}
-	if !validConfigSnapshot(storedConfig) || storedConfig.ID != config.ID ||
-		storedConfig.TurnID != config.TurnID || storedConfig.ContentHash != config.ContentHash {
+	_, configIntegrityErr := canonicalSealedConfig(storedConfig)
+	if storedConfig.ID != config.ID || storedConfig.TurnID != config.TurnID ||
+		storedConfig.ContentHash != config.ContentHash || configIntegrityErr != nil {
+		return Turn{}, false, ErrConflict
+	}
+	// The returned receipt alone cannot attest what was persisted. Check
+	// the canonical Store record before admitting any executable owner.
+	storedConfig, err = loadSealedConfig(ctx, runner.store, config.ID)
+	if err != nil || storedConfig.ContentHash != config.ContentHash {
 		return Turn{}, false, ErrConflict
 	}
 	turn := Turn{
@@ -1652,7 +1659,7 @@ func normalizeOptionalHostRef(value **HostRef) error {
 // from the frozen Config and current Invocation. It never dispatches a Model,
 // Tool, or host capability. This is safe after any partial Item append.
 func (runner *Runner) repairStartItems(ctx context.Context, turn Turn, invocation Invocation) error {
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return err
 	}
@@ -1739,7 +1746,7 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	if err != nil {
 		return Snapshot{}, err
 	}
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return Snapshot{}, err
 	}

@@ -414,7 +414,7 @@ func (runner *Runner) prepareTopLevelFeatureInvocation(
 	if err != nil {
 		return Invocation{}, err
 	}
-	invocation, fresh, err := runner.store.CreateInvocation(ctx, Invocation{
+	invocation, fresh, err := runner.createVerifiedInvocation(ctx, Invocation{
 		ID: invocationID, TurnID: envelope.turn.ID, CapabilityKey: capabilityKey,
 		DefinitionVersion: strings.TrimSpace(definitionVersion), ExecutionClass: executionClass,
 		Input: append(json.RawMessage(nil), input...), InputHash: inputHash,
@@ -972,7 +972,7 @@ func (runner *Runner) startRetriedAgent(ctx context.Context, invocation Invocati
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
 		return kernel.Snapshot{}, ErrConflict
 	}
-	config, err := runner.store.GetConfigSnapshot(ctx, child.turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, child.turn.ConfigSnapshotID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -1119,7 +1119,7 @@ func (runner *Runner) beginChildInvocation(
 		ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
 		Attempt: 1, OutputRefs: []HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	created, fresh, err := runner.store.CreateInvocation(ctx, value)
+	created, fresh, err := runner.createVerifiedInvocation(ctx, value)
 	if err != nil {
 		return Invocation{}, childInvocationContext{}, false, err
 	}

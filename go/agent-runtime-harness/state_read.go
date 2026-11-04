@@ -27,7 +27,7 @@ func (runner *Runner) LoadState(ctx context.Context, turnID string) (StateSnapsh
 	if err != nil {
 		return StateSnapshot{}, err
 	}
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return StateSnapshot{}, err
 	}

@@ -65,7 +65,7 @@ func (policy *FrozenApprovalPolicy) Approval(
 	if err != nil {
 		return plugin.ApprovalNotRequired, err
 	}
-	config, err := policy.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, policy.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return plugin.ApprovalNotRequired, err
 	}

@@ -85,7 +85,7 @@ func (middleware *BudgetMiddleware) bindRun(ctx context.Context, runID string) (
 	if err != nil {
 		return budget.Ledger{}, err
 	}
-	config, err := middleware.dependencies.Store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, middleware.dependencies.Store, turn.ConfigSnapshotID)
 	if err != nil || config.SharedBudget == nil {
 		return budget.Ledger{}, err
 	}

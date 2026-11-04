@@ -175,7 +175,7 @@ func capabilityToolContext(
 	if err != nil {
 		return Turn{}, Session{}, ConfigSnapshot{}, err
 	}
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	return turn, session, config, err
 }
 
@@ -409,7 +409,7 @@ func NewCapabilityInvocationRequestPreparer(store Store) (agent.ModelRequestPrep
 		if !harnessRun {
 			return model.Request{}, ErrInvalidRequest
 		}
-		config, err := store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+		config, err := loadSealedConfig(ctx, store, turn.ConfigSnapshotID)
 		if err != nil {
 			return model.Request{}, err
 		}
