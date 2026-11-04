@@ -94,9 +94,16 @@ func (handler *ContextArtifactToolHandler) resolveReadableArtifact(
 	runID string,
 	artifactID string,
 ) (runtimecontext.Artifact, error) {
-	turn, _, err := resolveContextTurnForRun(ctx, handler.store, handler.relations, runID)
+	// The exact archive is part of the same Context isolation boundary as
+	// the active window. An isolated Specialist or its descendants may not
+	// borrow a Supervisor Turn merely by knowing an Artifact ID, even if
+	// the Host explicitly exposes this read-only Tool to that Run.
+	turn, _, isolated, err := resolveContextRunAuthority(ctx, handler.store, handler.relations, runID)
 	if err != nil {
 		return runtimecontext.Artifact{}, err
+	}
+	if isolated {
+		return runtimecontext.Artifact{}, ErrConflict
 	}
 	artifact, err := handler.store.GetContextArtifact(ctx, artifactID)
 	if err != nil {
@@ -113,7 +120,10 @@ func (handler *ContextArtifactToolHandler) resolveReadableArtifact(
 		}
 		return runtimecontext.Artifact{}, err
 	}
-	if strings.TrimSpace(artifact.ScopeID) == "" || artifact.ScopeID != turn.SessionID {
+	// The Store read is untrusted until the returned object's exact identity
+	// and content hash match this request. Scope-only checks permit a valid
+	// different same-session artifact (or corrupted bytes) to escape.
+	if artifact.ID != artifactID || !runtimecontext.ValidArtifact(artifact) || artifact.ScopeID != turn.SessionID {
 		return runtimecontext.Artifact{}, ErrConflict
 	}
 	return artifact, nil

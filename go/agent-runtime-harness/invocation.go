@@ -241,7 +241,14 @@ func validInvocation(value Invocation) bool {
 	if value.ExecutionRefID == "" && value.Status != InvocationAccepted {
 		return false
 	}
-	if len(value.Input) != 0 && (!json.Valid(value.Input) || hashInvocationBytes(value.Input) != value.InputHash) {
+	// A frozen InputHash without its payload is not an optional input: it
+	// is an incomplete ownership record. In particular, dropping a Handoff
+	// child's payload must never turn its isolated Run into an ordinary child.
+	if len(value.Input) == 0 {
+		if value.InputHash != "" || (value.ParentItemID != "" && value.ExecutionClass == ExecutionAgent && value.CapabilityKey == CapabilityAgent) {
+			return false
+		}
+	} else if !json.Valid(value.Input) || hashInvocationBytes(value.Input) != value.InputHash {
 		return false
 	}
 	return validInvocationOutputRefs(value.OutputRefs)

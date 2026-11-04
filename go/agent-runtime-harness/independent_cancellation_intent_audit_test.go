@@ -109,7 +109,7 @@ func TestIndependentCancellationIntentPreventsLateChildAdmission(t *testing.T) {
 			late := harness.Invocation{
 				ID: "hiv_late_" + mode, TurnID: turnID, ParentItemID: parentItemID,
 				CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
-				ExecutionClass: harness.ExecutionTeam, InputHash: "late", ExecutionRefID: "run_late_" + mode,
+				ExecutionClass: harness.ExecutionTeam, ExecutionRefID: "run_late_" + mode,
 				Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
 				OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
 			}
@@ -163,7 +163,7 @@ func TestIndependentCancellationIntentFencesInteractionAndInvocationStore(t *tes
 	child := harness.Invocation{
 		ID: "hiv_late_store", TurnID: turnID, ParentItemID: parentItemID,
 		CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionTeam, InputHash: "late-store", ExecutionRefID: "run-late-store",
+		ExecutionClass: harness.ExecutionTeam, ExecutionRefID: "run-late-store",
 		Status: harness.InvocationAccepted, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
 		CreatedAt: now, UpdatedAt: now,
 	}
