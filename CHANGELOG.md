@@ -5,11 +5,23 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Top-level Store receipt authority: the shared Harness admission path now
+  rejects a Store CreateSession, PutConfigSnapshot or CreateTurn response that
+  disagrees with the Host-selected immutable identity. A fresh Turn must also
+  retain its original Accepted/Revision-1 lifecycle. The first physical
+  Invocation, shared-budget reservation and Feature dispatch cannot proceed
+  on a substituted Session, Config or Turn. This fixes a confirmed P1 where
+  an inconsistent CreateTurn return could complete an Agent under a foreign
+  already-persisted Turn. No additional Store state, schema or compatibility
+  bridge. See [independent remediation](docs/audits/2026-11-04-harness-top-level-store-receipt-remediation.md).
+
 - Harness/Agent startup minimalization: remove the duplicate private Agent
   top-level admission envelope and Agent StartRun dispatch construction.
   Agent, Team, GroupChat, Workflow and Application share one top-level Turn
-  envelope and first-admission result settlement, without an old forwarding
-  alias. Agent's pre-Run recovery and the **first-attempt-only** native
+  admission envelope; Agent, Team, GroupChat and Workflow share Kernel-backed
+  first-admission result settlement. Application retains its independent Host
+  effect/OutputRefs settlement. No old forwarding alias is retained.
+  Agent's pre-Run recovery and the **first-attempt-only** native
   cancellation-conflict exception remain preserved; subsequent RetryInvocation
   Attempts do not inherit that extra snapshot-conflict suppression. Certified
   no-effect receipts and unknown-effect
