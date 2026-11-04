@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Harness protective-stop Invocation authority correction: Root/Child Cancel
+  validate the frozen execution identity and both canonical Store indexes
+  independently of Host-visible OutputRefs. Malformed display metadata can
+  fail final projection without blocking an already-authorized physical
+  cancellation; changed Attempt, RunID, InputHash or parent cannot substitute
+  another execution. Existing Kernel/RunRelation fences and cancellation
+  intent/CAS remain mandatory. No API, Store schema, legacy bridge or new
+  persisted authority. See the [protective Invocation proof audit](docs/audits/2026-11-04-harness-protective-invocation-authority.md).
+
 - Harness protective-cancellation authority correction: an already-admitted
   Agent/child Run may be safely stopped when Session or Config presentation
   reads temporarily fail; exact Turn/Invocation and existing Kernel/RunRelation

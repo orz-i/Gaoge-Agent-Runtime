@@ -2,6 +2,23 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-04 — Protective cancel requires frozen Invocation authority, not OutputRefs (beta.24 candidate)
+
+Root and Child protective cancellation now use one private frozen execution
+identity validator that ignores Host-visible `OutputRefs` while enforcing the
+Invocation ID/Turn, original frozen Input+InputHash, capability/version,
+execution class, Attempt and physical Run ID. Both durable indexed records
+(`GetInvocation` and `GetInvocationByExecutionRefID`) must agree before a
+cancellation intent can be claimed; a mutated Attempt or substituted Run
+cannot authorize cancellation of the wrong execution. Kernel/RunRelation
+ownership, native/external physical CAS and unknown-outcome fences remain
+mandatory. Invalid OutputRefs can still fail the final Host projection **after**
+a proven physical stop; an error in that projection cannot imply no effect.
+
+This corrects a pre-stable P1 behavior regression in cancellation availability
+without changing public APIs, persisted fields, Kernel status or adding a
+compatibility fallback. See the [independent repair evidence](audits/2026-11-04-harness-protective-invocation-authority.md).
+
 ## 2026-11-04 — Protective cancel does not depend on Config/Session presentation reads (beta.24 candidate)
 
 `Cancel` and `CancelInvocation` use an operation-specific, immutable Turn
