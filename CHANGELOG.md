@@ -9,8 +9,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   top-level admission envelope and Agent StartRun dispatch construction.
   Agent, Team, GroupChat, Workflow and Application share one top-level Turn
   envelope and first-admission result settlement, without an old forwarding
-  alias. Agent's pre-Run recovery and its cancellation-conflict semantics remain
-  explicitly preserved; certified no-effect receipts and unknown-effect
+  alias. Agent's pre-Run recovery and the **first-attempt-only** native
+  cancellation-conflict exception remain preserved; subsequent RetryInvocation
+  Attempts do not inherit that extra snapshot-conflict suppression. Certified
+  no-effect receipts and unknown-effect
   fencing are unchanged. No public API or persistence migration. See the
   [Harness/Agent hard-cut audit](docs/audits/2026-11-04-harness-agent-start-hardcut.md).
 

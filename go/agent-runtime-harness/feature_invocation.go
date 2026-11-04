@@ -530,14 +530,18 @@ func (runner *Runner) finishTopLevelStart(
 		return failed, errors.Join(startErr, failErr)
 	}
 	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
-	// Agent cancellation may win a competing native Kernel Start. Its
-	// original caller observes the committed cancelled Turn, not a stale
-	// Kernel revision conflict. Composite Features retain their own errors.
-	if invocation.ExecutionClass == ExecutionAgent && snapshot.Turn.Status == TurnCancelled &&
-		errors.Is(startErr, kernel.ErrConflict) {
+	if initialAgentCancelledStartConflict(invocation, snapshot.Turn.Status, startErr) {
 		startErr = nil
 	}
 	return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, runtimeSnapshot, startErr, syncErr)
+}
+
+// The original Agent Start caller may observe a committed cancellation instead
+// of a competing Kernel CAS error. Retried Agent Attempts and composite Feature
+// starts must retain their errors; this is not a general retry exception.
+func initialAgentCancelledStartConflict(invocation Invocation, status TurnStatus, startErr error) bool {
+	return invocation.ExecutionClass == ExecutionAgent && invocation.Attempt == 1 &&
+		status == TurnCancelled && errors.Is(startErr, kernel.ErrConflict)
 }
 
 // WorkflowFeature is the narrow Dynamic Workflow Runtime capability consumed by Harness.
