@@ -2,6 +2,25 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-04 — Protective cancel does not depend on Config/Session presentation reads (beta.24 candidate)
+
+`Cancel` and `CancelInvocation` use an operation-specific, immutable Turn
+identity proof. A previously admitted Run can be stopped even when its
+Config or Session read is temporarily unavailable; the exact Turn and
+Invocation owner, durable cancellation fence and original physical Kernel
+Run/RunRelation checks still apply. Other operations continue to use the
+full frozen Session/Config association before execution or Host display.
+A physical stop may succeed even when the final Snapshot projection returns
+an error; this is not evidence of no effect or authority to retry the stop
+without checking the durable control receipt.
+
+The deterministic Host Session and Turn ID namespace is limited to exact
+`hs_` or `ht_` plus **24 lowercase hexadecimal digits**. Existing standalone
+Store-defined IDs with similar noncanonical prefixes are no longer
+incorrectly treated as Host-derived hashes. No new persisted authority,
+Store schema, public API, legacy bridge, or prerelease version increment.
+See [the read-safety repair](audits/2026-11-04-harness-protective-cancel-and-id-grammar.md).
+
 ## 2026-11-04 — Harness Session/Turn Store reads require original owner proof (beta.24 candidate)
 
 All Harness read-side `GetSession` and `GetTurn` consumption now validates

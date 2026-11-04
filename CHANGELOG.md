@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Harness protective-cancellation authority correction: an already-admitted
+  Agent/child Run may be safely stopped when Session or Config presentation
+  reads temporarily fail; exact Turn/Invocation and existing Kernel/RunRelation
+  ownership fences still apply before any physical cancellation. New execution,
+  replay and Host-visible reads retain the complete frozen owner proof. Host
+  `hs_`/`ht_` namespaces now require the exact lowercase 24-hex digest,
+  preserving valid standalone Store IDs with noncanonical lookalike prefixes.
+  No new persistence, schema, compatibility shim or Kernel state. See
+  [the independent P1/P2 repair](docs/audits/2026-11-04-harness-protective-cancel-and-id-grammar.md).
+
 - Harness I1 read-side ownership hard cut: centralize all Session and Turn
   Store reads behind exact requested-ID verification. Host-derived identities
   additionally bind the original HostThread, HostTurn, owning Session and
