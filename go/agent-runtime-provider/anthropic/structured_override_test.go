@@ -30,7 +30,7 @@ func TestStructuredOutputTruncationDistinctFromRefusal(t *testing.T) {
 	// Existing TestTruncatedAndThinkingResponsesRejected tests the 200-status
 	// truncated message response. This directly tests the typed sentinel.
 	client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "truncated", "stop_reason": "max_tokens",
+		_ = json.NewEncoder(w).Encode(map[string]any{"type": "message", "role": "assistant", "id": "truncated", "stop_reason": "max_tokens",
 			"content": []any{map[string]any{"type": "text", "text": "{"}}})
 	})
 	req := model.Request{Model: "claude-sonnet-5-5", OutputContract: outputContract, Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("answer")}}}

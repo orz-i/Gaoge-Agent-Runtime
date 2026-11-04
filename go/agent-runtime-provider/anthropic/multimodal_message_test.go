@@ -43,7 +43,7 @@ func TestAnthropicMessagesOrderedImageAndPDFSourcesAndNoAudioFallback(t *testing
 			p[3].Type != "text" || p[3].Text != "after" {
 			t.Fatalf("anthropic media order or source changed: %+v", p)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"msg-1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":20,"output_tokens":4}}`)
+		_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"msg-1","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":20,"output_tokens":4}}`)
 	})
 	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: []model.ContentPart{
 		{Kind: model.ContentText, Text: "before"},
@@ -93,7 +93,7 @@ func TestAnthropicMessagesMultimodalStreamingKeepsFrozenInput(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		for _, event := range []struct{ kind, body string }{
-			{"message_start", `{"type":"message_start","message":{"id":"msg-stream","usage":{"input_tokens":40}}}`},
+			{"message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"msg-stream","usage":{"input_tokens":40}}}`},
 			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
 			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}`},
 			{"content_block_stop", `{"type":"content_block_stop","index":0}`},

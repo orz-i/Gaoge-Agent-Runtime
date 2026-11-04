@@ -197,6 +197,7 @@ func cloneModelInvocation(value ModelInvocation) ModelInvocation {
 
 func validModelInvocations(values []ModelInvocation) bool {
 	active := 0
+	seenPhysical := make(map[[3]string]struct{})
 	for index, invocation := range values {
 		if strings.TrimSpace(invocation.ID) == "" || strings.TrimSpace(invocation.RunID) == "" ||
 			invocation.SourceRevision == 0 || len(invocation.RequestHash) != sha256.Size*2 ||
@@ -259,6 +260,14 @@ func validModelInvocations(values []ModelInvocation) bool {
 		default:
 			return false
 		}
+		if invocation.Provider != "" && invocation.BindingFingerprint != "" &&
+			(invocation.Status == ModelInvocationCompleted || invocation.Status == ModelInvocationConsumed) {
+			key := [3]string{invocation.Provider, invocation.BindingFingerprint, invocation.ProviderResponseID}
+			if _, duplicate := seenPhysical[key]; duplicate {
+				return false
+			}
+			seenPhysical[key] = struct{}{}
+		}
 	}
 	return active <= 1
 }
@@ -279,6 +288,18 @@ func validCatalogFingerprints(definitions []tools.Definition, fingerprints []str
 }
 
 func validModelInvocationReceipt(invocation ModelInvocation) bool {
+	// Restarted Runs must not trust legacy completed/consumed named Provider
+	// receipts whose original physical identity was never established. Agent
+	// normalizes ProviderResponseID when writing it; insist that the stored
+	// ID still exactly matches the unmodified Provider response evidence.
+	if invocation.Provider != "" || invocation.BindingFingerprint != "" {
+		if invocation.Provider == "" || !validBindingFingerprint(invocation.BindingFingerprint) ||
+			invocation.ProviderResponseID == "" ||
+			strings.TrimSpace(invocation.ProviderResponseID) != invocation.ProviderResponseID ||
+			invocation.ProviderResponseID != invocation.Response.ResponseID {
+			return false
+		}
+	}
 	if invocation.ErrorCode != "" {
 		return invocation.Usage != nil && invocation.Response.Usage != nil &&
 			validModelUsage(invocation.Usage) && *invocation.Usage == *invocation.Response.Usage
@@ -631,6 +652,30 @@ func dispatchHostedToolsWithinIntent(frozen, candidate []model.HostedTool) bool 
 	return true
 }
 
+// Reusing one physical Provider completion ID for a different durable
+// ModelInvocation cannot prove a second generation or authorize a new local
+// Tool side effect. Retries of the *same* pending invocation are unaffected.
+// Scope this check to the same named Provider binding: independent providers
+// and changed Host bindings may legitimately issue colliding opaque IDs.
+func duplicatePhysicalProviderResponseID(state runState, current ModelInvocation, responseID string) bool {
+	responseID = strings.TrimSpace(responseID)
+	if current.Provider == "" || current.BindingFingerprint == "" || responseID == "" {
+		return false
+	}
+	for _, previous := range state.ModelInvocations {
+		if previous.ID == current.ID ||
+			(previous.Status != ModelInvocationCompleted && previous.Status != ModelInvocationConsumed) {
+			continue
+		}
+		if previous.Provider == current.Provider &&
+			previous.BindingFingerprint == current.BindingFingerprint &&
+			previous.ProviderResponseID == responseID {
+			return true
+		}
+	}
+	return false
+}
+
 func (runner *Runner) executeModelInvocation(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
@@ -666,6 +711,13 @@ func (runner *Runner) executeModelInvocation(
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
+	authority := modelCompletionAuthority{
+		named:   invocation.Provider != "" && invocation.BindingFingerprint != "",
+		request: model.CloneRequest(invocation.Request),
+		duplicate: func(id string) bool {
+			return duplicatePhysicalProviderResponseID(state, invocation, id)
+		},
+	}
 	response, err := runner.generateModelWithPolicyGuarded(ctx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
 		func(dispatchCtx context.Context) error {
 			// Resolve and revalidate Catalog authority first: a slow external
@@ -687,13 +739,24 @@ func (runner *Runner) executeModelInvocation(
 			}
 			return runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID)
 		},
+		&authority,
 	)
-	late := errors.Is(err, ErrModelLateResult)
 	response.Content = strings.TrimSpace(response.Content)
 	if err == nil && response.Usage != nil && validModelUsage(response.Usage) && !validModelResponse(response) {
 		err = model.NewResponseRejectedError(ErrInvalidModelResponse)
 	}
+	// Validate against the original receipt, not just another syntactically
+	// valid ID. The same authority also fences downstream shared settlement.
+	response, err = authority.validate(response, err)
+	late := errors.Is(err, ErrModelLateResult)
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
+	if knownRejection {
+		// The rejected assistant reply is NOT an authorized transcript or
+		// executable Tool payload. Persist only the verified billing receipt
+		// even for custom named clients and Model middleware that return
+		// an unsanitized rejected Response.
+		response = model.Response{ResponseID: response.ResponseID, Usage: model.CloneUsage(response.Usage)}
+	}
 	var denied modelPreDispatchDenied
 	if errors.As(err, &denied) {
 		// Nothing reached the Provider. Keep the committed pending Claim

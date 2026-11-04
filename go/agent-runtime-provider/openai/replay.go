@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -38,7 +39,8 @@ func encodeReplay(output []json.RawMessage) (*model.ProviderReplay, error) {
 func verifiedReplay(message model.Message) ([]json.RawMessage, error) {
 	replay := message.ProviderReplay
 	if replay == nil || replay.Provider != "openai" || replay.Format != replayFormat ||
-		len(replay.Data) == 0 || len(replay.Data) > maxReplayBytes {
+		len(replay.Data) == 0 || len(replay.Data) > maxReplayBytes ||
+		providerhttp.ValidateUniqueJSONKeys(replay.Data) != nil {
 		return nil, ErrUnsupported
 	}
 	var outputs []json.RawMessage

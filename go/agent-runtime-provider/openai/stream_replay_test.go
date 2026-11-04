@@ -39,7 +39,7 @@ func streamReasoningResponse(t *testing.T, w http.ResponseWriter, finalReason st
 	for _, event := range doneEvents {
 		writeReasoningEvent(t, w, "response.output_item.done", event)
 	}
-	complete := `{"id":"resp-stream-replay","status":"completed","output":[` + finalReason + "," + streamToolCall + `],"usage":{"input_tokens":12,"output_tokens":6}}`
+	complete := `{"object":"response","id":"resp-stream-replay","status":"completed","output":[` + finalReason + "," + streamToolCall + `],"usage":{"input_tokens":12,"output_tokens":6}}`
 	writeReasoningEvent(t, w, "response.completed", map[string]any{
 		"type": "response.completed", "response": json.RawMessage(complete),
 	})
@@ -134,7 +134,7 @@ func TestStreamingSchemaAcceptsOptionalDoneCompletedStatus(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		writeReasoningEvent(t, w, "response.output_item.done", doneReasoningEvent(
 			`{"type":"reasoning","id":"rs_1","summary":[],"status":"completed"}`, 0))
-		complete := `{"id":"resp-schema","status":"completed","output":[` + finalReasoning +
+		complete := `{"object":"response","id":"resp-schema","status":"completed","output":[` + finalReasoning +
 			`,{"type":"message","id":"msg_1","role":"assistant","phase":"final_answer","status":"completed","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":12,"output_tokens":6}}`
 		writeReasoningEvent(t, w, "response.completed", map[string]any{
 			"type": "response.completed", "response": json.RawMessage(complete),

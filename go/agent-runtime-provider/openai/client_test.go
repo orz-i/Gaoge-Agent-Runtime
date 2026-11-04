@@ -51,12 +51,12 @@ func TestUnaryToolRoundTripAndNormalizedUsage(t *testing.T) {
 			if body.ToolChoice != "required" {
 				t.Errorf("required tool choice ignored")
 			}
-			_, _ = fmt.Fprint(w, `{"id":"resp-1","status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{\"x\":1}"}],"usage":{"input_tokens":10,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}`)
+			_, _ = fmt.Fprint(w, `{"object":"response","id":"resp-1","status":"completed","output":[{"type":"function_call","call_id":"call-1","name":"lookup","arguments":"{\"x\":1}"}],"usage":{"input_tokens":10,"output_tokens":3,"input_tokens_details":{"cached_tokens":2}}}`)
 		} else {
 			if len(body.Input) != 3 || body.Input[1]["type"] != "function_call" || body.Input[2]["type"] != "function_call_output" {
 				t.Errorf("history lost tool IDs: %+v", body.Input)
 			}
-			_, _ = fmt.Fprint(w, `{"id":"resp-2","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}],"usage":{"input_tokens":20,"output_tokens":5}}`)
+			_, _ = fmt.Fprint(w, `{"object":"response","id":"resp-2","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}],"usage":{"input_tokens":20,"output_tokens":5}}`)
 		}
 	})
 	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("do lookup")}}, Tools: []tools.Definition{definition}, RequireToolCall: true}
@@ -90,7 +90,7 @@ func TestStreamingTerminalAndPartialFailure(t *testing.T) {
 		_, _ = fmt.Fprintln(w, `data: {"type":"response.output_text.delta","delta":"lo"}`)
 		_, _ = fmt.Fprintln(w)
 		_, _ = fmt.Fprintln(w, "event: response.completed")
-		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"resp-3","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":1}}}`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"object":"response","id":"resp-3","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":3,"output_tokens":1}}}`)
 		_, _ = fmt.Fprintln(w)
 	})
 	var deltas, receipts int

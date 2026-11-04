@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -1384,8 +1385,38 @@ func withBlockedToolGuidance(messages []model.Message, toolKeys []string) []mode
 	return append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(guidance)}}, messages...)
 }
 
+// ValidateModelResponseAuthority lets accounting middleware apply the Agent's
+// frozen invocation authority before persisting a downstream model receipt.
+// Contexts outside an Agent invocation have no additional authority guard.
+type modelResponseAuthorityKey struct{}
+
+func ValidateModelResponseAuthority(ctx context.Context, response model.Response, err error) (model.Response, error) {
+	guard, _ := ctx.Value(modelResponseAuthorityKey{}).(*modelCompletionAuthority)
+	if guard != nil {
+		return guard.validate(response, err)
+	}
+	return response, err
+}
+
+// ReplayModelResponseAuthority registers a trusted accounting receipt without
+// re-dispatching its Provider. Accounting middleware must first verify that the
+// settled reservation and receipt belong to this InvocationID and RequestHash.
+// Agent additionally checks its frozen request. This is a trusted Host
+// attestation API, not a sandbox for malicious in-process plugins: matching
+// request fields alone cannot prove that a caller read a settled ledger.
+// Ordinary middleware must use
+// ValidateModelResponseAuthority, which cannot manufacture a trusted source.
+func ReplayModelResponseAuthority(ctx context.Context, request model.Request, response model.Response, err error) (model.Response, error) {
+	guard, _ := ctx.Value(modelResponseAuthorityKey{}).(*modelCompletionAuthority)
+	if guard != nil {
+		return guard.replay(request, response, err)
+	}
+	return response, err
+}
+
 func (runner *Runner) generateModel(
 	ctx context.Context, request model.Request, beforeProvider func(context.Context) error,
+	afterProvider ...*modelCompletionAuthority,
 ) (model.Response, error) {
 	emit := func(event model.StreamEvent) error {
 		runner.publishValue(ctx, request.RunID, plugin.Event{
@@ -1410,7 +1441,14 @@ func (runner *Runner) generateModel(
 				return model.Response{}, modelPreDispatchDenied{cause: err}
 			}
 		}
-		return runner.generateProviderModel(callCtx, candidate, sink)
+		response, err := runner.generateProviderModel(callCtx, candidate, sink)
+		if len(afterProvider) != 0 && afterProvider[0] != nil {
+			return afterProvider[0].record(response, err)
+		}
+		return response, err
+	}
+	if len(afterProvider) != 0 && afterProvider[0] != nil {
+		ctx = context.WithValue(ctx, modelResponseAuthorityKey{}, afterProvider[0])
 	}
 	return runner.modelChain.Invoke(ctx, request, emit, terminal)
 }
@@ -1424,11 +1462,27 @@ func (runner *Runner) generateProviderModel(
 	if !ok {
 		return runner.model.Generate(ctx, request)
 	}
+	var streamMu sync.Mutex
+	var streamClosed bool
 	var responseID string
+	var streamIdentityConflict bool
 	var usage *model.Usage
 	response, err := streaming.GenerateStream(ctx, request, func(event model.StreamEvent) error {
-		if strings.TrimSpace(event.ResponseID) != "" {
-			responseID = strings.TrimSpace(event.ResponseID)
+		streamMu.Lock()
+		defer streamMu.Unlock()
+		if streamClosed {
+			return ErrInvalidModelResponse
+		}
+		if event.ResponseID != "" {
+			// Preserve exact physical evidence rather than normalizing an
+			// invalid ID into an apparently valid durable completion.
+			if responseID != "" && responseID != event.ResponseID {
+				// A faulty custom StreamingClient may ignore callback errors.
+				// Retain this contradiction through its final return anyway.
+				streamIdentityConflict = true
+				return ErrInvalidModelResponse
+			}
+			responseID = event.ResponseID
 		}
 		if event.Usage != nil {
 			usage = model.CloneUsage(event.Usage)
@@ -1438,16 +1492,29 @@ func (runner *Runner) generateProviderModel(
 		}
 		return emit(event)
 	})
+	streamMu.Lock()
+	defer streamMu.Unlock()
+	streamClosed = true
+	if streamIdentityConflict {
+		return model.Response{}, ErrInvalidModelResponse
+	}
+	// A known rejected completion carries the same physical receipt
+	// obligation as success. Check contradictions before the error return.
+	if response.ResponseID != "" && responseID != "" && response.ResponseID != responseID {
+		return model.Response{}, ErrInvalidModelResponse
+	}
 	if err != nil {
+		// Stream observations are not an authoritative rejected receipt.
+		// A typed rejection must supply its own final ID and Usage.
 		return response, err
 	}
-	if strings.TrimSpace(response.ResponseID) == "" {
+	if response.ResponseID == "" {
 		response.ResponseID = responseID
 	}
 	if response.Usage == nil {
 		response.Usage = usage
 	}
-	return response, nil
+	return response, err
 }
 
 func (runner *Runner) resolveSelectedTools(

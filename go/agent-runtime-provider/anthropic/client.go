@@ -118,6 +118,8 @@ func tokenCount(value *int64) int64 {
 
 type messageBody struct {
 	ID         string            `json:"id"`
+	Type       string            `json:"type"`
+	Role       string            `json:"role"`
 	StopReason string            `json:"stop_reason"`
 	Content    []json.RawMessage `json:"content"`
 	Usage      *usage            `json:"usage"`
@@ -227,7 +229,7 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 				if toolName == "" {
 					toolName = byKey[call.ToolKey]
 				}
-				if call.ID == "" || toolName == "" || !json.Valid(call.Arguments) {
+				if call.ID == "" || toolName == "" || providerhttp.ValidateUniqueJSONObject(call.Arguments) != nil {
 					return prepared{}, ErrUnsupported
 				}
 				blocks = append(blocks, map[string]any{
@@ -293,7 +295,15 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	return prepared{body: payload, names: byName}, nil
 }
 
-func decodeResponse(body messageBody, names map[string]string) (model.Response, error) {
+// completedMessageReceipt validates the final Anthropic completion envelope
+// and normalizes cumulative Usage independently of Tool-block semantics.
+func completedMessageReceipt(body messageBody) (model.Response, error) {
+	// A content block is not an independent Tool execution authority. Only
+	// a real assistant Message can authorize its tool_use or a safety refusal;
+	// absent, null, foreign and malformed ownership evidence fails closed.
+	if body.Type != "message" || body.Role != string(model.RoleAssistant) {
+		return model.Response{}, ErrUnsupported
+	}
 	if body.StopReason == "max_tokens" {
 		return model.Response{}, errors.Join(ErrUnsupported, ErrIncomplete)
 	}
@@ -302,7 +312,10 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 	default:
 		return model.Response{}, ErrUnsupported
 	}
-	if body.ID == "" {
+	// Physical message identity is an exact Provider-owned completion
+	// receipt. Agent trims ResponseID when persisting the ModelInvocation;
+	// never authorize a Tool whose original ID would be changed or lost.
+	if body.ID == "" || strings.TrimSpace(body.ID) != body.ID {
 		return model.Response{}, ErrUnsupported
 	}
 	result := model.Response{ResponseID: body.ID, Refused: body.StopReason == "refusal"}
@@ -318,54 +331,90 @@ func decodeResponse(body messageBody, names map[string]string) (model.Response, 
 			OutputTokens: output, CacheReadTokens: read, CacheWriteTokens: write,
 		}
 	}
+	return result, nil
+}
+
+func decodeResponse(body messageBody, names map[string]string, required bool) (model.Response, error) {
+	result, err := completedMessageReceipt(body)
+	if err != nil {
+		return model.Response{}, err
+	}
+	// Keep the original completed receipt independent of progressively decoded
+	// content. A malformed sibling must not erase billing for a physical Tool.
+	receipt := result
 	var output strings.Builder
 	for _, raw := range body.Content {
 		block, err := parseContentBlock(raw)
 		if err != nil {
-			return model.Response{}, err
+			return rejectCompletedToolOutput(receipt, body.Content, required, err)
 		}
 		switch block.Type {
 		case "text":
 			output.WriteString(block.Text)
 		case "tool_use":
 			key := names[block.Name]
-			if key == "" || block.ID == "" || !json.Valid(block.Input) {
-				return model.Response{}, ErrUnsupported
+			if key == "" || block.ID == "" || providerhttp.ValidateUniqueJSONObject(block.Input) != nil {
+				return rejectCompletedToolOutput(receipt, body.Content, required, ErrUnsupported)
 			}
 			result.ToolCalls = append(result.ToolCalls, tools.Call{
 				ID: block.ID, ToolKey: key, Name: block.Name, Arguments: append(json.RawMessage(nil), block.Input...),
 			})
 		case "thinking":
 			if block.Signature == "" {
-				return model.Response{}, ErrUnsupported
+				return rejectCompletedToolOutput(receipt, body.Content, required, ErrUnsupported)
 			}
 		case "redacted_thinking":
 			if block.Data == "" {
-				return model.Response{}, ErrUnsupported
+				return rejectCompletedToolOutput(receipt, body.Content, required, ErrUnsupported)
 			}
 		default:
-			return model.Response{}, ErrUnsupported
+			return rejectCompletedToolOutput(receipt, body.Content, required, ErrUnsupported)
 		}
 	}
 	result.Content = output.String()
 	if len(result.ToolCalls) != 0 {
 		if body.StopReason != "tool_use" {
-			return model.Response{}, ErrUnsupported
+			return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
 		}
 		serializedBlocks, err := normalizedContentForReplay(body.Content)
 		if err != nil {
-			return model.Response{}, err
+			return providerhttp.RejectCompletedResponse(receipt, err)
 		}
 		serialized, err := json.Marshal(serializedBlocks)
 		if err != nil || len(serialized) > 16<<20 {
-			return model.Response{}, ErrUnsupported
+			return providerhttp.RejectCompletedResponse(receipt, ErrUnsupported)
 		}
 		result.ProviderReplay = &model.ProviderReplay{Provider: "anthropic", Format: "messages.content.v1", Data: serialized}
 	}
 	if result.Content == "" && len(result.ToolCalls) == 0 {
+		if required {
+			return providerhttp.RejectCompletedResponse(receipt, ErrUnsupported)
+		}
 		return model.Response{}, ErrUnsupported
 	}
 	return result, nil
+}
+
+// A completed Anthropic message can contain a valid physical tool_use *after*
+// an invalid sibling block. Check the entire original output, not just the
+// first failing block or the partially decoded ToolCalls. Only the minimal
+// verified completion receipt survives; no partial Tool, text or signed replay
+// becomes authorized on any post-completion semantic rejection.
+func rejectCompletedToolOutput(receipt model.Response, content []json.RawMessage, required bool, cause error) (model.Response, error) {
+	// A completed mandatory-Tool reply with unsupported non-Tool content
+	// must still be settled if its final cumulative Usage is trustworthy.
+	if required {
+		return providerhttp.RejectCompletedResponse(receipt, cause)
+	}
+	for _, raw := range content {
+		var kind struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(raw, &kind) == nil && kind.Type == "tool_use" {
+			return providerhttp.RejectCompletedResponse(receipt, cause)
+		}
+	}
+	return model.Response{}, cause
 }
 
 func (c *Client) Generate(ctx context.Context, request model.Request) (model.Response, error) {
@@ -382,7 +431,11 @@ func (c *Client) Generate(ctx context.Context, request model.Request) (model.Res
 	if err := providerhttp.ReadJSON(resp, &body); err != nil {
 		return model.Response{}, err
 	}
-	return decodeResponse(body, prepared.names)
+	result, err := decodeResponse(body, prepared.names, request.RequireToolCall)
+	if err != nil {
+		return result, err
+	}
+	return verifyRequiredToolResponse(request, result)
 }
 
 func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit func(model.StreamEvent) error) (model.Response, error) {
@@ -397,20 +450,37 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	defer func() { _ = resp.Body.Close() }()
 	var body messageBody
 	var started, stopped bool
+	// Content blocks precede final message deltas. Keep an explicit active
+	// block, so late/interleaved Tool events cannot be reconstructed as a
+	// legitimate executable response after the final stop boundary.
+	activeBlock := -1
+	var finalDeltaSeen, finalStopReasonSeen bool
 	var blocks = map[int]*contentBlock{}
 	var chunks = map[int]*strings.Builder{}
 	var closed = map[int]bool{}
+	// Keep only framing metadata after semantic rejection; never retain
+	// discarded Tool JSON or signed Thinking payloads for replay.
+	var rejectedToolDelta = map[int]bool{}
+	var rejectedSignatureDelta = map[int]bool{}
 	var resultBytes int
+	// Unsupported content is never authorized. Drain only a bounded,
+	// well-framed stream to establish final completion and paid Usage.
+	var rejectedContent bool
 	var initialUsagePresent bool
 	var finalOutputUsageObserved bool
 	err = providerhttp.Stream(resp, func(event string, data []byte) error {
+		// Duplicate keys could silently overwrite physical assistant role,
+		// stop reason or a Tool ID before frame/content validation.
+		if err := providerhttp.ValidateUniqueJSONKeys(data); err != nil {
+			return err
+		}
 		var frame struct {
 			Type  string `json:"type"`
 			Error struct {
 				Type string `json:"type"`
 			} `json:"error"`
 			Message      messageBody     `json:"message"`
-			Index        int             `json:"index"`
+			Index        *int            `json:"index"`
 			ContentBlock json.RawMessage `json:"content_block"`
 			Delta        struct {
 				Type        string `json:"type"`
@@ -428,35 +498,124 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		if stopped {
 			return providerhttp.ErrProtocol
 		}
+		// An absent or null index must not silently become block 0.
+		index := -1
+		if frame.Index != nil {
+			index = *frame.Index
+		}
 		switch frame.Type {
 		case "message_start":
-			if started {
+			if started || frame.Message.Type != "message" ||
+				frame.Message.Role != string(model.RoleAssistant) {
 				return providerhttp.ErrProtocol
+			}
+			// The initial Anthropic SSE message has no completed content.
+			// Never discard a physical Tool or text item supplied here and
+			// replace it with a later, different content_block_* sequence.
+			// Absent content remains valid; when present it must be [].
+			var start struct {
+				Message struct {
+					Content json.RawMessage `json:"content"`
+				} `json:"message"`
+			}
+			if json.Unmarshal(data, &start) != nil {
+				return providerhttp.ErrProtocol
+			}
+			if len(start.Message.Content) != 0 {
+				var items []json.RawMessage
+				if json.Unmarshal(start.Message.Content, &items) != nil || items == nil || len(items) != 0 {
+					return providerhttp.ErrProtocol
+				}
 			}
 			started, body = true, frame.Message
 			initialUsagePresent = body.Usage != nil && body.Usage.Input != nil
 			body.Content = nil
 		case "content_block_start":
-			if !started || blocks[frame.Index] != nil || frame.Index < 0 || frame.Index > 1024 {
+			if !started || finalDeltaSeen || activeBlock != -1 ||
+				index != len(blocks) || index > 1024 {
 				return providerhttp.ErrProtocol
 			}
 			b, err := parseContentBlock(frame.ContentBlock)
 			if err != nil {
-				return err
+				// A structurally valid content block with unsupported rich
+				// citations/metadata is a semantic rejection, not yet proof
+				// of an incomplete physical Provider response. Keep only its
+				// type for Tool evidence, never its untrusted payload.
+				var kind struct {
+					Type      string          `json:"type"`
+					Input     json.RawMessage `json:"input"`
+					Signature string          `json:"signature"`
+				}
+				if json.Unmarshal(frame.ContentBlock, &kind) != nil || kind.Type == "" {
+					return providerhttp.ErrProtocol
+				}
+				rejectedContent = true
+				// Keep only structural Tool input for delta/initial-input
+				// conflict detection; it is never decoded or replayed.
+				b = contentBlock{Type: kind.Type}
+				switch kind.Type {
+				case "tool_use":
+					b.Input = kind.Input
+				case "thinking":
+					// Preserve only the signature-presence evidence needed to fence later deltas.
+					b.Signature = kind.Signature
+				}
+				resultBytes += len(frame.ContentBlock)
+			} else {
+				resultBytes += len(b.Text) + len(b.Input) + len(b.Thinking) + len(b.Signature) + len(b.Data)
 			}
-			if b.Type != "text" && b.Type != "tool_use" && b.Type != "thinking" && b.Type != "redacted_thinking" {
-				return ErrUnsupported
-			}
-			resultBytes += len(b.Text) + len(b.Input) + len(b.Thinking) + len(b.Signature) + len(b.Data)
 			if resultBytes > 16<<20 {
 				return providerhttp.ErrProtocol
 			}
-			blocks[frame.Index] = &b
-			chunks[frame.Index] = &strings.Builder{}
+			blocks[index] = &b
+			chunks[index] = &strings.Builder{}
+			activeBlock = index
 		case "content_block_delta":
-			b := blocks[frame.Index]
-			if b == nil || closed[frame.Index] {
+			b := blocks[index]
+			if !started || finalDeltaSeen || activeBlock != index ||
+				b == nil || closed[index] || frame.Delta.Type == "" {
 				return providerhttp.ErrProtocol
+			}
+			if rejectedContent {
+				// Even when content is already semantically rejected, each
+				// physical delta must still belong to its active block. Never
+				// mint a completed paid receipt from mismatched SSE framing.
+				// Unknown future block types remain safely unprojected.
+				switch b.Type {
+				case "text":
+					if frame.Delta.Type != "text_delta" {
+						return providerhttp.ErrProtocol
+					}
+				case "tool_use":
+					if frame.Delta.Type != "input_json_delta" {
+						return providerhttp.ErrProtocol
+					}
+					if frame.Delta.PartialJSON != "" {
+						rejectedToolDelta[index] = true
+					}
+				case "thinking":
+					switch frame.Delta.Type {
+					case "thinking_delta":
+						if b.Signature != "" || rejectedSignatureDelta[index] {
+							return providerhttp.ErrProtocol
+						}
+					case "signature_delta":
+						if b.Signature != "" || rejectedSignatureDelta[index] || frame.Delta.Signature == "" {
+							return providerhttp.ErrProtocol
+						}
+						rejectedSignatureDelta[index] = true
+					default:
+						return providerhttp.ErrProtocol
+					}
+				case "redacted_thinking":
+					return providerhttp.ErrProtocol
+				}
+				// Bound raw bytes and suppress every rejected content delta.
+				resultBytes += len(data)
+				if resultBytes > 16<<20 {
+					return providerhttp.ErrProtocol
+				}
+				break
 			}
 			resultBytes += len(frame.Delta.Text) + len(frame.Delta.PartialJSON) + len(frame.Delta.Thinking) + len(frame.Delta.Signature)
 			if resultBytes > 16<<20 {
@@ -485,35 +644,67 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 				if b.Type != "tool_use" {
 					return providerhttp.ErrProtocol
 				}
-				if _, err := chunks[frame.Index].WriteString(frame.Delta.PartialJSON); err != nil {
+				if _, err := chunks[index].WriteString(frame.Delta.PartialJSON); err != nil {
 					return providerhttp.ErrProtocol
 				}
 			default:
 				return ErrUnsupported
 			}
 		case "content_block_stop":
-			b := blocks[frame.Index]
-			if b == nil || closed[frame.Index] {
+			b := blocks[index]
+			if !started || finalDeltaSeen || activeBlock != index ||
+				b == nil || closed[index] {
 				return providerhttp.ErrProtocol
 			}
-			closed[frame.Index] = true
-			if b.Type == "tool_use" && chunks[frame.Index].Len() > 0 {
-				b.Input = json.RawMessage(chunks[frame.Index].String())
+			closed[index] = true
+			activeBlock = -1
+			if b.Type == "tool_use" && (chunks[index].Len() > 0 || rejectedToolDelta[index]) {
+				// A streamed Tool argument delta may populate the initial empty
+				// input object, but must never replace physical arguments already
+				// present in content_block_start (including explicit null).
+				// Otherwise conflicting upstream evidence becomes executable.
+				var initial map[string]json.RawMessage
+				if json.Unmarshal(b.Input, &initial) != nil || initial == nil || len(initial) != 0 {
+					return providerhttp.ErrProtocol
+				}
+				if !rejectedContent {
+					b.Input = json.RawMessage(chunks[index].String())
+				}
 			}
 		case "message_delta":
-			if !started {
+			if !started || activeBlock != -1 {
 				return providerhttp.ErrProtocol
 			}
+			// Claude may send multiple message_delta events with cumulative
+			// Usage. Never accept a conflicting final stop reason or declining
+			// token count; both would undermine the final Tool/Usage proof.
+			finalDeltaSeen = true
 			if frame.Delta.StopReason != "" {
+				if body.StopReason != "" && body.StopReason != frame.Delta.StopReason {
+					return providerhttp.ErrProtocol
+				}
 				body.StopReason = frame.Delta.StopReason
+				finalStopReasonSeen = true
 			}
 			if frame.Usage != nil && frame.Usage.Output != nil && initialUsagePresent {
+				if body.Usage.Output != nil && *frame.Usage.Output < *body.Usage.Output {
+					return providerhttp.ErrProtocol
+				}
 				body.Usage.Output = frame.Usage.Output
 				finalOutputUsageObserved = true
 			}
 		case "message_stop":
-			if !started || len(blocks) != len(closed) {
+			if !started || !finalDeltaSeen || !finalStopReasonSeen || activeBlock != -1 ||
+				len(blocks) != len(closed) {
 				return providerhttp.ErrProtocol
+			}
+			// Completion proof requires a contiguous sequence of closed
+			// blocks. Matching map lengths alone can conceal index gaps,
+			// which must not certify even a minimal rejected receipt.
+			for index := 0; index < len(blocks); index++ {
+				if blocks[index] == nil || !closed[index] {
+					return providerhttp.ErrProtocol
+				}
 			}
 			stopped = true
 		case "ping":
@@ -537,6 +728,11 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 	if !initialUsagePresent || !finalOutputUsageObserved {
 		body.Usage = nil
 	}
+	if rejectedContent {
+		// Only after message_stop: never reconstruct or trust rejected
+		// content, even if another block contains a legitimate local Tool.
+		return rejectCompletedStreamToolOutput(body, blocks, request.RequireToolCall, ErrUnsupported)
+	}
 	for index := 0; index < len(blocks); index++ {
 		b := blocks[index]
 		if b == nil {
@@ -544,17 +740,65 @@ func (c *Client) GenerateStream(ctx context.Context, request model.Request, emit
 		}
 		encoded, err := marshalStreamBlock(b)
 		if err != nil {
-			return model.Response{}, providerhttp.ErrProtocol
+			return rejectCompletedStreamToolOutput(body, blocks, request.RequireToolCall, providerhttp.ErrProtocol)
 		}
 		body.Content = append(body.Content, encoded)
 	}
-	result, err := decodeResponse(body, prepared.names)
-	if err == nil && emit != nil {
+	result, err := decodeResponse(body, prepared.names, request.RequireToolCall)
+	if err != nil {
+		return result, err
+	}
+	result, err = verifyRequiredToolResponse(request, result)
+	if err != nil {
+		// Return trusted completion/usage for Agent's durable rejected
+		// receipt, without signaling a successful terminal SSE event.
+		return result, err
+	}
+	if emit != nil {
 		if emitErr := emit(model.StreamEvent{ResponseID: result.ResponseID, Usage: model.CloneUsage(result.Usage)}); emitErr != nil {
 			return model.Response{}, emitErr
 		}
 	}
 	return result, err
+}
+
+// Stream block reconstruction runs only after message_stop and final cumulative
+// Usage checks. All observed blocks are available, so an invalid sibling
+// before a valid Tool cannot hide a paid physical Tool response. Earlier
+// streaming/protocol failures do not use this completed-response receipt path.
+func rejectCompletedStreamToolOutput(body messageBody, blocks map[int]*contentBlock, required bool, noToolCause error) (model.Response, error) {
+	// The entire SSE framing and message_stop have already been verified.
+	// Missing a mandatory Tool is itself a semantic rejection, even when
+	// the only observed blocks were unrepresentable text.
+	hasTool := required
+	for _, block := range blocks {
+		if block != nil && block.Type == "tool_use" {
+			hasTool = true
+		}
+	}
+	if !hasTool {
+		return model.Response{}, noToolCause
+	}
+	receipt, err := completedMessageReceipt(body)
+	if err != nil {
+		return model.Response{}, providerhttp.ErrProtocol
+	}
+	return providerhttp.RejectCompletedResponse(receipt, ErrUnsupported)
+}
+
+// A gateway may ignore tool_choice=any and return text instead of a required
+// Tool call. Known cumulative Usage proves a completed but locally rejected
+// response, which Agent must account once without retrying a billed request.
+// An unknown/invalid Usage cannot be promoted to a completed receipt.
+func verifyRequiredToolResponse(request model.Request, result model.Response) (model.Response, error) {
+	if !request.RequireToolCall || len(result.ToolCalls) > 0 || result.Refused {
+		return result, nil
+	}
+	if !providerhttp.ValidCompletedUsage(result.Usage) {
+		return model.Response{}, ErrUnsupported
+	}
+	// Tool-free rejected text is not an authorized transcript item.
+	return providerhttp.RejectCompletedResponse(result, ErrUnsupported)
 }
 
 // Error events can follow HTTP 200. Retry only documented transient types,

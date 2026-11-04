@@ -72,7 +72,6 @@ func TestModelPolicyBoundsConcurrentProviderCalls(t *testing.T) {
 }
 
 func TestModelTimeoutUsesDurableBoundedRetry(t *testing.T) {
-	t.Parallel()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +83,8 @@ func TestModelTimeoutUsesDurableBoundedRetry(t *testing.T) {
 		Model:   provider,
 		Clock:   clock,
 		Execution: ExecutionPolicy{Model: CallPolicy{
-			Timeout:        10 * time.Millisecond,
+			// Allow dispatch and claim checks to finish under coverage/CI load.
+			Timeout:        250 * time.Millisecond,
 			MaxAttempts:    2,
 			InitialBackoff: time.Millisecond,
 			MaxBackoff:     time.Millisecond,

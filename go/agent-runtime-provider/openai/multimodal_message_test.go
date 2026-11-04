@@ -42,7 +42,7 @@ func TestOpenAIResponsesOrderedImageAndPDFWireAndNoAudioFallback(t *testing.T) {
 			parts[3].Type != "input_text" || parts[3].Text != "after" {
 			t.Fatalf("openai request reordered or flattened media: %+v err=%v", parts, err)
 		}
-		_, _ = fmt.Fprint(w, `{"id":"resp-1","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":20,"output_tokens":4}}`)
+		_, _ = fmt.Fprint(w, `{"object":"response","id":"resp-1","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":20,"output_tokens":4}}`)
 	})
 	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: []model.ContentPart{
 		{Kind: model.ContentText, Text: "before"},
@@ -98,7 +98,7 @@ func TestOpenAIResponsesMultimodalStreamingKeepsFrozenInput(t *testing.T) {
 		_, _ = fmt.Fprintln(w, `data: {"type":"response.output_text.delta","delta":"ok"}`)
 		_, _ = fmt.Fprintln(w)
 		_, _ = fmt.Fprintln(w, "event: response.completed")
-		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"id":"r-stream","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":45,"output_tokens":2}}}`)
+		_, _ = fmt.Fprintln(w, `data: {"type":"response.completed","response":{"object":"response","id":"r-stream","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":45,"output_tokens":2}}}`)
 		_, _ = fmt.Fprintln(w)
 	})
 	request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: []model.ContentPart{

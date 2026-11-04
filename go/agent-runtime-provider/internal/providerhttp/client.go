@@ -185,6 +185,11 @@ func ReadJSON(resp *http.Response, dest any) error {
 	if err != nil || len(body) > maxResponseBytes {
 		return ErrProtocol
 	}
+	// A duplicated JSON key can replace a physical owner, completion
+	// status or Tool ID while leaving a valid-looking final structure.
+	if err := ValidateUniqueJSONKeys(body); err != nil {
+		return err
+	}
 	if err := json.Unmarshal(body, dest); err != nil {
 		return ErrProtocol
 	}

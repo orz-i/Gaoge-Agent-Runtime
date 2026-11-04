@@ -23,15 +23,19 @@ var (
 
 type rejectedInvocationModel struct {
 	invocationRecordingModel
-	rejections int
-	code       string
-	t          *testing.T
-	empty      bool
-	repair     string
+	rejections        int
+	code              string
+	t                 *testing.T
+	empty             bool
+	repair            string
+	missingPhysicalID bool
 }
 
 func (provider *rejectedInvocationModel) Generate(ctx context.Context, request runtimemodel.Request) (runtimemodel.Response, error) {
 	response, _ := provider.invocationRecordingModel.Generate(ctx, request)
+	if provider.missingPhysicalID && len(provider.callsCopy()) <= provider.rejections {
+		response.ResponseID = ""
+	}
 	if len(provider.callsCopy()) > 1 && (len(request.Tools) != 0 || request.RequireToolCall || request.HostedToolCallLimit == nil || *request.HostedToolCallLimit != 0) {
 		provider.t.Fatal("terminal repair regained tool execution authority")
 	}
@@ -114,11 +118,45 @@ func TestModelInvocationKnownRejectionHasOneToolFreeTerminalRepair(t *testing.T)
 				if invocation.Status != agent.ModelInvocationConsumed || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.Usage == nil || invocation.Response.Usage == nil || invocation.ExecutionLeaseUntil != nil {
 					t.Fatalf("known completion left pending: %+v", invocation)
 				}
+				if invocation.ErrorCode != "" && (invocation.Response.Content != "" ||
+					len(invocation.Response.ToolCalls) != 0 || len(invocation.Response.HostedToolCalls) != 0 ||
+					len(invocation.Response.Artifacts) != 0 || len(invocation.Response.Citations) != 0 ||
+					invocation.Response.ProviderReplay != nil || invocation.Response.Refused ||
+					invocation.Response.Continue) {
+					t.Fatalf("rejected model payload persisted into durable completion receipt: %+v", invocation.Response)
+				}
 			}
 			if test.rejections > 0 && view.ModelInvocations[0].ErrorCode == "" {
 				t.Fatal("rejected receipt was persisted as accepted")
 			}
 		})
+	}
+}
+
+// A named Provider's typed post-generation rejection does not prove a
+// completed, billable physical response unless it includes an exact
+// Provider-owned response ID. Never invent/charge an ID-less completion.
+func TestNamedRejectedResponseWithoutPhysicalIDIsNotBillable(t *testing.T) {
+	provider := &rejectedInvocationModel{t: t, rejections: 1, missingPhysicalID: true}
+	base := memory.NewStore()
+	runner := newModelInvocationRunner(t, base, provider)
+	result, err := runner.StartRun(t.Context(), startRequest(
+		"idless-rejection", "idless-rejection-req", "finish from evidence",
+	))
+	if !errors.Is(err, agent.ErrInvalidModelResponse) || result.Run.Status != kernel.RunStatusFailed ||
+		len(provider.callsCopy()) != 1 {
+		t.Fatalf("unproved completed rejection proceeded: run=%+v err=%v calls=%d",
+			result.Run, err, len(provider.callsCopy()))
+	}
+	state := mustModelInvocationView(t, mustLoadModelInvocationRun(t, newModelInvocationRuntime(t, base), result.Run.ID))
+	if state.Budget.Usage.LLMCalls != 0 || state.Budget.Usage.InputTokens != 0 ||
+		state.Budget.Usage.OutputTokens != 0 || len(state.ModelInvocations) != 1 ||
+		state.ModelInvocations[0].Status != agent.ModelInvocationPending ||
+		state.ModelInvocations[0].ProviderResponseID != "" ||
+		state.ModelInvocations[0].Usage != nil || state.ModelInvocations[0].Response.ResponseID != "" ||
+		len(state.ModelInvocations[0].Response.ToolCalls) != 0 {
+		t.Fatalf("ID-less unverified completion was persisted/billed: budget=%+v invocations=%+v",
+			state.Budget.Usage, state.ModelInvocations)
 	}
 }
 
@@ -462,8 +500,10 @@ func (provider *invocationRecordingModel) Generate(
 	provider.mu.Lock()
 	provider.calls = append(provider.calls, runtimemodel.CloneRequest(request))
 	provider.mu.Unlock()
+	// One logical invocation has a stable physical response identity across
+	// recovery, but distinct invocations must not reuse an already billed ID.
 	return runtimemodel.Response{
-		Content: "done", ResponseID: "resp_unary_1",
+		Content: "done", ResponseID: "resp_" + request.InvocationID,
 		Usage: &runtimemodel.Usage{InputTokens: 7, OutputTokens: 3, ReasoningTokens: 2},
 	}, nil
 }

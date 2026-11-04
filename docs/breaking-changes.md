@@ -2,6 +2,405 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-04 — Immutable named Provider completion authority (PR #87)
+
+Named Provider middleware must preserve the original physical response ID,
+Usage and completion outcome. A valid-to-valid ID replacement or in-place
+Usage change now fails closed, as does promoting a rejected/failed call to
+success or fabricating one without calling the Provider. Further rejection of
+a valid successful response remains supported. Trusted accounting replay must
+register its verified settled receipt through `ReplayModelResponseAuthority`;
+ordinary `ValidateModelResponseAuthority` only validates an existing source.
+The new replay API requires trusted Host validation of the reservation,
+original RequestHash and receipt; it is not a malicious-plugin sandbox.
+Duplicate completed/consumed physical IDs under the same Provider/binding
+now fail restored-state validation. Rejected streams cannot repair missing
+final receipts from partial Usage events. No schema migration, compatibility
+bridge or change to unnamed local models. See the
+[completion-authority audit](audits/2026-11-04-pr87-completion-authority.md).
+
+## 2026-11-03 — Exact physical ID required for successful named Provider completions (PR #87 P1)
+
+A named external Provider binding must return a **nonempty, exact** physical
+`ResponseID` for every accepted successful completion, not only for typed
+post-generation rejections. Previously empty/padded IDs were consumed and
+could authorize local Tools without a stable deduplication identity.
+Streaming terminal IDs must retain their original bytes, agree across
+successive events, and match a nonempty final Provider response ID; a
+mismatch fails closed before any Tool execution or durable receipt.
+Middleware cannot erase/normalize an otherwise valid ID after the Provider
+callback; even a StreamingClient ignoring sink errors cannot erase a
+contradictory SSE ID. Completed/consumed persisted named-Provider receipts
+are subject to the same exact-ID check on recovery; unsafe legacy Beta
+receipts now fail state validation rather than being grandfathered.
+This changes the contract for custom named Provider adapters that previously
+omitted IDs. Unnamed local Model clients keep optional IDs.
+No persistence migration, protocol version bump, compatibility bridge or
+legacy fallback. See the
+[successful completion identity audit](audits/2026-11-03-pr87-named-provider-success-identity.md).
+
+## 2026-11-02 — Provider forced Tool result must be proved (beta.24 candidate)
+
+**OpenAI physical output_text payload hard cut (PR #87 independent audit):**
+A `message.content` part of type `output_text` must contain an actual JSON
+string `text` field. Previously an explicitly null or absent `text` could
+become an empty Go string and be silently ignored when a sibling contained
+valid text. With a valid sibling `function_call` this incorrectly authorized
+local Tool execution (unary and SSE) and a successful terminal stream receipt.
+Now the entire completed response is rejected before a local Tool is exposed,
+with only a trustworthy original ResponseID/Usage returned as a sanitized
+`model.post_generation_failed` receipt; missing/invalid Usage still fails
+closed without an invented bill. A forged persisted replay with such a part
+also fails before continuation HTTP. This **does not change** the established
+legacy behavior for omitted or explicit-null `message.phase`; no Store/Kernel
+migration, replay format bump, Host fallback or compatibility bridge.
+
+**OpenAI persisted Tool replay status hard cut (PR #87 independent audit):**
+Previously the normal completed response decoder rejected explicitly
+unfinished `function_call.status`, but the stateless persisted replay path
+validated Tool identity/arguments without the same completion-status check.
+A replayed Tool item must now have either no physical `status` field (legacy)
+or exactly `"completed"`. Explicit `in_progress`, `incomplete`, `failed`,
+null, empty, unknown or incorrectly typed statuses fail before sending another
+Provider request. Signed/encrypted reasoning and the original Agent transcript
+are not used to repair contradictory Tool status. No replay format change,
+Kernel/Store migration, Host shim or fallback is introduced.
+
+**OpenAI SSE added-item physical identity hard cut (PR #87 follow-up P1):**
+When `response.output_item.added` is observed, its original output index,
+item type and ID, local function `call_id`/name or assistant message role
+must agree with the same item in `response.completed`. Duplicate added
+frames, a missing item identity, or an added frame after the same item's
+`response.output_item.done` now fail as malformed protocol **before**
+Tool execution, replay, or a completed ResponseID/Usage receipt.
+An omitted legacy or `in_progress` added-item status is not completion
+evidence: arguments, text and encrypted reasoning may still evolve.
+Explicit incomplete, failed, null, empty, unknown or wrong-type statuses
+now fail as protocol errors. An explicitly `completed` added item instead
+fixes its full terminal payload, which must agree with later done/final
+evidence; matching subsequent done events remain valid. This closes local
+Tool execution and payload-substitution gaps described in the
+[added-item status audit](audits/2026-11-03-pr87-openai-added-item-status.md).
+Final-only and done-only gateway streams remain supported. No Kernel/Store schema, replay format, compatibility bridge or
+new Hosted Tool authority is introduced.
+
+**Agent rejected-completion receipt proof and payload isolation hard cut
+(PR #87 P1/P2):** A typed `model.ResponseRejectedError` and Usage do not
+by themselves establish a **named Provider's** paid completion when its
+original `ResponseID` is absent or would be changed by whitespace
+normalization. Such a reply fails without a completed/billed
+ModelInvocation. For valid known rejected completions, Agent persists
+only original ResponseID and cloned Usage, never rejected Content,
+local/hosted ToolCalls, ProviderReplay, citations, artifacts or other
+payload fields. The former Agent code durably persisted untrusted
+rejected Tools and text supplied by custom Providers/middleware;
+pre-stable fail-closed enforcement now matches Provider adapter semantics.
+Unnamed local Models retain their original optional ID contract.
+No Kernel/Store schema, migration, new replay version or legacy bridge.
+See [independent audit](audits/2026-11-03-pr87-rejected-receipt-agent-authority.md).
+
+**Repeated physical Provider completion ID hard cut (PR #87 independent P1):**
+A named Provider's `ProviderResponseID` is a physical completion identity,
+not a reusable label. Agent now rejects any successful or known-billed
+rejection whose physical ID was already persisted by a different
+completed/consumed ModelInvocation in the **same Run** under the same
+Provider and `BindingFingerprint`. Previously two independent SSE
+replies with the same physical ID but distinct Tool Call IDs could execute
+a local Tool twice; a second rejected reply could also charge duplicate
+Usage. A duplicate is a permanent invalid Model response, not a second
+completed/billable receipt, Tool authorization, or retry fallback.
+Recovery retries of the **same** pending invocation remain valid; a
+changed Host binding, separate named Provider, or unverified local Model
+does not collide. No SQL/Kernel schema, HTTP Provider contract, global ID
+index, compatibility shim or legacy ID rewrite. Existing synthetic
+Provider fixtures that returned the same physical ID for distinct
+invocations are corrected to derive it from stable `InvocationID`.
+See [independent audit](audits/2026-11-03-pr87-provider-response-id-reuse-guard.md).
+
+**OpenAI completed response contradictory terminal evidence hard cut
+(PR #87 independent P1):** OpenAI Responses `status=completed` must
+not coexist with non-null `error` or `incomplete_details`. Those fields
+declare failure or truncation and cannot be discarded while the completed
+envelope's local Tools, Usage and response ID are accepted. Both Unary
+and SSE previously executed a real registered local Tool in isolated
+Agent/Kernel tests on an unchanged contradictory original Head. Both
+fields must now be absent or literal JSON `null`; any non-null value
+fails closed without Tool, replay or completed billing receipt, even
+if `status` claims completion. No field synthesis, fallback, migration,
+retry-policy or Host/Agent/Kernel change. See
+[independent audit](audits/2026-11-03-pr87-openai-terminal-evidence-contradiction.md).
+
+**Anthropic post-rejection SSE delta framing hard cut (PR #87 P1):**
+A previously unsupported content block may be drained for verified final
+Usage, but does not suspend the transport protocol. Known active block
+types still require matching deltas, including text, Tool JSON and
+Thinking/signature sequencing. Even after a rich-text rejection, a later
+Tool JSON delta may not replace nonempty physical input. The previous
+behavior falsely completed and billed an untrustworthy second
+ModelInvocation when its delta frames contradicted the physical owner.
+Malformed streams now return a protocol error **without** a completed
+ResponseID/Usage receipt; valid well-framed but unsupported content can
+still settle only its verified paid rejection. Public Agent/Kernel
+read-only original-Head RED and corrected-source GREEN tests cover this.
+No Host/Agent/Kernel change, migration or fallback is introduced.
+See [independent audit](audits/2026-11-03-pr87-anthropic-sse-rejected-delta-framing.md).
+
+`model.Request.RequireToolCall` now requires an actual decoded local
+`ToolCall` on successful final OpenAI Responses and Anthropic Messages
+responses, including SSE. Merely sending `tool_choice=required` or
+`tool_choice={"type":"any"}` does not prove a gateway obeyed it. A
+provider reply containing only ordinary text is now rejected (matching
+`ErrUnsupported`); streaming does not emit a final `ResponseID`/usage
+**success event** for that reply. If the provider supplied trustworthy
+cumulative Usage on a complete response, the adapter returns the original
+`ResponseID` and Usage **with** a `model.ResponseRejectedError` classified
+`model.post_generation_failed`, allowing Agent to durably complete/consume
+that exact billed ModelInvocation once. Missing, incomplete, invalid or
+overflowing Usage cannot establish known completion: only plain
+`ErrUnsupported` and an empty Response are returned, with no invented
+usage/terminal receipt. An explicit safety refusal remains a
+`Response.Refused` result, not a synthetic Tool call, while normal
+non-forced text and valid local Tool calls remain unchanged. For OpenAI
+phased responses, `Response.Refused=true` still records a refusal from
+**any** message, including commentary, but only a refusal-only selected
+`final_answer` qualifies for the mandatory Tool exception. A commentary
+refusal followed by ordinary final text, or mixed refusal and ordinary
+final text, is now rejected; for unphased legacy output only the final
+message may prove the exception. The final refusal must also have
+**assistant** ownership and a **completed** message status, when these
+fields are explicitly present. Non-assistant roles, unfinished statuses
+and explicit null/empty values cannot provide the mandatory Tool exception;
+omitted fields retain the original legacy interpretation. This closes the
+additional P1 where a foreign-role or unfinished message could authorize
+a Tool-free completion by borrowing the global refusal flag.
+
+**OpenAI function_call execution hard cut:** Even if the enclosing Responses
+object is `completed`, any local function item explicitly marked
+`in_progress`, `incomplete`, null/empty or otherwise not `completed`
+invalidates the entire candidate Tool execution, for both mandatory and
+optional Tool calls. Genuinely omitted item status continues to follow the
+existing legacy contract. The adapter returns no executable ToolCalls, no
+Tool arguments or replay and emits no terminal SSE success. When the outer
+response completed with trustworthy Usage, it preserves only the completed
+ResponseID/Usage and typed `model.post_generation_failed` rejection for
+single consumption/billing. The check runs before parsing potentially
+unfinished JSON arguments. Hosts must not rely on a completed envelope as
+proof that every physical Tool item is executable.
+
+**Completed but malformed Tool item accounting correction (PR #87):**
+An explicit `status=completed` does not certify an item's arguments, name,
+CallID as executable. When the enclosing OpenAI response or final
+Anthropic message is independently completed and its cumulative Usage valid,
+post-completion **Tool-item** validation failures now retain only the original
+ResponseID/Usage as `model.post_generation_failed` rejected evidence. This
+includes completed function calls with malformed JSON and malformed Anthropic
+Tool blocks reconstructed after final SSE Usage. Agent consumes exactly one
+billed invocation without Tool side effects or terminal SSE success. Missing
+or unverified final Usage, truncated responses and pre-completion stream errors
+remain fail-closed without a fabricated receipt. The subsequent independent
+mixed-output P1 correction also treats a completed OpenAI response with a
+valid physical Tool item plus contradictory final/refusal message, unsupported
+sibling item or unencodable replay as a rejected paid completion. No partial
+Tool batch, content, replay or SSE terminal success can escape; a verified
+ResponseID/Usage is consumed once. Missing encrypted reasoning replay and
+**optional** unsupported output without a physical Tool retain their original
+Provider failure classifications. For a **mandatory** Tool request, even
+unsupported text-only output is a known paid rejection after verified outer
+completion/Usage: its original ResponseID/Usage are consumed exactly once.
+No Tool-free text, refusal flag or phase replay is stored on a rejected
+mandatory-Tool completion, including otherwise-valid plain text. Missing
+final Usage, incomplete envelopes and malformed SSE framing still cannot
+mint a receipt. A subsequent Anthropic SSE phase hard cut prevents Tool
+blocks from appearing after the first `message_delta`, enforces sequential
+non-overlapping content indices and an explicit final stop reason, and
+rejects conflicting stop reasons or decreasing cumulative output Usage.
+Multiple consistent cumulative `message_delta` events remain supported.
+Invalid event order must never mint a local Tool intent, completion receipt
+or successful terminal event. A subsequent **outer response authority** P1
+hard cut now requires OpenAI `object="response"` and Anthropic
+`type="message", role="assistant"` on completed unary/SSE replies,
+with Anthropic SSE identity proven at `message_start`. Previously, a
+non-assistant Anthropic envelope or non-Responses OpenAI resource carrying
+otherwise valid Tool output could authorize executable local Tool calls.
+Omitted, null, malformed or foreign owner fields now fail closed with no
+Tool, replay or completed billing receipt. The old ownerless fixture shape
+was updated to the real provider protocol; no compatibility bridge remains.
+
+**Anthropic SSE initial content authority hard cut:** The initial
+`message_start.message.content` is only an empty not-yet-generated collection.
+Previously the adapter silently cleared a nonempty initial Tool/text array
+(or explicit null), allowing later `content_block_*` events to substitute
+a different executable local Tool and mint terminal billing evidence. The
+adapter now accepts genuinely omitted content or an explicit empty `[]`,
+but rejects nonempty arrays, `null` and other shapes as **unverified SSE
+framing**, with zero Tool effects and no invented completed Usage receipt.
+Public Agent→HTTP SSE→Kernel Store regression tests prove the original code
+executed a real Tool Handler and the corrected code never does. No new
+Host route, retry, persistence schema or compatibility fallback is added.
+
+**Anthropic SSE Tool input delta substitution hard cut:** An otherwise
+well-formed stream could previously supply `tool_use.input={"x":1}` in
+`content_block_start`, then send `input_json_delta.partial_json={"x":2}`;
+the final block-stop handler silently replaced the first physical argument
+value with the second and authorized a local Tool. The reconstructed Tool
+input now requires the initial `input` to be an empty JSON object **if any
+nonempty Tool JSON delta was received**. A populated initial object or
+`null` with later fragments fails as an untrusted SSE framing conflict;
+no Tool executes, no replay is saved and no verified completed billing
+receipt is fabricated. Legitimate `{}` plus streamed JSON and complete
+initial input **without** deltas continue to work. Tests independently
+reproduce real Agent→SSE→Kernel Tool effects on the original PR Head and
+prove zero effects after repair. No schema/Host/Kernel change or fallback.
+
+**OpenAI output-message hard cut:** even with a valid `object=response` and a
+completed physical `function_call`, a sibling `message` (phased or unphased)
+whose explicit `role` is not `assistant`, or whose explicit `status` is not
+`completed`, now invalidates the whole Tool batch. Null, empty and malformed
+values also reject. Only genuinely omitted legacy fields remain supported.
+An independently completed response with verifiable Usage preserves only a
+sanitized ID/Usage rejected receipt; no Tool handler, text, replay or terminal
+SSE success can escape.
+
+**Physical Tool Call ID identity hard cut:** OpenAI `function_call.call_id` and
+Anthropic `tool_use.id` must be nonempty and identical before/after
+`strings.TrimSpace`. Previously a whitespace-only ID reached Agent, which
+replaced it with a locally generated ID; leading/trailing whitespace also
+changed the physical Tool identity during Agent queuing. Both cases could
+actually execute a Tool despite the absence of an authorized stable Provider
+Call ID. Both unary and SSE adapters now reject these physical IDs before
+Tool authorization, including during stateless replay. Completed responses
+with independently verified final Usage retain only the original ID/Usage as
+a typed paid rejection; missing/invalid Usage remains unreceipted. No
+retry/status/SQL schema, Host route or compatibility bridge is added.
+
+**Physical completed Provider response ID hard cut:** OpenAI Responses
+`response.id` and Anthropic Messages `message.id` must be nonempty and
+identical before/after `strings.TrimSpace`. Previously a gateway could
+supply a padded OpenAI ID or a blank/padded Anthropic ID with a valid local
+Tool item and final Usage. Agent persisted a normalized/empty response ID
+while the Provider still authorized the local Tool. Both Unary and SSE now
+reject invalid physical completion identity **before** building an executable
+ToolCall, provider replay or final billing receipt. Even verified Usage does
+not certify a completion whose physical identity is untrustworthy. Valid
+unchanged IDs are supported; no automatic ID repair, Host/Kernel change,
+SQL schema migration or compatibility bridge is introduced. Public Agent→
+Provider SSE→Kernel tests prove a real local Handler executed under the old
+code and zero effects after repair.
+
+**Physical Tool argument JSON root hard cut (PR #87 follow-up P1):**
+OpenAI `function_call.arguments` decodes from its string into a JSON
+**object**; Anthropic `tool_use.input` must likewise be an object.
+A permissive registered local JSON Schema (for example `{}`) cannot
+override the Provider's physical function-argument wire contract.
+Previously arrays, `null` and boolean values were valid JSON and reached
+real Agent local Tool execution in both Unary and SSE. Shared Provider
+validation now enforces the root shape at completed Tool decoding, SSE
+item/block proof, replay validation and outbound Tool history. Unsupported
+roots never authorize a Tool or successful terminal event; verified
+completed Usage survives only as a minimal paid rejection receipt.
+Initial Anthropic `input:null` combined with a conflicting later
+`input_json_delta` remains a protocol/framing failure with no fabricated
+completed receipt. Real object input and nested objects remain supported;
+no legacy coercion of nonobject JSON, Host/Agent/Kernel change, migration or
+replay schema version bump. Public Agent→SSE→Kernel tests reproduce actual
+Tool Handler side effects on original Head and prove zero after repair.
+See [independent P1 audit](audits/2026-11-03-pr87-tool-argument-root-hardcut.md).
+
+**OpenAI SSE completed output-item consistency hard cut:** Previously,
+`response.output_item.done` for a local `function_call` or assistant `message`
+was ignored, allowing a gateway's subsequent `response.completed` to replace
+an incomplete Tool item, change its ID/name/arguments, move its index or
+reuse its position as a different output type while returning executable
+Tools and a successful SSE completion. Observed done items now reconcile
+against their final physical output entry, including any explicit completed
+status. Duplicates, missing/wrong indices, unknown item types and mismatches
+fail closed without a Tool, ProviderReplay, completed billing receipt or
+terminal SSE success. A final-only completed response and legitimately omitted
+`completed` item status on Tool/Message remain accepted. Existing Reasoning
+encrypted replay requirements remain unchanged. No retry, migration, Host
+router or compatibility shim is introduced.
+
+**OpenAI reasoning item status hard cut:** The final `response.completed`
+status and nonempty `reasoning.encrypted_content` do not certify that a
+physical `reasoning` output item is complete. Previously a final reasoning
+item carrying an explicit `status=in_progress`, `incomplete`, null or other
+invalid status could accompany a completed local `function_call` and execute
+the Tool. Physical `reasoning.status` is now checked in shared output
+projection: when present it must equal `completed`. Only genuinely omitted
+legacy status is allowed. A trustworthy outer completion and final cumulative
+Usage with a physical Tool retain only the sanitized ID/Usage as a typed
+post-generation rejection; no Tool, text, encrypted replay or terminal SSE
+success can escape. The contract also applies to replay validation. No new
+schema, retry, Host route or compatibility bridge is added.
+
+**Provider JSON duplicate-member hard cut:** OpenAI Responses and Anthropic
+Messages previously accepted conflicting JSON object fields because standard
+Go unmarshalling silently retained the final value. A foreign `object`/`role`,
+incomplete/foreign status, Tool ID/name or altered Usage could be overwritten
+by a second same-named member and still authorize a local Tool. Unary bodies
+and SSE JSON event frames now reject **all duplicate object keys**, including
+nested and Unicode escape-equivalent names, before authority decoding. A
+contradictory response is a protocol failure, not a trustworthy completed
+billing receipt: no Tool, replay or terminal SSE success is certified.
+Legitimate nonduplicate JSON, member reuse in different objects and OpenAI's
+terminal `[DONE]` remain supported. No Host route, schema, retry policy,
+provider fallback or compatibility rewrite is added.
+
+**Double-encoded Tool arguments uniqueness hard cut:** Strict outer JSON/SSE
+frame validation alone does not inspect strings containing another JSON
+value. Previously OpenAI `function_call.arguments` containing
+`{"x":1,"x":2}` and Anthropic SSE `input_json_delta.partial_json`
+reconstructing a repeated-key `tool_use.input` could still authorize a
+local Tool Handler. OpenAI now checks decoded argument JSON during physical
+function-item verification, output projection and SSE done-item validation.
+Anthropic validates the reconstructed Tool input in its existing content
+block parser, also protecting stateless replay. Duplicate keys at any depth,
+including escaped aliases, reject the Tool; completed responses with verified
+final Usage retain only a sanitized `model.post_generation_failed`
+ResponseID/Usage receipt. Incomplete or unknown Usage, invalid framing and
+transport failures do not mint billing evidence. No Agent/Kernel, schema,
+Host route, retry or legacy compatibility bridge is added.
+
+**Case-folded Provider JSON field alias hard cut:** An exact-spelling
+repeated-key check was insufficient because Go also case-folds JSON names
+when matching struct fields. OpenAI `Object`/`object`, `Status`/`status` and
+`Type`/`type`, or Anthropic `Role`/`role` and `Stop_Reason`/`stop_reason`,
+previously allowed contradictory physical evidence to authorize local Tools.
+The existing bounded Provider JSON uniqueness check now treats Unicode
+simple-fold equivalent keys as ambiguous at **every object level**, including
+SSE frames and encoded Tool inputs. Non-ASCII equivalents such as `ſ`/`s`
+and `K`/`K` are covered. This deliberately rejects keys differing only by
+case inside the same object (including otherwise case-sensitive JSON Tool
+arguments); producers must choose unambiguous member names. Different
+objects may reuse the same names. Rejected physical Provider framing yields
+no ToolCall, ProviderReplay, forged billing receipt or SSE terminal success;
+no Agent/Kernel schema, Host route, retry or compatibility bridge is added.
+
+**Persisted ProviderReplay authority hard cut:** Previous JSON uniqueness
+checks covered incoming physical OpenAI/Anthropic responses but not raw
+`model.ProviderReplay.Data` restored from a durable transcript. A mutated
+OpenAI replay could contain `Role=user,role=assistant`, conflicting phase or
+Tool type/status, while Anthropic replay could include duplicate Tool
+ID/name/type or a duplicated signed Thinking `signature`. The last-value
+struct decoder and normalized Tool transcript checks could approve the
+replayed content and physically resend ambiguous raw bytes to the upstream
+Provider. Both replay verification entries now validate the entire bounded
+raw JSON envelope using the shared strict field-uniqueness contract **before
+any outbound HTTP request**. Ambiguous replay returns unsupported without
+Tool execution, model request or fabricated billing; valid opaque signed/
+encrypted content retains its exact original bytes. No replay-format version,
+SQL schema, Host route, automatic retry or compatibility bridge is added.
+
+This deliberately drops the former permissive acceptance of gateway
+nonconformance. No API/schema/ModelInvocation field, SQL DDL, runtime status,
+provider fallback, silent request rewrite or legacy bridge is introduced.
+Transitory SSE deltas may already have been observed before a final
+violation; only the terminal response/receipt is rejected. Any impacted
+Host should configure a compatible endpoint/model instead of interpreting
+unverified text as successful mandatory Tool execution. Live endpoint
+compatibility still requires explicit provider/gateway verification.
+See [independent regression evidence](audits/2026-11-02-provider-required-tool-response-hardcut.md).
+
 ## 2026-11-01 — Root Turn output provenance and physical-owner P1 hard cut (beta.24 candidate)
 
 `Harness.Snapshot.Output` must represent the physical result of the

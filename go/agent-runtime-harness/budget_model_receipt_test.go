@@ -207,6 +207,9 @@ func TestRejectedCompletedResponseSettlesUsageAndReplaysFailureAfterRestart(t *t
 	if view.UnknownUsage || view.Reserved.LLMCalls != 0 || view.Usage.LLMCalls != 1 || view.Usage.TotalTokens != 30 || view.Usage.ToolCalls != 1 || view.Usage.HostedToolCalls != 1 {
 		t.Fatalf("known rejection left uncertain or incorrect charges: %+v", view)
 	}
+	if len(response.HostedToolCalls) != 0 || strings.Contains(string(ledger.Reservations["model:"+request.InvocationID].Receipt), "completed-search") {
+		t.Fatal("rejected hosted payload persisted in shared receipt")
+	}
 	if strings.Contains(string(ledger.Reservations["model:"+request.InvocationID].Receipt), cause.Error()) {
 		t.Fatal("private rejection detail leaked into accounting receipt")
 	}

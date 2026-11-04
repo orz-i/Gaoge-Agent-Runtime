@@ -42,10 +42,10 @@ func TestAgentPersistsAndResumesTransientStreamFailures(t *testing.T) {
 					return
 				}
 				if tc.kind == "openai" {
-					emit("response.completed", `{"type":"response.completed","response":{"id":"resp-retried","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}],"usage":{"input_tokens":2,"output_tokens":1}}}`)
+					emit("response.completed", `{"type":"response.completed","response":{"object":"response","id":"resp-retried","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"Done"}]}],"usage":{"input_tokens":2,"output_tokens":1}}}`)
 					return
 				}
-				emit("message_start", `{"type":"message_start","message":{"id":"msg-retried","usage":{"input_tokens":2}}}`)
+				emit("message_start", `{"type":"message_start","message":{"type":"message","role":"assistant","id":"msg-retried","usage":{"input_tokens":2}}}`)
 				emit("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Done"}}`)
 				emit("content_block_stop", `{"type":"content_block_stop","index":0}`)
 				emit("message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}`)

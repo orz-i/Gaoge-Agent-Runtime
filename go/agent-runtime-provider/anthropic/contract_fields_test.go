@@ -35,7 +35,7 @@ func TestDocumentedNullableContentFieldsAndDirectToolCaller(t *testing.T) {
 					t.Error(err)
 				}
 				if n == 1 {
-					_, _ = fmt.Fprintf(w, `{"id":"msg-first","stop_reason":"tool_use","content":[{"type":"text","text":"Using lookup.","citations":null},{"type":"tool_use","id":"toolu_1","name":"lookup","input":{"x":1},"caller":%s,"toolset_name":null}],"usage":{"input_tokens":10,"output_tokens":7}}`, caller)
+					_, _ = fmt.Fprintf(w, `{"type":"message","role":"assistant","id":"msg-first","stop_reason":"tool_use","content":[{"type":"text","text":"Using lookup.","citations":null},{"type":"tool_use","id":"toolu_1","name":"lookup","input":{"x":1},"caller":%s,"toolset_name":null}],"usage":{"input_tokens":10,"output_tokens":7}}`, caller)
 				} else {
 					if len(request.Messages) != 3 {
 						t.Errorf("provider transcript was not preserved")
@@ -51,7 +51,7 @@ func TestDocumentedNullableContentFieldsAndDirectToolCaller(t *testing.T) {
 							t.Errorf("validated direct caller not preserved")
 						}
 					}
-					_, _ = fmt.Fprint(w, `{"id":"msg-final","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":15,"output_tokens":2}}`)
+					_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"msg-final","stop_reason":"end_turn","content":[{"type":"text","text":"Done"}],"usage":{"input_tokens":15,"output_tokens":2}}`)
 				}
 			})
 			request := model.Request{Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("run lookup")}}, Tools: []tools.Definition{nullableMetadataDefinition}}
@@ -93,7 +93,7 @@ func TestDocumentedDirectCallerStreamingBlockReplayed(t *testing.T) {
 			_, _ = fmt.Fprintln(w, "data: "+data)
 			_, _ = fmt.Fprintln(w)
 		}
-		emit("message_start", fmt.Sprintf(`{"type":"message_start","message":{"id":"m%d","usage":{"input_tokens":8,"output_tokens":0}}}`, count))
+		emit("message_start", fmt.Sprintf(`{"type":"message_start","message":{"type":"message","role":"assistant","id":"m%d","usage":{"input_tokens":8,"output_tokens":0}}}`, count))
 		if count == 1 {
 			emit("content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"","citations":null}}`)
 			emit("content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Using lookup."}}`)
@@ -135,7 +135,7 @@ func TestRejectIndirectToolCallersAndUnrepresentableAnnotations(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			client := newClient(t, func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = fmt.Fprintf(w, `{"id":"m","stop_reason":"tool_use","content":%s,"usage":{"input_tokens":8,"output_tokens":2}}`, test.content)
+				_, _ = fmt.Fprintf(w, `{"type":"message","role":"assistant","id":"m","stop_reason":"tool_use","content":%s,"usage":{"input_tokens":8,"output_tokens":2}}`, test.content)
 			})
 			_, err := client.Generate(context.Background(), model.Request{
 				Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("lookup")}}, Tools: []tools.Definition{nullableMetadataDefinition},

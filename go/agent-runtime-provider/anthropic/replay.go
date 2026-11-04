@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -68,7 +69,8 @@ func normalizedContentForReplay(blocks []json.RawMessage) ([]json.RawMessage, er
 func verifiedReplay(message model.Message) (json.RawMessage, error) {
 	replay := message.ProviderReplay
 	if replay == nil || replay.Provider != "anthropic" || replay.Format != replayFormat ||
-		len(replay.Data) == 0 || len(replay.Data) > 16<<20 {
+		len(replay.Data) == 0 || len(replay.Data) > 16<<20 ||
+		providerhttp.ValidateUniqueJSONKeys(replay.Data) != nil {
 		return nil, ErrUnsupported
 	}
 	var blocks []json.RawMessage
@@ -86,7 +88,7 @@ func verifiedReplay(message model.Message) (json.RawMessage, error) {
 		case "text":
 			text.WriteString(block.Text)
 		case "tool_use":
-			if block.ID == "" || block.Name == "" || !json.Valid(block.Input) {
+			if block.ID == "" || block.Name == "" || providerhttp.ValidateUniqueJSONObject(block.Input) != nil {
 				return nil, ErrUnsupported
 			}
 			calls = append(calls, block)
@@ -136,7 +138,7 @@ func marshalStreamBlock(block *contentBlock) (json.RawMessage, error) {
 			output["citations"] = block.Citations
 		}
 	case "tool_use":
-		if block.Name == "" || block.ID == "" || !json.Valid(block.Input) {
+		if block.Name == "" || block.ID == "" || providerhttp.ValidateUniqueJSONObject(block.Input) != nil {
 			return nil, ErrUnsupported
 		}
 		output = map[string]any{"type": "tool_use", "id": block.ID,
@@ -185,6 +187,20 @@ func parseContentBlock(raw json.RawMessage) (contentBlock, error) {
 		}
 	case "tool_use":
 		allowed["id"], allowed["name"], allowed["input"] = true, true, true
+		// Anthropic SSE partial_json is a JSON string within a well-formed
+		// event. Check decoded/reconstructed member uniqueness here, but
+		// defer the *root object* gate until block_stop/final decoding.
+		// Otherwise initial input:null followed by a conflicting delta
+		// becomes a paid semantic rejection instead of a framing failure.
+		if providerhttp.ValidateUniqueJSONKeys(block.Input) != nil {
+			return contentBlock{}, ErrUnsupported
+		}
+		// Tool IDs are physical Provider authority, not user-facing text.
+		// Reject IDs that Agent would trim or replace before dispatch,
+		// including whitespace-only identifiers. This also fences replay.
+		if block.ID == "" || strings.TrimSpace(block.ID) != block.ID {
+			return contentBlock{}, ErrUnsupported
+		}
 		allowed["caller"], allowed["toolset_name"] = true, true
 		// Modern Claude responses may include caller:null or a direct
 		// caller. Server-delegated callers must not be executed as local Tools.
