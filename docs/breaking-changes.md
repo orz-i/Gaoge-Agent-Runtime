@@ -2,6 +2,25 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-04 — Harness Config and Invocation must prove sealed execution authority (beta.24 candidate)
+
+The pre-stable Harness no longer trusts a persisted Config's claimed
+`ContentHash` or ID without recomputing them from the canonical payload.
+All Harness reads (including Context, role/capability projection, Budget,
+Approval, retries and Session/Turn materialization) use one validated Config
+boundary. JSON roundtrip differences that canonicalize without changing the
+seal are accepted only after normalization; an actual Model, Tool, instruction
+or `AdmissionHash` change with a stale seal returns `ErrConflict`.
+
+Every `CreateInvocation` result must also prove its original frozen owner,
+input hash, Run/ExecutionRefID and Attempt, and the canonical indexed Store
+record must agree before an Item or physical Feature dispatch. Top-level,
+child and Handoff starts share this boundary. A poisoned or incomplete old
+Beta record now fails closed until explicit Host reconciliation/quarantine.
+No compatibility alias, alternate executor, Store schema, model replay format,
+Kernel status or version bump is added. The existing Store CAS guarantees are
+still required. See the [I2/I3 convergence evidence](audits/2026-11-04-harness-sealed-authority-convergence.md).
+
 ## 2026-11-04 — Context Run must prove durable Turn ownership (beta.24 candidate)
 
 `NewContextRunMiddleware` no longer accepts a process-local `ContextWindowBinding`

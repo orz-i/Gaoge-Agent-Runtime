@@ -5,6 +5,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Harness I2/I3 sealed-authority convergence: re-derive canonical Config
+  ContentHash and Config ID from the actual persisted payload, and use only
+  verified normalized configuration for admission, Context, Budget, Tool,
+  role and retry paths. Before any physical operation, validate both the
+  CreateInvocation reply and its canonical indexed Store record against the
+  Host-frozen Invocation/Run/Attempt identity. All top-level, child and
+  Handoff creation paths use the single check; old private direct callers
+  are removed without forwarding aliases. Malformed pre-stable Beta records
+  fail closed rather than receiving a compatibility fallback. No new Store
+  field, public API, schema or Kernel status. See the
+  [I2/I3 independent convergence audit](docs/audits/2026-11-04-harness-sealed-authority-convergence.md).
+
 - Top-level Store receipt authority: the shared Harness admission path now
   rejects a Store CreateSession, PutConfigSnapshot or CreateTurn response that
   disagrees with the Host-selected immutable identity. A fresh Turn must also
