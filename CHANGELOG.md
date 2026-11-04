@@ -5,6 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #87 completion-authority audit: bind each named Provider invocation to
+  one physical or verified settled-replay receipt. Middleware cannot replace
+  its exact ID or Usage, promote a rejected/failed call to success, or fabricate
+  a completion without a source. Rejected stream IDs are reconciled before
+  errors return, and persisted duplicate physical receipts fail recovery.
+  Shared-budget crash replay remains supported without another Provider call.
+  See [convergence audit and regression matrix](docs/audits/2026-11-04-pr87-completion-authority.md).
+
 - PR #87 independent Agent P1 audit: successful replies from named Provider
   bindings must carry an exact original physical response ID, just as known
   rejected replies do. Missing or whitespace-normalized IDs previously

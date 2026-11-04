@@ -322,7 +322,7 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 	request model.Request,
 	deadlineAt *time.Time,
 	beforeDispatch func(context.Context) error,
-	afterProvider ...func(model.Response, error) (model.Response, error),
+	afterProvider ...*modelCompletionAuthority,
 ) (model.Response, error) {
 	release, err := runner.acquireCallPermit(ctx, runner.modelLimiter, deadlineAt)
 	if err != nil {

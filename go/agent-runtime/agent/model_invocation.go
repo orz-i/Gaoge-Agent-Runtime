@@ -197,6 +197,7 @@ func cloneModelInvocation(value ModelInvocation) ModelInvocation {
 
 func validModelInvocations(values []ModelInvocation) bool {
 	active := 0
+	seenPhysical := make(map[[3]string]struct{})
 	for index, invocation := range values {
 		if strings.TrimSpace(invocation.ID) == "" || strings.TrimSpace(invocation.RunID) == "" ||
 			invocation.SourceRevision == 0 || len(invocation.RequestHash) != sha256.Size*2 ||
@@ -258,6 +259,14 @@ func validModelInvocations(values []ModelInvocation) bool {
 			}
 		default:
 			return false
+		}
+		if invocation.Provider != "" && invocation.BindingFingerprint != "" &&
+			(invocation.Status == ModelInvocationCompleted || invocation.Status == ModelInvocationConsumed) {
+			key := [3]string{invocation.Provider, invocation.BindingFingerprint, invocation.ProviderResponseID}
+			if _, duplicate := seenPhysical[key]; duplicate {
+				return false
+			}
+			seenPhysical[key] = struct{}{}
 		}
 	}
 	return active <= 1
@@ -702,6 +711,13 @@ func (runner *Runner) executeModelInvocation(
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
 		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
+	authority := modelCompletionAuthority{
+		named:   invocation.Provider != "" && invocation.BindingFingerprint != "",
+		request: model.CloneRequest(invocation.Request),
+		duplicate: func(id string) bool {
+			return duplicatePhysicalProviderResponseID(state, invocation, id)
+		},
+	}
 	response, err := runner.generateModelWithPolicyGuarded(ctx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
 		func(dispatchCtx context.Context) error {
 			// Resolve and revalidate Catalog authority first: a slow external
@@ -723,41 +739,17 @@ func (runner *Runner) executeModelInvocation(
 			}
 			return runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID)
 		},
-		func(response model.Response, err error) (model.Response, error) {
-			known := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
-			// An accepted physical completion needs the same exact named
-			// Provider identity as a known rejected completion. Otherwise a
-			// successful Tool result can bypass response-ID deduplication.
-			if (err == nil || known) && invocation.Provider != "" && invocation.BindingFingerprint != "" &&
-				(response.ResponseID == "" || strings.TrimSpace(response.ResponseID) != response.ResponseID) {
-				return model.Response{}, ErrInvalidModelResponse
-			}
-			if (err == nil || known) && duplicatePhysicalProviderResponseID(state, invocation, response.ResponseID) {
-				return model.Response{}, ErrInvalidModelResponse
-			}
-			return response, err
-		},
+		&authority,
 	)
-	late := errors.Is(err, ErrModelLateResult)
 	response.Content = strings.TrimSpace(response.Content)
 	if err == nil && response.Usage != nil && validModelUsage(response.Usage) && !validModelResponse(response) {
 		err = model.NewResponseRejectedError(ErrInvalidModelResponse)
 	}
+	// Validate against the original receipt, not just another syntactically
+	// valid ID. The same authority also fences downstream shared settlement.
+	response, err = authority.validate(response, err)
+	late := errors.Is(err, ErrModelLateResult)
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
-	// Named external Providers must prove exact physical completion identity
-	// for success, late success and verified rejection alike. Middleware may
-	// change the response after the private Provider guard, so recheck here
-	// before any durable receipt or local Tool execution is authorized.
-	if (err == nil || late || knownRejection) && invocation.Provider != "" && invocation.BindingFingerprint != "" &&
-		(response.ResponseID == "" || strings.TrimSpace(response.ResponseID) != response.ResponseID) {
-		return snapshot, state, ErrInvalidModelResponse
-	}
-	// A gateway can reply with a different Tool payload under an already
-	// consumed physical response ID. Do not count it as a new billable
-	// completion or dispatch its Tools, even if the new Call ID is distinct.
-	if (err == nil || late || knownRejection) && duplicatePhysicalProviderResponseID(state, invocation, response.ResponseID) {
-		return snapshot, state, ErrInvalidModelResponse
-	}
 	if knownRejection {
 		// The rejected assistant reply is NOT an authorized transcript or
 		// executable Tool payload. Persist only the verified billing receipt

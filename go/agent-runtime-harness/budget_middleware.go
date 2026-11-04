@@ -144,6 +144,10 @@ func (middleware *BudgetMiddleware) Model(ctx context.Context, request model.Req
 	projectErr := middleware.project(ctx, ledger)
 	if value := ledger.Reservations[reservation.ID]; err == nil && value.Status == budget.ReservationSettled {
 		response, callErr := decodeBudgetModelReceipt(value.Receipt)
+		// A trusted settled receipt may finish this invocation without a
+		// second physical call. Establish the same immutable authority before
+		// outer middleware can rewrite its identity or billing evidence.
+		response, callErr = agent.ReplayModelResponseAuthority(ctx, request, response, callErr)
 		return settledModelResult(response, callErr, projectErr)
 	}
 	if projectErr != nil {

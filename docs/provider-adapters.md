@@ -112,6 +112,19 @@ one never persists its rejected payload. Unnamed local Models keep
 their prior optional physical response ID contract. See the
 [P1/P2 independent audit](audits/2026-11-03-pr87-rejected-receipt-agent-authority.md).
 
+**Immutable invocation completion authority:** Agent records the first
+physical terminal or verified settled-budget replay before middleware can
+rewrite it. Named bindings must retain the exact response ID, cloned Usage
+value and completion outcome through accounting and durable receipt creation.
+Success may be rejected later; rejection or unknown failure cannot become
+success. Ordinary `ValidateModelResponseAuthority` cannot register a source.
+Trusted accounting middleware may call `ReplayModelResponseAuthority` only
+after verifying its settled reservation, original RequestHash and receipt;
+this Host attestation is not isolation from malicious in-process plugins.
+Typed rejected streaming responses must carry their own final ID and Usage,
+not partial observations; any observed/final ID conflict fails closed.
+See the [convergence audit](audits/2026-11-04-pr87-completion-authority.md).
+
 **Cross-invocation physical completion-ID authority:** OpenAI Responses
 and Anthropic Messages adapters require exact, nonblank Provider-owned IDs.
 Agent additionally rejects a *new* completed or known-billed rejected

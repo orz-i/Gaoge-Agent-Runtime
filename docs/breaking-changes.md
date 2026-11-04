@@ -2,6 +2,23 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-04 — Immutable named Provider completion authority (PR #87)
+
+Named Provider middleware must preserve the original physical response ID,
+Usage and completion outcome. A valid-to-valid ID replacement or in-place
+Usage change now fails closed, as does promoting a rejected/failed call to
+success or fabricating one without calling the Provider. Further rejection of
+a valid successful response remains supported. Trusted accounting replay must
+register its verified settled receipt through `ReplayModelResponseAuthority`;
+ordinary `ValidateModelResponseAuthority` only validates an existing source.
+The new replay API requires trusted Host validation of the reservation,
+original RequestHash and receipt; it is not a malicious-plugin sandbox.
+Duplicate completed/consumed physical IDs under the same Provider/binding
+now fail restored-state validation. Rejected streams cannot repair missing
+final receipts from partial Usage events. No schema migration, compatibility
+bridge or change to unnamed local models. See the
+[completion-authority audit](audits/2026-11-04-pr87-completion-authority.md).
+
 ## 2026-11-03 — Exact physical ID required for successful named Provider completions (PR #87 P1)
 
 A named external Provider binding must return a **nonempty, exact** physical
