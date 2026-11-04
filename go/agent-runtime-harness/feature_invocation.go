@@ -672,7 +672,7 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 		return Snapshot{}, ErrInvalidRequest
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
-		turn, loadErr := runner.store.GetTurn(ctx, invocation.TurnID)
+		turn, loadErr := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
@@ -720,7 +720,7 @@ func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string)
 		return Snapshot{}, ErrInvalidRequest
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
-		turn, loadErr := runner.store.GetTurn(ctx, invocation.TurnID)
+		turn, loadErr := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
@@ -768,7 +768,7 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 		// must not fall through to the native Agent retry adapter.
 		return Snapshot{}, ErrConflict
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil || (strings.TrimSpace(invocation.ParentItemID) != "" && terminalTurnStatus(turn.Status)) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
@@ -820,7 +820,7 @@ func (runner *Runner) startNextInvocationAttempt(
 	if err = runner.recordInvocationItem(ctx, retried); err != nil {
 		return Snapshot{}, err
 	}
-	turn, err = runner.store.GetTurn(ctx, turn.ID)
+	turn, err = loadVerifiedTurn(ctx, runner.store, turn.ID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1037,7 +1037,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if strings.TrimSpace(invocation.ParentItemID) == "" {
 		return Snapshot{}, ErrConflict
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1147,7 +1147,7 @@ func (runner *Runner) childInvocationContext(
 	if strings.TrimSpace(parentItemID) == "" {
 		return childInvocationContext{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil || terminalTurnStatus(turn.Status) {
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
 	}
@@ -1331,7 +1331,7 @@ func (runner *Runner) loadInvocationRuntime(
 	if err != nil {
 		return Invocation{}, Turn{}, kernel.Snapshot{}, err
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil {
 		return Invocation{}, Turn{}, kernel.Snapshot{}, err
 	}
@@ -1394,7 +1394,7 @@ func (runner *Runner) resumeInvocationExecution(
 		// delegated child into a locally resumed native Agent Run.
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -1499,7 +1499,7 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
-	turn, err = runner.store.GetTurn(ctx, turn.ID)
+	turn, err = loadVerifiedTurn(ctx, runner.store, turn.ID)
 	if err != nil {
 		return Snapshot{}, err
 	}

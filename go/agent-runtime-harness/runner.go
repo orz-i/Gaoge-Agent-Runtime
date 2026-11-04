@@ -232,7 +232,7 @@ func (runner *Runner) ResolveApproval(
 		len(request.CheckpointID) > 128 {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -833,7 +833,7 @@ func (runner *Runner) attachContextCheckpoint(
 
 // Load returns one durable Harness Turn and current root output without changing execution state.
 func (runner *Runner) Load(ctx context.Context, turnID string) (Snapshot, error) {
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -842,7 +842,7 @@ func (runner *Runner) Load(ctx context.Context, turnID string) (Snapshot, error)
 
 // Refresh synchronizes one active Harness Turn from its top-level Invocation.
 func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, error) {
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -906,7 +906,7 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 // Harness Turn state. C2 extends dispatch to the other explicit Feature adapters.
 func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (snapshot Snapshot, err error) {
 	turnID = strings.TrimSpace(turnID)
-	turn, err := runner.store.GetTurn(ctx, turnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1083,7 +1083,7 @@ func (runner *Runner) syncRuntimeSnapshotWithRetryProof(
 		if !errors.Is(err, ErrConflict) {
 			return snapshot, err
 		}
-		turn, err = runner.store.GetTurn(ctx, turn.ID)
+		turn, err = loadVerifiedTurn(ctx, runner.store, turn.ID)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -1213,7 +1213,7 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 	); err != nil {
 		return Snapshot{}, err
 	}
-	turn, err = runner.store.GetTurn(ctx, turn.ID)
+	turn, err = loadVerifiedTurn(ctx, runner.store, turn.ID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1368,7 +1368,7 @@ func (runner *Runner) FinalizeHostOutput(ctx context.Context, turnID string) (Sn
 	if runner == nil || turnID == "" {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, turnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1735,20 +1735,29 @@ func (runner *Runner) SubscribeTurnFeed(ctx context.Context, turnID string, afte
 	if runner == nil || runner.turnFeed == nil || turnID == "" || afterSeq < 0 {
 		return nil, ErrInvalidRequest
 	}
-	if _, err := runner.store.GetTurn(ctx, turnID); err != nil {
+	if _, err := loadVerifiedTurn(ctx, runner.store, turnID); err != nil {
 		return nil, err
 	}
 	return runner.turnFeed.Subscribe(ctx, turnID, afterSeq)
 }
 
 func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *kernel.Snapshot) (Snapshot, error) {
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	if !validTurn(turn) {
+		return Snapshot{}, ErrConflict
+	}
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	// Even a self-consistent Config must belong to this exact requested Turn.
+	// A Store read cannot compose another Turn's Session or sealed Config
+	// into this Host-visible snapshot.
+	if session.ID != turn.SessionID || config.TurnID != turn.ID {
+		return Snapshot{}, ErrConflict
 	}
 	items, err := listAllItems(ctx, runner.store, turn.ID)
 	if err != nil {

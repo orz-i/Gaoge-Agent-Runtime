@@ -84,7 +84,7 @@ func (runner *Runner) projectWorkflowWaitInteraction(ctx context.Context, turn T
 	if err != nil {
 		return err
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func (runner *Runner) resumeWorkflowInteraction(ctx context.Context, turn Turn, 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Snapshot{}, err
 	}

@@ -387,7 +387,7 @@ func (preparer roleModelRequestPreparer) prepare(ctx context.Context, request mo
 	if err != nil {
 		return model.Request{}, err
 	}
-	turn, err := preparer.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, preparer.store, invocation.TurnID)
 	if err != nil {
 		return model.Request{}, err
 	}

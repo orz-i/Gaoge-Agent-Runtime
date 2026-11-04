@@ -60,7 +60,7 @@ func (runner *Runner) interactionResponseContext(
 	if err != nil {
 		return InteractionResponseContext{}, err
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return InteractionResponseContext{}, err
 	}
@@ -302,7 +302,7 @@ func (runner *Runner) ResolveInteraction(
 	if err != nil || interaction.TurnID != strings.TrimSpace(turnID) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	owner, err := runner.store.GetTurn(ctx, interaction.TurnID)
+	owner, err := loadVerifiedTurn(ctx, runner.store, interaction.TurnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -396,7 +396,7 @@ func (runner *Runner) continueResolvedInteraction(ctx context.Context, interacti
 	if runner.interactions == nil {
 		return Snapshot{}, ErrInteractionResponseHandlerUnavailable
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -548,7 +548,7 @@ func (runner *Runner) loadResolvedInteractionOwners(
 	ctx context.Context,
 	interaction Interaction,
 ) (Turn, Invocation, error) {
-	turn, err := runner.store.GetTurn(ctx, interaction.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, interaction.TurnID)
 	if err != nil {
 		return Turn{}, Invocation{}, err
 	}
@@ -817,7 +817,7 @@ func (runner *Runner) loadInteractionRequestOwners(
 	ctx context.Context,
 	turnID, invocationID string,
 ) (Turn, Invocation, error) {
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil || terminalTurnStatus(turn.Status) {
 		return Turn{}, Invocation{}, errors.Join(ErrConflict, err)
 	}
@@ -910,7 +910,7 @@ func (runner *Runner) reconcileInteractionState(
 }
 
 func (runner *Runner) loadInteractionSnapshot(ctx context.Context, interaction Interaction) (Snapshot, error) {
-	turn, err := runner.store.GetTurn(ctx, interaction.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, interaction.TurnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -945,7 +945,7 @@ func (runner *Runner) reconcileTurnStatus(
 	turnID string,
 	status TurnStatus,
 ) (Turn, bool, error) {
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Turn{}, false, err
 	}

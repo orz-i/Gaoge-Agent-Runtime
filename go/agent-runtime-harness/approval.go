@@ -61,7 +61,7 @@ func (policy *FrozenApprovalPolicy) Approval(
 	if err != nil {
 		return plugin.ApprovalNotRequired, err
 	}
-	turn, err := policy.store.GetTurn(ctx, capabilityInvocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, policy.store, capabilityInvocation.TurnID)
 	if err != nil {
 		return plugin.ApprovalNotRequired, err
 	}

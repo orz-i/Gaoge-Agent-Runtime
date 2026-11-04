@@ -27,7 +27,7 @@ func (runner *Runner) resumeNativeFencedAgentAfterInterruptedStart(
 	if _, native := runner.agent.(*agent.Runner); !native {
 		return kernel.Snapshot{}, grantErr
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil || terminalTurnStatus(turn.Status) {
 		return kernel.Snapshot{}, errors.Join(grantErr, err)
 	}

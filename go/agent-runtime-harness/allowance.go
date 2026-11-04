@@ -39,7 +39,7 @@ func (runner *Runner) GrantCallAllowance(
 	if !ok {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -54,7 +54,7 @@ func (runner *Runner) GrantCallAllowance(
 		invocation.Status != InvocationPausedBudget || invocation.ExecutionRefID == "" {
 		return Snapshot{}, ErrConflict
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Snapshot{}, err
 	}

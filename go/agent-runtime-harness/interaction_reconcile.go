@@ -55,7 +55,7 @@ func (runner *Runner) ReconcileInteraction(
 	if !ok {
 		return Snapshot{}, ErrInteractionOutcomeUnknown
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Snapshot{}, err
 	}

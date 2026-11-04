@@ -33,7 +33,7 @@ func (runner *Runner) RecordExternalItem(
 		!json.Valid(defaultJSON(input.Payload)) {
 		return Item{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, turnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, turnID)
 	if err != nil {
 		return Item{}, err
 	}

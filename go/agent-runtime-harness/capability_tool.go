@@ -171,7 +171,7 @@ func capabilityToolContext(
 			"capability.invalid_parent", "capability invocation is available only to the root Harness agent", err,
 		)
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Turn{}, Session{}, ConfigSnapshot{}, err
 	}

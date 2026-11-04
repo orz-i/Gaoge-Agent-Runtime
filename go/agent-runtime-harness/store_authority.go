@@ -6,6 +6,78 @@ import (
 	"strings"
 )
 
+// loadVerifiedSession never accepts a Store read as a new Session owner.
+// The caller-supplied key remains the authority for the read, including
+// on Host presentation, cancellation and replay paths.
+func loadVerifiedSession(ctx context.Context, store Store, sessionID string) (Session, error) {
+	if store == nil || strings.TrimSpace(sessionID) == "" {
+		return Session{}, ErrInvalidRequest
+	}
+	value, err := store.GetSession(ctx, sessionID)
+	if err != nil {
+		return Session{}, err
+	}
+	if !validSession(value) || value.ID != sessionID {
+		return Session{}, ErrConflict
+	}
+	// Host-derived Session IDs carry the original HostThread identity.
+	// Independently persisted Store records may use their own IDs, but a
+	// Host-derived key must never be rebound to another HostThread.
+	if hostDerivedID(sessionID, "hs") {
+		derived, deriveErr := SessionID(value.HostThread)
+		if deriveErr != nil || derived != sessionID {
+			return Session{}, ErrConflict
+		}
+	}
+	return value, nil
+}
+
+// loadVerifiedTurn binds every Store GetTurn response to the exact requested
+// Turn key. A different, otherwise valid Turn may never stand in for the
+// original owner before execution, recovery or Host-visible projection.
+func loadVerifiedTurn(ctx context.Context, store Store, turnID string) (Turn, error) {
+	if store == nil || strings.TrimSpace(turnID) == "" {
+		return Turn{}, ErrInvalidRequest
+	}
+	value, err := store.GetTurn(ctx, turnID)
+	if err != nil {
+		return Turn{}, err
+	}
+	if !validTurn(value) || value.ID != turnID {
+		return Turn{}, ErrConflict
+	}
+	// The Host-derived Turn ID binds both its Session and HostTurn. Merely
+	// preserving the returned Turn.ID is not enough if a Store substitutes
+	// another Session or HostTurn while keeping the same ID.
+	if hostDerivedID(turnID, "ht") {
+		derived, deriveErr := TurnID(value.SessionID, value.HostTurn)
+		if deriveErr != nil || derived != turnID {
+			return Turn{}, ErrConflict
+		}
+		// A valid Turn ID alone is insufficient authority to use a foreign
+		// Session or Config. Verify both durable links here, before callers
+		// may reconcile, cancel, retry or dispatch any physical work.
+		if _, err := loadVerifiedSession(ctx, store, value.SessionID); err != nil {
+			return Turn{}, err
+		}
+		config, err := loadSealedConfig(ctx, store, value.ConfigSnapshotID)
+		if err != nil {
+			return Turn{}, err
+		}
+		if config.TurnID != turnID {
+			return Turn{}, ErrConflict
+		}
+	}
+	return value, nil
+}
+
+// Only Host-derived IDs have the deterministic 24-hex-digest form. The
+// Store interface also supports standalone caller-defined IDs, which can be
+// checked against their exact read keys but have no Host-derived seal.
+func hostDerivedID(value, prefix string) bool {
+	return len(value) == len(prefix)+1+24 && strings.HasPrefix(value, prefix+"_")
+}
+
 // canonicalSealedConfig never trusts a persisted ContentHash by itself. It
 // recomputes the original canonical payload, digest and derived ID, then
 // returns ONLY that normalized value. Legitimate Store JSON roundtrips may

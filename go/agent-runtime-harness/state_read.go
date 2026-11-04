@@ -19,11 +19,11 @@ func (runner *Runner) LoadState(ctx context.Context, turnID string) (StateSnapsh
 	if runner == nil || runner.store == nil || strings.TrimSpace(turnID) == "" {
 		return StateSnapshot{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return StateSnapshot{}, err
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return StateSnapshot{}, err
 	}
@@ -47,7 +47,7 @@ func (runner *Runner) ListTimeline(ctx context.Context, turnID string, afterSeq 
 	if runner == nil || runner.store == nil || turnID == "" || limit <= 0 || limit > defaultItemListLimit {
 		return nil, ErrInvalidRequest
 	}
-	if _, err := runner.store.GetTurn(ctx, turnID); err != nil {
+	if _, err := loadVerifiedTurn(ctx, runner.store, turnID); err != nil {
 		return nil, err
 	}
 	page, err := runner.store.ListItems(ctx, turnID, afterSeq, limit)
