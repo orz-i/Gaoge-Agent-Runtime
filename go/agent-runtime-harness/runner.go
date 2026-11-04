@@ -109,6 +109,27 @@ func (runner *Runner) recordInvocationItem(ctx context.Context, invocation Invoc
 	return err
 }
 
+// startAgentPhysical is the only top-level Agent StartRun construction and
+// physical dispatch path, shared by first admission and pre-Run recovery.
+// The durable Invocation owns the Turn identity; the Host still owns the
+// sealed request/config and cannot introduce a new execution mode on replay.
+func (runner *Runner) startAgentPhysical(
+	ctx context.Context, invocation Invocation, request StartRequest, config ConfigSnapshot,
+) (kernel.Snapshot, error) {
+	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.agent.StartRun(ctx, agent.StartRequest{
+			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), Goal: request.Goal,
+			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+			OutputContract:   model.CloneOutputContract(config.OutputContract),
+			ToolKeys:         append([]string(nil), config.ToolKeys...),
+			RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
+			InitialToolKeys:  append([]string(nil), request.InitialToolKeys...),
+			Limits:           config.Limits, CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
+		})
+	})
+}
+
 func (runner *Runner) resumeAgentStart(
 	ctx context.Context,
 	turn Turn,
@@ -123,19 +144,7 @@ func (runner *Runner) resumeAgentStart(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.agent.StartRun(runCtx, agent.StartRequest{
-			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turn.ID), Goal: request.Goal,
-			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-			OutputContract: model.CloneOutputContract(config.OutputContract),
-			ToolKeys:       append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-			InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
-			Limits:          config.Limits,
-			CallAllowance:   request.CallAllowance,
-			AutoAllowance:   request.AutoAllowance,
-		})
-	})
+	runtimeSnapshot, startErr := runner.startAgentPhysical(runCtx, invocation, request, config)
 	if runtimeSnapshot.Run.ID == "" {
 		if !isDispatchProvenNoEffect(startErr) {
 			return Snapshot{}, startErr
@@ -732,18 +741,7 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 		}
 		runCtx = withContextWindowBinding(runCtx, createdTurn.ID, ContextWindowOwner)
 	}
-	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.agent.StartRun(runCtx, agent.StartRequest{
-			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), createdTurn.ID), Goal: request.Goal,
-			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-			OutputContract:   model.CloneOutputContract(config.OutputContract),
-			ToolKeys:         append([]string(nil), config.ToolKeys...),
-			RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-			InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
-			CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
-		})
-	})
+	runtimeSnapshot, startErr := runner.startAgentPhysical(runCtx, invocation, request, config)
 	if runtimeSnapshot.Run.ID == "" {
 		if errors.Is(startErr, kernel.ErrConflict) {
 			recovered, recoverErr := runner.Refresh(ctx, createdTurn.ID)
