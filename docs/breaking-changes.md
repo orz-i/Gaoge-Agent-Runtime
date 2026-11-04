@@ -2,6 +2,24 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-04 — Harness Session/Turn Store reads require original owner proof (beta.24 candidate)
+
+All Harness read-side `GetSession` and `GetTurn` consumption now validates
+that a returned object has exactly the requested Store identity and a valid
+lifecycle/shape. Deterministic Host `hs_` / `ht_` identities must also match
+recomputed `SessionID(HostThread)` and `TurnID(SessionID, HostTurn)`;
+Host-derived Turns prove their Session and sealed Config association before
+any physical recovery, cancellation, approval or output projection. A foreign
+persisted Session/Turn or a same-ID Turn retargeted to another Session/Config
+returns `ErrConflict` without exposing the foreign tenant or continuing an
+effect. Existing standalone Store-defined IDs (outside Host-derived identity
+format) retain exact key validation and do not claim Host-derived proof.
+
+This is a hard cut in the unreleased Beta contract, not a compatibility
+bridge: inconsistent legacy Store records may fail read/reconciliation until
+Host/operator repair. No new database schema, Kernel lifecycle status,
+execution router or public SDK method. See the [I1 authority audit](audits/2026-11-04-harness-read-authority-hardcut.md).
+
 ## 2026-11-04 — Harness Config and Invocation must prove sealed execution authority (beta.24 candidate)
 
 The pre-stable Harness no longer trusts a persisted Config's claimed

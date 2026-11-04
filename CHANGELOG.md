@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Harness I1 read-side ownership hard cut: centralize all Session and Turn
+  Store reads behind exact requested-ID verification. Host-derived identities
+  additionally bind the original HostThread, HostTurn, owning Session and
+  canonical sealed Config before any replay, cancellation, control or
+  Host-visible projection. An inconsistent custom Store can no longer
+  substitute a different persisted tenant's Session/Turn or rebind the
+  original Turn to a foreign Config. `LoadSnapshot` enforces the same
+  Session/Config Turn association. No new public API, persisted schema,
+  compatibility alias or Kernel state. See the
+  [I1 read-side authority audit](docs/audits/2026-11-04-harness-read-authority-hardcut.md).
+
 - Harness I2/I3 sealed-authority convergence: re-derive canonical Config
   ContentHash and Config ID from the actual persisted payload, and use only
   verified normalized configuration for admission, Context, Budget, Tool,
