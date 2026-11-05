@@ -517,11 +517,28 @@ func (runner *Runner) finishTopLevelStart(
 	startErr error,
 ) (Snapshot, error) {
 	if runtimeSnapshot.Run.ID == "" {
-		if errors.Is(startErr, kernel.ErrConflict) {
-			recovered, recoverErr := runner.Refresh(ctx, turn.ID)
-			if recoverErr == nil && recovered.Turn.Status == TurnCancelled {
-				return recovered, nil
+		// An empty-snapshot conflict from a composite Feature or a retry is
+		// not proof that its remote work stopped. A same-ID cancelled
+		// Kernel Run cannot settle another unresolved physical dispatch.
+		// Only the original first-attempt Agent can reconcile a cancelled
+		// Run after a pre-dispatch conflict, with no unknown-effect receipt
+		// and no outstanding dispatch grant.
+		if invocation.ExecutionClass == ExecutionAgent && invocation.Attempt == 1 &&
+			errors.Is(startErr, kernel.ErrConflict) && !errors.Is(startErr, ErrExecutionOutcomeUnknown) {
+			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
+			if checkErr != nil {
+				return Snapshot{}, errors.Join(startErr, checkErr)
 			}
+			if !pending {
+				recovered, recoverErr := runner.Refresh(ctx, turn.ID)
+				if recoverErr == nil && initialAgentCancelledStartConflict(invocation, recovered.Turn.Status, startErr) {
+					return recovered, nil
+				}
+			}
+		}
+		if startErr == nil {
+			// Neither a physical Run nor an error is a completed effect.
+			return Snapshot{}, ErrExecutionOutcomeUnknown
 		}
 		if !isDispatchProvenNoEffect(startErr) {
 			return Snapshot{}, startErr

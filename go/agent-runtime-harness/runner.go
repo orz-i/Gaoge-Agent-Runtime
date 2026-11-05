@@ -1172,12 +1172,21 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 			return Snapshot{}, err
 		}
 	}
-	// An active cancellation intent can outlive the parent Kernel's
-	// cancelled status while a remote child remains running. No generic
-	// Refresh/Resume/Start callback may turn that root observation into
-	// a terminal Harness Turn; only Cancel after verified descendant cleanup
-	// may complete the projection. Keep the intent for reconciliation.
+	// A terminal same-ID Kernel Run is not proof that a separate Feature
+	// Start/Retry finished its remote effects. Keep unknown physical
+	// dispatch grants unresolved across Refresh and all ordinary terminal
+	// projections. Only the Cancel path, after verifying all descendants
+	// and effect receipts, may use verifiedCancellation to settle them.
+	// An active cancellation intent likewise blocks ordinary projection
+	// until its descendant cleanup has been confirmed.
 	if invocation.ParentItemID == "" && terminalRuntimeStatus(runtimeSnapshot.Run.Status) && !verifiedCancellation {
+		pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
+		if checkErr != nil {
+			return Snapshot{}, checkErr
+		}
+		if pending {
+			return Snapshot{}, ErrExecutionOutcomeUnknown
+		}
 		items, loadErr := listAllItems(ctx, runner.store, turn.ID)
 		if loadErr != nil {
 			return Snapshot{}, loadErr
