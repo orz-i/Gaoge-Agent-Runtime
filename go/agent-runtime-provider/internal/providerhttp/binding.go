@@ -18,7 +18,7 @@ type BindingSpec struct {
 	MaxOutputTokens        int64
 	StructuredOutputModels []string
 	// Exact Host-certified effort levels for private/gateway model IDs.
-	EffortModelLevels map[string][]string
+	EffortModelLevels map[string][]string `json:",omitempty"`
 }
 
 // FingerprintBinding binds a Provider's effective endpoint, authenticated
