@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp"
@@ -28,12 +29,15 @@ type Config struct {
 	// StructuredOutputModels opts explicitly named models/gateways into strict
 	// JSON Schema output. Unknown models otherwise fail closed.
 	StructuredOutputModels []string
+	// Explicit Host-certified levels for private or gateway model IDs.
+	EffortModelLevels map[string][]string
 }
 type Client struct {
 	http                   *providerhttp.Client
 	defaultModel           string
 	bindingFingerprint     string
 	structuredOutputModels map[string]bool
+	effortModelLevels      map[string][]string
 }
 
 func New(config Config) (*Client, error) {
@@ -54,6 +58,10 @@ func New(config Config) (*Client, error) {
 		}
 		allowed[name] = true
 	}
+	effortLevels, err := providerhttp.NormalizeEffortModels(config.EffortModelLevels, providerhttp.ValidEffortLevels)
+	if err != nil {
+		return nil, err
+	}
 	actualEndpoint := config.Endpoint
 	if actualEndpoint == "" {
 		actualEndpoint = endpoint
@@ -61,10 +69,10 @@ func New(config Config) (*Client, error) {
 	fingerprint := providerhttp.FingerprintBinding(config.APIKey, providerhttp.BindingSpec{
 		Protocol: "openai.responses.v1", Endpoint: actualEndpoint,
 		DefaultModel: strings.TrimSpace(config.DefaultModel), BindingScope: config.BindingScope,
-		StructuredOutputModels: config.StructuredOutputModels,
+		StructuredOutputModels: config.StructuredOutputModels, EffortModelLevels: effortLevels,
 	})
 	return &Client{http: httpClient, defaultModel: strings.TrimSpace(config.DefaultModel),
-		bindingFingerprint: fingerprint, structuredOutputModels: allowed}, nil
+		bindingFingerprint: fingerprint, structuredOutputModels: allowed, effortModelLevels: effortLevels}, nil
 }
 func (*Client) ProviderName() string                                { return "openai" }
 func (c *Client) BindingFingerprintForRequest(model.Request) string { return c.bindingFingerprint }
@@ -129,6 +137,12 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	}
 	if name == "" {
 		return prepared{}, ErrUnsupported
+	}
+	if options.Effort != "" {
+		capabilities, capErr := c.Capabilities(context.Background(), name)
+		if capErr != nil || !slices.Contains(capabilities.EffortLevels, options.Effort) {
+			return prepared{}, errors.Join(ErrUnsupported, model.ErrCapabilityUnavailable)
+		}
 	}
 	if request.OutputContract != nil {
 		if err := model.ValidateOutputContract(request.OutputContract); err != nil {
@@ -249,7 +263,10 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	} else if request.RequireToolCall {
 		return prepared{}, ErrUnsupported
 	}
-	for key, value := range options {
+	if options.Effort != "" {
+		payload["reasoning"] = map[string]any{"effort": options.Effort}
+	}
+	for key, value := range options.Sampling {
 		payload[key] = value
 	}
 	return prepared{body: payload, names: byName}, nil

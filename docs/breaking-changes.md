@@ -2,6 +2,22 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-05 — Exact-model reasoning effort projection (beta.24 candidate)
+
+The optional `ModelOptions.reasoning.effort` value is now admitted only
+when the concrete OpenAI/Anthropic adapter reports exact-model support.
+OpenAI projects it to Responses `reasoning.effort`; Anthropic projects
+it to Messages `output_config.effort`, without overriding a strict schema
+format. Unknown models and unsupported levels fail before any external
+effect; private/gateway support requires explicit per-ID
+`Config.EffortModelLevels` certification frozen in the nonsecret
+Provider binding fingerprint. The options parser now rejects ambiguous
+duplicate/folded JSON keys. Existing omitted effort keeps its original
+wire behavior. This adds one optional model capability field and one
+adapter configuration field; no persisted Run/Turn schema version,
+compatibility bridge, Kernel status or intent router is introduced.
+Existing frozen pending ModelInvocations remain immutable.
+
 ## 2026-11-05 — Shared top-level Start and Refresh preserve unknown physical effects (beta.24 candidate)
 
 The hard-cut top-level Agent, Team, GroupChat and Workflow Start and retry

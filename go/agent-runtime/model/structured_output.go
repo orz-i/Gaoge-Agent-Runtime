@@ -34,6 +34,10 @@ type OutputContract struct {
 // sufficient to prove a particular model supports strict output.
 type Capabilities struct {
 	StructuredJSONSchema bool
+	// EffortLevels enumerates the exact supported request-level thinking/effort
+	// controls for this concrete model binding. Empty means unverified: the
+	// host must not infer support from another model in the same provider.
+	EffortLevels []string
 }
 
 // CapabilityProvider optionally reports support for one concrete model ID.

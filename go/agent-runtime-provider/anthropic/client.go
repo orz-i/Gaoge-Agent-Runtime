@@ -8,6 +8,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp"
@@ -33,6 +34,8 @@ type Config struct {
 	// StructuredOutputModels opts explicitly verified private/gateway model IDs
 	// into native strict JSON Schema output; unknown IDs otherwise fail closed.
 	StructuredOutputModels []string
+	// Exact Host-certified levels for private or gateway model IDs.
+	EffortModelLevels map[string][]string
 }
 type Client struct {
 	http                   *providerhttp.Client
@@ -40,6 +43,7 @@ type Client struct {
 	maxTokens              int64
 	bindingFingerprint     string
 	structuredOutputModels map[string]bool
+	effortModelLevels      map[string][]string
 }
 
 var ErrUnsupported = errors.New("unsupported Anthropic model request or response")
@@ -73,6 +77,11 @@ func New(config Config) (*Client, error) {
 		}
 		allowed[name] = true
 	}
+	effortLevels, err := providerhttp.NormalizeEffortModels(config.EffortModelLevels,
+		[]string{"low", "medium", "high", "xhigh", "max"})
+	if err != nil {
+		return nil, err
+	}
 	actualEndpoint := config.Endpoint
 	if actualEndpoint == "" {
 		actualEndpoint = endpoint
@@ -81,9 +90,10 @@ func New(config Config) (*Client, error) {
 		Protocol: "anthropic.messages." + apiVersion, Endpoint: actualEndpoint,
 		DefaultModel: strings.TrimSpace(config.DefaultModel), BindingScope: config.BindingScope,
 		MaxOutputTokens: tokens, StructuredOutputModels: config.StructuredOutputModels,
+		EffortModelLevels: effortLevels,
 	})
 	return &Client{http: h, defaultModel: strings.TrimSpace(config.DefaultModel),
-		maxTokens: tokens, bindingFingerprint: fingerprint, structuredOutputModels: allowed}, nil
+		maxTokens: tokens, bindingFingerprint: fingerprint, structuredOutputModels: allowed, effortModelLevels: effortLevels}, nil
 }
 func (*Client) ProviderName() string                                { return "anthropic" }
 func (c *Client) BindingFingerprintForRequest(model.Request) string { return c.bindingFingerprint }
@@ -143,6 +153,12 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	}
 	if name == "" {
 		return prepared{}, ErrUnsupported
+	}
+	if options.Effort != "" {
+		capabilities, capErr := c.Capabilities(context.Background(), name)
+		if capErr != nil || !slices.Contains(capabilities.EffortLevels, options.Effort) {
+			return prepared{}, errors.Join(ErrUnsupported, model.ErrCapabilityUnavailable)
+		}
 	}
 	if request.OutputContract != nil {
 		if err := model.ValidateOutputContract(request.OutputContract); err != nil {
@@ -273,10 +289,17 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if len(systems) > 0 {
 		payload["system"] = strings.Join(systems, "\n\n")
 	}
+	outputConfig := make(map[string]any)
 	if request.OutputContract != nil {
-		payload["output_config"] = map[string]any{"format": map[string]any{
+		outputConfig["format"] = map[string]any{
 			"type": "json_schema", "schema": request.OutputContract.Schema,
-		}}
+		}
+	}
+	if options.Effort != "" {
+		outputConfig["effort"] = options.Effort
+	}
+	if len(outputConfig) != 0 {
+		payload["output_config"] = outputConfig
 	}
 	if len(definitions) > 0 {
 		payload["tools"] = definitions
@@ -289,7 +312,7 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	} else if request.RequireToolCall {
 		return prepared{}, ErrUnsupported
 	}
-	for key, value := range options {
+	for key, value := range options.Sampling {
 		payload[key] = value
 	}
 	return prepared{body: payload, names: byName}, nil

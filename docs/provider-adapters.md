@@ -85,6 +85,38 @@ multi-provider router.
 
 ## Supported model contract
 
+### Exact-model effort controls
+
+The optional immutable `model.Request.ModelOptions` object now admits
+`{"reasoning":{"effort":"high"}}` alongside the existing bounded
+`temperature` and `top_p` sampling settings. A bare `effort`, extra
+nested reasoning keys, provider-native Tool injection, duplicate/aliased JSON
+members, null values and unknown options **fail before physical HTTP dispatch**.
+No default effort is inserted: omitting it retains each provider/model's
+own behavior.
+
+OpenAI Responses maps the approved value to `reasoning.effort`; Anthropic
+Messages maps it to `output_config.effort` and preserves an existing strict
+JSON `output_config.format`. The same provider-neutral spelling describes a
+different underlying provider policy; it is not a guarantee of equal token
+budgets, thinking volume or inference quality. `model.Capabilities.EffortLevels`
+advertises only an exact model's verified values (not all aliases under a
+name prefix). A missing level blocks dispatch. Exact private/gateway IDs can
+be explicitly certified through the adapter's
+`Config.EffortModelLevels map[string][]string`. The normalized immutable
+policy is included in the Provider HMAC binding fingerprint, so recovery
+cannot silently switch effort permissions. If an upstream model stops
+supporting a declared level, its HTTP failure is reported, never downgraded
+to a cheaper effort or omitted setting.
+
+Both streaming and unary requests use the same adapter preparation path;
+the entire `ModelOptions` value is already frozen in the Agent's durable
+`ModelInvocation` hash. In-progress Runs are not rewritten. Supported
+model IDs and levels are intentionally conservative; additional models
+require independently verified exact-ID support or Host certification.
+This does **not** imply native Provider-hosted Tools or server-side
+compaction support.
+
 **OpenAI streaming item identity:** An observed `response.output_item.added`
 fixes its index, item ID, type and (for local functions) physical `call_id`
 and function name, or assistant role for message items. An inconsistent
