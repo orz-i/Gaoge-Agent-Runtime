@@ -2,6 +2,39 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-05 — Independent P1/P2 correction for effort and frozen options (beta.24 candidate)
+
+An optional `BindingSpec.EffortModelLevels` field was incorrectly included
+as JSON `null` in the Provider HMAC even when the Host had not configured
+it. That would have changed **every** previous OpenAI/Anthropic binding
+fingerprint, blocking pending named ModelInvocations with
+`ErrProviderBindingMismatch`. The empty/unconfigured field is now omitted
+from HMAC serialization, reproducing the previous input byte-for-byte;
+nonempty certifications still rotate the identity. Both named adapters
+have cross-restart pending-invocation regression tests using the original
+legacy fingerprint layout. No binding-match bypass or old/new fallback.
+
+Harness `SealConfigSnapshot` now rejects duplicate/fold-equivalent JSON
+keys (including nested fields) **before** canonicalization of top-level
+and Role ModelOptions. Provider and Harness reuse the same Core uniqueness
+validator. The standalone baseline stdin refuses null/empty
+`reasoningEffort`, case-folded aliases and unknown keys before any model
+call; an *omitted* optional field and valid historical reports remain
+supported. Previously accepted ambiguous inputs now fail closed rather
+than being guessed/reinterpreted.
+
+OpenAI and Anthropic adaptors reject incompatible reasoning/sampling
+combinations and Host attempts to override known public-model capability
+tables. OpenAI permits supported explicit `none` plus sampling; a known
+non-`none` default (or explicit non-`none`) may not carry `temperature` or
+`top_p`. Claude adaptive-thinking effort similarly cannot be combined
+with sampling, and documented newer models reject sampling even when
+effort is omitted. Unary/SSE both gate before physical dispatch, retaining
+the original request content and error classification. No persisted schema,
+new Kernel status, additional execution authority, router or compatibility
+protocol is introduced. See
+[remediation audit](audits/2026-11-05-three-part-agent-independent-remediation.md).
+
 ## 2026-11-05 — Exact-model reasoning effort projection (beta.24 candidate)
 
 The optional `ModelOptions.reasoning.effort` value is now admitted only

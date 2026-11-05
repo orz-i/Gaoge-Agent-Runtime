@@ -179,6 +179,10 @@ class EndpointTests(unittest.TestCase):
             with self.subTest(provider=provider, effort=effort):
                 configured = dict(legacy, provider=provider, reasoningEffort=effort)
                 self.assertEqual(baseline.validate_configuration(configured), configured)
+        for forbidden in ("ReasoningEffort", "reasoningeffort"):
+            with self.subTest(forbidden=forbidden):
+                with self.assertRaises(baseline.SafeFailure):
+                    baseline.validate_configuration(dict(legacy, **{forbidden: "high"}))
         for provider, effort in (("anthropic", "none"), ("openai", "ultra"),
                                  ("openai", ""), ("openai", None), ("openai", 3)):
             with self.subTest(provider=provider, effort=effort):

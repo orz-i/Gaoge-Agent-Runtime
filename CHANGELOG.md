@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Independent P1/P2 effort-governance remediation (2026-11-05):
+  preserve pre-effort Provider HMAC identity for old pending Runs; reject
+  duplicate or aliased ModelOptions *before* Harness canonicalization;
+  reject unsupported OpenAI/Anthropic reasoning-and-sampling combinations
+  before Unary/SSE physical dispatch; preserve explicit baseline effort
+  without accepting null/empty/case-folded shadow fields. Core and
+  Provider now share one strict JSON-member validator; cross-restart
+  original-ID recovery and independent red-to-green fault probes covered.
+  No new Kernel status, Store schema, alternate recovery protocol or
+  compatibility bridge. See [remediation notes](docs/audits/2026-11-05-three-part-agent-independent-remediation.md).
+
 - Three-part Provider/Agent-Harness/quality governance (2026-11-05):
   exact-model reasoning effort support with pre-dispatch rejection and
   Provider binding fingerprint, single Session read/resume identity guard,

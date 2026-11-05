@@ -125,10 +125,27 @@ func uniqueObjectFields(raw []byte) bool {
 		if tokenErr != nil || !ok || seen[name] {
 			return false
 		}
+		// Exact wire keys only: encoding/json's case-folded struct aliases
+		// (ReasoningEffort, reasoningeffort, etc.) can overwrite a prior
+		// authority-bearing value while passing an exact-duplicate scan.
+		switch name {
+		case "schemaVersion", "provider", "endpoint", "apiKey", "model",
+			"contextTokens", "maxOutputTokens", "repetitions", "allowUnknownStructuredModel", "reasoningEffort":
+		default:
+			return false
+		}
 		seen[name] = true
 		var value json.RawMessage
 		if decoder.Decode(&value) != nil {
 			return false
+		}
+		if name == "reasoningEffort" {
+			// Explicit null or empty is not the same as an omitted field.
+			// The Go struct decoder otherwise erases that distinction.
+			var effort string
+			if json.Unmarshal(value, &effort) != nil || effort == "" {
+				return false
+			}
 		}
 	}
 	last, err := decoder.Token()

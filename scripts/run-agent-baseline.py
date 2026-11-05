@@ -152,6 +152,14 @@ def positive_integer(value, minimum=1, maximum=None):
 
 
 def validate_configuration(value, service_input_tokens=SERVICE_INPUT_TOKENS):
+    if not isinstance(value, dict):
+        raise SafeFailure("invalid_configuration")
+    # Preserve readability of historical reports containing extra metadata,
+    # but never silently discard an alias of the reasoning control.
+    for name in value:
+        if (isinstance(name, str) and name.casefold() == "reasoningeffort" and
+                name != "reasoningEffort"):
+            raise SafeFailure("invalid_configuration")
     config = {name: value[name] for name in PUBLIC_CONFIGURATION if name in value}
     if len(config) != len(PUBLIC_CONFIGURATION):
         raise SafeFailure("invalid_configuration")

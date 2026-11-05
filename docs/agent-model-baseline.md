@@ -46,7 +46,11 @@ preflight stops **before sending HTTP**. The field is carried through schema
 preflight, synthetic OpenAI Tool/replay probing, and the real two-case Agent
 workload, including frozen Context and crash/lease recovery. It is recorded
 as nonsecret public configuration in the report; historical reports without
-this field remain valid and preserve their original meaning.
+this field remain valid and preserve their original meaning. An *explicit*
+null/empty value or a case-folded alias such as `ReasoningEffort` is not
+an omission and is rejected by the Go stdin boundary before preflight. The
+Python launcher similarly rejects aliases while keeping historical reports
+with extra non-execution metadata readable.
 
 It builds the
 current checkout before requesting the API key. Enter the key at the hidden
