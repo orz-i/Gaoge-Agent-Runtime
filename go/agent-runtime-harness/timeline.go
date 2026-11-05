@@ -322,7 +322,7 @@ func timelineTurn(ctx context.Context, store Store, executionRefID string) (Turn
 	if err != nil {
 		return Turn{}, Invocation{}, false, err
 	}
-	turn, err := store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, store, invocation.TurnID)
 	return turn, invocation, err == nil, err
 }
 

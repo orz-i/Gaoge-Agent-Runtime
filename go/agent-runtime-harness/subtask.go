@@ -291,7 +291,7 @@ func (runner *Runner) syncSubtaskItems(ctx context.Context, turn Turn) error {
 }
 
 func (runner *Runner) findSubtask(ctx context.Context, turnID, taskID string) (Turn, Subtask, error) {
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Turn{}, Subtask{}, err
 	}

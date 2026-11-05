@@ -235,6 +235,15 @@ func validInvocationStatus(value InvocationStatus) bool {
 }
 
 func validInvocation(value Invocation) bool {
+	return validInvocationExecutionAuthority(value) && validInvocationOutputRefs(value.OutputRefs)
+}
+
+// validInvocationExecutionAuthority validates the frozen execution identity,
+// lifecycle and InputHash without treating Host-visible OutputRefs as a
+// prerequisite to a protective physical stop. Root/child Cancel must still
+// prove exact owner, Run and ancestry before a Kernel cancellation; all
+// ordinary reads and new execution retain the full validInvocation check.
+func validInvocationExecutionAuthority(value Invocation) bool {
 	if !validInvocationIdentity(value) || !validInvocationLifecycle(value) {
 		return false
 	}
@@ -251,7 +260,7 @@ func validInvocation(value Invocation) bool {
 	} else if !json.Valid(value.Input) || hashInvocationBytes(value.Input) != value.InputHash {
 		return false
 	}
-	return validInvocationOutputRefs(value.OutputRefs)
+	return true
 }
 
 func validInvocationIdentity(value Invocation) bool {

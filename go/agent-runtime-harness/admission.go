@@ -112,7 +112,7 @@ func sealStartAdmission(request StartRequest, config *ConfigSnapshot, root rootA
 // original Context/authority was never bound to its immutable Config ID.
 // Read-only inspection and fact reconciliation remain available during drain.
 func (runner *Runner) requireFrozenAdmission(ctx context.Context, turn Turn) error {
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return err
 	}

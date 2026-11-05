@@ -59,14 +59,14 @@ func (preparer managedContextPreparer) prepare(ctx context.Context, incoming mod
 	if !bound {
 		return model.Request{}, ErrInvalidRequest
 	}
-	turn, err := preparer.store.GetTurn(ctx, binding.TurnID)
+	turn, err := loadVerifiedTurn(ctx, preparer.store, binding.TurnID)
 	if err != nil {
 		return model.Request{}, err
 	}
 	if turn.ContextCheckpointID != checkpoint.ID || !sameContextCheckpointRef(checkpoint, turn.ContextRef) {
 		return model.Request{}, ErrConflict
 	}
-	config, err := preparer.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, preparer.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return model.Request{}, err
 	}

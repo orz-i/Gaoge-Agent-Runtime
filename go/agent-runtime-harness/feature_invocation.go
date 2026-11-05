@@ -71,7 +71,7 @@ type topLevelFeatureStart struct {
 	replayed   bool
 }
 
-type topLevelFeatureEnvelope struct {
+type topLevelStartEnvelope struct {
 	request StartRequest
 	turn    Turn
 	config  ConfigSnapshot
@@ -144,7 +144,7 @@ func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest
 			Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
 		})
 	})
-	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
 
 // StartGroupChatTurn starts Group Chat without creating a placeholder Agent root.
@@ -189,7 +189,7 @@ func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatT
 	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func() (kernel.Snapshot, error) {
 		return runner.groupChats.StartRun(prepared.runContext, runtimeRequest)
 	})
-	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
 
 func materializeGroupChatPolicy(
@@ -324,7 +324,7 @@ func (runner *Runner) StartWorkflowTurn(ctx context.Context, request WorkflowTur
 			Definition: frozen.Definition, Input: frozen.Input,
 		})
 	})
-	return runner.finishTopLevelFeatureStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
+	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
 
 func (runner *Runner) prepareTopLevelFeatureStart(
@@ -336,7 +336,7 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 	input json.RawMessage,
 	inputHash string,
 ) (topLevelFeatureStart, error) {
-	envelope, err := runner.prepareTopLevelFeatureEnvelope(ctx, request, rootAdmission{
+	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{
 		ExecutionClass: executionClass, CapabilityKey: capabilityKey,
 		DefinitionVersion: definitionVersion, InputHash: inputHash,
 	})
@@ -371,38 +371,38 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 	return topLevelFeatureStart{turn: turn, invocation: invocation, runContext: runCtx}, nil
 }
 
-func (runner *Runner) prepareTopLevelFeatureEnvelope(
+func (runner *Runner) prepareTopLevelStartEnvelope(
 	ctx context.Context,
 	request StartRequest,
 	root rootAdmission,
-) (topLevelFeatureEnvelope, error) {
+) (topLevelStartEnvelope, error) {
 	request, sessionID, turnID, err := normalizeStartRequest(request)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
 	now := runner.clock.Now().UTC()
 	resolvedConfig, err := runner.resolveConfigExecutionPolicy(request.Config)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
 	request, err = sealStartAdmission(request, &resolvedConfig, root)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
 	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
 	turn, created, err := runner.persistStartEnvelope(ctx, request, sessionID, turnID, config, now)
 	if err != nil {
-		return topLevelFeatureEnvelope{}, err
+		return topLevelStartEnvelope{}, err
 	}
-	return topLevelFeatureEnvelope{request: request, turn: turn, config: config, created: created, now: now}, nil
+	return topLevelStartEnvelope{request: request, turn: turn, config: config, created: created, now: now}, nil
 }
 
 func (runner *Runner) prepareTopLevelFeatureInvocation(
 	ctx context.Context,
-	envelope topLevelFeatureEnvelope,
+	envelope topLevelStartEnvelope,
 	capabilityKey string,
 	definitionVersion string,
 	executionClass ExecutionClass,
@@ -414,7 +414,7 @@ func (runner *Runner) prepareTopLevelFeatureInvocation(
 	if err != nil {
 		return Invocation{}, err
 	}
-	invocation, fresh, err := runner.store.CreateInvocation(ctx, Invocation{
+	invocation, fresh, err := runner.createVerifiedInvocation(ctx, Invocation{
 		ID: invocationID, TurnID: envelope.turn.ID, CapabilityKey: capabilityKey,
 		DefinitionVersion: strings.TrimSpace(definitionVersion), ExecutionClass: executionClass,
 		Input: append(json.RawMessage(nil), input...), InputHash: inputHash,
@@ -435,7 +435,7 @@ func (runner *Runner) prepareTopLevelFeatureInvocation(
 
 func (runner *Runner) prepareTopLevelFeatureContext(
 	ctx context.Context,
-	envelope topLevelFeatureEnvelope,
+	envelope topLevelStartEnvelope,
 	invocation Invocation,
 ) (Turn, context.Context, error) {
 	turn := envelope.turn
@@ -509,7 +509,7 @@ func (runner *Runner) replayTopLevelFeatureStart(
 	return Snapshot{}, true, err
 }
 
-func (runner *Runner) finishTopLevelFeatureStart(
+func (runner *Runner) finishTopLevelStart(
 	ctx context.Context,
 	turn Turn,
 	invocation Invocation,
@@ -517,11 +517,28 @@ func (runner *Runner) finishTopLevelFeatureStart(
 	startErr error,
 ) (Snapshot, error) {
 	if runtimeSnapshot.Run.ID == "" {
-		if errors.Is(startErr, kernel.ErrConflict) {
-			recovered, recoverErr := runner.Refresh(ctx, turn.ID)
-			if recoverErr == nil && recovered.Turn.Status == TurnCancelled {
-				return recovered, nil
+		// An empty-snapshot conflict from a composite Feature or a retry is
+		// not proof that its remote work stopped. A same-ID cancelled
+		// Kernel Run cannot settle another unresolved physical dispatch.
+		// Only the original first-attempt Agent can reconcile a cancelled
+		// Run after a pre-dispatch conflict, with no unknown-effect receipt
+		// and no outstanding dispatch grant.
+		if invocation.ExecutionClass == ExecutionAgent && invocation.Attempt == 1 &&
+			errors.Is(startErr, kernel.ErrConflict) && !errors.Is(startErr, ErrExecutionOutcomeUnknown) {
+			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
+			if checkErr != nil {
+				return Snapshot{}, errors.Join(startErr, checkErr)
 			}
+			if !pending {
+				recovered, recoverErr := runner.Refresh(ctx, turn.ID)
+				if recoverErr == nil && initialAgentCancelledStartConflict(invocation, recovered.Turn.Status, startErr) {
+					return recovered, nil
+				}
+			}
+		}
+		if startErr == nil {
+			// Neither a physical Run nor an error is a completed effect.
+			return Snapshot{}, ErrExecutionOutcomeUnknown
 		}
 		if !isDispatchProvenNoEffect(startErr) {
 			return Snapshot{}, startErr
@@ -530,7 +547,18 @@ func (runner *Runner) finishTopLevelFeatureStart(
 		return failed, errors.Join(startErr, failErr)
 	}
 	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	if initialAgentCancelledStartConflict(invocation, snapshot.Turn.Status, startErr) {
+		startErr = nil
+	}
 	return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, runtimeSnapshot, startErr, syncErr)
+}
+
+// The original Agent Start caller may observe a committed cancellation instead
+// of a competing Kernel CAS error. Retried Agent Attempts and composite Feature
+// starts must retain their errors; this is not a general retry exception.
+func initialAgentCancelledStartConflict(invocation Invocation, status TurnStatus, startErr error) bool {
+	return invocation.ExecutionClass == ExecutionAgent && invocation.Attempt == 1 &&
+		status == TurnCancelled && errors.Is(startErr, kernel.ErrConflict)
 }
 
 // WorkflowFeature is the narrow Dynamic Workflow Runtime capability consumed by Harness.
@@ -661,7 +689,7 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 		return Snapshot{}, ErrInvalidRequest
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
-		turn, loadErr := runner.store.GetTurn(ctx, invocation.TurnID)
+		turn, loadErr := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
@@ -709,7 +737,7 @@ func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string)
 		return Snapshot{}, ErrInvalidRequest
 	}
 	if invocation.ExecutionClass == ExecutionApplication {
-		turn, loadErr := runner.store.GetTurn(ctx, invocation.TurnID)
+		turn, loadErr := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
@@ -757,7 +785,7 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 		// must not fall through to the native Agent retry adapter.
 		return Snapshot{}, ErrConflict
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil || (strings.TrimSpace(invocation.ParentItemID) != "" && terminalTurnStatus(turn.Status)) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
@@ -809,7 +837,7 @@ func (runner *Runner) startNextInvocationAttempt(
 	if err = runner.recordInvocationItem(ctx, retried); err != nil {
 		return Snapshot{}, err
 	}
-	turn, err = runner.store.GetTurn(ctx, turn.ID)
+	turn, err = loadVerifiedTurn(ctx, runner.store, turn.ID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -887,7 +915,7 @@ func (runner *Runner) startRetriedTopLevelInvocation(
 	runtimeSnapshot, startErr := runner.startInvocationAttempt(runCtx, invocation, childInvocationContext{
 		turn: turn, actor: actor, thread: thread,
 	})
-	return runner.finishTopLevelFeatureStart(ctx, turn, invocation, runtimeSnapshot, startErr)
+	return runner.finishTopLevelStart(ctx, turn, invocation, runtimeSnapshot, startErr)
 }
 
 // frozenTopLevelInvocationIdentity reads the exact Actor/Thread committed in
@@ -961,7 +989,7 @@ func (runner *Runner) startRetriedAgent(ctx context.Context, invocation Invocati
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
 		return kernel.Snapshot{}, ErrConflict
 	}
-	config, err := runner.store.GetConfigSnapshot(ctx, child.turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, child.turn.ConfigSnapshotID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -1019,14 +1047,22 @@ func (runner *Runner) startRetriedWorkflow(ctx context.Context, invocation Invoc
 
 // CancelInvocation cancels one child Runtime Feature by its durable Invocation identity.
 func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason string) (snapshot Snapshot, err error) {
-	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
+	invocationID = strings.TrimSpace(invocationID)
+	invocation, err := runner.store.GetInvocation(ctx, invocationID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if strings.TrimSpace(invocation.ParentItemID) == "" {
+	if !validInvocationExecutionAuthority(invocation) || invocation.ID != invocationID ||
+		strings.TrimSpace(invocation.ParentItemID) == "" || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, ErrConflict
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	if err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
+		return Snapshot{}, err
+	}
+	// A protective child stop uses only the original Turn identity here.
+	// The existing related-Run and ancestry fences must still prove ownership
+	// before any physical cancellation; ancillary Config reads can fail.
+	turn, err := loadVerifiedTurnIdentity(ctx, runner.store, invocation.TurnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1108,7 +1144,7 @@ func (runner *Runner) beginChildInvocation(
 		ExecutionRefID: CapabilityExecutionRefID(invocationID), Status: InvocationAccepted,
 		Attempt: 1, OutputRefs: []HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	created, fresh, err := runner.store.CreateInvocation(ctx, value)
+	created, fresh, err := runner.createVerifiedInvocation(ctx, value)
 	if err != nil {
 		return Invocation{}, childInvocationContext{}, false, err
 	}
@@ -1136,7 +1172,7 @@ func (runner *Runner) childInvocationContext(
 	if strings.TrimSpace(parentItemID) == "" {
 		return childInvocationContext{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil || terminalTurnStatus(turn.Status) {
 		return childInvocationContext{}, errors.Join(ErrConflict, err)
 	}
@@ -1320,7 +1356,7 @@ func (runner *Runner) loadInvocationRuntime(
 	if err != nil {
 		return Invocation{}, Turn{}, kernel.Snapshot{}, err
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil {
 		return Invocation{}, Turn{}, kernel.Snapshot{}, err
 	}
@@ -1383,7 +1419,7 @@ func (runner *Runner) resumeInvocationExecution(
 		// delegated child into a locally resumed native Agent Run.
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -1488,7 +1524,7 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
-	turn, err = runner.store.GetTurn(ctx, turn.ID)
+	turn, err = loadVerifiedTurn(ctx, runner.store, turn.ID)
 	if err != nil {
 		return Snapshot{}, err
 	}

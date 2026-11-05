@@ -21,7 +21,7 @@ func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, 
 	if runner == nil || runner.runtime == nil || runner.store == nil || runner.agent == nil || strings.TrimSpace(turnID) == "" {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -42,7 +42,7 @@ func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, 
 	if pending {
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return runner.resumeTurnError(ctx, turn, nil, err)
 	}

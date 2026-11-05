@@ -171,11 +171,11 @@ func capabilityToolContext(
 			"capability.invalid_parent", "capability invocation is available only to the root Harness agent", err,
 		)
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Turn{}, Session{}, ConfigSnapshot{}, err
 	}
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	return turn, session, config, err
 }
 
@@ -409,7 +409,7 @@ func NewCapabilityInvocationRequestPreparer(store Store) (agent.ModelRequestPrep
 		if !harnessRun {
 			return model.Request{}, ErrInvalidRequest
 		}
-		config, err := store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+		config, err := loadSealedConfig(ctx, store, turn.ConfigSnapshotID)
 		if err != nil {
 			return model.Request{}, err
 		}

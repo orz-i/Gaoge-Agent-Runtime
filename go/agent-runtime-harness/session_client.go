@@ -206,7 +206,7 @@ func (session *SessionClient) requireIdentity(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	stored, err := session.runner.store.GetSession(ctx, id)
+	stored, err := loadVerifiedSession(ctx, session.runner.store, id)
 	if err != nil {
 		return err
 	}

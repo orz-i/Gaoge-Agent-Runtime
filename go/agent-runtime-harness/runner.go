@@ -109,6 +109,27 @@ func (runner *Runner) recordInvocationItem(ctx context.Context, invocation Invoc
 	return err
 }
 
+// startAgentPhysical is the only top-level Agent StartRun construction and
+// physical dispatch path, shared by first admission and pre-Run recovery.
+// The durable Invocation owns the Turn identity; the Host still owns the
+// sealed request/config and cannot introduce a new execution mode on replay.
+func (runner *Runner) startAgentPhysical(
+	ctx context.Context, invocation Invocation, request StartRequest, config ConfigSnapshot,
+) (kernel.Snapshot, error) {
+	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func() (kernel.Snapshot, error) {
+		return runner.agent.StartRun(ctx, agent.StartRequest{
+			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
+			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), Goal: request.Goal,
+			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
+			OutputContract:   model.CloneOutputContract(config.OutputContract),
+			ToolKeys:         append([]string(nil), config.ToolKeys...),
+			RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
+			InitialToolKeys:  append([]string(nil), request.InitialToolKeys...),
+			Limits:           config.Limits, CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
+		})
+	})
+}
+
 func (runner *Runner) resumeAgentStart(
 	ctx context.Context,
 	turn Turn,
@@ -123,19 +144,7 @@ func (runner *Runner) resumeAgentStart(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.agent.StartRun(runCtx, agent.StartRequest{
-			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turn.ID), Goal: request.Goal,
-			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-			OutputContract: model.CloneOutputContract(config.OutputContract),
-			ToolKeys:       append([]string(nil), config.ToolKeys...), RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-			InitialToolKeys: append([]string(nil), request.InitialToolKeys...),
-			Limits:          config.Limits,
-			CallAllowance:   request.CallAllowance,
-			AutoAllowance:   request.AutoAllowance,
-		})
-	})
+	runtimeSnapshot, startErr := runner.startAgentPhysical(runCtx, invocation, request, config)
 	if runtimeSnapshot.Run.ID == "" {
 		if !isDispatchProvenNoEffect(startErr) {
 			return Snapshot{}, startErr
@@ -223,7 +232,7 @@ func (runner *Runner) ResolveApproval(
 		len(request.CheckpointID) > 128 {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -680,48 +689,32 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 // top-level Invocation after Session/Turn/Config creation. Host code chooses
 // this entry point; Harness never classifies a user intent or routes implicitly.
 func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) (Snapshot, error) {
-	request, sessionID, turnID, err := normalizeStartRequest(request)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	now := runner.clock.Now().UTC()
-	resolvedConfig, err := runner.resolveConfigExecutionPolicy(request.Config)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	request, err = sealStartAdmission(request, &resolvedConfig, rootAdmission{
+	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{
 		ExecutionClass: ExecutionAgent, CapabilityKey: CapabilityAgent,
 		DefinitionVersion: RuntimeCapabilityVersion,
 	})
 	if err != nil {
 		return Snapshot{}, err
 	}
-	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	createdTurn, created, err := runner.persistStartEnvelope(ctx, request, sessionID, turnID, config, now)
-	if err != nil {
-		return Snapshot{}, err
-	}
+	request, createdTurn, config := envelope.request, envelope.turn, envelope.config
 	invocation, err := newAgentInvocation(
-		turnID, firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), request.Goal,
-		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys, now,
+		createdTurn.ID, firstNonEmpty(strings.TrimSpace(request.RequestID), createdTurn.ID), request.Goal,
+		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys, envelope.now,
 	)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	invocation, invocationCreated, err := runner.store.CreateInvocation(ctx, invocation)
+	invocation, invocationCreated, err := runner.createVerifiedInvocation(ctx, invocation)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if created && !invocationCreated {
+	if envelope.created && !invocationCreated {
 		return Snapshot{}, ErrConflict
 	}
 	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
 		return Snapshot{}, err
 	}
-	if !created {
+	if !envelope.created {
 		if err := runner.repairStartItems(ctx, createdTurn, invocation); err != nil {
 			return Snapshot{}, err
 		}
@@ -748,39 +741,8 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 		}
 		runCtx = withContextWindowBinding(runCtx, createdTurn.ID, ContextWindowOwner)
 	}
-	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.agent.StartRun(runCtx, agent.StartRequest{
-			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), turnID), Goal: request.Goal,
-			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-			OutputContract:   model.CloneOutputContract(config.OutputContract),
-			ToolKeys:         append([]string(nil), config.ToolKeys...),
-			RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-			InitialToolKeys:  append([]string(nil), request.InitialToolKeys...), Limits: config.Limits,
-			CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
-		})
-	})
-	if runtimeSnapshot.Run.ID == "" {
-		if errors.Is(startErr, kernel.ErrConflict) {
-			recovered, recoverErr := runner.Refresh(ctx, createdTurn.ID)
-			if recoverErr == nil && recovered.Turn.Status == TurnCancelled {
-				return recovered, nil
-			}
-		}
-		// Another Start may hold the grant, or a physical feature may have
-		// returned an outcome-unknown error. Neither authorizes marking its
-		// Invocation/Turn Failed while the original effect could still run.
-		if !isDispatchProvenNoEffect(startErr) {
-			return Snapshot{}, startErr
-		}
-		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, createdTurn, invocation, startErr)
-		return failed, errors.Join(startErr, failErr)
-	}
-	snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, createdTurn, invocation, runtimeSnapshot)
-	if snapshot.Turn.Status == TurnCancelled && errors.Is(startErr, kernel.ErrConflict) {
-		startErr = nil
-	}
-	return snapshot, errors.Join(startErr, syncErr)
+	runtimeSnapshot, startErr := runner.startAgentPhysical(runCtx, invocation, request, config)
+	return runner.finishTopLevelStart(ctx, createdTurn, invocation, runtimeSnapshot, startErr)
 }
 
 func (runner *Runner) persistStartEnvelope(
@@ -798,19 +760,45 @@ func (runner *Runner) persistStartEnvelope(
 		ID: sessionID, HostThread: request.HostThread, Actor: request.Actor,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	if _, _, err := runner.store.CreateSession(ctx, session); err != nil {
+	storedSession, _, err := runner.store.CreateSession(ctx, session)
+	if err != nil {
 		return Turn{}, false, err
 	}
-	if _, _, err := runner.store.PutConfigSnapshot(ctx, config); err != nil {
+	if !validSession(storedSession) || !sameSessionIdentity(storedSession, session) {
+		return Turn{}, false, ErrConflict
+	}
+	storedConfig, _, err := runner.store.PutConfigSnapshot(ctx, config)
+	if err != nil {
 		return Turn{}, false, err
+	}
+	_, configIntegrityErr := canonicalSealedConfig(storedConfig)
+	if storedConfig.ID != config.ID || storedConfig.TurnID != config.TurnID ||
+		storedConfig.ContentHash != config.ContentHash || configIntegrityErr != nil {
+		return Turn{}, false, ErrConflict
+	}
+	// The returned receipt alone cannot attest what was persisted. Check
+	// the canonical Store record before admitting any executable owner.
+	storedConfig, err = loadSealedConfig(ctx, runner.store, config.ID)
+	if err != nil || storedConfig.ContentHash != config.ContentHash {
+		return Turn{}, false, ErrConflict
 	}
 	turn := Turn{
 		ID: turnID, SessionID: sessionID, HostTurn: request.HostTurn,
 		ConfigSnapshotID: config.ID, Status: TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	created, fresh, err := runner.store.CreateTurn(ctx, turn)
-	if err != nil || config.SharedBudget == nil {
-		return created, fresh, err
+	if err != nil {
+		return Turn{}, false, err
+	}
+	// A Store return is not authority to rebind this Host-selected Turn to
+	// another Session, HostTurn, or Config. Check before creating an
+	// Invocation, reserving budget, or dispatching any physical Feature.
+	if !validTurn(created) || !sameTurnIdentity(created, turn) ||
+		(fresh && (created.Status != TurnAccepted || created.Revision != turn.Revision)) {
+		return Turn{}, false, ErrConflict
+	}
+	if config.SharedBudget == nil {
+		return created, fresh, nil
 	}
 	ledger, err := runner.budgets.coordinator().Ensure(ctx, turn.ID, *config.SharedBudget)
 	if err != nil {
@@ -845,7 +833,7 @@ func (runner *Runner) attachContextCheckpoint(
 
 // Load returns one durable Harness Turn and current root output without changing execution state.
 func (runner *Runner) Load(ctx context.Context, turnID string) (Snapshot, error) {
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -854,7 +842,7 @@ func (runner *Runner) Load(ctx context.Context, turnID string) (Snapshot, error)
 
 // Refresh synchronizes one active Harness Turn from its top-level Invocation.
 func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, error) {
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -918,7 +906,10 @@ func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, err
 // Harness Turn state. C2 extends dispatch to the other explicit Feature adapters.
 func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) (snapshot Snapshot, err error) {
 	turnID = strings.TrimSpace(turnID)
-	turn, err := runner.store.GetTurn(ctx, turnID)
+	// A protective stop must not depend on Config or Session presentation
+	// reads. The exact Turn key and Host derivation remain mandatory; the
+	// frozen root Invocation and physical Run are checked below before effect.
+	turn, err := loadVerifiedTurnIdentity(ctx, runner.store, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -927,8 +918,12 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	// member or remote ChildRunner; reconcile its descendants under the
 	// standard durable cancellation fence before returning success.
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
+	if err != nil || !validInvocationExecutionAuthority(invocation) || invocation.TurnID != turn.ID ||
+		strings.TrimSpace(invocation.ParentItemID) != "" || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
+		return Snapshot{}, err
 	}
 	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled && invocation.ExecutionClass != ExecutionApplication {
 		// A Failed admission may have been rejected before its Kernel Run
@@ -1095,7 +1090,7 @@ func (runner *Runner) syncRuntimeSnapshotWithRetryProof(
 		if !errors.Is(err, ErrConflict) {
 			return snapshot, err
 		}
-		turn, err = runner.store.GetTurn(ctx, turn.ID)
+		turn, err = loadVerifiedTurn(ctx, runner.store, turn.ID)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -1177,12 +1172,21 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 			return Snapshot{}, err
 		}
 	}
-	// An active cancellation intent can outlive the parent Kernel's
-	// cancelled status while a remote child remains running. No generic
-	// Refresh/Resume/Start callback may turn that root observation into
-	// a terminal Harness Turn; only Cancel after verified descendant cleanup
-	// may complete the projection. Keep the intent for reconciliation.
+	// A terminal same-ID Kernel Run is not proof that a separate Feature
+	// Start/Retry finished its remote effects. Keep unknown physical
+	// dispatch grants unresolved across Refresh and all ordinary terminal
+	// projections. Only the Cancel path, after verifying all descendants
+	// and effect receipts, may use verifiedCancellation to settle them.
+	// An active cancellation intent likewise blocks ordinary projection
+	// until its descendant cleanup has been confirmed.
 	if invocation.ParentItemID == "" && terminalRuntimeStatus(runtimeSnapshot.Run.Status) && !verifiedCancellation {
+		pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
+		if checkErr != nil {
+			return Snapshot{}, checkErr
+		}
+		if pending {
+			return Snapshot{}, ErrExecutionOutcomeUnknown
+		}
 		items, loadErr := listAllItems(ctx, runner.store, turn.ID)
 		if loadErr != nil {
 			return Snapshot{}, loadErr
@@ -1225,7 +1229,7 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 	); err != nil {
 		return Snapshot{}, err
 	}
-	turn, err = runner.store.GetTurn(ctx, turn.ID)
+	turn, err = loadVerifiedTurn(ctx, runner.store, turn.ID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1380,7 +1384,7 @@ func (runner *Runner) FinalizeHostOutput(ctx context.Context, turnID string) (Sn
 	if runner == nil || turnID == "" {
 		return Snapshot{}, ErrInvalidRequest
 	}
-	turn, err := runner.store.GetTurn(ctx, turnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1671,7 +1675,7 @@ func normalizeOptionalHostRef(value **HostRef) error {
 // from the frozen Config and current Invocation. It never dispatches a Model,
 // Tool, or host capability. This is safe after any partial Item append.
 func (runner *Runner) repairStartItems(ctx context.Context, turn Turn, invocation Invocation) error {
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return err
 	}
@@ -1747,20 +1751,29 @@ func (runner *Runner) SubscribeTurnFeed(ctx context.Context, turnID string, afte
 	if runner == nil || runner.turnFeed == nil || turnID == "" || afterSeq < 0 {
 		return nil, ErrInvalidRequest
 	}
-	if _, err := runner.store.GetTurn(ctx, turnID); err != nil {
+	if _, err := loadVerifiedTurn(ctx, runner.store, turnID); err != nil {
 		return nil, err
 	}
 	return runner.turnFeed.Subscribe(ctx, turnID, afterSeq)
 }
 
 func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *kernel.Snapshot) (Snapshot, error) {
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	if !validTurn(turn) {
+		return Snapshot{}, ErrConflict
+	}
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	// Even a self-consistent Config must belong to this exact requested Turn.
+	// A Store read cannot compose another Turn's Session or sealed Config
+	// into this Host-visible snapshot.
+	if session.ID != turn.SessionID || config.TurnID != turn.ID {
+		return Snapshot{}, ErrConflict
 	}
 	items, err := listAllItems(ctx, runner.store, turn.ID)
 	if err != nil {

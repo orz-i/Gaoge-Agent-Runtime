@@ -72,7 +72,7 @@ func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) 
 }
 
 func (runner *Runner) Delegate(ctx context.Context, turnID string, request DelegateRequest) (DelegationResult, error) {
-	turn, err := runner.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return DelegationResult{}, err
 	}
@@ -114,7 +114,7 @@ func (runner *Runner) DelegateByExecutionRefID(ctx context.Context, executionRef
 	if err != nil {
 		return DelegationResult{}, err
 	}
-	turn, err := runner.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil {
 		return DelegationResult{}, err
 	}
@@ -164,7 +164,7 @@ func (runner *Runner) prepareDelegation(
 	invocation Invocation,
 	request DelegateRequest,
 ) (handoff.Delegation, kernel.Snapshot, error) {
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return handoff.Delegation{}, kernel.Snapshot{}, err
 	}

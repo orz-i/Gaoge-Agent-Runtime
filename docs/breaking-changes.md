@@ -2,6 +2,94 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-05 — Shared top-level Start and Refresh preserve unknown physical effects (beta.24 candidate)
+
+The hard-cut top-level Agent, Team, GroupChat and Workflow Start and retry
+result settlement no longer interprets an empty physical Run response plus a
+Kernel conflict as successful cancellation merely because an unrelated same-ID
+Kernel Run is already terminal. **Unresolved physical dispatch grants must
+remain outcome-unknown** and cannot be terminalized by ordinary Refresh,
+replay or other read-side projection. Only first-attempt Agent cancellation
+with a verified pre-dispatch conflict and no pending unknown-effect dispatch
+retains the existing narrowly scoped idempotent reconciliation. This is an
+intentional fail-closed behavioral contract correction; `ErrExecutionOutcomeUnknown`
+can now be returned instead of a false `nil` success for such abnormal
+custom Feature outcomes. No API, Schema, Kernel status, legacy bridge or
+prerelease version increment. See [the PR #89 hard-cut audit](audits/2026-11-05-pr89-top-level-unknown-effect-hardcut.md).
+
+## 2026-11-04 — Protective cancel requires frozen Invocation authority, not OutputRefs (beta.24 candidate)
+
+Root and Child protective cancellation now use one private frozen execution
+identity validator that ignores Host-visible `OutputRefs` while enforcing the
+Invocation ID/Turn, original frozen Input+InputHash, capability/version,
+execution class, Attempt and physical Run ID. Both durable indexed records
+(`GetInvocation` and `GetInvocationByExecutionRefID`) must agree before a
+cancellation intent can be claimed; a mutated Attempt or substituted Run
+cannot authorize cancellation of the wrong execution. Kernel/RunRelation
+ownership, native/external physical CAS and unknown-outcome fences remain
+mandatory. Invalid OutputRefs can still fail the final Host projection **after**
+a proven physical stop; an error in that projection cannot imply no effect.
+
+This corrects a pre-stable P1 behavior regression in cancellation availability
+without changing public APIs, persisted fields, Kernel status or adding a
+compatibility fallback. See the [independent repair evidence](audits/2026-11-04-harness-protective-invocation-authority.md).
+
+## 2026-11-04 — Protective cancel does not depend on Config/Session presentation reads (beta.24 candidate)
+
+`Cancel` and `CancelInvocation` use an operation-specific, immutable Turn
+identity proof. A previously admitted Run can be stopped even when its
+Config or Session read is temporarily unavailable; the exact Turn and
+Invocation owner, durable cancellation fence and original physical Kernel
+Run/RunRelation checks still apply. Other operations continue to use the
+full frozen Session/Config association before execution or Host display.
+A physical stop may succeed even when the final Snapshot projection returns
+an error; this is not evidence of no effect or authority to retry the stop
+without checking the durable control receipt.
+
+The deterministic Host Session and Turn ID namespace is limited to exact
+`hs_` or `ht_` plus **24 lowercase hexadecimal digits**. Existing standalone
+Store-defined IDs with similar noncanonical prefixes are no longer
+incorrectly treated as Host-derived hashes. No new persisted authority,
+Store schema, public API, legacy bridge, or prerelease version increment.
+See [the read-safety repair](audits/2026-11-04-harness-protective-cancel-and-id-grammar.md).
+
+## 2026-11-04 — Harness Session/Turn Store reads require original owner proof (beta.24 candidate)
+
+All Harness read-side `GetSession` and `GetTurn` consumption now validates
+that a returned object has exactly the requested Store identity and a valid
+lifecycle/shape. Deterministic Host `hs_` / `ht_` identities must also match
+recomputed `SessionID(HostThread)` and `TurnID(SessionID, HostTurn)`;
+Host-derived Turns prove their Session and sealed Config association before
+any physical recovery, cancellation, approval or output projection. A foreign
+persisted Session/Turn or a same-ID Turn retargeted to another Session/Config
+returns `ErrConflict` without exposing the foreign tenant or continuing an
+effect. Existing standalone Store-defined IDs (outside Host-derived identity
+format) retain exact key validation and do not claim Host-derived proof.
+
+This is a hard cut in the unreleased Beta contract, not a compatibility
+bridge: inconsistent legacy Store records may fail read/reconciliation until
+Host/operator repair. No new database schema, Kernel lifecycle status,
+execution router or public SDK method. See the [I1 authority audit](audits/2026-11-04-harness-read-authority-hardcut.md).
+
+## 2026-11-04 — Harness Config and Invocation must prove sealed execution authority (beta.24 candidate)
+
+The pre-stable Harness no longer trusts a persisted Config's claimed
+`ContentHash` or ID without recomputing them from the canonical payload.
+All Harness reads (including Context, role/capability projection, Budget,
+Approval, retries and Session/Turn materialization) use one validated Config
+boundary. JSON roundtrip differences that canonicalize without changing the
+seal are accepted only after normalization; an actual Model, Tool, instruction
+or `AdmissionHash` change with a stale seal returns `ErrConflict`.
+
+Every `CreateInvocation` result must also prove its original frozen owner,
+input hash, Run/ExecutionRefID and Attempt, and the canonical indexed Store
+record must agree before an Item or physical Feature dispatch. Top-level,
+child and Handoff starts share this boundary. A poisoned or incomplete old
+Beta record now fails closed until explicit Host reconciliation/quarantine.
+No compatibility alias, alternate executor, Store schema, model replay format,
+Kernel status or version bump is added. The existing Store CAS guarantees are
+still required. See the [I2/I3 convergence evidence](audits/2026-11-04-harness-sealed-authority-convergence.md).
+
 ## 2026-11-04 — Context Run must prove durable Turn ownership (beta.24 candidate)
 
 `NewContextRunMiddleware` no longer accepts a process-local `ContextWindowBinding`

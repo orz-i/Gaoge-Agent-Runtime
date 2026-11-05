@@ -5,6 +5,81 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Harness top-level unknown-effect outcome hard cut: a custom composite Feature,
+  Agent or Retry returning no physical Run receipt can no longer be reported
+  as successfully cancelled merely because a same-ID local Kernel Run is
+  terminal. Unsettled physical dispatch grants now block ordinary terminal
+  Refresh/replay projection; only the original first-attempt Agent's proven
+  pre-dispatch cancellation conflict remains eligible for narrow recovery.
+  The 24-path Agent/Team/Workflow/GroupChat start/retry fault matrix is
+  permanently covered. No new persistence/API/schema/compatibility layer.
+  See [PR #89 independent P1 remediation](docs/audits/2026-11-05-pr89-top-level-unknown-effect-hardcut.md).
+
+- Harness protective-stop Invocation authority correction: Root/Child Cancel
+  validate the frozen execution identity and both canonical Store indexes
+  independently of Host-visible OutputRefs. Malformed display metadata can
+  fail final projection without blocking an already-authorized physical
+  cancellation; changed Attempt, RunID, InputHash or parent cannot substitute
+  another execution. Existing Kernel/RunRelation fences and cancellation
+  intent/CAS remain mandatory. No API, Store schema, legacy bridge or new
+  persisted authority. See the [protective Invocation proof audit](docs/audits/2026-11-04-harness-protective-invocation-authority.md).
+
+- Harness protective-cancellation authority correction: an already-admitted
+  Agent/child Run may be safely stopped when Session or Config presentation
+  reads temporarily fail; exact Turn/Invocation and existing Kernel/RunRelation
+  ownership fences still apply before any physical cancellation. New execution,
+  replay and Host-visible reads retain the complete frozen owner proof. Host
+  `hs_`/`ht_` namespaces now require the exact lowercase 24-hex digest,
+  preserving valid standalone Store IDs with noncanonical lookalike prefixes.
+  No new persistence, schema, compatibility shim or Kernel state. See
+  [the independent P1/P2 repair](docs/audits/2026-11-04-harness-protective-cancel-and-id-grammar.md).
+
+- Harness I1 read-side ownership hard cut: centralize all Session and Turn
+  Store reads behind exact requested-ID verification. Host-derived identities
+  additionally bind the original HostThread, HostTurn, owning Session and
+  canonical sealed Config before any replay, cancellation, control or
+  Host-visible projection. An inconsistent custom Store can no longer
+  substitute a different persisted tenant's Session/Turn or rebind the
+  original Turn to a foreign Config. `LoadSnapshot` enforces the same
+  Session/Config Turn association. No new public API, persisted schema,
+  compatibility alias or Kernel state. See the
+  [I1 read-side authority audit](docs/audits/2026-11-04-harness-read-authority-hardcut.md).
+
+- Harness I2/I3 sealed-authority convergence: re-derive canonical Config
+  ContentHash and Config ID from the actual persisted payload, and use only
+  verified normalized configuration for admission, Context, Budget, Tool,
+  role and retry paths. Before any physical operation, validate both the
+  CreateInvocation reply and its canonical indexed Store record against the
+  Host-frozen Invocation/Run/Attempt identity. All top-level, child and
+  Handoff creation paths use the single check; old private direct callers
+  are removed without forwarding aliases. Malformed pre-stable Beta records
+  fail closed rather than receiving a compatibility fallback. No new Store
+  field, public API, schema or Kernel status. See the
+  [I2/I3 independent convergence audit](docs/audits/2026-11-04-harness-sealed-authority-convergence.md).
+
+- Top-level Store receipt authority: the shared Harness admission path now
+  rejects a Store CreateSession, PutConfigSnapshot or CreateTurn response that
+  disagrees with the Host-selected immutable identity. A fresh Turn must also
+  retain its original Accepted/Revision-1 lifecycle. The first physical
+  Invocation, shared-budget reservation and Feature dispatch cannot proceed
+  on a substituted Session, Config or Turn. This fixes a confirmed P1 where
+  an inconsistent CreateTurn return could complete an Agent under a foreign
+  already-persisted Turn. No additional Store state, schema or compatibility
+  bridge. See [independent remediation](docs/audits/2026-11-04-harness-top-level-store-receipt-remediation.md).
+
+- Harness/Agent startup minimalization: remove the duplicate private Agent
+  top-level admission envelope and Agent StartRun dispatch construction.
+  Agent, Team, GroupChat, Workflow and Application share one top-level Turn
+  admission envelope; Agent, Team, GroupChat and Workflow share Kernel-backed
+  first-admission result settlement. Application retains its independent Host
+  effect/OutputRefs settlement. No old forwarding alias is retained.
+  Agent's pre-Run recovery and the **first-attempt-only** native
+  cancellation-conflict exception remain preserved; subsequent RetryInvocation
+  Attempts do not inherit that extra snapshot-conflict suppression. Certified
+  no-effect receipts and unknown-effect
+  fencing are unchanged. No public API or persistence migration. See the
+  [Harness/Agent hard-cut audit](docs/audits/2026-11-04-harness-agent-start-hardcut.md).
+
 - Context Run owner hard cut: process-local Context Window bindings cannot
   authorize a different Agent Run's Session/Turn or elevate a descendant to
   Context `owner`. Rebuild the active Context from durable Invocation/RunRelation

@@ -196,7 +196,7 @@ func (runner *Runner) prepareApplicationExecution(
 	// Materialize all reads and policy inputs BEFORE claiming the external
 	// dispatch. A concurrent cancellation at this point still wins its
 	// Accepted -> Cancelled CAS and the claim then fails without an effect.
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Turn{}, Invocation{}, ApplicationCapabilityRequest{}, err
 	}
@@ -257,7 +257,7 @@ func (runner *Runner) reconcileApplicationOutcome(ctx context.Context, turn Turn
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	session, err := runner.store.GetSession(ctx, turn.SessionID)
+	session, err := loadVerifiedSession(ctx, runner.store, turn.SessionID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -361,7 +361,7 @@ func (runner *Runner) finishResolvedApplicationInteraction(
 }
 
 func (runner *Runner) reopenApplicationParentTurn(ctx context.Context, turnID string) (Turn, error) {
-	turn, err := runner.store.GetTurn(ctx, turnID)
+	turn, err := loadVerifiedTurn(ctx, runner.store, turnID)
 	if err != nil {
 		return Turn{}, err
 	}

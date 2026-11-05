@@ -194,7 +194,7 @@ func (runner *Runner) frozenDelegation(ctx context.Context, turnID, id string) (
 }
 
 func (runner *Runner) admitRoleChild(ctx context.Context, turn Turn, parent Invocation, delegation handoff.Delegation) error {
-	config, err := runner.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil || config.SharedBudget == nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func (runner *Runner) prepareHandoffChild(ctx context.Context, turn Turn, parent
 	if err != nil {
 		return err
 	}
-	invocation, _, err := runner.store.CreateInvocation(ctx, Invocation{
+	invocation, _, err := runner.createVerifiedInvocation(ctx, Invocation{
 		ID: id, TurnID: turn.ID, ParentItemID: parentItemID, CapabilityKey: CapabilityAgent, DefinitionVersion: RuntimeCapabilityVersion,
 		ExecutionClass: ExecutionAgent, Input: input, InputHash: inputHash, ExecutionRefID: delegation.ChildRunID,
 		Status: InvocationAccepted, Attempt: 1, Revision: 1, OutputRefs: []HostRef{}, CreatedAt: now, UpdatedAt: now,
@@ -387,11 +387,11 @@ func (preparer roleModelRequestPreparer) prepare(ctx context.Context, request mo
 	if err != nil {
 		return model.Request{}, err
 	}
-	turn, err := preparer.store.GetTurn(ctx, invocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, preparer.store, invocation.TurnID)
 	if err != nil {
 		return model.Request{}, err
 	}
-	config, err := preparer.store.GetConfigSnapshot(ctx, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, preparer.store, turn.ConfigSnapshotID)
 	if err != nil {
 		return model.Request{}, err
 	}

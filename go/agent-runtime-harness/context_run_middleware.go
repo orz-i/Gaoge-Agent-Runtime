@@ -93,7 +93,7 @@ func (middleware contextRunMiddleware) hydrateExistingBinding(
 	if !ok {
 		return middleware.hydrateTurn(ctx, binding.TurnID, binding.Access)
 	}
-	turn, err := middleware.store.GetTurn(ctx, binding.TurnID)
+	turn, err := loadVerifiedTurn(ctx, middleware.store, binding.TurnID)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func resolveContextRunAuthority(
 	if turnID == "" {
 		return Turn{}, "", false, ErrNotFound
 	}
-	turn, err := store.GetTurn(ctx, turnID)
+	turn, err := loadVerifiedTurn(ctx, store, turnID)
 	if err != nil {
 		return Turn{}, "", false, err
 	}
@@ -247,7 +247,7 @@ func (middleware contextRunMiddleware) hydrateTurn(
 	turnID string,
 	access ContextWindowAccess,
 ) (context.Context, error) {
-	turn, err := middleware.store.GetTurn(ctx, strings.TrimSpace(turnID))
+	turn, err := loadVerifiedTurn(ctx, middleware.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return nil, err
 	}
