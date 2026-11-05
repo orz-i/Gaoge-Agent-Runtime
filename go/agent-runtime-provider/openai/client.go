@@ -62,6 +62,13 @@ func New(config Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	for id := range effortLevels {
+		if len(knownEffortLevels(id)) != 0 {
+			// Private override may never broaden a known public model's
+			// original Provider-owned capability (e.g. Astra none).
+			return nil, providerhttp.ErrConfig
+		}
+	}
 	actualEndpoint := config.Endpoint
 	if actualEndpoint == "" {
 		actualEndpoint = endpoint
@@ -136,6 +143,13 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 		name = c.defaultModel
 	}
 	if name == "" {
+		return prepared{}, ErrUnsupported
+	}
+	if len(options.Sampling) != 0 &&
+		(options.Effort != "" && options.Effort != "none" ||
+			options.Effort == "" && len(knownEffortLevels(name)) != 0) {
+		// Reasoning models default to a non-none effort, which does
+		// not accept temperature or top_p. Do not silently drop them.
 		return prepared{}, ErrUnsupported
 	}
 	if options.Effort != "" {

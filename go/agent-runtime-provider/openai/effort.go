@@ -1,12 +1,9 @@
 package openai
 
-// Every listed model is an exact, documented API ID. An unknown model
-// (including a similarly-prefixed gateway alias) has no implicit capability.
-// The Host can certify a private model using Config.EffortModelLevels.
-func (c *Client) effortLevels(id string) []string {
-	if levels, ok := c.effortModelLevels[id]; ok {
-		return append([]string(nil), levels...)
-	}
+// Exact IDs: no family-prefix inference for third-party routes. The
+// provider's published reasoning guidance excludes sampling parameters when
+// effort is non-none; the documented default for these models is non-none.
+func knownEffortLevels(id string) []string {
 	switch id {
 	case "gpt-6-astra", "gpt-6.1-sol":
 		return []string{"low", "medium", "high", "xhigh", "max"}
@@ -16,4 +13,13 @@ func (c *Client) effortLevels(id string) []string {
 	default:
 		return nil
 	}
+}
+
+// Host certification is reserved for otherwise unknown private model IDs;
+// it cannot re-enable an unsupported level on a documented public model.
+func (c *Client) effortLevels(id string) []string {
+	if levels, ok := c.effortModelLevels[id]; ok {
+		return append([]string(nil), levels...)
+	}
+	return knownEffortLevels(id)
 }

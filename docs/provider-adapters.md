@@ -105,13 +105,33 @@ name prefix). A missing level blocks dispatch. Exact private/gateway IDs can
 be explicitly certified through the adapter's
 `Config.EffortModelLevels map[string][]string`. The normalized immutable
 policy is included in the Provider HMAC binding fingerprint, so recovery
-cannot silently switch effort permissions. If an upstream model stops
-supporting a declared level, its HTTP failure is reported, never downgraded
-to a cheaper effort or omitted setting.
+cannot silently switch effort permissions. **When the new policy is empty or
+omitted, HMAC serialization remains byte-for-byte identical to the previous
+beta.24 adapter**; pending ModelInvocations can safely resume on unchanged
+bindings. Known public model IDs cannot be overridden with additional levels:
+explicit Host certification is only for unknown/private route IDs. If an
+upstream model stops supporting a declared level, its HTTP failure is
+reported, never downgraded to a cheaper effort or omitted setting.
+
+**Sampling compatibility:** OpenAI reasoning models reject `temperature` and
+`top_p` when explicit effort is not `none`; the documented non-`none` default
+of recognized model IDs also disallows those sampling fields when effort is
+omitted. An explicit supported `none` may retain sampling. Anthropic models
+with adaptive thinking reject sampling alongside an explicitly requested
+effort; documented newer models also reject sampling when effort is omitted.
+These known-invalid combinations fail before both Unary and SSE dispatch,
+without removing parameters or silently changing effort. Unknown/private
+models retain the previous omitted-effort sampling contract unless a certified
+explicit effort is requested. See the official [OpenAI reasoning guidance](https://developers.openai.com/api/docs/guides/latest-model)
+and [Claude thinking compatibility](https://platform.claude.com/docs/en/build-with-claude/thinking).
 
 Both streaming and unary requests use the same adapter preparation path;
 the entire `ModelOptions` value is already frozen in the Agent's durable
-`ModelInvocation` hash. In-progress Runs are not rewritten. Supported
+`ModelInvocation` hash. Harness now checks unique JSON member names
+(including Unicode/case-fold aliases) **before** sealing any top-level or
+Role `ModelOptions`; Core and Provider share one validator, so no parser
+silently canonicalizes away a duplicate into a different execution policy.
+In-progress Runs are not rewritten. Supported
 model IDs and levels are intentionally conservative; additional models
 require independently verified exact-ID support or Host certification.
 This does **not** imply native Provider-hosted Tools or server-side

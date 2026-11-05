@@ -82,6 +82,11 @@ func New(config Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	for id := range effortLevels {
+		if len(knownEffortLevels(id)) != 0 {
+			return nil, providerhttp.ErrConfig
+		}
+	}
 	actualEndpoint := config.Endpoint
 	if actualEndpoint == "" {
 		actualEndpoint = endpoint
@@ -152,6 +157,11 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 		name = c.defaultModel
 	}
 	if name == "" {
+		return prepared{}, ErrUnsupported
+	}
+	if len(options.Sampling) != 0 && (options.Effort != "" || knownNoSampling(name)) {
+		// Adaptive thinking and the documented current model families
+		// reject temperature/top_p; never send an unsupported pair.
 		return prepared{}, ErrUnsupported
 	}
 	if options.Effort != "" {

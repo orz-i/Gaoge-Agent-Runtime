@@ -81,6 +81,9 @@ func TestAnthropicEffortAndStrictOutputShareOneConfig(t *testing.T) {
 		{"none", "claude-sonnet-5-5", `{"reasoning":{"effort":"none"}}`},
 		{"duplicate", "claude-sonnet-5-5", `{"reasoning":{"effort":"low","effort":"high"}}`},
 		{"injection", "claude-sonnet-5-5", `{"reasoning":{"effort":"high"},"thinking":{"type":"disabled"}}`},
+		{"high-temperature", "claude-sonnet-5-5", `{"reasoning":{"effort":"high"},"temperature":0.5}`},
+		{"high-top-p", "claude-fable-5", `{"reasoning":{"effort":"medium"},"top_p":0.5}`},
+		{"default-temperature", "claude-sonnet-5-5", `{"temperature":0.5}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bad := req
@@ -116,6 +119,7 @@ func TestAnthropicEffortPolicyFingerprintAndIsolation(t *testing.T) {
 	}
 	for _, input := range []map[string][]string{
 		{"claude-private": {"none"}}, {"claude-private": {"low", "low"}}, {" claude-private": {"high"}},
+		{"claude-sonnet-5-5": {"none"}},
 	} {
 		if _, err := anthropic.New(anthropic.Config{APIKey: "secret", EffortModelLevels: input}); err == nil {
 			t.Fatalf("invalid policy accepted: %+v", input)

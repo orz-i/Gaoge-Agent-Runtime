@@ -23,13 +23,13 @@ func TestExactModelEffortProjectedBeforePhysicalOpenAI(t *testing.T) {
 			Reasoning struct {
 				Effort string `json:"effort"`
 			} `json:"reasoning"`
-			Temperature float64 `json:"temperature"`
-			Stream      bool    `json:"stream"`
+			Temperature *float64 `json:"temperature"`
+			Stream      bool     `json:"stream"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Error(err)
 		}
-		if payload.Model != "gpt-6-sol" || payload.Store || payload.Reasoning.Effort != "high" || payload.Temperature != 0.5 {
+		if payload.Model != "gpt-6-sol" || payload.Store || payload.Reasoning.Effort != "high" || payload.Temperature != nil {
 			t.Errorf("reasoning projection: %+v", payload)
 		}
 		if payload.Stream {
@@ -49,7 +49,7 @@ func TestExactModelEffortProjectedBeforePhysicalOpenAI(t *testing.T) {
 		t.Fatalf("caps %+v %v", caps, err)
 	}
 	base := model.Request{
-		Model: "gpt-6-sol", ModelOptions: json.RawMessage(`{"reasoning":{"effort":"high"},"temperature":0.5}`),
+		Model: "gpt-6-sol", ModelOptions: json.RawMessage(`{"reasoning":{"effort":"high"}}`),
 		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hi")}},
 	}
 	if result, err := client.Generate(context.Background(), base); err != nil || result.ResponseID != "effort-unary" {
@@ -64,6 +64,9 @@ func TestExactModelEffortProjectedBeforePhysicalOpenAI(t *testing.T) {
 		{"duplicate", "gpt-6-sol", `{"reasoning":{"effort":"high","effort":"low"}}`},
 		{"injection", "gpt-6-sol", `{"reasoning":{"effort":"high"},"tools":[]}`},
 		{"malformed", "gpt-6-sol", `{"reasoning":null}`},
+		{"high-temperature", "gpt-6-sol", `{"reasoning":{"effort":"high"},"temperature":0.5}`},
+		{"high-top-p", "gpt-6-sol", `{"reasoning":{"effort":"high"},"top_p":0.5}`},
+		{"default-high-temperature", "gpt-6-sol", `{"temperature":0.5}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			bad := base
@@ -109,5 +112,8 @@ func TestOpenAIEffortOverrideIsBoundAndImmutable(t *testing.T) {
 	}
 	if _, err := openai.New(openai.Config{APIKey: "secret", EffortModelLevels: map[string][]string{"private": {"high"}}}); err != nil {
 		t.Fatalf("valid certified config rejected: %v", err)
+	}
+	if _, err := openai.New(openai.Config{APIKey: "secret", EffortModelLevels: map[string][]string{"gpt-6-astra": {"none"}}}); err == nil {
+		t.Fatal("Host override re-enabled unsupported public Astra effort")
 	}
 }
