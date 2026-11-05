@@ -169,6 +169,18 @@ func TestSessionFacadeRejectsUntrustedOrStaleContext(t *testing.T) {
 	if !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("cross-actor refresh: %v", err)
 	}
+	_, err = foreign.LoadState(t.Context(), "turn")
+	if !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("cross-actor bounded state: %v", err)
+	}
+	_, err = foreign.Timeline(t.Context(), "turn", 0, 50)
+	if !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("cross-actor timeline: %v", err)
+	}
+	_, err = foreign.Resume(t.Context(), "turn")
+	if !errors.Is(err, harness.ErrConflict) || len(provider.requests) != 1 {
+		t.Fatalf("cross-actor resume or unexpected model effect: %v calls=%d", err, len(provider.requests))
+	}
 	_, err = foreign.Prompt(t.Context(), "another-turn", "a prompt")
 	if !errors.Is(err, harness.ErrConflict) || transcriptReads != 1 {
 		t.Fatalf("cross-actor prompt or unauthorized transcript load: err=%v reads=%d", err, transcriptReads)

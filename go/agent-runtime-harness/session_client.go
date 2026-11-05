@@ -110,11 +110,8 @@ func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string)
 
 // Load obtains an existing durable Turn without generating another model call.
 func (session *SessionClient) Load(ctx context.Context, turnID string) (Snapshot, error) {
-	id, err := session.turnID(turnID)
+	id, err := session.authorizedTurnID(ctx, turnID)
 	if err != nil {
-		return Snapshot{}, err
-	}
-	if err = session.requireIdentity(ctx); err != nil {
 		return Snapshot{}, err
 	}
 	return session.runner.Load(ctx, id)
@@ -123,11 +120,8 @@ func (session *SessionClient) Load(ctx context.Context, turnID string) (Snapshot
 // LoadState reads bounded status/config facts without scanning Timeline history.
 // Like Load, it does not advance the underlying Agent Run.
 func (session *SessionClient) LoadState(ctx context.Context, turnID string) (StateSnapshot, error) {
-	id, err := session.turnID(turnID)
+	id, err := session.authorizedTurnID(ctx, turnID)
 	if err != nil {
-		return StateSnapshot{}, err
-	}
-	if err = session.requireIdentity(ctx); err != nil {
 		return StateSnapshot{}, err
 	}
 	return session.runner.LoadState(ctx, id)
@@ -135,11 +129,8 @@ func (session *SessionClient) LoadState(ctx context.Context, turnID string) (Sta
 
 // Timeline reads one page of the committed Turn Item history.
 func (session *SessionClient) Timeline(ctx context.Context, turnID string, afterSeq uint64, limit int) ([]Item, error) {
-	id, err := session.turnID(turnID)
+	id, err := session.authorizedTurnID(ctx, turnID)
 	if err != nil {
-		return nil, err
-	}
-	if err = session.requireIdentity(ctx); err != nil {
 		return nil, err
 	}
 	return session.runner.ListTimeline(ctx, id, afterSeq, limit)
@@ -147,11 +138,8 @@ func (session *SessionClient) Timeline(ctx context.Context, turnID string, after
 
 // Refresh synchronizes one existing Turn from its underlying Runtime facts.
 func (session *SessionClient) Refresh(ctx context.Context, turnID string) (Snapshot, error) {
-	id, err := session.turnID(turnID)
+	id, err := session.authorizedTurnID(ctx, turnID)
 	if err != nil {
-		return Snapshot{}, err
-	}
-	if err = session.requireIdentity(ctx); err != nil {
 		return Snapshot{}, err
 	}
 	return session.runner.Refresh(ctx, id)
@@ -161,14 +149,26 @@ func (session *SessionClient) Refresh(ctx context.Context, turnID string) (Snaps
 // It neither reads TranscriptSource nor creates a new execution attempt. A
 // waiting or terminal Turn is returned without resolving approval or budget.
 func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapshot, error) {
-	id, err := session.turnID(turnID)
+	id, err := session.authorizedTurnID(ctx, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err = session.requireIdentity(ctx); err != nil {
-		return Snapshot{}, err
-	}
 	return session.runner.ResumeTurn(ctx, id)
+}
+
+// authorizedTurnID is the single read/recovery trust boundary for all
+// SessionClient operations. The identity proof must precede any Turn load,
+// projection or native Run continuation; Prompt independently checks ownership
+// before asking the Host for a potentially private transcript.
+func (session *SessionClient) authorizedTurnID(ctx context.Context, turnID string) (string, error) {
+	id, err := session.turnID(turnID)
+	if err != nil {
+		return "", err
+	}
+	if err = session.requireIdentity(ctx); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 func (session *SessionClient) hostTurn(turnID string) (HostRef, error) {
