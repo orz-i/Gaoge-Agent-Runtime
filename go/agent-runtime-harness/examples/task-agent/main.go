@@ -25,6 +25,7 @@ type settings struct {
 	contextTokens, outputTokens              int64
 	endpoint, apiKey, sampleID, bindingScope string
 	allowUnknownStructuredModel              bool
+	reasoningEffort                          string
 	httpClient                               *http.Client
 }
 
@@ -90,6 +91,19 @@ func (config *settings) resolve() error {
 		return errors.New("invalid mode")
 	}
 	return nil
+}
+
+// Model options are frozen through ConfigSnapshot -> ModelInvocation, not
+// injected by middleware or changed on recovery. Only a validated effort
+// string reaches this helper in the interactive baseline path.
+func (config settings) modelOptions() json.RawMessage {
+	if config.reasoningEffort == "" {
+		return nil
+	}
+	encoded, _ := json.Marshal(map[string]any{
+		"reasoning": map[string]string{"effort": config.reasoningEffort},
+	})
+	return encoded
 }
 
 func (config settings) routedModel() string {

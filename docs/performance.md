@@ -38,6 +38,32 @@ The committed `benchmarks/baseline.json` records the current reference environme
 
 The comparison refuses to compare different GOOS/GOARCH/CPU environments. It is therefore not part of ordinary PR CI. A nightly or release runner should establish a baseline on its own stable environment before turning this into a performance gate.
 
+## Agent repeated-Tool policy: opposite workload shapes
+
+`make benchmark-agent-policy` runs an independent 160-seed randomized
+behavioral oracle followed by explicit `ns/op`, `B/op`, and `allocs/op`
+benchmarks over 32/256/1024 completed Tool batches in two scenarios:
+(a) repeated results and arguments which frequently match an earlier batch,
+and (b) unique results which require scanning long history. The oracle
+compares the current production policy against an independently written
+nested-scan reference; it rejects accidental suppression based solely on
+same-batch matching, changed arguments or recoverable Tool errors.
+
+An attempted indexed-scan refactor won in the 1024 unique-result case
+(~0.6ms vs ~2.2ms/op on Apple M4) but regressed the same-size common
+repeated-result workload (~0.4ms vs ~0.26ms/op), with substantially more
+allocations. The production implementation was **reverted**, leaving the
+current receipt/projection behavior unchanged. The fixture and benchmarks
+remain for profiling future changes. Like other portable benchmarks,
+this is report-only and does not establish production latency,
+cross-device throughput, or a suitable default optimization.
+
+For quality and real Provider latency/usage, use the separate
+[real-model Agent baseline](agent-model-baseline.md): it records both
+successful and failed samples and now supports explicit per-model effort
+sweeps. Do not equate deterministic fixture quality with live-model
+task success, and do not claim unknown upstream token bills are zero.
+
 ## Real PostgreSQL and Redis baseline
 
 A separate integration benchmark suite measures real service boundaries without mixing their latency into portable PR benchmarks:

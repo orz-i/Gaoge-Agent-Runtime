@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -161,12 +162,14 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 		return event
 	}
 	available, err := capability.Capabilities(probeCtx, config.routedModel())
-	if err != nil || !available.StructuredJSONSchema {
+	if err != nil || !available.StructuredJSONSchema ||
+		(config.reasoningEffort != "" && !slices.Contains(available.EffortLevels, config.reasoningEffort)) {
 		event.FailureCode = failureCode(errors.Join(err, model.ErrCapabilityUnavailable), "capability_unavailable")
 		return event
 	}
 	response, err := client.Generate(probeCtx, model.Request{
 		RunID: "baseline-preflight", InvocationID: "baseline-preflight", Model: config.routedModel(),
+		ModelOptions:    config.modelOptions(),
 		Messages:        []model.Message{{Role: model.RoleUser, Content: model.TextParts(preflightPrompt)}},
 		OutputContract:  &model.OutputContract{Name: "baseline_probe", Schema: probeSchema},
 		MaxOutputTokens: config.outputTokens,

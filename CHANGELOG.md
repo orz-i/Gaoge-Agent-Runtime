@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Three-part Provider/Agent-Harness/quality governance (2026-11-05):
+  exact-model reasoning effort support with pre-dispatch rejection and
+  Provider binding fingerprint, single Session read/resume identity guard,
+  and optional effort-aware real-model task/recovery baseline. Offline
+  randomized Agent policy oracle and two performance workloads show that
+  an attempted hash-index optimization regressed common-case latency;
+  the optimization was deliberately reverted. No Kernel schema or Agent
+  loop change. See [Provider protocol](docs/provider-adapters.md),
+  [benchmark guide](docs/performance.md) and
+  [Session convergence audit](docs/audits/2026-11-05-session-identity-convergence.md).
+
 - Harness top-level unknown-effect outcome hard cut: a custom composite Feature,
   Agent or Retry returning no physical Run receipt can no longer be reported
   as successfully cancelled merely because a same-ID local Kernel Run is

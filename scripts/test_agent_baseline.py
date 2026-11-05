@@ -172,6 +172,19 @@ class EndpointTests(unittest.TestCase):
                 expected = endpoint or baseline.DEFAULT_ENDPOINTS[provider]
                 self.assertEqual(baseline.validate_endpoint(provider, endpoint), expected)
 
+    def test_optional_reasoning_effort_is_validated_without_changing_legacy_config(self):
+        legacy = configuration()
+        self.assertEqual(baseline.validate_configuration(legacy), legacy)
+        for provider, effort in (("openai", "none"), ("openai", "high"), ("anthropic", "medium")):
+            with self.subTest(provider=provider, effort=effort):
+                configured = dict(legacy, provider=provider, reasoningEffort=effort)
+                self.assertEqual(baseline.validate_configuration(configured), configured)
+        for provider, effort in (("anthropic", "none"), ("openai", "ultra"),
+                                 ("openai", ""), ("openai", None), ("openai", 3)):
+            with self.subTest(provider=provider, effort=effort):
+                with self.assertRaises(baseline.SafeFailure):
+                    baseline.validate_configuration(dict(legacy, provider=provider, reasoningEffort=effort))
+
     def test_interactive_standard_base_paths_only_are_expanded(self):
         for provider, suffix in (("openai", "responses"), ("anthropic", "messages")):
             for entered, expected in (
@@ -192,7 +205,7 @@ class EndpointTests(unittest.TestCase):
     def test_interactive_address_and_output_budget_are_shown_before_launch(self):
         entered = "https://gateway.example"
         final = entered + "/v1/responses"
-        choices = ["1", entered, "fixture-model", "16384", "", "1", "n"]
+        choices = ["1", entered, "fixture-model", "16384", "", "1", "n", ""]
         with mock.patch.object(sys.stdin, "isatty", return_value=True), \
                 mock.patch.object(sys.stderr, "isatty", return_value=True), \
                 mock.patch("builtins.input", side_effect=choices), \
@@ -1234,6 +1247,33 @@ class ToolReplayProbeTests(unittest.TestCase):
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_effort_sweep_preserves_workload_identity_and_displays_difference(self):
+        original = complete_report()
+        configured = dict(configuration(), reasoningEffort="high")
+        candidate = baseline.new_report(configured, {"revision": "b" * 40, "dirty": False})
+        records = events()
+        records[0] = start_event(configured)
+        for record in records:
+            baseline.accept_event(candidate, record)
+        baseline.finish_report(candidate, 0)
+        baseline.validate_report(candidate)
+        rendered, complete = baseline.comparison_markdown(original, candidate)
+        self.assertTrue(complete)
+        self.assertIn("reasoningEffort", rendered)
+        self.assertIn("high", rendered)
+        self.assertIn("## 已观察结果", rendered)
+        self.assertNotIn("无法进行数值比较", rendered)
+        self.assertNotIn("reasoningEffort", (original["runner"]["profile"] or {}))
+        self.assertEqual(candidate["runner"]["datasetHash"], original["runner"]["datasetHash"])
+
+    def test_changed_effort_start_event_must_match_approved_configuration(self):
+        report = baseline.new_report(dict(configuration(), reasoningEffort="high"), {})
+        event = start_event(configuration())
+        with self.assertRaisesRegex(baseline.ProtocolFailure, "configuration_mismatch"):
+            baseline.accept_event(report, event)
+        self.assertEqual(report["runner"], {})
+        self.assertIsNone(report["preflight"])
+
     def test_different_repetition_counts_are_not_numerically_comparable(self):
         old = complete_report()
         cfg = configuration()

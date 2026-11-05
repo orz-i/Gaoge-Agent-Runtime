@@ -68,8 +68,9 @@ func baselineToolReplayProbe(ctx context.Context, config settings) (probe toolPr
 	firstRequest := model.Request{
 		RunID: "baseline-tool-probe", InvocationID: "baseline-tool-probe-1",
 		Model: config.routedModel(), MaxOutputTokens: config.outputTokens,
-		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts(replayProbePrompt)}},
-		Tools:    []tools.Definition{definition}, RequireToolCall: true, OutputContract: contract,
+		ModelOptions: config.modelOptions(),
+		Messages:     []model.Message{{Role: model.RoleUser, Content: model.TextParts(replayProbePrompt)}},
+		Tools:        []tools.Definition{definition}, RequireToolCall: true, OutputContract: contract,
 	}
 	callCtx, cancel := context.WithTimeout(ctx, modelTimeout)
 	probe.ModelCalls++
@@ -103,6 +104,7 @@ func baselineToolReplayProbe(ctx context.Context, config settings) (probe toolPr
 	secondRequest := model.Request{
 		RunID: "baseline-tool-probe", InvocationID: "baseline-tool-probe-2",
 		Model: config.routedModel(), MaxOutputTokens: config.outputTokens,
+		ModelOptions:   config.modelOptions(),
 		OutputContract: contract, Tools: []tools.Definition{definition},
 		Messages: []model.Message{
 			firstRequest.Messages[0],

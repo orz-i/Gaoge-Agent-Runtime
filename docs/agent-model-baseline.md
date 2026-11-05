@@ -37,8 +37,18 @@ interactive command instead. A successful probe proceeds to the requested task
 samples; a failed probe still makes no task calls.
 
 The script asks for the protocol, base URL or complete endpoint, exact
-provider-native model ID, documented context capacity, task output budget, and
-repetitions. It builds the
+provider-native model ID, documented context capacity, task output budget,
+repetitions, and an **optional reasoning effort**. The new `reasoningEffort`
+field accepts `none` (OpenAI only), `low`, `medium`, `high`, `xhigh`,
+or `max`; leaving it blank preserves the model's default. A configured
+level must also be explicitly supported by the exact chosen model, or the
+preflight stops **before sending HTTP**. The field is carried through schema
+preflight, synthetic OpenAI Tool/replay probing, and the real two-case Agent
+workload, including frozen Context and crash/lease recovery. It is recorded
+as nonsecret public configuration in the report; historical reports without
+this field remain valid and preserve their original meaning.
+
+It builds the
 current checkout before requesting the API key. Enter the key at the hidden
 terminal prompt; do not paste it into a command, report or chat.
 
@@ -113,6 +123,35 @@ not proof of universal support. Failure does not silently drop reasoning,
 weaken schema validation, enable remote storage or switch API protocols. Probe
 usage and task sample usage/latency remain separate. Historical reports retain
 their original measurement profiles.
+
+## Compare reasoning effort without changing the workload
+
+Run the interactive launcher with identical protocol, endpoint, exact model ID,
+context capacity, output tokens, source revision and repetition count, changing
+only the explicit reasoning effort. Reports are retained separately; compare
+the two JSON files with `python3 scripts/run-agent-baseline.py compare
+OLD.json NEW.json`. The comparison now prints `reasoningEffort` alongside
+the other public settings; effort differences alone do not change the
+Task/Dataset hash and do not invalidate numerical comparison. Historical
+omitted-effort reports show the model default; do **not** interpret that
+as a confirmed value such as `medium`.
+
+Compare success rate, completed and skipped cases, p50/p95 duration, the
+original Tool execution count, model calls, known tokens (including reasoning)
+and missing usage coverage. Keep the strict-schema and OpenAI stateless
+Tool/reasoning replay preflight results separate from task scores. A failed or
+incomplete sample stays in the denominator, and unavailable usage stays
+unknown, not zero. A two-task sample is a functional smoke baseline, not a
+statistically reliable overall model/effort ranking. No price table is applied;
+monetary cost requires your current provider billing rates.
+
+Higher effort may need a larger per-call output budget because reasoning tokens
+share the output ceiling. Changing that budget changes the measurement
+profile and prevents direct numeric comparison to the old configuration.
+Unsupported levels, gateway-proxy model aliases, and Providers without the
+required physical response/replay evidence do not silently downgrade to a
+different effort. No new HTTP credentials, provider capability registry,
+Kernel state, or transcript Store is created.
 
 ## If a run reports failed
 
