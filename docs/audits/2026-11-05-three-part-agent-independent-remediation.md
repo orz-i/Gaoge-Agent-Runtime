@@ -61,8 +61,10 @@ Permanent tests: `TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort` and 
 - Task-agent `go test -race ./examples/task-agent -count=1` — PASS.
 - Python baseline launcher — 62 tests PASS.
 - Whole workspace `fmt-check`, `tidy-check`, `go-vet`, `go-lint` — PASS (0 lint issues).
-- Other module race, TypeScript/evaluation/integration/clean consumer and final full `make check` are separate, later release/merge-admission gates; do not report unrun checks as passed.
-- No live paid OpenAI/Anthropic/gateway request or external production/real power-failure test was run. Local HTTP and retryable in-process persistent Store fixtures do not prove provider-side billing/exactly-once.
+- At code HEAD `aa7790df766cd338145214e0fa39f524e36f3e84`, all remaining Go module Race tests, Go Lint (0 issues), TypeScript lint/typecheck/46 tests/build, Evaluation/A2A/MCP corpus, benchmark smoke, OTel smoke and beta.24 clean-consumer release check — PASS.
+- `make integration` with project-local Docker Compose PostgreSQL/Redis services — **PASS, exit 0**. Real database cross-connection and cross-process cancellation, Session recovery and Continuation tests passed; project-local test containers, volumes and network were removed. Other Docker projects were not changed.
+- Full `make check` ran on the same locked code SHA but the Mac Pi command channel disconnected during task-agent Race, after passing metadata, formatting, tidy, Vet, all module unit tests and Core/Provider/Harness Race. **No single successful `make check` exit was obtained**; every remaining original Make target was run separately and passed.
+- No live paid OpenAI/Anthropic/gateway request, external production traffic, GitHub PR-head CI, or real device power-loss test was run. Local HTTP and persisted-store fixtures do not prove provider-side billing/exactly-once.
 
 ## Exit criterion
 
