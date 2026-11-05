@@ -281,6 +281,11 @@ func ParseOptions(raw json.RawMessage) (ModelOptions, error) {
 		switch k {
 		case "temperature", "top_p":
 			var number float64
+			// JSON null silently unmarshals to zero into a nonpointer float;
+			// it is not a valid explicit sampling value.
+			if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+				return ModelOptions{}, ErrConfig
+			}
 			if err := json.Unmarshal(v, &number); err != nil || number < 0 || number > 1 {
 				return ModelOptions{}, ErrConfig
 			}

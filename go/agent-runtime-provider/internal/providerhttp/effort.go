@@ -5,11 +5,21 @@ import (
 	"strings"
 )
 
-// ValidEffortLevels is the conservative supported option vocabulary. The
-// exact model-specific subset must be checked by each concrete adapter.
-var ValidEffortLevels = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+// OpenAIEffortLevels returns fresh option vocabulary on each call so callers
+// cannot mutate the shared validator via an exported package-level slice.
+// The actual model-specific subset is checked by the concrete adapter.
+func OpenAIEffortLevels() []string {
+	return []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+}
 
-func validEffort(level string) bool { return slices.Contains(ValidEffortLevels, level) }
+func validEffort(level string) bool {
+	switch level {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
 
 // NormalizeEffortModels copies and validates explicit Host opt-ins for
 // private/gateway models. No implicit prefix match or silent level expansion.

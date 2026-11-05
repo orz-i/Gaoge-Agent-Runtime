@@ -26,6 +26,8 @@ func TestParseModelOptionsFailClosed(t *testing.T) {
 		`{"reasoning":{"effort":"high"},"Reasoning":{"effort":"low"}}`,
 		`{"reasoning":{"effort":"high"},"tools":[]}`,
 		`{"reasoning":{"effort":"high"},"temperature":true}`,
+		`{"reasoning":{"effort":"high"},"temperature":null}`,
+		`{"reasoning":{"effort":"high"},"top_p":null}`,
 		`{"reasoning":{"effort":"high"},"temperature":-0.1}`,
 		`{"reasoning":{"effort":"high"},"top_p":1.01}`,
 		`{"effort":"high"}`,

@@ -70,9 +70,14 @@ func TestAnthropicEffortAndStrictOutputShareOneConfig(t *testing.T) {
 	if response, err := client.GenerateStream(context.Background(), req, nil); err != nil || response.ResponseID != "effort-stream" {
 		t.Fatalf("stream %+v %v", response, err)
 	}
+	sonnet46, capErr := client.Capabilities(context.Background(), "claude-sonnet-4-6")
+	if capErr != nil || slices.Contains(sonnet46.EffortLevels, "xhigh") || !slices.Contains(sonnet46.EffortLevels, "max") {
+		t.Fatalf("Sonnet 4.6 supports max but not xhigh: %+v %v", sonnet46, capErr)
+	}
 	for _, tc := range []struct{ name, modelID, opts string }{
 		{"unknown-model", "claude-sonnet-5-5-proxy", `{"reasoning":{"effort":"high"}}`},
 		{"unsupported-legacy", "claude-sonnet-4-5", `{"reasoning":{"effort":"low"}}`},
+		{"unsupported-sonnet46-xhigh", "claude-sonnet-4-6", `{"reasoning":{"effort":"xhigh"}}`},
 		{"none", "claude-sonnet-5-5", `{"reasoning":{"effort":"none"}}`},
 		{"duplicate", "claude-sonnet-5-5", `{"reasoning":{"effort":"low","effort":"high"}}`},
 		{"injection", "claude-sonnet-5-5", `{"reasoning":{"effort":"high"},"thinking":{"type":"disabled"}}`},

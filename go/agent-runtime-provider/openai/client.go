@@ -58,7 +58,7 @@ func New(config Config) (*Client, error) {
 		}
 		allowed[name] = true
 	}
-	effortLevels, err := providerhttp.NormalizeEffortModels(config.EffortModelLevels, providerhttp.ValidEffortLevels)
+	effortLevels, err := providerhttp.NormalizeEffortModels(config.EffortModelLevels, providerhttp.OpenAIEffortLevels())
 	if err != nil {
 		return nil, err
 	}

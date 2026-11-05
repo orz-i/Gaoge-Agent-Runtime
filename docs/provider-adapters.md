@@ -491,8 +491,13 @@ is permitted. See the [P1 frame audit](audits/2026-11-03-pr87-anthropic-sse-reje
   silently downgrading the requirement. Ordinary automatic tool selection and
   signed Thinking replay remain supported. For newer, unrecognized model IDs,
   provider validation remains the final authority.
-- The only allowed `ModelOptions` today are `temperature` and
-  `top_p`, both in [0, 1]. Unknown keys are rejected, not silently sent.
+- The only admitted `ModelOptions` keys are `temperature` and `top_p`
+  (both in [0, 1]), plus the nested `reasoning.effort` field when the
+  **exact model** has a verified capability. Unknown, duplicate or null
+  keys/values are rejected rather than silently sent. Supported effort
+  values are model-specific; see the
+  [OpenAI deployment checklist](https://developers.openai.com/api/docs/guides/deployment-checklist)
+  and [Anthropic effort reference](https://platform.claude.com/docs/en/build-with-claude/effort).
 - Retryable HTTP status 408/409/425/429/5xx and transport failures return
   `model.RetryableError`; 400/401/403 errors do not. Agent owns retry
   budgets. A typed `net.Error` timeout from HTTP dispatch, while the caller
