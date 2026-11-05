@@ -2,6 +2,21 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-05 — Shared top-level Start and Refresh preserve unknown physical effects (beta.24 candidate)
+
+The hard-cut top-level Agent, Team, GroupChat and Workflow Start and retry
+result settlement no longer interprets an empty physical Run response plus a
+Kernel conflict as successful cancellation merely because an unrelated same-ID
+Kernel Run is already terminal. **Unresolved physical dispatch grants must
+remain outcome-unknown** and cannot be terminalized by ordinary Refresh,
+replay or other read-side projection. Only first-attempt Agent cancellation
+with a verified pre-dispatch conflict and no pending unknown-effect dispatch
+retains the existing narrowly scoped idempotent reconciliation. This is an
+intentional fail-closed behavioral contract correction; `ErrExecutionOutcomeUnknown`
+can now be returned instead of a false `nil` success for such abnormal
+custom Feature outcomes. No API, Schema, Kernel status, legacy bridge or
+prerelease version increment. See [the PR #89 hard-cut audit](audits/2026-11-05-pr89-top-level-unknown-effect-hardcut.md).
+
 ## 2026-11-04 — Protective cancel requires frozen Invocation authority, not OutputRefs (beta.24 candidate)
 
 Root and Child protective cancellation now use one private frozen execution

@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Harness top-level unknown-effect outcome hard cut: a custom composite Feature,
+  Agent or Retry returning no physical Run receipt can no longer be reported
+  as successfully cancelled merely because a same-ID local Kernel Run is
+  terminal. Unsettled physical dispatch grants now block ordinary terminal
+  Refresh/replay projection; only the original first-attempt Agent's proven
+  pre-dispatch cancellation conflict remains eligible for narrow recovery.
+  The 24-path Agent/Team/Workflow/GroupChat start/retry fault matrix is
+  permanently covered. No new persistence/API/schema/compatibility layer.
+  See [PR #89 independent P1 remediation](docs/audits/2026-11-05-pr89-top-level-unknown-effect-hardcut.md).
+
 - Harness protective-stop Invocation authority correction: Root/Child Cancel
   validate the frozen execution identity and both canonical Store indexes
   independently of Host-visible OutputRefs. Malformed display metadata can
