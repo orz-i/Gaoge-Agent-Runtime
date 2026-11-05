@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 )
 
 // Provider-owned role/status/Tool keys are authority-bearing. Reject duplicate
@@ -45,9 +47,9 @@ func TestValidateUniqueJSONKeys(t *testing.T) {
 		})
 	}
 	t.Run("deep_nesting_is_bounded", func(t *testing.T) {
-		raw := bytes.Repeat([]byte("["), maxProviderJSONDepth+1)
+		raw := bytes.Repeat([]byte("["), jsoncontract.MaxUniqueJSONDepth+1)
 		raw = append(raw, '0')
-		raw = append(raw, bytes.Repeat([]byte("]"), maxProviderJSONDepth+1)...)
+		raw = append(raw, bytes.Repeat([]byte("]"), jsoncontract.MaxUniqueJSONDepth+1)...)
 		if !errors.Is(ValidateUniqueJSONKeys(raw), ErrProtocol) {
 			t.Fatal("unbounded provider JSON nesting")
 		}
