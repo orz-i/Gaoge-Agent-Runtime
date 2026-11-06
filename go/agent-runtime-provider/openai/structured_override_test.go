@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 func TestHostVerifiedGatewayStrictOutputCapability(t *testing.T) {
 	client, err := openai.New(openai.Config{
 		APIKey: "test", DefaultModel: "private/verified",
-		StructuredOutputModels: []string{"private/verified"},
+		ModelProfiles: model.StaticModelProfiles{"private/verified": {StructuredJSONSchema: true}},
 	})
 	if err != nil {
 		t.Fatal(err)

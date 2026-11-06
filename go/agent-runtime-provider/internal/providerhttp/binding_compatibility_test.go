@@ -7,64 +7,85 @@ import (
 	"encoding/json"
 	"slices"
 	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-// The type is intentionally locked to the previous beta.24 wire/HMAC layout.
-// Recomputing its digest catches accidental changes to the historical binding
-// identity of in-flight ModelInvocations (not just an equivalent new value).
-type oldProviderBindingSpec struct {
+// Previous beta.24 layout (unreleased pending intents may still exist in
+// developer Stores). No compatibility bridge is retained: old identity must
+// differ from this new explicitly model-scoped authority.
+type previousBindingSpec struct {
 	Protocol               string
 	Endpoint               string
 	DefaultModel           string
 	BindingScope           string
 	MaxOutputTokens        int64
 	StructuredOutputModels []string
+	EffortModelLevels      map[string][]string `json:",omitempty"`
 }
 
-func oldProviderFingerprint(key string, value oldProviderBindingSpec) string {
-	value.StructuredOutputModels = slices.Clone(value.StructuredOutputModels)
-	slices.Sort(value.StructuredOutputModels)
-	raw, _ := json.Marshal(value)
+func previousBindingHMAC(key string, input previousBindingSpec) string {
+	input.StructuredOutputModels = slices.Clone(input.StructuredOutputModels)
+	slices.Sort(input.StructuredOutputModels)
+	if len(input.EffortModelLevels) != 0 {
+		copyLevels := make(map[string][]string, len(input.EffortModelLevels))
+		for id, levels := range input.EffortModelLevels {
+			copyLevels[id] = slices.Clone(levels)
+			slices.Sort(copyLevels[id])
+		}
+		input.EffortModelLevels = copyLevels
+	}
+	raw, _ := json.Marshal(input)
 	mac := hmac.New(sha256.New, []byte(key))
 	_, _ = mac.Write([]byte("gaoge-provider-binding.v1\x00"))
 	_, _ = mac.Write(raw)
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func TestUnconfiguredEffortPreservesOldPersistedProviderBinding(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		protocol   string
-		endpoint   string
-		tokens     int64
-		structured []string
-	}{
-		{"openai-default", "openai.responses.v1", "https://api.openai.com/v1/responses", 0, nil},
-		{"openai-schema", "openai.responses.v1", "https://api.openai.com/v1/responses", 0, []string{"gpt-6-sol", "gpt-5.6"}},
-		{"anthropic-default", "anthropic.messages.2023-06-01", "https://api.anthropic.com/v1/messages", 4096, nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			prior := oldProviderBindingSpec{Protocol: tc.protocol, Endpoint: tc.endpoint,
-				DefaultModel: "model", MaxOutputTokens: tc.tokens, StructuredOutputModels: tc.structured}
-			current := BindingSpec{Protocol: tc.protocol, Endpoint: tc.endpoint,
-				DefaultModel: "model", MaxOutputTokens: tc.tokens, StructuredOutputModels: tc.structured}
-			expected := oldProviderFingerprint("private-fixture-key", prior)
-			for _, noOverride := range []map[string][]string{nil, {}} {
-				current.EffortModelLevels = noOverride
-				if actual := FingerprintBinding("private-fixture-key", current); actual != expected {
-					t.Fatalf("historical pending invocation cannot resume: original=%s current=%s", expected, actual)
-				}
+func TestModelProfileFingerprintScopesOnlySelectedModelAndNoLegacyBridge(t *testing.T) {
+	const key = "private-fixture-key"
+	for _, protocol := range []string{"openai.responses.v1", "anthropic.messages.2023-06-01"} {
+		base := BindingSpec{
+			Protocol: protocol, Endpoint: "https://provider.example/v1", DefaultModel: "model", MaxOutputTokens: 4096,
+		}
+		previous := previousBindingSpec{
+			Protocol: protocol, Endpoint: base.Endpoint, DefaultModel: base.DefaultModel, MaxOutputTokens: base.MaxOutputTokens,
+		}
+		root := FingerprintBinding(key, base)
+		unknown := FingerprintModelBinding(root, "model-a", model.Capabilities{}, false)
+		if unknown == previousBindingHMAC(key, previous) || len(unknown) != 64 {
+			t.Fatalf("new model-scoped authority reused beta.24 identity: %s", protocol)
+		}
+		original := model.Capabilities{
+			StructuredJSONSchema: true, EffortLevels: []string{"high", "low"},
+			DisallowSamplingWhenEffortOmitted: true,
+		}
+		same := model.Capabilities{
+			StructuredJSONSchema: true, EffortLevels: []string{"low", "high"},
+			DisallowSamplingWhenEffortOmitted: true,
+		}
+		exact := FingerprintModelBinding(root, "model-a", original, true)
+		if exact == unknown || exact != FingerprintModelBinding(root, "model-a", same, true) {
+			t.Fatal("selected model identity not bound canonically")
+		}
+		for _, changed := range []model.Capabilities{
+			{StructuredJSONSchema: true, EffortLevels: []string{"low", "high"}},
+			{EffortLevels: []string{"low", "high"}, DisallowSamplingWhenEffortOmitted: true},
+			{StructuredJSONSchema: true, EffortLevels: []string{"medium"}, DisallowSamplingWhenEffortOmitted: true},
+		} {
+			if exact == FingerprintModelBinding(root, "model-a", changed, true) {
+				t.Fatalf("selected model's capability change did not revoke pending execution grant: %+v", changed)
 			}
-			current.EffortModelLevels = map[string][]string{"private-model": {"high", "low"}}
-			changed := FingerprintBinding("private-fixture-key", current)
-			if changed == expected {
-				t.Fatal("explicit new effort policy failed to rotate binding authority")
-			}
-			// Certification order is not a meaningful policy change.
-			current.EffortModelLevels = map[string][]string{"private-model": {"low", "high"}}
-			if changed != FingerprintBinding("private-fixture-key", current) {
-				t.Fatal("capability order incorrectly rotates a frozen binding")
-			}
-		})
+		}
+		if exact == FingerprintModelBinding(root, "model-b", original, true) ||
+			FingerprintModelBinding(root, "model-a", original, false) == exact {
+			t.Fatal("changed original request model or certification did not rotate fingerprint")
+		}
+		modifiedTransport := base
+		modifiedTransport.BindingScope = "rotated-host-v2"
+		if exact == FingerprintModelBinding(FingerprintBinding(key, modifiedTransport), "model-a", original, true) ||
+			exact == FingerprintModelBinding(FingerprintBinding(key+"rotated", base), "model-a", original, true) {
+			t.Fatal("credential/transport drift did not invalidate original Provider identity")
+		}
 	}
 }

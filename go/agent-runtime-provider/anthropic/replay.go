@@ -11,21 +11,6 @@ import (
 
 const replayFormat = "messages.content.v1"
 
-func forcedChoiceUnsupported(name string) bool {
-	// These models reject tool_choice=any/tool even with adaptive thinking.
-	// This list is deliberately restrictive and should be revised with the
-	// official model capability matrix; unknown models rely on the API.
-	for _, prefix := range []string{
-		"claude-opus-5-5", "claude-sonnet-5-5",
-		"claude-fable-5-1", "claude-mythos-5-1",
-	} {
-		if name == prefix || strings.HasPrefix(name, prefix+"-") {
-			return true
-		}
-	}
-	return false
-}
-
 // normalizedContentForReplay keeps signed Thinking bytes unchanged but removes
 // nullable optional metadata from text/local Tool blocks. Some upstream
 // Messages validators reject caller:null when used as an input parameter;

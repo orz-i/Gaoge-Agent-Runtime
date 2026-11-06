@@ -48,12 +48,12 @@ func TestMythosPreviewEffortMaxWithoutXhighBeforeUnaryAndSSE(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"mythos-unary","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":2,"output_tokens":1}}`)
 	}))
 	defer server.Close()
-	client, err := anthropic.New(anthropic.Config{Endpoint: server.URL, APIKey: "synthetic-key"})
+	client, err := anthropic.New(anthropic.Config{Endpoint: server.URL, APIKey: "synthetic-key", ModelProfiles: fixtureAnthropicProfiles()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	caps, err := client.Capabilities(t.Context(), "claude-mythos-preview")
-	if err != nil || !slices.Equal(caps.EffortLevels, []string{"low", "medium", "high", "max"}) {
+	if err != nil || !slices.Equal(caps.EffortLevels, []string{"high", "low", "max", "medium"}) {
 		t.Fatalf("unsupported or invented public effort level: %+v err=%v", caps, err)
 	}
 	request := model.Request{

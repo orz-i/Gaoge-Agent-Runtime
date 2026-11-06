@@ -26,18 +26,17 @@ type Config struct {
 	// BindingScope identifies the Host's custom transport/policy revision.
 	// It is mandatory when HTTPClient is supplied and never persisted raw.
 	BindingScope string
-	// StructuredOutputModels opts explicitly named models/gateways into strict
-	// JSON Schema output. Unknown models otherwise fail closed.
-	StructuredOutputModels []string
-	// Explicit Host-certified levels for private or gateway model IDs.
-	EffortModelLevels map[string][]string
+	// ModelProfiles supplies an externally imported, Host-certified snapshot.
+	// Rebuild the adapter when model metadata changes. The *selected*
+	// request model's frozen profile is bound to the durable Provider
+	// fingerprint; unrelated catalog updates do not revoke pending work.
+	ModelProfiles model.ModelProfileSource
 }
 type Client struct {
-	http                   *providerhttp.Client
-	defaultModel           string
-	bindingFingerprint     string
-	structuredOutputModels map[string]bool
-	effortModelLevels      map[string][]string
+	http               *providerhttp.Client
+	defaultModel       string
+	bindingFingerprint string
+	profiles           map[string]model.Capabilities
 }
 
 func New(config Config) (*Client, error) {
@@ -51,23 +50,9 @@ func New(config Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	allowed := make(map[string]bool, len(config.StructuredOutputModels))
-	for _, name := range config.StructuredOutputModels {
-		if name == "" || strings.TrimSpace(name) != name {
-			return nil, providerhttp.ErrConfig
-		}
-		allowed[name] = true
-	}
-	effortLevels, err := providerhttp.NormalizeEffortModels(config.EffortModelLevels, providerhttp.OpenAIEffortLevels())
+	profiles, err := providerhttp.NormalizeModelProfiles(config.ModelProfiles, providerhttp.OpenAIEffortLevels())
 	if err != nil {
 		return nil, err
-	}
-	for id := range effortLevels {
-		if len(knownEffortLevels(id)) != 0 {
-			// Private override may never broaden a known public model's
-			// original Provider-owned capability (e.g. Astra none).
-			return nil, providerhttp.ErrConfig
-		}
 	}
 	actualEndpoint := config.Endpoint
 	if actualEndpoint == "" {
@@ -76,13 +61,22 @@ func New(config Config) (*Client, error) {
 	fingerprint := providerhttp.FingerprintBinding(config.APIKey, providerhttp.BindingSpec{
 		Protocol: "openai.responses.v1", Endpoint: actualEndpoint,
 		DefaultModel: strings.TrimSpace(config.DefaultModel), BindingScope: config.BindingScope,
-		StructuredOutputModels: config.StructuredOutputModels, EffortModelLevels: effortLevels,
 	})
 	return &Client{http: httpClient, defaultModel: strings.TrimSpace(config.DefaultModel),
-		bindingFingerprint: fingerprint, structuredOutputModels: allowed, effortModelLevels: effortLevels}, nil
+		bindingFingerprint: fingerprint, profiles: profiles}, nil
 }
-func (*Client) ProviderName() string                                { return "openai" }
-func (c *Client) BindingFingerprintForRequest(model.Request) string { return c.bindingFingerprint }
+func (*Client) ProviderName() string { return "openai" }
+func (c *Client) BindingFingerprintForRequest(request model.Request) string {
+	if c == nil {
+		return ""
+	}
+	name := strings.TrimSpace(request.Model)
+	if name == "" {
+		name = c.defaultModel
+	}
+	profile, certified := c.profiles[name]
+	return providerhttp.FingerprintModelBinding(c.bindingFingerprint, name, profile, certified)
+}
 
 type outputItem struct {
 	Type    string  `json:"type"`
@@ -145,11 +139,14 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if name == "" {
 		return prepared{}, ErrUnsupported
 	}
+	profile := c.profiles[name]
 	if len(options.Sampling) != 0 &&
 		(options.Effort != "" && options.Effort != "none" ||
-			options.Effort == "" && len(knownEffortLevels(name)) != 0) {
-		// Reasoning models default to a non-none effort, which does
-		// not accept temperature or top_p. Do not silently drop them.
+			options.Effort == "" && profile.DisallowSamplingWhenEffortOmitted) {
+		// The documented public-model default is non-none reasoning;
+		// omitted effort does not authorize temperature or top_p.
+		// Unknown/private routes retain their original omitted-effort
+		// contract until the Host explicitly certifies a policy.
 		return prepared{}, ErrUnsupported
 	}
 	if options.Effort != "" {
@@ -272,6 +269,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if len(definitions) != 0 {
 		payload["tools"] = definitions
 		if request.RequireToolCall {
+			if c.profiles[name].DisallowForcedToolChoice {
+				return prepared{}, ErrUnsupported
+			}
 			payload["tool_choice"] = "required"
 		}
 	} else if request.RequireToolCall {

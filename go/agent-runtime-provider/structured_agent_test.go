@@ -94,10 +94,12 @@ func TestStructuredOutputProviderToolLoopEndToEnd(t *testing.T) {
 			var err error
 			modelID := "gpt-4.1"
 			if vendor == "openai" {
-				client, err = openai.New(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
+				client, err = openai.New(openai.Config{APIKey: "test", Endpoint: endpoint.URL,
+					ModelProfiles: model.StaticModelProfiles{"gpt-4.1": {StructuredJSONSchema: true}}})
 			} else {
 				modelID = "claude-sonnet-5-5"
-				client, err = anthropic.New(anthropic.Config{APIKey: "test", Endpoint: endpoint.URL})
+				client, err = anthropic.New(anthropic.Config{APIKey: "test", Endpoint: endpoint.URL,
+					ModelProfiles: model.StaticModelProfiles{"claude-sonnet-5-5": {StructuredJSONSchema: true}}})
 			}
 			if err != nil {
 				t.Fatal(err)

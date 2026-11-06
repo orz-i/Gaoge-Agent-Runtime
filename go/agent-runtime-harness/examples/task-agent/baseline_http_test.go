@@ -1040,6 +1040,7 @@ func TestBaselineHTTPWireObserverPreservesJSONSplitAcrossTextParts(t *testing.T)
 	defer server.Close()
 	input := unitBaselineInput()
 	input.Endpoint, input.APIKey = server.URL+"/split-probe", baselineHTTPFakeKey
+	input.AllowUnknownStructuredModel = true // Host certifies the selected strict-schema probe.
 	event := baselinePreflight(t.Context(), input.settings())
 	if event.Status != "passed" || event.FailureCode != "" || calls.Load() != 3 ||
 		event.ToolProbe == nil || event.ToolProbe.Status != "passed" {

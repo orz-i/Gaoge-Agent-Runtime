@@ -55,14 +55,25 @@ func TestRoutedProviderBindingFingerprintFencesSameNameEndpointAndCredentialDrif
 func TestProviderBindingFingerprintIncludesProtocolAndEffectivePolicy(t *testing.T) {
 	t.Parallel()
 	openaiClient, err := openai.New(openai.Config{APIKey: "test-credential", Endpoint: "https://gateway.example/v1/messages",
-		StructuredOutputModels: []string{"model-z", "model-a"}})
+		ModelProfiles: model.StaticModelProfiles{"model-z": {StructuredJSONSchema: true}, "model-a": {StructuredJSONSchema: true, EffortLevels: []string{"high", "low"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	same, err := openai.New(openai.Config{APIKey: "test-credential", Endpoint: "https://gateway.example/v1/messages",
-		StructuredOutputModels: []string{"model-a", "model-z"}})
-	if err != nil || openaiClient.BindingFingerprintForRequest(model.Request{}) != same.BindingFingerprintForRequest(model.Request{}) {
-		t.Fatalf("semantically identical model allowlists changed binding identity: %v", err)
+		ModelProfiles: model.StaticModelProfiles{"model-a": {StructuredJSONSchema: true, EffortLevels: []string{"low", "high"}}, "model-z": {StructuredJSONSchema: true}}})
+	modelA := model.Request{Model: "model-a"}
+	if err != nil || openaiClient.BindingFingerprintForRequest(modelA) != same.BindingFingerprintForRequest(modelA) {
+		t.Fatalf("semantically identical selected model capability changed binding identity: %v", err)
+	}
+	// The same Host may update unrelated catalog entries without revoking
+	// pending work on an unchanged selected model.
+	newCatalog, err := openai.New(openai.Config{APIKey: "test-credential", Endpoint: "https://gateway.example/v1/messages",
+		ModelProfiles: model.StaticModelProfiles{"model-a": {StructuredJSONSchema: true, EffortLevels: []string{"low", "high"}}, "model-z": {EffortLevels: []string{"low"}}}})
+	if err != nil || openaiClient.BindingFingerprintForRequest(modelA) != newCatalog.BindingFingerprintForRequest(modelA) {
+		t.Fatalf("unrelated catalog update unnecessarily invalidated model-a: %v", err)
+	}
+	if openaiClient.BindingFingerprintForRequest(model.Request{Model: "model-z"}) == newCatalog.BindingFingerprintForRequest(model.Request{Model: "model-z"}) {
+		t.Fatal("changed selected model capability retained the original execution grant")
 	}
 	anthropicClient, err := anthropic.New(anthropic.Config{APIKey: "test-credential", Endpoint: "https://gateway.example/v1/messages"})
 	if err != nil || anthropicClient.BindingFingerprintForRequest(model.Request{}) == openaiClient.BindingFingerprintForRequest(model.Request{}) {

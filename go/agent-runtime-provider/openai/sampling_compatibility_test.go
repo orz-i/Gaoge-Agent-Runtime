@@ -50,7 +50,7 @@ func TestOpenAIReasoningSamplingCombinationsBeforeUnaryAndStream(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"object":"response","id":"sample-unary","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1}}`)
 	}))
 	defer server.Close()
-	client, err := openai.New(openai.Config{APIKey: "synthetic-key", Endpoint: server.URL})
+	client, err := openai.New(openai.Config{APIKey: "synthetic-key", Endpoint: server.URL, ModelProfiles: fixtureOpenAIProfiles()})
 	if err != nil {
 		t.Fatal(err)
 	}
