@@ -76,7 +76,7 @@ func TestOpenAIContradictorySSEDoneNeverDispatchesLocalTool(t *testing.T) {
 						"status": "completed", "output": output, "usage": map[string]any{"input_tokens": 17, "output_tokens": 5}}})
 			}))
 			defer endpoint.Close()
-			client, err := openai.New(openai.Config{APIKey: "audit-only", Endpoint: endpoint.URL})
+			client, err := newAuditedOpenAIClient(openai.Config{APIKey: "audit-only", Endpoint: endpoint.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

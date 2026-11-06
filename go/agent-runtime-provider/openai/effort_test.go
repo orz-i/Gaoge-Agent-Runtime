@@ -40,7 +40,7 @@ func TestExactModelEffortProjectedBeforePhysicalOpenAI(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := openai.New(openai.Config{APIKey: "secret", Endpoint: server.URL, DefaultModel: "gpt-6-sol"})
+	client, err := openai.New(openai.Config{APIKey: "secret", Endpoint: server.URL, DefaultModel: "gpt-6-sol", ModelProfiles: fixtureOpenAIProfiles()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +86,9 @@ func TestExactModelEffortProjectedBeforePhysicalOpenAI(t *testing.T) {
 	}
 }
 
-func TestOpenAIEffortOverrideIsBoundAndImmutable(t *testing.T) {
-	overrides := map[string][]string{"proxy-private": {"medium", "high"}}
-	client, err := openai.New(openai.Config{APIKey: "secret", DefaultModel: "proxy-private", EffortModelLevels: overrides})
+func TestOpenAIImportedProfileIsBoundAndImmutable(t *testing.T) {
+	source := model.StaticModelProfiles{"proxy-private": {StructuredJSONSchema: true, EffortLevels: []string{"medium", "high"}, SupportsSamplingWhenEffortOmitted: true}}
+	client, err := openai.New(openai.Config{APIKey: "secret", DefaultModel: "proxy-private", ModelProfiles: source})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,23 +97,29 @@ func TestOpenAIEffortOverrideIsBoundAndImmutable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if client.BindingFingerprintForRequest(model.Request{}) == baseline.BindingFingerprintForRequest(model.Request{}) {
-		t.Fatal("certified effort policy missing from immutable provider identity")
+		t.Fatal("Host profile missing from Provider identity")
 	}
-	overrides["proxy-private"][0] = "low"
-	caps, err := client.Capabilities(context.Background(), "proxy-private")
-	if err != nil || !slices.Equal(caps.EffortLevels, []string{"high", "medium"}) {
-		t.Fatalf("caller mutated verified capability: %+v %v", caps, err)
+	original, _ := client.Capabilities(t.Context(), "proxy-private")
+	changed := source["proxy-private"]
+	changed.EffortLevels[0] = "low"
+	changed.StructuredJSONSchema = false
+	source["proxy-private"] = changed
+	after, err := client.Capabilities(t.Context(), "proxy-private")
+	if err != nil || !slices.Equal(after.EffortLevels, []string{"high", "medium"}) || !after.StructuredJSONSchema || after.SupportsSamplingWhenEffortOmitted != original.SupportsSamplingWhenEffortOmitted {
+		t.Fatalf("mutable Host source modified frozen capabilities: %+v %v", after, err)
 	}
-	if _, err := openai.New(openai.Config{APIKey: "secret", EffortModelLevels: map[string][]string{"private": {"high", "high"}}}); err == nil {
-		t.Fatal("invalid duplicated levels accepted")
+	for _, bad := range []model.StaticModelProfiles{
+		{"private": {EffortLevels: []string{"high", "high"}}},
+		{"private": {EffortLevels: []string{"ultra"}}},
+		{" private": {EffortLevels: []string{"high"}}},
+	} {
+		if _, err := openai.New(openai.Config{APIKey: "secret", ModelProfiles: bad}); err == nil {
+			t.Fatalf("invalid Host profile accepted: %+v", bad)
+		}
 	}
-	if _, err := openai.New(openai.Config{APIKey: "secret", EffortModelLevels: map[string][]string{"private": {"ultra"}}}); err == nil {
-		t.Fatal("unknown level accepted")
-	}
-	if _, err := openai.New(openai.Config{APIKey: "secret", EffortModelLevels: map[string][]string{"private": {"high"}}}); err != nil {
-		t.Fatalf("valid certified config rejected: %v", err)
-	}
-	if _, err := openai.New(openai.Config{APIKey: "secret", EffortModelLevels: map[string][]string{"gpt-6-astra": {"none"}}}); err == nil {
-		t.Fatal("Host override re-enabled unsupported public Astra effort")
+	// The SDK deliberately does not know which names are public. Host-owned
+	// metadata for any exact name is authorized and bound by the fingerprint.
+	if _, err := openai.New(openai.Config{APIKey: "secret", ModelProfiles: model.StaticModelProfiles{"gpt-6-astra": {EffortLevels: []string{"low"}}}}); err != nil {
+		t.Fatalf("Host-defined profile was wrongly denied by SDK model-name registry: %v", err)
 	}
 }

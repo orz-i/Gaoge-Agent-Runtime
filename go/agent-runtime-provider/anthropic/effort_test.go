@@ -51,7 +51,7 @@ func TestAnthropicEffortAndStrictOutputShareOneConfig(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := anthropic.New(anthropic.Config{APIKey: "secret", Endpoint: server.URL, DefaultModel: "claude-sonnet-5-5"})
+	client, err := anthropic.New(anthropic.Config{APIKey: "secret", Endpoint: server.URL, DefaultModel: "claude-sonnet-5-5", ModelProfiles: fixtureAnthropicProfiles()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,9 +99,9 @@ func TestAnthropicEffortAndStrictOutputShareOneConfig(t *testing.T) {
 	}
 }
 
-func TestAnthropicEffortPolicyFingerprintAndIsolation(t *testing.T) {
-	levels := map[string][]string{"claude-private": {"high", "low"}}
-	a, err := anthropic.New(anthropic.Config{APIKey: "secret", EffortModelLevels: levels})
+func TestAnthropicImportedProfileFingerprintAndIsolation(t *testing.T) {
+	source := model.StaticModelProfiles{"claude-private": {StructuredJSONSchema: true, EffortLevels: []string{"high", "low"}, SupportsSamplingWhenEffortOmitted: true}}
+	a, err := anthropic.New(anthropic.Config{APIKey: "secret", ModelProfiles: source})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,20 +109,27 @@ func TestAnthropicEffortPolicyFingerprintAndIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.BindingFingerprintForRequest(model.Request{}) == b.BindingFingerprintForRequest(model.Request{}) {
-		t.Fatal("effort Host opt-in omitted from bound provider identity")
+	if a.BindingFingerprintForRequest(model.Request{Model: "claude-private"}) == b.BindingFingerprintForRequest(model.Request{Model: "claude-private"}) {
+		t.Fatal("external profile missing from Provider HMAC")
 	}
-	levels["claude-private"][0] = "max"
-	caps, err := a.Capabilities(context.Background(), "claude-private")
-	if err != nil || !slices.Equal(caps.EffortLevels, []string{"high", "low"}) {
-		t.Fatalf("mutable host config changed existing binding: %+v %v", caps, err)
+	profile := source["claude-private"]
+	profile.EffortLevels[0] = "max"
+	profile.StructuredJSONSchema = false
+	source["claude-private"] = profile
+	caps, err := a.Capabilities(t.Context(), "claude-private")
+	if err != nil || !slices.Equal(caps.EffortLevels, []string{"high", "low"}) || !caps.StructuredJSONSchema {
+		t.Fatalf("mutable source rewrote frozen provider policy: %+v %v", caps, err)
 	}
-	for _, input := range []map[string][]string{
-		{"claude-private": {"none"}}, {"claude-private": {"low", "low"}}, {" claude-private": {"high"}},
-		{"claude-sonnet-5-5": {"none"}},
+	for _, bad := range []model.StaticModelProfiles{
+		{"claude-private": {EffortLevels: []string{"none"}}},
+		{"claude-private": {EffortLevels: []string{"low", "low"}}},
+		{" claude-private": {EffortLevels: []string{"high"}}},
 	} {
-		if _, err := anthropic.New(anthropic.Config{APIKey: "secret", EffortModelLevels: input}); err == nil {
-			t.Fatalf("invalid policy accepted: %+v", input)
+		if _, err := anthropic.New(anthropic.Config{APIKey: "secret", ModelProfiles: bad}); err == nil {
+			t.Fatalf("invalid profile accepted: %+v", bad)
 		}
+	}
+	if _, err := anthropic.New(anthropic.Config{APIKey: "secret", ModelProfiles: model.StaticModelProfiles{"claude-sonnet-5-5": {EffortLevels: []string{"low"}}}}); err != nil {
+		t.Fatalf("Host model snapshot unexpectedly blocked by SDK model list: %v", err)
 	}
 }

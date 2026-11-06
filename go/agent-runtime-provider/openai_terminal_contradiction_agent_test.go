@@ -39,7 +39,7 @@ func TestOpenAIContradictoryOuterCompletionNeverExecutesLocalTool(t *testing.T) 
 				_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", body)
 			}))
 			defer server.Close()
-			client, err := openai.New(openai.Config{APIKey: "audit", Endpoint: server.URL})
+			client, err := newAuditedOpenAIClient(openai.Config{APIKey: "audit", Endpoint: server.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

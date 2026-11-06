@@ -86,7 +86,7 @@ func TestAnthropicTerminalSSEOrderCannotDispatchLocalTool(t *testing.T) {
 				write("message_stop", `{"type":"message_stop"}`)
 			}))
 			defer server.Close()
-			client, err := anthropic.New(anthropic.Config{APIKey: "audit-only", Endpoint: server.URL})
+			client, err := newAuditedAnthropicClient(anthropic.Config{APIKey: "audit-only", Endpoint: server.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

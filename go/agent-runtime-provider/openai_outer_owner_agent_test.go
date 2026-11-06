@@ -63,7 +63,7 @@ func TestForeignResponsesOuterResourceNeverExecutesLocalTool(t *testing.T) {
 				_, _ = fmt.Fprintf(w, "event: response.completed\ndata: %s\n\n", raw)
 			}))
 			defer server.Close()
-			client, err := openai.New(openai.Config{APIKey: "audit", Endpoint: server.URL})
+			client, err := newAuditedOpenAIClient(openai.Config{APIKey: "audit", Endpoint: server.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

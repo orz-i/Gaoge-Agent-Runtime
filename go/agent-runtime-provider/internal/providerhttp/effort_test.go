@@ -2,8 +2,11 @@ package providerhttp
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 func TestParseModelOptionsFailClosed(t *testing.T) {
@@ -46,22 +49,56 @@ func TestParseModelOptionsFailClosed(t *testing.T) {
 	}
 }
 
-func TestEffortModelOverridesAreIsolatedAndCanonical(t *testing.T) {
-	original := map[string][]string{"private-v1": {"high", "low"}}
-	first, err := NormalizeEffortModels(original, []string{"low", "medium", "high"})
-	if err != nil || !reflect.DeepEqual(first["private-v1"], []string{"high", "low"}) {
+func TestImportedProfilesAreIsolatedAndCanonical(t *testing.T) {
+	original := model.StaticModelProfiles{"private-v1": {StructuredJSONSchema: true, EffortLevels: []string{"low", "high"}, SupportsSamplingWhenEffortOmitted: true}}
+	first, err := NormalizeModelProfiles(original, []string{"low", "medium", "high"})
+	if err != nil || !reflect.DeepEqual(first["private-v1"].EffortLevels, []string{"high", "low"}) {
 		t.Fatalf("normalized: %+v %v", first, err)
 	}
-	original["private-v1"][0] = "medium"
-	if first["private-v1"][0] != "high" {
-		t.Fatal("caller mutation changed certified levels")
+	mutated := original["private-v1"]
+	mutated.EffortLevels[0] = "medium"
+	original["private-v1"] = mutated
+	if first["private-v1"].EffortLevels[0] != "high" {
+		t.Fatal("caller mutation changed original certified levels")
 	}
-	for _, invalid := range []map[string][]string{
-		{"": {"low"}}, {" x ": {"low"}}, {"x": nil},
-		{"x": {"low", "low"}}, {"x": {"none"}}, {"x": {""}},
+	for _, invalid := range []model.StaticModelProfiles{
+		{"": {EffortLevels: []string{"low"}}},
+		{" x ": {EffortLevels: []string{"low"}}},
+		{"x": {EffortLevels: []string{"low", "low"}}},
+		{"x": {EffortLevels: []string{"none"}}},
+		{"x": {EffortLevels: []string{""}}},
 	} {
-		if _, err := NormalizeEffortModels(invalid, []string{"low", "medium", "high"}); err == nil {
+		if _, err := NormalizeModelProfiles(invalid, []string{"low", "medium", "high"}); err == nil {
 			t.Fatalf("accepted %v", invalid)
 		}
+	}
+	calls := 0
+	loader := model.ModelProfileSourceFunc(func() map[string]model.Capabilities {
+		calls++
+		return map[string]model.Capabilities{"external-id": {StructuredJSONSchema: true}}
+	})
+	if _, err := NormalizeModelProfiles(loader, []string{"high"}); err != nil || calls != 1 {
+		t.Fatalf("external Host source not snapshotted once: calls=%d err=%v", calls, err)
+	}
+}
+
+// Bounded snapshots prevent a Host metadata feed from accidentally adding
+// unbounded model payloads to each Provider construction.
+func TestImportedModelProfileSnapshotBoundsAndAbsentSource(t *testing.T) {
+	var absent model.ModelProfileSource = model.ModelProfileSourceFunc(nil)
+	got, err := NormalizeModelProfiles(absent, []string{"low", "high"})
+	if err != nil || len(got) != 0 {
+		t.Fatalf("nil model catalog must stay unverified: %+v %v", got, err)
+	}
+	catalog := make(model.StaticModelProfiles, 257)
+	for i := 0; i < 257; i++ {
+		catalog[fmt.Sprintf("external-model-%d", i)] = model.Capabilities{StructuredJSONSchema: true}
+	}
+	if _, err = NormalizeModelProfiles(catalog, []string{"low", "high"}); err == nil {
+		t.Fatal("oversized Host catalog accepted")
+	}
+	delete(catalog, "external-model-256")
+	if loaded, err := NormalizeModelProfiles(catalog, []string{"low", "high"}); err != nil || len(loaded) != 256 {
+		t.Fatalf("bounded Host catalog rejected: %d %v", len(loaded), err)
 	}
 }

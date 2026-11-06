@@ -67,6 +67,43 @@ terminal prompt; do not paste it into a command, report or chat.
 | Unknown-model schema opt-in | Explicit permission to probe native strict JSON Schema for an unlisted model; default no |
 | API key | Hidden input, passed to the already built runner through stdin |
 
+**Capability source:** The SDK and its OpenAI/Anthropic adapters no longer
+embed any public-model ID list. This baseline CLI is Host code: its existing
+`allowUnknownStructuredModel` selection is an explicit Host declaration for
+the exact chosen model, **not** a remote capability discovery or a guarantee
+that the Provider will accept a strict schema. The real Schema/Tool replay
+probes remain mandatory before task sampling. An explicit `reasoningEffort`
+is a **user preference, not a proof of upstream support**: without an
+independent Host-certified `EffortLevels` entry, it is rejected before any
+physical HTTP. The baseline also requires a positively certified mandatory
+Tool capability for its Tool/reasoning replay probe; merely selecting the
+unknown-model Schema opt-in never authorizes forced Tools or effort.
+
+To run the baseline with a verified model, the **Host operator** provisions
+a trusted JSON file outside the SDK and exposes its path via
+`GAOGE_MODEL_PROFILES_FILE` in the environment of the baseline runner.
+The user-facing baseline JSON stdin cannot inject or override that path.
+For example, Host-owned content (not shipped by the SDK):
+
+```json
+{
+  "host-verified-model-id": {
+    "StructuredJSONSchema": true,
+    "EffortLevels": ["low", "medium", "high"],
+    "SupportsForcedToolChoice": true,
+    "SupportsSamplingWhenEffortOmitted": false
+  }
+}
+```
+
+The Host can instead directly supply a `model.ModelProfileSource` in its
+Go integration. The file loader is bounded (256 KiB), rejects ambiguous
+JSON keys/invalid fields and never logs its contents or path on failure.
+The operator, not user messages or the SDK, authenticates the source and
+keeps the selected model facts current. A changed selected model profile
+invalidates old pending bindings; unrelated catalog updates do not.
+See [provider adapter contract](provider-adapters.md).
+
 The context capacity must leave at least 8,192 tokens after reserving the output
 ceiling. The service input ceiling is fixed at 8,192 tokens for this measurement
 profile, so that the task exercises Context compaction even when the model

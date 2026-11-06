@@ -61,9 +61,9 @@ func TestDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool(t *testing.
 			var client model.Client
 			var err error
 			if kind == "openai" {
-				client, err = openai.New(openai.Config{APIKey: "test", Endpoint: server.URL})
+				client, err = newAuditedOpenAIClient(openai.Config{APIKey: "test", Endpoint: server.URL})
 			} else {
-				client, err = anthropic.New(anthropic.Config{APIKey: "test", Endpoint: server.URL})
+				client, err = newAuditedAnthropicClient(anthropic.Config{APIKey: "test", Endpoint: server.URL})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -187,9 +187,9 @@ func TestLateDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool(t *test
 			var client model.Client
 			var err error
 			if kind == "openai" {
-				client, err = openai.New(openai.Config{APIKey: "test", Endpoint: server.URL})
+				client, err = newAuditedOpenAIClient(openai.Config{APIKey: "test", Endpoint: server.URL})
 			} else {
-				client, err = anthropic.New(anthropic.Config{APIKey: "test", Endpoint: server.URL})
+				client, err = newAuditedAnthropicClient(anthropic.Config{APIKey: "test", Endpoint: server.URL})
 			}
 			if err != nil {
 				t.Fatal(err)

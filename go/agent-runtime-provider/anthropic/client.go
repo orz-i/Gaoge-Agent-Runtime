@@ -31,19 +31,16 @@ type Config struct {
 	// It is mandatory when HTTPClient is supplied and never persisted raw.
 	BindingScope           string
 	DefaultMaxOutputTokens int64
-	// StructuredOutputModels opts explicitly verified private/gateway model IDs
-	// into native strict JSON Schema output; unknown IDs otherwise fail closed.
-	StructuredOutputModels []string
-	// Exact Host-certified levels for private or gateway model IDs.
-	EffortModelLevels map[string][]string
+	// ModelProfiles is an externally supplied snapshot of exact model
+	// capabilities. This is Host data, never an embedded Provider model list.
+	ModelProfiles model.ModelProfileSource
 }
 type Client struct {
-	http                   *providerhttp.Client
-	defaultModel           string
-	maxTokens              int64
-	bindingFingerprint     string
-	structuredOutputModels map[string]bool
-	effortModelLevels      map[string][]string
+	http               *providerhttp.Client
+	defaultModel       string
+	maxTokens          int64
+	bindingFingerprint string
+	profiles           map[string]model.Capabilities
 }
 
 var ErrUnsupported = errors.New("unsupported Anthropic model request or response")
@@ -70,22 +67,10 @@ func New(config Config) (*Client, error) {
 	if tokens == 0 {
 		tokens = defaultMaxTokens
 	}
-	allowed := make(map[string]bool, len(config.StructuredOutputModels))
-	for _, name := range config.StructuredOutputModels {
-		if name == "" || strings.TrimSpace(name) != name {
-			return nil, providerhttp.ErrConfig
-		}
-		allowed[name] = true
-	}
-	effortLevels, err := providerhttp.NormalizeEffortModels(config.EffortModelLevels,
+	profiles, err := providerhttp.NormalizeModelProfiles(config.ModelProfiles,
 		[]string{"low", "medium", "high", "xhigh", "max"})
 	if err != nil {
 		return nil, err
-	}
-	for id := range effortLevels {
-		if len(knownEffortLevels(id)) != 0 {
-			return nil, providerhttp.ErrConfig
-		}
 	}
 	actualEndpoint := config.Endpoint
 	if actualEndpoint == "" {
@@ -94,14 +79,23 @@ func New(config Config) (*Client, error) {
 	fingerprint := providerhttp.FingerprintBinding(config.APIKey, providerhttp.BindingSpec{
 		Protocol: "anthropic.messages." + apiVersion, Endpoint: actualEndpoint,
 		DefaultModel: strings.TrimSpace(config.DefaultModel), BindingScope: config.BindingScope,
-		MaxOutputTokens: tokens, StructuredOutputModels: config.StructuredOutputModels,
-		EffortModelLevels: effortLevels,
+		MaxOutputTokens: tokens,
 	})
 	return &Client{http: h, defaultModel: strings.TrimSpace(config.DefaultModel),
-		maxTokens: tokens, bindingFingerprint: fingerprint, structuredOutputModels: allowed, effortModelLevels: effortLevels}, nil
+		maxTokens: tokens, bindingFingerprint: fingerprint, profiles: profiles}, nil
 }
-func (*Client) ProviderName() string                                { return "anthropic" }
-func (c *Client) BindingFingerprintForRequest(model.Request) string { return c.bindingFingerprint }
+func (*Client) ProviderName() string { return "anthropic" }
+func (c *Client) BindingFingerprintForRequest(request model.Request) string {
+	if c == nil {
+		return ""
+	}
+	name := strings.TrimSpace(request.Model)
+	if name == "" {
+		name = c.defaultModel
+	}
+	profile, certified := c.profiles[name]
+	return providerhttp.FingerprintModelBinding(c.bindingFingerprint, name, profile, certified)
+}
 
 type contentBlock struct {
 	Type      string          `json:"type"`
@@ -159,9 +153,10 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if name == "" {
 		return prepared{}, ErrUnsupported
 	}
-	if len(options.Sampling) != 0 && (options.Effort != "" || knownNoSampling(name)) {
-		// Adaptive thinking and the documented current model families
-		// reject temperature/top_p; never send an unsupported pair.
+	if len(options.Sampling) != 0 && (options.Effort != "" ||
+		!c.profiles[name].SupportsSamplingWhenEffortOmitted) {
+		// No sampled omitted-effort request is allowed until the Host
+		// certifies its compatibility for this exact model.
 		return prepared{}, ErrUnsupported
 	}
 	if options.Effort != "" {
@@ -314,7 +309,7 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if len(definitions) > 0 {
 		payload["tools"] = definitions
 		if request.RequireToolCall {
-			if forcedChoiceUnsupported(name) {
+			if !c.profiles[name].SupportsForcedToolChoice {
 				return prepared{}, ErrUnsupported
 			}
 			payload["tool_choice"] = map[string]any{"type": "any"}

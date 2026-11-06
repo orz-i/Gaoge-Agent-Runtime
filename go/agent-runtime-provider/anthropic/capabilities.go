@@ -2,6 +2,7 @@ package anthropic
 
 import (
 	"context"
+	"slices"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -19,38 +20,9 @@ func (c *Client) Capabilities(_ context.Context, modelID string) (model.Capabili
 	if modelID == "" || strings.TrimSpace(modelID) != modelID {
 		return model.Capabilities{}, model.ErrCapabilityUnavailable
 	}
-	return model.Capabilities{
-		StructuredJSONSchema: c.structuredOutputModels[modelID] || knownStructuredModel(modelID),
-		EffortLevels:         c.effortLevels(modelID),
-	}, nil
-}
-
-func knownStructuredModel(id string) bool {
-	// Models documented by Claude Platform as supporting output_config.format.
-	for _, family := range []string{
-		"claude-fable-5", "claude-fable-5-1",
-		"claude-mythos-5", "claude-mythos-5-1", "claude-mythos-preview",
-		"claude-opus-4-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-opus-5-5",
-		"claude-sonnet-4-5", "claude-sonnet-4-6", "claude-sonnet-5", "claude-sonnet-5-5",
-		"claude-haiku-4-5", "claude-haiku-5-5",
-	} {
-		if id == family {
-			return true
-		}
-		if snapshot, ok := strings.CutPrefix(id, family+"-"); ok && len(snapshot) == 8 && strings.HasPrefix(snapshot, "20") {
-			validDateSuffix := true
-			for _, digit := range snapshot {
-				if digit < '0' || digit > '9' {
-					validDateSuffix = false
-					break
-				}
-			}
-			if validDateSuffix {
-				return true
-			}
-		}
-	}
-	return false
+	profile := c.profiles[modelID]
+	profile.EffortLevels = slices.Clone(profile.EffortLevels)
+	return profile, nil
 }
 
 var _ model.CapabilityProvider = (*Client)(nil)

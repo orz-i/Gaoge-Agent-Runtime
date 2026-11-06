@@ -42,7 +42,7 @@ func historicalBindingHMAC(key string, input historicalBindingInput) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func TestHistoricalPendingNamedProviderBindingSurvivesEffortUpgrade(t *testing.T) {
+func TestPendingNamedProviderBindingResumesOnlyItsOriginalCatalogSnapshot(t *testing.T) {
 	for _, protocol := range []string{"openai", "anthropic"} {
 		t.Run(protocol, func(t *testing.T) {
 			physical := 0
@@ -70,16 +70,17 @@ func TestHistoricalPendingNamedProviderBindingSurvivesEffortUpgrade(t *testing.T
 			}))
 			defer server.Close()
 			const key = "durable-fixture-key"
+			profiles := model.StaticModelProfiles{"fixture-model": {StructuredJSONSchema: true}}
 			newModel := func() model.Client {
 				t.Helper()
 				if protocol == "openai" {
-					client, err := openai.New(openai.Config{APIKey: key, DefaultModel: "fixture-model", Endpoint: server.URL})
+					client, err := openai.New(openai.Config{APIKey: key, DefaultModel: "fixture-model", Endpoint: server.URL, ModelProfiles: profiles})
 					if err != nil {
 						t.Fatal(err)
 					}
 					return client
 				}
-				client, err := anthropic.New(anthropic.Config{APIKey: key, DefaultModel: "fixture-model", Endpoint: server.URL})
+				client, err := anthropic.New(anthropic.Config{APIKey: key, DefaultModel: "fixture-model", Endpoint: server.URL, ModelProfiles: profiles})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -124,13 +125,32 @@ func TestHistoricalPendingNamedProviderBindingSurvivesEffortUpgrade(t *testing.T
 				previous.Protocol = "anthropic.messages.2023-06-01"
 				previous.MaxOutputTokens = 4096
 			}
-			if active.BindingFingerprint != historicalBindingHMAC(key, previous) {
-				t.Fatalf("pending ModelInvocation cannot be resumed by previous fingerprint: %s", active.BindingFingerprint)
+			if active.BindingFingerprint == historicalBindingHMAC(key, previous) {
+				t.Fatalf("new profile authority reused incompatible beta.24 HMAC: %s", active.BindingFingerprint)
+			}
+			binder, ok := newModel().(model.RequestBindingFingerprinter)
+			if !ok || active.BindingFingerprint != binder.BindingFingerprintForRequest(model.Request{Model: request.Model}) {
+				t.Fatal("new pending intent is not bound to the original normalized Host catalog")
 			}
 			if active.RetryAfter == nil {
 				t.Fatal("pending retry lost durable due time")
 			}
 			now.now = active.RetryAfter.Add(time.Second)
+			// External discovery adds an unrelated model after the first call.
+			// The original selected model's frozen identity must still resume.
+			profiles["newly-discovered-model"] = model.Capabilities{StructuredJSONSchema: true}
+			if binder.BindingFingerprintForRequest(model.Request{Model: request.Model}) != newModel().(model.RequestBindingFingerprinter).BindingFingerprintForRequest(model.Request{Model: request.Model}) {
+				t.Fatal("unrelated catalog update invalidated selected pending model binding")
+			}
+			// A changed SELECTED model policy must reject before physical HTTP,
+			// preserving the original durable pending grant for later recovery.
+			original := profiles["fixture-model"]
+			profiles["fixture-model"] = model.Capabilities{StructuredJSONSchema: false}
+			_, incompatible := build()
+			if _, changedErr := incompatible.Resume(t.Context(), persisted.Run.ID, persisted.Run.Revision); !errors.Is(changedErr, agent.ErrProviderBindingMismatch) || physical != 1 {
+				t.Fatalf("selected capability drift crossed original physical binding: %v calls=%d", changedErr, physical)
+			}
+			profiles["fixture-model"] = original
 			_, resumed := build()
 			done, err := resumed.Resume(t.Context(), persisted.Run.ID, persisted.Run.Revision)
 			if errors.Is(err, agent.ErrProviderBindingMismatch) || err != nil || physical != 2 ||

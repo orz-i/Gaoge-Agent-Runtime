@@ -38,6 +38,14 @@ type Capabilities struct {
 	// controls for this concrete model binding. Empty means unverified: the
 	// host must not infer support from another model in the same provider.
 	EffortLevels []string
+	// SupportsSamplingWhenEffortOmitted positively certifies temperature/top_p
+	// when reasoning.effort is absent. Without this Host attestation the
+	// adapter refuses sampling before dispatch; no default effort is inferred.
+	SupportsSamplingWhenEffortOmitted bool
+	// SupportsForcedToolChoice positively certifies mandatory client Tools
+	// (Anthropic any / OpenAI required). Missing or false fails closed; normal
+	// optional Tools remain available without this stronger capability.
+	SupportsForcedToolChoice bool
 }
 
 // CapabilityProvider optionally reports support for one concrete model ID.

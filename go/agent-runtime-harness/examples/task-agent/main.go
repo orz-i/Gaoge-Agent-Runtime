@@ -26,6 +26,7 @@ type settings struct {
 	endpoint, apiKey, sampleID, bindingScope string
 	allowUnknownStructuredModel              bool
 	reasoningEffort                          string
+	modelProfiles                            model.ModelProfileSource
 	httpClient                               *http.Client
 }
 
@@ -128,19 +129,18 @@ func (config settings) newModel() (model.Client, error) {
 			key = os.Getenv("ANTHROPIC_API_KEY")
 		}
 	}
-	var allowed []string
-	if config.allowUnknownStructuredModel {
-		allowed = []string{config.modelID}
+	profiles, err := config.hostModelProfileSource()
+	if err != nil {
+		return nil, err
 	}
 	var client model.Client
-	var err error
 	switch config.provider {
 	case "openai":
 		client, err = openai.New(openai.Config{APIKey: key, Endpoint: config.endpoint, HTTPClient: config.httpClient,
-			BindingScope: config.bindingScope, StructuredOutputModels: allowed})
+			BindingScope: config.bindingScope, ModelProfiles: profiles})
 	case "anthropic":
 		client, err = anthropic.New(anthropic.Config{APIKey: key, Endpoint: config.endpoint, HTTPClient: config.httpClient,
-			BindingScope: config.bindingScope, StructuredOutputModels: allowed})
+			BindingScope: config.bindingScope, ModelProfiles: profiles})
 	default:
 		return nil, errors.New("unsupported provider")
 	}

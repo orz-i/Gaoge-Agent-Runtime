@@ -94,10 +94,12 @@ func TestStructuredOutputProviderToolLoopEndToEnd(t *testing.T) {
 			var err error
 			modelID := "gpt-4.1"
 			if vendor == "openai" {
-				client, err = openai.New(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
+				client, err = newAuditedOpenAIClient(openai.Config{APIKey: "test", Endpoint: endpoint.URL,
+					ModelProfiles: model.StaticModelProfiles{"gpt-4.1": {StructuredJSONSchema: true, SupportsForcedToolChoice: true}}})
 			} else {
 				modelID = "claude-sonnet-5-5"
-				client, err = anthropic.New(anthropic.Config{APIKey: "test", Endpoint: endpoint.URL})
+				client, err = newAuditedAnthropicClient(anthropic.Config{APIKey: "test", Endpoint: endpoint.URL,
+					ModelProfiles: model.StaticModelProfiles{"claude-sonnet-5-5": {StructuredJSONSchema: true, SupportsForcedToolChoice: true}}})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -198,11 +200,11 @@ func TestIndependentPaidRequiredToolResponseMustHaveDurableAgentReceipt(t *testi
 			var err error
 			modelName := "gpt-audit"
 			if vendor == "openai" {
-				client, err = openai.New(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
+				client, err = newAuditedOpenAIClient(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
 			}
 			if vendor == "anthropic" {
 				modelName = "claude-test"
-				client, err = anthropic.New(anthropic.Config{APIKey: "test", Endpoint: endpoint.URL})
+				client, err = newAuditedAnthropicClient(anthropic.Config{APIKey: "test", Endpoint: endpoint.URL})
 			}
 			if err != nil {
 				t.Fatal(err)
@@ -292,7 +294,7 @@ func TestIndependentUnfinishedOpenAIToolCallCannotExecuteThroughAgent(t *testing
 				_, _ = fmt.Fprintf(w, "event: response.completed\ndata: %s\n\n", body)
 			}))
 			defer endpoint.Close()
-			client, err := openai.New(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
+			client, err := newAuditedOpenAIClient(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

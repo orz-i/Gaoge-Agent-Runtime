@@ -21,7 +21,7 @@ func newClient(t *testing.T, handler http.HandlerFunc) *openai.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	client, err := openai.New(openai.Config{APIKey: "test-secret", DefaultModel: "gpt-test", Endpoint: server.URL})
+	client, err := openai.New(openai.Config{APIKey: "test-secret", DefaultModel: "gpt-test", Endpoint: server.URL, ModelProfiles: fixtureOpenAIProfiles()})
 	if err != nil {
 		t.Fatal(err)
 	}

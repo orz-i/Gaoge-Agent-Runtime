@@ -58,9 +58,9 @@ func TestNonObjectPhysicalToolInputNeverExecutesRegisteredTool(t *testing.T) {
 			var err error
 			switch name {
 			case "openai":
-				client, err = openai.New(openai.Config{APIKey: "audit", Endpoint: server.URL})
+				client, err = newAuditedOpenAIClient(openai.Config{APIKey: "audit", Endpoint: server.URL})
 			case "anthropic":
-				client, err = anthropic.New(anthropic.Config{APIKey: "audit", Endpoint: server.URL})
+				client, err = newAuditedAnthropicClient(anthropic.Config{APIKey: "audit", Endpoint: server.URL})
 			}
 			if err != nil {
 				t.Fatal(err)

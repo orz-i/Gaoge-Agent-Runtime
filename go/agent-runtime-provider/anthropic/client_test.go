@@ -20,7 +20,7 @@ func newClient(t *testing.T, handler http.HandlerFunc) *anthropic.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
-	client, err := anthropic.New(anthropic.Config{APIKey: "test-secret", DefaultModel: "claude-test", Endpoint: server.URL})
+	client, err := anthropic.New(anthropic.Config{APIKey: "test-secret", DefaultModel: "claude-test", Endpoint: server.URL, ModelProfiles: fixtureAnthropicProfiles()})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,7 @@ import (
 )
 
 func TestHostVerifiedGatewayStrictOutputCapability(t *testing.T) {
-	client, err := anthropic.New(anthropic.Config{APIKey: "test", StructuredOutputModels: []string{"private-model-v1"}})
+	client, err := anthropic.New(anthropic.Config{APIKey: "test", ModelProfiles: model.StaticModelProfiles{"private-model-v1": {StructuredJSONSchema: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}

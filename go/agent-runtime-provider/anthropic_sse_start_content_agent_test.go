@@ -73,7 +73,7 @@ func TestAnthropicSSEInitialPhysicalContentCannotDispatchTool(t *testing.T) {
 				send("message_stop", `{"type":"message_stop"}`)
 			}))
 			defer server.Close()
-			client, err := anthropic.New(anthropic.Config{APIKey: "test", Endpoint: server.URL})
+			client, err := newAuditedAnthropicClient(anthropic.Config{APIKey: "test", Endpoint: server.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

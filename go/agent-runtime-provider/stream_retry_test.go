@@ -55,9 +55,9 @@ func TestAgentPersistsAndResumesTransientStreamFailures(t *testing.T) {
 			var client model.Client
 			var err error
 			if tc.kind == "openai" {
-				client, err = openai.New(openai.Config{APIKey: "fixture-key", DefaultModel: "fixture-model", Endpoint: server.URL})
+				client, err = newAuditedOpenAIClient(openai.Config{APIKey: "fixture-key", DefaultModel: "fixture-model", Endpoint: server.URL})
 			} else {
-				client, err = anthropic.New(anthropic.Config{APIKey: "fixture-key", DefaultModel: "fixture-model", Endpoint: server.URL})
+				client, err = newAuditedAnthropicClient(anthropic.Config{APIKey: "fixture-key", DefaultModel: "fixture-model", Endpoint: server.URL})
 			}
 			if err != nil {
 				t.Fatal(err)

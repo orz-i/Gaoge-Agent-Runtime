@@ -111,7 +111,7 @@ func TestCompletedMixedAnthropicToolConsumesPaidAgentInvocation(t *testing.T) {
 				send("message_stop", `{"type":"message_stop"}`)
 			}))
 			defer endpoint.Close()
-			client, err := anthropic.New(anthropic.Config{APIKey: "test", Endpoint: endpoint.URL})
+			client, err := newAuditedAnthropicClient(anthropic.Config{APIKey: "test", Endpoint: endpoint.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

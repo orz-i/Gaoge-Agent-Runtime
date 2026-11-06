@@ -625,6 +625,7 @@ func baselineHTTPAssertTextOnlyInResponseDebug(t *testing.T, events []map[string
 }
 
 func TestBaselineHTTPFailedProbeShowsOriginalAnswerAndNormalizedText(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	const answer = " \nThe check passed in a plain sentence.\n "
 	for _, protocol := range []string{"openai", "anthropic"} {
 		t.Run(protocol, func(t *testing.T) {
@@ -700,6 +701,7 @@ func TestBaselineHTTPFailedProbeShowsOriginalAnswerAndNormalizedText(t *testing.
 func TestBaselineHTTPAdaptersCompleteBothCases(t *testing.T) {
 	for _, protocol := range []string{"openai", "anthropic"} {
 		t.Run(protocol, func(t *testing.T) {
+			certifyBaselineModelForTest(t, "private/baseline-verified")
 			fixture := &baselineHTTPFixture{
 				t: t, protocol: protocol, path: "/private-gateway/v3/task-endpoint", model: "private/baseline-verified",
 			}
@@ -779,6 +781,7 @@ func TestBaselineHTTPAdaptersCompleteBothCases(t *testing.T) {
 }
 
 func TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	for _, tc := range []struct {
 		name    string
 		content string
@@ -924,6 +927,7 @@ func baselineHTTPAssertWireCheck(t *testing.T, actual any, responseFormat map[st
 }
 
 func TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	plain := "private-schema-probe-" + baselineHTTPFakeKey
 	legacyFirst := baselineOpenAIPhaseMessage("commentary", plain)
 	delete(legacyFirst, "phase")
@@ -1012,6 +1016,7 @@ func TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages(t *testin
 }
 
 func TestBaselineHTTPWireObserverPreservesJSONSplitAcrossTextParts(t *testing.T) {
+	certifyBaselineModelForTest(t, "gpt-4.1")
 	final := baselineOpenAIPhaseMessage("final_answer", "")
 	final["content"] = []any{
 		map[string]string{"type": "output_text", "text": " \n{\"ok\":"},
@@ -1040,6 +1045,7 @@ func TestBaselineHTTPWireObserverPreservesJSONSplitAcrossTextParts(t *testing.T)
 	defer server.Close()
 	input := unitBaselineInput()
 	input.Endpoint, input.APIKey = server.URL+"/split-probe", baselineHTTPFakeKey
+	input.AllowUnknownStructuredModel = true // Host certifies the selected strict-schema probe.
 	event := baselinePreflight(t.Context(), input.settings())
 	if event.Status != "passed" || event.FailureCode != "" || calls.Load() != 3 ||
 		event.ToolProbe == nil || event.ToolProbe.Status != "passed" {
@@ -1085,6 +1091,7 @@ func TestBaselineHTTPUnknownCapabilityMakesNoRequest(t *testing.T) {
 }
 
 func TestBaselineHTTPFailureCannotEchoCredentials(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	for _, protocol := range []string{"openai", "anthropic"} {
 		t.Run(protocol, func(t *testing.T) {
 			var calls atomic.Int32
@@ -1120,6 +1127,7 @@ func TestBaselineHTTPFailureCannotEchoCredentials(t *testing.T) {
 }
 
 func TestBaselineHTTPRedirectDoesNotForwardCredentials(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	var targetCalls atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		targetCalls.Add(1)
@@ -1149,6 +1157,7 @@ func TestBaselineHTTPRedirectDoesNotForwardCredentials(t *testing.T) {
 }
 
 func TestBaselineHTTPHTMLRootPageFailsPreflight(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	for _, protocol := range []string{"openai", "anthropic"} {
 		t.Run(protocol, func(t *testing.T) {
 			var calls atomic.Int32
@@ -1192,6 +1201,7 @@ func (baselineHTTPTransportTimeout) Timeout() bool         { return true }
 func (baselineHTTPTransportTimeout) Temporary() bool       { return true }
 
 func TestBaselineHTTPTransportTimeoutPreservesSafeClassification(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	for _, protocol := range []string{"openai", "anthropic"} {
 		t.Run(protocol, func(t *testing.T) {
 			var calls atomic.Int32
@@ -1242,6 +1252,7 @@ func TestBaselineHTTPTransportTimeoutPreservesSafeClassification(t *testing.T) {
 }
 
 func TestBaselineHTTPNoResponseDoesNotInventDiagnostics(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	for _, protocol := range []string{"openai", "anthropic"} {
 		t.Run(protocol, func(t *testing.T) {
 			var calls atomic.Int32
@@ -1281,6 +1292,7 @@ func TestBaselineHTTPNoResponseDoesNotInventDiagnostics(t *testing.T) {
 }
 
 func TestBaselineHTTPWrongAnswersRemainInFailureDenominator(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	fixture := &baselineHTTPFixture{
 		t: t, protocol: "openai", path: "/oracle-failure", model: "private/baseline-verified", wrongFinal: true,
 	}

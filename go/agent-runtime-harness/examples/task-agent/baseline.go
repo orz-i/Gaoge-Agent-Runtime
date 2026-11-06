@@ -162,7 +162,7 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 		return event
 	}
 	available, err := capability.Capabilities(probeCtx, config.routedModel())
-	if err != nil || !available.StructuredJSONSchema ||
+	if err != nil || !available.StructuredJSONSchema || !available.SupportsForcedToolChoice ||
 		(config.reasoningEffort != "" && !slices.Contains(available.EffortLevels, config.reasoningEffort)) {
 		event.FailureCode = failureCode(errors.Join(err, model.ErrCapabilityUnavailable), "capability_unavailable")
 		return event
