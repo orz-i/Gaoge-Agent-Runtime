@@ -152,6 +152,14 @@ def positive_integer(value, minimum=1, maximum=None):
 
 
 def validate_configuration(value, service_input_tokens=SERVICE_INPUT_TOKENS):
+    if not isinstance(value, dict):
+        raise SafeFailure("invalid_configuration")
+    # Preserve readability of historical reports containing extra metadata,
+    # but never silently discard an alias of the reasoning control.
+    for name in value:
+        if (isinstance(name, str) and name.casefold() == "reasoningeffort" and
+                name != "reasoningEffort"):
+            raise SafeFailure("invalid_configuration")
     config = {name: value[name] for name in PUBLIC_CONFIGURATION if name in value}
     if len(config) != len(PUBLIC_CONFIGURATION):
         raise SafeFailure("invalid_configuration")
@@ -169,6 +177,14 @@ def validate_configuration(value, service_input_tokens=SERVICE_INPUT_TOKENS):
         raise SafeFailure("insufficient_context_capacity")
     if type(config["allowUnknownStructuredModel"]) is not bool:
         raise SafeFailure("invalid_probe_choice")
+    if "reasoningEffort" in value:
+        effort = value["reasoningEffort"]
+        permitted = {"low", "medium", "high", "xhigh", "max"}
+        if config["provider"] == "openai":
+            permitted.add("none")
+        if type(effort) is not str or effort not in permitted:
+            raise SafeFailure("invalid_reasoning_effort")
+        config["reasoningEffort"] = effort
     return config
 
 
@@ -209,11 +225,15 @@ def collect_configuration():
         if probe in ("", "n", "no", "y", "yes"):
             break
         print("请输入 y 或 n。")
-    config = validate_configuration({
+    effort = input("推理强度 [留空=模型默认；low/medium/high/xhigh/max，OpenAI 可选 none]: ").strip()
+    candidate = {
         "provider": provider, "endpoint": endpoint, "model": model,
         "contextTokens": context_tokens, "maxOutputTokens": output_tokens,
         "repetitions": repetitions, "allowUnknownStructuredModel": probe in ("y", "yes"),
-    })
+    }
+    if effort:
+        candidate["reasoningEffort"] = effort
+    config = validate_configuration(candidate)
     display_configuration(config)
     return config
 
@@ -222,6 +242,7 @@ def display_configuration(config, heading="配置"):
     print("\n%s：" % heading)
     for name in PUBLIC_CONFIGURATION:
         print("  %s: %s" % (name, config[name]))
+    print("  reasoningEffort: %s" % config.get("reasoningEffort", "omitted (provider default)"))
     repetitions = config["repetitions"]
     if config["provider"] == "openai":
         print("将执行 2 个任务 × %d 次 = %d 个样本；先执行 1 次原生 Schema 探测，"
@@ -979,9 +1000,11 @@ def accept_event(report, event):
         for name in ("provider", "model", "contextTokens", "maxOutputTokens", "repetitions", "allowUnknownStructuredModel"):
             if configuration.get(name) != report["configuration"][name]:
                 raise ProtocolFailure("configuration_mismatch")
+        if configuration.get("reasoningEffort") != report["configuration"].get("reasoningEffort"):
+            raise ProtocolFailure("configuration_mismatch")
         public = {name: configuration[name] for name in (
             "provider", "model", "endpointOrigin", "endpointHash", "contextTokens",
-            "maxOutputTokens", "repetitions", "allowUnknownStructuredModel",
+            "maxOutputTokens", "repetitions", "allowUnknownStructuredModel", "reasoningEffort",
         ) if name in configuration}
         report["runner"] = {name: event[name] for name in ("schemaVersion", "taskVersion", "datasetHash", "profile", "requestedSamples")}
         report["runner"]["configuration"] = public
@@ -1401,7 +1424,7 @@ def comparison_markdown(old, new):
     validate_report(old)
     validate_report(new)
     lines = ["# 模型基线比较", "", "| 配置 | 基线 | 新报告 |", "| --- | --- | --- |"]
-    for name in ("provider", "endpoint", "model", "contextTokens", "maxOutputTokens", "repetitions"):
+    for name in ("provider", "endpoint", "model", "contextTokens", "maxOutputTokens", "repetitions", "reasoningEffort"):
         lines.append("| %s | %s | %s |" % (name, md_cell(old["configuration"].get(name)), md_cell(new["configuration"].get(name))))
     lines.append("| revision | %s | %s |" % (md_cell(old.get("source", {}).get("revision")), md_cell(new.get("source", {}).get("revision"))))
     incompatible = []

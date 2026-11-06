@@ -57,14 +57,26 @@ func NormalizeContextCheckpointPathQuery(value ContextCheckpointPathQuery) (Cont
 	return value, nil
 }
 
-// Store is the durable Harness state boundary. Implementations must clone values at every boundary.
+// Store is the trusted durable Harness execution-integrity boundary (ADR 0017),
+// not an untrusted source of independently forgeable owner records. Implementations
+// must clone values and preserve exact Session/Turn/Invocation owner identity
+// across reads, concurrent replays, crashes and revisions. A privileged Store
+// that persistently fabricates mutually consistent identities is outside the
+// SDK security contract; it cannot be authenticated by more reads of itself.
+// Host authentication and tenant-scoped HostThread authorization remain required.
 type Store interface {
+	// CreateSession atomically binds ID + HostThread + Actor for life. A
+	// same-ID replay with different original identity MUST return ErrConflict.
 	CreateSession(context.Context, Session) (Session, bool, error)
+	// GetSession must return the original committed owner or a Store error,
+	// never a changed Actor/HostThread for the same ID.
 	GetSession(context.Context, string) (Session, error)
 	CreateTurn(context.Context, Turn) (Turn, bool, error)
 	GetTurn(context.Context, string) (Turn, error)
 	UpdateTurn(context.Context, Turn, uint64) (Turn, error)
 	// CreateInvocation atomically permits one top-level Invocation per Turn.
+	// Its original Actor/Thread in Input, raw Input bytes and InputHash are
+	// immutable; a recomputed hash must NOT authorize different input.
 	// ParentItemID is trimmed; an empty value identifies the root. Replaying
 	// the same identity is allowed, but a different root returns ErrConflict.
 	CreateInvocation(context.Context, Invocation) (Invocation, bool, error)

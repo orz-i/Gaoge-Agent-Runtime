@@ -85,6 +85,62 @@ multi-provider router.
 
 ## Supported model contract
 
+### Exact-model effort controls
+
+The optional immutable `model.Request.ModelOptions` object now admits
+`{"reasoning":{"effort":"high"}}` alongside the existing bounded
+`temperature` and `top_p` sampling settings. A bare `effort`, extra
+nested reasoning keys, provider-native Tool injection, duplicate/aliased JSON
+members, null values and unknown options **fail before physical HTTP dispatch**.
+No default effort is inserted: omitting it retains each provider/model's
+own behavior.
+
+OpenAI Responses maps the approved value to `reasoning.effort`; Anthropic
+Messages maps it to `output_config.effort` and preserves an existing strict
+JSON `output_config.format`. The same provider-neutral spelling describes a
+different underlying provider policy; it is not a guarantee of equal token
+budgets, thinking volume or inference quality. `model.Capabilities.EffortLevels`
+advertises only an exact model's verified values (not all aliases under a
+name prefix). A missing level blocks dispatch. Exact private/gateway IDs can
+be explicitly certified through the adapter's
+`Config.EffortModelLevels map[string][]string`. The normalized immutable
+policy is included in the Provider HMAC binding fingerprint, so recovery
+cannot silently switch effort permissions. **When the new policy is empty or
+omitted, HMAC serialization remains byte-for-byte identical to the previous
+beta.24 adapter**; pending ModelInvocations can safely resume on unchanged
+bindings. Known public model IDs cannot be overridden with additional levels:
+explicit Host certification is only for unknown/private route IDs. If an
+upstream model stops supporting a declared level, its HTTP failure is
+reported, never downgraded to a cheaper effort or omitted setting. The
+exact public `claude-mythos-preview` ID supports `low`, `medium`, `high`
+and `max` but **not** `xhigh`, per the
+[Anthropic effort matrix](https://platform.claude.com/docs/en/build-with-claude/effort);
+this rule is enforced for both Unary and SSE requests.
+
+**Sampling compatibility:** OpenAI reasoning models reject `temperature` and
+`top_p` when explicit effort is not `none`; the documented non-`none` default
+of recognized model IDs also disallows those sampling fields when effort is
+omitted. An explicit supported `none` may retain sampling. Anthropic models
+with adaptive thinking reject sampling alongside an explicitly requested
+effort; documented newer models also reject sampling when effort is omitted.
+These known-invalid combinations fail before both Unary and SSE dispatch,
+without removing parameters or silently changing effort. Unknown/private
+models retain the previous omitted-effort sampling contract unless a certified
+explicit effort is requested. See the official [OpenAI reasoning guidance](https://developers.openai.com/api/docs/guides/latest-model)
+and [Claude thinking compatibility](https://platform.claude.com/docs/en/build-with-claude/thinking).
+
+Both streaming and unary requests use the same adapter preparation path;
+the entire `ModelOptions` value is already frozen in the Agent's durable
+`ModelInvocation` hash. Harness now checks unique JSON member names
+(including Unicode/case-fold aliases) **before** sealing any top-level or
+Role `ModelOptions`; Core and Provider share one validator, so no parser
+silently canonicalizes away a duplicate into a different execution policy.
+In-progress Runs are not rewritten. Supported
+model IDs and levels are intentionally conservative; additional models
+require independently verified exact-ID support or Host certification.
+This does **not** imply native Provider-hosted Tools or server-side
+compaction support.
+
 **OpenAI streaming item identity:** An observed `response.output_item.added`
 fixes its index, item ID, type and (for local functions) physical `call_id`
 and function name, or assistant role for message items. An inconsistent
@@ -459,8 +515,13 @@ is permitted. See the [P1 frame audit](audits/2026-11-03-pr87-anthropic-sse-reje
   silently downgrading the requirement. Ordinary automatic tool selection and
   signed Thinking replay remain supported. For newer, unrecognized model IDs,
   provider validation remains the final authority.
-- The only allowed `ModelOptions` today are `temperature` and
-  `top_p`, both in [0, 1]. Unknown keys are rejected, not silently sent.
+- The only admitted `ModelOptions` keys are `temperature` and `top_p`
+  (both in [0, 1]), plus the nested `reasoning.effort` field when the
+  **exact model** has a verified capability. Unknown, duplicate or null
+  keys/values are rejected rather than silently sent. Supported effort
+  values are model-specific; see the
+  [OpenAI deployment checklist](https://developers.openai.com/api/docs/guides/deployment-checklist)
+  and [Anthropic effort reference](https://platform.claude.com/docs/en/build-with-claude/effort).
 - Retryable HTTP status 408/409/425/429/5xx and transport failures return
   `model.RetryableError`; 400/401/403 errors do not. Agent owns retry
   budgets. A typed `net.Error` timeout from HTTP dispatch, while the caller

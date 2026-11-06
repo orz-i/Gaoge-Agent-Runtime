@@ -5,6 +5,52 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Harness owner-integrity trust-boundary closure (2026-11-06):
+  [ADR 0017](docs/adr/0017-trusted-harness-store-and-frozen-owner.md)
+  defines the Host-authenticated Actor and trusted durable Harness Store as
+  the owner integrity boundary. Memory/SQL conformance and real PostgreSQL
+  cross-connection tests exercise immutable Session owner, exact root
+  Invocation Input/Hash, concurrent hostile replay and CAS/ID protection.
+  A custom Store able to fabricate both immutable records remains outside
+  the supported security model; no extra Kernel query, owner-signer,
+  schema change, compatibility bridge or duplicative Agent state was added.
+  See [audit closure](docs/audits/2026-11-06-harness-store-tcb-closure.md).
+
+- Follow-up independent Session owner P1 remediation (2026-11-06):
+  Host-selected Actor and Kernel Thread are now checked against the original
+  frozen root Agent Invocation for all SessionClient read/recovery operations,
+  and again against the actual returned Snapshot. A Session-scoped Resume
+  passes the expected caller identity to its last native/Kernel dispatch
+  fence, preventing an inconsistent Store's first Session response from
+  authorizing another actor's pending model call. Adversarial once-only,
+  persistent and two-stage Store-return substitutions and same-Actor wrong
+  Thread are permanently covered; no new Store schema, replay protocol or
+  Kernel state. Anthropic's documented exact `claude-mythos-preview`
+  supports `max` but not `xhigh`; Unary and SSE are covered. See
+  [second-review remediation](docs/audits/2026-11-06-session-owner-followup-remediation.md).
+
+- Independent P1/P2 effort-governance remediation (2026-11-05):
+  preserve pre-effort Provider HMAC identity for old pending Runs; reject
+  duplicate or aliased ModelOptions *before* Harness canonicalization;
+  reject unsupported OpenAI/Anthropic reasoning-and-sampling combinations
+  before Unary/SSE physical dispatch; preserve explicit baseline effort
+  without accepting null/empty/case-folded shadow fields. Core and
+  Provider now share one strict JSON-member validator; cross-restart
+  original-ID recovery and independent red-to-green fault probes covered.
+  No new Kernel status, Store schema, alternate recovery protocol or
+  compatibility bridge. See [remediation notes](docs/audits/2026-11-05-three-part-agent-independent-remediation.md).
+
+- Three-part Provider/Agent-Harness/quality governance (2026-11-05):
+  exact-model reasoning effort support with pre-dispatch rejection and
+  Provider binding fingerprint, single Session read/resume identity guard,
+  and optional effort-aware real-model task/recovery baseline. Offline
+  randomized Agent policy oracle and two performance workloads show that
+  an attempted hash-index optimization regressed common-case latency;
+  the optimization was deliberately reverted. No Kernel schema or Agent
+  loop change. See [Provider protocol](docs/provider-adapters.md),
+  [benchmark guide](docs/performance.md) and
+  [Session convergence audit](docs/audits/2026-11-05-session-identity-convergence.md).
+
 - Harness top-level unknown-effect outcome hard cut: a custom composite Feature,
   Agent or Retry returning no physical Run receipt can no longer be reported
   as successfully cancelled merely because a same-ID local Kernel Run is

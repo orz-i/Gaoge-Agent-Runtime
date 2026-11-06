@@ -121,6 +121,7 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 		Transcript: transcript,
 		Config: harness.ConfigSnapshot{
 			Model:          config.routedModel(),
+			ModelOptions:   config.modelOptions(),
 			Instructions:   taskInstructions,
 			OutputContract: &model.OutputContract{Name: "task_answer", Schema: answerSchema},
 			ToolKeys:       []string{lookupKey, harness.ContextArtifactToolKey, draftKey},

@@ -254,26 +254,55 @@ func Stream(resp *http.Response, onEvent func(event string, data []byte) error) 
 	return dispatch()
 }
 
-// ParseOptions permits only provider-neutral, explicitly supported options.
-// Unknown fields fail closed instead of silently dropping caller preferences.
-func ParseOptions(raw json.RawMessage) (map[string]any, error) {
+// ModelOptions is a deliberately small, provider-neutral request projection.
+// Effort is not a wire field: OpenAI and Anthropic encode it differently.
+// It is frozen with the whole ModelInvocation before any physical dispatch.
+type ModelOptions struct {
+	Sampling map[string]any
+	Effort   string
+}
+
+// ParseOptions rejects unknown, ambiguous or malformed options before a
+// provider request is sent. In particular, no caller-controlled wire object
+// may bypass the adapter's Tool, replay or structured-output restrictions.
+func ParseOptions(raw json.RawMessage) (ModelOptions, error) {
 	if len(raw) == 0 {
-		return nil, nil
+		return ModelOptions{}, nil
+	}
+	if len(raw) > 512 || ValidateUniqueJSONObject(raw) != nil {
+		return ModelOptions{}, ErrConfig
 	}
 	var items map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &items); err != nil || items == nil {
-		return nil, ErrConfig
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return ModelOptions{}, ErrConfig
 	}
-	options := make(map[string]any, len(items))
+	options := ModelOptions{Sampling: make(map[string]any, len(items))}
 	for k, v := range items {
-		if k != "temperature" && k != "top_p" {
-			return nil, ErrConfig
+		switch k {
+		case "temperature", "top_p":
+			var number float64
+			// JSON null silently unmarshals to zero into a nonpointer float;
+			// it is not a valid explicit sampling value.
+			if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+				return ModelOptions{}, ErrConfig
+			}
+			if err := json.Unmarshal(v, &number); err != nil || number < 0 || number > 1 {
+				return ModelOptions{}, ErrConfig
+			}
+			options.Sampling[k] = number
+		case "reasoning":
+			var reasoning map[string]json.RawMessage
+			if err := json.Unmarshal(v, &reasoning); err != nil || len(reasoning) != 1 {
+				return ModelOptions{}, ErrConfig
+			}
+			var effort string
+			if err := json.Unmarshal(reasoning["effort"], &effort); err != nil || !validEffort(effort) {
+				return ModelOptions{}, ErrConfig
+			}
+			options.Effort = effort
+		default:
+			return ModelOptions{}, ErrConfig
 		}
-		var number float64
-		if err := json.Unmarshal(v, &number); err != nil || number < 0 || number > 1 {
-			return nil, ErrConfig
-		}
-		options[k] = number
 	}
 	return options, nil
 }

@@ -18,6 +18,16 @@ import (
 // original Start or Prompt to repair admission, including its original Context
 // and allowances. Resume never reconstructs those inputs from current settings.
 func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, error) {
+	return runner.resumeTurn(ctx, turnID, nil)
+}
+
+// The Session facade carries its Host-authorized Actor/Thread to the native
+// physical continuation gate. Direct Runner callers keep their own Host auth.
+func (runner *Runner) resumeTurnForSession(ctx context.Context, turnID string, actor kernel.ActorRef, thread kernel.ThreadRef) (Snapshot, error) {
+	return runner.resumeTurn(ctx, turnID, &sessionBoundOwner{actor: actor, thread: thread})
+}
+
+func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *sessionBoundOwner) (Snapshot, error) {
 	if runner == nil || runner.runtime == nil || runner.store == nil || runner.agent == nil || strings.TrimSpace(turnID) == "" {
 		return Snapshot{}, ErrInvalidRequest
 	}
@@ -31,6 +41,9 @@ func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, 
 	}
 	if invocation.ExecutionClass != ExecutionAgent {
 		return runner.resumeTurnError(ctx, turn, nil, ErrInvalidRequest)
+	}
+	if expected != nil && requireSessionRootOwner(turn, invocation, *expected) != nil {
+		return Snapshot{}, ErrConflict
 	}
 	if terminalTurnStatus(turn.Status) {
 		return runner.Refresh(ctx, turn.ID)
@@ -46,6 +59,9 @@ func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, 
 	if err != nil {
 		return runner.resumeTurnError(ctx, turn, nil, err)
 	}
+	if expected != nil && session.Actor != expected.actor {
+		return Snapshot{}, ErrConflict
+	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err != nil {
 		if errors.Is(err, kernel.ErrNotFound) {
@@ -54,6 +70,12 @@ func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, 
 		return runner.resumeTurnError(ctx, turn, nil, err)
 	}
 	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) || runtimeSnapshot.Run.Kind != agent.RunKind || runtimeSnapshot.Run.Actor != session.Actor {
+		return Snapshot{}, ErrConflict
+	}
+	if expected != nil && (runtimeSnapshot.Run.Actor != expected.actor || runtimeSnapshot.Run.Thread != expected.thread) {
+		// Cross-check the independent Kernel owner immediately before any
+		// executable Agent.Resume work. A retargeted Session Store alone
+		// cannot authorize someone else's original physical invocation.
 		return Snapshot{}, ErrConflict
 	}
 	// Matching Run ID, Kind and Session Actor do not authorize a physical

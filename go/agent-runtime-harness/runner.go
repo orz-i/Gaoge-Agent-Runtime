@@ -842,14 +842,34 @@ func (runner *Runner) Load(ctx context.Context, turnID string) (Snapshot, error)
 
 // Refresh synchronizes one active Harness Turn from its top-level Invocation.
 func (runner *Runner) Refresh(ctx context.Context, turnID string) (Snapshot, error) {
+	return runner.refreshTurn(ctx, turnID, nil)
+}
+
+// A Session facade must not repair another Actor's durable Items, even when
+// the first Session read was inconsistent. The Host-authorized direct Runner
+// API keeps the same behavior without an additional caller identity.
+func (runner *Runner) refreshTurnForSession(ctx context.Context, turnID string, actor kernel.ActorRef, thread kernel.ThreadRef) (Snapshot, error) {
+	return runner.refreshTurn(ctx, turnID, &sessionBoundOwner{actor: actor, thread: thread})
+}
+
+func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *sessionBoundOwner) (Snapshot, error) {
 	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if expected != nil {
+		root, rootErr := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+		if rootErr != nil || requireSessionRootOwner(turn, root, *expected) != nil {
+			return Snapshot{}, errors.Join(ErrConflict, rootErr)
+		}
 	}
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+	if expected != nil && (err != nil || requireSessionRootOwner(turn, invocation, *expected) != nil) {
+		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		if terminalTurnStatus(turn.Status) {
 			return runner.loadSnapshot(ctx, turn, nil)

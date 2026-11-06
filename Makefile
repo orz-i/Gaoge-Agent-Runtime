@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata agent-baseline agent-baseline-test fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
+.PHONY: bootstrap metadata agent-baseline agent-baseline-test benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -12,6 +12,12 @@ agent-baseline:
 
 agent-baseline-test:
 	python3 -m unittest discover -s scripts -p 'test_agent_baseline.py'
+
+# Optional, report-only policy benchmark on two opposing workload shapes.
+# Not an ordinary CI gate: timing is meaningful only on a stable runner.
+benchmark-agent-policy:
+	cd go/agent-runtime && go test ./agent -run '^TestRepeatedToolPolicyMatchesIndependentNestedOracle$$' -count=1
+	cd go/agent-runtime && go test ./agent -run '^$$' -bench 'BenchmarkRepeatedToolPolicy(UniqueTranscript|LongTranscript)$$' -benchmem -benchtime=250ms -count=3
 
 fmt-check:
 	node scripts/go-workspace.mjs fmt-check

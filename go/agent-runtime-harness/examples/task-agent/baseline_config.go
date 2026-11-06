@@ -35,6 +35,7 @@ type baselineInput struct {
 	MaxOutputTokens             int64  `json:"maxOutputTokens"`
 	Repetitions                 int    `json:"repetitions"`
 	AllowUnknownStructuredModel bool   `json:"allowUnknownStructuredModel"`
+	ReasoningEffort             string `json:"reasoningEffort,omitempty"`
 }
 
 // This separate type is the only configuration permitted in events.
@@ -47,6 +48,7 @@ type publicConfiguration struct {
 	MaxOutputTokens             int64  `json:"maxOutputTokens"`
 	Repetitions                 int    `json:"repetitions"`
 	AllowUnknownStructuredModel bool   `json:"allowUnknownStructuredModel"`
+	ReasoningEffort             string `json:"reasoningEffort,omitempty"`
 }
 
 var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$`)
@@ -83,7 +85,8 @@ func readBaselineInput(reader io.Reader) (baselineInput, publicConfiguration, er
 		input.Repetitions < 1 || input.Repetitions > 20 ||
 		input.MaxOutputTokens < 1 || input.MaxOutputTokens > 1<<20 ||
 		input.ContextTokens < input.MaxOutputTokens+serviceInputTokens || input.ContextTokens > 1<<24 ||
-		strings.Contains(input.Model, input.APIKey) || strings.Contains(input.Endpoint, input.APIKey) {
+		strings.Contains(input.Model, input.APIKey) || strings.Contains(input.Endpoint, input.APIKey) ||
+		!validBaselineReasoningEffort(input.Provider, input.ReasoningEffort) {
 		return baselineInput{}, publicConfiguration{}, errors.New("invalid configuration")
 	}
 	origin := (&url.URL{Scheme: endpoint.Scheme, Host: endpoint.Host}).String()
@@ -91,7 +94,22 @@ func readBaselineInput(reader io.Reader) (baselineInput, publicConfiguration, er
 		Provider: input.Provider, Model: input.Model, EndpointOrigin: origin, EndpointHash: digest([]byte(input.Endpoint)),
 		ContextTokens: input.ContextTokens, MaxOutputTokens: input.MaxOutputTokens, Repetitions: input.Repetitions,
 		AllowUnknownStructuredModel: input.AllowUnknownStructuredModel,
+		ReasoningEffort:             input.ReasoningEffort,
 	}, nil
+}
+
+// Exact model capabilities are independently checked at Provider preflight.
+func validBaselineReasoningEffort(provider, effort string) bool {
+	if effort == "" {
+		return true
+	}
+	switch effort {
+	case "low", "medium", "high", "xhigh", "max":
+		return true
+	case "none":
+		return provider == "openai"
+	}
+	return false
 }
 
 func uniqueObjectFields(raw []byte) bool {
@@ -107,10 +125,27 @@ func uniqueObjectFields(raw []byte) bool {
 		if tokenErr != nil || !ok || seen[name] {
 			return false
 		}
+		// Exact wire keys only: encoding/json's case-folded struct aliases
+		// (ReasoningEffort, reasoningeffort, etc.) can overwrite a prior
+		// authority-bearing value while passing an exact-duplicate scan.
+		switch name {
+		case "schemaVersion", "provider", "endpoint", "apiKey", "model",
+			"contextTokens", "maxOutputTokens", "repetitions", "allowUnknownStructuredModel", "reasoningEffort":
+		default:
+			return false
+		}
 		seen[name] = true
 		var value json.RawMessage
 		if decoder.Decode(&value) != nil {
 			return false
+		}
+		if name == "reasoningEffort" {
+			// Explicit null or empty is not the same as an omitted field.
+			// The Go struct decoder otherwise erases that distinction.
+			var effort string
+			if json.Unmarshal(value, &effort) != nil || effort == "" {
+				return false
+			}
 		}
 	}
 	last, err := decoder.Token()
@@ -122,6 +157,7 @@ func (input baselineInput) settings() settings {
 		mode: "live", provider: input.Provider, modelID: input.Model, endpoint: input.Endpoint, apiKey: input.APIKey,
 		contextTokens: input.ContextTokens, outputTokens: input.MaxOutputTokens,
 		allowUnknownStructuredModel: input.AllowUnknownStructuredModel,
+		reasoningEffort:             input.ReasoningEffort,
 	}
 }
 

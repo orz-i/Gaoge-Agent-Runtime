@@ -19,7 +19,10 @@ func (c *Client) Capabilities(_ context.Context, modelID string) (model.Capabili
 	if modelID == "" || strings.TrimSpace(modelID) != modelID {
 		return model.Capabilities{}, model.ErrCapabilityUnavailable
 	}
-	return model.Capabilities{StructuredJSONSchema: c.structuredOutputModels[modelID] || knownStructuredModel(modelID)}, nil
+	return model.Capabilities{
+		StructuredJSONSchema: c.structuredOutputModels[modelID] || knownStructuredModel(modelID),
+		EffortLevels:         c.effortLevels(modelID),
+	}, nil
 }
 
 func knownStructuredModel(id string) bool {

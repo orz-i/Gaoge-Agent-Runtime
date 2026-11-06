@@ -12,6 +12,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -261,6 +262,11 @@ func canonicalJSON(value json.RawMessage) (json.RawMessage, error) {
 	trimmed := bytes.TrimSpace(value)
 	if len(trimmed) == 0 {
 		return nil, nil
+	}
+	// Validate original bytes before json.Unmarshal can erase duplicates or
+	// Unicode/case-fold aliases. This also applies to Role ModelOptions.
+	if err := jsoncontract.ValidateUniqueJSONObject(trimmed); err != nil {
+		return nil, ErrInvalidRequest
 	}
 	var decoded any
 	if err := json.Unmarshal(trimmed, &decoded); err != nil {

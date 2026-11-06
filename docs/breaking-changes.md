@@ -2,6 +2,122 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-06 — Final Harness Store TCB and owner contract decision (beta.24 candidate)
+
+Repeated independent audits found ever-stronger custom Store fault injections:
+first-read Actor mismatch, persistent GetSession owner substitution, and
+coordinated re-hashing of root Invocation Input together with Session Actor.
+The final case disclosed bounded Turn/Timeline data **only when a privileged
+custom Store intentionally fabricates both original owners**. Comparing two
+records returned by that same compromised Store cannot authenticate either.
+
+**ADR 0017 accepts Harness Store as trusted execution-integrity state**, not
+an untrusted provider response. The Host must authenticate Actor and
+tenant-scope HostThread; Memory/PostgreSQL Harness Stores must atomically
+reject rebinding Session ID/HostThread/Actor, Turn owner and original root
+Invocation Input/Hash even when callers recompute a normal hash. Database
+connections and backups must not be controlled by untrusted tenants.
+Untrusted third-party Store adapters are not supported without independent
+authentication; a complete Store compromise is an explicit residual risk,
+not an unbounded new SessionClient P1.
+
+A shared seeded owner-integrity conformance matrix now covers Memory and
+SQL-compatible Store, with a separate real PostgreSQL two-connection suite.
+**No runtime protocol, SQL schema version, Session field, Token signer,
+compatibility bridge or extra per-read Kernel lookup was introduced.**
+This is a clarification/hardening of the privileged Store contract, not a
+change to Provider ResponseID, Tool/Model invocation or billing semantics.
+See [ADR 0017](adr/0017-trusted-harness-store-and-frozen-owner.md).
+
+## 2026-11-06 — SessionClient frozen owner read/resume hard cut (beta.24 candidate)
+
+Before this correction, `SessionClient.authorizedTurnID` verified the
+first Store-provided Session Actor but returned only a Turn ID. Later
+`Runner.Load`, bounded state/Timeline reads, `Refresh`, and `ResumeTurn`
+re-read Store identity without retaining the *Host caller's* actor. An
+inconsistent Store that spoofed the first Session read could disclose
+another Actor's committed result or enter its pending physical Agent
+ModelInvocation on a later genuine Session read.
+
+The Session facade now requires an original, hash-validated **root Agent
+Invocation Actor/Thread** matching the Host caller before reading or
+continuing a Turn. Its ID is derived from the existing stable Session
+Turn/Request identity and loaded by indexed `GetInvocation`, avoiding a
+new unbounded child-Invocation scan for `LoadState`. Returned full snapshots are independently checked
+against that caller, bounded state checks the returned Session owner, and
+Timeline rechecks the frozen owner after the Item read. Session-scoped
+`Refresh` checks the actual reloaded root owner **before** any repair writes.
+Session-scoped `Resume` additionally passes the expected Actor/Thread to the same native
+`Runner.ResumeTurn` implementation and compares them with the actual
+root/Session/**Kernel Run** owner before physical Agent execution. The
+direct, Host-authorized `Runner.ResumeTurn` API remains unchanged; there
+is no second continuation algorithm or durable authority.
+
+Behavioral hard cut: a Session facade read of an `accepted` Turn with **no
+verifiable original root Invocation** now returns `ErrConflict`, rather
+than inferring owner from a mutable Session Store response. The Host can
+retry the original admission or use an explicitly authorized direct
+Runner API. `Prompt` retains the Host's responsibility to authenticate
+the transcript source. Regular bounded `LoadState` still does not query
+Kernel state, and Custom Stores must maintain the original immutable
+Invocation input as required by their contract. No new SQL DDL, persisted
+schema, compatibility bridge or Kernel status was added.
+
+The Anthropic exact-model effort table also includes verified public
+`claude-mythos-preview` with `low/medium/high/max`, but no `xhigh`.
+Both Unary and SSE check exact effort and reject unsupported options
+before HTTP. See
+[follow-up remediation](audits/2026-11-06-session-owner-followup-remediation.md).
+
+## 2026-11-05 — Independent P1/P2 correction for effort and frozen options (beta.24 candidate)
+
+An optional `BindingSpec.EffortModelLevels` field was incorrectly included
+as JSON `null` in the Provider HMAC even when the Host had not configured
+it. That would have changed **every** previous OpenAI/Anthropic binding
+fingerprint, blocking pending named ModelInvocations with
+`ErrProviderBindingMismatch`. The empty/unconfigured field is now omitted
+from HMAC serialization, reproducing the previous input byte-for-byte;
+nonempty certifications still rotate the identity. Both named adapters
+have cross-restart pending-invocation regression tests using the original
+legacy fingerprint layout. No binding-match bypass or old/new fallback.
+
+Harness `SealConfigSnapshot` now rejects duplicate/fold-equivalent JSON
+keys (including nested fields) **before** canonicalization of top-level
+and Role ModelOptions. Provider and Harness reuse the same Core uniqueness
+validator. The standalone baseline stdin refuses null/empty
+`reasoningEffort`, case-folded aliases and unknown keys before any model
+call; an *omitted* optional field and valid historical reports remain
+supported. Previously accepted ambiguous inputs now fail closed rather
+than being guessed/reinterpreted.
+
+OpenAI and Anthropic adaptors reject incompatible reasoning/sampling
+combinations and Host attempts to override known public-model capability
+tables. OpenAI permits supported explicit `none` plus sampling; a known
+non-`none` default (or explicit non-`none`) may not carry `temperature` or
+`top_p`. Claude adaptive-thinking effort similarly cannot be combined
+with sampling, and documented newer models reject sampling even when
+effort is omitted. Unary/SSE both gate before physical dispatch, retaining
+the original request content and error classification. No persisted schema,
+new Kernel status, additional execution authority, router or compatibility
+protocol is introduced. See
+[remediation audit](audits/2026-11-05-three-part-agent-independent-remediation.md).
+
+## 2026-11-05 — Exact-model reasoning effort projection (beta.24 candidate)
+
+The optional `ModelOptions.reasoning.effort` value is now admitted only
+when the concrete OpenAI/Anthropic adapter reports exact-model support.
+OpenAI projects it to Responses `reasoning.effort`; Anthropic projects
+it to Messages `output_config.effort`, without overriding a strict schema
+format. Unknown models and unsupported levels fail before any external
+effect; private/gateway support requires explicit per-ID
+`Config.EffortModelLevels` certification frozen in the nonsecret
+Provider binding fingerprint. The options parser now rejects ambiguous
+duplicate/folded JSON keys. Existing omitted effort keeps its original
+wire behavior. This adds one optional model capability field and one
+adapter configuration field; no persisted Run/Turn schema version,
+compatibility bridge, Kernel status or intent router is introduced.
+Existing frozen pending ModelInvocations remain immutable.
+
 ## 2026-11-05 — Shared top-level Start and Refresh preserve unknown physical effects (beta.24 candidate)
 
 The hard-cut top-level Agent, Team, GroupChat and Workflow Start and retry
