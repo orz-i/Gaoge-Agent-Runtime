@@ -114,7 +114,8 @@ func (session *SessionClient) Load(ctx context.Context, turnID string) (Snapshot
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return session.runner.Load(ctx, id)
+	value, loadErr := session.runner.Load(ctx, id)
+	return session.verifySnapshot(id, value, loadErr)
 }
 
 // LoadState reads bounded status/config facts without scanning Timeline history.
@@ -124,7 +125,16 @@ func (session *SessionClient) LoadState(ctx context.Context, turnID string) (Sta
 	if err != nil {
 		return StateSnapshot{}, err
 	}
-	return session.runner.LoadState(ctx, id)
+	state, err := session.runner.LoadState(ctx, id)
+	if err != nil {
+		return StateSnapshot{}, err
+	}
+	if state.Session.Actor != session.actor || state.Session.HostThread != session.hostThread ||
+		state.Turn.ID != id || state.Turn.SessionID != state.Session.ID ||
+		state.Config.TurnID != id {
+		return StateSnapshot{}, ErrConflict
+	}
+	return state, nil
 }
 
 // Timeline reads one page of the committed Turn Item history.
@@ -133,7 +143,16 @@ func (session *SessionClient) Timeline(ctx context.Context, turnID string, after
 	if err != nil {
 		return nil, err
 	}
-	return session.runner.ListTimeline(ctx, id, afterSeq, limit)
+	items, err := session.runner.ListTimeline(ctx, id, afterSeq, limit)
+	if err != nil {
+		return nil, err
+	}
+	// The page has only Turn IDs, not Actor metadata. Recheck its frozen
+	// owner after the Store read, not merely the initial Session projection.
+	if err := session.requireFrozenTurnOwner(ctx, id); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 // Refresh synchronizes one existing Turn from its underlying Runtime facts.
@@ -142,7 +161,8 @@ func (session *SessionClient) Refresh(ctx context.Context, turnID string) (Snaps
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return session.runner.Refresh(ctx, id)
+	value, refreshErr := session.runner.refreshTurnForSession(ctx, id, session.actor, session.thread)
+	return session.verifySnapshot(id, value, refreshErr)
 }
 
 // Resume continues one admitted Agent Turn from its committed Context.
@@ -153,7 +173,8 @@ func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapsh
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return session.runner.ResumeTurn(ctx, id)
+	value, resumeErr := session.runner.resumeTurnForSession(ctx, id, session.actor, session.thread)
+	return session.verifySnapshot(id, value, resumeErr)
 }
 
 // authorizedTurnID is the single read/recovery trust boundary for all
@@ -168,7 +189,93 @@ func (session *SessionClient) authorizedTurnID(ctx context.Context, turnID strin
 	if err = session.requireIdentity(ctx); err != nil {
 		return "", err
 	}
+	// The Session record alone is not independent ownership authority: an
+	// inconsistent Store can return a forged Actor on this first read. The
+	// already-frozen root Invocation must agree with this exact caller.
+	if err = session.requireFrozenTurnOwner(ctx, id); err != nil {
+		return "", err
+	}
 	return id, nil
+}
+
+// requireFrozenTurnOwner cross-checks the Host Session handle with the
+// immutable root Agent Invocation. A malicious/stale GetSession response must
+// never authorize another Actor's history or a continuation. No Kernel read is
+// needed for bounded LoadState or Timeline, and no extra persisted state is added.
+func (session *SessionClient) requireFrozenTurnOwner(ctx context.Context, id string) error {
+	if session == nil || session.runner == nil || session.runner.store == nil {
+		return ErrInvalidRequest
+	}
+	turn, err := loadVerifiedTurn(ctx, session.runner.store, id)
+	if err != nil {
+		return err
+	}
+	sessionID, err := SessionID(session.hostThread)
+	if err != nil || turn.SessionID != sessionID {
+		return ErrConflict
+	}
+	// Prompt freezes its root Invocation ID from the stable Host Turn ID.
+	// Use this exact indexed record rather than scanning child Invocations
+	// on each bounded status/history read or trusting a returned list order.
+	rootID, err := AgentInvocationID(id, turn.HostTurn.ID)
+	if err != nil {
+		return ErrConflict
+	}
+	invocation, err := session.runner.store.GetInvocation(ctx, rootID)
+	if err != nil {
+		// A Turn without an original frozen execution owner cannot grant
+		// SessionClient read or resume authority from a Session alone.
+		return errors.Join(ErrConflict, err)
+	}
+	return session.checkFrozenRootOwner(turn, invocation)
+}
+
+// sessionBoundOwner is a caller-supplied requirement, not a new persistent
+// execution identity or a replacement for the original root Invocation.
+type sessionBoundOwner struct {
+	actor  kernel.ActorRef
+	thread kernel.ThreadRef
+}
+
+// requireSessionRootOwner is shared by pre-read proof, returned snapshots,
+// pre-Refresh repair and pre-Resume physical continuation. Inconsistent
+// Store reads must not choose different rules at different boundaries.
+func requireSessionRootOwner(turn Turn, invocation Invocation, owner sessionBoundOwner) error {
+	rootID, err := AgentInvocationID(turn.ID, turn.HostTurn.ID)
+	if err != nil || invocation.ID != rootID || invocation.TurnID != turn.ID ||
+		invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent ||
+		invocation.CapabilityKey != CapabilityAgent || !validInvocation(invocation) {
+		return ErrConflict
+	}
+	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)
+	if err != nil || actor != owner.actor || thread != owner.thread {
+		return ErrConflict
+	}
+	return nil
+}
+
+func (session *SessionClient) checkFrozenRootOwner(turn Turn, invocation Invocation) error {
+	return requireSessionRootOwner(turn, invocation, sessionBoundOwner{actor: session.actor, thread: session.thread})
+}
+
+// verifySnapshot applies the caller's owner proof to the actual returned
+// projection (including non-nil error snapshots). A second Store read cannot
+// substitute another Session, root Invocation, or physical result for display.
+func (session *SessionClient) verifySnapshot(id string, value Snapshot, runErr error) (Snapshot, error) {
+	if value.Turn.ID == "" && runErr != nil {
+		return Snapshot{}, runErr
+	}
+	sessionID, err := SessionID(session.hostThread)
+	if err != nil || value.Session.ID != sessionID || value.Session.HostThread != session.hostThread ||
+		value.Session.Actor != session.actor || value.Turn.ID != id ||
+		value.Turn.SessionID != sessionID || value.Config.TurnID != id {
+		return Snapshot{}, ErrConflict
+	}
+	root, ok := topLevelInvocation(value.Invocations)
+	if !ok || session.checkFrozenRootOwner(value.Turn, root) != nil {
+		return Snapshot{}, ErrConflict
+	}
+	return value, runErr
 }
 
 func (session *SessionClient) hostTurn(turnID string) (HostRef, error) {
