@@ -199,9 +199,11 @@ func (session *SessionClient) authorizedTurnID(ctx context.Context, turnID strin
 }
 
 // requireFrozenTurnOwner cross-checks the Host Session handle with the
-// immutable root Agent Invocation. A malicious/stale GetSession response must
-// never authorize another Actor's history or a continuation. No Kernel read is
-// needed for bounded LoadState or Timeline, and no extra persisted state is added.
+// original root Agent Invocation from the trusted Store (ADR 0017). An
+// inconsistent or stale Session receipt must not authorize another Actor's
+// history or continuation. Both values come from the same trusted Store;
+// they are not independent proofs against a persistently malicious Store.
+// No Kernel read is needed for bounded LoadState/Timeline.
 func (session *SessionClient) requireFrozenTurnOwner(ctx context.Context, id string) error {
 	if session == nil || session.runner == nil || session.runner.store == nil {
 		return ErrInvalidRequest
