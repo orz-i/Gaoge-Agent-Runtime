@@ -2,6 +2,47 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-06 — Host-owned ModelProfileSource hard cut (beta.24 candidate)
+
+The Runtime SDK and OpenAI/Anthropic adapters no longer carry bundled
+public model lists, feature guesswork or vendor capability matrices. A
+model's supported reasoning effort, native Structured Outputs, omitted-effort
+sampling restriction and forced-Tool restriction (OpenAI/Anthropic) are owned by the Host and loaded
+through `model.ModelProfileSource`, with `model.StaticModelProfiles`
+and `model.ModelProfileSourceFunc` for ordinary Go composition.
+Both `openai.Config` and `anthropic.Config` replace
+`StructuredOutputModels []string` and
+`EffortModelLevels map[string][]string` with **one** field:
+`ModelProfiles model.ModelProfileSource`. The two old config fields
+and the embedded exact-model/dated-snapshot allowlists have been
+**deleted**, not bridged.
+
+The adapter snapshots its source exactly once at construction, validates
+bounded exact IDs and the protocol's effort vocabulary, and clones the
+profile. A missing profile reports no verified effort or strict schema
+capability. Only an explicit Host-certified default restriction blocks
+omitted-effort sampling; the adapter neither inserts an inferred effort
+nor silently drops a caller's option. The Host remains responsible for
+external catalog authentication, accuracy and freshness.
+
+**Persistence-breaking:** The persisted Provider HMAC now has a
+per-request **selected model** scope. Even a Host with no configured
+model profiles receives a new fingerprint; old beta.24 pending
+ModelInvocations **cannot resume under the new adapter** and fail closed
+with `ErrProviderBindingMismatch`. They require an explicit Host
+migration/restart policy, not an SDK compatibility bridge. After this
+hard cut, a new catalog record for an unrelated model does not revoke
+the already-frozen selected model; changing its own profile, credential,
+transport or Host binding does. No Kernel or Harness storage schema
+change, duplicate ModelInvocation loop or automatic catalog network
+request is introduced.
+
+The task-agent baseline example now explicitly certifies the selected
+model through its existing Host opt-in or an imported Host source.
+Neither a public-looking model ID nor a mutable global cache grants
+implicit capabilities. See [external profile contract](provider-adapters.md)
+and [verification](audits/2026-11-06-host-owned-model-capabilities.md).
+
 ## 2026-11-06 — Final Harness Store TCB and owner contract decision (beta.24 candidate)
 
 Repeated independent audits found ever-stronger custom Store fault injections:

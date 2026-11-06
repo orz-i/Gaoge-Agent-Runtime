@@ -5,6 +5,21 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Host-owned Model Capability Source hard cut (2026-11-06):
+  remove every bundled OpenAI/Anthropic public model capability list and
+  replace the two independent adapter override fields with one
+  `model.ModelProfileSource` interface. The Host imports a snapshot from
+  external files, databases or discovery; the adapter copies and validates
+  only the model facts it is actually given. Effort, native strict-schema
+  support and omitted-effort sampling restrictions are per exact model.
+  Bind the **selected model** profile to the original Provider HMAC so
+  related changes fence pending recovery but adding unrelated catalog
+  entries does not. Old beta.24 persisted Provider fingerprints are
+  intentionally incompatible (fail-closed; no bridge); no new database
+  schema, secondary agent loop or remote catalog client. See
+  [breaking changes](docs/breaking-changes.md) and
+  [verification](docs/audits/2026-11-06-host-owned-model-capabilities.md).
+
 - Harness owner-integrity trust-boundary closure (2026-11-06):
   [ADR 0017](docs/adr/0017-trusted-harness-store-and-frozen-owner.md)
   defines the Host-authenticated Actor and trusted durable Harness Store as

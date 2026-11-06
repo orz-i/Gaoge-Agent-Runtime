@@ -67,6 +67,18 @@ terminal prompt; do not paste it into a command, report or chat.
 | Unknown-model schema opt-in | Explicit permission to probe native strict JSON Schema for an unlisted model; default no |
 | API key | Hidden input, passed to the already built runner through stdin |
 
+**Capability source:** The SDK and its OpenAI/Anthropic adapters no longer
+embed any public-model ID list. This baseline CLI is Host code: its existing
+`allowUnknownStructuredModel` selection is an explicit Host declaration for
+the exact chosen model, **not** a remote capability discovery or a guarantee
+that the Provider will accept a strict schema. The real Schema/Tool replay
+probes remain mandatory before task sampling. An explicit `reasoningEffort`
+is similarly carried as an exact Host declaration and frozen with the model
+request, not silently inferred from a vendor family. Products with a verified
+model catalog may import it as `model.ModelProfileSource` when constructing
+adapters; the repository deliberately does not ship or auto-update such a
+catalog. See [provider adapter contract](provider-adapters.md).
+
 The context capacity must leave at least 8,192 tokens after reserving the output
 ceiling. The service input ceiling is fixed at 8,192 tokens for this measurement
 profile, so that the task exercises Context compaction even when the model

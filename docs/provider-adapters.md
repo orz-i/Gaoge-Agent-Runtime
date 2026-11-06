@@ -85,61 +85,100 @@ multi-provider router.
 
 ## Supported model contract
 
-### Exact-model effort controls
+### Host-supplied model capability profiles (hard cut)
 
-The optional immutable `model.Request.ModelOptions` object now admits
-`{"reasoning":{"effort":"high"}}` alongside the existing bounded
-`temperature` and `top_p` sampling settings. A bare `effort`, extra
-nested reasoning keys, provider-native Tool injection, duplicate/aliased JSON
-members, null values and unknown options **fail before physical HTTP dispatch**.
-No default effort is inserted: omitting it retains each provider/model's
-own behavior.
+The runtime and the OpenAI/Anthropic Protocol Adapters **do not ship model-ID
+allowlists or a vendor-specific model catalog**. OpenAI/Anthropic model
+availability, strict JSON Schema support, effort vocabulary and implicit
+sampling incompatibility are **Host policy**, not SDK releases. The Host can
+import a JSON/YAML catalog, database records or discovery-service results into
+`model.ModelProfileSource`, or pass an already-loaded
+`model.StaticModelProfiles`. The SDK provides only the capability interface,
+validation and wire-protocol adapter. This applies equally to public and
+private/gateway model IDs; **no prefix inference** is performed.
 
-OpenAI Responses maps the approved value to `reasoning.effort`; Anthropic
-Messages maps it to `output_config.effort` and preserves an existing strict
-JSON `output_config.format`. The same provider-neutral spelling describes a
-different underlying provider policy; it is not a guarantee of equal token
-budgets, thinking volume or inference quality. `model.Capabilities.EffortLevels`
-advertises only an exact model's verified values (not all aliases under a
-name prefix). A missing level blocks dispatch. Exact private/gateway IDs can
-be explicitly certified through the adapter's
-`Config.EffortModelLevels map[string][]string`. The normalized immutable
-policy is included in the Provider HMAC binding fingerprint, so recovery
-cannot silently switch effort permissions. **When the new policy is empty or
-omitted, HMAC serialization remains byte-for-byte identical to the previous
-beta.24 adapter**; pending ModelInvocations can safely resume on unchanged
-bindings. Known public model IDs cannot be overridden with additional levels:
-explicit Host certification is only for unknown/private route IDs. If an
-upstream model stops supporting a declared level, its HTTP failure is
-reported, never downgraded to a cheaper effort or omitted setting. The
-exact public `claude-mythos-preview` ID supports `low`, `medium`, `high`
-and `max` but **not** `xhigh`, per the
-[Anthropic effort matrix](https://platform.claude.com/docs/en/build-with-claude/effort);
-this rule is enforced for both Unary and SSE requests.
+```go
+// Host example: load/validate a complete snapshot before constructing a
+// Provider client. No model identifiers are defined in the SDK itself.
+blob, err := os.ReadFile("/etc/my-host/model-profiles.json")
+if err != nil { return err }
+var catalog model.StaticModelProfiles
+if err := json.Unmarshal(blob, &catalog); err != nil { return err }
+client, err := openai.New(openai.Config{
+    APIKey: apiKey,
+    ModelProfiles: catalog, // model.ModelProfileSource
+})
+if err != nil { return err }
+```
 
-**Sampling compatibility:** OpenAI reasoning models reject `temperature` and
-`top_p` when explicit effort is not `none`; the documented non-`none` default
-of recognized model IDs also disallows those sampling fields when effort is
-omitted. An explicit supported `none` may retain sampling. Anthropic models
-with adaptive thinking reject sampling alongside an explicitly requested
-effort; documented newer models also reject sampling when effort is omitted.
-These known-invalid combinations fail before both Unary and SSE dispatch,
-without removing parameters or silently changing effort. Unknown/private
-models retain the previous omitted-effort sampling contract unless a certified
-explicit effort is requested. See the official [OpenAI reasoning guidance](https://developers.openai.com/api/docs/guides/latest-model)
-and [Claude thinking compatibility](https://platform.claude.com/docs/en/build-with-claude/thinking).
+Example **Host-owned data** (not installed by the SDK):
 
-Both streaming and unary requests use the same adapter preparation path;
-the entire `ModelOptions` value is already frozen in the Agent's durable
-`ModelInvocation` hash. Harness now checks unique JSON member names
-(including Unicode/case-fold aliases) **before** sealing any top-level or
-Role `ModelOptions`; Core and Provider share one validator, so no parser
-silently canonicalizes away a duplicate into a different execution policy.
-In-progress Runs are not rewritten. Supported
-model IDs and levels are intentionally conservative; additional models
-require independently verified exact-ID support or Host certification.
-This does **not** imply native Provider-hosted Tools or server-side
-compaction support.
+```json
+{
+  "example-host-verified-model": {
+    "StructuredJSONSchema": true,
+    "EffortLevels": ["low", "medium", "high"],
+    "DisallowSamplingWhenEffortOmitted": true,
+    "DisallowForcedToolChoice": false
+  }
+}
+```
+
+`model.ModelProfileSourceFunc` also adapts an external loader returning a
+snapshot. The adapter calls it **once** during `New`, validates a bounded map
+of exact IDs and permitted effort vocabulary, takes an immutable private copy,
+and exposes the result through the existing `model.CapabilityProvider`
+interface. Unknown IDs and missing profiles have no certified effort or
+native strict JSON Schema; they may still be used for ordinary requests without
+those features. The Host must verify its own model facts, source freshness and
+request authorization: a self-attested but incorrect profile may be rejected
+by the upstream Provider; it is not verified dynamically by the SDK.
+
+**Binding / recovery:** The original API credential, endpoint, protocol,
+transport scope and **exact selected model's normalized profile** determine
+the request's persisted Provider HMAC binding fingerprint. Rebuilding an
+adapter after an external-catalog change does **not** revoke an existing
+pending invocation for an unchanged model. Changing that selected model's
+verified capabilities, endpoint, credential or Host binding *does* cause the
+Agent's existing `ErrProviderBindingMismatch` fail-closed recovery fence.
+There is no silent fallback, policy downgrade or second retry protocol. Do not
+mutate a snapshot from another goroutine while the Host loader is reading it.
+
+**Effort and sampling:** The immutable
+`model.Request.ModelOptions` accepts `{"reasoning":{"effort":"high"}}`
+plus the existing bounded `temperature` and `top_p` settings. A bare `effort`,
+unknown keys, duplicate/case-folded members, null values or invalid nested
+reasoning fail before physical HTTP. OpenAI projects the chosen effort to
+`reasoning.effort`; Anthropic projects it to `output_config.effort` without
+removing a native strict JSON `output_config.format`. Missing effort does
+not inject a default. An explicit effort must appear in that exact model's
+Host-certified `EffortLevels`; the SDK still validates the provider's legal
+effort *vocabulary* (not its model ID list). For OpenAI, non-`none` explicit
+effort disallows sampling; for Anthropic, an explicit effort disallows it. A
+Host-certified `DisallowSamplingWhenEffortOmitted` blocks sampling even when
+effort is not supplied. The Host-certified `DisallowForcedToolChoice`
+rejects incompatible mandatory Tool requests (`tool_choice=any` on
+Anthropic or `required` on OpenAI) before physical HTTP without inferring
+model-name prefixes. `none` is meaningful only for a model where the Host
+verified its support and the protocol permits it. Unknown models without a
+profile retain plain requests and the previously defined omitted-effort
+sampling behavior, without inventing model support.
+
+Provider-specific wire semantics still differ and effort choices are **not**
+portable measures of thinking tokens or price. Core and Provider share a
+strict JSON member validator. Output contracts are still checked locally
+against the conservative supported schema subset; no dynamic model catalog
+can authorize server-side storage, hosted Tools or unsupported API features.
+
+**Breaking change (unreleased beta.24):** Remove
+`Config.StructuredOutputModels` and `Config.EffortModelLevels` for both
+OpenAI and Anthropic in favor of `Config.ModelProfiles`. The old adapter
+fingerprints cannot authorize pending executions under the new model-scoped
+format; unchanged new-format model bindings can resume across unrelated
+Host catalog updates. No legacy compatibility reader or alternate
+ModelInvocation identity protocol is retained. See
+[breaking changes](breaking-changes.md) and the
+[model-source hard-cut audit](audits/2026-11-06-host-owned-model-capabilities.md).
 
 **OpenAI streaming item identity:** An observed `response.output_item.added`
 fixes its index, item ID, type and (for local functions) physical `call_id`
