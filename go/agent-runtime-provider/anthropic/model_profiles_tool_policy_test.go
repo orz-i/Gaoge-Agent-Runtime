@@ -29,8 +29,8 @@ func TestImportedForcedToolPolicyIsExactAndPreDispatchForUnaryAndSSE(t *testing.
 	defer server.Close()
 
 	catalog := model.StaticModelProfiles{
-		"new-future-model":       {StructuredJSONSchema: true, DisallowForcedToolChoice: true},
-		"new-future-model-proxy": {StructuredJSONSchema: true},
+		"new-future-model":       {StructuredJSONSchema: true, SupportsForcedToolChoice: false},
+		"new-future-model-proxy": {StructuredJSONSchema: true, SupportsForcedToolChoice: true},
 	}
 	client, err := anthropic.New(anthropic.Config{APIKey: "synthetic", Endpoint: server.URL, ModelProfiles: catalog})
 	if err != nil {

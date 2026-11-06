@@ -87,7 +87,7 @@ func TestExactModelEffortProjectedBeforePhysicalOpenAI(t *testing.T) {
 }
 
 func TestOpenAIImportedProfileIsBoundAndImmutable(t *testing.T) {
-	source := model.StaticModelProfiles{"proxy-private": {StructuredJSONSchema: true, EffortLevels: []string{"medium", "high"}, DisallowSamplingWhenEffortOmitted: true}}
+	source := model.StaticModelProfiles{"proxy-private": {StructuredJSONSchema: true, EffortLevels: []string{"medium", "high"}, SupportsSamplingWhenEffortOmitted: true}}
 	client, err := openai.New(openai.Config{APIKey: "secret", DefaultModel: "proxy-private", ModelProfiles: source})
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestOpenAIImportedProfileIsBoundAndImmutable(t *testing.T) {
 	changed.StructuredJSONSchema = false
 	source["proxy-private"] = changed
 	after, err := client.Capabilities(t.Context(), "proxy-private")
-	if err != nil || !slices.Equal(after.EffortLevels, []string{"high", "medium"}) || !after.StructuredJSONSchema || after.DisallowSamplingWhenEffortOmitted != original.DisallowSamplingWhenEffortOmitted {
+	if err != nil || !slices.Equal(after.EffortLevels, []string{"high", "medium"}) || !after.StructuredJSONSchema || after.SupportsSamplingWhenEffortOmitted != original.SupportsSamplingWhenEffortOmitted {
 		t.Fatalf("mutable Host source modified frozen capabilities: %+v %v", after, err)
 	}
 	for _, bad := range []model.StaticModelProfiles{

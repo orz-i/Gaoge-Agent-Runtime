@@ -128,9 +128,9 @@ func TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool(t *testing.T) {
 			var err error
 			switch tc.provider {
 			case "openai":
-				client, err = openai.New(openai.Config{APIKey: "audit", Endpoint: endpoint.URL})
+				client, err = newAuditedOpenAIClient(openai.Config{APIKey: "audit", Endpoint: endpoint.URL})
 			case "anthropic":
-				client, err = anthropic.New(anthropic.Config{APIKey: "audit", Endpoint: endpoint.URL})
+				client, err = newAuditedAnthropicClient(anthropic.Config{APIKey: "audit", Endpoint: endpoint.URL})
 			}
 			if err != nil {
 				t.Fatal(err)

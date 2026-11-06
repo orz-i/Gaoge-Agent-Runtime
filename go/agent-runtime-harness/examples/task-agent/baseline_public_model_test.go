@@ -16,6 +16,7 @@ import (
 func TestBaselineExternallySelectedModelProfileAcrossRecovery(t *testing.T) {
 	for _, effort := range []string{"", "high"} {
 		t.Run("effort="+effort, func(t *testing.T) {
+			certifyBaselineModelForTest(t, "gpt-6.1-terra", "high")
 			fixture := &baselineHTTPFixture{
 				t: t, protocol: "openai", path: "/v1/responses", model: "gpt-6.1-terra",
 			}
@@ -47,7 +48,7 @@ func TestBaselineExternallySelectedModelProfileAcrossRecovery(t *testing.T) {
 				fixture.ServeHTTP(w, r)
 			}))
 			defer server.Close()
-			input := baselineHTTPInput("openai", server.URL+fixture.path, true)
+			input := baselineHTTPInput("openai", server.URL+fixture.path, false)
 			input["model"] = "gpt-6.1-terra"
 			if effort != "" {
 				input["reasoningEffort"] = effort

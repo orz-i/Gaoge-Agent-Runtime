@@ -31,11 +31,11 @@ func TestExternallyImportedOpenAIModelProfilesAndSnapshotIsolation(t *testing.T)
 		want.EffortLevels = slices.Clone(want.EffortLevels)
 		slices.Sort(want.EffortLevels)
 		got, err := c.Capabilities(t.Context(), id)
-		if err != nil || got.StructuredJSONSchema != want.StructuredJSONSchema || !slices.Equal(got.EffortLevels, want.EffortLevels) || got.DisallowSamplingWhenEffortOmitted != want.DisallowSamplingWhenEffortOmitted {
+		if err != nil || got.StructuredJSONSchema != want.StructuredJSONSchema || !slices.Equal(got.EffortLevels, want.EffortLevels) || got.SupportsSamplingWhenEffortOmitted != want.SupportsSamplingWhenEffortOmitted {
 			t.Fatalf("Host profile for %s changed: %+v wanted %+v err=%v", id, got, want, err)
 		}
 		unconfigured, err := without.Capabilities(t.Context(), id)
-		if err != nil || unconfigured.StructuredJSONSchema || len(unconfigured.EffortLevels) != 0 || unconfigured.DisallowSamplingWhenEffortOmitted {
+		if err != nil || unconfigured.StructuredJSONSchema || len(unconfigured.EffortLevels) != 0 || unconfigured.SupportsSamplingWhenEffortOmitted {
 			t.Fatalf("SDK invented built-in model authority for %s: %+v %v", id, unconfigured, err)
 		}
 	}

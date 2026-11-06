@@ -44,7 +44,11 @@ func TestAnthropicSamplingCompatibilityBeforeUnaryAndStream(t *testing.T) {
 		_, _ = fmt.Fprint(w, `{"type":"message","role":"assistant","id":"sampling-unary","stop_reason":"end_turn","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
 	}))
 	defer server.Close()
-	client, err := anthropic.New(anthropic.Config{APIKey: "synthetic-key", Endpoint: server.URL, ModelProfiles: fixtureAnthropicProfiles()})
+	client, err := anthropic.New(anthropic.Config{APIKey: "synthetic-key", Endpoint: server.URL, ModelProfiles: func() model.StaticModelProfiles {
+		profiles := fixtureAnthropicProfiles()
+		profiles["gateway-legacy"] = model.Capabilities{SupportsSamplingWhenEffortOmitted: true}
+		return profiles
+	}()})
 	if err != nil {
 		t.Fatal(err)
 	}

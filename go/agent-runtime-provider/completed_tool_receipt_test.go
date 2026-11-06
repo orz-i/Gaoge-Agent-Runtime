@@ -195,7 +195,7 @@ func assertCompletedRejectedToolReceipt(t *testing.T, rejectedOutput []any) {
 		_, _ = fmt.Fprintf(w, "event: response.completed\ndata: %s\n\n", frame)
 	}))
 	defer endpoint.Close()
-	client, err := openai.New(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
+	client, err := newAuditedOpenAIClient(openai.Config{APIKey: "test", Endpoint: endpoint.URL})
 	if err != nil {
 		t.Fatal(err)
 	}

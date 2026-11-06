@@ -100,7 +100,7 @@ func TestAnthropicEffortAndStrictOutputShareOneConfig(t *testing.T) {
 }
 
 func TestAnthropicImportedProfileFingerprintAndIsolation(t *testing.T) {
-	source := model.StaticModelProfiles{"claude-private": {StructuredJSONSchema: true, EffortLevels: []string{"high", "low"}, DisallowSamplingWhenEffortOmitted: true}}
+	source := model.StaticModelProfiles{"claude-private": {StructuredJSONSchema: true, EffortLevels: []string{"high", "low"}, SupportsSamplingWhenEffortOmitted: true}}
 	a, err := anthropic.New(anthropic.Config{APIKey: "secret", ModelProfiles: source})
 	if err != nil {
 		t.Fatal(err)

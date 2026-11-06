@@ -11,6 +11,7 @@ import (
 )
 
 func TestBaselineReportsActualTaskResponseWhenEncryptedReplayMissing(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	var physical atomic.Int32
 	var probes atomic.Int32
 	var tasks atomic.Int32
@@ -83,6 +84,7 @@ func TestBaselineReportsActualTaskResponseWhenEncryptedReplayMissing(t *testing.
 }
 
 func TestBaselineReportsSecondTaskHTTPResponseAfterSuccessfulLookup(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	var physical atomic.Int32
 	var tasks atomic.Int32
 	toolProbeFixture := &baselineHTTPFixture{t: t, protocol: "openai"}

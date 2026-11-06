@@ -10,6 +10,7 @@ import (
 )
 
 func TestOpenAIToolReplayAdmissionFailsBeforeAnyTaskWhenEncryptionAbsent(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
 	var total atomic.Int32
 	var forcedProbe atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

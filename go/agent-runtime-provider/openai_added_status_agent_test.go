@@ -45,7 +45,7 @@ func TestOpenAIContradictoryAddedItemStatusNeverExecutesLocalTool(t *testing.T) 
 				_, _ = fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":%s}\n\n", body)
 			}))
 			defer endpoint.Close()
-			client, err := openai.New(openai.Config{APIKey: "audit", Endpoint: endpoint.URL})
+			client, err := newAuditedOpenAIClient(openai.Config{APIKey: "audit", Endpoint: endpoint.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

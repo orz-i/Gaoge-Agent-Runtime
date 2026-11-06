@@ -38,16 +38,14 @@ type Capabilities struct {
 	// controls for this concrete model binding. Empty means unverified: the
 	// host must not infer support from another model in the same provider.
 	EffortLevels []string
-	// DisallowSamplingWhenEffortOmitted is a Host-certified default wire
-	// restriction. Do not send temperature/top_p when this model's omitted
-	// reasoning.effort still selects an incompatible adaptive/reasoning mode.
-	// This is a policy fact, not an instruction to insert an effort value.
-	DisallowSamplingWhenEffortOmitted bool
-	// DisallowForcedToolChoice marks an exact model whose upstream endpoint
-	// rejects a forced Tool selection (Anthropic any or OpenAI required).
-	// Ordinary automatic client Tools remain usable. This is Host metadata,
-	// never an inferred vendor family or embedded model-name policy.
-	DisallowForcedToolChoice bool
+	// SupportsSamplingWhenEffortOmitted positively certifies temperature/top_p
+	// when reasoning.effort is absent. Without this Host attestation the
+	// adapter refuses sampling before dispatch; no default effort is inferred.
+	SupportsSamplingWhenEffortOmitted bool
+	// SupportsForcedToolChoice positively certifies mandatory client Tools
+	// (Anthropic any / OpenAI required). Missing or false fails closed; normal
+	// optional Tools remain available without this stronger capability.
+	SupportsForcedToolChoice bool
 }
 
 // CapabilityProvider optionally reports support for one concrete model ID.

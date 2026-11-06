@@ -29,8 +29,8 @@ func TestOpenAIImportedForcedToolPolicyIsExactAndPreDispatch(t *testing.T) {
 	defer server.Close()
 
 	profiles := model.StaticModelProfiles{
-		"future-model":       {DisallowForcedToolChoice: true},
-		"future-model-proxy": {},
+		"future-model":       {SupportsForcedToolChoice: false},
+		"future-model-proxy": {SupportsForcedToolChoice: true},
 	}
 	client, err := openai.New(openai.Config{APIKey: "synthetic", Endpoint: server.URL, ModelProfiles: profiles})
 	if err != nil {

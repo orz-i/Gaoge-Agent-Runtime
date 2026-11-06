@@ -129,19 +129,11 @@ func (config settings) newModel() (model.Client, error) {
 			key = os.Getenv("ANTHROPIC_API_KEY")
 		}
 	}
-	profiles := config.modelProfiles
-	if profiles == nil && (config.allowUnknownStructuredModel || config.reasoningEffort != "") {
-		// This example's Host explicitly certifies the selected feature and
-		// model ID. Production Hosts may import a complete versioned catalog
-		// from configuration or discovery into settings.modelProfiles instead.
-		profile := model.Capabilities{StructuredJSONSchema: config.allowUnknownStructuredModel}
-		if config.reasoningEffort != "" {
-			profile.EffortLevels = []string{config.reasoningEffort}
-		}
-		profiles = model.StaticModelProfiles{config.modelID: profile}
+	profiles, err := config.hostModelProfileSource()
+	if err != nil {
+		return nil, err
 	}
 	var client model.Client
-	var err error
 	switch config.provider {
 	case "openai":
 		client, err = openai.New(openai.Config{APIKey: key, Endpoint: config.endpoint, HTTPClient: config.httpClient,

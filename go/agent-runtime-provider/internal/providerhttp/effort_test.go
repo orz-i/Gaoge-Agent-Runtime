@@ -50,7 +50,7 @@ func TestParseModelOptionsFailClosed(t *testing.T) {
 }
 
 func TestImportedProfilesAreIsolatedAndCanonical(t *testing.T) {
-	original := model.StaticModelProfiles{"private-v1": {StructuredJSONSchema: true, EffortLevels: []string{"low", "high"}, DisallowSamplingWhenEffortOmitted: true}}
+	original := model.StaticModelProfiles{"private-v1": {StructuredJSONSchema: true, EffortLevels: []string{"low", "high"}, SupportsSamplingWhenEffortOmitted: true}}
 	first, err := NormalizeModelProfiles(original, []string{"low", "medium", "high"})
 	if err != nil || !reflect.DeepEqual(first["private-v1"].EffortLevels, []string{"high", "low"}) {
 		t.Fatalf("normalized: %+v %v", first, err)

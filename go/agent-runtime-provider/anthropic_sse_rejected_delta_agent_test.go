@@ -58,7 +58,7 @@ func TestAnthropicRejectedContentBadDeltaNeverCertifiesAgentCompletion(t *testin
 				send("message_stop", `{"type":"message_stop"}`)
 			}))
 			defer srv.Close()
-			client, err := anthropic.New(anthropic.Config{APIKey: "audit", Endpoint: srv.URL})
+			client, err := newAuditedAnthropicClient(anthropic.Config{APIKey: "audit", Endpoint: srv.URL})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -58,11 +58,11 @@ func TestModelProfileFingerprintScopesOnlySelectedModelAndNoLegacyBridge(t *test
 		}
 		original := model.Capabilities{
 			StructuredJSONSchema: true, EffortLevels: []string{"high", "low"},
-			DisallowSamplingWhenEffortOmitted: true,
+			SupportsSamplingWhenEffortOmitted: true,
 		}
 		same := model.Capabilities{
 			StructuredJSONSchema: true, EffortLevels: []string{"low", "high"},
-			DisallowSamplingWhenEffortOmitted: true,
+			SupportsSamplingWhenEffortOmitted: true,
 		}
 		exact := FingerprintModelBinding(root, "model-a", original, true)
 		if exact == unknown || exact != FingerprintModelBinding(root, "model-a", same, true) {
@@ -70,8 +70,8 @@ func TestModelProfileFingerprintScopesOnlySelectedModelAndNoLegacyBridge(t *test
 		}
 		for _, changed := range []model.Capabilities{
 			{StructuredJSONSchema: true, EffortLevels: []string{"low", "high"}},
-			{EffortLevels: []string{"low", "high"}, DisallowSamplingWhenEffortOmitted: true},
-			{StructuredJSONSchema: true, EffortLevels: []string{"medium"}, DisallowSamplingWhenEffortOmitted: true},
+			{EffortLevels: []string{"low", "high"}, SupportsSamplingWhenEffortOmitted: true},
+			{StructuredJSONSchema: true, EffortLevels: []string{"medium"}, SupportsSamplingWhenEffortOmitted: true},
 		} {
 			if exact == FingerprintModelBinding(root, "model-a", changed, true) {
 				t.Fatalf("selected model's capability change did not revoke pending execution grant: %+v", changed)

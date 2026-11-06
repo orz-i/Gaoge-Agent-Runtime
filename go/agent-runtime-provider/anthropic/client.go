@@ -154,9 +154,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 		return prepared{}, ErrUnsupported
 	}
 	if len(options.Sampling) != 0 && (options.Effort != "" ||
-		c.profiles[name].DisallowSamplingWhenEffortOmitted) {
-		// Adaptive thinking and the documented current model families
-		// reject temperature/top_p; never send an unsupported pair.
+		!c.profiles[name].SupportsSamplingWhenEffortOmitted) {
+		// No sampled omitted-effort request is allowed until the Host
+		// certifies its compatibility for this exact model.
 		return prepared{}, ErrUnsupported
 	}
 	if options.Effort != "" {
@@ -309,7 +309,7 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if len(definitions) > 0 {
 		payload["tools"] = definitions
 		if request.RequireToolCall {
-			if c.profiles[name].DisallowForcedToolChoice {
+			if !c.profiles[name].SupportsForcedToolChoice {
 				return prepared{}, ErrUnsupported
 			}
 			payload["tool_choice"] = map[string]any{"type": "any"}

@@ -142,11 +142,10 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	profile := c.profiles[name]
 	if len(options.Sampling) != 0 &&
 		(options.Effort != "" && options.Effort != "none" ||
-			options.Effort == "" && profile.DisallowSamplingWhenEffortOmitted) {
-		// The documented public-model default is non-none reasoning;
-		// omitted effort does not authorize temperature or top_p.
-		// Unknown/private routes retain their original omitted-effort
-		// contract until the Host explicitly certifies a policy.
+			options.Effort == "" && !profile.SupportsSamplingWhenEffortOmitted) {
+		// Unverified omitted-effort sampling is not a portable model
+		// capability. The Host must positively attest its support; explicit
+		// none remains valid only when certified by the exact model profile.
 		return prepared{}, ErrUnsupported
 	}
 	if options.Effort != "" {
@@ -269,7 +268,7 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if len(definitions) != 0 {
 		payload["tools"] = definitions
 		if request.RequireToolCall {
-			if c.profiles[name].DisallowForcedToolChoice {
+			if !c.profiles[name].SupportsForcedToolChoice {
 				return prepared{}, ErrUnsupported
 			}
 			payload["tool_choice"] = "required"

@@ -69,9 +69,9 @@ func TestRealAgentWithBothProviderAdapters(t *testing.T) {
 			var err error
 			switch kind {
 			case "openai":
-				client, err = openai.New(openai.Config{APIKey: "mock-key", DefaultModel: "unused", Endpoint: server.URL})
+				client, err = newAuditedOpenAIClient(openai.Config{APIKey: "mock-key", DefaultModel: "unused", Endpoint: server.URL})
 			case "anthropic":
-				client, err = anthropic.New(anthropic.Config{APIKey: "mock-key", DefaultModel: "unused", Endpoint: server.URL})
+				client, err = newAuditedAnthropicClient(anthropic.Config{APIKey: "mock-key", DefaultModel: "unused", Endpoint: server.URL})
 			}
 			if err != nil {
 				t.Fatal(err)
