@@ -11,7 +11,8 @@ func knownEffortLevels(id string) []string {
 		"claude-opus-4-7",
 		"claude-sonnet-5-5", "claude-sonnet-5", "claude-haiku-5-5":
 		return []string{"low", "medium", "high", "xhigh", "max"}
-	case "claude-opus-4-6", "claude-sonnet-4-6":
+	case "claude-opus-4-6", "claude-sonnet-4-6", "claude-mythos-preview":
+		// Mythos Preview supports max but does not support xhigh.
 		return []string{"low", "medium", "high", "max"}
 	default:
 		return nil
