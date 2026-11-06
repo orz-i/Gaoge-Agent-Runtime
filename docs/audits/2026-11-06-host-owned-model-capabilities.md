@@ -22,7 +22,7 @@ The previous beta.24 OpenAI and Anthropic adapters embedded multiple exact-model
 
 ## Implementation
 
-- `go/agent-runtime/model/model_profile_source.go`: interface, function adapter and immutable-by-copy map adapter. `model.Capabilities` now includes `DisallowSamplingWhenEffortOmitted` and `DisallowForcedToolChoice`.
+- `go/agent-runtime/model/model_profile_source.go`: interface, function adapter and immutable-by-copy map adapter. `model.Capabilities` now includes `SupportsSamplingWhenEffortOmitted` and `SupportsForcedToolChoice`.
 - `go/agent-runtime-provider/internal/providerhttp/model_profiles.go`: bounded exact-ID and per-protocol effort validation; one snapshot. `binding.go` now fingerprints the selected model, avoiding global-catalog invalidation.
 - `openai/client.go` and `anthropic/client.go`: same shared interface, frozen exact profiles and unchanged wire-protocol projection. Remove `openai/effort.go`, `anthropic/effort.go`, Anthropic `forcedChoiceUnsupported` family-prefix inference, and both legacy `StructuredOutputModels` / `EffortModelLevels` Config fields.
 - `task-agent`: Host keeps its explicitly selected Schema/effort certification and may import a model profile source; no automatic public-model recognition.
@@ -54,3 +54,12 @@ The SDK does not fetch live model metadata, validate external catalog signatures
 - Previous frozen/selected-ModelInvocation replay tests, binding drift tests, prefix/capability tests, both Unary/SSE fail-closed checks, and seeded 512-case unknown-name property test PASS.
 
 This is a **locally tested pre-stable hard-cut candidate**, not a release. GitHub PR-Head CI, third-party live billable Provider tests and a fresh post-change independent audit are **not executed**. The Host owns migration policy for old pending beta.24 ModelInvocations; unsupported/changed routes remain fail-closed, not silently replayed.
+
+## Follow-up — default-deny authorization convergence
+
+The subsequent independent code audit on `456543c7` found two P2
+model-authorization regressions and reproduced both with Go overlays.
+This audit's original beta.24 hard-cut implementation did **not** close
+them. See [separate P2 remediation](2026-11-06-host-owned-model-capabilities-p2-remediation.md)
+for the positive, default-deny capability change, the Host effort
+self-certification fix, and fresh post-fix validation evidence.

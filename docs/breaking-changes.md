@@ -20,9 +20,13 @@ and the embedded exact-model/dated-snapshot allowlists have been
 The adapter snapshots its source exactly once at construction, validates
 bounded exact IDs and the protocol's effort vocabulary, and clones the
 profile. A missing profile reports no verified effort or strict schema
-capability. Only an explicit Host-certified default restriction blocks
-omitted-effort sampling; the adapter neither inserts an inferred effort
-nor silently drops a caller's option. The Host remains responsible for
+capability. The earlier `DisallowSamplingWhenEffortOmitted` and
+`DisallowForcedToolChoice` negative flags are now removed in favor of
+**positive, default-deny** `SupportsSamplingWhenEffortOmitted` and
+`SupportsForcedToolChoice`: absent or false denies optional advanced
+feature usage (for both Unary and SSE) before physical HTTP. Explicit
+OpenAI `effort=none` with certified support may still sample. The adapter
+neither inserts an inferred effort nor silently drops a caller's option. The Host remains responsible for
 external catalog authentication, accuracy and freshness.
 
 **Persistence-breaking:** The persisted Provider HMAC now has a
@@ -37,8 +41,12 @@ transport or Host binding does. No Kernel or Harness storage schema
 change, duplicate ModelInvocation loop or automatic catalog network
 request is introduced.
 
-The task-agent baseline example now explicitly certifies the selected
-model through its existing Host opt-in or an imported Host source.
+The task-agent baseline example now distinguishes the user's requested
+effort from separately Host-certified capability. The existing schema opt-in
+only permits a probe; it does not certify effort or mandatory Tool support.
+Operators may load an independent catalog via `GAOGE_MODEL_PROFILES_FILE`
+(Host environment, not the user's stdin). Without a verified positive
+mandatory-Tool grant the baseline refuses before the paid preflight.
 Neither a public-looking model ID nor a mutable global cache grants
 implicit capabilities. See [external profile contract](provider-adapters.md)
 and [verification](audits/2026-11-06-host-owned-model-capabilities.md).

@@ -5,6 +5,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Follow-up model capability authorization P2 remediation (2026-11-06):
+  replace the negative omitted-effort sampling / mandatory Tool flags with
+  **positive Host-certified support**. Missing model metadata never
+  authorizes advanced physical parameters on either OpenAI or Anthropic.
+  The task-agent Host no longer converts user-selected `reasoningEffort`
+  into its own evidence, and accepts a separate operator-provisioned
+  `GAOGE_MODEL_PROFILES_FILE` for verified capabilities. Schema, Tool/replay
+  and effort admission remain independent; ineligible requests fail
+  before paid HTTP. Loopback real-adapter and pinned-ModelInvocation
+  negative/positive tests accompany the hard cut. See
+  [remediation](docs/audits/2026-11-06-host-owned-model-capabilities-p2-remediation.md).
+
 - Host-owned Model Capability Source hard cut (2026-11-06):
   remove every bundled OpenAI/Anthropic public model capability list and
   replace the two independent adapter override fields with one

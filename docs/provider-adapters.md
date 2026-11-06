@@ -118,8 +118,8 @@ Example **Host-owned data** (not installed by the SDK):
   "example-host-verified-model": {
     "StructuredJSONSchema": true,
     "EffortLevels": ["low", "medium", "high"],
-    "DisallowSamplingWhenEffortOmitted": true,
-    "DisallowForcedToolChoice": false
+    "SupportsSamplingWhenEffortOmitted": false,
+    "SupportsForcedToolChoice": true
   }
 }
 ```
@@ -155,14 +155,17 @@ not inject a default. An explicit effort must appear in that exact model's
 Host-certified `EffortLevels`; the SDK still validates the provider's legal
 effort *vocabulary* (not its model ID list). For OpenAI, non-`none` explicit
 effort disallows sampling; for Anthropic, an explicit effort disallows it. A
-Host-certified `DisallowSamplingWhenEffortOmitted` blocks sampling even when
-effort is not supplied. The Host-certified `DisallowForcedToolChoice`
-rejects incompatible mandatory Tool requests (`tool_choice=any` on
-Anthropic or `required` on OpenAI) before physical HTTP without inferring
-model-name prefixes. `none` is meaningful only for a model where the Host
-verified its support and the protocol permits it. Unknown models without a
-profile retain plain requests and the previously defined omitted-effort
-sampling behavior, without inventing model support.
+**Unknown is denied for advanced features.** Omitted-effort
+`temperature`/`top_p` requests require the Host's positive
+`SupportsSamplingWhenEffortOmitted: true` for that exact model; absence or
+`false` rejects before Unary/SSE HTTP. Mandatory local Tool selection
+(`tool_choice=any` for Anthropic or `required` for OpenAI) similarly requires
+`SupportsForcedToolChoice: true`. Ordinary text and optional Tools continue
+without these grants. Neither absence of a catalog nor a model's name/prefix
+implies compatibility. An explicit OpenAI `effort=none` may still carry
+sampling if that effort is in the verified model's `EffortLevels`.
+The Host must independently verify both positive permissions from the
+upstream contract; the SDK does not infer or insert model defaults.
 
 Provider-specific wire semantics still differ and effort choices are **not**
 portable measures of thinking tokens or price. Core and Provider share a
@@ -175,7 +178,10 @@ can authorize server-side storage, hosted Tools or unsupported API features.
 OpenAI and Anthropic in favor of `Config.ModelProfiles`. The old adapter
 fingerprints cannot authorize pending executions under the new model-scoped
 format; unchanged new-format model bindings can resume across unrelated
-Host catalog updates. No legacy compatibility reader or alternate
+Host catalog updates. This beta.24 candidate also hard-cuts the two
+negative capability booleans in favor of positive `Supports*` grants and
+requires the Host example to load a separate trusted catalog for verified
+effort / mandatory Tools. No legacy compatibility reader or alternate
 ModelInvocation identity protocol is retained. See
 [breaking changes](breaking-changes.md) and the
 [model-source hard-cut audit](audits/2026-11-06-host-owned-model-capabilities.md).
