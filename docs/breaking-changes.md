@@ -2,6 +2,33 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-06 — Final Harness Store TCB and owner contract decision (beta.24 candidate)
+
+Repeated independent audits found ever-stronger custom Store fault injections:
+first-read Actor mismatch, persistent GetSession owner substitution, and
+coordinated re-hashing of root Invocation Input together with Session Actor.
+The final case disclosed bounded Turn/Timeline data **only when a privileged
+custom Store intentionally fabricates both original owners**. Comparing two
+records returned by that same compromised Store cannot authenticate either.
+
+**ADR 0017 accepts Harness Store as trusted execution-integrity state**, not
+an untrusted provider response. The Host must authenticate Actor and
+tenant-scope HostThread; Memory/PostgreSQL Harness Stores must atomically
+reject rebinding Session ID/HostThread/Actor, Turn owner and original root
+Invocation Input/Hash even when callers recompute a normal hash. Database
+connections and backups must not be controlled by untrusted tenants.
+Untrusted third-party Store adapters are not supported without independent
+authentication; a complete Store compromise is an explicit residual risk,
+not an unbounded new SessionClient P1.
+
+A shared seeded owner-integrity conformance matrix now covers Memory and
+SQL-compatible Store, with a separate real PostgreSQL two-connection suite.
+**No runtime protocol, SQL schema version, Session field, Token signer,
+compatibility bridge or extra per-read Kernel lookup was introduced.**
+This is a clarification/hardening of the privileged Store contract, not a
+change to Provider ResponseID, Tool/Model invocation or billing semantics.
+See [ADR 0017](adr/0017-trusted-harness-store-and-frozen-owner.md).
+
 ## 2026-11-06 — SessionClient frozen owner read/resume hard cut (beta.24 candidate)
 
 Before this correction, `SessionClient.authorizedTurnID` verified the

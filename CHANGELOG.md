@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Harness owner-integrity trust-boundary closure (2026-11-06):
+  [ADR 0017](docs/adr/0017-trusted-harness-store-and-frozen-owner.md)
+  defines the Host-authenticated Actor and trusted durable Harness Store as
+  the owner integrity boundary. Memory/SQL conformance and real PostgreSQL
+  cross-connection tests exercise immutable Session owner, exact root
+  Invocation Input/Hash, concurrent hostile replay and CAS/ID protection.
+  A custom Store able to fabricate both immutable records remains outside
+  the supported security model; no extra Kernel query, owner-signer,
+  schema change, compatibility bridge or duplicative Agent state was added.
+  See [audit closure](docs/audits/2026-11-06-harness-store-tcb-closure.md).
+
 - Follow-up independent Session owner P1 remediation (2026-11-06):
   Host-selected Actor and Kernel Thread are now checked against the original
   frozen root Agent Invocation for all SessionClient read/recovery operations,

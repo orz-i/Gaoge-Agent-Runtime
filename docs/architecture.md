@@ -156,7 +156,12 @@ there is no automatic user-intent classifier or default `Runner.Start`.
 The optional Agent `SessionClient.Prompt` is a deliberately Agent-specific
 facade that delegates to `StartAgentTurn`, not a second model/Tool loop.
 The Host owns all slash commands, triggers, labels, descriptions and intent
-routing. The Harness `CommandCatalog` freezes only explicit child-capability
+routing. It also authenticates the caller and scopes HostThread per tenant;
+[ADR 0017](adr/0017-trusted-harness-store-and-frozen-owner.md) explicitly
+places the durable Harness Store inside the execution-integrity trust boundary.
+An adversarial Store that permanently rewrites immutable Session/root Actor
+values is not an authenticated source, and cannot be repaired by additional
+reads of that same Store. The Harness `CommandCatalog` freezes only explicit child-capability
 execution authorization (`ID`, `CapabilityKey`, version, class, source,
 application kind and `InputSchema`) into the Turn config for replay safety.
 It does not create default `/team` or `/workflow` commands, classify user
