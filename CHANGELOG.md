@@ -5,6 +5,19 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Follow-up independent Session owner P1 remediation (2026-11-06):
+  Host-selected Actor and Kernel Thread are now checked against the original
+  frozen root Agent Invocation for all SessionClient read/recovery operations,
+  and again against the actual returned Snapshot. A Session-scoped Resume
+  passes the expected caller identity to its last native/Kernel dispatch
+  fence, preventing an inconsistent Store's first Session response from
+  authorizing another actor's pending model call. Adversarial once-only,
+  persistent and two-stage Store-return substitutions and same-Actor wrong
+  Thread are permanently covered; no new Store schema, replay protocol or
+  Kernel state. Anthropic's documented exact `claude-mythos-preview`
+  supports `max` but not `xhigh`; Unary and SSE are covered. See
+  [second-review remediation](docs/audits/2026-11-06-session-owner-followup-remediation.md).
+
 - Independent P1/P2 effort-governance remediation (2026-11-05):
   preserve pre-effort Provider HMAC identity for old pending Runs; reject
   duplicate or aliased ModelOptions *before* Harness canonicalization;

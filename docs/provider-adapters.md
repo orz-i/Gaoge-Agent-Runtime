@@ -111,7 +111,11 @@ beta.24 adapter**; pending ModelInvocations can safely resume on unchanged
 bindings. Known public model IDs cannot be overridden with additional levels:
 explicit Host certification is only for unknown/private route IDs. If an
 upstream model stops supporting a declared level, its HTTP failure is
-reported, never downgraded to a cheaper effort or omitted setting.
+reported, never downgraded to a cheaper effort or omitted setting. The
+exact public `claude-mythos-preview` ID supports `low`, `medium`, `high`
+and `max` but **not** `xhigh`, per the
+[Anthropic effort matrix](https://platform.claude.com/docs/en/build-with-claude/effort);
+this rule is enforced for both Unary and SSE requests.
 
 **Sampling compatibility:** OpenAI reasoning models reject `temperature` and
 `top_p` when explicit effort is not `none`; the documented non-`none` default

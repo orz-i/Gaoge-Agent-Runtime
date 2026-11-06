@@ -123,7 +123,10 @@ if err != nil { return err }
 turn, err := reopened.Resume(ctx, stableTurnID)
 ```
 
-The actor/session check runs before execution. Resume loads the existing root Run
+The actor/session check runs before execution and is cross-checked against
+the original root Invocation and actual Kernel Run owner. A forged or stale
+first Session Store response cannot authorize someone else's pending work.
+Resume loads the existing root Run
 and revision, restores its Context, delegates to Agent's execution path once, and
 synchronizes the root Invocation and Turn outcome. A completed Turn is safe to
 load or resume again without repeating the model or committed Tool effects.

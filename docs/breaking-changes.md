@@ -2,6 +2,46 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-06 — SessionClient frozen owner read/resume hard cut (beta.24 candidate)
+
+Before this correction, `SessionClient.authorizedTurnID` verified the
+first Store-provided Session Actor but returned only a Turn ID. Later
+`Runner.Load`, bounded state/Timeline reads, `Refresh`, and `ResumeTurn`
+re-read Store identity without retaining the *Host caller's* actor. An
+inconsistent Store that spoofed the first Session read could disclose
+another Actor's committed result or enter its pending physical Agent
+ModelInvocation on a later genuine Session read.
+
+The Session facade now requires an original, hash-validated **root Agent
+Invocation Actor/Thread** matching the Host caller before reading or
+continuing a Turn. Its ID is derived from the existing stable Session
+Turn/Request identity and loaded by indexed `GetInvocation`, avoiding a
+new unbounded child-Invocation scan for `LoadState`. Returned full snapshots are independently checked
+against that caller, bounded state checks the returned Session owner, and
+Timeline rechecks the frozen owner after the Item read. Session-scoped
+`Refresh` checks the actual reloaded root owner **before** any repair writes.
+Session-scoped `Resume` additionally passes the expected Actor/Thread to the same native
+`Runner.ResumeTurn` implementation and compares them with the actual
+root/Session/**Kernel Run** owner before physical Agent execution. The
+direct, Host-authorized `Runner.ResumeTurn` API remains unchanged; there
+is no second continuation algorithm or durable authority.
+
+Behavioral hard cut: a Session facade read of an `accepted` Turn with **no
+verifiable original root Invocation** now returns `ErrConflict`, rather
+than inferring owner from a mutable Session Store response. The Host can
+retry the original admission or use an explicitly authorized direct
+Runner API. `Prompt` retains the Host's responsibility to authenticate
+the transcript source. Regular bounded `LoadState` still does not query
+Kernel state, and Custom Stores must maintain the original immutable
+Invocation input as required by their contract. No new SQL DDL, persisted
+schema, compatibility bridge or Kernel status was added.
+
+The Anthropic exact-model effort table also includes verified public
+`claude-mythos-preview` with `low/medium/high/max`, but no `xhigh`.
+Both Unary and SSE check exact effort and reject unsupported options
+before HTTP. See
+[follow-up remediation](audits/2026-11-06-session-owner-followup-remediation.md).
+
 ## 2026-11-05 — Independent P1/P2 correction for effort and frozen options (beta.24 candidate)
 
 An optional `BindingSpec.EffortModelLevels` field was incorrectly included
