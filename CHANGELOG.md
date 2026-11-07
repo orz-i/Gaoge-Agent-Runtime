@@ -5,6 +5,22 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Minimal text Session onboarding (2026-11-07): add optional
+  `harness.OpenTextAgentSession` and `TranscriptHistoryFunc` over the existing
+  Agent/Harness execution path. The former composes the original Context
+  projection and recovery middleware; the latter reads immutable prior Host
+  transcript entries and appends one stable-ID User entry. No second Agent
+  loop, transcript Store, implicit Tool/Feature router, persistent schema,
+  execution status or replay compatibility bridge. Advanced integration
+  remains explicitly composed; Host retains owner/identity and transcript
+  responsibilities. The minimal Session example now uses the facade and
+  regression tests cover retries, new composition, cross-actor read denial
+  and invalid prior history. Independent review P2 remediation now validates
+  every prior message's model contract and restricts standard history to
+  pure-text User/Assistant content before durable Turn creation; invalid
+  history cannot poison a stable Turn ID, and media/Tool/ProviderReplay/system
+  content must use explicitly composed sources.
+
 - Follow-up model capability authorization P2 remediation (2026-11-06):
   replace the negative omitted-effort sampling / mandatory Tool flags with
   **positive Host-certified support**. Missing model metadata never

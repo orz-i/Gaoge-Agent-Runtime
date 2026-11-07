@@ -48,13 +48,19 @@ modules adapt contracts at the edge and are assembled by the host.
 and call `StartRun` directly; Harness, Context, Session, Team, Workflow and
 Continuation are not prerequisites for the Agent Loop. Add Harness only when
 Host Turn identity, shared interactions, delegation or Context checkpoints are
-needed. For the simple text Session path, manually supply the same Kernel,
-Agent, a Harness Store, a pure Context Manager, and the existing pre-commit
-`MaterializeContextWindowRequest`; `Dependencies.Clock` may be omitted for a
-system timestamp clock. Neither omission bypasses the Kernel Store's execution
-lease or Tool intent/receipt gates. No automatic feature routing or provider
-selection follows from this convenience. See the
-[minimal Session example](../go/agent-runtime-harness/examples/session/README.md).
+needed. For a simple text-only Session, the optional `OpenTextAgentSession`
+helper composes this same Agent + Harness pair, attaching the existing
+`MaterializeContextWindowRequest` and Context-run recovery middleware. Its
+`TranscriptHistoryFunc` adapter validates an ordered Host-owned history of
+pure-text User/Assistant messages before durable Turn creation, then appends
+the current User entry with a stable ID; it neither persists replies nor
+maintains a second transcript. Custom System, Tool, ProviderReplay or media
+history must use the original explicitly composed `TranscriptSource`. Tools, delegation, middleware, managed
+Context and specialized feature flows still require explicit composition.
+The Harness system clock remains optional. No convenience call bypasses
+Kernel execution leases, effect receipts, original identity or Provider replay
+authority. There is no automatic feature routing or model-provider selection.
+See the [minimal Session example](../go/agent-runtime-harness/examples/session/README.md).
 
 ## Ownership
 

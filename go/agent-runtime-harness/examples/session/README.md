@@ -25,35 +25,53 @@ turn-2: I can see 2 user turn(s).
 | Stable Host Turns and transcript-derived Context | The same Agent + Harness Store + `harness.Runner` + Context Manager | [This example](main.go) |
 | Persist across process loss, recover pending Model/Tool effects | Persistent Kernel/Harness stores, frozen request projection, original identities and reconciliation; optional worker | [Task-agent recovery](../task-agent/README.md) |
 
-The Session example manually composes these existing ports:
+The example uses the optional **text-only composition helper**, which
+combines the existing Agent and Harness runners without creating a second
+execution loop or transcript Store:
 
 ```go
 runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 // Check err.
-loop, err := agent.NewRunner(agent.Dependencies{
-    Runtime: runtime,
-    Model: client,
-    PrepareModelRequest: harness.MaterializeContextWindowRequest,
-})
-// Check err.
-host, err := harness.NewRunner(harness.Dependencies{
-    Runtime: runtime, Agent: loop, Store: harness.NewMemoryStore(),
-    Context: runtimecontext.NewManager(runtimecontext.Dependencies{}),
+session, err := harness.OpenTextAgentSession(harness.TextAgentSessionOptions{
+    Runtime: runtime, Store: harness.NewMemoryStore(), Model: client,
+    Session: harness.SessionOptions{
+        HostThread: hostThread, Actor: actor, Thread: thread,
+        Config: harness.ConfigSnapshot{Model: "fixture"},
+        Transcript: harness.TranscriptHistoryFunc(readPriorHostEntries),
+    },
 })
 // Check err.
 ```
 
-No `Team`, `Workflow`, `Continuation`, `RunRelation`, `TurnFeed`, default
-commands, or middleware is required for this in-process case. The Harness
-clock now defaults to the system clock if omitted; the Kernel Store remains
-authoritative for execution leases and safety checks.
+Here `readPriorHostEntries` is a Host-owned function with signature
+`func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error)`.
+It reads a stable, ordered snapshot of **previous completed, pure-text
+User/Assistant messages** with unique canonical `ID` and `SourceID` values;
+the adapter appends the current User entry as `<turn.ID>/user`. It validates
+message roles, content and identities **before any immutable Turn admission**.
+System messages, empty/invalid messages, Tool calls/results, ProviderReplay,
+images, files and audio fail closed with `ErrInvalidRequest`. A Host may fix
+invalid historical data and retry the same Turn ID because the rejected
+submission did not persist a Turn. For more general Context payloads, the Host
+must use an explicitly composed `TranscriptSource` rather than this text
+adapter. The Host must authenticate the conversation, retain completed
+Assistant answers, and append them before the next Turn. There is no automatic
+transcript persistence or delayed background answer insertion.
 
-For a **new** Turn, the Host-supplied `TranscriptSource` returns the full
-source ancestry as an immutable *submission snapshot*, with stable source IDs
-and the new User message last. The Host retains completed Assistant answers
-and appends them before the next Turn. Context projection occurs **before**
-the durable ModelInvocation request is sealed, never in dispatch middleware.
-The second Turn verifies that the model sees the earlier messages.
+The helper automatically attaches the existing Context rehydration middleware
+and pre-commit request projection. It rejects Tool/Command/Role/delegation/
+shared-budget configurations because those require explicit Host composition.
+For those capabilities, custom middleware or a managed bounded Context, keep
+using `agent.NewRunner` + `harness.NewRunner`; both paths execute the same
+Agent Loop. Plain `TranscriptSourceFunc` remains available for custom immutable
+submission seeds, Context deltas and branch handling.
+
+No `Team`, `Workflow`, `Continuation`, `RunRelation`, `TurnFeed` or default
+command routing is necessary for this in-process case. The Harness clock
+defaults to the system clock. The Kernel Store remains authoritative for
+execution leases and physical effect safety. Context projection occurs
+**before** the durable ModelInvocation is committed, never in dispatch
+middleware. The second Turn verifies that the model sees the earlier messages.
 
 The example separates three operations:
 
@@ -66,8 +84,8 @@ The example separates three operations:
    later Turns have advanced the Host transcript. The example verifies the
    original result is unchanged and no new model call occurs. Its regression
    check deliberately tries an old `Prompt` against the now-changed history:
-   it must return `ErrConflict`, not dispatch a new execution or silently
-   replace the original admission. A Host retaining the original immutable
+   it must fail closed (`ErrInvalidRequest` for duplicate current SourceID,
+   or `ErrConflict` for changed frozen ancestry), without a new execution. A Host retaining the original immutable
    submission can alternatively retry that *exact* input.
 
 Terminal `Session.Resume` also returns without another model invocation. This

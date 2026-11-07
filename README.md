@@ -84,7 +84,12 @@ go run ./go/agent-runtime-harness/examples/session
 
 It uses the **same** Agent Loop with optional Harness, a Host-owned transcript,
 and explicit Context projection; no Workflow, Team, scheduler, or intent router
-is involved. A basic Harness `Clock` defaults to the system clock. For bounded
+is involved. For a text-only conversation, `harness.OpenTextAgentSession`
+composes the existing runners and `harness.TranscriptHistoryFunc` projects
+prior text-only User/Assistant messages with stable IDs, validates the history
+before Turn admission, and appends the current User message. The Host still
+persists its transcript and answers; advanced Tools, multimodal history,
+delegation and bounded Context require explicit composition. A basic Harness `Clock` defaults to the system clock. For bounded
 Context, retrievable archives and interrupted-execution recovery, follow the
 [single-Agent task guide](docs/agent-task-workflow.md) and
 [advanced task-agent example](go/agent-runtime-harness/examples/task-agent/README.md).
