@@ -5,6 +5,21 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #94 report-consistency audit fix (2026-11-07): make the Pilot
+  report reader respect the smaller of the verified model input window and
+  the Host's quality-only service ceiling; a 32,768-token ceiling does not
+  impose a 32,768-token minimum model window. Centralize independent report
+  checks for exact Endpoint origin/hash, sample identity and recovery evidence,
+  required per-call Tool/Model receipts, known/unknown Usage totals and exact
+  nearest-rank duration aggregates. Inconsistent imported reports now fail
+  closed, including reports previously accepted with contradictory success or
+  forged subtotal evidence. Genuine historical lower-ceiling reports remain
+  readable but are not silently granted new-run admission. This is an
+  intentional **unreleased report-validation hard cut**; it introduces no
+  compatibility bridge, new schema version or Agent/Provider/Kernel changes.
+  It is semantic consistency validation, not a cryptographic authenticity
+  guarantee. See [Pilot audit](docs/audits/2026-11-07-first-live-agent-pilot.md).
+
 - First real Agent pilot positive evidence (2026-11-07): after the scoped
   Host budget correction, the real OpenAI `gpt-5.6-terra` `code-01` task
   completed its verified Oracle and all seven recovery checks with one draft,
