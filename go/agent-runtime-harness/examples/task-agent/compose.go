@@ -28,12 +28,23 @@ func taskLimits() agent.Limits {
 	return agent.Limits{MaxLLMCalls: maxModelCalls, MaxToolCalls: maxToolCalls}
 }
 
-func taskToolPolicies() []harness.ToolPolicySnapshot {
+func taskToolPoliciesForSuite(suite string) []harness.ToolPolicySnapshot {
+	reader := harness.ContextArtifactToolPolicySnapshot()
+	if suite == qualitySuite {
+		reader = harness.ContextArtifactCandidateToolPolicySnapshot()
+	}
 	return []harness.ToolPolicySnapshot{
 		{Key: lookupKey, DefinitionVersion: "task-v1", ApprovalMode: "never", SideEffectLevel: "read"},
-		harness.ContextArtifactToolPolicySnapshot(),
+		reader,
 		{Key: draftKey, DefinitionVersion: "task-v1", ApprovalMode: "never", SideEffectLevel: "write", IdempotencyMode: "none"},
 	}
+}
+
+func taskArtifactRegistrationForSuite(suite string, handler *harness.ContextArtifactToolHandler) tools.Registration {
+	if suite == qualitySuite {
+		return harness.ContextArtifactCandidateToolRegistration(handler)
+	}
+	return harness.ContextArtifactToolRegistration(handler)
 }
 
 func taskContextPolicy() runtimecontext.Policy {
@@ -65,7 +76,7 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 		return nil, err
 	}
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
-	reader := harness.ContextArtifactToolRegistration(harness.NewContextArtifactToolHandler(state.store, nil))
+	reader := taskArtifactRegistrationForSuite(config.suite, harness.NewContextArtifactToolHandler(state.store, nil))
 	handler := reader.Handler
 	reader.Handler = tools.HandlerFunc(func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 		result, readErr := handler.Execute(ctx, request)
@@ -136,10 +147,10 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 		Config: harness.ConfigSnapshot{
 			Model:          config.routedModel(),
 			ModelOptions:   config.modelOptions(),
-			Instructions:   taskInstructions,
+			Instructions:   taskInstructionsForSuite(config.suite),
 			OutputContract: &model.OutputContract{Name: "task_answer", Schema: answerSchema},
 			ToolKeys:       []string{lookupKey, harness.ContextArtifactToolKey, draftKey},
-			ToolPolicies:   taskToolPolicies(),
+			ToolPolicies:   taskToolPoliciesForSuite(config.suite),
 			ContextPolicy:  taskContextPolicyForSuite(config.suite),
 			Limits:         taskLimits(),
 		},
