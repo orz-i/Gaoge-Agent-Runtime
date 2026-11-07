@@ -5,6 +5,45 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- First real Agent pilot positive evidence (2026-11-07): after the scoped
+  Host budget correction, the real OpenAI `gpt-5.6-terra` `code-01` task
+  completed its verified Oracle and all seven recovery checks with one draft,
+  four Model calls and three Tools; 39/40 cases remain unattempted and the
+  source checkout was dirty. The preflight's normal Tool continuation passed
+  but returned no reasoning item, so that individual probe does **not** prove
+  encrypted replay; earlier independent Provider evidence did. The report
+  renderer now distinguishes those coverage facts without loosening admission.
+  See [pilot audit](docs/audits/2026-11-07-first-live-agent-pilot.md).
+
+- Real pilot Host-budget correction (2026-11-07): the first official
+  `gpt-5.6-terra` `code-01` pilot passed Schema and encrypted Tool/replay
+  preflight, then failed `context_budget_exceeded` after 2 real Model and 2
+  Tool calls (lookup and Context artifact read), before draft creation.
+  Without an exact tokenizer, the example's 8,192-token service cap charges
+  a conservative hard upper bound of serialized input bytes including opaque
+  reasoning replay; model context capacity alone does not lift that cap.
+  A 12 KiB completed-reasoning SSE fixture reproduced the failure before the
+  third Model request. Limit **only** the quality task family's Host service
+  input to 32,768; keep the two-case baseline at 8,192, retain strict
+  Context/Provider replay validation and the same evidence Oracle. The
+  quality profile's dataset hash changes deliberately; earlier failed pilot
+  results cannot be treated as comparable quality samples or silently fixed.
+  No SDK/Kernel estimator or persistence protocol changes. See
+  [real pilot audit](docs/audits/2026-11-07-first-live-agent-pilot.md).
+
+- First-live-Agent-quality gate (2026-11-07): add opt-in
+  `agent-quality-pilot` to measure exactly the first fixed `evidence-40-v1`
+  case (`code-01`) through the actual Agent/Tool/Context/recovery Oracle after
+  the existing real Provider preflight. Preserve the 40-case manifest and
+  historical baseline hashes. Pilot reports carry explicit `pilotOnly`,
+  `pilotCaseID` and `pilot_sample_passed` / `pilot_sample_failed` statuses;
+  39 unattempted cases never turn into an inferred complete benchmark score.
+  Prevent extra or substituted samples, forged summaries, numerical full-suite
+  comparison and accidental escalation via `retry`. All real Provider calls
+  remain interactive, credential-private and separately paid/authorized.
+  The SDK/Kernel/Provider execution contract and database schemas are unchanged.
+  See [first-live Agent task gate](docs/agent-effect-benchmark.md).
+
 - Agent effect benchmark governance (2026-11-07): preserve the historical
   two-case real-model baseline while adding opt-in `evidence-40-v1` with
   40 immutable evidence/Tool/Context/recovery cases across five data-variation

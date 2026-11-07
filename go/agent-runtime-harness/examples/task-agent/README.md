@@ -56,10 +56,12 @@ it does not deploy, publish, send a message or modify repository files.
 - The model-window resolver accepts only the exact configured model. Scripted
   mode declares a 16,384-token synthetic capacity. Live mode requires the host
   to supply the selected model's documented capacity.
-- `ContextPolicy.MaxInputTokens = 8192` is a separate service ceiling that
-  makes this small task exercise compaction, even with a large model window.
-  The default Context estimator is conservative; this is not an exact
-  provider tokenizer measurement.
+- `ContextPolicy.MaxInputTokens = 8192` remains the historical two-case
+  service ceiling. The separate `evidence-40-v1` suite uses 32,768 so an
+  otherwise valid encrypted reasoning replay does not routinely exhaust the
+  conservative serialized-byte fallback before the next model dispatch.
+  The full dossier still requires compaction. Neither limit is the model's
+  context capacity or an exact Provider-tokenizer measurement.
 - Managed preparation is the last pre-intent projection. Rehydration middleware
   restores committed Context during execution recovery.
 - Native `RunExecution` sets an owner and lease, with bounded model/tool calls.
@@ -70,10 +72,13 @@ it does not deploy, publish, send a message or modify repository files.
 The service ceiling must still leave room for the selected model's Tool
 schemas, instructions and retrieved evidence. Making it too small can archive
 the reader's result again or fail admission; increasing the provider capacity
-alone does not raise the separate service ceiling. The current 8,192 ceiling
-replaces the earlier 6,144 baseline profile after native phase/replay fixtures
-exceeded that conservative input allowance. The dataset hash and measurement
-profile record this change; results across those budgets are not comparable.
+alone does not raise the separate service ceiling. The historical 8,192 ceiling
+replaced the earlier 6,144 baseline profile. The evidence-quality suite now
+uses a separate 32,768 limit after its first real pilot encountered a local
+`context_budget_exceeded` in the presence of stateless reasoning replay.
+The model's own effective input limit remains binding. These distinct policies
+are included in dataset hashes and measurement profiles; cross-budget results
+are not comparable.
 
 ## Oracle and correctness boundary
 

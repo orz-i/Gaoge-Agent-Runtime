@@ -1,6 +1,6 @@
 # Agent effect benchmark — evidence-quality v1
 
-**Status:** opt-in beta.24 development suite (2026-11-07). Not a general Agent benchmark, leaderboard, paid-provider validation, or release gate.
+**Status:** opt-in beta.24 development suite (2026-11-07). Not a general Agent benchmark, leaderboard, or release gate. A single real-provider pilot has been observed and failed at the Host Context budget boundary; no complete real-model 40-case score exists.
 
 ## Goals and scope
 
@@ -45,6 +45,26 @@ Both commands still require an interactive terminal, a fresh hidden API key and 
 This mode is enforced by a separate Go command path (`-mode=baseline-preflight-stdin`) which returns after the shared preflight and summary, before the first call to `runTask`. The ordinary `quality` path is unchanged. No API calls are launched automatically by CI, and an already-failed preflight cannot be resumed as if it produced committed task effects.
 
 **First real-probe evidence (2026-11-07):** the official OpenAI Responses endpoint with `gpt-5.6-terra`, medium reasoning and output ceiling 4,096 successfully completed the strict-Schema preflight and both synthetic Tool/replay HTTP requests. The saved local report `20261107T045702Z-143d389d.json` was validated as `preflight_only_passed` with `reasoningSeen=true` and `encryptedReplaySeen=true`, complete Tool/replay Usage receipts, **0/40 task samples attempted**, and an explicitly unknown quality success rate. The local source was dirty; this is evidence of live compatibility for that checkout, not an immutable PR-Head/CI sign-off or a measured Agent task result. See [dated verification record](audits/2026-11-07-agent-effect-benchmark.md).
+
+## First real Agent task: bounded one-case pilot
+
+After Provider preflight succeeds, verify the **actual Agent/Tool/Context/Oracle/recovery path** before committing to the entire 40-case paid suite. The pilot is a separate, explicit command:
+
+```sh
+make agent-quality-pilot
+# Or reuse an existing report's public endpoint/model/output budget:
+python3 scripts/run-agent-baseline.py pilot artifacts/agent-baselines/<report>.json
+```
+
+The Host requires a newly hidden API key, trusted model capability profile, and interactive opt-in. The Go runner restricts this mode to **`evidence-40-v1`, repetitions=1**, and runs precisely **`code-01` once** after the usual strict Schema and synthetic Tool/replay preflight. It cannot start any of the remaining 39 cases, even if the first passes or fails. The same real Agent Loop, existing deterministic evidence Oracle and same-Run recovery tests are exercised; the task may invoke the model multiple times (existing cap of 12 Model calls, 10 Tools, and 5-minute sample timeout), in addition to the 1–3 preflight calls. These are upper bounds, **not** monetary price guarantees. A successful fake/local Model is not a substitute for a real Provider observation.
+
+The report retains the same **40-case source corpus and task version** and records its actual measurement profile/dataset hash, plus `pilotOnly=true` and `pilotCaseID=code-01`. The quality suite's Context-budget profile changed after the first real pilot; historical reports keep their own earlier hash and must not be numerically compared with the new profile. On task completion it reports `attempted=1`, `skipped=39`, `complete=false` and either `pilot_sample_passed` or `pilot_sample_failed`; a failed preflight reports attempted=0. The attempted single-case outcome, latency and known/unknown token receipts are observations, **not a 40-case success rate, grouped score, or leaderboard**. Numeric comparison with full or other pilot reports is explicitly disallowed. `retry` refuses pilot reports to avoid launching all 40 tasks; use another explicit `pilot` command to repeat the pilot, or `quality` only when the full budget has been approved.
+
+**First real pilot observation (2026-11-07):** the official OpenAI Responses `gpt-5.6-terra` trial passed the Schema/Tool replay preflight, then executed `lookup_release` and `read_context_artifact` before failing locally at `context_budget_exceeded`; it issued 2 task Model calls and 2 Tool calls, with 0 draft writes and 39 tasks skipped. The prior **8192-token Host service ceiling**, not the 1,050,000-token model capacity, was the effective constraint. Without an exact TokenCounter, the Context manager conservatively bounds serialized bytes, including encrypted replay. A synthetic 12 KB encrypted reasoning completion reproduced the same local failure; the quality suite's Host limit was raised to **32768** while retaining the original **8192** for the historical two-case suite, with a new quality dataset hash and no SDK estimator bypass. The actual original encrypted payload length is unavailable from the redacted report, and the updated code has **not** been retested against the paid model. See [first-pilot evidence and limitations](audits/2026-11-07-first-live-agent-pilot.md).
+
+**Second real pilot observation (2026-11-07):** After the quality-only Host cap adjustment, the same `gpt-5.6-terra` / medium-effort `code-01` trial passed its full Agent Oracle and all recovery checks. Local report `20261107T065511Z-44b17e65.json` was validated as `pilot_sample_passed`, with 4 Model calls, 3 Tool executions (including exactly one draft), 9,990 ms task duration, complete 4/4 task Usage receipts (2,709 input / 268 output Tokens), and **39/40 tasks unattempted**. Its corrected quality dataset hash is `sha256:1d57c9a8827816d63340f027a60bfdc92c63624e982232cb4f49ba2ff2bf3993`, while `source.dirty=true` means the result is not yet a locked-commit acceptance. The synthetic Tool preflight was also `passed` but reported `reasoningSeen=false` and `encryptedReplaySeen=false`: this particular probe proved ordinary Tool continuation, **not** encrypted reasoning replay coverage. A separate earlier Provider preflight had verified encrypted reasoning replay. See the [live pilot audit](audits/2026-11-07-first-live-agent-pilot.md) for the distinct evidence claims.
+
+**Go/no-go after the pilot:** inspect the real oracle verdict, Model/Tool call counts, provider Usage coverage, saved draft, Context Artifact read, lease fencing and same-Run recovery evidence. A single successful case is a *smoke check*, not evidence for cross-model or cross-workload performance. If it fails, diagnose first rather than automatically proceeding to 40 samples. Any full real-model benchmark requires separate explicit budget authorization and the regular `quality` command. Wider coding, browser and research task families require independently designed Oracles; do not extend this one release-evidence family by merely cloning more cases.
 
 ## Opt-in real-model measurement
 
