@@ -13,7 +13,6 @@ import (
 	"os"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -34,23 +33,6 @@ func run(ctx context.Context, output io.Writer) error {
 		return err
 	}
 	client := &fixtureModel{}
-	loop, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: client,
-		// The Host owns the transcript. Project its immutable Context before
-		// the one ModelInvocation commit, never from dispatch middleware.
-		PrepareModelRequest: harness.MaterializeContextWindowRequest,
-	})
-	if err != nil {
-		return err
-	}
-	host, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: loop, Store: harness.NewMemoryStore(),
-		Context: runtimecontext.NewManager(runtimecontext.Dependencies{}),
-		// A Clock is not required for the normal system-clock path.
-	})
-	if err != nil {
-		return err
-	}
 
 	// The transcript is deliberately held by the Host. Harness persists only
 	// model-visible Context checkpoints; it is not a second conversation DB.
@@ -58,22 +40,19 @@ func run(ctx context.Context, output io.Writer) error {
 	// snapshots: after later Turns, use Session.Load for an earlier result.
 	var history []runtimecontext.Entry
 	threadID := "demo/tenant-a/conversation"
-	session, err := host.OpenSession(harness.SessionOptions{
-		HostThread: harness.HostRef{Kind: "conversation", ID: threadID},
-		Actor:      kernel.ActorRef{TenantID: "tenant-a", ActorID: "reader"},
-		Thread:     kernel.ThreadRef{Kind: "conversation", ID: threadID},
-		Config:     harness.ConfigSnapshot{Model: "fixture"},
-		Transcript: harness.TranscriptSourceFunc(func(
-			_ context.Context, _, turn harness.HostRef, prompt string,
-		) (*harness.ContextSeed, error) {
-			current := userEntry(turn.ID, prompt)
-			entries := append(runtimecontext.CloneEntries(history), current)
-			path := make([]string, len(entries))
-			for i, entry := range entries {
-				path[i] = entry.SourceID
-			}
-			return &harness.ContextSeed{SourcePath: path, Entries: entries}, nil
-		}),
+	session, err := harness.OpenTextAgentSession(harness.TextAgentSessionOptions{
+		Runtime: runtime, Store: harness.NewMemoryStore(), Model: client,
+		Session: harness.SessionOptions{
+			HostThread: harness.HostRef{Kind: "conversation", ID: threadID},
+			Actor:      kernel.ActorRef{TenantID: "tenant-a", ActorID: "reader"},
+			Thread:     kernel.ThreadRef{Kind: "conversation", ID: threadID},
+			Config:     harness.ConfigSnapshot{Model: "fixture"},
+			Transcript: harness.TranscriptHistoryFunc(func(
+				_ context.Context, _, _ harness.HostRef,
+			) ([]runtimecontext.Entry, error) {
+				return runtimecontext.CloneEntries(history), nil
+			}),
+		},
 	})
 	if err != nil {
 		return err
@@ -134,7 +113,7 @@ func run(ctx context.Context, output io.Writer) error {
 
 	// Regression proof: the changed Host transcript cannot be passed as a
 	// retry of the OLD Prompt. Frozen admission rejects it, without dispatch.
-	if _, lateErr := session.Prompt(ctx, turns[0].id, turns[0].prompt); !errors.Is(lateErr, harness.ErrConflict) {
+	if _, lateErr := session.Prompt(ctx, turns[0].id, turns[0].prompt); !errors.Is(lateErr, harness.ErrInvalidRequest) {
 		if lateErr == nil {
 			return errors.New("changed historical Prompt unexpectedly succeeded")
 		}
