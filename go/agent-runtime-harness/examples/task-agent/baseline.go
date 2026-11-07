@@ -75,13 +75,18 @@ type startEvent struct {
 	Profile          measurementProfile  `json:"profile"`
 	Configuration    publicConfiguration `json:"configuration"`
 	RequestedSamples int                 `json:"requestedSamples"`
+	PreflightOnly    bool                `json:"preflightOnly,omitempty"`
 }
 
 // The manifest hashes the real fixtures, instructions, tool/output contracts
 // and execution policy. Model identity and host-supplied capacity remain in the
 // separate configuration so the task can be compared across models.
 func baselineStart(configuration publicConfiguration) (startEvent, error) {
+	if configuration.Suite != "" && configuration.Suite != qualitySuite {
+		return startEvent{}, errors.New("invalid baseline suite")
+	}
 	profile := baselineProfile(configuration.Provider)
+	cases, taskVersion := selectedBaselineCases(configuration.Suite)
 	type caseManifest struct {
 		ID         string `json:"id"`
 		SourceHash string `json:"sourceHash"`
@@ -95,8 +100,8 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 		ToolPolicies []harness.ToolPolicySnapshot `json:"toolPolicies"`
 		Cases        []caseManifest               `json:"cases"`
 		Profile      measurementProfile           `json:"profile"`
-	}{TaskVersion: baselineTaskVersion, Prompt: taskPrompt, Instructions: taskInstructions, OutputSchema: answerSchema, ToolPolicies: taskToolPolicies(), Profile: profile}
-	for _, item := range baselineCases() {
+	}{TaskVersion: taskVersion, Prompt: taskPrompt, Instructions: taskInstructions, OutputSchema: answerSchema, ToolPolicies: taskToolPolicies(), Profile: profile}
+	for _, item := range cases {
 		manifest.Cases = append(manifest.Cases, caseManifest{ID: item.id, SourceHash: digest([]byte(item.source.document()))})
 	}
 	for _, registration := range (&taskState{}).registrations() {
@@ -108,7 +113,7 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 		return startEvent{}, err
 	}
 	return startEvent{
-		Type: "start", SchemaVersion: baselineSchemaVersion, TaskVersion: baselineTaskVersion, DatasetHash: digest(body),
+		Type: "start", SchemaVersion: baselineSchemaVersion, TaskVersion: taskVersion, DatasetHash: digest(body),
 		Profile: profile, Configuration: configuration, RequestedSamples: len(manifest.Cases) * configuration.Repetitions,
 	}, nil
 }
@@ -287,6 +292,17 @@ func summarize(requested int, samples []baselineSample, preflightPassed bool) ba
 // runBaseline writes one complete JSON object per event. Completed samples are
 // flushed by Encoder immediately; provider failure never suppresses the report.
 func runBaseline(ctx context.Context, input io.Reader, output io.Writer) int {
+	return runBaselineWithPreflightOnly(ctx, input, output, false)
+}
+
+// runBaselinePreflightOnly uses the same configuration and physical Provider
+// probes, but has no path to runTask. It never launches quality samples even
+// when both strict-schema and stateless Tool/reasoning probes succeed.
+func runBaselinePreflightOnly(ctx context.Context, input io.Reader, output io.Writer) int {
+	return runBaselineWithPreflightOnly(ctx, input, output, true)
+}
+
+func runBaselineWithPreflightOnly(ctx context.Context, input io.Reader, output io.Writer, preflightOnly bool) int {
 	configuration, public, err := readBaselineInput(input)
 	if err != nil {
 		return configurationError(output)
@@ -295,6 +311,7 @@ func runBaseline(ctx context.Context, input io.Reader, output io.Writer) int {
 	if err != nil {
 		return configurationError(output)
 	}
+	start.PreflightOnly = preflightOnly
 	encoder := json.NewEncoder(output)
 	if encoder.Encode(start) != nil {
 		return 1
@@ -304,10 +321,26 @@ func runBaseline(ctx context.Context, input io.Reader, output io.Writer) int {
 	if encoder.Encode(preflight) != nil {
 		return 1
 	}
+	if preflightOnly {
+		// A successful probe is never a completed quality result. Requested
+		// tasks remain explicitly unattempted, including when the probe passes.
+		summary := summarize(start.RequestedSamples, nil, false)
+		if encoder.Encode(struct {
+			Type    string          `json:"type"`
+			Summary baselineSummary `json:"summary"`
+		}{Type: "summary", Summary: summary}) != nil {
+			return 1
+		}
+		if preflight.Status == "passed" && ctx.Err() == nil {
+			return 0
+		}
+		return 1
+	}
 	var samples []baselineSample
 	if preflight.Status == "passed" {
+		cases, _ := selectedBaselineCases(configuration.Suite)
 		for repetition := 1; repetition <= configuration.Repetitions && ctx.Err() == nil; repetition++ {
-			for _, item := range baselineCases() {
+			for _, item := range cases {
 				if ctx.Err() != nil {
 					break
 				}

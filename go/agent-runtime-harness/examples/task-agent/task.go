@@ -26,7 +26,8 @@ const (
 var answerSchema = json.RawMessage(`{"type":"object","properties":{"release":{"type":"string"},"deploymentCode":{"type":"string"},"window":{"type":"string"},"artifactID":{"type":"string"},"draftID":{"type":"string"}},"required":["release","deploymentCode","window","artifactID","draftID"],"additionalProperties":false}`)
 
 type sourceFixture struct {
-	code, window string
+	code, window      string
+	prelude, epilogue string // optional quality-only noise; legacy fixtures remain byte-for-byte identical
 }
 
 func defaultSource() sourceFixture {
@@ -41,7 +42,7 @@ func (source sourceFixture) document() string {
 	// Both ends are uninformative. The fact is deep inside the exact payload,
 	// beyond either bounded compaction excerpt and the reader's first page.
 	padding := strings.Repeat("audit log: routine checks passed; 核验记录。\n", 1200)
-	return padding + source.record() + "\n" + padding
+	return padding + source.prelude + source.record() + "\n" + source.epilogue + padding
 }
 
 type taskAnswer struct {

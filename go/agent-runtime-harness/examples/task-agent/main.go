@@ -42,7 +42,7 @@ func runCommand(ctx context.Context, args []string, input io.Reader, output io.W
 	flags := flag.NewFlagSet("task-agent", flag.ContinueOnError)
 	// Flag errors may quote arbitrary argv. Emit only a bounded classification.
 	flags.SetOutput(io.Discard)
-	flags.StringVar(&config.mode, "mode", "scripted", "scripted, live, or baseline-stdin")
+	flags.StringVar(&config.mode, "mode", "scripted", "scripted, quality-scripted, live, baseline-stdin, or baseline-preflight-stdin")
 	flags.StringVar(&config.provider, "provider", "", "live only: openai or anthropic")
 	flags.StringVar(&config.modelID, "model", "", "live only: exact provider model ID")
 	flags.Int64Var(&config.contextTokens, "context-tokens", 0, "live only: documented model capacity")
@@ -50,11 +50,20 @@ func runCommand(ctx context.Context, args []string, input io.Reader, output io.W
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return configurationError(output)
 	}
-	if config.mode == "baseline-stdin" {
+	if config.mode == "baseline-stdin" || config.mode == "baseline-preflight-stdin" {
 		if config.provider != "" || config.modelID != "" || config.contextTokens != 0 || config.outputTokens != 0 {
 			return configurationError(output)
 		}
+		if config.mode == "baseline-preflight-stdin" {
+			return runBaselinePreflightOnly(ctx, input, output)
+		}
 		return runBaseline(ctx, input, output)
+	}
+	if config.mode == "quality-scripted" {
+		if config.provider != "" || config.modelID != "" || config.contextTokens != 0 || config.outputTokens != 0 {
+			return configurationError(output)
+		}
+		return runScriptedQuality(ctx, output)
 	}
 	if err := config.resolve(); err != nil {
 		return configurationError(output)

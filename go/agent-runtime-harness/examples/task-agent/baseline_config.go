@@ -36,6 +36,7 @@ type baselineInput struct {
 	Repetitions                 int    `json:"repetitions"`
 	AllowUnknownStructuredModel bool   `json:"allowUnknownStructuredModel"`
 	ReasoningEffort             string `json:"reasoningEffort,omitempty"`
+	Suite                       string `json:"suite,omitempty"`
 }
 
 // This separate type is the only configuration permitted in events.
@@ -49,6 +50,7 @@ type publicConfiguration struct {
 	Repetitions                 int    `json:"repetitions"`
 	AllowUnknownStructuredModel bool   `json:"allowUnknownStructuredModel"`
 	ReasoningEffort             string `json:"reasoningEffort,omitempty"`
+	Suite                       string `json:"suite,omitempty"`
 }
 
 var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$`)
@@ -86,7 +88,9 @@ func readBaselineInput(reader io.Reader) (baselineInput, publicConfiguration, er
 		input.MaxOutputTokens < 1 || input.MaxOutputTokens > 1<<20 ||
 		input.ContextTokens < input.MaxOutputTokens+serviceInputTokens || input.ContextTokens > 1<<24 ||
 		strings.Contains(input.Model, input.APIKey) || strings.Contains(input.Endpoint, input.APIKey) ||
-		!validBaselineReasoningEffort(input.Provider, input.ReasoningEffort) {
+		!validBaselineReasoningEffort(input.Provider, input.ReasoningEffort) ||
+		(input.Suite != "" && input.Suite != qualitySuite) ||
+		(input.Suite == qualitySuite && input.Repetitions > 3) {
 		return baselineInput{}, publicConfiguration{}, errors.New("invalid configuration")
 	}
 	origin := (&url.URL{Scheme: endpoint.Scheme, Host: endpoint.Host}).String()
@@ -95,6 +99,7 @@ func readBaselineInput(reader io.Reader) (baselineInput, publicConfiguration, er
 		ContextTokens: input.ContextTokens, MaxOutputTokens: input.MaxOutputTokens, Repetitions: input.Repetitions,
 		AllowUnknownStructuredModel: input.AllowUnknownStructuredModel,
 		ReasoningEffort:             input.ReasoningEffort,
+		Suite:                       input.Suite,
 	}, nil
 }
 
@@ -130,7 +135,7 @@ func uniqueObjectFields(raw []byte) bool {
 		// authority-bearing value while passing an exact-duplicate scan.
 		switch name {
 		case "schemaVersion", "provider", "endpoint", "apiKey", "model",
-			"contextTokens", "maxOutputTokens", "repetitions", "allowUnknownStructuredModel", "reasoningEffort":
+			"contextTokens", "maxOutputTokens", "repetitions", "allowUnknownStructuredModel", "reasoningEffort", "suite":
 		default:
 			return false
 		}
@@ -138,6 +143,12 @@ func uniqueObjectFields(raw []byte) bool {
 		var value json.RawMessage
 		if decoder.Decode(&value) != nil {
 			return false
+		}
+		if name == "suite" {
+			var suite string
+			if json.Unmarshal(value, &suite) != nil || suite != qualitySuite {
+				return false
+			}
 		}
 		if name == "reasoningEffort" {
 			// Explicit null or empty is not the same as an omitted field.
