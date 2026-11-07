@@ -22,6 +22,9 @@ const MaxUniqueJSONDepth = 256
 // and matches struct fields case-insensitively; neither behavior is acceptable
 // for provider effect identities or frozen ModelOptions.
 func ValidateUniqueJSONKeys(data []byte) error {
+	if ValidateCanonicalJSONUnicode(data) != nil {
+		return ErrAmbiguousJSON
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	if err := readUniqueJSONValue(decoder, 0); err != nil {
 		return ErrAmbiguousJSON

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -30,7 +31,9 @@ type rootAdmission struct {
 }
 
 func sealStartAdmission(request StartRequest, config *ConfigSnapshot, root rootAdmission) (StartRequest, error) {
-	if config == nil || strings.TrimSpace(root.CapabilityKey) == "" || strings.TrimSpace(root.DefinitionVersion) == "" ||
+	if config == nil || jsoncontract.ValidateCanonicalUTF8(request) != nil ||
+		jsoncontract.ValidateCanonicalUTF8(*config) != nil || jsoncontract.ValidateCanonicalUTF8(root) != nil ||
+		strings.TrimSpace(root.CapabilityKey) == "" || strings.TrimSpace(root.DefinitionVersion) == "" ||
 		strings.TrimSpace(string(root.ExecutionClass)) == "" {
 		return StartRequest{}, ErrInvalidRequest
 	}

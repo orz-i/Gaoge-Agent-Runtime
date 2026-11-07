@@ -152,3 +152,55 @@ outside this synthetic test. The original paid-Provider probe scripts remain
 user-owned and unmodified. Merge admission still requires the **new actual
 PR Head** to pass its required CI and final review; prior-Head CI evidence
 cannot substitute for new-Head gates.
+
+## PR #92 same-class follow-up — unified pre-seal Unicode identity contract
+
+The subsequent actual-Head review of `ed84512942123f3e613f38607e7d2578a1287a79`
+confirmed a new P2 in the **same family**: the text-only checks protected
+message content but not Config instructions/model/environment identity,
+Host references, ModelOptions JSON strings or ContextSeed instructions.
+Different invalid UTF-8 byte values (0x80–0xFF) were accepted and collapsed
+to the same JSON-based Config ContentHash. Distinct raw instructions on the
+same Turn ID incorrectly replayed the prior success rather than returning
+`ErrConflict`. MediaSource.FileID and ProviderReplay.Provider showed a
+corresponding metadata serialization alias. These are Unicode
+canonicalization aliases, not cryptographic hash collisions.
+
+To avoid repeated field-specific repairs, the original failing Head was
+covered by a RED→GREEN matrix and one shared authoritative validator:
+`jsoncontract.ValidateCanonicalUTF8` recursively inspects exported
+JSON-bound structs, maps (including keys), collections and interfaces,
+treating arbitrary `[]byte` as opaque binary and `json.RawMessage` as
+strict JSON Unicode text. It rejects invalid bytes and unpaired UTF-16
+surrogate escapes before encoding/json can replace them with U+FFFD.
+`ValidateUniqueJSONKeys` also rejects these noncanonical JSON payloads.
+The same guard is invoked at **Config seal**, **Harness root admission**,
+**Context normalization/Open**, **Session identity/history preflight**
+and the **model.ValidateMessage** boundary. Existing context lineage,
+Kernel receipts, physical Run ownership and Provider protocol are unchanged.
+
+Regression coverage explicitly includes:
+- Every invalid single byte (128 variants) across 7 typed Config fields
+  and 6 nested JSON-value positions; valid Unicode and the intentional
+  U+FFFD rune remain usable.
+- Config/Context instructions, model ID, dynamic message identities,
+  metadata, raw ModelOptions JSON and invalid Unicode surrogate escapes.
+- Direct Harness StartAgentTurn, pure Context.Manager.Open, standard and
+  custom TranscriptSource, no Session/Turn persistence, zero Model effects,
+  and corrected **same-ID** retries; changed valid configuration still
+  rejects via frozen admission hash.
+- Model media and ProviderReplay metadata, plus a dedicated fuzz target
+  for raw JSON string encoding/escaping alongside the original model-text
+  JSON fuzz target.
+
+This is a **pre-stable validation hard cut**; no compatibility bridge, DB
+schema change or new Agent Loop was added. Limitations: this validator
+covers the declared typed fields at these boundaries; arbitrary
+third-party custom MarshalJSON implementations must independently maintain
+their JSON identity contracts. Opaque Provider behavior, external billing,
+real Provider replay and post-delivery recovery still require their
+respective Provider/integration acceptance checks.
+
+Final merge authorization must refer to the precise **new immutable PR
+Head**, its required GitHub CI, and a full-chain audit. Previous green CI
+cannot authorize a subsequent modified commit.

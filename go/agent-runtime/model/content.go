@@ -4,7 +4,8 @@ import (
 	"errors"
 	"net/url"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 )
 
 // ContentPartKind is the closed provider-neutral set of ordered input blocks.
@@ -80,7 +81,9 @@ func TextValue(parts []ContentPart) string {
 
 // ValidateMessage is the single normalized role/content authority.
 func ValidateMessage(message Message) error {
-	if len(message.Content) > 64 {
+	// Validate all JSON-bound fields, including media references, Tool call
+	// metadata and opaque ProviderReplay identity, before normalization.
+	if jsoncontract.ValidateCanonicalUTF8(message) != nil || len(message.Content) > 64 {
 		return ErrInvalidContent
 	}
 	var nonempty bool
@@ -120,7 +123,7 @@ func ValidateMessage(message Message) error {
 func validatePart(part ContentPart) error {
 	switch part.Kind {
 	case ContentText:
-		if part.Source != nil || part.MediaType != "" || strings.TrimSpace(part.Text) == "" || !utf8.ValidString(part.Text) {
+		if part.Source != nil || part.MediaType != "" || strings.TrimSpace(part.Text) == "" {
 			return ErrInvalidContent
 		}
 		return nil

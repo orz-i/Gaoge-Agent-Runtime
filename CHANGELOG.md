@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #92 follow-up P2: centralize fail-closed Unicode validation of
+  JSON-bound identity/configuration before admission hashing and Model-visible
+  dispatch. Malformed UTF-8 in Host/Actor refs, Config fields, Context
+  instructions/history, model metadata and nested raw JSON (including
+  unpaired surrogate escapes) is now rejected instead of being silently
+  normalized to U+FFFD and replayed as the same immutable Turn. Valid Unicode
+  and opaque binary evidence are preserved. This is a deliberate validation
+  hard cut within the unreleased beta.24; no schema or replay compatibility
+  bridge. See the PR #92 governance audit for the RED/GREEN matrix.
+
 - Minimal text Session onboarding (2026-11-07): add optional
   `harness.OpenTextAgentSession` and `TranscriptHistoryFunc` over the existing
   Agent/Harness execution path. The former composes the original Context

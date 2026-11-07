@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -373,7 +374,7 @@ func canonicalContextJSON(value json.RawMessage) json.RawMessage {
 }
 
 func normalizeContextSeed(seed *ContextSeed) (*ContextSeed, error) {
-	if seed == nil {
+	if seed == nil || jsoncontract.ValidateCanonicalUTF8(seed) != nil {
 		return nil, ErrInvalidRequest
 	}
 	result := &ContextSeed{

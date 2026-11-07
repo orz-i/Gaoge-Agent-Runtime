@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -40,8 +41,8 @@ func (read TranscriptHistoryFunc) Seed(ctx context.Context, thread, turn HostRef
 	seenMessages := make(map[string]struct{}, len(entries)+1)
 	for _, entry := range entries {
 		sourceID, messageID := strings.TrimSpace(entry.SourceID), strings.TrimSpace(entry.ID)
-		if !utf8.ValidString(sourceID) || !utf8.ValidString(messageID) ||
-			!utf8.ValidString(entry.TurnID) || entry.TurnID != strings.TrimSpace(entry.TurnID) ||
+		if jsoncontract.ValidateCanonicalUTF8(entry) != nil ||
+			entry.TurnID != strings.TrimSpace(entry.TurnID) ||
 			sourceID == "" || sourceID != entry.SourceID || sourceID == currentID ||
 			messageID == "" || messageID != entry.ID || messageID == currentID ||
 			(strings.TrimSpace(entry.TurnID) != "" && strings.TrimSpace(entry.TurnID) == turn.ID) ||

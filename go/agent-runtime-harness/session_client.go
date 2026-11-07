@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
@@ -77,6 +78,10 @@ func (runner *Runner) OpenSession(options SessionOptions) (*SessionClient, error
 // the same turn must reuse the same ID, while a new prompt uses a new ID.
 func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string) (Snapshot, error) {
 	if session == nil || session.runner == nil || session.transcript == nil || !utf8.ValidString(turnID) ||
+		jsoncontract.ValidateCanonicalUTF8(session.config) != nil ||
+		jsoncontract.ValidateCanonicalUTF8(session.actor) != nil ||
+		jsoncontract.ValidateCanonicalUTF8(session.thread) != nil ||
+		jsoncontract.ValidateCanonicalUTF8(session.hostThread) != nil ||
 		model.ValidateMessage(model.Message{Role: model.RoleUser, Content: model.TextParts(prompt)}) != nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
@@ -104,8 +109,8 @@ func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string)
 	// Turn; otherwise malformed UTF-8 can be lossy-encoded in the admission
 	// hash and fail only after the Model has already performed an effect.
 	for _, entry := range normalized.Entries {
-		if !utf8.ValidString(entry.ID) || !utf8.ValidString(entry.SourceID) ||
-			!utf8.ValidString(entry.TurnID) || entry.ID == "" || entry.ID != strings.TrimSpace(entry.ID) ||
+		if jsoncontract.ValidateCanonicalUTF8(entry) != nil ||
+			entry.ID == "" || entry.ID != strings.TrimSpace(entry.ID) ||
 			entry.SourceID == "" || entry.SourceID != strings.TrimSpace(entry.SourceID) ||
 			entry.TurnID != strings.TrimSpace(entry.TurnID) || model.ValidateMessage(entry.Message) != nil {
 			return Snapshot{}, ErrInvalidRequest

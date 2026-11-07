@@ -170,6 +170,11 @@ type configPayload struct {
 
 // SealConfigSnapshot normalizes, hashes and seals one immutable configuration for a Harness Turn.
 func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (ConfigSnapshot, error) {
+	// Enforce canonical original bytes before any string normalization or
+	// JSON hash can collapse distinct submitted identities to U+FFFD.
+	if jsoncontract.ValidateCanonicalUTF8(turnID) != nil || jsoncontract.ValidateCanonicalUTF8(value) != nil {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
 	turnID = strings.TrimSpace(turnID)
 	if turnID == "" || now.IsZero() {
 		return ConfigSnapshot{}, ErrInvalidRequest
