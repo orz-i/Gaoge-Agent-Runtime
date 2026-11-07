@@ -109,3 +109,53 @@ func TestOpenAIToolProbeContinuesWithAuthoritativeDoneCiphertext(t *testing.T) {
 		t.Fatal("successful tool probe report exposed ciphertext or credentials")
 	}
 }
+
+// A tool-only Responses completion is valid if there was genuinely no
+// reasoning to preserve. Do not label that event as proven encrypted replay.
+// A reasoning item that does exist but lacks its required encryption remains
+// rejected by TestOpenAIToolReplayAdmissionFailsBeforeAnyTaskWhenEncryptionAbsent.
+func TestOpenAIToolProbeToolOnlyContinuationDoesNotClaimEncryptedReasoning(t *testing.T) {
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			first := `{"object":"response","id":"resp-tool-only","status":"completed","output":[{"type":"function_call","id":"fc-tool-only","status":"completed","call_id":"call-tool-only","name":"baseline_probe_echo","arguments":"{\"value\":\"probe\"}"}],"usage":{"input_tokens":9,"output_tokens":3}}`
+			_, _ = io.WriteString(w, wireFixtureFrame("response.completed", `{"type":"response.completed","response":`+first+`}`))
+			return
+		}
+		var payload struct {
+			Store   bool                         `json:"store"`
+			Input   []map[string]json.RawMessage `json:"input"`
+			Include []string                     `json:"include"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if payload.Store || len(payload.Include) != 1 || payload.Include[0] != "reasoning.encrypted_content" ||
+			len(payload.Input) != 3 {
+			t.Error("tool-only continuation failed stateless input contract")
+		}
+		for _, item := range payload.Input {
+			if _, exists := item["encrypted_content"]; exists {
+				t.Error("tool-only continuation fabricated encrypted reasoning evidence")
+			}
+		}
+		final := `{"object":"response","id":"resp-tool-only-final","status":"completed","output":[{"type":"message","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"{\"ok\":true}"}]}],"usage":{"input_tokens":7,"output_tokens":2}}`
+		_, _ = io.WriteString(w, wireFixtureFrame("response.completed", `{"type":"response.completed","response":`+final+`}`))
+	}))
+	defer server.Close()
+	config := settings{mode: "live", provider: "openai", modelID: "quality-fixture", endpoint: server.URL,
+		apiKey: "test-key-never-export", outputTokens: 1024, reasoningEffort: "medium",
+		modelProfiles: model.StaticModelProfiles{"quality-fixture": {
+			StructuredJSONSchema: true, EffortLevels: []string{"medium"}, SupportsForcedToolChoice: true,
+		}},
+	}
+	probe := baselineToolReplayProbe(context.Background(), config)
+	if probe.Status != "passed" || probe.Stage != "completed" || requests != 2 ||
+		probe.HTTPRequests != 2 || probe.ModelCalls != 2 || probe.ReasoningSeen ||
+		probe.EncryptedReplaySeen || probe.Usage.KnownCalls != 2 ||
+		probe.Usage.MissingCalls != 0 || !probe.Usage.Complete {
+		t.Fatalf("tool-only continuation mislabeled encrypted replay: %+v, requests=%d", probe, requests)
+	}
+}

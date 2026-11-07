@@ -63,8 +63,9 @@ A separate optional [40-case evidence-quality benchmark](agent-effect-benchmark.
 reuses the same Agent/Tool/Context/recovery Oracle with five data variation
 groups. `make agent-quality-calibrate` exercises all 40 cases with a scripted
 model without network, while `make agent-quality-probe` confines real Provider
-activity to the Schema + synthetic Tool/replay probes, and `make agent-quality`
-explicitly opts into 40 real task samples. A preflight-only pass leaves every
-task unattempted and is not numerically comparable with quality observations;
+activity to the Schema + synthetic Tool/replay probes, `make agent-quality-pilot`
+opts into only the fixed `code-01` real Agent task, and `make agent-quality`
+explicitly opts into 40 real task samples. Preflight-only and pilot runs are
+not numerically comparable with a complete quality benchmark;
 one family of tasks is not a measure of general Agent ability. `make agent-baseline-test` verifies both report protocols offline and
 is part of `make check`; real models remain opt-in.

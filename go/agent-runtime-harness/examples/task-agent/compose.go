@@ -43,6 +43,20 @@ func taskContextPolicy() runtimecontext.Policy {
 	})
 }
 
+// The evidence-quality workload needs room for physically completed opaque
+// reasoning replay. The Context manager's no-tokenizer fallback correctly
+// charges >=1 token per serialized byte, so the legacy 8192 service cap can
+// reject a valid third request even on models with much larger windows.
+// A separate quality policy is tied to its dataset hash; the old two-case
+// benchmark retains its exact budget and hash. Never change SDK accounting.
+func taskContextPolicyForSuite(suite string) runtimecontext.Policy {
+	policy := taskContextPolicy()
+	if suite == qualitySuite {
+		policy.MaxInputTokens = 32768
+	}
+	return policy
+}
+
 // compose is deliberately local to this example: the host chooses stores,
 // authority, real model limits, preparation order and execution ownership.
 func compose(store kernel.Store, state *taskState, client model.Client, config settings, owner string, transcript harness.TranscriptSource) (*harness.SessionClient, error) {
@@ -126,7 +140,7 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 			OutputContract: &model.OutputContract{Name: "task_answer", Schema: answerSchema},
 			ToolKeys:       []string{lookupKey, harness.ContextArtifactToolKey, draftKey},
 			ToolPolicies:   taskToolPolicies(),
-			ContextPolicy:  taskContextPolicy(),
+			ContextPolicy:  taskContextPolicyForSuite(config.suite),
 			Limits:         taskLimits(),
 		},
 	})

@@ -70,7 +70,7 @@ func selectedBaselineCases(suite string) ([]baselineCase, string) {
 // Agent/Tool/Context/Recovery tasks with a scripted model and emits no prompts,
 // source records or secrets: only content-free metrics and dataset identity.
 func runScriptedQuality(ctx context.Context, output io.Writer) int {
-	config := settings{mode: "scripted"}
+	config := settings{mode: "scripted", suite: qualitySuite}
 	if err := config.resolve(); err != nil {
 		return configurationError(output)
 	}

@@ -16,7 +16,11 @@ The 40-case mode allows 1–3 repetitions per case and retains exact report
 profiles and historical two-case report compatibility. Use
 `make agent-quality-probe` or `python3 scripts/run-agent-baseline.py probe <report.json>`
 to perform **only** a strict Schema + up to two synthetic Tool/replay preflight
-requests before paying for full task sampling. A successful probe produces a
+requests before paying for full task sampling. The separate
+`make agent-quality-pilot` / `python3 scripts/run-agent-baseline.py pilot <report.json>`
+performs that preflight and then **at most one** real evidence task, `code-01`,
+using the original 40-case manifest and Oracle. Pilot results are explicitly
+partial and ineligible for numerical full-suite comparisons. A successful probe produces a
 `preflight_only_passed` report with **zero attempted tasks**, not a quality
 score; it cannot be numerically compared with full runs, and `retry` refuses
 probe-only reports to prevent accidentally launching all 40 tasks.
@@ -119,11 +123,15 @@ invalidates old pending bindings; unrelated catalog updates do not.
 See [provider adapter contract](provider-adapters.md).
 
 The context capacity must leave at least 8,192 tokens after reserving the output
-ceiling. The service input ceiling is fixed at 8,192 tokens for this measurement
-profile, so that the task exercises Context compaction even when the model
-supports a much larger window. This uses the existing conservative Context
-estimate; it does not claim an exact provider
-tokenizer or reliable token-admission capability.
+ceiling for the historical two-case baseline, whose Host service input ceiling
+remains fixed at **8,192**. The separate `evidence-40-v1` workload now has a
+**32,768** Host service limit to admit stateless encrypted reasoning replay under
+the conservative serialized-byte hard estimate while still archiving the large
+dossier. The effective input limit remains the minimum of the declared model
+window minus reserved output and the Host service cap; it does not claim an
+exact Provider tokenizer or override model capacity. These policies are included
+in distinct measurement profiles and dataset hashes; old and new reports must
+not be numerically compared.
 
 Official endpoint defaults are `https://api.openai.com/v1/responses` and
 `https://api.anthropic.com/v1/messages`. Interactive input resolves only the
@@ -400,7 +408,8 @@ artifact, save one local draft, and return the required structured fields.
 The task instructions suggest a 128-character artifact query page so that the
 returned evidence fits alongside both providers' native transcript overhead.
 This is a prompt instruction, not a new SDK reader limit; the oracle checks the
-actual recovered evidence. The shared 8,192-token service ceiling stays fixed.
+actual recovered evidence. The historical two-case service ceiling stays fixed at 8,192 tokens; the
+40-case evidence suite uses its separately identified 32,768-token ceiling.
 After the draft's Tool receipt commits, a controlled interruption reconstructs
 the runners. The same Run and Turn must complete without executing the committed
 Tool call again. The oracle checks source facts, archived evidence, actual

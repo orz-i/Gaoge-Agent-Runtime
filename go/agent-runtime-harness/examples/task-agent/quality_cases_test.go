@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -51,11 +52,44 @@ func TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent(t *testi
 		t.Fatal(err)
 	}
 	const pinnedLegacyOpenAIDatasetHash = "sha256:e4a782b32d69f7d7e7d25df60ef3416b4c950315e30d5cf716cd05fe2e0c4203"
+	const pinnedQualityOpenAIDatasetHash = "sha256:1d57c9a8827816d63340f027a60bfdc92c63624e982232cb4f49ba2ff2bf3993"
+	const oldQualityOpenAIDatasetHash = "sha256:73424212f400c6226d6329e6ae5474bd84b81c6a35d5aaf964f117519c0aa970"
 	if first.DatasetHash != second.DatasetHash || first.DatasetHash == legacy.DatasetHash ||
 		legacy.DatasetHash != pinnedLegacyOpenAIDatasetHash ||
+		first.DatasetHash != pinnedQualityOpenAIDatasetHash || first.DatasetHash == oldQualityOpenAIDatasetHash ||
+		first.Profile.ContextPolicy.MaxInputTokens != 32768 || legacy.Profile.ContextPolicy.MaxInputTokens != 8192 ||
 		first.TaskVersion != qualityTaskVersion || legacy.TaskVersion != baselineTaskVersion ||
 		first.RequestedSamples != 40 || second.RequestedSamples != 120 || legacy.RequestedSamples != 2 {
 		t.Fatalf("wrong or unstable dataset identity: quality=%+v second=%+v legacy=%+v", first, second, legacy)
+	}
+}
+
+func TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence(t *testing.T) {
+	legacy := taskContextPolicyForSuite("")
+	quality := taskContextPolicyForSuite(qualitySuite)
+	if legacy.MaxInputTokens != 8192 || quality.MaxInputTokens != 32768 ||
+		legacy.PreserveRecentTurns != quality.PreserveRecentTurns ||
+		legacy.MaxToolResultBytes != quality.MaxToolResultBytes {
+		t.Fatal("invalid Context policy budget selection")
+	}
+	for _, tc := range []struct {
+		name                        string
+		capacity, reserve, expected int64
+	}{
+		{"model-at-admission-floor", 9216, 1024, 8192},
+		{"model-smaller-than-service", 16384, 512, 15872},
+		{"model-near-service-ceiling", 32768, 1024, 31744},
+		{"service-and-model-ceiling-align", 33792, 1024, 32768},
+		{"large-model-service-cap", 1050000, 4096, 32768},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bound, err := runtimecontext.EffectiveInputLimit(runtimecontext.ModelWindow{
+				ContextTokens: tc.capacity, ReservedOutputTokens: tc.reserve,
+			}, quality.MaxInputTokens)
+			if err != nil || bound != tc.expected {
+				t.Fatalf("quality service cap bypassed actual model window: bound=%d err=%v", bound, err)
+			}
+		})
 	}
 }
 
@@ -75,7 +109,8 @@ func TestQualityScriptedCommandEmitsContentFreeCalibrationAndRespectsCancellatio
 	if err := json.Unmarshal(output.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	const pinnedScriptedDatasetHash = "sha256:941168211fd24478c6ef64fafd2a581116c3c42def54a227885ab5479e3032f2"
+	// The quality-only Context limit is part of the measurement identity.
+	const pinnedScriptedDatasetHash = "sha256:838df87f9c4d80155059a949cadd048abc9f921e554792382c62dc9e42fefbbf"
 	if result.Suite != qualitySuite || result.Mode != "scripted_oracle_calibration" ||
 		result.Status != "passed" || result.Summary.Requested != 40 || result.Summary.Passed != 40 ||
 		result.Summary.ModelCalls != 160 || result.Summary.ToolCalls != 120 || len(result.Samples) != 40 ||

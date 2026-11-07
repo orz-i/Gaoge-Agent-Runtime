@@ -99,9 +99,10 @@ API key locally. The [baseline guide](docs/agent-model-baseline.md) explains
 fixed tasks, repeatable reports, comparison and recovery limits. The optional
 [40-case Agent effect benchmark](docs/agent-effect-benchmark.md) uses
 `make agent-quality-calibrate` for offline Oracle calibration and
-`make agent-quality-probe` for bounded real-provider preflight only, and
-`make agent-quality` for explicitly authorized 40-case real-model sampling.
-Probe-only reports cannot be mistaken for task completions. The suite measures
+`make agent-quality-probe` for bounded real-provider preflight only,
+`make agent-quality-pilot` for one fixed real Agent task (`code-01`), and
+`make agent-quality` for separately authorized 40-case real-model sampling.
+Probe-only and single-pilot reports cannot be mistaken for complete task scores. The suite measures
 one evidence task family, not general Agent intelligence.
 
 The [TypeScript client guide](ts/agent-runtime-client/README.md),

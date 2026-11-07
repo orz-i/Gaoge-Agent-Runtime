@@ -76,6 +76,8 @@ type startEvent struct {
 	Configuration    publicConfiguration `json:"configuration"`
 	RequestedSamples int                 `json:"requestedSamples"`
 	PreflightOnly    bool                `json:"preflightOnly,omitempty"`
+	PilotOnly        bool                `json:"pilotOnly,omitempty"`
+	PilotCaseID      string              `json:"pilotCaseID,omitempty"`
 }
 
 // The manifest hashes the real fixtures, instructions, tool/output contracts
@@ -86,6 +88,7 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 		return startEvent{}, errors.New("invalid baseline suite")
 	}
 	profile := baselineProfile(configuration.Provider)
+	profile.ContextPolicy = taskContextPolicyForSuite(configuration.Suite)
 	cases, taskVersion := selectedBaselineCases(configuration.Suite)
 	type caseManifest struct {
 		ID         string `json:"id"`
@@ -289,20 +292,36 @@ func summarize(requested int, samples []baselineSample, preflightPassed bool) ba
 	return result
 }
 
+// Baseline execution modes are selected by the Host command, never by the
+// untrusted JSON stdin. Pilot samples preserve the full suite manifest/hash
+// but cannot be counted as a completed benchmark.
+type baselineExecutionMode uint8
+
+const (
+	baselineFull baselineExecutionMode = iota
+	baselineProbe
+	baselinePilot
+	pilotCaseID = "code-01"
+)
+
 // runBaseline writes one complete JSON object per event. Completed samples are
 // flushed by Encoder immediately; provider failure never suppresses the report.
 func runBaseline(ctx context.Context, input io.Reader, output io.Writer) int {
-	return runBaselineWithPreflightOnly(ctx, input, output, false)
+	return runBaselineMode(ctx, input, output, baselineFull)
 }
 
-// runBaselinePreflightOnly uses the same configuration and physical Provider
-// probes, but has no path to runTask. It never launches quality samples even
-// when both strict-schema and stateless Tool/reasoning probes succeed.
+// runBaselinePreflightOnly runs no task even after a successful Provider probe.
 func runBaselinePreflightOnly(ctx context.Context, input io.Reader, output io.Writer) int {
-	return runBaselineWithPreflightOnly(ctx, input, output, true)
+	return runBaselineMode(ctx, input, output, baselineProbe)
 }
 
-func runBaselineWithPreflightOnly(ctx context.Context, input io.Reader, output io.Writer, preflightOnly bool) int {
+// runBaselinePilot runs exactly the first fixed quality case at most once.
+// This is task-path calibration with a real Provider, not the 40-case score.
+func runBaselinePilot(ctx context.Context, input io.Reader, output io.Writer) int {
+	return runBaselineMode(ctx, input, output, baselinePilot)
+}
+
+func runBaselineMode(ctx context.Context, input io.Reader, output io.Writer, execution baselineExecutionMode) int {
 	configuration, public, err := readBaselineInput(input)
 	if err != nil {
 		return configurationError(output)
@@ -311,7 +330,15 @@ func runBaselineWithPreflightOnly(ctx context.Context, input io.Reader, output i
 	if err != nil {
 		return configurationError(output)
 	}
-	start.PreflightOnly = preflightOnly
+	if execution == baselinePilot {
+		cases, _ := selectedBaselineCases(configuration.Suite)
+		if configuration.Suite != qualitySuite || configuration.Repetitions != 1 ||
+			len(cases) == 0 || cases[0].id != pilotCaseID {
+			return configurationError(output)
+		}
+		start.PilotOnly, start.PilotCaseID = true, pilotCaseID
+	}
+	start.PreflightOnly = execution == baselineProbe
 	encoder := json.NewEncoder(output)
 	if encoder.Encode(start) != nil {
 		return 1
@@ -321,7 +348,7 @@ func runBaselineWithPreflightOnly(ctx context.Context, input io.Reader, output i
 	if encoder.Encode(preflight) != nil {
 		return 1
 	}
-	if preflightOnly {
+	if execution == baselineProbe {
 		// A successful probe is never a completed quality result. Requested
 		// tasks remain explicitly unattempted, including when the probe passes.
 		summary := summarize(start.RequestedSamples, nil, false)
@@ -339,6 +366,11 @@ func runBaselineWithPreflightOnly(ctx context.Context, input io.Reader, output i
 	var samples []baselineSample
 	if preflight.Status == "passed" {
 		cases, _ := selectedBaselineCases(configuration.Suite)
+		if execution == baselinePilot {
+			// Select exactly one immutable case; do not rely on interrupts
+			// or the Python runner to stop the remaining 39 cases.
+			cases = cases[:1]
+		}
 		for repetition := 1; repetition <= configuration.Repetitions && ctx.Err() == nil; repetition++ {
 			for _, item := range cases {
 				if ctx.Err() != nil {
@@ -375,6 +407,13 @@ func runBaselineWithPreflightOnly(ctx context.Context, input io.Reader, output i
 		Type    string          `json:"type"`
 		Summary baselineSummary `json:"summary"`
 	}{Type: "summary", Summary: summary}) != nil {
+		return 1
+	}
+	if execution == baselinePilot {
+		if preflight.Status == "passed" && len(samples) == 1 &&
+			samples[0].Status == "passed" && ctx.Err() == nil {
+			return 0
+		}
 		return 1
 	}
 	if !summary.Complete || summary.Failed != 0 || ctx.Err() != nil {
