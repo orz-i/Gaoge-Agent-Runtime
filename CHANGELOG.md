@@ -5,6 +5,31 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Agent effect benchmark governance (2026-11-07): preserve the historical
+  two-case real-model baseline while adding opt-in `evidence-40-v1` with
+  40 immutable evidence/Tool/Context/recovery cases across five data-variation
+  groups. A scripted offline runner validates all 40 actual Agent + Tool
+  oracles without network; interactive quality mode reuses the existing hidden
+  credential, Provider preflight and fail-closed sample protocol. Reports
+  include group-level success/latency/call/known-token observations and
+  compare only matching dataset/profile/suite configurations. Unfinished
+  attempts and missing Usage never become successful/zero-cost samples. No
+  SDK execution loop, Kernel schema, Provider binding or Host policy changes.
+  Real OpenAI tool-probe preflight also uncovered an overstrict SDK ciphertext
+  comparator: an authoritative completed reasoning `response.output_item.done`
+  and a later `response.completed` can expose different encrypted blobs.
+  The Provider now replays only the completed-done encrypted bytes after strict
+  non-encrypted reasoning, Tool, status, item owner and response identity
+  checks; an already-completed `added` item remains immutable. The bounded,
+  content-free `wireEvidence` diagnostic remains available for failed probes.
+  An independent follow-up adds a bounded, explicit `agent-quality-probe`
+  command that runs only the existing Schema and synthetic Tool/replay
+  preflight: it cannot start real tasks even after a pass. Probe-only reports
+  carry a distinct unscored status, preserve 0 attempted task samples and
+  are barred from `retry` full-task execution or numerical quality comparison.
+  No new Agent/Kernel replay mode or compatibility bridge is introduced.
+  See [scope and limits](docs/agent-effect-benchmark.md).
+
 - PR #92 follow-up P2: centralize fail-closed Unicode validation of
   JSON-bound identity/configuration before admission hashing and Model-visible
   dispatch. Malformed UTF-8 in Host/Actor refs, Config fields, Context

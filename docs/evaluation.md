@@ -59,5 +59,12 @@ preserves failed or incomplete observations. A separate native-schema probe
 precedes task sampling; its latency and usage are not counted as task results.
 The launcher compares compatible reports without installing an evaluation
 service or turning a recorded run into an automatically accepted baseline.
-`make agent-baseline-test` verifies the launcher offline and is part of
-`make check`; real models remain opt-in.
+A separate optional [40-case evidence-quality benchmark](agent-effect-benchmark.md)
+reuses the same Agent/Tool/Context/recovery Oracle with five data variation
+groups. `make agent-quality-calibrate` exercises all 40 cases with a scripted
+model without network, while `make agent-quality-probe` confines real Provider
+activity to the Schema + synthetic Tool/replay probes, and `make agent-quality`
+explicitly opts into 40 real task samples. A preflight-only pass leaves every
+task unattempted and is not numerically comparable with quality observations;
+one family of tasks is not a measure of general Agent ability. `make agent-baseline-test` verifies both report protocols offline and
+is part of `make check`; real models remain opt-in.
