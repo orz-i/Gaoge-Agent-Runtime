@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata agent-baseline agent-baseline-test benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
+.PHONY: bootstrap metadata agent-baseline agent-quality agent-quality-probe agent-quality-calibrate agent-baseline-test benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -11,7 +11,19 @@ agent-baseline:
 	python3 scripts/run-agent-baseline.py
 
 agent-baseline-test:
-	python3 -m unittest discover -s scripts -p 'test_agent_baseline.py'
+	python3 -m unittest discover -s scripts -p 'test_agent_*.py'
+
+# Opt-in live quality: 40 independent samples; may incur actual Provider charges.
+agent-quality:
+	python3 scripts/run-agent-baseline.py quality
+
+# Paid preflight only: strict JSON + bounded synthetic Tool/replay, no task samples.
+agent-quality-probe:
+	python3 scripts/run-agent-baseline.py probe
+
+# Local calibration only: scripted Model, same real Agent/Tool/Recovery oracle.
+agent-quality-calibrate:
+	@go run ./go/agent-runtime-harness/examples/task-agent -mode=quality-scripted
 
 # Optional, report-only policy benchmark on two opposing workload shapes.
 # Not an ordinary CI gate: timing is meaningful only on a stable runner.

@@ -80,6 +80,27 @@ func (items *addedOutputItems) observe(index *int, raw json.RawMessage) error {
 }
 
 func (items *addedOutputItems) reconcile(final *responseBody) error {
+	// Unlike a provisional added item, one that explicitly claims
+	// status=completed already supplies terminal physical evidence. Another
+	// done item or the final output must not substitute its encrypted bytes.
+	// The independent done reconciliation runs first and has already selected
+	// the completed done ciphertext for the final output when one exists.
+	for index, original := range items.completed.byIndex {
+		if index >= len(final.Output) {
+			return providerhttp.ErrProtocol
+		}
+		var added, finished struct {
+			Type             string `json:"type"`
+			EncryptedContent string `json:"encrypted_content"`
+		}
+		if json.Unmarshal(original, &added) != nil ||
+			json.Unmarshal(final.Output[index], &finished) != nil ||
+			added.Type != finished.Type ||
+			(added.Type == "reasoning" && added.EncryptedContent != "" &&
+				finished.EncryptedContent != "" && added.EncryptedContent != finished.EncryptedContent) {
+			return providerhttp.ErrProtocol
+		}
+	}
 	if err := items.completed.reconcile(final); err != nil {
 		return err
 	}
@@ -160,8 +181,11 @@ func (items *completedOutputItems) observe(index *int, raw json.RawMessage) erro
 
 // reconcile proves that observed completed output items and the final SSE
 // response agree in type, identity, arguments, position and completion status.
-// Reasoning alone may supply the encrypted bytes omitted by the final frame;
-// its existing stricter status evidence is preserved. Mismatches fail closed.
+// OpenAI's stateless streaming contract makes the completed reasoning item in
+// output_item.done the authoritative encrypted replay source. The final
+// response may independently re-encrypt that opaque content, so ciphertext
+// bytes are not an identity invariant; every other field still must match.
+// Tool and message items never gain this exception.
 func (items *completedOutputItems) reconcile(final *responseBody) error {
 	for index, raw := range items.byIndex {
 		if index >= len(final.Output) {
@@ -185,8 +209,8 @@ func (items *completedOutputItems) reconcile(final *responseBody) error {
 				(doneIdentity.ID == "" || doneIdentity.ID != finalIdentity.ID) {
 			return providerhttp.ErrProtocol
 		}
-		// Tool items must match in full; only reasoning items may provide
-		// separate encrypted bytes missing from the final response.
+		// Tool/message items must match in full. Only reasoning ciphertext
+		// can differ: the completed done item owns its opaque replay bytes.
 		originalEncryption := done["encrypted_content"]
 		if doneIdentity.Type == "reasoning" {
 			delete(done, "encrypted_content")
@@ -226,14 +250,13 @@ func (items *completedOutputItems) reconcile(final *responseBody) error {
 			// The final response may still provide usable evidence.
 			continue
 		}
-		if finalIdentity.EncryptedContent != "" {
-			if finalIdentity.EncryptedContent != doneIdentity.EncryptedContent {
-				return providerhttp.ErrProtocol
-			}
+		if finalIdentity.EncryptedContent == doneIdentity.EncryptedContent {
 			continue
 		}
-		// Keep the final response's other fields byte-for-byte in meaning.
-		// The outbound provider replay is constructed from this exact JSON.
+		// The done item is the completed physical reasoning authority even
+		// when response.completed carries different ciphertext. Normalize
+		// only this opaque value after non-encrypted equality and item owner
+		// checks have passed; ProviderReplay is built from this exact JSON.
 		complete["encrypted_content"] = append(json.RawMessage(nil), originalEncryption...)
 		if len(complete["encrypted_content"]) == 0 {
 			return providerhttp.ErrProtocol

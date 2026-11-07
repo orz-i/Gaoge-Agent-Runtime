@@ -497,9 +497,15 @@ is permitted. See the [P1 frame audit](audits/2026-11-03-pr87-anthropic-sse-reje
   legacy support, but a stored unfinished/null/malformed status fails before
   the next Provider dispatch. No raw reasoning text is interpreted or exposed.
   During SSE streaming, the adapter uses the encrypted reasoning from a
-  completed `response.output_item.done` item if its index, ID and all
-  other fields match `response.completed`, except that the terminal response
-  may omit the done item's optional `status: "completed"`.
+  completed `response.output_item.done` item when its index, ID and all
+  **non-encrypted** fields reconcile with `response.completed` (the terminal
+  response may omit the done item's optional `status: "completed"`). The
+  terminal response may contain different opaque `encrypted_content` bytes;
+  its value is **not** the authority for stateless replay. Use the completed
+  done item's exact encrypted bytes, as documented by OpenAI, without
+  assuming two independent encryptions must produce identical ciphertext.
+  An `output_item.added` item explicitly marked `completed` remains separately
+  binding completed evidence and cannot contradict a later done item.
   The same reconciliation now covers every observed completed `message`
   and `function_call` output item: their physical type, absolute index,
   ID, status, Tool name/Call ID, arguments and other represented fields

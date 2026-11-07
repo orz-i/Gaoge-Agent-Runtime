@@ -32,6 +32,7 @@ type toolProbeCheck struct {
 	Usage               usageCoverage           `json:"usage"`
 	ReasoningSeen       bool                    `json:"reasoningSeen"`
 	EncryptedReplaySeen bool                    `json:"encryptedReplaySeen"`
+	WireEvidence        *toolProbeWireEvidence  `json:"wireEvidence,omitempty"`
 	HTTPStatus          int                     `json:"httpStatus,omitempty"`
 	ResponseKind        preflightResponseKind   `json:"responseKind,omitempty"`
 	ResponseDebug       *preflightResponseDebug `json:"responseDebug,omitempty"`
@@ -45,6 +46,9 @@ func baselineToolReplayProbe(ctx context.Context, config settings) (probe toolPr
 	defer func() {
 		probe.HTTPRequests = observation.dispatchedRequests()
 		if probe.Status != "passed" {
+			// Observe only structural facts from the bytes already read by the
+			// Provider adapter. Never persist or log opaque reasoning ciphertext.
+			probe.WireEvidence = observeToolProbeWireEvidence(observation)
 			probe.HTTPStatus, probe.ResponseKind = observation.snapshot()
 			probe.ResponseDebug = observation.responseDebugSnapshot("", config.apiKey)
 		}

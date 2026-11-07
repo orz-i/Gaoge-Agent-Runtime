@@ -164,7 +164,6 @@ func TestStreamingReplayRejectsAbsentOrContradictoryCompletedItems(t *testing.T)
 		{name: "different-ID", finalItem: finalReasoning, done: []map[string]any{doneReasoningEvent(strings.Replace(doneReasoning, "rs_1", "other-reasoning", 1), 0)}},
 		{name: "different-summary", finalItem: finalReasoning, done: []map[string]any{doneReasoningEvent(strings.Replace(doneReasoning, "[]", `[{"type":"summary_text","text":"different"}]`, 1), 0)}},
 		{name: "duplicate-index", finalItem: finalReasoning, done: []map[string]any{doneReasoningEvent(doneReasoning, 0), doneReasoningEvent(doneReasoning, 0)}},
-		{name: "different-encryption", finalItem: strings.Replace(finalReasoning, `"summary":[]`, `"summary":[],"encrypted_content":"other"`, 1), done: []map[string]any{doneReasoningEvent(doneReasoning, 0)}},
 		{name: "added-is-not-completed", finalItem: finalReasoning, missingReplay: true},
 		{name: "done-completed-status-without-encryption", finalItem: finalReasoning, done: []map[string]any{doneReasoningEvent(strings.Replace(finalReasoning, `"summary":[]`, `"summary":[],"status":"completed"`, 1), 0)}, missingReplay: true},
 		{name: "done-missing-index", finalItem: finalReasoning, done: []map[string]any{{"type": "response.output_item.done", "item": json.RawMessage(doneReasoning)}}},

@@ -7,6 +7,20 @@ no SDK factory, provider fallback, evaluator service or persistence authority.
 
 ## Run locally
 
+The historical default remains a **two-case** baseline. For the separate
+optional 40-case, five-group evidence/Tool/Context/recovery benchmark see the
+[Agent effect benchmark guide](agent-effect-benchmark.md). Run
+`make agent-quality-calibrate` for offline scripted Oracle validation or
+`make agent-quality` for interactive, potentially billable real-model samples.
+The 40-case mode allows 1–3 repetitions per case and retains exact report
+profiles and historical two-case report compatibility. Use
+`make agent-quality-probe` or `python3 scripts/run-agent-baseline.py probe <report.json>`
+to perform **only** a strict Schema + up to two synthetic Tool/replay preflight
+requests before paying for full task sampling. A successful probe produces a
+`preflight_only_passed` report with **zero attempted tasks**, not a quality
+score; it cannot be numerically compared with full runs, and `retry` refuses
+probe-only reports to prevent accidentally launching all 40 tasks.
+
 Requirements: the repository's Go toolchain, Git, Python 3.9 or newer, and a
 terminal that can hide password input. No Python packages need to be installed.
 From the repository root:
