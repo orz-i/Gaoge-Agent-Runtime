@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
@@ -75,7 +77,12 @@ func (runner *Runner) OpenSession(options SessionOptions) (*SessionClient, error
 // turnID is a host-stable identity, not a generated sequence number: retrying
 // the same turn must reuse the same ID, while a new prompt uses a new ID.
 func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string) (Snapshot, error) {
-	if session == nil || session.runner == nil || session.transcript == nil || strings.TrimSpace(prompt) == "" {
+	if session == nil || session.runner == nil || session.transcript == nil || !utf8.ValidString(turnID) ||
+		jsoncontract.ValidateCanonicalUTF8(session.config) != nil ||
+		jsoncontract.ValidateCanonicalUTF8(session.actor) != nil ||
+		jsoncontract.ValidateCanonicalUTF8(session.thread) != nil ||
+		jsoncontract.ValidateCanonicalUTF8(session.hostThread) != nil ||
+		model.ValidateMessage(model.Message{Role: model.RoleUser, Content: model.TextParts(prompt)}) != nil {
 		return Snapshot{}, ErrInvalidRequest
 	}
 	hostTurn, err := session.hostTurn(turnID)
@@ -96,6 +103,18 @@ func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string)
 	normalized, err := normalizeContextSeed(seed)
 	if err != nil || normalized == nil || len(normalized.Entries) == 0 {
 		return Snapshot{}, ErrInvalidRequest
+	}
+	// A custom TranscriptSource may also contain richer roles and media. Apply
+	// the shared model contract to every entry before admitting an immutable
+	// Turn; otherwise malformed UTF-8 can be lossy-encoded in the admission
+	// hash and fail only after the Model has already performed an effect.
+	for _, entry := range normalized.Entries {
+		if jsoncontract.ValidateCanonicalUTF8(entry) != nil ||
+			entry.ID == "" || entry.ID != strings.TrimSpace(entry.ID) ||
+			entry.SourceID == "" || entry.SourceID != strings.TrimSpace(entry.SourceID) ||
+			entry.TurnID != strings.TrimSpace(entry.TurnID) || model.ValidateMessage(entry.Message) != nil {
+			return Snapshot{}, ErrInvalidRequest
+		}
 	}
 	last := normalized.Entries[len(normalized.Entries)-1].Message
 	if last.Role != model.RoleUser || strings.TrimSpace(model.TextValue(last.Content)) != strings.TrimSpace(prompt) {

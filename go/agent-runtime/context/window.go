@@ -13,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
@@ -1148,6 +1149,9 @@ func CloneArtifacts(values []Artifact) []Artifact {
 }
 
 func normalizeOpenRequest(request OpenRequest) (OpenRequest, error) {
+	if jsoncontract.ValidateCanonicalUTF8(request) != nil {
+		return OpenRequest{}, ErrInvalidInput
+	}
 	request.ScopeID = strings.TrimSpace(request.ScopeID)
 	request.StaticFingerprint = strings.TrimSpace(request.StaticFingerprint)
 	request.Instructions = strings.TrimSpace(request.Instructions)

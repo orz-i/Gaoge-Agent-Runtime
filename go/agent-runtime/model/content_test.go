@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
@@ -78,6 +79,71 @@ func TestMessageMediaFailsClosedOnMalformedPartsAndUnauthorizedRoles(t *testing.
 	if json.Unmarshal([]byte("{"+chrQuote("role")+":"+chrQuote("user")+","+chrQuote("content")+":"+chrQuote("legacy string")+"}"), &legacy) == nil {
 		t.Fatal("legacy string Content decoded into the hard-cut ordered blocks")
 	}
+}
+
+func TestMessageRejectsInvalidUTF8TextWithoutChangingValidUnicode(t *testing.T) {
+	invalid := []struct {
+		name string
+		text string
+	}{
+		{"isolated-continuation", "start \x80"},
+		{"invalid-leading-byte", "start \xff"},
+		{"overlong-encoding", "start \xc0\xaf"},
+		{"truncated-multibyte", "start \xe2\x82"},
+		{"surrogate-encoding", "start \xed\xa0\x80"},
+		{"out-of-range-codepoint", "start \xf4\x90\x80\x80"},
+	}
+	for _, tc := range invalid {
+		for _, role := range []model.Role{model.RoleUser, model.RoleAssistant, model.RoleSystem, model.RoleTool} {
+			t.Run(tc.name+"/"+string(role), func(t *testing.T) {
+				message := model.Message{Role: role, Content: model.TextParts(tc.text)}
+				if role == model.RoleTool {
+					message.ToolCallID = "call"
+				}
+				if err := model.ValidateMessage(message); !errors.Is(err, model.ErrInvalidContent) {
+					t.Fatalf("invalid UTF-8 %x passed model contract: %v", []byte(tc.text), err)
+				}
+			})
+		}
+	}
+	for _, text := range []string{"你好，世界", "é", "hello\n世界", "emoji 🧩"} {
+		if err := model.ValidateMessage(model.Message{Role: model.RoleUser, Content: model.TextParts(text)}); err != nil {
+			t.Fatalf("valid UTF-8 text %q denied: %v", text, err)
+		}
+	}
+}
+
+// A malformed byte sequence must never be accepted and then silently
+// normalized by encoding/json when the immutable request is sealed.
+func FuzzModelTextMessageCanonicalJSON(f *testing.F) {
+	for _, sample := range [][]byte{
+		[]byte("normal text"), []byte("你好 🧩"), []byte("é\nworld"),
+		{0xff}, {0xfe}, {0xc0, 0xaf}, {0xed, 0xa0, 0x80}, {0xe2, 0x82},
+		{0xf4, 0x90, 0x80, 0x80}, {'x', 0x00, 'y'}, {},
+	} {
+		f.Add(sample)
+	}
+	f.Fuzz(func(t *testing.T, payload []byte) {
+		if len(payload) > 2048 {
+			t.Skip()
+		}
+		message := model.Message{Role: model.RoleUser, Content: model.TextParts(string(payload))}
+		err := model.ValidateMessage(message)
+		if !utf8.Valid(payload) && err == nil {
+			t.Fatalf("invalid bytes accepted: %x", payload)
+		}
+		if err != nil {
+			return
+		}
+		encoded, err := json.Marshal(message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded model.Message
+		if err := json.Unmarshal(encoded, &decoded); err != nil || !reflect.DeepEqual(message, decoded) {
+			t.Fatalf("accepted message changed during JSON round trip: input=%x decoded=%+v err=%v", payload, decoded, err)
+		}
+	})
 }
 
 func chrQuote(s string) string {

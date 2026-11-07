@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -44,6 +45,9 @@ type Session struct {
 }
 
 func normalizeHostRef(value HostRef) (HostRef, error) {
+	if jsoncontract.ValidateCanonicalUTF8(value) != nil {
+		return HostRef{}, ErrInvalidRequest
+	}
 	value.Kind = strings.TrimSpace(value.Kind)
 	value.ID = strings.TrimSpace(value.ID)
 	if value.Kind == "" || value.ID == "" || len(value.Kind) > maxHostRefKindBytes || len(value.ID) > maxHostRefIDBytes {
@@ -53,7 +57,8 @@ func normalizeHostRef(value HostRef) (HostRef, error) {
 }
 
 func validActor(actor kernel.ActorRef) bool {
-	return strings.TrimSpace(actor.TenantID) != "" && strings.TrimSpace(actor.ActorID) != ""
+	return jsoncontract.ValidateCanonicalUTF8(actor) == nil &&
+		strings.TrimSpace(actor.TenantID) != "" && strings.TrimSpace(actor.ActorID) != ""
 }
 
 func stableID(prefix string, values ...string) string {
