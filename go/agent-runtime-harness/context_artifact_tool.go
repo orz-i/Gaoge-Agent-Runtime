@@ -15,11 +15,12 @@ import (
 const ContextArtifactToolKey = "harness.read_context_artifact"
 
 const (
-	contextArtifactDefaultLimit     = 2000
-	contextArtifactMaxLimit         = 8000
-	contextArtifactMaxSuggestions   = 3
-	contextArtifactPreviewRunes     = 35
-	contextArtifactResponseMaxBytes = 512
+	contextArtifactDefaultLimit      = 2000
+	contextArtifactMaxLimit          = 8000
+	contextArtifactMaxSuggestions    = 3
+	contextArtifactPreviewRunes      = 35
+	contextArtifactPreviewLookbehind = 16
+	contextArtifactResponseMaxBytes  = 512
 )
 
 type contextArtifactReadInput struct {
@@ -48,6 +49,9 @@ type contextArtifactPage struct {
 type contextArtifactMatch struct {
 	Offset  int    `json:"offset"`
 	Preview string `json:"preview"`
+	// Internal only. The serialized preview offset may precede the
+	// actual match, but byte-budget shrinkage must never erase it.
+	matchStart int
 }
 
 // ContextArtifactToolHandler reads exact payloads removed from the inline Context
@@ -230,7 +234,7 @@ func buildContextArtifactPage(
 			if moreMatches {
 				// A hint is not an exact result, but later hints still
 				// need a usable forward-only cursor rather than done=true.
-				next = positions[len(matches)-1] + 1
+				next = contextArtifactNormalizedMatchEnd(runes, positions[len(matches)-1], input.Query)
 			}
 			return contextArtifactPage{offset: input.Offset, nextOffset: next, totalRunes: len(runes),
 				done: !moreMatches, found: found, matches: matches, searchMode: searchMode, moreMatches: moreMatches}, nil
@@ -279,16 +283,17 @@ func contextArtifactLiteralMatches(runes []rune, offset int, query string) []int
 // Search suggestions tolerate ordinary case and separator mistakes without
 // changing the exact literal-match flag. This is navigation only: the caller
 // must explicitly read the original offset to obtain authoritative text.
-func contextArtifactNormalizedHints(runes []rune, offset int, query string) []int {
-	normalize := func(r rune) (rune, bool) {
-		if r == '_' || r == '-' || unicode.IsSpace(r) {
-			return 0, false
-		}
-		return unicode.ToLower(r), true
+func contextArtifactNormalizedRune(r rune) (rune, bool) {
+	if r == '_' || r == '-' || unicode.IsSpace(r) {
+		return 0, false
 	}
+	return unicode.ToLower(r), true
+}
+
+func contextArtifactNormalizedHints(runes []rune, offset int, query string) []int {
 	var needle []rune
 	for _, r := range query {
-		if lowered, ok := normalize(r); ok {
+		if lowered, ok := contextArtifactNormalizedRune(r); ok {
 			needle = append(needle, lowered)
 		}
 	}
@@ -300,7 +305,7 @@ func contextArtifactNormalizedHints(runes []rune, offset int, query string) []in
 	var normalized []rune
 	var originalOffsets []int
 	for i := offset; i < len(runes); i++ {
-		if lowered, ok := normalize(runes[i]); ok {
+		if lowered, ok := contextArtifactNormalizedRune(runes[i]); ok {
 			normalized, originalOffsets = append(normalized, lowered), append(originalOffsets, i)
 		}
 	}
@@ -318,6 +323,27 @@ func contextArtifactNormalizedHints(runes []rune, offset int, query string) []in
 	return positions
 }
 
+// The next hint page must begin AFTER the last match's full normalized
+// span, not one rune past its start. Otherwise repeated letters or
+// separator-spanning searches can show overlapping duplicates forever.
+func contextArtifactNormalizedMatchEnd(runes []rune, start int, query string) int {
+	length := 0
+	for _, r := range query {
+		if _, keep := contextArtifactNormalizedRune(r); keep {
+			length++
+		}
+	}
+	for i := start; i < len(runes); i++ {
+		if _, keep := contextArtifactNormalizedRune(runes[i]); keep {
+			length--
+			if length == 0 {
+				return i + 1
+			}
+		}
+	}
+	return len(runes)
+}
+
 func contextArtifactMatchPreviews(runes []rune, positions []int) ([]contextArtifactMatch, bool) {
 	more := len(positions) > contextArtifactMaxSuggestions
 	if more {
@@ -326,18 +352,14 @@ func contextArtifactMatchPreviews(runes []rune, positions []int) ([]contextArtif
 	result := make([]contextArtifactMatch, 0, len(positions))
 	for _, position := range positions {
 		start := position
-		for start > 0 && position-start < 96 {
+		// Reserve most of the preview for the actual matched term.
+		// Longer indentation or unrelated line prefixes must not
+		// consume all 35 runes and hide the candidate's identifier.
+		for start > 0 && position-start < contextArtifactPreviewLookbehind {
 			if runes[start-1] == '\n' || start > 1 && runes[start-2] == '\\' && runes[start-1] == 'n' {
 				break
 			}
 			start--
-		}
-		// Do not let an extremely long line hide the actual match.
-		if position-start >= 96 {
-			start = position
-			if start > 20 {
-				start -= 20
-			}
 		}
 		end := start
 		for end < len(runes) && end-start < contextArtifactPreviewRunes && runes[end] != '\n' {
@@ -349,7 +371,7 @@ func contextArtifactMatchPreviews(runes []rune, positions []int) ([]contextArtif
 		// Offset points to the start of the bounded preview, not
 		// necessarily the query itself. This lets a caller re-read the
 		// exact record prefix when the match is inside a field name.
-		result = append(result, contextArtifactMatch{Offset: start, Preview: string(runes[start:end])})
+		result = append(result, contextArtifactMatch{Offset: start, Preview: string(runes[start:end]), matchStart: position})
 	}
 	return result, more
 }
@@ -390,11 +412,32 @@ func contextArtifactExecutionResult(
 	for len(page.matches) != 0 && len(content) > contextArtifactResponseMaxBytes {
 		progress := false
 		for index := range page.matches {
-			runes := []rune(page.matches[index].Preview)
-			if len(runes) != 0 {
-				page.matches[index].Preview = string(runes[:len(runes)-1])
-				progress = true
+			match := &page.matches[index]
+			runes := []rune(match.Preview)
+			if len(runes) == 0 {
+				continue
 			}
+			leading := match.matchStart - match.Offset
+			if leading < 0 || leading >= len(runes) {
+				return tools.ExecutionResult{}, tools.ErrInvalidCall
+			}
+			// Preserve up to sixteen runes at the actual match position;
+			// dropping only the suffix can leave a useless prefix that
+			// conceals the hit. If necessary, trim leading text instead
+			// and move the published offset with the original source.
+			visibleFromMatch := len(runes) - leading
+			switch {
+			case visibleFromMatch > 16:
+				match.Preview = string(runes[:len(runes)-1])
+			case leading > 0:
+				match.Preview = string(runes[1:])
+				match.Offset++
+			case len(runes) > 1:
+				match.Preview = string(runes[:len(runes)-1])
+			default:
+				continue
+			}
+			progress = true
 		}
 		if !progress {
 			return tools.ExecutionResult{}, tools.ErrInvalidCall
@@ -441,8 +484,9 @@ func ContextArtifactToolPolicySnapshot() ToolPolicySnapshot {
 // enhancement of the existing read-only artifact Tool. The ordinary reader
 // and its task/Tool manifest stay unchanged. The handler still enforces the
 // same Run -> Turn -> artifact authority, exact byte/hash identity and scope.
-// Only this separate registration accepts candidates=true; no implicit fuzzy
-// lookup is performed when the caller requests an exact read.
+// Only this separate registration accepts candidates=true; it performs
+// candidate navigation for nonempty queries without requiring that flag.
+// The original registration remains byte-exact, case-sensitive and unchanged.
 func ContextArtifactCandidateToolRegistration(handler *ContextArtifactToolHandler) tools.Registration {
 	registration := ContextArtifactToolRegistration(handler)
 	registration.Definition.Description = "Read bounded exact Context artifact text. The Host enables candidate navigation on every query in this enhanced registration (candidates=true is optional): ambiguous queries yield at most 3 short candidate previews and original offsets. 'literal_candidates' are actual case-sensitive matches; 'normalized_hints' are case/separator-insensitive navigation suggestions, NOT confirmed literal matches (found remains false). Re-read an exact original offset before using any facts. Use nextOffset to continue; no answer ranking, guessing or scope bypass is performed."

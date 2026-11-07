@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -258,10 +260,187 @@ func TestContextArtifactCandidatesKeepUTF8AndOutputWithinBudget(t *testing.T) {
 		}
 		source := []rune(doc)
 		for _, match := range parsed.Matches {
+			if !strings.Contains(match.Preview, "DEPLOYMENT_CODE") {
+				t.Fatalf("preview byte-budget truncation hid matching field: iteration=%d preview=%q", index, match.Preview)
+			}
 			if match.Offset < 0 || match.Offset >= len(source) || match.Preview == "" ||
 				!strings.HasPrefix(string(source[match.Offset:]), match.Preview) ||
 				!utf8.ValidString(match.Preview) {
 				t.Fatalf("unsafe preview/offset: iteration=%d offset=%d preview=%q", index, match.Offset, match.Preview)
+			}
+		}
+	}
+}
+
+// An ambiguous match is only useful when its preview visibly contains the
+// matching term. Long indentation and JSON-wrapped transcript lines must not
+// hide the literal match behind an unrelated 35-rune prefix.
+func TestContextArtifactCandidatePreviewAlwaysIncludesTheMatchingTerm(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		payload string
+	}{
+		{"indented", "header\n" + strings.Repeat(" ", 57) + "RELEASE R-17 DEPLOYMENT_CODE=OK;\n" + strings.Repeat(" ", 61) + "RELEASE R-18 DEPLOYMENT_CODE=DECOY;\n"},
+		{"long-field", "prefix:" + strings.Repeat("X", 70) + " RELEASE R-17 TARGET\n" + strings.Repeat("X", 85) + " RELEASE R-18 DECOY\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runes := []rune(tc.payload)
+			positions := contextArtifactLiteralMatches(runes, 0, "RELEASE")
+			matches, _ := contextArtifactMatchPreviews(runes, positions)
+			if len(matches) != 2 {
+				t.Fatalf("missing test matches: %+v", matches)
+			}
+			for _, match := range matches {
+				if !strings.Contains(match.Preview, "RELEASE R-") {
+					t.Fatalf("candidate preview hid the matched release at offset %d: %q", match.Offset, match.Preview)
+				}
+				if !strings.HasPrefix(string(runes[match.Offset:]), match.Preview) {
+					t.Fatalf("preview offset no longer addresses its exact source: %+v", match)
+				}
+			}
+		})
+	}
+}
+
+func TestContextArtifactCandidateByteLimitMustNotEraseEveryMatchedLabel(t *testing.T) {
+	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
+	var payload strings.Builder
+	for _, id := range []string{"R-16", "R-18", "R-17", "R-19"} {
+		payload.WriteString(strings.Repeat("🌱中", 28))
+		payload.WriteString(" RELEASE " + id + " DEPLOYMENT_CODE=VALUE; WINDOW=UTC;\n")
+	}
+	artifact, err := runtimecontext.NewArtifact(runtimecontext.ArtifactCompaction, turn.SessionID,
+		checkpoint.Generation, checkpoint.CoveredThroughSourceID, payload.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.PutContextArtifact(t.Context(), artifact); err != nil {
+		t.Fatal(err)
+	}
+	registration := ContextArtifactCandidateToolRegistration(NewContextArtifactToolHandler(store, nil))
+	args, _ := json.Marshal(contextArtifactReadInput{ArtifactID: artifact.ID, Query: "RELEASE", Limit: 128})
+	result, err := registration.Handler.Execute(t.Context(), tools.ExecutionRequest{
+		RunID: root.ExecutionRefID, Call: tools.Call{ID: "long-prefix", ToolKey: ContextArtifactToolKey, Arguments: args},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Matches []contextArtifactMatch `json:"matches"`
+	}
+	if err = json.Unmarshal(result.Content, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Matches) != 3 {
+		t.Fatalf("unexpected candidate count: %+v", decoded.Matches)
+	}
+	for i, candidate := range decoded.Matches {
+		if !strings.Contains(candidate.Preview, "RELEASE") {
+			t.Fatalf("byte-shrinking hid match: %d bytes %d preview %q", i, len(result.Content), candidate.Preview)
+		}
+	}
+}
+
+func TestContextArtifactNormalizedHintPaginationSkipsEntirePreviousMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload, query string
+		expectedNext         int
+	}{
+		{"overlapping_lowercase", strings.Repeat("a", 28), "AAAA", 12},
+		{"separator_spanning", strings.Repeat("a_a_a_a_", 5), "AAAA", 23},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			artifact, err := runtimecontext.NewArtifact(runtimecontext.ArtifactCompaction,
+				"scope", 1, "source", tc.payload, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := buildContextArtifactPage(artifact, contextArtifactReadInput{
+				Query: tc.query, Candidates: true, Limit: 128})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(first.matches) != 3 || !first.moreMatches || first.nextOffset != tc.expectedNext || first.found == nil || *first.found {
+				t.Fatalf("normalized hints repeated earlier match or claimed literal authority: %+v", first)
+			}
+			second, err := buildContextArtifactPage(artifact, contextArtifactReadInput{
+				Offset: first.nextOffset, Query: tc.query, Candidates: true, Limit: 128})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if second.nextOffset <= first.nextOffset && second.moreMatches {
+				t.Fatalf("second normalized hint page did not advance: %+v", second)
+			}
+		})
+	}
+}
+
+// Fixed-seed property matrix: enumerate ambiguous source presentations with
+// both real and JSON-escaped line boundaries, varied Unicode prelude sizes,
+// and several matches. Every candidate must remain reachable exactly once,
+// label-visible, source-addressable, and within the 512-byte Tool-result cap.
+func TestContextArtifactCandidateSeededPagingInvariants(t *testing.T) {
+	rng := rand.New(rand.NewSource(96007))
+	for trial := 0; trial < 320; trial++ {
+		var source strings.Builder
+		count := rng.Intn(8) + 4
+		separator := "\n"
+		if rng.Intn(2) == 1 {
+			separator = `\n`
+		}
+		for j := 0; j < count; j++ {
+			source.WriteString(strings.Repeat("数🌱", rng.Intn(65)))
+			fmt.Fprintf(&source, "RELEASE R-%02d DEPLOYMENT_CODE=C%d; WINDOW=UTC;", j+10, j)
+			source.WriteString(separator)
+		}
+		artifact, err := runtimecontext.NewArtifact(runtimecontext.ArtifactCompaction, "scope", 1, "source", source.String(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, test := range []struct{ mode, query string }{{"literal", "RELEASE"}, {"normalized", "release"}} {
+			seen := map[int]bool{}
+			cursor := 0
+			for step := 0; step < count+3; step++ {
+				page, err := buildContextArtifactPage(artifact, contextArtifactReadInput{Offset: cursor, Query: test.query, Candidates: true, Limit: 128})
+				if err != nil {
+					t.Fatal(err)
+				}
+				serialized, err := contextArtifactExecutionResult("seed", artifact, page)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(page.matches) != 0 && len(serialized.Content) > contextArtifactResponseMaxBytes {
+					t.Fatalf("candidate result escaped 512 bytes: trial=%d mode=%s", trial, test.mode)
+				}
+				if test.mode == "normalized" && page.found != nil && *page.found {
+					t.Fatalf("nonliteral hint reported exact match: trial=%d", trial)
+				}
+				if len(page.matches) == 0 {
+					if test.mode == "literal" && page.found != nil && *page.found {
+						// The last singleton is an ordinary exact response.
+						if !strings.Contains(page.content, test.query) || seen[page.offset] {
+							t.Fatalf("last literal candidate was duplicated or unreadable: trial=%d page=%+v", trial, page)
+						}
+						seen[page.offset] = true
+					}
+					break
+				}
+				for _, candidate := range page.matches {
+					if seen[candidate.matchStart] || candidate.matchStart < cursor ||
+						candidate.Offset > candidate.matchStart ||
+						!strings.HasPrefix(string([]rune(source.String())[candidate.Offset:]), candidate.Preview) ||
+						!strings.Contains(candidate.Preview, "RELEASE") {
+						t.Fatalf("candidate repeated, offset wrong, or label hidden: trial=%d mode=%s step=%d match=%+v", trial, test.mode, step, candidate)
+					}
+					seen[candidate.matchStart] = true
+				}
+				if page.nextOffset <= cursor || page.nextOffset > len([]rune(source.String())) {
+					t.Fatalf("pagination did not advance safely: trial=%d mode=%s page=%+v", trial, test.mode, page)
+				}
+				cursor = page.nextOffset
+			}
+			if len(seen) != count {
+				t.Fatalf("missing or duplicated candidate: trial=%d mode=%s count=%d seen=%d", trial, test.mode, count, len(seen))
 			}
 		}
 	}
