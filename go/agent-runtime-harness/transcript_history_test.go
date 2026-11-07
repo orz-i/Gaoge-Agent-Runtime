@@ -34,6 +34,47 @@ func TestTranscriptHistorySourceAppendsStableUserWithoutMutatingHostData(t *test
 	}
 }
 
+func TestTranscriptHistorySourceRejectsInvalidUTF8IdentitiesAndPrompt(t *testing.T) {
+	makeEntry := func() runtimecontext.Entry {
+		return runtimecontext.Entry{
+			ID: "prior/id", SourceID: "prior/source", TurnID: "prior",
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("valid history")},
+		}
+	}
+	thread := harness.HostRef{Kind: "conversation", ID: "thread"}
+	turn := harness.HostRef{Kind: "conversation_turn", ID: "new"}
+	cases := []struct {
+		name   string
+		mutate func(*runtimecontext.Entry, *harness.HostRef)
+	}{
+		{"entry ID", func(e *runtimecontext.Entry, _ *harness.HostRef) { e.ID = "bad-\xff" }},
+		{"source ID", func(e *runtimecontext.Entry, _ *harness.HostRef) { e.SourceID = "bad-\xfe" }},
+		{"prior turn ID", func(e *runtimecontext.Entry, _ *harness.HostRef) { e.TurnID = "bad-\xe2\x82" }},
+		{"noncanonical prior turn ID", func(e *runtimecontext.Entry, _ *harness.HostRef) { e.TurnID = " prior " }},
+		{"current turn ID", func(_ *runtimecontext.Entry, t *harness.HostRef) { t.ID = "bad-\xff" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			entry, current := makeEntry(), turn
+			tc.mutate(&entry, &current)
+			reader := harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
+				return []runtimecontext.Entry{entry}, nil
+			})
+			if _, err := reader.Seed(t.Context(), thread, current, "valid prompt"); !errors.Is(err, harness.ErrInvalidRequest) {
+				t.Fatalf("malformed identity was accepted: %v", err)
+			}
+		})
+	}
+	reads := 0
+	reader := harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
+		reads++
+		return []runtimecontext.Entry{makeEntry()}, nil
+	})
+	if _, err := reader.Seed(t.Context(), thread, turn, "bad \xff"); !errors.Is(err, harness.ErrInvalidRequest) || reads != 0 {
+		t.Fatalf("invalid prompt bypassed direct source preflight: err=%v reads=%d", err, reads)
+	}
+}
+
 func TestTranscriptHistorySourceRejectsCollisionsAndPropagatesErrors(t *testing.T) {
 	thread, turn := harness.HostRef{ID: "thread"}, harness.HostRef{ID: "second"}
 	cases := []struct {

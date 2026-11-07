@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 )
 
 // ContentPartKind is the closed provider-neutral set of ordered input blocks.
@@ -119,7 +120,7 @@ func ValidateMessage(message Message) error {
 func validatePart(part ContentPart) error {
 	switch part.Kind {
 	case ContentText:
-		if part.Source != nil || part.MediaType != "" || strings.TrimSpace(part.Text) == "" {
+		if part.Source != nil || part.MediaType != "" || strings.TrimSpace(part.Text) == "" || !utf8.ValidString(part.Text) {
 			return ErrInvalidContent
 		}
 		return nil

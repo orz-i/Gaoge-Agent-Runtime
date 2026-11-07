@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"strings"
+	"unicode/utf8"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -24,7 +25,8 @@ type TranscriptHistoryFunc func(context.Context, HostRef, HostRef) ([]runtimecon
 
 // Seed does not write to a transcript or load one from the Harness Store.
 func (read TranscriptHistoryFunc) Seed(ctx context.Context, thread, turn HostRef, prompt string) (*ContextSeed, error) {
-	if read == nil || strings.TrimSpace(prompt) == "" || strings.TrimSpace(turn.ID) == "" || strings.TrimSpace(turn.ID) != turn.ID {
+	if read == nil || !utf8.ValidString(turn.ID) || strings.TrimSpace(turn.ID) == "" || strings.TrimSpace(turn.ID) != turn.ID ||
+		model.ValidateMessage(model.Message{Role: model.RoleUser, Content: model.TextParts(prompt)}) != nil {
 		return nil, ErrInvalidRequest
 	}
 	entries, err := read(ctx, thread, turn)
@@ -38,7 +40,9 @@ func (read TranscriptHistoryFunc) Seed(ctx context.Context, thread, turn HostRef
 	seenMessages := make(map[string]struct{}, len(entries)+1)
 	for _, entry := range entries {
 		sourceID, messageID := strings.TrimSpace(entry.SourceID), strings.TrimSpace(entry.ID)
-		if sourceID == "" || sourceID != entry.SourceID || sourceID == currentID ||
+		if !utf8.ValidString(sourceID) || !utf8.ValidString(messageID) ||
+			!utf8.ValidString(entry.TurnID) || entry.TurnID != strings.TrimSpace(entry.TurnID) ||
+			sourceID == "" || sourceID != entry.SourceID || sourceID == currentID ||
 			messageID == "" || messageID != entry.ID || messageID == currentID ||
 			(strings.TrimSpace(entry.TurnID) != "" && strings.TrimSpace(entry.TurnID) == turn.ID) ||
 			!validTextHistoryMessage(entry.Message) {

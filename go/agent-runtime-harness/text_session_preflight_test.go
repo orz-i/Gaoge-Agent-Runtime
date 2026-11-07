@@ -36,6 +36,11 @@ func TestTextSessionHistoryPreflightRejectsInvalidContentBeforeAdmission(t *test
 		{"invalid empty text part", model.Message{Role: model.RoleUser, Content: []model.ContentPart{{Kind: model.ContentText, Text: ""}}}},
 		{"text with unexpected media", model.Message{Role: model.RoleUser, Content: []model.ContentPart{{Kind: model.ContentText, Text: "hello", Source: &model.MediaSource{Kind: model.MediaSourceFileID, FileID: "private"}}}}},
 		{"user tool call id", model.Message{Role: model.RoleUser, Content: model.TextParts("hello"), ToolCallID: "fake"}},
+		{"invalid UTF-8 prior user", model.Message{Role: model.RoleUser, Content: model.TextParts("old \xff")}},
+		{"invalid UTF-8 prior assistant", model.Message{Role: model.RoleAssistant, Content: model.TextParts("old \xfe")}},
+		{"invalid UTF-8 multipart assistant", model.Message{Role: model.RoleAssistant, Content: []model.ContentPart{
+			{Kind: model.ContentText, Text: "valid"}, {Kind: model.ContentText, Text: " \xe2\x82"},
+		}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -84,6 +89,106 @@ func TestTextSessionHistoryPreflightRejectsInvalidContentBeforeAdmission(t *test
 				t.Fatalf("unexpected corrected model context: %+v", client.requests[0].Messages)
 			}
 		})
+	}
+}
+
+// An invalid current prompt must be denied before the Host reader, Session,
+// immutable Turn or physical Model sees it. The corrected same-ID Turn is safe.
+func TestTextSessionInvalidUTF8PromptNeverCreatesTurnOrModelEffect(t *testing.T) {
+	cases := []struct {
+		name string
+		text string
+	}{
+		{"isolated-invalid-byte", "hello \xff"},
+		{"other-invalid-byte", "hello \xfe"},
+		{"truncated-rune", "hello \xe2\x82"},
+		{"overlong-rune", "hello \xc0\xaf"},
+		{"surrogate", "hello \xed\xa0\x80"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			kstore, hstore := memory.NewStore(), harness.NewMemoryStore()
+			client := &textSessionModel{}
+			reads := 0
+			transcript := harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
+				reads++
+				return nil, nil
+			})
+			options := textSessionOptions(mustTextRuntime(t, kstore), hstore, client, transcript)
+			session, err := harness.OpenTextAgentSession(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := session.Prompt(t.Context(), "turn", tc.text); !errors.Is(err, harness.ErrInvalidRequest) {
+				t.Fatalf("invalid prompt %x was not rejected: %v", []byte(tc.text), err)
+			}
+			if reads != 0 || len(client.requests) != 0 {
+				t.Fatalf("invalid prompt reached reader/model: reads=%d calls=%d", reads, len(client.requests))
+			}
+			sessionID, err := harness.SessionID(options.Session.HostThread)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = hstore.GetSession(t.Context(), sessionID); !errors.Is(err, harness.ErrNotFound) {
+				t.Fatalf("invalid prompt persisted Session: %v", err)
+			}
+			turnID, err := harness.TurnID(sessionID, harness.HostRef{Kind: "conversation_turn", ID: "turn"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = hstore.GetTurn(t.Context(), turnID); !errors.Is(err, harness.ErrNotFound) {
+				t.Fatalf("invalid prompt persisted Turn: %v", err)
+			}
+			corrected, err := session.Prompt(t.Context(), "turn", "hello")
+			if err != nil || corrected.Turn.Status != harness.TurnCompleted || reads != 1 || len(client.requests) != 1 {
+				t.Fatalf("same Turn correction failed: status=%s err=%v reads=%d calls=%d", corrected.Turn.Status, err, reads, len(client.requests))
+			}
+		})
+	}
+}
+
+// Even custom TranscriptSource must not sneak malformed model content past
+// Session admission and strand a stable Turn ID after the original is fixed.
+func TestSessionCustomTranscriptInvalidUTF8HistoryPreflight(t *testing.T) {
+	kstore, hstore := memory.NewStore(), harness.NewMemoryStore()
+	client := &textSessionModel{}
+	history := "old \xff"
+	source := harness.TranscriptSourceFunc(func(_ context.Context, _, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {
+		prior := runtimecontext.Entry{ID: "prior/user", SourceID: "prior/user", TurnID: "prior",
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts(history)}}
+		current := runtimecontext.Entry{ID: turn.ID + "/user", SourceID: turn.ID + "/user", TurnID: turn.ID,
+			Message: model.Message{Role: model.RoleUser, Content: model.TextParts(prompt)}}
+		return &harness.ContextSeed{SourcePath: []string{prior.SourceID, current.SourceID}, Entries: []runtimecontext.Entry{prior, current}}, nil
+	})
+	options := textSessionOptions(mustTextRuntime(t, kstore), hstore, client, source)
+	session, err := harness.OpenTextAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Prompt(t.Context(), "turn", "hello"); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("malformed custom history accepted: %v", err)
+	}
+	sid, err := harness.SessionID(options.Session.HostThread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hstore.GetSession(t.Context(), sid); !errors.Is(err, harness.ErrNotFound) {
+		t.Fatalf("malformed custom history persisted Session: %v", err)
+	}
+	id, err := harness.TurnID(sid, harness.HostRef{Kind: "conversation_turn", ID: "turn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hstore.GetTurn(t.Context(), id); !errors.Is(err, harness.ErrNotFound) {
+		t.Fatalf("malformed custom history persisted Turn: %v", err)
+	}
+	if len(client.requests) != 0 {
+		t.Fatalf("malformed custom history dispatched model: %d", len(client.requests))
+	}
+	history = "old"
+	recovered, err := session.Prompt(t.Context(), "turn", "hello")
+	if err != nil || recovered.Turn.Status != harness.TurnCompleted || len(client.requests) != 1 {
+		t.Fatalf("corrected custom history failed: status=%s err=%v calls=%d", recovered.Turn.Status, err, len(client.requests))
 	}
 }
 

@@ -115,3 +115,40 @@ Not run for this repair: external paid Provider sampling, Docker-backed
 integration, coverage/security release gates, GitHub CI or an independent
 review of the final committed PR Head. This branch remains **not merge-ready**
 until normal PR gates are met.
+
+## PR #92 final-Head UTF-8 audit remediation
+
+An independent review of PR #92 at initial Head
+`3b8c217501d25525fa36ac98a23f412015e30fc8` discovered a
+new P2 variant of the pre-admission invariant: Go text strings containing
+invalid UTF-8 bytes passed the model message contract. In the current Prompt,
+they could reach the physical Model client, then fail with a Context/hash
+conflict after the immutable Turn had been accepted; corrected same-ID retries
+could not recover. Malformed prior messages could also be admitted as history.
+
+The correction uses **one model-visible text authority**:
+`model.ValidateMessage` now rejects invalid UTF-8 in each text part.
+`SessionClient.Prompt` validates the current User message *before* the Host
+history lookup and preflights each submitted Context entry's message and
+identity before durable Turn creation, including a custom `TranscriptSource`.
+Custom sources still own transcript ordering, Tool call relationships and
+lineage semantics. The standard
+`TranscriptHistoryFunc` performs the same canonical text check for direct
+`Seed` callers and rejects malformed/noncanonical source, message and
+prior Turn IDs. It does not normalize invalid input into a different identity.
+
+The RED regression matrix reproduced rejection failures for malformed UTF-8
+in current User prompts, prior User/Assistant and multipart text, historical
+IDs, and custom transcript sources. The GREEN suite asserts no Session/Turn
+creation, no Model dispatch, and successful corrected **same-ID** retries.
+`model/content_test.go` covers multiple malformed encodings across
+User/Assistant/System/Tool roles and valid Unicode; its new fuzz target asserts
+that any accepted text message survives a byte-exact JSON round trip.
+A local 5-second Go fuzz run exercised over 55,000 inputs without a violation.
+
+No new Agent Loop, permission model, Provider replay behavior, schema
+migration, or compatibility path is involved. Real Provider sampling remains
+outside this synthetic test. The original paid-Provider probe scripts remain
+user-owned and unmodified. Merge admission still requires the **new actual
+PR Head** to pass its required CI and final review; prior-Head CI evidence
+cannot substitute for new-Head gates.
