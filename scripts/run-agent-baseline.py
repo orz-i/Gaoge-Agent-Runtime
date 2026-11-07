@@ -19,7 +19,7 @@ import tempfile
 import threading
 import time
 import unicodedata
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 import uuid
 import warnings
 
@@ -118,6 +118,14 @@ def validate_endpoint(provider, value):
         raise SafeFailure("invalid_endpoint") from None
     if not host or parts.scheme not in ("https", "http") or "@" in parts.netloc:
         raise SafeFailure("invalid_endpoint")
+    # Go net/url rejects percent escapes in DNS authorities, but permits
+    # encoded zone separators (%25) inside bracketed IPv6 literals.
+    if "%" in parts.netloc:
+        bracket = parts.netloc.split("]", 1)
+        if (not parts.netloc.startswith("[") or len(bracket) != 2 or
+                "%25" not in bracket[0] or "%" in bracket[1] or
+                re.search(r"%(?!25)", bracket[0])):
+            raise SafeFailure("invalid_endpoint")
     if port is not None and not 1 <= port <= 65535:
         raise SafeFailure("invalid_endpoint")
     loopback = host == "localhost"
@@ -140,7 +148,10 @@ def validate_endpoint(provider, value):
 def endpoint_identity(endpoint):
     """Match Go's exact, credential-free endpoint origin and raw-byte digest."""
     parts = urlsplit(endpoint)
-    return parts.scheme + "://" + parts.netloc, "sha256:" + hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
+    # Go's url.URL{Scheme, Host}.String() escapes UTF-8 authority bytes;
+    # the identity hash still covers the exact raw endpoint input.
+    origin = parts.scheme + "://" + quote(parts.netloc, safe="!$&'()*+,;=:@[]-._~%")
+    return origin, "sha256:" + hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
 
 
 def resolve_interactive_endpoint(provider, value):
