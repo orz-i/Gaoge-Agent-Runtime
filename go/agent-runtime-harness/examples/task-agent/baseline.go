@@ -103,14 +103,14 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 		ToolPolicies []harness.ToolPolicySnapshot `json:"toolPolicies"`
 		Cases        []caseManifest               `json:"cases"`
 		Profile      measurementProfile           `json:"profile"`
-	}{TaskVersion: taskVersion, Prompt: taskPrompt, Instructions: taskInstructions, OutputSchema: answerSchema, ToolPolicies: taskToolPolicies(), Profile: profile}
+	}{TaskVersion: taskVersion, Prompt: taskPrompt, Instructions: taskInstructionsForSuite(configuration.Suite), OutputSchema: answerSchema, ToolPolicies: taskToolPoliciesForSuite(configuration.Suite), Profile: profile}
 	for _, item := range cases {
 		manifest.Cases = append(manifest.Cases, caseManifest{ID: item.id, SourceHash: digest([]byte(item.source.document()))})
 	}
 	for _, registration := range (&taskState{}).registrations() {
 		manifest.Tools = append(manifest.Tools, registration.Definition)
 	}
-	manifest.Tools = append(manifest.Tools, harness.ContextArtifactToolRegistration(nil).Definition)
+	manifest.Tools = append(manifest.Tools, taskArtifactRegistrationForSuite(configuration.Suite, nil).Definition)
 	body, err := json.Marshal(manifest)
 	if err != nil {
 		return startEvent{}, err

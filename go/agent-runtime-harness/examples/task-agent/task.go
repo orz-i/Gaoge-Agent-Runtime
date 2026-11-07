@@ -23,6 +23,16 @@ const (
 	taskInstructions  = "Use only returned evidence. Call lookup_release, recover the deep RELEASE R-17 record with read_context_artifact query and limit 128, then save_draft exactly once. Return the saved draft as JSON. Copy exact artifact IDs; never guess them."
 )
 
+// The quality-only instruction teaches navigation of ambiguous evidence; it
+// does not embed expected deployment facts or bypass the original deep-read
+// and draft Oracle. Historical two-case prompts remain byte-for-byte intact.
+func taskInstructionsForSuite(suite string) string {
+	if suite != qualitySuite {
+		return taskInstructions
+	}
+	return taskInstructions + " When a source contains similar records or a literal search misses, use a short query from the user's target: read_context_artifact automatically returns bounded candidate matches in this Host. Inspect match previews by record identifiers; normalized_hints are NOT evidence. Re-query the selected exact original offset to verify the target record before saving a draft. Avoid repeating an ambiguous query without advancing the returned offset."
+}
+
 var answerSchema = json.RawMessage(`{"type":"object","properties":{"release":{"type":"string"},"deploymentCode":{"type":"string"},"window":{"type":"string"},"artifactID":{"type":"string"},"draftID":{"type":"string"}},"required":["release","deploymentCode","window","artifactID","draftID"],"additionalProperties":false}`)
 
 type sourceFixture struct {

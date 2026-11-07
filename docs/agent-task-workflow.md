@@ -57,7 +57,14 @@ existing components directly:
 
 The reader must have both a registered handler and an explicit Tool grant.
 Archived evidence stays available by exact artifact ID; bounded query/page reads
-avoid sending all history on every model request. Context rollover stores the
+avoid sending all history on every model request. Hosts handling ambiguous
+records may explicitly opt into `ContextArtifactCandidateToolRegistration` with
+its separate `ContextArtifactCandidateToolPolicySnapshot`. Only that registration automatically enables candidate navigation for queries
+(the `candidates=true` input is optional): it returns at most three short source-offset
+previews and bounded case/separator-insensitive *navigation hints*. Normalized
+hints retain `found=false`, so a model must re-read the original exact record
+before treating a preview as evidence. The ordinary reader and its policy
+version retain their original literal-search contract. Context rollover stores the
 archive before committing a checkpoint that references it. Pending ModelInvocation
 requests remain frozen during recovery.
 
