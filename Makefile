@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata agent-baseline agent-quality agent-quality-probe agent-quality-calibrate agent-baseline-test benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
+.PHONY: bootstrap metadata agent-baseline agent-quality agent-quality-pilot agent-quality-probe agent-quality-calibrate agent-baseline-test benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -20,6 +20,10 @@ agent-quality:
 # Paid preflight only: strict JSON + bounded synthetic Tool/replay, no task samples.
 agent-quality-probe:
 	python3 scripts/run-agent-baseline.py probe
+
+# Paid pilot only: preflight plus exactly one fixed evidence-40 task; no full score.
+agent-quality-pilot:
+	python3 scripts/run-agent-baseline.py pilot
 
 # Local calibration only: scripted Model, same real Agent/Tool/Recovery oracle.
 agent-quality-calibrate:

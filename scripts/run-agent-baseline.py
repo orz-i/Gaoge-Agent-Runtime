@@ -24,6 +24,7 @@ import warnings
 
 SCHEMA_VERSION = 1
 QUALITY_SUITE = "evidence-40-v1"
+PILOT_CASE_ID = "code-01"  # Fixed first case of the unmodified 40-case corpus.
 QUALITY_GROUPS = ("code", "window", "distractor", "unicode", "layout")
 QUALITY_CASE_IDS = frozenset(f"{group}-{number:02d}" for group in QUALITY_GROUPS for number in range(1, 9))
 LEGACY_CASE_COUNT = 2
@@ -209,7 +210,7 @@ def prompt_integer(label, default=None, maximum=None):
             print("请输入有效的正整数" + ("（不超过 %d）" % maximum if maximum else "") + "。")
 
 
-def collect_configuration(suite="", preflight_only=False):
+def collect_configuration(suite="", preflight_only=False, pilot_only=False):
     cases = len(QUALITY_CASE_IDS) if suite == QUALITY_SUITE else LEGACY_CASE_COUNT
     print("真实模型 Agent 基线：%d 个合成证据任务，验证取证、草稿、Context 与中断恢复。" % cases)
     while True:
@@ -231,8 +232,12 @@ def collect_configuration(suite="", preflight_only=False):
     print("本次任务输出预算默认 1024，不必填模型最大输出容量。")
     output_tokens = prompt_integer("本次任务每次调用 max output tokens [1024]: ", default=1024, maximum=1 << 20)
     quality = suite == QUALITY_SUITE
-    repetitions = prompt_integer("每个任务重复次数 [%d，范围 1..%d]: " % (1 if quality else 3, 3 if quality else 20),
-                                 default=1 if quality else 3, maximum=3 if quality else 20)
+    if pilot_only:
+        repetitions = 1  # No interactive way to escalate a one-case pilot.
+        print("真实模型单例试运行：固定重复次数 1，不执行其他 39 个案例。")
+    else:
+        repetitions = prompt_integer("每个任务重复次数 [%d，范围 1..%d]: " % (1 if quality else 3, 3 if quality else 20),
+                                     default=1 if quality else 3, maximum=3 if quality else 20)
     while True:
         probe = input("允许对 SDK 未登记的模型执行原生严格 JSON Schema 探测？工具能力由后续任务验证。[y/N]: ").strip().lower()
         if probe in ("", "n", "no", "y", "yes"):
@@ -249,11 +254,11 @@ def collect_configuration(suite="", preflight_only=False):
     if suite:
         candidate["suite"] = suite
     config = validate_configuration(candidate)
-    display_configuration(config, preflight_only=preflight_only)
+    display_configuration(config, preflight_only=preflight_only, pilot_only=pilot_only)
     return config
 
 
-def display_configuration(config, heading="配置", preflight_only=False):
+def display_configuration(config, heading="配置", preflight_only=False, pilot_only=False):
     print("\n%s：" % heading)
     for name in PUBLIC_CONFIGURATION:
         print("  %s: %s" % (name, config[name]))
@@ -264,6 +269,11 @@ def display_configuration(config, heading="配置", preflight_only=False):
     if preflight_only:
         print("本次为仅预检模式：只执行 Schema 与必要的工具/加密回放探测；"
               "不会运行任何任务样本，即使预检通过。实际 Provider 探测可能产生费用。")
+        return
+    if pilot_only:
+        print("本次仅试运行固定案例 %s × 1 次；完整数据集仍为 %d 例。" % (PILOT_CASE_ID, count))
+        print("通过严格 Schema 与工具/回放预检后，最多启动 1 次真实 Agent 任务（可能包含多次模型调用）。"
+              "不运行其余 %d 例，也不形成正式基准成功率。实际调用可能产生费用。" % (count - 1))
         return
     if config["provider"] == "openai":
         print("将执行 %d 个任务 × %d 次 = %d 个样本；先执行 1 次原生 Schema 探测，"
@@ -448,7 +458,13 @@ def failure_advice(stage, code, preflight):
                 "现有证据不能定位具体超时阶段，确认原因后再采样。")
     if code == "build_failed":
         return "先检查本地 Go 工具链与工作区构建配置；编译失败时尚未读取 API key。"
-    if code in {"invalid_configuration", "provider_configuration_failed", "context_budget_exceeded"}:
+    if code == "context_budget_exceeded":
+        return ("Context 管理器在 Provider 下一次模型请求派发前拒绝了输入预算。"
+                "请核对报告中的 runner.profile.contextPolicy.maxInputTokens（ContextPolicy.MaxInputTokens）；"
+                "这是独立于模型 contextTokens 的 Host 服务上限。缺少精确 TokenCounter 时，"
+                "管理器用保守的序列化字节上界估算，完成态加密 reasoning 回放也占用预算。"
+                "不要据此声称 Provider 拒绝请求，也不要通过关闭预算校验或丢弃回放来继续执行。")
+    if code in {"invalid_configuration", "provider_configuration_failed"}:
         return "核对 endpoint、model ID、已核实的 context capacity 与本次任务输出预算。"
     if code == "cancelled":
         return "已保留收到的样本；需要完整基线时重新运行，并保留本次部分结果作为记录。"
@@ -712,6 +728,16 @@ def quality_group_markdown(report):
     return lines
 
 
+def tool_probe_scope_note(probe):
+    """Explain observed coverage, not an unobserved cryptographic claim."""
+    if (isinstance(probe, dict) and probe.get("status") == "passed" and
+            probe.get("reasoningSeen") is False and probe.get("encryptedReplaySeen") is False):
+        return ("本次无 reasoning 的普通工具续接已通过；首个工具响应未提供 reasoning，"
+                "因此本次预检没有实际覆盖加密 reasoning 回放。"
+                "这不表示之前获得的加密回放证据失效。")
+    return None
+
+
 def render_markdown(report):
     summary = report.get("summary") or {}
     preflight = report.get("preflight") or {}
@@ -719,7 +745,9 @@ def render_markdown(report):
     lines = [
         "# 真实模型 Agent 基线", "",
         "- 状态：%s" % md_cell(report.get("status")),
-        "- 模式：%s" % ("仅执行 Provider 能力预检，不运行任务样本" if runner.get("preflightOnly") else "实际任务采样"),
+        "- 模式：%s" % ("仅执行 Provider 能力预检，不运行任务样本" if runner.get("preflightOnly") else
+                        "固定单案例真实任务试运行（不是完整基准）" if runner.get("pilotOnly") else
+                        "实际任务采样"),
         "- 开始：%s；结束：%s" % (md_cell(report.get("startedAt")), md_cell(report.get("finishedAt"))),
         "- 代码：%s；工作区有修改：%s" % (md_cell(report.get("source", {}).get("revision")), md_cell(report.get("source", {}).get("dirty"))),
         "- 任务版本：%s；数据集：%s" % (md_cell(runner.get("taskVersion")), md_cell(runner.get("datasetHash"))),
@@ -746,6 +774,9 @@ def render_markdown(report):
                   (tool["status"], tool["stage"], tool["modelCalls"], tool["httpRequests"]),
                   "- 探针 reasoning=%s；encrypted replay=%s；探针 usage：%s。" %
                   (md_cell(tool["reasoningSeen"]), md_cell(tool["encryptedReplaySeen"]), md_cell(tool["usage"]))]
+        scope_note = tool_probe_scope_note(tool)
+        if scope_note:
+            lines.append("- 探针覆盖范围：" + scope_note)
     debug_target = preflight.get("toolProbe", preflight)
     debug_lines = response_debug_lines(debug_target, markdown=True,
                                         title="工具与回放预检响应正文" if "toolProbe" in preflight else "失败预检响应正文")
@@ -764,7 +795,10 @@ def render_markdown(report):
             "sampleID", "caseID", "repetition", "status", "stage", "failureCode",
             "durationMs", "modelCalls", "toolCalls", "oraclePassed",
         )) + " |")
-    lines += quality_group_markdown(report)
+    if runner.get("pilotOnly") is True:
+        lines += ["", "本报告只试运行固定案例 %s，不能给出 40 案例成功率、分组表现或模型排名。" % PILOT_CASE_ID]
+    else:
+        lines += quality_group_markdown(report)
     for sample in report["samples"]:
         if sample["status"] != "failed" or "lastResponseDebug" not in sample:
             continue
@@ -1089,6 +1123,13 @@ def accept_event(report, event):
             raise ProtocolFailure("invalid_start")
         if "preflightOnly" in event and event["preflightOnly"] is not True:
             raise ProtocolFailure("invalid_start")
+        if "pilotOnly" in event:
+            if (event["pilotOnly"] is not True or event.get("pilotCaseID") != PILOT_CASE_ID or
+                    event.get("preflightOnly") is True or suite != QUALITY_SUITE or
+                    report["configuration"]["repetitions"] != 1):
+                raise ProtocolFailure("invalid_pilot_start")
+        elif "pilotCaseID" in event:
+            raise ProtocolFailure("invalid_pilot_start")
         case_count = len(QUALITY_CASE_IDS) if suite == QUALITY_SUITE else LEGACY_CASE_COUNT
         if ((suite == QUALITY_SUITE and event.get("taskVersion") != "release-evidence-quality-v1") or
                 type(event.get("requestedSamples")) is not int or
@@ -1108,6 +1149,9 @@ def accept_event(report, event):
         report["runner"] = {name: event[name] for name in ("schemaVersion", "taskVersion", "datasetHash", "profile", "requestedSamples")}
         if event.get("preflightOnly") is True:
             report["runner"]["preflightOnly"] = True
+        if event.get("pilotOnly") is True:
+            report["runner"]["pilotOnly"] = True
+            report["runner"]["pilotCaseID"] = PILOT_CASE_ID
         report["runner"]["configuration"] = public
     elif kind == "error":
         if not valid_code(event.get("stage")) or not valid_code(event.get("failureCode")):
@@ -1181,6 +1225,10 @@ def accept_event(report, event):
         if not isinstance(checks, dict) or set(checks) != RECOVERY_FIELDS or any(type(value) is not bool for value in checks.values()):
             raise ProtocolFailure("invalid_sample")
         validate_sample_diagnostics(sample)
+        if runner.get("pilotOnly") is True and (
+                len(report["samples"]) != 0 or sample["caseID"] != PILOT_CASE_ID or
+                sample["sampleID"] != PILOT_CASE_ID + "-01" or sample["repetition"] != 1):
+            raise ProtocolFailure("pilot_sample_conflict")
         if len(report["samples"]) >= runner["requestedSamples"] or any(
                 item["sampleID"] == sample["sampleID"] or
                 (item["caseID"], item["repetition"]) == (sample["caseID"], sample["repetition"])
@@ -1213,6 +1261,10 @@ def accept_event(report, event):
                 summary["passed"] != 0 or summary["failed"] != 0 or
                 summary["skipped"] != summary["requested"] or summary["complete"]):
             raise ProtocolFailure("preflight_only_sample_conflict")
+        if runner.get("pilotOnly") is True and (
+                summary["complete"] or summary["attempted"] > 1 or
+                (report["preflight"]["status"] == "failed" and summary["attempted"] != 0)):
+            raise ProtocolFailure("pilot_summary_conflict")
         durations = summary.get("durationMs")
         if not isinstance(durations, dict) or any(type(durations.get(name)) is not int or durations[name] < 0 for name in ("count", "total", "min", "max", "p50", "p95")):
             raise ProtocolFailure("invalid_duration_summary")
@@ -1260,6 +1312,19 @@ def finish_report(report, exit_code, failure=None):
         else:
             report["status"] = "incomplete"
             report["launcherFailure"] = {"stage": "protocol", "failureCode": "exit_preflight_mismatch"}
+    elif summary is not None and report["runner"].get("pilotOnly") is True:
+        preflight_status = (report.get("preflight") or {}).get("status")
+        if (exit_code == 0 and preflight_status == "passed" and
+                summary["attempted"] == 1 and summary["passed"] == 1):
+            report["status"] = "pilot_sample_passed"
+        elif exit_code == 1 and preflight_status == "failed" and summary["attempted"] == 0:
+            report["status"] = "failed"
+        elif (exit_code == 1 and preflight_status == "passed" and
+              summary["attempted"] == 1 and summary["failed"] == 1):
+            report["status"] = "pilot_sample_failed"
+        else:
+            report["status"] = "incomplete"
+            report["launcherFailure"] = {"stage": "protocol", "failureCode": "exit_pilot_mismatch"}
     elif summary is not None:
         all_passed = summary["complete"] and summary["requested"] == summary["passed"] and summary["skipped"] == 0
         if (exit_code == 0) != all_passed:
@@ -1345,16 +1410,20 @@ def retain_queued_samples(events, reader, report, writer, secret, remaining):
         writer.save(report, secret)
 
 
-def run_child(command, root, config, secret, report, writer, timeout_seconds=None, preflight_only=False):
+def run_child(command, root, config, secret, report, writer, timeout_seconds=None,
+              preflight_only=False, pilot_only=False):
     process = None
     reader = None
     stop = threading.Event()
     failure = None
     events = queue.Queue(maxsize=16)
     seen = 0
+    if preflight_only and pilot_only:
+        raise SafeFailure("conflicting_execution_modes")
     case_count = len(QUALITY_CASE_IDS) if config.get("suite") == QUALITY_SUITE else LEGACY_CASE_COUNT
     if timeout_seconds is None:
-        timeout_seconds = 300 if preflight_only else 90 + 330 * case_count * config["repetitions"]
+        timeout_seconds = (300 if preflight_only else 630 if pilot_only else
+                           90 + 330 * case_count * config["repetitions"])
     deadline = time.monotonic() + timeout_seconds
     try:
         writer.save(report, secret)
@@ -1384,10 +1453,14 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
             if seen > MAX_EVENTS:
                 raise ProtocolFailure("event_limit")
             event = decode_event(value)
-            if event.get("type") == "start" and (event.get("preflightOnly") is True) != preflight_only:
+            if event.get("type") == "start" and (
+                    (event.get("preflightOnly") is True) != preflight_only or
+                    (event.get("pilotOnly") is True) != pilot_only):
                 raise ProtocolFailure("execution_mode_mismatch")
             if preflight_only and event.get("type") == "sample":
                 raise ProtocolFailure("preflight_only_sample_conflict")
+            if pilot_only and event.get("type") == "sample" and len(report["samples"]) >= 1:
+                raise ProtocolFailure("pilot_sample_conflict")
             accept_event(report, event)
             writer.save(report, secret)
             if event["type"] == "preflight":
@@ -1400,6 +1473,9 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
                     print("原生 JSON Schema：通过。工具/回放预检：%s；阶段 %s；模型请求 %s；实际 HTTP 请求 %s；reasoning=%s；encrypted replay=%s。" %
                           (tool["status"], tool["stage"], tool["modelCalls"], tool["httpRequests"],
                            md_cell(tool["reasoningSeen"]), md_cell(tool["encryptedReplaySeen"])), flush=True)
+                    scope_note = tool_probe_scope_note(tool)
+                    if scope_note:
+                        print("探针覆盖范围：" + scope_note, flush=True)
                 debug_target = preflight.get("toolProbe", preflight)
                 for line in response_debug_lines(debug_target,
                                                   title="工具与回放预检响应正文" if "toolProbe" in preflight else "失败预检响应正文"):
@@ -1452,8 +1528,12 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
     return report
 
 
-def launch(config, root, get_key=None, builder=None, preflight_only=False):
+def launch(config, root, get_key=None, builder=None, preflight_only=False, pilot_only=False):
     config = validate_configuration(config)
+    if preflight_only and pilot_only:
+        raise SafeFailure("conflicting_execution_modes")
+    if pilot_only and (config.get("suite") != QUALITY_SUITE or config["repetitions"] != 1):
+        raise SafeFailure("pilot_requires_one_quality_case")
     get_key = get_key or read_api_key
     builder = builder or build_runner
     writer = ReportWriter(Path(root) / "artifacts" / "agent-baselines")
@@ -1465,12 +1545,14 @@ def launch(config, root, get_key=None, builder=None, preflight_only=False):
             print("正在编译当前工作区；编译成功后才读取 API key。", flush=True)
             builder(root, executable)
             secret = get_key()
-            mode = "baseline-preflight-stdin" if preflight_only else "baseline-stdin"
+            mode = ("baseline-preflight-stdin" if preflight_only else
+                    "baseline-pilot-stdin" if pilot_only else "baseline-stdin")
             # Keep the original launch invocation contract untouched when
             # running the historical full baseline.
-            probe_options = {"preflight_only": True} if preflight_only else {}
+            mode_options = ({"preflight_only": True} if preflight_only else
+                            {"pilot_only": True} if pilot_only else {})
             run_child([str(executable), "-mode=" + mode], root, config, secret, report, writer,
-                      **probe_options)
+                      **mode_options)
     except KeyboardInterrupt:
         finish_report(report, None, {"stage": "launcher", "failureCode": "cancelled"})
         writer.save(report, secret)
@@ -1492,10 +1574,12 @@ def launch(config, root, get_key=None, builder=None, preflight_only=False):
     print("状态：%s" % safe["status"])
     if preflight_only:
         print("仅预检模式；任务样本 0 已执行。此结果不构成 Agent 效果成绩。")
+    if pilot_only:
+        print("单案例真实任务试运行；其他 39 个质量案例未执行。此结果不是 40 案例基准成绩。")
     for line in failure_diagnostics(safe):
         print(line)
     print("JSON 报告：%s\nMarkdown 报告：%s" % (writer.json_path, writer.md_path))
-    return 0 if report["status"] in ("passed", "preflight_only_passed") else 1
+    return 0 if report["status"] in ("passed", "preflight_only_passed", "pilot_sample_passed") else 1
 
 
 def validate_report(report):
@@ -1581,6 +1665,8 @@ def comparison_markdown(old, new):
         incompatible.append("suite")
     if old["runner"].get("preflightOnly") or new["runner"].get("preflightOnly"):
         incompatible.append("preflightOnly")
+    if old["runner"].get("pilotOnly") or new["runner"].get("pilotOnly"):
+        incompatible.append("pilotOnly")
     if incompatible:
         lines += ["", "无法进行数值比较：%s 不一致或缺失。请使用相同任务、数据集、执行策略和输出上限重新采样。" % "、".join(incompatible), ""]
         return "\n".join(lines), False
@@ -1614,11 +1700,12 @@ def comparison_markdown(old, new):
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     usage = ("用法：python3 scripts/run-agent-baseline.py "
-             "[quality | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json]")
+             "[quality | pilot [report.json] | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json]")
     try:
         if args in (["--help"], ["-h"]):
             print(usage + "\n无参数执行原两任务基线；quality 选择 40 个合成证据案例；"
-                  "probe 只做付费前预检，绝不启动任务样本；probe report.json 复用原配置并重新隐藏输入 key；"
+                  "pilot 仅运行固定 code-01 案例一次；probe 只做付费前预检，绝不启动任务样本；"
+                  "pilot/probe report.json 复用原配置并重新隐藏输入 key；"
                   "retry 运行完整任务；compare 离线读取报告，不会联网。")
             return 0
         if len(args) == 3 and args[0] == "compare":
@@ -1629,6 +1716,20 @@ def main(argv=None):
             if not sys.stdin.isatty() or not sys.stderr.isatty():
                 raise SafeFailure("interactive_tty_required")
             return launch(collect_configuration(QUALITY_SUITE), repository_root())
+        if args and args[0] == "pilot":
+            if len(args) not in (1, 2):
+                print(usage, file=sys.stderr)
+                return 2
+            if not sys.stdin.isatty() or not sys.stderr.isatty():
+                raise SafeFailure("interactive_tty_required")
+            if len(args) == 2:
+                config = validate_configuration(dict(read_report(args[1])["configuration"]))
+                if config.get("suite") != QUALITY_SUITE or config["repetitions"] != 1:
+                    raise SafeFailure("pilot_requires_one_quality_case")
+                display_configuration(config, "固定单例试运行：复用已核实的历史公开配置", pilot_only=True)
+            else:
+                config = collect_configuration(QUALITY_SUITE, pilot_only=True)
+            return launch(config, repository_root(), pilot_only=True)
         if args and args[0] == "probe":
             if len(args) not in (1, 2):
                 print(usage, file=sys.stderr)
@@ -1653,9 +1754,11 @@ def main(argv=None):
             # reports remain readable under their own recorded profile.
             previous = read_report(args[1])
             if previous["runner"].get("preflightOnly") is True:
-                # Retrying a probe report must never silently turn its
-                # two/three low-risk API calls into 40-120 paid task runs.
+                # Retrying a probe must not convert low-cost API calls into
+                # 40-120 paid Agent task runs.
                 raise SafeFailure("probe_report_requires_explicit_quality")
+            if previous["runner"].get("pilotOnly") is True:
+                raise SafeFailure("pilot_report_requires_explicit_quality")
             config = dict(previous["configuration"])
             if len(args) == 4:
                 config["repetitions"] = int(args[3])
