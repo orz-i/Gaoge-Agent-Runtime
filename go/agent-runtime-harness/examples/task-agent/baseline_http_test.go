@@ -45,6 +45,9 @@ type baselineHTTPFixture struct {
 	answers             []taskAnswer
 	phaseReplayRequests int
 	probeStreams        int
+	// Test-only: emulate a Provider returning substantial opaque encrypted
+	// reasoning in the second real task response, before the third request.
+	replayCipherBytes int
 }
 
 func (fixture *baselineHTTPFixture) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -283,17 +286,18 @@ func (fixture *baselineHTTPFixture) assertSchema(schema json.RawMessage, stream 
 }
 
 type baselineOpenAIItem struct {
-	Type      string          `json:"type"`
-	ID        string          `json:"id"`
-	Role      model.Role      `json:"role"`
-	Phase     string          `json:"phase"`
-	Status    string          `json:"status"`
-	Opaque    string          `json:"fixture_opaque"`
-	Content   json.RawMessage `json:"content"`
-	CallID    string          `json:"call_id"`
-	Name      string          `json:"name"`
-	Arguments string          `json:"arguments"`
-	Output    string          `json:"output"`
+	Type             string          `json:"type"`
+	ID               string          `json:"id"`
+	Role             model.Role      `json:"role"`
+	Phase            string          `json:"phase"`
+	Status           string          `json:"status"`
+	Opaque           string          `json:"fixture_opaque"`
+	Content          json.RawMessage `json:"content"`
+	CallID           string          `json:"call_id"`
+	Name             string          `json:"name"`
+	Arguments        string          `json:"arguments"`
+	Output           string          `json:"output"`
+	EncryptedContent string          `json:"encrypted_content"`
 }
 
 type baselineAnthropicBlock struct {
@@ -337,6 +341,10 @@ func (fixture *baselineHTTPFixture) decodeRequest(payload map[string]json.RawMes
 				}
 				request.Messages = append(request.Messages, model.Message{Role: item.Role, Content: model.TextParts(content[0].Text)})
 				replayedPhase = true
+			case "reasoning":
+				if fixture.replayCipherBytes == 0 || item.EncryptedContent != strings.Repeat("z", fixture.replayCipherBytes) {
+					return request, errors.New("opaque encrypted reasoning replay was changed")
+				}
 			case "function_call":
 				key, ok := baselineToolNames[item.Name]
 				if !ok {
@@ -428,7 +436,18 @@ func (fixture *baselineHTTPFixture) writeResponse(w http.ResponseWriter, respons
 		w.Header().Set("Content-Type", "application/json")
 	}
 	if fixture.protocol == "openai" {
-		output := make([]any, 0, len(response.ToolCalls)+2)
+		output := make([]any, 0, len(response.ToolCalls)+3)
+		var doneReasoning map[string]any
+		if stream && fixture.replayCipherBytes > 0 && ordinal == 3 {
+			doneReasoning = map[string]any{
+				"type": "reasoning", "id": "rs_finite_test_2", "summary": []any{},
+				"encrypted_content": strings.Repeat("z", fixture.replayCipherBytes),
+			}
+			output = append(output, map[string]any{
+				"type": "reasoning", "id": "rs_finite_test_2", "summary": []any{},
+				"encrypted_content": "re-encrypted-terminal-projection",
+			})
+		}
 		output = append(output, baselineOpenAIPhaseMessage("commentary", baselineHTTPCommentary))
 		for _, call := range response.ToolCalls {
 			output = append(output, map[string]any{
@@ -444,6 +463,16 @@ func (fixture *baselineHTTPFixture) writeResponse(w http.ResponseWriter, respons
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
+		if doneReasoning != nil {
+			baselineSSE(fixture.t, w, "response.output_item.added", map[string]any{
+				"type": "response.output_item.added", "output_index": 0,
+				"item": map[string]any{"type": "reasoning", "id": "rs_finite_test_2", "summary": []any{},
+					"encrypted_content": "incomplete-added-payload"},
+			})
+			baselineSSE(fixture.t, w, "response.output_item.done", map[string]any{
+				"type": "response.output_item.done", "output_index": 0, "item": doneReasoning,
+			})
+		}
 		baselineSSE(fixture.t, w, "response.completed", map[string]any{"type": "response.completed", "response": body})
 		return
 	}

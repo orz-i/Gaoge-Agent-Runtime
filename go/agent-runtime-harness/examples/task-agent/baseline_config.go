@@ -169,6 +169,7 @@ func (input baselineInput) settings() settings {
 		contextTokens: input.ContextTokens, outputTokens: input.MaxOutputTokens,
 		allowUnknownStructuredModel: input.AllowUnknownStructuredModel,
 		reasoningEffort:             input.ReasoningEffort,
+		suite:                       input.Suite,
 	}
 }
 
