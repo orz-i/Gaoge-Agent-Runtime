@@ -76,7 +76,10 @@ func TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence(t *testing
 		name                        string
 		capacity, reserve, expected int64
 	}{
+		{"model-at-admission-floor", 9216, 1024, 8192},
 		{"model-smaller-than-service", 16384, 512, 15872},
+		{"model-near-service-ceiling", 32768, 1024, 31744},
+		{"service-and-model-ceiling-align", 33792, 1024, 32768},
 		{"large-model-service-cap", 1050000, 4096, 32768},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

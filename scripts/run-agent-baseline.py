@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime as dt
 import getpass
+import hashlib
 import ipaddress
 import json
 import math
@@ -134,6 +135,12 @@ def validate_endpoint(provider, value):
     if path.endswith("/chat/completions") or path.endswith(opposite):
         raise SafeFailure("endpoint_protocol_mismatch")
     return endpoint
+
+
+def endpoint_identity(endpoint):
+    """Match Go's exact, credential-free endpoint origin and raw-byte digest."""
+    parts = urlsplit(endpoint)
+    return parts.scheme + "://" + parts.netloc, "sha256:" + hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
 
 
 def resolve_interactive_endpoint(provider, value):
@@ -1107,6 +1114,60 @@ def validate_sample_diagnostics(sample):
                 raise ProtocolFailure("invalid_sample_diagnostics")
 
 
+def validate_sample_consistency(sample):
+    """Validate independent receipts before accepting any task result."""
+    required = ("lookupCalls", "artifactReads", "draftWrites", "contextGeneration",
+                "modelDurationsMs", "toolExecutions")
+    if any(field not in sample for field in required):
+        raise ProtocolFailure("missing_sample_receipt")
+    coverage = sample["usage"]
+    if coverage["knownCalls"] + coverage["missingCalls"] != sample["modelCalls"]:
+        raise ProtocolFailure("sample_usage_call_mismatch")
+    if len(sample["modelDurationsMs"]) != sample["modelCalls"]:
+        raise ProtocolFailure("sample_model_duration_mismatch")
+    if sum(item["executions"] for item in sample["toolExecutions"]) != sample["toolCalls"]:
+        raise ProtocolFailure("sample_tool_execution_mismatch")
+    if sum(sample[name] for name in ("lookupCalls", "artifactReads", "draftWrites")) > sample["toolCalls"]:
+        raise ProtocolFailure("sample_tool_count_mismatch")
+    if sample["status"] == "passed" and (
+            sample["stage"] != "completed" or "failureCode" in sample or
+            sample["modelCalls"] < 1 or sample["lookupCalls"] != 1 or
+            sample["artifactReads"] < 1 or sample["draftWrites"] != 1 or
+            sample["contextGeneration"] < 2 or not all(sample["recoveryChecks"].values()) or
+            any(not isinstance(sample.get(key), str) or not sample[key] or len(sample[key]) > 256
+                for key in ("runID", "turnID"))):
+        raise ProtocolFailure("sample_success_evidence_mismatch")
+    if sample["status"] == "failed" and sample["stage"] == "completed":
+        raise ProtocolFailure("sample_failure_evidence_mismatch")
+
+
+def validate_summary_consistency(summary, samples, preflight):
+    """One source of truth for counts, latency and known/unknown token totals."""
+    values = sorted(sample["durationMs"] for sample in samples)
+    n = len(values)
+    expected_duration = {
+        "count": n, "total": sum(values), "min": values[0] if n else 0,
+        "max": values[-1] if n else 0,
+        "p50": values[(50 * n + 99) // 100 - 1] if n else 0,
+        "p95": values[(95 * n + 99) // 100 - 1] if n else 0,
+    }
+    if any(summary["durationMs"].get(key) != value for key, value in expected_duration.items()):
+        raise ProtocolFailure("summary_duration_mismatch")
+    fields = ("inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens")
+    known_calls = sum(sample["usage"]["knownCalls"] for sample in samples)
+    missing_calls = sum(sample["usage"]["missingCalls"] for sample in samples)
+    known = ({field: sum((sample["usage"]["known"] or {}).get(field, 0) for sample in samples)
+              for field in fields} if known_calls else None)
+    expected_usage = {
+        "knownCalls": known_calls, "missingCalls": missing_calls,
+        "complete": missing_calls == 0, "known": known,
+    }
+    if summary["usage"] != expected_usage:
+        raise ProtocolFailure("summary_usage_mismatch")
+    if summary["complete"] != (preflight["status"] == "passed" and n == summary["requested"]):
+        raise ProtocolFailure("summary_completion_mismatch")
+
+
 def accept_event(report, event):
     if not isinstance(event, dict) or not isinstance(event.get("type"), str) or report["summary"] is not None:
         raise ProtocolFailure("invalid_event")
@@ -1141,6 +1202,16 @@ def accept_event(report, event):
                 raise ProtocolFailure("configuration_mismatch")
         if (configuration.get("reasoningEffort") != report["configuration"].get("reasoningEffort") or
                 configuration.get("suite", "") != suite):
+            raise ProtocolFailure("configuration_mismatch")
+        endpoint = report["configuration"].get("endpoint")
+        if not isinstance(endpoint, str):
+            raise ProtocolFailure("configuration_mismatch")
+        try:
+            expected_origin, expected_hash = endpoint_identity(endpoint)
+        except ValueError:
+            raise ProtocolFailure("configuration_mismatch") from None
+        if (configuration.get("endpointOrigin") != expected_origin or
+                configuration.get("endpointHash") != expected_hash):
             raise ProtocolFailure("configuration_mismatch")
         public = {name: configuration[name] for name in (
             "provider", "model", "endpointOrigin", "endpointHash", "contextTokens",
@@ -1217,7 +1288,7 @@ def accept_event(report, event):
             raise ProtocolFailure("invalid_sample")
         if type(sample.get("oraclePassed")) is not bool or (sample["status"] == "passed" and not sample["oraclePassed"]):
             raise ProtocolFailure("invalid_sample")
-        if not nonnegative_number(sample.get("durationMs")) or any(type(sample.get(name)) is not int or sample[name] < 0 for name in ("modelCalls", "toolCalls")):
+        if type(sample.get("durationMs")) is not int or sample["durationMs"] < 0 or any(type(sample.get(name)) is not int or sample[name] < 0 for name in ("modelCalls", "toolCalls")):
             raise ProtocolFailure("invalid_sample")
         if sample["status"] == "failed" and not valid_code(sample.get("failureCode")):
             raise ProtocolFailure("invalid_sample")
@@ -1225,6 +1296,7 @@ def accept_event(report, event):
         if not isinstance(checks, dict) or set(checks) != RECOVERY_FIELDS or any(type(value) is not bool for value in checks.values()):
             raise ProtocolFailure("invalid_sample")
         validate_sample_diagnostics(sample)
+        validate_sample_consistency(sample)
         if runner.get("pilotOnly") is True and (
                 len(report["samples"]) != 0 or sample["caseID"] != PILOT_CASE_ID or
                 sample["sampleID"] != PILOT_CASE_ID + "-01" or sample["repetition"] != 1):
@@ -1286,6 +1358,7 @@ def accept_event(report, event):
         for name in ("modelCalls", "toolCalls"):
             if name in summary and (type(summary[name]) is not int or summary[name] != sum(item[name] for item in report["samples"])):
                 raise ProtocolFailure("summary_call_count_mismatch")
+        validate_summary_consistency(summary, report["samples"], report["preflight"])
         report["summary"] = {name: summary[name] for name in (
             "requested", "attempted", "passed", "failed", "skipped", "complete",
             "successRate", "durationMs", "usage", "modelCalls", "toolCalls",
@@ -1596,11 +1669,16 @@ def validate_report(report):
         runner = report["runner"]
         # Historical runs keep their own execution budget. A checkpoint before
         # start has no measured profile and cannot be numerically compared.
-        service_input_tokens = None
+        minimum_input_tokens = None
         if runner.get("taskVersion"):
-            service_input_tokens = runner["profile"]["contextPolicy"]["maxInputTokens"]
-            positive_integer(service_input_tokens)
-        config = validate_configuration(report["configuration"], service_input_tokens=service_input_tokens)
+            recorded_ceiling = runner["profile"]["contextPolicy"]["maxInputTokens"]
+            positive_integer(recorded_ceiling)
+            # Context uses min(model window minus output reserve, service ceiling).
+            # A 32768 service ceiling is NOT a minimum model window. Keep the
+            # original 8192 admission floor, while still reading older profiles
+            # whose own ceiling legitimately fell below that floor.
+            minimum_input_tokens = min(SERVICE_INPUT_TOKENS, recorded_ceiling)
+        config = validate_configuration(report["configuration"], service_input_tokens=minimum_input_tokens)
         rebuilt = new_report(config, report["source"])
         if runner.get("taskVersion"):
             accept_event(rebuilt, dict(runner, type="start"))

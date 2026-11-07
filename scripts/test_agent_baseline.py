@@ -32,7 +32,8 @@ def configuration():
 def start_event(config=None):
     config = config or configuration()
     public = {name: value for name, value in config.items() if name != "endpoint"}
-    public.update(endpointOrigin="https://gateway.example", endpointHash="sha256:" + "e" * 64)
+    origin, fingerprint = baseline.endpoint_identity(config["endpoint"])
+    public.update(endpointOrigin=origin, endpointHash=fingerprint)
     return {
         "type": "start", "schemaVersion": 1, "taskVersion": "release-recovery-v1",
         "datasetHash": "sha256:" + "d" * 64,
@@ -99,8 +100,12 @@ def sample(index=1, passed=True):
         "durationMs": 10 * index, "modelCalls": 4, "toolCalls": 3,
         "oraclePassed": passed, "recoveryChecks": dict.fromkeys(baseline.RECOVERY_FIELDS, passed),
         "usage": usage(), "lookupCalls": 1, "artifactReads": 1, "draftWrites": 1,
+        "contextGeneration": 2, "runID": "fixture-run", "turnID": "fixture-turn",
         "modelDurationsMs": [1, 2, 3, 4],
-        "toolExecutions": [{"toolKey": "fixture.draft", "callIDHash": "sha256:" + "a" * 64, "executions": 1}],
+        "toolExecutions": [
+            {"toolKey": "fixture." + tool, "callIDHash": "sha256:" + digest * 64, "executions": 1}
+            for tool, digest in (("lookup", "a"), ("read", "b"), ("draft", "c"))
+        ],
     }
     if not passed:
         result["failureCode"] = "oracle_failed"
@@ -395,6 +400,8 @@ class RetryTests(unittest.TestCase):
     def test_retry_preserves_full_endpoint_and_explicit_probe_choice(self):
         report = complete_report()
         report["configuration"]["endpoint"] = "https://gateway.example"
+        origin, fingerprint = baseline.endpoint_identity(report["configuration"]["endpoint"])
+        report["runner"]["configuration"].update(endpointOrigin=origin, endpointHash=fingerprint)
         report["configuration"]["allowUnknownStructuredModel"] = True
         report["runner"]["configuration"]["allowUnknownStructuredModel"] = True
         with tempfile.TemporaryDirectory() as directory:
@@ -612,9 +619,12 @@ class ProcessReportTests(unittest.TestCase):
                 continue
             item = record['sample']
             item.update(stage='start', failureCode='provider_replay_unavailable', modelCalls=1,
-                        toolCalls=0, providerHTTPRequests=1, lastHTTPStatus=200,
+                        toolCalls=0, lookupCalls=0, artifactReads=0, draftWrites=0,
+                        usage=usage(1), modelDurationsMs=[1], toolExecutions=[],
+                        providerHTTPRequests=1, lastHTTPStatus=200,
                         lastResponseKind='event_stream',
                         lastResponseDebug=response_debug_fixture(body=response, answer=''))
+        records[-1]['summary']['usage'] = usage(2)
         with tempfile.TemporaryDirectory() as directory:
             report, writer, _, output = self.invoke(directory, records, exit_code=1)
             self.assertEqual(report['status'], 'failed')
@@ -1309,6 +1319,8 @@ class ComparisonTests(unittest.TestCase):
         for configuration in (new["configuration"], new["runner"]["configuration"]):
             configuration.update(provider="anthropic", model="candidate-model")
         new["configuration"]["endpoint"] = "https://other.example/custom"
+        origin, fingerprint = baseline.endpoint_identity(new["configuration"]["endpoint"])
+        new["runner"]["configuration"].update(endpointOrigin=origin, endpointHash=fingerprint)
         new["source"]["revision"] = "b" * 40
         rendered, complete = baseline.comparison_markdown(old, new)
         self.assertTrue(complete)
