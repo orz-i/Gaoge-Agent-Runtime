@@ -5,6 +5,19 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Complete report-only provenance for optional native input counting
+  (2026-11-08): preserve fixed, content-free refusal classes
+  (local/HTTP 4xx/HTTP 5xx/other HTTP/transport-or-protocol/other) and
+  correlate already accepted native counts with the same input's completed
+  Provider Usage. Report compared/equal/under/over without extra API
+  requests, persisted request hashes or changes to Context admission;
+  missing coverage is never falsely counted as exact. A synthetic byte
+  counter's overcount and native 422/503/malformed failures are exercised
+  through the real task Agent. The pinned quality dataset/Task Oracle and
+  historical paid failures remain unchanged. The v2 real-model outcome
+  still requires a local TTY and hidden credentials. See
+  [verification audit](docs/audits/2026-11-08-real-model-count-cause-and-usage-verification.md).
+
 - Correct native counting of signed Tool/reasoning replay (2026-11-08):
   Context's generic JSON normalization reordered nested Tool arguments while
   the original encrypted replay kept its signed string. The combined

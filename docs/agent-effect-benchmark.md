@@ -223,6 +223,31 @@ changed. See [native count replay audit](audits/2026-11-08-native-count-replay-o
 
 ## Native input-counting observations
 
+The quality report's optional `inputCountObservations.unavailableReasons`
+partitions unavailable native count attempts into six fixed categories:
+`localRejected`, `http4xx`, `http5xx`, `otherHTTP`,
+`transportOrProtocol` and `other`. These originate from trusted
+Provider error types, never HTTP body/message text. An HTTP class
+describes a typed response status observed by the selected adapter,
+not a separate network receipt, billing event or model generation.
+The categories sum exactly to `unavailable` and are omitted from
+historical uninstrumented reports.
+
+The optional `inputCountComparison` is an **actual native count vs.
+Provider Usage evidence check**, not another Token count request.
+Only accepted counts for the exact same input-affecting request, followed
+by a successful model response with known `usage.inputTokens`, may be
+compared. It exports only `compared`, `equal`, `belowUsage`,
+`aboveUsage` and `maxUnderestimate`; the private correlation digest,
+replay and message content never leave the process. Run identity and
+the output-only Token ceiling do not affect this comparison, but source
+messages, model, Tool schemas/arguments, output Schema and reasoning
+effort must remain unchanged. Any `belowUsage` is a metering safety
+blocker, and an unmatched/unknown request is **never** an equality.
+These diagnostics are report-only and do not rotate the current v2
+dataset hash or rewrite either genuine failed pilot. See the
+[real-model verification gate](audits/2026-11-08-real-model-count-cause-and-usage-verification.md).
+
 For the OpenAI `evidence-40-v1` Host, a sample may include the optional
 `inputCountObservations` object with **attempts**, **accepted** and
 **unavailable** counts. This is measured around each call into the already
