@@ -132,6 +132,24 @@ func (c *Client) Post(ctx context.Context, payload any, stream bool) (*http.Resp
 	return resp, nil
 }
 
+// PostResponsesInputTokens uses the exact sibling of the configured Responses
+// endpoint. Never send credentials to an arbitrary counting URL, redirect, or
+// a path synthesized from model/user input. This read-only request is not a
+// physical model generation and never authorizes a replay or effect receipt.
+func (c *Client) PostResponsesInputTokens(ctx context.Context, payload any) (*http.Response, error) {
+	if c == nil {
+		return nil, ErrConfig
+	}
+	u, err := url.Parse(c.url)
+	if err != nil || u.RawPath != "" || !strings.HasSuffix(u.Path, "/responses") {
+		return nil, ErrConfig
+	}
+	u.Path += "/input_tokens"
+	copy := *c
+	copy.url = u.String()
+	return copy.Post(ctx, payload, false)
+}
+
 // transportTimedOut keeps looking after a non-timeout wrapper: http.Client's
 // url.Error can report false when a typed timeout is behind another wrapper.
 func transportTimedOut(err error) bool {
