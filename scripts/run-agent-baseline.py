@@ -413,7 +413,8 @@ def failure_advice(stage, code, preflight):
         if status in (401, 403):
             return "检查 key 的访问权限，以及网关路由和策略；该状态本身不足以确定密钥是否错误。"
         if status in (400, 422):
-            return "按网关文档检查 model ID、输出预算和请求协议；本次任务输出预算可先使用默认 1024。"
+            return ("按网关文档检查 model ID、请求协议及实际错误码；核对输出预算（maxOutputTokens）的支持情况。仅当上游明确报告输出上限不支持时，"
+                    "才针对该错误调整 maxOutputTokens；该值不是已生成的 Token 数量。")
         if status == 404:
             return "核对完整 API 地址，以及该网关是否提供所填 model ID。"
         if status == 429:
@@ -428,7 +429,7 @@ def failure_advice(stage, code, preflight):
                     "连通性正常后，再核对 endpoint、所选协议及 model 的原生严格 JSON Schema 支持。")
         return ("网关拒绝、协议不兼容或连接异常均可能导致此分类，现有证据不足以确定具体原因。"
                 "请按网关文档核对最终 endpoint、所选协议及 model 的原生严格 JSON Schema 支持；"
-                "可先使用输出预算 1024、每任务 1 次重新运行。")
+                "只有确认上游限制与 maxOutputTokens 有关时才调整该上限；不要把它当成失败根因。")
     if code == "strict_schema_probe_failed":
         return ("请确认该 endpoint/model 的原生严格 JSON Schema 实现及最终回答映射；"
                 "修正协议适配或改用已验证支持的入口后再采样。"
@@ -503,7 +504,8 @@ def failure_advice(stage, code, preflight):
                 "草稿回执和 Turn 终态；不能由此宣称 Provider 出错或恢复成功。")
     if code == "task_did_not_reach_interruption":
         return ("这是历史基线的宽泛失败码，可能表示模型提前完成或 Agent 执行异常，"
-                "不能仅凭该码判断真正原因。保留历史记录，结合工具计数和原始证据重新定位。")
+                "不能仅凭该码判断真正原因，也不能从 maxOutputTokens 反推失败根因。"
+                "保留历史记录，结合工具计数和原始证据重新定位。")
     if code in {"invalid_configuration", "provider_configuration_failed"}:
         return "核对 endpoint、model ID、已核实的 context capacity 与本次任务输出预算。"
     if code == "cancelled":
@@ -677,6 +679,32 @@ def response_debug_lines(preflight, markdown=False, title="失败预检响应正
     return lines
 
 
+def task_output_reservation_facts(report):
+    """Describe the Host's budget boundary, without diagnosing a task failure.
+
+    maxOutputTokens is a *per-model-request upper ceiling*, not an observed
+    consumption. This Host reserves it from the model context and separately
+    caps input by ContextPolicy.MaxInputTokens. Only the actual error path
+    can establish whether Context admission failed.
+    """
+    config = report.get("configuration") or {}
+    profile = (report.get("runner") or {}).get("profile") or {}
+    policy = profile.get("contextPolicy") or {}
+    model_capacity = config.get("contextTokens")
+    max_output = config.get("maxOutputTokens")
+    service_cap = policy.get("maxInputTokens")
+    if not all(type(value) is int and value > 0 for value in
+               (model_capacity, max_output, service_cap)):
+        return ""
+    if model_capacity <= max_output:
+        return ""
+    effective = min(model_capacity - max_output, service_cap)
+    return ("任务预算事实：maxOutputTokens=%d 是单次模型输出上限，并非模型必须生成或已消耗的 Tokens。"
+            "此 Host 在 Context 中将其预留，有效输入上限 min(%d - %d, %d)=%d；"
+            "这一预算配置本身不能证明本次任务为何停止，也不等于实际 Token Usage。" %
+            (max_output, model_capacity, max_output, service_cap, effective))
+
+
 def failure_diagnostics(report):
     preflight = report.get("preflight") or {}
     failures = []
@@ -707,6 +735,10 @@ def failure_diagnostics(report):
         lines = ["已收到 %d 个样本结果；已尝试与跳过总数未知（缺少最终汇总）。" % len(report.get("samples", []))]
     if preflight.get("status") == "failed" and not report.get("samples"):
         lines.append("任务尚未开始：暂无任务完成率证据。")
+    if any(sample.get("status") == "failed" for sample in report.get("samples", [])):
+        facts = task_output_reservation_facts(report)
+        if facts:
+            lines.append(facts)
     if "httpStatus" in preflight:
         lines.append("JSON Schema 探测传输事实：HTTP %d；响应 Content-Type 归类 %s。" %
                      (preflight["httpStatus"], preflight["responseKind"]))

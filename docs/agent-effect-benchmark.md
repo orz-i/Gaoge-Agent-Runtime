@@ -116,6 +116,26 @@ For a new failed probe, the optional `toolProbe.wireEvidence` records only alrea
 
 The older SDK could reject a properly completed stream solely because the two ciphertext strings differed. The narrow correction uses **only** completed-done encryption as the authoritative replay source; no fallback to partial added reasoning, loss of Tool identity checks or unverified external retry is allowed. An unknown or incomplete first response is not permission to retry a real Provider operation blindly. Keep the failed report, verify the upstream API's stateless encrypted-reasoning contract and use the observed structural fields to localize further investigation before another billable task run. If preflight eventually passes, the interactive **quality** command **will proceed to all 40 cases** (or more with repetitions); plan that expense beforehand. Use `probe` instead for a bounded capability-only retest.
 
+## Output ceiling is not output usage or a root cause
+
+`maxOutputTokens` is the **maximum output allowed per request**, not a
+required generation size. The task Host separately maps this ceiling to
+`ModelWindow.ReservedOutputTokens` for conservative input admission; this
+does not mean the model consumed the reservation. For the 2026-11-08
+`gpt-5.6-terra` `distractor-05` pilot, both
+`min(1,050,000-128,000, 32,768)` and
+`min(1,050,000-4,096, 32,768)` are **32,768**. Therefore the 128,000
+output ceiling cannot, by itself, explain that run's early termination.
+Its actual measured total was 979 output tokens across 7 model calls
+(630 of these were reasoning tokens); its historical
+`task_did_not_reach_interruption` code is ambiguous and must not be
+retroactively relabeled. Context budget rejection requires its own
+typed observation, while failure to save a draft requires actual
+Tool/Run evidence. See the
+[causal-attribution correction](audits/2026-11-08-output-ceiling-attribution-correction.md).
+Changing output ceilings creates another experimental configuration,
+not proof of improvement or a generic remedy for Tool retrieval failures.
+
 ## Observable measurements
 
 - **Pass/fail:** deterministic evidence Oracle, actual saved draft, required Tool calls and same-Run recovery; failure stage and code retained rather than rewritten to success

@@ -87,6 +87,13 @@ func TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence(t *testing
 		{"model-near-service-ceiling", 32768, 1024, 31744},
 		{"service-and-model-ceiling-align", 33792, 1024, 32768},
 		{"large-model-service-cap", 1050000, 4096, 32768},
+		// Production 2026-11-08 pilot: 128k is a permitted OUTPUT CEILING,
+		// not consumed output. Host input remains capped at 32768 for
+		// both 4096 and 128000 reservations on this model window.
+		{"live-pilot-output-ceiling-not-usage", 1050000, 128000, 32768},
+		// Show the real boundary: only a reservation that reduces
+		// available model input below the Host ceiling changes admission.
+		{"reservation-reduces-actual-input", 1050000, 1018000, 32000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bound, err := runtimecontext.EffectiveInputLimit(runtimecontext.ModelWindow{

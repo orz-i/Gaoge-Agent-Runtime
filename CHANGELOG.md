@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Correct failed-task output-budget attribution (2026-11-08): distinguish
+  `maxOutputTokens` (per-request output ceiling), Context's reserved output,
+  measured Provider output usage and a typed failure cause. For the recorded
+  `gpt-5.6-terra` `distractor-05` pilot, 128,000 and 4,096 output ceilings
+  both leave the same 32,768-token Host input limit. Generic Provider errors
+  no longer trigger unsupported output-ceiling tuning advice. Preserve the
+  original ambiguous failure report, and add negative/positive budget-boundary
+  oracles and safer diagnostic text. See the [attribution correction](docs/audits/2026-11-08-output-ceiling-attribution-correction.md).
+
 - Bounded Provider/Context native token counting + ambiguous-evidence pilot
   (2026-11-07): optional same-origin OpenAI Responses input-token counting,
   exact-request/replay projection and positive TokenAdmissionPlanner; unknown
