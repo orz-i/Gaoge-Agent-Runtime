@@ -113,6 +113,40 @@ func (failure taskFailure) Unwrap() error { return failure.cause }
 
 func taskFailed(code string, cause error) error { return taskFailure{code: code, cause: cause} }
 
+// onlyExpectedDraftInterruption permits Host/Harness wrapping of the exact
+// local injected sentinel, but rejects any additional joined error. A
+// physical Model failure, timeout or failed Harness projection may accompany
+// the Store receipt: such mixed evidence must NOT enter successful recovery.
+// Bound traversal even for cyclic or adversarial error wrappers.
+func onlyExpectedDraftInterruption(err error, depth int) bool {
+	if err == errInterrupted { //nolint:errorlint // Direct local sentinel leaf only; errors.Is also accepts foreign joined errors.
+		return true
+	}
+	if err == nil || depth >= 32 {
+		return false
+	}
+	if _, classified := err.(model.ClassifiedModelError); classified { //nolint:errorlint // A classified wrapper never proves a pure Host interruption.
+		return false
+	}
+	switch nested := err.(type) { //nolint:errorlint // Inspect EVERY immediate error; errors.As would ignore joined foreign siblings.
+	case interface{ Unwrap() []error }:
+		children := nested.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !onlyExpectedDraftInterruption(child, depth+1) {
+				return false
+			}
+		}
+		return true
+	case interface{ Unwrap() error }:
+		return onlyExpectedDraftInterruption(nested.Unwrap(), depth+1)
+	default:
+		return false
+	}
+}
+
 // classifyPreInterruptionFailure distinguishes a model's ordinary premature
 // completion from a failed dispatch or an inconsistent interruption receipt.
 // The error itself may contain Provider-controlled text: only fixed codes
@@ -185,7 +219,7 @@ func runTask(ctx context.Context, config settings, newModel func() (model.Client
 	initial, startErr := session.Prompt(ctx, hostTurnID, taskPrompt)
 	updateReportIdentity(&report, initial)
 	interruptionCommitted := fault.fired.Load()
-	if !errors.Is(startErr, errInterrupted) || !interruptionCommitted {
+	if !interruptionCommitted || !onlyExpectedDraftInterruption(startErr, 0) {
 		return report, classifyPreInterruptionFailure(initial, startErr, interruptionCommitted, state.counts().drafts)
 	}
 	report.RecoveryChecks.InterruptionObserved = true
