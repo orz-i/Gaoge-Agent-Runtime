@@ -52,7 +52,12 @@ it does not deploy, publish, send a message or modify repository files.
 
 - Kernel Store and Harness Store are separate dependencies.
 - The archive reader is registered in the Tool registry and explicitly granted
-  in `ConfigSnapshot.ToolKeys`, with its policy snapshot.
+  in `ConfigSnapshot.ToolKeys`, with its policy snapshot. The historical two-case
+  baseline keeps the exact reader. The quality suite opts into a separate
+  candidate-aware Tool definition to recover from ambiguous or misspelled search
+  queries without automatically selecting a target record. Candidate hints are
+  bounded, scoped to the original artifact and must be followed by an exact
+  read before a draft can pass the Oracle.
 - The model-window resolver accepts only the exact configured model. Scripted
   mode declares a 16,384-token synthetic capacity. Live mode requires the host
   to supply the selected model's documented capacity.

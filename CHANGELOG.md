@@ -5,6 +5,20 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Bounded, Host-opt-in Context Artifact candidate navigation (2026-11-07):
+  retain the ordinary literal reader and legacy two-case baseline identity;
+  add a separately versioned read-only Tool definition for a maximum of three
+  record previews, original-offset pagination and Unicode-aware case/separator
+  hints without claiming a nonliteral match is exact evidence. Preview output
+  stays under 512 bytes and remains subject to Run/Turn/Session artifact
+  authorization; actual source facts still require exact re-read. The
+  `evidence-40-v1` Host opts into this generic capability without changing the
+  Agent Loop, Kernel, ProviderReplay, Context budgeting, source fixtures or
+  save-draft Oracle. A 24-path offline Distractor regression suite passes;
+  the prior **37/40** real model outcome is preserved, not upgraded. The new
+  quality measurement fingerprint intentionally differs from its predecessor.
+  See [candidate retrieval audit](docs/audits/2026-11-07-context-artifact-candidate-retrieval.md).
+
 - PR #94 report-consistency audit fix (2026-11-07): make the Pilot
   report reader respect the smaller of the verified model input window and
   the Host's quality-only service ceiling; a 32,768-token ceiling does not
