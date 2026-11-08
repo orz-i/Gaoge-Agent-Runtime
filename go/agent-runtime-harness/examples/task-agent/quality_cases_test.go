@@ -52,7 +52,8 @@ func TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent(t *testi
 		t.Fatal(err)
 	}
 	const pinnedLegacyOpenAIDatasetHash = "sha256:e4a782b32d69f7d7e7d25df60ef3416b4c950315e30d5cf716cd05fe2e0c4203"
-	const pinnedQualityOpenAIDatasetHash = "sha256:2ec73b1a92858853ba01a6f2999be07b2501b1c1a34c6c07ef93375df904a92e"
+	const pinnedQualityOpenAIDatasetHash = "sha256:d22c61a16559e72d0c75c8f61ba342ac16c9382d3a55afc6a5622d8d4f70624b"
+	const previousCandidateQualityOpenAIDatasetHash = "sha256:2ec73b1a92858853ba01a6f2999be07b2501b1c1a34c6c07ef93375df904a92e"
 	// A richer Tool query contract must not be scored against the 37/40
 	// measured legacy-quality profile as though task conditions were identical.
 	const measuredOldQualityOpenAIDatasetHash = "sha256:1d57c9a8827816d63340f027a60bfdc92c63624e982232cb4f49ba2ff2bf3993"
@@ -60,6 +61,7 @@ func TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent(t *testi
 	if first.DatasetHash != second.DatasetHash || first.DatasetHash == legacy.DatasetHash ||
 		legacy.DatasetHash != pinnedLegacyOpenAIDatasetHash ||
 		first.DatasetHash != pinnedQualityOpenAIDatasetHash ||
+		first.DatasetHash == previousCandidateQualityOpenAIDatasetHash ||
 		first.DatasetHash == measuredOldQualityOpenAIDatasetHash || first.DatasetHash == oldQualityOpenAIDatasetHash ||
 		first.Profile.ContextPolicy.MaxInputTokens != 32768 || legacy.Profile.ContextPolicy.MaxInputTokens != 8192 ||
 		first.TaskVersion != qualityTaskVersion || legacy.TaskVersion != baselineTaskVersion ||

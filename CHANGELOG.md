@@ -5,6 +5,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Bounded Provider/Context native token counting + ambiguous-evidence pilot
+  (2026-11-07): optional same-origin OpenAI Responses input-token counting,
+  exact-request/replay projection and positive TokenAdmissionPlanner; unknown
+  counts retain Context's original conservative hard bound, no inference or
+  effect receipts are minted. The `evidence-40-v1` Host explicitly wires this
+  only for OpenAI and changes its measurement hash; the two-case baseline
+  stays byte-identical. Add an opt-in one-case real `distractor-05` pilot with
+  immutable case ID, same Tool/Context/Oracle/recovery gates, and strict
+  prevention of accidental full-suite sampling. Offline evidence only; the
+  historic 37/40 real-model observation remains the only completed live score.
+  See [governance record](docs/audits/2026-11-07-provider-context-count-and-distractor-pilot.md).
+
 - Bounded, Host-opt-in Context Artifact candidate navigation (2026-11-07):
   retain the ordinary literal reader and legacy two-case baseline identity;
   add a separately versioned read-only Tool definition for a maximum of three

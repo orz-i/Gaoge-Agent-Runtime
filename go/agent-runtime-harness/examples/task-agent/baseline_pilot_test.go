@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,6 +29,115 @@ func runQualityPilotFixture(t *testing.T, badFinal bool) (int, []map[string]any,
 	var output bytes.Buffer
 	code := runCommand(t.Context(), []string{"-mode=baseline-pilot-stdin"}, bytes.NewReader(body), &output)
 	return code, decodeProbeOnlyEvents(t, output.Bytes()), fixture, output.String()
+}
+
+func TestDistractorPilotIsOneFixedRealAgentCaseAndNeverAFullQualityScore(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
+	fixture := &baselineHTTPFixture{t: t, protocol: "openai", path: "/pilot",
+		model: "private/baseline-verified"}
+	server := httptest.NewServer(fixture)
+	defer server.Close()
+	input := baselineHTTPInput("openai", server.URL+"/pilot", false)
+	input["suite"] = qualitySuite
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	code := runCommand(t.Context(), []string{"-mode=baseline-distractor-pilot-stdin"}, bytes.NewReader(raw), &output)
+	events := decodeProbeOnlyEvents(t, output.Bytes())
+	start, samples, summary := baselineEventsOfType(events, "start"), baselineEventsOfType(events, "sample"), baselineEventsOfType(events, "summary")
+	if len(start) != 1 || len(summary) != 1 || len(samples) != 1 ||
+		start[0]["pilotOnly"] != true || start[0]["pilotCaseID"] != distractorPilotCaseID ||
+		start[0]["requestedSamples"] != float64(40) ||
+		samples[0]["caseID"] != distractorPilotCaseID || samples[0]["repetition"] != float64(1) ||
+		summary[0]["attempted"] != float64(1) || summary[0]["skipped"] != float64(39) ||
+		summary[0]["complete"] != false || strings.Contains(output.String(), baselineHTTPFakeKey) {
+		t.Fatalf("distractor pilot violated one-case authority: exit=%d events=%+v", code, events)
+	}
+	if (code == 0) != (samples[0]["status"] == "passed") {
+		t.Fatalf("pilot exit/result disagreement: %d %+v", code, samples[0])
+	}
+}
+
+func TestDistractorPilotWiresReadOnlyNativeCountAcrossActualContext(t *testing.T) {
+	certifyBaselineModelForTest(t, "private/baseline-verified")
+	fixture := &baselineHTTPFixture{t: t, protocol: "openai", path: "/pilot/responses",
+		model: "private/baseline-verified"}
+	var nativeCounts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/pilot/responses/input_tokens" {
+			nativeCounts.Add(1)
+			if r.Header.Get("Authorization") != "Bearer "+baselineHTTPFakeKey {
+				t.Error("counting lost same-origin Provider auth")
+			}
+			body, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
+			if err != nil {
+				t.Error(err)
+				w.WriteHeader(400)
+				return
+			}
+			var payload map[string]json.RawMessage
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Error(err)
+				w.WriteHeader(400)
+				return
+			}
+			for _, field := range []string{"model", "input", "tools"} {
+				if len(payload[field]) == 0 {
+					t.Errorf("missing native count input field %s", field)
+				}
+			}
+			for _, forbidden := range []string{"stream", "store", "include", "max_output_tokens"} {
+				if _, ok := payload[forbidden]; ok {
+					t.Errorf("count leaked output-only field %s", forbidden)
+				}
+			}
+			// Deliberately conservative synthetic count, NOT a model tokenizer:
+			// verifies Context wires and honors a positive native receipt, and
+			// still archives oversized evidence under the original 32768 cap.
+			_, _ = fmt.Fprintf(w, `{"object":"response.input_tokens","input_tokens":%d}`, len(body))
+			return
+		}
+		fixture.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	input := baselineHTTPInput("openai", server.URL+"/pilot/responses", false)
+	input["suite"] = qualitySuite
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	_ = runCommand(t.Context(), []string{"-mode=baseline-distractor-pilot-stdin"},
+		bytes.NewReader(raw), &output)
+	events := decodeProbeOnlyEvents(t, output.Bytes())
+	start, samples := baselineEventsOfType(events, "start"), baselineEventsOfType(events, "sample")
+	if len(start) != 1 || len(samples) != 1 || nativeCounts.Load() < 1 ||
+		start[0]["pilotCaseID"] != distractorPilotCaseID {
+		t.Fatalf("native count pilot did not reach one real task path: count=%d events=%+v", nativeCounts.Load(), events)
+	}
+	profile, ok := start[0]["profile"].(map[string]any)
+	if !ok || profile["inputTokenCountStrategy"] != "openai-native-input-count-v1-fallback-hard-byte" {
+		t.Fatal("native count plan not captured in immutable quality profile")
+	}
+}
+
+func TestDistractorPilotRejectsUntrustedModeSelectionBeforeProvider(t *testing.T) {
+	input := baselineHTTPInput("openai", "https://example.invalid/v1/responses", true)
+	input["suite"] = qualitySuite
+	input["pilotCaseID"] = distractorPilotCaseID
+	raw, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	exit := runCommand(t.Context(), []string{"-mode=baseline-distractor-pilot-stdin"}, bytes.NewReader(raw), &output)
+	events := decodeProbeOnlyEvents(t, output.Bytes())
+	if exit == 0 || len(events) != 1 || events[0]["type"] != "error" ||
+		events[0]["failureCode"] != "invalid_configuration" {
+		t.Fatalf("stdin injected pilot authority: exit=%d events=%+v", exit, events)
+	}
 }
 
 func TestQualityPilotHasHardSingleCaseCeilingAndRealAgentOracle(t *testing.T) {

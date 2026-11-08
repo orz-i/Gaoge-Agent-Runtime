@@ -49,6 +49,7 @@ type measurementProfile struct {
 	DurationClock                string                `json:"durationClock"`
 	LatencyPercentile            string                `json:"latencyPercentile"`
 	UsageAccounting              string                `json:"usageAccounting"`
+	InputTokenCountStrategy      string                `json:"inputTokenCountStrategy,omitempty"`
 }
 
 func baselineProfile(provider string) measurementProfile {
@@ -89,6 +90,9 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 	}
 	profile := baselineProfile(configuration.Provider)
 	profile.ContextPolicy = taskContextPolicyForSuite(configuration.Suite)
+	if configuration.Suite == qualitySuite && configuration.Provider == "openai" {
+		profile.InputTokenCountStrategy = "openai-native-input-count-v1-fallback-hard-byte"
+	}
 	cases, taskVersion := selectedBaselineCases(configuration.Suite)
 	type caseManifest struct {
 		ID         string `json:"id"`
@@ -301,7 +305,9 @@ const (
 	baselineFull baselineExecutionMode = iota
 	baselineProbe
 	baselinePilot
-	pilotCaseID = "code-01"
+	baselineDistractorPilot
+	pilotCaseID           = "code-01"
+	distractorPilotCaseID = "distractor-05"
 )
 
 // runBaseline writes one complete JSON object per event. Completed samples are
@@ -321,6 +327,22 @@ func runBaselinePilot(ctx context.Context, input io.Reader, output io.Writer) in
 	return runBaselineMode(ctx, input, output, baselinePilot)
 }
 
+// runBaselineDistractorPilot exercises exactly one historically difficult
+// evidence case. The Host selects it, never the untrusted stdin or Model.
+func runBaselineDistractorPilot(ctx context.Context, input io.Reader, output io.Writer) int {
+	return runBaselineMode(ctx, input, output, baselineDistractorPilot)
+}
+
+func pilotCaseForMode(execution baselineExecutionMode) string {
+	if execution == baselinePilot {
+		return pilotCaseID
+	}
+	if execution == baselineDistractorPilot {
+		return distractorPilotCaseID
+	}
+	return ""
+}
+
 func runBaselineMode(ctx context.Context, input io.Reader, output io.Writer, execution baselineExecutionMode) int {
 	configuration, public, err := readBaselineInput(input)
 	if err != nil {
@@ -330,13 +352,20 @@ func runBaselineMode(ctx context.Context, input io.Reader, output io.Writer, exe
 	if err != nil {
 		return configurationError(output)
 	}
-	if execution == baselinePilot {
+	pilotCase := pilotCaseForMode(execution)
+	if pilotCase != "" {
 		cases, _ := selectedBaselineCases(configuration.Suite)
-		if configuration.Suite != qualitySuite || configuration.Repetitions != 1 ||
-			len(cases) == 0 || cases[0].id != pilotCaseID {
+		found := false
+		for _, item := range cases {
+			if item.id == pilotCase {
+				found = true
+				break
+			}
+		}
+		if configuration.Suite != qualitySuite || configuration.Repetitions != 1 || !found {
 			return configurationError(output)
 		}
-		start.PilotOnly, start.PilotCaseID = true, pilotCaseID
+		start.PilotOnly, start.PilotCaseID = true, pilotCase
 	}
 	start.PreflightOnly = execution == baselineProbe
 	encoder := json.NewEncoder(output)
@@ -366,10 +395,15 @@ func runBaselineMode(ctx context.Context, input io.Reader, output io.Writer, exe
 	var samples []baselineSample
 	if preflight.Status == "passed" {
 		cases, _ := selectedBaselineCases(configuration.Suite)
-		if execution == baselinePilot {
+		if pilotCase != "" {
 			// Select exactly one immutable case; do not rely on interrupts
 			// or the Python runner to stop the remaining 39 cases.
-			cases = cases[:1]
+			for _, item := range cases {
+				if item.id == pilotCase {
+					cases = []baselineCase{item}
+					break
+				}
+			}
 		}
 		for repetition := 1; repetition <= configuration.Repetitions && ctx.Err() == nil; repetition++ {
 			for _, item := range cases {
@@ -409,7 +443,7 @@ func runBaselineMode(ctx context.Context, input io.Reader, output io.Writer, exe
 	}{Type: "summary", Summary: summary}) != nil {
 		return 1
 	}
-	if execution == baselinePilot {
+	if pilotCase != "" {
 		if preflight.Status == "passed" && len(samples) == 1 &&
 			samples[0].Status == "passed" && ctx.Err() == nil {
 			return 0

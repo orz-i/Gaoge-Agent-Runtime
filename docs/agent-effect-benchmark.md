@@ -1,6 +1,6 @@
 # Agent effect benchmark — evidence-quality v1
 
-**Status:** opt-in beta.24 development suite (2026-11-07). Not a general Agent benchmark, leaderboard, or release gate. A first full official OpenAI real-model run has now **attempted all 40 cases**, with **37 passed / 3 failed** (92.5% of attempted samples, overall report status `failed`). This is a single run of one evidence task family, not a general-model score. See [first complete run audit](audits/2026-11-07-first-real-agent-quality-40.md).
+**Status:** opt-in beta.24 development suite (2026-11-07). Not a general Agent benchmark, leaderboard, or release gate. A first full official OpenAI real-model run has now **attempted all 40 cases**, with **37 passed / 3 failed** (92.5% of attempted samples, overall report status `failed`). This is a single run of one evidence task family, not a general-model score. See [first complete run audit](audits/2026-11-07-first-real-agent-quality-40.md). This historical result predates the later candidate Tool and native input-counting contracts; it is not evidence of improved performance under those profiles.
 
 ## Goals and scope
 
@@ -73,6 +73,22 @@ The first full `evidence-40-v1` run using official OpenAI Responses, `gpt-5.6-te
 All three failures were in the distractor group: `distractor-01` never reached the intentional post-draft interruption after five Context Artifact reads, while `distractor-05` and `distractor-07` each hit the local `context_budget_exceeded` safety boundary after seven and six artifact reads, respectively. The final observable artifact queries were less specific than the prompted exact `RELEASE R-17` literal. This is evidence of variable search behavior, not proof of a Provider defect; do not disable Context limits or treat the missing recovery checks as failed recovery attempts. The original local report (`20261107T093913Z-12da49b7.json`, source marked dirty) is preserved and not committed. For the full immutable profile, per-group usage, failure trace limits, SHA-256 and interpretation rules, see the [dated audit record](audits/2026-11-07-first-real-agent-quality-40.md).
 
 This is a **descriptive first measurement**, not a leaderboard or a claim about coding, browser, research or production crash-recovery abilities. Do not rerun or alter the dataset to pursue a 40/40 score without separately authorizing paid calls and creating a distinct measurement identity whenever execution policy or task semantics change.
+
+## Targeted ambiguous-evidence live pilot (opt-in, bounded)
+
+On this branch, the original 40-case manifest adds a *second*, distinct, Host-selected pilot of `distractor-05`, the historically failing ambiguous-evidence case:
+
+```sh
+make agent-quality-distractor-pilot
+# Or reuse a validated report's public configuration; a new hidden key is mandatory:
+python3 scripts/run-agent-baseline.py pilot-distractor artifacts/agent-baselines/<report>.json
+```
+
+This mode first runs the same strict Schema + (for OpenAI) Tool/replay compatibility preflight, then launches **at most one** `distractor-05` Agent task with the real Tool, Context, draft Oracle and recovery checks. It cannot be activated by untrusted stdin, a model prompt, or a report field. The existing `pilot` continues to run `code-01` only. The new pilot emits `requested=40, attempted<=1, skipped>=39, complete=false`, with an explicit `pilotCaseID`. Neither pilot is a 40-case result; automatic replay of pilot reports as a full 40-case task is prohibited. The changed native-count strategy is included in a **new OpenAI quality dataset hash**; do not compare success rates numerically with the old 37/40 profile.
+
+For the `evidence-40-v1` OpenAI Host, `runtimecontext.Manager` is optionally wired to `provider.ContextTokenCounter`. When the routed, frozen model request matches the certified OpenAI Responses client, a bounded read-only `POST /responses/input_tokens` is sent to the configured same-origin endpoint, reusing the native Provider input/tool/replay projection. A positive native count can inform Context admission before the ModelInvocation is committed. Endpoint refusal, malformed counts, a model/protocol mismatch or unimplemented proxy support retain the **original conservative hard-byte fallback**. The legacy two-case suite remains unchanged; the Anthropic counting endpoint is documented as an estimate and does not authorize a tight hard budget.
+
+Input-count HTTP requests are extra pre-generation calls and can add time, network traffic or provider-specific quotas. They are **not** model generations or known billing Usage, and the task Model call count does not include them. No native-count latency/coverage telemetry has yet been claimed for a live run. To accept this candidate: record whether the count endpoint was reached and accepted for each planned request, validate the provider's real token count against the original completed Usage when available, and report cost/latency separately. No paid API request was executed in the development branch's deterministic tests.
 
 ## Opt-in real-model measurement
 

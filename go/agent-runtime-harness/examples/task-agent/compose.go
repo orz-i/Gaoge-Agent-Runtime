@@ -7,6 +7,7 @@ import (
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	provider "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -75,7 +76,15 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 	if err != nil {
 		return nil, err
 	}
-	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	// The optional native count is a read-only, pre-intent capability of the
+	// original Host-selected model. It never authorizes a model dispatch.
+	// Scope the changed accounting policy to the versioned quality workload;
+	// the historical two-case baseline and all scripted paths stay unchanged.
+	contextDependencies := runtimecontext.Dependencies{}
+	if config.suite == qualitySuite && config.provider == "openai" {
+		contextDependencies.Counter = provider.ContextTokenCounter{Client: client}
+	}
+	manager := runtimecontext.NewManager(contextDependencies)
 	reader := taskArtifactRegistrationForSuite(config.suite, harness.NewContextArtifactToolHandler(state.store, nil))
 	handler := reader.Handler
 	reader.Handler = tools.HandlerFunc(func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {

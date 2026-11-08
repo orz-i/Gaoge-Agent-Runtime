@@ -25,7 +25,9 @@ import warnings
 
 SCHEMA_VERSION = 1
 QUALITY_SUITE = "evidence-40-v1"
-PILOT_CASE_ID = "code-01"  # Fixed first case of the unmodified 40-case corpus.
+PILOT_CASE_ID = "code-01"  # Historical fixed first-case pilot.
+DISTRACTOR_PILOT_CASE_ID = "distractor-05"  # Fixed ambiguous-evidence pilot.
+PILOT_CASE_IDS = frozenset((PILOT_CASE_ID, DISTRACTOR_PILOT_CASE_ID))
 QUALITY_GROUPS = ("code", "window", "distractor", "unicode", "layout")
 QUALITY_CASE_IDS = frozenset(f"{group}-{number:02d}" for group in QUALITY_GROUPS for number in range(1, 9))
 LEGACY_CASE_COUNT = 2
@@ -1216,7 +1218,7 @@ def accept_event(report, event):
         if "preflightOnly" in event and event["preflightOnly"] is not True:
             raise ProtocolFailure("invalid_start")
         if "pilotOnly" in event:
-            if (event["pilotOnly"] is not True or event.get("pilotCaseID") != PILOT_CASE_ID or
+            if (event["pilotOnly"] is not True or event.get("pilotCaseID") not in PILOT_CASE_IDS or
                     event.get("preflightOnly") is True or suite != QUALITY_SUITE or
                     report["configuration"]["repetitions"] != 1):
                 raise ProtocolFailure("invalid_pilot_start")
@@ -1253,7 +1255,7 @@ def accept_event(report, event):
             report["runner"]["preflightOnly"] = True
         if event.get("pilotOnly") is True:
             report["runner"]["pilotOnly"] = True
-            report["runner"]["pilotCaseID"] = PILOT_CASE_ID
+            report["runner"]["pilotCaseID"] = event["pilotCaseID"]
         report["runner"]["configuration"] = public
     elif kind == "error":
         if not valid_code(event.get("stage")) or not valid_code(event.get("failureCode")):
@@ -1329,8 +1331,8 @@ def accept_event(report, event):
         validate_sample_diagnostics(sample)
         validate_sample_consistency(sample)
         if runner.get("pilotOnly") is True and (
-                len(report["samples"]) != 0 or sample["caseID"] != PILOT_CASE_ID or
-                sample["sampleID"] != PILOT_CASE_ID + "-01" or sample["repetition"] != 1):
+                len(report["samples"]) != 0 or sample["caseID"] != runner["pilotCaseID"] or
+                sample["sampleID"] != runner["pilotCaseID"] + "-01" or sample["repetition"] != 1):
             raise ProtocolFailure("pilot_sample_conflict")
         if len(report["samples"]) >= runner["requestedSamples"] or any(
                 item["sampleID"] == sample["sampleID"] or
@@ -1515,7 +1517,9 @@ def retain_queued_samples(events, reader, report, writer, secret, remaining):
 
 
 def run_child(command, root, config, secret, report, writer, timeout_seconds=None,
-              preflight_only=False, pilot_only=False):
+              preflight_only=False, pilot_only=False, pilot_case_id=PILOT_CASE_ID):
+    if pilot_only and pilot_case_id not in PILOT_CASE_IDS:
+        raise SafeFailure("invalid_pilot_case")
     process = None
     reader = None
     stop = threading.Event()
@@ -1559,7 +1563,8 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
             event = decode_event(value)
             if event.get("type") == "start" and (
                     (event.get("preflightOnly") is True) != preflight_only or
-                    (event.get("pilotOnly") is True) != pilot_only):
+                    (event.get("pilotOnly") is True) != pilot_only or
+                    pilot_only and event.get("pilotCaseID") != pilot_case_id):
                 raise ProtocolFailure("execution_mode_mismatch")
             if preflight_only and event.get("type") == "sample":
                 raise ProtocolFailure("preflight_only_sample_conflict")
@@ -1632,8 +1637,11 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
     return report
 
 
-def launch(config, root, get_key=None, builder=None, preflight_only=False, pilot_only=False):
+def launch(config, root, get_key=None, builder=None, preflight_only=False, pilot_only=False,
+           pilot_case_id=PILOT_CASE_ID):
     config = validate_configuration(config)
+    if pilot_only and pilot_case_id not in PILOT_CASE_IDS:
+        raise SafeFailure("invalid_pilot_case")
     if preflight_only and pilot_only:
         raise SafeFailure("conflicting_execution_modes")
     if pilot_only and (config.get("suite") != QUALITY_SUITE or config["repetitions"] != 1):
@@ -1650,11 +1658,12 @@ def launch(config, root, get_key=None, builder=None, preflight_only=False, pilot
             builder(root, executable)
             secret = get_key()
             mode = ("baseline-preflight-stdin" if preflight_only else
-                    "baseline-pilot-stdin" if pilot_only else "baseline-stdin")
+                    ("baseline-distractor-pilot-stdin" if pilot_case_id == DISTRACTOR_PILOT_CASE_ID else
+                     "baseline-pilot-stdin") if pilot_only else "baseline-stdin")
             # Keep the original launch invocation contract untouched when
             # running the historical full baseline.
             mode_options = ({"preflight_only": True} if preflight_only else
-                            {"pilot_only": True} if pilot_only else {})
+                            {"pilot_only": True, "pilot_case_id": pilot_case_id} if pilot_only else {})
             run_child([str(executable), "-mode=" + mode], root, config, secret, report, writer,
                       **mode_options)
     except KeyboardInterrupt:
@@ -1809,11 +1818,12 @@ def comparison_markdown(old, new):
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     usage = ("用法：python3 scripts/run-agent-baseline.py "
-             "[quality | pilot [report.json] | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json]")
+             "[quality | pilot [report.json] | pilot-distractor [report.json] | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json]")
     try:
         if args in (["--help"], ["-h"]):
             print(usage + "\n无参数执行原两任务基线；quality 选择 40 个合成证据案例；"
-                  "pilot 仅运行固定 code-01 案例一次；probe 只做付费前预检，绝不启动任务样本；"
+                  "pilot 仅运行 code-01；pilot-distractor 仅运行 distractor-05；两者均限一次；"
+                  "probe 只做付费前预检，绝不启动任务样本；"
                   "pilot/probe report.json 复用原配置并重新隐藏输入 key；"
                   "retry 运行完整任务；compare 离线读取报告，不会联网。")
             return 0
@@ -1825,7 +1835,7 @@ def main(argv=None):
             if not sys.stdin.isatty() or not sys.stderr.isatty():
                 raise SafeFailure("interactive_tty_required")
             return launch(collect_configuration(QUALITY_SUITE), repository_root())
-        if args and args[0] == "pilot":
+        if args and args[0] in ("pilot", "pilot-distractor"):
             if len(args) not in (1, 2):
                 print(usage, file=sys.stderr)
                 return 2
@@ -1838,7 +1848,8 @@ def main(argv=None):
                 display_configuration(config, "固定单例试运行：复用已核实的历史公开配置", pilot_only=True)
             else:
                 config = collect_configuration(QUALITY_SUITE, pilot_only=True)
-            return launch(config, repository_root(), pilot_only=True)
+            return launch(config, repository_root(), pilot_only=True,
+                          **({"pilot_case_id": DISTRACTOR_PILOT_CASE_ID} if args[0] == "pilot-distractor" else {}))
         if args and args[0] == "probe":
             if len(args) not in (1, 2):
                 print(usage, file=sys.stderr)
