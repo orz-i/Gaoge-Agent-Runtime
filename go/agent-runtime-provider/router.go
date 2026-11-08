@@ -113,6 +113,23 @@ func (r *Router) GenerateStream(ctx context.Context, request model.Request, emit
 	return client.Generate(ctx, routed)
 }
 
+// PlanTokenAdmission forwards an explicitly Host-selected request without
+// modifying model binding. Missing native count capability stays unavailable;
+// this never creates a default budget meter or speculative Token estimate.
+func (r *Router) PlanTokenAdmission(ctx context.Context, request model.Request) (model.TokenAdmission, error) {
+	client, routed, _, err := r.route(request)
+	if err != nil {
+		return model.TokenAdmission{}, err
+	}
+	planner, ok := client.(model.TokenAdmissionPlanner)
+	if !ok {
+		return model.TokenAdmission{}, model.ErrCapabilityUnavailable
+	}
+	return planner.PlanTokenAdmission(ctx, routed)
+}
+
+var _ model.TokenAdmissionPlanner = (*Router)(nil)
+
 // Capabilities resolves the exact routed model before an opt-in strict output
 // is persisted. A provider without capability metadata must fail closed.
 func (r *Router) Capabilities(ctx context.Context, modelID string) (model.Capabilities, error) {

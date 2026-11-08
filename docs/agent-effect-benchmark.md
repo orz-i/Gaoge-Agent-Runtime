@@ -1,6 +1,73 @@
 # Agent effect benchmark — evidence-quality v1
 
-**Status:** opt-in beta.24 development suite (2026-11-07). Not a general Agent benchmark, leaderboard, or release gate. A first full official OpenAI real-model run has now **attempted all 40 cases**, with **37 passed / 3 failed** (92.5% of attempted samples, overall report status `failed`). This is a single run of one evidence task family, not a general-model score. See [first complete run audit](audits/2026-11-07-first-real-agent-quality-40.md).
+**Status:** opt-in beta.24 development suite (2026-11-07). Not a general Agent benchmark, leaderboard, or release gate. A first full official OpenAI real-model run has now **attempted all 40 cases**, with **37 passed / 3 failed** (92.5% of attempted samples, overall report status `failed`). This is a single run of one evidence task family, not a general-model score. See [first complete run audit](audits/2026-11-07-first-real-agent-quality-40.md). This historical result predates the later candidate Tool and native input-counting contracts; it is not evidence of improved performance under those profiles.
+
+## Third official one-case pilot — native count passed, Tool budget exhausted (2026-11-08)
+
+On clean `43f42d6` under the original v2 manifest
+`sha256:5d8827e9cb5f4394f35fc0a675f1376e6e2a354d535536008add0012f244338c`,
+the official `gpt-5.6-terra` `distractor-05` pilot observed native
+input counting **12/12 accepted**, with **11/11 exact same-input
+comparisons equal to completed Provider input-token Usage**. This
+establishes metering agreement for the eleven matched calls on that
+model/endpoint, not global compatibility or cost. The single task
+**failed**: `agent.tool_limit`, one lookup plus nine Artifact reads,
+zero drafts; all ten authorized Tools were spent before the required
+draft. The last attempted queryless `offset=0` read was not executed,
+and no Content/Context overrun was observed. Schema preflight passed;
+the two-call Tool probe did not observe encrypted reasoning replay
+(`reasoning=false, encrypted=false`), so no such claim is made for
+that probe. The original report is immutable (SHA-256
+`a581b069d9659547716ebe9bfdbfc639b71ffad4b74de2e4a9fa90a73352f49e`).
+
+The **quality-only** navigation guidance now prioritizes the complete
+target identifier already stated in the user's task, avoids broad
+queries and offset-zero loops, and saves a draft immediately after an
+authoritative exact-original-source read; candidate/normalized hints
+remain suggestions and are re-read if needed. Exactly **10** SDK Tool
+calls remain the hard maximum, including the draft. No facts,
+authorization, Tool schema, Context policy, source corpus or Oracle
+were changed. A source-blind scripted Agent with the full 40-case
+corpus demonstrates one lookup, one exact original read and one draft
+per case, preserving same-Run recovery and leaving seven unused
+Tool slots. This is **not** a new successful real-model result.
+
+The changed evaluation instructions necessarily rotate the quality
+manifest: OpenAI
+`sha256:9e6a18425ab3ce620e9b65d864626855f60dcd860533741154fc29c364f9f114`,
+scripted calibration
+`sha256:9817632b1e3a2354db4e56314af4cd79841aa7efa7f74ca2207b59792bad246a`.
+Keep the historical v2 real failure at its original dataset hash;
+do not numerically compare different profiles as the same task.
+See the [full real-model forensic and corrective review](audits/2026-11-08-real-distractor05-metering-passed-tool-limit.md).
+
+## Successful official real-model target pilot — 2026-11-08
+
+The current quality Host profile
+`sha256:9e6a18425ab3ce620e9b65d864626855f60dcd860533741154fc29c364f9f114`
+has now completed a **successful official OpenAI `gpt-5.6-terra`
+`distractor-05` single-case pilot**. Clean source `b219b83`;
+private report `20261108T073605Z-97c7b1ea.json`
+(SHA-256 `228785b209571def2cf67e50d541eadbb9b36edc3fe1070714c19f7399047f03`)
+was validated but not committed or edited.
+
+Actual task work: four model calls, exactly **three committed
+Tools** (one lookup, one exact query-backed original-source
+Artifact read and one saved draft), passed draft Oracle, legitimate
+interruption/lease fencing/same Run and Turn recovery and no Tool
+replay. The optional native Count endpoint accepted 5/5 counting
+attempts; 4/4 **same-input** count-to-completed-Usage comparisons
+were exact, with zero observed low/high counts. One unmatched counting
+attempt remains unverified. The strict Schema and two-step
+stateless Tool probe passed, and **both reasoning and encrypted
+replay were observed in this run**.
+
+This was **one attempted case out of forty**, with 39 untested
+cases, and does **not** establish general Agent ability, a new full
+40-case benchmark score, or success with all Providers. Earlier
+failed pilots and the original descriptive 37/40 measurement
+retain their original distinct hashes/statuses. See
+[official real evidence and exit scope](audits/2026-11-08-official-real-distractor05-success.md).
 
 ## Goals and scope
 
@@ -74,6 +141,22 @@ All three failures were in the distractor group: `distractor-01` never reached t
 
 This is a **descriptive first measurement**, not a leaderboard or a claim about coding, browser, research or production crash-recovery abilities. Do not rerun or alter the dataset to pursue a 40/40 score without separately authorizing paid calls and creating a distinct measurement identity whenever execution policy or task semantics change.
 
+## Targeted ambiguous-evidence live pilot (opt-in, bounded)
+
+On this branch, the original 40-case manifest adds a *second*, distinct, Host-selected pilot of `distractor-05`, the historically failing ambiguous-evidence case:
+
+```sh
+make agent-quality-distractor-pilot
+# Or reuse a validated report's public configuration; a new hidden key is mandatory:
+python3 scripts/run-agent-baseline.py pilot-distractor artifacts/agent-baselines/<report>.json
+```
+
+This mode first runs the same strict Schema + (for OpenAI) Tool/replay compatibility preflight, then launches **at most one** `distractor-05` Agent task with the real Tool, Context, draft Oracle and recovery checks. It cannot be activated by untrusted stdin, a model prompt, or a report field. The existing `pilot` continues to run `code-01` only. The new pilot emits `requested=40, attempted<=1, skipped>=39, complete=false`, with an explicit `pilotCaseID`. Neither pilot is a 40-case result; automatic replay of pilot reports as a full 40-case task is prohibited. The changed native-count strategy is included in a **new OpenAI quality dataset hash**; do not compare success rates numerically with the old 37/40 profile.
+
+For the `evidence-40-v1` OpenAI Host, `runtimecontext.Manager` is optionally wired to `provider.ContextTokenCounter`. When the routed, frozen model request matches the certified OpenAI Responses client, a bounded read-only `POST /responses/input_tokens` is sent to the configured same-origin endpoint, reusing the native Provider input/tool/replay projection. A positive native count can inform Context admission before the ModelInvocation is committed. Endpoint refusal, malformed counts, a model/protocol mismatch or unimplemented proxy support retain the **original conservative hard-byte fallback**. The legacy two-case suite remains unchanged; the Anthropic counting endpoint is documented as an estimate and does not authorize a tight hard budget.
+
+Input-count HTTP requests are extra pre-generation calls and can add time, network traffic or provider-specific quotas. They are **not** model generations or known billing Usage, and the task Model call count does not include them. No native-count latency/coverage telemetry has yet been claimed for a live run. To accept this candidate: record whether the count endpoint was reached and accepted for each planned request, validate the provider's real token count against the original completed Usage when available, and report cost/latency separately. No paid API request was executed in the development branch's deterministic tests.
+
 ## Opt-in real-model measurement
 
 ```sh
@@ -99,6 +182,159 @@ If strict JSON Schema succeeds but `tool_probe_provider_failed` occurs at `tool_
 For a new failed probe, the optional `toolProbe.wireEvidence` records only already-observed structural facts: `reasoningDone`, `encryptedDone`, `terminalSeen` and, **only when two same-item ciphertext values were present**, a boolean `doneFinalMatch`. Neither ciphertext nor reasoning item ID/hash is saved or displayed; partial or missing evidence is unknown rather than false authority. A false comparison proves that the two opaque ciphertext strings differed, **not** that the response was invalid: OpenAI documents the completed `response.output_item.done` reasoning item as the source for stateless continuation and does not require its ciphertext to equal the later `response.completed` copy. The Provider uses the completed done item's encryption after matching its output index/ID and every other field; explicit completed evidence from `response.output_item.added` must still agree, and Tool IDs/arguments/statuses, response IDs, non-encrypted reasoning and final completion remain strictly reconciled. A true comparison does **not** prove those other checks passed. These fields remain informational and never override a missing Provider receipt or authorize rejected Tools.
 
 The older SDK could reject a properly completed stream solely because the two ciphertext strings differed. The narrow correction uses **only** completed-done encryption as the authoritative replay source; no fallback to partial added reasoning, loss of Tool identity checks or unverified external retry is allowed. An unknown or incomplete first response is not permission to retry a real Provider operation blindly. Keep the failed report, verify the upstream API's stateless encrypted-reasoning contract and use the observed structural fields to localize further investigation before another billable task run. If preflight eventually passes, the interactive **quality** command **will proceed to all 40 cases** (or more with repetitions); plan that expense beforehand. Use `probe` instead for a bounded capability-only retest.
+
+## Output ceiling is not output usage or a root cause
+
+`maxOutputTokens` is the **maximum output allowed per request**, not a
+required generation size. The task Host separately maps this ceiling to
+`ModelWindow.ReservedOutputTokens` for conservative input admission; this
+does not mean the model consumed the reservation. For the 2026-11-08
+`gpt-5.6-terra` `distractor-05` pilot, both
+`min(1,050,000-128,000, 32,768)` and
+`min(1,050,000-4,096, 32,768)` are **32,768**. Therefore the 128,000
+output ceiling cannot, by itself, explain that run's early termination.
+Its actual measured total was 979 output tokens across 7 model calls
+(630 of these were reasoning tokens); its historical
+`task_did_not_reach_interruption` code is ambiguous and must not be
+retroactively relabeled. Context budget rejection requires its own
+typed observation, while failure to save a draft requires actual
+Tool/Run evidence. See the
+[causal-attribution correction](audits/2026-11-08-output-ceiling-attribution-correction.md).
+Changing output ceilings creates another experimental configuration,
+not proof of improvement or a generic remedy for Tool retrieval failures.
+
+## Long-artifact offset paging and evidence-strategy observations
+
+The new bounded queryless candidate tool profile (`harness-candidate-search-v2`)
+does **not** force an answer or silently substitute a search. When the Host
+opts into the candidate reader and a large archived artifact is read with
+`offset` but no `query`, the tool now returns an *exact bounded source
+prefix*, a matching forward-only Unicode-rune `nextOffset`, and a fixed,
+non-evidentiary `searchHint`. The complete result fits **512 bytes**
+even if the model requests `limit=8000`, preventing the important hint
+from being immediately archived with the oversized Tool response.
+Smaller documents, query-backed reads, and the ordinary literal reader
+remain unchanged. A direct source read is still mandatory for evidence.
+
+Quality sample reports may optionally include `artifactReadStrategy`
+with six **counts only**: queried reads, offset-only reads, candidate
+pages, normalized hint pages, hinted offset pages and terminal pages.
+The Host observes successful registered Tool handler calls, not an LLM
+claim. No original query text, cursor, artifact ID or preview is
+serialized into this summary. The Python reader validates count totals
+and subset relations, accepts historical reports without this field,
+and does not interpret these metrics as a root cause.
+
+The official `gpt-5.6-terra` `distractor-05` report
+`20261108T022700Z-85cf9d6e.json` remains **failed** on the original
+`33c876b` source; its last captured response showed an offset-only
+read and its historic `task_did_not_reach_interruption` failure is still
+ambiguous. The new Source-blind scripted Agent demonstrates that
+`offset=0,limit=8000` can be followed by a Tool-provided hint, real
+candidate search, exact source reread, one draft and same-Run recovery.
+This does not establish any real-model improvement. The OpenAI
+quality dataset hash is now
+`sha256:7905b6abca186865869bcdc89ad8178cc2cb2ec4b5b1ada64aea4356ec97f992`,
+different from the prior count-aware
+`sha256:d22c61a16559e72d0c75c8f61ba342ac16c9382d3a55afc6a5622d8d4f70624b`;
+never rank or compare these profiles numerically as the same workload.
+See the [queryless navigation governance record](audits/2026-11-08-context-queryless-paging-advice.md).
+
+## Trusted Agent terminal evidence after the real second pilot
+
+The 2026-11-08 `gpt-5.6-terra` `distractor-05` real pilot at
+`d674b86` (immutable report `20261108T033222Z-4271a907.json`)
+returned `task_failed_before_interruption` after 8 model calls and
+8 Tool executions, including 7 Artifact reads and no draft. The
+final captured Tool call identity matches the eighth recorded Tool
+execution receipt. The model had used enhanced candidate search,
+but the report did not persist a trusted Harness Turn terminal code.
+Do not claim the last Tool failed, the model exhausted its limits,
+or that a native counting error caused the run to terminate.
+
+Subsequent reports optionally include `preInterruption.turnStatus`
+and an exact whitelist `agentErrorCode`, drawn from the original
+Harness Turn after `Prompt` failed to reach the expected draft
+interruption. The API excludes arbitrary `Turn.ErrorDetail` and
+unknown Provider-controlled error strings. The report validator
+rejects unknown status/code combinations and keeps old reports
+unchanged rather than inventing their missing terminal facts.
+See the [real pilot forensic review](audits/2026-11-08-real-distractor05-terminal-evidence.md).
+
+## Exact signed replay in native input counting
+
+A real `gpt-5.6-terra` pilot observed 12 native input-counter calls but only
+3 accepted results; the original report does not contain the nine individual
+failure causes. A new **offline full-path** Context→Router→Provider test found
+one concrete defect capable of causing that pattern: canonicalizing nested
+Tool Call argument JSON rearranged keys, while encrypted reasoning/Tool
+replay retained the Provider's original argument string. The byte-strict
+replay check then correctly rejected native counting before HTTP.
+
+The corrected optional count path serializes the original typed
+`model.Request` using a single shared `MarshalRequestForInputCount`
+helper without generic reordering or HTML escaping, then validates an exact typed
+round trip in the Provider bridge. The Context hard-byte bound is strengthened to the larger of normalized
+and original typed request sizes whenever this native counter is configured;
+strict signed replay equality remains intact. Valid signed Tool/reasoning
+replay now reaches native count HTTP in loopback tests; tampered/duplicate
+arguments still fall back conservatively without an HTTP count request.
+This is not a real-Provider verification or proof of a changed task outcome.
+
+The v2 OpenAI native counting strategy rotates the quality dataset hash to
+`sha256:5d8827e9cb5f4394f35fc0a675f1376e6e2a354d535536008add0012f244338c`,
+from `sha256:7905b6abca186865869bcdc89ad8178cc2cb2ec4b5b1ada64aea4356ec97f992`.
+Do not numerically compare prior paid pilots as the same profile. Neither
+the scripted 40-case workload nor the historical two-case baseline is
+changed. See [native count replay audit](audits/2026-11-08-native-count-replay-order-hardcut.md).
+
+## Native input-counting observations
+
+The quality report's optional `inputCountObservations.unavailableReasons`
+partitions unavailable native count attempts into six fixed categories:
+`localRejected`, `http4xx`, `http5xx`, `otherHTTP`,
+`transportOrProtocol` and `other`. These originate from trusted
+Provider error types, never HTTP body/message text. An HTTP class
+describes a typed response status observed by the selected adapter,
+not a separate network receipt, billing event or model generation.
+The categories sum exactly to `unavailable` and are omitted from
+historical uninstrumented reports.
+
+The optional `inputCountComparison` is an **actual native count vs.
+Provider Usage evidence check**, not another Token count request.
+Only accepted counts for the exact same input-affecting request, followed
+by a successful model response with known `usage.inputTokens`, may be
+compared. It exports only `compared`, `equal`, `belowUsage`,
+`aboveUsage` and `maxUnderestimate`; the private correlation digest,
+replay and message content never leave the process. Run identity and
+the output-only Token ceiling do not affect this comparison, but source
+messages, model, Tool schemas/arguments, output Schema and reasoning
+effort must remain unchanged. Any `belowUsage` is a metering safety
+blocker, and an unmatched/unknown request is **never** an equality.
+These diagnostics are report-only and do not rotate the current v2
+dataset hash or rewrite either genuine failed pilot. See the
+[real-model verification gate](audits/2026-11-08-real-model-count-cause-and-usage-verification.md).
+
+For the OpenAI `evidence-40-v1` Host, a sample may include the optional
+`inputCountObservations` object with **attempts**, **accepted** and
+**unavailable** counts. This is measured around each call into the already
+configured native Provider counter, before Context applies its own admission
+policy; a positive response is counted as accepted, other responses as
+unavailable. The object is not Provider Usage, not the number of outbound HTTP
+requests and not proof of a billable generation. An unavailable count does not
+authorize a tighter Context budget: the existing conservative byte upper bound
+remains in effect. Even an accepted count does not prove that the model
+subsequently dispatched a generation. The existing `modelCalls` and Usage
+receipts remain separate.
+
+The Python validator enforces exact three-field shapes, nonnegative integers
+and `accepted + unavailable == attempts`, and rejects this OpenAI quality-only
+field for other protocols or the old two-case baseline. Historical reports do
+not gain fabricated observations. This is **report-only instrumentation**;
+the original Model request, Tool schema, Oracle, Context budget, manifest and
+quality dataset hash do not change. Actual transport-specific counting
+latency/usage and any live improvement remain unverified until a new authorized
+provider run. See the [verification audit](audits/2026-11-08-provider-context-identity-and-observations.md).
 
 ## Observable measurements
 

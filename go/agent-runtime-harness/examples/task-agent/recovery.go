@@ -66,26 +66,69 @@ type recoveryChecks struct {
 	TerminalResumeNoOp        bool `json:"terminalResumeNoOp"`
 }
 
+// Fixed Agent-owned failure facts, never raw Provider/Store error messages.
+type preInterruptionEvidence struct {
+	TurnStatus     harness.TurnStatus `json:"turnStatus"`
+	AgentErrorCode string             `json:"agentErrorCode,omitempty"`
+}
+
+// A previous model invocation may have completed and its last Tool been
+// committed even when the following dispatch fails. Observations must come
+// from the original Harness Turn, not from the last HTTP response.
+func safePreInterruptionEvidence(snapshot harness.Snapshot) *preInterruptionEvidence {
+	status := snapshot.Turn.Status
+	switch status {
+	case harness.TurnAccepted, harness.TurnRunning, harness.TurnWaitingInput,
+		harness.TurnPausedBudget, harness.TurnCompleted, harness.TurnFailed,
+		harness.TurnCancelled:
+	default:
+		return nil
+	}
+	result := &preInterruptionEvidence{TurnStatus: status}
+	if status != harness.TurnFailed {
+		return result
+	}
+	// Only exact fixed Agent SDK codes, not arbitrary input from a Provider
+	// or from the Store's untrusted ErrorDetail.
+	switch snapshot.Turn.ErrorCode {
+	case "agent.llm_limit", "agent.tool_limit", "agent.tool_invalid",
+		"agent.model_dispatch_invalid", "agent.model_invocation_invalid",
+		"agent.model_failed", "agent.completion_repair_exhausted",
+		"agent.output_schema_invalid", "agent.output_refused",
+		"agent.completion_validation_failed", "agent.usage_invalid",
+		"agent.state_invalid", "agent.tool_failed", "agent.tool_error_invalid",
+		"agent.discovery_invalid", "agent.deadline_exceeded",
+		"agent.model_retry_exhausted", "agent.tool_retry_exhausted",
+		"agent.shared_budget_exhausted":
+		result.AgentErrorCode = snapshot.Turn.ErrorCode
+	}
+	return result
+}
+
 type taskReport struct {
-	Mode              string                `json:"mode"`
-	Model             string                `json:"model"`
-	Status            string                `json:"status"`
-	Stage             string                `json:"stage"`
-	FailureCode       string                `json:"failureCode,omitempty"`
-	DurationMs        int64                 `json:"durationMs"`
-	TurnID            string                `json:"turnID"`
-	RunID             string                `json:"runID"`
-	ContextGeneration int                   `json:"contextGeneration"`
-	ModelCalls        int                   `json:"modelCalls"`
-	ToolCalls         int                   `json:"toolCalls"`
-	LookupCalls       int                   `json:"lookupCalls"`
-	ArtifactReads     int                   `json:"artifactReads"`
-	DraftWrites       int                   `json:"draftWrites"`
-	OraclePassed      bool                  `json:"oraclePassed"`
-	RecoveryChecks    recoveryChecks        `json:"recoveryChecks"`
-	Usage             usageCoverage         `json:"usage"`
-	ModelDurationsMs  []int64               `json:"modelDurationsMs"`
-	ToolExecutions    []toolExecutionMetric `json:"toolExecutions"`
+	Mode                   string                     `json:"mode"`
+	Model                  string                     `json:"model"`
+	Status                 string                     `json:"status"`
+	Stage                  string                     `json:"stage"`
+	FailureCode            string                     `json:"failureCode,omitempty"`
+	PreInterruption        *preInterruptionEvidence   `json:"preInterruption,omitempty"`
+	DurationMs             int64                      `json:"durationMs"`
+	TurnID                 string                     `json:"turnID"`
+	RunID                  string                     `json:"runID"`
+	ContextGeneration      int                        `json:"contextGeneration"`
+	ModelCalls             int                        `json:"modelCalls"`
+	ToolCalls              int                        `json:"toolCalls"`
+	LookupCalls            int                        `json:"lookupCalls"`
+	ArtifactReads          int                        `json:"artifactReads"`
+	ArtifactReadStrategy   *artifactReadStrategy      `json:"artifactReadStrategy,omitempty"`
+	InputCountObservations *inputCountObservations    `json:"inputCountObservations,omitempty"`
+	InputCountComparison   *inputCountUsageComparison `json:"inputCountComparison,omitempty"`
+	DraftWrites            int                        `json:"draftWrites"`
+	OraclePassed           bool                       `json:"oraclePassed"`
+	RecoveryChecks         recoveryChecks             `json:"recoveryChecks"`
+	Usage                  usageCoverage              `json:"usage"`
+	ModelDurationsMs       []int64                    `json:"modelDurationsMs"`
+	ToolExecutions         []toolExecutionMetric      `json:"toolExecutions"`
 	// Internal oracle material: baseline events project only safe metrics.
 	Answer taskAnswer `json:"answer"`
 }
@@ -188,7 +231,7 @@ func classifyPreInterruptionFailure(initial harness.Snapshot, startErr error, re
 // remain available to tests; command/event reporting uses stable codes only.
 func runTask(ctx context.Context, config settings, newModel func() (model.Client, error), source sourceFixture) (report taskReport, runErr error) {
 	started := time.Now()
-	state := &taskState{store: harness.NewMemoryStore(), clock: &demoClock{now: time.Now().UTC()}, source: source, sampleID: config.sampleID}
+	state := &taskState{suite: config.suite, store: harness.NewMemoryStore(), clock: &demoClock{now: time.Now().UTC()}, source: source, sampleID: config.sampleID}
 	if state.sampleID == "" {
 		state.sampleID = "session"
 	}
@@ -220,6 +263,7 @@ func runTask(ctx context.Context, config settings, newModel func() (model.Client
 	updateReportIdentity(&report, initial)
 	interruptionCommitted := fault.fired.Load()
 	if !interruptionCommitted || !onlyExpectedDraftInterruption(startErr, 0) {
+		report.PreInterruption = safePreInterruptionEvidence(initial)
 		return report, classifyPreInterruptionFailure(initial, startErr, interruptionCommitted, state.counts().drafts)
 	}
 	report.RecoveryChecks.InterruptionObserved = true

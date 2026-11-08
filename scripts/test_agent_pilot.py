@@ -16,17 +16,17 @@ import test_agent_quality as quality
 baseline = fixture.baseline
 
 
-def pilot_events(config=None, passed=True, preflight_passed=True):
+def pilot_events(config=None, passed=True, preflight_passed=True, case_id=baseline.PILOT_CASE_ID):
     config = quality.quality_config() if config is None else config
     start = quality.quality_start(config)
-    start.update(pilotOnly=True, pilotCaseID=baseline.PILOT_CASE_ID)
+    start.update(pilotOnly=True, pilotCaseID=case_id)
     preflight = {"type": "preflight", "status": "passed" if preflight_passed else "failed",
                  "durationMs": 5, "usage": None}
     if not preflight_passed:
         preflight["failureCode"] = "capability_unavailable"
     sample = fixture.sample(1, passed=passed)
-    sample["caseID"] = baseline.PILOT_CASE_ID
-    sample["sampleID"] = baseline.PILOT_CASE_ID + "-01"
+    sample["caseID"] = case_id
+    sample["sampleID"] = case_id + "-01"
     samples = [sample] if preflight_passed else []
     count = len(samples)
     duration = sample["durationMs"] if count else 0
@@ -55,6 +55,114 @@ def pilot_report(passed=True, preflight_passed=True):
 
 
 class FirstLivePilotTests(unittest.TestCase):
+    def test_distractor_pilot_report_and_single_case_identity(self):
+        config = quality.quality_config()
+        report = baseline.new_report(config, {"revision": "a" * 40, "dirty": False})
+        events = pilot_events(config, case_id=baseline.DISTRACTOR_PILOT_CASE_ID)
+        for event in events:
+            baseline.accept_event(report, event)
+        baseline.finish_report(report, 0)
+        self.assertEqual(report["status"], "pilot_sample_passed")
+        self.assertEqual(report["runner"]["pilotCaseID"], "distractor-05")
+        markdown = baseline.render_markdown(report)
+        self.assertIn("本报告只试运行固定案例 distractor-05", markdown)
+        self.assertNotIn("本报告只试运行固定案例 code-01", markdown)
+        self.assertEqual(len(report["samples"]), 1)
+        self.assertEqual(report["samples"][0]["caseID"], "distractor-05")
+        self.assertFalse(report["summary"]["complete"])
+        self.assertEqual(report["summary"]["skipped"], 39)
+        baseline.validate_report(report)
+        with self.assertRaises(baseline.ProtocolFailure):
+            invalid = baseline.new_report(config, {"revision": "b" * 40, "dirty": False})
+            for event in pilot_events(config, case_id="distractor-06"):
+                baseline.accept_event(invalid, event)
+        for wrong in ("code-01", "distractor-01", "distractor-05-02"):
+            forged = pilot_events(config, case_id=baseline.DISTRACTOR_PILOT_CASE_ID)
+            forged[2]["sample"]["sampleID"] = wrong
+            invalid = baseline.new_report(config, {"revision": "c" * 40, "dirty": False})
+            with self.assertRaises(baseline.ProtocolFailure):
+                for event in forged:
+                    baseline.accept_event(invalid, event)
+
+    def test_pilot_terminal_banner_matches_actual_case_for_reused_and_interactive_config(self):
+        config = quality.quality_config()
+        for command, expected in (("pilot", "code-01"), ("pilot-distractor", "distractor-05")):
+            with self.subTest(mode=command, source="historical report"):
+                printed = io.StringIO()
+                with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                        mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                        mock.patch.object(baseline, "read_report", return_value={"configuration": config}), \
+                        mock.patch.object(baseline, "launch", return_value=0) as launched, \
+                        contextlib.redirect_stdout(printed):
+                    self.assertEqual(baseline.main([command, "/private/prior_report.json"]), 0)
+                self.assertEqual(launched.call_args.kwargs["pilot_case_id"], expected)
+                self.assertIn("固定案例 %s × 1 次" % expected, printed.getvalue())
+                self.assertNotIn(
+                    "固定案例 %s × 1 次" %
+                    ("code-01" if expected == "distractor-05" else "distractor-05"),
+                    printed.getvalue())
+            with self.subTest(mode=command, source="interactive"):
+                printed = io.StringIO()
+                with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                        mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                        mock.patch("builtins.input", side_effect=[
+                            "1", "", config["model"], "y", "high"
+                        ]), \
+                        mock.patch.object(baseline, "prompt_integer",
+                                          side_effect=[config["contextTokens"],
+                                                       config["maxOutputTokens"]]), \
+                        mock.patch.object(baseline, "launch", return_value=0) as launched, \
+                        contextlib.redirect_stdout(printed):
+                    self.assertEqual(baseline.main([command]), 0)
+                self.assertEqual(launched.call_args.kwargs["pilot_case_id"], expected)
+                self.assertIn("固定案例 %s × 1 次" % expected, printed.getvalue())
+        with self.assertRaisesRegex(baseline.SafeFailure, "invalid_pilot_case"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                baseline.display_configuration(config, pilot_only=True,
+                                               pilot_case_id="distractor-06")
+
+    def test_distractor_pilot_launcher_fences_child_case_and_cli(self):
+        config = quality.quality_config()
+        mode = []
+        original_child = baseline.run_child
+        def intercepted(command, root, selected, secret, report, writer, **kwargs):
+            self.assertEqual(command[1:], ["-mode=baseline-distractor-pilot-stdin"])
+            self.assertEqual(kwargs["pilot_case_id"], baseline.DISTRACTOR_PILOT_CASE_ID)
+            mode.append("child")
+            program = fixture.child_program(pilot_events(selected, case_id=baseline.DISTRACTOR_PILOT_CASE_ID), exit_code=0)
+            return original_child([sys.executable, "-u", "-c", program], root, selected, secret,
+                                  report, writer, pilot_only=True, pilot_case_id=baseline.DISTRACTOR_PILOT_CASE_ID)
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(baseline, "source_metadata", return_value={}), \
+                mock.patch.object(baseline, "run_child", side_effect=intercepted), \
+                contextlib.redirect_stdout(io.StringIO()):
+            exit_code = baseline.launch(config, Path(directory), get_key=lambda:"fake-key",
+                                        builder=lambda *_:None, pilot_only=True,
+                                        pilot_case_id=baseline.DISTRACTOR_PILOT_CASE_ID)
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(mode, ["child"])
+            saved = next((Path(directory)/"artifacts"/"agent-baselines").glob("*.json"))
+            self.assertEqual(baseline.read_report(saved)["runner"]["pilotCaseID"], "distractor-05")
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                    mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                    mock.patch.object(baseline, "collect_configuration", return_value=config), \
+                    mock.patch.object(baseline, "launch", return_value=0) as launched:
+                self.assertEqual(baseline.main(["pilot-distractor"]), 0)
+                self.assertEqual(launched.call_args.kwargs["pilot_case_id"], "distractor-05")
+        mismatch = pilot_events(config, case_id=baseline.PILOT_CASE_ID)
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(baseline, "source_metadata", return_value={}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            report=baseline.new_report(config,{})
+            writer=baseline.ReportWriter(Path(directory))
+            program=fixture.child_program(mismatch, exit_code=0)
+            failed=baseline.run_child([sys.executable,"-u","-c",program],Path(directory),
+                      config,"fake-key",report,writer,pilot_only=True,
+                      pilot_case_id=baseline.DISTRACTOR_PILOT_CASE_ID)
+            self.assertEqual(failed["launcherFailure"]["failureCode"],"execution_mode_mismatch")
+            self.assertNotEqual(failed["status"],"pilot_sample_passed")
+
     def test_tool_probe_without_reasoning_has_narrower_coverage_than_encrypted_replay(self):
         base = {
             "status": "passed", "stage": "completed",
@@ -271,7 +379,8 @@ class FirstLivePilotTests(unittest.TestCase):
                                       return_value=quality.quality_config()) as collect, \
                     mock.patch.object(baseline, "launch", return_value=0) as launched:
                 self.assertEqual(baseline.main(["pilot"]), 0)
-                collect.assert_called_once_with(baseline.QUALITY_SUITE, pilot_only=True)
+                collect.assert_called_once_with(baseline.QUALITY_SUITE, pilot_only=True,
+                                                pilot_case_id=baseline.PILOT_CASE_ID)
                 self.assertTrue(launched.call_args.kwargs["pilot_only"])
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(baseline.main(["pilot", "a", "b"]), 2)

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	provider "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -68,6 +69,62 @@ func taskContextPolicyForSuite(suite string) runtimecontext.Policy {
 	return policy
 }
 
+// Observes only the optional native count result. This does not replace the
+// Context counter or change its existing Fail-Closed budget fallback.
+// Metrics intentionally do not include input content, IDs or error text.
+type recordedInputTokenCounter struct {
+	next  runtimecontext.TokenCounter
+	state *taskState
+}
+
+func (counter recordedInputTokenCounter) Count(ctx context.Context, request runtimecontext.TokenCountRequest) (int64, error) {
+	count, err := counter.next.Count(ctx, request)
+	var countedRequest model.Request
+	decodeErr := json.Unmarshal(request.Payload, &countedRequest)
+	fingerprint, fingerprintErr := inputCountObservationFingerprint(countedRequest)
+	validFingerprint := decodeErr == nil && fingerprintErr == nil
+	counter.state.mu.Lock()
+	defer counter.state.mu.Unlock()
+	observed := &counter.state.inputCounts
+	observed.Attempts++
+	if observed.UnavailableReasons == nil {
+		observed.UnavailableReasons = &inputCountUnavailableReasons{}
+	}
+	if err == nil && count > 0 {
+		observed.Accepted++
+		if counter.state.acceptedInputCounts == nil {
+			counter.state.acceptedInputCounts = make(map[[32]byte]int64)
+		}
+		if validFingerprint {
+			counter.state.acceptedInputCounts[fingerprint] = count
+		}
+	} else {
+		if validFingerprint {
+			delete(counter.state.acceptedInputCounts, fingerprint)
+		}
+		observed.Unavailable++
+		switch provider.ClassifyInputCountFailure(err) {
+		case provider.InputCountLocalRejected:
+			observed.UnavailableReasons.LocalRejected++
+		case provider.InputCountHTTP4xx:
+			observed.UnavailableReasons.HTTP4xx++
+		case provider.InputCountHTTP5xx:
+			observed.UnavailableReasons.HTTP5xx++
+		case provider.InputCountOtherHTTP:
+			observed.UnavailableReasons.OtherHTTP++
+		case provider.InputCountTransportOrProtocol:
+			observed.UnavailableReasons.TransportOrProtocol++
+		case provider.InputCountOther:
+			observed.UnavailableReasons.Other++
+		default:
+			// Unknown future enums are never evidence of a native HTTP
+			// response. Preserve the conservative unclassified bucket.
+			observed.UnavailableReasons.Other++
+		}
+	}
+	return count, err
+}
+
 // compose is deliberately local to this example: the host chooses stores,
 // authority, real model limits, preparation order and execution ownership.
 func compose(store kernel.Store, state *taskState, client model.Client, config settings, owner string, transcript harness.TranscriptSource) (*harness.SessionClient, error) {
@@ -75,7 +132,15 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 	if err != nil {
 		return nil, err
 	}
-	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	// The optional native count is a read-only, pre-intent capability of the
+	// original Host-selected model. It never authorizes a model dispatch.
+	// Scope the changed accounting policy to the versioned quality workload;
+	// the historical two-case baseline and all scripted paths stay unchanged.
+	contextDependencies := runtimecontext.Dependencies{}
+	if config.suite == qualitySuite && config.provider == "openai" {
+		contextDependencies.Counter = recordedInputTokenCounter{next: provider.ContextTokenCounter{Client: client}, state: state}
+	}
+	manager := runtimecontext.NewManager(contextDependencies)
 	reader := taskArtifactRegistrationForSuite(config.suite, harness.NewContextArtifactToolHandler(state.store, nil))
 	handler := reader.Handler
 	reader.Handler = tools.HandlerFunc(func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -85,6 +150,13 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 			if decodeErr := json.Unmarshal(result.Content, &page); decodeErr != nil {
 				return tools.ExecutionResult{}, decodeErr
 			}
+			var input struct {
+				Query string `json:"query"`
+			}
+			if decodeErr := json.Unmarshal(request.Call.Arguments, &input); decodeErr != nil {
+				return tools.ExecutionResult{}, decodeErr
+			}
+			page.queried = input.Query != ""
 			state.mu.Lock()
 			state.reads = append(state.reads, page)
 			state.mu.Unlock()
@@ -176,10 +248,12 @@ func (ceiling outputCeiling) Model(ctx context.Context, request model.Request, s
 	if !agent.IsModelPreDispatchDenied(err) {
 		ceiling.state.mu.Lock()
 		ceiling.state.requests = append(ceiling.state.requests, model.CloneRequest(request))
+		receipt := numericUsage(response.Usage)
 		ceiling.state.observations = append(ceiling.state.observations, modelObservation{
-			DurationMs: time.Since(started).Milliseconds(), Usage: numericUsage(response.Usage),
+			DurationMs: time.Since(started).Milliseconds(), Usage: receipt,
 		})
 		ceiling.state.mu.Unlock()
+		ceiling.state.recordInputCountUsageComparison(request, receipt, err)
 	}
 	return response, err
 }

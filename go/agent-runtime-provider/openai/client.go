@@ -357,6 +357,67 @@ func decodeResponse(body responseBody, names map[string]string, required bool) (
 	}
 	return result, nil
 }
+
+// CountInputTokens uses the same validated, provider-native input projection as
+// Generate. Output-only settings are omitted because the counting API does not
+// accept them. A failing proxy, malformed receipt, or unsupported request never
+// becomes an approximate or zero count; callers may use their conservative
+// existing fallback instead.
+func (c *Client) CountInputTokens(ctx context.Context, request model.Request) (int64, error) {
+	projection, err := c.prepare(model.CloneRequest(request), false)
+	if err != nil {
+		return 0, err
+	}
+	// These are the input-affecting fields of the supported stateless
+	// Responses profile. Never invent a second Tool/replay serializer.
+	body := make(map[string]any)
+	for _, key := range []string{"model", "input", "tools", "tool_choice", "text", "reasoning"} {
+		if value, exists := projection.body[key]; exists {
+			body[key] = value
+		}
+	}
+	resp, err := c.http.PostResponsesInputTokens(ctx, body)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var counted struct {
+		Object      string `json:"object"`
+		InputTokens *int64 `json:"input_tokens"`
+	}
+	if err := providerhttp.ReadJSON(resp, &counted); err != nil {
+		return 0, err
+	}
+	// The JSON transport is capped at 8 MiB per request; a count exceeding
+	// 2^32 is not credible for this stateless input profile. Bound untrusted
+	// arithmetic before it can enter Context or an int64 budget sum.
+	if counted.Object != "response.input_tokens" || counted.InputTokens == nil ||
+		*counted.InputTokens <= 0 || *counted.InputTokens > 1<<32 {
+		return 0, providerhttp.ErrProtocol
+	}
+	return *counted.InputTokens, nil
+}
+
+var _ model.InputTokenCounter = (*Client)(nil)
+
+// PlanTokenAdmission is an optional explicit Host budget capability. It requires
+// an already enforced positive output ceiling and the same native input count;
+// it never guesses tokens on an unavailable counting endpoint. The existing
+// BudgetMiddleware still handles missing usage and unknown settlement as
+// suspended, not zero-charge success.
+func (c *Client) PlanTokenAdmission(ctx context.Context, request model.Request) (model.TokenAdmission, error) {
+	if request.MaxOutputTokens <= 0 {
+		return model.TokenAdmission{}, ErrUnsupported
+	}
+	count, err := c.CountInputTokens(ctx, request)
+	if err != nil {
+		return model.TokenAdmission{}, err
+	}
+	return model.TokenAdmission{InputUpperBound: count, MaxOutputTokens: request.MaxOutputTokens}, nil
+}
+
+var _ model.TokenAdmissionPlanner = (*Client)(nil)
+
 func (c *Client) Generate(ctx context.Context, request model.Request) (model.Response, error) {
 	prepared, err := c.prepare(request, false)
 	if err != nil {

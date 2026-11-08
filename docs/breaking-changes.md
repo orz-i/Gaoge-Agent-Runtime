@@ -19,6 +19,32 @@ historical code, sample results, task version, dataset hash and schema v1;
 no compatibility rewrite or migration is performed. See
 [bounded audit](audits/2026-11-08-task-preinterruption-failure-attribution.md).
 
+## 2026-11-08 — Exact typed TokenCountRequest.Payload (beta.24 hard cut)
+
+The optional `runtimecontext.TokenCountRequest.Payload` now contains the
+exact `model.MarshalRequestForInputCount(model.Request)` bytes of the frozen
+request (typed Encoder, `SetEscapeHTML(false)`, no framing newline), **not**
+a generic JSON interface{} normalization of the request. Generic normalization
+reorders keys inside `json.RawMessage` Tool arguments, while default
+`json.Marshal` HTML-escapes `<>&` inside signed Tool arguments. Both break
+byte-strict matching of those arguments with opaque signed OpenAI
+reasoning/function replay. A new full Context → Router → Provider replay test
+reproduced this mismatch before HTTP, and passed with the corrected projection.
+
+Custom `TokenCounter` implementations must accept the new exact typed bytes.
+The Host-owned Provider counter requires an exact typed JSON round trip,
+still rejects duplicate keys, aliases, unknown fields, trailing data and
+cross-provider/model requests, and still fails conservatively. **No
+compatibility bridge** admits legacy generic-reordered signed payloads.
+The Context noncounter/legacy byte-estimation and persisted checkpoint,
+Run and SQL formats do not change. Under an enabled native counter,
+the hard-byte fallback is strengthened to charge at least the larger of
+generic-canonical and exact-typed serialized bytes, so normalized long
+number literals cannot lower the original request's conservative bound. The OpenAI quality measurement profile rotates from
+v1 to v2 and receives a new dataset hash; historical paid samples retain
+their original immutable contract and results. See
+[native count/opaque replay audit](audits/2026-11-08-native-count-replay-order-hardcut.md).
+
 ## 2026-11-06 — Host-owned ModelProfileSource hard cut (beta.24 candidate)
 
 The Runtime SDK and OpenAI/Anthropic adapters no longer carry bundled

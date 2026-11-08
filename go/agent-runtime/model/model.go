@@ -151,6 +151,14 @@ type Client interface {
 	Generate(context.Context, Request) (Response, error)
 }
 
+// InputTokenCounter optionally counts the input of this exact model Request with
+// a provider-native read-only counting endpoint. It must not infer support from
+// a model name, silently change the request, or manufacture a count on errors.
+// It does not authorize generation, reserve budget, or provide a billing receipt.
+type InputTokenCounter interface {
+	CountInputTokens(context.Context, Request) (int64, error)
+}
+
 // TokenAdmission is computed over the final canonical provider request, including
 // system context, tool schemas, native tools and replay/cache materialization.
 type TokenAdmission struct {

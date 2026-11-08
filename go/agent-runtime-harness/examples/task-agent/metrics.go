@@ -69,6 +69,52 @@ func (usage *usageCoverage) merge(other usageCoverage) {
 	usage.Complete = usage.MissingCalls == 0
 }
 
+// A count attempt is the Host's call to an optional native counter, not
+// proof of a physical HTTP request, a generation, or a billed token. An
+// unavailable result may lead to Context's conservative byte fallback; only
+// the Context manager itself makes that admission decision.
+// No upstream messages, endpoints, source text or credentials are retained.
+// A local rejection proves no native count HTTP was attempted. An HTTP class
+// proves a native count response status was seen, not billable generation.
+type inputCountUnavailableReasons struct {
+	LocalRejected       int `json:"localRejected"`
+	HTTP4xx             int `json:"http4xx"`
+	HTTP5xx             int `json:"http5xx"`
+	OtherHTTP           int `json:"otherHTTP"`
+	TransportOrProtocol int `json:"transportOrProtocol"`
+	Other               int `json:"other"`
+}
+
+type inputCountObservations struct {
+	Attempts           int                           `json:"attempts"`
+	Accepted           int                           `json:"accepted"`
+	Unavailable        int                           `json:"unavailable"`
+	UnavailableReasons *inputCountUnavailableReasons `json:"unavailableReasons,omitempty"`
+}
+
+// A count-to-usage comparison is valid only for the exact model input
+// byte identity and a successful model response with known Provider Usage.
+// It is never an admission decision, a generation request or billing proof.
+type inputCountUsageComparison struct {
+	Compared         int   `json:"compared"`
+	Equal            int   `json:"equal"`
+	BelowUsage       int   `json:"belowUsage"`
+	AboveUsage       int   `json:"aboveUsage"`
+	MaxUnderestimate int64 `json:"maxUnderestimate"`
+}
+
+// Content-free aggregate of actual successful Artifact handler outputs and
+// validated model Tool arguments; query text, Artifact IDs and previews never
+// leave this process. Optional on the quality suite only.
+type artifactReadStrategy struct {
+	Queried             int `json:"queried"`
+	OffsetOnly          int `json:"offsetOnly"`
+	CandidatePages      int `json:"candidatePages"`
+	NormalizedHintPages int `json:"normalizedHintPages"`
+	HintedOffsetPages   int `json:"hintedOffsetPages"`
+	DonePages           int `json:"donePages"`
+}
+
 type modelObservation struct {
 	DurationMs int64
 	Usage      *tokenUsage
@@ -131,6 +177,35 @@ func (state *taskState) collectMetrics(report *taskReport) {
 	report.ModelCalls = len(state.observations)
 	report.ToolCalls = len(state.executions)
 	report.LookupCalls, report.ArtifactReads, report.DraftWrites = state.lookupCalls, len(state.reads), len(state.drafts)
+	if state.suite == qualitySuite {
+		modes := &artifactReadStrategy{}
+		for _, page := range state.reads {
+			if page.queried {
+				modes.Queried++
+			} else {
+				modes.OffsetOnly++
+				if page.SearchHint != "" {
+					modes.HintedOffsetPages++
+				}
+			}
+			if len(page.Matches) != 0 {
+				modes.CandidatePages++
+			}
+			if page.SearchMode == "normalized_hints" {
+				modes.NormalizedHintPages++
+			}
+			if page.Done {
+				modes.DonePages++
+			}
+		}
+		report.ArtifactReadStrategy = modes
+	}
+	if state.inputCounts.Attempts > 0 {
+		observed := state.inputCounts
+		report.InputCountObservations = &observed
+		comparison := state.inputCountComparison
+		report.InputCountComparison = &comparison
+	}
 	if report.Stage == "start" && state.lookupCalls > 0 {
 		report.Stage = "evidence"
 	}

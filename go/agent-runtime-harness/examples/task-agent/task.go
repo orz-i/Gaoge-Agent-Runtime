@@ -30,7 +30,7 @@ func taskInstructionsForSuite(suite string) string {
 	if suite != qualitySuite {
 		return taskInstructions
 	}
-	return taskInstructions + " When a source contains similar records or a literal search misses, use a short query from the user's target: read_context_artifact automatically returns bounded candidate matches in this Host. Inspect match previews by record identifiers; normalized_hints are NOT evidence. Re-query the selected exact original offset to verify the target record before saving a draft. Avoid repeating an ambiguous query without advancing the returned offset."
+	return taskInstructions + " For long or ambiguous archives, first search the exact distinctive record identifier supplied in the user's request (here the literal RELEASE R-17), not broad words such as RELEASE or repeated offset=0 scans. Set read_context_artifact query to that full identifier, offset=0 and limit=128. If found=true and the returned content contains the complete matching original record with both requested fields, that content is exact source evidence: save_draft next, without another redundant read. If exact search misses or returns only navigation matches, inspect at most the bounded candidates, select the original target offset and re-read that exact original source before saving. Normalized_hints are NOT evidence; never infer target facts from a preview. This task has a strict shared Tool-call limit of 10 including lookup, Artifact reads and save_draft; reserve at least one call for save_draft. Do not repeat an ineffective query or offset cursor, invent facts, or weaken the draft/Oracle checks."
 }
 
 var answerSchema = json.RawMessage(`{"type":"object","properties":{"release":{"type":"string"},"deploymentCode":{"type":"string"},"window":{"type":"string"},"artifactID":{"type":"string"},"draftID":{"type":"string"}},"required":["release","deploymentCode","window","artifactID","draftID"],"additionalProperties":false}`)
@@ -69,20 +69,33 @@ type artifactPage struct {
 	Content     string `json:"content"`
 	Offset      int    `json:"offset"`
 	Found       bool   `json:"found"`
+	SearchMode  string `json:"searchMode"`
+	SearchHint  string `json:"searchHint"`
+	Done        bool   `json:"done"`
+	// Empty structs count candidate previews without retaining their
+	// source text. Only aggregate mode counts leave the Host.
+	Matches []struct{} `json:"matches"`
+	queried bool
 }
 
 type taskState struct {
-	store        harness.Store
-	clock        *demoClock
-	source       sourceFixture
-	mu           sync.Mutex
-	lookupCalls  int
-	reads        []artifactPage
-	drafts       []taskAnswer
-	requests     []model.Request
-	observations []modelObservation
-	executions   []toolExecution
-	sampleID     string
+	suite       string
+	store       harness.Store
+	clock       *demoClock
+	source      sourceFixture
+	mu          sync.Mutex
+	lookupCalls int
+	reads       []artifactPage
+	inputCounts inputCountObservations
+	// Only ephemeral hashes of exact request bytes; never persisted to a
+	// benchmark report or included in a Tool/Provider request.
+	acceptedInputCounts  map[[32]byte]int64
+	inputCountComparison inputCountUsageComparison
+	drafts               []taskAnswer
+	requests             []model.Request
+	observations         []modelObservation
+	executions           []toolExecution
+	sampleID             string
 }
 
 func (state *taskState) registrations() []tools.Registration {

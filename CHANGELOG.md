@@ -5,6 +5,119 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Official real single-case Provider/Context + complex evidence verification
+  (2026-11-08): on clean Head `b219b83`, the genuine `gpt-5.6-terra`
+  `distractor-05` pilot **passed** with 1 lookup, 1 exact original
+  Artifact read and 1 committed draft; all original interruption/lease/
+  same-Run recovery and Oracle checks passed. Five native counts accepted,
+  four compared exactly to the same-input completed Provider Usage (zero
+  under/over); the fifth is unpaired and not claimed accurate.
+  Reasoning/encrypted replay was observed in this probe. The pilot is
+  **1/1 attempted with 39 skipped**, not a new full 40-case score.
+  The launcher also now displays the **actual** selected pilot case
+  rather than always printing `code-01`, with both interactive and
+  historic-report paths tested. No Task/Tool/Context contract change or
+  dataset hash rotation for this message-only fix. See the
+  [live acceptance record](docs/audits/2026-11-08-official-real-distractor05-success.md).
+
+- Real `distractor-05` evidence: Provider/Context count verified, retrieval
+  Tool budget exhausted (2026-11-08). On actual clean v2 Head `43f42d6`,
+  one official `gpt-5.6-terra` pilot observed 12/12 native count accepts
+  and 11/11 exact same-input Provider Usage matches, with no under/over
+  counts. The Agent nevertheless used all 10 permitted Tools
+  (1 lookup + 9 Artifact reads), wrote no draft and failed with a trusted
+  `agent.tool_limit`. The final attempted offset-only read was not
+  executed. The quality Host now recommends exact user-supplied target
+  identifiers before broad/offset scans, uses actual original source
+  evidence without redundant rereads and explicitly reserves one Tool
+  for saving a draft. The SDK limit, source content and Oracle are
+  unchanged; both live and scripted quality hashes rotate to protect
+  comparability. A Source-blind Agent verifies the 3-tool workflow
+  across all 40 cases locally; a new paid trial is still required for
+  real-model retrieval success. See
+  [real evidence and limits](docs/audits/2026-11-08-real-distractor05-metering-passed-tool-limit.md).
+
+- Complete report-only provenance for optional native input counting
+  (2026-11-08): preserve fixed, content-free refusal classes
+  (local/HTTP 4xx/HTTP 5xx/other HTTP/transport-or-protocol/other) and
+  correlate already accepted native counts with the same input's completed
+  Provider Usage. Report compared/equal/under/over without extra API
+  requests, persisted request hashes or changes to Context admission;
+  missing coverage is never falsely counted as exact. A synthetic byte
+  counter's overcount and native 422/503/malformed failures are exercised
+  through the real task Agent. The pinned quality dataset/Task Oracle and
+  historical paid failures remain unchanged. The v2 real-model outcome
+  still requires a local TTY and hidden credentials. See
+  [verification audit](docs/audits/2026-11-08-real-model-count-cause-and-usage-verification.md).
+
+- Correct native counting of signed Tool/reasoning replay (2026-11-08):
+  Context's generic JSON normalization reordered nested Tool arguments while
+  the original encrypted replay kept its signed string. The combined
+  Context→Router→OpenAI count path then rejected legitimate requests before
+  HTTP. Preserve the exact typed Request JSON solely for native counting,
+  retaining the original Context hard-byte estimate, strict Tool replay
+  byte comparison, Provider/model routing and conservative fallback on
+  unverified inputs. A RED malformed-long-number variant also proved that
+  generic normalization could shrink the nominal hard-byte bound; the
+  counter-enabled fallback now charges at least the exact typed byte length.
+  A shared no-HTML-escape serializer also prevents `<>&` inside signed Tool
+  arguments from being rewritten during count projection. The beta.24 `TokenCountRequest.Payload` contract is a
+  deliberate hard cut with no compatibility bridge. OpenAI quality dataset
+  hash rotates; historical real scores are not rewritten. See
+  [native count audit](docs/audits/2026-11-08-native-count-replay-order-hardcut.md).
+
+- Preserve trusted Agent terminal evidence after pre-interruption failures
+  (2026-11-08): the `gpt-5.6-terra` second single-case real pilot reached
+  8 registered Tool executions, then failed before the expected draft
+  interruption. The last captured Tool call matches an executed receipt;
+  the previous broad error could not expose its subsequent terminal
+  category. New optional `preInterruption` reports only the real Harness
+  Turn status and exact allowlisted Agent terminal codes; no Provider
+  errors or Store details are serialized, and historical results remain
+  unchanged. Fixed-code status and real Agent failure regression added.
+  See [evidence](docs/audits/2026-11-08-real-distractor05-terminal-evidence.md).
+
+- Provider-native input-count observation (2026-11-08): the OpenAI quality
+  Host now records only counter attempts/positive accepts/unavailable counts,
+  independently of Provider HTTP generations, Usage and billing. Invalid or
+  missing count remains the original Context hard-byte fallback. Strict
+  report validation rejects malformed or cross-provider observations while
+  accepting historical reports. No Model/Tool policy change or dataset hash
+  change. See [review](docs/audits/2026-11-08-provider-context-identity-and-observations.md).
+
+- Bounded queryless Context navigation and evidence strategy measurements
+  (2026-11-08): the opt-in candidate reader now keeps a content-free search
+  hint and exact original-rune cursor inside a 512-byte Tool result when
+  models page large archives without a query. The original literal reader,
+  source, authority and exact queried reads remain unchanged; opt-in Tool
+  definition advances to `harness-candidate-search-v2`. The quality
+  benchmark reports query/offset/candidate/hint counts without storing
+  queries or source content, validates those counts and rotates its dataset
+  hash. Source-blind scripted offset→hint→search→exact reread→draft→recovery
+  passes; the historical genuine failed pilot is not reclassified or
+  upgraded to success. See [queryless navigation audit](docs/audits/2026-11-08-context-queryless-paging-advice.md).
+
+- Correct failed-task output-budget attribution (2026-11-08): distinguish
+  `maxOutputTokens` (per-request output ceiling), Context's reserved output,
+  measured Provider output usage and a typed failure cause. For the recorded
+  `gpt-5.6-terra` `distractor-05` pilot, 128,000 and 4,096 output ceilings
+  both leave the same 32,768-token Host input limit. Generic Provider errors
+  no longer trigger unsupported output-ceiling tuning advice. Preserve the
+  original ambiguous failure report, and add negative/positive budget-boundary
+  oracles and safer diagnostic text. See the [attribution correction](docs/audits/2026-11-08-output-ceiling-attribution-correction.md).
+
+- Bounded Provider/Context native token counting + ambiguous-evidence pilot
+  (2026-11-07): optional same-origin OpenAI Responses input-token counting,
+  exact-request/replay projection and positive TokenAdmissionPlanner; unknown
+  counts retain Context's original conservative hard bound, no inference or
+  effect receipts are minted. The `evidence-40-v1` Host explicitly wires this
+  only for OpenAI and changes its measurement hash; the two-case baseline
+  stays byte-identical. Add an opt-in one-case real `distractor-05` pilot with
+  immutable case ID, same Tool/Context/Oracle/recovery gates, and strict
+  prevention of accidental full-suite sampling. Offline evidence only; the
+  historic 37/40 real-model observation remains the only completed live score.
+  See [governance record](docs/audits/2026-11-07-provider-context-count-and-distractor-pilot.md).
+
 - Bounded, Host-opt-in Context Artifact candidate navigation (2026-11-07):
   retain the ordinary literal reader and legacy two-case baseline identity;
   add a separately versioned read-only Tool definition for a maximum of three

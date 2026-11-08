@@ -52,7 +52,12 @@ func TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent(t *testi
 		t.Fatal(err)
 	}
 	const pinnedLegacyOpenAIDatasetHash = "sha256:e4a782b32d69f7d7e7d25df60ef3416b4c950315e30d5cf716cd05fe2e0c4203"
-	const pinnedQualityOpenAIDatasetHash = "sha256:2ec73b1a92858853ba01a6f2999be07b2501b1c1a34c6c07ef93375df904a92e"
+	const pinnedQualityOpenAIDatasetHash = "sha256:9e6a18425ab3ce620e9b65d864626855f60dcd860533741154fc29c364f9f114"
+	const measuredV2BeforeTargetedGuidanceHash = "sha256:5d8827e9cb5f4394f35fc0a675f1376e6e2a354d535536008add0012f244338c"
+	const previousCountV1OpenAIDatasetHash = "sha256:7905b6abca186865869bcdc89ad8178cc2cb2ec4b5b1ada64aea4356ec97f992"
+	const preBoundedHintQualityOpenAIDatasetHash = "sha256:fff3cf1c4dd02102d556091b48d07c67765c59b96ea6a286f276b417343268d8"
+	const preSearchHintQualityOpenAIDatasetHash = "sha256:d22c61a16559e72d0c75c8f61ba342ac16c9382d3a55afc6a5622d8d4f70624b"
+	const previousCandidateQualityOpenAIDatasetHash = "sha256:2ec73b1a92858853ba01a6f2999be07b2501b1c1a34c6c07ef93375df904a92e"
 	// A richer Tool query contract must not be scored against the 37/40
 	// measured legacy-quality profile as though task conditions were identical.
 	const measuredOldQualityOpenAIDatasetHash = "sha256:1d57c9a8827816d63340f027a60bfdc92c63624e982232cb4f49ba2ff2bf3993"
@@ -60,6 +65,11 @@ func TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent(t *testi
 	if first.DatasetHash != second.DatasetHash || first.DatasetHash == legacy.DatasetHash ||
 		legacy.DatasetHash != pinnedLegacyOpenAIDatasetHash ||
 		first.DatasetHash != pinnedQualityOpenAIDatasetHash ||
+		first.DatasetHash == measuredV2BeforeTargetedGuidanceHash ||
+		first.DatasetHash == previousCountV1OpenAIDatasetHash ||
+		first.DatasetHash == preBoundedHintQualityOpenAIDatasetHash ||
+		first.DatasetHash == preSearchHintQualityOpenAIDatasetHash ||
+		first.DatasetHash == previousCandidateQualityOpenAIDatasetHash ||
 		first.DatasetHash == measuredOldQualityOpenAIDatasetHash || first.DatasetHash == oldQualityOpenAIDatasetHash ||
 		first.Profile.ContextPolicy.MaxInputTokens != 32768 || legacy.Profile.ContextPolicy.MaxInputTokens != 8192 ||
 		first.TaskVersion != qualityTaskVersion || legacy.TaskVersion != baselineTaskVersion ||
@@ -85,6 +95,13 @@ func TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence(t *testing
 		{"model-near-service-ceiling", 32768, 1024, 31744},
 		{"service-and-model-ceiling-align", 33792, 1024, 32768},
 		{"large-model-service-cap", 1050000, 4096, 32768},
+		// Production 2026-11-08 pilot: 128k is a permitted OUTPUT CEILING,
+		// not consumed output. Host input remains capped at 32768 for
+		// both 4096 and 128000 reservations on this model window.
+		{"live-pilot-output-ceiling-not-usage", 1050000, 128000, 32768},
+		// Show the real boundary: only a reservation that reduces
+		// available model input below the Host ceiling changes admission.
+		{"reservation-reduces-actual-input", 1050000, 1018000, 32000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bound, err := runtimecontext.EffectiveInputLimit(runtimecontext.ModelWindow{
@@ -114,13 +131,23 @@ func TestQualityScriptedCommandEmitsContentFreeCalibrationAndRespectsCancellatio
 		t.Fatal(err)
 	}
 	// The quality-only Context limit is part of the measurement identity.
-	const pinnedScriptedDatasetHash = "sha256:bf5d49af98d408c382aeb29c02514d29be370f636a136cae54c94b48f5364934"
+	const pinnedScriptedDatasetHash = "sha256:9817632b1e3a2354db4e56314af4cd79841aa7efa7f74ca2207b59792bad246a"
 	if result.Suite != qualitySuite || result.Mode != "scripted_oracle_calibration" ||
 		result.Status != "passed" || result.Summary.Requested != 40 || result.Summary.Passed != 40 ||
 		result.Summary.ModelCalls != 160 || result.Summary.ToolCalls != 120 || len(result.Samples) != 40 ||
 		result.DatasetHash != pinnedScriptedDatasetHash || bytes.Contains(output.Bytes(), []byte("DEPLOYMENT_CODE=")) ||
 		bytes.Contains(output.Bytes(), []byte("audit log:")) || bytes.Contains(output.Bytes(), []byte("private-fixture-key")) {
 		t.Fatalf("invalid or leaking offline calibration: suite=%s status=%s requested=%d passed=%d", result.Suite, result.Status, result.Summary.Requested, result.Summary.Passed)
+	}
+	// Successful scripted execution must also produce content-free read
+	// strategy evidence. This baseline model always uses an exact query.
+	for _, sample := range result.Samples {
+		modes := sample.ArtifactReadStrategy
+		if modes == nil || modes.Queried != sample.ArtifactReads ||
+			modes.OffsetOnly != 0 || modes.CandidatePages != 0 ||
+			modes.NormalizedHintPages != 0 || modes.HintedOffsetPages != 0 {
+			t.Fatalf("scripted quality did not record actual search path: sample=%s modes=%+v", sample.CaseID, modes)
+		}
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

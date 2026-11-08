@@ -49,6 +49,7 @@ type measurementProfile struct {
 	DurationClock                string                `json:"durationClock"`
 	LatencyPercentile            string                `json:"latencyPercentile"`
 	UsageAccounting              string                `json:"usageAccounting"`
+	InputTokenCountStrategy      string                `json:"inputTokenCountStrategy,omitempty"`
 }
 
 func baselineProfile(provider string) measurementProfile {
@@ -89,6 +90,9 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 	}
 	profile := baselineProfile(configuration.Provider)
 	profile.ContextPolicy = taskContextPolicyForSuite(configuration.Suite)
+	if configuration.Suite == qualitySuite && configuration.Provider == "openai" {
+		profile.InputTokenCountStrategy = "openai-native-input-count-v2-exact-raw-replay-fallback-hard-byte"
+	}
 	cases, taskVersion := selectedBaselineCases(configuration.Suite)
 	type caseManifest struct {
 		ID         string `json:"id"`
@@ -218,37 +222,45 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 }
 
 type baselineSample struct {
-	SampleID             string                  `json:"sampleID"`
-	CaseID               string                  `json:"caseID"`
-	Repetition           int                     `json:"repetition"`
-	Status               string                  `json:"status"`
-	Stage                string                  `json:"stage"`
-	FailureCode          string                  `json:"failureCode,omitempty"`
-	DurationMs           int64                   `json:"durationMs"`
-	ModelCalls           int                     `json:"modelCalls"`
-	ToolCalls            int                     `json:"toolCalls"`
-	LookupCalls          int                     `json:"lookupCalls"`
-	ArtifactReads        int                     `json:"artifactReads"`
-	DraftWrites          int                     `json:"draftWrites"`
-	OraclePassed         bool                    `json:"oraclePassed"`
-	RecoveryChecks       recoveryChecks          `json:"recoveryChecks"`
-	Usage                usageCoverage           `json:"usage"`
-	ModelDurationsMs     []int64                 `json:"modelDurationsMs"`
-	ToolExecutions       []toolExecutionMetric   `json:"toolExecutions"`
-	ContextGeneration    int                     `json:"contextGeneration"`
-	ProviderHTTPRequests int                     `json:"providerHTTPRequests,omitempty"`
-	LastHTTPStatus       int                     `json:"lastHTTPStatus,omitempty"`
-	LastResponseKind     preflightResponseKind   `json:"lastResponseKind,omitempty"`
-	LastResponseDebug    *preflightResponseDebug `json:"lastResponseDebug,omitempty"`
-	RunID                string                  `json:"runID,omitempty"`
-	TurnID               string                  `json:"turnID,omitempty"`
+	SampleID               string                     `json:"sampleID"`
+	CaseID                 string                     `json:"caseID"`
+	Repetition             int                        `json:"repetition"`
+	Status                 string                     `json:"status"`
+	Stage                  string                     `json:"stage"`
+	FailureCode            string                     `json:"failureCode,omitempty"`
+	PreInterruption        *preInterruptionEvidence   `json:"preInterruption,omitempty"`
+	DurationMs             int64                      `json:"durationMs"`
+	ModelCalls             int                        `json:"modelCalls"`
+	ToolCalls              int                        `json:"toolCalls"`
+	LookupCalls            int                        `json:"lookupCalls"`
+	ArtifactReads          int                        `json:"artifactReads"`
+	ArtifactReadStrategy   *artifactReadStrategy      `json:"artifactReadStrategy,omitempty"`
+	InputCountObservations *inputCountObservations    `json:"inputCountObservations,omitempty"`
+	InputCountComparison   *inputCountUsageComparison `json:"inputCountComparison,omitempty"`
+	DraftWrites            int                        `json:"draftWrites"`
+	OraclePassed           bool                       `json:"oraclePassed"`
+	RecoveryChecks         recoveryChecks             `json:"recoveryChecks"`
+	Usage                  usageCoverage              `json:"usage"`
+	ModelDurationsMs       []int64                    `json:"modelDurationsMs"`
+	ToolExecutions         []toolExecutionMetric      `json:"toolExecutions"`
+	ContextGeneration      int                        `json:"contextGeneration"`
+	ProviderHTTPRequests   int                        `json:"providerHTTPRequests,omitempty"`
+	LastHTTPStatus         int                        `json:"lastHTTPStatus,omitempty"`
+	LastResponseKind       preflightResponseKind      `json:"lastResponseKind,omitempty"`
+	LastResponseDebug      *preflightResponseDebug    `json:"lastResponseDebug,omitempty"`
+	RunID                  string                     `json:"runID,omitempty"`
+	TurnID                 string                     `json:"turnID,omitempty"`
 }
 
 func sampleMetrics(report taskReport, caseID, sampleID string, repetition int) baselineSample {
 	return baselineSample{
 		SampleID: sampleID, CaseID: caseID, Repetition: repetition, Status: report.Status, Stage: report.Stage,
-		FailureCode: report.FailureCode, DurationMs: report.DurationMs, ModelCalls: report.ModelCalls, ToolCalls: report.ToolCalls,
-		LookupCalls: report.LookupCalls, ArtifactReads: report.ArtifactReads, DraftWrites: report.DraftWrites,
+		FailureCode: report.FailureCode, PreInterruption: report.PreInterruption,
+		DurationMs: report.DurationMs, ModelCalls: report.ModelCalls, ToolCalls: report.ToolCalls,
+		LookupCalls: report.LookupCalls, ArtifactReads: report.ArtifactReads,
+		ArtifactReadStrategy:   report.ArtifactReadStrategy,
+		InputCountObservations: report.InputCountObservations,
+		InputCountComparison:   report.InputCountComparison, DraftWrites: report.DraftWrites,
 		OraclePassed: report.OraclePassed, RecoveryChecks: report.RecoveryChecks, Usage: report.Usage,
 		ModelDurationsMs: append([]int64{}, report.ModelDurationsMs...), ToolExecutions: append([]toolExecutionMetric{}, report.ToolExecutions...),
 		ContextGeneration: report.ContextGeneration, RunID: report.RunID, TurnID: report.TurnID,
@@ -301,7 +313,9 @@ const (
 	baselineFull baselineExecutionMode = iota
 	baselineProbe
 	baselinePilot
-	pilotCaseID = "code-01"
+	baselineDistractorPilot
+	pilotCaseID           = "code-01"
+	distractorPilotCaseID = "distractor-05"
 )
 
 // runBaseline writes one complete JSON object per event. Completed samples are
@@ -321,6 +335,22 @@ func runBaselinePilot(ctx context.Context, input io.Reader, output io.Writer) in
 	return runBaselineMode(ctx, input, output, baselinePilot)
 }
 
+// runBaselineDistractorPilot exercises exactly one historically difficult
+// evidence case. The Host selects it, never the untrusted stdin or Model.
+func runBaselineDistractorPilot(ctx context.Context, input io.Reader, output io.Writer) int {
+	return runBaselineMode(ctx, input, output, baselineDistractorPilot)
+}
+
+func pilotCaseForMode(execution baselineExecutionMode) string {
+	if execution == baselinePilot {
+		return pilotCaseID
+	}
+	if execution == baselineDistractorPilot {
+		return distractorPilotCaseID
+	}
+	return ""
+}
+
 func runBaselineMode(ctx context.Context, input io.Reader, output io.Writer, execution baselineExecutionMode) int {
 	configuration, public, err := readBaselineInput(input)
 	if err != nil {
@@ -330,13 +360,20 @@ func runBaselineMode(ctx context.Context, input io.Reader, output io.Writer, exe
 	if err != nil {
 		return configurationError(output)
 	}
-	if execution == baselinePilot {
+	pilotCase := pilotCaseForMode(execution)
+	if pilotCase != "" {
 		cases, _ := selectedBaselineCases(configuration.Suite)
-		if configuration.Suite != qualitySuite || configuration.Repetitions != 1 ||
-			len(cases) == 0 || cases[0].id != pilotCaseID {
+		found := false
+		for _, item := range cases {
+			if item.id == pilotCase {
+				found = true
+				break
+			}
+		}
+		if configuration.Suite != qualitySuite || configuration.Repetitions != 1 || !found {
 			return configurationError(output)
 		}
-		start.PilotOnly, start.PilotCaseID = true, pilotCaseID
+		start.PilotOnly, start.PilotCaseID = true, pilotCase
 	}
 	start.PreflightOnly = execution == baselineProbe
 	encoder := json.NewEncoder(output)
@@ -366,10 +403,15 @@ func runBaselineMode(ctx context.Context, input io.Reader, output io.Writer, exe
 	var samples []baselineSample
 	if preflight.Status == "passed" {
 		cases, _ := selectedBaselineCases(configuration.Suite)
-		if execution == baselinePilot {
+		if pilotCase != "" {
 			// Select exactly one immutable case; do not rely on interrupts
 			// or the Python runner to stop the remaining 39 cases.
-			cases = cases[:1]
+			for _, item := range cases {
+				if item.id == pilotCase {
+					cases = []baselineCase{item}
+					break
+				}
+			}
 		}
 		for repetition := 1; repetition <= configuration.Repetitions && ctx.Err() == nil; repetition++ {
 			for _, item := range cases {
@@ -409,7 +451,7 @@ func runBaselineMode(ctx context.Context, input io.Reader, output io.Writer, exe
 	}{Type: "summary", Summary: summary}) != nil {
 		return 1
 	}
-	if execution == baselinePilot {
+	if pilotCase != "" {
 		if preflight.Status == "passed" && len(samples) == 1 &&
 			samples[0].Status == "passed" && ctx.Err() == nil {
 			return 0
