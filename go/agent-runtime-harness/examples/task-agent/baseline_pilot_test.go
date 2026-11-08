@@ -31,6 +31,26 @@ func runQualityPilotFixture(t *testing.T, badFinal bool) (int, []map[string]any,
 	return code, decodeProbeOnlyEvents(t, output.Bytes()), fixture, output.String()
 }
 
+func requireInputCountReasonPartition(t *testing.T, counts map[string]any) map[string]any {
+	t.Helper()
+	reasons, ok := counts["unavailableReasons"].(map[string]any)
+	if !ok || len(reasons) != 6 {
+		t.Fatalf("native count observations missing bounded cause classes: %+v", counts)
+	}
+	sum := float64(0)
+	for _, field := range []string{"localRejected", "http4xx", "http5xx", "otherHTTP", "transportOrProtocol", "other"} {
+		value, valid := reasons[field].(float64)
+		if !valid || value < 0 {
+			t.Fatalf("count failure class %q was invalid: %+v", field, reasons)
+		}
+		sum += value
+	}
+	if sum != counts["unavailable"] {
+		t.Fatalf("count failure categories disagree with unavailable events: sum=%v receipt=%+v", sum, counts)
+	}
+	return reasons
+}
+
 func TestDistractorPilotIsOneFixedRealAgentCaseAndNeverAFullQualityScore(t *testing.T) {
 	certifyBaselineModelForTest(t, "private/baseline-verified")
 	fixture := &baselineHTTPFixture{t: t, protocol: "openai", path: "/pilot",
@@ -59,6 +79,10 @@ func TestDistractorPilotIsOneFixedRealAgentCaseAndNeverAFullQualityScore(t *test
 	if !ok || counts["accepted"] != float64(0) || counts["unavailable"] == float64(0) ||
 		counts["attempts"] != counts["unavailable"] {
 		t.Fatalf("unsupported custom gateway invented native count success: %+v", counts)
+	}
+	reasons := requireInputCountReasonPartition(t, counts)
+	if reasons["localRejected"] != counts["unavailable"] {
+		t.Fatalf("invalid native input endpoint unexpectedly made counting HTTP requests: %+v", reasons)
 	}
 	if (code == 0) != (samples[0]["status"] == "passed") {
 		t.Fatalf("pilot exit/result disagreement: %d %+v", code, samples[0])
@@ -128,9 +152,79 @@ func TestDistractorPilotWiresReadOnlyNativeCountAcrossActualContext(t *testing.T
 		counts["accepted"].(float64) > float64(nativeCounts.Load()) {
 		t.Fatalf("read-only native endpoint observations were not retained: %+v calls=%d", counts, nativeCounts.Load())
 	}
+	requireInputCountReasonPartition(t, counts)
+	comparison, valid := samples[0]["inputCountComparison"].(map[string]any)
+	if !valid || comparison["compared"] == float64(0) ||
+		comparison["aboveUsage"] == float64(0) {
+		// This fixture deliberately returns serialized *byte size* as a
+		// false native token count. Its discrepancy must be reported, not
+		// incorrectly marked as exact agreement.
+		t.Fatalf("real Agent/Context did not expose synthetic count/usage mismatch: %+v", comparison)
+	}
 	profile, ok := start[0]["profile"].(map[string]any)
 	if !ok || profile["inputTokenCountStrategy"] != "openai-native-input-count-v2-exact-raw-replay-fallback-hard-byte" {
 		t.Fatal("native count plan not captured in immutable quality profile")
+	}
+}
+
+// One full task with a real Agent/Context/Provider stack. Counter endpoint
+// rejection does not authorize additional model calls, and its original
+// Provider body must never escape into the Host's quality report.
+func TestDistractorPilotNativeCountFailureClassesFromActualTask(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		key    string
+	}{
+		{"native-http-422", http.StatusUnprocessableEntity, `{"error":{"message":"private-api-key","code":"untrusted_message"}}`, "http4xx"},
+		{"native-http-503", http.StatusServiceUnavailable, `{"error":{"message":"private-api-key"}}`, "http5xx"},
+		{"native-malformed-response", http.StatusOK, `{"object":"response.input_tokens","input_tokens":"bad"}`, "transportOrProtocol"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			certifyBaselineModelForTest(t, "private/baseline-verified")
+			fixture := &baselineHTTPFixture{t: t, protocol: "openai", path: "/pilot/responses", model: "private/baseline-verified"}
+			var nativeCountCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/pilot/responses/input_tokens" {
+					nativeCountCalls.Add(1)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(tc.status)
+					_, _ = w.Write([]byte(tc.body))
+					return
+				}
+				fixture.ServeHTTP(w, r)
+			}))
+			defer server.Close()
+			input := baselineHTTPInput("openai", server.URL+"/pilot/responses", false)
+			input["suite"] = qualitySuite
+			raw, err := json.Marshal(input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output bytes.Buffer
+			exit := runCommand(t.Context(), []string{"-mode=baseline-distractor-pilot-stdin"}, bytes.NewReader(raw), &output)
+			events := decodeProbeOnlyEvents(t, output.Bytes())
+			samples, summary := baselineEventsOfType(events, "sample"), baselineEventsOfType(events, "summary")
+			if len(samples) != 1 || len(summary) != 1 || samples[0]["caseID"] != distractorPilotCaseID ||
+				summary[0]["attempted"] != float64(1) || summary[0]["skipped"] != float64(39) ||
+				nativeCountCalls.Load() == 0 || strings.Contains(output.String(), "private-api-key") ||
+				(exit == 0) != (samples[0]["status"] == "passed") {
+				t.Fatalf("task-level native count rejection corrupted single-case oracle/metrics: exit=%d calls=%d", exit, nativeCountCalls.Load())
+			}
+			counts, ok := samples[0]["inputCountObservations"].(map[string]any)
+			if !ok || counts["accepted"] != float64(0) || counts["attempts"] != counts["unavailable"] {
+				t.Fatalf("refused native count minted exact admission: %+v", counts)
+			}
+			causes := requireInputCountReasonPartition(t, counts)
+			if causes[tc.key] != float64(nativeCountCalls.Load()) {
+				t.Fatalf("wrong native count class: want=%s http=%d partition=%+v", tc.key, nativeCountCalls.Load(), causes)
+			}
+			comparison, ok := samples[0]["inputCountComparison"].(map[string]any)
+			if !ok || comparison["compared"] != float64(0) {
+				t.Fatalf("rejected count was compared as valid native input: %+v", comparison)
+			}
+		})
 	}
 }
 

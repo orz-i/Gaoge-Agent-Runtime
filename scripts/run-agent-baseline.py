@@ -55,6 +55,10 @@ WIRE_RESPONSE_STATUSES = {"missing", "completed", "incomplete", "failed", "other
 WIRE_PHASES = {"absent", "null", "commentary", "final_answer", "other"}
 MAX_WIRE_MESSAGES = 16
 MAX_WIRE_COUNT = 1 << 20
+INPUT_COUNT_UNAVAILABLE_REASON_FIELDS = {
+    "localRejected", "http4xx", "http5xx", "otherHTTP",
+    "transportOrProtocol", "other",
+}
 STAGES = {
     "configuration", "preflight", "start", "evidence", "interrupted",
     "lease_check", "resume", "oracle", "terminal_check", "completed",
@@ -63,7 +67,7 @@ SAMPLE_FIELDS = {
     "sampleID", "caseID", "repetition", "status", "stage", "failureCode",
     "durationMs", "modelCalls", "toolCalls", "oraclePassed", "recoveryChecks",
     "usage", "contextGeneration", "runID", "turnID", "modelDurationsMs",
-    "toolExecutions", "lookupCalls", "artifactReads", "draftWrites", "artifactReadStrategy", "inputCountObservations",
+    "toolExecutions", "lookupCalls", "artifactReads", "draftWrites", "artifactReadStrategy", "inputCountObservations", "inputCountComparison",
     "providerHTTPRequests", "lastHTTPStatus", "lastResponseKind", "lastResponseDebug", "preInterruption",
 }
 TRUSTED_TURN_STATUSES = {
@@ -799,6 +803,23 @@ def failure_diagnostics(report):
         lines.append("样本 %s 的原生计数器调用：尝试=%d；接受正数计数=%d；不可用=%d。"
                      "这是计数接口结果，不等于真实 HTTP 请求次数、已消耗 Token、计费或此次失败根因。" %
                      (sample["caseID"], observed["attempts"], observed["accepted"], observed["unavailable"]))
+        if "unavailableReasons" in observed:
+            reasons = observed["unavailableReasons"]
+            lines.append("原生计数不可用分类：本地拒绝=%d；HTTP 4xx=%d；HTTP 5xx=%d；其他 HTTP=%d；"
+                         "传输或响应协议=%d；其余未分类=%d。"
+                         "HTTP 分类仅表示计数端点响应，非模型生成；传输/协议分类不能证明一定发起过 HTTP。" %
+                         (reasons["localRejected"], reasons["http4xx"], reasons["http5xx"],
+                          reasons["otherHTTP"], reasons["transportOrProtocol"], reasons["other"]))
+    for sample in report.get("samples", []):
+        if sample.get("status") != "failed" or "inputCountComparison" not in sample:
+            continue
+        matched = sample["inputCountComparison"]
+        lines.append("原生计数与随后相同输入的 Provider Usage 对照：匹配比较=%d；相等=%d；"
+                     "计数低于实际 Usage=%d；计数高于实际 Usage=%d；最大已观测低估=%d Tokens。"
+                     "只有输入身份相同、模型调用成功且 Usage 已知才比较；不匹配项不是零误差。"
+                     "低估属于计量准入阻断证据，不能据此推断本次任务失败原因。" %
+                     (matched["compared"], matched["equal"], matched["belowUsage"],
+                      matched["aboveUsage"], matched["maxUnderestimate"]))
     for label, stage, code in failures:
         lines.append("%s：阶段 %s；失败分类 %s。" % (label, stage, code))
         if stage == "preflight" and code == "strict_schema_probe_failed":
@@ -1195,12 +1216,42 @@ def validate_sample_diagnostics(sample):
             raise ProtocolFailure("invalid_preinterruption_evidence")
     if "inputCountObservations" in sample:
         counted = sample["inputCountObservations"]
-        if (not isinstance(counted, dict) or set(counted) != {"attempts", "accepted", "unavailable"} or
+        allowed = {"attempts", "accepted", "unavailable"}
+        if (not isinstance(counted, dict) or
+                set(counted) not in (allowed, allowed | {"unavailableReasons"}) or
                 any(type(counted[name]) is not int or not 0 <= counted[name] <= MAX_WIRE_COUNT
-                    for name in ("attempts", "accepted", "unavailable")) or
+                    for name in allowed) or
                 counted["attempts"] == 0 or
                 counted["accepted"] + counted["unavailable"] != counted["attempts"]):
             raise ProtocolFailure("invalid_input_count_observations")
+        if "unavailableReasons" in counted:
+            reasons = counted["unavailableReasons"]
+            if (not isinstance(reasons, dict) or
+                    set(reasons) != INPUT_COUNT_UNAVAILABLE_REASON_FIELDS or
+                    any(type(value) is not int or not 0 <= value <= counted["unavailable"]
+                        for value in reasons.values()) or
+                    sum(reasons.values()) != counted["unavailable"]):
+                raise ProtocolFailure("invalid_input_count_observations")
+    if "inputCountComparison" in sample:
+        comparison = sample["inputCountComparison"]
+        required = {"compared", "equal", "belowUsage", "aboveUsage", "maxUnderestimate"}
+        observations = sample.get("inputCountObservations")
+        known = sample.get("usage", {}).get("knownCalls")
+        models = sample.get("modelCalls")
+        if (not isinstance(comparison, dict) or set(comparison) != required or
+                not isinstance(observations, dict) or
+                type(models) is not int or type(known) is not int or
+                any(type(comparison[name]) is not int or not 0 <= comparison[name] <= MAX_WIRE_COUNT
+                    for name in ("compared", "equal", "belowUsage", "aboveUsage")) or
+                type(comparison["maxUnderestimate"]) is not int or
+                not 0 <= comparison["maxUnderestimate"] <= 1 << 50 or
+                comparison["compared"] !=
+                    comparison["equal"] + comparison["belowUsage"] + comparison["aboveUsage"] or
+                comparison["compared"] > min(models, known) or
+                comparison["compared"] > observations.get("accepted", 0) or
+                (comparison["belowUsage"] == 0 and comparison["maxUnderestimate"] != 0) or
+                (comparison["belowUsage"] > 0 and comparison["maxUnderestimate"] == 0)):
+            raise ProtocolFailure("invalid_input_count_comparison")
     for name in ("lookupCalls", "artifactReads", "draftWrites", "contextGeneration"):
         if name in sample and (type(sample[name]) is not int or sample[name] < 0):
             raise ProtocolFailure("invalid_sample_diagnostics")
@@ -1438,8 +1489,8 @@ def accept_event(report, event):
         validate_sample_consistency(sample)
         if "artifactReadStrategy" in sample and suite != QUALITY_SUITE:
             raise ProtocolFailure("invalid_artifact_read_strategy")
-        if "inputCountObservations" in sample and (suite != QUALITY_SUITE or
-                report["configuration"]["provider"] != "openai"):
+        if ("inputCountObservations" in sample or "inputCountComparison" in sample) and (
+                suite != QUALITY_SUITE or report["configuration"]["provider"] != "openai"):
             raise ProtocolFailure("invalid_input_count_observations")
         if runner.get("pilotOnly") is True and (
                 len(report["samples"]) != 0 or sample["caseID"] != runner["pilotCaseID"] or
@@ -1713,10 +1764,22 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
                     state = sample["preInterruption"]
                     print("可信 Turn 终态：%s；固定 Agent 错误码：%s；非 Provider 错误正文。" %
                           (state["turnStatus"], state.get("agentErrorCode", "无已认证码")), flush=True)
+                if "inputCountComparison" in sample:
+                    observed = sample["inputCountComparison"]
+                    print("原生计数与模型 Usage（相同请求）对照：比较=%d；相等=%d；"
+                          "低估=%d；高估=%d；最大低估=%d Tokens；不可比请求不计为相等。" %
+                          (observed["compared"], observed["equal"], observed["belowUsage"],
+                           observed["aboveUsage"], observed["maxUnderestimate"]), flush=True)
                 if "inputCountObservations" in sample:
                     counts = sample["inputCountObservations"]
                     print("原生 Token 计数器：调用=%d；接受=%d；不可用=%d；不是 HTTP 或 Token Usage 计数。" %
                           (counts["attempts"], counts["accepted"], counts["unavailable"]), flush=True)
+                    if "unavailableReasons" in counts:
+                        causes = counts["unavailableReasons"]
+                        print("计数不可用分类（固定安全枚举）：本地拒绝=%d；HTTP 4xx=%d；"
+                              "HTTP 5xx=%d；其他 HTTP=%d；传输或响应协议=%d；其余=%d。" %
+                              (causes["localRejected"], causes["http4xx"], causes["http5xx"],
+                               causes["otherHTTP"], causes["transportOrProtocol"], causes["other"]), flush=True)
                 if sample["status"] == "failed" and "lastResponseDebug" in sample:
                     print("物理 HTTP 请求 %s；最后观测状态 %s；类型 %s。"
                           % (sample.get("providerHTTPRequests", 0), sample.get("lastHTTPStatus", "未收到"),

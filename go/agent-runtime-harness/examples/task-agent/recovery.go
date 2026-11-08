@@ -106,28 +106,29 @@ func safePreInterruptionEvidence(snapshot harness.Snapshot) *preInterruptionEvid
 }
 
 type taskReport struct {
-	Mode                   string                   `json:"mode"`
-	Model                  string                   `json:"model"`
-	Status                 string                   `json:"status"`
-	Stage                  string                   `json:"stage"`
-	FailureCode            string                   `json:"failureCode,omitempty"`
-	PreInterruption        *preInterruptionEvidence `json:"preInterruption,omitempty"`
-	DurationMs             int64                    `json:"durationMs"`
-	TurnID                 string                   `json:"turnID"`
-	RunID                  string                   `json:"runID"`
-	ContextGeneration      int                      `json:"contextGeneration"`
-	ModelCalls             int                      `json:"modelCalls"`
-	ToolCalls              int                      `json:"toolCalls"`
-	LookupCalls            int                      `json:"lookupCalls"`
-	ArtifactReads          int                      `json:"artifactReads"`
-	ArtifactReadStrategy   *artifactReadStrategy    `json:"artifactReadStrategy,omitempty"`
-	InputCountObservations *inputCountObservations  `json:"inputCountObservations,omitempty"`
-	DraftWrites            int                      `json:"draftWrites"`
-	OraclePassed           bool                     `json:"oraclePassed"`
-	RecoveryChecks         recoveryChecks           `json:"recoveryChecks"`
-	Usage                  usageCoverage            `json:"usage"`
-	ModelDurationsMs       []int64                  `json:"modelDurationsMs"`
-	ToolExecutions         []toolExecutionMetric    `json:"toolExecutions"`
+	Mode                   string                     `json:"mode"`
+	Model                  string                     `json:"model"`
+	Status                 string                     `json:"status"`
+	Stage                  string                     `json:"stage"`
+	FailureCode            string                     `json:"failureCode,omitempty"`
+	PreInterruption        *preInterruptionEvidence   `json:"preInterruption,omitempty"`
+	DurationMs             int64                      `json:"durationMs"`
+	TurnID                 string                     `json:"turnID"`
+	RunID                  string                     `json:"runID"`
+	ContextGeneration      int                        `json:"contextGeneration"`
+	ModelCalls             int                        `json:"modelCalls"`
+	ToolCalls              int                        `json:"toolCalls"`
+	LookupCalls            int                        `json:"lookupCalls"`
+	ArtifactReads          int                        `json:"artifactReads"`
+	ArtifactReadStrategy   *artifactReadStrategy      `json:"artifactReadStrategy,omitempty"`
+	InputCountObservations *inputCountObservations    `json:"inputCountObservations,omitempty"`
+	InputCountComparison   *inputCountUsageComparison `json:"inputCountComparison,omitempty"`
+	DraftWrites            int                        `json:"draftWrites"`
+	OraclePassed           bool                       `json:"oraclePassed"`
+	RecoveryChecks         recoveryChecks             `json:"recoveryChecks"`
+	Usage                  usageCoverage              `json:"usage"`
+	ModelDurationsMs       []int64                    `json:"modelDurationsMs"`
+	ToolExecutions         []toolExecutionMetric      `json:"toolExecutions"`
 	// Internal oracle material: baseline events project only safe metrics.
 	Answer taskAnswer `json:"answer"`
 }

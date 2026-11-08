@@ -79,19 +79,23 @@ type artifactPage struct {
 }
 
 type taskState struct {
-	suite        string
-	store        harness.Store
-	clock        *demoClock
-	source       sourceFixture
-	mu           sync.Mutex
-	lookupCalls  int
-	reads        []artifactPage
-	inputCounts  inputCountObservations
-	drafts       []taskAnswer
-	requests     []model.Request
-	observations []modelObservation
-	executions   []toolExecution
-	sampleID     string
+	suite       string
+	store       harness.Store
+	clock       *demoClock
+	source      sourceFixture
+	mu          sync.Mutex
+	lookupCalls int
+	reads       []artifactPage
+	inputCounts inputCountObservations
+	// Only ephemeral hashes of exact request bytes; never persisted to a
+	// benchmark report or included in a Tool/Provider request.
+	acceptedInputCounts  map[[32]byte]int64
+	inputCountComparison inputCountUsageComparison
+	drafts               []taskAnswer
+	requests             []model.Request
+	observations         []modelObservation
+	executions           []toolExecution
+	sampleID             string
 }
 
 func (state *taskState) registrations() []tools.Registration {

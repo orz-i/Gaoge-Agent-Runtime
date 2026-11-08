@@ -79,14 +79,49 @@ type recordedInputTokenCounter struct {
 
 func (counter recordedInputTokenCounter) Count(ctx context.Context, request runtimecontext.TokenCountRequest) (int64, error) {
 	count, err := counter.next.Count(ctx, request)
+	var countedRequest model.Request
+	decodeErr := json.Unmarshal(request.Payload, &countedRequest)
+	fingerprint, fingerprintErr := inputCountObservationFingerprint(countedRequest)
+	validFingerprint := decodeErr == nil && fingerprintErr == nil
 	counter.state.mu.Lock()
-	counter.state.inputCounts.Attempts++
-	if err == nil && count > 0 {
-		counter.state.inputCounts.Accepted++
-	} else {
-		counter.state.inputCounts.Unavailable++
+	defer counter.state.mu.Unlock()
+	observed := &counter.state.inputCounts
+	observed.Attempts++
+	if observed.UnavailableReasons == nil {
+		observed.UnavailableReasons = &inputCountUnavailableReasons{}
 	}
-	counter.state.mu.Unlock()
+	if err == nil && count > 0 {
+		observed.Accepted++
+		if counter.state.acceptedInputCounts == nil {
+			counter.state.acceptedInputCounts = make(map[[32]byte]int64)
+		}
+		if validFingerprint {
+			counter.state.acceptedInputCounts[fingerprint] = count
+		}
+	} else {
+		if validFingerprint {
+			delete(counter.state.acceptedInputCounts, fingerprint)
+		}
+		observed.Unavailable++
+		switch provider.ClassifyInputCountFailure(err) {
+		case provider.InputCountLocalRejected:
+			observed.UnavailableReasons.LocalRejected++
+		case provider.InputCountHTTP4xx:
+			observed.UnavailableReasons.HTTP4xx++
+		case provider.InputCountHTTP5xx:
+			observed.UnavailableReasons.HTTP5xx++
+		case provider.InputCountOtherHTTP:
+			observed.UnavailableReasons.OtherHTTP++
+		case provider.InputCountTransportOrProtocol:
+			observed.UnavailableReasons.TransportOrProtocol++
+		case provider.InputCountOther:
+			observed.UnavailableReasons.Other++
+		default:
+			// Unknown future enums are never evidence of a native HTTP
+			// response. Preserve the conservative unclassified bucket.
+			observed.UnavailableReasons.Other++
+		}
+	}
 	return count, err
 }
 
@@ -213,10 +248,12 @@ func (ceiling outputCeiling) Model(ctx context.Context, request model.Request, s
 	if !agent.IsModelPreDispatchDenied(err) {
 		ceiling.state.mu.Lock()
 		ceiling.state.requests = append(ceiling.state.requests, model.CloneRequest(request))
+		receipt := numericUsage(response.Usage)
 		ceiling.state.observations = append(ceiling.state.observations, modelObservation{
-			DurationMs: time.Since(started).Milliseconds(), Usage: numericUsage(response.Usage),
+			DurationMs: time.Since(started).Milliseconds(), Usage: receipt,
 		})
 		ceiling.state.mu.Unlock()
+		ceiling.state.recordInputCountUsageComparison(request, receipt, err)
 	}
 	return response, err
 }

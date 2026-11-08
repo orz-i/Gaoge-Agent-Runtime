@@ -73,10 +73,34 @@ func (usage *usageCoverage) merge(other usageCoverage) {
 // proof of a physical HTTP request, a generation, or a billed token. An
 // unavailable result may lead to Context's conservative byte fallback; only
 // the Context manager itself makes that admission decision.
+// No upstream messages, endpoints, source text or credentials are retained.
+// A local rejection proves no native count HTTP was attempted. An HTTP class
+// proves a native count response status was seen, not billable generation.
+type inputCountUnavailableReasons struct {
+	LocalRejected       int `json:"localRejected"`
+	HTTP4xx             int `json:"http4xx"`
+	HTTP5xx             int `json:"http5xx"`
+	OtherHTTP           int `json:"otherHTTP"`
+	TransportOrProtocol int `json:"transportOrProtocol"`
+	Other               int `json:"other"`
+}
+
 type inputCountObservations struct {
-	Attempts    int `json:"attempts"`
-	Accepted    int `json:"accepted"`
-	Unavailable int `json:"unavailable"`
+	Attempts           int                           `json:"attempts"`
+	Accepted           int                           `json:"accepted"`
+	Unavailable        int                           `json:"unavailable"`
+	UnavailableReasons *inputCountUnavailableReasons `json:"unavailableReasons,omitempty"`
+}
+
+// A count-to-usage comparison is valid only for the exact model input
+// byte identity and a successful model response with known Provider Usage.
+// It is never an admission decision, a generation request or billing proof.
+type inputCountUsageComparison struct {
+	Compared         int   `json:"compared"`
+	Equal            int   `json:"equal"`
+	BelowUsage       int   `json:"belowUsage"`
+	AboveUsage       int   `json:"aboveUsage"`
+	MaxUnderestimate int64 `json:"maxUnderestimate"`
 }
 
 // Content-free aggregate of actual successful Artifact handler outputs and
@@ -179,6 +203,8 @@ func (state *taskState) collectMetrics(report *taskReport) {
 	if state.inputCounts.Attempts > 0 {
 		observed := state.inputCounts
 		report.InputCountObservations = &observed
+		comparison := state.inputCountComparison
+		report.InputCountComparison = &comparison
 	}
 	if report.Stage == "start" && state.lookupCalls > 0 {
 		report.Stage = "evidence"
