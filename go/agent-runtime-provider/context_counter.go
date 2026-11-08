@@ -45,27 +45,17 @@ func (counter ContextTokenCounter) Count(ctx context.Context, input runtimeconte
 	if decoder.Decode(&request) != nil || request.Model == "" {
 		return 0, ErrTokenCountUnavailable
 	}
-	// The Context Manager supplies JSON normalized by key and value. Reject
-	// aliases, explicit-omission drift and trailing JSON instead of allowing
-	// a lossy Go decoder to count a different request than the one frozen.
+	// The Context Manager supplies the exact typed model.Request JSON.
+	// Generic key reordering would mutate signed Tool argument RawMessages,
+	// so reject any alias, extra/trailing document or lossy decode through
+	// an exact typed round-trip instead. This preserves the physical
+	// generation request's frozen replay bytes for native counting.
 	var trailing any
 	if decoder.Decode(&trailing) != io.EOF {
 		return 0, ErrTokenCountUnavailable
 	}
-	var raw any
-	if json.Unmarshal(input.Payload, &raw) != nil {
-		return 0, ErrTokenCountUnavailable
-	}
-	canonicalRaw, rawErr := json.Marshal(raw)
-	encoded, encodeErr := json.Marshal(request)
-	var typed any
-	if encodeErr != nil || json.Unmarshal(encoded, &typed) != nil {
-		return 0, ErrTokenCountUnavailable
-	}
-	canonicalTyped, typedErr := json.Marshal(typed)
-	if rawErr != nil || typedErr != nil ||
-		!bytes.Equal(input.Payload, canonicalRaw) ||
-		!bytes.Equal(canonicalRaw, canonicalTyped) {
+	encoded, err := json.Marshal(request)
+	if err != nil || !bytes.Equal(input.Payload, encoded) {
 		return 0, ErrTokenCountUnavailable
 	}
 	if input.Context.Protocol != "openai" || input.Context.Model == "" {

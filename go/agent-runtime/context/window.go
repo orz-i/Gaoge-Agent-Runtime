@@ -506,9 +506,12 @@ type ToolPressureCompaction struct {
 	CompactedResults int
 }
 
-// TokenCountRequest carries both the canonical provider-visible request bytes and the routed
-// protocol/model identity. Implementations may report an exact count only when they understand
-// that concrete provider contract; otherwise they must return an error so the conservative hard
+// TokenCountRequest carries the exact typed model.Request JSON byte projection
+// and the routed protocol/model identity. The provider-neutral Context byte
+// assessment is normalized separately: generic JSON canonicalization would
+// reorder nested RawMessage Tool arguments and invalidate signed ProviderReplay.
+// Implementations may report an exact count only when they can validate this
+// physical input; otherwise they must return an error so the conservative hard
 // upper bound remains authoritative.
 type TokenCountRequest struct {
 	Context TokenCountContext
@@ -862,9 +865,27 @@ func (manager *Manager) AssessModelRequest(
 	// hard context limit; require an exact Provider-aware token counter.
 	requiresExact := requestContainsMedia(request)
 	if manager != nil && manager.counter != nil && countContext.Protocol != "" && countContext.Model != "" {
+		// The generic canonicalJSON projection is suitable for stable
+		// Context sizing, but sorts keys *inside* json.RawMessage fields.
+		// Function-call arguments are signed against opaque ProviderReplay
+		// with their original key order. Counting must preserve exactly the
+		// same typed request bytes that Generate sees, or a valid replay is
+		// spuriously rejected before the native endpoint is reached.
+		exactPayload, marshalErr := json.Marshal(request)
+		if marshalErr != nil {
+			return Assessment{}, errors.Join(ErrInvalidInput, marshalErr)
+		}
+		// If counting fails, the conservative text-only fallback must
+		// charge at least the original typed request size. Canonicalizing
+		// arbitrary JSON number spellings can shorten them drastically;
+		// never reduce the hard-byte bound by that normalization.
+		if len(exactPayload) > len(serialized) {
+			serialized = exactPayload
+			assessment.SerializedBytes = int64(len(exactPayload))
+		}
 		countRequest := TokenCountRequest{
 			Context: countContext,
-			Payload: append([]byte(nil), serialized...),
+			Payload: exactPayload,
 		}
 		// A complete sampling request has non-empty framing. A zero response cannot
 		// prove its input budget and must use the same fail-safe path as an unavailable counter.

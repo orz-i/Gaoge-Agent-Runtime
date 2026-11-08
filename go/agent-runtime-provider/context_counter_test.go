@@ -53,14 +53,9 @@ func TestContextCounterExactRoutedRequestAndConservativeFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var normalized any
-	if err := json.Unmarshal(payload, &normalized); err != nil {
-		t.Fatal(err)
-	}
-	payload, err = json.Marshal(normalized) // Context's canonicalJSON contract
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The Context Manager now preserves the original typed model.Request
+	// bytes when counting; nested RawMessage Tool arguments may be signed
+	// by the Provider replay and cannot be key-reordered.
 	base := runtimecontext.TokenCountRequest{
 		Context: runtimecontext.TokenCountContext{Protocol: "openai", Model: "native-exact"}, Payload: payload,
 	}
