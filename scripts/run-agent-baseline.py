@@ -63,7 +63,7 @@ SAMPLE_FIELDS = {
     "sampleID", "caseID", "repetition", "status", "stage", "failureCode",
     "durationMs", "modelCalls", "toolCalls", "oraclePassed", "recoveryChecks",
     "usage", "contextGeneration", "runID", "turnID", "modelDurationsMs",
-    "toolExecutions", "lookupCalls", "artifactReads", "draftWrites",
+    "toolExecutions", "lookupCalls", "artifactReads", "draftWrites", "artifactReadStrategy",
     "providerHTTPRequests", "lastHTTPStatus", "lastResponseKind", "lastResponseDebug",
 }
 RECOVERY_FIELDS = {
@@ -758,6 +758,17 @@ def failure_diagnostics(report):
         if "httpStatus" in tool:
             lines.append("工具续接 HTTP 事实：HTTP %d；类型 %s。" %
                          (tool["httpStatus"], tool["responseKind"]))
+    for sample in report.get("samples", []):
+        if sample.get("status") != "failed" or "artifactReadStrategy" not in sample:
+            continue
+        modes = sample["artifactReadStrategy"]
+        lines.append("样本 %s 的 Artifact 读取方式（已成功执行的工具）："
+                     "query=%d；offset-only=%d；候选页=%d；归一化提示页=%d；"
+                     "带搜索建议的分页=%d；终止页=%d。"
+                     "这些是工具路径事实，不等于模型失败或 Context 失败根因。" %
+                     (sample["caseID"], modes["queried"], modes["offsetOnly"],
+                      modes["candidatePages"], modes["normalizedHintPages"],
+                      modes["hintedOffsetPages"], modes["donePages"]))
     for label, stage, code in failures:
         lines.append("%s：阶段 %s；失败分类 %s。" % (label, stage, code))
         if stage == "preflight" and code == "strict_schema_probe_failed":
@@ -868,7 +879,7 @@ def render_markdown(report):
             "durationMs", "modelCalls", "toolCalls", "oraclePassed",
         )) + " |")
     if runner.get("pilotOnly") is True:
-        lines += ["", "本报告只试运行固定案例 %s，不能给出 40 案例成功率、分组表现或模型排名。" % PILOT_CASE_ID]
+        lines += ["", "本报告只试运行固定案例 %s，不能给出 40 案例成功率、分组表现或模型排名。" % runner["pilotCaseID"]]
     else:
         lines += quality_group_markdown(report)
     for sample in report["samples"]:
@@ -1143,6 +1154,19 @@ def validate_sample_diagnostics(sample):
     for name in ("lookupCalls", "artifactReads", "draftWrites", "contextGeneration"):
         if name in sample and (type(sample[name]) is not int or sample[name] < 0):
             raise ProtocolFailure("invalid_sample_diagnostics")
+    if "artifactReadStrategy" in sample:
+        modes = sample["artifactReadStrategy"]
+        required = {"queried", "offsetOnly", "candidatePages",
+                    "normalizedHintPages", "hintedOffsetPages", "donePages"}
+        total = sample.get("artifactReads")
+        if (not isinstance(modes, dict) or set(modes) != required or
+                type(total) is not int or total < 0 or
+                any(type(modes[key]) is not int or not 0 <= modes[key] <= total for key in required) or
+                modes["queried"] + modes["offsetOnly"] != total or
+                modes["candidatePages"] > modes["queried"] or
+                modes["normalizedHintPages"] > modes["candidatePages"] or
+                modes["hintedOffsetPages"] > modes["offsetOnly"]):
+            raise ProtocolFailure("invalid_artifact_read_strategy")
     if "modelDurationsMs" in sample and (
             not isinstance(sample["modelDurationsMs"], list) or
             len(sample["modelDurationsMs"]) > 100 or
@@ -1362,6 +1386,8 @@ def accept_event(report, event):
             raise ProtocolFailure("invalid_sample")
         validate_sample_diagnostics(sample)
         validate_sample_consistency(sample)
+        if "artifactReadStrategy" in sample and suite != QUALITY_SUITE:
+            raise ProtocolFailure("invalid_artifact_read_strategy")
         if runner.get("pilotOnly") is True and (
                 len(report["samples"]) != 0 or sample["caseID"] != runner["pilotCaseID"] or
                 sample["sampleID"] != runner["pilotCaseID"] + "-01" or sample["repetition"] != 1):
@@ -1626,6 +1652,10 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
                 detail = "；失败分类 " + sample["failureCode"] if sample["status"] == "failed" else ""
                 print("样本 %d：%s，第 %s 次，%s，阶段 %s%s。" %
                       (len(report["samples"]), sample["caseID"], sample["repetition"], sample["status"], sample["stage"], detail), flush=True)
+                if "artifactReadStrategy" in sample:
+                    strategy = sample["artifactReadStrategy"]
+                    print("Artifact 读取方式：query=%d；offset-only=%d；候选页=%d；带搜索建议分页=%d（非失败根因）。" %
+                          (strategy["queried"], strategy["offsetOnly"], strategy["candidatePages"], strategy["hintedOffsetPages"]), flush=True)
                 if sample["status"] == "failed" and "lastResponseDebug" in sample:
                     print("物理 HTTP 请求 %s；最后观测状态 %s；类型 %s。"
                           % (sample.get("providerHTTPRequests", 0), sample.get("lastHTTPStatus", "未收到"),

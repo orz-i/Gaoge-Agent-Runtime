@@ -69,9 +69,17 @@ type artifactPage struct {
 	Content     string `json:"content"`
 	Offset      int    `json:"offset"`
 	Found       bool   `json:"found"`
+	SearchMode  string `json:"searchMode"`
+	SearchHint  string `json:"searchHint"`
+	Done        bool   `json:"done"`
+	// Empty structs count candidate previews without retaining their
+	// source text. Only aggregate mode counts leave the Host.
+	Matches []struct{} `json:"matches"`
+	queried bool
 }
 
 type taskState struct {
+	suite        string
 	store        harness.Store
 	clock        *demoClock
 	source       sourceFixture

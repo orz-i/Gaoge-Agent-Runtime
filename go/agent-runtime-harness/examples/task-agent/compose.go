@@ -94,6 +94,13 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 			if decodeErr := json.Unmarshal(result.Content, &page); decodeErr != nil {
 				return tools.ExecutionResult{}, decodeErr
 			}
+			var input struct {
+				Query string `json:"query"`
+			}
+			if decodeErr := json.Unmarshal(request.Call.Arguments, &input); decodeErr != nil {
+				return tools.ExecutionResult{}, decodeErr
+			}
+			page.queried = input.Query != ""
 			state.mu.Lock()
 			state.reads = append(state.reads, page)
 			state.mu.Unlock()

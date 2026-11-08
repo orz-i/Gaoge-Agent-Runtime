@@ -5,6 +5,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Bounded queryless Context navigation and evidence strategy measurements
+  (2026-11-08): the opt-in candidate reader now keeps a content-free search
+  hint and exact original-rune cursor inside a 512-byte Tool result when
+  models page large archives without a query. The original literal reader,
+  source, authority and exact queried reads remain unchanged; opt-in Tool
+  definition advances to `harness-candidate-search-v2`. The quality
+  benchmark reports query/offset/candidate/hint counts without storing
+  queries or source content, validates those counts and rotates its dataset
+  hash. Source-blind scripted offset→hint→search→exact reread→draft→recovery
+  passes; the historical genuine failed pilot is not reclassified or
+  upgraded to success. See [queryless navigation audit](docs/audits/2026-11-08-context-queryless-paging-advice.md).
+
 - Correct failed-task output-budget attribution (2026-11-08): distinguish
   `maxOutputTokens` (per-request output ceiling), Context's reserved output,
   measured Provider output usage and a typed failure cause. For the recorded

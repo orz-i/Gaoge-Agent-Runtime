@@ -69,6 +69,18 @@ func (usage *usageCoverage) merge(other usageCoverage) {
 	usage.Complete = usage.MissingCalls == 0
 }
 
+// Content-free aggregate of actual successful Artifact handler outputs and
+// validated model Tool arguments; query text, Artifact IDs and previews never
+// leave this process. Optional on the quality suite only.
+type artifactReadStrategy struct {
+	Queried             int `json:"queried"`
+	OffsetOnly          int `json:"offsetOnly"`
+	CandidatePages      int `json:"candidatePages"`
+	NormalizedHintPages int `json:"normalizedHintPages"`
+	HintedOffsetPages   int `json:"hintedOffsetPages"`
+	DonePages           int `json:"donePages"`
+}
+
 type modelObservation struct {
 	DurationMs int64
 	Usage      *tokenUsage
@@ -131,6 +143,29 @@ func (state *taskState) collectMetrics(report *taskReport) {
 	report.ModelCalls = len(state.observations)
 	report.ToolCalls = len(state.executions)
 	report.LookupCalls, report.ArtifactReads, report.DraftWrites = state.lookupCalls, len(state.reads), len(state.drafts)
+	if state.suite == qualitySuite {
+		modes := &artifactReadStrategy{}
+		for _, page := range state.reads {
+			if page.queried {
+				modes.Queried++
+			} else {
+				modes.OffsetOnly++
+				if page.SearchHint != "" {
+					modes.HintedOffsetPages++
+				}
+			}
+			if len(page.Matches) != 0 {
+				modes.CandidatePages++
+			}
+			if page.SearchMode == "normalized_hints" {
+				modes.NormalizedHintPages++
+			}
+			if page.Done {
+				modes.DonePages++
+			}
+		}
+		report.ArtifactReadStrategy = modes
+	}
 	if report.Stage == "start" && state.lookupCalls > 0 {
 		report.Stage = "evidence"
 	}

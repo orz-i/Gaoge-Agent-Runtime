@@ -136,6 +136,43 @@ Tool/Run evidence. See the
 Changing output ceilings creates another experimental configuration,
 not proof of improvement or a generic remedy for Tool retrieval failures.
 
+## Long-artifact offset paging and evidence-strategy observations
+
+The new bounded queryless candidate tool profile (`harness-candidate-search-v2`)
+does **not** force an answer or silently substitute a search. When the Host
+opts into the candidate reader and a large archived artifact is read with
+`offset` but no `query`, the tool now returns an *exact bounded source
+prefix*, a matching forward-only Unicode-rune `nextOffset`, and a fixed,
+non-evidentiary `searchHint`. The complete result fits **512 bytes**
+even if the model requests `limit=8000`, preventing the important hint
+from being immediately archived with the oversized Tool response.
+Smaller documents, query-backed reads, and the ordinary literal reader
+remain unchanged. A direct source read is still mandatory for evidence.
+
+Quality sample reports may optionally include `artifactReadStrategy`
+with six **counts only**: queried reads, offset-only reads, candidate
+pages, normalized hint pages, hinted offset pages and terminal pages.
+The Host observes successful registered Tool handler calls, not an LLM
+claim. No original query text, cursor, artifact ID or preview is
+serialized into this summary. The Python reader validates count totals
+and subset relations, accepts historical reports without this field,
+and does not interpret these metrics as a root cause.
+
+The official `gpt-5.6-terra` `distractor-05` report
+`20261108T022700Z-85cf9d6e.json` remains **failed** on the original
+`33c876b` source; its last captured response showed an offset-only
+read and its historic `task_did_not_reach_interruption` failure is still
+ambiguous. The new Source-blind scripted Agent demonstrates that
+`offset=0,limit=8000` can be followed by a Tool-provided hint, real
+candidate search, exact source reread, one draft and same-Run recovery.
+This does not establish any real-model improvement. The OpenAI
+quality dataset hash is now
+`sha256:7905b6abca186865869bcdc89ad8178cc2cb2ec4b5b1ada64aea4356ec97f992`,
+different from the prior count-aware
+`sha256:d22c61a16559e72d0c75c8f61ba342ac16c9382d3a55afc6a5622d8d4f70624b`;
+never rank or compare these profiles numerically as the same workload.
+See the [queryless navigation governance record](audits/2026-11-08-context-queryless-paging-advice.md).
+
 ## Observable measurements
 
 - **Pass/fail:** deterministic evidence Oracle, actual saved draft, required Tool calls and same-Run recovery; failure stage and code retained rather than rewritten to success

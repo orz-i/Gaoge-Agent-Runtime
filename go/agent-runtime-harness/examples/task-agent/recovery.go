@@ -67,25 +67,26 @@ type recoveryChecks struct {
 }
 
 type taskReport struct {
-	Mode              string                `json:"mode"`
-	Model             string                `json:"model"`
-	Status            string                `json:"status"`
-	Stage             string                `json:"stage"`
-	FailureCode       string                `json:"failureCode,omitempty"`
-	DurationMs        int64                 `json:"durationMs"`
-	TurnID            string                `json:"turnID"`
-	RunID             string                `json:"runID"`
-	ContextGeneration int                   `json:"contextGeneration"`
-	ModelCalls        int                   `json:"modelCalls"`
-	ToolCalls         int                   `json:"toolCalls"`
-	LookupCalls       int                   `json:"lookupCalls"`
-	ArtifactReads     int                   `json:"artifactReads"`
-	DraftWrites       int                   `json:"draftWrites"`
-	OraclePassed      bool                  `json:"oraclePassed"`
-	RecoveryChecks    recoveryChecks        `json:"recoveryChecks"`
-	Usage             usageCoverage         `json:"usage"`
-	ModelDurationsMs  []int64               `json:"modelDurationsMs"`
-	ToolExecutions    []toolExecutionMetric `json:"toolExecutions"`
+	Mode                 string                `json:"mode"`
+	Model                string                `json:"model"`
+	Status               string                `json:"status"`
+	Stage                string                `json:"stage"`
+	FailureCode          string                `json:"failureCode,omitempty"`
+	DurationMs           int64                 `json:"durationMs"`
+	TurnID               string                `json:"turnID"`
+	RunID                string                `json:"runID"`
+	ContextGeneration    int                   `json:"contextGeneration"`
+	ModelCalls           int                   `json:"modelCalls"`
+	ToolCalls            int                   `json:"toolCalls"`
+	LookupCalls          int                   `json:"lookupCalls"`
+	ArtifactReads        int                   `json:"artifactReads"`
+	ArtifactReadStrategy *artifactReadStrategy `json:"artifactReadStrategy,omitempty"`
+	DraftWrites          int                   `json:"draftWrites"`
+	OraclePassed         bool                  `json:"oraclePassed"`
+	RecoveryChecks       recoveryChecks        `json:"recoveryChecks"`
+	Usage                usageCoverage         `json:"usage"`
+	ModelDurationsMs     []int64               `json:"modelDurationsMs"`
+	ToolExecutions       []toolExecutionMetric `json:"toolExecutions"`
 	// Internal oracle material: baseline events project only safe metrics.
 	Answer taskAnswer `json:"answer"`
 }
@@ -188,7 +189,7 @@ func classifyPreInterruptionFailure(initial harness.Snapshot, startErr error, re
 // remain available to tests; command/event reporting uses stable codes only.
 func runTask(ctx context.Context, config settings, newModel func() (model.Client, error), source sourceFixture) (report taskReport, runErr error) {
 	started := time.Now()
-	state := &taskState{store: harness.NewMemoryStore(), clock: &demoClock{now: time.Now().UTC()}, source: source, sampleID: config.sampleID}
+	state := &taskState{suite: config.suite, store: harness.NewMemoryStore(), clock: &demoClock{now: time.Now().UTC()}, source: source, sampleID: config.sampleID}
 	if state.sampleID == "" {
 		state.sampleID = "session"
 	}

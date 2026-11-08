@@ -233,6 +233,7 @@ type baselineSample struct {
 	ToolCalls            int                     `json:"toolCalls"`
 	LookupCalls          int                     `json:"lookupCalls"`
 	ArtifactReads        int                     `json:"artifactReads"`
+	ArtifactReadStrategy *artifactReadStrategy   `json:"artifactReadStrategy,omitempty"`
 	DraftWrites          int                     `json:"draftWrites"`
 	OraclePassed         bool                    `json:"oraclePassed"`
 	RecoveryChecks       recoveryChecks          `json:"recoveryChecks"`
@@ -252,7 +253,8 @@ func sampleMetrics(report taskReport, caseID, sampleID string, repetition int) b
 	return baselineSample{
 		SampleID: sampleID, CaseID: caseID, Repetition: repetition, Status: report.Status, Stage: report.Stage,
 		FailureCode: report.FailureCode, DurationMs: report.DurationMs, ModelCalls: report.ModelCalls, ToolCalls: report.ToolCalls,
-		LookupCalls: report.LookupCalls, ArtifactReads: report.ArtifactReads, DraftWrites: report.DraftWrites,
+		LookupCalls: report.LookupCalls, ArtifactReads: report.ArtifactReads,
+		ArtifactReadStrategy: report.ArtifactReadStrategy, DraftWrites: report.DraftWrites,
 		OraclePassed: report.OraclePassed, RecoveryChecks: report.RecoveryChecks, Usage: report.Usage,
 		ModelDurationsMs: append([]int64{}, report.ModelDurationsMs...), ToolExecutions: append([]toolExecutionMetric{}, report.ToolExecutions...),
 		ContextGeneration: report.ContextGeneration, RunID: report.RunID, TurnID: report.TurnID,
