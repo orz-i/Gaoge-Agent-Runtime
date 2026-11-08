@@ -52,7 +52,8 @@ func TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent(t *testi
 		t.Fatal(err)
 	}
 	const pinnedLegacyOpenAIDatasetHash = "sha256:e4a782b32d69f7d7e7d25df60ef3416b4c950315e30d5cf716cd05fe2e0c4203"
-	const pinnedQualityOpenAIDatasetHash = "sha256:5d8827e9cb5f4394f35fc0a675f1376e6e2a354d535536008add0012f244338c"
+	const pinnedQualityOpenAIDatasetHash = "sha256:9e6a18425ab3ce620e9b65d864626855f60dcd860533741154fc29c364f9f114"
+	const measuredV2BeforeTargetedGuidanceHash = "sha256:5d8827e9cb5f4394f35fc0a675f1376e6e2a354d535536008add0012f244338c"
 	const previousCountV1OpenAIDatasetHash = "sha256:7905b6abca186865869bcdc89ad8178cc2cb2ec4b5b1ada64aea4356ec97f992"
 	const preBoundedHintQualityOpenAIDatasetHash = "sha256:fff3cf1c4dd02102d556091b48d07c67765c59b96ea6a286f276b417343268d8"
 	const preSearchHintQualityOpenAIDatasetHash = "sha256:d22c61a16559e72d0c75c8f61ba342ac16c9382d3a55afc6a5622d8d4f70624b"
@@ -64,6 +65,7 @@ func TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent(t *testi
 	if first.DatasetHash != second.DatasetHash || first.DatasetHash == legacy.DatasetHash ||
 		legacy.DatasetHash != pinnedLegacyOpenAIDatasetHash ||
 		first.DatasetHash != pinnedQualityOpenAIDatasetHash ||
+		first.DatasetHash == measuredV2BeforeTargetedGuidanceHash ||
 		first.DatasetHash == previousCountV1OpenAIDatasetHash ||
 		first.DatasetHash == preBoundedHintQualityOpenAIDatasetHash ||
 		first.DatasetHash == preSearchHintQualityOpenAIDatasetHash ||
@@ -129,7 +131,7 @@ func TestQualityScriptedCommandEmitsContentFreeCalibrationAndRespectsCancellatio
 		t.Fatal(err)
 	}
 	// The quality-only Context limit is part of the measurement identity.
-	const pinnedScriptedDatasetHash = "sha256:266271798fd56bf591346145b8256a67ee0d5ca57b63af1f760f61f67c532e10"
+	const pinnedScriptedDatasetHash = "sha256:9817632b1e3a2354db4e56314af4cd79841aa7efa7f74ca2207b59792bad246a"
 	if result.Suite != qualitySuite || result.Mode != "scripted_oracle_calibration" ||
 		result.Status != "passed" || result.Summary.Requested != 40 || result.Summary.Passed != 40 ||
 		result.Summary.ModelCalls != 160 || result.Summary.ToolCalls != 120 || len(result.Samples) != 40 ||

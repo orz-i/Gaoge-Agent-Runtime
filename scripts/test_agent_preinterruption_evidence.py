@@ -42,6 +42,21 @@ class PreInterruptionTurnEvidenceTests(unittest.TestCase):
         baseline.accept_event(report, {"type":"sample","sample":sample})
         self.assertIn("Agent 固定错误码：无已认证码", "\n".join(baseline.failure_diagnostics(report)))
 
+    def test_certified_tool_limit_guidance_is_specific_not_budget_guesswork(self):
+        report, sample = report_with_sample({"turnStatus": "failed", "agentErrorCode": "agent.tool_limit"})
+        sample["failureCode"] = "task_failed_before_interruption"
+        baseline.accept_event(report, {"type": "sample", "sample": sample})
+        diagnostics = "\n".join(baseline.failure_diagnostics(report))
+        self.assertIn("已认证的 Agent 终态为 agent.tool_limit", diagnostics)
+        self.assertIn("预留一次 save_draft", diagnostics)
+        self.assertNotIn("没有可安全归类的更具体原因", diagnostics)
+
+        historic, old_sample = report_with_sample(None)
+        old_sample["failureCode"] = "task_failed_before_interruption"
+        baseline.accept_event(historic, {"type": "sample", "sample": old_sample})
+        historical_text = "\n".join(baseline.failure_diagnostics(historic))
+        self.assertNotIn("已认证的 Agent 终态为 agent.tool_limit", historical_text)
+
     def test_rejects_forged_private_failure_code_or_invalid_state(self):
         cases=[
             {"turnStatus":"unknown","agentErrorCode":"agent.tool_invalid"},

@@ -829,7 +829,18 @@ def failure_diagnostics(report):
                 lines.append("本报告未记录 schema 细项，无法从已存数据还原具体违例。")
             if "wireCheck" in preflight:
                 lines += wire_diagnostics(preflight["wireCheck"], preflight["schemaCheck"])
-        lines.append("下一步：" + failure_advice(stage, code, preflight))
+        same_cause_samples = [sample for sample in report.get("samples", [])
+                              if sample.get("status") == "failed" and
+                              (sample.get("stage"), sample.get("failureCode")) == (stage, code)]
+        if (code == "task_failed_before_interruption" and same_cause_samples and
+                all((sample.get("preInterruption") or {}).get("turnStatus") == "failed" and
+                    (sample.get("preInterruption") or {}).get("agentErrorCode") == "agent.tool_limit"
+                    for sample in same_cause_samples)):
+            lines.append("下一步：已认证的 Agent 终态为 agent.tool_limit（工具调用硬上限）。"
+                         "检查 lookup、Artifact 查询与分页是否耗尽预算，预留一次 save_draft；"
+                         "不要据此推断 Token 预算或上游 Provider 故障，也不要直接放宽安全限制。")
+        else:
+            lines.append("下一步：" + failure_advice(stage, code, preflight))
     return lines
 
 
