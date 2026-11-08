@@ -69,6 +69,27 @@ func taskContextPolicyForSuite(suite string) runtimecontext.Policy {
 	return policy
 }
 
+// Observes only the optional native count result. This does not replace the
+// Context counter or change its existing Fail-Closed budget fallback.
+// Metrics intentionally do not include input content, IDs or error text.
+type recordedInputTokenCounter struct {
+	next  runtimecontext.TokenCounter
+	state *taskState
+}
+
+func (counter recordedInputTokenCounter) Count(ctx context.Context, request runtimecontext.TokenCountRequest) (int64, error) {
+	count, err := counter.next.Count(ctx, request)
+	counter.state.mu.Lock()
+	counter.state.inputCounts.Attempts++
+	if err == nil && count > 0 {
+		counter.state.inputCounts.Accepted++
+	} else {
+		counter.state.inputCounts.Unavailable++
+	}
+	counter.state.mu.Unlock()
+	return count, err
+}
+
 // compose is deliberately local to this example: the host chooses stores,
 // authority, real model limits, preparation order and execution ownership.
 func compose(store kernel.Store, state *taskState, client model.Client, config settings, owner string, transcript harness.TranscriptSource) (*harness.SessionClient, error) {
@@ -82,7 +103,7 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 	// the historical two-case baseline and all scripted paths stay unchanged.
 	contextDependencies := runtimecontext.Dependencies{}
 	if config.suite == qualitySuite && config.provider == "openai" {
-		contextDependencies.Counter = provider.ContextTokenCounter{Client: client}
+		contextDependencies.Counter = recordedInputTokenCounter{next: provider.ContextTokenCounter{Client: client}, state: state}
 	}
 	manager := runtimecontext.NewManager(contextDependencies)
 	reader := taskArtifactRegistrationForSuite(config.suite, harness.NewContextArtifactToolHandler(state.store, nil))

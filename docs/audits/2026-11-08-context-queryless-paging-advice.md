@@ -108,5 +108,13 @@ would test whether the model actually adapts to the advisory and records
 query vs offset counts; it must retain its new dataset hash and bounded
 one-case pilot restrictions.
 
+A subsequent read-only second-pass governance review identified that the
+versioned Host reported the native counter policy but did not record whether
+calls actually returned a positive count or fell back. The Host now adds
+optional, **content-free** `inputCountObservations` counts on the same quality
+profile, with strict report validation. It does not change the Tool or Model
+input, the pinned dataset hash, or the physical Provider Usage. See the
+[separate counting review](2026-11-08-provider-context-identity-and-observations.md).
+
 Final commit, independent code boundary review, test/Race/lint, GitHub PR
 Head and any required integration gates remain distinct delivery checks.

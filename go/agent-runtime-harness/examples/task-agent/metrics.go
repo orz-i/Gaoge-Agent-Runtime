@@ -69,6 +69,16 @@ func (usage *usageCoverage) merge(other usageCoverage) {
 	usage.Complete = usage.MissingCalls == 0
 }
 
+// A count attempt is the Host's call to an optional native counter, not
+// proof of a physical HTTP request, a generation, or a billed token. An
+// unavailable result may lead to Context's conservative byte fallback; only
+// the Context manager itself makes that admission decision.
+type inputCountObservations struct {
+	Attempts    int `json:"attempts"`
+	Accepted    int `json:"accepted"`
+	Unavailable int `json:"unavailable"`
+}
+
 // Content-free aggregate of actual successful Artifact handler outputs and
 // validated model Tool arguments; query text, Artifact IDs and previews never
 // leave this process. Optional on the quality suite only.
@@ -165,6 +175,10 @@ func (state *taskState) collectMetrics(report *taskReport) {
 			}
 		}
 		report.ArtifactReadStrategy = modes
+	}
+	if state.inputCounts.Attempts > 0 {
+		observed := state.inputCounts
+		report.InputCountObservations = &observed
 	}
 	if report.Stage == "start" && state.lookupCalls > 0 {
 		report.Stage = "evidence"

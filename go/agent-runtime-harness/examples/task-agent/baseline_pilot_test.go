@@ -55,6 +55,11 @@ func TestDistractorPilotIsOneFixedRealAgentCaseAndNeverAFullQualityScore(t *test
 		summary[0]["complete"] != false || strings.Contains(output.String(), baselineHTTPFakeKey) {
 		t.Fatalf("distractor pilot violated one-case authority: exit=%d events=%+v", code, events)
 	}
+	counts, ok := samples[0]["inputCountObservations"].(map[string]any)
+	if !ok || counts["accepted"] != float64(0) || counts["unavailable"] == float64(0) ||
+		counts["attempts"] != counts["unavailable"] {
+		t.Fatalf("unsupported custom gateway invented native count success: %+v", counts)
+	}
 	if (code == 0) != (samples[0]["status"] == "passed") {
 		t.Fatalf("pilot exit/result disagreement: %d %+v", code, samples[0])
 	}
@@ -116,6 +121,12 @@ func TestDistractorPilotWiresReadOnlyNativeCountAcrossActualContext(t *testing.T
 	if len(start) != 1 || len(samples) != 1 || nativeCounts.Load() < 1 ||
 		start[0]["pilotCaseID"] != distractorPilotCaseID {
 		t.Fatalf("native count pilot did not reach one real task path: count=%d events=%+v", nativeCounts.Load(), events)
+	}
+	counts, ok := samples[0]["inputCountObservations"].(map[string]any)
+	if !ok || counts["accepted"] == float64(0) ||
+		counts["attempts"] != counts["accepted"].(float64)+counts["unavailable"].(float64) ||
+		counts["accepted"].(float64) > float64(nativeCounts.Load()) {
+		t.Fatalf("read-only native endpoint observations were not retained: %+v calls=%d", counts, nativeCounts.Load())
 	}
 	profile, ok := start[0]["profile"].(map[string]any)
 	if !ok || profile["inputTokenCountStrategy"] != "openai-native-input-count-v1-fallback-hard-byte" {

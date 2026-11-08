@@ -173,6 +173,29 @@ different from the prior count-aware
 never rank or compare these profiles numerically as the same workload.
 See the [queryless navigation governance record](audits/2026-11-08-context-queryless-paging-advice.md).
 
+## Native input-counting observations
+
+For the OpenAI `evidence-40-v1` Host, a sample may include the optional
+`inputCountObservations` object with **attempts**, **accepted** and
+**unavailable** counts. This is measured around each call into the already
+configured native Provider counter, before Context applies its own admission
+policy; a positive response is counted as accepted, other responses as
+unavailable. The object is not Provider Usage, not the number of outbound HTTP
+requests and not proof of a billable generation. An unavailable count does not
+authorize a tighter Context budget: the existing conservative byte upper bound
+remains in effect. Even an accepted count does not prove that the model
+subsequently dispatched a generation. The existing `modelCalls` and Usage
+receipts remain separate.
+
+The Python validator enforces exact three-field shapes, nonnegative integers
+and `accepted + unavailable == attempts`, and rejects this OpenAI quality-only
+field for other protocols or the old two-case baseline. Historical reports do
+not gain fabricated observations. This is **report-only instrumentation**;
+the original Model request, Tool schema, Oracle, Context budget, manifest and
+quality dataset hash do not change. Actual transport-specific counting
+latency/usage and any live improvement remain unverified until a new authorized
+provider run. See the [verification audit](audits/2026-11-08-provider-context-identity-and-observations.md).
+
 ## Observable measurements
 
 - **Pass/fail:** deterministic evidence Oracle, actual saved draft, required Tool calls and same-Run recovery; failure stage and code retained rather than rewritten to success

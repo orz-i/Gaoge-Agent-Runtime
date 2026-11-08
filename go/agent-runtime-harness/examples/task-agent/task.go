@@ -86,6 +86,7 @@ type taskState struct {
 	mu           sync.Mutex
 	lookupCalls  int
 	reads        []artifactPage
+	inputCounts  inputCountObservations
 	drafts       []taskAnswer
 	requests     []model.Request
 	observations []modelObservation

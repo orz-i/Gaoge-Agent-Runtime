@@ -222,31 +222,32 @@ func baselinePreflight(ctx context.Context, config settings) (event preflightEve
 }
 
 type baselineSample struct {
-	SampleID             string                  `json:"sampleID"`
-	CaseID               string                  `json:"caseID"`
-	Repetition           int                     `json:"repetition"`
-	Status               string                  `json:"status"`
-	Stage                string                  `json:"stage"`
-	FailureCode          string                  `json:"failureCode,omitempty"`
-	DurationMs           int64                   `json:"durationMs"`
-	ModelCalls           int                     `json:"modelCalls"`
-	ToolCalls            int                     `json:"toolCalls"`
-	LookupCalls          int                     `json:"lookupCalls"`
-	ArtifactReads        int                     `json:"artifactReads"`
-	ArtifactReadStrategy *artifactReadStrategy   `json:"artifactReadStrategy,omitempty"`
-	DraftWrites          int                     `json:"draftWrites"`
-	OraclePassed         bool                    `json:"oraclePassed"`
-	RecoveryChecks       recoveryChecks          `json:"recoveryChecks"`
-	Usage                usageCoverage           `json:"usage"`
-	ModelDurationsMs     []int64                 `json:"modelDurationsMs"`
-	ToolExecutions       []toolExecutionMetric   `json:"toolExecutions"`
-	ContextGeneration    int                     `json:"contextGeneration"`
-	ProviderHTTPRequests int                     `json:"providerHTTPRequests,omitempty"`
-	LastHTTPStatus       int                     `json:"lastHTTPStatus,omitempty"`
-	LastResponseKind     preflightResponseKind   `json:"lastResponseKind,omitempty"`
-	LastResponseDebug    *preflightResponseDebug `json:"lastResponseDebug,omitempty"`
-	RunID                string                  `json:"runID,omitempty"`
-	TurnID               string                  `json:"turnID,omitempty"`
+	SampleID               string                  `json:"sampleID"`
+	CaseID                 string                  `json:"caseID"`
+	Repetition             int                     `json:"repetition"`
+	Status                 string                  `json:"status"`
+	Stage                  string                  `json:"stage"`
+	FailureCode            string                  `json:"failureCode,omitempty"`
+	DurationMs             int64                   `json:"durationMs"`
+	ModelCalls             int                     `json:"modelCalls"`
+	ToolCalls              int                     `json:"toolCalls"`
+	LookupCalls            int                     `json:"lookupCalls"`
+	ArtifactReads          int                     `json:"artifactReads"`
+	ArtifactReadStrategy   *artifactReadStrategy   `json:"artifactReadStrategy,omitempty"`
+	InputCountObservations *inputCountObservations `json:"inputCountObservations,omitempty"`
+	DraftWrites            int                     `json:"draftWrites"`
+	OraclePassed           bool                    `json:"oraclePassed"`
+	RecoveryChecks         recoveryChecks          `json:"recoveryChecks"`
+	Usage                  usageCoverage           `json:"usage"`
+	ModelDurationsMs       []int64                 `json:"modelDurationsMs"`
+	ToolExecutions         []toolExecutionMetric   `json:"toolExecutions"`
+	ContextGeneration      int                     `json:"contextGeneration"`
+	ProviderHTTPRequests   int                     `json:"providerHTTPRequests,omitempty"`
+	LastHTTPStatus         int                     `json:"lastHTTPStatus,omitempty"`
+	LastResponseKind       preflightResponseKind   `json:"lastResponseKind,omitempty"`
+	LastResponseDebug      *preflightResponseDebug `json:"lastResponseDebug,omitempty"`
+	RunID                  string                  `json:"runID,omitempty"`
+	TurnID                 string                  `json:"turnID,omitempty"`
 }
 
 func sampleMetrics(report taskReport, caseID, sampleID string, repetition int) baselineSample {
@@ -254,7 +255,8 @@ func sampleMetrics(report taskReport, caseID, sampleID string, repetition int) b
 		SampleID: sampleID, CaseID: caseID, Repetition: repetition, Status: report.Status, Stage: report.Stage,
 		FailureCode: report.FailureCode, DurationMs: report.DurationMs, ModelCalls: report.ModelCalls, ToolCalls: report.ToolCalls,
 		LookupCalls: report.LookupCalls, ArtifactReads: report.ArtifactReads,
-		ArtifactReadStrategy: report.ArtifactReadStrategy, DraftWrites: report.DraftWrites,
+		ArtifactReadStrategy:   report.ArtifactReadStrategy,
+		InputCountObservations: report.InputCountObservations, DraftWrites: report.DraftWrites,
 		OraclePassed: report.OraclePassed, RecoveryChecks: report.RecoveryChecks, Usage: report.Usage,
 		ModelDurationsMs: append([]int64{}, report.ModelDurationsMs...), ToolExecutions: append([]toolExecutionMetric{}, report.ToolExecutions...),
 		ContextGeneration: report.ContextGeneration, RunID: report.RunID, TurnID: report.TurnID,

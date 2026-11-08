@@ -5,6 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Provider-native input-count observation (2026-11-08): the OpenAI quality
+  Host now records only counter attempts/positive accepts/unavailable counts,
+  independently of Provider HTTP generations, Usage and billing. Invalid or
+  missing count remains the original Context hard-byte fallback. Strict
+  report validation rejects malformed or cross-provider observations while
+  accepting historical reports. No Model/Tool policy change or dataset hash
+  change. See [review](docs/audits/2026-11-08-provider-context-identity-and-observations.md).
+
 - Bounded queryless Context navigation and evidence strategy measurements
   (2026-11-08): the opt-in candidate reader now keeps a content-free search
   hint and exact original-rune cursor inside a 512-byte Tool result when

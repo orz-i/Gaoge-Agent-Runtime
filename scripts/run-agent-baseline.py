@@ -63,7 +63,7 @@ SAMPLE_FIELDS = {
     "sampleID", "caseID", "repetition", "status", "stage", "failureCode",
     "durationMs", "modelCalls", "toolCalls", "oraclePassed", "recoveryChecks",
     "usage", "contextGeneration", "runID", "turnID", "modelDurationsMs",
-    "toolExecutions", "lookupCalls", "artifactReads", "draftWrites", "artifactReadStrategy",
+    "toolExecutions", "lookupCalls", "artifactReads", "draftWrites", "artifactReadStrategy", "inputCountObservations",
     "providerHTTPRequests", "lastHTTPStatus", "lastResponseKind", "lastResponseDebug",
 }
 RECOVERY_FIELDS = {
@@ -769,6 +769,13 @@ def failure_diagnostics(report):
                      (sample["caseID"], modes["queried"], modes["offsetOnly"],
                       modes["candidatePages"], modes["normalizedHintPages"],
                       modes["hintedOffsetPages"], modes["donePages"]))
+    for sample in report.get("samples", []):
+        if sample.get("status") != "failed" or "inputCountObservations" not in sample:
+            continue
+        observed = sample["inputCountObservations"]
+        lines.append("样本 %s 的原生计数器调用：尝试=%d；接受正数计数=%d；不可用=%d。"
+                     "这是计数接口结果，不等于真实 HTTP 请求次数、已消耗 Token、计费或此次失败根因。" %
+                     (sample["caseID"], observed["attempts"], observed["accepted"], observed["unavailable"]))
     for label, stage, code in failures:
         lines.append("%s：阶段 %s；失败分类 %s。" % (label, stage, code))
         if stage == "preflight" and code == "strict_schema_probe_failed":
@@ -1151,6 +1158,14 @@ def validate_wire_check(check):
 
 def validate_sample_diagnostics(sample):
     validate_usage(sample.get("usage"), coverage=True)
+    if "inputCountObservations" in sample:
+        counted = sample["inputCountObservations"]
+        if (not isinstance(counted, dict) or set(counted) != {"attempts", "accepted", "unavailable"} or
+                any(type(counted[name]) is not int or not 0 <= counted[name] <= MAX_WIRE_COUNT
+                    for name in ("attempts", "accepted", "unavailable")) or
+                counted["attempts"] == 0 or
+                counted["accepted"] + counted["unavailable"] != counted["attempts"]):
+            raise ProtocolFailure("invalid_input_count_observations")
     for name in ("lookupCalls", "artifactReads", "draftWrites", "contextGeneration"):
         if name in sample and (type(sample[name]) is not int or sample[name] < 0):
             raise ProtocolFailure("invalid_sample_diagnostics")
@@ -1388,6 +1403,9 @@ def accept_event(report, event):
         validate_sample_consistency(sample)
         if "artifactReadStrategy" in sample and suite != QUALITY_SUITE:
             raise ProtocolFailure("invalid_artifact_read_strategy")
+        if "inputCountObservations" in sample and (suite != QUALITY_SUITE or
+                report["configuration"]["provider"] != "openai"):
+            raise ProtocolFailure("invalid_input_count_observations")
         if runner.get("pilotOnly") is True and (
                 len(report["samples"]) != 0 or sample["caseID"] != runner["pilotCaseID"] or
                 sample["sampleID"] != runner["pilotCaseID"] + "-01" or sample["repetition"] != 1):
@@ -1656,6 +1674,10 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
                     strategy = sample["artifactReadStrategy"]
                     print("Artifact 读取方式：query=%d；offset-only=%d；候选页=%d；带搜索建议分页=%d（非失败根因）。" %
                           (strategy["queried"], strategy["offsetOnly"], strategy["candidatePages"], strategy["hintedOffsetPages"]), flush=True)
+                if "inputCountObservations" in sample:
+                    counts = sample["inputCountObservations"]
+                    print("原生 Token 计数器：调用=%d；接受=%d；不可用=%d；不是 HTTP 或 Token Usage 计数。" %
+                          (counts["attempts"], counts["accepted"], counts["unavailable"]), flush=True)
                 if sample["status"] == "failed" and "lastResponseDebug" in sample:
                     print("物理 HTTP 请求 %s；最后观测状态 %s；类型 %s。"
                           % (sample.get("providerHTTPRequests", 0), sample.get("lastHTTPStatus", "未收到"),
