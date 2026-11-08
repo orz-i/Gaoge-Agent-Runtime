@@ -2,6 +2,23 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-08 — Task-Agent pre-interruption failure codes (beta.24 candidate)
+
+The task-agent benchmark Host no longer uses the catch-all
+`task_did_not_reach_interruption` for new executions that terminate
+before the expected committed draft interruption. It now distinguishes
+an already-completed Turn with no draft, a typed Agent model failure or
+invalid response, generic execution failure, cancellation, and an
+inconsistent interruption receipt using fixed safe failure codes.
+A committed interruption with additional error evidence fails closed: its
+Host integrity mismatch cannot be masked by cancellation, timeout or
+Provider classification, and mixed error joins cannot authorize recovery.
+These codes are **report diagnostics**, not new Agent/Kernel execution
+states or additional Provider dispatches. Existing reports retain their
+historical code, sample results, task version, dataset hash and schema v1;
+no compatibility rewrite or migration is performed. See
+[bounded audit](audits/2026-11-08-task-preinterruption-failure-attribution.md).
+
 ## 2026-11-06 — Host-owned ModelProfileSource hard cut (beta.24 candidate)
 
 The Runtime SDK and OpenAI/Anthropic adapters no longer carry bundled
