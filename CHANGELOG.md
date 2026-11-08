@@ -5,6 +5,23 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Real `distractor-05` evidence: Provider/Context count verified, retrieval
+  Tool budget exhausted (2026-11-08). On actual clean v2 Head `43f42d6`,
+  one official `gpt-5.6-terra` pilot observed 12/12 native count accepts
+  and 11/11 exact same-input Provider Usage matches, with no under/over
+  counts. The Agent nevertheless used all 10 permitted Tools
+  (1 lookup + 9 Artifact reads), wrote no draft and failed with a trusted
+  `agent.tool_limit`. The final attempted offset-only read was not
+  executed. The quality Host now recommends exact user-supplied target
+  identifiers before broad/offset scans, uses actual original source
+  evidence without redundant rereads and explicitly reserves one Tool
+  for saving a draft. The SDK limit, source content and Oracle are
+  unchanged; both live and scripted quality hashes rotate to protect
+  comparability. A Source-blind Agent verifies the 3-tool workflow
+  across all 40 cases locally; a new paid trial is still required for
+  real-model retrieval success. See
+  [real evidence and limits](docs/audits/2026-11-08-real-distractor05-metering-passed-tool-limit.md).
+
 - Complete report-only provenance for optional native input counting
   (2026-11-08): preserve fixed, content-free refusal classes
   (local/HTTP 4xx/HTTP 5xx/other HTTP/transport-or-protocol/other) and

@@ -2,6 +2,45 @@
 
 **Status:** opt-in beta.24 development suite (2026-11-07). Not a general Agent benchmark, leaderboard, or release gate. A first full official OpenAI real-model run has now **attempted all 40 cases**, with **37 passed / 3 failed** (92.5% of attempted samples, overall report status `failed`). This is a single run of one evidence task family, not a general-model score. See [first complete run audit](audits/2026-11-07-first-real-agent-quality-40.md). This historical result predates the later candidate Tool and native input-counting contracts; it is not evidence of improved performance under those profiles.
 
+## Third official one-case pilot — native count passed, Tool budget exhausted (2026-11-08)
+
+On clean `43f42d6` under the original v2 manifest
+`sha256:5d8827e9cb5f4394f35fc0a675f1376e6e2a354d535536008add0012f244338c`,
+the official `gpt-5.6-terra` `distractor-05` pilot observed native
+input counting **12/12 accepted**, with **11/11 exact same-input
+comparisons equal to completed Provider input-token Usage**. This
+establishes metering agreement for the eleven matched calls on that
+model/endpoint, not global compatibility or cost. The single task
+**failed**: `agent.tool_limit`, one lookup plus nine Artifact reads,
+zero drafts; all ten authorized Tools were spent before the required
+draft. The last attempted queryless `offset=0` read was not executed,
+and no Content/Context overrun was observed. Schema preflight passed;
+the two-call Tool probe did not observe encrypted reasoning replay
+(`reasoning=false, encrypted=false`), so no such claim is made for
+that probe. The original report is immutable (SHA-256
+`a581b069d9659547716ebe9bfdbfc639b71ffad4b74de2e4a9fa90a73352f49e`).
+
+The **quality-only** navigation guidance now prioritizes the complete
+target identifier already stated in the user's task, avoids broad
+queries and offset-zero loops, and saves a draft immediately after an
+authoritative exact-original-source read; candidate/normalized hints
+remain suggestions and are re-read if needed. Exactly **10** SDK Tool
+calls remain the hard maximum, including the draft. No facts,
+authorization, Tool schema, Context policy, source corpus or Oracle
+were changed. A source-blind scripted Agent with the full 40-case
+corpus demonstrates one lookup, one exact original read and one draft
+per case, preserving same-Run recovery and leaving seven unused
+Tool slots. This is **not** a new successful real-model result.
+
+The changed evaluation instructions necessarily rotate the quality
+manifest: OpenAI
+`sha256:9e6a18425ab3ce620e9b65d864626855f60dcd860533741154fc29c364f9f114`,
+scripted calibration
+`sha256:9817632b1e3a2354db4e56314af4cd79841aa7efa7f74ca2207b59792bad246a`.
+Keep the historical v2 real failure at its original dataset hash;
+do not numerically compare different profiles as the same task.
+See the [full real-model forensic and corrective review](audits/2026-11-08-real-distractor05-metering-passed-tool-limit.md).
+
 ## Goals and scope
 
 The existing two-case `release-recovery-v1` real-model baseline stays the default. The additional **40-case `evidence-40-v1` suite** samples the same real Agent + Harness + Kernel, Provider, Tools, archived Context and interrupted-execution recovery path, with an immutable expanded corpus. Every case requires the actual model to find an exact deep source fact, read its bounded Context Artifact, save exactly one draft and produce a schema-valid answer consistent with committed evidence.
