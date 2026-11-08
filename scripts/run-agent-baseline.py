@@ -249,7 +249,8 @@ def prompt_integer(label, default=None, maximum=None):
             print("请输入有效的正整数" + ("（不超过 %d）" % maximum if maximum else "") + "。")
 
 
-def collect_configuration(suite="", preflight_only=False, pilot_only=False):
+def collect_configuration(suite="", preflight_only=False, pilot_only=False,
+                          pilot_case_id=PILOT_CASE_ID):
     cases = len(QUALITY_CASE_IDS) if suite == QUALITY_SUITE else LEGACY_CASE_COUNT
     print("真实模型 Agent 基线：%d 个合成证据任务，验证取证、草稿、Context 与中断恢复。" % cases)
     while True:
@@ -293,11 +294,13 @@ def collect_configuration(suite="", preflight_only=False, pilot_only=False):
     if suite:
         candidate["suite"] = suite
     config = validate_configuration(candidate)
-    display_configuration(config, preflight_only=preflight_only, pilot_only=pilot_only)
+    display_configuration(config, preflight_only=preflight_only, pilot_only=pilot_only,
+                          pilot_case_id=pilot_case_id)
     return config
 
 
-def display_configuration(config, heading="配置", preflight_only=False, pilot_only=False):
+def display_configuration(config, heading="配置", preflight_only=False, pilot_only=False,
+                          pilot_case_id=PILOT_CASE_ID):
     print("\n%s：" % heading)
     for name in PUBLIC_CONFIGURATION:
         print("  %s: %s" % (name, config[name]))
@@ -310,7 +313,9 @@ def display_configuration(config, heading="配置", preflight_only=False, pilot_
               "不会运行任何任务样本，即使预检通过。实际 Provider 探测可能产生费用。")
         return
     if pilot_only:
-        print("本次仅试运行固定案例 %s × 1 次；完整数据集仍为 %d 例。" % (PILOT_CASE_ID, count))
+        if pilot_case_id not in PILOT_CASE_IDS or config.get("suite") != QUALITY_SUITE:
+            raise SafeFailure("invalid_pilot_case")
+        print("本次仅试运行固定案例 %s × 1 次；完整数据集仍为 %d 例。" % (pilot_case_id, count))
         print("通过严格 Schema 与工具/回放预检后，最多启动 1 次真实 Agent 任务（可能包含多次模型调用）。"
               "不运行其余 %d 例，也不形成正式基准成功率。实际调用可能产生费用。" % (count - 1))
         return
@@ -2033,6 +2038,8 @@ def main(argv=None):
                 raise SafeFailure("interactive_tty_required")
             return launch(collect_configuration(QUALITY_SUITE), repository_root())
         if args and args[0] in ("pilot", "pilot-distractor"):
+            selected_case = (DISTRACTOR_PILOT_CASE_ID if args[0] == "pilot-distractor"
+                             else PILOT_CASE_ID)
             if len(args) not in (1, 2):
                 print(usage, file=sys.stderr)
                 return 2
@@ -2042,11 +2049,13 @@ def main(argv=None):
                 config = validate_configuration(dict(read_report(args[1])["configuration"]))
                 if config.get("suite") != QUALITY_SUITE or config["repetitions"] != 1:
                     raise SafeFailure("pilot_requires_one_quality_case")
-                display_configuration(config, "固定单例试运行：复用已核实的历史公开配置", pilot_only=True)
+                display_configuration(config, "固定单例试运行：复用已核实的历史公开配置",
+                                      pilot_only=True, pilot_case_id=selected_case)
             else:
-                config = collect_configuration(QUALITY_SUITE, pilot_only=True)
+                config = collect_configuration(QUALITY_SUITE, pilot_only=True,
+                                               pilot_case_id=selected_case)
             return launch(config, repository_root(), pilot_only=True,
-                          **({"pilot_case_id": DISTRACTOR_PILOT_CASE_ID} if args[0] == "pilot-distractor" else {}))
+                          pilot_case_id=selected_case)
         if args and args[0] == "probe":
             if len(args) not in (1, 2):
                 print(usage, file=sys.stderr)

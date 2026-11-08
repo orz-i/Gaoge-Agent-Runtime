@@ -84,6 +84,43 @@ class FirstLivePilotTests(unittest.TestCase):
                 for event in forged:
                     baseline.accept_event(invalid, event)
 
+    def test_pilot_terminal_banner_matches_actual_case_for_reused_and_interactive_config(self):
+        config = quality.quality_config()
+        for command, expected in (("pilot", "code-01"), ("pilot-distractor", "distractor-05")):
+            with self.subTest(mode=command, source="historical report"):
+                printed = io.StringIO()
+                with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                        mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                        mock.patch.object(baseline, "read_report", return_value={"configuration": config}), \
+                        mock.patch.object(baseline, "launch", return_value=0) as launched, \
+                        contextlib.redirect_stdout(printed):
+                    self.assertEqual(baseline.main([command, "/private/prior_report.json"]), 0)
+                self.assertEqual(launched.call_args.kwargs["pilot_case_id"], expected)
+                self.assertIn("固定案例 %s × 1 次" % expected, printed.getvalue())
+                self.assertNotIn(
+                    "固定案例 %s × 1 次" %
+                    ("code-01" if expected == "distractor-05" else "distractor-05"),
+                    printed.getvalue())
+            with self.subTest(mode=command, source="interactive"):
+                printed = io.StringIO()
+                with mock.patch.object(sys.stdin, "isatty", return_value=True), \
+                        mock.patch.object(sys.stderr, "isatty", return_value=True), \
+                        mock.patch("builtins.input", side_effect=[
+                            "1", "", config["model"], "y", "high"
+                        ]), \
+                        mock.patch.object(baseline, "prompt_integer",
+                                          side_effect=[config["contextTokens"],
+                                                       config["maxOutputTokens"]]), \
+                        mock.patch.object(baseline, "launch", return_value=0) as launched, \
+                        contextlib.redirect_stdout(printed):
+                    self.assertEqual(baseline.main([command]), 0)
+                self.assertEqual(launched.call_args.kwargs["pilot_case_id"], expected)
+                self.assertIn("固定案例 %s × 1 次" % expected, printed.getvalue())
+        with self.assertRaisesRegex(baseline.SafeFailure, "invalid_pilot_case"):
+            with contextlib.redirect_stdout(io.StringIO()):
+                baseline.display_configuration(config, pilot_only=True,
+                                               pilot_case_id="distractor-06")
+
     def test_distractor_pilot_launcher_fences_child_case_and_cli(self):
         config = quality.quality_config()
         mode = []
@@ -342,7 +379,8 @@ class FirstLivePilotTests(unittest.TestCase):
                                       return_value=quality.quality_config()) as collect, \
                     mock.patch.object(baseline, "launch", return_value=0) as launched:
                 self.assertEqual(baseline.main(["pilot"]), 0)
-                collect.assert_called_once_with(baseline.QUALITY_SUITE, pilot_only=True)
+                collect.assert_called_once_with(baseline.QUALITY_SUITE, pilot_only=True,
+                                                pilot_case_id=baseline.PILOT_CASE_ID)
                 self.assertTrue(launched.call_args.kwargs["pilot_only"])
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(baseline.main(["pilot", "a", "b"]), 2)
