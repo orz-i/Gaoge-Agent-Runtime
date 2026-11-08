@@ -5,6 +5,20 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Correct native counting of signed Tool/reasoning replay (2026-11-08):
+  Context's generic JSON normalization reordered nested Tool arguments while
+  the original encrypted replay kept its signed string. The combined
+  Context→Router→OpenAI count path then rejected legitimate requests before
+  HTTP. Preserve the exact typed Request JSON solely for native counting,
+  retaining the original Context hard-byte estimate, strict Tool replay
+  byte comparison, Provider/model routing and conservative fallback on
+  unverified inputs. A RED malformed-long-number variant also proved that
+  generic normalization could shrink the nominal hard-byte bound; the
+  counter-enabled fallback now charges at least the exact typed byte length. The beta.24 `TokenCountRequest.Payload` contract is a
+  deliberate hard cut with no compatibility bridge. OpenAI quality dataset
+  hash rotates; historical real scores are not rewritten. See
+  [native count audit](docs/audits/2026-11-08-native-count-replay-order-hardcut.md).
+
 - Preserve trusted Agent terminal evidence after pre-interruption failures
   (2026-11-08): the `gpt-5.6-terra` second single-case real pilot reached
   8 registered Tool executions, then failed before the expected draft

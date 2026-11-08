@@ -52,7 +52,8 @@ func TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent(t *testi
 		t.Fatal(err)
 	}
 	const pinnedLegacyOpenAIDatasetHash = "sha256:e4a782b32d69f7d7e7d25df60ef3416b4c950315e30d5cf716cd05fe2e0c4203"
-	const pinnedQualityOpenAIDatasetHash = "sha256:7905b6abca186865869bcdc89ad8178cc2cb2ec4b5b1ada64aea4356ec97f992"
+	const pinnedQualityOpenAIDatasetHash = "sha256:5d8827e9cb5f4394f35fc0a675f1376e6e2a354d535536008add0012f244338c"
+	const previousCountV1OpenAIDatasetHash = "sha256:7905b6abca186865869bcdc89ad8178cc2cb2ec4b5b1ada64aea4356ec97f992"
 	const preBoundedHintQualityOpenAIDatasetHash = "sha256:fff3cf1c4dd02102d556091b48d07c67765c59b96ea6a286f276b417343268d8"
 	const preSearchHintQualityOpenAIDatasetHash = "sha256:d22c61a16559e72d0c75c8f61ba342ac16c9382d3a55afc6a5622d8d4f70624b"
 	const previousCandidateQualityOpenAIDatasetHash = "sha256:2ec73b1a92858853ba01a6f2999be07b2501b1c1a34c6c07ef93375df904a92e"
@@ -63,6 +64,7 @@ func TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent(t *testi
 	if first.DatasetHash != second.DatasetHash || first.DatasetHash == legacy.DatasetHash ||
 		legacy.DatasetHash != pinnedLegacyOpenAIDatasetHash ||
 		first.DatasetHash != pinnedQualityOpenAIDatasetHash ||
+		first.DatasetHash == previousCountV1OpenAIDatasetHash ||
 		first.DatasetHash == preBoundedHintQualityOpenAIDatasetHash ||
 		first.DatasetHash == preSearchHintQualityOpenAIDatasetHash ||
 		first.DatasetHash == previousCandidateQualityOpenAIDatasetHash ||

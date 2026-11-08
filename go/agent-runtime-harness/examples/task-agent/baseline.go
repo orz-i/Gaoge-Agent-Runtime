@@ -91,7 +91,7 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 	profile := baselineProfile(configuration.Provider)
 	profile.ContextPolicy = taskContextPolicyForSuite(configuration.Suite)
 	if configuration.Suite == qualitySuite && configuration.Provider == "openai" {
-		profile.InputTokenCountStrategy = "openai-native-input-count-v1-fallback-hard-byte"
+		profile.InputTokenCountStrategy = "openai-native-input-count-v2-exact-raw-replay-fallback-hard-byte"
 	}
 	cases, taskVersion := selectedBaselineCases(configuration.Suite)
 	type caseManifest struct {

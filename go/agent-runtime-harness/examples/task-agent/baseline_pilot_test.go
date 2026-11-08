@@ -129,7 +129,7 @@ func TestDistractorPilotWiresReadOnlyNativeCountAcrossActualContext(t *testing.T
 		t.Fatalf("read-only native endpoint observations were not retained: %+v calls=%d", counts, nativeCounts.Load())
 	}
 	profile, ok := start[0]["profile"].(map[string]any)
-	if !ok || profile["inputTokenCountStrategy"] != "openai-native-input-count-v1-fallback-hard-byte" {
+	if !ok || profile["inputTokenCountStrategy"] != "openai-native-input-count-v2-exact-raw-replay-fallback-hard-byte" {
 		t.Fatal("native count plan not captured in immutable quality profile")
 	}
 }

@@ -194,6 +194,32 @@ rejects unknown status/code combinations and keeps old reports
 unchanged rather than inventing their missing terminal facts.
 See the [real pilot forensic review](audits/2026-11-08-real-distractor05-terminal-evidence.md).
 
+## Exact signed replay in native input counting
+
+A real `gpt-5.6-terra` pilot observed 12 native input-counter calls but only
+3 accepted results; the original report does not contain the nine individual
+failure causes. A new **offline full-path** Context→Router→Provider test found
+one concrete defect capable of causing that pattern: canonicalizing nested
+Tool Call argument JSON rearranged keys, while encrypted reasoning/Tool
+replay retained the Provider's original argument string. The byte-strict
+replay check then correctly rejected native counting before HTTP.
+
+The corrected optional count path serializes the original typed
+`model.Request` without generic reordering, then validates an exact typed
+round trip in the Provider bridge. The Context hard-byte bound is strengthened to the larger of normalized
+and original typed request sizes whenever this native counter is configured;
+strict signed replay equality remains intact. Valid signed Tool/reasoning
+replay now reaches native count HTTP in loopback tests; tampered/duplicate
+arguments still fall back conservatively without an HTTP count request.
+This is not a real-Provider verification or proof of a changed task outcome.
+
+The v2 OpenAI native counting strategy rotates the quality dataset hash to
+`sha256:5d8827e9cb5f4394f35fc0a675f1376e6e2a354d535536008add0012f244338c`,
+from `sha256:7905b6abca186865869bcdc89ad8178cc2cb2ec4b5b1ada64aea4356ec97f992`.
+Do not numerically compare prior paid pilots as the same profile. Neither
+the scripted 40-case workload nor the historical two-case baseline is
+changed. See [native count replay audit](audits/2026-11-08-native-count-replay-order-hardcut.md).
+
 ## Native input-counting observations
 
 For the OpenAI `evidence-40-v1` Host, a sample may include the optional
