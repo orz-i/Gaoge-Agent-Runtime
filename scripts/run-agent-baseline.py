@@ -64,7 +64,22 @@ SAMPLE_FIELDS = {
     "durationMs", "modelCalls", "toolCalls", "oraclePassed", "recoveryChecks",
     "usage", "contextGeneration", "runID", "turnID", "modelDurationsMs",
     "toolExecutions", "lookupCalls", "artifactReads", "draftWrites", "artifactReadStrategy", "inputCountObservations",
-    "providerHTTPRequests", "lastHTTPStatus", "lastResponseKind", "lastResponseDebug",
+    "providerHTTPRequests", "lastHTTPStatus", "lastResponseKind", "lastResponseDebug", "preInterruption",
+}
+TRUSTED_TURN_STATUSES = {
+    "accepted", "running", "waiting_input", "paused_budget",
+    "completed", "failed", "cancelled",
+}
+TRUSTED_AGENT_TERMINAL_CODES = {
+    "agent.llm_limit", "agent.tool_limit", "agent.tool_invalid",
+    "agent.model_dispatch_invalid", "agent.model_invocation_invalid",
+    "agent.model_failed", "agent.completion_repair_exhausted",
+    "agent.output_schema_invalid", "agent.output_refused",
+    "agent.completion_validation_failed", "agent.usage_invalid",
+    "agent.state_invalid", "agent.tool_failed", "agent.tool_error_invalid",
+    "agent.discovery_invalid", "agent.deadline_exceeded",
+    "agent.model_retry_exhausted", "agent.tool_retry_exhausted",
+    "agent.shared_budget_exhausted",
 }
 RECOVERY_FIELDS = {
     "interruptionObserved", "leaseBlocked", "sameRun", "sameTurn",
@@ -770,6 +785,14 @@ def failure_diagnostics(report):
                       modes["candidatePages"], modes["normalizedHintPages"],
                       modes["hintedOffsetPages"], modes["donePages"]))
     for sample in report.get("samples", []):
+        if sample.get("status") != "failed" or "preInterruption" not in sample:
+            continue
+        observed = sample["preInterruption"]
+        reason = observed.get("agentErrorCode")
+        lines.append("样本 %s 原始 Harness Turn 终态：%s；Agent 固定错误码：%s。"
+                     "这是原执行快照的白名单事实，不是 Provider 文字、HTTP 状态或对历史报告的重新归因。" %
+                     (sample["caseID"], observed["turnStatus"], reason or "无已认证码"))
+    for sample in report.get("samples", []):
         if sample.get("status") != "failed" or "inputCountObservations" not in sample:
             continue
         observed = sample["inputCountObservations"]
@@ -1158,6 +1181,18 @@ def validate_wire_check(check):
 
 def validate_sample_diagnostics(sample):
     validate_usage(sample.get("usage"), coverage=True)
+    if "preInterruption" in sample:
+        observed = sample["preInterruption"]
+        if (not isinstance(observed, dict) or
+                set(observed) not in ({"turnStatus"}, {"turnStatus", "agentErrorCode"}) or
+                sample["status"] != "failed" or sample["stage"] not in ("start", "evidence") or
+                type(observed["turnStatus"]) is not str or
+                observed["turnStatus"] not in TRUSTED_TURN_STATUSES or
+                ("agentErrorCode" in observed and
+                 (observed["turnStatus"] != "failed" or
+                  type(observed["agentErrorCode"]) is not str or
+                  observed["agentErrorCode"] not in TRUSTED_AGENT_TERMINAL_CODES))):
+            raise ProtocolFailure("invalid_preinterruption_evidence")
     if "inputCountObservations" in sample:
         counted = sample["inputCountObservations"]
         if (not isinstance(counted, dict) or set(counted) != {"attempts", "accepted", "unavailable"} or
@@ -1674,6 +1709,10 @@ def run_child(command, root, config, secret, report, writer, timeout_seconds=Non
                     strategy = sample["artifactReadStrategy"]
                     print("Artifact 读取方式：query=%d；offset-only=%d；候选页=%d；带搜索建议分页=%d（非失败根因）。" %
                           (strategy["queried"], strategy["offsetOnly"], strategy["candidatePages"], strategy["hintedOffsetPages"]), flush=True)
+                if "preInterruption" in sample:
+                    state = sample["preInterruption"]
+                    print("可信 Turn 终态：%s；固定 Agent 错误码：%s；非 Provider 错误正文。" %
+                          (state["turnStatus"], state.get("agentErrorCode", "无已认证码")), flush=True)
                 if "inputCountObservations" in sample:
                     counts = sample["inputCountObservations"]
                     print("原生 Token 计数器：调用=%d；接受=%d；不可用=%d；不是 HTTP 或 Token Usage 计数。" %

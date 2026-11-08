@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Preserve trusted Agent terminal evidence after pre-interruption failures
+  (2026-11-08): the `gpt-5.6-terra` second single-case real pilot reached
+  8 registered Tool executions, then failed before the expected draft
+  interruption. The last captured Tool call matches an executed receipt;
+  the previous broad error could not expose its subsequent terminal
+  category. New optional `preInterruption` reports only the real Harness
+  Turn status and exact allowlisted Agent terminal codes; no Provider
+  errors or Store details are serialized, and historical results remain
+  unchanged. Fixed-code status and real Agent failure regression added.
+  See [evidence](docs/audits/2026-11-08-real-distractor05-terminal-evidence.md).
+
 - Provider-native input-count observation (2026-11-08): the OpenAI quality
   Host now records only counter attempts/positive accepts/unavailable counts,
   independently of Provider HTTP generations, Usage and billing. Invalid or

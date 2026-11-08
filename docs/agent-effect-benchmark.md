@@ -173,6 +173,27 @@ different from the prior count-aware
 never rank or compare these profiles numerically as the same workload.
 See the [queryless navigation governance record](audits/2026-11-08-context-queryless-paging-advice.md).
 
+## Trusted Agent terminal evidence after the real second pilot
+
+The 2026-11-08 `gpt-5.6-terra` `distractor-05` real pilot at
+`d674b86` (immutable report `20261108T033222Z-4271a907.json`)
+returned `task_failed_before_interruption` after 8 model calls and
+8 Tool executions, including 7 Artifact reads and no draft. The
+final captured Tool call identity matches the eighth recorded Tool
+execution receipt. The model had used enhanced candidate search,
+but the report did not persist a trusted Harness Turn terminal code.
+Do not claim the last Tool failed, the model exhausted its limits,
+or that a native counting error caused the run to terminate.
+
+Subsequent reports optionally include `preInterruption.turnStatus`
+and an exact whitelist `agentErrorCode`, drawn from the original
+Harness Turn after `Prompt` failed to reach the expected draft
+interruption. The API excludes arbitrary `Turn.ErrorDetail` and
+unknown Provider-controlled error strings. The report validator
+rejects unknown status/code combinations and keeps old reports
+unchanged rather than inventing their missing terminal facts.
+See the [real pilot forensic review](audits/2026-11-08-real-distractor05-terminal-evidence.md).
+
 ## Native input-counting observations
 
 For the OpenAI `evidence-40-v1` Host, a sample may include the optional

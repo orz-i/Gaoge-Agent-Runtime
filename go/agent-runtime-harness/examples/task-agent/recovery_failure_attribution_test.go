@@ -68,6 +68,86 @@ func TestPreInterruptionTypedCauseKeepsOriginalClassification(t *testing.T) {
 	}
 }
 
+type repeatedToolIDModel struct{}
+
+func (repeatedToolIDModel) Capabilities(context.Context, string) (model.Capabilities, error) {
+	return model.Capabilities{StructuredJSONSchema: true}, nil
+}
+
+func (repeatedToolIDModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
+	if dossier, found := toolMessage(request.Messages, lookupKey); found {
+		id := artifactPattern.FindStringSubmatch(dossier)
+		if len(id) != 2 {
+			return model.Response{}, errors.New("expected archived dossier")
+		}
+		// Re-use the exact *previous* model call ID. A real Agent must fail
+		// this attempt before Tool execution and retain its fixed failure code.
+		return toolCall("lookup-release", harness.ContextArtifactToolKey, map[string]any{
+			"artifactID": id[1], "query": "RELEASE R-17", "limit": 128,
+		})
+	}
+	return toolCall("lookup-release", lookupKey, map[string]string{"release": "R-17"})
+}
+
+func TestPreInterruptionAgentFailurePreservesOnlyFixedTurnCode(t *testing.T) {
+	settings := scriptedSettings(t)
+	settings.suite = qualitySuite
+	report, err := runTask(t.Context(), settings, func() (model.Client, error) {
+		return repeatedToolIDModel{}, nil
+	}, defaultSource())
+	if err == nil || report.Status != "failed" ||
+		report.DraftWrites != 0 || report.LookupCalls != 1 ||
+		report.ModelCalls != 2 || report.ToolCalls != 1 ||
+		report.FailureCode != "task_failed_before_interruption" ||
+		report.PreInterruption == nil ||
+		report.PreInterruption.TurnStatus != harness.TurnFailed ||
+		report.PreInterruption.AgentErrorCode != "agent.tool_invalid" {
+		t.Fatalf("fixed Agent failure code was lost or tool was rerun: report=%+v err=%v", report, err)
+	}
+	wire, marshalErr := json.Marshal(sampleMetrics(report, "code-01", "code-01-01", 1))
+	if marshalErr != nil || !bytes.Contains(wire, []byte(`"agentErrorCode":"agent.tool_invalid"`)) ||
+		bytes.Contains(wire, []byte("api-key")) {
+		t.Fatalf("fixed termination proof missing/leaked: %s err=%v", wire, marshalErr)
+	}
+}
+
+func TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails(t *testing.T) {
+	secret := "private-credential-and-untrusted-Provider-body"
+	for _, tc := range []struct {
+		status     harness.TurnStatus
+		code, want string
+	}{
+		{harness.TurnFailed, "agent.tool_limit", "agent.tool_limit"},
+		{harness.TurnFailed, "agent.model_dispatch_invalid", "agent.model_dispatch_invalid"},
+		{harness.TurnFailed, "model.upstream_request_invalid", ""},
+		{harness.TurnFailed, "agent.fake.secret." + secret, ""},
+		{harness.TurnCompleted, "agent.tool_limit", ""},
+		{harness.TurnRunning, "agent.tool_limit", ""},
+		{harness.TurnStatus("untrusted"), "agent.tool_limit", ""},
+	} {
+		t.Run(string(tc.status)+"/"+tc.want, func(t *testing.T) {
+			snapshot := harness.Snapshot{Turn: harness.Turn{
+				Status: tc.status, ErrorCode: tc.code, ErrorDetail: secret,
+			}}
+			result := safePreInterruptionEvidence(snapshot)
+			if tc.status == "untrusted" {
+				if result != nil {
+					t.Fatalf("untrusted turn status serialized: %+v", result)
+				}
+				return
+			}
+			if result == nil || result.AgentErrorCode != tc.want {
+				t.Fatalf("safe Agent error code mismatch: %+v", result)
+			}
+			body, err := json.Marshal(result)
+			if err != nil || bytes.Contains(body, []byte(secret)) ||
+				bytes.Contains(body, []byte("model.upstream_request_invalid")) {
+				t.Fatalf("untrusted source escaped: %s err=%v", body, err)
+			}
+		})
+	}
+}
+
 // An independent lifecycle matrix exercises every accepted pre-interruption
 // boundary, not only the originally reported early text completion and model
 // transport error. The test oracle derives its expected public codes from
