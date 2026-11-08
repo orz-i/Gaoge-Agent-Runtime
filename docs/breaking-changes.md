@@ -10,6 +10,9 @@ before the expected committed draft interruption. It now distinguishes
 an already-completed Turn with no draft, a typed Agent model failure or
 invalid response, generic execution failure, cancellation, and an
 inconsistent interruption receipt using fixed safe failure codes.
+A committed interruption with additional error evidence fails closed: its
+Host integrity mismatch cannot be masked by cancellation, timeout or
+Provider classification, and mixed error joins cannot authorize recovery.
 These codes are **report diagnostics**, not new Agent/Kernel execution
 states or additional Provider dispatches. Existing reports retain their
 historical code, sample results, task version, dataset hash and schema v1;
