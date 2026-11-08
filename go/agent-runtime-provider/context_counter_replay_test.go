@@ -111,6 +111,8 @@ func TestContextCounterRoutedOpaqueReasoningAndToolReply(t *testing.T) {
 		`{"escaped":"\u0061","z":1,"a":2}`,
 		`{"scientific":1e0004,"z":1,"a":2}`,
 		`{"array":[{"z":1,"a":2}],"z":1,"a":2}`,
+		`{"html":"<>&","z":1,"a":2}`,
+		`{"line":"\u2028","z":1,"a":2}`,
 	} {
 		t.Run(fmt.Sprintf("signed-json-variant-%02d", index), func(t *testing.T) {
 			variant := model.CloneRequest(request)

@@ -506,7 +506,7 @@ type ToolPressureCompaction struct {
 	CompactedResults int
 }
 
-// TokenCountRequest carries the exact typed model.Request JSON byte projection
+// TokenCountRequest carries model.MarshalRequestForInputCount(request) bytes
 // and the routed protocol/model identity. The provider-neutral Context byte
 // assessment is normalized separately: generic JSON canonicalization would
 // reorder nested RawMessage Tool arguments and invalidate signed ProviderReplay.
@@ -871,7 +871,7 @@ func (manager *Manager) AssessModelRequest(
 		// with their original key order. Counting must preserve exactly the
 		// same typed request bytes that Generate sees, or a valid replay is
 		// spuriously rejected before the native endpoint is reached.
-		exactPayload, marshalErr := json.Marshal(request)
+		exactPayload, marshalErr := model.MarshalRequestForInputCount(request)
 		if marshalErr != nil {
 			return Assessment{}, errors.Join(ErrInvalidInput, marshalErr)
 		}

@@ -45,7 +45,9 @@ server rejection, and not a reason to relax replay validation.
 
 - The Context Manager still computes its ordinary `serialized`
   `canonicalJSON(model.Request)` for existing size/budget decisions, and
-  adds `json.Marshal(model.Request)` for the optional native counter.
+  uses the shared `model.MarshalRequestForInputCount` helper for the
+  optional native counter. Its typed JSON Encoder disables HTML escaping,
+  preventing another false mismatch for Tool arguments containing `<>&`.
   This keeps the exact immutable request's nested signed JSON bytes;
   it does not change the actual generation request or tool execution.
   **When the typed serialization is longer**, the counter-enabled
@@ -56,14 +58,14 @@ server rejection, and not a reason to relax replay validation.
   original signed request. Noncounter/legacy Context policies retain
   their original byte-accounting path.
 - `provider.ContextTokenCounter` changes validation from
-  `canonicalJSON(interface{})` equality to **exact typed model.Request
-  re-encoding** equality, retaining `DisallowUnknownFields`,
+  `canonicalJSON(interface{})` equality to **the same shared typed
+  MarshalRequestForInputCount re-encoding** equality, retaining `DisallowUnknownFields`,
   recursive unique-key validation, trailing-token rejection and exact
   routed Provider/model identity. Signed replay validation stays
   byte-strict in the original OpenAI Adapter.
 - The previously implicit public `runtimecontext.TokenCountRequest.Payload`
   shape is a deliberate beta.24 **breaking contract change** from
-  generic normalized JSON to exact typed JSON. There is **no bridge**
+  generic normalized JSON to exact typed/no-HTML-escape JSON. There is **no bridge**
   that silently admits old canonicalized signed payloads. Such payloads
   fail closed, and custom TokenCounter implementations must use the new
   documented contract. No SQL/Kernel schema or persisted Run format changes.
@@ -82,9 +84,10 @@ server rejection, and not a reason to relax replay validation.
   forced Tool choice and `reasoning.effort=high`. After the correction,
   the native read-only endpoint is actually called and returns
   `CountExact=367`; *zero* generation requests are made.
-- **Nine additional valid signed replay variants** cover sorted and
+- **Eleven additional valid signed replay variants** cover sorted and
   unsorted Tool argument keys, extraneous whitespace, multiline JSON,
-  nested objects, Unicode, escaped Unicode, exponent notation and arrays.
+  nested objects, Unicode, escaped Unicode, exponent notation, arrays,
+  HTML-sensitive characters (`<>&`) and Unicode line separators.
   Each must reach the native *read-only* count endpoint with `CountExact`,
   without any generation.
 - Adversarial mutations of the frozen request: changed Tool argument
@@ -92,6 +95,10 @@ server rejection, and not a reason to relax replay validation.
   foreign replay Provider, duplicate Tool argument keys.
   These cases stay `CountEstimated` with conservative
   hard-byte upper bound and **zero** additional count or generation HTTP.
+- **HTML escaping RED → GREEN:** Go's default `json.Marshal` rewrote a
+  valid signed Tool string containing `<>&`, while the opaque replay kept
+  the original text. The shared typed serializer with `SetEscapeHTML(false)`
+  preserves byte identity without weakening `verifiedReplay`.
 - **Second RED → GREEN:** valid but very long decimal notation in a
   modified Tool argument, where native replay counting correctly rejects
   the modification. Generic JSON serialization reduced the 3,990-byte

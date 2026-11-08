@@ -22,9 +22,11 @@ no compatibility rewrite or migration is performed. See
 ## 2026-11-08 — Exact typed TokenCountRequest.Payload (beta.24 hard cut)
 
 The optional `runtimecontext.TokenCountRequest.Payload` now contains the
-exact `json.Marshal(model.Request)` bytes of the frozen request, **not**
+exact `model.MarshalRequestForInputCount(model.Request)` bytes of the frozen
+request (typed Encoder, `SetEscapeHTML(false)`, no framing newline), **not**
 a generic JSON interface{} normalization of the request. Generic normalization
-reorders keys inside `json.RawMessage` Tool arguments, breaking the
+reorders keys inside `json.RawMessage` Tool arguments, while default
+`json.Marshal` HTML-escapes `<>&` inside signed Tool arguments. Both break
 byte-strict matching of those arguments with opaque signed OpenAI
 reasoning/function replay. A new full Context → Router → Provider replay test
 reproduced this mismatch before HTTP, and passed with the corrected projection.

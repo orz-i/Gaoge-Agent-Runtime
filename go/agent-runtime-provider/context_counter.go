@@ -45,7 +45,7 @@ func (counter ContextTokenCounter) Count(ctx context.Context, input runtimeconte
 	if decoder.Decode(&request) != nil || request.Model == "" {
 		return 0, ErrTokenCountUnavailable
 	}
-	// The Context Manager supplies the exact typed model.Request JSON.
+	// The Context Manager supplies model.MarshalRequestForInputCount bytes.
 	// Generic key reordering would mutate signed Tool argument RawMessages,
 	// so reject any alias, extra/trailing document or lossy decode through
 	// an exact typed round-trip instead. This preserves the physical
@@ -54,7 +54,7 @@ func (counter ContextTokenCounter) Count(ctx context.Context, input runtimeconte
 	if decoder.Decode(&trailing) != io.EOF {
 		return 0, ErrTokenCountUnavailable
 	}
-	encoded, err := json.Marshal(request)
+	encoded, err := model.MarshalRequestForInputCount(request)
 	if err != nil || !bytes.Equal(input.Payload, encoded) {
 		return 0, ErrTokenCountUnavailable
 	}

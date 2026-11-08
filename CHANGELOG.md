@@ -14,7 +14,9 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   byte comparison, Provider/model routing and conservative fallback on
   unverified inputs. A RED malformed-long-number variant also proved that
   generic normalization could shrink the nominal hard-byte bound; the
-  counter-enabled fallback now charges at least the exact typed byte length. The beta.24 `TokenCountRequest.Payload` contract is a
+  counter-enabled fallback now charges at least the exact typed byte length.
+  A shared no-HTML-escape serializer also prevents `<>&` inside signed Tool
+  arguments from being rewritten during count projection. The beta.24 `TokenCountRequest.Payload` contract is a
   deliberate hard cut with no compatibility bridge. OpenAI quality dataset
   hash rotates; historical real scores are not rewritten. See
   [native count audit](docs/audits/2026-11-08-native-count-replay-order-hardcut.md).

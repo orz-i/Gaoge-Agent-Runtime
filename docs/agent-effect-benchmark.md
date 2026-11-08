@@ -205,7 +205,8 @@ replay retained the Provider's original argument string. The byte-strict
 replay check then correctly rejected native counting before HTTP.
 
 The corrected optional count path serializes the original typed
-`model.Request` without generic reordering, then validates an exact typed
+`model.Request` using a single shared `MarshalRequestForInputCount`
+helper without generic reordering or HTML escaping, then validates an exact typed
 round trip in the Provider bridge. The Context hard-byte bound is strengthened to the larger of normalized
 and original typed request sizes whenever this native counter is configured;
 strict signed replay equality remains intact. Valid signed Tool/reasoning
