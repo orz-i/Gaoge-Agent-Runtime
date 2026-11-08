@@ -11,6 +11,7 @@ import (
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -112,6 +113,43 @@ func (failure taskFailure) Unwrap() error { return failure.cause }
 
 func taskFailed(code string, cause error) error { return taskFailure{code: code, cause: cause} }
 
+// classifyPreInterruptionFailure distinguishes a model's ordinary premature
+// completion from a failed dispatch or an inconsistent interruption receipt.
+// The error itself may contain Provider-controlled text: only fixed codes
+// leave the Host through taskReport, never Error(), Turn.ErrorDetail or raw
+// external status strings. The pre-existing typed Context/Provider errors
+// remain wrapped so failureCode can retain their more specific identity.
+func classifyPreInterruptionFailure(initial harness.Snapshot, startErr error, receiptCommitted bool, drafts int) error {
+	if receiptCommitted || errors.Is(startErr, errInterrupted) {
+		return taskFailed("task_interruption_evidence_inconsistent", startErr)
+	}
+	if startErr != nil {
+		switch {
+		case errors.Is(startErr, agent.ErrInvalidModelResponse):
+			return taskFailed("task_model_response_invalid_before_interruption", startErr)
+		case errors.Is(startErr, agent.ErrModelFailure):
+			return taskFailed("task_model_failed_before_interruption", startErr)
+		default:
+			return taskFailed("task_failed_before_interruption", startErr)
+		}
+	}
+	switch initial.Turn.Status {
+	case harness.TurnCompleted:
+		if drafts == 0 {
+			return taskFailed("task_completed_without_draft", nil)
+		}
+		return taskFailed("task_completed_before_interruption", nil)
+	case harness.TurnFailed:
+		return taskFailed("task_failed_before_interruption", nil)
+	case harness.TurnCancelled:
+		return taskFailed("cancelled", nil)
+	case harness.TurnAccepted, harness.TurnRunning, harness.TurnWaitingInput, harness.TurnPausedBudget:
+		return taskFailed("task_returned_without_interruption", nil)
+	default:
+		return taskFailed("task_returned_without_interruption", nil)
+	}
+}
+
 // Every return retains observed counts and the last completed checks. Errors
 // remain available to tests; command/event reporting uses stable codes only.
 func runTask(ctx context.Context, config settings, newModel func() (model.Client, error), source sourceFixture) (report taskReport, runErr error) {
@@ -146,8 +184,9 @@ func runTask(ctx context.Context, config settings, newModel func() (model.Client
 	report.Stage = "start"
 	initial, startErr := session.Prompt(ctx, hostTurnID, taskPrompt)
 	updateReportIdentity(&report, initial)
-	if !errors.Is(startErr, errInterrupted) || !fault.fired.Load() {
-		return report, taskFailed("task_did_not_reach_interruption", startErr)
+	interruptionCommitted := fault.fired.Load()
+	if !errors.Is(startErr, errInterrupted) || !interruptionCommitted {
+		return report, classifyPreInterruptionFailure(initial, startErr, interruptionCommitted, state.counts().drafts)
 	}
 	report.RecoveryChecks.InterruptionObserved = true
 	report.Stage = "interrupted"

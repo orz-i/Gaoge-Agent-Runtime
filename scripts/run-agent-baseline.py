@@ -482,6 +482,26 @@ def failure_advice(stage, code, preflight):
                 "这是独立于模型 contextTokens 的 Host 服务上限。缺少精确 TokenCounter 时，"
                 "管理器用保守的序列化字节上界估算，完成态加密 reasoning 回放也占用预算。"
                 "不要据此声称 Provider 拒绝请求，也不要通过关闭预算校验或丢弃回放来继续执行。")
+    if code == "task_completed_without_draft":
+        return ("模型在保存必需的草稿前已正常结束任务；这是 Agent 工作流证据缺失，"
+                "不能归因于 Provider 请求失败。检查 artifactReads、draftWrites 和实际工具轨迹，"
+                "确认是否在读取候选证据后提前提交终答。保留原始报告，不将本次失败重记为成功。")
+    if code == "task_model_failed_before_interruption":
+        return ("首次 Agent 执行在预期草稿中断前遇到模型执行失败；先检查失败样本的模型调用数、"
+                "最后 HTTP 观察和工具执行记录。此分类不能单独证明上游 HTTP 失败或 Context 预算耗尽。")
+    if code == "task_model_response_invalid_before_interruption":
+        return ("模型响应未通过 Agent 的本地完整性或结构校验，未到达草稿中断点。"
+                "按报告中的实际响应/回放证据检查原生 Schema、Tool 和流式终态，不放宽校验。")
+    if code == "task_failed_before_interruption":
+        return ("任务在预期草稿中断前失败，但没有可安全归类的更具体原因；"
+                "保留阶段与调用计数，检查可信的 Harness/Agent 状态，不要推断上游故障。")
+    if code in {"task_completed_before_interruption", "task_returned_without_interruption",
+                "task_interruption_evidence_inconsistent"}:
+        return ("任务状态与基线预期的已提交草稿中断不一致。检查 Host 中断夹具、"
+                "草稿回执和 Turn 终态；不能由此宣称 Provider 出错或恢复成功。")
+    if code == "task_did_not_reach_interruption":
+        return ("这是历史基线的宽泛失败码，可能表示模型提前完成或 Agent 执行异常，"
+                "不能仅凭该码判断真正原因。保留历史记录，结合工具计数和原始证据重新定位。")
     if code in {"invalid_configuration", "provider_configuration_failed"}:
         return "核对 endpoint、model ID、已核实的 context capacity 与本次任务输出预算。"
     if code == "cancelled":
