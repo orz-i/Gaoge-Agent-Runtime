@@ -41,6 +41,34 @@ Keep the historical v2 real failure at its original dataset hash;
 do not numerically compare different profiles as the same task.
 See the [full real-model forensic and corrective review](audits/2026-11-08-real-distractor05-metering-passed-tool-limit.md).
 
+## Successful official real-model target pilot — 2026-11-08
+
+The current quality Host profile
+`sha256:9e6a18425ab3ce620e9b65d864626855f60dcd860533741154fc29c364f9f114`
+has now completed a **successful official OpenAI `gpt-5.6-terra`
+`distractor-05` single-case pilot**. Clean source `b219b83`;
+private report `20261108T073605Z-97c7b1ea.json`
+(SHA-256 `228785b209571def2cf67e50d541eadbb9b36edc3fe1070714c19f7399047f03`)
+was validated but not committed or edited.
+
+Actual task work: four model calls, exactly **three committed
+Tools** (one lookup, one exact query-backed original-source
+Artifact read and one saved draft), passed draft Oracle, legitimate
+interruption/lease fencing/same Run and Turn recovery and no Tool
+replay. The optional native Count endpoint accepted 5/5 counting
+attempts; 4/4 **same-input** count-to-completed-Usage comparisons
+were exact, with zero observed low/high counts. One unmatched counting
+attempt remains unverified. The strict Schema and two-step
+stateless Tool probe passed, and **both reasoning and encrypted
+replay were observed in this run**.
+
+This was **one attempted case out of forty**, with 39 untested
+cases, and does **not** establish general Agent ability, a new full
+40-case benchmark score, or success with all Providers. Earlier
+failed pilots and the original descriptive 37/40 measurement
+retain their original distinct hashes/statuses. See
+[official real evidence and exit scope](audits/2026-11-08-official-real-distractor05-success.md).
+
 ## Goals and scope
 
 The existing two-case `release-recovery-v1` real-model baseline stays the default. The additional **40-case `evidence-40-v1` suite** samples the same real Agent + Harness + Kernel, Provider, Tools, archived Context and interrupted-execution recovery path, with an immutable expanded corpus. Every case requires the actual model to find an exact deep source fact, read its bounded Context Artifact, save exactly one draft and produce a schema-valid answer consistent with committed evidence.

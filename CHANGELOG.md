@@ -5,6 +5,21 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Official real single-case Provider/Context + complex evidence verification
+  (2026-11-08): on clean Head `b219b83`, the genuine `gpt-5.6-terra`
+  `distractor-05` pilot **passed** with 1 lookup, 1 exact original
+  Artifact read and 1 committed draft; all original interruption/lease/
+  same-Run recovery and Oracle checks passed. Five native counts accepted,
+  four compared exactly to the same-input completed Provider Usage (zero
+  under/over); the fifth is unpaired and not claimed accurate.
+  Reasoning/encrypted replay was observed in this probe. The pilot is
+  **1/1 attempted with 39 skipped**, not a new full 40-case score.
+  The launcher also now displays the **actual** selected pilot case
+  rather than always printing `code-01`, with both interactive and
+  historic-report paths tested. No Task/Tool/Context contract change or
+  dataset hash rotation for this message-only fix. See the
+  [live acceptance record](docs/audits/2026-11-08-official-real-distractor05-success.md).
+
 - Real `distractor-05` evidence: Provider/Context count verified, retrieval
   Tool budget exhausted (2026-11-08). On actual clean v2 Head `43f42d6`,
   one official `gpt-5.6-terra` pilot observed 12/12 native count accepts
