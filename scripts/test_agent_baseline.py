@@ -441,6 +441,26 @@ class RetryTests(unittest.TestCase):
 
 
 class WireDiagnosticsTests(unittest.TestCase):
+    def test_task_before_interruption_guidance_preserves_distinct_causes_and_history(self):
+        premature = baseline.failure_advice('evidence', 'task_completed_without_draft', {})
+        self.assertIn('正常结束', premature)
+        self.assertIn('draftWrites', premature)
+        self.assertIn('不能归因于 Provider 请求失败', premature)
+        provider = baseline.failure_advice('start', 'task_model_failed_before_interruption', {})
+        self.assertIn('模型执行失败', provider)
+        self.assertIn('不能单独证明', provider)
+        invalid = baseline.failure_advice('start', 'task_model_response_invalid_before_interruption', {})
+        self.assertIn('完整性或结构校验', invalid)
+        self.assertNotEqual(provider, premature)
+        self.assertNotEqual(provider, invalid)
+        inconsistent = baseline.failure_advice('start', 'task_interruption_evidence_inconsistent', {})
+        self.assertIn('Host 中断夹具', inconsistent)
+        historical = baseline.failure_advice('evidence', 'task_did_not_reach_interruption', {})
+        self.assertIn('历史基线', historical)
+        self.assertIn('不能仅凭该码判断', historical)
+        budget = baseline.failure_advice('evidence', 'context_budget_exceeded', {})
+        self.assertIn('Provider 下一次模型请求派发前', budget)
+
     def test_task_unsupported_guidance_uses_task_response_not_preflight_schema(self):
         advice = baseline.failure_advice('start', 'provider_unsupported', {'httpStatus': 200})
         self.assertIn('物理 HTTP 请求数', advice)

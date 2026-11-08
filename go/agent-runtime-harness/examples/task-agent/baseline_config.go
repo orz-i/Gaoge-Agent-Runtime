@@ -185,6 +185,13 @@ func configurationError(output io.Writer) int {
 // Never parse Error() or copy Runtime.ErrorDetail: provider-controlled messages
 // can contain credentials, even when a transport limits their length.
 func failureCode(err error, fallback string) string {
+	var failure taskFailure
+	// A committed-draft interruption mismatch is a Host execution-integrity
+	// failure. Do not let a joined Provider timeout, cancellation or classified
+	// upstream error hide the independently observed receipt contradiction.
+	if errors.As(err, &failure) && failure.code == "task_interruption_evidence_inconsistent" {
+		return failure.code
+	}
 	switch {
 	case errors.Is(err, context.Canceled):
 		return "cancelled"
@@ -212,7 +219,6 @@ func failureCode(err error, fallback string) string {
 	if code := model.ClassifiedErrorCode(err); code != "" {
 		return code
 	}
-	var failure taskFailure
 	if errors.As(err, &failure) {
 		return failure.code // Created only from fixed local constants.
 	}
