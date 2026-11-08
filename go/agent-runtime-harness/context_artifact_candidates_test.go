@@ -15,6 +15,75 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
+// Queryless offsets are permitted for backwards-compatible exact reads, but
+// a Host opting into candidate navigation must give a model actionable search
+// guidance when a large archive would otherwise encourage linear scanning.
+// This advisory never selects an answer, changes evidence, or authorizes reads.
+func TestCandidateLongOffsetPagingSuggestsQueryWithoutChangingEvidence(t *testing.T) {
+	t.Parallel()
+	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
+	doc := strings.Repeat("ordinary audit row; 核验日志;\n", 700) +
+		"RELEASE R-17 DEPLOYMENT_CODE=FROM-SOURCE; WINDOW=UTC;\n"
+	artifact, err := runtimecontext.NewArtifact(runtimecontext.ArtifactCompaction,
+		turn.SessionID, checkpoint.Generation, checkpoint.CoveredThroughSourceID, doc, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.PutContextArtifact(t.Context(), artifact); err != nil {
+		t.Fatal(err)
+	}
+	base := NewContextArtifactToolHandler(store, nil)
+	candidate := ContextArtifactCandidateToolRegistration(base)
+	execute := func(t *testing.T, handler tools.Handler, input contextArtifactReadInput) (struct {
+		Content    string `json:"content"`
+		SearchHint string `json:"searchHint"`
+		NextOffset int    `json:"nextOffset"`
+		Done       bool   `json:"done"`
+		size       int
+	}, error) {
+		t.Helper()
+		var parsed struct {
+			Content    string `json:"content"`
+			SearchHint string `json:"searchHint"`
+			NextOffset int    `json:"nextOffset"`
+			Done       bool   `json:"done"`
+			size       int
+		}
+		body, err := json.Marshal(input)
+		if err != nil {
+			return parsed, err
+		}
+		response, err := handler.Execute(t.Context(), tools.ExecutionRequest{RunID: root.ExecutionRefID,
+			Call: tools.Call{ID: "queryless-advice", ToolKey: ContextArtifactToolKey, Arguments: body}})
+		if err == nil {
+			parsed.size = len(response.Content)
+			err = json.Unmarshal(response.Content, &parsed)
+		}
+		return parsed, err
+	}
+	plain, err := execute(t, base, contextArtifactReadInput{ArtifactID: artifact.ID, Limit: 128})
+	if err != nil || plain.SearchHint != "" || plain.Content != string([]rune(doc)[:128]) {
+		t.Fatalf("legacy offset reader changed: hint=%q contentLen=%d err=%v", plain.SearchHint, len(plain.Content), err)
+	}
+	// A large requested page must be bounded by the enhanced Tool policy.
+	// Every returned rune remains the original prefix, and the published
+	// cursor must advance by exactly that prefix length.
+	enhanced, err := execute(t, candidate.Handler, contextArtifactReadInput{ArtifactID: artifact.ID, Limit: 8000})
+	if err != nil || !strings.Contains(enhanced.SearchHint, "query") ||
+		strings.Contains(enhanced.SearchHint, "R-17") || enhanced.Content == "" ||
+		!strings.HasPrefix(doc, enhanced.Content) || enhanced.size > 512 ||
+		enhanced.NextOffset != utf8.RuneCountInString(enhanced.Content) ||
+		enhanced.NextOffset > 128 || enhanced.Done {
+		t.Fatalf("candidate did not preserve bounded original prefix and query advice: hint=%q len=%d bytes=%d next=%d err=%v",
+			enhanced.SearchHint, len(enhanced.Content), enhanced.size, enhanced.NextOffset, err)
+	}
+	withQuery, err := execute(t, candidate.Handler, contextArtifactReadInput{ArtifactID: artifact.ID,
+		Query: "RELEASE R-17", Limit: 128})
+	if err != nil || withQuery.SearchHint != "" || !strings.HasPrefix(withQuery.Content, "RELEASE R-17") {
+		t.Fatalf("query result was obscured or search hint incorrectly inserted: %+v err=%v", withQuery, err)
+	}
+}
+
 func TestContextArtifactCandidatesExposeDistinctMatchesWithoutChangingLiteralReader(t *testing.T) {
 	t.Parallel()
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)

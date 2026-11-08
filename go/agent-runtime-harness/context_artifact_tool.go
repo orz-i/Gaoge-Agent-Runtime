@@ -15,12 +15,15 @@ import (
 const ContextArtifactToolKey = "harness.read_context_artifact"
 
 const (
-	contextArtifactDefaultLimit      = 2000
-	contextArtifactMaxLimit          = 8000
-	contextArtifactMaxSuggestions    = 3
-	contextArtifactPreviewRunes      = 35
-	contextArtifactPreviewLookbehind = 16
-	contextArtifactResponseMaxBytes  = 512
+	// This is only model-facing navigation advice, never a content match
+	// or a source of Tool authorization. It contains no user/source values.
+	contextArtifactLongPageSearchHint = "Large artifact: use the query argument to locate target evidence instead of sequential offset paging. Re-read the exact original source after any candidate hints."
+	contextArtifactDefaultLimit       = 2000
+	contextArtifactMaxLimit           = 8000
+	contextArtifactMaxSuggestions     = 3
+	contextArtifactPreviewRunes       = 35
+	contextArtifactPreviewLookbehind  = 16
+	contextArtifactResponseMaxBytes   = 512
 )
 
 type contextArtifactReadInput struct {
@@ -41,6 +44,7 @@ type contextArtifactPage struct {
 	matches     []contextArtifactMatch
 	searchMode  string
 	moreMatches bool
+	searchHint  string
 }
 
 // An authorized, bounded preview, not an assertion that the candidate
@@ -92,6 +96,25 @@ func (handler *ContextArtifactToolHandler) Execute(
 	page, err := buildContextArtifactPage(artifact, input)
 	if err != nil {
 		return tools.ExecutionResult{}, err
+	}
+	// A model can still choose offset-only pagination even when the Host
+	// enabled candidate navigation. For large archives attach one bounded,
+	// content-free hint at the END of the Tool result, where compaction
+	// preserves it. The original page and authorization are unchanged.
+	if handler.allowCandidateHints && input.Query == "" &&
+		page.totalRunes > contextArtifactMaxLimit {
+		// In an oversized archive, an 8000-rune offset read is often
+		// archived immediately by the Host's 512-byte Tool-result policy,
+		// hiding even a helpful search hint. Retain an exact, bounded
+		// prefix and a forward-only cursor; the original artifact stays
+		// intact and remains available through query-backed reads.
+		const guidedPrefixRunes = 128
+		if runes := []rune(page.content); len(runes) > guidedPrefixRunes {
+			page.content = string(runes[:guidedPrefixRunes])
+			page.nextOffset = page.offset + guidedPrefixRunes
+			page.done = false
+		}
+		page.searchHint = contextArtifactLongPageSearchHint
 	}
 	return contextArtifactExecutionResult(request.Call.ID, artifact, page)
 }
@@ -395,11 +418,13 @@ func contextArtifactExecutionResult(
 			Matches     []contextArtifactMatch      `json:"matches,omitempty"`
 			SearchMode  string                      `json:"searchMode,omitempty"`
 			MoreMatches bool                        `json:"moreMatches,omitempty"`
+			SearchHint  string                      `json:"searchHint,omitempty"`
 		}{
 			ArtifactID: artifact.ID, Kind: artifact.Kind, ContentHash: artifact.ContentHash,
 			Offset: page.offset, NextOffset: page.nextOffset, Done: page.done, Content: page.content,
 			TotalRunes: page.totalRunes, Found: page.found, Matches: page.matches,
 			SearchMode: page.searchMode, MoreMatches: page.moreMatches,
+			SearchHint: page.searchHint,
 		})
 	}
 	content, err := encode()
@@ -447,6 +472,25 @@ func contextArtifactExecutionResult(
 			return tools.ExecutionResult{}, err
 		}
 	}
+	// Long queryless pages must keep their generic search hint model-visible
+	// after Context compaction. Shrink only the end of the original excerpt,
+	// updating its exact rune cursor; never remove the hint or invent facts.
+	if page.searchHint != "" {
+		runes := []rune(page.content)
+		for len(content) > contextArtifactResponseMaxBytes {
+			if len(runes) == 0 {
+				return tools.ExecutionResult{}, tools.ErrInvalidCall
+			}
+			runes = runes[:len(runes)-1]
+			page.content = string(runes)
+			page.nextOffset--
+			page.done = false
+			content, err = encode()
+			if err != nil {
+				return tools.ExecutionResult{}, err
+			}
+		}
+	}
 	return tools.ExecutionResult{
 		Content: content,
 		Receipt: tools.Receipt{ExecutionID: executionID, Disposition: "read"},
@@ -489,7 +533,7 @@ func ContextArtifactToolPolicySnapshot() ToolPolicySnapshot {
 // The original registration remains byte-exact, case-sensitive and unchanged.
 func ContextArtifactCandidateToolRegistration(handler *ContextArtifactToolHandler) tools.Registration {
 	registration := ContextArtifactToolRegistration(handler)
-	registration.Definition.Description = "Read bounded exact Context artifact text. The Host enables candidate navigation on every query in this enhanced registration (candidates=true is optional): ambiguous queries yield at most 3 short candidate previews and original offsets. 'literal_candidates' are actual case-sensitive matches; 'normalized_hints' are case/separator-insensitive navigation suggestions, NOT confirmed literal matches (found remains false). Re-read an exact original offset before using any facts. Use nextOffset to continue; no answer ranking, guessing or scope bypass is performed."
+	registration.Definition.Description = "Read bounded exact Context artifact text. The Host enables candidate navigation on every query in this enhanced registration (candidates=true is optional): ambiguous queries yield at most 3 short candidate previews and original offsets. 'literal_candidates' are actual case-sensitive matches; 'normalized_hints' are case/separator-insensitive navigation suggestions, NOT confirmed literal matches (found remains false). Large offset-only pages are bounded to 512 bytes including a generic searchHint; use query for deep evidence, and do not mistake the hint for an answer. Re-read an exact original offset before using any facts. Use nextOffset to continue; no answer ranking, guessing or scope bypass is performed."
 	registration.Definition.InputSchema = json.RawMessage(`{"type":"object","additionalProperties":false,"required":["artifactID"],"properties":{"artifactID":{"type":"string","minLength":1,"maxLength":128},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":8000},"query":{"type":"string","minLength":1,"maxLength":256},"candidates":{"type":"boolean"}}}`)
 	if handler != nil {
 		isolated := *handler
@@ -501,6 +545,6 @@ func ContextArtifactCandidateToolRegistration(handler *ContextArtifactToolHandle
 
 func ContextArtifactCandidateToolPolicySnapshot() ToolPolicySnapshot {
 	policy := ContextArtifactToolPolicySnapshot()
-	policy.DefinitionVersion = "harness-candidate-search-v1"
+	policy.DefinitionVersion = "harness-candidate-search-v2"
 	return policy
 }
