@@ -88,6 +88,18 @@ type teamInvocationInput struct {
 	Join    handoff.Join       `json:"join"`
 }
 
+// Each native composite Feature has exactly one private projection from the
+// original frozen Invocation input. Root/child/retry supply only their own
+// physical execution identity, never mutable Host capability definitions.
+func (input teamInvocationInput) startRequest(
+	id string, actor kernel.ActorRef, thread kernel.ThreadRef, requestID string,
+) team.StartRequest {
+	return team.StartRequest{
+		ID: id, Actor: actor, Thread: thread, RequestID: requestID, Goal: input.Goal,
+		Mode: input.Mode, Members: append([]team.Member(nil), input.Members...), Join: input.Join,
+	}
+}
+
 type groupChatInvocationInput struct {
 	Goal                 string                    `json:"goal"`
 	Actor                kernel.ActorRef           `json:"actor"`
@@ -108,6 +120,15 @@ type workflowInvocationInput struct {
 	Thread     kernel.ThreadRef    `json:"thread"`
 	Definition workflow.Definition `json:"definition"`
 	Input      json.RawMessage     `json:"input"`
+}
+
+func (input workflowInvocationInput) startRequest(
+	id string, actor kernel.ActorRef, thread kernel.ThreadRef, requestID string,
+) workflow.StartRequest {
+	return workflow.StartRequest{
+		ID: id, Actor: actor, Thread: thread, RequestID: requestID, Goal: input.Goal,
+		Definition: input.Definition, Input: append(json.RawMessage(nil), input.Input...),
+	}
 }
 
 // StartTeamTurn starts Team without creating a placeholder Agent root.
@@ -138,11 +159,10 @@ func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest
 		return Snapshot{}, ErrConflict
 	}
 	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.teams.StartRun(prepared.runContext, team.StartRequest{
-			ID: prepared.invocation.ExecutionRefID, Actor: frozen.Actor, Thread: frozen.Thread,
-			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: frozen.Goal,
-			Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
-		})
+		return runner.teams.StartRun(prepared.runContext, frozen.startRequest(
+			prepared.invocation.ExecutionRefID, frozen.Actor, frozen.Thread,
+			firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID),
+		))
 	})
 	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
@@ -156,7 +176,7 @@ func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatT
 	if err != nil {
 		return Snapshot{}, err
 	}
-	runtimeRequest, input, err := materializeGroupChatPolicy(request, speakerConfigs, speakerIDs)
+	input, err := materializeGroupChatPolicy(request, speakerConfigs, speakerIDs)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -179,13 +199,13 @@ func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatT
 	if err = json.Unmarshal(prepared.invocation.Input, &frozen); err != nil {
 		return Snapshot{}, ErrConflict
 	}
-	runtimeRequest.ID = prepared.invocation.ExecutionRefID
-	runtimeRequest.RequestID = firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID)
-	runtimeRequest.Goal, runtimeRequest.Actor, runtimeRequest.Thread = frozen.Goal, frozen.Actor, frozen.Thread
-	runtimeRequest.SpeakerPolicy, runtimeRequest.MaxUtterances = frozen.SpeakerPolicy, frozen.MaxUtterances
-	runtimeRequest.Participants, runtimeRequest.SpeakerConfigs = frozen.Participants, frozen.SpeakerConfigs
-	runtimeRequest.DirectedSpeakerIDs, runtimeRequest.CandidateSpeakerIDs = frozen.DirectedSpeakerIDs, frozen.CandidateSpeakerIDs
-	runtimeRequest.SelectorModel, runtimeRequest.SelectorModelOptions = frozen.SelectorModel, frozen.SelectorModelOptions
+	// The committed Invocation is the only source for physical GroupChat
+	// inputs. A separate pre-commit runtimeRequest can drift if new fields
+	// are added or the Host mutates its request during durable admission.
+	runtimeRequest := frozen.startRequest(
+		prepared.invocation.ExecutionRefID, frozen.Actor, frozen.Thread,
+		firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID),
+	)
 	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func() (kernel.Snapshot, error) {
 		return runner.groupChats.StartRun(prepared.runContext, runtimeRequest)
 	})
@@ -196,13 +216,7 @@ func materializeGroupChatPolicy(
 	request GroupChatTurnRequest,
 	speakerConfigs []groupchat.SpeakerConfig,
 	speakerIDs []string,
-) (groupchat.StartRequest, groupChatInvocationInput, error) {
-	runtimeRequest := groupchat.StartRequest{
-		Actor: request.Actor, Thread: request.Thread, Goal: request.Goal,
-		SpeakerPolicy:  request.SpeakerPolicy,
-		Participants:   append([]groupchat.Participant(nil), request.Participants...),
-		SpeakerConfigs: speakerConfigs, MaxUtterances: request.MaxUtterances,
-	}
+) (groupChatInvocationInput, error) {
 	input := groupChatInvocationInput{
 		Goal: strings.TrimSpace(request.Goal), Actor: request.Actor, Thread: request.Thread,
 		SpeakerPolicy:  request.SpeakerPolicy,
@@ -211,33 +225,47 @@ func materializeGroupChatPolicy(
 	}
 	switch request.SpeakerPolicy {
 	case groupchat.SpeakerDirected:
-		runtimeRequest.DirectedSpeakerIDs = append([]string(nil), speakerIDs...)
 		input.DirectedSpeakerIDs = append([]string(nil), speakerIDs...)
 	case groupchat.SpeakerSelector:
 		if strings.TrimSpace(request.Config.Model) == "" {
-			return groupchat.StartRequest{}, groupChatInvocationInput{}, ErrInvalidRequest
+			return groupChatInvocationInput{}, ErrInvalidRequest
 		}
-		runtimeRequest.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
-		runtimeRequest.SelectorModel = strings.TrimSpace(request.Config.Model)
-		runtimeRequest.SelectorModelOptions = append(json.RawMessage(nil), request.Config.ModelOptions...)
 		input.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
-		input.SelectorModel = runtimeRequest.SelectorModel
-		input.SelectorModelOptions = append(json.RawMessage(nil), runtimeRequest.SelectorModelOptions...)
+		input.SelectorModel = strings.TrimSpace(request.Config.Model)
+		input.SelectorModelOptions = append(json.RawMessage(nil), request.Config.ModelOptions...)
 	case groupchat.SpeakerHandoff:
 		if len(speakerIDs) < 2 {
-			return groupchat.StartRequest{}, groupChatInvocationInput{}, ErrInvalidRequest
+			return groupChatInvocationInput{}, ErrInvalidRequest
 		}
 		for index := range speakerConfigs {
 			speakerConfigs[index].ToolKeys = normalizeStrings(append(speakerConfigs[index].ToolKeys, GroupChatHandoffToolKey))
 		}
-		runtimeRequest.SpeakerConfigs = speakerConfigs
 		input.SpeakerConfigs = speakerConfigs
-		runtimeRequest.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
 		input.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
 	default:
-		return groupchat.StartRequest{}, groupChatInvocationInput{}, ErrInvalidRequest
+		return groupChatInvocationInput{}, ErrInvalidRequest
 	}
-	return runtimeRequest, input, nil
+	return input, nil
+}
+
+// startRequest is the one GroupChat projection from immutable Invocation
+// input into its physical Runtime request. Both initial Start and durable
+// Retry call it, passing only their own original execution/actor identity.
+// Never reconstruct missing execution authority from a mutable Host request.
+func (input groupChatInvocationInput) startRequest(
+	id string, actor kernel.ActorRef, thread kernel.ThreadRef, requestID string,
+) groupchat.StartRequest {
+	return groupchat.StartRequest{
+		ID: id, Actor: actor, Thread: thread, RequestID: requestID, Goal: input.Goal,
+		SpeakerPolicy:        input.SpeakerPolicy,
+		Participants:         append([]groupchat.Participant(nil), input.Participants...),
+		SpeakerConfigs:       append([]groupchat.SpeakerConfig(nil), input.SpeakerConfigs...),
+		DirectedSpeakerIDs:   append([]string(nil), input.DirectedSpeakerIDs...),
+		CandidateSpeakerIDs:  append([]string(nil), input.CandidateSpeakerIDs...),
+		SelectorModel:        input.SelectorModel,
+		SelectorModelOptions: append(json.RawMessage(nil), input.SelectorModelOptions...),
+		MaxUtterances:        input.MaxUtterances,
+	}
 }
 
 func materializeGroupChatSpeakerConfigs(
@@ -318,11 +346,10 @@ func (runner *Runner) StartWorkflowTurn(ctx context.Context, request WorkflowTur
 		return Snapshot{}, ErrConflict
 	}
 	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.workflows.StartRun(prepared.runContext, workflow.StartRequest{
-			ID: prepared.invocation.ExecutionRefID, Actor: frozen.Actor, Thread: frozen.Thread,
-			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID), Goal: frozen.Goal,
-			Definition: frozen.Definition, Input: frozen.Input,
-		})
+		return runner.workflows.StartRun(prepared.runContext, frozen.startRequest(
+			prepared.invocation.ExecutionRefID, frozen.Actor, frozen.Thread,
+			firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID),
+		))
 	})
 	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
 }
@@ -628,11 +655,9 @@ func (runner *Runner) StartTeamInvocation(
 		return Snapshot{}, ErrConflict
 	}
 	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.teams.StartRun(ctx, team.StartRequest{
-			ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
-			RequestID: strings.TrimSpace(request.RequestID), Goal: frozen.Goal,
-			Mode: frozen.Mode, Members: frozen.Members, Join: frozen.Join,
-		})
+		return runner.teams.StartRun(ctx, frozen.startRequest(
+			invocation.ExecutionRefID, child.actor, child.thread, strings.TrimSpace(request.RequestID),
+		))
 	})
 	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
 }
@@ -669,11 +694,9 @@ func (runner *Runner) StartWorkflowInvocation(
 		return Snapshot{}, ErrConflict
 	}
 	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.workflows.StartRun(ctx, workflow.StartRequest{
-			ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
-			RequestID: strings.TrimSpace(request.RequestID), Goal: frozen.Goal,
-			Definition: frozen.Definition, Input: frozen.Input,
-		})
+		return runner.workflows.StartRun(ctx, frozen.startRequest(
+			invocation.ExecutionRefID, child.actor, child.thread, strings.TrimSpace(request.RequestID),
+		))
 	})
 	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
 }
@@ -1010,7 +1033,9 @@ func (runner *Runner) startRetriedTeam(ctx context.Context, invocation Invocatio
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
 		return kernel.Snapshot{}, ErrConflict
 	}
-	return runner.teams.StartRun(ctx, team.StartRequest{ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal, Mode: input.Mode, Members: append([]team.Member(nil), input.Members...), Join: input.Join})
+	return runner.teams.StartRun(ctx, input.startRequest(
+		invocation.ExecutionRefID, child.actor, child.thread, requestID,
+	))
 }
 
 func (runner *Runner) startRetriedGroupChat(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
@@ -1021,17 +1046,9 @@ func (runner *Runner) startRetriedGroupChat(ctx context.Context, invocation Invo
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
 		return kernel.Snapshot{}, ErrConflict
 	}
-	return runner.groupChats.StartRun(ctx, groupchat.StartRequest{
-		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal,
-		SpeakerPolicy:        input.SpeakerPolicy,
-		Participants:         append([]groupchat.Participant(nil), input.Participants...),
-		SpeakerConfigs:       append([]groupchat.SpeakerConfig(nil), input.SpeakerConfigs...),
-		DirectedSpeakerIDs:   append([]string(nil), input.DirectedSpeakerIDs...),
-		CandidateSpeakerIDs:  append([]string(nil), input.CandidateSpeakerIDs...),
-		SelectorModel:        input.SelectorModel,
-		SelectorModelOptions: append(json.RawMessage(nil), input.SelectorModelOptions...),
-		MaxUtterances:        input.MaxUtterances,
-	})
+	return runner.groupChats.StartRun(ctx, input.startRequest(
+		invocation.ExecutionRefID, child.actor, child.thread, requestID,
+	))
 }
 
 func (runner *Runner) startRetriedWorkflow(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
@@ -1042,7 +1059,9 @@ func (runner *Runner) startRetriedWorkflow(ctx context.Context, invocation Invoc
 	if err := json.Unmarshal(invocation.Input, &input); err != nil {
 		return kernel.Snapshot{}, ErrConflict
 	}
-	return runner.workflows.StartRun(ctx, workflow.StartRequest{ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread, RequestID: requestID, Goal: input.Goal, Definition: input.Definition, Input: append(json.RawMessage(nil), input.Input...)})
+	return runner.workflows.StartRun(ctx, input.startRequest(
+		invocation.ExecutionRefID, child.actor, child.thread, requestID,
+	))
 }
 
 // CancelInvocation cancels one child Runtime Feature by its durable Invocation identity.

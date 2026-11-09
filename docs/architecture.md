@@ -185,7 +185,15 @@ Core exports provider-neutral `model.Client`; the separate
 `go/agent-runtime-provider` module supplies optional Router/OpenAI/Anthropic
 adapters. Public Harness does not require any concrete Model Provider.
 The built-in `ExecutionClass` set remains closed because each class has
-specific recovery/approval/cancellation semantics. Product capabilities
+specific recovery/approval/cancellation semantics. For native Team, GroupChat
+and Workflow, each original frozen `Invocation.Input` has one private
+type-specific physical Start projection, reused by root/child/retry. GroupChat
+no longer creates a separate mutable pre-commit physical request alongside
+the sealed input. Original Actor/Thread, Run/Request ID and cancellation/Run
+ownership remain checked by the existing Feature/Harness/Kernel boundaries;
+this does not introduce a general FeatureDriver registry or second model loop.
+See the [frozen composite convergence review](audits/2026-11-09-composite-frozen-projection-governance.md).
+Product capabilities
 can use the existing Host-composed `ApplicationCapabilityExecutor`; there
 is no unverified generic FeatureDriver registry. See
 [ADR 0012](adr/0012-host-selected-capabilities-and-external-model-providers.md).

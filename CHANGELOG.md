@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Harness native composite projection convergence (2026-11-09): Team,
+  GroupChat and Workflow now each have one private frozen-Invocation input
+  projector for root/child/retry Start requests, instead of duplicated
+  mappings. GroupChat no longer maintains a speculative pre-commit Runtime
+  request alongside its durable input. No new model loop, status, Router,
+  Kernel/persistence schema or compatibility bridge. New directed/selector/
+  handoff, post-commit Host mutation, retry and pre-effect rejection tests
+  preserve the original recovery contract and Agent quality profile.
+  See [governance review](docs/audits/2026-11-09-composite-frozen-projection-governance.md).
+
 - Independent Provider-quality audit remediation (2026-11-08): bind each
   historical report's SHA-256 and strict parsing to the same bounded raw
   byte snapshot; reject Token Counting elapsed totals greater than the
