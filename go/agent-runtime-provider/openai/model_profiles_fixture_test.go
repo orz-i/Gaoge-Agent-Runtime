@@ -7,7 +7,7 @@ func fixtureOpenAIProfiles() model.StaticModelProfiles {
 	withNone := []string{"none", "low", "medium", "high", "xhigh", "max"}
 	withoutNone := []string{"low", "medium", "high", "xhigh", "max"}
 	result := model.StaticModelProfiles{
-		"gpt-test": {StructuredJSONSchema: true, SupportsForcedToolChoice: true, SupportsSamplingWhenEffortOmitted: true},
+		"gpt-test": {StructuredJSONSchema: true, SupportsForcedToolChoice: true, SupportsSamplingWhenEffortOmitted: true, SupportsImageInput: true, SupportsPDFInput: true},
 		"gpt-reasoning-fixture": {
 			StructuredJSONSchema: true, EffortLevels: withNone,
 		},

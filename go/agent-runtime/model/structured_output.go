@@ -46,6 +46,15 @@ type Capabilities struct {
 	// (Anthropic any / OpenAI required). Missing or false fails closed; normal
 	// optional Tools remain available without this stronger capability.
 	SupportsForcedToolChoice bool
+	// SupportsImageInput and SupportsPDFInput are separate positive Host grants
+	// for the exact selected model. A Provider adapter must still implement the
+	// actual wire projection; these flags never authorize audio or hosted Tools.
+	// Without an explicit grant, even syntactically valid remote media is denied
+	// before physical dispatch.
+	// Omit false from serialized profiles to keep previously frozen
+	// text-only Provider binding fingerprints unchanged.
+	SupportsImageInput bool `json:"SupportsImageInput,omitempty"`
+	SupportsPDFInput   bool `json:"SupportsPDFInput,omitempty"`
 }
 
 // CapabilityProvider optionally reports support for one concrete model ID.

@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata agent-baseline agent-quality agent-quality-pilot agent-quality-distractor-pilot agent-quality-probe agent-quality-calibrate agent-baseline-test benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
+.PHONY: bootstrap metadata agent-baseline agent-quality agent-quality-pilot agent-quality-distractor-pilot agent-quality-probe agent-quality-calibrate agent-baseline-test agent-quality-anchor-check benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -12,6 +12,11 @@ agent-baseline:
 
 agent-baseline-test:
 	python3 -m unittest discover -s scripts -p 'test_agent_*.py'
+
+# Read-only, content-free evidence manifest. To verify private original reports,
+# use scripts/agent_quality_anchors.py --evidence-dir <directory> explicitly.
+agent-quality-anchor-check:
+	python3 scripts/agent_quality_anchors.py
 
 # Opt-in live quality: 40 independent samples; may incur actual Provider charges.
 agent-quality:

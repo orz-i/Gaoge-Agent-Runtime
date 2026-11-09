@@ -38,6 +38,28 @@ The committed `benchmarks/baseline.json` records the current reference environme
 
 The comparison refuses to compare different GOOS/GOARCH/CPU environments. It is therefore not part of ordinary PR CI. A nightly or release runner should establish a baseline on its own stable environment before turning this into a performance gate.
 
+## Agent quality observations and Provider count overhead
+
+The historical official Agent-quality measurements are anchored by
+`benchmarks/agent-quality-anchors-v1.json`. Run
+`make agent-quality-anchor-check` for a static check, or explicitly verify
+the original operator-owned ignored reports using
+`python3 scripts/agent_quality_anchors.py --evidence-dir artifacts/agent-baselines`.
+Different dataset hashes and output/effort configurations must **not**
+be used as a same-profile performance or quality comparison.
+
+When the real OpenAI quality Host opts into native input counting, report
+`inputCountObservations.totalDurationMs/maxDurationMs` separately from the
+existing per-model durations, Token Usage coverage and sample p50/p95.
+These are measured Count() downcall durations (including failed/local
+attempts), not model time, HTTP-attempt counts, billable tokens or an
+additive decomposition of concurrent task wall time. They do not create
+any additional counter requests. The optional diagnostic is checked against
+the recorded number of Count attempts (sum at most attempts × maximum single
+duration), rather than accepting impossible elapsed totals. Never attribute
+a change in task latency to token counting from one isolated observation;
+compare repeated fixed-profile tasks first.
+
 ## Agent repeated-Tool policy: opposite workload shapes
 
 `make benchmark-agent-policy` runs an independent 160-seed randomized

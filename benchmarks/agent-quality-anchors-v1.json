@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "description": "Immutable public aggregates only. The source reports remain operator-owned, untracked, and their SHA-256 is authoritative. The two evidence configurations are not numerically comparable.",
+  "records": [
+    {
+      "id": "2026-11-07-full-40-historical",
+      "filename": "20261107T093913Z-12da49b7.json",
+      "sha256": "562c1115541379df1d027faba6f5e74078fa46cb3dbb32a1c259f0009131db03",
+      "sourceRevision": "c503aca1d21308b2e3ce243d5c70f9fbc2a9047e",
+      "sourceDirty": true,
+      "taskVersion": "release-evidence-quality-v1",
+      "datasetHash": "sha256:1d57c9a8827816d63340f027a60bfdc92c63624e982232cb4f49ba2ff2bf3993",
+      "status": "failed",
+      "pilotOnly": false,
+      "pilotCaseID": null,
+      "configuration": {
+        "provider": "openai",
+        "endpoint": "https://api.openai.com/v1/responses",
+        "model": "gpt-5.6-terra",
+        "contextTokens": 1050000,
+        "maxOutputTokens": 4096,
+        "repetitions": 1,
+        "suite": "evidence-40-v1",
+        "reasoningEffort": "medium"
+      },
+      "summary": {
+        "requested": 40,
+        "attempted": 40,
+        "passed": 37,
+        "failed": 3,
+        "skipped": 0,
+        "modelCalls": 174,
+        "toolCalls": 137,
+        "durationP50Ms": 8998,
+        "durationP95Ms": 25876
+      }
+    },
+    {
+      "id": "2026-11-08-distractor05-pilot-success",
+      "filename": "20261108T073605Z-97c7b1ea.json",
+      "sha256": "228785b209571def2cf67e50d541eadbb9b36edc3fe1070714c19f7399047f03",
+      "sourceRevision": "b219b837d6cda10fea691e4829b72dd9da7c627b",
+      "sourceDirty": false,
+      "taskVersion": "release-evidence-quality-v1",
+      "datasetHash": "sha256:9e6a18425ab3ce620e9b65d864626855f60dcd860533741154fc29c364f9f114",
+      "status": "pilot_sample_passed",
+      "pilotOnly": true,
+      "pilotCaseID": "distractor-05",
+      "configuration": {
+        "provider": "openai",
+        "endpoint": "https://api.openai.com/v1/responses",
+        "model": "gpt-5.6-terra",
+        "contextTokens": 1050000,
+        "maxOutputTokens": 128000,
+        "repetitions": 1,
+        "suite": "evidence-40-v1",
+        "reasoningEffort": "high"
+      },
+      "summary": {
+        "requested": 40,
+        "attempted": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 39,
+        "modelCalls": 4,
+        "toolCalls": 3,
+        "durationP50Ms": 11832,
+        "durationP95Ms": 11832
+      }
+    }
+  ]
+}

@@ -90,6 +90,11 @@ type inputCountObservations struct {
 	Accepted           int                           `json:"accepted"`
 	Unavailable        int                           `json:"unavailable"`
 	UnavailableReasons *inputCountUnavailableReasons `json:"unavailableReasons,omitempty"`
+	// Count-side wall time, including local rejections. This is not a
+	// physical HTTP duration or model generation time, and is not additive
+	// to task wall time under concurrent requests. Historical reports omit it.
+	TotalDurationMs int64 `json:"totalDurationMs"`
+	MaxDurationMs   int64 `json:"maxDurationMs"`
 }
 
 // A count-to-usage comparison is valid only for the exact model input

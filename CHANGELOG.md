@@ -5,6 +5,29 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Independent Provider-quality audit remediation (2026-11-08): bind each
+  historical report's SHA-256 and strict parsing to the same bounded raw
+  byte snapshot; reject Token Counting elapsed totals greater than the
+  number of attempts times the maximum single-call duration; classify
+  malformed hash-matching reports as a fixed, nonleaking CLI failure.
+  Additional RED/GREEN swap, malformed-data, timing-property and bounded
+  report-reader tests preserve the original dataset and raw evidence. See
+  [remediation record](docs/audits/2026-11-08-provider-quality-independent-remediation.md).
+
+- First Provider capability / Agent-quality governance slice (2026-11-08):
+  Host-certified exact-model image/PDF grants are required before OpenAI or
+  Anthropic Unary/SSE requests (and OpenAI native input counting); missing
+  authorization no longer dispatches valid-looking media for an unknown model.
+  Existing text-only Provider bindings are stable when grants are absent;
+  changing a selected media grant rotates its original execution fingerprint.
+  Quality-only native count latency is recorded as optional content-free
+  timing independent of model Usage or physical HTTP fact. A checked
+  two-entry public SHA-256 evidence anchor freezes the historical 37/40
+  complete run separately from the current-profile 1/1 `distractor-05`
+  pilot, without committing the private reports or comparing their scores.
+  See [breaking changes](docs/breaking-changes.md) and the
+  [governance audit](docs/audits/2026-11-08-provider-quality-contract-round1.md).
+
 - Official real single-case Provider/Context + complex evidence verification
   (2026-11-08): on clean Head `b219b83`, the genuine `gpt-5.6-terra`
   `distractor-05` pilot **passed** with 1 lookup, 1 exact original

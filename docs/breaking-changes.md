@@ -2,6 +2,36 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-08 — Exact-model media-input grants (beta.24 candidate)
+
+OpenAI Responses and Anthropic Messages already supported ordered User image
+and PDF URL/FileID wire blocks, but previously projected valid media for
+**any** model ID without checking that the selected model actually supported
+the modality. This is now denied until the trusted Host's
+`model.ModelProfileSource` snapshot positively certifies the exact model's
+`SupportsImageInput` and/or `SupportsPDFInput`. A missing or false grant
+rejects Unary and SSE *before HTTP*, and the OpenAI native InputTokenCounter
+uses the same projection/preflight. No prefix or public model list is inferred;
+the existing audio, hosted-Tool and source-authorization restrictions remain.
+
+This is a deliberate **behavior break for previously implicitly permitted
+image/PDF requests**, not a new model loop or compatibility path. Model
+capability certification stays Host-owned and model-specific. The positive
+grant is included in the persisted selected-model HMAC fingerprint, so
+adding/revoking a grant fences in-flight attempts bound to the previous
+profile; restore the original certified snapshot or handle affected pending
+media Runs through explicit Host quarantine/migration. False grants use
+`omitempty`, keeping *pre-change text-only* fingerprints stable when
+the Host has no media grants. No Kernel state, SQL schema, local Tool identity,
+Provider ResponseID/Usage accounting or existing settled receipts change.
+
+The Agent-quality report now has an optional content-free, local
+`inputCountObservations.totalDurationMs/maxDurationMs` pair. It is
+report-only and omitted for historical traces; this is not a dataset/profile
+rotation, Provider generation time, cost or billing evidence. Two historical
+real-model measurements are retained as a read-only SHA-256-anchored public
+manifest, never as a replacement or upgrade of the operator-owned raw JSON.
+
 ## 2026-11-08 — Task-Agent pre-interruption failure codes (beta.24 candidate)
 
 The task-agent benchmark Host no longer uses the catch-all

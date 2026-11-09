@@ -8,7 +8,7 @@ func fixtureAnthropicProfiles() model.StaticModelProfiles {
 	all := []string{"low", "medium", "high", "xhigh", "max"}
 	withoutXHigh := []string{"low", "medium", "high", "max"}
 	result := model.StaticModelProfiles{
-		"claude-test":    {StructuredJSONSchema: true, SupportsForcedToolChoice: true, SupportsSamplingWhenEffortOmitted: true},
+		"claude-test":    {StructuredJSONSchema: true, SupportsForcedToolChoice: true, SupportsSamplingWhenEffortOmitted: true, SupportsImageInput: true, SupportsPDFInput: true},
 		"claude-private": {StructuredJSONSchema: true, SupportsForcedToolChoice: true},
 	}
 	for _, id := range []string{"claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5",
