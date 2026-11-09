@@ -5,6 +5,10 @@ machine, Store and existing `model.Client` contract do not depend on any
 model vendor. The standalone module has no compatibility alias in Core and
 introduces no Kernel schema, runtime worker, or global registry.
 
+For the exact distinction between SDK-implemented protocols, Host-certified
+model permissions and features not implemented yet, see the
+[Provider capability matrix](provider-capability-matrix.md).
+
 ## Components and extension contract
 
 | Package | Responsibility |
@@ -119,7 +123,9 @@ Example **Host-owned data** (not installed by the SDK):
     "StructuredJSONSchema": true,
     "EffortLevels": ["low", "medium", "high"],
     "SupportsSamplingWhenEffortOmitted": false,
-    "SupportsForcedToolChoice": true
+    "SupportsForcedToolChoice": true,
+    "SupportsImageInput": false,
+    "SupportsPDFInput": false
   }
 }
 ```
@@ -143,6 +149,19 @@ verified capabilities, endpoint, credential or Host binding *does* cause the
 Agent's existing `ErrProviderBindingMismatch` fail-closed recovery fence.
 There is no silent fallback, policy downgrade or second retry protocol. Do not
 mutate a snapshot from another goroutine while the Host loader is reading it.
+
+**Model-specific image/PDF admission:** `SupportsImageInput` and
+`SupportsPDFInput` are independent positive Host grants for the exact
+model binding. An unlisted model, false/omitted flag, or a PDF supplied to an
+image-only model fails **before Unary, SSE or OpenAI native Count HTTP** with
+`model.ErrCapabilityUnavailable`; text-only requests remain usable without
+the flags. These grants do not implement media upload, hosted Tools, or
+referenced audio, and do not attest URL/FileID authorization. The existing
+ordered image/PDF wire encoder remains mandatory. The selected model's
+Provider HMAC covers true grants and rotates if they change; omitted/false
+grants retain the pre-change text-only fingerprint to avoid invalidating
+unrelated pending work. Hosts should separately certify actual upstream
+model/proxy support and avoid granting an unverified route.
 
 **Effort and sampling:** The immutable
 `model.Request.ModelOptions` accepts `{"reasoning":{"effort":"high"}}`
@@ -600,6 +619,14 @@ references. Each media block has a required MIME and exactly
 one `MediaSource`: a Host-authorized HTTPS URL or a
 Provider-scoped uploaded File ID. No raw base64/data URI or
 implicit HTTP download is stored or performed in the Runtime.
+
+Before either adapter sends image/PDF input, the selected model must
+have matching positive Host-certified `SupportsImageInput` /
+`SupportsPDFInput` flags. This is separate from the Provider's support
+for the *wire format*; unverified advanced input never receives a network
+request, including native Count. Text-only requests are unchanged. This
+is a pre-stable capability hard cut; see
+[breaking changes](breaking-changes.md).
 
 OpenAI Responses input emits ordered `input_text`,
 `input_image` (`image_url`/`file_id`), and `input_file`

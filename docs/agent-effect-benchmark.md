@@ -2,6 +2,44 @@
 
 **Status:** opt-in beta.24 development suite (2026-11-07). Not a general Agent benchmark, leaderboard, or release gate. A first full official OpenAI real-model run has now **attempted all 40 cases**, with **37 passed / 3 failed** (92.5% of attempted samples, overall report status `failed`). This is a single run of one evidence task family, not a general-model score. See [first complete run audit](audits/2026-11-07-first-real-agent-quality-40.md). This historical result predates the later candidate Tool and native input-counting contracts; it is not evidence of improved performance under those profiles.
 
+## Historical evidence anchors and count-latency observation (round 1)
+
+The read-only public manifest
+`benchmarks/agent-quality-anchors-v1.json` anchors the **original,
+dirty-source complete 37/40** observation and the separately verified
+**clean-source 1/1 distractor-05 pilot**, with original JSON SHA-256,
+dataset hash, selected model/configuration, source revision and actual
+coverage/latency/call totals. It never copies original task/report bodies,
+tokens, replay material or credentials. The two entries have different
+quality dataset hashes and reasoning/output ceilings: they are historical
+facts, **not a valid same-profile A/B improvement**. Verify the bounded
+manifest without network or credentials:
+
+```sh
+make agent-quality-anchor-check
+# Only when the original ignored reports are present; read-only:
+python3 scripts/agent_quality_anchors.py --evidence-dir artifacts/agent-baselines
+```
+
+The explicit evidence-directory variant captures each original file **once**
+with a fixed size bound, then verifies the SHA-256, strict report protocol
+and public facts against the **same in-memory byte snapshot**. Concurrent
+replacement of the path cannot make the checker parse different bytes after
+hashing; missing, modified or malformed reports produce controlled failures.
+Ordinary
+CI only validates the checked-in public manifest, as original private
+evidence is not distributed. New quality reports optionally record the
+monotonic Count() downcall total and maximum duration in milliseconds,
+including local denials, separately from sampled model-call durations and
+task wall time. Old reports omit the pair and remain readable.
+Counter-attempt timing does **not** certify physical HTTP calls, model
+generation latency, monetary price, or causal saved time. A new timing pair is
+accepted only when `maxDurationMs <= totalDurationMs <= attempts * maxDurationMs`,
+with bounded nonnegative integers; an impossible sum is rejected before
+publishing a new report. Historical reports lacking timing remain readable
+without fabricated zero measurements. See the
+[independent audit remediation](audits/2026-11-08-provider-quality-independent-remediation.md).
+
 ## Third official one-case pilot — native count passed, Tool budget exhausted (2026-11-08)
 
 On clean `43f42d6` under the original v2 manifest
