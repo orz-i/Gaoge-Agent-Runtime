@@ -65,6 +65,10 @@ func TestModelProfileFingerprintScopesOnlySelectedModelAndNoLegacyBridge(t *test
 			SupportsSamplingWhenEffortOmitted: true,
 		}
 		exact := FingerprintModelBinding(root, "model-a", original, true)
+		if protocol == "openai.responses.v1" &&
+			exact != "586e81772670e81158a97352ac2759532baf923fae6089e96d7af0624ae0ca75" {
+			t.Fatal("adding absent media grants changed the original text-only persisted model binding")
+		}
 		if exact == unknown || exact != FingerprintModelBinding(root, "model-a", same, true) {
 			t.Fatal("selected model identity not bound canonically")
 		}
@@ -75,6 +79,14 @@ func TestModelProfileFingerprintScopesOnlySelectedModelAndNoLegacyBridge(t *test
 		} {
 			if exact == FingerprintModelBinding(root, "model-a", changed, true) {
 				t.Fatalf("selected model's capability change did not revoke pending execution grant: %+v", changed)
+			}
+		}
+		for _, altered := range []model.Capabilities{
+			func() model.Capabilities { next := original; next.SupportsImageInput = true; return next }(),
+			func() model.Capabilities { next := original; next.SupportsPDFInput = true; return next }(),
+		} {
+			if exact == FingerprintModelBinding(root, "model-a", altered, true) {
+				t.Fatal("media capability grant changed without rotating selected model binding")
 			}
 		}
 		if exact == FingerprintModelBinding(root, "model-b", original, true) ||

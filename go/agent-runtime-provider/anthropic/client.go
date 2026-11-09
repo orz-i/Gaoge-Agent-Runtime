@@ -153,6 +153,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	if name == "" {
 		return prepared{}, ErrUnsupported
 	}
+	if err := providerhttp.RequireMediaCapabilities(request.Messages, c.profiles[name]); err != nil {
+		return prepared{}, errors.Join(ErrUnsupported, err)
+	}
 	if len(options.Sampling) != 0 && (options.Effort != "" ||
 		!c.profiles[name].SupportsSamplingWhenEffortOmitted) {
 		// No sampled omitted-effort request is allowed until the Host

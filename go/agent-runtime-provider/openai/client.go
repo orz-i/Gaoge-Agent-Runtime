@@ -140,6 +140,9 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 		return prepared{}, ErrUnsupported
 	}
 	profile := c.profiles[name]
+	if err := providerhttp.RequireMediaCapabilities(request.Messages, profile); err != nil {
+		return prepared{}, errors.Join(ErrUnsupported, err)
+	}
 	if len(options.Sampling) != 0 &&
 		(options.Effort != "" && options.Effort != "none" ||
 			options.Effort == "" && !profile.SupportsSamplingWhenEffortOmitted) {
