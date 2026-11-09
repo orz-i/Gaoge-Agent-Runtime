@@ -108,40 +108,19 @@ func (runner *Runner) inspectRelatedCancellation(ctx context.Context, turn Turn,
 			return nil, ErrApplicationOutcomeUnknown
 		}
 	}
-	interactions, err := runner.store.ListInteractions(ctx, turn.ID)
+	// Cancellation and Refresh/Resume must accept the exact same Host
+	// response proof. Scope is the original affected set; a missing
+	// RunRelation index widens only read-only admission, never writes.
+	unverified, err := runner.unverifiedResolvedInteraction(ctx, turn.ID, func(ownerID string) bool {
+		_, targeted := targetInvocations[ownerID]
+		return targeted
+	})
 	if err != nil {
 		return nil, err
 	}
-	var items []Item
-	itemsLoaded := false
-	for _, interaction := range interactions {
-		if _, target := targetInvocations[interaction.InvocationID]; !target {
-			continue
-		}
-		if interaction.Status != InteractionResolved {
-			continue
-		}
-		owner, loadErr := runner.store.GetInvocation(ctx, interaction.InvocationID)
-		if loadErr != nil {
-			return nil, loadErr
-		}
-		if owner.TurnID != turn.ID {
-			return nil, ErrConflict
-		}
-		if owner.Status != InvocationRunning {
-			continue
-		}
-		if !itemsLoaded {
-			items, err = listAllItems(ctx, runner.store, turn.ID)
-			if err != nil {
-				return nil, err
-			}
-			itemsLoaded = true
-		}
-		if !hasVerifiedInteractionResponse(items, interaction, owner) {
-			// No cancellation or budget side effects have been attempted.
-			return nil, ErrConflict
-		}
+	if unverified {
+		// No cancellation or budget side effects have been attempted.
+		return nil, ErrConflict
 	}
 	// A descendant Run without a Harness Invocation might be an application-
 	// owned or externally delegated execution with incomplete relation data.

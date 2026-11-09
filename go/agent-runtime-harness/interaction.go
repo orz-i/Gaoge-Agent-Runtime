@@ -593,6 +593,20 @@ func interactionOwnersRunning(turn Turn, invocation Invocation) bool {
 // Kernel Run snapshots cannot project a waiting Turn to running while this
 // independent, persisted Harness effect boundary remains unresolved.
 func (runner *Runner) resolvedInteractionClaimPending(ctx context.Context, turnID string, invocationID string) (bool, error) {
+	return runner.unverifiedResolvedInteraction(ctx, turnID, func(ownerID string) bool {
+		return invocationID == "" || ownerID == invocationID
+	})
+}
+
+// unverifiedResolvedInteraction is the shared read-only proof for both
+// continuation admission and cancellation preflight. A Resolved Interaction
+// whose original Running owner lacks an exact, committed business receipt
+// is still an unknown physical Host effect. The caller chooses its scope,
+// never the proof semantics. This method does not mutate the owner or
+// retire a physical dispatch/cancellation intent.
+func (runner *Runner) unverifiedResolvedInteraction(
+	ctx context.Context, turnID string, inScope func(string) bool,
+) (bool, error) {
 	interactions, err := runner.store.ListInteractions(ctx, turnID)
 	if err != nil {
 		return false, err
@@ -600,7 +614,7 @@ func (runner *Runner) resolvedInteractionClaimPending(ctx context.Context, turnI
 	var items []Item
 	itemsLoaded := false
 	for _, interaction := range interactions {
-		if interaction.Status != InteractionResolved || (invocationID != "" && interaction.InvocationID != invocationID) {
+		if interaction.Status != InteractionResolved || (inScope != nil && !inScope(interaction.InvocationID)) {
 			continue
 		}
 		owner, loadErr := runner.store.GetInvocation(ctx, interaction.InvocationID)
