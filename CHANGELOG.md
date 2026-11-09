@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Host Interaction response-proof convergence (2026-11-09): cancellation
+  preflight and Refresh/Resume now reuse one read-only, exact-owner and
+  exact-business-receipt check for a running resolved Interaction. The
+  cancellation path retains its separately scoped write-capable CAS,
+  unknown-effect fence, and conservative missing-RunRelation admission.
+  New status/forged-receipt/foreign-owner/sibling tests prevent a resumed
+  business effect from being mistaken for safe cancellation. No Kernel,
+  Provider, persistence, status, or public API change. See the
+  [governance record](docs/audits/2026-11-09-host-interaction-receipt-proof-convergence.md).
+
 - Harness native composite projection convergence (2026-11-09): Team,
   GroupChat and Workflow now each have one private frozen-Invocation input
   projector for root/child/retry Start requests, instead of duplicated

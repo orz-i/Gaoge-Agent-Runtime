@@ -198,6 +198,19 @@ can use the existing Host-composed `ApplicationCapabilityExecutor`; there
 is no unverified generic FeatureDriver registry. See
 [ADR 0012](adr/0012-host-selected-capabilities-and-external-model-providers.md).
 
+## Resolved Interaction proof and cancellation authority
+
+A resolved Host business Interaction is an **in-flight effect claim** until
+the original running Invocation has an exact, verified durable response
+receipt. Harness Refresh/Resume and cancellation read preflight use the
+same private read-only proof, scoped to the relevant Invocation owners.
+A missing RunRelation registry may conservatively broaden read checks,
+but never the set of waiting sibling Invocations that a post-intent CAS
+can mutate. The actual write-capable cancellation claim, unique
+continuation claim, physical Dispatch Grant and Kernel control receipts
+remain separate; a verified Host callback is **not** a completed Runtime
+continuation. See the [receipt-proof convergence governance record](audits/2026-11-09-host-interaction-receipt-proof-convergence.md).
+
 ## Indexed Harness child admission and parent liveness
 
 A child `Start*Invocation` must name an existing, same-Turn parent Item.
