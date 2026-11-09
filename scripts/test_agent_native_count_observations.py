@@ -36,6 +36,56 @@ class NativeInputCountObservationsTests(unittest.TestCase):
         self.assertNotIn("因计数失败导致", lines)
         self.assertNotIn("Token 费用=", lines)
 
+    def test_optional_count_side_latency_is_bounded_and_not_a_physical_http_claim(self):
+        report, sample = seeded_sample()
+        counts = sample["inputCountObservations"]
+        counts.update(totalDurationMs=84, maxDurationMs=62)
+        baseline.accept_event(report, {"type": "sample", "sample": sample})
+        baseline.validate_report(report)
+        text = baseline.render_markdown(report)
+        self.assertIn("原生输入计数器耗时", text)
+        self.assertIn("84 ms", text)
+        self.assertIn("62 ms", text)
+        self.assertIn("不证明 HTTP 请求发生", text)
+
+        for name, mutation in {
+            "only-total": lambda v: v.update(totalDurationMs=1),
+            "only-max": lambda v: v.update(maxDurationMs=1),
+            "negative": lambda v: v.update(totalDurationMs=-1, maxDurationMs=0),
+            "boolean": lambda v: v.update(totalDurationMs=True, maxDurationMs=1),
+            "fractional": lambda v: v.update(totalDurationMs=1.5, maxDurationMs=1),
+            "inverted": lambda v: v.update(totalDurationMs=1, maxDurationMs=2),
+            "unbounded": lambda v: v.update(totalDurationMs=3_600_001, maxDurationMs=1),
+        }.items():
+            with self.subTest(name=name):
+                invalid_report, invalid_sample = seeded_sample()
+                mutation(invalid_sample["inputCountObservations"])
+                with self.assertRaisesRegex(baseline.ProtocolFailure, "invalid_input_count_observations"):
+                    baseline.accept_event(invalid_report, {"type": "sample", "sample": invalid_sample})
+
+    def test_count_timing_sum_is_bounded_by_attempts_times_max(self):
+        # Three measured calls whose maximum is 1 ms cannot total 100 ms.
+        # Exhaustive small integer combinations form a separate oracle for
+        # accepted timing tuples; no provider/network request is needed.
+        for attempts in range(1, 5):
+            for maximum in range(0, 9):
+                for total in range(0, 17):
+                    report, sample = seeded_sample()
+                    observed = sample["inputCountObservations"]
+                    observed.update(attempts=attempts, accepted=attempts,
+                                    unavailable=0, totalDurationMs=total,
+                                    maxDurationMs=maximum)
+                    expected_valid = maximum <= total <= attempts * maximum
+                    if expected_valid:
+                        baseline.accept_event(report, {"type": "sample", "sample": sample})
+                        self.assertEqual(
+                            report["samples"][0]["inputCountObservations"]["totalDurationMs"], total)
+                    else:
+                        with self.assertRaisesRegex(
+                                baseline.ProtocolFailure, "invalid_input_count_observations"):
+                            baseline.accept_event(report, {"type": "sample", "sample": sample})
+                        self.assertEqual(report["samples"], [])
+
     def test_missing_optional_on_historical_report_is_not_backfilled(self):
         report, sample = seeded_sample()
         del sample["inputCountObservations"]

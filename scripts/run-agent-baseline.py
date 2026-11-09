@@ -878,6 +878,29 @@ def quality_group_markdown(report):
     return lines
 
 
+def quality_native_count_latency_markdown(report):
+    """Content-free timing of the optional count path, never model-generation latency."""
+    if report.get("configuration", {}).get("suite") != QUALITY_SUITE:
+        return []
+    counted = [s["inputCountObservations"] for s in report["samples"]
+               if "inputCountObservations" in s]
+    if not counted:
+        return []
+    measured = [item for item in counted if {"totalDurationMs", "maxDurationMs"} <= set(item)]
+    if not measured:
+        return ["", "原生计数器延迟：历史报告或未启用计时；不可推断为 0 毫秒。"]
+    return [
+        "", "## 原生输入计数器耗时（独立观测）", "",
+        "- 具备计时的计数样本 %d / %d（总任务样本 %d）；计数器调用 %d 次（含本地拒绝）。" %
+        (len(measured), len(counted), len(report["samples"]),
+         sum(item["attempts"] for item in measured)),
+        "- 调用耗时合计 %d ms；观测到的最慢单次调用 %d ms。" %
+        (sum(item["totalDurationMs"] for item in measured),
+         max(item["maxDurationMs"] for item in measured)),
+        "- 这些是 Count() 调用的本地单调计时，不证明 HTTP 请求发生、模型生成耗时或费用；并发时不可直接从任务总耗时中扣减。"
+    ]
+
+
 def tool_probe_scope_note(probe):
     """Explain observed coverage, not an unobserved cryptographic claim."""
     if (isinstance(probe, dict) and probe.get("status") == "passed" and
@@ -949,6 +972,7 @@ def render_markdown(report):
         lines += ["", "本报告只试运行固定案例 %s，不能给出 40 案例成功率、分组表现或模型排名。" % runner["pilotCaseID"]]
     else:
         lines += quality_group_markdown(report)
+    lines += quality_native_count_latency_markdown(report)
     for sample in report["samples"]:
         if sample["status"] != "failed" or "lastResponseDebug" not in sample:
             continue
@@ -1233,12 +1257,25 @@ def validate_sample_diagnostics(sample):
     if "inputCountObservations" in sample:
         counted = sample["inputCountObservations"]
         allowed = {"attempts", "accepted", "unavailable"}
+        timing = {"totalDurationMs", "maxDurationMs"}
+        recognized = allowed | {"unavailableReasons"} | timing
         if (not isinstance(counted, dict) or
-                set(counted) not in (allowed, allowed | {"unavailableReasons"}) or
+                not allowed <= set(counted) or
+                not set(counted) <= recognized or
+                (set(counted) & timing not in (set(), timing)) or
                 any(type(counted[name]) is not int or not 0 <= counted[name] <= MAX_WIRE_COUNT
                     for name in allowed) or
                 counted["attempts"] == 0 or
                 counted["accepted"] + counted["unavailable"] != counted["attempts"]):
+            raise ProtocolFailure("invalid_input_count_observations")
+        if timing <= set(counted) and (
+                any(type(counted[key]) is not int or not 0 <= counted[key] <= 3_600_000
+                    for key in timing) or
+                counted["maxDurationMs"] > counted["totalDurationMs"] or
+                counted["totalDurationMs"] > counted["attempts"] * counted["maxDurationMs"]):
+            # Every elapsed call is bounded by the reported maximum; even
+            # under concurrency, the sum cannot exceed attempts * maximum.
+            # This also rejects a positive total paired with a zero maximum.
             raise ProtocolFailure("invalid_input_count_observations")
         if "unavailableReasons" in counted:
             reasons = counted["unavailableReasons"]
@@ -1955,14 +1992,28 @@ def validate_report(report):
     return report
 
 
-def read_report(path):
+def read_report_bytes(raw):
+    """Validate a single bounded raw snapshot with the existing strict protocol."""
+    if not isinstance(raw, bytes):
+        raise SafeFailure("invalid_report")
+    if len(raw) > MAX_OUTPUT_BYTES:
+        raise SafeFailure("report_too_large")
     try:
-        if Path(path).stat().st_size > MAX_OUTPUT_BYTES:
-            raise SafeFailure("report_too_large")
-        report = parse_json(Path(path).read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValueError, RecursionError):
+        report = parse_json(raw.decode("utf-8"))
+    except (UnicodeError, ValueError, TypeError, RecursionError):
         raise SafeFailure("invalid_report") from None
     return validate_report(report)
+
+
+def read_report(path):
+    try:
+        # A stat-then-read can race a replaced file and does not bound the
+        # actual read. Open once, read at most the allowed size plus one byte.
+        with Path(path).open("rb") as source:
+            raw = source.read(MAX_OUTPUT_BYTES + 1)
+    except OSError:
+        raise SafeFailure("invalid_report") from None
+    return read_report_bytes(raw)
 
 
 def comparison_markdown(old, new):

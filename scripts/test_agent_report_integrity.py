@@ -5,6 +5,7 @@ the physical HTTP/Agent execution side of the same interface.
 """
 
 import copy
+import json
 from pathlib import Path
 import random
 import tempfile
@@ -30,6 +31,30 @@ def admitted_pilot(context_tokens=16384, service_ceiling=32768, output_tokens=10
 
 
 class PilotReportIntegrityTests(unittest.TestCase):
+    def test_single_snapshot_bytes_match_file_reader_and_remain_bounded(self):
+        report = admitted_pilot()
+        raw = json.dumps(report, ensure_ascii=False).encode("utf-8")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "captured.json"
+            path.write_bytes(raw)
+            self.assertEqual(baseline.read_report_bytes(raw),
+                             baseline.read_report(path))
+            with self.assertRaisesRegex(baseline.SafeFailure, "invalid_report"):
+                baseline.read_report_bytes(b"\xff")
+            with self.assertRaisesRegex(baseline.SafeFailure, "invalid_report"):
+                baseline.read_report_bytes(b'{"schemaVersion":1,"schemaVersion":1}')
+            with self.assertRaisesRegex(baseline.SafeFailure, "invalid_report"):
+                baseline.read_report_bytes("text")
+            too_large = b" " * (baseline.MAX_OUTPUT_BYTES + 1)
+            with self.assertRaisesRegex(baseline.SafeFailure, "report_too_large"):
+                baseline.read_report_bytes(too_large)
+            path.write_bytes(too_large)
+            with self.assertRaisesRegex(baseline.SafeFailure, "report_too_large"):
+                baseline.read_report(path)
+            path.unlink()
+            with self.assertRaisesRegex(baseline.SafeFailure, "invalid_report"):
+                baseline.read_report(path)
+
     def test_model_window_is_not_the_quality_service_ceiling(self):
         # Go EffectiveInputLimit takes min(contextTokens - outputReserve, ceiling).
         # The independent Host admission floor remains at 8192 input tokens.

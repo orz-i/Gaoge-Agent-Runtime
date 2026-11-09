@@ -78,7 +78,9 @@ type recordedInputTokenCounter struct {
 }
 
 func (counter recordedInputTokenCounter) Count(ctx context.Context, request runtimecontext.TokenCountRequest) (int64, error) {
+	started := time.Now()
 	count, err := counter.next.Count(ctx, request)
+	durationMs := time.Since(started).Milliseconds()
 	var countedRequest model.Request
 	decodeErr := json.Unmarshal(request.Payload, &countedRequest)
 	fingerprint, fingerprintErr := inputCountObservationFingerprint(countedRequest)
@@ -87,6 +89,10 @@ func (counter recordedInputTokenCounter) Count(ctx context.Context, request runt
 	defer counter.state.mu.Unlock()
 	observed := &counter.state.inputCounts
 	observed.Attempts++
+	observed.TotalDurationMs += durationMs
+	if durationMs > observed.MaxDurationMs {
+		observed.MaxDurationMs = durationMs
+	}
 	if observed.UnavailableReasons == nil {
 		observed.UnavailableReasons = &inputCountUnavailableReasons{}
 	}
