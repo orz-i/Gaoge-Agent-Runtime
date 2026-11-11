@@ -819,11 +819,15 @@ func applyResponsesCompletedEvent(
 	if err != nil {
 		return err
 	}
-	if output.Text != "" {
-		if !strings.HasPrefix(output.Text, result.responsesEmittedText) {
+	visibleText := output.Text
+	if visibleText == "" && !output.responsesPhased {
+		visibleText = result.Text
+	}
+	if visibleText != "" {
+		if !strings.HasPrefix(visibleText, result.responsesEmittedText) {
 			return errInvalidResponsesPhase
 		}
-		if suffix := strings.TrimPrefix(output.Text, result.responsesEmittedText); suffix != "" {
+		if suffix := strings.TrimPrefix(visibleText, result.responsesEmittedText); suffix != "" {
 			if err := emitResponsesTextDelta(result, onEvent, suffix); err != nil {
 				return err
 			}

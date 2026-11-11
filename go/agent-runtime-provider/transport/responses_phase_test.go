@@ -174,15 +174,19 @@ func TestLegacyDoneReconcilesWithoutCompletionOutput(t *testing.T) {
 				delete(item, "phase")
 			}
 			require.NoError(t, rememberResponsesPhase(result, item, 0))
+			var visible strings.Builder
 			var callback func(GenerateStreamEvent) error
 			if !noCallback {
-				callback = func(GenerateStreamEvent) error { return nil }
+				callback = func(event GenerateStreamEvent) error { visible.WriteString(event.Delta); return nil }
 			}
 			require.NoError(t, applyResponsesTextDeltaEvent(map[string]any{"output_index": 0, "delta": "ans"}, result, callback))
 			require.NoError(t, applyResponsesTextDoneEvent(map[string]any{"output_index": 0, "text": "answer"}, result, "text"))
 			require.NoError(t, applyResponsesTextDoneEvent(map[string]any{"output_index": 0, "text": "answer"}, result, "text"))
 			require.NoError(t, applyResponsesCompletedEvent(AdapterOpenAIResponses, "response.completed", map[string]any{"response": map[string]any{"id": "r"}}, result, callback))
 			require.Equal(t, "answer", result.Text)
+			if !noCallback {
+				require.Equal(t, "answer", visible.String())
+			}
 			require.NoError(t, applyResponsesTextDoneEvent(map[string]any{"output_index": 0, "content_index": 1, "text": "answer"}, result, "text"))
 			require.Equal(t, "answeranswer", result.Text, "distinct identical content blocks remain distinct")
 		}
