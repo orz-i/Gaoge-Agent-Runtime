@@ -113,6 +113,9 @@ func rememberResponsesPhase(result *GenerateOutput, item map[string]any, index i
 		if prior, present := result.responsesItemPhases[id]; present && prior != phase {
 			return errInvalidResponsesPhase
 		}
+		if prior, present := result.responsesItemIndexes[id]; present && prior != index {
+			return errInvalidResponsesPhase
+		}
 		result.responsesItemPhases[id] = phase
 		result.responsesItemIndexes[id] = index
 	}
@@ -170,6 +173,9 @@ func responsesTextPartKey(result *GenerateOutput, event map[string]any) ([2]int,
 	}
 	if id := getString(event["item_id"]); id != "" {
 		if known, ok := result.responsesItemIndexes[id]; ok {
+			if _, present := event["output_index"]; present && index != known {
+				return [2]int{}, errInvalidResponsesPhase
+			}
 			index = known
 		}
 	}

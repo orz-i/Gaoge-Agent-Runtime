@@ -192,3 +192,35 @@ func TestLegacyDoneReconcilesWithoutCompletionOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacySparseCompletionEventSequence(t *testing.T) {
+	for _, omitted := range []bool{true, false} {
+		for _, noCallback := range []bool{true, false} {
+			result := &GenerateOutput{}
+			var visible strings.Builder
+			var callback func(GenerateStreamEvent) error
+			if !noCallback {
+				callback = func(event GenerateStreamEvent) error { visible.WriteString(event.Delta); return nil }
+			}
+			item := phaseFixture(nil, "")
+			item["id"] = "m"
+			if omitted {
+				delete(item, "phase")
+			}
+			events := []map[string]any{
+				{"type": "response.output_item.added", "output_index": 0, "item": item},
+				{"type": "response.output_text.delta", "item_id": "m", "output_index": 0, "content_index": 0, "delta": "ans"},
+				{"type": "response.output_text.done", "item_id": "m", "output_index": 0, "content_index": 0, "text": "answer"},
+				{"type": "response.completed", "response": map[string]any{"id": "r"}},
+			}
+			for _, event := range events {
+				require.NoError(t, applyResponsesStreamEvent(AdapterOpenAIResponses, "", event, "", result, callback))
+			}
+			require.Equal(t, "answer", result.Text)
+			if !noCallback {
+				require.Equal(t, "answer", visible.String())
+			}
+			require.ErrorIs(t, applyResponsesTextDeltaEvent(map[string]any{"item_id": "m", "output_index": 1, "delta": "x"}, result, callback), errInvalidResponsesPhase)
+		}
+	}
+}
