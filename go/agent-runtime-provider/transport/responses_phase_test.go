@@ -1,9 +1,10 @@
 package transport
 
 import (
-	"github.com/stretchr/testify/require"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func phaseFixture(phase any, text string) map[string]any {

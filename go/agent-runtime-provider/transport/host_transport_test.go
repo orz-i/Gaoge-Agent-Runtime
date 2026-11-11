@@ -41,7 +41,11 @@ func TestQuotedTransportWithoutHostPolicyFailsClosed(t *testing.T) {
 	}
 	response, err := (quotedSingleAttemptTransport{}).RoundTrip(request)
 	if response != nil && response.Body != nil {
-		defer response.Body.Close()
+		defer func() {
+			if err := response.Body.Close(); err != nil {
+				t.Errorf("close response body: %v", err)
+			}
+		}()
 	}
 	if !errors.Is(err, ErrHTTPClientRequired) {
 		t.Fatalf("missing policy did not fail closed: %v", err)
