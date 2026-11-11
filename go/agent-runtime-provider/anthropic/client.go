@@ -209,7 +209,7 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 				return prepared{}, ErrUnsupported
 			}
 		}
-		if m.CacheControl != nil {
+		if m.CacheControl != nil || m.ToolResult != nil {
 			return prepared{}, ErrUnsupported
 		}
 		if err := model.ValidateMessage(m); err != nil {

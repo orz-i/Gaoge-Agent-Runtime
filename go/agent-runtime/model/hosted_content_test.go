@@ -79,3 +79,29 @@ func TestRequestBindingValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestToolResultMetadataIsRoleBoundAndCloned(t *testing.T) {
+	message := model.Message{Role: model.RoleTool, ToolCallID: "call", ToolResult: &model.ToolResultMetadata{Name: "lookup", Status: "failed", Error: "failure"}}
+	if err := model.ValidateMessage(message); err != nil {
+		t.Fatal(err)
+	}
+	cloned := model.CloneMessages([]model.Message{message})
+	cloned[0].ToolResult.Error = "changed"
+	if message.ToolResult.Error != "failure" {
+		t.Fatal("clone shared result metadata")
+	}
+	for _, role := range []model.Role{model.RoleUser, model.RoleSystem, model.RoleAssistant} {
+		bad := message
+		bad.Role = role
+		bad.ToolCallID = ""
+		bad.Content = model.TextParts("text")
+		if model.ValidateMessage(bad) == nil {
+			t.Fatal("result metadata accepted outside tool role")
+		}
+	}
+	empty := message
+	empty.ToolResult = &model.ToolResultMetadata{}
+	if model.ValidateMessage(empty) == nil {
+		t.Fatal("empty tool output accepted")
+	}
+}

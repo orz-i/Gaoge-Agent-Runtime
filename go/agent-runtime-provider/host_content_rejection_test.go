@@ -33,6 +33,9 @@ func TestNativeClientsRejectUnresolvedHostContentWithoutNetwork(t *testing.T) {
 		for _, change := range []func(*model.Request){
 			func(r *model.Request) { r.PromptCacheKey = "cache" },
 			func(r *model.Request) { r.PreviousResponseID = "response" },
+			func(r *model.Request) {
+				r.Messages[0] = model.Message{Role: model.RoleTool, ToolCallID: "call", ToolResult: &model.ToolResultMetadata{Name: "tool", Status: "failed", Error: "failed"}}
+			},
 			func(r *model.Request) { r.Messages[0].CacheControl = &model.CacheControl{Type: "ephemeral"} },
 			func(r *model.Request) { r.Messages[0].Content[0].CacheControl = &model.CacheControl{Type: "ephemeral"} },
 			func(r *model.Request) {

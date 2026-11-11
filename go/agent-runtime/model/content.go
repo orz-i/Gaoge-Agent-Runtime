@@ -96,6 +96,11 @@ func ValidateMessage(message Message) error {
 	if jsoncontract.ValidateCanonicalUTF8(message) != nil || len(message.Content) > 64 || !validCacheControl(message.CacheControl) {
 		return ErrInvalidContent
 	}
+	if message.ToolResult != nil {
+		if message.Role != RoleTool || !validBindingValue(message.ToolResult.Name, 512, true) || !validBindingValue(message.ToolResult.Status, 128, true) || len(message.ToolResult.Error) > 65536 || strings.ContainsRune(message.ToolResult.Error, 0) {
+			return ErrInvalidContent
+		}
+	}
 	var nonempty bool
 	for _, part := range message.Content {
 		if err := validatePart(part); err != nil {
@@ -121,7 +126,7 @@ func ValidateMessage(message Message) error {
 		}
 		// May contain only ToolCalls or ProviderReplay, with no visible text.
 	case RoleTool:
-		if message.ToolCallID == "" || len(message.ToolCalls) != 0 || message.ProviderReplay != nil || !nonempty {
+		if message.ToolCallID == "" || len(message.ToolCalls) != 0 || message.ProviderReplay != nil || (!nonempty && (message.ToolResult == nil || strings.TrimSpace(message.ToolResult.Error) == "")) {
 			return ErrInvalidContent
 		}
 	default:

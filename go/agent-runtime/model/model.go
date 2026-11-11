@@ -29,14 +29,22 @@ type ProviderReplay struct {
 	Data     json.RawMessage `json:"data"`
 }
 
+// ToolResultMetadata preserves outcome semantics without duplicating the content.
+type ToolResultMetadata struct {
+	Name   string `json:"name,omitempty"`
+	Status string `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
 // Message is one provider-neutral transcript item consumed by a model.
 type Message struct {
-	CacheControl   *CacheControl   `json:"cacheControl,omitempty"`
-	Role           Role            `json:"role"`
-	Content        []ContentPart   `json:"content"`
-	ToolCalls      []tools.Call    `json:"toolCalls,omitempty"`
-	ToolCallID     string          `json:"toolCallID,omitempty"`
-	ProviderReplay *ProviderReplay `json:"providerReplay,omitempty"`
+	ToolResult     *ToolResultMetadata `json:"toolResult,omitempty"`
+	CacheControl   *CacheControl       `json:"cacheControl,omitempty"`
+	Role           Role                `json:"role"`
+	Content        []ContentPart       `json:"content"`
+	ToolCalls      []tools.Call        `json:"toolCalls,omitempty"`
+	ToolCallID     string              `json:"toolCallID,omitempty"`
+	ProviderReplay *ProviderReplay     `json:"providerReplay,omitempty"`
 }
 
 // Request is one provider-neutral model call.
@@ -290,6 +298,10 @@ func CloneMessages(values []Message) []Message {
 	for index, message := range values {
 		result[index] = message
 		result[index].CacheControl = CloneCacheControl(message.CacheControl)
+		if message.ToolResult != nil {
+			value := *message.ToolResult
+			result[index].ToolResult = &value
+		}
 		result[index].Content = CloneContentParts(message.Content)
 		result[index].ToolCalls = cloneToolCalls(message.ToolCalls)
 		result[index].ProviderReplay = CloneProviderReplay(message.ProviderReplay)
