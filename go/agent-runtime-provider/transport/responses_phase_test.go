@@ -97,3 +97,33 @@ func TestResponsesUnassociatedStreamDeltasWaitForProjection(t *testing.T) {
 	require.Equal(t, "answer", visible.String())
 	require.Equal(t, "answer", result.Text)
 }
+
+func TestResponsesCompletedEmitsMissingTextExactlyOnce(t *testing.T) {
+	for _, partial := range []string{"", "ans"} {
+		t.Run(partial, func(t *testing.T) {
+			result := &GenerateOutput{}
+			var visible strings.Builder
+			callback := func(event GenerateStreamEvent) error { visible.WriteString(event.Delta); return nil }
+			final := phaseFixture("final_answer", "answer")
+			require.NoError(t, rememberResponsesPhase(result, final, 0))
+			if partial != "" {
+				require.NoError(t, applyResponsesTextDeltaEvent(map[string]any{"output_index": 0, "delta": partial}, result, callback))
+			}
+			require.NoError(t, applyResponsesTextDoneEvent(map[string]any{"output_index": 0, "text": "answer"}, result, "text"))
+			event := map[string]any{"response": map[string]any{"output": []any{final}}}
+			require.NoError(t, applyResponsesCompletedEvent(AdapterOpenAIResponses, "response.completed", event, result, callback))
+			require.NoError(t, applyResponsesCompletedEvent(AdapterOpenAIResponses, "response.completed", event, result, callback))
+			require.Equal(t, "answer", visible.String())
+			require.Equal(t, "answer", result.Text)
+		})
+	}
+}
+
+func TestExplicitResponsesPhaseRequiresPhysicalOutput(t *testing.T) {
+	for _, content := range []any{nil, "text", []any{}, []any{map[string]any{"type": "input_text", "text": "x"}}, []any{map[string]any{"type": "output_text"}}, []any{map[string]any{"type": "output_text", "text": nil}}, []any{map[string]any{"type": "refusal", "refusal": ""}}} {
+		item := phaseFixture("final_answer", "")
+		item["content"] = content
+		_, err := buildGenerateOutputFromParsed(EndpointResponses, map[string]any{"output": []any{item}})
+		require.ErrorIs(t, err, errInvalidResponsesPhase)
+	}
+}

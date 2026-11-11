@@ -785,10 +785,11 @@ type GenerateOutput struct {
 	StopReason          string                 `json:"-"`
 	StopSequence        string                 `json:"-"`
 
-	chatTextBuffer      string
-	responsesPhases     map[int]string
-	responsesItemPhases map[string]string
-	responsesPhased     bool
+	chatTextBuffer       string
+	responsesPhases      map[int]string
+	responsesItemPhases  map[string]string
+	responsesPhased      bool
+	responsesEmittedText string
 }
 
 // GeneratedImage 表示图片生成/编辑接口返回的一张图片。

@@ -43,18 +43,22 @@ func projectResponsesPhase(items []any) (string, bool, bool, error) {
 		if status, present := item["status"]; present && status != "completed" {
 			return "", false, false, errInvalidResponsesPhase
 		}
+		text, err := responsesPhaseMessageText(item)
+		if err != nil {
+			return "", true, refused, err
+		}
 		switch phase {
 		case "commentary":
 			if hasFinal {
 				return "", false, false, errInvalidResponsesPhase
 			}
-			commentary.WriteString(responsesPhaseMessageText(item))
+			commentary.WriteString(text)
 		case "final_answer":
 			if hasFinal {
 				return "", false, false, errInvalidResponsesPhase
 			}
 			hasFinal = true
-			final = responsesPhaseMessageText(item)
+			final = text
 		}
 	}
 	if !phased {
@@ -65,6 +69,9 @@ func projectResponsesPhase(items []any) (string, bool, bool, error) {
 		return "", true, refused, errInvalidResponsesPhase
 	}
 	if hasFinal {
+		if final == "" {
+			return "", true, refused, errInvalidResponsesPhase
+		}
 		return final, true, refused, nil
 	}
 	return commentary.String(), true, refused, nil
@@ -125,15 +132,28 @@ func responsesEventPhase(result *GenerateOutput, event map[string]any) (string, 
 	return phase, nil
 }
 
-func responsesPhaseMessageText(item map[string]any) string {
-	var text strings.Builder
-	for _, raw := range asSlice(item["content"]) {
-		part := asMap(raw)
-		if getString(part["type"]) == "refusal" {
-			text.WriteString(getString(part["refusal"]))
-		} else {
-			text.WriteString(extractContentText(part))
-		}
+func responsesPhaseMessageText(item map[string]any) (string, error) {
+	parts, ok := item["content"].([]any)
+	if !ok || parts == nil {
+		return "", errInvalidResponsesPhase
 	}
-	return text.String()
+	var text strings.Builder
+	for _, raw := range parts {
+		part := asMap(raw)
+		var key string
+		switch getString(part["type"]) {
+		case "output_text":
+			key = "text"
+		case "refusal":
+			key = "refusal"
+		default:
+			return "", errInvalidResponsesPhase
+		}
+		value, ok := part[key].(string)
+		if !ok || (key == "refusal" && value == "") {
+			return "", errInvalidResponsesPhase
+		}
+		text.WriteString(value)
+	}
+	return text.String(), nil
 }

@@ -742,10 +742,14 @@ func emitResponsesTextDelta(
 	if onEvent == nil {
 		return nil
 	}
-	return onEvent(GenerateStreamEvent{
+	if err := onEvent(GenerateStreamEvent{
 		Delta:      delta,
 		ResponseID: result.ResponseID,
-	})
+	}); err != nil {
+		return err
+	}
+	result.responsesEmittedText += delta
+	return nil
 }
 
 func applyResponsesReasoningDeltaEvent(
@@ -797,9 +801,14 @@ func applyResponsesCompletedEvent(
 	if err != nil {
 		return err
 	}
-	if result.Text == "" && output.Text != "" {
-		if err := emitResponsesTextDelta(result, onEvent, output.Text); err != nil {
-			return err
+	if output.Text != "" {
+		if !strings.HasPrefix(output.Text, result.responsesEmittedText) {
+			return errInvalidResponsesPhase
+		}
+		if suffix := strings.TrimPrefix(output.Text, result.responsesEmittedText); suffix != "" {
+			if err := emitResponsesTextDelta(result, onEvent, suffix); err != nil {
+				return err
+			}
 		}
 	}
 	if output.responsesPhased {
