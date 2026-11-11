@@ -48,6 +48,36 @@ func (runner *Runner) requireObservedApplicationParentContinuation(
 		root.ExecutionRefID == "" {
 		return ErrConflict
 	}
+	// A child freezes its ORIGINAL root Run and Attempt when it is first
+	// admitted. The root's current ExecutionRefID can rotate on Retry while
+	// the child and its Host callback remain immutable. Never use today's
+	// root Run to turn a later Attempt's Resume into proof for this child.
+	frozen, err := frozenChildRoot(child)
+	if err != nil || frozen.InvocationID != root.ID ||
+		!validChildAttempt(frozen.attempt()) ||
+		root.Attempt < frozen.Attempt ||
+		(root.Attempt == frozen.Attempt && root.ExecutionRefID != frozen.ExecutionRefID) ||
+		(root.Attempt > frozen.Attempt && root.ExecutionRefID == frozen.ExecutionRefID) {
+		return ErrConflict
+	}
+	// Validate the complete sealed intermediate ancestry as historical
+	// origin, not as a requirement that every ancestor is still live. A
+	// terminal ancestor or a later Retry does not erase a valid original
+	// receipt, but it cannot rewrite the child's frozen root authority.
+	for _, bound := range frozen.Parents {
+		ancestor, loadErr := runner.store.GetInvocation(ctx, bound.InvocationID)
+		if loadErr != nil || ancestor.ID == child.ID || ancestor.TurnID != child.TurnID ||
+			ancestor.ParentItemID == "" {
+			return ErrConflict
+		}
+		ancestorRoot, sourceErr := frozenChildRoot(ancestor)
+		if sourceErr != nil || ancestorRoot.attempt() != frozen.attempt() ||
+			ancestor.Attempt < bound.Attempt ||
+			(ancestor.Attempt == bound.Attempt && ancestor.ExecutionRefID != bound.ExecutionRefID) ||
+			(ancestor.Attempt > bound.Attempt && ancestor.ExecutionRefID == bound.ExecutionRefID) {
+			return ErrConflict
+		}
+	}
 	// The terminal lifecycle Item is emitted only AFTER the committed
 	// Invocation CAS. A Resume grant predating that Item may belong to an
 	// unrelated earlier Agent segment and cannot settle this child result.
@@ -73,10 +103,10 @@ func (runner *Runner) requireObservedApplicationParentContinuation(
 		return ErrApplicationParentContinuationUnverified
 	}
 	receipts := executionDispatchReceiptIndex(items)
-	observed := false
+	observed, foreignAttempt := false, false
 	for _, grant := range items {
 		if grant.ParentItemID != ExecutionDispatchParentItemID ||
-			grant.InvocationID != root.ID || grant.RunID != root.ExecutionRefID ||
+			grant.InvocationID != frozen.InvocationID ||
 			grant.TurnID != child.TurnID || grant.Seq <= childCompletedSeq {
 			continue
 		}
@@ -85,6 +115,13 @@ func (runner *Runner) requireObservedApplicationParentContinuation(
 			return ErrConflict
 		}
 		if phase != "resume" {
+			continue
+		}
+		if grant.RunID != frozen.ExecutionRefID {
+			// The Store may legitimately have rotated the root Attempt.
+			// This newer Resume cannot settle the old child's physical
+			// continuation, even with its own perfectly valid receipt.
+			foreignAttempt = true
 			continue
 		}
 		boundary, settled := VerifiedExecutionDispatchReceipt(grant, receipts[grant.ID])
@@ -97,8 +134,11 @@ func (runner *Runner) requireObservedApplicationParentContinuation(
 			return ErrConflict
 		}
 	}
-	if !observed {
-		return ErrApplicationParentContinuationUnverified
+	if observed {
+		return nil
 	}
-	return nil
+	if foreignAttempt {
+		return ErrConflict
+	}
+	return ErrApplicationParentContinuationUnverified
 }
