@@ -45,6 +45,9 @@ audit: the concrete failure was authorization of a new grant / Retry.
 - **Native exception is not a forged receipt:** the native Kernel Epoch
   takeover or native Start cancellation exception applies only to a truly
   missing Start return, never to a persisted but contradictory receipt.
+  When cancelling a subtree, unrelated owners are filtered by verified
+  target scope **before** the contradictory-receipt fence: an unrelated
+  historical anomaly cannot veto safe scoped cancellation.
 - **Artifact classification:** ordinary Host Interaction Source Artifact
   children remain business data. Physical Dispatch and Cancellation receipts
   require **all** globally indexed children.
@@ -91,6 +94,13 @@ new migration, and no optional old-Store compatibility path.
 - SQL SQLite and isolated real PostgreSQL: same physically admitted original
   Grant, valid baseline versus foreign-Turn contradictory completion across
   Retry, new Grant, terminal Invocation and Turn CAS.
+- Target-scoped cancellation: an unrelated Invocation's malformed historical
+  receipt cannot block cancellation of a disjoint owner/Run, while the same
+  receipt must block full-Turn or physically targeted cancellation. The
+  scope is applied BEFORE the contradiction check, and native Start
+  exceptions remain forbidden for matching corrupted original receipts.
+  `TestGlobalPhysicalCancellationKeepsOriginalTargetScope` and
+  `FuzzGlobalPhysicalCancellationScope` cover this liveness/security pair.
 - Native Kernel Epoch takeover, Handoff and Host callbacks remain governed by
   the original pure proofs; rerun their full suite and relevant Fuzz families.
 - Negative mutation tests should restore the old Turn-local reader using a

@@ -205,13 +205,6 @@ func (runner *Runner) pendingExecutionDispatch(
 		if _, done := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); done {
 			continue
 		}
-		// An absent original receipt may be recoverable by a fenced
-		// native Kernel Start. A PRESENT but contradictory/duplicate
-		// receipt is not an interrupted Start and must never use that
-		// exceptional physical-cancellation permit.
-		if len(receipts[item.ID]) != 0 {
-			return true, nil
-		}
 		var phase struct {
 			Phase         string `json:"phase"`
 			PhysicalRunID string `json:"physicalRunID"`
@@ -225,6 +218,13 @@ func (runner *Runner) pendingExecutionDispatch(
 			if !matchedOwner && (phase.PhysicalRunID == "" || !matchedRun) {
 				continue
 			}
+		}
+		// A foreign Invocation's malformed receipt must not veto a
+		// disjoint targeted cancellation. After the original scope is
+		// established, a present-but-contradictory receipt disables the
+		// otherwise valid native Kernel Start cancellation exception.
+		if len(receipts[item.ID]) != 0 {
+			return true, nil
 		}
 		if (phase.Phase == "start" || phase.Phase == "start-retry") &&
 			runner.nativeAgentStartOwnedByKernel(ctx, item, phase.PhysicalRunID) {
