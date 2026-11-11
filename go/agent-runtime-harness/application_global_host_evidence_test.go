@@ -73,6 +73,27 @@ func TestApplicationHostOriginalSourceGlobalAuthorityInMemory(t *testing.T) {
 		}
 	})
 
+	for _, typeName := range []string{"claim", "done"} {
+		t.Run("foreign-Turn-orphan-"+typeName+"-ID", func(t *testing.T) {
+			fx := newFrozenApplicationParentFixture(t, true, false)
+			orphanID := stableID("hcontclaim", fx.interaction.ID)
+			if typeName == "done" {
+				orphanID = interactionContinuationCompletedItemID(fx.interaction.ID)
+			}
+			orphan := Item{
+				ID: orphanID, ParentItemID: "unrelated-legacy-parent",
+				TurnID: "damaged-historical-turn", Kind: ItemDiagnostic,
+				Status: ItemCompleted, Seq: 1,
+			}
+			fx.store.itemIDs[orphanID] = orphan
+			fx.store.items[orphan.TurnID] = append(fx.store.items[orphan.TurnID], orphan)
+			fx.store.itemChildren[orphan.ParentItemID] = append(fx.store.itemChildren[orphan.ParentItemID], orphan)
+			if got := fx.observe(); !errors.Is(got, ErrConflict) {
+				t.Fatalf("orphan original Continuation %s with malformed Turn/parent authorized recovery: %v", typeName, got)
+			}
+		})
+	}
+
 	t.Run("missing-global-authority-is-not-a-success", func(t *testing.T) {
 		fx := newFrozenApplicationParentFixture(t, true, false)
 		fx.store.itemChildren[sourceID(fx)] = nil
@@ -128,6 +149,17 @@ func FuzzApplicationGlobalHostAuthoritySiblings(f *testing.F) {
 				ID: "foreign-host-receipt-child", ParentItemID: verifiedInteractionResponseItemID(fx.interaction.ID),
 				TurnID: "historical-other-turn", Kind: ItemArtifact,
 			}}
+			contradiction = true
+		}
+		if mask&64 != 0 {
+			orphanID := stableID("hcontclaim", fx.interaction.ID)
+			if mask&128 != 0 {
+				orphanID = interactionContinuationCompletedItemID(fx.interaction.ID)
+			}
+			fx.store.itemIDs[orphanID] = Item{
+				ID: orphanID, ParentItemID: "unrelated-historical-parent",
+				TurnID: "historical-foreign-turn", Kind: ItemDiagnostic,
+			}
 			contradiction = true
 		}
 		result := fx.observe()

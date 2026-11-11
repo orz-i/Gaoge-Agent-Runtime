@@ -164,8 +164,11 @@ parent descendants are sufficient to refute one-receipt uniqueness even if
 more persisted siblings exist. Missing physical receipts remain
 outcome-unverified; present malformed or duplicate receipts are conflicts.
 `VerifiedExecutionDispatchReceipt` remains the **single** typed physical
-receipt predicate; no new persisted ledger, state machine or SQL schema is
-introduced.
+receipt predicate. Since a completed Application never claims a native
+Kernel continuation, the observer also queries both globally deterministic
+`hcontclaim` and `hcontdone` IDs with `Store.GetItem`. A historical orphan
+with a damaged Turn or unrelated ParentItemID is a conflict, not absence
+of a claim. No new persisted ledger, state machine or SQL schema is introduced.
 
 The new permanent regressions cover: (1) Memory cross-Turn Artifact,
 Diagnostic, wrong owner/Run/Status and same-Turn contradictions, plus
@@ -173,8 +176,9 @@ returned-Item cloning, bounded reads, Host Source/response completeness,
 and many ordinary Artifact attachments; (2) SQLite public
 `ReconcileInteraction` and `ResolveInteraction` after the original Host
 callback and a real parent `ResumeTurn`, then a historical foreign-Turn
-corrupt Dispatch, Host Source or Host response child; (3) equivalent isolated
-real PostgreSQL schemas for each. The original positive receipt path,
+corrupt Dispatch, Host Source or Host response child, plus reserved orphan
+Continuation Claim/Done IDs; (3) equivalent isolated real PostgreSQL schemas
+for each. The original positive receipt path,
 unrelated-parent cases and ordinary Artifact allowance remain valid.
 Deliberately reverting to the prior Turn-local reader makes the negative
 tests red. Bounded Go fuzz also explores Host/physical sibling variants.
