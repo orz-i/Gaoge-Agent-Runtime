@@ -156,7 +156,8 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 	}
 	record.Revision = expectedRevision + 1
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if value.Status == harness.InvocationRunning || value.Status == harness.InvocationFailed {
+		if value.Status == harness.InvocationRunning || value.Status == harness.InvocationFailed ||
+			value.Status == harness.InvocationCompleted || value.Status == harness.InvocationCancelled {
 			// Failed projection must not outrun a new physical Start after
 			// the prior attempt's no-effect receipt closes its grant.
 			if lockErr := lockAdmissionTurn(tx, value.TurnID); lockErr != nil {
@@ -172,7 +173,48 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 					return checkErr
 				}
 				if pending {
-					return harness.ErrConflict
+					// Native Kernel cancellation can be authoritative even
+					// while the original Start receipt is unknown, but only
+					// when the owning Turn has already sealed its durable
+					// cancellation intent. The fence remains active until
+					// physical/descendant cleanup is independently proven.
+					if value.Status != harness.InvocationCancelled {
+						return harness.ErrConflict
+					}
+					active, activeErr := pendingCancellationFenceTx(tx, value.TurnID)
+					if activeErr != nil {
+						return activeErr
+					}
+					if !active {
+						return harness.ErrConflict
+					}
+				}
+				// A terminal status is a new authority fact. Compare the
+				// original Store state and durable Host continuation facts
+				// under the same Turn row lock as competing Claim append.
+				var existing invocationRecord
+				if checkErr := tx.Where("id = ?", value.ID).Take(&existing).Error; checkErr != nil {
+					return interactionOwnerLockError(checkErr)
+				}
+				if existing.Status != string(value.Status) &&
+					(value.Status == harness.InvocationCompleted || value.Status == harness.InvocationFailed ||
+						value.Status == harness.InvocationCancelled) {
+					original, conversionErr := invocationFromRecord(existing)
+					if conversionErr != nil {
+						return conversionErr
+					}
+					noEffect, proofErr := originalNoEffectTerminalTx(tx, original)
+					if proofErr != nil {
+						return proofErr
+					}
+					if !harness.ValidInvocationTerminalTransitionWithEvidence(ctx, original, value, noEffect) {
+						return harness.ErrConflict
+					}
+					if value.Status == harness.InvocationCompleted || value.Status == harness.InvocationFailed {
+						if checkErr := checkTerminalProjectionTx(ctx, tx, value.TurnID, value.ID); checkErr != nil {
+							return checkErr
+						}
+					}
 				}
 			}
 		}
@@ -244,6 +286,9 @@ func (store *Store) RetryInvocation(
 		}
 		if pending {
 			return harness.ErrConflict
+		}
+		if err := originalRetryEffectTx(ctx, tx, current); err != nil {
+			return err
 		}
 		// The completed Start receipt proves dispatch, not child termination.
 		// The same Turn lock serializes this nonterminal-child check with
@@ -457,37 +502,6 @@ func (store *Store) GetInteraction(ctx context.Context, id string) (harness.Inte
 		return harness.Interaction{}, mapError(err)
 	}
 	return interactionFromRecord(record)
-}
-
-func (store *Store) UpdateInteraction(
-	ctx context.Context,
-	value harness.Interaction,
-	expectedRevision uint64,
-) (harness.Interaction, error) {
-	if strings.TrimSpace(value.ID) == "" || expectedRevision == 0 {
-		return harness.Interaction{}, harness.ErrInvalidRequest
-	}
-	record, err := interactionToRecord(value)
-	if err != nil {
-		return harness.Interaction{}, err
-	}
-	record.Revision = expectedRevision + 1
-	result := store.db.WithContext(ctx).Model(&interactionRecord{}).
-		Where("id = ? AND revision = ? AND turn_id = ? AND invocation_id = ? AND parent_item_id = ? AND key = ? AND kind = ? AND schema_json = ? AND presentation_json = ?",
-			value.ID, expectedRevision, value.TurnID, value.InvocationID, value.ParentItemID, value.Key, string(value.Kind),
-			record.SchemaJSON, record.PresentationJSON).
-		Updates(map[string]any{
-			"status": record.Status, "response_json": record.ResponseJSON,
-			"revision": record.Revision, "updated_at": record.UpdatedAt,
-		})
-	if result.Error != nil {
-		return harness.Interaction{}, result.Error
-	}
-	if result.RowsAffected != 1 {
-		return harness.Interaction{}, harness.ErrConflict
-	}
-	value.Revision = record.Revision
-	return value, nil
 }
 
 func (store *Store) ResolveInteraction(
@@ -787,28 +801,127 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 	}
 	record := turnToRecord(value)
 	record.Revision = expectedRevision + 1
-	result := store.db.WithContext(ctx).Model(&turnRecord{}).
-		Where("id = ? AND revision = ? AND session_id = ? AND host_turn_kind = ? AND host_turn_id = ? AND config_snapshot_id = ?",
-			value.ID, expectedRevision, value.SessionID, value.HostTurn.Kind, value.HostTurn.ID, value.ConfigSnapshotID).
-		Updates(map[string]any{
-			"context_checkpoint_id": record.ContextCheckpointID, "context_ref_id": record.ContextRefID,
-			"context_generation": record.ContextGeneration, "context_revision": record.ContextRevision,
-			"context_lineage_hash":              record.ContextLineageHash,
-			"context_covered_through_source_id": record.ContextCoveredThroughSourceID,
-			"context_content_hash":              record.ContextContentHash,
-			"status":                            record.Status, "revision": record.Revision, "error_code": record.ErrorCode,
-			"error_detail": record.ErrorDetail, "updated_at": record.UpdatedAt,
-		})
-	if result.Error != nil {
-		return harness.Turn{}, result.Error
+	update := func(db *gorm.DB) error {
+		result := db.Model(&turnRecord{}).
+			Where("id = ? AND revision = ? AND session_id = ? AND host_turn_kind = ? AND host_turn_id = ? AND config_snapshot_id = ?",
+				value.ID, expectedRevision, value.SessionID, value.HostTurn.Kind, value.HostTurn.ID, value.ConfigSnapshotID).
+			Where("(status NOT IN ? OR status = ?)",
+				[]string{string(harness.TurnCompleted), string(harness.TurnFailed), string(harness.TurnCancelled)},
+				string(value.Status)).
+			Updates(map[string]any{
+				"context_checkpoint_id": record.ContextCheckpointID, "context_ref_id": record.ContextRefID,
+				"context_generation": record.ContextGeneration, "context_revision": record.ContextRevision,
+				"context_lineage_hash":              record.ContextLineageHash,
+				"context_covered_through_source_id": record.ContextCoveredThroughSourceID,
+				"context_content_hash":              record.ContextContentHash,
+				"status":                            record.Status, "revision": record.Revision, "error_code": record.ErrorCode,
+				"error_detail": record.ErrorDetail, "updated_at": record.UpdatedAt,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return harness.ErrConflict
+		}
+		return nil
 	}
-	if result.RowsAffected != 1 {
-		return harness.Turn{}, harness.ErrConflict
+	var err error
+	if value.Status == harness.TurnCompleted || value.Status == harness.TurnFailed ||
+		value.Status == harness.TurnCancelled {
+		// The terminal status CAS and the original Host continuation claim
+		// share one Turn row lock. A read-only Refresh cannot terminalize
+		// an unconfirmed physical continuation between proof and COMMIT.
+		err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if lockErr := lockAdmissionTurn(tx, value.ID); lockErr != nil {
+				return lockErr
+			}
+			var current turnRecord
+			if loadErr := tx.Where("id = ?", value.ID).Take(&current).Error; loadErr != nil {
+				return interactionOwnerLockError(loadErr)
+			}
+			if current.Status != string(value.Status) {
+				// The Turn's root Invocation must already carry the
+				// exact native terminal result and this caller must
+				// hold the original unforgeable operation witness.
+				var rootRecord invocationRecord
+				if rootErr := tx.Where("turn_id = ? AND parent_item_id = ?", value.ID, "").
+					Take(&rootRecord).Error; rootErr != nil {
+					return interactionOwnerLockError(rootErr)
+				}
+				root, rootErr := invocationFromRecord(rootRecord)
+				if rootErr != nil {
+					return rootErr
+				}
+				// All child statuses are read under the same owning Turn
+				// lock as their terminal UpdateInvocation CAS. A terminal
+				// root cannot hide a still-running Application/Team child.
+				var ownerRows []invocationRecord
+				if loadErr := tx.Where("turn_id = ?", value.ID).Find(&ownerRows).Error; loadErr != nil {
+					return loadErr
+				}
+				owners := make([]harness.Invocation, 0, len(ownerRows))
+				for _, row := range ownerRows {
+					candidate, conversionErr := invocationFromRecord(row)
+					if conversionErr != nil {
+						return conversionErr
+					}
+					owners = append(owners, candidate)
+				}
+				// An accepted Handoff child may have a separately observed
+				// terminal ChildRunner result. Verify its original Item chain
+				// and physical Start return under this Turn's CAS lock.
+				handoffFacts, handoffErr := terminalHandoffChildEvidenceTx(tx, value.ID, owners)
+				if handoffErr != nil {
+					return handoffErr
+				}
+				if !harness.ValidTurnTerminalDescendants(root, owners, handoffFacts) {
+					return harness.ErrConflict
+				}
+				noEffect, proofErr := originalNoEffectTerminalTx(tx, root)
+				if proofErr != nil {
+					return proofErr
+				}
+				if !harness.ValidTurnTerminalTransitionWithEvidence(
+					ctx, turnFromRecord(current), value, root, noEffect,
+				) {
+					return harness.ErrConflict
+				}
+				// Host callback completion is a separate authority from
+				// native Kernel cancellation. Cancelled retains its own
+				// proven control semantics.
+				if value.Status == harness.TurnCompleted || value.Status == harness.TurnFailed {
+					if checkErr := checkTerminalProjectionTx(ctx, tx, value.ID, ""); checkErr != nil {
+						return checkErr
+					}
+				}
+				// This single pure predicate is also used by Memory. Read
+				// exact physical claims and cancellation intents with the
+				// SAME owning Turn lock as grant/intent AppendItem.
+				active, activeErr := pendingCancellationFenceTx(tx, value.ID)
+				if activeErr != nil {
+					return activeErr
+				}
+				pending, pendingErr := pendingExecutionDispatchTx(tx, value.ID, "")
+				if pendingErr != nil {
+					return pendingErr
+				}
+				if !harness.ValidTurnTerminalEffectProjection(
+					ctx, value.ID, value.Status, pending, active,
+				) {
+					return harness.ErrConflict
+				}
+			}
+			return update(tx)
+		})
+	} else {
+		err = update(store.db.WithContext(ctx))
+	}
+	if err != nil {
+		return harness.Turn{}, err
 	}
 	value.Revision = record.Revision
 	return value, nil
 }
-
 func (store *Store) PutConfigSnapshot(ctx context.Context, value harness.ConfigSnapshot) (harness.ConfigSnapshot, bool, error) {
 	record, err := configToRecord(value)
 	if err != nil {
@@ -1279,6 +1392,22 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	if err = lockTurn(tx, value.TurnID); err != nil {
 		return err
 	}
+	// The original authority namespace and its completion identity are
+	// validated for ALL Item kinds, not only the expected Diagnostic kind.
+	// Otherwise a malformed original or orphan completion can reserve the
+	// immutable ID before any legitimate physical operation commits.
+	if !harness.ValidReservedAuthorityOrigin(value) {
+		return harness.ErrConflict
+	}
+	if harness.IsCancellationCompletionID(value.ID) || harness.IsExecutionDispatchCompletionID(value.ID) {
+		parent, found, loadErr := findItem(tx, value.ParentItemID)
+		if loadErr != nil {
+			return loadErr
+		}
+		if !harness.ValidReservedAuthorityCompletion(value, parent, found) {
+			return harness.ErrConflict
+		}
+	}
 	if value.Kind == harness.ItemDiagnostic && value.Status == harness.ItemStarted {
 		switch value.ParentItemID {
 		case harness.CancellationFenceParentItemID:
@@ -1311,6 +1440,12 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	}
 	value.Seq = seq
 	if err := checkExecutionDispatchCompletionTx(tx, value); err != nil {
+		return err
+	}
+	if err := checkCancellationFenceCompletionTx(tx, value); err != nil {
+		return err
+	}
+	if err := checkInteractionAuthorityAppendTx(tx, value); err != nil {
 		return err
 	}
 	record, err := itemToRecord(value)

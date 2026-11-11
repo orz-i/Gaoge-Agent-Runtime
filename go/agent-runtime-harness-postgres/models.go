@@ -123,16 +123,20 @@ type contextArtifactRecord struct {
 func (contextArtifactRecord) TableName() string { return "agent_harness_context_artifacts" }
 
 type itemRecord struct {
-	ID           string    `gorm:"primaryKey;size:64"`
-	TurnID       string    `gorm:"size:64;not null;uniqueIndex:uk_harness_item_seq,priority:1;index:idx_harness_item_turn"`
-	Seq          uint64    `gorm:"not null;uniqueIndex:uk_harness_item_seq,priority:2"`
-	Kind         string    `gorm:"size:32;not null"`
-	Status       string    `gorm:"size:32;not null"`
-	HostRefKind  string    `gorm:"size:64;not null;default:''"`
-	HostRefID    string    `gorm:"size:128;not null;default:''"`
-	RunID        string    `gorm:"size:64;not null;default:'';index:idx_harness_item_run"`
-	InvocationID string    `gorm:"size:64;not null;default:'';index:idx_harness_item_invocation"`
-	ParentItemID string    `gorm:"size:64;not null;default:''"`
+	ID           string `gorm:"primaryKey;size:64"`
+	TurnID       string `gorm:"size:64;not null;uniqueIndex:uk_harness_item_seq,priority:1;index:idx_harness_item_turn"`
+	Seq          uint64 `gorm:"not null;uniqueIndex:uk_harness_item_seq,priority:2"`
+	Kind         string `gorm:"size:32;not null"`
+	Status       string `gorm:"size:32;not null"`
+	HostRefKind  string `gorm:"size:64;not null;default:''"`
+	HostRefID    string `gorm:"size:128;not null;default:''"`
+	RunID        string `gorm:"size:64;not null;default:'';index:idx_harness_item_run"`
+	InvocationID string `gorm:"size:64;not null;default:'';index:idx_harness_item_invocation"`
+	// Global original-parent lookups must never scan the complete Item
+	// ledger: a corrupted cross-Turn receipt must remain visible without
+	// using an untrusted TurnID as a pre-filter. AutoMigrate adds this
+	// ordinary B-tree index to both new and existing Harness Store tables.
+	ParentItemID string    `gorm:"size:64;not null;default:'';index:idx_harness_item_parent"`
 	PayloadJSON  string    `gorm:"type:text;not null;default:'{}'"`
 	CreatedAt    time.Time `gorm:"not null"`
 	UpdatedAt    time.Time `gorm:"not null"`

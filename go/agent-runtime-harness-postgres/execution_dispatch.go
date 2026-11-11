@@ -10,6 +10,9 @@ import (
 // The caller already holds the owning Turn row's UPDATE lock. A physical
 // dispatch grant and a cancellation intent cannot both win this boundary.
 func checkExecutionDispatchGrantTx(tx *gorm.DB, value harness.Item) error {
+	if _, valid := harness.ValidExecutionDispatchGrantAdmission(value); !valid {
+		return harness.ErrConflict
+	}
 	if err := checkCancellationFenceTx(tx, value.TurnID); err != nil {
 		return err
 	}
@@ -55,7 +58,7 @@ func checkExecutionDispatchGrantTx(tx *gorm.DB, value harness.Item) error {
 // validation and admission with the same Turn row lock as Retry and new
 // grants. Existing ID replay is handled before this check by AppendItem.
 func checkExecutionDispatchCompletionTx(tx *gorm.DB, completion harness.Item) error {
-	if completion.Kind != harness.ItemDiagnostic || completion.ParentItemID == "" {
+	if completion.ParentItemID == "" {
 		return nil
 	}
 	grant, found, err := findItem(tx, completion.ParentItemID)
@@ -72,8 +75,8 @@ func checkExecutionDispatchCompletionTx(tx *gorm.DB, completion harness.Item) er
 	var existing int64
 	// The grant's TurnID is indexed; a different Turn cannot contribute a
 	// settlement, and cross-Turn attempts fail owner validation above.
-	if err := tx.Model(&itemRecord{}).Where("turn_id = ? AND parent_item_id = ? AND kind = ?",
-		grant.TurnID, grant.ID, string(harness.ItemDiagnostic)).Count(&existing).Error; err != nil {
+	if err := tx.Model(&itemRecord{}).Where("parent_item_id = ?",
+		grant.ID).Count(&existing).Error; err != nil {
 		return err
 	}
 	if existing != 0 {
@@ -83,9 +86,11 @@ func checkExecutionDispatchCompletionTx(tx *gorm.DB, completion harness.Item) er
 }
 
 func pendingExecutionDispatchTx(tx *gorm.DB, turnID, invocationID string) (bool, error) {
-	query := tx.Where("turn_id = ? AND kind = ? AND status = ? AND parent_item_id = ?",
-		turnID, string(harness.ItemDiagnostic), string(harness.ItemStarted),
-		harness.ExecutionDispatchParentItemID)
+	// Read EVERY original claim at this reserved parent, including a
+	// previously committed Item with corrupted status/kind. The shared
+	// VerifiedExecutionDispatchReceipt decides validity fail-closed.
+	query := tx.Where("turn_id = ? AND parent_item_id = ?",
+		turnID, harness.ExecutionDispatchParentItemID)
 	if invocationID != "" {
 		query = query.Where("invocation_id = ?", invocationID)
 	}
@@ -99,8 +104,8 @@ func pendingExecutionDispatchTx(tx *gorm.DB, turnID, invocationID string) (bool,
 			return false, err
 		}
 		var records []itemRecord
-		if err := tx.Where("turn_id = ? AND parent_item_id = ? AND kind = ?",
-			start.TurnID, start.ID, string(harness.ItemDiagnostic)).Find(&records).Error; err != nil {
+		if err := tx.Where("parent_item_id = ?",
+			start.ID).Find(&records).Error; err != nil {
 			return false, err
 		}
 		receipts := make([]harness.Item, 0, len(records))
