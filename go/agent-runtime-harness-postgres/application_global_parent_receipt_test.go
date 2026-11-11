@@ -109,6 +109,9 @@ func pr103SQLGlobalOriginalEvidenceSibling(t *testing.T, db *gorm.DB, tc pr103Gl
 	case "host-receipt":
 		parentID = hostReceipt.ID
 		baselineCount = 0
+	case "orphan-claim", "orphan-done":
+		parentID = "unrelated-historical-parent"
+		baselineCount = 0
 	default:
 		t.Fatalf("invalid proof parent: %q", tc.parent)
 	}
@@ -120,6 +123,12 @@ func pr103SQLGlobalOriginalEvidenceSibling(t *testing.T, db *gorm.DB, tc pr103Gl
 	id := fmt.Sprintf("historical-%s-%s-%t", tc.parent, tc.kind, tc.foreignTurn)
 	if tc.reservedHostID {
 		id = "hbizverified_other_historical_authority"
+	}
+	if tc.parent == "orphan-claim" {
+		id = pr103RetryID("hcontclaim", interaction.ID)
+	}
+	if tc.parent == "orphan-done" {
+		id = pr103RetryID("hcontdone", interaction.ID)
 	}
 	insert := db.Exec(`INSERT INTO agent_harness_items
 		(id,turn_id,seq,kind,status,run_id,invocation_id,parent_item_id,payload_json,created_at,updated_at)
@@ -176,6 +185,8 @@ var pr103GlobalOriginalEvidenceCases = []pr103GlobalOriginalEvidenceCase{
 	{"host-source-foreign-Turn-Diagnostic", "host-source", harness.ItemDiagnostic, true, false, false},
 	{"host-source-reserved-ID-Artifact", "host-source", harness.ItemArtifact, true, true, false},
 	{"host-receipt-foreign-Turn-Artifact", "host-receipt", harness.ItemArtifact, true, false, false},
+	{"orphan-foreign-Turn-claim-ID", "orphan-claim", harness.ItemDiagnostic, true, false, false},
+	{"orphan-foreign-Turn-done-ID", "orphan-done", harness.ItemDiagnostic, true, false, false},
 	{"host-source-ordinary-Artifact-remains-data", "host-source", harness.ItemArtifact, true, false, true},
 }
 

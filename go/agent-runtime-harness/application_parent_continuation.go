@@ -62,6 +62,25 @@ func (runner *Runner) requireObservedApplicationParentContinuation(
 	if len(responseChildren) != 0 {
 		return ErrConflict
 	}
+	// A malformed historical Continuation Claim/Done may have an entirely
+	// unrelated parent and a damaged TurnID. These two immutable IDs are
+	// derived from the original Interaction, so a global exact-ID lookup
+	// must also prove their ABSENCE for an Application that never enters
+	// the Kernel continuation protocol. A local ancestry scan cannot.
+	for _, forbiddenID := range []string{
+		stableID("hcontclaim", interaction.ID),
+		interactionContinuationCompletedItemID(interaction.ID),
+	} {
+		_, lookupErr := runner.store.GetItem(ctx, forbiddenID)
+		switch {
+		case lookupErr == nil:
+			return ErrConflict
+		case errors.Is(lookupErr, ErrNotFound):
+			// The original globally reserved continuation Item is absent.
+		default:
+			return lookupErr
+		}
+	}
 	root, err := loadTopLevelInvocation(ctx, runner.store, child.TurnID)
 	if err != nil {
 		return err

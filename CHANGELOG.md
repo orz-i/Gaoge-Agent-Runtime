@@ -11,11 +11,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   siblings across every Turn. Typed `ItemChildProofAll` includes every Kind
   for physical Dispatch/Host receipt parents; `ItemChildProofHostAuthority`
   preserves ordinary application Artifacts while detecting every Diagnostic
-  or reserved Host receipt child of a resolved Interaction Source. The
-  Application recovery observer consumes these global proofs and the
-  existing typed `VerifiedExecutionDispatchReceipt` instead of Turn-local
-  completion indexes. Historical corruption, duplicate and malformed Host
-  or physical receipts fail closed without repeating external effects.
+  or reserved Host receipt child of a resolved Interaction Source. Exact
+  globally unique `hcontclaim`/`hcontdone` identities are also checked for
+  forbidden orphan Continuation facts, regardless of corrupted Turn/parent.
+  The Application observer consumes these global proofs and the existing
+  typed `VerifiedExecutionDispatchReceipt` instead of Turn-local indexes.
+  Historical corruption, duplicate and malformed Host/physical receipts
+  fail closed without repeating external effects.
   Memory maintains a global append-only parent index; PostgreSQL/SQLite
   reuse the existing required `idx_harness_item_parent` migration index, so
   no new database migration or compatibility adapter is introduced.
