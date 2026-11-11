@@ -352,7 +352,9 @@ func applyChatStreamEvent(
 	if err := applyChatStreamReasoningDelta(parsed, result, onEvent); err != nil {
 		return err
 	}
-	mergeChatStreamToolCalls(parsed, result)
+	if err := mergeChatStreamToolCalls(parsed, result); err != nil {
+		return err
+	}
 	if serviceTier := strings.TrimSpace(getString(parsed["service_tier"])); serviceTier != "" {
 		result.Usage.ServiceTier = serviceTier
 	}
@@ -428,27 +430,30 @@ func emitChatUsage(result *GenerateOutput, onEvent func(GenerateStreamEvent) err
 	})
 }
 
-func mergeChatStreamToolCalls(parsed map[string]interface{}, result *GenerateOutput) {
+func mergeChatStreamToolCalls(parsed map[string]interface{}, result *GenerateOutput) error {
 	choice := firstMapItem(asSlice(parsed["choices"]))
 	delta := asMap(choice["delta"])
 	items := asSlice(delta["tool_calls"])
-	if len(items) == 0 {
-		return
-	}
+	indexes := make([]int, len(items))
+	// Validate every index before mutating the output or growing a sparse slice.
 	for fallbackIndex, raw := range items {
 		payload := asMap(raw)
-		index := chatToolCallDeltaIndex(payload, fallbackIndex)
+		value, present := payload["index"]
+		if !present {
+			value = fallbackIndex
+		}
+		index, err := streamIndex(value)
+		if err != nil {
+			return err
+		}
+		indexes[fallbackIndex] = index
+	}
+	for position, raw := range items {
+		index := indexes[position]
 		ensureChatToolCallSlot(result, index)
-		result.ToolCalls[index] = mergeChatToolCallDelta(result.ToolCalls[index], payload)
+		result.ToolCalls[index] = mergeChatToolCallDelta(result.ToolCalls[index], asMap(raw))
 	}
-}
-
-func chatToolCallDeltaIndex(payload map[string]interface{}, fallbackIndex int) int {
-	index := int(toInt64(payload["index"]))
-	if index < 0 {
-		return fallbackIndex
-	}
-	return index
+	return nil
 }
 
 func ensureChatToolCallSlot(result *GenerateOutput, index int) {

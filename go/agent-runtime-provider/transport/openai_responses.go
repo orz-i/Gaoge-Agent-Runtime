@@ -594,13 +594,17 @@ func handleResponsesCreatedStreamEvent(ctx responsesStreamEventContext) {
 }
 
 func handleResponsesOutputItemStreamEvent(ctx responsesStreamEventContext) error {
+	index, err := streamIndexField(ctx.parsed, "output_index")
+	if err != nil {
+		return err
+	}
 	item := asMap(ctx.parsed["item"])
 	if err := mergeResponsesStreamOutputItem(ctx.result, item, ctx.parsed["output_index"], ctx.onEvent); err != nil {
 		return err
 	}
 	if ctx.eventType == "response.output_item.done" && NormalizeAdapter(ctx.adapter) == AdapterOpenAIResponses {
 		ctx.result.ReplayStateJSON = upsertOpenAIResponsesReplayItem(
-			ctx.result.ReplayStateJSON, int(toInt64(ctx.parsed["output_index"])), item,
+			ctx.result.ReplayStateJSON, index, item,
 		)
 	}
 	return nil

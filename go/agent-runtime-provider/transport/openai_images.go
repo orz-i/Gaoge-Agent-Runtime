@@ -1021,10 +1021,16 @@ func emitOpenAIImagePartial(
 	if !ok {
 		return nil
 	}
-	index := int(firstNonZero(
-		getInt64FromPath(parsed, "partial_image_index"),
-		getInt64FromPath(parsed, "index"),
-	))
+	index, err := streamIndexField(parsed, "partial_image_index")
+	if err != nil {
+		return err
+	}
+	if index == 0 {
+		index, err = streamIndexField(parsed, "index")
+		if err != nil {
+			return err
+		}
+	}
 	return onEvent(GenerateStreamEvent{
 		GeneratedImage:        &image,
 		GeneratedImageIndex:   index,

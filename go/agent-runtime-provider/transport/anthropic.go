@@ -1430,7 +1430,10 @@ func applyAnthropicStreamEvent(
 	case "content_block_delta":
 		return applyAnthropicContentBlockDelta(parsed, result, onEvent)
 	case "content_block_stop":
-		index := anthropicContentBlockIndex(parsed)
+		index, err := anthropicContentBlockIndex(parsed)
+		if err != nil {
+			return err
+		}
 		_, _ = markAnthropicStreamToolCallComplete(result, index)
 
 	case "message_delta":
@@ -1469,7 +1472,10 @@ func applyAnthropicContentBlockStart(
 	classifier anthropicToolClassifier,
 ) error {
 	block := asMap(parsed["content_block"])
-	index := anthropicContentBlockIndex(parsed)
+	index, err := anthropicContentBlockIndex(parsed)
+	if err != nil {
+		return err
+	}
 	switch strings.TrimSpace(getString(block[valueTypeF2B37301])) {
 	case valueToolUse6527A599:
 		return applyAnthropicToolUseBlockStart(block, index, rawBody, result, onEvent, classifier)
@@ -1599,7 +1605,11 @@ func applyAnthropicInputJSONDelta(
 	if partial == "" {
 		return nil
 	}
-	toolCall := mergeAnthropicInputJSONDelta(result, anthropicContentBlockIndex(parsed), partial)
+	index, err := anthropicContentBlockIndex(parsed)
+	if err != nil {
+		return err
+	}
+	toolCall := mergeAnthropicInputJSONDelta(result, index, partial)
 	return emitAnthropicServerToolCall(result, onEvent, toolCall)
 }
 
@@ -1800,12 +1810,8 @@ func anthropicStreamError(parsed map[string]interface{}, rawBody string) error {
 	}
 }
 
-func anthropicContentBlockIndex(parsed map[string]interface{}) int {
-	index := int(toInt64(parsed["index"]))
-	if index < 0 {
-		return 0
-	}
-	return index
+func anthropicContentBlockIndex(parsed map[string]interface{}) (int, error) {
+	return streamIndexField(parsed, "index")
 }
 
 func upsertAnthropicStreamToolCall(result *GenerateOutput, index int, item ToolCall) {

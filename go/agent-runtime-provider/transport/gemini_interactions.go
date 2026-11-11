@@ -645,22 +645,22 @@ func (p *geminiInteractionsStreamParser) flush() error {
 }
 
 func (p *geminiInteractionsStreamParser) applyEvent(parsed map[string]interface{}) error {
+	index, err := streamIndexField(parsed, "index")
+	if err != nil {
+		return err
+	}
 	eventType := firstNonEmptyString(getString(parsed[interactionKeyEventType]), getString(parsed[interactionKeyType]))
 	switch eventType {
 	case interactionEventCreated, interactionEventInProgress, interactionEventRequiresAction, interactionEventCompleted:
 		return p.applyLifecycle(eventType, asMap(parsed[interactionKeyInteraction]))
 	case interactionEventStepStart:
-		return p.applyStepStart(eventType, geminiInteractionStreamIndex(parsed), asMap(parsed[interactionKeyStep]))
+		return p.applyStepStart(eventType, index, asMap(parsed[interactionKeyStep]))
 	case interactionEventStepDelta:
-		return p.applyStepDelta(eventType, geminiInteractionStreamIndex(parsed), asMap(parsed[interactionKeyDelta]))
+		return p.applyStepDelta(eventType, index, asMap(parsed[interactionKeyDelta]))
 	case interactionEventStepStop:
-		return p.applyStepStop(geminiInteractionStreamIndex(parsed))
+		return p.applyStepStop(index)
 	}
 	return nil
-}
-
-func geminiInteractionStreamIndex(parsed map[string]interface{}) int {
-	return int(toInt64(parsed["index"]))
 }
 
 func (p *geminiInteractionsStreamParser) applyLifecycle(eventType string, interaction map[string]interface{}) error {
