@@ -5,6 +5,114 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Original-parent proof query convergence (2026-11-10): V7 independent
+  audit found that Host continuation admission and terminal projection
+  pre-filtered original response siblings by claimed Turn, allowing a
+  historical foreign-Turn Diagnostic sibling to disappear from proof.
+  Both SQL readers now use the same bounded, typed, globally unique
+  `parent_item_id` lookup; a Handoff second Delegation with a different
+  Run likewise remains visible. Ordinary Artifact attachments remain
+  business data, not proof. V8 independent performance audit additionally
+  demonstrated a full-table scan without a parent index. The Harness
+  PostgreSQL/SQLite Item schema now adds `idx_harness_item_parent`
+  through the explicit `Migrate` operation, including existing tables.
+  This **is a database index migration**, not a new state machine,
+  compatibility bridge or API. Existing installations must plan an
+  index build before using the globally scoped proof query under load;
+  constructors do not perform migrations. Independent RED/GREEN, query
+  plan, legacy-index-upgrade, mutation and PostgreSQL regressions guard
+  the new read, write and migration contracts. See the systemic proof
+  audit for the exact-source verification and remaining gates.
+
+- Independent receipt audit hard-cut repair (2026-11-10): separate a settled
+  physical Dispatch **operation** from a no-effect receipt for the current
+  Invocation Attempt's **original Start**. Only its exact one-and-only
+  `start`/`start-retry` grant and pre-effect rejection may durably
+  authorize `Failed`; a harmless Approval, Control or Resume failure
+  cannot fail a still-running Kernel Run. The original Turn-serialized
+  Memory and SQL Retry paths require exact Start no-effect or a private
+  terminal Kernel Run/Attempt witness verified through the Runner's
+  original frozen execution identity. Even a historical Failed row with
+  a returned effectful Start plus later harmless Control cannot mint a
+  second physical Run ID. Handoff terminal authority now rejects duplicate,
+  unknown, case-aliased and nested ambiguous JSON in the frozen child
+  input and its original Started/terminal Items, explicitly including
+  the sealed `harnessRoot` identity envelope. The terminal proof now
+  reuses `frozenChildRoot` for the complete original ancestor Attempt
+  chain and compares each intermediate parent's current Run/Attempt under
+  the same Turn lock, so a stale child cannot settle a rotated parent.
+  Missing/unsealed legacy child identity remains fenced with no
+  compatibility bridge. The same strict frozen-source validator also
+  applies when a Handoff child has already reached `Completed`:
+  neither child terminal status nor a mutated ChildRunID/ambiguous
+  input can bypass original Handoff provenance. Non-authority Artifact
+  children remain legal but do not count as Handoff completion votes.
+  Cross-Store, async Delegation and real PostgreSQL two-connection
+  regressions protect both the fail-closed and legitimate positive paths.
+  No separate Kernel state machine, SQL schema or compatibility shim.
+
+- Whole-chain terminal authority protocol hard cut (2026-11-10): direct
+  `Store.UpdateTurn` and `Store.UpdateInvocation` terminal CAS no longer
+  infer execution completion from status, a pending Cancellation Fence, an
+  unrelated sibling's cancel, a Dispatch-return receipt, or a resolved Host
+  business request. Original Kernel/Host operation-scoped terminal witnesses,
+  and exactly verified durable no-effect Start receipts (Failed only),
+  are checked inside the original Turn-serializing Memory/SQL Store CAS.
+  Terminal outcomes are immutable within an Attempt; explicit validated
+  Retry owns Attempt rotation. Terminal Turn also requires its child effects
+  to be closed. For independently executing local Handoff children, the
+  original ChildRunner's terminal snapshot is observed read-only and projected
+  into an immutable, exact-owner Handoff Item; Store accepts it only together
+  with the unique original handoff_start_returned dispatch receipt. Unknown
+  remote routes remain fenced. Five independent P1 failures are permanent
+  Memory/SQL regressions, with authenticated no-effect/Retry positives,
+  Handoff proof corruption tests, and real PostgreSQL dual-connection
+  positive/negative validation. No new Kernel state machine, schema, or
+  compatibility bridge. See the
+  [terminal authority governance record](docs/audits/2026-11-09-receipt-authority-systemic-recurrence.md).
+
+- Systemic Harness Item receipt-authority hard cut (2026-11-09): cancellation
+  settlement can no longer accept a foreign Turn/Run, malformed boundary or
+  contradictory completion; both Memory and SQL transaction Stores validate
+  the same proof before COMMIT and during restart/Recovery. Bind Host callback
+  responses to the entire immutable Waiting/Resolved Interaction source
+  payload, and Runtime continuation claims/completions to the exact original
+  callback receipt, owning Run, ordering and unique completion. Root and child
+  Resume use one read-only classification of callback-returned/unclaimed,
+  claimed-pending, completed and contradictory continuation facts. The
+  original callback capability is scoped to its exact Turn, Invocation and
+  Interaction; a later callback for the same Invocation cannot settle an
+  earlier unresolved continuation. Remove the
+  redundant public Store.UpdateInteraction method: only the original
+  ResolveInteraction CAS may commit a Host business answer. Reserve physical
+  grant/settlement/source ID namespaces, reject duplicate JSON authority keys,
+  validate original phase/physicalRunID, and never filter historically
+  corrupted grants by expected Kind/Status on recovery. Independent
+  projection verification also revealed that an already-claimed, unentered
+  Runtime continuation could be hidden by an unrelated terminal Kernel
+  snapshot. Both public root/child projection and the underlying Memory/SQL
+  terminal Invocation/Turn CAS now share the exact callback/Claim/Completion
+  authority predicate; SQL serializes this with the original Turn row lock.
+  Valid elected callbacks retain private projection context; unrelated
+  Refresh cannot mint terminal status. Direct InvocationCancelled CAS cannot
+  bypass an outstanding physical Start Grant without the owning Turn's
+  already-sealed cancellation intent; native Kernel cancellation retains
+  its original fenced control authority. TurnCompleted/TurnFailed CAS also
+  verify the entire Turn's original Dispatch and Cancellation fences, even
+  when there were no resolved Host Interactions. The original elected native
+  Kernel cancellation path alone can carry an unforgeable internal projection
+  context after physically verifying descendant cleanup; it never makes an
+  incomplete grant appear to have returned. A final cross-product audit
+  includes TurnCancelled alongside Completed/Failed: all three target states
+  consume one pure, original-Turn physical grant/cancellation proof before
+  the atomic Store CAS, never a generic terminal-status shortcut.
+  Preserve existing Kernel/Provider protocols, cancellation CAS, opaque
+  unknown-outcome fences and the closed execution-class model; do not add a
+  second state machine or a backward-compatibility bridge. Historic
+  noncanonical synthetic test receipts are updated, never silently
+  accepted by the production verifier. See the
+  [systemic integrity audit](docs/audits/2026-11-09-receipt-authority-systemic-recurrence.md).
+
 - Host Interaction response-proof convergence (2026-11-09): cancellation
   preflight and Refresh/Resume now reuse one read-only, exact-owner and
   exact-business-receipt check for a running resolved Interaction. The
