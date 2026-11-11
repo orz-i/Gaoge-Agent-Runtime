@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -89,14 +88,13 @@ func seededTerminalProjectionChild(t *testing.T, status InvocationStatus) (*Runn
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This is historical terminal-state fixture setup, not a new
+	// terminal CAS without original physical Kernel proof.
 	created.ParentItemID = "parent-lifecycle-item"
-	if _, _, err = store.CreateInvocation(t.Context(), created); err != nil {
-		t.Fatal(err)
-	}
 	created.Status = status
 	created.UpdatedAt = time.Now().UTC()
-	committed, err := store.UpdateInvocation(context.Background(), created, created.Revision)
-	if err != nil {
+	committed, fresh, err := store.CreateInvocation(t.Context(), created)
+	if err != nil || !fresh {
 		t.Fatal(err)
 	}
 	return &Runner{store: store, clock: systemClock{}}, store, committed

@@ -49,7 +49,7 @@ func TestRefreshInvocationPreservesTerminalChildAgainstStaleRunningRun(t *testin
 			// status rewrite or an unverified retry.
 			running.Status = status
 			running.UpdatedAt = running.UpdatedAt.Add(time.Second)
-			settled, err := store.UpdateInvocation(t.Context(), running, running.Revision)
+			settled, err := harness.TerminalFixtureInvocationForTest(store, running, running.Revision)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -133,7 +133,7 @@ func TestChildAdmissionAndRetryCannotRebindToNewRootAttempt(t *testing.T) {
 				t.Fatal(err)
 			}
 			root.Status, root.ErrorCode = harness.InvocationFailed, "root.attempt_ended"
-			failedRoot, err := store.UpdateInvocation(t.Context(), root, root.Revision)
+			failedRoot, err := harness.TerminalFixtureInvocationForTest(store, root, root.Revision)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,7 +142,7 @@ func TestChildAdmissionAndRetryCannotRebindToNewRootAttempt(t *testing.T) {
 				t.Fatal(err)
 			}
 			turn.Status = harness.TurnFailed
-			if _, err := store.UpdateTurn(t.Context(), turn, turn.Revision); err != nil {
+			if _, err := harness.TerminalFixtureTurnForTest(store, turn, turn.Revision); err != nil {
 				t.Fatal(err)
 			}
 			const newRunID = "root-run-attempt-2"
@@ -178,7 +178,7 @@ func TestChildAdmissionAndRetryCannotRebindToNewRootAttempt(t *testing.T) {
 			// failed, but must still not rotate a Run under root Attempt 2.
 			after.Status = harness.InvocationFailed
 			after.ErrorCode = "child.failed"
-			failedChild, err := store.UpdateInvocation(t.Context(), after, after.Revision)
+			failedChild, err := harness.TerminalFixtureInvocationForTest(store, after, after.Revision)
 			if err != nil {
 				t.Fatal(err)
 			}

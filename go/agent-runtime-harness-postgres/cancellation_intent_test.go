@@ -16,7 +16,7 @@ func TestSQLCancellationFenceSerializesInteractionAndChildAdmission(t *testing.T
 	intent := harness.Item{
 		ID: "sql_fence_intent", TurnID: turn.ID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		ParentItemID: harness.CancellationFenceParentItemID, RunID: invocation.ExecutionRefID,
-		Payload:   json.RawMessage(`{"boundary":"cancel_scope_pending"}`),
+		Payload:   json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"` + invocation.ExecutionRefID + `"}`),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, fresh, err := store.AppendItem(t.Context(), intent); err != nil || !fresh {
@@ -41,8 +41,8 @@ func TestSQLCancellationFenceSerializesInteractionAndChildAdmission(t *testing.T
 		t.Fatalf("child admitted during cancellation: %v", err)
 	}
 	closed := harness.Item{
-		ID: "sql_fence_settled", TurnID: turn.ID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-		ParentItemID: intent.ID, Payload: json.RawMessage(`{"boundary":"cancel_scope_settled"}`),
+		ID: sqlProofFactID("hcancelclosed", intent.ID), TurnID: turn.ID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
+		ParentItemID: intent.ID, RunID: intent.RunID, Payload: json.RawMessage(`{"boundary":"cancel_scope_settled"}`),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, _, err := store.AppendItem(t.Context(), closed); err != nil {
@@ -62,7 +62,7 @@ func TestSQLPhysicalDispatchGrantCompetesWithCancellation(t *testing.T) {
 		ID: "sql_exec_grant", TurnID: turn.ID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		InvocationID: invocation.ID, RunID: invocation.ExecutionRefID,
 		ParentItemID: harness.ExecutionDispatchParentItemID,
-		Payload:      json.RawMessage("{\"phase\":\"resume\"}"), CreatedAt: now, UpdatedAt: now,
+		Payload:      json.RawMessage(`{"phase":"resume","physicalRunID":"` + invocation.ExecutionRefID + `"}`), CreatedAt: now, UpdatedAt: now,
 	}
 	if _, created, err := store.AppendItem(t.Context(), start); err != nil || !created {
 		t.Fatalf("physical grant: created=%v err=%v", created, err)
@@ -73,9 +73,10 @@ func TestSQLPhysicalDispatchGrantCompetesWithCancellation(t *testing.T) {
 		t.Fatalf("second physical grant escaped pending owner: %v", err)
 	}
 	cancel := harness.Item{
-		ID: "sql_exec_cancel", TurnID: turn.ID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
+		ID: "sql_exec_cancel", TurnID: turn.ID, RunID: invocation.ExecutionRefID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		ParentItemID: harness.CancellationFenceParentItemID,
-		Payload:      json.RawMessage("{\"boundary\":\"cancel_scope_pending\"}"),
+		Payload:      json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"` + invocation.ExecutionRefID + `"}`),
 		CreatedAt:    now, UpdatedAt: now,
 	}
 	if _, created, err := store.AppendItem(t.Context(), cancel); err != nil || !created {
@@ -86,13 +87,13 @@ func TestSQLPhysicalDispatchGrantCompetesWithCancellation(t *testing.T) {
 	}
 	for _, receipt := range []harness.Item{
 		{
-			ID: "sql_exec_grant_done", TurnID: turn.ID, InvocationID: start.InvocationID, RunID: start.RunID,
+			ID: sqlProofFactID("hdispatchdone", start.ID), TurnID: turn.ID, InvocationID: start.InvocationID, RunID: start.RunID,
 			Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: start.ID,
 			Payload:   json.RawMessage("{\"boundary\":\"physical_dispatch_returned\"}"),
 			CreatedAt: now, UpdatedAt: now,
 		},
 		{
-			ID: "sql_exec_cancel_done", TurnID: turn.ID, Kind: harness.ItemDiagnostic,
+			ID: sqlProofFactID("hcancelclosed", cancel.ID), TurnID: turn.ID, RunID: cancel.RunID, Kind: harness.ItemDiagnostic,
 			Status: harness.ItemCompleted, ParentItemID: cancel.ID,
 			Payload:   json.RawMessage("{\"boundary\":\"cancel_scope_settled\"}"),
 			CreatedAt: now, UpdatedAt: now,
@@ -118,7 +119,7 @@ func TestSQLApprovalAndAllowanceDispatchClaimsCompeteWithCancellation(t *testing
 				ID: "sql_control_cancel", TurnID: turn.ID, RunID: owner.ExecutionRefID,
 				Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 				ParentItemID: harness.CancellationFenceParentItemID,
-				Payload:      json.RawMessage("{\"boundary\":\"cancel_scope_pending\"}"),
+				Payload:      json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"` + owner.ExecutionRefID + `"}`),
 				CreatedAt:    now, UpdatedAt: now,
 			}
 			if _, fresh, err := store.AppendItem(t.Context(), cancel); err != nil || !fresh {
@@ -128,15 +129,15 @@ func TestSQLApprovalAndAllowanceDispatchClaimsCompeteWithCancellation(t *testing
 				ID: "sql_control_grant", TurnID: turn.ID, InvocationID: owner.ID, RunID: owner.ExecutionRefID,
 				Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 				ParentItemID: harness.ExecutionDispatchParentItemID,
-				Payload:      json.RawMessage("{\"phase\":\"" + phase + "\",\"physicalRunID\":\"delegated-agent-run\"}"),
+				Payload:      json.RawMessage(`{"phase":"` + phase + `","physicalRunID":"` + owner.ExecutionRefID + `"}`),
 				CreatedAt:    now, UpdatedAt: now,
 			}
 			if _, _, err := store.AppendItem(t.Context(), grant); !errors.Is(err, harness.ErrConflict) {
 				t.Fatalf("control %s crossed cancel intent: %v", phase, err)
 			}
 			if _, _, err := store.AppendItem(t.Context(), harness.Item{
-				ID: "sql_control_cancel_closed", TurnID: turn.ID, Kind: harness.ItemDiagnostic,
-				Status: harness.ItemCompleted, ParentItemID: cancel.ID,
+				ID: sqlProofFactID("hcancelclosed", cancel.ID), TurnID: turn.ID, RunID: cancel.RunID,
+				Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: cancel.ID,
 				Payload:   json.RawMessage("{\"boundary\":\"cancel_scope_settled\"}"),
 				CreatedAt: now, UpdatedAt: now,
 			}); err != nil {

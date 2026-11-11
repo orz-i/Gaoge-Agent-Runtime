@@ -52,7 +52,8 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 	intent := harness.Item{
 		ID: "pg_fence_pending", TurnID: turn.ID, Kind: harness.ItemDiagnostic,
 		Status: harness.ItemStarted, ParentItemID: harness.CancellationFenceParentItemID,
-		RunID: invocation.ExecutionRefID, Payload: json.RawMessage(`{"boundary":"cancel_scope_pending"}`),
+		RunID:     invocation.ExecutionRefID,
+		Payload:   json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"` + invocation.ExecutionRefID + `"}`),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, fresh, err := first.AppendItem(t.Context(), intent); err != nil || !fresh {
@@ -85,7 +86,7 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 			InvocationID: invocation.ID, RunID: invocation.ExecutionRefID,
 			Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 			ParentItemID: harness.ExecutionDispatchParentItemID,
-			Payload:      json.RawMessage(`{"phase":"` + phase + `","physicalRunID":"child-agent-run"}`),
+			Payload:      json.RawMessage(`{"phase":"` + phase + `","physicalRunID":"` + invocation.ExecutionRefID + `"}`),
 			CreatedAt:    now, UpdatedAt: now,
 		}
 		if _, _, err = second.AppendItem(t.Context(), grant); !errors.Is(err, harness.ErrConflict) {
@@ -93,8 +94,8 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 		}
 	}
 	closed := harness.Item{
-		ID: "pg_fence_settled", TurnID: turn.ID, Kind: harness.ItemDiagnostic,
-		Status: harness.ItemCompleted, ParentItemID: intent.ID,
+		ID: sqlProofFactID("hcancelclosed", intent.ID), TurnID: turn.ID, Kind: harness.ItemDiagnostic,
+		Status: harness.ItemCompleted, ParentItemID: intent.ID, RunID: intent.RunID,
 		Payload:   json.RawMessage(`{"boundary":"cancel_scope_settled"}`),
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -108,7 +109,7 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 		ID: "pg_real_dispatch_first", TurnID: turn.ID, InvocationID: late.ID, RunID: late.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		ParentItemID: harness.ExecutionDispatchParentItemID,
-		Payload:      json.RawMessage(`{"phase":"start"}`),
+		Payload:      json.RawMessage(`{"phase":"start","physicalRunID":"` + late.ExecutionRefID + `"}`),
 		CreatedAt:    now, UpdatedAt: now,
 	}
 	if _, fresh, err := first.AppendItem(t.Context(), dispatch); err != nil || !fresh {
@@ -120,7 +121,7 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 		t.Fatalf("second connection obtained a concurrent physical grant: %v", err)
 	}
 	if _, _, err := second.AppendItem(t.Context(), harness.Item{
-		ID: "pg_real_dispatch_first_done", TurnID: turn.ID,
+		ID: sqlProofFactID("hdispatchdone", dispatch.ID), TurnID: turn.ID,
 		InvocationID: late.ID, RunID: late.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
 		ParentItemID: dispatch.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),

@@ -105,7 +105,7 @@ func TestPR82RootRetryCannotOverlapLiveNativeChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	root.Status = harness.InvocationFailed
-	failed, err := store.UpdateInvocation(t.Context(), root, root.Revision)
+	failed, err := harness.TerminalFixtureInvocationForTest(store, root, root.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestPR82RootRetryCannotOverlapLiveNativeChild(t *testing.T) {
 		t.Fatal(err)
 	}
 	turn.Status = harness.TurnFailed
-	if _, err := store.UpdateTurn(t.Context(), turn, turn.Revision); err != nil {
+	if _, err := harness.TerminalFixtureTurnForTest(store, turn, turn.Revision); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.RetryInvocation(t.Context(), root.ID, failed.Revision, "pr82-native-root-second", now); !errors.Is(err, harness.ErrConflict) {

@@ -10,16 +10,16 @@ func TestPR82PhysicalDispatchSettlementRequiresUniqueOwnerBoundReceipt(t *testin
 	grant := Item{
 		ID: "dispatch-1", TurnID: "turn-1", InvocationID: "owner-1", RunID: "run-1",
 		Kind: ItemDiagnostic, Status: ItemStarted, ParentItemID: ExecutionDispatchParentItemID,
-		Seq: 10, Payload: json.RawMessage(`{"phase":"start"}`),
+		Seq: 10, Payload: json.RawMessage(`{"phase":"start","physicalRunID":"run-1"}`),
 	}
 	valid := Item{
-		ID: "settled-1", TurnID: grant.TurnID, InvocationID: grant.InvocationID,
+		ID: stableID("hdispatchdone", grant.ID), TurnID: grant.TurnID, InvocationID: grant.InvocationID,
 		RunID: grant.RunID, ParentItemID: grant.ID, Seq: 11,
 		Kind: ItemDiagnostic, Status: ItemCompleted,
 		Payload: json.RawMessage(`{"boundary":"physical_dispatch_rejected"}`),
 	}
 	physical := valid
-	physical.ID = "physical-executed"
+	// Different outcomes share the original grant's deterministic receipt ID.
 	physical.Payload = json.RawMessage(`{"boundary":"physical_dispatch_returned"}`)
 	tests := []struct {
 		name       string
@@ -38,6 +38,14 @@ func TestPR82PhysicalDispatchSettlementRequiresUniqueOwnerBoundReceipt(t *testin
 		{"conflicting-receipts", []Item{physical, valid}, false},
 		{"duplicate-no-effect-receipts", []Item{valid, func() Item { v := valid; v.ID = "another-completion"; v.Seq++; return v }()}, false},
 		{"foreign-and-valid", []Item{valid, func() Item { v := valid; v.ID = "foreign-completion"; v.InvocationID = "other"; return v }()}, false},
+		{"wrong-kind-and-valid", []Item{valid, func() Item {
+			v := valid
+			v.ID = "wrong-kind-child"
+			v.Kind = ItemTool
+			v.Seq++
+			v.Payload = json.RawMessage(`{"unrelated":"not_a_completion"}`)
+			return v
+		}()}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -62,6 +70,52 @@ func TestPR82PhysicalDispatchSettlementRequiresUniqueOwnerBoundReceipt(t *testin
 			}
 			if !wantSafe && !errors.Is(err, ErrConflict) {
 				t.Fatalf("unsafe composite Retry authorized: %v", err)
+			}
+		})
+	}
+}
+
+func TestDispatchReceiptRequiresOriginalRecognizedPhaseAndBoundary(t *testing.T) {
+	grant := Item{
+		ID: "grant-phase", TurnID: "turn-A", InvocationID: "owner-A", RunID: "run-A",
+		Kind: ItemDiagnostic, Status: ItemStarted,
+		ParentItemID: ExecutionDispatchParentItemID, Seq: 5,
+		Payload: json.RawMessage(`{"phase":"start","physicalRunID":"run-A"}`),
+	}
+	receipt := Item{
+		ID: stableID("hdispatchdone", grant.ID), TurnID: grant.TurnID, InvocationID: grant.InvocationID,
+		RunID: grant.RunID, Kind: ItemDiagnostic, Status: ItemCompleted,
+		ParentItemID: grant.ID, Seq: 6,
+		Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),
+	}
+	for _, tc := range []struct {
+		name     string
+		phase    string
+		boundary string
+		want     bool
+	}{
+		{"valid-start", "start", "physical_dispatch_returned", true},
+		{"valid-retry", "start-retry", "feature_start_no_effect", true},
+		{"valid-control", "resolve-subtask-approval", "native_agent_control_no_effect", true},
+		{"valid-handoff", "handoff-start", "handoff_start_returned", true},
+		{"valid-native-recovery", "start", "native_kernel_epoch_recovered", true},
+		{"unknown-stage", "unrecognized", "physical_dispatch_returned", false},
+		{"blank-stage", "", "physical_dispatch_returned", false},
+		{"control-no-effect-on-start", "start", "native_agent_control_no_effect", false},
+		{"start-no-effect-on-resume", "resume", "native_agent_start_no_effect", false},
+		{"handoff-completed-by-control", "grant-call-allowance", "handoff_start_returned", false},
+		{"handoff-completed-as-kernel-snapshot", "handoff-start", "physical_dispatch_returned", false},
+		{"native-recovery-on-resume", "resume", "native_kernel_epoch_recovered", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := grant
+			r := receipt
+			g.Payload = json.RawMessage(`{"phase":"` + tc.phase + `","physicalRunID":"` + g.RunID + `"}`)
+			r.Payload = json.RawMessage(`{"boundary":"` + tc.boundary + `"}`)
+			_, got := VerifiedExecutionDispatchReceipt(g, []Item{r})
+			if got != tc.want {
+				t.Fatalf("phase=%q boundary=%q verified=%t expected=%t",
+					tc.phase, tc.boundary, got, tc.want)
 			}
 		})
 	}

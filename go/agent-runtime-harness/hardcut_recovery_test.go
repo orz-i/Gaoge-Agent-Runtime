@@ -585,7 +585,7 @@ func TestHardcutTerminalApplicationTurnNeverDispatchesAcceptedInvocation(t *test
 	}
 	turn.Status = harness.TurnCancelled
 	turn.UpdatedAt = now
-	if _, err = store.UpdateTurn(t.Context(), turn, turn.Revision); err != nil {
+	if _, err = harness.TerminalFixtureTurnForTest(store, turn, turn.Revision); err != nil {
 		t.Fatal(err)
 	}
 	_, err = newRunner(store).Refresh(t.Context(), turnID)
@@ -652,7 +652,7 @@ func TestHardcutTerminalProjectionNeverRewritesAnotherTerminalOutcome(t *testing
 	cancelled := finished.Turn
 	cancelled.Status = harness.TurnCancelled
 	cancelled.UpdatedAt = fixedClock{}.Now()
-	cancelled, err = store.UpdateTurn(t.Context(), cancelled, cancelled.Revision)
+	cancelled, err = harness.TerminalFixtureTurnForTest(store, cancelled, cancelled.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}

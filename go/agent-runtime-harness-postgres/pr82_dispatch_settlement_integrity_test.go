@@ -68,14 +68,14 @@ func assertPR82DispatchSettlementIntegrity(t *testing.T, store harness.Store, pr
 		ID: "grant-" + turnID, TurnID: turnID, InvocationID: root.ID, RunID: root.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		ParentItemID: harness.ExecutionDispatchParentItemID,
-		Payload:      json.RawMessage(`{"phase":"start","physicalRunID":"team"}`),
+		Payload:      json.RawMessage(`{"phase":"start","physicalRunID":"` + root.ExecutionRefID + `"}`),
 		CreatedAt:    now, UpdatedAt: now,
 	}
 	if _, _, err := store.AppendItem(ctx, grant); err != nil {
 		t.Fatal(err)
 	}
 	receipt := harness.Item{
-		ID: "receipt-" + turnID, TurnID: turnID, InvocationID: root.ID, RunID: root.ExecutionRefID,
+		ID: sqlProofFactID("hdispatchdone", grant.ID), TurnID: turnID, InvocationID: root.ID, RunID: root.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
 		ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),
 		CreatedAt: now, UpdatedAt: now,
@@ -91,7 +91,7 @@ func assertPR82DispatchSettlementIntegrity(t *testing.T, store harness.Store, pr
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			invalid := receipt
-			invalid.ID = tc.name + "-" + turnID
+			// Keep the canonical ID so each negative case tests its actual invalid field.
 			tc.mutate(&invalid)
 			if _, _, err := store.AppendItem(ctx, invalid); !errors.Is(err, harness.ErrConflict) {
 				t.Fatalf("invalid receipt allowed grant settlement: %v", err)
@@ -130,17 +130,19 @@ func assertPR82DispatchSettlementIntegrity(t *testing.T, store harness.Store, pr
 	if err != nil || harness.PendingExecutionDispatch(items, "") {
 		t.Fatalf("sole authoritative outcome did not settle grant: %v", err)
 	}
+	// A physical Start callback returning is not a Kernel terminal
+	// result. This effectful receipt must NOT authorize even the initial
+	// Failed status, let alone a Retry/Attempt rotation.
 	failed := root
 	failed.Status = harness.InvocationFailed
-	failed, err = store.UpdateInvocation(ctx, failed, root.Revision)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := store.UpdateInvocation(ctx, failed, root.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("effectful Start was mistaken for terminal failure: %v", err)
 	}
 	turn.Status = harness.TurnFailed
-	if _, err := store.UpdateTurn(ctx, turn, turn.Revision); err != nil {
-		t.Fatal(err)
+	if _, err := store.UpdateTurn(ctx, turn, turn.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("effectful Start was mistaken for terminal Turn failure: %v", err)
 	}
-	if rotated, retryErr := store.RetryInvocation(ctx, failed.ID, failed.Revision, "next-team-"+turnID, now.Add(time.Second)); !errors.Is(retryErr, harness.ErrConflict) {
+	if rotated, retryErr := store.RetryInvocation(ctx, failed.ID, root.Revision, "next-team-"+turnID, now.Add(time.Second)); !errors.Is(retryErr, harness.ErrConflict) {
 		t.Fatalf("effectful Team start allowed another Attempt: %+v %v", rotated, retryErr)
 	}
 }

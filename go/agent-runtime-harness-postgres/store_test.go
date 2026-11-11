@@ -615,14 +615,17 @@ func TestStorePersistsInteractionResolutionBeforeOwnersResume(t *testing.T) {
 func TestStoreRejectsInteractionResolutionAfterCancellation(t *testing.T) {
 	store := newStore(t)
 	turn, invocation, interaction := createWaitingInteractionFixture(t, store, "cancel")
+	// Model a historical completed cancellation: this test validates
+	// late Interaction.Resolve rejection, not the new authorization to
+	// terminalize a live Invocation/Turn without Kernel control proof.
 	invocation.Status = harness.InvocationCancelled
 	invocation.UpdatedAt = invocation.UpdatedAt.Add(time.Second)
-	if _, err := store.UpdateInvocation(t.Context(), invocation, invocation.Revision); err != nil {
+	if _, err := harnesspostgres.TerminalFixtureInvocationForTest(t.Context(), store, invocation, invocation.Revision); err != nil {
 		t.Fatal(err)
 	}
 	turn.Status = harness.TurnCancelled
 	turn.UpdatedAt = turn.UpdatedAt.Add(time.Second)
-	if _, err := store.UpdateTurn(t.Context(), turn, turn.Revision); err != nil {
+	if _, err := harnesspostgres.TerminalFixtureTurnForTest(t.Context(), store, turn, turn.Revision); err != nil {
 		t.Fatal(err)
 	}
 	interaction.Status = harness.InteractionResolved
@@ -992,14 +995,35 @@ func updateInteractionFixture(
 	now time.Time,
 ) harness.Interaction {
 	t.Helper()
+	// ResolveInteraction, not the removed general UpdateInteraction bypass,
+	// is the only Host response CAS. Model the normal WaitingInput owner
+	// transition before committing the business response.
+	turn, err := store.GetTurn(t.Context(), created.TurnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn.Status = harness.TurnWaitingInput
+	turn.UpdatedAt = now.Add(time.Second)
+	if _, err := store.UpdateTurn(t.Context(), turn, turn.Revision); err != nil {
+		t.Fatal(err)
+	}
+	owner, err := store.GetInvocation(t.Context(), created.InvocationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.Status = harness.InvocationWaitingInput
+	owner.UpdatedAt = now.Add(time.Second)
+	if _, err := store.UpdateInvocation(t.Context(), owner, owner.Revision); err != nil {
+		t.Fatal(err)
+	}
 	created.Status = harness.InteractionResolved
 	created.Response = json.RawMessage(`{"candidateID":"candidate-2"}`)
 	created.UpdatedAt = now.Add(2 * time.Second)
-	updated, err := store.UpdateInteraction(t.Context(), created, 1)
-	if err != nil || updated.Revision != 2 || updated.Status != harness.InteractionResolved {
-		t.Fatalf("update interaction: %#v err=%v", updated, err)
+	resolution, err := store.ResolveInteraction(t.Context(), created, 1)
+	if err != nil || resolution.Interaction.Revision != 2 || resolution.Interaction.Status != harness.InteractionResolved {
+		t.Fatalf("resolve interaction: %#v err=%v", resolution, err)
 	}
-	return updated
+	return resolution.Interaction
 }
 
 func assertInteractionList(

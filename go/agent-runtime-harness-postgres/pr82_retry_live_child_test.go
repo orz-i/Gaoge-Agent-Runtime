@@ -45,21 +45,20 @@ func TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren(t *testin
 func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, prefix string) {
 	t.Helper()
 	scenarios := []struct {
-		name        string
-		class       harness.ExecutionClass
-		status      harness.InvocationStatus
-		receipt     string
-		wantBlocked bool
+		name    string
+		class   harness.ExecutionClass
+		status  harness.InvocationStatus
+		receipt string
 	}{
-		{"native-running", harness.ExecutionTeam, harness.InvocationRunning, "physical_dispatch_returned", true},
-		{"native-waiting", harness.ExecutionTeam, harness.InvocationWaitingInput, "physical_dispatch_returned", true},
-		{"native-paused", harness.ExecutionTeam, harness.InvocationPausedBudget, "physical_dispatch_returned", true},
-		{"app-running", harness.ExecutionApplication, harness.InvocationRunning, "", true},
-		{"accepted-native-start", harness.ExecutionTeam, harness.InvocationAccepted, "physical_dispatch_returned", true},
-		{"accepted-remote-handoff", harness.ExecutionAgent, harness.InvocationAccepted, "handoff_start_returned", true},
-		{"accepted-unknown-outcome", harness.ExecutionAgent, harness.InvocationAccepted, "none", true},
-		{"accepted-never-dispatched", harness.ExecutionTeam, harness.InvocationAccepted, "", false},
-		{"accepted-definitive-no-effect", harness.ExecutionTeam, harness.InvocationAccepted, "physical_dispatch_rejected", false},
+		{"native-running", harness.ExecutionTeam, harness.InvocationRunning, "physical_dispatch_returned"},
+		{"native-waiting", harness.ExecutionTeam, harness.InvocationWaitingInput, "physical_dispatch_returned"},
+		{"native-paused", harness.ExecutionTeam, harness.InvocationPausedBudget, "physical_dispatch_returned"},
+		{"app-running", harness.ExecutionApplication, harness.InvocationRunning, ""},
+		{"accepted-native-start", harness.ExecutionTeam, harness.InvocationAccepted, "physical_dispatch_returned"},
+		{"accepted-remote-handoff", harness.ExecutionAgent, harness.InvocationAccepted, "handoff_start_returned"},
+		{"accepted-unknown-outcome", harness.ExecutionAgent, harness.InvocationAccepted, "none"},
+		{"accepted-never-dispatched", harness.ExecutionTeam, harness.InvocationAccepted, ""},
+		{"accepted-definitive-no-effect", harness.ExecutionTeam, harness.InvocationAccepted, "physical_dispatch_rejected"},
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -99,11 +98,17 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 			}
 			if scenario.receipt != "" {
 				grantID := "grant-" + turnID
+				phase := "start"
+				if scenario.receipt == "handoff_start_returned" {
+					// A remote Handoff grant has its own original physical
+					// phase; it cannot be closed by a generic Start receipt.
+					phase = "handoff-start"
+				}
 				grant := harness.Item{
 					ID: grantID, TurnID: turnID, InvocationID: child.ID, RunID: child.ExecutionRefID,
 					Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 					ParentItemID: harness.ExecutionDispatchParentItemID,
-					Payload:      json.RawMessage(`{"phase":"start","physicalRunID":"child"}`),
+					Payload:      json.RawMessage(`{"phase":"` + phase + `","physicalRunID":"` + child.ExecutionRefID + `"}`),
 					CreatedAt:    now, UpdatedAt: now,
 				}
 				if _, _, err := store.AppendItem(ctx, grant); err != nil {
@@ -115,7 +120,7 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 						t.Fatal(err)
 					}
 					if _, _, err := store.AppendItem(ctx, harness.Item{
-						ID: "receipt-" + turnID, TurnID: turnID, InvocationID: child.ID, RunID: child.ExecutionRefID,
+						ID: sqlProofFactID("hdispatchdone", "grant-"+turnID), TurnID: turnID, InvocationID: child.ID, RunID: child.ExecutionRefID,
 						Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
 						ParentItemID: grantID, Payload: receipt, CreatedAt: now, UpdatedAt: now,
 					}); err != nil {
@@ -123,61 +128,36 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 					}
 				}
 			}
+			// A root failure must be backed by its own original
+			// definite no-effect receipt; the child's returned Start
+			// does not grant terminal authority to the parent.
+			recordTestOriginalNoEffect(t, store, root, now)
 			root.Status = harness.InvocationFailed
 			failed, err := store.UpdateInvocation(ctx, root, root.Revision)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("root failed after exact original no-effect proof: %v", err)
 			}
 			turn.Status = harness.TurnFailed
-			if _, err := store.UpdateTurn(ctx, turn, turn.Revision); err != nil {
-				t.Fatal(err)
+			// All cases here deliberately retain a nonterminal child:
+			// Running, WaitingInput, PausedBudget or Accepted. A root
+			// with a valid no-effect response cannot terminalize its Turn
+			// until the child's own original lifecycle is finished.
+			if _, err := store.UpdateTurn(ctx, turn, turn.Revision); !errors.Is(err, harness.ErrConflict) {
+				t.Fatalf("live child was hidden by no-effect root: child=%s outcome=%s err=%v",
+					scenario.status, scenario.receipt, err)
 			}
-			next := "r2-" + turnID
-			rotated, err := store.RetryInvocation(ctx, root.ID, failed.Revision, next, now.Add(time.Second))
-			if scenario.wantBlocked {
-				if scenario.class == harness.ExecutionApplication {
-					if !errors.Is(err, harness.ErrApplicationOutcomeUnknown) {
-						t.Fatalf("Running Application child did not fence retry: %v", err)
-					}
-				} else if !errors.Is(err, harness.ErrConflict) {
-					t.Fatalf("unresolved native/remote child allowed Attempt rotation: %+v %v", rotated, err)
+			_, err = store.RetryInvocation(ctx, root.ID, failed.Revision, "r2-"+turnID, now.Add(time.Second))
+			if scenario.class == harness.ExecutionApplication && scenario.status == harness.InvocationRunning {
+				if !errors.Is(err, harness.ErrApplicationOutcomeUnknown) && !errors.Is(err, harness.ErrConflict) {
+					t.Fatalf("live Application child permitted parent Retry: %v", err)
 				}
-				unchanged, loadErr := store.GetInvocation(ctx, root.ID)
-				if loadErr != nil || unchanged.Attempt != failed.Attempt || unchanged.ExecutionRefID != failed.ExecutionRefID {
-					t.Fatalf("rejected retry mutated Attempt: %+v %v", unchanged, loadErr)
-				}
-				// Only verified terminal child status permits the parent retry.
-				child.Status = harness.InvocationCompleted
-				child, err = store.UpdateInvocation(ctx, child, child.Revision)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if scenario.receipt == "none" {
-					// A terminal projection alone does not close an unknown
-					// physical grant. Recovery must also persist its real receipt.
-					if _, _, err := store.AppendItem(ctx, harness.Item{
-						ID: "receipt-" + turnID, TurnID: turnID, InvocationID: child.ID, RunID: child.ExecutionRefID,
-						Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-						ParentItemID: "grant-" + turnID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),
-						CreatedAt: now, UpdatedAt: now,
-					}); err != nil {
-						t.Fatal(err)
-					}
-				}
-				rotated, err = store.RetryInvocation(ctx, root.ID, failed.Revision, next, now.Add(time.Second))
-				if scenario.class == harness.ExecutionTeam && scenario.receipt != "physical_dispatch_rejected" {
-					// A Team can leave non-Invocation RunRelation members
-					// executing after its own Harness status becomes terminal.
-					// A terminal Team status without an atomic descendant-drain
-					// proof must not release a new parent Attempt.
-					if !errors.Is(err, harness.ErrConflict) {
-						t.Fatalf("terminal Team effect was treated as descendant completion: %+v %v", rotated, err)
-					}
-					return
-				}
+			} else if !errors.Is(err, harness.ErrConflict) {
+				t.Fatalf("nonterminal native/remote child permitted Retry: %v", err)
 			}
-			if err != nil || rotated.Attempt != 2 || rotated.ExecutionRefID != next {
-				t.Fatalf("safely settled child should allow retry: %+v %v", rotated, err)
+			unchanged, loadErr := store.GetInvocation(ctx, root.ID)
+			if loadErr != nil || unchanged.Attempt != failed.Attempt ||
+				unchanged.ExecutionRefID != failed.ExecutionRefID {
+				t.Fatalf("rejected retry mutated original Attempt: %+v err=%v", unchanged, loadErr)
 			}
 		})
 	}

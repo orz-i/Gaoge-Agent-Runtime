@@ -85,7 +85,7 @@ func assertCompositeRootRetryFence(t *testing.T, store harness.Store, prefix str
 				grantID := "grant-" + turnID
 				grant := harness.Item{ID: grantID, TurnID: turnID, InvocationID: inv.ID, RunID: inv.ExecutionRefID,
 					Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.ExecutionDispatchParentItemID,
-					Payload: json.RawMessage(`{"phase":"start","physicalRunID":"child"}`), CreatedAt: now, UpdatedAt: now}
+					Payload: json.RawMessage(`{"phase":"start","physicalRunID":"` + inv.ExecutionRefID + `"}`), CreatedAt: now, UpdatedAt: now}
 				if _, _, err := store.AppendItem(ctx, grant); err != nil {
 					t.Fatal(err)
 				}
@@ -104,7 +104,7 @@ func assertCompositeRootRetryFence(t *testing.T, store harness.Store, prefix str
 				if err != nil {
 					t.Fatal(err)
 				}
-				receipt := harness.Item{ID: "done-" + turnID, TurnID: turnID, InvocationID: receiptOwner, RunID: receiptRun,
+				receipt := harness.Item{ID: sqlProofFactID("hdispatchdone", grantID), TurnID: turnID, InvocationID: receiptOwner, RunID: receiptRun,
 					Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: grantID,
 					Payload: payload, CreatedAt: now, UpdatedAt: now}
 				_, _, err = store.AppendItem(ctx, receipt)
@@ -125,6 +125,22 @@ func assertCompositeRootRetryFence(t *testing.T, store harness.Store, prefix str
 				}
 			}
 			inv.Status = harness.InvocationFailed
+			if !tc.allow && (tc.receipt == "" || tc.receipt == "physical_dispatch_returned") {
+				// A missing grant or a returned physical Start cannot mint
+				// Failed. Do not stage an unauthorized terminal fixture merely
+				// to exercise the subsequent Retry guard.
+				if _, err := store.UpdateInvocation(ctx, inv, inv.Revision); !errors.Is(err, harness.ErrConflict) {
+					t.Fatalf("unverified physical result committed Failed: %v", err)
+				}
+				turn.Status = harness.TurnFailed
+				if _, err := store.UpdateTurn(ctx, turn, turn.Revision); !errors.Is(err, harness.ErrConflict) {
+					t.Fatalf("unverified physical result committed terminal Turn: %v", err)
+				}
+				if _, err := store.RetryInvocation(ctx, inv.ID, inv.Revision, "r2-"+turnID, now.Add(time.Second)); !errors.Is(err, harness.ErrConflict) {
+					t.Fatalf("unverified original accepted Retry: %v", err)
+				}
+				return
+			}
 			failed, err := store.UpdateInvocation(ctx, inv, inv.Revision)
 			if err != nil {
 				t.Fatal(err)

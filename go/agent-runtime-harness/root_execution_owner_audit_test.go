@@ -83,12 +83,13 @@ func TestRootRetryRequestIDUsesFrozenAttemptDerivation(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			runner, store, turn, first, actor, thread := rootOutputOwnedNativeFixture(t)
 			first.Status = InvocationFailed
-			first, err := store.UpdateInvocation(t.Context(), first, first.Revision)
+			seedCtx := terminalFixtureContext(t.Context(), first, TurnFailed)
+			first, err := store.UpdateInvocation(seedCtx, first, first.Revision)
 			if err != nil {
 				t.Fatal(err)
 			}
 			turn.Status = TurnFailed
-			turn, err = store.UpdateTurn(t.Context(), turn, turn.Revision)
+			turn, err = store.UpdateTurn(seedCtx, turn, turn.Revision)
 			if err != nil {
 				t.Fatal(err)
 			}

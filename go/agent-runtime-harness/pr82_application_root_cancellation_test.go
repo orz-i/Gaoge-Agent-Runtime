@@ -48,8 +48,13 @@ func TestAuditPR82TerminalApplicationRootMustNotHideUnknownChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if root.Turn.Status != harness.TurnCompleted || child.Status != harness.InvocationRunning {
-		t.Fatalf("wrong setup: root=%s child=%s", root.Turn.Status, child.Status)
+	// A root Application result cannot terminalize the Turn while its
+	// child still has an unknown physical Host effect. The original
+	// callback is completed but the Turn must remain nonterminal.
+	rootInvocation, _ := harness.TopLevelInvocation(root)
+	if root.Turn.Status != harness.TurnRunning || rootInvocation.Status != harness.InvocationCompleted ||
+		child.Status != harness.InvocationRunning {
+		t.Fatalf("wrong setup: turn=%s root=%s child=%s", root.Turn.Status, rootInvocation.Status, child.Status)
 	}
 	_, cancelErr := runner.Cancel(t.Context(), root.Turn.ID, "stop descendants")
 	after, err := store.GetInvocation(t.Context(), child.ID)

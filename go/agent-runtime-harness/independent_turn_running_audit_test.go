@@ -133,7 +133,7 @@ func TestIndependentVerifiedInteractionReceiptResumesRunningAgentTurn(t *testing
 	}
 	i.Status = harness.InteractionResolved
 	i.Response = json.RawMessage("{}")
-	if _, err = store.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
+	if _, err = store.ResolveInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
 	inv, err := store.GetInvocation(t.Context(), featureParentInvocationID(tid))

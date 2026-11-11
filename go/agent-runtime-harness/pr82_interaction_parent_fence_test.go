@@ -42,7 +42,7 @@ func (s *pr82TerminateInteractionParentStore) UpdateInvocation(ctx context.Conte
 		return updated, err
 	}
 	parent.Status = InvocationCompleted
-	_, err = s.Store.UpdateInvocation(ctx, parent, parent.Revision)
+	_, err = s.Store.UpdateInvocation(terminalFixtureContext(ctx, parent, TurnCompleted), parent, parent.Revision)
 	s.terminated = err == nil
 	return updated, err
 }
