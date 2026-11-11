@@ -97,7 +97,7 @@ func (store *MemoryStore) GetInvocationByExecutionRefID(_ context.Context, execu
 	return cloneInvocation(value), nil
 }
 
-func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, expectedRevision uint64) (Invocation, error) {
+func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation, expectedRevision uint64) (Invocation, error) {
 	if store == nil || !validInvocation(value) || expectedRevision == 0 {
 		return Invocation{}, ErrInvalidRequest
 	}
@@ -119,6 +119,20 @@ func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, 
 	if terminalInvocationStatus(current.Status) && current.Status != value.Status {
 		return Invocation{}, ErrConflict
 	}
+	if terminalInvocationStatus(value.Status) && current.Status != value.Status &&
+		!ValidInvocationTerminalTransitionWithEvidence(
+			ctx, current, value, VerifiedOriginalStartNoEffect(store.items[value.TurnID], current),
+		) {
+		return Invocation{}, ErrConflict
+	}
+	// This proof is observed and consumed under the SAME Store mutex as
+	// Host continuation Claim append. A prior read-only Refresh cannot
+	// race a newly admitted claim into a terminal Invocation CAS.
+	if (value.Status == InvocationCompleted || value.Status == InvocationFailed) &&
+		current.Status != value.Status &&
+		!store.validTerminalProjectionLocked(ctx, value.TurnID, value.ID) {
+		return Invocation{}, ErrConflict
+	}
 	if current.Status != InvocationRunning && value.Status == InvocationRunning &&
 		ActiveCancellationFence(store.items[value.TurnID]) {
 		return Invocation{}, ErrConflict
@@ -126,8 +140,17 @@ func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, 
 	// A verified no-effect Start can finish its grant just before another
 	// worker takes the next physical grant. Marking Failed must compete with
 	// that admission under the same mutex, not terminalize the new owner.
-	if value.Status == InvocationFailed && PendingExecutionDispatch(store.items[value.TurnID], value.ID) {
-		return Invocation{}, ErrConflict
+	if (value.Status == InvocationFailed || value.Status == InvocationCompleted ||
+		value.Status == InvocationCancelled) &&
+		PendingExecutionDispatch(store.items[value.TurnID], value.ID) {
+		// Terminal projection of physical execution requires its original
+		// receipt. The sole exception is an InvocationCancelled CAS while
+		// an admitted Turn cancellation intent protects the real physical
+		// Kernel stop. This is NOT evidence that the Start itself returned;
+		// the cancellation fence remains until descendant/Kernel proof.
+		if value.Status != InvocationCancelled || !ActiveCancellationFence(store.items[value.TurnID]) {
+			return Invocation{}, ErrConflict
+		}
 	}
 	value.Revision = expectedRevision + 1
 	store.invocations[value.ID] = cloneInvocation(value)
@@ -135,7 +158,7 @@ func (store *MemoryStore) UpdateInvocation(_ context.Context, value Invocation, 
 }
 
 func (store *MemoryStore) RetryInvocation(
-	_ context.Context,
+	ctx context.Context,
 	invocationID string,
 	expectedRevision uint64,
 	nextExecutionRefID string,
@@ -157,7 +180,8 @@ func (store *MemoryStore) RetryInvocation(
 	// grants do not encode a transactional transitive ownership snapshot.
 	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
 		ActiveCancellationFence(store.items[current.TurnID]) ||
-		PendingExecutionDispatch(store.items[current.TurnID], "") {
+		PendingExecutionDispatch(store.items[current.TurnID], "") ||
+		!RetryOriginalOperationEvidenceValid(ctx, store.items[current.TurnID], current) {
 		return Invocation{}, ErrConflict
 	}
 	// Check all potentially executing children, not just unclaimed Host
@@ -303,28 +327,6 @@ func (store *MemoryStore) GetInteraction(_ context.Context, id string) (Interact
 	if !ok {
 		return Interaction{}, ErrNotFound
 	}
-	return cloneInteraction(value), nil
-}
-
-func (store *MemoryStore) UpdateInteraction(
-	_ context.Context,
-	value Interaction,
-	expectedRevision uint64,
-) (Interaction, error) {
-	if store == nil || !validInteraction(value) || expectedRevision == 0 {
-		return Interaction{}, ErrInvalidRequest
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	current, ok := store.interactions[value.ID]
-	if !ok {
-		return Interaction{}, ErrNotFound
-	}
-	if current.Revision != expectedRevision || !sameInteractionIdentity(current, value) {
-		return Interaction{}, ErrConflict
-	}
-	value.Revision = expectedRevision + 1
-	store.interactions[value.ID] = cloneInteraction(value)
 	return cloneInteraction(value), nil
 }
 
@@ -716,7 +718,7 @@ func (store *MemoryStore) GetTurn(_ context.Context, id string) (Turn, error) {
 	return value, nil
 }
 
-func (store *MemoryStore) UpdateTurn(_ context.Context, value Turn, expectedRevision uint64) (Turn, error) {
+func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRevision uint64) (Turn, error) {
 	if store == nil || !validTurn(value) || expectedRevision == 0 {
 		return Turn{}, ErrInvalidRequest
 	}
@@ -728,6 +730,52 @@ func (store *MemoryStore) UpdateTurn(_ context.Context, value Turn, expectedRevi
 	}
 	if current.Revision != expectedRevision || !sameTurnIdentity(current, value) {
 		return Turn{}, ErrConflict
+	}
+	if terminalTurnStatus(current.Status) && current.Status != value.Status {
+		return Turn{}, ErrConflict
+	}
+	if terminalTurnStatus(value.Status) && current.Status != value.Status {
+		var root Invocation
+		roots := 0
+		for _, owner := range store.invocations {
+			if owner.TurnID == value.ID && owner.ParentItemID == "" {
+				roots++
+				root = owner
+			}
+		}
+		owners := make([]Invocation, 0)
+		for _, candidate := range store.invocations {
+			if candidate.TurnID == value.ID {
+				owners = append(owners, candidate)
+			}
+		}
+		if roots != 1 || !ValidTurnTerminalDescendants(root, owners, store.items[value.ID]) ||
+			!ValidTurnTerminalTransitionWithEvidence(
+				ctx, current, value, root, VerifiedOriginalStartNoEffect(store.items[value.ID], root),
+			) {
+			return Turn{}, ErrConflict
+		}
+	}
+	if (value.Status == TurnCompleted || value.Status == TurnFailed ||
+		value.Status == TurnCancelled) && current.Status != value.Status {
+		// The original Host business continuation is not a generic Kernel
+		// terminal projection. This check is needed for Completed/Failed;
+		// Cancelled has its own native control and descendant proof.
+		if (value.Status == TurnCompleted || value.Status == TurnFailed) &&
+			!store.validTerminalProjectionLocked(ctx, value.ID, "") {
+			return Turn{}, ErrConflict
+		}
+		// All three terminal Turn statuses share the same original physical
+		// Grant/Cancel receipt contract under this Store mutex. The private
+		// cancellation context is a capability issued only after Kernel
+		// and descendant cleanup by the elected Cancel caller.
+		if !ValidTurnTerminalEffectProjection(
+			ctx, value.ID, value.Status,
+			PendingExecutionDispatch(store.items[value.ID], ""),
+			ActiveCancellationFence(store.items[value.ID]),
+		) {
+			return Turn{}, ErrConflict
+		}
 	}
 	value.Revision = expectedRevision + 1
 	store.turns[value.ID] = value
@@ -769,6 +817,15 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 	value.Payload = normalizedItemPayload(value.Payload)
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if !ValidReservedAuthorityOrigin(value) {
+		return Item{}, false, ErrConflict
+	}
+	if IsCancellationCompletionID(value.ID) || IsExecutionDispatchCompletionID(value.ID) {
+		parent, found := store.itemIDs[value.ParentItemID]
+		if !ValidReservedAuthorityCompletion(value, parent, found) {
+			return Item{}, false, ErrConflict
+		}
+	}
 	if existing, ok := store.itemIDs[value.ID]; ok {
 		if !sameItemIdentity(existing, value) {
 			return Item{}, false, ErrConflict
@@ -782,6 +839,9 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 				return Item{}, false, ErrConflict
 			}
 		case ExecutionDispatchParentItemID:
+			if _, valid := ValidExecutionDispatchGrantAdmission(value); !valid {
+				return Item{}, false, ErrConflict
+			}
 			turn, turnFound := store.turns[value.TurnID]
 			owner, ownerFound := store.invocations[value.InvocationID]
 			if !turnFound || terminalTurnStatus(turn.Status) ||
@@ -795,6 +855,28 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 		}
 	}
 	value.Seq = uint64(len(store.items[value.TurnID]) + 1)
+	if interactionID, reserved := InteractionAuthorityFactID(value); reserved {
+		interaction, interactionFound := store.interactions[interactionID]
+		owner, ownerFound := store.invocations[interaction.InvocationID]
+		if interactionID == "" || !interactionFound || !ownerFound ||
+			!VerifiedInteractionAuthorityAppend(value, interaction, owner, store.items[value.TurnID]) {
+			return Item{}, false, ErrConflict
+		}
+	}
+	if intent, found := store.itemIDs[value.ParentItemID]; found &&
+		intent.Kind == ItemDiagnostic && intent.Status == ItemStarted &&
+		intent.ParentItemID == CancellationFenceParentItemID {
+		// A synthetic or foreign completion cannot retire a live
+		// cancellation and authorize another Invocation/physical dispatch.
+		if !VerifiedCancellationFenceReceipt(intent, []Item{value}) {
+			return Item{}, false, ErrConflict
+		}
+		for _, previous := range store.items[intent.TurnID] {
+			if previous.ParentItemID == intent.ID {
+				return Item{}, false, ErrConflict
+			}
+		}
+	}
 	if grant, found := store.itemIDs[value.ParentItemID]; found &&
 		grant.Kind == ItemDiagnostic && grant.Status == ItemStarted &&
 		grant.ParentItemID == ExecutionDispatchParentItemID {
@@ -805,7 +887,7 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 			return Item{}, false, ErrConflict
 		}
 		for _, previous := range store.items[grant.TurnID] {
-			if previous.Kind == ItemDiagnostic && previous.ParentItemID == grant.ID {
+			if previous.ParentItemID == grant.ID {
 				return Item{}, false, ErrConflict
 			}
 		}

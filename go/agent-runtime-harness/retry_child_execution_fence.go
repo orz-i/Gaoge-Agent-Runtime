@@ -76,8 +76,8 @@ func compositeRunMayHaveDescendants(items []Item, invocation Invocation) bool {
 	grants := 0
 	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
-			item.InvocationID != invocation.ID || item.ParentItemID != ExecutionDispatchParentItemID {
+		if item.InvocationID != invocation.ID ||
+			item.ParentItemID != ExecutionDispatchParentItemID {
 			continue
 		}
 		grants++
@@ -92,8 +92,7 @@ func compositeRunMayHaveDescendants(items []Item, invocation Invocation) bool {
 func acceptedChildPhysicalEffectPossible(items []Item, child Invocation) bool {
 	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
-		if item.Kind == ItemDiagnostic && item.Status == ItemStarted &&
-			item.ParentItemID == ExecutionDispatchParentItemID && item.InvocationID == child.ID {
+		if item.ParentItemID == ExecutionDispatchParentItemID && item.InvocationID == child.ID {
 			boundary, verified := VerifiedExecutionDispatchReceipt(item, receipts[item.ID])
 			if item.RunID != child.ExecutionRefID || !verified || boundary != "physical_dispatch_rejected" {
 				return true

@@ -58,14 +58,63 @@ const ExecutionDispatchParentItemID = "harness.execution.dispatch"
 // malformed and conflicting ones. Dropping a second receipt or an incorrect
 // owner would turn inconsistent physical execution evidence into authority.
 func executionDispatchReceiptIndex(items []Item) map[string][]Item {
+	// Index only actual physical grant identities. Every child of one
+	// grant counts, not just Diagnostic children: filtering out an
+	// unexpected ItemKind would let one valid receipt hide a second
+	// contradictory persisted fact.
+	grants := make(map[string]struct{})
+	for _, item := range items {
+		if item.ParentItemID == ExecutionDispatchParentItemID {
+			// A corrupted historical grant is still an original claim,
+			// never proof that a physical operation did not occur.
+			grants[item.ID] = struct{}{}
+		}
+	}
 	byGrant := make(map[string][]Item)
 	for _, item := range items {
-		if item.Kind == ItemDiagnostic && item.ParentItemID != "" &&
-			item.ParentItemID != ExecutionDispatchParentItemID {
+		if _, owned := grants[item.ParentItemID]; owned {
 			byGrant[item.ParentItemID] = append(byGrant[item.ParentItemID], item)
 		}
 	}
 	return byGrant
+}
+
+// ValidExecutionDispatchGrantAdmission checks the exact original physical
+// phase before a Store has assigned its per-Turn Seq. Memory and SQL use this
+// same proof before committing a grant. A fabricated phase is not authority.
+func ValidExecutionDispatchGrantAdmission(grant Item) (string, bool) {
+	if grant.ID == "" || grant.Kind != ItemDiagnostic ||
+		grant.Status != ItemStarted || grant.ParentItemID != ExecutionDispatchParentItemID ||
+		grant.TurnID == "" || grant.InvocationID == "" || grant.RunID == "" {
+		return "", false
+	}
+	original, ok := authorityStringFields(grant.Payload, "phase", "physicalRunID")
+	if !ok || original["physicalRunID"] == "" {
+		return "", false
+	}
+	phase := original["phase"]
+	switch phase {
+	case "start", "start-retry", "resume", "resolve-approval",
+		"grant-call-allowance", "handoff-start":
+		if original["physicalRunID"] == grant.RunID {
+			return phase, true
+		}
+	case "resolve-subtask-approval", "resolve-wait":
+		// These explicitly target a proven descendant Kernel Run, not
+		// necessarily the owning Harness Invocation's root Run. The
+		// final physical call separately checks the child association.
+		return phase, true
+	}
+	return "", false
+}
+
+// VerifiedExecutionDispatchGrant also requires the original Store-allocated
+// Item sequence. An uncommitted request cannot be read as a settled grant.
+func VerifiedExecutionDispatchGrant(grant Item) (string, bool) {
+	if grant.Seq == 0 {
+		return "", false
+	}
+	return ValidExecutionDispatchGrantAdmission(grant)
 }
 
 // VerifiedExecutionDispatchReceipt is the single durable grant-settlement
@@ -74,46 +123,61 @@ func executionDispatchReceiptIndex(items []Item) map[string][]Item {
 // committed later in the same Turn with the exact Invocation and Run owner.
 // A foreign/unknown/contradictory completion is NOT a settlement.
 func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool) {
-	if grant.ID == "" || grant.Seq == 0 || grant.Kind != ItemDiagnostic ||
-		grant.Status != ItemStarted || grant.ParentItemID != ExecutionDispatchParentItemID ||
-		grant.TurnID == "" || grant.InvocationID == "" || grant.RunID == "" {
+	phase, validGrant := VerifiedExecutionDispatchGrant(grant)
+	if !validGrant {
 		return "", false
 	}
 	var receipt Item
 	count := 0
 	for _, item := range receipts {
-		if item.Kind != ItemDiagnostic || item.ParentItemID != grant.ID {
+		if item.ParentItemID != grant.ID {
 			continue
 		}
 		count++
 		receipt = item
 	}
-	if count != 1 || receipt.ID == "" || receipt.Status != ItemCompleted ||
+	if count != 1 || receipt.ID != stableID("hdispatchdone", grant.ID) ||
+		receipt.Kind != ItemDiagnostic ||
+		receipt.Status != ItemCompleted ||
 		receipt.TurnID != grant.TurnID || receipt.InvocationID != grant.InvocationID ||
 		receipt.RunID != grant.RunID || receipt.Seq <= grant.Seq {
 		return "", false
 	}
-	var payload struct {
-		Boundary string `json:"boundary"`
-	}
-	if json.Unmarshal(receipt.Payload, &payload) != nil {
+	payload, ok := authorityStringFields(receipt.Payload, "boundary")
+	if !ok {
 		return "", false
 	}
-	switch payload.Boundary {
-	case "physical_dispatch_rejected", "feature_start_no_effect", "native_agent_start_no_effect",
-		"native_agent_control_no_effect", "physical_dispatch_returned", "handoff_start_returned",
-		"native_kernel_epoch_recovered":
-		return payload.Boundary, true
-	default:
-		return "", false
+	switch payload["boundary"] {
+	case "physical_dispatch_rejected":
+		return payload["boundary"], true
+	case "physical_dispatch_returned":
+		// Handoff may dispatch to a separate child Runtime. Only the
+		// Handoff-specific observed return can settle that original grant;
+		// a local Kernel snapshot is not remote-execution evidence.
+		if phase != "handoff-start" {
+			return payload["boundary"], true
+		}
+	case "feature_start_no_effect", "native_agent_start_no_effect", "native_kernel_epoch_recovered":
+		if phase == "start" || phase == "start-retry" {
+			return payload["boundary"], true
+		}
+	case "native_agent_control_no_effect":
+		if phase == "resolve-approval" || phase == "resolve-subtask-approval" ||
+			phase == "grant-call-allowance" {
+			return payload["boundary"], true
+		}
+	case "handoff_start_returned":
+		if phase == "handoff-start" {
+			return payload["boundary"], true
+		}
 	}
+	return "", false
 }
 
 func PendingExecutionDispatch(items []Item, invocationID string) bool {
 	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
-			item.ParentItemID != ExecutionDispatchParentItemID {
+		if item.ParentItemID != ExecutionDispatchParentItemID {
 			continue
 		}
 		if invocationID != "" && item.InvocationID != invocationID {
@@ -135,8 +199,7 @@ func (runner *Runner) pendingExecutionDispatch(
 	}
 	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
-			item.ParentItemID != ExecutionDispatchParentItemID {
+		if item.ParentItemID != ExecutionDispatchParentItemID {
 			continue
 		}
 		if _, done := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); done {

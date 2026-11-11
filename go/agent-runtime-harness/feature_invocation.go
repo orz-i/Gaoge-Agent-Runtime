@@ -843,7 +843,11 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 			return Snapshot{}, err
 		}
 	}
-	return runner.startNextInvocationAttempt(ctx, turn, invocation)
+	retryCtx, authorityErr := runner.withOriginalRetryAuthority(ctx, invocation)
+	if authorityErr != nil {
+		return Snapshot{}, authorityErr
+	}
+	return runner.startNextInvocationAttempt(retryCtx, turn, invocation)
 }
 
 func (runner *Runner) startNextInvocationAttempt(
@@ -1349,6 +1353,11 @@ func (runner *Runner) failChildInvocation(
 	invocation Invocation,
 	cause error,
 ) (Snapshot, error) {
+	var proofErr error
+	ctx, proofErr = withOriginalNoEffectTerminalWitness(ctx, invocation, cause)
+	if proofErr != nil {
+		return Snapshot{}, proofErr
+	}
 	invocation.Status = InvocationFailed
 	invocation.ErrorCode = "harness.capability_start_failed"
 	invocation.ErrorDetail = "capability execution did not start"
@@ -1500,6 +1509,19 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	if pending {
 		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 	}
+	// Child Refresh and public Resume must not commit a terminal child
+	// projection while its original Host callback continuation is unknown.
+	// A Cancel path has its own verified no-Run cancellation proof.
+	verifiedCancel := len(verifiedNoRunCancel) == 1 && verifiedNoRunCancel[0]
+	if !verifiedCancel {
+		continuationPending, continuationErr := runner.pendingInteractionContinuation(ctx, turn.ID, invocation.ID)
+		if continuationErr != nil {
+			return Snapshot{}, continuationErr
+		}
+		if continuationPending {
+			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+		}
+	}
 	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) {
 		return Snapshot{}, ErrConflict
 	}
@@ -1524,6 +1546,16 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if terminalTurnStatus(status) {
+		if noRunProven {
+			ctx = withOriginalApplicationTerminalWitness(ctx, invocation, TurnCancelled)
+		} else {
+			ctx, err = withOriginalKernelTerminalWitness(ctx, invocation, runtimeSnapshot)
+			if err != nil {
+				return Snapshot{}, err
+			}
+		}
 	}
 	invocation, err = runner.syncInvocationProjection(ctx, invocation, runtimeSnapshot, status)
 	if err != nil {
