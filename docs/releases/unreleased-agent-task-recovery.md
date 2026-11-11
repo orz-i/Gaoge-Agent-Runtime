@@ -41,7 +41,7 @@ non-fenced Resume could ignore durable model retry due times.
 This is an additive Go API change. No exported symbols are removed, no Store
 ports are added, and no database or persisted-record migration is introduced.
 No compatibility bridge or additional execution authority is introduced.
-The standalone integration test module requests the patched Go 1.27.3 toolchain
+The standalone integration test module requests the patched Go 1.27.4 toolchain
 when running with `GOWORK=off`, matching the contributor workspace baseline.
 
 Validation covers deterministic task completion, Context artifact use, recovery

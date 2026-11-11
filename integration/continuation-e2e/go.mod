@@ -2,7 +2,7 @@ module example.com/agent-runtime-continuation-e2e
 
 go 1.26.6
 
-toolchain go1.27.3
+toolchain go1.27.4
 
 require (
 	github.com/go-redis/redis/v8 v8.11.5
