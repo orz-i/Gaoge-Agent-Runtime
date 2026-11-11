@@ -754,7 +754,8 @@ func TestParseChatCompletionsCustomToolCall(t *testing.T) {
 		}]
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointChatCompletions, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointChatCompletions, payload)
+	require.NoError(t, err)
 	if len(result.ToolCalls) != 1 || result.ToolCalls[0].ToolType != valueCustom3ED53885 || result.ToolCalls[0].ToolName != valueCodeExec6F7763BB || result.ToolCalls[0].ArgumentsJSON != valuePrintHi8277249E {
 		t.Fatalf("unexpected custom tool call: %#v", result.ToolCalls)
 	}
@@ -771,7 +772,8 @@ func TestParseChatCompletionsDSMLToolCalls(t *testing.T) {
 		}]
 	}`)
 
-	result := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterOpenAIChatCompletions, payload, true)
+	result, err := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterOpenAIChatCompletions, payload, true)
+	require.NoError(t, err)
 	if result.Text != "" {
 		t.Fatalf("expected DSML envelope to be removed from visible text, got %q", result.Text)
 	}
@@ -798,7 +800,8 @@ func TestParseChatCompletionsDSMLToolCallsDecodesJSONParameters(t *testing.T) {
 		}]
 	}`)
 
-	result := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterOpenAIChatCompletions, payload, true)
+	result, err := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterOpenAIChatCompletions, payload, true)
+	require.NoError(t, err)
 	if len(result.ToolCalls) != 1 {
 		t.Fatalf("expected one parsed DSML tool call, got %#v", result.ToolCalls)
 	}
@@ -818,7 +821,8 @@ func TestParseChatCompletionsDSMLToolCallsDisabledByDefault(t *testing.T) {
 		}]
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointChatCompletions, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointChatCompletions, payload)
+	require.NoError(t, err)
 	if !strings.Contains(result.Text, "DSML") {
 		t.Fatalf("expected default chat completions path to keep DSML as text, got %q", result.Text)
 	}
@@ -1144,7 +1148,8 @@ func TestParseResponsesSeparatesFunctionCallsFromServerSideToolCalls(t *testing.
 		}
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	assertResponsesFunctionAndServerToolSeparation(t, result)
 }
 
@@ -1166,7 +1171,8 @@ func TestParseResponsesCapturesServerSideToolCallOutputItems(t *testing.T) {
 		]
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	if len(result.ServerToolCalls) != 1 {
 		t.Fatalf("expected merged server-side tool call, got %#v", result.ServerToolCalls)
 	}
@@ -1190,7 +1196,8 @@ func TestParseResponsesCapturesSearchActionSourcesAsToolOutput(t *testing.T) {
 		]
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	if len(result.ServerToolCalls) != 1 {
 		t.Fatalf("expected server-side web search call, got %#v", result.ServerToolCalls)
 	}
@@ -1219,7 +1226,8 @@ func TestParseResponsesCapturesTopLevelServerSideToolCalls(t *testing.T) {
 		]
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	assertTopLevelServerSideToolCalls(t, result)
 }
 
@@ -1244,7 +1252,8 @@ func TestParseResponsesCapturesOpenAINativeShellAndImageTools(t *testing.T) {
 		}
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	assertOpenAINativeShellAndImageToolTrace(t, result)
 }
 
@@ -1269,7 +1278,8 @@ func TestParseResponsesTreatsXSearchCustomCallsAsServerSide(t *testing.T) {
 		}
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	if len(result.ToolCalls) != 0 {
 		t.Fatalf("expected x_search native custom calls not to require local execution, got %#v", result.ToolCalls)
 	}
@@ -1297,7 +1307,8 @@ func TestParseResponsesCapturesMixedWebAndXSearchToolShapes(t *testing.T) {
 		}
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	assertMixedWebAndXSearchToolShapes(t, result)
 }
 
@@ -1325,7 +1336,8 @@ func TestParseXAIResponsesNormalizesBillableNativeToolUsage(t *testing.T) {
 		}
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	if result.ServerSideToolUsage[valueWebSearch6C1E23E9] != 1 ||
 		result.ServerSideToolUsage[valueXSearchFB43F46C] != 2 ||
 		result.ServerSideToolUsage[valueCodeInterpreterDCAD241D] != 3 ||
@@ -1347,7 +1359,8 @@ func TestParseResponsesKeepsClientToolCallsGeneric(t *testing.T) {
 		]
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	if len(result.ServerToolCalls) != 0 {
 		t.Fatalf("expected no server-side tool calls for client tools, got %#v", result.ServerToolCalls)
 	}
@@ -1374,7 +1387,8 @@ func TestParseResponsesCitationsFromOutputAnnotations(t *testing.T) {
 		]
 	}`)
 
-	result := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, payload)
+	require.NoError(t, err)
 	if len(result.Citations) != 2 || result.Citations[0] != valueHttpsExampleComA59C4793C || result.Citations[1] != "https://example.com/b" {
 		t.Fatalf("expected citations from annotations and server tool results, got %#v", result.Citations)
 	}

@@ -564,14 +564,14 @@ type responsesStreamEventContext struct {
 
 var responsesStreamNoErrorEventHandlers = map[string]func(responsesStreamEventContext){
 	"response.created":                     handleResponsesCreatedStreamEvent,
-	"response.output_text.done":            handleResponsesOutputTextDoneStreamEvent,
-	"response.refusal.done":                handleResponsesRefusalDoneStreamEvent,
 	"response.reasoning_summary_text.done": handleResponsesReasoningDoneStreamEvent,
 	"response.reasoning_text.done":         handleResponsesReasoningDoneStreamEvent,
 	"response.thinking.done":               handleResponsesReasoningDoneStreamEvent,
 }
 
 var responsesStreamEventHandlers = map[string]func(responsesStreamEventContext) error{
+	"response.output_text.done":              handleResponsesOutputTextDoneStreamEvent,
+	"response.refusal.done":                  handleResponsesRefusalDoneStreamEvent,
 	"response.output_item.added":             handleResponsesOutputItemStreamEvent,
 	"response.output_item.in_progress":       handleResponsesOutputItemStreamEvent,
 	"response.output_item.done":              handleResponsesOutputItemStreamEvent,
@@ -599,6 +599,9 @@ func handleResponsesOutputItemStreamEvent(ctx responsesStreamEventContext) error
 		return err
 	}
 	item := asMap(ctx.parsed["item"])
+	if err := rememberResponsesPhase(ctx.result, item, index); err != nil {
+		return err
+	}
 	if err := mergeResponsesStreamOutputItem(ctx.result, item, ctx.parsed["output_index"], ctx.onEvent); err != nil {
 		return err
 	}
@@ -619,15 +622,19 @@ func handleResponsesFunctionCallArgumentsStreamEvent(ctx responsesStreamEventCon
 }
 
 func handleResponsesTextDeltaStreamEvent(ctx responsesStreamEventContext) error {
+	if ctx.eventType == "response.refusal.delta" {
+		ctx.result.Refused = true
+	}
 	return applyResponsesTextDeltaEvent(ctx.parsed, ctx.result, ctx.onEvent)
 }
 
-func handleResponsesOutputTextDoneStreamEvent(ctx responsesStreamEventContext) {
-	applyResponsesTextDoneEvent(ctx.parsed, ctx.result, valueText239B340C, "delta")
+func handleResponsesOutputTextDoneStreamEvent(ctx responsesStreamEventContext) error {
+	return applyResponsesTextDoneEvent(ctx.parsed, ctx.result, valueText239B340C, "delta")
 }
 
-func handleResponsesRefusalDoneStreamEvent(ctx responsesStreamEventContext) {
-	applyResponsesTextDoneEvent(ctx.parsed, ctx.result, "refusal", valueText239B340C, "delta")
+func handleResponsesRefusalDoneStreamEvent(ctx responsesStreamEventContext) error {
+	ctx.result.Refused = true
+	return applyResponsesTextDoneEvent(ctx.parsed, ctx.result, "refusal", valueText239B340C, "delta")
 }
 
 func handleResponsesReasoningDeltaStreamEvent(ctx responsesStreamEventContext) error {
@@ -688,6 +695,13 @@ func applyResponsesTextDeltaEvent(
 	result *GenerateOutput,
 	onEvent func(GenerateStreamEvent) error,
 ) error {
+	phase, err := responsesEventPhase(result, parsed)
+	if err != nil {
+		return err
+	}
+	if phase == "commentary" || phase == "pending" {
+		return nil
+	}
 	delta := getString(parsed["delta"])
 	if delta == "" {
 		return nil
@@ -696,11 +710,19 @@ func applyResponsesTextDeltaEvent(
 	return emitResponsesTextDelta(result, onEvent, delta)
 }
 
-func applyResponsesTextDoneEvent(parsed map[string]interface{}, result *GenerateOutput, keys ...string) {
+func applyResponsesTextDoneEvent(parsed map[string]interface{}, result *GenerateOutput, keys ...string) error {
+	phase, err := responsesEventPhase(result, parsed)
+	if err != nil {
+		return err
+	}
+	if phase == "commentary" || phase == "pending" {
+		return nil
+	}
 	text := firstResponsesTextValue(parsed, keys...)
 	if text != "" && !strings.Contains(result.Text, text) {
 		result.Text += text
 	}
+	return nil
 }
 
 func firstResponsesTextValue(parsed map[string]interface{}, keys ...string) string {
@@ -771,7 +793,18 @@ func applyResponsesCompletedEvent(
 	result *GenerateOutput,
 	onEvent func(GenerateStreamEvent) error,
 ) error {
-	output := buildGenerateOutputFromParsedForAdapter(EndpointResponses, adapter, asMap(parsed["response"]), false)
+	output, err := buildGenerateOutputFromParsedForAdapter(EndpointResponses, adapter, asMap(parsed["response"]), false)
+	if err != nil {
+		return err
+	}
+	if result.Text == "" && output.Text != "" {
+		if err := emitResponsesTextDelta(result, onEvent, output.Text); err != nil {
+			return err
+		}
+	}
+	if output.responsesPhased {
+		result.Text = output.Text
+	}
 	if err := emitResponsesCompletedReasoning(eventType, result, output, onEvent); err != nil {
 		return err
 	}
@@ -936,7 +969,15 @@ func parseResponsesStreamErrorEvent(parsed map[string]interface{}, rawBody strin
 	}
 }
 
-func parseResponsesOutput(adapter string, parsed map[string]interface{}, result *GenerateOutput) {
+func parseResponsesOutput(adapter string, parsed map[string]interface{}, result *GenerateOutput) error {
+	phaseItems := append([]any(nil), asSlice(parsed[valueOutputAD4FEFDA])...)
+	phaseItems = append(phaseItems, asSlice(parsed["tool_calls"])...)
+	phaseText, phased, refused, err := projectResponsesPhase(phaseItems)
+	if err != nil {
+		return err
+	}
+	result.responsesPhased = phased
+	result.Refused = refused
 	result.Text = getString(parsed[valueOutputTextFDC62B9B])
 	outputItems := asSlice(parsed[valueOutputAD4FEFDA])
 	if NormalizeAdapter(adapter) == AdapterOpenAIResponses {
@@ -957,9 +998,13 @@ func parseResponsesOutput(adapter string, parsed map[string]interface{}, result 
 
 	mergeResponsesTopLevelToolCalls(result, parsed["tool_calls"])
 
+	if phased {
+		result.Text = phaseText
+	}
 	result.Usage = parseOpenAICompatibleUsageForAdapter(adapter, parsed)
 	result.ServerSideToolUsage = parseServerSideToolUsage(parsed)
 	result.Citations = appendUniqueStrings(result.Citations, parseResponseCitations(parsed)...)
+	return nil
 }
 
 func mergeResponsesTopLevelToolCalls(result *GenerateOutput, raw interface{}) {

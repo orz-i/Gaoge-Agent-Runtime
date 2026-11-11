@@ -1393,7 +1393,7 @@ func (p *anthropicSSEParser) dispatch(data string) error {
 	}
 	parsed, err := decodeIndexedStreamObject(data)
 	if err != nil {
-		return nil
+		return err
 	}
 	if p.replay != nil {
 		if err := p.replay.consume(parsed); err != nil {

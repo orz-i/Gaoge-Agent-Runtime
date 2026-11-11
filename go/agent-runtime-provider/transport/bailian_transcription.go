@@ -31,7 +31,10 @@ func buildBailianTranscriptionRequest(model string, input GenerateInput) (bailia
 
 func (c *Client) parseBailianTranscription(ctx context.Context, route RouteConfig, parsed map[string]interface{}) (*GenerateOutput, error) {
 	if _, exists := parsed["choices"]; exists {
-		output := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterBailianChat, parsed, false)
+		output, err := buildGenerateOutputFromParsedForAdapter(EndpointChatCompletions, AdapterBailianChat, parsed, false)
+		if err != nil {
+			return nil, err
+		}
 		if output.Text == "" {
 			return nil, fmt.Errorf("%w: empty transcript", errBailianResponse)
 		}

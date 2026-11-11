@@ -1,0 +1,99 @@
+package transport
+
+import (
+	"github.com/stretchr/testify/require"
+	"strings"
+	"testing"
+)
+
+func phaseFixture(phase any, text string) map[string]any {
+	return map[string]any{"type": "message", "id": "item-" + text, "role": "assistant", "status": "completed", "phase": phase, "content": []any{map[string]any{"type": "output_text", "text": text}}, "fixture_opaque": map[string]any{"keep": true}}
+}
+func TestResponsesPhaseProjection(t *testing.T) {
+	commentary := phaseFixture("commentary", "Working")
+	final := phaseFixture("final_answer", `{"ok":true}`)
+	for _, adapter := range []string{AdapterOpenAIResponses, AdapterOpenRouterResponses} {
+		t.Run(adapter, func(t *testing.T) {
+			result, err := buildGenerateOutputFromParsedForAdapter(EndpointResponses, adapter, map[string]any{"output": []any{commentary, final}, "output_text": "Working{\"ok\":true}"}, false)
+			require.NoError(t, err)
+			require.Equal(t, `{"ok":true}`, result.Text)
+			require.False(t, result.Refused)
+			if adapter == AdapterOpenAIResponses {
+				require.Contains(t, result.ReplayStateJSON, `"phase":"commentary"`)
+				require.Contains(t, result.ReplayStateJSON, "fixture_opaque")
+			}
+		})
+	}
+	refusal := phaseFixture("commentary", "")
+	refusal["content"] = []any{map[string]any{"type": "refusal", "refusal": "Cannot comply."}}
+	result, err := buildGenerateOutputFromParsed(EndpointResponses, map[string]any{"output": []any{refusal, final}})
+	require.NoError(t, err)
+	require.True(t, result.Refused)
+	require.Equal(t, `{"ok":true}`, result.Text)
+	for _, phase := range []any{nil, "legacy-absent"} {
+		legacy := phaseFixture(phase, "Old answer")
+		if phase == "legacy-absent" {
+			delete(legacy, "phase")
+		}
+		result, err := buildGenerateOutputFromParsed(EndpointResponses, map[string]any{"output": []any{legacy}})
+		require.NoError(t, err)
+		require.Equal(t, "Old answer", result.Text)
+	}
+	call := map[string]any{"type": "function_call", "call_id": "c", "name": "lookup", "arguments": "{}"}
+	for name, items := range map[string][]any{
+		"unknown": {phaseFixture("future", "x")}, "empty": {phaseFixture("", "x")}, "nonstring": {phaseFixture(1, "x")},
+		"commentary only": {commentary}, "late commentary": {final, commentary}, "duplicate final": {final, final},
+		"mixed legacy": {phaseFixture(nil, "old"), final}, "final tool": {final, call}, "refusal tool": {refusal, call},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := buildGenerateOutputFromParsed(EndpointResponses, map[string]any{"output": items})
+			require.ErrorIs(t, err, errInvalidResponsesPhase)
+		})
+	}
+	result, err = buildGenerateOutputFromParsed(EndpointResponses, map[string]any{"output": []any{commentary, call}})
+	require.NoError(t, err)
+	require.Equal(t, "Working", result.Text)
+	require.Len(t, result.ToolCalls, 1)
+}
+func TestResponsesPhaseStreaming(t *testing.T) {
+	result := &GenerateOutput{}
+	var visible strings.Builder
+	callback := func(event GenerateStreamEvent) error { visible.WriteString(event.Delta); return nil }
+	send := func(kind string, event map[string]any) {
+		t.Helper()
+		require.NoError(t, applyResponsesStreamEvent(AdapterOpenAIResponses, kind, event, "", result, callback))
+	}
+	commentary := phaseFixture("commentary", "Working")
+	final := phaseFixture("final_answer", "answer")
+	send("response.output_item.added", map[string]any{"output_index": 0, "item": commentary})
+	send("response.output_text.delta", map[string]any{"output_index": 0, "item_id": commentary["id"], "delta": "Working"})
+	send("response.output_text.done", map[string]any{"output_index": 0, "text": "Working"})
+	send("response.output_item.added", map[string]any{"output_index": 1, "item": final})
+	send("response.output_text.delta", map[string]any{"output_index": 1, "delta": "answer"})
+	send("response.completed", map[string]any{"response": map[string]any{"output": []any{commentary, final}}})
+	require.Equal(t, "answer", result.Text)
+	require.Equal(t, "answer", visible.String())
+	require.Contains(t, result.ReplayStateJSON, "commentary")
+	require.ErrorIs(t, applyResponsesStreamEvent(AdapterOpenAIResponses, "response.output_item.added", map[string]any{"output_index": 2, "item": phaseFixture("unknown", "bad")}, "", result, nil), errInvalidResponsesPhase)
+	require.ErrorIs(t, applyResponsesStreamEvent(AdapterOpenAIResponses, "response.completed", map[string]any{"response": map[string]any{"output": []any{commentary}}}, "", result, nil), errInvalidResponsesPhase)
+}
+func TestAnthropicMalformedStreamJSONFailsClosed(t *testing.T) {
+	parser := &anthropicSSEParser{result: &GenerateOutput{}}
+	require.Error(t, parser.dispatch(`{"type":"content_block_delta","index":`))
+}
+
+func TestResponsesUnassociatedStreamDeltasWaitForProjection(t *testing.T) {
+	result := &GenerateOutput{}
+	var visible strings.Builder
+	callback := func(event GenerateStreamEvent) error { visible.WriteString(event.Delta); return nil }
+	require.NoError(t, applyResponsesStreamEvent(AdapterOpenAIResponses, "response.output_text.delta", map[string]any{"item_id": "unseen", "output_index": 0, "delta": "Working"}, "", result, callback))
+	require.Empty(t, visible.String())
+	require.Empty(t, result.Text)
+	require.NoError(t, rememberResponsesPhase(result, phaseFixture(nil, "legacy"), 0))
+	require.NoError(t, applyResponsesTextDeltaEvent(map[string]any{"item_id": "other", "output_index": 0, "delta": "Working"}, result, callback))
+	require.Empty(t, visible.String())
+	final := phaseFixture("final_answer", "answer")
+	require.NoError(t, applyResponsesCompletedEvent(AdapterOpenAIResponses, "response.completed", map[string]any{"response": map[string]any{"output": []any{phaseFixture("commentary", "Working"), final}}}, result, callback))
+	require.Equal(t, "answer", visible.String())
+	require.Equal(t, "answer", result.Text)
+}

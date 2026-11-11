@@ -768,6 +768,7 @@ type ReasoningOutput struct {
 
 // GenerateOutput 定义上游推理结果。
 type GenerateOutput struct {
+	Refused             bool
 	ResponseID          string
 	Text                string
 	Reasoning           *ReasoningOutput
@@ -784,7 +785,10 @@ type GenerateOutput struct {
 	StopReason          string                 `json:"-"`
 	StopSequence        string                 `json:"-"`
 
-	chatTextBuffer string
+	chatTextBuffer      string
+	responsesPhases     map[int]string
+	responsesItemPhases map[string]string
+	responsesPhased     bool
 }
 
 // GeneratedImage 表示图片生成/编辑接口返回的一张图片。
@@ -1618,7 +1622,7 @@ func extractContentText(raw interface{}) string {
 }
 
 func extractContentObjectText(value map[string]interface{}) string {
-	for _, key := range []string{valueText1D495308, "output_text", "input_text"} {
+	for _, key := range []string{valueText1D495308, "output_text", "input_text", "refusal"} {
 		if text := getString(value[key]); text != "" {
 			return text
 		}

@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -84,7 +86,7 @@ func TestParseResponsesUsage(t *testing.T) {
 	}`)
 
 	result := &GenerateOutput{}
-	parseResponsesOutput(AdapterOpenAIResponses, payload, result)
+	require.NoError(t, parseResponsesOutput(AdapterOpenAIResponses, payload, result))
 	if result.Usage.InputTokens != 84 || result.Usage.OutputTokens != 16 || result.Usage.CacheReadTokens != 17 || result.Usage.ReasoningTokens != 7 || result.Usage.ServiceTier != valueFlexF57399D0 {
 		t.Fatalf("unexpected responses usage: %+v", result.Usage)
 	}

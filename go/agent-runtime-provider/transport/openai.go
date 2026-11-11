@@ -568,7 +568,10 @@ func parseOpenAIGenerateOutput(endpoint string, adapter string, body []byte, all
 			return nil, err
 		}
 	}
-	result := buildGenerateOutputFromParsedForAdapter(endpoint, adapter, parsed, allowTextEncodedToolCalls)
+	result, err := buildGenerateOutputFromParsedForAdapter(endpoint, adapter, parsed, allowTextEncodedToolCalls)
+	if err != nil {
+		return nil, err
+	}
 	if normalizeEndpoint(endpoint) == EndpointChatCompletions && allowTextEncodedToolCalls && maybeDSMLToolCallsPrefix(result.Text) {
 		return nil, errDeepSeekDSMLToolCallsIncomplete
 	}
@@ -576,11 +579,11 @@ func parseOpenAIGenerateOutput(endpoint string, adapter string, body []byte, all
 	return result, nil
 }
 
-func buildGenerateOutputFromParsed(endpoint string, parsed map[string]interface{}) *GenerateOutput {
+func buildGenerateOutputFromParsed(endpoint string, parsed map[string]interface{}) (*GenerateOutput, error) {
 	return buildGenerateOutputFromParsedForAdapter(endpoint, AdapterOpenAIResponses, parsed, false)
 }
 
-func buildGenerateOutputFromParsedForAdapter(endpoint string, adapter string, parsed map[string]interface{}, allowTextEncodedToolCalls bool) *GenerateOutput {
+func buildGenerateOutputFromParsedForAdapter(endpoint string, adapter string, parsed map[string]interface{}, allowTextEncodedToolCalls bool) (*GenerateOutput, error) {
 	result := &GenerateOutput{
 		ResponseID:      strings.TrimSpace(getString(parsed["id"])),
 		Text:            "",
@@ -594,16 +597,18 @@ func buildGenerateOutputFromParsedForAdapter(endpoint string, adapter string, pa
 	case EndpointChatCompletions:
 		parseChatCompletionsOutput(adapter, parsed, result, allowTextEncodedToolCalls)
 	default:
-		parseResponsesOutput(adapter, parsed, result)
+		if err := parseResponsesOutput(adapter, parsed, result); err != nil {
+			return nil, err
+		}
 	}
 
 	if result.ResponseID == "" {
 		result.ResponseID = strings.TrimSpace(getStringFromPath(parsed, "response", "id"))
 	}
-	if result.Text == "" {
+	if result.Text == "" && !result.responsesPhased {
 		result.Text = getString(parsed["text"])
 	}
-	return result
+	return result, nil
 }
 
 func parseOpenAIModelList(body []byte) ([]ModelItem, error) {
@@ -650,6 +655,7 @@ func mergeGenerateOutputIdentity(dst *GenerateOutput, src *GenerateOutput) {
 }
 
 func mergeGenerateOutputContent(dst *GenerateOutput, src *GenerateOutput) {
+	dst.Refused = dst.Refused || src.Refused
 	if strings.TrimSpace(src.ReplayStateJSON) != "" {
 		dst.ReplayStateJSON = src.ReplayStateJSON
 	}
