@@ -104,11 +104,11 @@ func rememberResponsesPhase(result *GenerateOutput, item map[string]any, index i
 		result.responsesPhases = map[int]string{}
 		result.responsesItemPhases = map[string]string{}
 		result.responsesItemIndexes = map[string]int{}
+		result.responsesIndexIDs = map[int]string{}
 	}
 	if prior, present := result.responsesPhases[index]; present && prior != phase {
 		return errInvalidResponsesPhase
 	}
-	result.responsesPhases[index] = phase
 	if id := getString(item["id"]); id != "" {
 		if prior, present := result.responsesItemPhases[id]; present && prior != phase {
 			return errInvalidResponsesPhase
@@ -116,15 +116,23 @@ func rememberResponsesPhase(result *GenerateOutput, item map[string]any, index i
 		if prior, present := result.responsesItemIndexes[id]; present && prior != index {
 			return errInvalidResponsesPhase
 		}
+		if prior, present := result.responsesIndexIDs[index]; present && prior != id {
+			return errInvalidResponsesPhase
+		}
+		result.responsesIndexIDs[index] = id
 		result.responsesItemPhases[id] = phase
 		result.responsesItemIndexes[id] = index
 	}
+	result.responsesPhases[index] = phase
 	return nil
 }
 
 func responsesEventPhase(result *GenerateOutput, event map[string]any) (string, error) {
 	if id := getString(event["item_id"]); id != "" {
 		if phase, present := result.responsesItemPhases[id]; present {
+			if _, err := responsesTextPartKey(result, event); err != nil {
+				return "", err
+			}
 			return phase, nil
 		}
 		return "pending", nil

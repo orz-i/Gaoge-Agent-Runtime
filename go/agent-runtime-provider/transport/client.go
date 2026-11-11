@@ -792,6 +792,7 @@ type GenerateOutput struct {
 	responsesEmittedText string
 	responsesTextParts   map[[2]int]string
 	responsesItemIndexes map[string]int
+	responsesIndexIDs    map[int]string
 }
 
 // GeneratedImage 表示图片生成/编辑接口返回的一张图片。

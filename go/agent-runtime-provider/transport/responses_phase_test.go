@@ -224,3 +224,24 @@ func TestLegacySparseCompletionEventSequence(t *testing.T) {
 		}
 	}
 }
+
+func TestResponsesItemIdentityIsImmutable(t *testing.T) {
+	result := &GenerateOutput{}
+	item := phaseFixture(nil, "x")
+	item["id"] = "first"
+	require.NoError(t, rememberResponsesPhase(result, item, 2))
+	require.ErrorIs(t, rememberResponsesPhase(result, item, 3), errInvalidResponsesPhase)
+	require.NotContains(t, result.responsesPhases, 3)
+	other := phaseFixture(nil, "x")
+	other["id"] = "second"
+	require.ErrorIs(t, rememberResponsesPhase(result, other, 2), errInvalidResponsesPhase)
+	require.NotContains(t, result.responsesItemIndexes, "second")
+	key, err := responsesTextPartKey(result, map[string]any{"item_id": "first"})
+	require.NoError(t, err)
+	require.Equal(t, [2]int{2, 0}, key)
+	_, err = responsesTextPartKey(result, map[string]any{"item_id": "first", "output_index": 3})
+	require.ErrorIs(t, err, errInvalidResponsesPhase)
+	key, err = responsesTextPartKey(result, map[string]any{})
+	require.NoError(t, err)
+	require.Equal(t, [2]int{}, key)
+}
