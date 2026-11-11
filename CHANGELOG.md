@@ -16,7 +16,9 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   remain authoritative. Native Start exception cannot clear a contradictory
   persisted receipt. This closes independently reproduced false permissions
   for a new Attempt, new physical Resume Grant and an unsafe read-only
-  cancellation pending verdict. Add a Store/SQL/Runner cross-path adversarial
+  cancellation pending verdict. Scope-targeted cancellation first excludes
+  unrelated physical owners, then fail-closes on contradictory target proof;
+  disjoint subtrees remain independently cancellable. Add a Store/SQL/Runner cross-path adversarial
   matrix with positive receipt and cancellation cases. No new persisted
   ledger, compatibility bridge or schema migration; details in
   `docs/audits/2026-11-11-pr103-global-physical-admission-convergence.md`.
