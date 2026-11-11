@@ -191,8 +191,11 @@ against the updated Go runtime, not silence govulncheck or change the
 security gate threshold.
 
 **Compatibility hard cut:** pre-v1 custom Harness Stores must implement
-`ListItemChildren` with globally complete bounded semantics. There is no
-optional legacy reader or Turn-scoped fallback. The existing PR #103
+`ListItemChildren` with globally complete bounded semantics. The
+standalone `contracts/consumers/go/agent-runtime-harness_test.go` fixture
+asserts the exact added method on the public Store interface, and the
+clean-consumer release gate must pass. There is no optional legacy
+reader or Turn-scoped fallback. The existing PR #103
 `idx_harness_item_parent` migration remains mandatory on SQL stores.
 The final new Head still requires GitHub CI and independent merge-admission
 review; test success alone is not merge authorization.

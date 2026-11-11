@@ -22,6 +22,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   reuse the existing required `idx_harness_item_parent` migration index, so
   no new database migration or compatibility adapter is introduced.
   Custom Harness Stores must implement the new method; no silent fallback.
+  The clean external Go consumer contract tests pin the new required signature
+  explicitly so future Store API changes continue to trigger hard-cut review.
   The contributor/workspace and standalone E2E toolchains are pinned to
   Go 1.27.4 to address newly reported Go 1.27.3 `net/http` vulnerabilities.
 
