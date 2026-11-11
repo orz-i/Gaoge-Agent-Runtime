@@ -88,22 +88,15 @@ func TestPublicTurnConfigScopeAndFullActorErasure(t *testing.T) {
 	if err != nil || len(values) != 1 || values[0].Config.Model != "model-owned" {
 		t.Fatalf("values=%v err=%v", values, err)
 	}
-	if err = db.Create(&invocationRecord{ID: "pending", TurnID: "turn-owned", Status: "running"}).Error; err != nil {
+	if err = db.Create(&invocationRecord{ID: "foreign", TurnID: "turn-owned", Status: "running"}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err = store.EraseActorData(t.Context(), "tenant", "actor"); !errors.Is(err, ErrActorActive) {
 		t.Fatalf("pending not protected: %v", err)
 	}
-	for _, row := range []any{
-		&contextCheckpointRecord{ID: "child-checkpoint", ScopeID: "pending"},
-		&contextHeadRecord{ScopeID: "pending", CheckpointID: "child-checkpoint"},
-		&contextArtifactRecord{ID: "child-artifact", ScopeID: "pending"},
-	} {
-		if err = db.Create(row).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err = db.Model(&invocationRecord{}).Where("id = ?", "pending").Update("status", "completed").Error; err != nil {
+	// The owned Invocation deliberately collides with another actor Session ID.
+	// That does not make the foreign Context owned by this actor.
+	if err = db.Model(&invocationRecord{}).Where("id = ?", "foreign").Update("status", "completed").Error; err != nil {
 		t.Fatal(err)
 	}
 	if err = store.EraseActorData(t.Context(), "tenant", "actor"); err != nil {

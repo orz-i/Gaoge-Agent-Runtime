@@ -14,4 +14,6 @@ Kernel erasure rejects nonterminal Runs (including paused budget), unacknowledge
 
 The event journal is execution/recovery authority, not a disposable log. Existing Kernel Apply proof and descendant/retry validation may require historical events even for terminal Runs. There is intentionally no replacement for unrestricted `DELETE events WHERE created_at < cutoff`, and deleting whole Runs instead would change product retention semantics. Hosted adoption must define and verify a recovery-retirement/archive policy that preserves the product retention commitment before enabling event pruning. The actor-erasure API is not a substitute for event retention.
 
+Context ownership follows persisted Session IDs. The standard Harness creates the Session before Context persistence; Invocation IDs do not establish Context ownership and may collide with foreign Session IDs. Hosts that directly persist arbitrary Context scopes must separately maintain authenticated ownership and erasure of those records. The adapter cannot attribute orphan scopes to an actor by guessing.
+
 No schema migration, version tag, release or desktop/mobile implementation is included.

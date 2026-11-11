@@ -65,11 +65,10 @@ func (store *Store) EraseActorData(ctx context.Context, tenantID, actorID string
 				}
 			}
 		}
-		// Non-root feature Context scopes use Invocation IDs, while root scopes
-		// use Session IDs. Delete these before removing their ownership records.
+		// Context ownership is the persisted Session, not an Invocation ID.
+		// Cross-table identifier equality cannot authorize another scope's deletion.
 		for _, row := range []any{&contextHeadRecord{}, &contextCheckpointRecord{}, &contextArtifactRecord{}} {
-			invocationIDs := tx.Model(&invocationRecord{}).Select("id").Where("turn_id IN (?)", turns())
-			if err := tx.Where("scope_id IN (?) OR scope_id IN (?)", sessions(), invocationIDs).Delete(row).Error; err != nil {
+			if err := tx.Where("scope_id IN (?)", sessions()).Delete(row).Error; err != nil {
 				return err
 			}
 		}
