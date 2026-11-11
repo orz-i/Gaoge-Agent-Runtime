@@ -32,6 +32,7 @@ type MemoryStore struct {
 	contextArtifacts        map[string]runtimecontext.Artifact
 	items                   map[string][]Item
 	itemIDs                 map[string]Item
+	itemChildren            map[string][]Item // global immutable ParentItemID index
 }
 
 func sameInvocationIdentity(left, right Invocation) bool {
@@ -454,7 +455,7 @@ func NewMemoryStore() *MemoryStore {
 		invocations: map[string]Invocation{}, invocationExecutionRefs: map[string]string{},
 		interactions: map[string]Interaction{}, contextCheckpoints: map[string]runtimecontext.Checkpoint{},
 		contextHeads: map[string]string{}, contextArtifacts: map[string]runtimecontext.Artifact{},
-		items: map[string][]Item{}, itemIDs: map[string]Item{},
+		items: map[string][]Item{}, itemIDs: map[string]Item{}, itemChildren: map[string][]Item{},
 	}
 }
 
@@ -895,6 +896,9 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 	value = cloneItem(value)
 	store.items[value.TurnID] = append(store.items[value.TurnID], value)
 	store.itemIDs[value.ID] = value
+	if value.ParentItemID != "" {
+		store.itemChildren[value.ParentItemID] = append(store.itemChildren[value.ParentItemID], value)
+	}
 	return cloneItem(value), true, nil
 }
 
@@ -912,6 +916,30 @@ func (store *MemoryStore) GetItem(_ context.Context, id string) (Item, error) {
 		return Item{}, ErrNotFound
 	}
 	return cloneItem(item), nil
+}
+
+// ListItemChildren uses a globally indexed parent identity, not a
+// caller-supplied Turn. Historical foreign-Turn siblings remain visible.
+func (store *MemoryStore) ListItemChildren(_ context.Context, parentItemID string, scope ItemChildProofScope) ([]Item, error) {
+	parentItemID = strings.TrimSpace(parentItemID)
+	if store == nil || parentItemID == "" ||
+		(scope != ItemChildProofAll && scope != ItemChildProofHostAuthority) {
+		return nil, ErrInvalidRequest
+	}
+	store.mu.RLock()
+	defer store.mu.RUnlock()
+	result := make([]Item, 0, 2)
+	for _, value := range store.itemChildren[parentItemID] {
+		if scope == ItemChildProofHostAuthority && value.Kind != ItemDiagnostic &&
+			!strings.HasPrefix(value.ID, "hbizverified_") {
+			continue // ordinary application Artifact, not Host authority
+		}
+		result = append(result, cloneItem(value))
+		if len(result) == 2 {
+			break
+		}
+	}
+	return result, nil
 }
 
 func (store *MemoryStore) ListItems(_ context.Context, turnID string, afterSeq uint64, limit int) ([]Item, error) {

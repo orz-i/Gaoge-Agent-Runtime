@@ -1496,6 +1496,34 @@ func (store *Store) GetItem(ctx context.Context, id string) (harness.Item, error
 	return item, nil
 }
 
+// ListItemChildren uses the global idx_harness_item_parent B-tree index.
+// No Turn/Kind/Status filter is legal: a foreign-Turn historical sibling
+// conflicts with the one-and-only physical Dispatch receipt.
+func (store *Store) ListItemChildren(ctx context.Context, parentItemID string, scope harness.ItemChildProofScope) ([]harness.Item, error) {
+	parentItemID = strings.TrimSpace(parentItemID)
+	if store == nil || store.db == nil || parentItemID == "" ||
+		(scope != harness.ItemChildProofAll && scope != harness.ItemChildProofHostAuthority) {
+		return nil, harness.ErrInvalidRequest
+	}
+	// Share the identical bounded SQL predicate with terminal Host
+	// projection. Every lookup uses the existing global parent B-tree.
+	records, err := boundedInteractionAuthorityChildrenTx(
+		store.db.WithContext(ctx), parentItemID, scope == harness.ItemChildProofHostAuthority,
+	)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]harness.Item, 0, len(records))
+	for _, record := range records {
+		item, err := itemFromRecord(record)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
 func (store *Store) ListItems(ctx context.Context, turnID string, afterSeq uint64, limit int) ([]harness.Item, error) {
 	turnID = strings.TrimSpace(turnID)
 	if turnID == "" || limit < 0 {
