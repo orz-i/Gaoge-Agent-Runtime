@@ -39,6 +39,29 @@ func (runner *Runner) requireObservedApplicationParentContinuation(
 	if !verifiedCompletedApplicationResponse(items, interaction, child) {
 		return ErrConflict
 	}
+	// The Host response's first-party Interaction source is ALSO a
+	// globally unique Item parent. An ordinary Artifact attachment is
+	// legitimate business data; a Diagnostic or reserved Host receipt
+	// sibling, even under a different historical TurnID, is competing
+	// physical authority. A Turn-local scan is not a complete proof.
+	sourceID := stableID("hinteractionitem", interaction.ID, string(InteractionResolved))
+	sourceChildren, readErr := runner.store.ListItemChildren(ctx, sourceID, ItemChildProofHostAuthority)
+	if readErr != nil {
+		return readErr
+	}
+	if len(sourceChildren) != 1 || !verifiedHostInteractionResponse(interaction, child, sourceChildren[0]) {
+		return ErrConflict
+	}
+	// A completed Application has no Kernel continuation to claim. A
+	// stray child of the original Host response is contradictory even
+	// if its persisted TurnID is damaged or its Kind is unknown.
+	responseChildren, readErr := runner.store.ListItemChildren(ctx, sourceChildren[0].ID, ItemChildProofAll)
+	if readErr != nil {
+		return readErr
+	}
+	if len(responseChildren) != 0 {
+		return ErrConflict
+	}
 	root, err := loadTopLevelInvocation(ctx, runner.store, child.TurnID)
 	if err != nil {
 		return err
@@ -102,7 +125,6 @@ func (runner *Runner) requireObservedApplicationParentContinuation(
 	if childCompletedSeq == 0 {
 		return ErrApplicationParentContinuationUnverified
 	}
-	receipts := executionDispatchReceiptIndex(items)
 	observed, foreignAttempt := false, false
 	for _, grant := range items {
 		if grant.ParentItemID != ExecutionDispatchParentItemID ||
@@ -124,8 +146,23 @@ func (runner *Runner) requireObservedApplicationParentContinuation(
 			foreignAttempt = true
 			continue
 		}
-		boundary, settled := VerifiedExecutionDispatchReceipt(grant, receipts[grant.ID])
+		// A physical Grant ID is global. A historical child with a
+		// damaged TurnID must still count as this Grant's sibling. No
+		// per-Turn index can prove a one-and-only physical settlement.
+		// Store provides the bounded global parent read; the existing
+		// typed receipt predicate remains the sole authority.
+		receipts, readErr := runner.store.ListItemChildren(ctx, grant.ID, ItemChildProofAll)
+		if readErr != nil {
+			return readErr
+		}
+		boundary, settled := VerifiedExecutionDispatchReceipt(grant, receipts)
 		if !settled {
+			// No receipt means the physical operation may still be in
+			// flight or its ACK was lost. Any persisted but invalid or
+			// duplicate receipt is positive contradictory evidence.
+			if len(receipts) != 0 {
+				return ErrConflict
+			}
 			return ErrApplicationParentContinuationUnverified
 		}
 		if boundary == "physical_dispatch_returned" {

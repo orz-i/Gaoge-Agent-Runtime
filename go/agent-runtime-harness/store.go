@@ -57,6 +57,18 @@ func NormalizeContextCheckpointPathQuery(value ContextCheckpointPathQuery) (Cont
 	return value, nil
 }
 
+// ItemChildProofScope selects the original-parent evidence needed for a
+// bounded, globally indexed sibling read. An Interaction source may have
+// arbitrary ordinary Artifact attachments; only Diagnostics and reserved
+// Host response IDs compete as authority. Physical Dispatch grants and
+// Host response receipts require every child, whatever its Kind.
+type ItemChildProofScope uint8
+
+const (
+	ItemChildProofAll ItemChildProofScope = iota + 1
+	ItemChildProofHostAuthority
+)
+
 // Store is the trusted durable Harness execution-integrity boundary (ADR 0017),
 // not an untrusted source of independently forgeable owner records. Implementations
 // must clone values and preserve exact Session/Turn/Invocation owner identity
@@ -118,6 +130,13 @@ type Store interface {
 	// Child-effect ancestry checks must not scan full Turn histories.
 	// Missing IDs return ErrNotFound; callers still verify the Turn owner.
 	GetItem(context.Context, string) (Item, error)
+	// ListItemChildren returns at most TWO globally indexed children of an
+	// exact immutable ParentItemID, across ALL Turns. ItemChildProofAll
+	// includes every Kind; ItemChildProofHostAuthority includes Diagnostics
+	// or reserved Host response IDs, not ordinary Artifact attachments.
+	// The scope is explicit, with no fallback to current-Turn filtering.
+	// Two matches already refute unique physical/Host authority.
+	ListItemChildren(context.Context, string, ItemChildProofScope) ([]Item, error)
 	ListItems(context.Context, string, uint64, int) ([]Item, error)
 }
 

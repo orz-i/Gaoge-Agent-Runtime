@@ -92,6 +92,9 @@ func newFrozenApplicationParentFixture(t *testing.T, originalReturned, nested bo
 		item.CreatedAt, item.UpdatedAt = now, now
 		items = append(items, item)
 		store.itemIDs[item.ID] = item
+		if item.ParentItemID != "" {
+			store.itemChildren[item.ParentItemID] = append(store.itemChildren[item.ParentItemID], item)
+		}
 	}
 	receipt := func(grant Item) Item {
 		return Item{
