@@ -10,11 +10,14 @@ import (
 // Responses input content items. Unsupported media fails BEFORE transport;
 // no image, file, or audio evidence may be stringified or dropped.
 func inputContent(parts []model.ContentPart) (any, error) {
-	if len(parts) == 1 && parts[0].Kind == model.ContentText {
+	if len(parts) == 1 && parts[0].Kind == model.ContentText && parts[0].CacheControl == nil && parts[0].Name == "" {
 		return parts[0].Text, nil
 	}
 	result := make([]map[string]any, 0, len(parts))
 	for _, part := range parts {
+		if part.CacheControl != nil || part.Name != "" {
+			return nil, ErrUnsupported
+		}
 		switch part.Kind {
 		case model.ContentText:
 			result = append(result, map[string]any{"type": "input_text", "text": part.Text})
@@ -25,6 +28,8 @@ func inputContent(parts []model.ContentPart) (any, error) {
 				block["image_url"] = part.Source.URL
 			case model.MediaSourceFileID:
 				block["file_id"] = part.Source.FileID
+			case model.MediaSourceArtifact:
+				return nil, ErrUnsupported
 			default:
 				return nil, ErrUnsupported
 			}
@@ -36,11 +41,13 @@ func inputContent(parts []model.ContentPart) (any, error) {
 				block["file_url"] = part.Source.URL
 			case model.MediaSourceFileID:
 				block["file_id"] = part.Source.FileID
+			case model.MediaSourceArtifact:
+				return nil, ErrUnsupported
 			default:
 				return nil, ErrUnsupported
 			}
 			result = append(result, block)
-		case model.ContentAudio:
+		case model.ContentAudio, model.ContentVideo:
 			// The Responses input-audio request requires embedded bytes;
 			// Model Message intentionally refuses inline binary payloads.
 			// No implicit URL download, base64 storage or text fallback.

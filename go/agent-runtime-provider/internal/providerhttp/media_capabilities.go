@@ -20,7 +20,7 @@ func RequireMediaCapabilities(messages []model.Message, profile model.Capabiliti
 				if !profile.SupportsPDFInput {
 					return model.ErrCapabilityUnavailable
 				}
-			case model.ContentAudio:
+			case model.ContentAudio, model.ContentVideo:
 				return model.ErrCapabilityUnavailable
 			default:
 				// Future unknown media kinds must not inherit a text grant.

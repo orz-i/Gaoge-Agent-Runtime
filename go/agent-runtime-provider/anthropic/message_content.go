@@ -11,6 +11,9 @@ import (
 func inputContent(parts []model.ContentPart) ([]map[string]any, error) {
 	result := make([]map[string]any, 0, len(parts))
 	for _, part := range parts {
+		if part.CacheControl != nil || part.Name != "" {
+			return nil, ErrUnsupported
+		}
 		switch part.Kind {
 		case model.ContentText:
 			result = append(result, map[string]any{"type": "text", "text": part.Text})
@@ -21,6 +24,8 @@ func inputContent(parts []model.ContentPart) ([]map[string]any, error) {
 				source["type"], source["url"] = "url", part.Source.URL
 			case model.MediaSourceFileID:
 				source["type"], source["file_id"] = "file", part.Source.FileID
+			case model.MediaSourceArtifact:
+				return nil, ErrUnsupported
 			default:
 				return nil, ErrUnsupported
 			}
@@ -29,7 +34,7 @@ func inputContent(parts []model.ContentPart) ([]map[string]any, error) {
 				kind = "document"
 			}
 			result = append(result, map[string]any{"type": kind, "source": source})
-		case model.ContentAudio:
+		case model.ContentAudio, model.ContentVideo:
 			return nil, errors.Join(ErrUnsupported, model.ErrCapabilityUnavailable)
 		default:
 			return nil, ErrUnsupported

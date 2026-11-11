@@ -125,6 +125,9 @@ var ErrReplayUnavailable = errors.New("OpenAI encrypted reasoning replay unavail
 var ErrIncomplete = errors.New("OpenAI response incomplete")
 
 func (c *Client) prepare(request model.Request, streaming bool) (prepared, error) {
+	if model.ValidateRequestBinding(request) != nil || request.PromptCacheKey != "" || request.PreviousResponseID != "" {
+		return prepared{}, ErrUnsupported
+	}
 	if c == nil || len(request.HostedTools) != 0 {
 		return prepared{}, ErrUnsupported
 	}
@@ -181,6 +184,14 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	}
 	input := make([]any, 0, len(request.Messages))
 	for _, m := range request.Messages {
+		for _, part := range m.Content {
+			if part.CacheControl != nil || part.Name != "" {
+				return prepared{}, ErrUnsupported
+			}
+		}
+		if m.CacheControl != nil {
+			return prepared{}, ErrUnsupported
+		}
 		if err := model.ValidateMessage(m); err != nil {
 			return prepared{}, errors.Join(ErrUnsupported, err)
 		}
