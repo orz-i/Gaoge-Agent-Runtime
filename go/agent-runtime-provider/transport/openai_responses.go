@@ -706,6 +706,14 @@ func applyResponsesTextDeltaEvent(
 	if delta == "" {
 		return nil
 	}
+	key, err := responsesTextPartKey(result, parsed)
+	if err != nil {
+		return err
+	}
+	if result.responsesTextParts == nil {
+		result.responsesTextParts = map[[2]int]string{}
+	}
+	result.responsesTextParts[key] += delta
 	result.Text += delta
 	return emitResponsesTextDelta(result, onEvent, delta)
 }
@@ -719,9 +727,19 @@ func applyResponsesTextDoneEvent(parsed map[string]interface{}, result *Generate
 		return nil
 	}
 	text := firstResponsesTextValue(parsed, keys...)
-	if text != "" && !strings.Contains(result.Text, text) {
-		result.Text += text
+	key, err := responsesTextPartKey(result, parsed)
+	if err != nil {
+		return err
 	}
+	if result.responsesTextParts == nil {
+		result.responsesTextParts = map[[2]int]string{}
+	}
+	prior := result.responsesTextParts[key]
+	if !strings.HasPrefix(text, prior) {
+		return errInvalidResponsesPhase
+	}
+	result.Text += strings.TrimPrefix(text, prior)
+	result.responsesTextParts[key] = text
 	return nil
 }
 

@@ -103,6 +103,7 @@ func rememberResponsesPhase(result *GenerateOutput, item map[string]any, index i
 	if result.responsesPhases == nil {
 		result.responsesPhases = map[int]string{}
 		result.responsesItemPhases = map[string]string{}
+		result.responsesItemIndexes = map[string]int{}
 	}
 	if prior, present := result.responsesPhases[index]; present && prior != phase {
 		return errInvalidResponsesPhase
@@ -113,6 +114,7 @@ func rememberResponsesPhase(result *GenerateOutput, item map[string]any, index i
 			return errInvalidResponsesPhase
 		}
 		result.responsesItemPhases[id] = phase
+		result.responsesItemIndexes[id] = index
 	}
 	return nil
 }
@@ -159,4 +161,21 @@ func responsesPhaseMessageText(item map[string]any) (string, error) {
 		text.WriteString(value)
 	}
 	return text.String(), nil
+}
+
+func responsesTextPartKey(result *GenerateOutput, event map[string]any) ([2]int, error) {
+	index, err := streamIndexField(event, "output_index")
+	if err != nil {
+		return [2]int{}, err
+	}
+	if id := getString(event["item_id"]); id != "" {
+		if known, ok := result.responsesItemIndexes[id]; ok {
+			index = known
+		}
+	}
+	content, err := streamIndexField(event, "content_index")
+	if err != nil {
+		return [2]int{}, err
+	}
+	return [2]int{index, content}, nil
 }

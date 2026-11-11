@@ -790,6 +790,8 @@ type GenerateOutput struct {
 	responsesItemPhases  map[string]string
 	responsesPhased      bool
 	responsesEmittedText string
+	responsesTextParts   map[[2]int]string
+	responsesItemIndexes map[string]int
 }
 
 // GeneratedImage 表示图片生成/编辑接口返回的一张图片。
