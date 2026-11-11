@@ -1,7 +1,9 @@
 package model
 
 import (
+	"encoding/hex"
 	"errors"
+	"mime"
 	"net/url"
 	"strings"
 
@@ -17,6 +19,7 @@ const (
 	ContentImage ContentPartKind = "image"
 	ContentFile  ContentPartKind = "file"
 	ContentAudio ContentPartKind = "audio"
+	ContentVideo ContentPartKind = "video"
 )
 
 // MediaSourceKind chooses one Host-authorized remote reference.
@@ -26,24 +29,31 @@ type MediaSourceKind string
 const (
 	MediaSourceURL    MediaSourceKind = "url"
 	MediaSourceFileID MediaSourceKind = "file_id"
+	// MediaSourceArtifact is an immutable Host-authorized object, resolved only by a Host adapter.
+	MediaSourceArtifact MediaSourceKind = "artifact"
 )
 
 // MediaSource is one immutable remote media identity. A file ID is scoped to
 // the configured Provider and must not be reused across Provider bindings.
 type MediaSource struct {
-	Kind   MediaSourceKind `json:"kind"`
-	URL    string          `json:"url,omitempty"`
-	FileID string          `json:"fileID,omitempty"`
+	Kind       MediaSourceKind `json:"kind"`
+	URL        string          `json:"url,omitempty"`
+	FileID     string          `json:"fileID,omitempty"`
+	ArtifactID string          `json:"artifactID,omitempty"`
+	SHA256     string          `json:"sha256,omitempty"`
+	SizeBytes  int64           `json:"sizeBytes,omitempty"`
 }
 
 // ContentPart is an ordered, tagged, strictly validated Message content block.
 // Exactly one of Text or Source is set by Kind. Provider adapters translate
 // each neutral block or reject it, never silently flatten media into text.
 type ContentPart struct {
-	Kind      ContentPartKind `json:"kind"`
-	Text      string          `json:"text,omitempty"`
-	MediaType string          `json:"mediaType,omitempty"`
-	Source    *MediaSource    `json:"source,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	CacheControl *CacheControl   `json:"cacheControl,omitempty"`
+	Kind         ContentPartKind `json:"kind"`
+	Text         string          `json:"text,omitempty"`
+	MediaType    string          `json:"mediaType,omitempty"`
+	Source       *MediaSource    `json:"source,omitempty"`
 }
 
 var ErrInvalidContent = errors.New("invalid model message content")
@@ -83,8 +93,13 @@ func TextValue(parts []ContentPart) string {
 func ValidateMessage(message Message) error {
 	// Validate all JSON-bound fields, including media references, Tool call
 	// metadata and opaque ProviderReplay identity, before normalization.
-	if jsoncontract.ValidateCanonicalUTF8(message) != nil || len(message.Content) > 64 {
+	if jsoncontract.ValidateCanonicalUTF8(message) != nil || len(message.Content) > 64 || !validCacheControl(message.CacheControl) {
 		return ErrInvalidContent
+	}
+	if message.ToolResult != nil {
+		if message.Role != RoleTool || !validBindingValue(message.ToolResult.Name, 512, true) || !validBindingValue(message.ToolResult.Status, 128, true) || len(message.ToolResult.Error) > 65536 || strings.ContainsRune(message.ToolResult.Error, 0) {
+			return ErrInvalidContent
+		}
 	}
 	var nonempty bool
 	for _, part := range message.Content {
@@ -111,7 +126,7 @@ func ValidateMessage(message Message) error {
 		}
 		// May contain only ToolCalls or ProviderReplay, with no visible text.
 	case RoleTool:
-		if message.ToolCallID == "" || len(message.ToolCalls) != 0 || message.ProviderReplay != nil || !nonempty {
+		if message.ToolCallID == "" || len(message.ToolCalls) != 0 || message.ProviderReplay != nil || (!nonempty && (message.ToolResult == nil || strings.TrimSpace(message.ToolResult.Error) == "")) {
 			return ErrInvalidContent
 		}
 	default:
@@ -121,13 +136,22 @@ func ValidateMessage(message Message) error {
 }
 
 func validatePart(part ContentPart) error {
+	if part.MediaType != "" {
+		parsed, params, err := mime.ParseMediaType(part.MediaType)
+		if err != nil || parsed != part.MediaType || len(params) != 0 {
+			return ErrInvalidContent
+		}
+	}
+	if !validCacheControl(part.CacheControl) || len(part.Name) > 512 || strings.TrimSpace(part.Name) != part.Name || strings.ContainsAny(part.Name, "\x00\r\n") {
+		return ErrInvalidContent
+	}
 	switch part.Kind {
 	case ContentText:
-		if part.Source != nil || part.MediaType != "" || strings.TrimSpace(part.Text) == "" {
+		if part.Source != nil || part.MediaType != "" || part.Name != "" || strings.TrimSpace(part.Text) == "" {
 			return ErrInvalidContent
 		}
 		return nil
-	case ContentImage, ContentFile, ContentAudio:
+	case ContentImage, ContentFile, ContentAudio, ContentVideo:
 		if part.Text != "" || part.Source == nil ||
 			strings.TrimSpace(part.MediaType) != part.MediaType || part.MediaType == "" ||
 			len(part.MediaType) > 128 {
@@ -143,15 +167,27 @@ func validatePart(part ContentPart) error {
 				return ErrInvalidContent
 			}
 		case ContentFile:
-			if part.MediaType != "application/pdf" {
+			if part.MediaType != "application/pdf" && (part.Source.Kind != MediaSourceArtifact || !hostFileMIME(part.MediaType)) {
 				return ErrInvalidContent
 			}
 		case ContentAudio:
-			if part.MediaType != "audio/mpeg" && part.MediaType != "audio/wav" {
+			if part.MediaType != "audio/mpeg" && part.MediaType != "audio/wav" && (part.Source.Kind != MediaSourceArtifact || !strings.HasPrefix(part.MediaType, "audio/")) {
+				return ErrInvalidContent
+			}
+		case ContentVideo:
+			if !hostVideoMIME(part.MediaType) {
 				return ErrInvalidContent
 			}
 		}
+		if part.Source.Kind != MediaSourceArtifact && (part.Source.ArtifactID != "" || part.Source.SHA256 != "" || part.Source.SizeBytes != 0) {
+			return ErrInvalidContent
+		}
 		switch part.Source.Kind {
+		case MediaSourceArtifact:
+			digest, err := hex.DecodeString(part.Source.SHA256)
+			if err != nil || len(digest) != 32 || strings.ToLower(part.Source.SHA256) != part.Source.SHA256 || part.Source.URL != "" || part.Source.FileID != "" || !validBindingValue(part.Source.ArtifactID, 512, false) || part.Source.SizeBytes <= 0 {
+				return ErrInvalidContent
+			}
 		case MediaSourceFileID:
 			if part.Source.URL != "" || strings.TrimSpace(part.Source.FileID) != part.Source.FileID ||
 				part.Source.FileID == "" || len(part.Source.FileID) > 512 {
@@ -184,10 +220,42 @@ func CloneContentParts(parts []ContentPart) []ContentPart {
 	cloned := make([]ContentPart, len(parts))
 	for i, part := range parts {
 		cloned[i] = part
+		cloned[i].CacheControl = CloneCacheControl(part.CacheControl)
 		if part.Source != nil {
 			source := *part.Source
 			cloned[i].Source = &source
 		}
 	}
 	return cloned
+}
+
+// CacheControl is a provider-neutral prompt-cache breakpoint hint.
+type CacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
+}
+
+func validCacheControl(value *CacheControl) bool {
+	return value == nil || (value.Type == "ephemeral" && (value.TTL == "" || value.TTL == "5m" || value.TTL == "1h"))
+}
+func CloneCacheControl(value *CacheControl) *CacheControl {
+	if value == nil {
+		return nil
+	}
+	result := *value
+	return &result
+}
+func hostFileMIME(value string) bool {
+	switch value {
+	case "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "text/csv", "text/plain", "text/markdown", "application/json":
+		return true
+	}
+	return false
+}
+func hostVideoMIME(value string) bool {
+	switch value {
+	case "video/mp4", "video/x-msvideo", "video/avi", "video/quicktime", "video/mov", "video/x-matroska", "video/webm", "video/mpeg", "video/3gpp":
+		return true
+	}
+	return false
 }

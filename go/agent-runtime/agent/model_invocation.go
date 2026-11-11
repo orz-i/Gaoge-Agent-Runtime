@@ -89,6 +89,9 @@ func newModelInvocation(
 	provider, bindingFingerprint string,
 	now time.Time,
 ) (ModelInvocation, error) {
+	if err := model.ValidateRequestBinding(request); err != nil {
+		return ModelInvocation{}, errors.Join(ErrInvalidRequest, err)
+	}
 	request.InvocationID = ""
 	hash, err := modelRequestHash(request, catalogFingerprints, provider, bindingFingerprint)
 	if err != nil {
@@ -107,6 +110,9 @@ func newModelInvocation(
 }
 
 func modelRequestHash(request model.Request, fingerprints []string, provider, bindingFingerprint string) (string, error) {
+	if err := model.ValidateRequestBinding(request); err != nil {
+		return "", errors.Join(ErrInvalidRequest, err)
+	}
 	request.InvocationID = ""
 	encoded, err := json.Marshal(struct {
 		Request             model.Request `json:"request"`
@@ -458,6 +464,10 @@ func (runner *Runner) buildModelRequest(
 		zero := 0
 		request.Tools, request.RequireToolCall, request.HostedToolCallLimit = nil, false, &zero
 	}
+	request, err = runner.normalizeModelPolicy(ctx, request)
+	if err != nil {
+		return model.Request{}, nil, err
+	}
 	// Capture Catalog authority before Host-owned, model-facing projection.
 	// The final Request and original Catalog fingerprints are both hashed into
 	// the same durable ModelInvocation, never recomputed on resume.
@@ -480,10 +490,26 @@ func (runner *Runner) buildModelRequest(
 }
 
 // PrepareModelRequest may project messages and visible Tool schemas before the
-// intent is sealed. It may never change identity, granted Tool keys, provider
-// targets or budgets. Dispatch-time ModelMiddleware cannot change them later.
+// intent is sealed. It may add immutable Host binding metadata and option defaults,
+// but never override caller options, granted Tool keys, provider targets or budgets.
+// Dispatch-time ModelMiddleware cannot change any of the sealed fields later.
 func validPreparedModelRequest(original, prepared model.Request) bool {
-	return len(prepared.Messages) > 0 && sameModelRequestIdentity(original, prepared) &&
+	// The preparer may freeze new Host binding metadata, but cannot replace metadata already supplied.
+	bindingOriginal := original
+	if !additivePreparedOptions(original.ModelOptions, prepared.ModelOptions) {
+		return false
+	}
+	bindingOriginal.ModelOptions = prepared.ModelOptions
+	if bindingOriginal.BindingRef == "" {
+		bindingOriginal.BindingRef = prepared.BindingRef
+	}
+	if bindingOriginal.PromptCacheKey == "" {
+		bindingOriginal.PromptCacheKey = prepared.PromptCacheKey
+	}
+	if bindingOriginal.PreviousResponseID == "" {
+		bindingOriginal.PreviousResponseID = prepared.PreviousResponseID
+	}
+	return model.ValidateRequestBinding(prepared) == nil && len(prepared.Messages) > 0 && sameModelRequestIdentity(bindingOriginal, prepared) &&
 		prepared.MaxOutputTokens == original.MaxOutputTokens &&
 		reflect.DeepEqual(prepared.HostedToolCallLimit, original.HostedToolCallLimit) &&
 		prepared.RequireToolCall == original.RequireToolCall &&
@@ -492,7 +518,7 @@ func validPreparedModelRequest(original, prepared model.Request) bool {
 }
 
 func sameModelRequestIdentity(frozen, candidate model.Request) bool {
-	return frozen.RunID == candidate.RunID && frozen.InvocationID == candidate.InvocationID &&
+	return frozen.BindingRef == candidate.BindingRef && frozen.PromptCacheKey == candidate.PromptCacheKey && frozen.PreviousResponseID == candidate.PreviousResponseID && frozen.RunID == candidate.RunID && frozen.InvocationID == candidate.InvocationID &&
 		frozen.Model == candidate.Model && sameFrozenModelOptions(frozen.ModelOptions, candidate.ModelOptions) &&
 		sameFrozenOutputContract(frozen.OutputContract, candidate.OutputContract)
 }

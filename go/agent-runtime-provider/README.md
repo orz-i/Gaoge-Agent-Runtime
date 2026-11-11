@@ -6,6 +6,7 @@ without coupling Kernel, Agent, or Harness to vendor APIs:
 - `provider.NewRouter`: immutable, explicitly bound Provider routing
 - `provider/openai`: OpenAI Responses client
 - `provider/anthropic`: Anthropic Messages client
+- `provider/transport`: reusable 38-protocol Host wire adapters; explicit Host HTTP policy, no routing or billing
 - `provider/internal/providerhttp`: private bounded HTTP/SSE transport
 
 Host code supplies credentials and authorized endpoints. Each Router

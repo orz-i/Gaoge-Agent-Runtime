@@ -139,6 +139,9 @@ type prepared struct {
 }
 
 func (c *Client) prepare(request model.Request, streaming bool) (prepared, error) {
+	if model.ValidateRequestBinding(request) != nil || request.PromptCacheKey != "" || request.PreviousResponseID != "" {
+		return prepared{}, ErrUnsupported
+	}
 	if c == nil || len(request.HostedTools) != 0 {
 		return prepared{}, ErrUnsupported
 	}
@@ -201,6 +204,14 @@ func (c *Client) prepare(request model.Request, streaming bool) (prepared, error
 	messages := make([]map[string]any, 0, len(request.Messages))
 	seenNonSystem := false
 	for _, m := range request.Messages {
+		for _, part := range m.Content {
+			if part.CacheControl != nil || part.Name != "" {
+				return prepared{}, ErrUnsupported
+			}
+		}
+		if m.CacheControl != nil || m.ToolResult != nil {
+			return prepared{}, ErrUnsupported
+		}
 		if err := model.ValidateMessage(m); err != nil {
 			return prepared{}, errors.Join(ErrUnsupported, err)
 		}

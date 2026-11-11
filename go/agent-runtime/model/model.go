@@ -29,25 +29,46 @@ type ProviderReplay struct {
 	Data     json.RawMessage `json:"data"`
 }
 
+// ToolResultMetadata preserves outcome semantics without duplicating the content.
+type ToolResultMetadata struct {
+	Name   string `json:"name,omitempty"`
+	Status string `json:"status,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
 // Message is one provider-neutral transcript item consumed by a model.
 type Message struct {
-	Role           Role            `json:"role"`
-	Content        []ContentPart   `json:"content"`
-	ToolCalls      []tools.Call    `json:"toolCalls,omitempty"`
-	ToolCallID     string          `json:"toolCallID,omitempty"`
-	ProviderReplay *ProviderReplay `json:"providerReplay,omitempty"`
+	ToolResult     *ToolResultMetadata `json:"toolResult,omitempty"`
+	CacheControl   *CacheControl       `json:"cacheControl,omitempty"`
+	Role           Role                `json:"role"`
+	Content        []ContentPart       `json:"content"`
+	ToolCalls      []tools.Call        `json:"toolCalls,omitempty"`
+	ToolCallID     string              `json:"toolCallID,omitempty"`
+	ProviderReplay *ProviderReplay     `json:"providerReplay,omitempty"`
+}
+
+// PolicyBinding is the narrow result of trusted Host model-option policy.
+// It contains no credentials, Tool authority, model selection or budgets.
+type PolicyBinding struct {
+	ModelOptions json.RawMessage
+	BindingRef   string
 }
 
 // Request is one provider-neutral model call.
 type Request struct {
-	RunID          string             `json:"runID"`
-	InvocationID   string             `json:"invocationID,omitempty"`
-	Model          string             `json:"model,omitempty"`
-	ModelOptions   json.RawMessage    `json:"modelOptions,omitempty"`
-	OutputContract *OutputContract    `json:"outputContract,omitempty"`
-	Messages       []Message          `json:"messages"`
-	Tools          []tools.Definition `json:"tools,omitempty"`
-	HostedTools    []HostedTool       `json:"hostedTools,omitempty"`
+	// BindingRef identifies an immutable nonsecret Host-owned route snapshot.
+	BindingRef     string `json:"bindingRef,omitempty"`
+	PromptCacheKey string `json:"promptCacheKey,omitempty"`
+	// PreviousResponseID is conversation continuation, never proof of external effects.
+	PreviousResponseID string             `json:"previousResponseID,omitempty"`
+	RunID              string             `json:"runID"`
+	InvocationID       string             `json:"invocationID,omitempty"`
+	Model              string             `json:"model,omitempty"`
+	ModelOptions       json.RawMessage    `json:"modelOptions,omitempty"`
+	OutputContract     *OutputContract    `json:"outputContract,omitempty"`
+	Messages           []Message          `json:"messages"`
+	Tools              []tools.Definition `json:"tools,omitempty"`
+	HostedTools        []HostedTool       `json:"hostedTools,omitempty"`
 	// MaxOutputTokens is an enforceable provider-neutral output ceiling. A host
 	// enabling token admission must translate it to the selected provider.
 	MaxOutputTokens int64 `json:"maxOutputTokens,omitempty"`
@@ -283,6 +304,11 @@ func CloneMessages(values []Message) []Message {
 	result := make([]Message, len(values))
 	for index, message := range values {
 		result[index] = message
+		result[index].CacheControl = CloneCacheControl(message.CacheControl)
+		if message.ToolResult != nil {
+			value := *message.ToolResult
+			result[index].ToolResult = &value
+		}
 		result[index].Content = CloneContentParts(message.Content)
 		result[index].ToolCalls = cloneToolCalls(message.ToolCalls)
 		result[index].ProviderReplay = CloneProviderReplay(message.ProviderReplay)
