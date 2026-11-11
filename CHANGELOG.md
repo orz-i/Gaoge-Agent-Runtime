@@ -5,6 +5,26 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #103 final merge-audit recovery correction (2026-11-10): a successful
+  Host callback's immutable original receipt and its independently committed
+  terminal Application Invocation now authorize read-only recovery of the
+  Application Turn even after the original callback's transient context is
+  lost. A merely Running/Failed owner, missing or conflicting Host proof,
+  or an outstanding native Runtime continuation remains fail-closed under
+  the shared Memory/SQL terminal CAS. Replaying the original resolved
+  Application response as the **first** recovery action also routes through
+  verified Application repair rather than loading a nonexistent Kernel Run.
+  A completed child Application does NOT
+  prove that its parent Agent physically resumed: resolved-response replay
+  and explicit ReconcileInteraction now report
+  `ErrApplicationParentContinuationUnverified` when the original
+  child-completion Item is not followed by an owner-bound, settled parent
+  Resume grant. A host can explicitly invoke ResumeTurn; read-only recovery
+  does not mint a second physical grant or repeat the business callback.
+  These changes add no state machine, schema or legacy compatibility bridge.
+  Fault-injection regression tests cover Memory, SQLite, and real PostgreSQL,
+  including cross-owner/invalid receipt matrix and post-resume positive paths.
+
 - Original-parent proof query convergence (2026-11-10): V7 independent
   audit found that Host continuation admission and terminal projection
   pre-filtered original response siblings by claimed Turn, allowing a
