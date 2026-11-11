@@ -127,3 +127,40 @@ func TestExplicitResponsesPhaseRequiresPhysicalOutput(t *testing.T) {
 		require.ErrorIs(t, err, errInvalidResponsesPhase)
 	}
 }
+
+func TestLegacyResponsesCompletionReconcilesText(t *testing.T) {
+	for _, omitted := range []bool{false, true} {
+		for _, partial := range []string{"", "ans"} {
+			for _, noCallback := range []bool{false, true} {
+				result := &GenerateOutput{}
+				var visible strings.Builder
+				var callback func(GenerateStreamEvent) error
+				if !noCallback {
+					callback = func(event GenerateStreamEvent) error { visible.WriteString(event.Delta); return nil }
+				}
+				item := phaseFixture(nil, "answer")
+				if omitted {
+					delete(item, "phase")
+				}
+				require.NoError(t, rememberResponsesPhase(result, item, 0))
+				if partial != "" {
+					require.NoError(t, applyResponsesTextDeltaEvent(map[string]any{"output_index": 0, "delta": partial}, result, callback))
+				}
+				require.NoError(t, applyResponsesTextDoneEvent(map[string]any{"output_index": 0, "text": "answer"}, result, "text"))
+				event := map[string]any{"response": map[string]any{"output": []any{item}}}
+				for i := 0; i < 2; i++ {
+					require.NoError(t, applyResponsesCompletedEvent(AdapterOpenAIResponses, "response.completed", event, result, callback))
+					require.Equal(t, "answer", result.Text)
+				}
+				if !noCallback {
+					require.Equal(t, "answer", visible.String())
+				}
+			}
+		}
+	}
+}
+func TestLegacyResponsesEmptyCompletionPreservesConfirmedText(t *testing.T) {
+	result := &GenerateOutput{Text: "answer"}
+	require.NoError(t, applyResponsesCompletedEvent(AdapterOpenAIResponses, "response.completed", map[string]any{"response": map[string]any{"id": "r"}}, result, nil))
+	require.Equal(t, "answer", result.Text)
+}

@@ -811,7 +811,9 @@ func applyResponsesCompletedEvent(
 			}
 		}
 	}
-	if output.responsesPhased {
+	// A nonempty completed projection is authoritative for legacy endpoints too.
+	// An absent compatible completion payload must not erase confirmed deltas.
+	if output.responsesPhased || output.Text != "" {
 		result.Text = output.Text
 	}
 	if err := emitResponsesCompletedReasoning(eventType, result, output, onEvent); err != nil {
