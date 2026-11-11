@@ -198,6 +198,155 @@ can use the existing Host-composed `ApplicationCapabilityExecutor`; there
 is no unverified generic FeatureDriver registry. See
 [ADR 0012](adr/0012-host-selected-capabilities-and-external-model-providers.md).
 
+## Durable Harness authority facts
+
+Physical Dispatch, Cancellation Fence, Host business callback and Runtime
+Continuation have distinct original owners, but their Item receipts share
+one invariant: a matching status or parent ID **alone** never proves effect
+completion. Each family has its own pure, type-specific validator for
+original operation identity, Turn/Invocation/Run, required payload boundary,
+durable Item ancestry, sequence ordering and contradictory completions.
+The Memory and PostgreSQL/SQLite Harness Stores invoke the same semantic
+contract **before** their atomic AppendItem commit; read-only recovery also
+validates existing rows before any new physical effect. A damaged original
+Kind/Status never disappears by filtering it out of Retry, Cancellation or
+Dispatch admission. The immutable Waiting/Resolved Interaction source Item,
+business-response receipt and continuation Claim/Completion are checked as
+one exact original response chain; a Host callback receipt without a
+continuation Claim is **not** a Runtime Resume authorization. All authority
+JSON rejects duplicate/ambiguous fields, while settlement Items require
+their deterministic original parent-derived ID. Reserved source/grant and
+completion namespaces cannot be preoccupied with arbitrary Items.
+
+An independent post-review failure demonstrated another TOCTOU boundary:
+a committed continuation Claim with no physical Resume could be mistaken
+for completed execution when the Kernel Run independently became terminal.
+Public root/child Refresh observes the same continuation predicate before
+projecting state, but the decisive invariant is enforced again INSIDE the
+atomic Store.UpdateInvocation / Store.UpdateTurn terminal CAS. Memory and
+SQL share a pure type-specific original Host callback/Claim/Completion
+predicate. SQL reads exact primary-key original proof IDs and bounded
+siblings through the global `idx_harness_item_parent` index, without
+pre-filtering a possibly corrupted sibling `TurnID` or `RunID`. Both
+Host continuation admission and terminal projection consume the same typed
+sibling reader and serialize with competing Claim under the original Turn
+row lock. Ordinary Artifact attachments remain separate from Host response
+Diagnostic authority. This index is added by the explicit Harness `Migrate`
+operation on new and existing PostgreSQL/SQLite Stores; constructors do not
+migrate. Hosts must plan the index build for existing large Item tables.
+A private elected callback context, bound to the original Turn, Invocation
+and **exact Interaction ID**, allows only that physical caller to project
+its returned snapshot before its completion Item is appended. The same
+Invocation can have earlier Resolved Interactions; a newer callback must
+never borrow authority for those unfinished physical continuations. This
+cannot authorize an unrelated Refresh or an unclaimed Resume.
+Cancellation retains its separately verified physical control authority.
+An InvocationCancelled status does not by itself settle a physical Start.
+Memory and SQL both reject this terminal CAS while the original Start Grant
+is unknown, unless a durable original Turn cancellation intent has already
+won admission; this allows the trusted native Kernel cancellation path to
+update its Host projection while the cancellation fence stays in force.
+The intent alone does not certify that a physical remote effect stopped or
+release its pending Grant.
+
+A terminal Turn CAS without any resolved Interaction must still prove all
+original physical Dispatch Grants and Cancellation Fences settled. Both
+Memory and SQL check these existing type-specific predicates **inside the
+Turn-serializing status transaction**, not just in public Refresh. A private
+Turn-scoped context marker may be created only by the original native
+cancellation pathway after Kernel terminal proof and descendant cleanup;
+this permits the corresponding Completed/Failed observation while the
+cancellation intent remains active, without treating that intent as an
+unqualified generic terminal authority. Ordinary terminal projections,
+Retry and custom Store calls cannot use this exception. TurnCancelled is
+included in the same physical-grant matrix: when a physical Start is still
+outcome-unknown, only a separately verified native cancellation AND an
+active original cancellation intent may authorize its terminal Turn CAS.
+This distinction is expressed by one pure shared validator used by both
+Memory and SQL in their original Store transaction.
+
+**Terminal transition authority (pre-v1 hard cut):** neither a Turn or
+Invocation terminal `Status`, nor a physically returned Start, nor a
+Turn-scoped pending Cancel intent is proof that the original Runtime
+operation or descendant cleanup completed. Memory and SQL require the
+exact original Kernel/Host operation-scoped private transition witness
+inside the same serialized Turn CAS. If a physical Start was positively
+rejected before any effect, the complete unique original grant plus
+no-effect receipt may instead authorize **Failed only**, including after
+the immediate callback ACK was lost. A different sibling's Cancel never
+authorizes another Run's terminal outcome; a Waiting Host Interaction
+and any unconfirmed Continuation remain protected.
+
+**Original Start vs Control/Resume no-effect:** a correct
+`VerifiedExecutionDispatchReceipt` can show a Control, Approval or
+Resume operation did not change the Kernel. This is **not** proof the
+original Kernel Run was never started or has reached a terminal state.
+`VerifiedOriginalStartNoEffect` therefore requires the current
+Invocation/Run/Attempt's unique `start` or `start-retry` grant and
+its exact confirmed pre-effect rejection; it never promotes
+`native_agent_control_no_effect`, a failed Resume or a Handoff result
+to original Run failure. The Memory/SQL Retry transactions recheck the
+same immutable physical lineage *under the owning Turn lock*, including
+historical Failed rows created by an earlier defective Store. A returned
+**effectful original Start** never becomes no-effect just because a
+later Control failed; a second Attempt then requires the Runner to
+read-only load the same original Kernel Run, prove frozen root/child
+execution ownership, verify its **matching terminal outcome**, and
+pass a private Turn/Invocation/Run/Attempt-scoped witness to Store CAS.
+A Running, Waiting or Paused Kernel Run cannot mint this witness. A
+definitively rejected original Start may still be recovered after lost
+ACK by its unique durable no-effect grant/receipt alone. Host-owned
+Application has separate original Host-effect/cancellation fences.
+No new persisted execution state machine or compatibility bridge is
+introduced.
+
+Handoff terminal proof JSON uses the same duplicate-free, strict typed
+authority contract as cancellation and Interaction: duplicate keys at
+any depth, case aliases, unknown fields and changing response semantics
+remain fail-closed. Frozen child input explicitly includes its sealed
+`harnessRoot` Turn/Invocation/Run/Attempt binding; arbitrary Handoff
+metadata cannot replace it. The same original `frozenChildRoot`
+validator is reused for the complete ancestor Attempt list, including
+duplicate/missing/invalid parents; `ValidTurnTerminalDescendants` compares
+those frozen parent Run/Attempt identities with the Invocation rows
+loaded under the terminal Turn lock. The strict first-party frozen
+Handoff ChildRun/source validator runs for **all Handoff statuses**,
+including an already terminal Harness child, rather than assuming
+`Completed` makes its source trustworthy. A returned terminal child
+from an older intermediate Attempt or with an altered ChildRun ID
+cannot release the current Turn.
+Unsealed pre-hard-cut child inputs remain fenced pending explicit
+quarantine or repair, with no silent compatibility bridge.
+Non-authority Artifact children may be attached to the original Handoff
+Started Item but cannot vote for completion; only one exact terminal
+Delegation Item has that authority.
+
+A parent Turn cannot be committed terminal while any original child
+Invocation is still physically outcome-unknown. A statically bound local
+Handoff ChildRunner is a distinct original execution owner: a terminal
+snapshot, verified via the same physical Kernel and frozen child identity,
+is projected read-only to a deterministic terminal Handoff Item. The
+Store may treat its `Accepted` Harness child as settled only after
+verifying that exact started/terminal Item ancestry and the unique
+original `handoff_start_returned` grant/receipt. Merely sharing a child
+Run ID, a returned Start, a remote/unverified route or any unmatched
+terminal Item remains **fail-closed**. Terminal outcomes cannot be
+changed to a different outcome within the same Attempt; validated
+`RetryInvocation` is the only Attempt rotation. No new persisted
+execution state machine is introduced.
+
+**Breaking Store protocol:** `Store.UpdateInteraction` has been removed,
+including from the Memory/SQL implementations and Go consumer contract.
+`ResolveInteraction` is the sole original Turn/Invocation-serialized
+Host response CAS. This pre-v1 correction has no legacy compatibility
+bridge; custom Store implementations must use the same typed trust
+contract, and persisted legacy noncanonical proof facts remain fenced
+pending explicit repair/quarantine.
+
+This is *not* an interchangeable universal receipt, a second Host routing
+protocol or a new Kernel/Provider state machine. See the
+[systemic proof-authority governance record](audits/2026-11-09-receipt-authority-systemic-recurrence.md).
+
 ## Resolved Interaction proof and cancellation authority
 
 A resolved Host business Interaction is an **in-flight effect claim** until
@@ -251,9 +400,12 @@ weaken authorization or prevent a concurrent later parent cancellation;
 the existing pre/post-claim fences retain that responsibility.
 MemoryStore resolves global Item IDs from its existing map and
 positions sequential page cursors by binary search. PostgreSQL
-uses its existing Item primary key, without an extra index or
-migration. Full Timeline/Turn history remains an explicit,
-proportional materialization.
+uses its existing Item primary key for `GetItem`, without an extra
+index for that specific point lookup. In contrast, global parent
+siblings required by independent Receipt/Handoff authority proof
+use the separate `idx_harness_item_parent` index installed by the
+explicit Harness migration. Full Timeline/Turn history remains an
+explicit, proportional materialization.
 
 ## Durable execution rule
 
