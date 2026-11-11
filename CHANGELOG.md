@@ -5,6 +5,22 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #103 physical original-receipt admission convergence (2026-11-11):
+  Memory Retry, new Dispatch Grant, terminal Invocation/Turn CAS and
+  cancellation admission now consume globally complete original Grant and
+  Cancel-intent children under their owning Store mutex, not a Turn-local
+  receipt subset. Runner cancellation and native Kernel Epoch recovery
+  share the same evidence bridge, while SQL reuses its preexisting global
+  Parent-ID transaction queries. Immutable original IDs, typed physical
+  receipt validators and safe missing-versus-contradictory classification
+  remain authoritative. Native Start exception cannot clear a contradictory
+  persisted receipt. This closes independently reproduced false permissions
+  for a new Attempt, new physical Resume Grant and an unsafe read-only
+  cancellation pending verdict. Add a Store/SQL/Runner cross-path adversarial
+  matrix with positive receipt and cancellation cases. No new persisted
+  ledger, compatibility bridge or schema migration; details in
+  `docs/audits/2026-11-11-pr103-global-physical-admission-convergence.md`.
+
 - PR #103 independent original-receipt scope and Go security correction
   (2026-11-11): all Harness Stores now expose one hard-cut, globally indexed
   `ListItemChildren` contract returning up to two original-parent
