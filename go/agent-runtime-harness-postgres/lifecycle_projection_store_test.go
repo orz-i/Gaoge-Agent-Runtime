@@ -36,15 +36,13 @@ func TestStoresFenceTerminalInvocationProjection(t *testing.T) {
 					if _, fresh, err := store.CreateTurn(t.Context(), turn); err != nil || !fresh {
 						t.Fatalf("create Turn: fresh=%t err=%v", fresh, err)
 					}
-					created, fresh, err := store.CreateInvocation(t.Context(), root)
+					// Historical terminal fixture is inserted with its
+					// original outcome; it must not use a generic new
+					// terminal CAS lacking physical Kernel evidence.
+					root.Status = tc.committed
+					committed, fresh, err := store.CreateInvocation(t.Context(), root)
 					if err != nil || !fresh {
-						t.Fatalf("create Invocation: fresh=%t err=%v", fresh, err)
-					}
-					created.Status = tc.committed
-					created.UpdatedAt = created.UpdatedAt.Add(time.Second)
-					committed, err := store.UpdateInvocation(t.Context(), created, created.Revision)
-					if err != nil {
-						t.Fatalf("commit terminal Invocation: %v", err)
+						t.Fatalf("create committed fixture: fresh=%t err=%v", fresh, err)
 					}
 					stale := committed
 					stale.Status = tc.stale

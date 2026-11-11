@@ -82,7 +82,7 @@ func TestChildParentAttemptRemainsFrozenAfterIntermediateRetry(t *testing.T) {
 			}
 
 			parent.Status = InvocationFailed
-			failed, err := store.UpdateInvocation(t.Context(), parent, parent.Revision)
+			failed, err := store.UpdateInvocation(terminalFixtureContext(t.Context(), parent, TurnFailed), parent, parent.Revision)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,7 +175,7 @@ func TestNestedChildInheritsFrozenParentAttemptsAcrossDelegationItem(t *testing.
 		t.Fatalf("valid inherited parent proof rejected: %v", err)
 	}
 	owner.Status = InvocationFailed
-	failed, err := store.UpdateInvocation(t.Context(), owner, owner.Revision)
+	failed, err := store.UpdateInvocation(terminalFixtureContext(t.Context(), owner, TurnFailed), owner, owner.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestNestedChildInheritsFrozenParentAttemptsAcrossDelegationItem(t *testing.
 		t.Fatalf("retry crossed a Waiting descendant: %v", err)
 	}
 	delegator.Status = InvocationCompleted
-	if _, err := store.UpdateInvocation(t.Context(), delegator, delegator.Revision); err != nil {
+	if _, err := store.UpdateInvocation(terminalFixtureContext(t.Context(), delegator, TurnCompleted), delegator, delegator.Revision); err != nil {
 		t.Fatal(err)
 	}
 	retried, err := store.RetryInvocation(t.Context(), owner.ID, failed.Revision, "owner-run-2", time.Now().UTC())

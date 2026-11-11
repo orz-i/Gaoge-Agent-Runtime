@@ -37,21 +37,22 @@ func TestInteractionHandlerClaimAndCancellationAreCASExclusive(t *testing.T) {
 						t.Fatalf("stale cancellation accepted after business dispatch claim: %v", err)
 					}
 				} else {
-					if _, err = store.UpdateInvocation(t.Context(), cancel, start.Revision); err != nil {
-						t.Fatal(err)
+					// A bare terminal status is not a cancellation operation:
+					// only the elected Cancel path can carry the exact
+					// physical control/owner proof. An unverified competing
+					// Cancelled CAS must lose *before* the actual handler claims.
+					if _, err = store.UpdateInvocation(t.Context(), cancel, start.Revision); !errors.Is(err, harness.ErrConflict) {
+						t.Fatalf("unverified cancellation stole the handler's CAS: %v", err)
 					}
-					if _, err = store.UpdateInvocation(t.Context(), dispatch, start.Revision); !errors.Is(err, harness.ErrConflict) {
-						t.Fatalf("business handler dispatched after cancelled invocation: %v", err)
+					if _, err = store.UpdateInvocation(t.Context(), dispatch, start.Revision); err != nil {
+						t.Fatalf("legitimate waiting handler did not claim after rejected cancel: %v", err)
 					}
 				}
 				persisted, err := store.GetInvocation(t.Context(), root.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := harness.InvocationCancelled
-				if dispatchFirst {
-					want = harness.InvocationRunning
-				}
+				want := harness.InvocationRunning
 				if persisted.Status != want || persisted.Revision != start.Revision+1 {
 					t.Fatalf("CAS winner was not durable: status=%s revision=%d", persisted.Status, persisted.Revision)
 				}

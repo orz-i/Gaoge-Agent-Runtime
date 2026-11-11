@@ -47,7 +47,7 @@ func TestNewIndependentCommittedContinuationClaimDoesNotReportSuccessWithoutRunt
 	i := waiting.Interactions[0]
 	i.Status = harness.InteractionResolved
 	i.Response = json.RawMessage("{}")
-	if _, err = backing.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
+	if _, err = backing.ResolveInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
 	inv, err := backing.GetInvocation(t.Context(), featureParentInvocationID(tid))
@@ -116,7 +116,7 @@ func TestNewIndependentVerifiedClaimBypassedByResumeTurn(t *testing.T) {
 	i := waiting.Interactions[0]
 	i.Status = harness.InteractionResolved
 	i.Response = json.RawMessage("{}")
-	if _, err = backing.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
+	if _, err = backing.ResolveInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
 	inv, err := backing.GetInvocation(t.Context(), featureParentInvocationID(tid))
@@ -193,7 +193,7 @@ func TestNewIndependentVerifiedClaimBypassedByResumeInvocation(t *testing.T) {
 	i := waiting.Interactions[0]
 	i.Status = harness.InteractionResolved
 	i.Response = json.RawMessage("{}")
-	if _, err = backing.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
+	if _, err = backing.ResolveInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
 	inv, err := backing.GetInvocation(t.Context(), child.ID)

@@ -24,7 +24,6 @@ type harnessStoreContract interface {
 	ListInvocations(context.Context, string) ([]harness.Invocation, error)
 	CreateInteraction(context.Context, harness.Interaction, uint64, uint64) (harness.Interaction, bool, error)
 	GetInteraction(context.Context, string) (harness.Interaction, error)
-	UpdateInteraction(context.Context, harness.Interaction, uint64) (harness.Interaction, error)
 	ResolveInteraction(context.Context, harness.Interaction, uint64) (harness.InteractionResolution, error)
 	ListInteractions(context.Context, string) ([]harness.Interaction, error)
 	PutConfigSnapshot(context.Context, harness.ConfigSnapshot) (harness.ConfigSnapshot, bool, error)

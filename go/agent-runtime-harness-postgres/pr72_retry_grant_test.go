@@ -68,7 +68,7 @@ func TestPR72RetryCASPreservesPendingPhysicalExecutionInMemoryAndSQL(t *testing.
 			if err != nil || unchanged.Status != harness.InvocationAccepted || unchanged.ExecutionRefID != grant.RunID || unchanged.Attempt != 1 || unchanged.Revision != child.Revision {
 				t.Fatalf("failed rotation changed persisted state: %+v err=%v", unchanged, err)
 			}
-			settled := harness.Item{ID: "settled-grant", TurnID: turn.ID, InvocationID: child.ID, RunID: child.ExecutionRefID,
+			settled := harness.Item{ID: sqlProofFactID("hdispatchdone", grant.ID), TurnID: turn.ID, InvocationID: child.ID, RunID: child.ExecutionRefID,
 				Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
 				ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_rejected"}`),
 				CreatedAt: now, UpdatedAt: now}
@@ -146,7 +146,7 @@ func TestRealPostgresPR72PendingGrantPreventsFailureAndRetryAcrossConnections(t 
 	grant := harness.Item{
 		ID: "pr72-original-dispatch-grant", TurnID: turn.ID, InvocationID: inv.ID, RunID: inv.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.ExecutionDispatchParentItemID,
-		Payload: json.RawMessage(`{"phase":"start"}`), CreatedAt: now, UpdatedAt: now,
+		Payload: json.RawMessage(`{"phase":"start","physicalRunID":"` + inv.ExecutionRefID + `"}`), CreatedAt: now, UpdatedAt: now,
 	}
 	if _, created, e := first.AppendItem(t.Context(), grant); e != nil || !created {
 		t.Fatalf("grant=%t %v", created, e)
@@ -163,7 +163,7 @@ func TestRealPostgresPR72PendingGrantPreventsFailureAndRetryAcrossConnections(t 
 	if e != nil || current.Status != harness.InvocationAccepted || current.ExecutionRefID != inv.ExecutionRefID || current.Attempt != 1 {
 		t.Fatalf("state altered across handles: %+v %v", current, e)
 	}
-	settled := harness.Item{ID: "pr72-original-dispatch-settled", TurnID: turn.ID,
+	settled := harness.Item{ID: sqlProofFactID("hdispatchdone", grant.ID), TurnID: turn.ID,
 		InvocationID: inv.ID, RunID: inv.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: grant.ID,
 		Payload: json.RawMessage(`{"boundary":"feature_start_no_effect"}`), CreatedAt: now, UpdatedAt: now}

@@ -46,7 +46,7 @@ func TestRetryRootMissingFrozenIdentityDoesNotRotateOrDispatch(t *testing.T) {
 				t.Fatal(err)
 			}
 			turn.Status = harness.TurnFailed
-			if _, err = store.UpdateTurn(t.Context(), turn, turn.Revision); err != nil {
+			if _, err = harness.TerminalFixtureTurnForTest(store, turn, turn.Revision); err != nil {
 				t.Fatal(err)
 			}
 

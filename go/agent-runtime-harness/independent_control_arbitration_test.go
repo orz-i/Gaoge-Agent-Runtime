@@ -132,7 +132,8 @@ func TestIndependentApprovalRequiresCancellationDispatchAuthority(t *testing.T) 
 		ID: "audit-active-cancel", TurnID: waiting.Turn.ID, RunID: root.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		ParentItemID: harness.CancellationFenceParentItemID,
-		Payload:      json.RawMessage("{\"boundary\":\"cancel_scope_pending\"}"), CreatedAt: now, UpdatedAt: now,
+		Payload:      json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"` + root.ExecutionRefID + `"}`),
+		CreatedAt:    now, UpdatedAt: now,
 	})
 	if err != nil || !created {
 		t.Fatalf("cancel intent setup: %v", err)
@@ -145,11 +146,11 @@ func TestIndependentApprovalRequiresCancellationDispatchAuthority(t *testing.T) 
 		t.Fatalf("approval dispatched after persisted cancellation intent: err=%v modelCalls=%d->%d", resolveErr, before, client.calls)
 	}
 	if _, _, closeErr := store.AppendItem(t.Context(), harness.Item{
-		ID: "audit-active-cancel-settled", TurnID: waiting.Turn.ID,
+		ID: testAuthorityReceiptID("hcancelclosed", "audit-active-cancel"), TurnID: waiting.Turn.ID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-		ParentItemID: "audit-active-cancel",
-		Payload:      json.RawMessage(`{"boundary":"cancel_scope_settled"}`),
-		CreatedAt:    now, UpdatedAt: now,
+		ParentItemID: "audit-active-cancel", RunID: root.ExecutionRefID,
+		Payload:   json.RawMessage(`{"boundary":"cancel_scope_settled"}`),
+		CreatedAt: now, UpdatedAt: now,
 	}); closeErr != nil {
 		t.Fatal(closeErr)
 	}
@@ -197,7 +198,7 @@ func TestIndependentAllowanceGrantRequiresCancellationDispatchAuthority(t *testi
 		ID: "audit-budget-cancel-intent", TurnID: paused.Turn.ID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		ParentItemID: harness.CancellationFenceParentItemID, RunID: owner.ExecutionRefID,
-		Payload: json.RawMessage("{\"boundary\":\"cancel_scope_pending\"}"), CreatedAt: now, UpdatedAt: now,
+		Payload: json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"` + owner.ExecutionRefID + `"}`), CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil || !fresh {
 		t.Fatalf("cancel intent setup: %v", err)
@@ -212,10 +213,10 @@ func TestIndependentAllowanceGrantRequiresCancellationDispatchAuthority(t *testi
 		t.Fatalf("allowance wakeup crossed committed cancellation intent: err=%v run=%s", grantErr, state.Run.Status)
 	}
 	if _, _, closeErr := store.AppendItem(t.Context(), harness.Item{
-		ID: "audit-budget-cancel-intent-closed", TurnID: paused.Turn.ID,
+		ID: testAuthorityReceiptID("hcancelclosed", "audit-budget-cancel-intent"), TurnID: paused.Turn.ID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-		ParentItemID: "audit-budget-cancel-intent",
-		Payload:      json.RawMessage(`{"boundary":"cancel_scope_settled"}`), CreatedAt: now, UpdatedAt: now,
+		ParentItemID: "audit-budget-cancel-intent", RunID: owner.ExecutionRefID,
+		Payload: json.RawMessage(`{"boundary":"cancel_scope_settled"}`), CreatedAt: now, UpdatedAt: now,
 	}); closeErr != nil {
 		t.Fatal(closeErr)
 	}

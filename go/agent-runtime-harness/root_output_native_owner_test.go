@@ -57,13 +57,14 @@ func TestRootNativeOutputRequiresFrozenKindActorThread(t *testing.T) {
 			settled := root
 			settled.Status = InvocationCompleted
 			settled.UpdatedAt = settled.UpdatedAt.Add(time.Second)
-			_, err = store.UpdateInvocation(t.Context(), settled, root.Revision)
+			seedCtx := terminalFixtureContext(t.Context(), root, TurnCompleted)
+			_, err = store.UpdateInvocation(seedCtx, settled, root.Revision)
 			if err != nil {
 				t.Fatal(err)
 			}
 			turn.Status = TurnCompleted
 			turn.UpdatedAt = turn.UpdatedAt.Add(time.Second)
-			turn, err = store.UpdateTurn(t.Context(), turn, turn.Revision)
+			turn, err = store.UpdateTurn(seedCtx, turn, turn.Revision)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -265,13 +266,14 @@ func TestRootResultFreeForeignRunCannotFinalizeHostMessage(t *testing.T) {
 	invocation := root
 	invocation.Status = InvocationFailed
 	invocation.UpdatedAt = invocation.UpdatedAt.Add(time.Second)
-	updated, err := store.UpdateInvocation(t.Context(), invocation, invocation.Revision)
+	seedCtx := terminalFixtureContext(t.Context(), invocation, TurnFailed)
+	updated, err := store.UpdateInvocation(seedCtx, invocation, invocation.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
 	turn.Status = TurnFailed
 	turn.UpdatedAt = turn.UpdatedAt.Add(time.Second)
-	turn, err = store.UpdateTurn(t.Context(), turn, turn.Revision)
+	turn, err = store.UpdateTurn(seedCtx, turn, turn.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}

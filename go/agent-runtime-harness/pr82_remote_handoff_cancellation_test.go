@@ -149,7 +149,10 @@ func TestPR82RejectedHandoffDispatchAllowsNoEffectCancellation(t *testing.T) {
 			return err
 		}
 		owner.Status = InvocationCancelled
-		_, err = f.store.UpdateInvocation(ctx, owner, owner.Revision)
+		// Model an independently elected parent canceller committing its
+		// original terminal control before Handoff's grant. The fixture
+		// has no Kernel cancellation input; the authority is test-only.
+		_, err = f.store.UpdateInvocation(terminalFixtureContext(ctx, owner, TurnCancelled), owner, owner.Revision)
 		return err
 	}
 	f.runner.store = wrap

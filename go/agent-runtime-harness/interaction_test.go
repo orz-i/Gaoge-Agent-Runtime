@@ -265,9 +265,9 @@ func TestInteractionResolutionReplayRepairsPartialOwnerProjection(t *testing.T) 
 	response := json.RawMessage(`{"candidateID":"candidate-2"}`)
 	interaction.Status = harness.InteractionResolved
 	interaction.Response = append(json.RawMessage(nil), response...)
-	updated, err := store.UpdateInteraction(t.Context(), interaction, interaction.Revision)
-	if err != nil || updated.Status != harness.InteractionResolved {
-		t.Fatalf("seed partial resolution: %#v err=%v", updated, err)
+	resolution, err := store.ResolveInteraction(t.Context(), interaction, interaction.Revision)
+	if err != nil || resolution.Interaction.Status != harness.InteractionResolved {
+		t.Fatalf("seed partial resolution: %#v err=%v", resolution, err)
 	}
 
 	repaired, err := runner.ResolveInteraction(t.Context(), turnID, interaction.ID, harness.ResolveInteractionRequest{Response: response})

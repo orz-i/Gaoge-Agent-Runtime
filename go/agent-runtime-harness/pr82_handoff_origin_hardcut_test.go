@@ -52,7 +52,7 @@ func TestPR82HandoffRetryCannotRotateOrStartNativeAgent(t *testing.T) {
 				t.Fatal(err)
 			}
 			child.Status = InvocationFailed
-			child, err = f.store.UpdateInvocation(t.Context(), child, child.Revision)
+			child, err = f.store.UpdateInvocation(terminalFixtureContext(t.Context(), child, TurnFailed), child, child.Revision)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -66,30 +66,31 @@ func assertApplicationClaimFencesRetry(t *testing.T, store harness.Store, turnID
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The root Application and its child have both entered the original
+	// Host-effect claim, but neither has an authenticated business-return
+	// witness. The previous fixture used generic Store status updates to
+	// manufacture Failed / Completed and then tested a positive Retry.
+	// This is precisely the bypass the pre-v1 hard cut removes.
 	root.Status = harness.InvocationFailed
-	root, err = store.UpdateInvocation(ctx, root, root.Revision)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := store.UpdateInvocation(ctx, root, root.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("ambiguous root Host effect was committed Failed: %v", err)
 	}
 	turn.Status = harness.TurnFailed
-	if _, err := store.UpdateTurn(ctx, turn, turn.Revision); err != nil {
-		t.Fatal(err)
+	if _, err := store.UpdateTurn(ctx, turn, turn.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("ambiguous child effect allowed terminal Turn: %v", err)
 	}
-	if _, err := store.RetryInvocation(ctx, root.ID, root.Revision, "root-run-2-"+turnID, now.Add(time.Second)); !errors.Is(err, harness.ErrApplicationOutcomeUnknown) {
-		t.Fatalf("rotated root despite a child Application external-effect claim: %v", err)
+	if _, err := store.RetryInvocation(ctx, root.ID, root.Revision, "root-run-2-"+turnID, now.Add(time.Second)); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("ambiguous parent was retried without original result: %v", err)
+	}
+	child.Status = harness.InvocationCompleted
+	if _, err := store.UpdateInvocation(ctx, child, child.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("in-flight child Application was falsely marked Completed without original callback: %v", err)
 	}
 	unchanged, err := store.GetInvocation(ctx, root.ID)
 	if err != nil || unchanged.ExecutionRefID != root.ExecutionRefID ||
-		unchanged.Attempt != 1 || unchanged.Revision != root.Revision {
-		t.Fatalf("rejected retry mutated root Attempt: %+v %v", unchanged, err)
-	}
-	child.Status = harness.InvocationCompleted // externally verified outcome
-	if _, err := store.UpdateInvocation(ctx, child, child.Revision); err != nil {
-		t.Fatal(err)
-	}
-	retried, err := store.RetryInvocation(ctx, root.ID, root.Revision, "root-run-2-"+turnID, now.Add(time.Second))
-	if err != nil || retried.Attempt != 2 || retried.Status != harness.InvocationAccepted {
-		t.Fatalf("verified child did not release retry: %+v %v", retried, err)
+		unchanged.Attempt != 1 || unchanged.Revision != root.Revision ||
+		unchanged.Status != harness.InvocationRunning {
+		t.Fatalf("rejected terminal/retry mutated original root Attempt: %+v %v", unchanged, err)
 	}
 }
 
@@ -161,7 +162,7 @@ func assertPendingDescendantGrantFencesRetry(t *testing.T, store harness.Store, 
 		ID: "unsettled-grandchild-" + turnID, TurnID: turnID, InvocationID: child.ID, RunID: child.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		ParentItemID: harness.ExecutionDispatchParentItemID,
-		Payload:      json.RawMessage(`{"phase":"start","physicalRunID":"unknown"}`),
+		Payload:      json.RawMessage(`{"phase":"start","physicalRunID":"` + child.ExecutionRefID + `"}`),
 		CreatedAt:    now, UpdatedAt: now,
 	}
 	if _, _, err := store.AppendItem(ctx, grant); err != nil {
@@ -171,7 +172,7 @@ func assertPendingDescendantGrantFencesRetry(t *testing.T, store harness.Store, 
 		t.Fatalf("parent retry crossed grandchild's still-open physical grant: %v", err)
 	}
 	settled := harness.Item{
-		ID: "settled-grandchild-" + turnID, TurnID: turnID,
+		ID: sqlProofFactID("hdispatchdone", grant.ID), TurnID: turnID,
 		InvocationID: child.ID, RunID: child.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
 		ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_rejected"}`),

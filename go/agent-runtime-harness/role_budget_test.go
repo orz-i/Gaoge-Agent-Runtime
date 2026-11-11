@@ -149,7 +149,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool) {
 		ID: "role-cancellation-admission", TurnID: started.Turn.ID, RunID: rootInvocation.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		ParentItemID: harness.CancellationFenceParentItemID,
-		Payload:      json.RawMessage(`{"boundary":"cancel_scope_pending"}`),
+		Payload:      json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"` + rootInvocation.ExecutionRefID + `"}`),
 		CreatedAt:    now, UpdatedAt: now,
 	}
 	if _, fresh, appendErr := store.AppendItem(t.Context(), intent); appendErr != nil || !fresh {
@@ -162,9 +162,9 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool) {
 		t.Fatalf("delegated approval crossed cancellation intent: err=%v calls=%d->%d", blockedErr, beforeApprovalCalls, len(meteredModel.requests))
 	}
 	if _, _, closeErr := store.AppendItem(t.Context(), harness.Item{
-		ID: "role-cancellation-admission-closed", TurnID: started.Turn.ID,
+		ID: testAuthorityReceiptID("hcancelclosed", intent.ID), TurnID: started.Turn.ID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-		ParentItemID: intent.ID, Payload: json.RawMessage(`{"boundary":"cancel_scope_settled"}`),
+		ParentItemID: intent.ID, RunID: intent.RunID, Payload: json.RawMessage(`{"boundary":"cancel_scope_settled"}`),
 		CreatedAt: now, UpdatedAt: now,
 	}); closeErr != nil {
 		t.Fatal(closeErr)
@@ -186,7 +186,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool) {
 		t.Fatalf("subtask cancellation ignored physical child Run grant: %v", blockedErr)
 	}
 	if _, _, closeErr := store.AppendItem(t.Context(), harness.Item{
-		ID: "role-child-approval-grant-closed", TurnID: started.Turn.ID,
+		ID: testAuthorityReceiptID("hdispatchdone", grant.ID), TurnID: started.Turn.ID,
 		InvocationID: grant.InvocationID, RunID: grant.RunID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
 		ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),

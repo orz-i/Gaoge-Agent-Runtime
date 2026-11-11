@@ -55,7 +55,7 @@ func TestReauditVerifiedInteractionReconcileIdempotency(t *testing.T) {
 	}
 	i.Status = harness.InteractionResolved
 	i.Response = json.RawMessage("{}")
-	if _, err = store.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
+	if _, err = store.ResolveInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
 	inv, err := store.GetInvocation(t.Context(), featureParentInvocationID(tid))
@@ -248,7 +248,7 @@ func TestReauditConcurrentVerifiedReconcileDoubleResumesRootAgent(t *testing.T) 
 	}
 	i.Status = harness.InteractionResolved
 	i.Response = json.RawMessage("{}")
-	if _, err = store.UpdateInteraction(t.Context(), i, i.Revision); err != nil {
+	if _, err = store.ResolveInteraction(t.Context(), i, i.Revision); err != nil {
 		t.Fatal(err)
 	}
 	inv, err := store.GetInvocation(t.Context(), featureParentInvocationID(tid))
@@ -383,7 +383,7 @@ func TestReauditRunningResolvedResponseReplayRequiresBusinessReceipt(t *testing.
 	}
 	interaction.Status = harness.InteractionResolved
 	interaction.Response = json.RawMessage("{}")
-	if _, err = store.UpdateInteraction(t.Context(), interaction, interaction.Revision); err != nil {
+	if _, err = store.ResolveInteraction(t.Context(), interaction, interaction.Revision); err != nil {
 		t.Fatal(err)
 	}
 	invocation, err := store.GetInvocation(t.Context(), featureParentInvocationID(turnID))
@@ -459,7 +459,7 @@ func TestReauditLostContinuationClaimACKCannotReenterAgent(t *testing.T) {
 	interaction := waiting.Interactions[0]
 	interaction.Status = harness.InteractionResolved
 	interaction.Response = json.RawMessage("{}")
-	if _, err = backing.UpdateInteraction(t.Context(), interaction, interaction.Revision); err != nil {
+	if _, err = backing.ResolveInteraction(t.Context(), interaction, interaction.Revision); err != nil {
 		t.Fatal(err)
 	}
 	invocation, err := backing.GetInvocation(t.Context(), featureParentInvocationID(tid))

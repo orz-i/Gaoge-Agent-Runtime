@@ -43,7 +43,7 @@ func TestRootApplicationParentFenceUsesInvocationNotKernelRun(t *testing.T) {
 	}
 	root.Status = InvocationCancelled
 	root.UpdatedAt = now.Add(time.Second)
-	_, err = store.UpdateInvocation(t.Context(), root, root.Revision)
+	_, err = store.UpdateInvocation(terminalFixtureContext(t.Context(), root, TurnCancelled), root, root.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}

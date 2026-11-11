@@ -52,6 +52,53 @@ func (store *proofReadOnlyStore) ListItems(ctx context.Context, _ string, afterS
 	return store.items, nil
 }
 
+func auditResolvedInteractionSource(interaction Interaction, owner Invocation) Item {
+	payload, err := interactionItemPayload(interaction)
+	if err != nil {
+		panic(err)
+	}
+	return Item{
+		ID:     stableID("hinteractionitem", interaction.ID, string(InteractionResolved)),
+		TurnID: interaction.TurnID, InvocationID: owner.ID,
+		Kind: ItemInteraction, Status: ItemCompleted, Seq: 1,
+		ParentItemID: interaction.ParentItemID,
+		Payload:      payload,
+	}
+}
+
+func TestHostResponseReceiptRequiresOriginalResolvedItem(t *testing.T) {
+	interaction := Interaction{ID: "source-proof", TurnID: "turn-1", InvocationID: "owner-A", Status: InteractionResolved}
+	owner := Invocation{ID: "owner-A", TurnID: "turn-1", ExecutionRefID: "run-A", Status: InvocationRunning}
+	source := auditResolvedInteractionSource(interaction, owner)
+	response := auditVerifiedHostReceipt(interaction, owner)
+	response.Seq = 2
+	for _, tc := range []struct {
+		name    string
+		missing bool
+		corrupt func(*Item)
+	}{
+		{"canonical", false, func(*Item) {}},
+		{"missing-source", true, func(*Item) {}},
+		{"wrong-status", false, func(s *Item) { s.Status = ItemWaiting }},
+		{"wrong-owner", false, func(s *Item) { s.InvocationID = "foreign" }},
+		{"wrong-source-payload", false, func(s *Item) { s.Payload = json.RawMessage(`{"interactionID":"other","status":"resolved"}`) }},
+		{"future-sequence", false, func(s *Item) { s.Seq = 2 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := source
+			tc.corrupt(&src)
+			items := []Item{response}
+			if !tc.missing {
+				items = append([]Item{src}, items...)
+			}
+			want := tc.name == "canonical"
+			if got := hasVerifiedInteractionResponse(items, interaction, owner); got != want {
+				t.Fatalf("source %s authorized=%v want=%v", tc.name, got, want)
+			}
+		})
+	}
+}
+
 func auditVerifiedHostReceipt(interaction Interaction, owner Invocation) Item {
 	payload, _ := json.Marshal(struct {
 		InteractionID string `json:"interactionID"`
@@ -60,7 +107,7 @@ func auditVerifiedHostReceipt(interaction Interaction, owner Invocation) Item {
 	return Item{
 		ID:     verifiedInteractionResponseItemID(interaction.ID),
 		TurnID: interaction.TurnID, InvocationID: owner.ID,
-		RunID: owner.ExecutionRefID, Seq: 1,
+		RunID: owner.ExecutionRefID, Seq: 2,
 		Kind: ItemDiagnostic, Status: ItemCompleted,
 		ParentItemID: stableID("hinteractionitem", interaction.ID, string(InteractionResolved)),
 		Payload:      payload,
@@ -101,7 +148,7 @@ func TestResolvedHostReceiptProofScopeStatusAndForgeryMatrix(t *testing.T) {
 						case "bad-boundary":
 							receipt.Payload = json.RawMessage(`{"interactionID":"interaction-A","boundary":"not_verified"}`)
 						}
-						store.items = []Item{receipt}
+						store.items = []Item{auditResolvedInteractionSource(interaction, owner), receipt}
 					}
 					runner := &Runner{store: store}
 					// An independent truth table: only a resolved Interaction
@@ -159,7 +206,7 @@ func TestResolvedHostReceiptProofPreservesSiblingScopeAndPagesOnce(t *testing.T)
 	store := &proofReadOnlyStore{
 		interactions: []Interaction{a, b, foreign},
 		owners:       map[string]Invocation{"owner-A": ownerA, "owner-B": ownerB},
-		items:        []Item{verified},
+		items:        []Item{auditResolvedInteractionSource(a, ownerA), verified},
 	}
 	runner := &Runner{store: store}
 	pendingA, err := runner.resolvedInteractionClaimPending(t.Context(), "turn-1", "owner-A")

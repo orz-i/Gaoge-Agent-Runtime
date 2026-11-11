@@ -55,7 +55,12 @@ func TestRealPostgresTerminalInvocationFenceAcrossConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created.Status = harness.InvocationCompleted
+	// Commit an authentic first-party physical no-effect receipt rather
+	// than creating a terminal state from a bare Store status update.
+	// A second PostgreSQL connection must then preserve this original
+	// Failed outcome for the full lifetime of its Attempt.
+	recordTestOriginalNoEffect(t, first, created, created.CreatedAt)
+	created.Status = harness.InvocationFailed
 	created.UpdatedAt = created.UpdatedAt.Add(time.Second)
 	settled, err := first.UpdateInvocation(t.Context(), created, created.Revision)
 	if err != nil {
@@ -63,7 +68,7 @@ func TestRealPostgresTerminalInvocationFenceAcrossConnections(t *testing.T) {
 	}
 
 	for _, staleStatus := range []harness.InvocationStatus{
-		harness.InvocationRunning, harness.InvocationFailed, harness.InvocationCancelled,
+		harness.InvocationRunning, harness.InvocationCompleted, harness.InvocationCancelled,
 	} {
 		stale, readErr := second.GetInvocation(t.Context(), settled.ID)
 		if readErr != nil {
@@ -85,10 +90,10 @@ func TestRealPostgresTerminalInvocationFenceAcrossConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	same.ErrorDetail = "updated after durable completion"
+	same.ErrorDetail = "updated after durable terminal failure"
 	same.UpdatedAt = same.UpdatedAt.Add(time.Second)
 	updated, err := second.UpdateInvocation(t.Context(), same, same.Revision)
-	if err != nil || updated.Status != harness.InvocationCompleted || updated.Revision != settled.Revision+1 {
+	if err != nil || updated.Status != harness.InvocationFailed || updated.Revision != settled.Revision+1 {
 		t.Fatalf("same-terminal repair unexpectedly rejected: result=%+v err=%v", updated, err)
 	}
 }

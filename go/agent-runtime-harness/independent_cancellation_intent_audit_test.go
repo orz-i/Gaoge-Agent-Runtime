@@ -141,7 +141,7 @@ func TestIndependentCancellationIntentFencesInteractionAndInvocationStore(t *tes
 		ID: "audit-fenced-cancel", TurnID: turnID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
 		RunID: "scope-test", ParentItemID: harness.CancellationFenceParentItemID,
-		Payload:   json.RawMessage("{\"boundary\":\"cancel_scope_pending\"}"),
+		Payload:   json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"scope-test"}`),
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, fresh, appendErr := store.AppendItem(t.Context(), intent); appendErr != nil || !fresh {
@@ -171,8 +171,8 @@ func TestIndependentCancellationIntentFencesInteractionAndInvocationStore(t *tes
 		t.Fatalf("late Invocation admitted: %v", err)
 	}
 	if _, _, err = store.AppendItem(t.Context(), harness.Item{
-		ID: "audit-fenced-cancel-closed", TurnID: turnID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-		ParentItemID: intent.ID, Payload: json.RawMessage("{\"boundary\":\"cancel_scope_settled\"}"),
+		ID: testAuthorityReceiptID("hcancelclosed", intent.ID), TurnID: turnID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
+		ParentItemID: intent.ID, RunID: intent.RunID, Payload: json.RawMessage("{\"boundary\":\"cancel_scope_settled\"}"),
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
