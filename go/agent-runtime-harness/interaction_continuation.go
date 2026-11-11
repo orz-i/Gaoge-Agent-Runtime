@@ -165,6 +165,22 @@ func classifyContinuationEvidence(items []Item, interaction Interaction, invocat
 	return continuationAbsent
 }
 
+// verifiedCompletedApplicationResponse is the durable terminal authority for
+// an Application-owned Host callback. The original Store terminal Invocation
+// CAS already required the elected callback's private witness and a verified
+// first-party response; a restarted Runner may rely on that committed
+// Application result only when the complete immutable response chain is still
+// unambiguous. Application execution has no Kernel continuation of its own.
+// This does not authorize a parent Agent resume, another Application effect,
+// or an uncommitted/failed Host callback.
+func verifiedCompletedApplicationResponse(items []Item, interaction Interaction, owner Invocation) bool {
+	return owner.ExecutionClass == ExecutionApplication &&
+		owner.Status == InvocationCompleted &&
+		interaction.Status == InteractionResolved &&
+		classifyContinuationEvidence(items, interaction, owner) == continuationHostReturnedUnclaimed &&
+		hasVerifiedInteractionResponse(items, interaction, owner)
+}
+
 // pendingInteractionContinuation is an observation-only guard shared by all
 // public Resume/Replay routes. A Host success Item does not permit arbitrary
 // re-entry to the previously claimed feature continuation. The sole elected
