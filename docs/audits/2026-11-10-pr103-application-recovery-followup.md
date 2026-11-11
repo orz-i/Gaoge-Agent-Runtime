@@ -95,6 +95,47 @@ merge-admission approval on the later PR Head.
   fuzz families remain applicable; this correction does not relax their
   identity/rejection predicates.
 
+## Post-review additional root cause — frozen parent Attempt provenance
+
+A further independent final audit on the subsequently frozen PR Head found
+that `requireObservedApplicationParentContinuation` filtered later parent
+`resume` Grants using the **current** root `ExecutionRefID`, not the original
+child `harnessRoot` Run/Attempt. A valid parent Retry from Attempt 1 to 2,
+followed by a new physical Resume and owner-matched returned receipt, was
+therefore accepted as evidence that an earlier child from Attempt 1 had
+resumed. The exact physical Receipt and per-Turn Seq checks were necessary
+but insufficient because they belonged to a different original operation.
+
+The correction treats the hashed child `Input` as the immutable original
+source. It requires a valid frozen root binding and original intermediate
+ancestor provenance; compares the current root/ancestor Attempt monotonicity
+without conflating a later Run with the earlier Run; and filters the physical
+`resume` receipts by the **frozen** original parent Run. If a different
+Attempt has returned and the old one has no valid observed receipt, the
+observer returns `ErrConflict`, never success. If the old original receipt
+exists with the correct sequence and physical boundary, later legitimate
+Retries do not erase that historical evidence. No new ledger, compatibility
+bridge or database schema is introduced.
+
+Permanent tests:
+
+- `TestApplicationParentFrozenAttemptUsesOriginalReceiptAfterRealStoreRetry`
+  exercises actual `MemoryStore.RetryInvocation`, invocation CAS and
+  `AppendItem` for the new Attempt, including old-receipt positive history,
+  nested ancestor continuity, altered roots and missing/malformed facts.
+- `FuzzApplicationParentFrozenOriginalReceipt` ranges over original/new
+  receipt presence, nested ancestors and corrupted sources. This is bounded
+  property coverage, not an exhaustive proof of all possible interleavings.
+- `TestSQLApplicationParentFrozenAttemptRecheck` and
+  `TestRealPostgresApplicationParentFrozenAttemptRecheck` exercise original
+  Host callback, controlled terminal recovery, real SQL Store Retry and
+  owner-validated first-party `ResumeTurn` on SQLite/PostgreSQL. A new
+  Attempt's physical return must remain a conflict for the original child.
+
+New PR Head GitHub CI and a complete read-only merge-admission re-review are
+still required after pushing the correction. Before that, local green
+checks are evidence of test coverage only, not merge authorization.
+
 ## Compatibility, limits and rollout
 
 This is a pre-v1 visible error-contract improvement for child Application

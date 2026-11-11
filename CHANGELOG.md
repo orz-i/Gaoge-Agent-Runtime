@@ -5,6 +5,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #103 post-review frozen-Attempt receipt correction (2026-11-10):
+  read-only child Application reconciliation now selects parent Agent Resume
+  Grant/Receipt facts using the original hashed `harnessRoot` Run/Attempt,
+  not the root Invocation's mutable current Retry identity. A legitimate
+  second Attempt's returned Resume cannot close the first Attempt's child;
+  when the original Resume was actually observed, that historical fact
+  remains valid after a later Retry. Also verify frozen intermediate ancestor
+  sources, reject retargeted/reused Run IDs and preserve fail-closed missing
+  or contradictory proof. Memory, SQLite and real PostgreSQL regressions
+  include real Store Retry, first-party parent Resume, historical positive
+  proof, corrupted ancestor, and bounded state-space fuzz. No schema change.
+
 - PR #103 final merge-audit recovery correction (2026-11-10): a successful
   Host callback's immutable original receipt and its independently committed
   terminal Application Invocation now authorize read-only recovery of the
