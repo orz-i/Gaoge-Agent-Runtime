@@ -384,6 +384,25 @@ func (runner *Runner) replayResolvedInteraction(ctx context.Context, interaction
 	if owner.Status == InvocationRunning {
 		return Snapshot{}, ErrInteractionOutcomeUnknown
 	}
+	if owner.ExecutionClass == ExecutionApplication && owner.Status == InvocationCompleted {
+		// The original Application callback already committed its terminal
+		// Invocation. Replaying its business response must repair its own
+		// Turn projection, never enter a nonexistent Application Kernel Run.
+		// For a child, the parent Agent Resume remains a separate physical
+		// operation: a later original receipt is required to report progress.
+		turn, loadErr := loadVerifiedTurn(ctx, runner.store, interaction.TurnID)
+		if loadErr != nil {
+			return Snapshot{}, loadErr
+		}
+		refreshed, refreshErr := runner.Refresh(ctx, turn.ID)
+		if refreshErr != nil || terminalTurnStatus(refreshed.Turn.Status) || owner.ParentItemID == "" {
+			return refreshed, refreshErr
+		}
+		if err := runner.requireObservedApplicationParentContinuation(ctx, interaction, owner); err != nil {
+			return refreshed, err
+		}
+		return refreshed, nil
+	}
 	return runner.continueResolvedInteraction(ctx, interaction)
 }
 

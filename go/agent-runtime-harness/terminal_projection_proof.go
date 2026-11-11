@@ -129,12 +129,22 @@ func ValidTerminalProjectionProof(
 		switch classifyContinuationEvidence(items, interaction, owner) {
 		case continuationCompleted:
 			continue
-		case continuationClaimedPending, continuationHostReturnedUnclaimed:
-			// Only the caller that received the original business
-			// response may project its own physical continuation after
-			// it returned. An unrelated Refresh/Retry never inherits
-			// this private callback context, nor can one callback
-			// authorize a pending sibling's terminalization.
+		case continuationHostReturnedUnclaimed:
+			// Application has no Kernel continuation. Its Completed
+			// Invocation passed the original Store CAS with the elected
+			// callback witness, and the exact Host success chain remains
+			// immutable. Recovery may project that committed result after
+			// losing the ephemeral callback context. Neither Running nor
+			// a missing/contradictory receipt can take this path.
+			if verifiedCompletedApplicationResponse(items, interaction, owner) ||
+				interactionCallbackConfirmed(ctx, turnID, owner.ID, interaction.ID) {
+				continue
+			}
+			return false
+		case continuationClaimedPending:
+			// A claimed physical Runtime continuation is not settled by
+			// the mere presence of a Host callback or a terminal Status.
+			// Only its original elected caller holds this private proof.
 			if interactionCallbackConfirmed(ctx, turnID, owner.ID, interaction.ID) {
 				continue
 			}
