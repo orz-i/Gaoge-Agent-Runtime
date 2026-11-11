@@ -5,6 +5,24 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- PR #103 independent original-receipt scope and Go security correction
+  (2026-11-11): all Harness Stores now expose one hard-cut, globally indexed
+  `ListItemChildren` contract returning up to two original-parent
+  siblings across every Turn. Typed `ItemChildProofAll` includes every Kind
+  for physical Dispatch/Host receipt parents; `ItemChildProofHostAuthority`
+  preserves ordinary application Artifacts while detecting every Diagnostic
+  or reserved Host receipt child of a resolved Interaction Source. The
+  Application recovery observer consumes these global proofs and the
+  existing typed `VerifiedExecutionDispatchReceipt` instead of Turn-local
+  completion indexes. Historical corruption, duplicate and malformed Host
+  or physical receipts fail closed without repeating external effects.
+  Memory maintains a global append-only parent index; PostgreSQL/SQLite
+  reuse the existing required `idx_harness_item_parent` migration index, so
+  no new database migration or compatibility adapter is introduced.
+  Custom Harness Stores must implement the new method; no silent fallback.
+  The contributor/workspace and standalone E2E toolchains are pinned to
+  Go 1.27.4 to address newly reported Go 1.27.3 `net/http` vulnerabilities.
+
 - PR #103 post-review frozen-Attempt receipt correction (2026-11-10):
   read-only child Application reconciliation now selects parent Agent Resume
   Grant/Receipt facts using the original hashed `harnessRoot` Run/Attempt,
