@@ -193,7 +193,7 @@ func PendingExecutionDispatch(items []Item, invocationID string) bool {
 func (runner *Runner) pendingExecutionDispatch(
 	ctx context.Context, turnID string, targets map[string]struct{}, targetRuns map[string]struct{},
 ) (bool, error) {
-	items, err := listAllItems(ctx, runner.store, turnID)
+	items, err := runner.loadGlobalPhysicalEvidence(ctx, turnID)
 	if err != nil {
 		return false, err
 	}
@@ -204,6 +204,13 @@ func (runner *Runner) pendingExecutionDispatch(
 		}
 		if _, done := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); done {
 			continue
+		}
+		// An absent original receipt may be recoverable by a fenced
+		// native Kernel Start. A PRESENT but contradictory/duplicate
+		// receipt is not an interrupted Start and must never use that
+		// exceptional physical-cancellation permit.
+		if len(receipts[item.ID]) != 0 {
+			return true, nil
 		}
 		var phase struct {
 			Phase         string `json:"phase"`

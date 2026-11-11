@@ -1273,7 +1273,7 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 		if pending {
 			return Snapshot{}, ErrExecutionOutcomeUnknown
 		}
-		items, loadErr := listAllItems(ctx, runner.store, turn.ID)
+		items, loadErr := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}

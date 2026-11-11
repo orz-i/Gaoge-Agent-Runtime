@@ -145,7 +145,7 @@ func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn
 	if !terminal {
 		return Item{}, ErrConflict
 	}
-	items, err := listAllItems(ctx, runner.store, turn.ID)
+	items, err := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
 	if err != nil {
 		return Item{}, err
 	}
