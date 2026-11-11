@@ -136,6 +136,63 @@ New PR Head GitHub CI and a complete read-only merge-admission re-review are
 still required after pushing the correction. Before that, local green
 checks are evidence of test coverage only, not merge authorization.
 
+## Second independent re-audit — global original-parent receipt completeness
+
+The frozen PR Head `bbac65f9e66d1e2403320e466efaa8f462731f45`
+passed the original Attempt tests but failed a new historical corruption
+case: a globally unique physical parent `resume` Grant had its canonical
+returned Receipt and an extra malformed Item with the same `ParentItemID`
+recorded under a **different** Turn. The observer read only the nominal
+Turn's Items, so it incorrectly accepted the original receipt as unique.
+A separate SQLite-backed real Runner exercise reproduced the false success
+through `ReconcileInteraction`; the normal Store `AppendItem` API already
+rejects that malformed insertion, so this is a strict historical-integrity
+recovery requirement, not permission for a second physical dispatch.
+
+The hard-cut fix adds
+`Store.ListItemChildren(ctx, parentID, ItemChildProofScope)`, a single typed
+read contract for globally complete *one-receipt* authority. Memory maintains
+an immutable ParentItemID index; PostgreSQL and SQLite reuse the existing
+indexed `WHERE parent_item_id = ? LIMIT 2` predicate across all Turn IDs.
+`ItemChildProofAll` counts **every** child of a Dispatch Grant or verified
+Host response receipt regardless of Kind, Status or owner. For a resolved
+Interaction Source, `ItemChildProofHostAuthority` counts Diagnostics and
+reserved Host receipt IDs, while excluding unlimited ordinary Artifact
+attachments (business data). Neither scope filters by Turn, Invocation or
+Run, since those are the potentially corrupt attributes. Two original
+parent descendants are sufficient to refute one-receipt uniqueness even if
+more persisted siblings exist. Missing physical receipts remain
+outcome-unverified; present malformed or duplicate receipts are conflicts.
+`VerifiedExecutionDispatchReceipt` remains the **single** typed physical
+receipt predicate; no new persisted ledger, state machine or SQL schema is
+introduced.
+
+The new permanent regressions cover: (1) Memory cross-Turn Artifact,
+Diagnostic, wrong owner/Run/Status and same-Turn contradictions, plus
+returned-Item cloning, bounded reads, Host Source/response completeness,
+and many ordinary Artifact attachments; (2) SQLite public
+`ReconcileInteraction` and `ResolveInteraction` after the original Host
+callback and a real parent `ResumeTurn`, then a historical foreign-Turn
+corrupt Dispatch, Host Source or Host response child; (3) equivalent isolated
+real PostgreSQL schemas for each. The original positive receipt path,
+unrelated-parent cases and ordinary Artifact allowance remain valid.
+Deliberately reverting to the prior Turn-local reader makes the negative
+tests red. Bounded Go fuzz also explores Host/physical sibling variants.
+
+The Go stdlib security advisory GO-2026-6859 affected the existing
+Go 1.27.3 scanner toolchain. Go 1.27.4 is an official security patch;
+`go.work`, the independent continuation E2E module, README and release
+instructions now target that patched version. CI must run `make security`
+against the updated Go runtime, not silence govulncheck or change the
+security gate threshold.
+
+**Compatibility hard cut:** pre-v1 custom Harness Stores must implement
+`ListItemChildren` with globally complete bounded semantics. There is no
+optional legacy reader or Turn-scoped fallback. The existing PR #103
+`idx_harness_item_parent` migration remains mandatory on SQL stores.
+The final new Head still requires GitHub CI and independent merge-admission
+review; test success alone is not merge authorization.
+
 ## Compatibility, limits and rollout
 
 This is a pre-v1 visible error-contract improvement for child Application
