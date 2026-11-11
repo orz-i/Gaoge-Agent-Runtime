@@ -464,6 +464,10 @@ func (runner *Runner) buildModelRequest(
 		zero := 0
 		request.Tools, request.RequireToolCall, request.HostedToolCallLimit = nil, false, &zero
 	}
+	request, err = runner.normalizeModelPolicy(ctx, request)
+	if err != nil {
+		return model.Request{}, nil, err
+	}
 	// Capture Catalog authority before Host-owned, model-facing projection.
 	// The final Request and original Catalog fingerprints are both hashed into
 	// the same durable ModelInvocation, never recomputed on resume.

@@ -47,6 +47,13 @@ type Message struct {
 	ProviderReplay *ProviderReplay     `json:"providerReplay,omitempty"`
 }
 
+// PolicyBinding is the narrow result of trusted Host model-option policy.
+// It contains no credentials, Tool authority, model selection or budgets.
+type PolicyBinding struct {
+	ModelOptions json.RawMessage
+	BindingRef   string
+}
+
 // Request is one provider-neutral model call.
 type Request struct {
 	// BindingRef identifies an immutable nonsecret Host-owned route snapshot.

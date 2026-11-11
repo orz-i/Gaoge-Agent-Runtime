@@ -267,10 +267,12 @@ type Dependencies struct {
 	// PrepareModelRequest is the only pre-commit message/Tool schema projection.
 	// It does not choose an Agent mode. ModelMiddleware cannot rewrite frozen input.
 	PrepareModelRequest ModelRequestPreparer
-	ToolMiddleware      []plugin.ToolMiddleware
-	CompletionPolicies  []CompletionPolicy
-	Limits              Limits
-	Execution           ExecutionPolicy
+	// NormalizeModelPolicy selects and freezes Host options/route policy before preparation.
+	NormalizeModelPolicy ModelPolicyNormalizer
+	ToolMiddleware       []plugin.ToolMiddleware
+	CompletionPolicies   []CompletionPolicy
+	Limits               Limits
+	Execution            ExecutionPolicy
 	// RunExecution opts this Agent StartRun/Resume path into the existing
 	// authoritative Store epoch/lease. Nil retains the legacy behavior.
 	RunExecution *RunExecution
@@ -310,30 +312,31 @@ type StartRequest struct {
 
 // Runner owns only the Agent model and Tool loop, not Host intent routing.
 type Runner struct {
-	runtime             *kernel.Runtime
-	model               model.Client
-	clock               kernel.Clock
-	catalog             tools.Catalog
-	executor            tools.Executor
-	approvals           plugin.ApprovalHandler
-	approvalPolicies    *plugin.ApprovalPolicySet
-	hostedTools         HostedToolCatalog
-	discovery           ToolDiscovery
-	observers           *plugin.ObserverSet
-	telemetry           *observability.Set
-	runChain            *plugin.RunChain
-	modelChain          *plugin.ModelChain
-	prepareModelRequest ModelRequestPreparer
-	toolChain           *plugin.ToolChain
-	completionPolicies  []CompletionPolicy
-	limits              Limits
-	execution           ExecutionPolicy
-	runExecution        *RunExecution
-	activeRunLease      *kernel.ExecutionLease
-	toolOutcomeVerifier ToolOutcomeVerifier
-	modelLimiter        *callLimiter
-	toolLimiter         *callLimiter
-	deferResume         bool
+	runtime               *kernel.Runtime
+	model                 model.Client
+	clock                 kernel.Clock
+	catalog               tools.Catalog
+	executor              tools.Executor
+	approvals             plugin.ApprovalHandler
+	approvalPolicies      *plugin.ApprovalPolicySet
+	hostedTools           HostedToolCatalog
+	discovery             ToolDiscovery
+	observers             *plugin.ObserverSet
+	telemetry             *observability.Set
+	runChain              *plugin.RunChain
+	modelChain            *plugin.ModelChain
+	prepareModelRequest   ModelRequestPreparer
+	modelPolicyNormalizer ModelPolicyNormalizer
+	toolChain             *plugin.ToolChain
+	completionPolicies    []CompletionPolicy
+	limits                Limits
+	execution             ExecutionPolicy
+	runExecution          *RunExecution
+	activeRunLease        *kernel.ExecutionLease
+	toolOutcomeVerifier   ToolOutcomeVerifier
+	modelLimiter          *callLimiter
+	toolLimiter           *callLimiter
+	deferResume           bool
 
 	// Frozen at composition: Host middleware/preparers may issue effects
 	// after Kernel Cancel, even when the native Run is already terminal.
@@ -494,9 +497,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		runChain:            runChain, modelChain: modelChain, toolChain: toolChain,
 		kernelOwnedStartCancellation: len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
-			dependencies.PrepareModelRequest == nil,
-		prepareModelRequest: dependencies.PrepareModelRequest,
-		deferResume:         dependencies.DeferResumption,
+			dependencies.PrepareModelRequest == nil && dependencies.NormalizeModelPolicy == nil,
+		prepareModelRequest:   dependencies.PrepareModelRequest,
+		modelPolicyNormalizer: dependencies.NormalizeModelPolicy,
+		deferResume:           dependencies.DeferResumption,
 	}, nil
 }
 
