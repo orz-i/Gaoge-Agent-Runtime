@@ -37,6 +37,9 @@ type harnessStoreContract interface {
 	GetContextArtifact(context.Context, string) (runtimecontext.Artifact, error)
 	AppendItem(context.Context, harness.Item) (harness.Item, bool, error)
 	GetItem(context.Context, string) (harness.Item, error)
+	// Pre-v1 hard-cut: globally indexed original-parent proof is now
+	// mandatory on every Harness Store (no Turn-scoped fallback).
+	ListItemChildren(context.Context, string, harness.ItemChildProofScope) ([]harness.Item, error)
 	ListItems(context.Context, string, uint64, int) ([]harness.Item, error)
 }
 
