@@ -6,9 +6,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
 - Add public tenant-scoped PostgreSQL Run/event metadata and Harness Turn
-  configuration queries, plus transaction-composable actor erasure that
-  rejects active/undrained work and removes owned Context scopes. Event
-  pruning remains separately gated on recovery-retirement policy; see
+  configuration queries. Actor erasure and event pruning remain separately
+  gated on an enforced recovery-retirement/reconciliation policy; see
   `docs/releases/hosted-storage-public-queries.md`.
 
 - PR #103 physical original-receipt admission convergence (2026-11-11):

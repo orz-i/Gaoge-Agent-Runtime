@@ -9,7 +9,6 @@ import (
 
 var _ interface {
 	ListTurnConfigs(context.Context, harnesspostgres.TurnConfigQuery) ([]harnesspostgres.TurnConfigProjection, error)
-	EraseActorData(context.Context, string, string) error
 } = (*harnesspostgres.Store)(nil)
 
 var (

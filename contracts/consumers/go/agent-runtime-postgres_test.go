@@ -13,7 +13,6 @@ var _ interface {
 	ListRuns(context.Context, postgres.RunQuery) ([]kernel.Snapshot, error)
 	ListEventMetadata(context.Context, postgres.EventQuery) ([]postgres.EventMetadata, int64, error)
 	CountEventTypes(context.Context, postgres.EventQuery) ([]postgres.EventTypeCount, error)
-	EraseActorData(context.Context, string, string) error
 } = (*postgres.KernelStore)(nil)
 
 // Migrations are a separate host operation; constructors retain typed ports.

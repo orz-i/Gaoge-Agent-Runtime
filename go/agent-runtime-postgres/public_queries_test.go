@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -51,46 +50,27 @@ func TestPublicQueriesScopePaginationAndMetadata(t *testing.T) {
 	}
 }
 
-func TestPublicActorErasureRequiresDrainAndIsScoped(t *testing.T) {
+func TestPublicEventInclusiveAndExclusiveBoundary(t *testing.T) {
 	db := openPublicKernelDB(t)
 	store := NewKernelStore(db)
-	for _, id := range []string{"owned", "foreign"} {
-		record := snapshotTestRecord(id)
-		record.Run.Status = kernel.RunStatusCompleted
-		if id == "foreign" {
-			record.Run.Actor.TenantID = "other"
-		}
-		if _, err := store.Create(t.Context(), record, []kernel.EventDraft{{Type: "run.completed"}}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := store.EraseActorData(t.Context(), "tenant", "actor"); !errors.Is(err, ErrActorActive) {
-		t.Fatalf("outbox not protected: %v", err)
-	}
-	if err := db.Where("run_id = ?", "owned").Delete(&models.KernelTransitionOutboxRecord{}).Error; err != nil {
+	record := snapshotTestRecord("boundary")
+	if _, err := store.Create(t.Context(), record, []kernel.EventDraft{{Type: "run.created"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Model(&models.KernelRunRecord{}).Where("run_id = ?", "owned").Update("status", "paused_budget").Error; err != nil {
-		t.Fatal(err)
+	rows, _, err := store.ListEventMetadata(t.Context(), EventQuery{TenantID: "tenant", Limit: 10})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("initial rows=%v err=%v", rows, err)
 	}
-	if err := store.EraseActorData(t.Context(), "tenant", "actor"); !errors.Is(err, ErrActorActive) {
-		t.Fatalf("paused not protected: %v", err)
+	boundary := rows[0].CreatedAt
+	_, inclusive, err := store.ListEventMetadata(t.Context(), EventQuery{TenantID: "tenant", CreatedThrough: &boundary, Limit: 10})
+	if err != nil || inclusive != 1 {
+		t.Fatalf("inclusive=%d err=%v", inclusive, err)
 	}
-	if err := db.Model(&models.KernelRunRecord{}).Where("run_id = ?", "owned").Update("status", "completed").Error; err != nil {
-		t.Fatal(err)
+	_, exclusive, err := store.ListEventMetadata(t.Context(), EventQuery{TenantID: "tenant", CreatedTo: &boundary, Limit: 10})
+	if err != nil || exclusive != 0 {
+		t.Fatalf("exclusive=%d err=%v", exclusive, err)
 	}
-	if err := store.EraseActorData(t.Context(), "tenant", "actor"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Load(t.Context(), "owned"); !errors.Is(err, kernel.ErrNotFound) {
-		t.Fatalf("owned remains: %v", err)
-	}
-	if _, err := store.Load(t.Context(), "foreign"); err != nil {
-		t.Fatalf("foreign removed: %v", err)
-	}
-	var n int64
-	db.Model(&models.KernelEventRecord{}).Where("run_id = ?", "owned").Count(&n)
-	if n != 0 {
-		t.Fatal("orphan events")
+	if _, _, err = store.ListEventMetadata(t.Context(), EventQuery{TenantID: "tenant", CreatedTo: &boundary, CreatedThrough: &boundary, Limit: 10}); !errors.Is(err, kernel.ErrInvalidInput) {
+		t.Fatalf("conflicting bounds=%v", err)
 	}
 }

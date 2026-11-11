@@ -2,7 +2,6 @@ package harnesspostgres
 
 import (
 	"encoding/json"
-	"errors"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -61,59 +60,32 @@ func publicQueryStore(t *testing.T) (*Store, *gorm.DB) {
 	return store, db
 }
 
-func TestPublicTurnConfigScopeAndFullActorErasure(t *testing.T) {
+func TestPublicTurnConfigTenantAndActorScope(t *testing.T) {
 	store, db := publicQueryStore(t)
-	for _, id := range []string{"owned", "foreign"} {
-		tenant := "tenant"
-		if id == "foreign" {
+	for _, id := range []string{"owned", "foreign-tenant", "foreign-actor"} {
+		tenant, actor := "tenant", "actor"
+		if id == "foreign-tenant" {
 			tenant = "other"
 		}
-		raw, _ := json.Marshal(harness.ConfigSnapshot{ID: "config-" + id, TurnID: "turn-" + id, Model: "model-" + id})
+		if id == "foreign-actor" {
+			actor = "other"
+		}
+		raw, err := json.Marshal(harness.ConfigSnapshot{ID: "config-" + id, TurnID: "turn-" + id, Model: "model-" + id})
+		if err != nil {
+			t.Fatal(err)
+		}
 		for _, row := range []any{
-			&sessionRecord{ID: id, TenantID: tenant, ActorID: "actor", HostThreadKind: "chat", HostThreadID: id},
+			&sessionRecord{ID: id, TenantID: tenant, ActorID: actor, HostThreadKind: "chat", HostThreadID: id},
 			&turnRecord{ID: "turn-" + id, SessionID: id, Status: "completed", ConfigSnapshotID: "config-" + id},
 			&configRecord{ID: "config-" + id, TurnID: "turn-" + id, ContentHash: id, PayloadJSON: string(raw)},
-			&contextCheckpointRecord{ID: "checkpoint-" + id, ScopeID: id},
-			&contextHeadRecord{ScopeID: id, CheckpointID: "checkpoint-" + id},
-			&contextArtifactRecord{ID: "artifact-" + id, ScopeID: id},
-			&itemRecord{ID: "item-" + id, TurnID: "turn-" + id, Seq: 1},
-			&budgetRecord{ID: "turn-" + id, PayloadJSON: `{"id":"turn-` + id + `"}`},
 		} {
-			if err := db.Create(row).Error; err != nil {
+			if err = db.Create(row).Error; err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-	values, err := store.ListTurnConfigs(t.Context(), TurnConfigQuery{TenantID: "tenant", ActorID: "actor", TurnIDs: []string{"turn-owned", "turn-foreign"}})
+	values, err := store.ListTurnConfigs(t.Context(), TurnConfigQuery{TenantID: "tenant", ActorID: "actor", TurnIDs: []string{"turn-owned", "turn-foreign-tenant", "turn-foreign-actor"}})
 	if err != nil || len(values) != 1 || values[0].Config.Model != "model-owned" {
 		t.Fatalf("values=%v err=%v", values, err)
-	}
-	if err = db.Create(&invocationRecord{ID: "foreign", TurnID: "turn-owned", Status: "running"}).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err = store.EraseActorData(t.Context(), "tenant", "actor"); !errors.Is(err, ErrActorActive) {
-		t.Fatalf("pending not protected: %v", err)
-	}
-	// The owned Invocation deliberately collides with another actor Session ID.
-	// That does not make the foreign Context owned by this actor.
-	if err = db.Model(&invocationRecord{}).Where("id = ?", "foreign").Update("status", "completed").Error; err != nil {
-		t.Fatal(err)
-	}
-	if err = store.EraseActorData(t.Context(), "tenant", "actor"); err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range []any{&sessionRecord{}, &turnRecord{}, &configRecord{}, &contextCheckpointRecord{}, &contextHeadRecord{}, &contextArtifactRecord{}, &itemRecord{}, &budgetRecord{}} {
-		var n int64
-		if err = db.Model(row).Count(&n).Error; err != nil {
-			t.Fatal(err)
-		}
-		if n != 1 {
-			t.Fatalf("%T remaining %d want foreign only", row, n)
-		}
-	}
-	var n int64
-	db.Model(&invocationRecord{}).Count(&n)
-	if n != 0 {
-		t.Fatal("orphan invocation")
 	}
 }
