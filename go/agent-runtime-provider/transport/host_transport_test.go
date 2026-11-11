@@ -33,3 +33,14 @@ func TestTransportFactoryKeepsHostTimeoutAndIsolation(t *testing.T) {
 		t.Fatal("single attempt mutated shared host policy")
 	}
 }
+
+func TestQuotedTransportWithoutHostPolicyFailsClosed(t *testing.T) {
+	request, err := http.NewRequest(http.MethodPost, "https://example.invalid", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = (quotedSingleAttemptTransport{}).RoundTrip(request)
+	if !errors.Is(err, ErrHTTPClientRequired) {
+		t.Fatalf("missing policy did not fail closed: %v", err)
+	}
+}

@@ -49,3 +49,11 @@ func TestPreparedHostBindingAndDefaultsFreezeAtDispatch(t *testing.T) {
 		}
 	}
 }
+
+func TestIdenticalInvalidPreparedOptionsStillFailClosed(t *testing.T) {
+	for _, raw := range []string{`{"x":1,"x":1}`, `{"x":`, `[]`, `null`} {
+		if additivePreparedOptions(json.RawMessage(raw), json.RawMessage(raw)) {
+			t.Fatalf("identical invalid JSON accepted: %s", raw)
+		}
+	}
+}

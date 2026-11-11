@@ -3,7 +3,6 @@ package agent
 import (
 	"bytes"
 	"encoding/json"
-
 	"reflect"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
@@ -12,9 +11,6 @@ import (
 // Preparation may add host defaults, never remove or override a caller's option.
 // Arrays and scalar values are atomic. Duplicate keys and malformed JSON fail closed.
 func additivePreparedOptions(original, candidate json.RawMessage) bool {
-	if reflect.DeepEqual(original, candidate) {
-		return true
-	}
 	decode := func(raw json.RawMessage) (map[string]any, bool) {
 		if len(raw) == 0 {
 			return map[string]any{}, true

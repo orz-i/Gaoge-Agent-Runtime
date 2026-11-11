@@ -15,7 +15,7 @@ func (transport quotedSingleAttemptTransport) RoundTrip(request *http.Request) (
 	bound.GetBody = nil
 	next := transport.next
 	if next == nil {
-		next = http.DefaultTransport
+		return nil, ErrHTTPClientRequired
 	}
 	return next.RoundTrip(bound)
 }
