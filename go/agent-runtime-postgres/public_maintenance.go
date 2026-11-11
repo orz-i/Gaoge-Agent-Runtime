@@ -20,6 +20,10 @@ var ErrActorActive = errors.New("runtime actor has active or undrained data")
 // account deletion in one transaction, passing that transaction to constructors.
 // PostgreSQL table locks prevent concurrent writes during this bounded
 // maintenance transaction; host admission fencing must persist after commit.
+// Terminal status and an empty transition outbox do not prove physical
+// quiescence. The host must independently reconcile unknown provider/tool
+// effects, execution ownership/quarantine and dispatch/cancellation receipts
+// before invoking this API; this adapter does not establish those proofs.
 func (store *KernelStore) EraseActorData(ctx context.Context, tenantID, actorID string) error {
 	if store == nil || store.db == nil || !validScope(tenantID) || actorID == "" || strings.TrimSpace(actorID) != actorID {
 		return kernel.ErrInvalidInput

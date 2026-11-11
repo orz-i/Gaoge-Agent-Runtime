@@ -15,8 +15,11 @@ var ErrActorActive = errors.New("harness actor has active or undrained data")
 
 // EraseActorData removes all Harness-owned data in a quiesced actor scope.
 // Hosts must stop admissions and compose this with Kernel erasure and account
-// deletion in a single transaction. It refuses unresolved Turns, Invocations,
-// Interactions and budget reservations, including unknown provider effects.
+// deletion in a single transaction. It checks Turn/Invocation status,
+// Interactions and budget reservations, but these checks do not prove physical
+// quiescence. The host must independently reconcile unknown provider/tool
+// effects and settle dispatch/cancellation receipts before invoking this API.
+// Terminal or cancelled lifecycle state is not proof of that reconciliation.
 func (store *Store) EraseActorData(ctx context.Context, tenantID, actorID string) error {
 	if store == nil || store.db == nil || tenantID == "" || actorID == "" || strings.TrimSpace(tenantID) != tenantID || strings.TrimSpace(actorID) != actorID {
 		return harness.ErrInvalidRequest
