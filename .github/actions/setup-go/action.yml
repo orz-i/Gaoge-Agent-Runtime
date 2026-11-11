@@ -1,0 +1,29 @@
+name: Set up Go with job-scoped caches
+description: Keep race, coverage, audit, and ordinary build caches from competing.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v7
+      id: go
+      with:
+        go-version-file: go.work
+        cache: false
+    - name: Locate Go caches
+      id: paths
+      shell: bash
+      run: |
+        source /etc/os-release
+        echo "platform=$ID-$VERSION_ID" >> "$GITHUB_OUTPUT"
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        echo "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.paths.outputs.build }}
+          ${{ steps.paths.outputs.modules }}
+        # Include the job and actual toolchain; no cross-job fallback. Commit
+        # suffixes allow successful runs to refresh compiled package caches.
+        key: ${{ steps.paths.outputs.platform }}-${{ runner.arch }}-go-${{ steps.go.outputs.go-version }}-${{ github.job }}-v1-${{ hashFiles('go.work', 'go.work.sum', '**/go.mod', '**/go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          ${{ steps.paths.outputs.platform }}-${{ runner.arch }}-go-${{ steps.go.outputs.go-version }}-${{ github.job }}-v1-${{ hashFiles('go.work', 'go.work.sum', '**/go.mod', '**/go.sum') }}-
+          ${{ steps.paths.outputs.platform }}-${{ runner.arch }}-go-${{ steps.go.outputs.go-version }}-${{ github.job }}-v1-

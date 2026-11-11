@@ -15,18 +15,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Keep the existing required-check name; fail closed for every dependency.
   quality:
     name: Unit, race, lint, and release consumers
+    if: ${{ always() }}
+    needs: [quality-main, race]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all quality checks to pass
+        env:
+          QUALITY_RESULT: ${{ needs.quality-main.result }}
+          RACE_RESULT: ${{ needs.race.result }}
+        run: test "$QUALITY_RESULT" = success && test "$RACE_RESULT" = success
+
+  quality-main:
+    name: Unit, lint, and release consumers
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
-          cache-dependency-path: go/**/go.sum
+      - uses: ./.github/actions/setup-go
 
       - uses: pnpm/action-setup@v6
         with:
@@ -48,11 +58,36 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Restore Go linter
+        id: linter-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin/golangci-lint
+          key: ${{ runner.os }}-${{ runner.arch }}-golangci-lint-v2.14.0-${{ hashFiles('go.work') }}
+
       - name: Install Go linter
-        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+        if: steps.linter-cache.outputs.cache-hit != 'true'
+        run: GOBIN="$HOME/.local/bin" go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+
+      - name: Add Go linter to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run release-quality gate
-        run: make check
+        run: make check-no-race
+
+  race:
+    name: Go race detector
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
+      - name: Run all Go race tests
+        run: make go-race
 
   release-commands-windows:
     name: Windows release command safety
@@ -73,10 +108,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
-          cache-dependency-path: go/**/go.sum
+      - uses: ./.github/actions/setup-go
       - uses: pnpm/action-setup@v6
         with:
           version: 11.22.0
@@ -106,10 +138,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
-          cache-dependency-path: go/**/go.sum
+      - uses: ./.github/actions/setup-go
       - uses: pnpm/action-setup@v6
         with:
           version: 11.22.0
@@ -150,10 +179,7 @@ jobs:
       TEST_REDIS_ADDR: 127.0.0.1:6379
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
-          cache-dependency-path: go/**/go.sum
+      - uses: ./.github/actions/setup-go
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
       - name: Run real-engine suites
@@ -166,13 +192,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.work
-          cache-dependency-path: |
-            integration/otel-e2e/go.sum
-            go/agent-runtime-otel/go.sum
-            go/agent-runtime/go.sum
+      - uses: ./.github/actions/setup-go
 
       - uses: actions/setup-node@v7
         with:
