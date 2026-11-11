@@ -41,7 +41,7 @@ func (runner *Runner) resumeNativeFencedAgentAfterInterruptedStart(
 	if err = runner.runtime.RequireExecution(ctx, invocation.ExecutionRefID); !errors.Is(err, kernel.ErrExecutionRequired) {
 		return kernel.Snapshot{}, grantErr
 	}
-	items, err := listAllItems(ctx, runner.store, invocation.TurnID)
+	items, err := runner.loadGlobalPhysicalEvidence(ctx, invocation.TurnID)
 	if err != nil || ActiveCancellationFence(items) {
 		return kernel.Snapshot{}, errors.Join(grantErr, err)
 	}
@@ -61,6 +61,13 @@ func (runner *Runner) resumeNativeFencedAgentAfterInterruptedStart(
 		}
 		if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); settled {
 			continue
+		}
+		// Kernel Epoch recovery only owns an interrupted original Start
+		// with NO completion. A malformed or duplicate historical
+		// receipt is conflicting physical evidence, not a new permit
+		// to enter native Agent.Resume or retire that same grant.
+		if len(receipts[item.ID]) != 0 {
+			return kernel.Snapshot{}, ErrConflict
 		}
 		var phase struct {
 			Phase string `json:"phase"`

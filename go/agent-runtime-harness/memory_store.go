@@ -49,7 +49,7 @@ func (store *MemoryStore) CreateInvocation(_ context.Context, value Invocation) 
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if _, replay := store.invocations[value.ID]; !replay && ActiveCancellationFence(store.items[value.TurnID]) {
+	if _, replay := store.invocations[value.ID]; !replay && store.activeCancellationFenceLocked(value.TurnID) {
 		return Invocation{}, false, ErrConflict
 	}
 	if value.ParentItemID == "" {
@@ -114,6 +114,17 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 	if current.ExecutionRefID != value.ExecutionRefID {
 		return Invocation{}, ErrConflict
 	}
+	// Every terminal CAS must assess the same globally complete original
+	// Dispatch evidence as the new-grant and Retry admission paths. Do not
+	// reenter public Store readers while holding the exclusive Store mutex.
+	var physicalItems []Item
+	if terminalInvocationStatus(value.Status) {
+		var proofErr error
+		physicalItems, proofErr = store.globalPhysicalEvidenceLocked(value.TurnID)
+		if proofErr != nil {
+			return Invocation{}, proofErr
+		}
+	}
 	// A terminal Invocation cannot return to an active state or switch to
 	// another terminal outcome within the same Attempt. RetryInvocation owns
 	// explicit Attempt and Run-ID rotation under the Store's separate fences.
@@ -122,7 +133,7 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 	}
 	if terminalInvocationStatus(value.Status) && current.Status != value.Status &&
 		!ValidInvocationTerminalTransitionWithEvidence(
-			ctx, current, value, VerifiedOriginalStartNoEffect(store.items[value.TurnID], current),
+			ctx, current, value, VerifiedOriginalStartNoEffect(physicalItems, current),
 		) {
 		return Invocation{}, ErrConflict
 	}
@@ -135,7 +146,7 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 		return Invocation{}, ErrConflict
 	}
 	if current.Status != InvocationRunning && value.Status == InvocationRunning &&
-		ActiveCancellationFence(store.items[value.TurnID]) {
+		store.activeCancellationFenceLocked(value.TurnID) {
 		return Invocation{}, ErrConflict
 	}
 	// A verified no-effect Start can finish its grant just before another
@@ -143,13 +154,13 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 	// that admission under the same mutex, not terminalize the new owner.
 	if (value.Status == InvocationFailed || value.Status == InvocationCompleted ||
 		value.Status == InvocationCancelled) &&
-		PendingExecutionDispatch(store.items[value.TurnID], value.ID) {
+		PendingExecutionDispatch(physicalItems, value.ID) {
 		// Terminal projection of physical execution requires its original
 		// receipt. The sole exception is an InvocationCancelled CAS while
 		// an admitted Turn cancellation intent protects the real physical
 		// Kernel stop. This is NOT evidence that the Start itself returned;
 		// the cancellation fence remains until descendant/Kernel proof.
-		if value.Status != InvocationCancelled || !ActiveCancellationFence(store.items[value.TurnID]) {
+		if value.Status != InvocationCancelled || !store.activeCancellationFenceLocked(value.TurnID) {
 			return Invocation{}, ErrConflict
 		}
 	}
@@ -176,13 +187,17 @@ func (store *MemoryStore) RetryInvocation(
 	if !ok {
 		return Invocation{}, ErrNotFound
 	}
+	physicalItems, proofErr := store.globalPhysicalEvidenceLocked(current.TurnID)
+	if proofErr != nil {
+		return Invocation{}, proofErr
+	}
 	// Retrying even an intermediate parent cannot outlive a descendant's
 	// pre-effect dispatch grant. Take the conservative Turn-wide barrier:
 	// grants do not encode a transactional transitive ownership snapshot.
 	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
-		ActiveCancellationFence(store.items[current.TurnID]) ||
-		PendingExecutionDispatch(store.items[current.TurnID], "") ||
-		!RetryOriginalOperationEvidenceValid(ctx, store.items[current.TurnID], current) {
+		store.activeCancellationFenceLocked(current.TurnID) ||
+		PendingExecutionDispatch(physicalItems, "") ||
+		!RetryOriginalOperationEvidenceValid(ctx, physicalItems, current) {
 		return Invocation{}, ErrConflict
 	}
 	// Check all potentially executing children, not just unclaimed Host
@@ -195,7 +210,7 @@ func (store *MemoryStore) RetryInvocation(
 			children = append(children, child)
 		}
 	}
-	if err := RetryChildEffectFence(children, store.items[current.TurnID], current); err != nil {
+	if err := RetryChildEffectFence(children, physicalItems, current); err != nil {
 		return Invocation{}, err
 	}
 	var rootTurn Turn
@@ -258,7 +273,7 @@ func (store *MemoryStore) CreateInteraction(
 	if replay, found, err := memoryInteractionReplay(store.interactions, value); found || err != nil {
 		return replay, false, err
 	}
-	if ActiveCancellationFence(store.items[value.TurnID]) {
+	if store.activeCancellationFenceLocked(value.TurnID) {
 		return Interaction{}, false, ErrConflict
 	}
 	turn, turnFound := store.turns[value.TurnID]
@@ -348,7 +363,7 @@ func (store *MemoryStore) ResolveInteraction(
 		return InteractionResolution{}, ErrConflict
 	}
 	if !memoryInteractionCanResolve(current, value, turn, invocation, expectedRevision) ||
-		ActiveCancellationFence(store.items[value.TurnID]) {
+		store.activeCancellationFenceLocked(value.TurnID) {
 		return InteractionResolution{}, ErrConflict
 	}
 	value.Revision = expectedRevision + 1
@@ -735,7 +750,13 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 	if terminalTurnStatus(current.Status) && current.Status != value.Status {
 		return Turn{}, ErrConflict
 	}
+	var physicalItems []Item
 	if terminalTurnStatus(value.Status) && current.Status != value.Status {
+		var proofErr error
+		physicalItems, proofErr = store.globalPhysicalEvidenceLocked(value.ID)
+		if proofErr != nil {
+			return Turn{}, proofErr
+		}
 		var root Invocation
 		roots := 0
 		for _, owner := range store.invocations {
@@ -750,9 +771,9 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 				owners = append(owners, candidate)
 			}
 		}
-		if roots != 1 || !ValidTurnTerminalDescendants(root, owners, store.items[value.ID]) ||
+		if roots != 1 || !ValidTurnTerminalDescendants(root, owners, physicalItems) ||
 			!ValidTurnTerminalTransitionWithEvidence(
-				ctx, current, value, root, VerifiedOriginalStartNoEffect(store.items[value.ID], root),
+				ctx, current, value, root, VerifiedOriginalStartNoEffect(physicalItems, root),
 			) {
 			return Turn{}, ErrConflict
 		}
@@ -772,8 +793,8 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 		// and descendant cleanup by the elected Cancel caller.
 		if !ValidTurnTerminalEffectProjection(
 			ctx, value.ID, value.Status,
-			PendingExecutionDispatch(store.items[value.ID], ""),
-			ActiveCancellationFence(store.items[value.ID]),
+			PendingExecutionDispatch(physicalItems, ""),
+			store.activeCancellationFenceLocked(value.ID),
 		) {
 			return Turn{}, ErrConflict
 		}
@@ -836,10 +857,14 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
 		switch value.ParentItemID {
 		case CancellationFenceParentItemID:
-			if ActiveCancellationFence(store.items[value.TurnID]) {
+			if store.activeCancellationFenceLocked(value.TurnID) {
 				return Item{}, false, ErrConflict
 			}
 		case ExecutionDispatchParentItemID:
+			physicalItems, proofErr := store.globalPhysicalEvidenceLocked(value.TurnID)
+			if proofErr != nil {
+				return Item{}, false, proofErr
+			}
 			if _, valid := ValidExecutionDispatchGrantAdmission(value); !valid {
 				return Item{}, false, ErrConflict
 			}
@@ -849,8 +874,8 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 				!ownerFound || owner.TurnID != value.TurnID ||
 				owner.ExecutionRefID != value.RunID ||
 				terminalInvocationStatus(owner.Status) ||
-				ActiveCancellationFence(store.items[value.TurnID]) ||
-				PendingExecutionDispatch(store.items[value.TurnID], value.InvocationID) {
+				store.activeCancellationFenceLocked(value.TurnID) ||
+				PendingExecutionDispatch(physicalItems, value.InvocationID) {
 				return Item{}, false, ErrConflict
 			}
 		}
@@ -859,8 +884,12 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 	if interactionID, reserved := InteractionAuthorityFactID(value); reserved {
 		interaction, interactionFound := store.interactions[interactionID]
 		owner, ownerFound := store.invocations[interaction.InvocationID]
+		physicalFacts, proofErr := store.globalPhysicalEvidenceLocked(value.TurnID)
+		if proofErr != nil {
+			return Item{}, false, proofErr
+		}
 		if interactionID == "" || !interactionFound || !ownerFound ||
-			!VerifiedInteractionAuthorityAppend(value, interaction, owner, store.items[value.TurnID]) {
+			!VerifiedInteractionAuthorityAppend(value, interaction, owner, physicalFacts) {
 			return Item{}, false, ErrConflict
 		}
 	}
@@ -872,10 +901,11 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 		if !VerifiedCancellationFenceReceipt(intent, []Item{value}) {
 			return Item{}, false, ErrConflict
 		}
-		for _, previous := range store.items[intent.TurnID] {
-			if previous.ParentItemID == intent.ID {
-				return Item{}, false, ErrConflict
-			}
+		// Cancellation settlement is a globally unique original intent.
+		// Its historically damaged foreign-Turn children cannot vanish
+		// behind a Turn-filtered duplicate completion check.
+		if len(store.itemChildren[intent.ID]) != 0 {
+			return Item{}, false, ErrConflict
 		}
 	}
 	if grant, found := store.itemIDs[value.ParentItemID]; found &&
@@ -887,10 +917,11 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 		if _, valid := VerifiedExecutionDispatchReceipt(grant, []Item{value}); !valid {
 			return Item{}, false, ErrConflict
 		}
-		for _, previous := range store.items[grant.TurnID] {
-			if previous.ParentItemID == grant.ID {
-				return Item{}, false, ErrConflict
-			}
+		// A prior child of this globally unique Grant may belong to a
+		// historically damaged different Turn. Global ParentItemID is
+		// the authority, never a Turn-filtered scan.
+		if len(store.itemChildren[grant.ID]) != 0 {
+			return Item{}, false, ErrConflict
 		}
 	}
 	value = cloneItem(value)
