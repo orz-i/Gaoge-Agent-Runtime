@@ -48,11 +48,15 @@ func (runner *Runner) resumeNativeFencedAgentAfterInterruptedStart(
 	receipts := executionDispatchReceiptIndex(items)
 	var interruptedStart Item
 	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
-			item.ParentItemID != ExecutionDispatchParentItemID || item.InvocationID != invocation.ID {
+		if item.ParentItemID != ExecutionDispatchParentItemID ||
+			item.InvocationID != invocation.ID {
 			continue
 		}
-		if item.RunID != invocation.ExecutionRefID {
+		// A corrupted original grant cannot be ignored in the exceptional
+		// Kernel Epoch takeover path. The same durable fact must pass the
+		// normal Dispatch verifier before an existing lease may be reused.
+		if _, valid := VerifiedExecutionDispatchGrant(item); !valid ||
+			item.RunID != invocation.ExecutionRefID {
 			return kernel.Snapshot{}, ErrConflict
 		}
 		if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); settled {

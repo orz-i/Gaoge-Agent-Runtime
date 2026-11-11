@@ -103,13 +103,15 @@ type InteractionResponseResult struct {
 // It is never persisted or reconstructed from an ambiguous external result.
 type completedInteractionCallbackKey struct{}
 type completedInteractionCallback struct {
-	turnID       string
-	invocationID string
+	turnID        string
+	invocationID  string
+	interactionID string
 }
 
-func interactionCallbackConfirmed(ctx context.Context, turnID, invocationID string) bool {
+func interactionCallbackConfirmed(ctx context.Context, turnID, invocationID, interactionID string) bool {
 	value, ok := ctx.Value(completedInteractionCallbackKey{}).(completedInteractionCallback)
-	return ok && value.turnID == turnID && value.invocationID == invocationID
+	return ok && value.turnID == turnID && value.invocationID == invocationID &&
+		value.interactionID == interactionID && interactionID != ""
 }
 
 // InteractionResponseHandler persists the application-owned meaning of one
@@ -477,7 +479,7 @@ func (runner *Runner) continueConfirmedInteraction(
 		return Snapshot{}, err
 	}
 	ctx = context.WithValue(ctx, completedInteractionCallbackKey{}, completedInteractionCallback{
-		turnID: turn.ID, invocationID: invocation.ID,
+		turnID: turn.ID, invocationID: invocation.ID, interactionID: interaction.ID,
 	})
 	if invocation.ExecutionClass == ExecutionApplication {
 		return runner.finishResolvedApplicationInteraction(ctx, turn, invocation, result)
@@ -529,7 +531,7 @@ func (runner *Runner) prepareResolvedInteractionContinuation(
 	// the read-only reconciler's verified witness may drive continuation.
 	// Unrelated replay/Refresh callers still observe without dispatching.
 	unconfirmedRunning := interactionOwnersRunning(turn, invocation) &&
-		!interactionCallbackConfirmed(ctx, turn.ID, invocation.ID)
+		!interactionCallbackConfirmed(ctx, turn.ID, invocation.ID, interaction.ID)
 	if (waiting || unconfirmedRunning) && !runner.projectsWorkflowWaits(invocation) {
 		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
 		return turn, invocation, snapshot, true, loadErr
@@ -695,7 +697,11 @@ func (runner *Runner) fenceInteractionCancellationWithClaim(ctx context.Context,
 			// Do not clear the cancellation intent if Store commits this
 			// CAS then drops its reply (or rejects without a snapshot).
 			*writeAttempted = true
-			if _, updateErr := runner.store.UpdateInvocation(ctx, owner, owner.Revision); updateErr != nil {
+			// The waiting Invocation belongs to the read-verified target
+			// set of this original committed cancellation intent.
+			// Only that precise owner may consume this private CAS grant.
+			claimCtx := withOriginalWaitingCancellationWitness(ctx, owner)
+			if _, updateErr := runner.store.UpdateInvocation(claimCtx, owner, owner.Revision); updateErr != nil {
 				return updateErr
 			}
 		case InvocationAccepted, InvocationPausedBudget, InvocationCompleted, InvocationFailed, InvocationCancelled:

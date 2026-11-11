@@ -93,7 +93,8 @@ type Store interface {
 	ListInvocations(context.Context, string) ([]Invocation, error)
 	CreateInteraction(context.Context, Interaction, uint64, uint64) (Interaction, bool, error)
 	GetInteraction(context.Context, string) (Interaction, error)
-	UpdateInteraction(context.Context, Interaction, uint64) (Interaction, error)
+	// ResolveInteraction is the only CAS that can commit a Host response.
+	// There is no general UpdateInteraction write bypass for a Resolved fact.
 	ResolveInteraction(context.Context, Interaction, uint64) (InteractionResolution, error)
 	ListInteractions(context.Context, string) ([]Interaction, error)
 	PutConfigSnapshot(context.Context, ConfigSnapshot) (ConfigSnapshot, bool, error)

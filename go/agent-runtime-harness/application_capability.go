@@ -290,6 +290,25 @@ func (runner *Runner) requestApplicationInteraction(
 	})
 }
 
+// applicationRootHasLiveDescendants is read-only admission information.
+// A completed root Application callback cannot terminalize its entire Turn
+// while a child still awaits a Host business input or external effect.
+// The final Store terminal CAS remains the race arbiter.
+func (runner *Runner) applicationRootHasLiveDescendants(
+	ctx context.Context, turnID, rootID string,
+) (bool, error) {
+	owners, err := runner.store.ListInvocations(ctx, turnID)
+	if err != nil {
+		return false, err
+	}
+	for _, child := range owners {
+		if child.ID != rootID && !terminalInvocationStatus(child.Status) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (runner *Runner) completeApplicationInvocation(
 	ctx context.Context,
 	turn Turn,
@@ -306,6 +325,10 @@ func (runner *Runner) completeApplicationInvocation(
 	if terminalInvocationStatus(current.Status) {
 		return runner.repairApplicationProjection(ctx, turn, current)
 	}
+	// A trusted Application result, unlike a Kernel Snapshot, is an
+	// original Host business completion. Its terminal permit is scoped
+	// to this precise Invocation and is never a Turn-wide grant.
+	ctx = withOriginalApplicationTerminalWitness(ctx, current, TurnCompleted)
 	current.Status = InvocationCompleted
 	current.OutputRefs = append([]HostRef(nil), outputRefs...)
 	current.ErrorCode, current.ErrorDetail = "", ""
@@ -318,6 +341,20 @@ func (runner *Runner) completeApplicationInvocation(
 		return Snapshot{}, err
 	}
 	if strings.TrimSpace(updated.ParentItemID) == "" {
+		liveChildren, childErr := runner.applicationRootHasLiveDescendants(ctx, turn.ID, updated.ID)
+		if childErr != nil {
+			return Snapshot{}, childErr
+		}
+		if liveChildren {
+			// The child remains an independent running/WaitingInput Host
+			// authority. Keep Turn nonterminal until actual child cleanup
+			// or completion; a root callback result is insufficient.
+			currentTurn, loadErr := loadVerifiedTurn(ctx, runner.store, turn.ID)
+			if loadErr != nil {
+				return Snapshot{}, loadErr
+			}
+			return runner.loadSnapshot(ctx, currentTurn, nil)
+		}
 		completedTurn, _, turnErr := runner.reconcileTurnStatus(ctx, turn.ID, TurnCompleted)
 		if turnErr != nil {
 			return Snapshot{}, turnErr
@@ -454,6 +491,24 @@ func (runner *Runner) repairApplicationProjection(ctx context.Context, turn Turn
 		if terminalTurnStatus(turn.Status) {
 			return Snapshot{}, ErrConflict
 		}
+		// Before repairing an already-committed root, preserve any
+		// outstanding child Host effects instead of terminalizing Turn.
+		if desired == TurnCompleted || desired == TurnFailed {
+			liveChildren, childErr := runner.applicationRootHasLiveDescendants(ctx, turn.ID, invocation.ID)
+			if childErr != nil {
+				return Snapshot{}, childErr
+			}
+			if liveChildren {
+				return runner.loadSnapshot(ctx, turn, nil)
+			}
+		}
+		// The terminal Application Invocation was already committed by
+		// its original guarded CAS. Repair only that exact root's Turn;
+		// this cannot be used to project a child or another Invocation.
+		if invocation.ExecutionClass != ExecutionApplication {
+			return Snapshot{}, ErrConflict
+		}
+		ctx = withOriginalApplicationTerminalWitness(ctx, invocation, desired)
 		updated, _, err := runner.reconcileTurnStatus(ctx, turn.ID, desired)
 		if err != nil {
 			return Snapshot{}, err
@@ -515,6 +570,13 @@ func (runner *Runner) cancelApplicationInvocation(
 	reason string,
 ) (Snapshot, error) {
 	if terminalInvocationStatus(invocation.Status) {
+		// This direct Cancel path has already reconciled its original
+		// Application descendants. An idempotently Cancelled root may
+		// finish its protected Turn projection, but a passive Refresh
+		// cannot mint that proof.
+		if invocation.Status == InvocationCancelled && invocation.ParentItemID == "" {
+			ctx = withVerifiedCancellationProjection(ctx, turn.ID)
+		}
 		return runner.repairApplicationProjection(ctx, turn, invocation)
 	}
 	if invocation.Status == InvocationRunning {
@@ -526,6 +588,7 @@ func (runner *Runner) cancelApplicationInvocation(
 	if invocation.Status != InvocationAccepted && invocation.Status != InvocationWaitingInput {
 		return Snapshot{}, ErrConflict
 	}
+	ctx = withOriginalApplicationTerminalWitness(ctx, invocation, TurnCancelled)
 	invocation.Status = InvocationCancelled
 	invocation.ErrorCode = "run.cancelled"
 	invocation.ErrorDetail = strings.TrimSpace(reason)
@@ -538,6 +601,10 @@ func (runner *Runner) cancelApplicationInvocation(
 		return Snapshot{}, err
 	}
 	if strings.TrimSpace(updated.ParentItemID) == "" {
+		// The root Application is explicitly non-dispatched and all
+		// affected descendants were reconciled by the original Cancel
+		// call. Only this physical control stack gets the Turn proof.
+		ctx = withVerifiedCancellationProjection(ctx, turn.ID)
 		cancelledTurn, _, turnErr := runner.reconcileTurnStatus(ctx, turn.ID, TurnCancelled)
 		if turnErr != nil {
 			return Snapshot{}, turnErr

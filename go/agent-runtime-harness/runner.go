@@ -1041,6 +1041,52 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		if loadErr != nil {
 			return Snapshot{}, loadErr
 		}
+		if (current.Status == InvocationCompleted || current.Status == InvocationFailed) &&
+			current.ParentItemID == "" {
+			// The root Application finished before a descendant requested
+			// Host input. That root's completion is immutable, but the
+			// still-active Turn must be cancelable once this original
+			// elected cancellation has confirmed all descendants stopped.
+			liveChildren, childErr := runner.applicationRootHasLiveDescendants(ctx, turn.ID, current.ID)
+			if childErr != nil {
+				return Snapshot{}, childErr
+			}
+			if liveChildren {
+				return Snapshot{}, ErrApplicationOutcomeUnknown
+			}
+			// A completed/failed Application root cannot change its original
+			// terminal outcome merely because a later Cancel has now cleaned
+			// up an accepted descendant. Preserve the immutable Turn status
+			// and settle only the original cancellation fence. If the Turn is
+			// still active, the elected Cancel path can project Cancelled.
+			if terminalTurnStatus(turn.Status) {
+				if turn.Status != turnStatusFromInvocation(current.Status) {
+					return Snapshot{}, ErrConflict
+				}
+				if terminalErr := runner.finalizeApplicationTerminalProjection(ctx, turn, current); terminalErr != nil {
+					return Snapshot{}, terminalErr
+				}
+				snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
+				if loadErr != nil {
+					return Snapshot{}, loadErr
+				}
+				return snapshot, runner.cancelTurnBudget(ctx, turn)
+			}
+			cancelCtx := withOriginalApplicationTerminalWitness(ctx, current, TurnCancelled)
+			cancelCtx = withVerifiedCancellationProjection(cancelCtx, turn.ID)
+			cancelledTurn, _, turnErr := runner.reconcileTurnStatus(cancelCtx, turn.ID, TurnCancelled)
+			if turnErr != nil {
+				return Snapshot{}, turnErr
+			}
+			if terminalErr := runner.finalizeApplicationTerminalProjection(cancelCtx, cancelledTurn, current); terminalErr != nil {
+				return Snapshot{}, terminalErr
+			}
+			snapshot, loadErr := runner.loadSnapshot(cancelCtx, cancelledTurn, nil)
+			if loadErr != nil {
+				return Snapshot{}, loadErr
+			}
+			return snapshot, runner.cancelTurnBudget(cancelCtx, cancelledTurn)
+		}
 		cancelled, cancelErr := runner.cancelApplicationInvocation(ctx, turn, current, reason)
 		if cancelErr != nil {
 			return cancelled, cancelErr
@@ -1098,7 +1144,14 @@ func (runner *Runner) syncRuntimeSnapshotWithRetry(
 func (runner *Runner) syncRuntimeSnapshotWithRetryAfterCancellation(
 	ctx context.Context, turn Turn, invocation Invocation, runtimeSnapshot kernel.Snapshot,
 ) (Snapshot, error) {
-	return runner.syncRuntimeSnapshotWithRetryProof(ctx, turn, invocation, runtimeSnapshot, true)
+	// Only this completed physical cancellation path has verified Kernel
+	// terminal status AND original descendant cleanup. Carry that proof
+	// through the Store's atomic terminal CAS without allowing a public
+	// Refresh or arbitrary Store caller to mint it.
+	return runner.syncRuntimeSnapshotWithRetryProof(
+		withVerifiedCancellationProjection(ctx, turn.ID),
+		turn, invocation, runtimeSnapshot, true,
+	)
 }
 
 func (runner *Runner) syncRuntimeSnapshotWithRetryProof(
@@ -1184,6 +1237,19 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 		// independently claimed, still-unverified sibling effect.
 		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 	}
+	// Refresh, public Resume and synchronization must use the same
+	// authoritative callback-to-continuation proof as physical dispatch.
+	// A verified Host response or one committed continuation claim alone
+	// cannot authorize a terminal Kernel snapshot to finalize the Turn.
+	if !verifiedCancellation {
+		pendingContinuation, continuationErr := runner.pendingInteractionContinuation(ctx, turn.ID, "")
+		if continuationErr != nil {
+			return Snapshot{}, continuationErr
+		}
+		if pendingContinuation {
+			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+		}
+	}
 	// Every physical root observation can drive status or lifecycle facts,
 	// even with no Result (failed, cancelled, waiting, etc.). Validate its
 	// original frozen owner before allowing any Invocation/Turn CAS or Item.
@@ -1218,6 +1284,25 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if terminalTurnStatus(status) && !verifiedCancellation {
+		// Local async ChildRunner may become terminal after the original
+		// Handoff Start returned Running. Verify the same physical Kernel
+		// owner read-only, then persist its first-party terminal Handoff
+		// result BEFORE the parent Turn's terminal CAS.
+		if err := runner.reconcileLocalTerminalHandoffEvidence(ctx, turn); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	if terminalTurnStatus(status) {
+		// The frozen Kernel owner has already been verified above. Attach
+		// its exact terminal result to the original Invocation/Turn CAS;
+		// a dispatch-returned Item or a status-only Store client cannot
+		// mint the same terminal authorization.
+		ctx, err = withOriginalKernelTerminalWitness(ctx, invocation, runtimeSnapshot)
+		if err != nil {
+			return Snapshot{}, err
+		}
 	}
 	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) ||
 		(terminalTurnStatus(turn.Status) && turn.Status != status) ||
@@ -1615,6 +1700,13 @@ func (runner *Runner) recordAgentRunItem(ctx context.Context, turn Turn, invocat
 }
 
 func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Turn, invocation Invocation, cause error) (Snapshot, error) {
+	// Only a proved no-effect original Start (or Application call) may
+	// terminalize an Invocation without a Kernel terminal result.
+	var proofErr error
+	ctx, proofErr = withOriginalNoEffectTerminalWitness(ctx, invocation, cause)
+	if proofErr != nil {
+		return Snapshot{}, proofErr
+	}
 	invocation.Status = InvocationFailed
 	invocation.ErrorCode = capabilityStartFailedCode
 	invocation.ErrorDetail = "capability execution did not start"

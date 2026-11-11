@@ -292,6 +292,64 @@ func (runner *Runner) executeDelegation(
 	return DelegationResult{Delegation: delegation, Snapshot: snapshot}, errors.Join(delegateErr, loadErr)
 }
 
+// reconcileLocalTerminalHandoffEvidence repairs a durable terminal
+// ChildRunner observation before the original root's terminal Store CAS.
+// It never starts/resumes/cancels the child: only a statically composed
+// local ChildRunner with proven Kernel ownership may supply this result.
+// Remote or ambiguous routes remain fenced until their own first-party
+// terminal Handoff fact is committed.
+func (runner *Runner) reconcileLocalTerminalHandoffEvidence(
+	ctx context.Context, turn Turn,
+) error {
+	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
+	if !ok || !coordinator.ObservesLocalKernelRunner(runner.runtime) {
+		return nil
+	}
+	items, err := listAllItems(ctx, runner.store, turn.ID)
+	if err != nil {
+		return err
+	}
+	proven := make(map[string]kernel.Snapshot)
+	for _, item := range items {
+		if item.Kind != ItemDelegation || item.Status != ItemStarted {
+			continue
+		}
+		// A second terminal projection is not permitted to mint an
+		// alternate result or mutate the existing immutable receipt.
+		hasTerminal := false
+		for _, next := range items {
+			if next.Kind == ItemDelegation && next.ParentItemID == item.ID &&
+				(next.Status == ItemCompleted || next.Status == ItemFailed ||
+					next.Status == ItemCancelled) {
+				hasTerminal = true
+				break
+			}
+		}
+		if hasTerminal {
+			continue
+		}
+		owner, loadErr := runner.store.GetInvocationByExecutionRefID(ctx, item.RunID)
+		if loadErr != nil || !isHandoffDelegationInvocation(owner) ||
+			owner.TurnID != turn.ID || owner.ParentItemID != item.ID {
+			return ErrConflict
+		}
+		child, _, observationErr := runner.localDelegationObservation(ctx, item.RunID)
+		if errors.Is(observationErr, kernel.ErrNotFound) {
+			continue
+		}
+		if observationErr != nil {
+			return observationErr
+		}
+		if terminalRuntimeStatus(child.Run.Status) {
+			proven[item.RunID] = child
+		}
+	}
+	if len(proven) == 0 {
+		return nil
+	}
+	return runner.syncTerminalDelegations(ctx, turn, proven)
+}
+
 // dispatchHandoff uses the native Feature dispatch grant for every delegated
 // child, owned by its frozen child Invocation rather than its parent Agent.
 // Only a matching Handoff-observed Run outcome can settle that grant.

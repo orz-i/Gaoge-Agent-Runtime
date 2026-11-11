@@ -25,22 +25,61 @@ func cancellationSettlementContext(ctx context.Context) (context.Context, contex
 // Turn lock. No independent cancellation state or SQL schema is introduced.
 const CancellationFenceParentItemID = "harness.cancel.fence"
 
-func ActiveCancellationFence(items []Item) bool {
-	pending := make(map[string]struct{})
-	closed := make(map[string]struct{})
+// VerifiedCancellationFenceReceipt is the only durable settlement proof
+// accepted by Memory, PostgreSQL/SQLite, and cancellation recovery. Merely
+// finding a Completed Item with the same ParentItemID is insufficient: its
+// original Turn, physical Run, boundary, and ordering must all agree.
+// Multiple/contradictory receipts fail closed, including malformed siblings.
+// ValidCancellationFenceIntentAdmission establishes one original, immutable
+// cancellation operation before Store-allocated Seq exists. All Store
+// adapters apply this same predicate at the first durable authorization.
+func ValidCancellationFenceIntentAdmission(intent Item) bool {
+	if intent.ID == "" || intent.TurnID == "" || intent.RunID == "" ||
+		intent.Kind != ItemDiagnostic || intent.Status != ItemStarted ||
+		intent.ParentItemID != CancellationFenceParentItemID || intent.InvocationID != "" {
+		return false
+	}
+	admission, ok := authorityStringFields(intent.Payload, "boundary", "runID")
+	return ok && admission["boundary"] == "cancel_scope_pending" &&
+		admission["runID"] == intent.RunID
+}
+
+func VerifiedCancellationFenceReceipt(intent Item, receipts []Item) bool {
+	if intent.Seq == 0 || !ValidCancellationFenceIntentAdmission(intent) {
+		return false
+	}
+	if len(receipts) != 1 {
+		return false
+	}
+	receipt := receipts[0]
+	if receipt.ID != stableID("hcancelclosed", intent.ID) ||
+		receipt.ParentItemID != intent.ID ||
+		receipt.Kind != ItemDiagnostic || receipt.Status != ItemCompleted ||
+		receipt.TurnID != intent.TurnID || receipt.RunID != intent.RunID ||
+		receipt.InvocationID != "" || receipt.Seq <= intent.Seq {
+		return false
+	}
+	completion, ok := authorityStringFields(receipt.Payload, "boundary")
+	return ok && completion["boundary"] == "cancel_scope_settled"
+}
+
+func cancellationFenceReceipts(items []Item) map[string][]Item {
+	result := make(map[string][]Item)
 	for _, item := range items {
-		if item.Kind != ItemDiagnostic {
-			continue
-		}
-		if item.Status == ItemStarted && item.ParentItemID == CancellationFenceParentItemID {
-			pending[item.ID] = struct{}{}
-		}
-		if item.Status == ItemCompleted {
-			closed[item.ParentItemID] = struct{}{}
+		if item.ParentItemID != "" && item.ParentItemID != CancellationFenceParentItemID {
+			result[item.ParentItemID] = append(result[item.ParentItemID], item)
 		}
 	}
-	for id := range pending {
-		if _, settled := closed[id]; !settled {
+	return result
+}
+
+func ActiveCancellationFence(items []Item) bool {
+	receipts := cancellationFenceReceipts(items)
+	for _, intent := range items {
+		if intent.ParentItemID == CancellationFenceParentItemID &&
+			!VerifiedCancellationFenceReceipt(intent, receipts[intent.ID]) {
+			// Invalid original intent status/kind is not absence of an
+			// intent. Damaged historical rows retain the physical fence.
 			return true
 		}
 	}
@@ -110,18 +149,13 @@ func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn
 	if err != nil {
 		return Item{}, err
 	}
-	closed := make(map[string]struct{})
-	for _, item := range items {
-		if item.Kind == ItemDiagnostic && item.Status == ItemCompleted {
-			closed[item.ParentItemID] = struct{}{}
-		}
-	}
+	receipts := cancellationFenceReceipts(items)
 	for _, item := range items {
 		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
 			item.ParentItemID != CancellationFenceParentItemID || item.RunID != runID {
 			continue
 		}
-		if _, done := closed[item.ID]; !done {
+		if !VerifiedCancellationFenceReceipt(item, receipts[item.ID]) {
 			return item, nil
 		}
 	}

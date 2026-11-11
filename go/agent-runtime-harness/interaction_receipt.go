@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // A resolved Interaction becomes a dispatch grant before the physical Host
@@ -21,15 +22,23 @@ func (runner *Runner) interactionContinuationClaimed(ctx context.Context, intera
 	if err != nil {
 		return false, err
 	}
-	claimID := stableID("hcontclaim", interaction.ID)
-	for _, item := range items {
-		if item.ID == claimID {
-			return item.Kind == ItemDiagnostic && item.Status == ItemStarted &&
-				item.TurnID == interaction.TurnID &&
-				item.InvocationID == interaction.InvocationID, nil
-		}
+	owner, err := runner.store.GetInvocation(ctx, interaction.InvocationID)
+	if err != nil {
+		return false, err
 	}
-	return false, nil
+	if owner.TurnID != interaction.TurnID || owner.ID != interaction.InvocationID {
+		return false, ErrConflict
+	}
+	switch classifyContinuationEvidence(items, interaction, owner) {
+	case continuationAbsent, continuationHostReturnedUnclaimed:
+		return false, nil
+	case continuationClaimedPending, continuationCompleted:
+		return true, nil
+	case continuationContradictory:
+		return false, ErrConflict
+	default:
+		return false, ErrConflict
+	}
 }
 
 // The verified Host receipt and the permission to enter a Runtime continuation
@@ -116,26 +125,77 @@ func (runner *Runner) recordVerifiedInteractionResponse(
 // The saved completion Item is an authoritative Host business callback receipt,
 // not proof that the owning Runtime resumed. Check the exact Interaction and
 // Invocation; an unrelated receipt may never release this effect's fence.
-func hasVerifiedInteractionResponse(items []Item, interaction Interaction, invocation Invocation) bool {
-	id := verifiedInteractionResponseItemID(interaction.ID)
-	for _, item := range items {
-		if item.ID != id {
-			continue
-		}
-		if item.TurnID != interaction.TurnID ||
-			item.Kind != ItemDiagnostic || item.Status != ItemCompleted ||
-			item.InvocationID != invocation.ID ||
-			item.RunID != invocation.ExecutionRefID ||
-			item.ParentItemID != stableID("hinteractionitem", interaction.ID, string(InteractionResolved)) {
-			return false
-		}
-		var receipt struct {
-			InteractionID string `json:"interactionID"`
-			Boundary      string `json:"boundary"`
-		}
-		return json.Unmarshal(item.Payload, &receipt) == nil &&
-			receipt.InteractionID == interaction.ID &&
-			receipt.Boundary == "host_response_verified"
+// A Host callback receipt is an immutable, original-owner-bound physical
+// fact. Its strict predicate is shared by cancellation/continuation reads
+// and the Store's domain-specific admission checks.
+func verifiedHostInteractionResponse(interaction Interaction, invocation Invocation, item Item) bool {
+	if interaction.ID == "" || interaction.TurnID == "" || interaction.Status != InteractionResolved ||
+		interaction.InvocationID != invocation.ID || invocation.ID == "" ||
+		invocation.TurnID != interaction.TurnID || invocation.ExecutionRefID == "" ||
+		item.ID != verifiedInteractionResponseItemID(interaction.ID) ||
+		item.TurnID != interaction.TurnID || item.Kind != ItemDiagnostic ||
+		item.Status != ItemCompleted || item.InvocationID != invocation.ID ||
+		item.RunID != invocation.ExecutionRefID ||
+		item.ParentItemID != stableID("hinteractionitem", interaction.ID, string(InteractionResolved)) {
+		return false
 	}
-	return false
+	receipt, ok := authorityStringFields(item.Payload, "interactionID", "boundary")
+	return ok && receipt["interactionID"] == interaction.ID &&
+		receipt["boundary"] == "host_response_verified"
+}
+
+// The original Interaction source Item is an immutable Host fact in its
+// own right. Both Waiting and Resolved source projections have one exact
+// deterministic ID, original owner and complete response/presentation bytes.
+func verifiedInteractionSource(item Item, interaction Interaction, invocation Invocation) bool {
+	var requiredStatus ItemStatus
+	switch interaction.Status {
+	case InteractionWaiting:
+		requiredStatus = ItemWaiting
+	case InteractionResolved:
+		requiredStatus = ItemCompleted
+	default:
+		return false
+	}
+	if item.ID != stableID("hinteractionitem", interaction.ID, string(interaction.Status)) ||
+		item.TurnID != interaction.TurnID || item.Kind != ItemInteraction ||
+		item.Status != requiredStatus || item.InvocationID != invocation.ID ||
+		item.ParentItemID != interaction.ParentItemID || item.RunID != "" ||
+		item.Seq == 0 || invocation.TurnID != interaction.TurnID {
+		return false
+	}
+	original, err := interactionItemPayload(interaction)
+	return err == nil && sameUniqueAuthorityJSON(item.Payload, original)
+}
+
+func verifiedResolvedInteractionSource(item Item, interaction Interaction, invocation Invocation) bool {
+	return interaction.Status == InteractionResolved &&
+		verifiedInteractionSource(item, interaction, invocation)
+}
+
+func hasVerifiedInteractionResponse(items []Item, interaction Interaction, invocation Invocation) bool {
+	var receipt, source Item
+	receipts, sources, sourceChildren := 0, 0, 0
+	sourceID := stableID("hinteractionitem", interaction.ID, string(InteractionResolved))
+	for _, item := range items {
+		if item.ID == verifiedInteractionResponseItemID(interaction.ID) {
+			receipts++
+			receipt = item
+		}
+		if item.ID == sourceID {
+			sources++
+			source = item
+		}
+		// Only Host diagnostic response facts and reserved response IDs
+		// are competing authority; ordinary Artifact children of an
+		// Interaction source remain application data (as in Handoff).
+		if item.ParentItemID == sourceID &&
+			(item.Kind == ItemDiagnostic || strings.HasPrefix(item.ID, "hbizverified_")) {
+			sourceChildren++
+		}
+	}
+	return receipts == 1 && sources == 1 && sourceChildren == 1 &&
+		verifiedResolvedInteractionSource(source, interaction, invocation) &&
+		verifiedHostInteractionResponse(interaction, invocation, receipt) &&
+		receipt.Seq > source.Seq
 }
