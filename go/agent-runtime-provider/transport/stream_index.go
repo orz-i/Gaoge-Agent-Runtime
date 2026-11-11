@@ -3,8 +3,10 @@ package transport
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"strconv"
+	"strings"
 )
 
 // A single response cannot need an unbounded sparse index. This limit bounds
@@ -45,4 +47,19 @@ func streamIndexField(value map[string]any, key string) (int, error) {
 		return 0, nil
 	}
 	return streamIndex(raw)
+}
+
+// Keep index token spelling until validation, instead of rounding through float64.
+func decodeIndexedStreamObject(raw string) (map[string]any, error) {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	var value map[string]any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, errInvalidStreamIndex
+	}
+	return value, nil
 }

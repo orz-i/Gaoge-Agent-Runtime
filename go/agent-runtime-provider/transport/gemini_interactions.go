@@ -637,8 +637,8 @@ func (p *geminiInteractionsStreamParser) flush() error {
 	if data == "" {
 		return nil
 	}
-	parsed := map[string]interface{}{}
-	if err := json.Unmarshal([]byte(data), &parsed); err != nil {
+	parsed, err := decodeIndexedStreamObject(data)
+	if err != nil {
 		return err
 	}
 	return p.applyEvent(parsed)

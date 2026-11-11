@@ -518,8 +518,8 @@ func (p *openAIGenerateSSEParser) dispatch(eventName string, payloadText string)
 }
 
 func (p *openAIGenerateSSEParser) dispatchJSONPayload(eventName string, payloadText string) error {
-	parsed := make(map[string]interface{})
-	if err := json.Unmarshal([]byte(payloadText), &parsed); err != nil {
+	parsed, err := decodeIndexedStreamObject(payloadText)
+	if err != nil {
 		return err
 	}
 	if NormalizeAdapter(p.adapter) == AdapterBailianChat {

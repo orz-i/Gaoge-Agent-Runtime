@@ -39,3 +39,18 @@ func TestMalformedStreamIndexCannotGrowToolOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestWireStreamIndexNeverRoundsBeforeValidation(t *testing.T) {
+	for _, raw := range []string{`{"index":1.00000000000000001}`, `{"index":-0.00000000000000001}`, `{"index":9223372036854775808}`} {
+		parsed, err := decodeIndexedStreamObject(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = streamIndexField(parsed, "index"); !errors.Is(err, errInvalidStreamIndex) {
+			t.Fatalf("wire index rounded: %s", raw)
+		}
+	}
+	if _, err := decodeIndexedStreamObject(`{"index":0} {"index":1}`); err == nil {
+		t.Fatal("trailing JSON accepted")
+	}
+}

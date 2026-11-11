@@ -937,8 +937,8 @@ func (p *openAIImageSSEParser) dispatch(eventName string, payloadText string) er
 }
 
 func parseOpenAIImageStreamPayload(payloadText string) (map[string]interface{}, error) {
-	parsed := make(map[string]interface{})
-	if err := json.Unmarshal([]byte(payloadText), &parsed); err != nil {
+	parsed, err := decodeIndexedStreamObject(payloadText)
+	if err != nil {
 		return nil, err
 	}
 	if err := parseStreamUpstreamError(parsed, payloadText); err != nil {

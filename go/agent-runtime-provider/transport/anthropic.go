@@ -1391,8 +1391,8 @@ func (p *anthropicSSEParser) dispatch(data string) error {
 	if strings.TrimSpace(data) == "" {
 		return nil
 	}
-	parsed, ok := decodeStreamObject(data)
-	if !ok {
+	parsed, err := decodeIndexedStreamObject(data)
+	if err != nil {
 		return nil
 	}
 	if p.replay != nil {
