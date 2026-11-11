@@ -1109,6 +1109,9 @@ func TestResponsesCompletedReasoningSummaryIsEmittedWhenNoDeltaArrived(t *testin
 func TestResponsesStreamDoneEventsAreMergedWithoutDuplicateText(t *testing.T) {
 	result := &GenerateOutput{ToolCalls: make([]ToolCall, 0)}
 	rawStream := strings.Join([]string{
+		`event: response.output_item.added`,
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"legacy-message","type":"message","content":[]}}`,
+		``,
 		`event: response.output_text.delta`,
 		`data: {"type":"response.output_text.delta","delta":"Hello"}`,
 		``,

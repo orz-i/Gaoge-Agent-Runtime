@@ -62,6 +62,9 @@ func projectResponsesPhase(items []any) (string, bool, bool, error) {
 		}
 	}
 	if !phased {
+		if refused && hasCall {
+			return "", false, refused, errInvalidResponsesPhase
+		}
 		return "", false, refused, nil
 	}
 	// Refusal is global across phases, even when final content is valid JSON.
