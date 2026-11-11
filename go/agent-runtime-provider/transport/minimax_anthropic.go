@@ -114,7 +114,10 @@ func newAnthropicReplay(protocol string) *anthropicReplay {
 }
 
 func (r *anthropicReplay) consume(event map[string]interface{}) error {
-	index := anthropicContentBlockIndex(event)
+	index, err := anthropicContentBlockIndex(event)
+	if err != nil {
+		return err
+	}
 	switch getString(event[valueTypeF2B37301]) {
 	case "content_block_start":
 		r.blocks[index] = cloneMap(asMap(event["content_block"]))
