@@ -44,8 +44,9 @@ Boundary sequence:
 7. An already terminal original child is read only for idempotent
    settlement; its committed Run status cannot execute a second Cancel.
    A Completed child without a valid result fails closed.
-8. A mixed Host Canceller can attest only the local Agent RunKind bound to its
-   exact Kernel. A2A, foreign/missing Runners and other RunKinds stay remote
+8. A mixed Host Canceller can attest only the original native Agent or
+   Workflow RunKind bound to its exact Kernel. A2A, foreign/missing Runners
+   and other unbound kinds stay remote
    or unverified. Post-write errors (including a misleading ErrConflict) are
    outcome-unknown, never a no-effect certificate.
 
@@ -180,3 +181,72 @@ Standalone Gaoge currently still pins an earlier Runtime beta.24 source
 cohort and must update its SDK gitlink *together with* the future Runtime PR
 head. No production drain, external billing proof or cross-repository CI
 acceptance has been claimed here.
+
+
+## Fourth-review atomic arbitration and crash-recovery remediation (2026-11-12)
+
+Against Runtime `e4e6fb0` / Gaoge `67d6d2b`, the independent review
+reproduced (1) the parent-cancel/child-Approval last-read CAS window,
+(2) parent-cancel/approved Tool dispatch after the Host status read,
+(3) relation loss permitting direct Agent approval without Harness Grant,
+and (4) mutually exclusive frozen `isolatedContext` values accepted by
+the same child. Evidence:
+`/tmp/issue107-fourth-independent-evidence` on the isolated Mac.
+
+The remediation replaces repeated liveness reads as permission with a
+transactional `ChildExecutionStore` physical Grant. A persisted
+`Run.ParentRunID` binds AgentTask and nested Subworkflow to every Kernel
+ancestor. Store `BeginChildExecution` acquires/validates the complete
+ancestor chain; parent terminal `Apply` / `ApplyControl` and child Approval
+CAS must compete with the original Grant in the *same* persistence lock /
+transaction, including across independent PostgreSQL connections. A direct
+missing-relation child has no Root fallback. Frozen
+`OriginFingerprint` binds the exact serialized parent Effect input
+including privacy Context isolation; the Host original Runner verifies
+the same immutable initial Model/Tool policy. Parented approvals must
+pass a pure Host `ApprovalControlPreflight` of the real Harness dispatch
+Grant before any Run middleware, physical Store Grant or Model/Tool call.
+
+A further independent negative test uncovered a restart race:
+a recovered Agent could previously see clean child state and retire a
+**still active** approval's physical Grant before its callback returned,
+allowing the parent Cancel to win and exposing the same TOCTOU. The fix
+requires a distinct **durable post-callback settlement marker** tied to
+the original Grant/revision and validated inside the Store transaction.
+The Agent alone can mint its opaque proof after successfully returning
+and verifying pending physical Model/Tool effects. The Store rejects zero,
+forged, stale and premature settlement permits. Reconciliation is
+read-only until this marker exists. Unknown outcomes stay blocked.
+
+The previously separate Harness Turn budget cancellation path also needed
+an exact source-restricted no-effect `ChildGrantBusy` fact. Without it,
+a budget already cancelled by the first parent cancellation prevented
+a second request from resuming even after the original Tool completed.
+The deferred witness retains the **same** outstanding Harness cancel intent
+and never releases the budget or grants a second side-effect authorization.
+Invalid/duplicate/foreign proof Items are rejected.
+
+**Positive and adversarial verification:**
+- 80 in-memory competing parent terminal / child Begin operations.
+- Same parent/child immutable origin, tenant, thread and fresh Attempt.
+- Memory, GORM PostgreSQL and native SQLite cross-Store Grant suite.
+- 30 real PostgreSQL cases with independently connected transactional
+  cancellation versus Grant admission; the isolated server did not
+  exercise production traffic.
+- PostgreSQL/SQLite Grant survives restart, rejects premature retirement,
+  and supports recovery after a persisted settlement marker with lost ACK.
+- Original #107 Hosted Approval/Tool races and relation-loss/Context
+  fingerprint adversarial fixtures (repeated five times).
+- Active approval callback remains uncancellable by fake clean-state
+  reconciliation; shared-budget active Tool rejects the first parent
+  cancellation and permits safe retry after trusted receipt.
+- Full Core, Harness, PostgreSQL and SQLite test suites, Race and lint
+  must be rerun on the eventual exact locked PR head.
+
+**Exit status:** This remediation is still not an independent final
+acceptance. Gaoge #69 full Hosted ProviderReplay and other existing
+integration failures, the outdated `sdk` gitlink, required GitHub CI,
+operational migration and release proof remain NO-GO. Unknown external
+effects cannot be administratively erased by an API call; a dedicated
+authoritative external reconciliation process is required for any such
+historical Grant.

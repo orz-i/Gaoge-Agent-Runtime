@@ -5,6 +5,21 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Issue #107 fourth-audit atomic parent/child authority remediation
+  (2026-11-12): replace untrusted read/check parent liveness with a
+  Store-serialized physical Grant covering child Agent Start, Approval and
+  Resume. Preserve immutable parent ancestry across nested Subworkflows;
+  seal the original Context-isolation source and require pre-Grant Host
+  approval admission. Memory, PostgreSQL and SQLite persist Grant status,
+  validate first-party post-callback settlement proofs, and block parent
+  terminal state during unknown Tool/Model dispatch. A committed
+  settlement marker survives lost ACK/restart; a merely clean child State
+  never releases a live callback's Grant. The Harness retains the original
+  cancellation election after a typed busy rejection when shared budget
+  is already revoked, with a single verified deferred receipt. SQLite
+  development schema hard-cuts v1 to v2; PostgreSQL adds parent identity
+  and child Grant table. See `docs/breaking-changes.md`.
+
 - Issue #107 independent third-round governance (2026-11-12): A terminal parent
   Workflow cannot authorize new AgentTask approval or Tool continuation, even
   if the Harness Turn has not been projected. The original raw Feature ancestor

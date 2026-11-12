@@ -2,6 +2,90 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-12 — Issue #107 parent/child physical Grant and frozen source hard-cut (beta.24 candidate)
+
+Fourth independent review confirmed that repeated Host/Harness `Load` checks
+still allowed a parent Workflow to terminate after the final status read and
+before its child Agent's approval CAS or Model/Tool dispatch. It also
+confirmed that missing RunRelation evidence could silently downgrade a child
+to a directly approvable Agent, and that `isolatedContext` was not bound to
+the frozen Agent identity. The former bug executed a real in-memory Tool
+handler after parent cancellation, while subsequent Root/child state writes
+looked locally valid. The previous read/check approach is removed as an
+authorizing boundary; it may remain as defense-in-depth.
+
+**Physical execution authorization now belongs to Kernel Store.** New
+`kernel.Run.ParentRunID` and `kernel.CreateRequest.ParentRunID` are immutable
+Kernel ancestry, not a replacement for the original relation proof.
+`agent.StartRequest` and nested `workflow.StartRequest` carry this parent
+source; the first-party `agent.FrozenOriginFingerprint` preserves the exact
+raw frozen Workflow Effect input, including its Context-isolation/source
+policy, in the persisted Agent State. `agent.MatchesFrozenOrigin` and the
+original Runner reject contradictory same-ID resumes. Parent-bound Agent
+approval requires an immutable `agent.Dependencies.ApprovalControlPreflight`
+that the Host must implement as a **pure** verification of the original
+Harness physical approval Grant. A missing verifier denies approval before
+Model/Tool middleware or a Kernel physical Grant starts. No fallback to
+unbound Root when the RunRelation index disappears.
+
+**Atomic child effect protocol:** Kernel `ChildExecutionStore` has original
+`BeginChildExecution`, read-only `LookupChildExecution`, validated
+`MarkChildExecutionSettled` and `FinishChildExecution` ports. A child
+Start/Approval/Resume holds a durable, original-ID Grant across its physical
+callback, Model/Tool invocation and Host middleware. Grant admission and
+all terminal mutations of the original parent and its Kernel ancestors
+compete in one authoritative Store transaction. A known in-flight child
+returns a typed `ErrChildExecutionBusy` no-effect rejection to the parent
+Cancel, not a fabricated success; existing approved Tool work is allowed
+to reach a trusted receipt. An interrupted/unknown callback keeps its Grant
+durably quarantined, with **no automatic TTL release or effect replay**.
+
+A clean-looking persisted Agent State or a public Grant ID is **not**
+physical completion evidence. After the original physical callback returns
+successfully, the trusted Agent validates all Model/Tool physical receipts,
+mints an opaque original-Grant/revision/state proof, and atomically records
+its post-callback `SettledRevision` through the Store port. The Store
+verifies that proof **again under its own lock/transaction**. Only a matching
+durable settlement marker permits `FinishChildExecution`. A crash between
+the settlement marker and its ACK is recovered by
+`agent.ReconcileChildPhysicalGrant`; a crash before the marker, a late
+effect, or a returned callback error remains BLOCKED until trustworthy
+manual/Host receipt reconciliation. A direct call to `Store.Mark` with a
+zero or forged permit cannot retire the Grant.
+
+**Shared-budget cancellation:** The Harness cancels the Turn budget before
+the parent Kernel CAS. A `ChildGrantBusy` rejection proves no parent CAS
+committed, so the original still-active Harness cancellation intent may
+record one strictly structured, original-identity deferred fact and resume
+the **same** cancellation after the child Tool receipt. The budget is not
+restored and the request does not mint a second cancellation election.
+Ordinary Host errors, damaged/duplicated proof Items, unknown Store ACKs
+and remote Handoffs cannot use this deferral path.
+
+**Persistent breaking change:** PostgreSQL adds the immutable
+`agent_kernel_runs.parent_run_id` column and
+`agent_kernel_child_effect_grants` table (with original
+`settled_revision` for each ancestor). This requires the unpublished
+schema migration via `postgres.Migrate` on a safely drained environment.
+The embedded SQLite Profile Store schema hard-cuts from experimental v1 to
+**v2**; opening an older database fails closed without implicit migration,
+repair, table replacement or deleting existing data. Export/drain and
+explicitly recreate a fresh v2 Profile before re-admitting work; keep
+unreconciled old effects quarantined. There is no backwards compatibility
+shim and existing parentless historical child Runs are NOT silently trusted
+or reparented. Public beta.24 is still unreleased; published tags stay
+immutable.
+
+**Acceptance limits:** Conformance covers Memory, PostgreSQL (including
+independent real-server connections), SQLite, nested ancestry and restart
+with pending Grants. Deterministic real Hosted races test parent Cancel
+after the final read and before Approval/Tool dispatch. Separate tests cover
+lost settlement ACK on a new Store process, forged proofs, shared-budget
+cancel retry and the original independent audit findings. The full Gaoge
+#69 Hosted ProviderReplay and pinned SDK/gitlink upgrade remain separate
+NO-GO gates. Full final independent audit and actual GitHub PR-head CI are
+required before shipping.
+
 ## 2026-11-11 — Workflow AgentTask child ownership and approval proof (beta.24 candidate)
 
 A `workflow.Runner` now permits local observation and Harness approval of
@@ -41,7 +125,7 @@ AgentTask-only Workflow does not require a Subworkflow DefinitionRegistry.
 
 The Harness `RunRelationSource` must be the original Workflow recorder,
 and mixed Host cancellers may use the new narrowly scoped
-`LocalKernelRunKindCanceller.OwnsKernelRunKind` only for native Agent Kind
+`LocalKernelRunKindCanceller.OwnsKernelRunKind` only for original native Agent/Workflow kinds
 in the same exact Kernel. This does not authorize remote A2A, Team Handoff,
 other Run kinds or generic Host callbacks. Unknown post-write cancellation
 outcomes remain fenced and cannot be reclassified as no-effect from a raw
