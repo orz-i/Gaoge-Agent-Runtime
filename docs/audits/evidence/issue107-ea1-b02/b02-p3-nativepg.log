@@ -1,0 +1,21 @@
+=== RUN   TestEA1RealPostgresReceiptBeforeMark
+=== RUN   TestEA1RealPostgresReceiptBeforeMark/root_receipt_committed_before_Mark
+=== RUN   TestEA1RealPostgresReceiptBeforeMark/child_receipt_committed_before_Mark
+--- PASS: TestEA1RealPostgresReceiptBeforeMark (0.40s)
+    --- PASS: TestEA1RealPostgresReceiptBeforeMark/root_receipt_committed_before_Mark (0.24s)
+    --- PASS: TestEA1RealPostgresReceiptBeforeMark/child_receipt_committed_before_Mark (0.16s)
+=== RUN   TestEA1RealPostgresReceiptBeforeMark
+=== RUN   TestEA1RealPostgresReceiptBeforeMark/root_receipt_committed_before_Mark
+=== RUN   TestEA1RealPostgresReceiptBeforeMark/child_receipt_committed_before_Mark
+--- PASS: TestEA1RealPostgresReceiptBeforeMark (0.40s)
+    --- PASS: TestEA1RealPostgresReceiptBeforeMark/root_receipt_committed_before_Mark (0.16s)
+    --- PASS: TestEA1RealPostgresReceiptBeforeMark/child_receipt_committed_before_Mark (0.23s)
+=== RUN   TestEA1RealPostgresReceiptBeforeMark
+=== RUN   TestEA1RealPostgresReceiptBeforeMark/root_receipt_committed_before_Mark
+=== RUN   TestEA1RealPostgresReceiptBeforeMark/child_receipt_committed_before_Mark
+--- PASS: TestEA1RealPostgresReceiptBeforeMark (0.46s)
+    --- PASS: TestEA1RealPostgresReceiptBeforeMark/root_receipt_committed_before_Mark (0.26s)
+    --- PASS: TestEA1RealPostgresReceiptBeforeMark/child_receipt_committed_before_Mark (0.20s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	2.697s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

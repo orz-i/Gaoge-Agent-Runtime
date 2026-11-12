@@ -1,0 +1,16 @@
+=== RUN   TestEA1P0SourceAdmissionMemory
+=== RUN   TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent
+=== RUN   TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant
+=== RUN   TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor
+=== RUN   TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread
+=== RUN   TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent
+=== RUN   TestEA1P0SourceAdmissionMemory/wrong_kind_duplicate_run_and_stale/future_expected_Revision
+--- PASS: TestEA1P0SourceAdmissionMemory (0.00s)
+    --- PASS: TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionMemory/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent (0.00s)
+    --- PASS: TestEA1P0SourceAdmissionMemory/wrong_kind_duplicate_run_and_stale/future_expected_Revision (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	2.070s

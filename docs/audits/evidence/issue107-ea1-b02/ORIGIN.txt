@@ -1,0 +1,4 @@
+SOURCE_SHA=6e25233e80aa30a45b3ba645bda0ececae9266c6
+SCOPE=EA-1 fixed P0/P3/P4 Batch02 + same-SHA recheck of Batch01 signed evidence
+BACKENDS=Memory, native SQLite v3, GORM SQLite adapter, isolated real PostgreSQL 16
+PRODUCTION_OPERATIONS=none
