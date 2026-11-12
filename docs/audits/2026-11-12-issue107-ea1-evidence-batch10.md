@@ -17,3 +17,5 @@ Two prior fixture diagnostics are preserved separately. At source 54985e08, Prep
 Independent source and temporary evidence review accepted final 14c43621: both fixture corrections were verified, all four backend results and three linters passed, PostgreSQL executed both suites three times. Durable evidence signoff follows separately.
 
 No Root production edits, push, PR, merge, runtime data migration or WP-GAOGE changes. Disk available before batch 9.2 GiB and after 9.0 GiB; no cache deletion. Another Go server uses shared cache, so it was not cleared or interrupted.
+
+Durable independent signoff: c56297a66e583149a8eaf1dc6262762d5eb05b15 was checked read-only. All seven checksums/source labels/zero exits matched; PostgreSQL ran both suites three times without skip/fail; no Go drift occurred. Exactly the two specified rows changed, all prior 73 recorded PASS/FAIL rows were unchanged. This is B10 evidence acceptance, not Root implementation or full-matrix GO.
