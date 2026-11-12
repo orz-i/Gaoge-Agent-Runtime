@@ -117,6 +117,7 @@ type ea1ChildCancelHarnessFixture struct {
 	physical    *ea1ChildCancelKernelStore
 	toolUnknown bool
 	toolRequest tools.ExecutionRequest
+	toolResult  tools.ExecutionResult
 	budgets     *harness.BudgetMiddleware
 	agent       *agent.Runner
 	workflow    *workflow.Runner
@@ -154,13 +155,17 @@ func newEA1ChildCancelHarnessFixture(t *testing.T, persistent bool) *ea1ChildCan
 			}
 			f.toolCalls++
 			f.toolRequest = request
+			f.toolRequest.Call.Arguments = append(json.RawMessage(nil), request.Call.Arguments...)
 			if f.toolUnknown {
 				return tools.ExecutionResult{}, errors.New("ea1 actual Tool request sent; response unavailable")
 			}
-			return tools.ExecutionResult{
+			result := tools.ExecutionResult{
 				Content: json.RawMessage(`{"evidence":"approved"}`),
 				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "read"},
-			}, nil
+			}
+			f.toolResult = result
+			f.toolResult.Content = append(json.RawMessage(nil), result.Content...)
+			return result, nil
 		}),
 	}})
 	if err != nil {
@@ -291,7 +296,7 @@ func ea1ChildCancelStart(t *testing.T, f *ea1ChildCancelHarnessFixture) (harness
 	t.Helper()
 	waiting, err := f.harness.StartWorkflowTurn(t.Context(), f.request)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("start original Workflow AgentTask: %v", err)
 	}
 	if len(waiting.Subtasks) != 1 || waiting.Subtasks[0].Approval == nil || f.model.calls != 1 || f.toolCalls != 0 {
 		t.Fatalf("actual original AgentTask did not wait for approval: %+v", waiting)
@@ -302,20 +307,32 @@ func ea1ChildCancelStart(t *testing.T, f *ea1ChildCancelHarnessFixture) (harness
 	}
 	task := waiting.Subtasks[0]
 	c := budget.Coordinator{Store: f.backend.ledgers}
+	initial, err := f.backend.ledgers.LoadBudget(t.Context(), waiting.Turn.ID)
+	if err != nil || f.request.Config.SharedBudget == nil || initial.Limits != *f.request.Config.SharedBudget || len(initial.Runs) != 0 {
+		t.Fatalf("initial Host ledger/source before explicit registration: ledger=%+v err=%v", initial, err)
+	}
+	registered, err := c.RegisterRun(t.Context(), waiting.Turn.ID, root.ExecutionRefID, budget.RunBudget{})
+	if err != nil {
+		t.Fatalf("register original Workflow root %s: %v", root.ExecutionRefID, err)
+	}
+	binding, exists := registered.Runs[root.ExecutionRefID]
+	if !exists || binding != (budget.RunBudget{}) || registered.Limits != initial.Limits {
+		t.Fatal("root registration changed frozen limits/binding")
+	}
 	if _, err = c.RegisterRun(t.Context(), waiting.Turn.ID, task.RunID, budget.RunBudget{ParentRunID: root.ExecutionRefID}); err != nil {
-		t.Fatal(err)
+		t.Fatalf("register original AgentTask child %s under %s: %v", task.RunID, root.ExecutionRefID, err)
 	}
 	for _, id := range []string{"child-unsent", "child-dispatched"} {
 		if _, err = c.Reserve(t.Context(), waiting.Turn.ID, budget.Reservation{ID: id, RunID: task.RunID, RequestHash: "original-" + id, Requested: budget.Usage{LLMCalls: 1, InputTokens: 3, OutputTokens: 2, TotalTokens: 5}}, true); err != nil {
-			t.Fatal(err)
+			t.Fatalf("reserve original child request %s: %v", id, err)
 		}
 	}
 	if _, err = c.Dispatch(t.Context(), waiting.Turn.ID, "child-dispatched"); err != nil {
-		t.Fatal(err)
+		t.Fatalf("dispatch original child reservation: %v", err)
 	}
 	ledger, err := f.backend.ledgers.LoadBudget(t.Context(), waiting.Turn.ID)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("load seeded cancellation budget: %v", err)
 	}
 	f.physical.target = task.RunID
 	return waiting, task, root, ledger
@@ -475,8 +492,11 @@ func TestEA1HarnessAgentTaskCancelP2(t *testing.T) {
 	child := ea1ChildCancelApprove(t, f, waiting, task)
 	f.toolUnknown = true
 	_, err := f.agent.Resume(t.Context(), task.RunID, child.Run.Revision)
-	if !errors.Is(err, agent.ErrToolOutcomeUnknown) || f.toolCalls != 1 || f.toolRequest.RunID != task.RunID || f.toolRequest.Call.ID != "ea1ChildCancel-call" || f.toolRequest.Call.ToolKey != ea1ChildCancelToolKey || string(f.toolRequest.Call.Arguments) != "{}" {
+	if !errors.Is(err, agent.ErrToolOutcomeUnknown) || f.toolCalls != 1 || !reflect.DeepEqual(f.toolRequest, ea1ChildCancelExpectedToolRequest(task.RunID)) {
 		t.Fatalf("actual Tool send did not become unknown: %v calls=%d", err, f.toolCalls)
+	}
+	if !reflect.DeepEqual(f.toolResult, tools.ExecutionResult{}) {
+		t.Fatal("unknown Tool unexpectedly produced a receipt")
 	}
 	child = ea1ChildCancelLoad(t, f, task.RunID)
 	parent := ea1ChildCancelLoad(t, f, root.ExecutionRefID)
@@ -547,8 +567,24 @@ func TestEA1HarnessAgentTaskCancelP3(t *testing.T) {
 	if err != nil || grant != intercepted || grant.ChildRunID != task.RunID || f.physical.markHits.Load() != 1 {
 		t.Fatal("intercepted wrong physical child scope")
 	}
-	if child.Run.Status != kernel.RunStatusCompleted || f.toolCalls != 1 || f.toolRequest.RunID != task.RunID || f.toolRequest.Call.ID != "ea1ChildCancel-call" || f.toolRequest.Call.ToolKey != ea1ChildCancelToolKey || string(f.toolRequest.Call.Arguments) != "{}" || child.Result == nil || !strings.Contains(string(child.Result.Content), "approved") {
+	if child.Run.Status != kernel.RunStatusCompleted || f.toolCalls != 1 || !reflect.DeepEqual(f.toolRequest, ea1ChildCancelExpectedToolRequest(task.RunID)) || !reflect.DeepEqual(f.toolResult, tools.ExecutionResult{Content: json.RawMessage(`{"evidence":"approved"}`), Receipt: tools.Receipt{ExecutionID: "ea1ChildCancel-call", Disposition: "read"}}) || !reflect.DeepEqual(child.Result, &kernel.Result{ContentType: "application/json", Content: f.toolResult.Content}) {
 		t.Fatal("actual terminal Tool receipt was not committed before original Mark")
+	}
+	events, eventErr := f.runtime.ListEvents(t.Context(), task.RunID, 0, 500)
+	if eventErr != nil {
+		t.Fatal(eventErr)
+	}
+	receiptEvents := 0
+	for _, event := range events {
+		if event.Type == "tool.completed" {
+			receiptEvents++
+			if event.Message != f.toolResult.Receipt.Disposition {
+				t.Fatal("durable Tool receipt disposition differs from actual handler return")
+			}
+		}
+	}
+	if receiptEvents != 1 {
+		t.Fatalf("original Tool completion event count=%d", receiptEvents)
 	}
 	if err = f.agent.ReconcileChildPhysicalGrant(t.Context(), task.RunID); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("receipt alone retired live callback: %v", err)
@@ -576,6 +612,9 @@ func TestEA1HarnessAgentTaskCancelP3(t *testing.T) {
 	}
 	if _, err = f.runtime.LookupChildExecution(t.Context(), task.RunID); !errors.Is(err, kernel.ErrNotFound) {
 		t.Fatalf("original marked scope failed to retire: %v", err)
+	}
+	if !reflect.DeepEqual(child, ea1ChildCancelLoad(t, f, task.RunID)) || !reflect.DeepEqual(parent, ea1ChildCancelLoad(t, f, root.ExecutionRefID)) {
+		t.Fatal("Mark/retirement changed original receipt snapshot")
 	}
 	if f.toolCalls != 1 || f.model.calls != 1 || f.physical.markHits.Load() != 1 {
 		t.Fatal("receipt completion replayed physical work")
@@ -657,4 +696,8 @@ func ea1ChildCancelACKRecovery(t *testing.T, persistent bool) {
 	if e != nil || !reflect.DeepEqual(receipt, fault.receipt) {
 		t.Fatal("recovery replaced original committed receipt")
 	}
+}
+
+func ea1ChildCancelExpectedToolRequest(childID string) tools.ExecutionRequest {
+	return tools.ExecutionRequest{RunID: childID, Call: tools.Call{ID: "ea1ChildCancel-call", ToolKey: ea1ChildCancelToolKey, Name: "read_evidence", Arguments: json.RawMessage(`{}`)}}
 }
