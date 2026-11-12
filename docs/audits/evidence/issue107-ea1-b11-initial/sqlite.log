@@ -1,0 +1,48 @@
+SOURCE_SHA=df8dad572c82d1a569dc89d28ff32bd14cad3cc5
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^(TestEA1RootAgent|TestOwned)' -v
+=== RUN   TestOwnedSchemaMigrationPreservesOriginalGrants
+--- PASS: TestOwnedSchemaMigrationPreservesOriginalGrants (0.09s)
+=== RUN   TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover
+--- PASS: TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover (0.07s)
+=== RUN   TestEA1RootAgentAdmissionSQLite
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim
+    ea1_root_agent_admission.go:69: claim conflict concealed created Root or dispatched: kernel execution lease is not current {ID: Kind: Actor:{TenantID: ActorID:} Thread:{Kind: ID:} RequestID: ParentRunID: Goal: Status: Revision:0 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:0001-01-01 00:00:00 +0000 UTC UpdatedAt:0001-01-01 00:00:00 +0000 UTC}
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model
+--- FAIL: TestEA1RootAgentAdmissionSQLite (0.32s)
+    --- FAIL: TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim (0.05s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission (0.05s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse (0.10s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical (0.06s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model (0.06s)
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim
+    ea1_root_agent_admission.go:52: invalid missing-id: <nil>
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model
+--- FAIL: TestEA1RootAgentDefaultAdmissionSQLite (0.35s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim (0.08s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission (0.05s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse (0.10s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical (0.06s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model (0.06s)
+=== RUN   TestEA1RootAgentUnknownNativeSQLite
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/host_middleware
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/model
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/tool
+--- PASS: TestEA1RootAgentUnknownNativeSQLite (6.66s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/host_middleware (2.26s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/model (2.20s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/tool (2.21s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	7.997s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.498s [no tests to run]
+FAIL
+
+EXIT_CODE=1

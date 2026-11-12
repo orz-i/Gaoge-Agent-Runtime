@@ -1,0 +1,84 @@
+SOURCE_SHA=df8dad572c82d1a569dc89d28ff32bd14cad3cc5
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 -timeout=180s ./...
+--- FAIL: TestFencedAgentAllowanceAcrossProcesses (0.07s)
+    allowance_control_process_test.go:188: start process: exit status 1 output=--- FAIL: TestFencedAllowanceProcessChild (0.03s)
+            allowance_control_process_test.go:91: invalid agent run request
+        FAIL
+--- FAIL: TestFencedAgentBatchApprovalAcrossThreeProcesses (0.14s)
+    --- FAIL: TestFencedAgentBatchApprovalAcrossThreeProcesses/approve (0.07s)
+        approval_control_process_test.go:277: phase=start decision=approve subprocess error=exit status 1 output=--- FAIL: TestFencedApprovalProcessChild (0.04s)
+                approval_control_process_test.go:144: invalid agent run request
+            FAIL
+    --- FAIL: TestFencedAgentBatchApprovalAcrossThreeProcesses/reject (0.07s)
+        approval_control_process_test.go:277: phase=start decision=reject subprocess error=exit status 1 output=--- FAIL: TestFencedApprovalProcessChild (0.03s)
+                approval_control_process_test.go:144: invalid agent run request
+            FAIL
+--- FAIL: TestFencedApprovalAutoDefersUntilNewClaim (0.07s)
+    approval_control_process_test.go:337: phase=start decision=approve subprocess error=exit status 1 output=--- FAIL: TestFencedApprovalProcessChild (0.03s)
+            approval_control_process_test.go:144: invalid agent run request
+        FAIL
+--- FAIL: TestVerifiedApprovalRollbackRetainsEpochAndWait (0.04s)
+    approval_control_rollback_test.go:35: invalid agent run request
+--- FAIL: TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated (0.04s)
+    audit_regression_test.go:188: unknown experimental schema version implicitly migrated: <nil>
+--- FAIL: TestEA1RootAgentAdmissionSQLite (0.35s)
+    --- FAIL: TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim (0.06s)
+        ea1_root_agent_admission.go:69: claim conflict concealed created Root or dispatched: kernel execution lease is not current {ID: Kind: Actor:{TenantID: ActorID:} Thread:{Kind: ID:} RequestID: ParentRunID: Goal: Status: Revision:0 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:0001-01-01 00:00:00 +0000 UTC UpdatedAt:0001-01-01 00:00:00 +0000 UTC}
+--- FAIL: TestEA1RootAgentDefaultAdmissionSQLite (0.33s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim (0.07s)
+        ea1_root_agent_admission.go:52: invalid missing-id: <nil>
+--- FAIL: TestRejectNewerSchemaAndCorruptedState (0.04s)
+    edge_test.go:56: unsupported SQLite runtime schema: existing database has version 3
+--- FAIL: TestUnboundFencedResumeDoesNotExecuteToolBeforeCAS (0.03s)
+    execution_dispatch_guard_test.go:37: invalid agent run request
+--- FAIL: TestNativeExternalReadySignalAcrossProcesses (4.38s)
+    native_external_signal_process_test.go:258: native external phase reconcile: exit status 1 output=--- FAIL: TestNativeExternalSignalChild (0.02s)
+            native_external_signal_process_test.go:250: verified external result didn't complete: {ID:native-external Kind:agent Actor:{TenantID:profile ActorID:a} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:pending externally Status:running Revision:10 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:47:45.260936 +0000 UTC UpdatedAt:2026-11-12 17:47:46.354497 +0000 UTC} agent external tool result is uncertain
+                invalid kernel input
+        FAIL
+--- FAIL: TestNativeEarlyExternalSignalRedeliveredAcrossProcesses (4.40s)
+    native_external_signal_process_test.go:262: native external phase reconcile: exit status 1 output=--- FAIL: TestNativeExternalSignalChild (0.02s)
+            native_external_signal_process_test.go:250: verified external result didn't complete: {ID:native-external Kind:agent Actor:{TenantID:profile ActorID:a} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:pending externally Status:running Revision:10 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:47:49.640914 +0000 UTC UpdatedAt:2026-11-12 17:47:50.744674 +0000 UTC} agent external tool result is uncertain
+                invalid kernel input
+        FAIL
+--- FAIL: TestNativeRunExecutionAcrossProcesses (2.45s)
+    --- FAIL: TestNativeRunExecutionAcrossProcesses/approve (1.24s)
+        native_run_execution_process_test.go:193: native phase "approve1": exit status 1 output=--- FAIL: TestNativeLeaseApprovalChild (0.05s)
+                native_run_execution_process_test.go:113: native ResolveApproval: {ID:native-leased-agent Kind:agent Actor:{TenantID:local ActorID:profile} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:two independent tool approvals Status:waiting_input Revision:11 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:47:57.313541 +0000 UTC UpdatedAt:2026-11-12 17:47:58.469432 +0000 UTC} <nil>
+            FAIL
+    --- FAIL: TestNativeRunExecutionAcrossProcesses/reject (1.21s)
+        native_run_execution_process_test.go:193: native phase "approve1": exit status 1 output=--- FAIL: TestNativeLeaseApprovalChild (0.04s)
+                native_run_execution_process_test.go:113: native ResolveApproval: {ID:native-leased-agent Kind:agent Actor:{TenantID:local ActorID:profile} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:two independent tool approvals Status:waiting_input Revision:9 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:47:58.549888 +0000 UTC UpdatedAt:2026-11-12 17:47:59.676315 +0000 UTC} <nil>
+            FAIL
+--- FAIL: TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool (0.12s)
+    native_run_execution_process_test.go:293: setup ready={ID:stale-after-claim Kind:agent Actor:{TenantID:local ActorID:profile} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:two approvals Status:waiting_input Revision:11 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:47:59.738007 +0000 UTC UpdatedAt:2026-11-12 17:47:59.810566 +0000 UTC} err=<nil>
+--- FAIL: TestLegacyRunCannotJoinNativeExecutionDuringTool (0.14s)
+    native_run_execution_process_test.go:418: AUDIT MIXED legacy epoch0 Tool already in flight; native claim accepted=false status= physical_effects=1 stale_legacy_error=<nil>
+    native_run_execution_process_test.go:424: legacy Run was upgraded into concurrent native execution: effects=1 stale=kernel run revision conflict fresh=agent external tool result is uncertain storeClaim=kernel descendant has an unsettled physical execution Grant legacy=<nil>
+--- FAIL: TestNativeUnknownToolReconcilesAcrossProcessesWithoutReplay (3.36s)
+    native_tool_outcome_process_test.go:194: unknown-result phase "reconcile": exit status 1 output=--- FAIL: TestNativeUnknownToolChild (0.01s)
+            native_tool_outcome_process_test.go:159: known external receipt could not be persisted: {ID:native-unknown Kind:agent Actor:{TenantID:p ActorID:a} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:external receipt uncertain Status:running Revision:7 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:48:00.063645 +0000 UTC UpdatedAt:2026-11-12 17:48:00.10192 +0000 UTC} agent external tool result is uncertain
+                agent original root callback result is uncertain
+        FAIL
+--- FAIL: TestAgentCrashAndResumeInNewProcess (0.19s)
+    --- FAIL: TestAgentCrashAndResumeInNewProcess/after-create (0.07s)
+        recovery_test.go:209: phase=create exit=exit status 1 want=75 output=--- FAIL: TestAgentCrashSubprocess (0.03s)
+                recovery_test.go:139: invalid agent run request
+            FAIL
+    --- FAIL: TestAgentCrashAndResumeInNewProcess/after-model-receipt (0.07s)
+        recovery_test.go:209: phase=model_receipt exit=exit status 1 want=76 output=--- FAIL: TestAgentCrashSubprocess (0.03s)
+                recovery_test.go:139: invalid agent run request
+            FAIL
+    --- FAIL: TestAgentCrashAndResumeInNewProcess/after-tool-receipt (0.06s)
+        recovery_test.go:209: phase=tool_receipt exit=exit status 1 want=77 output=--- FAIL: TestAgentCrashSubprocess (0.03s)
+                recovery_test.go:139: invalid agent run request
+            FAIL
+--- FAIL: TestKernelExecutionStoreConformance (0.61s)
+    --- FAIL: TestKernelExecutionStoreConformance/pending-gates-cannot-acquire (0.04s)
+        execution_store.go:272: waiting_input bypassed by acquire: kernel run requires fenced execution
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	55.728s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	2.311s
+FAIL
+
+EXIT_CODE=1

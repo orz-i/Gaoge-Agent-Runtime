@@ -1,0 +1,4 @@
+SOURCE_SHA=df8dad572c82d1a569dc89d28ff32bd14cad3cc5
+LOCAL_ONLY=true
+CHECKPOINT=initial unified Root implementation; failure evidence, not acceptance
+BACKENDS=Memory; nativeSQLite-v4; auxiliary GORM-SQLite; dedicated ephemeral PostgreSQL16

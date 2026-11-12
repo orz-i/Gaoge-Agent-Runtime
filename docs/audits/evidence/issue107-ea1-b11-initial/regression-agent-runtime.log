@@ -1,0 +1,227 @@
+SOURCE_SHA=df8dad572c82d1a569dc89d28ff32bd14cad3cc5
+COMMAND=go -C go/agent-runtime test -race -count=1 -timeout=180s ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.768s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	2.225s
+--- FAIL: TestDeferredApprovalMissingBindingCannotRecoverGrantedTool (0.01s)
+    approval_binding_recovery_test.go:65: kernel run requires fenced execution
+--- FAIL: TestDeferredApprovalRejectsMismatchedOrRejectedGrant (0.01s)
+    --- FAIL: TestDeferredApprovalRejectsMismatchedOrRejectedGrant/call-changed (0.00s)
+        approval_binding_recovery_test.go:108: kernel run requires fenced execution
+    --- FAIL: TestDeferredApprovalRejectsMismatchedOrRejectedGrant/payload-changed (0.00s)
+        approval_binding_recovery_test.go:108: kernel run requires fenced execution
+    --- FAIL: TestDeferredApprovalRejectsMismatchedOrRejectedGrant/decision-rejected (0.00s)
+        approval_binding_recovery_test.go:108: kernel run requires fenced execution
+--- FAIL: TestDeferredApprovalMissingBindingCannotBeReused (0.00s)
+    approval_binding_recovery_test.go:160: kernel run requires fenced execution
+--- FAIL: TestAutoAllowanceHostedYieldSurvivesRestartWithoutToolReplay (0.01s)
+    auto_allowance_restart_test.go:87: unexpected concurrent continuation: run=kernel.Run{ID:"auto-restore", Kind:"agent", Actor:kernel.ActorRef{TenantID:"default", ActorID:"1"}, Thread:kernel.ThreadRef{Kind:"conversation", ID:"conversation_1"}, RequestID:"auto-restore-request", ParentRunID:"", Goal:"complete after restart", Status:"running", Revision:0xa, ErrorCode:"", ErrorDetail:"", DeadlineAt:<nil>, EndedAt:<nil>, CreatedAt:time.Date(2026, time.November, 12, 17, 45, 42, 123325000, time.UTC), UpdatedAt:time.Date(2026, time.November, 12, 17, 45, 42, 130509000, time.UTC)} err=kernel execution lease is not current
+--- FAIL: TestChildBatchStartsAllChildrenBeforeWaitingAndSurvivesRestart (0.01s)
+    child_batch_test.go:103: read-only child outcome verification failed: call=batch_2 err=agent original root callback result is uncertain
+--- FAIL: TestExternalSignalRejectsWrongIdentityCancelAndDeadline (0.02s)
+    --- FAIL: TestExternalSignalRejectsWrongIdentityCancelAndDeadline/cancelled (0.01s)
+        external_wait_test.go:196: kernel descendant has an unsettled physical execution Grant
+    --- FAIL: TestExternalSignalRejectsWrongIdentityCancelAndDeadline/deadline (0.01s)
+        external_wait_test.go:214: unverified provider expiry must retain original operation identity: expired=kernel.Run{ID:"external-run", Kind:"agent", Actor:kernel.ActorRef{TenantID:"default", ActorID:"1"}, Thread:kernel.ThreadRef{Kind:"conversation", ID:"conversation_1"}, RequestID:"external-request", ParentRunID:"", Goal:"compute", Status:"running", Revision:0x9, ErrorCode:"", ErrorDetail:"", DeadlineAt:<nil>, EndedAt:<nil>, CreatedAt:time.Date(2026, time.October, 13, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(2026, time.October, 13, 0, 0, 0, 0, time.UTC)} err=<nil>
+--- FAIL: TestExternalCancellationAndDeadlineCannotBeRevivedBySignals (0.01s)
+    --- FAIL: TestExternalCancellationAndDeadlineCannotBeRevivedBySignals/cancel (0.01s)
+        external_wait_test.go:244: terminal race = kernel descendant has an unsettled physical execution Grant
+    --- FAIL: TestExternalCancellationAndDeadlineCannotBeRevivedBySignals/deadline (0.01s)
+        external_wait_test.go:253: kernel descendant has an unsettled physical execution Grant
+--- FAIL: TestExternalWaitCommitAndReadyCommitCrashesRecover (0.02s)
+    --- FAIL: TestExternalWaitCommitAndReadyCommitCrashesRecover/tool.external_result_ready (0.01s)
+        external_wait_test.go:295: ready commit error = <nil>
+--- FAIL: TestPendingModelInvocationRejectsSameNamedChangedBindingFingerprint (0.00s)
+    model_dispatch_fence_test.go:296: unverified binding was allowed to dispatch: kernel run revision conflict
+--- FAIL: TestExpiredModelInvocationClaimCannotDispatchAfterTakeover (0.00s)
+    model_invocation_claim_fence_test.go:97: new owner failed to complete: status=running err=agent original root callback result is uncertain
+--- FAIL: TestSlowHostedCatalogRecheckCannotDispatchStaleClaim (0.00s)
+    model_invocation_claim_fence_test.go:316: new owner: {ID:model-hosted-takeover Kind:agent Actor:{TenantID:default ActorID:1} Thread:{Kind:conversation ID:conversation_1} RequestID:hosted-takeover-req ParentRunID: Goal:complete Status:running Revision:3 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-10-23 08:00:00 +0000 UTC UpdatedAt:2026-10-23 08:00:00 +0000 UTC} err=agent original root callback result is uncertain
+--- FAIL: TestModelLimiterWaitCannotDispatchChangedProviderBinding (0.01s)
+    model_invocation_claim_fence_test.go:453: denial changed committed pending work: {ID:model-limiter-waiter Kind:agent Actor:{TenantID:default ActorID:1} Thread:{Kind:conversation ID:conversation_1} RequestID:binding-waiter ParentRunID: Goal:second Status:running Revision:4 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:45:42.661185 +0000 UTC UpdatedAt:2026-11-12 17:45:42.665228 +0000 UTC} err=<nil>
+--- FAIL: TestNamedRejectedResponseWithoutPhysicalIDIsNotBillable (0.00s)
+    model_invocation_fault_test.go:148: unproved completed rejection proceeded: run={ID:idless-rejection Kind:agent Actor:{TenantID:default ActorID:1} Thread:{Kind:conversation ID:conversation_1} RequestID:idless-rejection-req ParentRunID: Goal:finish from evidence Status:running Revision:5 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-08-31 12:00:00 +0000 UTC UpdatedAt:2026-08-31 12:00:00 +0000 UTC} err=agent external model result is uncertain
+        agent model failure
+        invalid agent model response
+        agent original root callback result is uncertain calls=1
+--- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity (0.09s)
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/unary_missing_id (0.00s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_748d3a663a7c6dc0ad7536946a407e3d RunID:identity-unary_missing_id SourceRevision:1 RequestHash:27e37f4ff8b5dec816712ae59c5e3711cc95cbbcd977a95524fdeaa3cb7eec92 CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-unary_missing_id InvocationID:modelinv_748d3a663a7c6dc0ad7536946a407e3d Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.789913 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.789685 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/unary_padded_id (0.00s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_6e937ad58a75c5ab11e36aba1fee7f11 RunID:identity-unary_padded_id SourceRevision:1 RequestHash:69ed2880ebada4d7f9961208a8987149b1d900cc537ed381738bb2f4f8278cfe CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-unary_padded_id InvocationID:modelinv_6e937ad58a75c5ab11e36aba1fee7f11 Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.793258 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.79302 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_missing_id (0.01s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_f46a0194a72a37e6aadfff75f2706fcf RunID:identity-stream_missing_id SourceRevision:1 RequestHash:951beb6bed5ab581ebb902d57a9a82a62d2739fae69512fe40e2cf17351d93ff CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-stream_missing_id InvocationID:modelinv_f46a0194a72a37e6aadfff75f2706fcf Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.814849 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.814087 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_padded_event_id (0.00s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_482422fdc573879d95eda7594ef3950b RunID:identity-stream_padded_event_id SourceRevision:1 RequestHash:e572e58869431c3eaa3747f95916a79925040567bde5f8e4e627af11ad9ee06b CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-stream_padded_event_id InvocationID:modelinv_482422fdc573879d95eda7594ef3950b Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.819555 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.819149 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_mismatched_event_id (0.01s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_9fa53ac764f276f680b5986249a921da RunID:identity-stream_mismatched_event_id SourceRevision:1 RequestHash:941f950946149d1ab227dd9d247993fd1c5186be6d955711169e5d01d9815b6b CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-stream_mismatched_event_id InvocationID:modelinv_9fa53ac764f276f680b5986249a921da Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.824384 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.82399 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_conflicting_event_ids (0.00s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_770265e4c28914355d28d9154d67397e RunID:identity-stream_conflicting_event_ids SourceRevision:1 RequestHash:f2ba1f88955b626a409b44257a74c43d55e7e1a888f64a928af6958486afb0f0 CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-stream_conflicting_event_ids InvocationID:modelinv_770265e4c28914355d28d9154d67397e Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.831957 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.831724 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_ignores_callback_error (0.01s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_21de896840a20d7bf2569ffd7e9af434 RunID:identity-stream_ignores_callback_error SourceRevision:1 RequestHash:c7b36b8fedefb90962ec201b56f1f2386a0073a22d0b35542086a4e4ecf67709 CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-stream_ignores_callback_error InvocationID:modelinv_21de896840a20d7bf2569ffd7e9af434 Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.834779 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.834558 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_padded_final_id (0.01s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_794843d58bbd69136be6f83fb86ba682 RunID:identity-stream_padded_final_id SourceRevision:1 RequestHash:8b7ece465a64ec568a11f3543cb99aca309a45bfc41bca5870d51baacc788127 CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-stream_padded_final_id InvocationID:modelinv_794843d58bbd69136be6f83fb86ba682 Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.841594 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.841126 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/middleware_erases_unary_id (0.00s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_2c5b81af762a3e0821e0514e3cfefb32 RunID:identity-middleware_erases_unary_id SourceRevision:1 RequestHash:275c740f2d5c2132b6fa4edcc6c886992fec11fbaf3750b4dca03d119456dcbe CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-middleware_erases_unary_id InvocationID:modelinv_2c5b81af762a3e0821e0514e3cfefb32 Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.87203 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.871641 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/middleware_pads_stream_id (0.00s)
+        model_invocation_success_identity_agent_test.go:145: unverified physical response authorized Tool: status=running err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain effects=0 calls=1 budget={LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0} invocations=[{ID:modelinv_c7187eb5a1b3d6cb99f40e9c95c027a2 RunID:identity-middleware_pads_stream_id SourceRevision:1 RequestHash:3a83b0320fbc5cdd462badebb8a66a13b01566e8160027ac1b4c014b0748381d CatalogFingerprints:[8ee5a71041cb4b43e12bf5b45dff97565e596a1ad0f46f43d1d1823710953e17] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:identity-middleware_pads_stream_id InvocationID:modelinv_c7187eb5a1b3d6cb99f40e9c95c027a2 Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:call lookup MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[{Key:lookup Name:lookup Description: InputSchema:{"type":"object"} Terminal:false}] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 17:47:42.876553 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 17:45:42.876144 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}]
+--- FAIL: TestPendingToolReceiptRequiresVerifiedCOMMITInsteadOfReexecution (0.00s)
+    pending_tool_test.go:24: agent original root callback result is uncertain
+--- FAIL: TestNativePendingToolNeedsVerifiedResultBeforeReentry (0.00s)
+    run_execution_receipt_test.go:112: native pending Tool failed: {ID:pending-native Kind:agent Actor:{TenantID:p ActorID:a} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:pending Tool Status:running Revision:9 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:45:43.023383 +0000 UTC UpdatedAt:2026-11-12 17:45:43.026189 +0000 UTC} effects=1 err=agent original root callback result is uncertain
+--- FAIL: TestNativeToolUnknownOutcomeBlocksReplayAfterExpiry (0.02s)
+    run_execution_replay_test.go:98: AUDIT TOOL leaseTTL=120s external attempt1+attempt2=131s; effects-before=1 effects-after=1 attempted=2 errorFirst=<nil> resumed=running resumedErr=agent external tool result is uncertain
+    run_execution_replay_test.go:110: known Tool receipt could not be reconciled: {ID:tool-retry-expiry Kind:agent Actor:{TenantID:p ActorID:a} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:effect Status:running Revision:7 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:45:43.047938 +0000 UTC UpdatedAt:2026-11-12 17:45:43.052265 +0000 UTC} agent external tool result is uncertain
+        agent original root callback result is uncertain
+--- FAIL: TestNativeStartRunClaimConflictLeavesRecoverableRun (0.00s)
+    run_execution_test.go:96: conflicting claim hid created Run: {ID: Kind: Actor:{TenantID: ActorID:} Thread:{Kind: ID:} RequestID: ParentRunID: Goal: Status: Revision:0 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:0001-01-01 00:00:00 +0000 UTC UpdatedAt:0001-01-01 00:00:00 +0000 UTC} kernel execution lease is not current
+--- FAIL: TestNativeAgentCannotBypassRunQuarantine (0.00s)
+    run_quarantine_test.go:52: invalid kernel input
+--- FAIL: TestPendingUnchangedHostedGrantRetainsInvocationIdentity (0.01s)
+    model_invocation_discovery_revocation_test.go:168: retryable invocation has no durable ReadyAt
+--- FAIL: TestRunnerDoesNotReplayModelAfterStreamDeltaFailure (0.00s)
+    agent_test.go:974: snapshot = kernel.Run{ID:"run_stream_failure", Kind:"agent", Actor:kernel.ActorRef{TenantID:"default", ActorID:"1"}, Thread:kernel.ThreadRef{Kind:"conversation", ID:"conversation_1"}, RequestID:"request_stream_failure", ParentRunID:"", Goal:"answer", Status:"running", Revision:0x5, ErrorCode:"", ErrorDetail:"", DeadlineAt:<nil>, EndedAt:<nil>, CreatedAt:time.Date(2026, time.November, 12, 17, 45, 43, 147460000, time.UTC), UpdatedAt:time.Date(2026, time.November, 12, 17, 45, 43, 148984000, time.UTC)}, error = agent external model result is uncertain
+        agent model failure
+        database unavailable
+        agent original root callback result is uncertain
+--- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry (0.03s)
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/auth_permanent (0.00s)
+        classified_model_failure_test.go:80: status=running code= calls=1 err=agent external model result is uncertain
+            agent model failure
+            Provider response Bearer sk-private
+            agent original root callback result is uncertain
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/quota_permanent (0.00s)
+        classified_model_failure_test.go:80: status=running code= calls=1 err=agent external model result is uncertain
+            agent model failure
+            Provider response Bearer sk-private
+            agent original root callback result is uncertain
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/rate_limited_retry_exhausted (0.00s)
+        classified_model_failure_test.go:80: status=running code= calls=1 err=agent external model result is uncertain
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/unknown_untyped (0.00s)
+        classified_model_failure_test.go:80: status=running code= calls=1 err=agent external model result is uncertain
+            agent model failure
+            Provider response Bearer sk-private
+            agent original root callback result is uncertain
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/untyped_retry_exhausted (0.01s)
+        classified_model_failure_test.go:80: status=running code= calls=1 err=agent external model result is uncertain
+--- FAIL: TestRunDeadlineBoundsModelInvocation (0.08s)
+    execution_policy_test.go:259: deadline snapshot = kernel.Run{ID:"run_228e104b0099dbfd81eeef054d5285f6", Kind:"agent", Actor:kernel.ActorRef{TenantID:"tenant", ActorID:"actor"}, Thread:kernel.ThreadRef{Kind:"test", ID:"deadline"}, RequestID:"", ParentRunID:"", Goal:"deadline", Status:"running", Revision:0x5, ErrorCode:"", ErrorDetail:"", DeadlineAt:time.Date(2026, time.November, 12, 17, 45, 43, 187597000, time.UTC), EndedAt:<nil>, CreatedAt:time.Date(2026, time.November, 12, 17, 45, 43, 137681000, time.UTC), UpdatedAt:time.Date(2026, time.November, 12, 17, 45, 43, 216051000, time.UTC)}
+--- FAIL: TestRuntimeToolSearchPersistsReceiptAcrossRetryResume (0.06s)
+    tool_discovery_test.go:361: retryable invocation has no durable ReadyAt
+--- FAIL: TestRuntimeToolDiscoveryInitialSetSurvivesRetryAndRunnerRestart (0.05s)
+    tool_discovery_initial_retry_test.go:55: retryable invocation has no durable ReadyAt
+--- FAIL: TestPendingHostedGrantRevocationBlocksProviderRetry (0.00s)
+    --- FAIL: TestPendingHostedGrantRevocationBlocksProviderRetry/disabled_ordinary_hosted_activation (0.00s)
+        model_invocation_discovery_revocation_test.go:95: retryable invocation has no durable ReadyAt
+    --- FAIL: TestPendingHostedGrantRevocationBlocksProviderRetry/disabled_role_grant (0.01s)
+        model_invocation_discovery_revocation_test.go:95: retryable invocation has no durable ReadyAt
+    --- FAIL: TestPendingHostedGrantRevocationBlocksProviderRetry/provider_payload_drift_role_grant (0.01s)
+        model_invocation_discovery_revocation_test.go:95: retryable invocation has no durable ReadyAt
+    --- FAIL: TestPendingHostedGrantRevocationBlocksProviderRetry/version_drift_role_grant (0.02s)
+        model_invocation_discovery_revocation_test.go:95: retryable invocation has no durable ReadyAt
+--- FAIL: TestPendingLocalToolDefinitionDriftBlocksProviderRetry (0.08s)
+    model_invocation_discovery_revocation_test.go:130: retryable invocation has no durable ReadyAt
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	4.087s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.428s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.382s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	1.459s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	11.560s
+--- FAIL: TestAutoAllowanceCommittedWakeupResumesThroughSchedulerAndWorker (4.01s)
+    auto_allowance_integration_test.go:106: durable wakeup did not complete: run=kernel.Run{ID:"p2-worker-agent", Kind:"agent", Actor:kernel.ActorRef{TenantID:"tenant", ActorID:"owner"}, Thread:kernel.ThreadRef{Kind:"conversation", ID:"worker-thread"}, RequestID:"p2-worker-request", ParentRunID:"", Goal:"produce a corrected answer", Status:"running", Revision:0x8, ErrorCode:"", ErrorDetail:"", DeadlineAt:<nil>, EndedAt:<nil>, CreatedAt:time.Date(2026, time.November, 12, 17, 45, 40, 179312000, time.UTC), UpdatedAt:time.Date(2026, time.November, 12, 17, 45, 40, 182983000, time.UTC)} model=1 checks=1
+--- FAIL: TestExternalWaitDeadlineSurvivesCASConflictDuringDispatch (0.01s)
+    external_wait_cas_race_test.go:85: unverified deadline must NACK rather than grant another Tool attempt: kernel run requires fenced execution
+--- FAIL: TestExternalResultReadySurvivesCASConflictDuringDispatch (0.00s)
+    external_wait_cas_race_test.go:119: kernel run requires fenced execution
+--- FAIL: TestExternalWaitCASConflictExhaustionMustNackAndRetry (0.00s)
+    external_wait_cas_race_test.go:149: exhausted CAS conflicts must reach Worker as NACK, got kernel run requires fenced execution
+--- FAIL: TestExternalWaitCASConflictNacksRealQueueBeforeRecovery (0.01s)
+    external_wait_cas_race_test.go:227: queue must NACK unknown effect to explicit owner recovery, not ACK: status=dead_letter attempts=3 reports=0 err=<nil>
+--- FAIL: TestExternalWaitDeadlineSurvivesRevisionAndRejectsObsoleteGeneration (0.00s)
+    external_wait_test.go:167: kernel run requires fenced execution
+--- FAIL: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (3.01s)
+    integration_test.go:46: parent did not continue: kernel.Run{ID:"parent-team", Kind:"team", Actor:kernel.ActorRef{TenantID:"tenant", ActorID:"actor"}, Thread:kernel.ThreadRef{Kind:"conversation", ID:"thread"}, RequestID:"", ParentRunID:"", Goal:"publish", Status:"running", Revision:0x2, ErrorCode:"", ErrorDetail:"", DeadlineAt:<nil>, EndedAt:<nil>, CreatedAt:time.Date(2026, time.November, 12, 17, 45, 44, 377426000, time.UTC), UpdatedAt:time.Date(2026, time.November, 12, 17, 45, 44, 380509000, time.UTC)}
+--- FAIL: TestNativeDirectAndContinuationWorkerCompeteUnderSameLease (0.00s)
+    native_activation_competition_test.go:78: invalid agent run request
+--- FAIL: TestNativeQuarantineBlocksContinuationUntilVerifiedRepair (0.00s)
+    native_quarantine_delivery_test.go:38: invalid agent run request
+--- FAIL: TestWorkerResumesProviderPauseAfterRunnerRestart (3.00s)
+    provider_pause_test.go:79: worker failed to continue provider pause: {ID:provider-pause Kind:agent Actor:{TenantID:tenant ActorID:actor} Thread:{Kind:conversation ID:provider-pause-thread} RequestID:provider-pause-request ParentRunID: Goal:research Status:running Revision:7 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 17:45:47.435766 +0000 UTC UpdatedAt:2026-11-12 17:45:47.438401 +0000 UTC}
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	13.184s
+--- FAIL: TestRuntimeFeatureScenarioCorpus (0.04s)
+    runtime_feature_scenario_test.go:48: runtime feature baseline regressed: [overall score 0.8333 below baseline 1.0000 passed cases 5 below baseline 6 report no longer passes its dataset threshold]
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	1.096s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	2.060s
+--- FAIL: TestApprovalUsesOriginalFixedAgent (0.00s)
+    local_child_proof_test.go:37: invalid agent run request
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.160s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.917s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.393s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	1.438s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.385s
+--- FAIL: TestEA1RootAgentAdmissionMemory (0.01s)
+    --- FAIL: TestEA1RootAgentAdmissionMemory/P0/origin-and-claim (0.00s)
+        ea1_root_agent_admission.go:69: claim conflict concealed created Root or dispatched: kernel execution lease is not current {ID: Kind: Actor:{TenantID: ActorID:} Thread:{Kind: ID:} RequestID: ParentRunID: Goal: Status: Revision:0 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:0001-01-01 00:00:00 +0000 UTC UpdatedAt:0001-01-01 00:00:00 +0000 UTC}
+--- FAIL: TestEA1RootAgentDefaultAdmissionMemory (0.01s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionMemory/P0/origin-and-claim (0.00s)
+        ea1_root_agent_admission.go:52: invalid missing-id: <nil>
+--- FAIL: TestExecutionStoreConformance (0.28s)
+    --- FAIL: TestExecutionStoreConformance/pending-gates-cannot-acquire (0.00s)
+        execution_store.go:272: waiting_input bypassed by acquire: kernel run requires fenced execution
+--- FAIL: TestOwnedPhysicalMemoryApprovalPreservesLease (0.00s)
+    owned_physical_execution_test.go:176: invalid kernel input
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	18.766s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.446s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	1.378s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.499s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.608s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.492s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.428s
+--- FAIL: TestApprovalUsesOriginalFixedAgent (0.00s)
+    local_child_proof_test.go:37: invalid agent run request
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	0.412s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.435s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	1.382s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.643s
+FAIL
+
+EXIT_CODE=1
