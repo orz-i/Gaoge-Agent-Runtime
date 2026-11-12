@@ -23,6 +23,10 @@ func TestEA1RootAgentControlSettlementNativeSQLite(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = peer.Close() })
 		return first, peer, func() kernel.Store {
+			// Close every live handle before the persistence recovery open.
+			if err := peer.Close(); err != nil {
+				t.Fatal(err)
+			}
 			if err := first.Close(); err != nil {
 				t.Fatal(err)
 			}

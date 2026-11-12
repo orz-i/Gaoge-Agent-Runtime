@@ -206,7 +206,14 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if wait.Generation == 0 || wait.CallID != pendingRequest.Call.ID || wait.ToolKey != definition.Key || !reflect.DeepEqual(wait.PendingExecution, *pendingResult.Pending) {
+		// PersistToolWait clones the actual descriptor and clamps only its
+		// deadline to the earlier frozen Run deadline; never mutate the return.
+		durablePending := tools.ClonePending(pendingResult.Pending)
+		if initial.Run.DeadlineAt != nil && (durablePending.DeadlineAt == nil || initial.Run.DeadlineAt.Before(*durablePending.DeadlineAt)) {
+			clamped := initial.Run.DeadlineAt.UTC()
+			durablePending.DeadlineAt = &clamped
+		}
+		if wait.Generation == 0 || wait.CallID != pendingRequest.Call.ID || wait.ToolKey != definition.Key || !reflect.DeepEqual(wait.PendingExecution, *durablePending) {
 			t.Fatal("pending Tool full correlation changed")
 		}
 		if phase == "P5-pending-deadline" {
@@ -288,8 +295,9 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		peer := makeRunner(peerRT, "competing-control-owner", false)
 		if entry == "approval" {
 			_, e = peer.ResolveApproval(ctx, req.ID, before.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
-			if !errors.Is(e, kernel.ErrChildExecutionBusy) {
-				t.Fatalf("duplicate approval passed owner: %v", e)
+			// Public Root entry rejects its retained scope before Acquire.
+			if !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+				t.Fatalf("duplicate approval bypassed retained Root outcome: %v", e)
 			}
 		} else {
 			same, e := peer.NotifyExternalToolResultReady(ctx, signal)
