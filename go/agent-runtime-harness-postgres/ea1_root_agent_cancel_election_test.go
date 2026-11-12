@@ -298,6 +298,20 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 			}
 			original, e := f.host.GetInvocation(t.Context(), iid)
 			if e != nil || !reflect.DeepEqual(original, owner) {
+				wantFields, gotFields := reflect.ValueOf(owner), reflect.ValueOf(original)
+				for index := 0; index < wantFields.NumField(); index++ {
+					want, got := wantFields.Field(index).Interface(), gotFields.Field(index).Interface()
+					if reflect.DeepEqual(want, got) {
+						continue
+					}
+					name := wantFields.Type().Field(index).Name
+					t.Logf("Invocation field %s: expected=%#v actual=%#v", name, want, got)
+					if wantTime, ok := want.(time.Time); ok {
+						gotTime := got.(time.Time)
+						t.Logf("Invocation time %s: Equal=%t expectedLocation=%q(%p) actualLocation=%q(%p) UTCDeepEqual=%t", name,
+							wantTime.Equal(gotTime), wantTime.Location().String(), wantTime.Location(), gotTime.Location().String(), gotTime.Location(), reflect.DeepEqual(wantTime.UTC(), gotTime.UTC()))
+					}
+				}
 				t.Fatalf("original Invocation changed before physical cancel: %v", e)
 			}
 			_, e = makeRunner(f.peer, f.peerLedgers).Cancel(t.Context(), tid, "competing cancellation")
