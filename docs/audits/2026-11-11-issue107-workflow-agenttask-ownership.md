@@ -110,3 +110,73 @@ Gaoge #69 or the hosted cutover.
 
 No database migration, whole-Run erasure, replay of unknown effects,
 production deployment, tag or backwards-compatibility shim is part of this fix.
+
+## Independent P1/P2 remediation after the final audit (2026-11-12)
+
+The next independent audit reproduced three previously missed variants against
+Runtime `e6023f7` and Gaoge `d9a9572`, with runnable adversarial cases
+preserved under the Issue #107 regression files:
+
+1. Parent Workflow has already committed `cancelled` or `failed` in
+   Kernel; an older Harness Turn still exposes child approval. Previously
+   `ResolveSubtaskApproval` returned success, and a subsequent native child
+   Resume executed a Tool after parent cancellation.
+2. One approved Tool is already executing. Kernel terminal Cancel commits,
+   but the Tool dispatch lacks an authoritative completion receipt. Previously
+   `CancelSubtask` returned `confirmed` while the Tool still ran; its late
+   Kernel CAS conflict proved nothing about the physical callback.
+3. A Host Effect freezes child limits of one LLM call and one Tool call, but
+   a same-ID child already persists wider limits and matching public labels.
+   Previously the Host's origin proof accepted it, including via
+   `targetWorkflowAgentEffects.Execute`.
+
+### Restored invariants
+
+- **Execution authority:** `verifyLocalApprovalRun` walks raw Feature ancestry
+  and rejects any terminal Kernel parent. A second verification occurs after
+  the original physical Harness approval Grant is committed, before entering
+  Agent middleware. A no-effect rejection seals the Grant; it does not leave
+  an unknown physical dispatch. Gaoge's original Workflow-child Run middleware
+  checks the parent again on Start/Approval/Resume. A trusted direct
+  `Agent.Resume` cannot use a child whose parent has already terminated.
+- **Physical settlement:** `agent.TerminalPhysicalEffectsSettled` reads the
+  original validated Agent state, not just `RunStatus`. Unknown Tool dispatch,
+  active Model invocation, Tool wait, deferred children and unconsumed external
+  signals prevent declaring a local Workflow AgentTask cleaned. Cancellation
+  retains the unknown-effect intent until authoritative reconciliation; it does
+  not retry the Tool or infer cleanup from a failed late CAS.
+- **Feature ownership isolation:** These additional physical requirements
+  apply to the original local Workflow AgentTask route only. Remote Handoff,
+  Team, GroupChat and A2A retain their own dedicated cancellation proofs.
+  The existing PR82 descendant cleanup and retry tests are mandatory.
+- **Frozen child policy:** The original Agent Runner, not a Host duplicate
+  implementation, computes and verifies effective hard Limits with the same
+  `resolveRunLimits` admission logic. A reused child must match its original
+  Start ID, RequestID, Goal, Actor/Thread, Model, Tool Keys and ModelOptions,
+  and initial task transcript. Replaced or widened Run state fails closed.
+
+### Tests and outstanding scope
+
+The independent P1/P2 tests are pinned in
+`go/agent-runtime-harness/issue107_independent_audit_regression_test.go`,
+`go/agent-runtime/workflow/issue107_independent_audit_regression_test.go`
+and Gaoge's matching
+`backend/internal/bootstrap/mainapi/issue107_independent_audit_regression_test.go`.
+An additional Harness regression terminates the parent exactly after approval
+Grant persistence but before middleware and verifies safe child cleanup.
+State-matrix tests cover physical settlement and frozen Agent admission, with
+all existing Host/native cancellation evidence tests retained.
+
+The original Gaoge MCP end-to-end replay test remains separately blocked at
+`target provider replay state conflict`; this audit patch does not declare
+the hosted hard cut complete. A full Gaoge `backend/internal/bootstrap/mainapi`
+package run also fails in older delegation/model, browser Tool outcome-verifier
+and A2A cleanup paths. Selected representative failures were reproduced against
+the **prior** Gaoge `d9a9572` commit with the same working Runtime cohort, so
+those samples predate this remediation; the remaining failures were not all
+independently classified. The complete Gaoge package is therefore **NO-GO**,
+not an implied success from the passing Issue #107 focused tests.
+Standalone Gaoge currently still pins an earlier Runtime beta.24 source
+cohort and must update its SDK gitlink *together with* the future Runtime PR
+head. No production drain, external billing proof or cross-repository CI
+acceptance has been claimed here.

@@ -5,6 +5,22 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Issue #107 independent third-round governance (2026-11-12): A terminal parent
+  Workflow cannot authorize new AgentTask approval or Tool continuation, even
+  if the Harness Turn has not been projected. The original raw Feature ancestor
+  chain is checked again after physical Grant admission and before middleware;
+  rejected grants are settled as definitive no-effect. AgentTask terminal
+  reconciliation now consumes a pure physical-outcome proof that rejects
+  persisted unknown Tool/Model dispatch, rather than treating Kernel terminal
+  status as external cleanup. This proof is scoped to native Workflow AgentTask,
+  preserving Handoff/Delegation's independent remote cancellation contract.
+  A new Agent-owned exact frozen Start binding prevents a same-ID child from
+  widening configured effective hard limits or replacing initial task content.
+  Add independent P1/P2 regression cases, post-grant interleaving, full
+  Model/Tool settlement matrices and external consumer API contracts;
+  no compatibility shims or SQL schema changes. See
+  `docs/breaking-changes.md` and the Issue #107 audit note.
+
 - Issue #107: admit only a statically composed, same-Kernel Workflow
   AgentTask child with an exact frozen Effect/Activation, deterministic
   attempt/owner identity, immutable Agent Runner and relation recorder and

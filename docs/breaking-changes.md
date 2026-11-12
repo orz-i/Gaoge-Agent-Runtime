@@ -47,11 +47,12 @@ other Run kinds or generic Host callbacks. Unknown post-write cancellation
 outcomes remain fenced and cannot be reclassified as no-effect from a raw
 Store `ErrConflict`. No blanket `OwnsKernelRuntime` relaxation was made.
 
-not a copied index with coincidentally equal child IDs. No prior remote or
-custom Effect can become local through this new opt-in. The existing native
-Subworkflow proof, Tool approval CAS, per-child physical dispatch fences,
-model replay and Session ownership are not weakened. The new Host opt-in is
-a source-contract extension, not a legacy compatibility API.
+The original relation recorder may not be replaced by a copied index with
+coincidentally equal child IDs. No prior remote or custom Effect can become
+local through this new opt-in. The existing native Subworkflow proof,
+Tool approval CAS, per-child physical dispatch fences, model replay and
+Session ownership are not weakened. The new Host opt-in is a source-contract
+extension, not a legacy compatibility API.
 
 There is no SQL schema or on-disk state format change. **This does not
 retroactively certify old unproven AgentTask Runs**. Pending or ambiguous
@@ -62,6 +63,46 @@ runner, or treat a timeout as a no-effect receipt. Full Gaoge hosted cutover
 remains separately gated on host integration, provider replay, media
 admission, migration and reconciliation. See
 [audit and contract](audits/2026-11-11-issue107-workflow-agenttask-ownership.md).
+
+## 2026-11-12 — Issue #107 terminal-ancestry approval, physical-effect settlement and exact child origin
+
+A confirmed local AgentTask ancestry is **read-only ownership evidence**,
+not permission to introduce new Tool/Model effects when a parent Workflow has
+already reached `completed`, `failed` or `cancelled`. Harness now checks
+every raw Feature ancestor's current Kernel Run status before child approval,
+rechecks after persisting the physical approval Dispatch Grant and before
+invoking Agent middleware, and settles a denied pre-dispatch grant without
+pretending physical execution occurred. The Gaoge Workflow Agent Run middleware
+also checks the live parent on Start, ResolveApproval and Resume, including a
+direct child continuation that bypassed a stale Harness Turn projection.
+Already-terminal parents remain traversable for genuinely safe descendant
+cancellation and read-only recovery.
+
+Terminal child state is no longer sufficient to assert **physical cleanup**.
+The new public `agent.TerminalPhysicalEffectsSettled` pure proof rejects a
+terminal Agent with an unacknowledged Tool dispatch, active/unconsumed Model
+invocation, unresolved Tool wait, external signal or deferred child execution.
+The original local Workflow AgentTask verification consumes this proof before
+reporting cancellation settlement; non-Workflow Handoff/Delegation and remote
+A2A cleanup continue to obey their *separate* ownership protocols. A genuine
+unknown physical outcome remains quarantined and requires authoritative
+reconciliation; a late Kernel CAS failure is not an external no-effect receipt.
+
+The public `(*agent.Runner).VerifyFrozenStartRequest` binds a reused child to
+the *same original Agent policy* and its exact effective Model/Tool hard
+limits, immutable initial transcript, frozen Tool keys, model/options,
+Run/Request ID and Actor/Thread. Gaoge's `VerifyAgentTaskOrigin` checks this
+proof before accepting a same-ID child, instead of re-implementing the Agent
+limit/default resolution with potentially weaker Host logic. A changed Host
+admission policy may intentionally quarantine a previously created child:
+restore the original trusted configuration or reconcile it explicitly; do not
+silently widen budgets or add a compatibility fallback.
+
+This source-contract extension changes no persistence schema or RunState
+format, does not publish a new Beta tag, and does not make Gaoge #69 ready for
+cutover. Standalone consumers must compile against the same unpublished
+beta.24 Runtime cohort. The Gaoge provider replay failure and production
+migration gates remain independent blockers.
 
 ## 2026-11-08 — Exact-model media-input grants (beta.24 candidate)
 
