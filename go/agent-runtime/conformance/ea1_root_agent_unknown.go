@@ -35,12 +35,13 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 				event = "tool.completed"
 			}
 			injected := errors.New("test-only physical response received but original receipt not committed")
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: native, event: event, injected: injected}
+			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: native,
+				ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), event: event, injected: injected}
 			rt, err := kernel.New(kernel.Dependencies{Store: fault})
 			if err != nil {
 				t.Fatal(err)
 			}
-			physical := &ea1UnknownAgentPhysical{tool: kind == "tool"}
+			physical := &ea1UnknownAgentPhysical{tool: kind == "tool", rt: rt}
 			catalog, err := tools.NewRegistry([]tools.Registration{{
 				Definition: tools.Definition{Key: "effect", Name: "Effect", InputSchema: json.RawMessage(`{"type":"object"}`)},
 				Handler:    tools.HandlerFunc(physical.execute),
@@ -92,8 +93,10 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 				if e := json.Unmarshal(pending.State, &state); e != nil || state.ToolDispatchID != "original-tool-call" {
 					t.Fatalf("original Tool dispatch marker missing: %v", e)
 				}
-				if invocation.Status != agent.ModelInvocationCompleted {
-					t.Fatal("Tool fixture lost prior Model receipt")
+				if invocation.Status != agent.ModelInvocationConsumed || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.RequestHash == "" ||
+					len(invocation.Response.ToolCalls) != 1 || invocation.Response.ToolCalls[0].ID != "original-tool-call" ||
+					invocation.Response.ToolCalls[0].ToolKey != "effect" || !bytes.Equal(invocation.Response.ToolCalls[0].Arguments, json.RawMessage(`{"source":"original"}`)) {
+					t.Fatal("Tool fixture lost exact consumed Model receipt")
 				}
 			}
 			physical.assertOriginal(t, request, invocation)
@@ -135,6 +138,7 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 			if err != nil || !bytes.Equal(originalJSON, durableJSON) {
 				t.Fatal("original pending source changed across reopen")
 			}
+			physical.rt = ownerRT
 			next := makeRunner(ownerRT, "fresh-owner", 3*time.Minute)
 			_, resumeErr := next.Resume(t.Context(), request.ID, durable.Run.Revision)
 			afterCalls, afterTools := physical.counts()
@@ -166,6 +170,9 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 type ea1AgentReceiptFault struct {
 	kernel.Store
 	kernel.ExecutionStore
+	kernel.ControlStore
+	kernel.ChildExecutionStore
+	kernel.ExecutionQuarantineStore
 	event    string
 	injected error
 	failures int
@@ -196,15 +203,44 @@ type ea1UnknownAgentClock struct{ offset time.Duration }
 func (c ea1UnknownAgentClock) Now() time.Time { return time.Now().UTC().Add(c.offset) }
 
 type ea1UnknownAgentPhysical struct {
-	mu     sync.Mutex
-	tool   bool
-	models []model.Request
-	tools  []tools.ExecutionRequest
+	mu      sync.Mutex
+	tool    bool
+	models  []model.Request
+	rt      *kernel.Runtime
+	intents []agent.ModelInvocation
+	tools   []tools.ExecutionRequest
 }
 
-func (p *ea1UnknownAgentPhysical) Generate(_ context.Context, req model.Request) (model.Response, error) {
+func (p *ea1UnknownAgentPhysical) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	// Check the actual durable pending intent at the physical callback,
+	// before normal consumption intentionally prunes the request payload.
+	var intent agent.ModelInvocation
+	if p.rt != nil {
+		snapshot, err := p.rt.Load(ctx, req.RunID)
+		if err != nil {
+			return model.Response{}, err
+		}
+		view, err := agent.ViewState(snapshot)
+		if err != nil || len(view.ModelInvocations) == 0 {
+			return model.Response{}, errors.New("physical Model missing durable invocation")
+		}
+		intent = view.ModelInvocations[len(view.ModelInvocations)-1]
+		actual, err := json.Marshal(req)
+		if err != nil {
+			return model.Response{}, err
+		}
+		persisted, err := json.Marshal(intent.Request)
+		if err != nil {
+			return model.Response{}, err
+		}
+		if intent.Status != agent.ModelInvocationPending || intent.ID != req.InvocationID || intent.RunID != req.RunID ||
+			intent.RequestHash == "" || intent.ExecutionAttempt == 0 || !bytes.Equal(actual, persisted) {
+			return model.Response{}, errors.New("physical Model request not bound to original durable pending source")
+		}
+	}
 	p.mu.Lock()
 	p.models = append(p.models, model.CloneRequest(req))
+	p.intents = append(p.intents, intent)
 	p.mu.Unlock()
 	if p.tool {
 		for _, message := range req.Messages {
@@ -236,9 +272,18 @@ func (p *ea1UnknownAgentPhysical) assertOriginal(t *testing.T, request agent.Sta
 		t.Fatal("physical Model not original invocation")
 	}
 	physical, _ := json.Marshal(p.models[0])
-	persisted, _ := json.Marshal(invocation.Request)
+	if len(p.intents) != 1 || p.intents[0].ID != invocation.ID || p.intents[0].RequestHash != invocation.RequestHash || p.intents[0].ExecutionAttempt != invocation.ExecutionAttempt {
+		t.Fatal("consumed receipt lost original callback source fingerprint or attempt")
+	}
+	persisted, _ := json.Marshal(p.intents[0].Request)
 	if !bytes.Equal(physical, persisted) {
 		t.Fatal("physical Model payload differs from original persisted request")
+	}
+	if !p.tool {
+		current, err := json.Marshal(invocation.Request)
+		if err != nil || invocation.Status != agent.ModelInvocationPending || !bytes.Equal(physical, current) {
+			t.Fatal("unknown Model did not retain exact pending request")
+		}
 	}
 	if p.tool && (len(p.tools) != 1 || p.tools[0].RunID != request.ID || p.tools[0].Call.ID != "original-tool-call" || p.tools[0].Call.ToolKey != "effect" || !bytes.Equal(p.tools[0].Call.Arguments, json.RawMessage(`{"source":"original"}`))) {
 		t.Fatal("physical Tool not original dispatch/source")
