@@ -129,6 +129,23 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 	if _, err = s.db.Exec(`INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation); err != nil {
 		t.Fatal(err)
 	}
+	record := kernel.Record{Run: before.Run, State: before.State, Checkpoint: before.Checkpoint, Result: before.Result}
+	record.Run.Revision++
+	mutation := kernel.StoreMutation{Record: record}
+	if _, err = s.Apply(t.Context(), "root", before.Run.Revision, mutation); !errors.Is(err, kernel.ErrExecutionRequired) {
+		t.Fatalf("direct Store.Apply authority precedence: %v", err)
+	}
+	if _, err = s.ApplyExecution(t.Context(), lease, before.Run.Revision, mutation); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("native lease without physical permit: %v", err)
+	}
+	unchanged, err := s.Load(t.Context(), "root")
+	if err != nil || !reflect.DeepEqual(unchanged, before) {
+		t.Fatal("denied Apply changed full snapshot")
+	}
+	unchangedGrant, err := s.LookupChildExecution(t.Context(), "root")
+	if err != nil || unchangedGrant != g {
+		t.Fatal("denied Apply changed original grant/epoch")
+	}
 	if err = s.ReleaseExecution(t.Context(), lease); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("owned Release: %v", err)
 	}

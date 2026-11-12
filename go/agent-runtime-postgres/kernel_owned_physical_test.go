@@ -101,8 +101,14 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 	}
 	unboundMutation := kernel.Mutation{Status: kernel.RunStatusRunning, State: original.State}
 	_, e = rt.Apply(ctx, original.Run.ID, original.Run.Revision, unboundMutation)
-	if !errors.Is(e, kernel.ErrChildExecutionBusy) {
-		t.Fatalf("plain Apply passed scope: %v", e)
+	if !errors.Is(e, kernel.ErrExecutionRequired) {
+		t.Fatalf("plain Apply did not require native authority: %v", e)
+	}
+	record := kernel.Record{Run: original.Run, State: original.State, Checkpoint: original.Checkpoint, Result: original.Result}
+	record.Run.Revision++
+	_, e = store.Apply(ctx, original.Run.ID, original.Run.Revision, kernel.StoreMutation{Record: record})
+	if !errors.Is(e, kernel.ErrExecutionRequired) {
+		t.Fatalf("direct Store.Apply authority precedence: %v", e)
 	}
 	bound, e := rt.WithExecution(lease)
 	if e != nil {

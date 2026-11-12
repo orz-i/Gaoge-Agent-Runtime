@@ -287,6 +287,11 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if lockErr != nil {
 			return lockErr
 		}
+		// Native authority is required before evaluating a physical-scope fence.
+		// Control and exact leased writes retain their separate authority paths.
+		if lease == nil && guard == nil && lockedRun.ExecutionEpoch > 0 {
+			return kernel.ErrExecutionRequired
+		}
 		current, decodeErr := kernelSnapshotFrom(lockedRun)
 		if decodeErr != nil {
 			return decodeErr

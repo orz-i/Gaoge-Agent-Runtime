@@ -338,6 +338,17 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 	if readErr != nil {
 		return kernel.Snapshot{}, readErr
 	}
+	// Read native authority in this same writer transaction before physical
+	// fence precedence; control and opaque recovery have distinct authority.
+	if lease == nil && guard == nil && recovery == nil {
+		var authorityEpoch int64
+		if err := tx.QueryRowContext(ctx, `SELECT execution_epoch FROM runtime_runs WHERE run_id=?`, runID).Scan(&authorityEpoch); err != nil {
+			return kernel.Snapshot{}, err
+		}
+		if authorityEpoch > 0 {
+			return kernel.Snapshot{}, kernel.ErrExecutionRequired
+		}
+	}
 	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
