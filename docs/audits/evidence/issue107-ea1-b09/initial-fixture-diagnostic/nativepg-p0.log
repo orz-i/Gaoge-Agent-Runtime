@@ -1,0 +1,19 @@
+SOURCE_SHA=2bf48748548dcd34092e87aecc26c9ec616f556c
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1RealPostgresRootAgentAdmission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim
+--- PASS: TestEA1RealPostgresRootAgentAdmission (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.31s)
+=== RUN   TestEA1RealPostgresRootAgentAdmission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim
+--- PASS: TestEA1RealPostgresRootAgentAdmission (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.26s)
+=== RUN   TestEA1RealPostgresRootAgentAdmission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim
+--- PASS: TestEA1RealPostgresRootAgentAdmission (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.19s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	2.511s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

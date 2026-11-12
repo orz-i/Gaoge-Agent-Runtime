@@ -1,0 +1,15 @@
+SOURCE_SHA=2545aa7b6eda95d193ecd549f29f1aecc387d108
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1RootAgentAdmissionSQLite$/^P0' -v
+=== RUN   TestEA1RootAgentAdmissionSQLite
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim
+    ea1_root_agent_admission.go:63: EA01/P0: failed original owner admission entered effect-capable Host middleware 1 times
+--- FAIL: TestEA1RootAgentAdmissionSQLite (0.10s)
+    --- FAIL: TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim (0.10s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	0.640s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.528s [no tests to run]
+FAIL
+
+EXIT_CODE=1

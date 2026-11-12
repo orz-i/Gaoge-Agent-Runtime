@@ -1,0 +1,12 @@
+SOURCE_SHA=2545aa7b6eda95d193ecd549f29f1aecc387d108
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1RootAgentAdmissionMemory$/^P0' -v
+=== RUN   TestEA1RootAgentAdmissionMemory
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/origin-and-claim
+    ea1_root_agent_admission.go:63: EA01/P0: failed original owner admission entered effect-capable Host middleware 1 times
+--- FAIL: TestEA1RootAgentAdmissionMemory (0.00s)
+    --- FAIL: TestEA1RootAgentAdmissionMemory/P0/origin-and-claim (0.00s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	0.850s
+FAIL
+
+EXIT_CODE=1

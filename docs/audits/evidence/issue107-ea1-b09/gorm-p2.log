@@ -1,0 +1,20 @@
+SOURCE_SHA=2545aa7b6eda95d193ecd549f29f1aecc387d108
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1RootAgentUnknownGORM$' -v
+=== RUN   TestEA1RootAgentUnknownGORM
+=== RUN   TestEA1RootAgentUnknownGORM/host_middleware
+    ea1_root_agent_unknown.go:357: EA-06 G02 UNKNOWN Host callback replayed after fresh owner/real TTL: sends=2 err=test-only Host write sent; outcome unknown
+    ea1_root_agent_unknown.go:372: unknown Host recovery mutated original full state: test-only Host write sent; outcome unknown
+=== RUN   TestEA1RootAgentUnknownGORM/model
+    ea1_root_agent_unknown.go:148: EA-06 UNKNOWN replay: model 1->2 tool 0->0 resumeErr=<nil> originalInvocation=modelinv_c2ac453ea84b648673b89ebd424e714b attempt=1
+    ea1_root_agent_unknown.go:164: UNKNOWN recovery changed original full Run/invocation/attempt state; resumeErr=<nil>
+=== RUN   TestEA1RootAgentUnknownGORM/tool
+--- FAIL: TestEA1RootAgentUnknownGORM (6.56s)
+    --- FAIL: TestEA1RootAgentUnknownGORM/host_middleware (2.22s)
+    --- FAIL: TestEA1RootAgentUnknownGORM/model (2.17s)
+    --- PASS: TestEA1RootAgentUnknownGORM/tool (2.17s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	6.961s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

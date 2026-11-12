@@ -1,0 +1,22 @@
+SOURCE_SHA=d42ba54043801a9b410b13546bf156535cd4a30b
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1RootAgentAdmissionSQLite
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical
+    ea1_root_agent_admission.go:141: EA03/G01: arbitrary Root callback reached before authoritative owner: lease={RunID: OwnerID: LeaseID: Epoch:0 ExpiresAt:0001-01-01 00:00:00 +0000 UTC} grantErr=kernel run not found
+    ea1_root_agent_admission.go:148: EA03/G01: competing Cancel did not reject: <nil>
+    ea1_root_agent_admission.go:152: competing control changed full original snapshot
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/acquired-before-model
+    ea1_root_agent_admission.go:148: EA03/G01: competing Cancel did not reject: <nil>
+    ea1_root_agent_admission.go:152: competing control changed full original snapshot
+    ea1_root_agent_admission.go:156: competing Cancel revoked original owner: kernel run is terminal
+--- FAIL: TestEA1RootAgentAdmissionSQLite (0.12s)
+    --- FAIL: TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical (0.06s)
+    --- FAIL: TestEA1RootAgentAdmissionSQLite/P1/acquired-before-model (0.07s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	0.617s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.493s [no tests to run]
+FAIL
+
+EXIT_CODE=1

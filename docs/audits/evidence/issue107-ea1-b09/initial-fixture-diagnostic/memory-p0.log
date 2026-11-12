@@ -1,0 +1,10 @@
+SOURCE_SHA=2bf48748548dcd34092e87aecc26c9ec616f556c
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1RootAgentAdmissionMemory
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/origin-and-claim
+--- PASS: TestEA1RootAgentAdmissionMemory (0.01s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P0/origin-and-claim (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	3.186s
+
+EXIT_CODE=0
