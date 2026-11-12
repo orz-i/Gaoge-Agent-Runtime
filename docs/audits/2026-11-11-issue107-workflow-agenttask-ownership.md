@@ -344,3 +344,72 @@ by these local test results.
 **Still NO-GO:** independent final review of the eventual locked commit,
 Gaoge #69 full Hosted ProviderReplay and pinned SDK cohort, exact PR Head
 required CI and safe production migration/drain have not been performed.
+
+
+## Seventh independent review / eighth remediation: self-owned physical Grant (2026-11-12)
+
+Against the locked Runtime `71bad5d` / Gaoge `c7759dc` heads, the
+seventh independent reviewer found four P1 invariants missing and
+preserved exact reproduction sources in the Mac-only
+`/tmp/issue107-seventh-independent-evidence/` directory.
+
+1. A Workflow root's public Cancel could dispatch an external
+   `resource.release` compensation while Kernel.Cancel of that Run
+   independently committed terminal state; no original physical Grant
+   existed during the external callback.
+2. A parented child Agent/Workflow with an outstanding physical Grant
+   could independently Kernel.Cancel or Apply to its **own** Run,
+   although its ancestors correctly rejected Cancel. The Grant owner
+   index contained only ancestor IDs, not the executing child itself.
+3. The first Attempt's genuine `PhysicalNoEffect=true` persisted after
+   scheduling Attempt 2; an ambiguous external send on Attempt 2 was
+   later acknowledged as no-effect by the stale marker, permitting
+   Attempt 3 to duplicate the external physical request.
+4. A Root Agent Start with an already-used Run ID could call arbitrary
+   Host RunMiddleware and perform a synthetic external effect BEFORE
+   Kernel.Create returned `ErrAlreadyExists`.
+
+### Protocol changes
+
+Root/child Workflow and parented Agent share an opaque
+`<Feature>_physical_owner` and per-revision `<Feature>_physical_apply`
+permit. Every Store now indexes the original physical Grant against
+its own executing Run ID and full immutable ancestry. Kernel Apply
+and first-party Control can mutate an active Run only with this
+exact Grant/revision/Feature proof; a direct ownerless call fails
+without a Store commit. Rejected direct Control must also preserve
+the current legacy Agent ExecutionLease identity and epoch.
+No helper can retire an unknown callback on elapsed time alone.
+
+Workflow.Cancel now uses `withChildPhysicalGrant` around the entire
+failure/compensation/terminal segment. For pending unknown external
+Undo the Grant remains quarantined; completed trusted receipts
+permit first-party settlement and later recovery without replay.
+A new attempt-bound persisted `physicalNoEffectAttempt` records
+the original Executor's affirmative pre-dispatch failure; scheduling
+a later Attempt cannot convert this into proof for that new callback.
+
+The Root Agent Start entrypoint now creates the Run before entering
+Host RunMiddleware. A middleware error with no native continuation
+cannot borrow any nested private no-effect proof to discharge
+the Harness physical dispatch grant. Root Agent's original
+ModelInvocation/ToolDispatch/ExecutionLease remains the authoritative
+long-lived Model/Tool recovery mechanism; this phase does not
+replace it with a second unverified root Grant.
+
+### Verification and remaining risk
+
+- All four seventh-audit minimal adversarial reproductions have
+  dedicated tests in the checked-out Runtime source.
+- A common self-physical-fence state machine checks Memory, SQLite,
+  GORM PostgreSQL and native PostgreSQL, including rejection of
+  direct self Cancel/Apply and preservation of original Agent
+  ExecutionLease after a rejected Cancel.
+- First-party Run Progress/Approval, frozen Host starts,
+  Workflow compensation and Attempt-specific no-effect are tested
+  across normal, cancelled and unknown external outcomes.
+- Independent final review, exact PR Head GitHub CI, external
+  ProviderReplay and production migration have **not** been
+  performed. Gaoge #69's original Hosted MCP test and outdated
+  `sdk` gitlink remain explicitly blocked; no unverified
+  success/GO should be claimed.

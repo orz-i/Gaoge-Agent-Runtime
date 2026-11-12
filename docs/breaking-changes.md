@@ -2,6 +2,77 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-12 — Issue #107 seventh independent review: physical self-fencing and Attempt receipts
+
+The seventh independent audit locked Runtime `71bad5d` and Gaoge
+`c7759dc` and reproduced four P1 variants. Workflow.Cancel called an
+external compensator without physical Store admission; a parented child
+with a live physical Grant could still Cancel itself or accept an
+unbound Apply; an earlier truthful `PhysicalNoEffect` was reused for a
+later ambiguous external attempt, allowing a duplicate write; and Root
+Agent Start ran arbitrary Host RunMiddleware before a duplicate Kernel
+Create failed.
+
+**Physical execution authority is now self-owned.** Every admitted
+parented Agent or Root/child Workflow Grant is indexed against its own
+Run ID *and* every immutable ancestor. An external Cancel, Control,
+ordinary Apply or lease-bearing mutation cannot alter the executing
+Run without its original first-party, per-revision
+`PhysicalApplyPermit`. This permission is opaque to third-party
+callers; the Store validates it under the same authoritative
+transaction that writes the state. A rejected direct Kernel Cancel
+does not revoke a current ExecutionLease epoch before reporting
+`ErrChildExecutionBusy`. The same invariant is tested on Memory,
+GORM PostgreSQL, native SQLite and real PostgreSQL 16 with an active
+execution lease, not solely on one process-local mutex.
+
+**Workflow cancellation is a physical feature execution.** The public
+`Workflow.Runner.Cancel` now acquires its original
+`BeginChildExecution` Grant before writing failure intent or issuing
+compensation Effects, and holds it through first-party persisted
+effect receipts and the final terminal CAS. An unacknowledged
+external undo cannot be treated as successfully cancelled or
+released by a concurrent Kernel writer. Compensation uses the
+original Workflow physical settlement protocol; it cannot bypass
+the Store via a direct Host executor callback.
+
+**NoEffect is per physical Attempt.** The persisted Workflow Effect
+State now records `physicalNoEffectAttempt` alongside the explicit
+`physicalNoEffect` marker. An original, trusted no-effect response
+may schedule the *next* Attempt, but it certifies only the prior
+pre-dispatch failure. A subsequent ambiguous send resets that
+prior proof and leaves the original physical Grant quarantined.
+Neither timeout nor a generic error constitutes no-effect evidence.
+This is an intentional pre-stable Workflow State JSON contract
+change, without a new SQL table or schema version.
+
+**Root Agent Start creates the immutable Run first.** After the pure
+native request/capability checks, Kernel.Create succeeds before the
+first arbitrary Host RunMiddleware callback. Duplicate/conflicting
+Root IDs are rejected without calling middleware. A middleware
+that returns an error without reaching the native continuation
+cannot present the newly created Run as proof that its possible
+Host side effects were safely completed; Harness continues to
+treat that physical dispatch as unknown. Root Agent's established
+ModelInvocation, ToolDispatch and optional ExecutionLease semantics
+are NOT replaced with the Workflow Root Grant: the two have
+different pending-provider replay and recovery contracts. Their
+remaining cross-feature Host middleware ownership boundary must
+be evaluated in a later independent audit; this remediation is not
+a declaration of complete Host exactly-once semantics.
+
+**Validation and release limits.** The seventh independent audit's
+minimal P1 repros are retained; cross-Store conformance covers
+self Cancel, unbound Apply and preservation of original Agent
+execution owner on a rejected control. First-party Agent and
+Workflow positive paths, original Hosted approval/cancellation,
+real PostgreSQL lock/Grant recovery and Go Race are mandatory.
+The prior SQLite v3 / PostgreSQL `start_revision` hard cut remains
+unchanged; no production migration has been attempted. The
+separate Gaoge #69 ProviderReplay conflict, old SDK gitlink,
+actual PR-head CI and final independent reviewer approval remain
+NO-GO gates.
+
 ## 2026-11-12 — Issue #107 sixth independent review: version-bound Root/Child physical admission
 
 The sixth independent review locked Runtime `30ad120` and Gaoge

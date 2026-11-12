@@ -5,6 +5,24 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Issue #107 seventh independent review / eighth remediation (2026-11-12):
+  eliminate the missing executing-child self-fence across Memory, native
+  SQLite and PostgreSQL. A physical Grant now protects its own Run and
+  every immutable ancestor, with the first-party Agent/Workflow carrying
+  an opaque per-revision mutation permit for legitimate state progression.
+  Rejected direct Cancel cannot revoke the original Agent ExecutionLease
+  epoch. The public Workflow.Cancel compensation path now acquires the
+  original physical Grant before any custom undo Executor. Frozen
+  `PhysicalNoEffect` evidence is bound to its exact Effect Attempt;
+  an ambiguous subsequent physical dispatch cannot inherit an earlier
+  attempt's no-effect receipt. Root Agent Start creates the durable Run
+  BEFORE entering arbitrary Host RunMiddleware and a middleware error
+  without native continuation remains unknown to Harness, not a
+  fabricated no-effect/committed-success receipt. Reuse existing Root
+  Agent ModelInvocation/ToolDispatch/ExecutionLease recovery semantics;
+  no legacy protocol bridge or new database schema is added. See the
+  Issue #107 audit and breaking-change ledger.
+
 - Issue #107 sixth independent review / seventh governance (2026-11-12):
   unify Root and Child Workflow physical admission with an original
   `(RunID, ExpectedRevision)` Store-authoritative Grant. Untrusted stale
