@@ -32,3 +32,10 @@ Current ledger cells AR-S-P0/P1/P2 remain FAIL until actual final-source evidenc
 
 ## Review record
 Two bounded read-only design passes independently recommended preserving native protocol plus durable physical authority, and identified Host result semantics and nonnative compatibility as unresolved decisions. No production change or new test process was performed during design. Parent review is pending.
+
+### Independent bounded design review, 2026-11-12
+Review of proposal commit 15ac22a07d8ba72512a851298ba73fcf85469efc found the direction reasonable but not implementation-ready. Required technical clarification: scope spans first Host entry through next and middleware return; ordinary Apply, ApplyExecution, Control and Acquire must all enforce the same Store-owned scope, exact self permit and EA03 ancestor rules. Durable admission/receipt/Mark/retirement need explicit original scope/attempt/source CAS identities and idempotent recovery, with no send or write authority inferred from an expired lease or surviving barrier.
+
+Two compatibility decisions remain escalated to the coordinating owner thread: whether the existing synchronous nil middleware return contract constitutes completion and how legacy Host callbacks adapt; and whether supported nonnative configurations retain an independent no-lease authority or are explicitly hard-cut to required native/new Store capability. Neither change is authorized by this proposal or review. Model verifier may remain optional; absence of provider proof preserves unknown. This design does not require implementation of every provider query adapter in this batch.
+
+Operational check: 9.1 GiB available; shared Go cache is 16 GiB but another go-run server process is active. No shared cache was deleted and that process was not interrupted. No production implementation or additional test run followed this review.
