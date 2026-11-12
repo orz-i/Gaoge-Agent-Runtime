@@ -97,6 +97,12 @@ func RunEA1ResumeAdmissionSuite(t *testing.T, factory func(*testing.T) (kernel.S
 				if err != nil || got.Run.Revision != winner.Run.Revision || got.Run.Status != winner.Run.Status || !bytes.Equal(got.State, winner.State) {
 					t.Fatal("losing admission changed winning transaction")
 				}
+				if race == "terminal" && child {
+					self, e := rt.Load(t.Context(), original.Run.ID)
+					if e != nil || self.Run.Revision != original.Run.Revision || self.Run.Status != original.Run.Status || !bytes.Equal(self.State, original.State) {
+						t.Fatal("rejected child Resume mutated original child")
+					}
+				}
 				if race == "revision" {
 					finished, e := runner.Resume(t.Context(), original.Run.ID, winner.Run.Revision)
 					if e != nil || finished.Run.Status != kernel.RunStatusCompleted || effects.calls.Load() != 2 {
@@ -138,6 +144,12 @@ func RunEA1ResumeAdmissionSuite(t *testing.T, factory func(*testing.T) (kernel.S
 					}
 					if !errors.Is(e, expected) || effects.calls.Load() != 1 {
 						t.Fatalf("terminal source re-admitted: %v", e)
+					}
+					for _, want := range []kernel.Snapshot{current, winner} {
+						after, loadErr := rt.Load(t.Context(), want.Run.ID)
+						if loadErr != nil || after.Run.Revision != want.Run.Revision || after.Run.Status != want.Run.Status || !bytes.Equal(after.State, want.State) {
+							t.Fatal("repeated terminal rejection mutated self or ancestor")
+						}
 					}
 				}
 			})

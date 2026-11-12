@@ -175,8 +175,8 @@ func assertEA1ResumeReceipt(t *testing.T, snapshot kernel.Snapshot, definition w
 	for i, effect := range view.Effects {
 		req := requests[i]
 		if effect.ID == "" || effect.ID != req.EffectID || effect.Attempt != 1 || req.Attempt != 1 ||
-			effect.Status != workflow.EffectCompleted || effect.ReceiptID != "receipt-"+req.EffectID ||
-			effect.Kind != req.Kind || effect.NodeID != req.NodeID || effect.Compensation ||
+			effect.Status != workflow.EffectCompleted || effect.ReceiptID != ea1EntryReceiptID(req) ||
+			effect.Kind != req.Kind || effect.NodeID != req.NodeID || effect.Class != req.Class || effect.Compensation || req.Compensation ||
 			!bytes.Equal(effect.Input, req.Input) || !bytes.Equal(effect.Output, req.Input) ||
 			req.RunID != snapshot.Run.ID || req.Actor != snapshot.Run.Actor || req.Thread != snapshot.Run.Thread ||
 			req.DefinitionID != definition.ID || req.DefinitionHash != definition.Hash {
@@ -197,7 +197,7 @@ func (e *ea1ResumeCounter) Execute(_ context.Context, req workflow.EffectRequest
 	req.Input = append(json.RawMessage(nil), req.Input...)
 	e.requests = append(e.requests, req)
 	return workflow.EffectResult{Disposition: workflow.DispositionCompleted,
-		ReceiptID: "receipt-" + req.EffectID, Output: append(json.RawMessage(nil), req.Input...), CostUnits: req.MaxCostUnits}, nil
+		ReceiptID: ea1EntryReceiptID(req), Output: append(json.RawMessage(nil), req.Input...), CostUnits: req.MaxCostUnits}, nil
 }
 
 type ea1ResumeLostAck struct {
