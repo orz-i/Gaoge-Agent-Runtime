@@ -1,0 +1,6 @@
+SOURCE_SHA=d170665f48f3f0bb70df338b6ebced436042ad71
+COMMAND=TEST_POSTGRES_DSN=<dedicated-ephemeral> go -C go/agent-runtime-harness test -race -count=1 ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	28.999s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.886s
+
+EXIT_CODE=0

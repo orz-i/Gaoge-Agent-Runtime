@@ -1,0 +1,28 @@
+SOURCE_SHA=d170665f48f3f0bb70df338b6ebced436042ad71
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1(ResumeUnknownMemory|WaitMarkAckMemory|WaitBarriersMemory)$' -v
+=== RUN   TestEA1ResumeUnknownMemory
+=== RUN   TestEA1ResumeUnknownMemory/root
+=== RUN   TestEA1ResumeUnknownMemory/child
+--- PASS: TestEA1ResumeUnknownMemory (0.03s)
+    --- PASS: TestEA1ResumeUnknownMemory/root (0.02s)
+    --- PASS: TestEA1ResumeUnknownMemory/child (0.02s)
+=== RUN   TestEA1WaitMarkAckMemory
+=== RUN   TestEA1WaitMarkAckMemory/root
+=== RUN   TestEA1WaitMarkAckMemory/child
+--- PASS: TestEA1WaitMarkAckMemory (0.02s)
+    --- PASS: TestEA1WaitMarkAckMemory/root (0.01s)
+    --- PASS: TestEA1WaitMarkAckMemory/child (0.01s)
+=== RUN   TestEA1WaitBarriersMemory
+=== RUN   TestEA1WaitBarriersMemory/root/P1
+=== RUN   TestEA1WaitBarriersMemory/root/P3
+=== RUN   TestEA1WaitBarriersMemory/child/P1
+=== RUN   TestEA1WaitBarriersMemory/child/P3
+--- PASS: TestEA1WaitBarriersMemory (0.04s)
+    --- PASS: TestEA1WaitBarriersMemory/root/P1 (0.01s)
+    --- PASS: TestEA1WaitBarriersMemory/root/P3 (0.01s)
+    --- PASS: TestEA1WaitBarriersMemory/child/P1 (0.01s)
+    --- PASS: TestEA1WaitBarriersMemory/child/P3 (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	1.975s
+
+EXIT_CODE=0
