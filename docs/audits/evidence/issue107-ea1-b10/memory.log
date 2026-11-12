@@ -1,0 +1,16 @@
+SOURCE_SHA=14c436216137c9a8ff55c0096664686ee4e77aa4
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run ^TestEA1ChildAgentRecovery -v
+=== RUN   TestEA1ChildAgentRecoveryUnknownMemory
+=== RUN   TestEA1ChildAgentRecoveryUnknownMemory/host_middleware
+=== RUN   TestEA1ChildAgentRecoveryUnknownMemory/model
+=== RUN   TestEA1ChildAgentRecoveryUnknownMemory/tool
+--- PASS: TestEA1ChildAgentRecoveryUnknownMemory (4.31s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownMemory/host_middleware (0.00s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownMemory/model (2.15s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownMemory/tool (2.15s)
+=== RUN   TestEA1ChildAgentRecoveryAdmissionMemory
+--- PASS: TestEA1ChildAgentRecoveryAdmissionMemory (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	6.526s
+
+EXIT_CODE=0

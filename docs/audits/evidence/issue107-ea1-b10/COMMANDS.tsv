@@ -1,0 +1,7 @@
+memory	14c436216137c9a8ff55c0096664686ee4e77aa4	go -C go/agent-runtime test -race -count=1 ./memory -run ^TestEA1ChildAgentRecovery -v	docs/audits/evidence/issue107-ea1-b10/memory.log
+sqlite	14c436216137c9a8ff55c0096664686ee4e77aa4	go -C go/agent-runtime-sqlite test -race -count=1 ./... -run ^TestEA1ChildAgentRecovery -v	docs/audits/evidence/issue107-ea1-b10/sqlite.log
+gorm	14c436216137c9a8ff55c0096664686ee4e77aa4	go -C go/agent-runtime-postgres test -race -count=1 ./... -run ^TestEA1ChildAgentRecovery -v	docs/audits/evidence/issue107-ea1-b10/gorm.log
+nativepg	14c436216137c9a8ff55c0096664686ee4e77aa4	TEST_POSTGRES_DSN=<dedicated-ephemeral> go -C go/agent-runtime-postgres test -race -count=3 ./... -run ^TestEA1RealPostgresChildAgentRecovery -v	docs/audits/evidence/issue107-ea1-b10/nativepg.log
+lint-agent-runtime	14c436216137c9a8ff55c0096664686ee4e77aa4	cd go/agent-runtime && golangci-lint run ./...	docs/audits/evidence/issue107-ea1-b10/lint-agent-runtime.log
+lint-agent-runtime-postgres	14c436216137c9a8ff55c0096664686ee4e77aa4	cd go/agent-runtime-postgres && golangci-lint run ./...	docs/audits/evidence/issue107-ea1-b10/lint-agent-runtime-postgres.log
+lint-agent-runtime-sqlite	14c436216137c9a8ff55c0096664686ee4e77aa4	cd go/agent-runtime-sqlite && golangci-lint run ./...	docs/audits/evidence/issue107-ea1-b10/lint-agent-runtime-sqlite.log

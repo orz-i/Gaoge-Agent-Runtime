@@ -1,0 +1,44 @@
+SOURCE_SHA=cb3d5887ade174ba6be762d2612dab10c02e1d18
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware
+    ea1_child_agent_recovery.go:233: actual child Host unknown: invalid agent run request
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/model
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/tool
+--- FAIL: TestEA1RealPostgresChildAgentRecoveryUnknown (4.97s)
+    --- FAIL: TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware (0.25s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/model (2.34s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/tool (2.38s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryAdmission
+    ea1_child_agent_recovery.go:233: actual child Host unknown: invalid agent run request
+--- FAIL: TestEA1RealPostgresChildAgentRecoveryAdmission (0.19s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware
+    ea1_child_agent_recovery.go:233: actual child Host unknown: invalid agent run request
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/model
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/tool
+--- FAIL: TestEA1RealPostgresChildAgentRecoveryUnknown (4.87s)
+    --- FAIL: TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware (0.22s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/model (2.29s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/tool (2.35s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryAdmission
+    ea1_child_agent_recovery.go:233: actual child Host unknown: invalid agent run request
+--- FAIL: TestEA1RealPostgresChildAgentRecoveryAdmission (0.18s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware
+    ea1_child_agent_recovery.go:233: actual child Host unknown: invalid agent run request
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/model
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/tool
+--- FAIL: TestEA1RealPostgresChildAgentRecoveryUnknown (4.86s)
+    --- FAIL: TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware (0.17s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/model (2.36s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/tool (2.34s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryAdmission
+    ea1_child_agent_recovery.go:233: actual child Host unknown: invalid agent run request
+--- FAIL: TestEA1RealPostgresChildAgentRecoveryAdmission (0.14s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	15.594s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

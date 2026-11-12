@@ -1,0 +1,20 @@
+SOURCE_SHA=cb3d5887ade174ba6be762d2612dab10c02e1d18
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM/host_middleware
+    ea1_child_agent_recovery.go:233: actual child Host unknown: invalid agent run request
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM/model
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM/tool
+--- FAIL: TestEA1ChildAgentRecoveryUnknownGORM (4.38s)
+    --- FAIL: TestEA1ChildAgentRecoveryUnknownGORM/host_middleware (0.03s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownGORM/model (2.18s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownGORM/tool (2.18s)
+=== RUN   TestEA1ChildAgentRecoveryAdmissionGORM
+    ea1_child_agent_recovery.go:233: actual child Host unknown: invalid agent run request
+--- FAIL: TestEA1ChildAgentRecoveryAdmissionGORM (0.02s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	5.011s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

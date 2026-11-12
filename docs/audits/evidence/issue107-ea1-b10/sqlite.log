@@ -1,0 +1,19 @@
+SOURCE_SHA=14c436216137c9a8ff55c0096664686ee4e77aa4
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run ^TestEA1ChildAgentRecovery -v
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite/host_middleware
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite/model
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite/tool
+--- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite (4.53s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite/host_middleware (0.10s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite/model (2.21s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite/tool (2.22s)
+=== RUN   TestEA1ChildAgentRecoveryAdmissionNativeSQLite
+--- PASS: TestEA1ChildAgentRecoveryAdmissionNativeSQLite (0.09s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	6.134s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.351s [no tests to run]
+
+EXIT_CODE=0

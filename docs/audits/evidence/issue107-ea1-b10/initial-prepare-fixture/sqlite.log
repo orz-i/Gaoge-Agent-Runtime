@@ -1,0 +1,22 @@
+SOURCE_SHA=54985e08a7aba0e54022b77c770485a682c4b75f
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite/host_middleware
+    ea1_child_agent_recovery.go:207: original child Host sent, no receipt
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite/model
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite/tool
+--- FAIL: TestEA1ChildAgentRecoveryUnknownNativeSQLite (4.47s)
+    --- FAIL: TestEA1ChildAgentRecoveryUnknownNativeSQLite/host_middleware (0.05s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite/model (2.20s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite/tool (2.22s)
+=== RUN   TestEA1ChildAgentRecoveryAdmissionNativeSQLite
+    ea1_child_agent_recovery.go:207: original child Host sent, no receipt
+--- FAIL: TestEA1ChildAgentRecoveryAdmissionNativeSQLite (0.05s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	5.049s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.516s [no tests to run]
+FAIL
+
+EXIT_CODE=1

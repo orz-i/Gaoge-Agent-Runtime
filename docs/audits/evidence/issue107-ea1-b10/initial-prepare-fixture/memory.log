@@ -1,0 +1,19 @@
+SOURCE_SHA=54985e08a7aba0e54022b77c770485a682c4b75f
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1ChildAgentRecoveryUnknownMemory
+=== RUN   TestEA1ChildAgentRecoveryUnknownMemory/host_middleware
+    ea1_child_agent_recovery.go:207: original child Host sent, no receipt
+=== RUN   TestEA1ChildAgentRecoveryUnknownMemory/model
+=== RUN   TestEA1ChildAgentRecoveryUnknownMemory/tool
+--- FAIL: TestEA1ChildAgentRecoveryUnknownMemory (4.31s)
+    --- FAIL: TestEA1ChildAgentRecoveryUnknownMemory/host_middleware (0.00s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownMemory/model (2.15s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownMemory/tool (2.15s)
+=== RUN   TestEA1ChildAgentRecoveryAdmissionMemory
+    ea1_child_agent_recovery.go:207: original child Host sent, no receipt
+--- FAIL: TestEA1ChildAgentRecoveryAdmissionMemory (0.00s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	5.568s
+FAIL
+
+EXIT_CODE=1
