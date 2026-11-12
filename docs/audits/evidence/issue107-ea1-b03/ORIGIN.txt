@@ -1,0 +1,5 @@
+SOURCE_SHA=c91a17a1a92c1116b99962992e36a618aad2ecc6
+DATE=2026-11-12
+SCOPE=EA1-B03 fixed 7 Workflow entry/phase cells; prior directed evidence rerun
+ISOLATION=Existing dedicated loopback PostgreSQL16 test container, isolated schema per scenario; native SQLite temp files; no production/provider calls
+POSTGRES_DSN=REDACTED

@@ -1,0 +1,26 @@
+SOURCE_SHA=c91a17a1a92c1116b99962992e36a618aad2ecc6
+COMMAND=go -C /tmp/gaoge-runtime-issue107/go/agent-runtime test -race -count=1 ./memory -run '^TestEA1(WorkflowEntryPhasesMemory|CompensationMarkAckMemory)$' -v
+=== RUN   TestEA1CompensationMarkAckMemory
+=== RUN   TestEA1CompensationMarkAckMemory/root
+=== RUN   TestEA1CompensationMarkAckMemory/child
+--- PASS: TestEA1CompensationMarkAckMemory (0.05s)
+    --- PASS: TestEA1CompensationMarkAckMemory/root (0.03s)
+    --- PASS: TestEA1CompensationMarkAckMemory/child (0.02s)
+=== RUN   TestEA1WorkflowEntryPhasesMemory
+=== RUN   TestEA1WorkflowEntryPhasesMemory/RootWaitP0
+=== RUN   TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3
+=== RUN   TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3/resume/root
+=== RUN   TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3/resume/child
+=== RUN   TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3/compensation/root
+=== RUN   TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3/compensation/child
+--- PASS: TestEA1WorkflowEntryPhasesMemory (0.05s)
+    --- PASS: TestEA1WorkflowEntryPhasesMemory/RootWaitP0 (0.01s)
+    --- PASS: TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3 (0.05s)
+        --- PASS: TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3/resume/root (0.01s)
+        --- PASS: TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3/resume/child (0.01s)
+        --- PASS: TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3/compensation/root (0.01s)
+        --- PASS: TestEA1WorkflowEntryPhasesMemory/ResumeCompensationP3/compensation/child (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	2.425s
+
+EXIT_CODE=0
