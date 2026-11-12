@@ -297,7 +297,16 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 				t.Fatal("post-election/pre-cancel cut mutated original Kernel or full budget")
 			}
 			original, e := f.host.GetInvocation(t.Context(), iid)
-			if e != nil || !reflect.DeepEqual(original, owner) {
+			if e == nil && (!original.CreatedAt.Equal(owner.CreatedAt) || !original.UpdatedAt.Equal(owner.UpdatedAt)) {
+				t.Fatalf("original Invocation timestamp instant changed: created want=%s got=%s updated want=%s got=%s", owner.CreatedAt, original.CreatedAt, owner.UpdatedAt, original.UpdatedAt)
+			}
+			// PostgreSQL returns the same timestamp instant in Local whereas the
+			// seed uses UTC. Normalize only these two proven representations on
+			// copies after verifying both instants, retaining every other field.
+			comparisonOriginal, comparisonOwner := original, owner
+			comparisonOriginal.CreatedAt, comparisonOriginal.UpdatedAt = original.CreatedAt.UTC(), original.UpdatedAt.UTC()
+			comparisonOwner.CreatedAt, comparisonOwner.UpdatedAt = owner.CreatedAt.UTC(), owner.UpdatedAt.UTC()
+			if e != nil || !reflect.DeepEqual(comparisonOriginal, comparisonOwner) {
 				wantFields, gotFields := reflect.ValueOf(owner), reflect.ValueOf(original)
 				for index := 0; index < wantFields.NumField(); index++ {
 					want, got := wantFields.Field(index).Interface(), gotFields.Field(index).Interface()
