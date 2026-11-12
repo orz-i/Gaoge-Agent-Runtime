@@ -235,8 +235,8 @@ func RunEA1RootWaitP0(t *testing.T, factory func(*testing.T) kernel.Store) {
 		return e
 	}
 	_, err = runner.ResolveWait(t.Context(), original.Run.ID, original.Run.Revision, json.RawMessage(`{"stale":true}`))
-	if !errors.Is(err, kernel.ErrConflict) {
-		t.Fatalf("stale pre-admission must conflict: %v", err)
+	if !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("stale Store admission must return execution conflict: %v", err)
 	}
 	after, err := rt.Load(t.Context(), original.Run.ID)
 	if err != nil || winner.Run.Revision <= original.Run.Revision || after.Run.Revision != winner.Run.Revision || string(after.State) != string(winner.State) {
