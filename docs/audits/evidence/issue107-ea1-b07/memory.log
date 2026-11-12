@@ -1,0 +1,48 @@
+SOURCE_SHA=49237900d5dcf51c070b80233fa4a2e639972ec8
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1(WaitUnknownMemory|ChildWaitAdmissionMemory|WorkflowEntryCompetitionMemory|WorkflowStartBoundariesMemory)$' -v
+=== RUN   TestEA1ChildWaitAdmissionMemory
+=== RUN   TestEA1ChildWaitAdmissionMemory/checkpoint
+=== RUN   TestEA1ChildWaitAdmissionMemory/ancestor-terminal
+--- PASS: TestEA1ChildWaitAdmissionMemory (0.03s)
+    --- PASS: TestEA1ChildWaitAdmissionMemory/checkpoint (0.03s)
+    --- PASS: TestEA1ChildWaitAdmissionMemory/ancestor-terminal (0.01s)
+=== RUN   TestEA1WaitUnknownMemory
+=== RUN   TestEA1WaitUnknownMemory/root
+=== RUN   TestEA1WaitUnknownMemory/child
+--- PASS: TestEA1WaitUnknownMemory (0.04s)
+    --- PASS: TestEA1WaitUnknownMemory/root (0.02s)
+    --- PASS: TestEA1WaitUnknownMemory/child (0.02s)
+=== RUN   TestEA1WorkflowEntryCompetitionMemory
+=== RUN   TestEA1WorkflowEntryCompetitionMemory/resume-child/P1
+=== RUN   TestEA1WorkflowEntryCompetitionMemory/resume-child/P5
+=== RUN   TestEA1WorkflowEntryCompetitionMemory/resume-child/P5-retry
+=== RUN   TestEA1WorkflowEntryCompetitionMemory/wait-root/P5
+=== RUN   TestEA1WorkflowEntryCompetitionMemory/wait-root/P5-retry
+--- PASS: TestEA1WorkflowEntryCompetitionMemory (2.07s)
+    --- PASS: TestEA1WorkflowEntryCompetitionMemory/resume-child/P1 (0.02s)
+    --- PASS: TestEA1WorkflowEntryCompetitionMemory/resume-child/P5 (2.01s)
+    --- PASS: TestEA1WorkflowEntryCompetitionMemory/resume-child/P5-retry (0.02s)
+    --- PASS: TestEA1WorkflowEntryCompetitionMemory/wait-root/P5 (0.01s)
+    --- PASS: TestEA1WorkflowEntryCompetitionMemory/wait-root/P5-retry (0.02s)
+=== RUN   TestEA1WorkflowStartBoundariesMemory
+=== RUN   TestEA1WorkflowStartBoundariesMemory/child/P0/builtin-subworkflow-source
+=== RUN   TestEA1WorkflowStartBoundariesMemory/root/P0/revision
+=== RUN   TestEA1WorkflowStartBoundariesMemory/root/P0/terminal
+=== RUN   TestEA1WorkflowStartBoundariesMemory/child/P0/revision
+=== RUN   TestEA1WorkflowStartBoundariesMemory/child/P0/terminal
+=== RUN   TestEA1WorkflowStartBoundariesMemory/root/P1
+=== RUN   TestEA1WorkflowStartBoundariesMemory/root/P5
+=== RUN   TestEA1WorkflowStartBoundariesMemory/root/P5-retry
+--- PASS: TestEA1WorkflowStartBoundariesMemory (0.06s)
+    --- PASS: TestEA1WorkflowStartBoundariesMemory/child/P0/builtin-subworkflow-source (0.01s)
+    --- PASS: TestEA1WorkflowStartBoundariesMemory/root/P0/revision (0.01s)
+    --- PASS: TestEA1WorkflowStartBoundariesMemory/root/P0/terminal (0.00s)
+    --- PASS: TestEA1WorkflowStartBoundariesMemory/child/P0/revision (0.01s)
+    --- PASS: TestEA1WorkflowStartBoundariesMemory/child/P0/terminal (0.01s)
+    --- PASS: TestEA1WorkflowStartBoundariesMemory/root/P1 (0.01s)
+    --- PASS: TestEA1WorkflowStartBoundariesMemory/root/P5 (0.01s)
+    --- PASS: TestEA1WorkflowStartBoundariesMemory/root/P5-retry (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	4.180s
+
+EXIT_CODE=0
