@@ -91,6 +91,7 @@ func TestIssue107HostedTerminalOwnershipIsReadOnlyNotNewCancellation(t *testing.
 	}
 	for _, status := range []kernel.RunStatus{kernel.RunStatusCancelled, kernel.RunStatusFailed, kernel.RunStatusCompleted} {
 		f.child.Run.Status = status
+		f.child.State = json.RawMessage(`{"budget":{"limits":{"maxLLMCalls":4,"maxToolCalls":4},"usage":{}}}`)
 		if status == kernel.RunStatusCompleted {
 			f.child.Result = &kernel.Result{ContentType: "application/json", Content: json.RawMessage(`{"ok":true}`)}
 		}

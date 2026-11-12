@@ -114,8 +114,22 @@ func (runner *Runner) verifyLocalAgentTaskChild(runtime *kernel.Runtime, state e
 	if original == nil || !original.ObservesKernelRuntime(runtime) {
 		return false
 	}
-	if control && !original.OwnsKernelRuntime(runtime) &&
-		!verifiedAgentTaskTerminalObservation(child) &&
+	terminalObserved := verifiedAgentTaskTerminalObservation(child)
+	if control {
+		switch child.Run.Status {
+		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
+			// Native and Host-prepared Agents share the same physical Tool
+			// settlement requirement: a terminal Kernel CAS does not cancel
+			// an unacknowledged external operation.
+			if !terminalObserved {
+				return false
+			}
+		case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
+		default:
+			return false
+		}
+	}
+	if control && !original.OwnsKernelRuntime(runtime) && !terminalObserved &&
 		(!runner.localAgentTaskWaitingCancellationFenced() ||
 			!original.QuiescentApprovalCancellation(runtime, child)) {
 		return false
@@ -147,6 +161,9 @@ func (runner *Runner) verifyLocalAgentTaskChild(runtime *kernel.Runtime, state e
 // waiting-input cancellation with Host middleware. A malformed completed Run
 // must never be treated as settled output.
 func verifiedAgentTaskTerminalObservation(child kernel.Snapshot) bool {
+	if !agent.TerminalPhysicalEffectsSettled(child) {
+		return false
+	}
 	switch child.Run.Status {
 	case kernel.RunStatusCompleted:
 		return child.Result != nil && json.Valid(child.Result.Content)

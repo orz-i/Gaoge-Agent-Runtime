@@ -337,6 +337,31 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	if scope != nil {
+		// The first ownership read happened before a potentially stale Turn
+		// projection. Recheck AFTER durable grant admission and BEFORE any
+		// Agent middleware or external effect, so a parent already terminal
+		// cannot use an otherwise valid child checkpoint.
+		child, loadErr := runner.runtime.Load(ctx, scope.ChildRunID)
+		if loadErr == nil && (child.Run.ID != scope.ChildRunID ||
+			child.Run.Revision != scope.Revision ||
+			child.Checkpoint == nil || child.Checkpoint.ID != scope.CheckpointID) {
+			loadErr = ErrConflict
+		}
+		if loadErr == nil {
+			loadErr = runner.verifyLocalApprovalRun(ctx, child)
+		}
+		if loadErr != nil {
+			// No physical callback has started in this grant, so this
+			// rejection is definitive no-effect. The receipt must be sealed,
+			// not kept as an unknown external operation on a stale parent.
+			settled := runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected")
+			if settled != nil {
+				return kernel.Snapshot{}, errors.Join(ErrExecutionOutcomeUnknown, loadErr, settled)
+			}
+			return kernel.Snapshot{}, errors.Join(ErrConflict, loadErr)
+		}
+	}
 	physicalCtx := ctx
 	if scope != nil {
 		bound := *scope

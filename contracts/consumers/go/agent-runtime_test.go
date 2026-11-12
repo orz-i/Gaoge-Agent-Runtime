@@ -79,6 +79,8 @@ type workflowAgentTaskApprovalCancellationContract interface {
 var (
 	_ workflow.LocalAgentTaskOwner                                                                               = (workflowAgentTaskOwnerContract)(nil)
 	_ workflowAgentTaskOwnerContract                                                                             = (workflow.LocalAgentTaskOwner)(nil)
+	_ func(*agent.Runner, kernel.Snapshot, agent.StartRequest) bool                                              = (*agent.Runner).VerifyFrozenStartRequest
+	_ func(kernel.Snapshot) bool                                                                                 = agent.TerminalPhysicalEffectsSettled
 	_ workflow.LocalAgentTaskApprovalCancellationOwner                                                           = (workflowAgentTaskApprovalCancellationContract)(nil)
 	_ workflowAgentTaskApprovalCancellationContract                                                              = (workflow.LocalAgentTaskApprovalCancellationOwner)(nil)
 	_ func(*agent.Runner, *kernel.Runtime, kernel.Snapshot) bool                                                 = (*agent.Runner).QuiescentApprovalCancellation

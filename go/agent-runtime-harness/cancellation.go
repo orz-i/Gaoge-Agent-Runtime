@@ -170,6 +170,11 @@ func (runner *Runner) cancelRuntimeRun(
 			return kernel.Snapshot{}, true, err
 		}
 		if terminalRuntimeStatus(current.Run.Status) {
+			// The original route-specific ownership proof above owns
+			// physical settlement semantics. Workflow AgentTask checks
+			// unresolved native Tool/Model intents before reaching here;
+			// independently routed Handoffs retain their own external
+			// cleanup and reconciliation contract instead of inheriting it.
 			return current, true, nil
 		}
 		// An A2A shadow Run is local evidence of a remote task, not the

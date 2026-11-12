@@ -114,6 +114,8 @@ type issue107HarnessFixture struct {
 	relations             *runrelation.Registry
 	model                 *issue107Model
 	toolCalls             int
+	toolStarted           chan struct{}
+	toolRelease           chan struct{}
 	request               harness.WorkflowTurnRequest
 	executor              *issue107AgentEffect
 }
@@ -154,6 +156,10 @@ func newIssue107HarnessFixture(t *testing.T, options ...bool) *issue107HarnessFi
 		Definition: tools.Definition{Key: issue107ToolKey, Name: "read_evidence",
 			InputSchema: json.RawMessage(`{"type":"object"}`)},
 		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			if f.toolStarted != nil {
+				close(f.toolStarted)
+				<-f.toolRelease
+			}
 			f.toolCalls++
 			return tools.ExecutionResult{
 				Content: json.RawMessage(`{"evidence":"approved"}`),
