@@ -1,0 +1,6 @@
+SOURCE_SHA=421a414ba46770156c047f018bf7ac6b2360ac4a
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 -timeout=180s ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	86.175s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

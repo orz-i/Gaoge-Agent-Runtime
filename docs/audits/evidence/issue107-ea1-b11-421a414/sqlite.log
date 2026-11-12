@@ -1,0 +1,69 @@
+SOURCE_SHA=421a414ba46770156c047f018bf7ac6b2360ac4a
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^(TestEA1RootAgent|TestEA1OwnedCallbackReturn|TestOwned)' -v
+=== RUN   TestOwnedSchemaMigrationPreservesOriginalGrants
+--- PASS: TestOwnedSchemaMigrationPreservesOriginalGrants (0.07s)
+=== RUN   TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover
+--- PASS: TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover (0.07s)
+=== RUN   TestEA1OwnedCallbackReturnSQLite
+=== RUN   TestEA1OwnedCallbackReturnSQLite/unknown-host
+=== RUN   TestEA1OwnedCallbackReturnSQLite/known-host
+--- PASS: TestEA1OwnedCallbackReturnSQLite (2.14s)
+    --- PASS: TestEA1OwnedCallbackReturnSQLite/unknown-host (1.06s)
+    --- PASS: TestEA1OwnedCallbackReturnSQLite/known-host (1.07s)
+=== RUN   TestEA1RootAgentAdmissionSQLite
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model
+--- PASS: TestEA1RootAgentAdmissionSQLite (0.83s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-bounded (0.11s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-opaque (0.09s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-foreign-hydration (0.12s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim (0.11s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission (0.05s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse (0.09s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/same-external-lease-two-callers (0.10s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical (0.07s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model (0.10s)
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/default-generated-id
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model
+--- PASS: TestEA1RootAgentDefaultAdmissionSQLite (0.81s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-bounded (0.11s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-opaque (0.06s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-foreign-hydration (0.06s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/default-generated-id (0.08s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim (0.12s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission (0.05s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse (0.09s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/same-external-lease-two-callers (0.11s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical (0.07s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model (0.07s)
+=== RUN   TestEA1RootAgentUnknownNativeSQLite
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/host_middleware
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/model
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/tool
+--- PASS: TestEA1RootAgentUnknownNativeSQLite (6.71s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/host_middleware (2.29s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/model (2.21s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/tool (2.21s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	12.127s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.471s [no tests to run]
+
+EXIT_CODE=0

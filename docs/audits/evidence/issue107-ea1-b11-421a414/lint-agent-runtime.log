@@ -1,0 +1,19 @@
+SOURCE_SHA=421a414ba46770156c047f018bf7ac6b2360ac4a
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+go/agent-runtime/agent/bounded_context_compaction.go:6:1: File is not properly formatted (goimports)
+	"errors"
+^
+go/agent-runtime/agent/root_observation_isolation_test.go:5:1: File is not properly formatted (goimports)
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+^
+go/agent-runtime/agent/tool_discovery_initial_retry_test.go:48:2: ineffectual assignment to pending (ineffassign)
+	pending, err := runner.StartRun(t.Context(), start)
+	^
+go/agent-runtime/agent/tool_discovery_test.go:340:2: ineffectual assignment to pending (ineffassign)
+	pending, err := runner.StartRun(t.Context(), startRequest("run_search_retry", "req_search_retry", "Find documents", keys...))
+	^
+4 issues:
+* goimports: 2
+* ineffassign: 2
+
+EXIT_CODE=1
