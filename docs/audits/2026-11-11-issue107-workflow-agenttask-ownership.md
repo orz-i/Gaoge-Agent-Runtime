@@ -302,3 +302,45 @@ cutover have run. Gaoge's `sdk` gitlink is still pinned to the
 pre-#107 cohort, and the original Hosted MCP test still reports
 `target provider replay state conflict`. Those gates must remain
 explicitly blocked rather than inferred from passing Issue #107 tests.
+
+## Sixth independent review / seventh governance: exact revision and Root authorization (2026-11-12)
+
+The sixth independent audit locked Runtime `30ad120` and Gaoge
+`c7759dc`, discovering four connected P1 failures: (1) a stale
+Workflow.Resume could send an external Effect at Run revision R even
+though another worker committed R+1 before physical Grant admission;
+(2) two valid Workflow ResolveWait continuations could cause a stale
+pure checkpoint CAS to pin an UNKNOWN Grant without any Tool/Model call;
+(3) Root Workflow omitted the physical Grant and permitted two queue
+workers to issue the same Effect before CAS; and (4) a fully completed
+Workflow could not recover its original durable post-callback settlement
+marker after an ACK loss and a new process/Store instance. Tests were
+preserved under `/tmp/issue107-sixth-independent-evidence` on the Mac.
+
+**Remediation:** Kernel `BeginChildExecution(ctx,runID,expectedRevision)`
+now binds the frozen original Run version. All three Stores atomically
+check it with current status and parent identity. Root Workflow obtains
+its own durable Grant and first-party scoped per-revision mutation
+permit, replacing the parentless bypass. The original Root permit is
+never inherited by a nested Subworkflow; that child gets its own Grant.
+An external Effect Pending without authoritative receipt remains
+QUARANTINED, not automatically replayable. Trusted original
+`EffectResult.PhysicalNoEffect` permits a failed/compensating/retrying
+Effect to yield safely only when no physical request was issued.
+`Workflow.ReconcileChildPhysicalGrant` recovers an exact already-marked
+Root or Child Grant without replaying any external operation. PostgreSQL
+checks immutable StartRevision during settlement and release, not merely
+its Grant ID; SQLite v3 follows the same exact transaction predicate.
+
+**Required test matrix:** original independent R/R+1 Effect and Wait
+races, duplicate Root Resume/Cancel, durable ACK lost and DB reopen,
+invalid child/tenant/foreign revision, unknown external Pending,
+original no-effect retry, Memory/GORM PostgreSQL/SQLite conformance,
+real PostgreSQL two-connection locks and revision interleavings,
+Agent/Host approval and child cancellation, Race, lint and external SDK
+consumer cohort. No future-release or production migration is implied
+by these local test results.
+
+**Still NO-GO:** independent final review of the eventual locked commit,
+Gaoge #69 full Hosted ProviderReplay and pinned SDK cohort, exact PR Head
+required CI and safe production migration/drain have not been performed.

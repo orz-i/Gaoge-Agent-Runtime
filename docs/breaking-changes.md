@@ -2,6 +2,72 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-12 — Issue #107 sixth independent review: version-bound Root/Child physical admission
+
+The sixth independent review locked Runtime `30ad120` and Gaoge
+`c7759dc` and found the remaining physical authorization gap:
+Workflow.Resume and ResolveWait verified a loaded Run revision R, then
+called `BeginChildExecution` with only the child ID. A concurrent worker
+could advance R to R+1 while status remained Running or WaitingInput;
+the old interpreter would send an external Effect and only later fail
+its Kernel CAS. A pure stale Wait CAS could conversely retain an UNKNOWN
+physical Grant forever although no Effect was ever dispatched. Root
+Workflow skipped the physical Grant entirely, allowing duplicate queue
+workers to execute the same Effect twice. A completed Workflow with a
+committed post-callback settlement marker but lost ACK had no reliable
+recovery API after restart.
+
+**Unified execution authority:** Kernel `ChildExecutionGrant` now seals
+`ExpectedRevision` as well as the immutable Run ID. The Store must
+atomically validate the exact original revision, current status, owner
+ancestry and active Grant exclusivity before admitting any physical
+callback. Root Workflow obtains a durable self-owned Grant, not a
+parentless exception. A root-scoped Kernel Runtime carries a first-party
+nonforgeable `PhysicalApplyPermit` so that its own legitimate state
+transitions can commit while competing unbound writers are rejected.
+Built-in nested Workflows explicitly drop their parent's root mutation
+permit and obtain their **own** original child Grant. Root/Child effect
+issuance, cancellation and outcome settlement now share the same Store
+physical admission authority on Memory, PostgreSQL and SQLite.
+
+**Effect outcome policy:** A Workflow EffectExecutor must return a trusted
+completed receipt or an explicit `PhysicalNoEffect` attestation on
+`DispositionFailed` to permit retry or compensation. Unknown remote
+`DispositionPending`, timeouts and ambiguous effects retain the
+original durable Grant and may not be re-dispatched simply because the
+Effect ID is unchanged. A purely pre-dispatch interpreter failure can
+be settled only when the first-party interpreter confirms it invoked
+**zero** physical Effect callbacks in that segment. A replayable
+snapshot cannot be inferred from an unacknowledged physical operation.
+
+**Durable recovery:** `(*workflow.Runner).ReconcileChildPhysicalGrant`
+checks the original persisted child/Root state, exact original Grant
+and prior Store-settled receipt without invoking any Effect. It can
+release a completed callback after a lost settlement ACK and Store
+restart. A clean-looking but still-running callback has no durable
+post-return settlement marker and stays quarantined. Agent's existing
+first-party recovery protocol remains separate but uses the same
+Kernel physical Store contract.
+
+**Schema hard cut:** PostgreSQL's `agent_kernel_child_effect_grants`
+adds required `start_revision`, checked against the exact caller's
+version at `BeginChildExecution`, `MarkChildExecutionSettled`,
+`FinishChildExecution` and `LookupChildExecution`. Native SQLite
+candidate Schema advances from experimental **v2 to v3** (strict
+`PRAGMA user_version=3`, new `start_revision` column). There is **no**
+automatic migration or compatibility shim. Hosts must explicitly
+rehearse, drain and quarantine unresolved physical effects before
+recreating a v3 Profile or migrating PostgreSQL off a drained instance.
+No stable release or public beta.24 tag exists yet.
+
+**Acceptance remains blocked:** New adversarial regressions cover stale
+Revision Effect dispatch, Wait CAS with no physical effect, same-revision
+Root double Resume, ACK-loss/reopen, cross-Store strict Grant identity
+and original external NoEffect receipts. This is local governance, not
+final independent merge approval. The Gaoge #69 full Hosted ProviderReplay
+failure, its outdated SDK gitlink, exact PR Head GitHub CI and live
+external-provider acceptance are separate NO-GO gates.
+
 ## 2026-11-12 — Issue #107 fifth audit: close remaining physical Feature admission paths
 
 The fifth independent review of Runtime `3e2a2739` and Gaoge

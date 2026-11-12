@@ -5,6 +5,22 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Issue #107 sixth independent review / seventh governance (2026-11-12):
+  unify Root and Child Workflow physical admission with an original
+  `(RunID, ExpectedRevision)` Store-authoritative Grant. Untrusted stale
+  Resume/Wait continuations fail before any Model/Tool/Effect invocation;
+  Root Workflow no longer skips physical admission or permits duplicate
+  queue-worker dispatch. Persist an opaque Root per-revision mutation proof
+  across Memory/PostgreSQL/SQLite, and add first-party Workflow recovery
+  for already committed settlement receipts whose ACK was lost. An
+  explicit original Executor `PhysicalNoEffect` receipt distinguishes
+  a safe pre-dispatch failure from unknown external Pending. A forged
+  `ExpectedRevision` cannot retire a settled Grant in SQL. Full
+  Root/Child Store conformance and actual PostgreSQL cross-connection
+  races are required. SQLite development Schema hard-cuts v2 to v3 and
+  PostgreSQL's physical Grant table adds `start_revision`. No legacy
+  compatibility path. See `docs/breaking-changes.md`.
+
 - Issue #107 fifth independent P1 audit remediation (2026-11-12):
   nested Workflow Start/Resume/ResolveWait, arbitrary EffectExecutor and
   compensation run under the original Kernel parent/child physical Grant.
