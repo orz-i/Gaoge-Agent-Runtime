@@ -138,8 +138,10 @@ func RunEA1CompensationMarkAckSuite(t *testing.T, makeStore func(*testing.T) (ke
 			if err = owner.ReconcileChildPhysicalGrant(t.Context(), durable.Run.ID); err != nil {
 				t.Fatalf("first-party post-Mark compensation recovery failed: %v", err)
 			}
-			if err = owner.ReconcileChildPhysicalGrant(t.Context(), durable.Run.ID); err != nil {
-				t.Fatalf("original reconciliation not idempotent: %v", err)
+			// Repeating reconciliation after confirmed successful retirement yields
+			// the documented typed absence, with no state/effect mutation.
+			if err = owner.ReconcileChildPhysicalGrant(t.Context(), durable.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
+				t.Fatalf("retired original Grant must report typed absence: %v", err)
 			}
 			if _, err = recovered.LookupChildExecution(t.Context(), durable.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
 				t.Fatalf("settled compensation grant remains: %v", err)

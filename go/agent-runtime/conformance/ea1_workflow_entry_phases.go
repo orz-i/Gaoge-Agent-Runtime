@@ -197,6 +197,12 @@ func (e *ea1WaitEffect) Execute(context.Context, workflow.EffectRequest) (workfl
 // no stranded Grant and preserve the winning checkpoint and revision.
 func RunEA1RootWaitP0(t *testing.T, factory func(*testing.T) kernel.Store) {
 	backing := factory(t)
+	RunEA1RootWaitP0AcrossStores(t, backing, backing)
+}
+
+// RunEA1RootWaitP0AcrossStores uses a second independently connected Store for
+// the winning checkpoint transaction on durable backends.
+func RunEA1RootWaitP0AcrossStores(t *testing.T, backing, peer kernel.Store) {
 	store := &ea1P0BeginInterleave{Store: backing, ChildExecutionStore: backing.(kernel.ChildExecutionStore)}
 	rt, err := kernel.New(kernel.Dependencies{Store: store})
 	if err != nil {
@@ -228,10 +234,18 @@ func RunEA1RootWaitP0(t *testing.T, factory func(*testing.T) kernel.Store) {
 	if _, e := runner.ResolveWait(t.Context(), original.Run.ID, original.Run.Revision, json.RawMessage(`invalid`)); !errors.Is(e, workflow.ErrInvalidExecution) {
 		t.Fatalf("bad response accepted: %v", e)
 	}
+	peerRuntime, err := kernel.New(kernel.Dependencies{Store: peer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerRunner, err := workflow.NewRunner(workflow.Dependencies{Runtime: peerRuntime, Effects: effect, DeferResumption: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	var winner kernel.Snapshot
 	store.before = func(ctx context.Context) error {
 		var e error
-		winner, e = runner.ResolveWait(ctx, original.Run.ID, original.Run.Revision, json.RawMessage(`{"winner":true}`))
+		winner, e = peerRunner.ResolveWait(ctx, original.Run.ID, original.Run.Revision, json.RawMessage(`{"winner":true}`))
 		return e
 	}
 	_, err = runner.ResolveWait(t.Context(), original.Run.ID, original.Run.Revision, json.RawMessage(`{"stale":true}`))
