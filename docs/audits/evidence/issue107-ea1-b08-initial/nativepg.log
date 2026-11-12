@@ -1,0 +1,83 @@
+SOURCE_SHA=97539e4880a6c9aa5ffb7464784bdfb583a95f53
+EXIT_CODE=0
+=== RUN   TestEA1RealPostgresWaitBarriers
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P3
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P3
+--- PASS: TestEA1RealPostgresWaitBarriers (0.96s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P1 (0.30s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P3 (0.21s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P1 (0.21s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P3 (0.24s)
+=== RUN   TestEA1RealPostgresWaitUnknown
+=== RUN   TestEA1RealPostgresWaitUnknown/root
+=== RUN   TestEA1RealPostgresWaitUnknown/child
+--- PASS: TestEA1RealPostgresWaitUnknown (0.54s)
+    --- PASS: TestEA1RealPostgresWaitUnknown/root (0.27s)
+    --- PASS: TestEA1RealPostgresWaitUnknown/child (0.27s)
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P0
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P5
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P0
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P5
+--- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries (1.32s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P0 (0.36s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P5 (0.29s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P0 (0.31s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P5 (0.35s)
+=== RUN   TestEA1RealPostgresWaitBarriers
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P3
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P3
+--- PASS: TestEA1RealPostgresWaitBarriers (0.93s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P1 (0.25s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P3 (0.23s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P1 (0.25s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P3 (0.19s)
+=== RUN   TestEA1RealPostgresWaitUnknown
+=== RUN   TestEA1RealPostgresWaitUnknown/root
+=== RUN   TestEA1RealPostgresWaitUnknown/child
+--- PASS: TestEA1RealPostgresWaitUnknown (0.53s)
+    --- PASS: TestEA1RealPostgresWaitUnknown/root (0.22s)
+    --- PASS: TestEA1RealPostgresWaitUnknown/child (0.30s)
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P0
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P5
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P0
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P5
+--- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries (1.53s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P0 (0.31s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P5 (0.33s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P0 (0.40s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P5 (0.49s)
+=== RUN   TestEA1RealPostgresWaitBarriers
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P3
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P3
+--- PASS: TestEA1RealPostgresWaitBarriers (0.87s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P1 (0.19s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P3 (0.25s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P1 (0.24s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P3 (0.20s)
+=== RUN   TestEA1RealPostgresWaitUnknown
+=== RUN   TestEA1RealPostgresWaitUnknown/root
+=== RUN   TestEA1RealPostgresWaitUnknown/child
+--- PASS: TestEA1RealPostgresWaitUnknown (0.58s)
+    --- PASS: TestEA1RealPostgresWaitUnknown/root (0.22s)
+    --- PASS: TestEA1RealPostgresWaitUnknown/child (0.36s)
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P0
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P5
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P0
+=== RUN   TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P5
+--- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries (1.34s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P0 (0.34s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/root/P5 (0.30s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P0 (0.38s)
+    --- PASS: TestEA1RealPostgresWorkflowRecoveryBoundaries/child/P5 (0.32s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	10.016s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

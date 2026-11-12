@@ -1,0 +1,46 @@
+SOURCE_SHA=97539e4880a6c9aa5ffb7464784bdfb583a95f53
+EXIT_CODE=1
+=== RUN   TestEA1WaitBarriersGORM
+=== RUN   TestEA1WaitBarriersGORM/root/P1
+=== RUN   TestEA1WaitBarriersGORM/root/P3
+=== RUN   TestEA1WaitBarriersGORM/child/P1
+=== RUN   TestEA1WaitBarriersGORM/child/P3
+--- PASS: TestEA1WaitBarriersGORM (0.15s)
+    --- PASS: TestEA1WaitBarriersGORM/root/P1 (0.04s)
+    --- PASS: TestEA1WaitBarriersGORM/root/P3 (0.04s)
+    --- PASS: TestEA1WaitBarriersGORM/child/P1 (0.04s)
+    --- PASS: TestEA1WaitBarriersGORM/child/P3 (0.03s)
+=== RUN   TestEA1WaitUnknownGORM
+=== RUN   TestEA1WaitUnknownGORM/root
+=== RUN   TestEA1WaitUnknownGORM/child
+--- PASS: TestEA1WaitUnknownGORM (0.10s)
+    --- PASS: TestEA1WaitUnknownGORM/root (0.05s)
+    --- PASS: TestEA1WaitUnknownGORM/child (0.06s)
+=== RUN   TestEA1WorkflowRecoveryBoundariesGORM
+=== RUN   TestEA1WorkflowRecoveryBoundariesGORM/root/P0
+
+2026/11/13 00:47:48 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.061ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1WorkflowRecoveryBoundariesGORM/root/P5
+
+2026/11/13 00:47:48 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:205 [35;1mdatabase is locked
+[0m[33m[0.037ms] [34;1m[rows:0][0m DELETE FROM `agent_kernel_child_effect_grants` WHERE grant_id = "childgrant_bc578ac90720dda1861ba8c9efa8489d" AND child_run_id = "original" AND start_revision = 2 AND settled_revision = 6
+    ea1_workflow_recovery_boundaries.go:185: concurrent retirement result: kernel run revision conflict
+=== RUN   TestEA1WorkflowRecoveryBoundariesGORM/child/P0
+
+2026/11/13 00:47:48 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.065ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1WorkflowRecoveryBoundariesGORM/child/P5
+
+2026/11/13 00:47:48 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:205 [35;1mdatabase is locked
+[0m[33m[0.075ms] [34;1m[rows:0][0m DELETE FROM `agent_kernel_child_effect_grants` WHERE grant_id = "childgrant_44c5eaf7d167cc8dc24b37733eebd75a" AND child_run_id = "original" AND start_revision = 2 AND settled_revision = 6
+    ea1_workflow_recovery_boundaries.go:185: concurrent retirement result: kernel run revision conflict
+--- FAIL: TestEA1WorkflowRecoveryBoundariesGORM (0.26s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesGORM/root/P0 (0.06s)
+    --- FAIL: TestEA1WorkflowRecoveryBoundariesGORM/root/P5 (0.06s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesGORM/child/P0 (0.08s)
+    --- FAIL: TestEA1WorkflowRecoveryBoundariesGORM/child/P5 (0.07s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	1.076s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL

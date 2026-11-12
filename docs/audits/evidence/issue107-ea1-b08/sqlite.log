@@ -1,0 +1,35 @@
+SOURCE_SHA=179acd4bf61d5680ef23c4f3df1bc63d1ae4ddf8
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1(WaitUnknownNativeSQLite|WaitBarriersSQLite|WorkflowRecoveryBoundariesNativeSQLite)$' -v
+=== RUN   TestEA1WaitBarriersSQLite
+=== RUN   TestEA1WaitBarriersSQLite/root/P1
+=== RUN   TestEA1WaitBarriersSQLite/root/P3
+=== RUN   TestEA1WaitBarriersSQLite/child/P1
+=== RUN   TestEA1WaitBarriersSQLite/child/P3
+--- PASS: TestEA1WaitBarriersSQLite (0.43s)
+    --- PASS: TestEA1WaitBarriersSQLite/root/P1 (0.14s)
+    --- PASS: TestEA1WaitBarriersSQLite/root/P3 (0.12s)
+    --- PASS: TestEA1WaitBarriersSQLite/child/P1 (0.08s)
+    --- PASS: TestEA1WaitBarriersSQLite/child/P3 (0.09s)
+=== RUN   TestEA1WaitUnknownNativeSQLite
+=== RUN   TestEA1WaitUnknownNativeSQLite/root
+=== RUN   TestEA1WaitUnknownNativeSQLite/child
+--- PASS: TestEA1WaitUnknownNativeSQLite (0.23s)
+    --- PASS: TestEA1WaitUnknownNativeSQLite/root (0.10s)
+    --- PASS: TestEA1WaitUnknownNativeSQLite/child (0.13s)
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite/root/P0
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite/root/P5
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite/child/P0
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite/child/P5
+--- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite (0.53s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite/root/P0 (0.12s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite/root/P5 (0.13s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite/child/P0 (0.14s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite/child/P5 (0.14s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	2.711s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.504s [no tests to run]
+
+EXIT_CODE=0
