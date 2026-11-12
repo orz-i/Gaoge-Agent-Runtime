@@ -86,6 +86,8 @@ def verify_local_evidence(cell: dict[str, str], result: str) -> None:
     raw = cell["evidence_log"].strip()
     if not raw:
         return
+    if not SHA.fullmatch(cell["tested_runtime_sha"]):
+        fail(f"{cell['cell_id']}: referenced evidence lacks exact Runtime SHA")
     for reference in [part.strip() for part in raw.split(";")]:
         if not reference:
             fail(f"{cell['cell_id']}: empty evidence log reference")
@@ -114,7 +116,10 @@ def verify_local_evidence(cell: dict[str, str], result: str) -> None:
         if expected_hash is None or hashlib.sha256(target.read_bytes()).hexdigest() != expected_hash:
             fail(f"{cell['cell_id']}: evidence log checksum mismatch: {reference}")
         log = target.read_text(encoding="utf-8")
-        if "--- FAIL: Test" in log or "WARNING: DATA RACE" in log or "\nFAIL\n" in log:
+        has_failure = "--- FAIL: Test" in log or "WARNING: DATA RACE" in log or "\nFAIL\n" in log
+        # A truthful FAIL must be able to retain its failing reproduction.
+        # This never certifies it: strict mode still rejects every FAIL row.
+        if has_failure and result != "FAIL":
             fail(f"{cell['cell_id']}: evidence contains a failed test or data race")
         if result == "PASS" and "--- PASS: Test" not in log:
             fail(f"{cell['cell_id']}: PASS is not supported by actual directed tests")
