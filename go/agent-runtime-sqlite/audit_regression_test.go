@@ -181,7 +181,7 @@ func TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err = db.Exec("PRAGMA user_version=2"); err != nil {
+	if _, err = db.Exec("PRAGMA user_version=3"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = sqlite.Open(t.Context(), path); !errors.Is(err, sqlite.ErrUnsupportedSchema) {

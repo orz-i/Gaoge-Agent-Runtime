@@ -29,6 +29,11 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	if current.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, false, kernel.ErrConflict
 	}
+	if guard.Kind == kernel.ControlApproval && current.Run.ParentRunID != "" {
+		if _, err := store.childAncestorsLocked(current.Run); err != nil {
+			return kernel.Snapshot{}, false, err
+		}
+	}
 	if err := kernel.ValidateControl(current, guard, mutation, store.currentExecutionTime()); err != nil {
 		return kernel.Snapshot{}, false, err
 	}
@@ -37,6 +42,9 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 		// An unrelated validated control cannot age out a poisoned work
 		// identity while the same Feature wait remains unresolved.
 		return kernel.Snapshot{}, false, kernel.ErrExecutionQuarantined
+	}
+	if memoryTerminalStatus(mutation.Record.Run.Status) && len(store.childGrantOwners[runID]) != 0 {
+		return kernel.Snapshot{}, false, kernel.ErrChildExecutionBusy
 	}
 	if authority.epoch == math.MaxUint64 {
 		return kernel.Snapshot{}, false, kernel.ErrExecutionConflict

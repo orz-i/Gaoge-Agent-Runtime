@@ -45,7 +45,7 @@ func TestRejectNewerSchemaAndCorruptedState(t *testing.T) {
 	if err = db.QueryRow("SELECT count(*) FROM runtime_runs WHERE run_id='must-survive'").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("unsupported schema was modified count=%d err=%v", count, err)
 	}
-	if _, err = db.Exec("PRAGMA user_version=1"); err != nil {
+	if _, err = db.Exec("PRAGMA user_version=2"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.Exec("UPDATE runtime_runs SET state_json=x'7b' WHERE run_id='must-survive'"); err != nil {

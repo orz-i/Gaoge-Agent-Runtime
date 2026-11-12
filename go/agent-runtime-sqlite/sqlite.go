@@ -15,8 +15,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// The first public schema is still under development; retain version 1.
-const schemaVersion = 1
+// Pre-stable hard cut: immutable parented Runs and durable child effect Grants.
+const schemaVersion = 2
 
 var (
 	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
@@ -300,7 +300,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 				return fmt.Errorf("create SQLite runtime schema: %w", err)
 			}
 		}
-		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
+		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 2"); err != nil {
 			return err
 		}
 		if err = tx.Commit(); err != nil {
@@ -332,6 +332,17 @@ var schemaDDL = []string{
         execution_quarantine_generation INTEGER NOT NULL DEFAULT 0,
         execution_quarantine_code TEXT NOT NULL DEFAULT ''
     )`,
+	// A child Grant is persisted against every ancestor. Terminal parent CAS
+	// checks this table in the SAME SQLite writer transaction as its Run CAS.
+	`CREATE TABLE runtime_child_effect_grants (
+		grant_id TEXT NOT NULL,
+		parent_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
+		child_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
+		settled_revision INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(grant_id,parent_run_id)
+	)`,
+	`CREATE INDEX runtime_child_grants_parent ON runtime_child_effect_grants(parent_run_id,grant_id)`,
+	`CREATE INDEX runtime_child_grants_child ON runtime_child_effect_grants(child_run_id)`,
 	`CREATE TABLE runtime_events (
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		seq INTEGER NOT NULL,

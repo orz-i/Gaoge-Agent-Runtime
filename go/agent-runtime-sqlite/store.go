@@ -245,6 +245,11 @@ func (s *Store) Create(ctx context.Context, record kernel.Record, drafts []kerne
 	if record.ExecutionRequired {
 		reservedEpoch = 1
 	}
+	if record.Run.ParentRunID != "" {
+		if _, err = sqliteLiveChildAncestors(ctx, tx, record.Run); err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO runtime_runs(run_id,scope_id,kind,status,revision,run_json,state_json,checkpoint_json,result_json,event_head,execution_epoch)
           VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
@@ -312,8 +317,31 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	// Read under the same writer transaction, never trust preflight parent
+	// status or a matching revision observed before the writer lock.
+	current, readErr := loadTx(ctx, tx, runID)
+	if readErr != nil {
+		return kernel.Snapshot{}, readErr
+	}
+	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
+		return kernel.Snapshot{}, kernel.ErrExecutionConflict
+	}
+	if guard != nil && guard.Kind == kernel.ControlApproval && current.Run.ParentRunID != "" {
+		if _, err := sqliteLiveChildAncestors(ctx, tx, current.Run); err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
+	if sqliteTerminalStatus(mutation.Record.Run.Status) {
+		var pending int
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=?", runID).Scan(&pending); err != nil {
+			return kernel.Snapshot{}, err
+		}
+		if pending > 0 {
+			return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+		}
+	}
 	if guard != nil {
-		current, readErr := loadTx(ctx, tx, runID)
+		current := current
 		if readErr != nil {
 			return kernel.Snapshot{}, readErr
 		}

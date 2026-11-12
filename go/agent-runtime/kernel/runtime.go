@@ -140,6 +140,12 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 	if request.ExecutionRequired && !runtime.SupportsExecution() {
 		return Snapshot{}, ErrExecutionRequired
 	}
+	if request.ParentRunID != "" {
+		if request.ParentRunID == request.ID || strings.TrimSpace(request.ParentRunID) != request.ParentRunID ||
+			!runtime.SupportsChildExecution() {
+			return Snapshot{}, ErrExecutionRequired
+		}
+	}
 	runID := strings.TrimSpace(request.ID)
 	if runID == "" {
 		var err error
@@ -157,7 +163,8 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		ExecutionRequired: request.ExecutionRequired,
 		Run: Run{
 			ID: runID, Kind: request.Kind, Actor: request.Actor, Thread: request.Thread,
-			RequestID: strings.TrimSpace(request.RequestID), Goal: strings.TrimSpace(request.Goal),
+			RequestID: strings.TrimSpace(request.RequestID), ParentRunID: request.ParentRunID,
+			Goal:   strings.TrimSpace(request.Goal),
 			Status: RunStatusRunning, Revision: 1, DeadlineAt: deadlineAt, CreatedAt: now, UpdatedAt: now,
 		},
 		State: cloneJSON(request.State),

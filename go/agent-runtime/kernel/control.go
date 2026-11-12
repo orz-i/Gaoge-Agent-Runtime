@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"time"
@@ -61,6 +62,7 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 	if next.Run.Kind != current.Run.Kind || next.Run.Actor != current.Run.Actor ||
 		next.Run.Thread != current.Run.Thread || next.Run.Goal != current.Run.Goal ||
 		next.Run.RequestID != current.Run.RequestID ||
+		next.Run.ParentRunID != current.Run.ParentRunID ||
 		!next.Run.CreatedAt.Equal(current.Run.CreatedAt) ||
 		(next.Run.DeadlineAt == nil) != (current.Run.DeadlineAt == nil) {
 		return ErrInvalidInput
@@ -209,6 +211,14 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 	// error as no-effect: even a failed CAS response can be outcome-unknown.
 	if store, ok := runtime.store.(ControlStore); ok {
 		snapshot, revoked, writeErr := store.ApplyControl(ctx, runID, expectedRevision, guard, next)
+		if guard.Kind == ControlCancel && errors.Is(writeErr, ErrChildExecutionBusy) {
+			if _, authorized := runtime.store.(ChildExecutionStore); authorized {
+				// Every ChildExecutionStore MUST attest this busy outcome was
+				// rejected BEFORE any CAS mutation; unlike a generic Store
+				// ErrConflict it is a source-specific no-effect proof.
+				return Snapshot{}, false, &controlChildBusyNoEffect{cause: writeErr}
+			}
+		}
 		return snapshot, revoked, controlStoreOutcome(writeErr)
 	}
 	// Older custom stores implement no execution epochs and retain the existing

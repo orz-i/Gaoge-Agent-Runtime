@@ -5,16 +5,17 @@ import "time"
 // KernelRunRecord stores only the feature-neutral Kernel aggregate.
 // Feature State, Checkpoint and Result remain opaque JSON.
 type KernelRunRecord struct {
-	RunID      string `gorm:"size:64;primaryKey"`
-	RequestID  string `gorm:"size:128;not null;default:'';index:idx_agent_kernel_runs_request"`
-	Kind       string `gorm:"size:32;not null;index:idx_agent_kernel_runs_kind"`
-	TenantID   string `gorm:"size:64;not null;index:idx_agent_kernel_runs_actor,priority:1"`
-	ActorID    string `gorm:"size:64;not null;index:idx_agent_kernel_runs_actor,priority:2"`
-	ThreadKind string `gorm:"size:64;not null;index:idx_agent_kernel_runs_thread,priority:1"`
-	ThreadID   string `gorm:"size:128;not null;index:idx_agent_kernel_runs_thread,priority:2"`
-	Goal       string `gorm:"type:text;not null"`
-	Status     string `gorm:"size:32;not null;index:idx_agent_kernel_runs_status"`
-	Revision   uint64 `gorm:"not null"`
+	RunID       string `gorm:"size:64;primaryKey"`
+	RequestID   string `gorm:"size:128;not null;default:'';index:idx_agent_kernel_runs_request"`
+	ParentRunID string `gorm:"size:64;not null;default:'';index:idx_agent_kernel_runs_parent"`
+	Kind        string `gorm:"size:32;not null;index:idx_agent_kernel_runs_kind"`
+	TenantID    string `gorm:"size:64;not null;index:idx_agent_kernel_runs_actor,priority:1"`
+	ActorID     string `gorm:"size:64;not null;index:idx_agent_kernel_runs_actor,priority:2"`
+	ThreadKind  string `gorm:"size:64;not null;index:idx_agent_kernel_runs_thread,priority:1"`
+	ThreadID    string `gorm:"size:128;not null;index:idx_agent_kernel_runs_thread,priority:2"`
+	Goal        string `gorm:"type:text;not null"`
+	Status      string `gorm:"size:32;not null;index:idx_agent_kernel_runs_status"`
+	Revision    uint64 `gorm:"not null"`
 	// Stage 2 execution authority lives in the same Run row as Revision CAS.
 	// The fence bit is sticky once claimed: legacy Apply cannot bypass it.
 	ExecutionEpoch     uint64     `gorm:"not null;default:0"`
@@ -90,3 +91,14 @@ type RunRelationRecord struct {
 }
 
 func (RunRelationRecord) TableName() string { return "agent_run_relations" }
+
+// KernelChildEffectGrantRecord holds one durable per-ancestor physical Grant.
+// Unknown work cannot be deleted by a parent terminal-CAS or TTL timeout.
+type KernelChildEffectGrantRecord struct {
+	GrantID         string `gorm:"size:128;primaryKey"`
+	ParentRunID     string `gorm:"size:64;primaryKey;index:idx_agent_kernel_child_grants_parent"`
+	ChildRunID      string `gorm:"size:64;not null;index:idx_agent_kernel_child_grants_child"`
+	SettledRevision uint64 `gorm:"not null;default:0"`
+}
+
+func (KernelChildEffectGrantRecord) TableName() string { return "agent_kernel_child_effect_grants" }

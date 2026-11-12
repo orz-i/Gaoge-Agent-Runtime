@@ -229,3 +229,7 @@ func privateDir(tb testing.TB) string {
 	}
 	return path
 }
+
+func TestIssue107SQLiteChildExecutionConformance(t *testing.T) {
+	conformance.RunChildExecutionSuite(t, func(child *testing.T) kernel.Store { return openStore(child) })
+}

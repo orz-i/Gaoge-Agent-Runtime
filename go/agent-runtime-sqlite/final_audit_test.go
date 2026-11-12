@@ -46,8 +46,8 @@ func TestCancelledCreateDoesNotPublishAndCanRetry(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	var version int
-	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 1 {
-		t.Fatalf("development schema should remain v1: version=%d err=%v", version, err)
+	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+		t.Fatalf("development schema should remain v2: version=%d err=%v", version, err)
 	}
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil {
@@ -120,8 +120,8 @@ func TestSameDevelopmentV1WithObsoleteLayoutIsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	var version int
-	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 1 {
-		t.Fatalf("test expects unchanged schema v1: %d %v", version, err)
+	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+		t.Fatalf("test expects unchanged schema v2: %d %v", version, err)
 	}
 	if _, err = sqlite.OpenExisting(t.Context(), path); !errors.Is(err, sqlite.ErrUnsupportedSchema) {
 		t.Fatalf("old dev layout accepted despite missing integrity field: %v", err)

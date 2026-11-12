@@ -61,3 +61,9 @@ func openKernelStoreTestDB(tb testing.TB) *gorm.DB {
 	}
 	return db
 }
+
+func TestIssue107PostgresChildExecutionConformance(t *testing.T) {
+	conformance.RunChildExecutionSuite(t, func(child *testing.T) kernel.Store {
+		return NewKernelStore(openKernelStoreTestDB(child))
+	})
+}

@@ -14,13 +14,15 @@ import (
 
 // Store is the single-process atomic Kernel adapter used by minimal hosts and tests.
 type Store struct {
-	mu              sync.RWMutex
-	records         map[string]kernel.Snapshot
-	events          map[string][]kernel.Event
-	transitions     map[string]transitionState
-	transitionOrder []string
-	execution       map[string]memoryExecutionState
-	executionClock  func() time.Time
+	mu               sync.RWMutex
+	records          map[string]kernel.Snapshot
+	events           map[string][]kernel.Event
+	transitions      map[string]transitionState
+	transitionOrder  []string
+	execution        map[string]memoryExecutionState
+	childGrants      map[string]memoryChildGrant
+	childGrantOwners map[string]map[string]struct{}
+	executionClock   func() time.Time
 }
 
 type transitionState struct {
@@ -47,9 +49,11 @@ func cloneRun(run kernel.Run) kernel.Run {
 func NewStore() *Store {
 	return &Store{
 		records: make(map[string]kernel.Snapshot), events: make(map[string][]kernel.Event),
-		transitions:    make(map[string]transitionState),
-		execution:      make(map[string]memoryExecutionState),
-		executionClock: time.Now,
+		transitions:      make(map[string]transitionState),
+		execution:        make(map[string]memoryExecutionState),
+		childGrants:      make(map[string]memoryChildGrant),
+		childGrantOwners: make(map[string]map[string]struct{}),
+		executionClock:   time.Now,
 	}
 }
 
@@ -59,6 +63,11 @@ func (store *Store) Create(_ context.Context, record kernel.Record, events []ker
 	defer store.mu.Unlock()
 	if _, exists := store.records[record.Run.ID]; exists {
 		return kernel.Snapshot{}, kernel.ErrAlreadyExists
+	}
+	if record.Run.ParentRunID != "" {
+		if _, err := store.childAncestorsLocked(record.Run); err != nil {
+			return kernel.Snapshot{}, err
+		}
 	}
 	snapshot := snapshotFromRecord(record)
 	journal := appendEvents(nil, events, record.Run.UpdatedAt)
@@ -122,6 +131,12 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 	}
 	if current.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
+	}
+	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
+		return kernel.Snapshot{}, kernel.ErrExecutionConflict
+	}
+	if memoryTerminalStatus(mutation.Record.Run.Status) && len(store.childGrantOwners[runID]) != 0 {
+		return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
 	}
 	next := snapshotFromRecord(mutation.Record)
 	journal := store.events[runID]
