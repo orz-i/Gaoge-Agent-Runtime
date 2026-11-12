@@ -26,3 +26,7 @@ The correction is limited to ordinary unbound Apply in PostgreSQL and SQLite, un
 Independent limited source review found and closed complete-response/result assertion gaps and the two distinct admission-gate paths at 6b4197e. The same reviewer diagnosed the precise EA-10 error-precedence difference and accepted the limited eaf89e6 SQL delta, explicitly checking Control/recovery isolation. Durable evidence and ledger signoff follows separately; source review alone is not evidence certification.
 
 No push, PR, merge, production migration, or WP-GAOGE edit. Available space was 9.9 GiB before the batch and 9.8 GiB after validation; task cache cleanup was zero. Next fixed batch: AR-R P0 through P4 using actual PrepareRun then Resume, not Start as a substitute.
+
+## Durable independent signoff
+
+The reviewer independently inspected exact evidence commit `7f1fa91b73128b3b86f47b50e0484e3bdb314511` and source `eaf89e66114b8d02af638a685dc68d579cf909a1`. All twelve durable log hashes, source tags and zero exits matched; four directed logs had no skips, both new real-PG suites ran three times, and all four module race runs, three linters and smoke completed. Only the seven specified rows changed UNRUN to PASS; the other 137 rows were byte-identical, total 82 PASS / 62 UNRUN. No Go drift or removal of initial failure evidence was found. Public identity applicability, N2, Hostfalse, backend recovery limits, inventory/strict results and six checker unit tests were accepted within this batch only. Whole acceptance remains NO-GO. The reviewer ran no tests.
