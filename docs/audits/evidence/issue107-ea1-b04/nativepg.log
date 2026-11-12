@@ -1,0 +1,55 @@
+SOURCE_SHA=880253aad587914cc28d4b9177f40aa83d730142
+COMMAND=TEST_POSTGRES_DSN=<dedicated-ephemeral> go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresResume(Admission|MarkAck)$' -v
+=== RUN   TestEA1RealPostgresResumeMarkAck
+=== RUN   TestEA1RealPostgresResumeMarkAck/root
+=== RUN   TestEA1RealPostgresResumeMarkAck/child
+--- PASS: TestEA1RealPostgresResumeMarkAck (0.57s)
+    --- PASS: TestEA1RealPostgresResumeMarkAck/root (0.28s)
+    --- PASS: TestEA1RealPostgresResumeMarkAck/child (0.29s)
+=== RUN   TestEA1RealPostgresResumeAdmission
+=== RUN   TestEA1RealPostgresResumeAdmission/root/revision
+=== RUN   TestEA1RealPostgresResumeAdmission/root/terminal
+=== RUN   TestEA1RealPostgresResumeAdmission/child/revision
+=== RUN   TestEA1RealPostgresResumeAdmission/child/terminal
+--- PASS: TestEA1RealPostgresResumeAdmission (0.84s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/root/revision (0.30s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/root/terminal (0.17s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/child/revision (0.18s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/child/terminal (0.19s)
+=== RUN   TestEA1RealPostgresResumeMarkAck
+=== RUN   TestEA1RealPostgresResumeMarkAck/root
+=== RUN   TestEA1RealPostgresResumeMarkAck/child
+--- PASS: TestEA1RealPostgresResumeMarkAck (0.42s)
+    --- PASS: TestEA1RealPostgresResumeMarkAck/root (0.21s)
+    --- PASS: TestEA1RealPostgresResumeMarkAck/child (0.21s)
+=== RUN   TestEA1RealPostgresResumeAdmission
+=== RUN   TestEA1RealPostgresResumeAdmission/root/revision
+=== RUN   TestEA1RealPostgresResumeAdmission/root/terminal
+=== RUN   TestEA1RealPostgresResumeAdmission/child/revision
+=== RUN   TestEA1RealPostgresResumeAdmission/child/terminal
+--- PASS: TestEA1RealPostgresResumeAdmission (0.84s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/root/revision (0.19s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/root/terminal (0.16s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/child/revision (0.27s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/child/terminal (0.22s)
+=== RUN   TestEA1RealPostgresResumeMarkAck
+=== RUN   TestEA1RealPostgresResumeMarkAck/root
+=== RUN   TestEA1RealPostgresResumeMarkAck/child
+--- PASS: TestEA1RealPostgresResumeMarkAck (0.57s)
+    --- PASS: TestEA1RealPostgresResumeMarkAck/root (0.27s)
+    --- PASS: TestEA1RealPostgresResumeMarkAck/child (0.30s)
+=== RUN   TestEA1RealPostgresResumeAdmission
+=== RUN   TestEA1RealPostgresResumeAdmission/root/revision
+=== RUN   TestEA1RealPostgresResumeAdmission/root/terminal
+=== RUN   TestEA1RealPostgresResumeAdmission/child/revision
+=== RUN   TestEA1RealPostgresResumeAdmission/child/terminal
+--- PASS: TestEA1RealPostgresResumeAdmission (0.93s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/root/revision (0.29s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/root/terminal (0.21s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/child/revision (0.22s)
+    --- PASS: TestEA1RealPostgresResumeAdmission/child/terminal (0.21s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	5.554s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

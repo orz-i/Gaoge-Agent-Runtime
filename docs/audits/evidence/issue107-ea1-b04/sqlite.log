@@ -1,0 +1,25 @@
+SOURCE_SHA=880253aad587914cc28d4b9177f40aa83d730142
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1Resume(AdmissionSQLite|MarkAckNativeSQLite)$' -v
+=== RUN   TestEA1ResumeMarkAckNativeSQLite
+=== RUN   TestEA1ResumeMarkAckNativeSQLite/root
+=== RUN   TestEA1ResumeMarkAckNativeSQLite/child
+--- PASS: TestEA1ResumeMarkAckNativeSQLite (0.23s)
+    --- PASS: TestEA1ResumeMarkAckNativeSQLite/root (0.13s)
+    --- PASS: TestEA1ResumeMarkAckNativeSQLite/child (0.10s)
+=== RUN   TestEA1ResumeAdmissionSQLite
+=== RUN   TestEA1ResumeAdmissionSQLite/root/revision
+=== RUN   TestEA1ResumeAdmissionSQLite/root/terminal
+=== RUN   TestEA1ResumeAdmissionSQLite/child/revision
+=== RUN   TestEA1ResumeAdmissionSQLite/child/terminal
+--- PASS: TestEA1ResumeAdmissionSQLite (0.31s)
+    --- PASS: TestEA1ResumeAdmissionSQLite/root/revision (0.08s)
+    --- PASS: TestEA1ResumeAdmissionSQLite/root/terminal (0.07s)
+    --- PASS: TestEA1ResumeAdmissionSQLite/child/revision (0.08s)
+    --- PASS: TestEA1ResumeAdmissionSQLite/child/terminal (0.07s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	2.057s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.339s [no tests to run]
+
+EXIT_CODE=0
