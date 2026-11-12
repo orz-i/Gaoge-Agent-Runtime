@@ -1,13 +1,14 @@
 package postgres
 
 import (
+	"os"
+	"strings"
+	"testing"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	pgdriver "gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"os"
-	"strings"
-	"testing"
 )
 
 func TestEA1RealPostgresWorkflowEntryPhases(t *testing.T) {

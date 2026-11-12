@@ -1,9 +1,13 @@
 package conformance
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -39,7 +43,7 @@ func RunEA1WorkflowResumeCompensationP3(t *testing.T, factory func(*testing.T) k
 					}
 					parentID = parent.Run.ID
 				}
-				effect := &ea1P3Effect{}
+				effect := &ea1EntryReceiptEffect{}
 				setup, err := workflow.NewRunner(workflow.Dependencies{Runtime: initial, Effects: effect})
 				if err != nil {
 					t.Fatal(err)
@@ -111,6 +115,31 @@ func RunEA1WorkflowResumeCompensationP3(t *testing.T, factory func(*testing.T) k
 				view, err := workflow.ViewState(snapshot)
 				if err != nil {
 					t.Fatal(err)
+				}
+				requests := effect.originalRequests()
+				if len(requests) != 2 {
+					t.Fatalf("expected two original dispatch identities: %d", len(requests))
+				}
+				for _, req := range requests {
+					if req.RunID != before.Run.ID || req.Actor != actor || req.Thread != thread || req.DefinitionID != definition.ID || req.DefinitionHash == "" || req.Attempt != 1 {
+						t.Fatalf("foreign original request: %+v", req)
+					}
+					found := 0
+					for _, receipt := range view.Effects {
+						if receipt.ID != req.EffectID {
+							continue
+						}
+						found++
+						if receipt.Attempt != req.Attempt || receipt.NodeID != req.NodeID || receipt.Kind != req.Kind || receipt.Class != req.Class || receipt.Compensation != req.Compensation || !bytes.Equal(receipt.Input, req.Input) || receipt.ReceiptID != ea1EntryReceiptID(req) || receipt.Status != workflow.EffectCompleted {
+							t.Fatalf("receipt not bound to exact original dispatch: %+v request=%+v", receipt, req)
+						}
+					}
+					if found != 1 {
+						t.Fatalf("original request receipt matches=%d", found)
+					}
+				}
+				if requests[0].EffectID == requests[1].EffectID || ea1EntryReceiptID(requests[0]) == ea1EntryReceiptID(requests[1]) {
+					t.Fatal("distinct original effects reused receipt identity")
 				}
 				if entry == "resume" {
 					if snapshot.Run.Status != kernel.RunStatusCompleted || len(view.Effects) != 2 || view.Effects[1].ReceiptID == "" {
@@ -234,6 +263,23 @@ func RunEA1RootWaitP0AcrossStores(t *testing.T, backing, peer kernel.Store) {
 	if _, e := runner.ResolveWait(t.Context(), original.Run.ID, original.Run.Revision, json.RawMessage(`invalid`)); !errors.Is(e, workflow.ErrInvalidExecution) {
 		t.Fatalf("bad response accepted: %v", e)
 	}
+	if _, e := runner.ResolveWait(t.Context(), "absent-original", original.Run.Revision, json.RawMessage("{}")); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("foreign/missing Run adopted: %v", e)
+	}
+	invalid, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "invalid-origin", Kind: workflow.RunKind, Actor: original.Run.Actor, Thread: original.Run.Thread, Goal: "no Workflow origin", State: json.RawMessage("{}")})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = runner.ResolveWait(t.Context(), invalid.Run.ID, invalid.Run.Revision, json.RawMessage("{}")); !errors.Is(e, workflow.ErrInvalidExecution) {
+		t.Fatalf("unbound Workflow origin accepted: %v", e)
+	}
+	preflight, e := rt.Load(t.Context(), original.Run.ID)
+	if e != nil || preflight.Run.Revision != original.Run.Revision || !bytes.Equal(preflight.State, original.State) || effect.calls.Load() != 0 {
+		t.Fatal("failed preflight mutated original or dispatched")
+	}
+	if _, e = rt.LookupChildExecution(t.Context(), original.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("preflight left Grant: %v", e)
+	}
 	peerRuntime, err := kernel.New(kernel.Dependencies{Store: peer})
 	if err != nil {
 		t.Fatal(err)
@@ -270,4 +316,28 @@ func RunEA1RootWaitP0AcrossStores(t *testing.T, backing, peer kernel.Store) {
 	if err != nil || resumed.Run.Status != kernel.RunStatusCompleted || effect.calls.Load() != 1 {
 		t.Fatalf("winning continuation failed: %s %v calls=%d", resumed.Run.Status, err, effect.calls.Load())
 	}
+}
+
+type ea1EntryReceiptEffect struct {
+	calls    atomic.Int32
+	mu       sync.Mutex
+	requests []workflow.EffectRequest
+}
+
+func (e *ea1EntryReceiptEffect) Execute(_ context.Context, req workflow.EffectRequest) (workflow.EffectResult, error) {
+	e.calls.Add(1)
+	req.Input = append(json.RawMessage(nil), req.Input...)
+	e.mu.Lock()
+	e.requests = append(e.requests, req)
+	e.mu.Unlock()
+	return workflow.EffectResult{Disposition: workflow.DispositionCompleted, ReceiptID: ea1EntryReceiptID(req), Output: json.RawMessage("{}"), CostUnits: req.MaxCostUnits}, nil
+}
+func (e *ea1EntryReceiptEffect) originalRequests() []workflow.EffectRequest {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]workflow.EffectRequest(nil), e.requests...)
+}
+func ea1EntryReceiptID(req workflow.EffectRequest) string {
+	encoded, _ := json.Marshal(req)
+	return fmt.Sprintf("original-receipt-%x", sha256.Sum256(encoded))
 }

@@ -1,9 +1,10 @@
 package postgres
 
 import (
+	"testing"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"testing"
 )
 
 func TestEA1WorkflowEntryPhasesGORM(t *testing.T) {
