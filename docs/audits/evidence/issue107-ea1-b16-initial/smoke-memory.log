@@ -1,0 +1,70 @@
+SOURCE_SHA=fc9a3b967b92c908dd2db3fb0556b1c106436de3
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1ChildAgent(StartPhases|RecoveryPhases)' -v
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P1/active-callback-before-and-after-Next
+    ea1_child_agent_recovery_phases.go:209: actual callback failed after denied recovery invalid agent run request
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P3/unmarked-model-yield
+    ea1_child_agent_recovery_phases.go:220: actual child settlement cut absent invalid agent run request
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P3/marked-model-yield
+    ea1_child_agent_recovery_phases.go:220: actual child settlement cut absent invalid agent run request
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P3/unmarked-terminal-tool
+    ea1_child_agent_recovery_phases.go:220: actual child settlement cut absent invalid agent run request
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P3/marked-terminal-tool
+    ea1_child_agent_recovery_phases.go:220: actual child settlement cut absent invalid agent run request
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P5/two-reconcilers-parent-cancel
+    ea1_child_agent_recovery_phases.go:220: actual child settlement cut absent invalid agent run request
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P5/two-reconcilers-ancestor-deadline
+    ea1_child_agent_recovery_phases.go:220: actual child settlement cut absent invalid agent run request
+--- FAIL: TestEA1ChildAgentRecoveryPhasesMemory (0.00s)
+    --- FAIL: TestEA1ChildAgentRecoveryPhasesMemory/P1/active-callback-before-and-after-Next (0.00s)
+    --- FAIL: TestEA1ChildAgentRecoveryPhasesMemory/P3/unmarked-model-yield (0.00s)
+    --- FAIL: TestEA1ChildAgentRecoveryPhasesMemory/P3/marked-model-yield (0.00s)
+    --- FAIL: TestEA1ChildAgentRecoveryPhasesMemory/P3/unmarked-terminal-tool (0.00s)
+    --- FAIL: TestEA1ChildAgentRecoveryPhasesMemory/P3/marked-terminal-tool (0.00s)
+    --- FAIL: TestEA1ChildAgentRecoveryPhasesMemory/P5/two-reconcilers-parent-cancel (0.00s)
+    --- FAIL: TestEA1ChildAgentRecoveryPhasesMemory/P5/two-reconcilers-ancestor-deadline (0.00s)
+=== RUN   TestEA1ChildAgentStartPhasesMemory
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/origin
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/actor
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/thread
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/missing-parent
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/terminal-parent
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/preflight
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/duplicate
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/stale-admission
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/parent-wins
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P1/host-before-next
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P2/host
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P2/model
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P2/tool
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P3/model
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P3/tool
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P5/host
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P5/model
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P5/tool
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P5/deadline
+--- PASS: TestEA1ChildAgentStartPhasesMemory (5.31s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/origin (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/actor (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/thread (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/missing-parent (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/terminal-parent (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/preflight (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/duplicate (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/stale-admission (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/parent-wins (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P1/host-before-next (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P2/host (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P2/model (2.15s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P2/tool (2.15s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P3/model (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P3/tool (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P5/host (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P5/model (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P5/tool (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P5/deadline (1.00s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	6.018s
+FAIL
+
+EXIT_CODE=1
