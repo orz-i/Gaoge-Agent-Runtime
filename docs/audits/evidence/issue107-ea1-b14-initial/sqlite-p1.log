@@ -1,0 +1,15 @@
+SOURCE_SHA=e94c62ba6c5671470f291306fad4f55ed7922f54
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1RootAgentControlPhasesNativeSQLite$/P1/approval' -v
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P1/approval
+    ea1_root_agent_control_phases.go:408: native-only write gate: kernel descendant has an unsettled physical execution Grant want kernel run requires fenced execution
+--- FAIL: TestEA1RootAgentControlPhasesNativeSQLite (0.12s)
+    --- FAIL: TestEA1RootAgentControlPhasesNativeSQLite/P1/approval (0.12s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	0.627s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.488s [no tests to run]
+FAIL
+
+EXIT_CODE=1
