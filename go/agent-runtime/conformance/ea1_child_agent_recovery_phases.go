@@ -134,8 +134,24 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		t.Fatal(e)
 	}
 	host := &ea1ChildRecoveryPhaseHost{t: t, request: request, physical: physical}
+	preflightCalls := 0
 	makeRunner := func(runtime *kernel.Runtime, owner string) *agent.Runner {
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physicalModel, Catalog: registry, Executor: registry, RunMiddleware: []plugin.RunMiddleware{host}, ToolMiddleware: []plugin.ToolMiddleware{physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physicalModel, Catalog: registry, Executor: registry, RunMiddleware: []plugin.RunMiddleware{host}, StartControlPreflight: func(ctx context.Context, actual agent.StartRequest) error {
+			preflightCalls++
+			if !reflect.DeepEqual(actual, request) {
+				return agent.ErrInvalidRequest
+			}
+			for _, expected := range []kernel.Snapshot{parent, grandparent} {
+				loaded, err := runtime.Load(ctx, expected.Run.ID)
+				if err != nil {
+					return err
+				}
+				if !ea1RecoveryJSONEqual(loaded, expected) {
+					return agent.ErrInvalidRequest
+				}
+			}
+			return nil
+		}, ToolMiddleware: []plugin.ToolMiddleware{physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -204,6 +220,14 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 	}
 	out, startErr := first.StartRun(t.Context(), request)
+	if preflightCalls != 1 || created.Run.ID != request.ID {
+		t.Fatalf("exact child preflight/Create not reached: preflight=%d created=%q err=%v", preflightCalls, created.Run.ID, startErr)
+	}
+	defer func() {
+		if preflightCalls != 1 {
+			t.Error("receipt-only reconciliation repeated Start preflight")
+		}
+	}()
 	if phase == "P1" {
 		if startErr != nil || cuts != 2 || modelCuts != 1 || store.marks != 1 || store.finishes != 1 {
 			t.Fatal("actual callback failed after denied recovery", startErr)

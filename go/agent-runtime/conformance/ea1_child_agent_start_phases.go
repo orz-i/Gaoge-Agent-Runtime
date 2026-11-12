@@ -305,6 +305,7 @@ func ea1ChildStartPreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 	req := f.request
 	expected := agent.ErrInvalidRequest
 	created := false
+	var retained kernel.Snapshot
 	useHost := false
 	switch vector {
 	case "origin":
@@ -330,9 +331,11 @@ func ea1ChildStartPreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 		expected = f.preflightErr
 		useHost = true
 	case "duplicate":
-		if _, e := f.runner(f.rt, "setup", false).PrepareRun(ctx, req); e != nil {
+		prepared, e := f.runner(f.rt, "setup", false).PrepareRun(ctx, req)
+		if e != nil {
 			t.Fatal(e)
 		}
+		retained = prepared
 		created = true
 		expected = kernel.ErrAlreadyExists
 	case "stale-admission":
@@ -355,11 +358,13 @@ func ea1ChildStartPreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 			if e = f.peer.ReleaseExecution(ctx, lease); e != nil {
 				t.Fatal(e)
 			}
+			retained = f.load(f.peer)
 		}
 	case "parent-wins":
 		created = true
 		expected = kernel.ErrExecutionConflict
 		f.store.beforeAdmission = func(kernel.ChildExecutionGrant) {
+			retained = f.load(f.peer)
 			next, e := f.peer.Cancel(ctx, f.ancestors[0].Run.ID, f.ancestors[0].Run.Revision, "parent wins admission")
 			if e != nil {
 				t.Fatal(e)
@@ -379,6 +384,9 @@ func ea1ChildStartPreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 	if created {
 		if e != nil || snap.Run.ID != req.ID || !f.runner(f.peer, "source", false).VerifyFrozenStartRequest(snap, f.request) {
 			t.Fatalf("created child erased after admission denial: %v", e)
+		}
+		if retained.Run.ID != req.ID || !reflect.DeepEqual(snap, retained) {
+			t.Fatal("denied admission changed full retained child snapshot/Budget")
 		}
 	} else if !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("pre-Create denial persisted child: %v", e)
