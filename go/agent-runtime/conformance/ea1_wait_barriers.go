@@ -143,7 +143,12 @@ func RunEA1WaitBarriers(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					if !errors.Is(e, expected) {
 						t.Fatalf("cancel not fenced: %v", e)
 					}
-					_, e = observer.Apply(t.Context(), want.Run.ID, want.Run.Revision, kernel.Mutation{Status: want.Run.Status, State: want.State, Checkpoint: want.Checkpoint})
+					// Self writes are fenced; descendant grants fence ancestor terminal writes.
+					nextStatus := kernel.RunStatusRunning
+					if want.Run.ID != original.Run.ID {
+						nextStatus = kernel.RunStatusCancelled
+					}
+					_, e = observer.Apply(t.Context(), want.Run.ID, want.Run.Revision, kernel.Mutation{Status: nextStatus, State: want.State})
 					if !errors.Is(e, expected) {
 						t.Fatalf("apply not fenced: %v", e)
 					}

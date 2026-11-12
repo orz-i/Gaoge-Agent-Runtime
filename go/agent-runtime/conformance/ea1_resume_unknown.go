@@ -108,7 +108,11 @@ func RunEA1ResumeUnknownSuite(t *testing.T, makeStore func(*testing.T) (kernel.S
 					if _, err = ownerRT.Cancel(t.Context(), before.Run.ID, before.Run.Revision, "unknown control"); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 						t.Fatalf("unknown self/ancestor cancel: %v", err)
 					}
-					if _, err = ownerRT.Apply(t.Context(), before.Run.ID, before.Run.Revision, kernel.Mutation{Status: before.Run.Status, State: before.State, Checkpoint: before.Checkpoint}); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+					nextStatus := kernel.RunStatusRunning
+					if before.Run.ID != durable.Run.ID {
+						nextStatus = kernel.RunStatusCancelled
+					}
+					if _, err = ownerRT.Apply(t.Context(), before.Run.ID, before.Run.Revision, kernel.Mutation{Status: nextStatus, State: before.State}); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 						t.Fatalf("unknown self/ancestor apply: %v", err)
 					}
 					after, loadErr := ownerRT.Load(t.Context(), before.Run.ID)
