@@ -142,14 +142,17 @@ func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn
 		terminal = ownerErr == nil && owner.ExecutionRefID == runID && owner.TurnID == turn.ID &&
 			owner.ExecutionClass == ExecutionApplication && terminalInvocationStatus(owner.Status)
 	}
-	if !terminal {
-		return Item{}, ErrConflict
+	if !terminal && err != nil {
+		return Item{}, errors.Join(ErrConflict, err)
 	}
 	items, err := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
 	if err != nil {
 		return Item{}, err
 	}
 	receipts := cancellationFenceReceipts(items)
+	if !terminal {
+		return runner.resumeDeferredChildGrantCancellation(ctx, turn, runID, snapshot, items, receipts)
+	}
 	for _, item := range items {
 		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
 			item.ParentItemID != CancellationFenceParentItemID || item.RunID != runID {

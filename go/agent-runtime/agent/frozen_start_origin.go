@@ -2,6 +2,9 @@ package agent
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -25,6 +28,7 @@ func (runner *Runner) VerifyFrozenStartRequest(snapshot kernel.Snapshot, request
 		snapshot.Run.Kind != RunKind || snapshot.Run.Actor != request.Actor ||
 		snapshot.Run.Thread != request.Thread ||
 		snapshot.Run.RequestID != strings.TrimSpace(request.RequestID) ||
+		snapshot.Run.ParentRunID != request.ParentRunID ||
 		snapshot.Run.Goal != strings.TrimSpace(request.Goal) {
 		return false
 	}
@@ -39,7 +43,7 @@ func (runner *Runner) VerifyFrozenStartRequest(snapshot kernel.Snapshot, request
 		return false
 	}
 	limits, err := resolveRunLimits(runner.limits, request.Limits)
-	if err != nil || state.Budget.Limits != limits ||
+	if err != nil || state.OriginFingerprint != request.OriginFingerprint || state.Budget.Limits != limits ||
 		state.Model != strings.TrimSpace(request.Model) ||
 		!bytes.Equal(state.ModelOptions, request.ModelOptions) ||
 		!slices.Equal(state.ToolKeys, normalizedToolKeys(request.ToolKeys)) ||
@@ -57,4 +61,31 @@ func (runner *Runner) VerifyFrozenStartRequest(snapshot kernel.Snapshot, request
 	}
 	return len(state.Messages) >= len(initial) &&
 		reflect.DeepEqual(state.Messages[:len(initial)], initial)
+}
+
+// FrozenOriginFingerprint seals the exact Host-generated immutable child
+// Effect envelope, including context-isolation and source-lineage policy.
+// An empty/forged key is never inferred from a coincidentally matching Goal.
+func FrozenOriginFingerprint(frozenInput []byte) string {
+	digest := sha256.Sum256(frozenInput)
+	return fmt.Sprintf("%x", digest[:])
+}
+
+func validFrozenOriginFingerprint(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size && hex.EncodeToString(decoded) == value
+}
+
+// MatchesFrozenOrigin is a pure restart-safe child origin check. The original
+// Host Effect input must still have its exact frozen bytes and relationship;
+// mutable relation lookup failure is not permission to discard this source.
+func MatchesFrozenOrigin(snapshot kernel.Snapshot, frozenInput []byte) bool {
+	if snapshot.Run.Kind != RunKind || snapshot.Run.ParentRunID == "" {
+		return false
+	}
+	state, err := decodeState(snapshot.State)
+	return err == nil && state.OriginFingerprint == FrozenOriginFingerprint(frozenInput)
 }

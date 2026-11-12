@@ -191,6 +191,7 @@ type StartRequest struct {
 	Actor       kernel.ActorRef
 	Thread      kernel.ThreadRef
 	RequestID   string
+	ParentRunID string
 	Goal        string
 	Definition  Definition
 	Input       json.RawMessage
@@ -327,7 +328,8 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	}
 	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
-		RequestID: request.RequestID, Goal: request.Goal, State: encoded,
+		RequestID: request.RequestID, ParentRunID: request.ParentRunID,
+		Goal: request.Goal, State: encoded,
 		Events: []kernel.EventDraft{{
 			Type: "workflow.started", Message: request.Definition.Hash, Wakeup: true,
 			WakeupAt: workflowWakeupAt(runner.runtime.Now()),

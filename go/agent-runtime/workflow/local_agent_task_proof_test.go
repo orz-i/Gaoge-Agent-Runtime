@@ -77,7 +77,7 @@ func newLocalAgentProofFixture(t *testing.T) localAgentProofFixture {
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},
 	}}
 	child := kernel.Snapshot{Run: kernel.Run{
-		ID: "effect", Kind: agent.RunKind, Actor: parent.Run.Actor, Thread: parent.Run.Thread,
+		ID: "effect", Kind: agent.RunKind, ParentRunID: parent.Run.ID, Actor: parent.Run.Actor, Thread: parent.Run.Thread,
 		RequestID: "effect", Goal: "approved search", Status: kernel.RunStatusWaitingInput,
 	}}
 	effect := Effect{

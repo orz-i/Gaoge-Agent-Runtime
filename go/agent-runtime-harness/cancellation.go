@@ -260,7 +260,7 @@ func sameCancellationRunOrigin(expected, candidate kernel.Run) bool {
 	return expected.ID != "" && candidate.ID == expected.ID &&
 		candidate.Kind == expected.Kind && candidate.Actor == expected.Actor &&
 		candidate.Thread == expected.Thread && candidate.Goal == expected.Goal &&
-		candidate.RequestID == expected.RequestID
+		candidate.RequestID == expected.RequestID && candidate.ParentRunID == expected.ParentRunID
 }
 
 // A correct ChildRunner alone cannot authorize cancellation when the Host

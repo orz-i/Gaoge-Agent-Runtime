@@ -71,9 +71,12 @@ func (runner *Runner) VerifyLocalChild(runtime *kernel.Runtime, parent kernel.Sn
 		return false
 	}
 	if child.Run.Kind == agent.RunKind {
+		if child.Run.ParentRunID != parent.Run.ID {
+			return false
+		}
 		return runner.verifyLocalAgentTaskChild(runtime, state, relation, child, control)
 	}
-	if child.Run.Kind != RunKind || runner.registry == nil {
+	if child.Run.Kind != RunKind || child.Run.ParentRunID != parent.Run.ID || runner.registry == nil {
 		return false
 	}
 	for _, effect := range state.Effects {
@@ -91,7 +94,7 @@ func (runner *Runner) VerifyLocalChild(runtime *kernel.Runtime, parent kernel.Sn
 			continue
 		}
 		return verifiedSubworkflowChildOrigin(EffectRequest{
-			EffectID: effect.ID, Actor: parent.Run.Actor, Thread: parent.Run.Thread,
+			RunID: parent.Run.ID, EffectID: effect.ID, Actor: parent.Run.Actor, Thread: parent.Run.Thread,
 			Definition: effect.Definition, NestedDepth: effect.NestedDepth, Input: effect.Input,
 		}, child)
 	}

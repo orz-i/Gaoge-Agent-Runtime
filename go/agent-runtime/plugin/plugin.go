@@ -30,12 +30,13 @@ const (
 
 // RunInvocation contains only common immutable Run facts. Middleware cannot rewrite it through next.
 type RunInvocation struct {
-	Operation RunOperation
-	Kind      kernel.RunKind
-	RunID     string
-	Actor     kernel.ActorRef
-	Thread    kernel.ThreadRef
-	Goal      string
+	Operation   RunOperation
+	Kind        kernel.RunKind
+	RunID       string
+	ParentRunID string
+	Actor       kernel.ActorRef
+	Thread      kernel.ThreadRef
+	Goal        string
 }
 
 func approvalPolicyNames(values []ApprovalPolicy) []string {

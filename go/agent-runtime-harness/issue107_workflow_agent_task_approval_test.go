@@ -83,7 +83,9 @@ func (e *issue107AgentEffect) Execute(ctx context.Context, request workflow.Effe
 	if errors.Is(err, kernel.ErrNotFound) {
 		child, err = e.original.StartRun(ctx, agent.StartRequest{
 			ID: childID, Actor: request.Actor, Thread: request.Thread,
-			RequestID: request.EffectID, Goal: input.Goal, Model: "fixture-model",
+			RequestID: request.EffectID, ParentRunID: request.RunID,
+			OriginFingerprint: agent.FrozenOriginFingerprint(request.Input),
+			Goal:              input.Goal, Model: "fixture-model",
 			ToolKeys: []string{issue107ToolKey},
 		})
 	}
@@ -116,6 +118,8 @@ type issue107HarnessFixture struct {
 	toolCalls             int
 	toolStarted           chan struct{}
 	toolRelease           chan struct{}
+	approvalPauseStarted  chan struct{}
+	approvalPauseRelease  chan struct{}
 	request               harness.WorkflowTurnRequest
 	executor              *issue107AgentEffect
 }
@@ -132,6 +136,10 @@ func (c issue107ApprovalContextCapture) Run(ctx context.Context, invocation plug
 		if err == nil && child.Checkpoint != nil {
 			c.fixture.observedApprovalGrant = harness.VerifiedSubtaskApprovalDispatch(ctx, invocation.RunID,
 				child.Run.Revision, child.Checkpoint.ID)
+		}
+		if c.fixture.approvalPauseStarted != nil {
+			close(c.fixture.approvalPauseStarted)
+			<-c.fixture.approvalPauseRelease
 		}
 	}
 	return next(ctx)
@@ -182,7 +190,13 @@ func newIssue107HarnessFixture(t *testing.T, options ...bool) *issue107HarnessFi
 		Runtime: runtime, Model: f.model, Catalog: registry, Executor: registry,
 		Approvals:        interactionadapter.New(interactionService),
 		ApprovalPolicies: []plugin.ApprovalPolicy{policy},
-		DeferResumption:  true,
+		ApprovalControlPreflight: func(ctx context.Context, snapshot kernel.Snapshot) error {
+			if snapshot.Checkpoint == nil || !harness.VerifiedSubtaskApprovalDispatch(ctx, snapshot.Run.ID, snapshot.Run.Revision, snapshot.Checkpoint.ID) {
+				return harness.ErrConflict
+			}
+			return nil
+		},
+		DeferResumption: true,
 	}
 	if hosted {
 		dependencies.PrepareModelRequest = func(_ context.Context, request model.Request) (model.Request, error) {

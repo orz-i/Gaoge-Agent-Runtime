@@ -13,8 +13,10 @@ func ValidReservedAuthorityOrigin(value Item) bool {
 	case ExecutionDispatchParentItemID:
 		_, valid := ValidExecutionDispatchGrantAdmission(value)
 		return valid
+	case DeferredChildGrantCancellationParentItemID:
+		return ValidDeferredChildGrantCancellationProofAdmission(value)
 	default:
-		return true
+		return !strings.HasPrefix(value.ID, "hcancelchildbusy_")
 	}
 }
 

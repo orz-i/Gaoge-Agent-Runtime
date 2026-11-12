@@ -1593,7 +1593,7 @@ func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapsho
 	if err := json.Unmarshal(invocation.Input, &input); err != nil || strings.TrimSpace(input.Goal) == "" {
 		return ErrConflict
 	}
-	if strings.TrimSpace(invocation.ExecutionRefID) == "" ||
+	if strings.TrimSpace(invocation.ExecutionRefID) == "" || snapshot.Run.ParentRunID != "" ||
 		snapshot.Run.ID != invocation.ExecutionRefID || snapshot.Run.Kind != kind ||
 		snapshot.Run.Actor != actor || snapshot.Run.Thread != thread ||
 		snapshot.Run.Goal != input.Goal {

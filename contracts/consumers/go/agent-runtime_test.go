@@ -66,6 +66,30 @@ var (
 
 // A separately linked Host implements only the narrow, immutable first-party
 // AgentTask ownership proof. Missing methods must fail the external SDK build.
+// External clients can see a pending original child Grant but cannot create
+// the Agent's internal settlement proof. Store backends must check the opaque
+// marker inside their own authoritative commit transaction.
+type childPhysicalStoreContract interface {
+	BeginChildExecution(context.Context, kernel.ChildExecutionGrant) error
+	LookupChildExecution(context.Context, string) (kernel.ChildExecutionGrant, error)
+	MarkChildExecutionSettled(context.Context, kernel.ChildExecutionGrant, kernel.ChildExecutionSettlement) error
+	FinishChildExecution(context.Context, kernel.ChildExecutionGrant) error
+}
+
+var (
+	_ kernel.ChildExecutionStore                                                         = (childPhysicalStoreContract)(nil)
+	_ childPhysicalStoreContract                                                         = (kernel.ChildExecutionStore)(nil)
+	_ childPhysicalStoreContract                                                         = (*memory.Store)(nil)
+	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).BeginChildExecution
+	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).LookupChildExecution
+	_ func(*agent.Runner, context.Context, string) error                                 = (*agent.Runner).ReconcileChildPhysicalGrant
+	_ func([]byte) string                                                                = agent.FrozenOriginFingerprint
+	_ func(kernel.Snapshot, []byte) bool                                                 = agent.MatchesFrozenOrigin
+	_                                                                                    = agent.Dependencies{
+		ApprovalControlPreflight: func(context.Context, kernel.Snapshot) error { return nil },
+	}
+)
+
 type workflowAgentTaskOwnerContract interface {
 	LocalAgentTaskRunner() *agent.Runner
 	LocalAgentTaskRecorder() runrelation.Recorder
