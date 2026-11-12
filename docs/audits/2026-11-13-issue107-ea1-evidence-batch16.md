@@ -29,3 +29,7 @@ No production code changed. This batch deliberately does not repeat full module 
 Independent bounded source review also required full rejected-child snapshot comparisons in three Start P0 races; those assertions were added without weakening source or error checks. The reviewer's initial suggestion that pre-acquisition self Apply should be Busy was explicitly withdrawn after checking Create's ExecutionRequired epoch seed; the correct Required assertion was unchanged. Final source review accepted the two-helper delta with no remaining concrete finding. Durable evidence signoff is recorded separately.
 
 Disk available was about 9.3 GiB before and 9.2 GiB during verification. No cache deletion, push, PR, merge, production-data migration or Gaoge edit occurred. Next fixed batch is Child Agent Resume P0 through P5, not another expansion of this batch.
+
+## Independent durable signoff
+
+Independent bounded review verified fixed evidence commit `3d97d45e1a8cfe1d1c76e6c25bdcace24d3bbf1c` against source `8778ae96be8f6d3fe57fe0b15f67b2aa5adc1049`: all eight fixed log hashes/source/zero exits match, none skip, and both native PG suites actually run three times. Exactly the assigned eight rows change to PASS, the other 136 original rows remain byte-identical, and there is no Go drift. Initial failure evidence remains intact. Inventory, strict NO-GO and six checker tests agree with 110 PASS / 34 UNRUN. The reviewer confirmed the documented Child marker, pre-acquisition epoch, Host TTL and Store-reopen limits and did not rerun tests or certify overall GO.
