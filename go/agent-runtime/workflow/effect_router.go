@@ -58,14 +58,25 @@ type LocalAgentTaskOwner interface {
 	VerifyAgentTaskOrigin(Effect, kernel.Snapshot) bool
 }
 
+// LocalAgentTaskApprovalCancellationOwner is a strictly scoped Host
+// attestation: every physical approval for this AgentTask must be admitted
+// through Harness's original-Store per-child dispatch grant and compete
+// atomically with Harness's cancellation intent. It does NOT certify arbitrary
+// running Model/Tool/middleware effects and cannot replace Kernel CAS.
+// Routes without this opt-in remain fail closed for Host-prepared Agents.
+type LocalAgentTaskApprovalCancellationOwner interface {
+	FencesAgentTaskApprovalThroughHarness() bool
+}
+
 // StaticEffectRouter contains an immutable, duplicate-free class route table.
 type StaticEffectRouter struct {
 	routes     map[EffectClass]EffectExecutor
 	authorizer EffectAuthorizer
 	// Capture once at composition; mutable executor fields cannot replace
 	// either original authority after a child has been dispatched.
-	agentTaskOriginal *agent.Runner
-	agentTaskRecorder runrelation.Recorder
+	agentTaskOriginal       *agent.Runner
+	agentTaskRecorder       runrelation.Recorder
+	agentTaskApprovalFenced bool
 }
 
 // NewStaticEffectRouter constructs a closed effect composition root.
@@ -89,6 +100,9 @@ func NewStaticEffectRouter(authorizer EffectAuthorizer, routes ...EffectRoute) (
 			if owner, ok := route.Executor.(LocalAgentTaskOwner); ok {
 				router.agentTaskOriginal = owner.LocalAgentTaskRunner()
 				router.agentTaskRecorder = owner.LocalAgentTaskRecorder()
+				if fence, ok := route.Executor.(LocalAgentTaskApprovalCancellationOwner); ok {
+					router.agentTaskApprovalFenced = fence.FencesAgentTaskApprovalThroughHarness()
+				}
 			}
 		}
 	}
@@ -109,6 +123,17 @@ func (router *StaticEffectRouter) localAgentTaskOwner(recorder runrelation.Recor
 		return nil
 	}
 	return owner
+}
+
+// localAgentTaskWaitingCancellationFenced rechecks the original captured
+// control authority. A later mutable Host field cannot grant this opt-in.
+func (router *StaticEffectRouter) localAgentTaskWaitingCancellationFenced(recorder runrelation.Recorder) bool {
+	owner := router.localAgentTaskOwner(recorder)
+	if owner == nil || !router.agentTaskApprovalFenced {
+		return false
+	}
+	fence, ok := owner.(LocalAgentTaskApprovalCancellationOwner)
+	return ok && fence.FencesAgentTaskApprovalThroughHarness()
 }
 
 // Execute authorizes and dispatches without dynamic service discovery.

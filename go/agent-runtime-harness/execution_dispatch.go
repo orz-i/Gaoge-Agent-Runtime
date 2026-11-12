@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -301,11 +302,55 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 	if physical == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
+	return runner.withPhysicalInvocationDispatchForContext(ctx, invocation, phase, resultRunID,
+		nil, func(context.Context) (kernel.Snapshot, error) { return physical() })
+}
+
+// An AgentTask approval carries a private per-call proof only AFTER the
+// Store has admitted its original-Invocation Grant. The checkpoint identity
+// is scoped to the exact revision; a process-local Context cannot substitute
+// for a new physical dispatch after a later approval checkpoint is created.
+func (runner *Runner) withPhysicalSubtaskApprovalDispatch(
+	ctx context.Context, invocation Invocation, childRunID string,
+	childRevision uint64, checkpointID string,
+	physical func(context.Context) (kernel.Snapshot, error),
+) (kernel.Snapshot, error) {
+	if childRevision == 0 || strings.TrimSpace(checkpointID) == "" {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	return runner.withPhysicalInvocationDispatchForContext(
+		ctx, invocation, "resolve-subtask-approval", childRunID,
+		&subtaskApprovalDispatchScope{
+			ChildRunID: childRunID, CheckpointID: checkpointID, Revision: childRevision,
+		}, physical)
+}
+
+func (runner *Runner) withPhysicalInvocationDispatchForContext(
+	ctx context.Context, invocation Invocation, phase, resultRunID string,
+	scope *subtaskApprovalDispatchScope,
+	physical func(context.Context) (kernel.Snapshot, error),
+) (kernel.Snapshot, error) {
+	if physical == nil || (scope != nil && phase != "resolve-subtask-approval") {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
 	grant, err := runner.beginPhysicalInvocationDispatch(ctx, invocation, phase, resultRunID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	snapshot, physicalErr := physical()
+	physicalCtx := ctx
+	if scope != nil {
+		bound := *scope
+		bound.GrantID = grant.ID
+		bound.active = new(atomic.Bool)
+		bound.active.Store(true)
+		// Middleware may retain Context for later asynchronous work. Expire
+		// this grant capability when the exact physical callback returns or
+		// panics; a retained Context cannot authorize a later approval without
+		// a fresh durable Harness admission.
+		defer bound.active.Store(false)
+		physicalCtx = context.WithValue(ctx, subtaskApprovalDispatchContextKey{}, bound)
+	}
+	snapshot, physicalErr := physical(physicalCtx)
 	if snapshot.Run.ID == "" {
 		// An arbitrary Feature may have dispatched remote side effects
 		// before returning a generic error, including a Kernel CAS conflict.

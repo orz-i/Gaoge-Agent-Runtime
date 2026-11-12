@@ -122,7 +122,7 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 	}
 	rawFeatureChild := relationErr == nil && (relation.Kind == runrelation.KindTeamMember ||
 		relation.Kind == runrelation.KindGroupChatSpeaker || relation.Kind == runrelation.KindWorkflowEffect)
-	if rawFeatureChild && control && !runner.localHandoffCancellerOwnsKernel() {
+	if rawFeatureChild && control && !runner.localRelationCancellerOwnsKernel(candidate.Run.Kind) {
 		// A local ChildRunner does not authorize a different physical
 		// Canceller. Reject before any callback, not after its foreign effect.
 		return unverified()

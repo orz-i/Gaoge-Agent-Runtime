@@ -26,9 +26,28 @@ Boundary sequence:
    then checks that its own `RunRelationSource` is the Workflow's exact recorder
    before reading Agent child state.
 5. A physical approval still requires the **same** original Agent pointer,
-   checkpoint ID, frozen Turn admission and physical dispatch Grant. A
-   physical Cancel additionally requires the independent Agent Kernel
-   cancellation fence and cancellation/dispatch arbitration.
+   checkpoint ID, frozen Turn admission and physical dispatch Grant. The Host's
+   first Workflow-child Run middleware verifies the private, per-call
+   `VerifiedSubtaskApprovalDispatch` context after the Harness persisted the
+   original Grant. The transient capability is atomically invalidated after
+   the original physical callback returns, including abnormal unwinding:
+   a Context retained by middleware cannot replay the original checkpoint.
+   Direct `Agent.ResolveApproval` cannot substitute for Harness.
+6. Physical Cancel with an ordinary native Agent still requires the Agent
+   Kernel-owned cancellation fence. A Host-prepared Agent's opt-in is strictly
+   limited to `QuiescentApprovalCancellation`: one pending Tool checkpoint
+   with a valid immutable binding, no unfinished Model/Tool dispatch and an
+   original static executor that certifies all approval admission through the
+   same Harness Store. Cancellation of Running or uncertain Host effects fails
+   before minting a new cancellation intent. The Kernel's original revision
+   CAS and Harness's Dispatch Grant/cancel-intent arbitration remain mandatory.
+7. An already terminal original child is read only for idempotent
+   settlement; its committed Run status cannot execute a second Cancel.
+   A Completed child without a valid result fails closed.
+8. A mixed Host Canceller can attest only the local Agent RunKind bound to its
+   exact Kernel. A2A, foreign/missing Runners and other RunKinds stay remote
+   or unverified. Post-write errors (including a misleading ErrConflict) are
+   outcome-unknown, never a no-effect certificate.
 
 ## Positive and adversarial coverage
 
@@ -44,8 +63,24 @@ Boundary sequence:
   stale/replayed checkpoint, Tool executes once on Resume, Workflow finishes.
 - Harness refuses approvals from a same-values alternate relation registry.
 - Native child `CancelSubtask` requires a valid physical owner; pending
-  approval Grant blocks concurrent per-child cancellation. Host callback
-  Runners without a Kernel execution fence remain read-only for cancellation.
+  approval Grant blocks concurrent per-child cancellation. A Host with
+  Run/Model/Tool middleware can cancel only before approval when it
+  owns the original per-child physical admission fence. Subsequent Running
+  approval/Tool dispatch is not a blanket cancellation grant.
+- Exact Agent state matrix rejects corrupted checkpoint, wrong call, unknown
+  Model/Tool dispatch, earlier/later checkpoint, terminal state and cross-Kernel.
+- Parent EffectCompleted requires child RunStatusCompleted, original ReceiptID
+  and semantically matching JSON Output; mismatched/foreign child denied.
+- AgentTask-only Workflow does not depend on the separate nested DefinitionRegistry.
+- 40 concurrent cancellation/approval races verify at most one physical
+  admission; a read-only denial leaves the waiting approval actionable.
+  Retained middleware Context is invalid after its exact callback ends.
+  Repeated cancel after successful native/Host cancellation reconciles the
+  terminal state without re-dispatch or an unknown intent.
+- Real Gaoge Hosted fixture (with its Context, Model/Tool and Budget middleware)
+  demonstrates approval, safe preapproval child/root cancellation, direct
+  approval rejection, no foreign-A2A local ownership, and post-commit ACK loss
+  never reclassified as no-effect.
 - Historical Subworkflow child proof is exercised independently, unchanged.
 
 Tests:
@@ -53,6 +88,11 @@ Tests:
 `go -C go/agent-runtime-harness test . -run Issue107`.
 Both affected modules have also passed race-enabled package suites locally.
 Full-cohort source and required CI gates must run on the eventual exact PR Head.
+A non-default Host Canceller must implement `LocalKernelRunKindCanceller`
+only when its Cancel implementation actually delegates that RunKind to the
+same Kernel; this is a strict contract, not a permission inferred by SDK.
+The Host must not accept direct Agent approval before the first middleware
+has checked the Harness-minted physical Dispatch context.
 
 ## Host integration and outstanding gates
 

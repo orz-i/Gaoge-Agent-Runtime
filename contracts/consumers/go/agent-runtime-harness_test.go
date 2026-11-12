@@ -6,6 +6,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // This deliberately spells out the host persistence port instead of embedding
@@ -43,7 +44,15 @@ type harnessStoreContract interface {
 	ListItems(context.Context, string, uint64, int) ([]harness.Item, error)
 }
 
+type localKernelRunKindCancellerContract interface {
+	Cancel(context.Context, string, uint64, string) (kernel.Snapshot, error)
+	OwnsKernelRunKind(*kernel.Runtime, kernel.RunKind) bool
+}
+
 var (
+	_ harness.LocalKernelRunKindCanceller                                                    = (localKernelRunKindCancellerContract)(nil)
+	_ localKernelRunKindCancellerContract                                                    = (harness.LocalKernelRunKindCanceller)(nil)
+	_ func(context.Context, string, uint64, string) bool                                     = harness.VerifiedSubtaskApprovalDispatch
 	_ harness.Store                                                                          = (harnessStoreContract)(nil)
 	_ harnessStoreContract                                                                   = (harness.Store)(nil)
 	_ harness.Store                                                                          = (*harness.MemoryStore)(nil)

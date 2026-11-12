@@ -12,7 +12,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   projecting AgentTask approval. Original approval route, cancellation and
   per-child dispatch grants remain independently fenced; custom/remote and
   unverified Effect routes fail closed. No schema migration or compatibility
-  bridge; see `docs/audits/2026-11-11-issue107-workflow-agenttask-ownership.md`.
+  bridge. Independent audit P1/P2 follow-up further constrains physical
+  cancellation of Host-prepared children to exact pending Tool approval,
+  restores actionability after a proven pre-cancel rejection, rejects
+  inconsistent parent-completed/child-waiting receipts, and removes
+  unrelated AgentTask DefinitionRegistry coupling. The same Turn Store
+  serializes cancellation with physical approval Dispatch Grants; the Host
+  validates the unforgeable per-call approval context before middleware.
+  A RunKind-specific local Kernel Canceller cannot borrow A2A/remote
+  authority. See `docs/audits/2026-11-11-issue107-workflow-agenttask-ownership.md`.
 
 - Add public tenant-scoped PostgreSQL Run/event metadata and Harness Turn
   configuration queries. Actor erasure and event pruning remain separately

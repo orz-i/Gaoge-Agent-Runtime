@@ -72,9 +72,16 @@ type workflowAgentTaskOwnerContract interface {
 	VerifyAgentTaskOrigin(workflow.Effect, kernel.Snapshot) bool
 }
 
+type workflowAgentTaskApprovalCancellationContract interface {
+	FencesAgentTaskApprovalThroughHarness() bool
+}
+
 var (
 	_ workflow.LocalAgentTaskOwner                                                                               = (workflowAgentTaskOwnerContract)(nil)
 	_ workflowAgentTaskOwnerContract                                                                             = (workflow.LocalAgentTaskOwner)(nil)
+	_ workflow.LocalAgentTaskApprovalCancellationOwner                                                           = (workflowAgentTaskApprovalCancellationContract)(nil)
+	_ workflowAgentTaskApprovalCancellationContract                                                              = (workflow.LocalAgentTaskApprovalCancellationOwner)(nil)
+	_ func(*agent.Runner, *kernel.Runtime, kernel.Snapshot) bool                                                 = (*agent.Runner).QuiescentApprovalCancellation
 	_ func(*workflow.Runner, *kernel.Runtime, *agent.Runner) bool                                                = (*workflow.Runner).UsesLocalAgentRunner
 	_ func(*workflow.Runner, *kernel.Runtime, kernel.Snapshot, runrelation.Relation, kernel.Snapshot, bool) bool = (*workflow.Runner).VerifyLocalChild
 )

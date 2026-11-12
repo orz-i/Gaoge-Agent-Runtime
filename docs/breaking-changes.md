@@ -16,11 +16,37 @@ one explicit AgentTask Definition node, one matching Activation/Effect, one
 current Attempt and the exact deterministic child Run ID, RequestID,
 Actor/tenant/thread and relation owner. A custom/dynamic executor, a foreign
 recorder/Kernel, stale Attempt, remote Run or unverified origin fails closed.
-Physical child cancellation additionally requires the original Agent's
-`OwnsKernelRuntime` fence; Host middleware does not gain cancellation
-authority through mere pointer equality.
+Physical child cancellation normally requires the original Agent's
+`OwnsKernelRuntime` fence. A Host-prepared Agent with middleware may opt in
+only for a **quiescent, exact pending Tool approval**, not for a Running,
+completed or unknown external effect: the Agent's new
+`QuiescentApprovalCancellation` checks committed checkpoint binding and the
+absence of unresolved Tool/Model dispatch, while the original static Host
+executor must additionally implement
+`LocalAgentTaskApprovalCancellationOwner.FencesAgentTaskApprovalThroughHarness`.
+Harness then serializes cancellation against the original Turn's physical
+approval Dispatch Grant; the Host's first Run middleware must check
+`VerifiedSubtaskApprovalDispatch` before any approval effects, disallowing
+direct `Agent.ResolveApproval` entry. The transient private grant is
+deactivated after the physical callback returns; saved middleware Context
+cannot authorize later replay. A missing opt-in or non-quiescent
+child fails before recording a new cancellation intent, retaining an
+actionable checkpoint rather than stranding the Turn. An already terminal,
+immutably verified child is read for idempotent cancellation settlement
+without invoking another physical Cancel; a malformed Completed result
+fails closed. Parent EffectCompleted
+must have a child Completed with the same receipt ID and normalized JSON
+output; a finished parent with a waiting child cannot grant control.
+AgentTask-only Workflow does not require a Subworkflow DefinitionRegistry.
 
 The Harness `RunRelationSource` must be the original Workflow recorder,
+and mixed Host cancellers may use the new narrowly scoped
+`LocalKernelRunKindCanceller.OwnsKernelRunKind` only for native Agent Kind
+in the same exact Kernel. This does not authorize remote A2A, Team Handoff,
+other Run kinds or generic Host callbacks. Unknown post-write cancellation
+outcomes remain fenced and cannot be reclassified as no-effect from a raw
+Store `ErrConflict`. No blanket `OwnsKernelRuntime` relaxation was made.
+
 not a copied index with coincidentally equal child IDs. No prior remote or
 custom Effect can become local through this new opt-in. The existing native
 Subworkflow proof, Tool approval CAS, per-child physical dispatch fences,

@@ -36,13 +36,17 @@ func (m *issue107Model) Generate(_ context.Context, _ model.Request) (model.Resp
 }
 
 type issue107AgentEffect struct {
-	original  *agent.Runner
-	relations *runrelation.Registry
+	original       *agent.Runner
+	relations      *runrelation.Registry
+	approvalFenced bool
 }
 
 func (e *issue107AgentEffect) LocalAgentTaskRunner() *agent.Runner { return e.original }
 func (e *issue107AgentEffect) LocalAgentTaskRecorder() runrelation.Recorder {
 	return e.relations
+}
+func (e *issue107AgentEffect) FencesAgentTaskApprovalThroughHarness() bool {
+	return e.approvalFenced
 }
 func (e *issue107AgentEffect) VerifyAgentTaskOrigin(effect workflow.Effect, child kernel.Snapshot) bool {
 	var input struct {
@@ -100,20 +104,42 @@ func (e *issue107AgentEffect) Execute(ctx context.Context, request workflow.Effe
 }
 
 type issue107HarnessFixture struct {
-	runtime   *kernel.Runtime
-	store     *harness.MemoryStore
-	agent     *agent.Runner
-	workflow  *workflow.Runner
-	harness   *harness.Runner
-	relations *runrelation.Registry
-	model     *issue107Model
-	toolCalls int
-	request   harness.WorkflowTurnRequest
-	executor  *issue107AgentEffect
+	savedApprovalCtx      context.Context
+	observedApprovalGrant bool
+	runtime               *kernel.Runtime
+	store                 *harness.MemoryStore
+	agent                 *agent.Runner
+	workflow              *workflow.Runner
+	harness               *harness.Runner
+	relations             *runrelation.Registry
+	model                 *issue107Model
+	toolCalls             int
+	request               harness.WorkflowTurnRequest
+	executor              *issue107AgentEffect
 }
 
-func newIssue107HarnessFixture(t *testing.T) *issue107HarnessFixture {
+type issue107ApprovalContextCapture struct {
+	fixture *issue107HarnessFixture
+}
+
+func (issue107ApprovalContextCapture) Name() string { return "issue107.approval_context_capture" }
+func (c issue107ApprovalContextCapture) Run(ctx context.Context, invocation plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+	if invocation.Operation == plugin.RunResolveApproval {
+		c.fixture.savedApprovalCtx = ctx
+		child, err := c.fixture.runtime.Load(ctx, invocation.RunID)
+		if err == nil && child.Checkpoint != nil {
+			c.fixture.observedApprovalGrant = harness.VerifiedSubtaskApprovalDispatch(ctx, invocation.RunID,
+				child.Run.Revision, child.Checkpoint.ID)
+		}
+	}
+	return next(ctx)
+}
+
+func newIssue107HarnessFixture(t *testing.T, options ...bool) *issue107HarnessFixture {
 	t.Helper()
+	hosted := len(options) > 0 && options[0]
+	fenced := len(options) > 1 && options[1]
+	capture := len(options) > 2 && options[2]
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
@@ -146,16 +172,25 @@ func newIssue107HarnessFixture(t *testing.T) *issue107HarnessFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.agent, err = agent.NewRunner(agent.Dependencies{
+	dependencies := agent.Dependencies{
 		Runtime: runtime, Model: f.model, Catalog: registry, Executor: registry,
 		Approvals:        interactionadapter.New(interactionService),
 		ApprovalPolicies: []plugin.ApprovalPolicy{policy},
 		DeferResumption:  true,
-	})
+	}
+	if hosted {
+		dependencies.PrepareModelRequest = func(_ context.Context, request model.Request) (model.Request, error) {
+			return request, nil
+		}
+	}
+	if capture {
+		dependencies.RunMiddleware = []plugin.RunMiddleware{issue107ApprovalContextCapture{fixture: f}}
+	}
+	f.agent, err = agent.NewRunner(dependencies)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.executor = &issue107AgentEffect{original: f.agent, relations: relations}
+	f.executor = &issue107AgentEffect{original: f.agent, relations: relations, approvalFenced: fenced}
 	static, err := workflow.NewStaticEffectRouter(nil, workflow.EffectRoute{
 		Class: workflow.EffectClassAgent, Executor: f.executor,
 	})
