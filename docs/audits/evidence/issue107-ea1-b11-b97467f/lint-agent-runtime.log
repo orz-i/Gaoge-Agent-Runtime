@@ -1,0 +1,29 @@
+SOURCE_SHA=b97467f52afaf877167d5d8c7deae8ec629d9c98
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+go/agent-runtime/agent/root_capability_wrappers_test.go:4:1: File is not properly formatted (goimports)
+	"context"
+^
+go/agent-runtime/agent/root_deferred_cleanup.go:5:1: File is not properly formatted (goimports)
+	"errors"
+^
+go/agent-runtime/agent/agent.go:927:3: ineffectual assignment to expectedRevision (ineffassign)
+		expectedRevision = snapshot.Run.Revision
+		^
+go/agent-runtime/agent/model_invocation_discovery_revocation_test.go:88:4: ineffectual assignment to pending (ineffassign)
+			pending, err := runner.StartRun(t.Context(), start)
+			^
+go/agent-runtime/agent/model_invocation_discovery_revocation_test.go:128:2: ineffectual assignment to pending (ineffassign)
+	pending, err := runner.StartRun(t.Context(), start)
+	^
+go/agent-runtime/agent/model_invocation_discovery_revocation_test.go:174:2: ineffectual assignment to pending (ineffassign)
+	pending, err := runner.StartRun(t.Context(), start)
+	^
+go/agent-runtime/agent/model_retry_eligibility_test.go:20:6: func newModelRunnerAfterRetryDue is unused (unused)
+func newModelRunnerAfterRetryDue(t *testing.T, pending kernel.Snapshot, deps agent.Dependencies) *agent.Runner {
+     ^
+7 issues:
+* goimports: 2
+* ineffassign: 4
+* unused: 1
+
+EXIT_CODE=1

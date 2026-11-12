@@ -1,0 +1,9 @@
+SOURCE_SHA=b97467f52afaf877167d5d8c7deae8ec629d9c98
+COMMAND=cd go/agent-runtime-sqlite && golangci-lint run ./...
+go/agent-runtime-sqlite/execution.go:71:50: QF1001: could apply De Morgan's law (staticcheck)
+	if status != string(kernel.RunStatusRunning) && !(epoch != 0 && kind == "agent" && status == string(kernel.RunStatusWaitingInput)) {
+	                                                ^
+1 issues:
+* staticcheck: 1
+
+EXIT_CODE=1

@@ -1,0 +1,53 @@
+SOURCE_SHA=b97467f52afaf877167d5d8c7deae8ec629d9c98
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 -timeout=180s ./...
+--- FAIL: TestFencedAgentBatchApprovalAcrossThreeProcesses (4.71s)
+    --- FAIL: TestFencedAgentBatchApprovalAcrossThreeProcesses/approve (2.33s)
+        approval_control_process_test.go:289: phase=second decision=approve subprocess error=exit status 1 output=--- FAIL: TestFencedApprovalProcessChild (0.01s)
+                approval_control_process_test.go:192: fenced second decision=approve status=waiting_input err=kernel execution lease is not current
+            FAIL
+    --- FAIL: TestFencedAgentBatchApprovalAcrossThreeProcesses/reject (2.39s)
+        approval_control_process_test.go:289: phase=second decision=reject subprocess error=exit status 1 output=--- FAIL: TestFencedApprovalProcessChild (0.02s)
+                approval_control_process_test.go:192: fenced second decision=approve status=waiting_input err=kernel execution lease is not current
+            FAIL
+--- FAIL: TestFencedApprovalAutoDefersUntilNewClaim (2.30s)
+    approval_control_process_test.go:332: phase=second decision=approve subprocess error=exit status 1 output=--- FAIL: TestFencedApprovalProcessChild (0.01s)
+            approval_control_process_test.go:192: fenced second decision=approve status=waiting_input err=kernel execution lease is not current
+        FAIL
+--- FAIL: TestVerifiedApprovalRollbackRetainsEpochAndWait (0.11s)
+    approval_control_rollback_test.go:76: failed approval revoked original lease: kernel execution lease is not current
+--- FAIL: TestUnboundFencedResumeDoesNotExecuteToolBeforeCAS (0.13s)
+    execution_dispatch_guard_test.go:66: unbound Resume not rejected BEFORE effects: <nil>
+--- FAIL: TestNativeExternalReadySignalAcrossProcesses (4.40s)
+    native_external_signal_process_test.go:258: native external phase reconcile: exit status 1 output=--- FAIL: TestNativeExternalSignalChild (0.03s)
+            native_external_signal_process_test.go:250: verified external result didn't complete: {ID:native-external Kind:agent Actor:{TenantID:profile ActorID:a} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:pending externally Status:running Revision:9 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 18:53:41.713404 +0000 UTC UpdatedAt:2026-11-12 18:53:42.824155 +0000 UTC} agent external tool result is uncertain
+                invalid kernel input
+        FAIL
+--- FAIL: TestNativeEarlyExternalSignalRedeliveredAcrossProcesses (4.40s)
+    native_external_signal_process_test.go:262: native external phase reconcile: exit status 1 output=--- FAIL: TestNativeExternalSignalChild (0.03s)
+            native_external_signal_process_test.go:250: verified external result didn't complete: {ID:native-external Kind:agent Actor:{TenantID:profile ActorID:a} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:pending externally Status:running Revision:9 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 18:53:46.117898 +0000 UTC UpdatedAt:2026-11-12 18:53:47.241618 +0000 UTC} agent external tool result is uncertain
+                invalid kernel input
+        FAIL
+--- FAIL: TestLegacyRunCannotJoinNativeExecutionDuringTool (0.13s)
+    native_run_execution_process_test.go:417: AUDIT MIXED legacy epoch0 Tool already in flight; native claim accepted=false status= physical_effects=1 stale_legacy_error=<nil>
+    native_run_execution_process_test.go:423: legacy Run was upgraded into concurrent native execution: effects=1 stale=kernel run revision conflict fresh=agent external tool result is uncertain storeClaim=kernel descendant has an unsettled physical execution Grant legacy=<nil>
+--- FAIL: TestNativeUnknownToolReconcilesAcrossProcessesWithoutReplay (3.32s)
+    native_tool_outcome_process_test.go:194: unknown-result phase "reconcile": exit status 1 output=--- FAIL: TestNativeUnknownToolChild (0.03s)
+            native_tool_outcome_process_test.go:159: known external receipt could not be persisted: {ID:native-unknown Kind:agent Actor:{TenantID:p ActorID:a} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:external receipt uncertain Status:running Revision:8 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 18:54:07.209875 +0000 UTC UpdatedAt:2026-11-12 18:54:10.431035 +0000 UTC} invalid kernel input
+        FAIL
+--- FAIL: TestAgentCrashAndResumeInNewProcess (1.53s)
+    --- FAIL: TestAgentCrashAndResumeInNewProcess/after-model-receipt (0.15s)
+        recovery_test.go:223: phase=resume err=exit status 1 output=--- FAIL: TestAgentCrashSubprocess (0.02s)
+                recovery_test.go:160: resume={ID:crash-agent Kind:agent Actor:{TenantID:local ActorID:profile-1} Thread:{Kind:conversation ID:thread} RequestID: ParentRunID: Goal:complete durable work Status:running Revision:5 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 18:54:11.859554 +0000 UTC UpdatedAt:2026-11-12 18:54:11.882752 +0000 UTC} err=agent original root callback result is uncertain
+                    kernel execution lease is not current
+            FAIL
+    --- FAIL: TestAgentCrashAndResumeInNewProcess/after-tool-receipt (0.19s)
+        recovery_test.go:223: phase=resume err=exit status 1 output=--- FAIL: TestAgentCrashSubprocess (0.01s)
+                recovery_test.go:160: resume={ID:crash-agent Kind:agent Actor:{TenantID:local ActorID:profile-1} Thread:{Kind:conversation ID:thread} RequestID: ParentRunID: Goal:complete durable work Status:running Revision:8 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-11-12 18:54:12.024979 +0000 UTC UpdatedAt:2026-11-12 18:54:12.063496 +0000 UTC} err=agent original root callback result is uncertain
+                    kernel execution lease is not current
+            FAIL
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	78.642s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.873s
+FAIL
+
+EXIT_CODE=1
