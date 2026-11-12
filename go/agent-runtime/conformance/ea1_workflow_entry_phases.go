@@ -121,7 +121,7 @@ func RunEA1WorkflowResumeCompensationP3(t *testing.T, factory func(*testing.T) k
 					t.Fatalf("expected two original dispatch identities: %d", len(requests))
 				}
 				for _, req := range requests {
-					if req.RunID != before.Run.ID || req.Actor != actor || req.Thread != thread || req.DefinitionID != definition.ID || req.DefinitionHash == "" || req.Attempt != 1 {
+					if req.RunID != before.Run.ID || req.Actor != actor || req.Thread != thread || req.DefinitionID != definition.ID || req.DefinitionHash != definition.Hash || req.Attempt != 1 {
 						t.Fatalf("foreign original request: %+v", req)
 					}
 					found := 0
@@ -270,8 +270,8 @@ func RunEA1RootWaitP0AcrossStores(t *testing.T, backing, peer kernel.Store) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = runner.ResolveWait(t.Context(), invalid.Run.ID, invalid.Run.Revision, json.RawMessage("{}")); !errors.Is(e, workflow.ErrInvalidExecution) {
-		t.Fatalf("unbound Workflow origin accepted: %v", e)
+	if _, e = runner.ResolveWait(t.Context(), invalid.Run.ID, invalid.Run.Revision, json.RawMessage("{}")); !errors.Is(e, workflow.ErrWaitPending) {
+		t.Fatalf("Run without original pending Wait was accepted: %v", e)
 	}
 	preflight, e := rt.Load(t.Context(), original.Run.ID)
 	if e != nil || preflight.Run.Revision != original.Run.Revision || !bytes.Equal(preflight.State, original.State) || effect.calls.Load() != 0 {
