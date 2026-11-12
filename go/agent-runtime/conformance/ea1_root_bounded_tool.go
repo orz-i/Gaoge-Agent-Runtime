@@ -32,11 +32,6 @@ func ea1RootBoundedTool(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			observer := ea1StartRuntime(t, peer)
 			request := ea1AdmissionRequest()
 			request.ToolKeys = []string{"effect"}
-			frozenBytes, marshalErr := json.Marshal(request)
-			if marshalErr != nil {
-				t.Fatal(marshalErr)
-			}
-			request.OriginFingerprint = agent.FrozenOriginFingerprint(frozenBytes)
 			physical := &ea1UnknownAgentPhysical{tool: true, rt: observer}
 			registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "effect", Name: "Effect", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
 				if req.RunID != request.ID || req.Call.ID != "original-tool-call" || string(req.Call.Arguments) != `{"source":"original"}` {
@@ -189,8 +184,13 @@ func ea1BoundedToolOrigin(t *testing.T, before, after kernel.Snapshot, request a
 		}
 	}
 	var fingerprint string
-	if err := json.Unmarshal(final["originFingerprint"], &fingerprint); err != nil || fingerprint != request.OriginFingerprint || fingerprint == "" {
-		t.Fatal("original request fingerprint missing")
+	if raw := final["originFingerprint"]; len(raw) != 0 {
+		if err := json.Unmarshal(raw, &fingerprint); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if fingerprint != request.OriginFingerprint || fingerprint != "" {
+		t.Fatal("Root acquired a child-only origin fingerprint")
 	}
 	var initialBudget, finalBudget map[string]json.RawMessage
 	if err := json.Unmarshal(initial["budget"], &initialBudget); err != nil {
