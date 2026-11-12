@@ -1,0 +1,99 @@
+SOURCE_SHA=8778ae96be8f6d3fe57fe0b15f67b2aa5adc1049
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1ChildAgent(StartPhases|RecoveryPhases)' -v
+=== RUN   TestEA1ChildAgentRecoveryPhasesGORM
+=== RUN   TestEA1ChildAgentRecoveryPhasesGORM/P1/active-callback-before-and-after-Next
+=== RUN   TestEA1ChildAgentRecoveryPhasesGORM/P3/unmarked-model-yield
+=== RUN   TestEA1ChildAgentRecoveryPhasesGORM/P3/marked-model-yield
+=== RUN   TestEA1ChildAgentRecoveryPhasesGORM/P3/unmarked-terminal-tool
+=== RUN   TestEA1ChildAgentRecoveryPhasesGORM/P3/marked-terminal-tool
+=== RUN   TestEA1ChildAgentRecoveryPhasesGORM/P5/two-reconcilers-parent-cancel
+=== RUN   TestEA1ChildAgentRecoveryPhasesGORM/P5/two-reconcilers-ancestor-deadline
+--- PASS: TestEA1ChildAgentRecoveryPhasesGORM (3.40s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesGORM/P1/active-callback-before-and-after-Next (0.08s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesGORM/P3/unmarked-model-yield (0.05s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesGORM/P3/marked-model-yield (0.04s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesGORM/P3/unmarked-terminal-tool (0.08s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesGORM/P3/marked-terminal-tool (0.05s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesGORM/P5/two-reconcilers-parent-cancel (0.05s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesGORM/P5/two-reconcilers-ancestor-deadline (3.06s)
+=== RUN   TestEA1ChildAgentStartPhasesGORM
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P0/origin
+
+2026/11/13 07:19:13 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.075ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "actual-start-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P0/actor
+
+2026/11/13 07:19:13 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.062ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "actual-start-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P0/thread
+
+2026/11/13 07:19:13 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.053ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "actual-start-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P0/missing-parent
+
+2026/11/13 07:19:13 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:36 [35;1mrecord not found
+[0m[33m[0.066ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 07:19:13 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.062ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "actual-start-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P0/terminal-parent
+
+2026/11/13 07:19:13 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.061ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "actual-start-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P0/preflight
+
+2026/11/13 07:19:13 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "actual-start-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P0/duplicate
+
+2026/11/13 07:19:13 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.115ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("actual-start-child","original-child-effect","middle","agent","tenant","owner","conversation","thread","original Child Start","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""originFingerprint"":""5f1a775cb9e60f324a6f3fd5cf5967b72c31c90a5894ac962c4d468d82a4adc6"",""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve child source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original Child Start""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:19:13.599","2026-11-12 23:19:13.599")
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P0/stale-admission
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P0/parent-wins
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P1/host-before-next
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P2/host
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P2/model
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P2/tool
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P3/model
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P3/tool
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P5/host
+
+2026/11/13 07:19:18 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.133ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("actual-start-child","original-child-effect","middle","agent","tenant","owner","conversation","thread","original Child Start","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""originFingerprint"":""5f1a775cb9e60f324a6f3fd5cf5967b72c31c90a5894ac962c4d468d82a4adc6"",""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve child source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original Child Start""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:19:18.204","2026-11-12 23:19:18.204")
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P5/model
+
+2026/11/13 07:19:18 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.275ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("actual-start-child","original-child-effect","middle","agent","tenant","owner","conversation","thread","original Child Start","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""originFingerprint"":""5f1a775cb9e60f324a6f3fd5cf5967b72c31c90a5894ac962c4d468d82a4adc6"",""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve child source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original Child Start""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:19:18.278","2026-11-12 23:19:18.278")
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P5/tool
+
+2026/11/13 07:19:18 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.209ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("actual-start-child","original-child-effect","middle","agent","tenant","owner","conversation","thread","original Child Start","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""originFingerprint"":""5f1a775cb9e60f324a6f3fd5cf5967b72c31c90a5894ac962c4d468d82a4adc6"",""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve child source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original Child Start""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[""effect""],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:19:18.337","2026-11-12 23:19:18.337")
+=== RUN   TestEA1ChildAgentStartPhasesGORM/P5/deadline
+
+2026/11/13 07:19:18 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.255ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("actual-start-child","original-child-effect","middle","agent","tenant","owner","conversation","thread","original Child Start","running",1,1,"","",NULL,0,0,"","","","2026-11-12 23:19:19.37",NULL,"{""originFingerprint"":""5f1a775cb9e60f324a6f3fd5cf5967b72c31c90a5894ac962c4d468d82a4adc6"",""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve child source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original Child Start""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:19:18.394","2026-11-12 23:19:18.394")
+--- PASS: TestEA1ChildAgentStartPhasesGORM (5.89s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P0/origin (0.01s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P0/actor (0.02s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P0/thread (0.01s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P0/missing-parent (0.01s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P0/terminal-parent (0.02s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P0/preflight (0.01s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P0/duplicate (0.02s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P0/stale-admission (0.02s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P0/parent-wins (0.01s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P1/host-before-next (0.03s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P2/host (0.02s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P2/model (2.17s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P2/tool (2.17s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P3/model (0.07s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P3/tool (0.09s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P5/host (0.06s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P5/model (0.06s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P5/tool (0.06s)
+    --- PASS: TestEA1ChildAgentStartPhasesGORM/P5/deadline (1.04s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	10.848s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

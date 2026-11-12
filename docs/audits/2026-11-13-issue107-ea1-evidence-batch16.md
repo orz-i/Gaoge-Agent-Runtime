@@ -1,0 +1,31 @@
+# EA-1 B16: fixed Child Agent Start and reconciliation phases
+
+Source: `8778ae96be8f6d3fe57fe0b15f67b2aa5adc1049`. Local-only, test-only batch. Exactly eight previously UNRUN cells are recorded: AC-S P0/P1/P2/P3/P5 and AC-Q P1/P3/P5. Previously passed AC-S P4 and AC-Q P0/P2/P4 are not relabeled or changed. Ledger is now **110 PASS / 34 UNRUN** on historical, distinct source commits; this is not common-source acceptance or overall GO. WP-GAOGE/H-FROZEN and remote PR-head gates remain separate and unexecuted under the no-push/PR/merge instruction.
+
+## Actual entries and complete proof
+
+`RunEA1ChildAgentStartPhases` and `RunEA1ChildAgentRecoveryPhases` exercise actual Child Agent StartRun and ReconcileChildPhysicalGrant beneath a Root Workflow and middle Workflow. The child preserves original nonempty parent and origin fingerprint, Actor/Thread, request tuple, attempt, provider/tool binding and budget. Frozen source is verified at actual Create, not by reconstructing a legally pruned consumed Model request. Actual Generate captures the complete request/catalog/provider/binding tuple for hash verification; durable full Response and terminal Tool result are compared to actual returned values.
+
+Start P0 checks invalid source, actor/thread/parent, preflight rejection, duplicate, stale child admission and parent cancellation winning before admission. A failed admission may leave its legitimately created child; assertions preserve that real contract rather than pretending NotFound. Complete retained snapshots are compared after duplicate Prepare, successful peer Apply/Release, and the parent-wins race. P1 and P5 exercise competing self and every ancestor Apply/terminal Apply/Cancel around actual Host/Model/Tool callbacks. Original full snapshots, Grant and native authority remain intact after rejection. Explicit ExecutionRequired seeds a native-required epoch at Create, so ordinary unbound self Apply is Required even before native acquisition; this does not claim a live native lease exists at the earlier Host callback.
+
+P2 preserves actual Host/Model/Tool unknown effects across fresh owners and native reopen. Only Model/Tool vectors claim observed native lease expiry; Host-before-Next has child Grant but may have no acquired native lease. Expiry cannot prove no effect, retire the Grant or authorize a repeated physical request. Real public deadline tests distinguish permitted receipt-only observation from new dispatch.
+
+Child settlement is deliberately not implemented or tested as Root recovery. Actual Child Reconcile only observes the original physical settlement and finishes an existing marker; it does not create Mark. Original durable receipt with clean state but active/unmarked callback must reject Busy plus ExecutionConflict. Start P3 pauses before the original callback's real Mark and then lets that same callback finish. Reconciliation P3 separately tests actual Model yield and terminal Tool receipt without Mark, and an original callback that actually marked before an injected Finish fault. Only the latter can retire from a fresh owner.
+
+Reconciliation P1 additionally checks before-Next, after-Next while outer Host is still active, and the actual original Model-intent cut. Reconciliation P5 synchronizes two independent peers at real Finish: one winner and one precise typed loser, no redispatch or fabricated marker. Parent Cancel and already-expired grandparent control remain rejected while the original scope is active, then can legitimately proceed after retirement. Full child/parent/grandparent state, receipts and native lifecycle are retained across those cuts.
+
+Reconcile accepts run ID, not arbitrary caller Actor/route/expected-revision parameters; these nonexpressible vectors are not falsely claimed as caller authentication. The Child Agent entry has no separate Workflow compensation callback or Root shared-budget election. Their separately frozen matrix rows remain obligations, not borrowed evidence or whole-cell N/A.
+
+## Cross-Store evidence and limits
+
+Eight same-source logs under `evidence/issue107-ea1-b16/` contain successful Memory smoke, three module linters, and four directed backend race checks. No selected test skipped. Both real PostgreSQL suites actually ran three times each with independent pools. Memory retains its Store while creating fresh owners; auxiliary GORM SQLite uses a shared DB and fresh wrapper, not an independent PostgreSQL proof. Native SQLite closes original and peer handles before OpenExisting; it is a real reopen, not a claimed OS process kill. Model/Tool native TTL uses actual Store time, not private SQL mutation or a fabricated Agent clock authority.
+
+No production code changed. This batch deliberately does not repeat full module race checks for test-only additions. Latest full four-module race evidence remains B14 source `a774e5c`, not this SHA; final common-source complete local gates remain required.
+
+## Preserved failure and bounded review
+
+`evidence/issue107-ea1-b16-initial/` retains source `fc9a3b967b92c908dd2db3fb0556b1c106436de3` Memory smoke failure. All nineteen Start phase subcases passed, but seven reconciliation fixture cases had RunMiddleware without the existing mandatory Child StartControlPreflight and were rejected before Create. This did not demonstrate a production settlement defect. The corrected fixture performs exact original request and complete two-ancestor pure-read validation, verifies one preflight and actual Create, and proves reconciliation does not repeat preflight.
+
+Independent bounded source review also required full rejected-child snapshot comparisons in three Start P0 races; those assertions were added without weakening source or error checks. The reviewer's initial suggestion that pre-acquisition self Apply should be Busy was explicitly withdrawn after checking Create's ExecutionRequired epoch seed; the correct Required assertion was unchanged. Final source review accepted the two-helper delta with no remaining concrete finding. Durable evidence signoff is recorded separately.
+
+Disk available was about 9.3 GiB before and 9.2 GiB during verification. No cache deletion, push, PR, merge, production-data migration or Gaoge edit occurred. Next fixed batch is Child Agent Resume P0 through P5, not another expansion of this batch.
