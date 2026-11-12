@@ -1,0 +1,40 @@
+SOURCE_SHA=3e653a65f7e4595968de489f2941ad761c9cde7d
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1RootAgent(ResumePhases|ResumeSettlement)' -v
+=== RUN   TestEA1RootAgentResumePhasesMemory
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/missing
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/stale
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/terminal
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/admission-revision
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/admission-cancel
+=== RUN   TestEA1RootAgentResumePhasesMemory/P1/admitted-before-dispatch
+=== RUN   TestEA1RootAgentResumePhasesMemory/P2/model
+=== RUN   TestEA1RootAgentResumePhasesMemory/P2/tool
+    ea1_root_agent_resume_phases.go:348: Resume invocation not exact original source hash
+=== RUN   TestEA1RootAgentResumePhasesMemory/P2/host
+--- FAIL: TestEA1RootAgentResumePhasesMemory (4.32s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/missing (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/stale (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/terminal (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/admission-revision (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/admission-cancel (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P1/admitted-before-dispatch (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P2/model (2.15s)
+    --- FAIL: TestEA1RootAgentResumePhasesMemory/P2/tool (0.01s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P2/host (2.15s)
+=== RUN   TestEA1RootAgentResumeSettlementMemory
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P3/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P3/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P4/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P4/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RootAgentResumeSettlementMemory (0.05s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P3/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P3/terminal-tool (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P4/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P4/terminal-tool (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P3/committed-model-receipt-unknown-host (0.01s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	5.099s
+FAIL
+
+EXIT_CODE=1
