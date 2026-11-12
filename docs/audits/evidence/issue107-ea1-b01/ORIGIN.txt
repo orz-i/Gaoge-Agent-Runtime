@@ -1,0 +1,5 @@
+SOURCE_SHA=a6532c705cbe2d2403d3c2522391f1b3b6bd7541
+TEST_BACKENDS=Memory, GORM SQLite adapter, native SQLite v3, isolated real PostgreSQL 16
+CAPTURED_WITH_GO_RACE=yes
+NO_PRODUCTION_TRAFFIC=yes
+NOTE=Existing test outputs only; coverage ledger distinguishes PASS from partial evidence.

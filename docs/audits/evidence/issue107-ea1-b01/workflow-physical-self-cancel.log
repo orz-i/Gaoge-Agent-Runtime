@@ -1,0 +1,5 @@
+=== RUN   TestAuditIssue107ParentedChildSelfCancelBypassesItsOwnPhysicalGrant
+    issue107_seventh_child_self_fence_test.go:78: originalPhysicalGrant=childgrant_1 parentCancelErr=kernel descendant has an unsettled physical execution Grant childCancelErr=kernel descendant has an unsettled physical execution Grant childTerminal= effectCalls=1
+--- PASS: TestAuditIssue107ParentedChildSelfCancelBypassesItsOwnPhysicalGrant (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.713s

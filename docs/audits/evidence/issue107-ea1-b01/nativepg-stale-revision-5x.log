@@ -1,0 +1,18 @@
+=== RUN   TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision
+    issue107_sixth_revision_audit_real_test.go:117: originalCallerRevision=1 currentRevision=2 storeGranted=false grantError=kernel execution lease is not current
+--- PASS: TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision (0.24s)
+=== RUN   TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision
+    issue107_sixth_revision_audit_real_test.go:117: originalCallerRevision=1 currentRevision=2 storeGranted=false grantError=kernel execution lease is not current
+--- PASS: TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision (0.22s)
+=== RUN   TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision
+    issue107_sixth_revision_audit_real_test.go:117: originalCallerRevision=1 currentRevision=2 storeGranted=false grantError=kernel execution lease is not current
+--- PASS: TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision (0.21s)
+=== RUN   TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision
+    issue107_sixth_revision_audit_real_test.go:117: originalCallerRevision=1 currentRevision=2 storeGranted=false grantError=kernel execution lease is not current
+--- PASS: TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision (0.19s)
+=== RUN   TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision
+    issue107_sixth_revision_audit_real_test.go:117: originalCallerRevision=1 currentRevision=2 storeGranted=false grantError=kernel execution lease is not current
+--- PASS: TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision (0.20s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	2.516s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

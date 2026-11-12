@@ -1,0 +1,15 @@
+=== RUN   TestToolPolicyTimeoutDoesNotRetryAmbiguousSideEffect
+=== PAUSE TestToolPolicyTimeoutDoesNotRetryAmbiguousSideEffect
+=== RUN   TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles
+--- PASS: TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles (0.00s)
+=== RUN   TestDeferredToolApprovalRequiresExplicitResume
+=== PAUSE TestDeferredToolApprovalRequiresExplicitResume
+=== RUN   TestAuditIssue107RootAgentStartMiddlewareExecutesBeforeFailedCreate
+    issue107_seventh_root_agent_start_test.go:54: rootStatus=running rootRevision=1 CreateRejected=true HostPhysicalEffects=0
+--- PASS: TestAuditIssue107RootAgentStartMiddlewareExecutesBeforeFailedCreate (0.00s)
+=== CONT  TestDeferredToolApprovalRequiresExplicitResume
+=== CONT  TestToolPolicyTimeoutDoesNotRetryAmbiguousSideEffect
+--- PASS: TestDeferredToolApprovalRequiresExplicitResume (0.01s)
+--- PASS: TestToolPolicyTimeoutDoesNotRetryAmbiguousSideEffect (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	1.318s

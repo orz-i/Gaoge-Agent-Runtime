@@ -1,0 +1,31 @@
+=== RUN   TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance
+=== RUN   TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/completed_Effect_fences_parent_then_retires_original_Grant
+=== RUN   TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/unknown_remote_Pending_pins_parent_and_rejects_replay
+=== RUN   TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass
+--- PASS: TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance (0.18s)
+    --- PASS: TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/completed_Effect_fences_parent_then_retires_original_Grant (0.08s)
+    --- PASS: TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/unknown_remote_Pending_pins_parent_and_rejects_replay (0.05s)
+    --- PASS: TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass (0.06s)
+=== RUN   TestIssue107SQLiteRootWorkflowPhysicalGrantConformance
+=== RUN   TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized
+=== RUN   TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant
+=== RUN   TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects
+--- PASS: TestIssue107SQLiteRootWorkflowPhysicalGrantConformance (0.20s)
+    --- PASS: TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized (0.10s)
+    --- PASS: TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant (0.07s)
+    --- PASS: TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects (0.04s)
+=== RUN   TestAuditIssue107SQLiteChildSelfPhysicalGrantFence
+=== RUN   TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies
+    issue107_seventh_child_self_fence.go:45: originalGrant=childgrant_edbfaa5673b26699555118440e22bc90 expectedRevision=1 selfCancelErr=kernel descendant has an unsettled physical execution Grant selfStatus=
+=== RUN   TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply
+    issue107_seventh_child_self_fence.go:78: grant=childgrant_d31326c31ad0100d89be22d5545900e4 concurrentApplyErr=kernel descendant has an unsettled physical execution Grant revisionAfter=0
+=== RUN   TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease
+--- PASS: TestAuditIssue107SQLiteChildSelfPhysicalGrantFence (0.12s)
+    --- PASS: TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies (0.04s)
+    --- PASS: TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply (0.04s)
+    --- PASS: TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease (0.04s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	2.056s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.548s [no tests to run]

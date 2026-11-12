@@ -1,0 +1,67 @@
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-0
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-1
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-2
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-3
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-4
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-5
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-6
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-7
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-8
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-9
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-10
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-11
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-12
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-13
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-14
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-15
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-16
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-17
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-18
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-19
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-20
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-21
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-22
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-23
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-24
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-25
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-26
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-27
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-28
+=== RUN   TestIssue107RealPostgresChildGrantVsParentTermination/i-29
+--- PASS: TestIssue107RealPostgresChildGrantVsParentTermination (0.71s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-0 (0.03s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-1 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-2 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-3 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-4 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-5 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-6 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-7 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-8 (0.03s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-9 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-10 (0.03s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-11 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-12 (0.03s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-13 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-14 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-15 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-16 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-17 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-18 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-19 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-20 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-21 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-22 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-23 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-24 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-25 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-26 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-27 (0.02s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-28 (0.01s)
+    --- PASS: TestIssue107RealPostgresChildGrantVsParentTermination/i-29 (0.01s)
+=== RUN   TestIssue107RealPostgresPhysicalSettlementAckLostAcrossStoreInstances
+--- PASS: TestIssue107RealPostgresPhysicalSettlementAckLostAcrossStoreInstances (0.29s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	2.427s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

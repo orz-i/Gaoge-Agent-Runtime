@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 from collections import Counter
 from pathlib import Path
 import re
@@ -75,6 +76,50 @@ def read_matrix() -> dict[str, tuple[str, str, str]]:
     return expected
 
 
+def verify_local_evidence(cell: dict[str, str], result: str) -> None:
+    """All referenced evidence must be durable, authentic and version-bound.
+
+    A PASS is not a mere string in a CSV file. A stored directed test log
+    proves only the test it actually ran; its substantive assertions remain
+    a reviewer's responsibility, recorded in reviewer_note.
+    """
+    raw = cell["evidence_log"].strip()
+    if not raw:
+        return
+    for reference in [part.strip() for part in raw.split(";")]:
+        if not reference:
+            fail(f"{cell['cell_id']}: empty evidence log reference")
+        relative = Path(reference)
+        if relative.is_absolute() or ".." in relative.parts or relative.suffix != ".log":
+            fail(f"{cell['cell_id']}: evidence must be a safe repository-relative .log")
+        target = ROOT / relative
+        if not target.is_file():
+            fail(f"{cell['cell_id']}: missing durable evidence log {reference}")
+        audit_dir = target.parent
+        origin = audit_dir / "ORIGIN.txt"
+        manifest = audit_dir / "SHA256SUMS.txt"
+        if not origin.is_file() or not manifest.is_file():
+            fail(f"{cell['cell_id']}: evidence lacks origin or digest manifest")
+        lines = origin.read_text(encoding="utf-8").splitlines()
+        source = next((v.split("=", 1)[1] for v in lines if v.startswith("SOURCE_SHA=")), "")
+        if source != cell["tested_runtime_sha"]:
+            fail(f"{cell['cell_id']}: log cohort does not match tested SHA")
+        checksums: dict[str, str] = {}
+        for line in manifest.read_text(encoding="utf-8").splitlines():
+            digest, sep, filename = line.partition("  ")
+            if not sep or not re.fullmatch(r"[a-f0-9]{64}", digest):
+                fail(f"{cell['cell_id']}: invalid evidence checksum line")
+            checksums[filename] = digest
+        expected_hash = checksums.get(target.name)
+        if expected_hash is None or hashlib.sha256(target.read_bytes()).hexdigest() != expected_hash:
+            fail(f"{cell['cell_id']}: evidence log checksum mismatch: {reference}")
+        log = target.read_text(encoding="utf-8")
+        if "--- FAIL: Test" in log or "WARNING: DATA RACE" in log or "\nFAIL\n" in log:
+            fail(f"{cell['cell_id']}: evidence contains a failed test or data race")
+        if result == "PASS" and "--- PASS: Test" not in log:
+            fail(f"{cell['cell_id']}: PASS is not supported by actual directed tests")
+
+
 def check_ledger(expected: dict[str, tuple[str, str, str]], strict: bool) -> None:
     with LEDGER.open("r", newline="", encoding="utf-8") as source:
         entries = list(csv.DictReader(source))
@@ -122,6 +167,7 @@ def check_ledger(expected: dict[str, tuple[str, str, str]], strict: bool) -> Non
             frozen_shas.add(cell["tested_runtime_sha"])
         elif result == "FAIL" and not cell["reviewer_note"].strip():
             fail(f"{identifier}: FAIL needs cause or reproducible trace")
+        verify_local_evidence(cell, result)
         outcome[result] += 1
         inventory[expected_inventory] += 1
     if seen != expected.keys():
