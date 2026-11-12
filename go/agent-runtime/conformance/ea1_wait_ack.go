@@ -122,6 +122,9 @@ func RunEA1WaitMarkAckSuite(t *testing.T, makeStore func(*testing.T) (kernel.Sto
 			}
 			if child {
 				parentBefore := ea1WaitSnapshotBytes(t, recovered, parent.Run.ID)
+				if _, applyErr := recovered.Apply(t.Context(), parent.Run.ID, parent.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: parent.State}); !errors.Is(applyErr, kernel.ErrChildExecutionBusy) {
+					t.Fatalf("ancestor nonterminal write bypassed unsettled original Wait: %v", applyErr)
+				}
 				_, err = recovered.Cancel(t.Context(), parent.Run.ID, parent.Run.Revision, "before recovery")
 				if !errors.Is(err, kernel.ErrChildExecutionBusy) {
 					t.Fatalf("ancestor unfenced before original Resume recovery: %v", err)

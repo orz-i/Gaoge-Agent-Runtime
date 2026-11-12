@@ -143,7 +143,14 @@ func RunEA1WaitBarriers(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					if !errors.Is(e, expected) {
 						t.Fatalf("cancel not fenced: %v", e)
 					}
-					// Self writes are fenced; descendant grants fence ancestor terminal writes.
+					// An ancestor cannot bypass its descendant fence with a nonterminal write.
+					if want.Run.ID != original.Run.ID {
+						_, nonterminalErr := observer.Apply(t.Context(), want.Run.ID, want.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: want.State})
+						if !errors.Is(nonterminalErr, kernel.ErrChildExecutionBusy) {
+							t.Fatalf("ancestor nonterminal Apply bypassed fence: %v", nonterminalErr)
+						}
+					}
+					// Keep the distinct ancestor terminal-write vector too.
 					nextStatus := kernel.RunStatusRunning
 					if want.Run.ID != original.Run.ID {
 						nextStatus = kernel.RunStatusCancelled

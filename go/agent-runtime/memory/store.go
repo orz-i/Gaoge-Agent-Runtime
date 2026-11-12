@@ -138,7 +138,7 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 	// The original self-owned physical Grant fences every competing Run
 	// write, not only terminal cancellation. Only a first-party scoped
 	// Kernel Runtime carries its exact per-revision proof. Descendant
-	// Grants independently prevent ancestor terminal mutation.
+	// Grants independently fence all competing ancestor mutations.
 	var rootGrantFound bool
 	for id := range store.childGrantOwners[runID] {
 		granted, ok := store.childGrants[id]
@@ -150,7 +150,7 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 			if !mutation.PhysicalPermit.Matches(granted.grant, current) {
 				return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
 			}
-		} else if memoryTerminalStatus(mutation.Record.Run.Status) {
+		} else {
 			return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
 		}
 	}

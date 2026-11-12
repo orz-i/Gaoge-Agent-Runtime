@@ -297,7 +297,7 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 				if !mutation.PhysicalPermit.Matches(original, current) {
 					return kernel.ErrChildExecutionBusy
 				}
-			} else if kernelPGTerminalStatus(mutation.Record.Run.Status) {
+			} else {
 				return kernel.ErrChildExecutionBusy
 			}
 		}

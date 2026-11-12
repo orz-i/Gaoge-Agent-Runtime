@@ -355,7 +355,7 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 				_ = rows.Close()
 				return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
 			}
-		} else if sqliteTerminalStatus(mutation.Record.Run.Status) {
+		} else {
 			_ = rows.Close()
 			return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
 		}

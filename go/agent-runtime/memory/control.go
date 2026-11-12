@@ -55,7 +55,7 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 			if !mutation.PhysicalPermit.Matches(original.grant, current) {
 				return kernel.Snapshot{}, false, kernel.ErrChildExecutionBusy
 			}
-		} else if memoryTerminalStatus(mutation.Record.Run.Status) {
+		} else {
 			return kernel.Snapshot{}, false, kernel.ErrChildExecutionBusy
 		}
 	}
