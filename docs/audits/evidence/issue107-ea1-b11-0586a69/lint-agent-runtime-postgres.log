@@ -1,0 +1,5 @@
+SOURCE_SHA=0586a69d104b0555c67d38fa4e9a117048d355c2
+COMMAND=cd go/agent-runtime-postgres && golangci-lint run ./...
+0 issues.
+
+EXIT_CODE=0

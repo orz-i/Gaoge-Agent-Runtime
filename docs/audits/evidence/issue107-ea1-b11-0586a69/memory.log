@@ -1,0 +1,89 @@
+SOURCE_SHA=0586a69d104b0555c67d38fa4e9a117048d355c2
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^(TestEA1RootAgent|TestEA1OwnedCallbackReturn|TestOwnedPhysical)' -v
+=== RUN   TestEA1OwnedCallbackReturnMemory
+=== RUN   TestEA1OwnedCallbackReturnMemory/unknown-host
+=== RUN   TestEA1OwnedCallbackReturnMemory/known-host
+--- PASS: TestEA1OwnedCallbackReturnMemory (2.01s)
+    --- PASS: TestEA1OwnedCallbackReturnMemory/unknown-host (1.00s)
+    --- PASS: TestEA1OwnedCallbackReturnMemory/known-host (1.01s)
+=== RUN   TestEA1RootAgentAdmissionMemory
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/opaque-tool
+    ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=agent original root callback result is uncertain
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/bounded-tool-timeline
+    ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=<nil>
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/origin-and-claim
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/owned-admission-before-model
+--- FAIL: TestEA1RootAgentAdmissionMemory (0.04s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/callback-completion-bounded (0.01s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/callback-completion-opaque (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/callback-completion-foreign-hydration (0.00s)
+    --- FAIL: TestEA1RootAgentAdmissionMemory/P1/opaque-tool (0.01s)
+    --- FAIL: TestEA1RootAgentAdmissionMemory/P1/bounded-tool-timeline (0.01s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P0/origin-and-claim (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P0/control-before-owned-admission (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P0/original-external-owner-reuse (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P0/same-external-lease-two-callers (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/middleware-before-physical (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/owned-admission-before-model (0.00s)
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/opaque-tool
+    ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=agent original root callback result is uncertain
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/bounded-tool-timeline
+    ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=<nil>
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/default-generated-id
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/origin-and-claim
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/owned-admission-before-model
+--- FAIL: TestEA1RootAgentDefaultAdmissionMemory (0.05s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-bounded (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-opaque (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-foreign-hydration (0.00s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionMemory/P1/opaque-tool (0.01s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionMemory/P1/bounded-tool-timeline (0.01s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/default-generated-id (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/origin-and-claim (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/control-before-owned-admission (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/original-external-owner-reuse (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/same-external-lease-two-callers (0.01s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/middleware-before-physical (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/owned-admission-before-model (0.00s)
+=== RUN   TestEA1RootAgentUnknownMemory
+=== RUN   TestEA1RootAgentUnknownMemory/host_middleware
+=== RUN   TestEA1RootAgentUnknownMemory/model
+=== RUN   TestEA1RootAgentUnknownMemory/tool
+--- PASS: TestEA1RootAgentUnknownMemory (6.51s)
+    --- PASS: TestEA1RootAgentUnknownMemory/host_middleware (2.20s)
+    --- PASS: TestEA1RootAgentUnknownMemory/model (2.15s)
+    --- PASS: TestEA1RootAgentUnknownMemory/tool (2.15s)
+=== RUN   TestOwnedPhysicalMemoryAdmissionBindingAndTTL
+--- PASS: TestOwnedPhysicalMemoryAdmissionBindingAndTTL (0.00s)
+=== RUN   TestOwnedPhysicalMemoryReceiptOnlyRecovery
+--- PASS: TestOwnedPhysicalMemoryReceiptOnlyRecovery (0.00s)
+=== RUN   TestOwnedPhysicalMemoryMarkedRecoveryAfterExpiry
+--- PASS: TestOwnedPhysicalMemoryMarkedRecoveryAfterExpiry (0.00s)
+=== RUN   TestOwnedPhysicalMemoryApprovalPreservesLease
+--- PASS: TestOwnedPhysicalMemoryApprovalPreservesLease (0.00s)
+=== RUN   TestOwnedPhysicalCallbackReturnMemory
+=== RUN   TestOwnedPhysicalCallbackReturnMemory/host-unknown
+=== RUN   TestOwnedPhysicalCallbackReturnMemory/host-complete
+--- PASS: TestOwnedPhysicalCallbackReturnMemory (0.00s)
+    --- PASS: TestOwnedPhysicalCallbackReturnMemory/host-unknown (0.00s)
+    --- PASS: TestOwnedPhysicalCallbackReturnMemory/host-complete (0.00s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	9.030s
+FAIL
+
+EXIT_CODE=1

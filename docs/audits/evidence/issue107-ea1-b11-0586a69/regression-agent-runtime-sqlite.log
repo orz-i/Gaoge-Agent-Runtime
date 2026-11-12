@@ -1,0 +1,18 @@
+SOURCE_SHA=0586a69d104b0555c67d38fa4e9a117048d355c2
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 -timeout=180s ./...
+--- FAIL: TestEA1RootAgentAdmissionSQLite (0.94s)
+    --- FAIL: TestEA1RootAgentAdmissionSQLite/P1/opaque-tool (0.11s)
+        ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=agent original root callback result is uncertain
+    --- FAIL: TestEA1RootAgentAdmissionSQLite/P1/bounded-tool-timeline (0.11s)
+        ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=<nil>
+--- FAIL: TestEA1RootAgentDefaultAdmissionSQLite (0.97s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionSQLite/P1/opaque-tool (0.11s)
+        ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=agent original root callback result is uncertain
+    --- FAIL: TestEA1RootAgentDefaultAdmissionSQLite/P1/bounded-tool-timeline (0.11s)
+        ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=<nil>
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	90.086s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.858s
+FAIL
+
+EXIT_CODE=1
