@@ -13,3 +13,10 @@ func TestEA1RootAgentAdmissionGORM(t *testing.T) {
 		return s, s
 	})
 }
+
+func TestEA1RootAgentDefaultAdmissionGORM(t *testing.T) {
+	conformance.RunEA1RootAgentDefaultAdmission(t, func(t *testing.T) (kernel.Store, kernel.Store) {
+		s := NewKernelStore(openKernelStoreTestDB(t))
+		return s, s
+	})
+}

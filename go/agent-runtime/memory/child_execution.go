@@ -56,7 +56,7 @@ func (store *Store) childAncestorsLocked(child kernel.Run) ([]string, error) {
 // BeginChildExecution is a persistent physical admission serialized with
 // parent Cancel/Fail/Complete, including native and unleased Run transitions.
 func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
+	if store == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 || grant.IsOwned() {
 		return kernel.ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
@@ -124,6 +124,15 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 	child, ok := store.records[grant.ChildRunID]
 	if !ok || !permit.Matches(grant, child) ||
 		(original.settledRevision != 0 && original.settledRevision != child.Run.Revision) {
+		return kernel.ErrExecutionConflict
+	}
+	if grant.IsOwned() && original.settledRevision == 0 && !permit.IsRecovery() {
+		lease, ok := permit.ExecutionLease()
+		if !ok || !grant.MatchesExecution(lease) || !activeMemoryLease(store.execution[grant.ChildRunID], lease, store.currentExecutionTime()) {
+			return kernel.ErrExecutionConflict
+		}
+	}
+	if grant.IsOwned() && !grant.MatchesExecution(store.execution[grant.ChildRunID].lease) {
 		return kernel.ErrExecutionConflict
 	}
 	original.settledRevision = child.Run.Revision

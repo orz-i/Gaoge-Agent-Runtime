@@ -31,6 +31,9 @@ func (store *KernelStore) QuarantineExecution(ctx context.Context, value kernel.
 		if err != nil {
 			return err
 		}
+		if scopeErr := pgRejectOwnedPhysical(tx, value.RunID); scopeErr != nil {
+			return scopeErr
+		}
 		if current.Revision != value.Revision {
 			return kernel.ErrConflict
 		}

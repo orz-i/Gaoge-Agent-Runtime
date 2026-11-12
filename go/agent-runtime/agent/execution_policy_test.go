@@ -71,7 +71,7 @@ func TestModelPolicyBoundsConcurrentProviderCalls(t *testing.T) {
 	}
 }
 
-func TestModelTimeoutUsesDurableBoundedRetry(t *testing.T) {
+func TestModelTimeoutRetainsUnknownWithoutReceipt(t *testing.T) {
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
@@ -104,11 +104,11 @@ func TestModelTimeoutUsesDurableBoundedRetry(t *testing.T) {
 	}
 	clock.Advance(time.Second)
 	snapshot, err = runner.Resume(t.Context(), snapshot.Run.ID, snapshot.Run.Revision)
-	if snapshot.Run.Status != kernel.RunStatusFailed {
-		t.Fatalf("second attempt status=%q err=%v", snapshot.Run.Status, err)
+	if snapshot.Run.Status != kernel.RunStatusRunning || !errors.Is(err, ErrModelOutcomeUnknown) {
+		t.Fatalf("unknown timeout status=%q err=%v", snapshot.Run.Status, err)
 	}
-	if provider.calls.Load() != 2 {
-		t.Fatalf("provider calls = %d, want 2", provider.calls.Load())
+	if provider.calls.Load() != 1 {
+		t.Fatalf("timeout replayed physical request: calls=%d", provider.calls.Load())
 	}
 }
 

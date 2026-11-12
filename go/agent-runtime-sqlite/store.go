@@ -298,6 +298,21 @@ func (s *Store) Apply(ctx context.Context, runID string, expectedRevision uint64
 // authority with the same short transaction as journal/ReadyWork/proof.
 func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionLease, guard *kernel.ControlGuard, revoked *bool,
 	runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+	return s.applyWithAuthority(ctx, lease, guard, revoked, nil, runID, expectedRevision, mutation)
+}
+
+type ownedRecoveryWrite struct {
+	grant  kernel.ChildExecutionGrant
+	permit kernel.OwnedPhysicalRecovery
+}
+
+func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, expectedRevision uint64, mutation kernel.StoreMutation, permit kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
+	if !g.IsOwned() {
+		return kernel.Snapshot{}, kernel.ErrInvalidInput
+	}
+	return s.applyWithAuthority(ctx, nil, nil, nil, &ownedRecoveryWrite{g, permit}, g.ChildRunID, expectedRevision, mutation)
+}
+func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionLease, guard *kernel.ControlGuard, revoked *bool, recovery *ownedRecoveryWrite, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	if s == nil || s.db == nil || ctx == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 {
 		return kernel.Snapshot{}, kernel.ErrInvalidInput
 	}
@@ -331,29 +346,59 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 			return kernel.Snapshot{}, err
 		}
 	}
+	if recovery != nil {
+		original, marked, e := loadPhysicalGrant(ctx, tx, runID)
+		if e != nil {
+			return kernel.Snapshot{}, e
+		}
+		if original != recovery.grant || marked != 0 || !recovery.permit.Matches(original, current, mutation) {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+	}
 	// A Root Workflow's own physical Grant fences ALL concurrent writes,
 	// not just Cancel. Its scoped first-party Kernel Runtime provides one
 	// per-revision proof; a public Grant ID or old Run revision cannot.
 	rows, grantErr := tx.QueryContext(ctx,
-		"SELECT grant_id,child_run_id,start_revision FROM runtime_child_effect_grants WHERE parent_run_id=?", runID)
+		"SELECT "+physicalGrantColumns+" FROM runtime_child_effect_grants WHERE parent_run_id=?", runID)
 	if grantErr != nil {
 		return kernel.Snapshot{}, grantErr
 	}
 	rootGrantFound := false
+	var ownedControlGrant *kernel.ChildExecutionGrant
+	var ownedControlLease kernel.ExecutionLease
 	for rows.Next() {
-		var id, childID string
-		var started uint64
-		if scanErr := rows.Scan(&id, &childID, &started); scanErr != nil {
+		var g kernel.ChildExecutionGrant
+		var marked uint64
+		if scanErr := rows.Scan(&g.ID, &g.ChildRunID, &g.ExpectedRevision, &g.ExecutionOwnerID, &g.ExecutionLeaseID, &g.ExecutionEpoch, &g.AdmissionSourceHash, &g.AdmissionOperation, &marked); scanErr != nil {
 			_ = rows.Close()
 			return kernel.Snapshot{}, scanErr
 		}
-		if childID == runID {
+		if g.ChildRunID == runID {
 			rootGrantFound = true
-			if !mutation.PhysicalPermit.Matches(kernel.ChildExecutionGrant{
-				ID: id, ChildRunID: runID, ExpectedRevision: started,
-			}, current) {
-				_ = rows.Close()
-				return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+			if g.IsOwned() && guard != nil {
+				bound, ok := mutation.PhysicalPermit.ExecutionLease()
+				if guard.Kind != kernel.ControlApproval || !ok || !g.MatchesExecution(bound) || !mutation.PhysicalPermit.Matches(g, current) {
+					_ = rows.Close()
+					return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+				}
+				copyGrant := g
+				ownedControlGrant = &copyGrant
+				ownedControlLease = bound
+			}
+			if recovery != nil {
+				if recovery.grant != g || !recovery.permit.Matches(g, current, mutation) {
+					_ = rows.Close()
+					return kernel.Snapshot{}, kernel.ErrExecutionConflict
+				}
+			} else {
+				if g.IsOwned() && guard == nil && (lease == nil || !g.MatchesExecution(*lease)) {
+					_ = rows.Close()
+					return kernel.Snapshot{}, kernel.ErrExecutionConflict
+				}
+				if !mutation.PhysicalPermit.Matches(g, current) {
+					_ = rows.Close()
+					return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+				}
 			}
 		} else {
 			_ = rows.Close()
@@ -366,6 +411,11 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 	}
 	if closeErr := rows.Close(); closeErr != nil {
 		return kernel.Snapshot{}, closeErr
+	}
+	if ownedControlGrant != nil {
+		if err = sqliteBoundLeaseCurrent(ctx, tx, *ownedControlGrant, ownedControlLease, true); err != nil {
+			return kernel.Snapshot{}, err
+		}
 	}
 	if !rootGrantFound && mutation.PhysicalPermit.IsPresent() {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
@@ -397,7 +447,7 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
 		if revoked != nil {
-			*revoked = epoch > 0
+			*revoked = epoch > 0 && ownedControlGrant == nil
 		}
 	}
 	// The entire predicate is evaluated by SQLite while holding the same
@@ -410,12 +460,23 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		string(mutation.Record.Run.Status), mutation.Record.Run.Revision,
 		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(mutation.Events),
 		runID, expectedRevision}
-	if guard != nil {
+	if guard != nil && ownedControlGrant != nil {
+		nowMS, clockErr := sqliteExecutionNow(ctx, tx)
+		if clockErr != nil {
+			return kernel.Snapshot{}, clockErr
+		}
+		updateSQL += ` AND execution_epoch=? AND execution_owner=? AND execution_lease_id=? AND execution_expiry_ms>? AND execution_quarantine_revision=0`
+		args = append(args, ownedControlLease.Epoch, ownedControlLease.OwnerID, ownedControlLease.LeaseID, nowMS)
+	} else if guard != nil {
 		// The write transaction already verified the exact existing gate.
 		// CAS + epoch revocation + journal/proof/wakeup are a single commit.
 		updateSQL = strings.Replace(updateSQL, "SET scope_id=?",
 			`SET execution_epoch=CASE WHEN execution_epoch>0 THEN execution_epoch+1 ELSE 0 END,
              execution_owner='',execution_lease_id='',execution_expiry_ms=0,scope_id=?`, 1)
+	} else if recovery != nil {
+		g := recovery.grant
+		updateSQL += ` AND status='running' AND execution_epoch=? AND execution_owner=? AND execution_lease_id=? AND execution_quarantine_revision=0`
+		args = append(args, g.ExecutionEpoch, g.ExecutionOwnerID, g.ExecutionLeaseID)
 	} else if lease == nil {
 		updateSQL += ` AND execution_epoch=0`
 	} else {
@@ -451,6 +512,9 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 		// This matters when a replacement owner has not changed revision.
 		if guard != nil {
 			return kernel.Snapshot{}, kernel.ErrConflict
+		}
+		if recovery != nil {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
 		if lease == nil && authorityEpoch != 0 {
 			return kernel.Snapshot{}, kernel.ErrExecutionRequired

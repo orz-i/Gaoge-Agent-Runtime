@@ -52,6 +52,18 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 		state.ToolDispatchID != callID || call.ID != callID {
 		return snapshot, ErrToolOutcomeUnknown
 	}
+	if snapshot.Run.ParentRunID == "" {
+		grant, lookupErr := runner.runtime.LookupChildExecution(ctx, runID)
+		if lookupErr == nil {
+			if grant.ExecutionLeaseID == "" {
+				return snapshot, ErrRootOutcomeUnknown
+			}
+			return runner.reconcileRootTool(ctx, snapshot, state, grant, callID)
+		}
+		if !errors.Is(lookupErr, kernel.ErrNotFound) {
+			return snapshot, lookupErr
+		}
+	}
 	return runner.withRunOwner(ctx, runID, expectedRevision,
 		func(nextCtx context.Context, scoped *Runner) (out kernel.Snapshot, callbackErr error) {
 			// This callback makes a trusted READ-ONLY provider lookup and a

@@ -187,7 +187,10 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 // a new execution claim before the Feature dispatches external effects.
 func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expectedRevision uint64,
 	guard ControlGuard, mutation Mutation, permit *featurecontrol.Proof) (Snapshot, bool, error) {
-	if runtime == nil || runtime.execution != nil || hasReservedApplyEvidence(mutation.Events) {
+	if runtime == nil || hasReservedApplyEvidence(mutation.Events) {
+		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
+	}
+	if runtime.execution != nil && (guard.Kind != ControlApproval || runtime.physicalGrant == nil || !runtime.physicalGrant.IsOwned() || !runtime.physicalGrant.MatchesExecution(*runtime.execution)) {
 		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
 	}
 	current, err := runtime.Load(ctx, runID)
@@ -206,7 +209,8 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 			return Snapshot{}, false, controlNoEffectBeforeStore(ErrExecutionConflict)
 		}
 		next.PhysicalPermit = PhysicalApplyPermit{
-			grant: *runtime.physicalGrant,
+			grant:     *runtime.physicalGrant,
+			execution: runtime.execution,
 			proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision,
 				physicalFeatureProofDomain(current.Run.Kind, "apply"),
 				runtime.physicalGrant.ID, current.State, current.Checkpoint),

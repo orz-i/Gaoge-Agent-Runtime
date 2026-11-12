@@ -286,7 +286,7 @@ type Dependencies struct {
 	Limits               Limits
 	Execution            ExecutionPolicy
 	// RunExecution opts this Agent StartRun/Resume path into the existing
-	// authoritative Store epoch/lease. Nil retains the legacy behavior.
+	// authoritative Store epoch/lease. Nil selects a safe internal Root owner.
 	RunExecution *RunExecution
 	// ToolOutcomeVerifier is a trusted provider-side lookup, used only
 	// for reconciling an uncertain native Tool dispatch. It does NOT retry.
@@ -350,6 +350,9 @@ type Runner struct {
 	execution                ExecutionPolicy
 	runExecution             *RunExecution
 	activeRunLease           *kernel.ExecutionLease
+	activeRootGrant          *kernel.ChildExecutionGrant
+	externalRunLease         bool
+	defaultRunOwner          bool
 	toolOutcomeVerifier      ToolOutcomeVerifier
 	modelLimiter             *callLimiter
 	toolLimiter              *callLimiter
@@ -361,6 +364,8 @@ type Runner struct {
 }
 
 type runState struct {
+	RecoveredTool     *rootToolReceipt       `json:"recoveredTool,omitempty"`
+	RootSegment       *rootSegmentState      `json:"rootSegment,omitempty"`
 	OriginFingerprint string                 `json:"originFingerprint,omitempty"`
 	Messages          []model.Message        `json:"messages"`
 	Model             string                 `json:"model,omitempty"`
@@ -491,6 +496,9 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
 	var runExecution *RunExecution
+	if !dependencies.Runtime.SupportsExecution() || !dependencies.Runtime.SupportsOwnedPhysicalExecution() || !dependencies.Runtime.SupportsChildExecution() {
+		return nil, ErrInvalidRequest
+	}
 	if dependencies.RunExecution != nil {
 		if !dependencies.Runtime.SupportsExecution() {
 			return nil, ErrInvalidRequest
@@ -500,6 +508,12 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		}
 		copied := *dependencies.RunExecution
 		runExecution = &copied
+	} else {
+		var defaultErr error
+		runExecution, defaultErr = defaultRunExecution(dependencies.Runtime, execution)
+		if defaultErr != nil {
+			return nil, defaultErr
+		}
 	}
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
@@ -512,6 +526,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		limits:              dependencies.Limits,
 		execution:           execution,
 		runExecution:        runExecution,
+		defaultRunOwner:     dependencies.RunExecution == nil,
 		toolOutcomeVerifier: dependencies.ToolOutcomeVerifier,
 		modelLimiter:        newCallLimiter(execution.Model.MaxConcurrency),
 		toolLimiter:         newCallLimiter(execution.Tool.MaxConcurrency),
@@ -577,11 +592,18 @@ func (runner *Runner) PrepareRun(ctx context.Context, request StartRequest) (ker
 
 func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartRequest, deferred bool) (kernel.Snapshot, error) {
 	if runner == nil || strings.TrimSpace(request.Goal) == "" ||
-		((runner.runExecution != nil || request.ParentRunID != "") && strings.TrimSpace(request.ID) == "") {
+		((!runner.defaultRunOwner || request.ParentRunID != "") && strings.TrimSpace(request.ID) == "") {
 		// Native durability cannot recover an uncertain Create when the
 		// caller never knew the generated Run ID. RequestID alone is not a
 		// Store-enforced unique idempotency key.
 		return kernel.Snapshot{}, nativeStartNoEffect(ErrInvalidRequest)
+	}
+	if strings.TrimSpace(request.ID) == "" {
+		id, idErr := runner.runtime.NewID("run")
+		if idErr != nil {
+			return kernel.Snapshot{}, nativeStartNoEffect(idErr)
+		}
+		request.ID = id
 	}
 	// Resolve all Start inputs BEFORE Run Middleware or Kernel.Create. A
 	// failure at this boundary cannot have dispatched Model/Tool or entered
@@ -616,13 +638,19 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 	}
 	invocation.RunID = created.Run.ID
 	var continuationReached bool
-	snapshot, invokeErr := runner.withChildPhysicalGrant(ctx, created.Run.ID, created.Run.Revision,
-		func(scoped *Runner) (kernel.Snapshot, error) {
-			return scoped.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-				continuationReached = true
-				return scoped.continuePreparedRun(nextCtx, created, deferred)
+	operation := "start"
+	if deferred {
+		operation = "prepare"
+	}
+	snapshot, invokeErr := runner.withRootSegment(ctx, created, operation, func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
+		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision,
+			func(scoped *Runner) (kernel.Snapshot, error) {
+				return scoped.runChain.Invoke(rootCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+					continuationReached = true
+					return scoped.continuePreparedRun(nextCtx, admitted, deferred)
+				})
 			})
-		})
+	})
 	if invokeErr != nil && snapshot.Run.ID == "" {
 		// Keep the newly created Run visible for explicit recovery, but
 		// never return here: an untrusted middleware may have returned a
@@ -742,7 +770,7 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 func (runner *Runner) createPreparedRun(ctx context.Context, request StartRequest, encoded json.RawMessage) (kernel.Snapshot, error) {
 	return runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
-		ExecutionRequired: runner.runExecution != nil,
+		ExecutionRequired: runner.runExecution != nil && (request.ParentRunID == "" || !runner.defaultRunOwner),
 		RequestID:         request.RequestID, ParentRunID: request.ParentRunID,
 		Goal: request.Goal, DeadlineAt: request.DeadlineAt, State: encoded,
 		Events: []kernel.EventDraft{{
@@ -801,12 +829,18 @@ func (runner *Runner) ResolveApproval(
 	// From this boundary onward a Run middleware, approval handler or
 	// Model/Tool may perform effects; no generic return error proves no-effect.
 	invocation := runInvocation(plugin.RunResolveApproval, snapshot)
-	return runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, snapshot.Run.Revision,
-		func(scoped *Runner) (kernel.Snapshot, error) {
-			return scoped.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-				return scoped.resolveApproval(nextCtx, snapshot, state, response)
+	return runner.withRootSegment(ctx, snapshot, "approval", func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
+		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision,
+			func(scoped *Runner) (kernel.Snapshot, error) {
+				freshState, decodeErr := decodeState(admitted.State)
+				if decodeErr != nil {
+					return admitted, decodeErr
+				}
+				return scoped.runChain.Invoke(rootCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+					return scoped.resolveApproval(nextCtx, admitted, freshState, response)
+				})
 			})
-		})
+	})
 }
 
 func (runner *Runner) resolveApproval(
@@ -857,6 +891,9 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrRunTerminal
 	}
+	if invocation, active := activeModelInvocation(state); active && invocation.Status == ModelInvocationPending && invocation.DispatchAttempt != 0 {
+		return snapshot, ErrModelOutcomeUnknown
+	}
 	if invocation, active := activeModelInvocation(state); active && invocation.RetryAfter != nil &&
 		runner.clock.Now().UTC().Before(invocation.RetryAfter.UTC()) {
 		// A Queue WakeupAt is not an execution grant. Every Agent or
@@ -878,16 +915,18 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	// Claim an execution segment BEFORE Run middleware and any Model/Tool
 	// side effect. A runner without RunExecution still follows the original
 	// pre-dispatch Store guard and will be rejected on fenced Runs.
-	resumed, resumeErr := runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, snapshot.Run.Revision,
-		func(physical *Runner) (kernel.Snapshot, error) {
-			return physical.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision,
-				func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-					invocation := runInvocation(plugin.RunResume, snapshot)
-					return scoped.runChain.Invoke(driveCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-						return scoped.resumeRunning(nextCtx, snapshot, state)
+	resumed, resumeErr := runner.withRootSegment(ctx, snapshot, "resume", func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
+		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision,
+			func(physical *Runner) (kernel.Snapshot, error) {
+				return physical.withRunOwner(rootCtx, admitted.Run.ID, admitted.Run.Revision,
+					func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
+						invocation := runInvocation(plugin.RunResume, admitted)
+						return scoped.runChain.Invoke(driveCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+							return scoped.resumeRunning(nextCtx, admitted, state)
+						})
 					})
-				})
-		})
+			})
+	})
 	if resumeErr != nil && resumed.Run.ID == "" {
 		return snapshot, resumeErr
 	}
@@ -998,6 +1037,18 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	snapshot, state, err = runner.executeModelInvocation(ctx, snapshot, state, invocation)
 	if err != nil {
+		current, loadErr := runner.runtime.Load(ctx, snapshot.Run.ID)
+		if loadErr == nil {
+			currentState, decodeErr := decodeState(current.State)
+			if decodeErr == nil {
+				if active, ok := activeModelInvocation(currentState); ok && active.Status == ModelInvocationPending && active.DispatchAttempt != 0 {
+					return current, true, errors.Join(ErrModelOutcomeUnknown, err)
+				}
+			}
+		}
+		if errors.Is(err, ErrModelOutcomeUnknown) {
+			return snapshot, true, err
+		}
 		if errors.Is(err, ErrToolDiscoveryDenied) || errors.Is(err, ErrToolDiscoveryInvalid) {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", err)
 			return failed, true, failErr
@@ -1807,6 +1858,13 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		}
 		failed, failErr := runner.fail(ctx, snapshot, execution.state, failCode, err)
 		return failed, false, failErr
+	}
+	if receipt := execution.state.RecoveredTool; receipt != nil {
+		if receipt.CallID != execution.call.ID || receipt.ToolKey != execution.call.ToolKey {
+			return snapshot, true, ErrToolReceiptMismatch
+		}
+		execution.state.RecoveredTool = nil
+		return runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(receipt.Result))
 	}
 	if allowanceExhausted(execution.state, "tool") {
 		return runner.advanceCallAllowance(ctx, snapshot, execution.state, "tool")

@@ -49,13 +49,16 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 		return kernel.ExecutionLease{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = ownedGrantBlocks(ctx, tx, req.RunID, nil, true); err != nil {
+		return kernel.ExecutionLease{}, err
+	}
 	now, err := sqliteExecutionNow(ctx, tx)
 	if err != nil {
 		return kernel.ExecutionLease{}, err
 	}
 	var epoch, expires, quarantineRev int64
-	var status string
-	err = tx.QueryRowContext(ctx, `SELECT execution_epoch,execution_expiry_ms,status,execution_quarantine_revision FROM runtime_runs WHERE run_id=?`, req.RunID).Scan(&epoch, &expires, &status, &quarantineRev)
+	var status, kind string
+	err = tx.QueryRowContext(ctx, `SELECT execution_epoch,execution_expiry_ms,status,execution_quarantine_revision,kind FROM runtime_runs WHERE run_id=?`, req.RunID).Scan(&epoch, &expires, &status, &quarantineRev, &kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return kernel.ExecutionLease{}, kernel.ErrNotFound
 	}
@@ -65,7 +68,7 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 	if status == string(kernel.RunStatusCompleted) || status == string(kernel.RunStatusFailed) || status == string(kernel.RunStatusCancelled) {
 		return kernel.ExecutionLease{}, kernel.ErrTerminal
 	}
-	if status != string(kernel.RunStatusRunning) {
+	if status != string(kernel.RunStatusRunning) && !(kind == "agent" && status == string(kernel.RunStatusWaitingInput)) {
 		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
 	}
 	if quarantineRev != 0 {
@@ -109,6 +112,9 @@ func (s *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRenewReq
 		return kernel.ExecutionLease{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = ownedGrantBlocks(ctx, tx, req.Lease.RunID, &req.Lease, false); err != nil {
+		return kernel.ExecutionLease{}, err
+	}
 	now, err := sqliteExecutionNow(ctx, tx)
 	if err != nil {
 		return kernel.ExecutionLease{}, err
@@ -145,6 +151,9 @@ func (s *Store) ReleaseExecution(ctx context.Context, lease kernel.ExecutionLeas
 		return conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = ownedGrantBlocks(ctx, tx, lease.RunID, nil, true); err != nil {
+		return err
+	}
 	now, err := sqliteExecutionNow(ctx, tx)
 	if err != nil {
 		return err
@@ -182,9 +191,17 @@ func (s *Store) CheckExecution(ctx context.Context, runID string, lease *kernel.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return conflictOrDatabaseError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = ownedGrantBlocks(ctx, tx, runID, lease, false); err != nil {
+		return err
+	}
 	var epoch, expiry, now, quarantineRev int64
 	var owner, id, status string
-	err := s.db.QueryRowContext(ctx, `SELECT execution_epoch,execution_owner,execution_lease_id,execution_expiry_ms,status,
+	err = tx.QueryRowContext(ctx, `SELECT execution_epoch,execution_owner,execution_lease_id,execution_expiry_ms,status,
    execution_quarantine_revision,CAST(unixepoch('subsec')*1000 AS INTEGER) FROM runtime_runs WHERE run_id=?`, runID).
 		Scan(&epoch, &owner, &id, &expiry, &status, &quarantineRev, &now)
 	if errors.Is(err, sql.ErrNoRows) {

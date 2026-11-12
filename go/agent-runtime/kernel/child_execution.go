@@ -18,9 +18,14 @@ var ErrChildExecutionBusy = errors.New("kernel descendant has an unsettled physi
 // and execution-lease commits. This identity is not a Model/Tool receipt.
 // Unknown effects keep the Grant pending until explicit reconciliation.
 type ChildExecutionGrant struct {
-	ID               string
-	ChildRunID       string
-	ExpectedRevision uint64 // Original physical caller's immutable Run revision.
+	ID                  string
+	ChildRunID          string
+	ExpectedRevision    uint64 // Original physical caller's immutable Run revision.
+	ExecutionOwnerID    string
+	ExecutionLeaseID    string
+	ExecutionEpoch      uint64
+	AdmissionSourceHash string
+	AdmissionOperation  string
 }
 
 // ChildExecutionSettlement is the opaque first-party Agent/Workflow physical
@@ -29,7 +34,22 @@ type ChildExecutionGrant struct {
 // authoritative child Snapshot INSIDE the SAME transaction as setting the
 // durable settlement revision; a direct Store call with a zero/forged permit
 // can never release an unsettled Grant.
-type ChildExecutionSettlement struct{ proof *featurecontrol.Proof }
+type ChildExecutionSettlement struct {
+	proof     *featurecontrol.Proof
+	execution *ExecutionLease
+	recovery  bool
+}
+
+// IsRecovery identifies a sealed first-party receipt-only settlement.
+func (s ChildExecutionSettlement) IsRecovery() bool { return s.recovery }
+
+// ExecutionLease returns an isolated original bearer, never new authority.
+func (s ChildExecutionSettlement) ExecutionLease() (ExecutionLease, bool) {
+	if s.execution == nil {
+		return ExecutionLease{}, false
+	}
+	return *s.execution, true
+}
 
 func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, snapshot Snapshot) bool {
 	if grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 ||
@@ -45,6 +65,15 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 	default:
 		return false
 	}
+	if grant.IsOwned() {
+		if snapshot.Run.Kind != "agent" || snapshot.Run.ParentRunID != "" {
+			return false
+		}
+		proofKind = "agent_owned_physical_settled"
+		if settlement.recovery {
+			proofKind = "agent_owned_physical_recovered"
+		}
+	}
 	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision,
 		proofKind, grant.ID, snapshot.State, snapshot.Checkpoint)
 }
@@ -54,8 +83,17 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 // exclusively by a first-party Feature-scoped Kernel Runtime. An external caller holding
 // a visible Grant ID cannot forge this permit or mutate a root mid-dispatch.
 type PhysicalApplyPermit struct {
-	grant ChildExecutionGrant
-	proof *featurecontrol.Proof
+	grant     ChildExecutionGrant
+	proof     *featurecontrol.Proof
+	execution *ExecutionLease
+}
+
+// ExecutionLease returns only the original first-party bound bearer.
+func (p PhysicalApplyPermit) ExecutionLease() (ExecutionLease, bool) {
+	if p.execution == nil {
+		return ExecutionLease{}, false
+	}
+	return *p.execution, true
 }
 
 func (permit PhysicalApplyPermit) Matches(grant ChildExecutionGrant, snapshot Snapshot) bool {
@@ -104,6 +142,12 @@ func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecut
 	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 ||
 		runtime.physicalGrant != nil {
 		return nil, ErrInvalidInput
+	}
+	if grant.IsOwned() {
+		lease, ok := runtime.BoundExecutionLease()
+		if !ok || !grant.MatchesExecution(lease) {
+			return nil, ErrExecutionConflict
+		}
 	}
 	stored, err := runtime.LookupChildExecution(ctx, grant.ChildRunID)
 	if err != nil {
@@ -188,7 +232,7 @@ func (runtime *Runtime) MarkChildExecutionSettled(ctx context.Context, grant Chi
 	if err != nil {
 		return err
 	}
-	permit := ChildExecutionSettlement{proof: proof}
+	permit := ChildExecutionSettlement{proof: proof, execution: runtime.execution}
 	if !permit.Matches(grant, snapshot) {
 		return ErrExecutionConflict
 	}
@@ -217,9 +261,12 @@ func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExe
 	// Agent and Workflow use different first-party Feature proof domains.
 	// They share the same opaque Store settlement permit; a Workflow proof
 	// must never be accepted as an Agent proof (or the inverse).
-	permit := ChildExecutionSettlement{proof: proof}
+	permit := ChildExecutionSettlement{proof: proof, execution: runtime.execution}
 	if !permit.Matches(grant, snapshot) {
-		return ErrExecutionConflict
+		permit.recovery = true
+		if !grant.IsOwned() || !permit.Matches(grant, snapshot) {
+			return ErrExecutionConflict
+		}
 	}
 	return store.FinishChildExecution(ctx, grant)
 }

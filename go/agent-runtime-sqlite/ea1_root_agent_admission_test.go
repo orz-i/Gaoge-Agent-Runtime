@@ -25,3 +25,20 @@ func TestEA1RootAgentAdmissionSQLite(t *testing.T) {
 		return first, peer
 	})
 }
+
+func TestEA1RootAgentDefaultAdmissionSQLite(t *testing.T) {
+	conformance.RunEA1RootAgentDefaultAdmission(t, func(t *testing.T) (kernel.Store, kernel.Store) {
+		path := filepath.Join(privateDir(t), "root-agent-admission.sqlite")
+		first, e := sqlite.CreateNew(t.Context(), path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		t.Cleanup(func() { _ = first.Close() })
+		peer, e := sqlite.OpenExisting(t.Context(), path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		t.Cleanup(func() { _ = peer.Close() })
+		return first, peer
+	})
+}

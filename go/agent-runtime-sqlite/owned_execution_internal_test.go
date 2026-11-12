@@ -1,0 +1,182 @@
+package sqlite
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+)
+
+func ownedPrivatePath(t *testing.T, name string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, name)
+}
+func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
+	path := ownedPrivatePath(t, "legacy.sqlite")
+	raw, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ddl := range schemaV3DDL() {
+		if _, err = raw.Exec(ddl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = raw.Exec("PRAGMA user_version=3"); err != nil {
+		t.Fatal(err)
+	}
+	old := &Store{db: raw}
+	rt, err := kernel.New(kernel.Dependencies{Store: old})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshots := map[string]kernel.Snapshot{}
+	for _, id := range []string{"active", "marked"} {
+		s, e := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "workflow", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "th"}, Goal: "original", State: json.RawMessage("{}")})
+		if e != nil {
+			t.Fatal(e)
+		}
+		snapshots[id] = s
+		marked := 0
+		if id == "marked" {
+			marked = 1
+		}
+		if _, e = raw.Exec("INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,settled_revision) VALUES(?,?,?,?,?)", id+"-grant", id, id, 1, marked); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if err = raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Chmod(path, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = OpenExisting(t.Context(), path); !errors.Is(err, ErrUnsupportedSchema) {
+		t.Fatalf("implicit migration: %v", err)
+	}
+	if err = MigrateV3ToV4(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
+	if err = MigrateV3ToV4(t.Context(), path); err != nil {
+		t.Fatalf("repeat migration: %v", err)
+	}
+	current, err := OpenExisting(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = current.Close() }()
+	for id, want := range snapshots {
+		got, e := current.Load(t.Context(), id)
+		if e != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("migration changed original %s: %v", id, e)
+		}
+		g, marked, e := loadPhysicalGrant(t.Context(), current.db, id)
+		if e != nil || g.IsOwned() || g.ID != id+"-grant" || g.ExpectedRevision != 1 {
+			t.Fatalf("migration guessed/dropped grant: %+v %v", g, e)
+		}
+		expected := uint64(0)
+		if id == "marked" {
+			expected = 1
+		}
+		if marked != expected {
+			t.Fatal("migration changed completion marker")
+		}
+	}
+}
+
+// Seed only the low-level durable row to exercise Store enforcement. This is
+// not evidence for first-party admission; conformance covers the actual entry.
+func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
+	path := ownedPrivatePath(t, "owned.sqlite")
+	s, err := CreateNew(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	rt, err := kernel.New(kernel.Dependencies{Store: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := rt.Create(t.Context(), kernel.CreateRequest{ID: "root", Kind: "agent", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "th"}, Goal: "original", State: json.RawMessage("{}"), ExecutionRequired: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := s.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: "root", OwnerID: "original", LeaseDuration: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := kernel.ChildExecutionGrant{ID: "owned", ChildRunID: "root", ExpectedRevision: before.Run.Revision, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
+	if err = s.BeginChildExecution(t.Context(), g); !errors.Is(err, kernel.ErrInvalidInput) {
+		t.Fatalf("old Begin accepted owned binding: %v", err)
+	}
+	if err = s.BeginOwnedPhysicalExecution(t.Context(), g, lease, kernel.OwnedPhysicalAdmission{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("forged admission accepted: %v", err)
+	}
+	if _, err = s.db.Exec(`INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.ReleaseExecution(t.Context(), lease); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("owned Release: %v", err)
+	}
+	if _, err = rt.Cancel(t.Context(), "root", before.Run.Revision, "competing"); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("owned Cancel: %v", err)
+	}
+	if err = s.QuarantineExecution(t.Context(), kernel.ExecutionQuarantine{RunID: "root", Revision: before.Run.Revision, Reason: "test"}); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("quarantine revoked owned epoch: %v", err)
+	}
+	if err = s.CheckExecution(t.Context(), "root", &lease); err != nil {
+		t.Fatalf("rejected controls revoked original owner: %v", err)
+	}
+	forged := lease
+	forged.OwnerID = "foreign"
+	if err = s.CheckExecution(t.Context(), "root", &forged); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("foreign identity: %v", err)
+	}
+	renewed, err := s.RenewExecution(t.Context(), kernel.ExecutionRenewRequest{Lease: lease, LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deterministic isolated stored-expiry fault, not a caller clock override.
+	if _, err = s.db.Exec("UPDATE runtime_runs SET execution_expiry_ms=1 WHERE run_id='root'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: "root", OwnerID: "replacement", LeaseDuration: time.Minute}); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("TTL bypassed barrier: %v", err)
+	}
+	if _, err = s.RenewExecution(t.Context(), kernel.ExecutionRenewRequest{Lease: renewed, LeaseDuration: time.Minute}); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("expired lease revived: %v", err)
+	}
+	if err = s.MarkChildExecutionSettled(t.Context(), g, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("forged Mark: %v", err)
+	}
+	if err = s.FinishChildExecution(t.Context(), g); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("unmarked Finish: %v", err)
+	}
+	after, err := s.Load(t.Context(), "root")
+	if err != nil || !reflect.DeepEqual(after, before) {
+		t.Fatal("rejected operations mutated snapshot")
+	}
+	if err = s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenExisting(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	loaded, err := reopened.LookupChildExecution(t.Context(), "root")
+	if err != nil || loaded != g {
+		t.Fatalf("binding did not survive reopen: %+v %v", loaded, err)
+	}
+}

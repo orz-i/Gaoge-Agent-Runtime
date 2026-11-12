@@ -15,8 +15,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// Pre-stable hard cut: immutable parented Runs and durable child effect Grants.
-const schemaVersion = 3
+// Schema v4 adds owned Root admission bindings; v3 requires explicit migration.
+const schemaVersion = 4
 
 var (
 	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
@@ -144,6 +144,10 @@ func checkNewDestination(abs string) error {
 // The caller owns the app Profile directory and platform credentials. Stage 1
 // supports a single executor, NOT multi-worker execution epoch isolation.
 func openStore(ctx context.Context, path string, create bool) (*Store, error) {
+	return openStoreMode(ctx, path, create, false)
+}
+
+func openStoreMode(ctx context.Context, path string, create, migrate bool) (*Store, error) {
 	if ctx == nil || strings.TrimSpace(path) == "" || path == ":memory:" {
 		return nil, kernel.ErrInvalidInput
 	}
@@ -186,7 +190,12 @@ func openStore(ctx context.Context, path string, create bool) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
-	if err = store.initialize(ctx, create); err != nil {
+	if migrate {
+		err = store.migrateV3ToV4(ctx)
+	} else {
+		err = store.initialize(ctx, create)
+	}
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -300,7 +309,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 				return fmt.Errorf("create SQLite runtime schema: %w", err)
 			}
 		}
-		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 3"); err != nil {
+		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 4"); err != nil {
 			return err
 		}
 		if err = tx.Commit(); err != nil {
@@ -340,6 +349,11 @@ var schemaDDL = []string{
 		child_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		start_revision INTEGER NOT NULL,
 		settled_revision INTEGER NOT NULL DEFAULT 0,
+		execution_owner_id TEXT NOT NULL DEFAULT '',
+		execution_lease_id TEXT NOT NULL DEFAULT '',
+		execution_epoch INTEGER NOT NULL DEFAULT 0,
+		admission_source_hash TEXT NOT NULL DEFAULT '',
+		admission_operation TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY(grant_id,parent_run_id)
 	)`,
 	`CREATE INDEX runtime_child_grants_parent ON runtime_child_effect_grants(parent_run_id,grant_id)`,

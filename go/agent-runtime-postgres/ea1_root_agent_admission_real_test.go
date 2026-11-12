@@ -33,3 +33,26 @@ func TestEA1RealPostgresRootAgentAdmission(t *testing.T) {
 		return NewKernelStore(db), NewKernelStore(peer)
 	})
 }
+
+func TestEA1RealPostgresRootAgentDefaultAdmission(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN not configured")
+	}
+	conformance.RunEA1RootAgentDefaultAdmission(t, func(t *testing.T) (kernel.Store, kernel.Store) {
+		db, isolated := openIsolatedRealPostgres(t, dsn)
+		if err := Migrate(db); err != nil {
+			t.Fatal(err)
+		}
+		peer, err := gorm.Open(pgdriver.Open(isolated), realPostgresTestConfig())
+		if err != nil {
+			t.Fatal(err)
+		}
+		sqlDB, err := peer.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = sqlDB.Close() })
+		return NewKernelStore(db), NewKernelStore(peer)
+	})
+}

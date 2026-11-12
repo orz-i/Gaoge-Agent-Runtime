@@ -230,7 +230,8 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 			return Snapshot{}, ErrExecutionConflict
 		}
 		proposed.PhysicalPermit = PhysicalApplyPermit{
-			grant: *runtime.physicalGrant,
+			grant:     *runtime.physicalGrant,
+			execution: runtime.execution,
 			proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision,
 				physicalFeatureProofDomain(current.Run.Kind, "apply"),
 				runtime.physicalGrant.ID, current.State, current.Checkpoint),

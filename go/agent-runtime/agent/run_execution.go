@@ -9,7 +9,8 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// RunExecution binds one Agent Run to the opt-in Kernel execution lease.
+// RunExecution configures the Agent Root Kernel execution lease. Nil configuration
+// uses a unique internal owner and a checked call-window duration.
 // It uses the existing Store ExecutionLease; no extra scheduler, progress
 // record, queue, or ActiveSegment table is introduced. The Store owns time.
 type RunExecution struct {
@@ -51,13 +52,45 @@ func safeToolRetryWindow(policy CallPolicy, available time.Duration) bool {
 }
 
 // withRunOwner acquires a fresh authoritative segment before native
-// Model/Tool dispatch and before Resume middleware. StartRun middleware
-// still runs before Create/claim for compatibility with host composition.
+// Model/Tool dispatch. Root middleware is enclosed by withRootSegment; child
+// execution retains its parent-authorized physical scope.
 // On clean return, release is best effort. A failed, cancelled or ambiguous
 // segment retains its owner until Store TTL expiration.
 // No hidden goroutine or independent lease service.
 func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRevision uint64,
 	execute func(context.Context, *Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+	if runner.activeRootGrant != nil || runner.activeRunLease != nil {
+		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
+			return kernel.Snapshot{}, err
+		}
+		return execute(ctx, runner)
+	}
+	if lease, bound := runner.runtime.BoundExecutionLease(); bound {
+		if lease.RunID != runID {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
+			return kernel.Snapshot{}, err
+		}
+		scoped := *runner
+		scoped.activeRunLease = &lease
+		scoped.externalRunLease = true
+		return execute(ctx, &scoped)
+	}
+	if runner.defaultRunOwner {
+		// Child physical admission remains its existing authority. The
+		// automatic native owner applies only to standalone Root segments.
+		snapshot, err := runner.runtime.Load(ctx, runID)
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+		if snapshot.Run.ParentRunID != "" {
+			if err = runner.runtime.RequireExecution(ctx, runID); err != nil {
+				return kernel.Snapshot{}, err
+			}
+			return execute(ctx, runner)
+		}
+	}
 	if runner.runExecution == nil {
 		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
 			return kernel.Snapshot{}, err
@@ -132,6 +165,9 @@ func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRe
 func (runner *Runner) keepRunLeaseAlive(ctx context.Context) error {
 	if runner.activeRunLease == nil {
 		return nil
+	}
+	if runner.externalRunLease {
+		return runner.runtime.RequireExecution(ctx, runner.activeRunLease.RunID)
 	}
 	horizon := max(runner.execution.Model.Timeout, runner.execution.Tool.Timeout) + time.Second
 	if runner.clock.Now().UTC().Add(horizon).Before(runner.activeRunLease.ExpiresAt) {

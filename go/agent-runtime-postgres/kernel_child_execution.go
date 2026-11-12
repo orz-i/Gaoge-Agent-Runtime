@@ -65,7 +65,7 @@ func (store *KernelStore) lockLiveChildAncestors(tx *gorm.DB, parentID, tenant, 
 }
 
 func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
+	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 || grant.IsOwned() {
 		return kernel.ErrInvalidInput
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -158,8 +158,25 @@ func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant k
 			return kernel.ErrExecutionConflict
 		}
 		for _, record := range records {
-			if record.ChildRunID != grant.ChildRunID || record.StartRevision != grant.ExpectedRevision ||
+			if pgPhysicalGrant(record) != grant ||
 				(record.SettledRevision != 0 && record.SettledRevision != revision) {
+				return kernel.ErrExecutionConflict
+			}
+		}
+		if grant.IsOwned() && (len(records) != 1 || records[0].ParentRunID != grant.ChildRunID) {
+			return kernel.ErrExecutionConflict
+		}
+		// Recovery and repeated Mark tolerate expiry, not a replaced native owner.
+		if grant.IsOwned() && (child.ExecutionOwner != grant.ExecutionOwnerID || child.ExecutionLeaseID != grant.ExecutionLeaseID || child.ExecutionEpoch != grant.ExecutionEpoch) {
+			return kernel.ErrExecutionConflict
+		}
+		if grant.IsOwned() && records[0].SettledRevision == 0 && !permit.IsRecovery() {
+			lease, ok := permit.ExecutionLease()
+			now, timeErr := pgStoreNow(tx)
+			if timeErr != nil {
+				return timeErr
+			}
+			if !ok || !grant.MatchesExecution(lease) || !pgLeaseMatches(child, lease, now) {
 				return kernel.ErrExecutionConflict
 			}
 		}
@@ -184,6 +201,18 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 		child, lockErr := lockKernelRun(tx, grant.ChildRunID)
 		if lockErr != nil {
 			return lockErr
+		}
+		var records []models.KernelChildEffectGrantRecord
+		if err := tx.Where("grant_id = ?", grant.ID).Find(&records).Error; err != nil {
+			return translateKernelError(err)
+		}
+		for _, record := range records {
+			if pgPhysicalGrant(record) != grant {
+				return kernel.ErrExecutionConflict
+			}
+		}
+		if grant.IsOwned() && (len(records) != 1 || records[0].ParentRunID != grant.ChildRunID) {
+			return kernel.ErrExecutionConflict
 		}
 		var total, count int64
 		if countErr := tx.Model(&models.KernelChildEffectGrantRecord{}).
@@ -224,12 +253,14 @@ func (store *KernelStore) LookupChildExecution(ctx context.Context, childID stri
 	if len(rows) == 0 {
 		return kernel.ChildExecutionGrant{}, kernel.ErrNotFound
 	}
-	id := rows[0].GrantID
-	revision := rows[0].StartRevision
+	original := pgPhysicalGrant(rows[0])
+	if original.IsOwned() && (len(rows) != 1 || rows[0].ParentRunID != childID) {
+		return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
+	}
 	for _, row := range rows {
-		if row.GrantID != id || row.StartRevision != revision || revision == 0 {
+		if pgPhysicalGrant(row) != original || original.ExpectedRevision == 0 || row.SettledRevision != rows[0].SettledRevision {
 			return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
 		}
 	}
-	return kernel.ChildExecutionGrant{ID: id, ChildRunID: childID, ExpectedRevision: revision}, nil
+	return original, nil
 }

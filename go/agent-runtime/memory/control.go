@@ -46,10 +46,18 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	// A child physical Grant requires an original, per-revision permit
 	// for control writes as well as ordinary Apply. Check BEFORE revoking
 	// a Run Execution epoch so a rejected Cancel is truly no-mutation.
+	ownedApproval := false
 	for id := range store.childGrantOwners[runID] {
 		original, ok := store.childGrants[id]
 		if !ok {
 			return kernel.Snapshot{}, false, kernel.ErrExecutionConflict
+		}
+		if original.grant.IsOwned() {
+			lease, hasLease := mutation.PhysicalPermit.ExecutionLease()
+			if guard.Kind != kernel.ControlApproval || !hasLease || !original.grant.MatchesExecution(lease) || !activeMemoryLease(authority, lease, store.currentExecutionTime()) || !mutation.PhysicalPermit.Matches(original.grant, current) {
+				return kernel.Snapshot{}, false, kernel.ErrChildExecutionBusy
+			}
+			ownedApproval = true
 		}
 		if original.grant.ChildRunID == runID {
 			if !mutation.PhysicalPermit.Matches(original.grant, current) {
@@ -64,7 +72,7 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	}
 	// Invalidate even a still-live external worker before committing the
 	// state and wakeup; Epoch=0 stays legacy/unclaimed.
-	revoked := authority.epoch > 0
+	revoked := authority.epoch > 0 && !ownedApproval
 	if revoked {
 		authority.epoch++
 		authority.lease = kernel.ExecutionLease{}

@@ -100,6 +100,12 @@ type KernelChildEffectGrantRecord struct {
 	ChildRunID      string `gorm:"size:64;not null;index:idx_agent_kernel_child_grants_child"`
 	StartRevision   uint64 `gorm:"not null;default:0"`
 	SettledRevision uint64 `gorm:"not null;default:0"`
+	// Empty binding preserves legacy child/Workflow grants; never guess a lease on migration.
+	ExecutionOwnerID    string `gorm:"size:128;not null;default:''"`
+	ExecutionLeaseID    string `gorm:"size:128;not null;default:''"`
+	ExecutionEpoch      uint64 `gorm:"not null;default:0"`
+	AdmissionSourceHash string `gorm:"size:64;not null;default:''"`
+	AdmissionOperation  string `gorm:"size:64;not null;default:''"`
 }
 
 func (KernelChildEffectGrantRecord) TableName() string { return "agent_kernel_child_effect_grants" }

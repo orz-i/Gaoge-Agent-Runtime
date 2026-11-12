@@ -90,11 +90,18 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		if err != nil {
 			return err
 		}
+		if scopeErr := pgRejectOwnedPhysical(tx, request.RunID); scopeErr != nil {
+			return scopeErr
+		}
 		switch kernel.RunStatus(current.Status) {
 		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
 			return kernel.ErrTerminal
 		case kernel.RunStatusRunning:
-		case kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
+		case kernel.RunStatusWaitingInput:
+			if current.Kind != "agent" {
+				return kernel.ErrExecutionConflict
+			}
+		case kernel.RunStatusPausedBudget:
 			return kernel.ErrExecutionConflict
 		default:
 			return kernel.ErrExecutionConflict
@@ -155,6 +162,9 @@ func (store *KernelStore) RenewExecution(ctx context.Context, req kernel.Executi
 		if err != nil {
 			return err
 		}
+		if scopeErr := pgMatchOwnedPhysical(tx, lease.RunID, &lease); scopeErr != nil {
+			return scopeErr
+		}
 		now, err := pgStoreNow(tx)
 		if err != nil {
 			return err
@@ -200,6 +210,9 @@ func (store *KernelStore) ReleaseExecution(ctx context.Context, lease kernel.Exe
 		current, err := lockKernelRun(tx, lease.RunID)
 		if err != nil {
 			return err
+		}
+		if scopeErr := pgRejectOwnedPhysical(tx, lease.RunID); scopeErr != nil {
+			return scopeErr
 		}
 		now, err := pgStoreNow(tx)
 		if err != nil {
@@ -274,14 +287,14 @@ func (store *KernelStore) CheckExecution(ctx context.Context, runID string, leas
 		return err
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var record models.KernelRunRecord
-		err := tx.Where("run_id = ?", runID).First(&record).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return kernel.ErrNotFound
-		}
+		record, err := lockKernelRun(tx, runID)
 		if err != nil {
-			return executionQueryError(tx, err)
+			return err
 		}
+		if err = pgMatchOwnedPhysical(tx, runID, lease); err != nil {
+			return err
+		}
+
 		switch kernel.RunStatus(record.Status) {
 		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
 			return kernel.ErrTerminal

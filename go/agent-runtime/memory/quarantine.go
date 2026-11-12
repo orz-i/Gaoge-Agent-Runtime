@@ -36,6 +36,9 @@ func (store *Store) QuarantineExecution(ctx context.Context, value kernel.Execut
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return kernel.ErrExecutionRequired
 	}
+	if _, exists := store.ownedGrantLocked(value.RunID); exists {
+		return kernel.ErrChildExecutionBusy
+	}
 	state := store.execution[value.RunID]
 	if state.epoch == 0 {
 		return kernel.ErrExecutionRequired

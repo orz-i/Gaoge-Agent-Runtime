@@ -72,16 +72,16 @@ func TestModelRetryReadyAtCannotBeBypassedByDirectResume(t *testing.T) {
 				view.ModelInvocations[0].Status != agent.ModelInvocationPending {
 				t.Fatalf("retryable intent not durable: %+v err=%v", view, viewErr)
 			}
-			if view.ModelInvocations[0].RetryAfter == nil ||
-				!view.ModelInvocations[0].RetryAfter.After(clock.Now()) {
-				t.Fatal("retry due time must be durable for all Agent execution modes")
+			if view.ModelInvocations[0].DispatchAttempt != 1 {
+				t.Fatal("unknown original dispatch attempt missing")
 			}
+
 			before, err := rt.Load(t.Context(), run.Run.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, err = runner.Resume(t.Context(), run.Run.ID, before.Run.Revision)
-			if !errors.Is(err, agent.ErrModelInvocationBusy) || len(model.callsCopy()) != 1 {
+			if !errors.Is(err, agent.ErrModelOutcomeUnknown) || len(model.callsCopy()) != 1 {
 				t.Fatalf("early direct Resume bypassed retry due time: err=%v providerCalls=%d", err, len(model.callsCopy()))
 			}
 			after, err := rt.Load(t.Context(), run.Run.ID)
@@ -90,7 +90,7 @@ func TestModelRetryReadyAtCannotBeBypassedByDirectResume(t *testing.T) {
 			}
 			clock.now = clock.now.Add(4 * time.Minute)
 			done, err := runner.Resume(t.Context(), run.Run.ID, after.Run.Revision)
-			if err != nil || done.Run.Status != kernel.RunStatusCompleted || len(model.callsCopy()) != 2 {
+			if !errors.Is(err, agent.ErrModelOutcomeUnknown) || done.Run.Status != kernel.RunStatusRunning || len(model.callsCopy()) != 1 {
 				t.Fatalf("due retry not completed exactly once: run=%+v calls=%d err=%v", done.Run, len(model.callsCopy()), err)
 			}
 		})

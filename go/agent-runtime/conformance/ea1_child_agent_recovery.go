@@ -31,7 +31,7 @@ func RunEA1ChildAgentRecoveryUnknownSuite(t *testing.T, factory func(*testing.T)
 				event = "tool.completed"
 			}
 			injected := errors.New("test-only physical response received but original receipt not committed")
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: native,
+			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: native, OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore),
 				ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), event: event, injected: injected}
 			rt, err := kernel.New(kernel.Dependencies{Store: fault})
 			if err != nil {

@@ -49,6 +49,8 @@ func (store *KernelStore) applyKernelMutation(
 	mutation kernel.StoreMutation,
 	lease *kernel.ExecutionLease,
 	control bool,
+	ownedRecovery bool,
+	ownedApproval bool,
 ) (kernel.Snapshot, error) {
 	// Lock before evaluating the DB-time expiry predicate. An UPDATE can
 	// otherwise evaluate it before waiting for an unchanged row's lock and
@@ -59,15 +61,21 @@ func (store *KernelStore) applyKernelMutation(
 		}
 	}
 	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND parent_run_id = ?", runID, expectedRevision, updatedModel.ParentRunID)
-	if control {
+	if ownedRecovery {
+		// Only the opaque, exact-source recovery transaction may reach here.
+	} else if control {
 		// Guarded controls are independently validated under a row lock by
 		// applyWithExecution. Do NOT enforce active execution-lease identity.
 	} else if lease == nil {
 		query = query.Where("execution_epoch = ?", 0)
 	} else {
+		expectedStatus := kernel.RunStatusRunning
+		if ownedApproval {
+			expectedStatus = kernel.RunStatusWaitingInput
+		}
 		query = query.Where(`status = ? AND execution_epoch = ? AND execution_owner = ? AND
             execution_lease_id = ? AND execution_quarantine_revision = 0`,
-			string(kernel.RunStatusRunning), lease.Epoch, lease.OwnerID, lease.LeaseID)
+			string(expectedStatus), lease.Epoch, lease.OwnerID, lease.LeaseID)
 		if db.Name() == "postgres" {
 			query = query.Where("execution_expires_at > clock_timestamp()")
 		} else {
@@ -287,12 +295,26 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if queryErr := tx.Where("parent_run_id = ?", runID).Find(&active).Error; queryErr != nil {
 			return translateKernelError(queryErr)
 		}
+		var approvalLease *kernel.ExecutionLease
 		rootGrantFound := false
 		for _, record := range active {
 			if record.ChildRunID == runID {
 				rootGrantFound = true
-				original := kernel.ChildExecutionGrant{
-					ID: record.GrantID, ChildRunID: runID, ExpectedRevision: record.StartRevision,
+				original := pgPhysicalGrant(record)
+				if original.IsOwned() {
+					if guard != nil {
+						originalLease, ok := mutation.PhysicalPermit.ExecutionLease()
+						now, timeErr := pgStoreNow(tx)
+						if timeErr != nil {
+							return timeErr
+						}
+						if guard.Kind != kernel.ControlApproval || !ok || !original.MatchesExecution(originalLease) || !pgLeaseMatches(lockedRun, originalLease, now) {
+							return kernel.ErrChildExecutionBusy
+						}
+						approvalLease = &originalLease
+					} else if lease == nil || !original.MatchesExecution(*lease) {
+						return kernel.ErrChildExecutionBusy
+					}
 				}
 				if !mutation.PhysicalPermit.Matches(original, current) {
 					return kernel.ErrChildExecutionBusy
@@ -330,11 +352,15 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 				return kernel.ErrExecutionConflict
 			}
 			if revoked != nil {
-				*revoked = persisted.ExecutionEpoch > 0
+				*revoked = persisted.ExecutionEpoch > 0 && approvalLease == nil
 			}
 		}
 		var applyErr error
-		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, lease, guard != nil)
+		effectiveLease := lease
+		if approvalLease != nil {
+			effectiveLease = approvalLease
+		}
+		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, effectiveLease, guard != nil && approvalLease == nil, false, approvalLease != nil)
 		return applyErr
 	})
 	if err != nil {
