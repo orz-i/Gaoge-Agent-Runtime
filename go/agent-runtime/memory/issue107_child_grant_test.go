@@ -148,3 +148,13 @@ func TestIssue107MemoryRootWorkflowPhysicalGrantConformance(t *testing.T) {
 func TestAuditIssue107MemoryChildSelfPhysicalGrantFence(t *testing.T) {
 	conformance.RunAuditPhysicalChildSelfFence(t, func(child *testing.T) kernel.Store { return memory.NewStore() })
 }
+
+// EA-1 frozen P3 cut: original Effect receipt committed, Store Mark pending.
+func TestEA1ReceiptBeforeMarkMemory(t *testing.T) {
+	conformance.RunEA1ReceiptBeforeMarkSuite(t, func(sub *testing.T) kernel.Store { return memory.NewStore() })
+}
+
+// EA-1 P0: original source, tenant/actor/thread, duplicate ID and Revision.
+func TestEA1P0SourceAdmissionMemory(t *testing.T) {
+	conformance.RunEA1P0SourceAdmissionSuite(t, func(sub *testing.T) kernel.Store { return memory.NewStore() })
+}

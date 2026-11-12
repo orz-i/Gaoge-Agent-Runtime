@@ -53,3 +53,32 @@ func TestAuditIssue107NativePostgresChildSelfPhysicalGrantFence(t *testing.T) {
 		return NewKernelStore(db)
 	})
 }
+
+// Native PostgreSQL physical receipt before Mark, independent real SQL connection.
+func TestEA1RealPostgresReceiptBeforeMark(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN not configured")
+	}
+	conformance.RunEA1ReceiptBeforeMarkSuite(t, func(sub *testing.T) kernel.Store {
+		db, _ := openIsolatedRealPostgres(sub, dsn)
+		if err := Migrate(db); err != nil {
+			sub.Fatal(err)
+		}
+		return NewKernelStore(db)
+	})
+}
+
+func TestEA1RealPostgresP0SourceAdmission(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN not configured")
+	}
+	conformance.RunEA1P0SourceAdmissionSuite(t, func(sub *testing.T) kernel.Store {
+		db, _ := openIsolatedRealPostgres(sub, dsn)
+		if err := Migrate(db); err != nil {
+			sub.Fatal(err)
+		}
+		return NewKernelStore(db)
+	})
+}

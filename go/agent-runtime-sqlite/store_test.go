@@ -245,3 +245,13 @@ func TestIssue107SQLiteRootWorkflowPhysicalGrantConformance(t *testing.T) {
 func TestAuditIssue107SQLiteChildSelfPhysicalGrantFence(t *testing.T) {
 	conformance.RunAuditPhysicalChildSelfFence(t, func(child *testing.T) kernel.Store { return openStore(child) })
 }
+
+// EA-1 frozen P3 cut: original Effect receipt committed, Store Mark pending.
+func TestEA1ReceiptBeforeMarkNativeSQLite(t *testing.T) {
+	conformance.RunEA1ReceiptBeforeMarkSuite(t, func(sub *testing.T) kernel.Store { return openStore(sub) })
+}
+
+// EA-1 P0: original source, tenant/actor/thread, duplicate ID and Revision.
+func TestEA1P0SourceAdmissionNativeSQLite(t *testing.T) {
+	conformance.RunEA1P0SourceAdmissionSuite(t, func(sub *testing.T) kernel.Store { return openStore(sub) })
+}
