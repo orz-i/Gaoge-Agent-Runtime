@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Issue #107: admit only a statically composed, same-Kernel Workflow
+  AgentTask child with an exact frozen Effect/Activation, deterministic
+  attempt/owner identity, immutable Agent Runner and relation recorder and
+  Host-verified child origin. Harness now checks its own recorder before
+  projecting AgentTask approval. Original approval route, cancellation and
+  per-child dispatch grants remain independently fenced; custom/remote and
+  unverified Effect routes fail closed. No schema migration or compatibility
+  bridge; see `docs/audits/2026-11-11-issue107-workflow-agenttask-ownership.md`.
+
 - Add public tenant-scoped PostgreSQL Run/event metadata and Harness Turn
   configuration queries. Actor erasure and event pruning remain separately
   gated on an enforced recovery-retirement/reconciliation policy; see

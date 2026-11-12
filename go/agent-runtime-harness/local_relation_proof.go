@@ -199,6 +199,16 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 	default:
 		return unverified()
 	}
+	if relation.Kind == runrelation.KindWorkflowEffect && candidate.Run.Kind == agent.RunKind {
+		// An AgentTask's Host effect must have indexed this physical child in
+		// the *same* immutable registry used by Harness. A coincidentally
+		// matching edge from another registry is never ownership evidence.
+		owner, ok := feature.(localCompositeExecutionOwner)
+		if !ok || !owner.OwnsKernelRuntime(runner.runtime) ||
+			!owner.RecordsRelationsTo(runner.relationReader) {
+			return unverified()
+		}
+	}
 	verifier, ok := feature.(localRelationVerifier)
 	if !ok || !verifier.VerifyLocalChild(runner.runtime, parent, relation, candidate, control) {
 		return unverified()

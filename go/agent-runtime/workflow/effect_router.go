@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 var (
@@ -41,10 +45,27 @@ type EffectRoute struct {
 	Executor EffectExecutor
 }
 
+// LocalAgentTaskOwner is an opt-in proof from the original, statically
+// composed AgentTask executor. A bare EffectExecutor or a matching Run ID
+// must never be promoted into local execution/approval authority.
+// The host must return the actual fixed Agent and original relation recorder.
+type LocalAgentTaskOwner interface {
+	LocalAgentTaskRunner() *agent.Runner
+	LocalAgentTaskRecorder() runrelation.Recorder
+	// VerifyAgentTaskOrigin binds the frozen Host-specific input/route to
+	// the concrete child created by this executor. It must be pure, without
+	// new calls, authorization grants or process-local recovery state.
+	VerifyAgentTaskOrigin(Effect, kernel.Snapshot) bool
+}
+
 // StaticEffectRouter contains an immutable, duplicate-free class route table.
 type StaticEffectRouter struct {
 	routes     map[EffectClass]EffectExecutor
 	authorizer EffectAuthorizer
+	// Capture once at composition; mutable executor fields cannot replace
+	// either original authority after a child has been dispatched.
+	agentTaskOriginal *agent.Runner
+	agentTaskRecorder runrelation.Recorder
 }
 
 // NewStaticEffectRouter constructs a closed effect composition root.
@@ -64,8 +85,30 @@ func NewStaticEffectRouter(authorizer EffectAuthorizer, routes ...EffectRoute) (
 			return nil, ErrInvalidEffectRouter
 		}
 		router.routes[route.Class] = route.Executor
+		if route.Class == EffectClassAgent {
+			if owner, ok := route.Executor.(LocalAgentTaskOwner); ok {
+				router.agentTaskOriginal = owner.LocalAgentTaskRunner()
+				router.agentTaskRecorder = owner.LocalAgentTaskRecorder()
+			}
+		}
 	}
 	return router, nil
+}
+
+// localAgentTaskOwner accepts only the original immutable class route,
+// whose executor explicitly attests to the same relation recorder. A custom
+// effect router, dynamically resolved Agent or foreign recorder fails closed.
+func (router *StaticEffectRouter) localAgentTaskOwner(recorder runrelation.Recorder) LocalAgentTaskOwner {
+	if router == nil || recorder == nil || router.agentTaskOriginal == nil ||
+		!runrelation.SameRecorder(router.agentTaskRecorder, recorder) {
+		return nil
+	}
+	owner, ok := router.routes[EffectClassAgent].(LocalAgentTaskOwner)
+	if !ok || owner.LocalAgentTaskRunner() != router.agentTaskOriginal ||
+		!runrelation.SameRecorder(owner.LocalAgentTaskRecorder(), router.agentTaskRecorder) {
+		return nil
+	}
+	return owner
 }
 
 // Execute authorizes and dispatches without dynamic service discovery.

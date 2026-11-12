@@ -2,6 +2,41 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-11 — Workflow AgentTask child ownership and approval proof (beta.24 candidate)
+
+A `workflow.Runner` now permits local observation and Harness approval of
+a Workflow `NodeAgentTask` child only when the original *static*
+`workflow.StaticEffectRouter` Agent class executor implements
+`workflow.LocalAgentTaskOwner`: it returns the original concrete `*agent.Runner`,
+the original `runrelation.Recorder` and a pure `VerifyAgentTaskOrigin` proof
+for the Host's frozen Effect input. Both pointer authorities are snapshotted
+once at router construction and checked again against the live executor;
+the returned Agent must observe the same Kernel. The parent must contain
+one explicit AgentTask Definition node, one matching Activation/Effect, one
+current Attempt and the exact deterministic child Run ID, RequestID,
+Actor/tenant/thread and relation owner. A custom/dynamic executor, a foreign
+recorder/Kernel, stale Attempt, remote Run or unverified origin fails closed.
+Physical child cancellation additionally requires the original Agent's
+`OwnsKernelRuntime` fence; Host middleware does not gain cancellation
+authority through mere pointer equality.
+
+The Harness `RunRelationSource` must be the original Workflow recorder,
+not a copied index with coincidentally equal child IDs. No prior remote or
+custom Effect can become local through this new opt-in. The existing native
+Subworkflow proof, Tool approval CAS, per-child physical dispatch fences,
+model replay and Session ownership are not weakened. The new Host opt-in is
+a source-contract extension, not a legacy compatibility API.
+
+There is no SQL schema or on-disk state format change. **This does not
+retroactively certify old unproven AgentTask Runs**. Pending or ambiguous
+historical children remain quarantined until their exact persisted parent
+Effect and original static Host route can be verified. A Host must not
+replay an unverified external Tool effect, silently authorize a replacement
+runner, or treat a timeout as a no-effect receipt. Full Gaoge hosted cutover
+remains separately gated on host integration, provider replay, media
+admission, migration and reconciliation. See
+[audit and contract](audits/2026-11-11-issue107-workflow-agenttask-ownership.md).
+
 ## 2026-11-08 — Exact-model media-input grants (beta.24 candidate)
 
 OpenAI Responses and Anthropic Messages already supported ordered User image

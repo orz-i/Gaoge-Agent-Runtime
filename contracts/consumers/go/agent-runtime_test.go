@@ -10,7 +10,9 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 // Keep host-implemented ports explicit: embedding the SDK interface would hide
@@ -60,6 +62,21 @@ var (
 	_ func(agent.Dependencies) (*agent.Runner, error)     = agent.NewRunner
 	_ func([]tools.Registration) (*tools.Registry, error) = tools.NewRegistry
 	_ continuation.ToolWaitResumer                        = (*agent.Runner)(nil)
+)
+
+// A separately linked Host implements only the narrow, immutable first-party
+// AgentTask ownership proof. Missing methods must fail the external SDK build.
+type workflowAgentTaskOwnerContract interface {
+	LocalAgentTaskRunner() *agent.Runner
+	LocalAgentTaskRecorder() runrelation.Recorder
+	VerifyAgentTaskOrigin(workflow.Effect, kernel.Snapshot) bool
+}
+
+var (
+	_ workflow.LocalAgentTaskOwner                                                                               = (workflowAgentTaskOwnerContract)(nil)
+	_ workflowAgentTaskOwnerContract                                                                             = (workflow.LocalAgentTaskOwner)(nil)
+	_ func(*workflow.Runner, *kernel.Runtime, *agent.Runner) bool                                                = (*workflow.Runner).UsesLocalAgentRunner
+	_ func(*workflow.Runner, *kernel.Runtime, kernel.Snapshot, runrelation.Relation, kernel.Snapshot, bool) bool = (*workflow.Runner).VerifyLocalChild
 )
 
 type externalWaitContract interface {
