@@ -1097,7 +1097,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 					}
 					active.OutcomeErrorCode = code
 					active.OutcomeErrorDetail = err.Error()
-					if replaceLastModelInvocation(&currentState, active) {
+					if replaceLastModelInvocation(&currentState, *active) {
 						if encoded, encodeErr := encodeState(currentState); encodeErr == nil {
 							diagnosed, diagnoseErr := runner.runtime.Apply(context.WithoutCancel(ctx), current.Run.ID, current.Run.Revision, kernel.Mutation{Status: current.Run.Status, State: encoded, Checkpoint: current.Checkpoint, ErrorCode: code, ErrorDetail: err.Error()})
 							if diagnoseErr == nil {

@@ -37,10 +37,11 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if snapshot.Run.ParentRunID != "" || snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrModelOutcomeUnknown
 	}
-	inv, ok := activeModelInvocation(state)
-	if !ok || (inv.Status != ModelInvocationPending && inv.Status != ModelInvocationCompleted) || inv.DispatchAttempt == 0 {
+	active, ok := activeModelInvocation(state)
+	if !ok || (active.Status != ModelInvocationPending && active.Status != ModelInvocationCompleted) || active.DispatchAttempt == 0 {
 		return snapshot, ErrModelOutcomeUnknown
 	}
+	inv := *active
 	grant, err := runner.runtime.LookupChildExecution(ctx, runID)
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, err)
@@ -58,7 +59,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if inv.Status == ModelInvocationCompleted {
 		authorityState.ModelInvocations = state.ModelInvocations[:len(state.ModelInvocations)-1]
 	}
-	authority := modelCompletionAuthority{named: inv.Provider != "" && inv.BindingFingerprint != "", request: model.CloneRequest(inv.Request), duplicate: func(id string) bool { return duplicatePhysicalProviderResponseID(authorityState, id) }}
+	authority := modelCompletionAuthority{named: inv.Provider != "" && inv.BindingFingerprint != "", request: model.CloneRequest(inv.Request), duplicate: func(id string) bool { return duplicatePhysicalProviderResponseID(authorityState, inv, id) }}
 	response, receiptErr = authority.replay(request, response, receiptErr)
 	response, receiptErr = authority.validate(response, receiptErr)
 	rejected := model.IsResponseRejectedError(receiptErr) && response.Usage != nil && validModelUsage(response.Usage)
