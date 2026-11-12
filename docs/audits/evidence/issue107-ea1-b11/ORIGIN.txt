@@ -1,0 +1,7 @@
+SOURCE_SHA=8fc23aae3b5719486d1bc25ed7b8455f01e4ab05
+SOURCE_STATE=clean, frozen before compile, directed tests, lint, smoke and full race
+HOST_SHA=not_tested; WP-GAOGE independently blocked
+POSTGRES=dedicated ephemeral PostgreSQL16; TEST_POSTGRES_DSN configured for both directed and full regression
+SQLITE=native v4; unknown recovery suite closes/reopens; admission suite uses independent peer
+AUXILIARY_GORM=SQLite dialect; admission factory serializes SQL transactions; not independent connection evidence
+CACHE_CLEANUP_BY_THIS_BATCH=0

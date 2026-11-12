@@ -1,0 +1,36 @@
+SOURCE_SHA=8fc23aae3b5719486d1bc25ed7b8455f01e4ab05
+COMMAND=go -C go/agent-runtime test -race -count=1 -timeout=180s ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.408s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	1.416s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	4.892s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.440s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.392s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	1.455s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	11.828s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	8.881s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	1.475s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	1.418s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.570s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.420s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	1.414s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.388s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	1.462s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.401s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	21.849s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.451s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	1.400s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.481s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.395s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.389s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.361s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	1.452s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.427s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	1.398s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.640s
+
+EXIT_CODE=0
