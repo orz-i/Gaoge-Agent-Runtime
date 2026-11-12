@@ -1,0 +1,15 @@
+SOURCE_SHA=996dd3466c12ad1880f1721ed4987720e4b32ead
+COMMAND=go -C go/agent-runtime-sqlite test ./... -run '^$'
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent
+../agent-runtime/agent/agent.go:1100:51: cannot use active (variable of type *ModelInvocation) as ModelInvocation value in argument to replaceLastModelInvocation
+../agent-runtime/agent/root_model_recovery.go:52:49: cannot use inv (variable of type *ModelInvocation) as ModelInvocation value in argument to matchesFrozenProviderBinding
+../agent-runtime/agent/root_model_recovery.go:61:234: not enough arguments in call to duplicatePhysicalProviderResponseID
+	have (runState, string)
+	want (runState, ModelInvocation, string)
+../agent-runtime/agent/root_model_recovery.go:109:34: cannot use inv (variable of type *ModelInvocation) as ModelInvocation value in argument to validModelInvocationReceipt
+../agent-runtime/agent/root_model_recovery.go:109:78: cannot use inv (variable of type *ModelInvocation) as ModelInvocation value in argument to replaceLastModelInvocation
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite [build failed]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded [build failed]
+FAIL
+
+EXIT_CODE=1
