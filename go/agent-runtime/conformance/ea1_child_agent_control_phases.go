@@ -76,7 +76,7 @@ func (s *ea1ChildControlStore) Apply(ctx context.Context, id string, rev uint64,
 			}
 		}
 	}
-	return s.ea1ChildStartStore.Store.Apply(ctx, id, rev, m)
+	return s.Store.Apply(ctx, id, rev, m)
 }
 
 type ea1ChildControlFixture struct {
