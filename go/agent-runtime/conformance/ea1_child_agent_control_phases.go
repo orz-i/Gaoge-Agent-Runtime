@@ -56,9 +56,33 @@ func (h *ea1ChildControlHost) Run(ctx context.Context, i plugin.RunInvocation, n
 	return next(ctx)
 }
 
+// Default Child control has no bound native lease: its real receipt CAS
+// reaches ordinary Apply, with the original opaque PhysicalPermit unchanged.
+type ea1ChildControlStore struct {
+	*ea1ChildStartStore
+	faultRun string
+	fault    error
+	failures int
+}
+
+func (s *ea1ChildControlStore) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+	if s.fault != nil && s.failures == 0 && id == s.faultRun && m.Record.Run.ID == id &&
+		m.Record.Run.Status == kernel.RunStatusCompleted && m.Record.Result != nil &&
+		m.Record.Result.ContentType == "application/json" {
+		for _, e := range m.Events {
+			if e.Type == "tool.completed" {
+				s.failures++
+				return kernel.Snapshot{}, s.fault
+			}
+		}
+	}
+	return s.ea1ChildStartStore.Store.Apply(ctx, id, rev, m)
+}
+
 type ea1ChildControlFixture struct {
 	*ea1ChildStartFixture
 	native            bool
+	controlStore      *ea1ChildControlStore
 	approval          *ea1ControlApproval
 	controlHost       *ea1ChildControlHost
 	waiting, approved kernel.Snapshot
@@ -68,6 +92,9 @@ type ea1ChildControlFixture struct {
 
 func ea1NewChildControl(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), native bool) *ea1ChildControlFixture {
 	f := &ea1ChildControlFixture{ea1ChildStartFixture: ea1NewChildStart(t, factory, true, false), native: native}
+	f.controlStore = &ea1ChildControlStore{ea1ChildStartStore: f.store}
+	f.rt = ea1StartRuntime(t, f.controlStore)
+	f.physical.rt = f.rt
 	approvals, e := interaction.New(f.rt)
 	if e != nil {
 		t.Fatal(e)
@@ -327,8 +354,8 @@ func ea1ChildControlUnknown(t *testing.T, factory func(*testing.T) (kernel.Store
 	case "handler":
 		f.approval.failure = stop
 	case "tool":
-		f.store.event = "tool.completed"
-		f.store.injected = stop
+		f.controlStore.faultRun = f.request.ID
+		f.controlStore.fault = stop
 	}
 	_, e := f.runner(f.rt, true).ResolveApproval(t.Context(), f.request.ID, f.waiting.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
 	if !errors.Is(e, stop) || !errors.Is(e, kernel.ErrChildExecutionBusy) {
@@ -336,7 +363,7 @@ func ea1ChildControlUnknown(t *testing.T, factory func(*testing.T) (kernel.Store
 	}
 	s, g := f.load(f.peer), f.scope()
 	if kind == "tool" {
-		if f.store.failures != 1 || len(f.physical.toolRequests) != 1 || len(f.physical.receipts) != 1 {
+		if f.controlStore.failures != 1 || len(f.physical.toolRequests) != 1 || len(f.physical.receipts) != 1 {
 			t.Fatal("actual approved Tool receipt fault missed")
 		}
 		f.assertResolved(s)
