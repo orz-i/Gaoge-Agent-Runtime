@@ -1,0 +1,24 @@
+fullrace-agent-runtime-harness.log
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 -timeout=180s ./...
+fullrace-agent-runtime-postgres.log
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 -timeout=180s ./...
+fullrace-agent-runtime-sqlite.log
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 -timeout=180s ./...
+fullrace-agent-runtime.log
+COMMAND=go -C go/agent-runtime test -race -count=1 -timeout=180s ./...
+gorm.log
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^(TestEA1RootAgent|TestOwnedPhysical|TestOwnedBarrier)' -v
+lint-agent-runtime-postgres.log
+COMMAND=cd go/agent-runtime-postgres && golangci-lint run ./...
+lint-agent-runtime-sqlite.log
+COMMAND=cd go/agent-runtime-sqlite && golangci-lint run ./...
+lint-agent-runtime.log
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+memory.log
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^(TestEA1RootAgent|TestOwnedPhysical|TestOwnedBarrier)' -v
+nativepg.log
+COMMAND=go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^(TestEA1RealPostgresRootAgent|TestRealPostgresOwnedPhysical)' -v
+smoke-memory.log
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1RootAgent(StartSettlement|ReconcilePhases)' -v
+sqlite.log
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^(TestEA1RootAgent|TestOwnedPhysical|TestOwnedBarrier)' -v
