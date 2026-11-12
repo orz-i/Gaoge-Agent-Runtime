@@ -1,0 +1,2 @@
+SOURCE_SHA=cd61409fa8fd590c29da3bf3b7fd88e383e942aa
+Initial smoke build failed: fixture referenced nonexistent kernel.Checkpoint.RunID. No test reached target cutpoints; no production defect established. Later checks not run.
