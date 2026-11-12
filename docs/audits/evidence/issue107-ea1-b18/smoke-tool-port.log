@@ -1,0 +1,10 @@
+SOURCE_SHA=85bfba1b686e462761dfd8819411ba7980b81a31
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1ChildAgentControlPhasesMemory$/^P2$/^tool$' -v
+=== RUN   TestEA1ChildAgentControlPhasesMemory
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P2/tool
+--- PASS: TestEA1ChildAgentControlPhasesMemory (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P2/tool (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	0.233s
+
+EXIT_CODE=0

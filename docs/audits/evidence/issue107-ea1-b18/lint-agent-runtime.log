@@ -1,0 +1,5 @@
+SOURCE_SHA=85bfba1b686e462761dfd8819411ba7980b81a31
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+0 issues.
+
+EXIT_CODE=0

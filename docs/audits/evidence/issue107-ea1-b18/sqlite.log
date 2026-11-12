@@ -1,0 +1,53 @@
+SOURCE_SHA=85bfba1b686e462761dfd8819411ba7980b81a31
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1ChildAgent(ControlPhases|ApprovalSettlement)' -v
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P3/native-checkpoint
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P4/native-checkpoint
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/native-checkpoint/two-approvals
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P3/default-terminal-tool
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P4/default-terminal-tool
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/default-terminal-tool/two-approvals
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/ancestor-deadline
+--- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite (4.03s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P3/native-checkpoint (0.18s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P4/native-checkpoint (0.15s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/native-checkpoint/two-approvals (0.14s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P3/default-terminal-tool (0.14s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P4/default-terminal-tool (0.14s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/default-terminal-tool/two-approvals (0.15s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/ancestor-deadline (3.12s)
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/missing
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/stale
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/not-waiting
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/missing-preflight
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/preflight-rejected
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/parent-wins
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/invalid-decision
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/foreign-checkpoint
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P1/default
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P1/native
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P2/host
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P2/handler
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P2/tool
+--- PASS: TestEA1ChildAgentControlPhasesNativeSQLite (1.57s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/missing (0.10s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/stale (0.11s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/not-waiting (0.10s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/missing-preflight (0.11s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/preflight-rejected (0.13s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/parent-wins (0.10s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/invalid-decision (0.10s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/foreign-checkpoint (0.10s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P1/default (0.18s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P1/native (0.17s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P2/host (0.11s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P2/handler (0.12s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P2/tool (0.13s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	7.124s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.493s [no tests to run]
+
+EXIT_CODE=0
