@@ -96,14 +96,20 @@ func (runner *Runner) knownWorkflowPhysicalSettlement(ctx context.Context, snaps
 	if snapshot.Run.Kind != RunKind || snapshot.Run.ID == "" {
 		return false
 	}
+	state, err := decodeExecutionState(snapshot.State)
+	if err != nil {
+		return false
+	}
+	// Resume may complete the original cancellation intent after a safe
+	// compensation retry. This private signal is not physical proof: the
+	// exact persisted intent and every original receipt are still required.
+	completedCancellation := errors.Is(physicalErr, errCancellationRequested) &&
+		snapshot.Run.Status == kernel.RunStatusCancelled && snapshot.Run.ErrorCode == "workflow.cancelled" &&
+		state.Failure != nil && state.Failure.Status == kernel.RunStatusCancelled && state.Failure.Code == "workflow.cancelled"
 	if physicalErr != nil && !errors.Is(physicalErr, ErrWaitPending) &&
 		!errors.Is(physicalErr, ErrSegmentYielded) &&
 		!errors.Is(physicalErr, ErrEffectFailed) &&
-		!errors.Is(physicalErr, ErrEffectPending) {
-		return false
-	}
-	state, err := decodeExecutionState(snapshot.State)
-	if err != nil {
+		!errors.Is(physicalErr, ErrEffectPending) && !completedCancellation {
 		return false
 	}
 	for _, effect := range state.Effects {
@@ -117,9 +123,14 @@ func (runner *Runner) knownWorkflowPhysicalSettlement(ctx context.Context, snaps
 				// A SegmentYielded effect may be scheduled but not
 				// dispatched. ErrEffectPending is an observed external
 				// pending outcome and requires separate trusted evidence.
-				if !errors.Is(physicalErr, ErrSegmentYielded) &&
-					(!errors.Is(physicalErr, ErrEffectPending) || !effect.PhysicalNoEffect ||
-						effect.PhysicalNoEffectAttempt != effect.Attempt-1 || effect.ErrorCode == "") {
+				// Unknown dispatch wins over a simultaneous segment-yield
+				// signal. Only the exact preceding no-effect attempt can
+				// authorize retirement before a scheduled retry dispatch.
+				if errors.Is(physicalErr, ErrEffectPending) {
+					if !effect.PhysicalNoEffect || effect.PhysicalNoEffectAttempt != effect.Attempt-1 || effect.ErrorCode == "" {
+						return false
+					}
+				} else if !errors.Is(physicalErr, ErrSegmentYielded) {
 					return false
 				}
 				continue

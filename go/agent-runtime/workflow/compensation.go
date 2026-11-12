@@ -201,7 +201,10 @@ func (runner *Runner) dispatchCompensation(
 			"workflow.compensation_dispatch", err)
 	}
 	if result.Disposition == DispositionPending {
-		return runner.yield(ctx, snapshot, state, "compensation_pending")
+		// Preserve the public yield boundary, but distinguish a dispatched
+		// unknown Undo from an un-dispatched scheduled next segment.
+		yielded, yieldErr := runner.yield(ctx, snapshot, state, "compensation_pending")
+		return yielded, errors.Join(yieldErr, ErrEffectPending)
 	}
 	if result.Disposition == DispositionFailed {
 		effect.PhysicalNoEffect = result.PhysicalNoEffect

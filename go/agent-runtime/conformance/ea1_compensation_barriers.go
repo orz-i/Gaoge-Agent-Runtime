@@ -28,10 +28,14 @@ func RunEA1CompensationBarriers(t *testing.T, factory func(*testing.T) (kernel.S
 				if err != nil {
 					t.Fatal(err)
 				}
-				// Only the peer sees the ancestor's frozen deadline as due. Workflow's
-				// StartRequest has no deadline input; do not fabricate a self deadline.
-				due := time.Now().UTC().Add(time.Hour)
-				observer, err := kernel.New(kernel.Dependencies{Store: peer, Clock: ea1CompBarrierClock{due.Add(time.Hour)}})
+				// Only the non-retry P5 child case exercises an actually due ancestor.
+				// Both Runtime and Store use real clocks. StartRequest has no self deadline.
+				var deadline *time.Time
+				if child && phase == "P5" {
+					due := time.Now().UTC().Add(2 * time.Second)
+					deadline = &due
+				}
+				observer, err := kernel.New(kernel.Dependencies{Store: peer})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -39,7 +43,7 @@ func RunEA1CompensationBarriers(t *testing.T, factory func(*testing.T) (kernel.S
 				thread := kernel.ThreadRef{Kind: "conversation", ID: "original"}
 				parentID := ""
 				if child {
-					p, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", Kind: workflow.RunKind, Actor: actor, Thread: thread, Goal: "original ancestor", State: json.RawMessage("{}"), DeadlineAt: &due})
+					p, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", Kind: workflow.RunKind, Actor: actor, Thread: thread, Goal: "original ancestor", State: json.RawMessage("{}"), DeadlineAt: deadline})
 					if e != nil {
 						t.Fatal(e)
 					}
@@ -69,7 +73,7 @@ func RunEA1CompensationBarriers(t *testing.T, factory func(*testing.T) (kernel.S
 				if err != nil || original.Run.Status != kernel.RunStatusWaitingInput || len(effects.requests()) != 1 {
 					t.Fatalf("setup: %v", err)
 				}
-				var owned kernel.Store = backing
+				owned := backing
 				if phase == "P1" {
 					owned = &ea1WaitAdmissionBarrier{Store: backing, ChildExecutionStore: backing.(kernel.ChildExecutionStore), entered: entered, release: release}
 				}
@@ -154,8 +158,23 @@ func RunEA1CompensationBarriers(t *testing.T, factory func(*testing.T) (kernel.S
 						t.Fatalf("self/ancestor Cancel: %v", e)
 					}
 					ea1CompBarrierUnchanged(t, observer, before)
-					if id == parentID {
+					if id == parentID && deadline != nil {
+						// No simulated eligibility: wait until Store-side wall time is due too.
+						if remaining := time.Until(*deadline); remaining > 0 {
+							time.Sleep(remaining + 20*time.Millisecond)
+						}
+						if time.Now().Before(*deadline) {
+							t.Fatal("deadline fixture not actually due")
+						}
 						_, applied, e := observer.Expire(t.Context(), id, before.Run.Revision)
+						// A bounded tolerance accommodates a slightly lagging database clock.
+						// ErrDeadline itself is never accepted as physical-fence evidence.
+						tolerance := time.Now().Add(time.Second)
+						for !applied && errors.Is(e, kernel.ErrDeadline) && time.Now().Before(tolerance) {
+							ea1CompBarrierUnchanged(t, observer, before)
+							time.Sleep(20 * time.Millisecond)
+							_, applied, e = observer.Expire(t.Context(), id, before.Run.Revision)
+						}
 						if applied || !errors.Is(e, kernel.ErrChildExecutionBusy) {
 							t.Fatalf("due ancestor deadline: %t %v", applied, e)
 						}
@@ -191,8 +210,7 @@ func RunEA1CompensationBarriers(t *testing.T, factory func(*testing.T) (kernel.S
 					if ve != nil || len(view.Effects) != 2 || view.Effects[1].Attempt != 2 || view.Budget.Effects != 2 || view.Budget.CostUnitsUsed != 1 || view.Budget.CostUnitsReserved != 1 {
 						t.Fatal("retry lost original reservation/attempt")
 					}
-					// The original first-party clock resumes the scheduled next attempt;
-					// the peer-only future clock above was only for deadline competition.
+					// Retry uses its own non-expiring fixture, separate from deadline competition.
 					settled, e = owner.Resume(t.Context(), settled.Run.ID, settled.Run.Revision)
 					if e == nil || e.Error() != "workflow cancellation requested" || settled.Run.Status != kernel.RunStatusCancelled || settled.Run.ErrorCode != "workflow.cancelled" {
 						t.Fatalf("legal retry must finish original cancellation without stranded grant: %v status=%s code=%s", e, settled.Run.Status, settled.Run.ErrorCode)
@@ -226,9 +244,6 @@ func RunEA1CompensationBarriers(t *testing.T, factory func(*testing.T) (kernel.S
 	}
 }
 
-type ea1CompBarrierClock struct{ now time.Time }
-
-func (c ea1CompBarrierClock) Now() time.Time { return c.now }
 func ea1CompBarrierUnchanged(t *testing.T, rt *kernel.Runtime, before kernel.Snapshot) {
 	t.Helper()
 	after, e := rt.Load(t.Context(), before.Run.ID)

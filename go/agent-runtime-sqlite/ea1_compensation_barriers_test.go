@@ -1,11 +1,12 @@
 package sqlite_test
 
 import (
+	"path/filepath"
+	"testing"
+
 	sqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"path/filepath"
-	"testing"
 )
 
 func TestEA1CompensationBarriersSQLite(t *testing.T) {
