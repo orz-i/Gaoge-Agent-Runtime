@@ -127,6 +127,16 @@ func RunEA1WaitBarriers(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				if e = peerRunner.ReconcileChildPhysicalGrant(t.Context(), original.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 					t.Fatalf("premature reconcile: %v", e)
 				}
+				// WR-Q/WC-Q P1: public recovery rejection itself must preserve
+				// the exact original owner before any other competing operation.
+				ea1CompBarrierUnchanged(t, observer, snapshot)
+				if child {
+					ea1CompBarrierUnchanged(t, observer, parent)
+				}
+				afterRecovery, recoveryErr := observer.LookupChildExecution(t.Context(), original.Run.ID)
+				if recoveryErr != nil || afterRecovery != grant {
+					t.Fatal("denied recovery changed original Grant")
+				}
 				if e = peer.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), grant); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("premature finish: %v", e)
 				}
