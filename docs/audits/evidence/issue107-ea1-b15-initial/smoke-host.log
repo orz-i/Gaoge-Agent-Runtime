@@ -1,0 +1,16 @@
+SOURCE_SHA=d96a3e79c16f1464e38ce837a152333b960c8a51
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=1 ./... -run '^TestEA1RootAgentCancelHostElection$' -v
+=== RUN   TestEA1RootAgentCancelHostElection
+=== RUN   TestEA1RootAgentCancelHostElection/election-after
+    ea1_root_agent_cancel_election_test.go:148: original Invocation changed before physical cancel: <nil>
+=== RUN   TestEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestEA1RootAgentCancelHostElection/receipt-ack-loss
+--- FAIL: TestEA1RootAgentCancelHostElection (0.01s)
+    --- FAIL: TestEA1RootAgentCancelHostElection/election-after (0.00s)
+    --- PASS: TestEA1RootAgentCancelHostElection/receipt-before (0.00s)
+    --- PASS: TestEA1RootAgentCancelHostElection/receipt-ack-loss (0.00s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	0.549s
+FAIL
+
+EXIT_CODE=1
