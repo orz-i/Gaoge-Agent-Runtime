@@ -257,7 +257,7 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 	return nil
 }
 
-func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelMiddleware) []any {
+func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelMiddleware, toolLayers []plugin.ToolMiddleware) []any {
 	var result []any
 	for _, m := range runs {
 		switch value := m.(type) {
@@ -272,6 +272,14 @@ func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelM
 		case *BoundedBudgetAdapter:
 			result = append(result, value)
 		case *ModelAdmissionBarrier:
+			result = append(result, value)
+		}
+	}
+	for _, m := range toolLayers {
+		switch value := m.(type) {
+		case *BoundedBudgetAdapter:
+			result = append(result, value)
+		case *BoundedToolTimelineAdapter:
 			result = append(result, value)
 		}
 	}

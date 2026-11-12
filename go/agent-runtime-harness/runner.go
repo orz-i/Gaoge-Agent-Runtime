@@ -863,6 +863,16 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 			return Snapshot{}, errors.Join(ErrConflict, rootErr)
 		}
 	}
+	// Refresh is observation, not the owner of an admitted cancellation.
+	// Check its durable fence after caller ownership validation but before
+	// any subtask/start-item repair, even while the root remains Running.
+	physicalEvidence, evidenceErr := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+	if evidenceErr != nil {
+		return Snapshot{}, evidenceErr
+	}
+	if ActiveCancellationFence(physicalEvidence) {
+		return Snapshot{}, ErrConflict
+	}
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}

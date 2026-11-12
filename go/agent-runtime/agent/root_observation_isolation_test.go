@@ -2,8 +2,9 @@ package agent
 
 import (
 	"context"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func TestPhysicalObservationNestedRunIsolationAndSameTargetRejection(t *testing.T) {

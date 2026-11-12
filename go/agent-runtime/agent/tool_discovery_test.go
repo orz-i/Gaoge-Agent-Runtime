@@ -337,8 +337,8 @@ func TestRuntimeToolSearchPersistsReceiptAcrossRetryResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, err := runner.StartRun(t.Context(), startRequest("run_search_retry", "req_search_retry", "Find documents", keys...))
-	pending = mustLoadModelInvocationRun(t, runtime, "run_search_retry")
+	_, err = runner.StartRun(t.Context(), startRequest("run_search_retry", "req_search_retry", "Find documents", keys...))
+	pending := mustLoadModelInvocationRun(t, runtime, "run_search_retry")
 	if !errors.Is(err, errInjectedModelInvocationCrash) || provider.calls != 1 || pending.Run.Status != kernel.RunStatusRunning || search.calls != 1 {
 		t.Fatalf("retryable failure not durable: status=%s err=%v search=%d", pending.Run.Status, err, search.calls)
 	}

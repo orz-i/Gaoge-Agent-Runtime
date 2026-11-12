@@ -29,7 +29,7 @@ type modelPreDispatchDenied struct {
 func modelDeniedForRequest(ctx context.Context, request model.Request, err error) bool {
 	var denied modelPreDispatchDenied
 	scope, _ := ctx.Value(modelDenialKey{}).(*modelDenialScope)
-	return scope != nil && errors.As(err, &denied) && denied.scope == scope && sameBoundedValue(denied.request, request)
+	return scope != nil && errors.As(err, &denied) && denied.scope == scope && sameBoundedValue(model.CloneRequest(denied.request), model.CloneRequest(request))
 }
 
 func (denied modelPreDispatchDenied) Error() string { return denied.cause.Error() }

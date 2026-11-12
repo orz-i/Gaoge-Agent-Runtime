@@ -262,7 +262,7 @@ func (chain *ModelChain) Invoke(
 		current := chain.middleware[index]
 		downstream := next
 		next = func(callCtx context.Context, callRequest model.Request, callEmit model.StreamSink) (out model.Response, callbackErr error) {
-			layerCtx, ticket := callbackscope.Enter(callCtx, callRequest.RunID, current, callRequest)
+			layerCtx, ticket := callbackscope.Enter(callCtx, request.RunID, current, callRequest)
 			lifetime := newNextLifetime()
 			defer func() {
 				lifetime.finish()
@@ -309,15 +309,23 @@ func (chain *ToolChain) Invoke(
 	for index := len(chain.middleware) - 1; index >= 0; index-- {
 		current := chain.middleware[index]
 		downstream := next
-		next = func(callCtx context.Context) (tools.ExecutionResult, error) {
+		next = func(callCtx context.Context) (out tools.ExecutionResult, callbackErr error) {
+			layerCtx, ticket := callbackscope.Enter(callCtx, invocation.Run.ID, current, invocation)
 			lifetime := newNextLifetime()
-			defer lifetime.finish()
-			return current.Tool(callCtx, cloneToolInvocation(invocation), onceToolNext(func(nextCtx context.Context) (tools.ExecutionResult, error) {
+			defer func() {
+				lifetime.finish()
+				if failure := recover(); failure != nil {
+					callbackscope.Aborted(ticket)
+					panic(failure)
+				}
+				callbackscope.Returned(ticket, callbackErr)
+			}()
+			return current.Tool(layerCtx, cloneToolInvocation(invocation), onceToolNext(func(nextCtx context.Context) (tools.ExecutionResult, error) {
 				if !lifetime.enter() {
 					return tools.ExecutionResult{}, ErrNextAlreadyCalled
 				}
 				defer lifetime.leave()
-				return downstream(nextCtx)
+				return downstream(callbackscope.Inherit(nextCtx, layerCtx))
 			}))
 		}
 	}

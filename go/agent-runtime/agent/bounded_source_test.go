@@ -18,6 +18,10 @@ func TestBoundedBudgetDenialRequiresOriginalRequestAndInvocationNonce(t *testing
 	if !modelDeniedForRequest(ctx, request, denied) {
 		t.Fatal("original private denial rejected")
 	}
+	normalized := model.CloneRequest(request)
+	if !modelDeniedForRequest(ctx, normalized, denied) {
+		t.Fatal("nil/empty normalized request rejected")
+	}
 	for _, field := range []string{"run", "invocation", "model"} {
 		candidate := model.CloneRequest(request)
 		switch field {

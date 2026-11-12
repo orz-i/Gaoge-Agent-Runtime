@@ -64,6 +64,23 @@ func TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild(t *testing.T) 
 	assertCompletedCapabilityHarness(t, fixture.runner, started.Turn.ID)
 }
 
+// A genuine Tool no-effect receipt does not prove an ordinary Host timeline
+// callback completed. Only the explicitly selected Runtime orchestrator does.
+func TestOrdinaryToolTimelineCannotClaimBoundedRecovery(t *testing.T) {
+	fixture := newCapabilityToolFixtureWithTimeline(t, false)
+	fixture.model.correctArguments = true
+	request := harness.StartRequest{HostThread: harness.HostRef{Kind: testThreadKind, ID: "opaque-capability-thread"}, HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "opaque-capability-turn"}, Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "opaque-capability-thread"}, RequestID: "opaque-capability-request", Goal: "coordinate the workflow", Config: harness.ConfigSnapshot{Model: "fixture", Commands: fixtureCapabilityCommands(), ToolKeys: []string{harness.CapabilityInvocationToolKey}}}
+	_, err := fixture.runner.StartAgentTurn(t.Context(), request)
+	if !errors.Is(err, agent.ErrRootOutcomeUnknown) {
+		t.Fatalf("ordinary Tool callback claimed bounded completion: %v", err)
+	}
+	modelCalls, childStarts := fixture.model.calls, fixture.workflowFeature.starts
+	_, againErr := fixture.runner.StartAgentTurn(t.Context(), request)
+	if fixture.model.calls != modelCalls || fixture.workflowFeature.starts != childStarts {
+		t.Fatalf("unknown Host callback replayed: %v calls=%d/%d starts=%d/%d", againErr, fixture.model.calls, modelCalls, fixture.workflowFeature.starts, childStarts)
+	}
+}
+
 func TestRootAgentPreparesWorkflowWithScopedApplicationCommand(t *testing.T) {
 	fixture := newCapabilityToolFixture(t)
 	started := startCapabilityToolHarness(t, fixture, harness.CommandDescriptor{
@@ -89,6 +106,9 @@ type capabilityToolFixture struct {
 }
 
 func newCapabilityToolFixture(t *testing.T, definitions ...workflow.Definition) capabilityToolFixture {
+	return newCapabilityToolFixtureWithTimeline(t, true, definitions...)
+}
+func newCapabilityToolFixtureWithTimeline(t *testing.T, bounded bool, definitions ...workflow.Definition) capabilityToolFixture {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -112,9 +132,16 @@ func newCapabilityToolFixture(t *testing.T, definitions ...workflow.Definition) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeline, err := harness.NewToolTimelineMiddleware(store, capabilityToolClock{}, nil)
+	ordinaryTimeline, err := harness.NewToolTimelineMiddleware(store, capabilityToolClock{}, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	var timeline plugin.ToolMiddleware = ordinaryTimeline
+	if bounded {
+		timeline, err = harness.NewBoundedToolTimelineAdapter(store, capabilityToolClock{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	model := &capabilityToolModel{t: t}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{

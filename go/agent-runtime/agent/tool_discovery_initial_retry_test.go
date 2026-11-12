@@ -45,8 +45,8 @@ func TestRuntimeToolDiscoveryInitialSetSurvivesRetryAndRunnerRestart(t *testing.
 	}
 	start := startRequest("initial-retry-run", "initial-retry-request", "Answer", keys...)
 	start.InitialToolKeys = []string{keys[0]}
-	pending, err := runner.StartRun(t.Context(), start)
-	pending = mustLoadModelInvocationRun(t, runtime, start.ID)
+	_, err = runner.StartRun(t.Context(), start)
+	pending := mustLoadModelInvocationRun(t, runtime, start.ID)
 	if !errors.Is(err, errInjectedModelInvocationCrash) || pending.Run.Status != kernel.RunStatusRunning ||
 		len(stub.requests) != 0 {
 		t.Fatalf("expected durable retryable model attempt: run=%+v err=%v calls=%d", pending.Run, err, len(stub.requests))

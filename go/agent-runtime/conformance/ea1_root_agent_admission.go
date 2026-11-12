@@ -29,6 +29,7 @@ func RunEA1RootAgentDefaultAdmission(t *testing.T, factory func(*testing.T) (ker
 }
 func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store), automatic bool) {
 	ea1RootBoundedContext(t, factory, automatic)
+	ea1RootBoundedTool(t, factory, automatic)
 
 	if automatic {
 		t.Run("P0/default-generated-id", func(t *testing.T) {

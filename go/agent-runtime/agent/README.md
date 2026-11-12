@@ -1,13 +1,17 @@
 
 ### Bounded first-party callback orchestration
 
-`BoundedContextAdapter` and `BoundedBudgetAdapter` are explicit alternatives to
+`BoundedContextAdapter`, `BoundedBudgetAdapter`, and `BoundedToolTimelineAdapter` are explicit alternatives to
 ordinary Host middleware. Runtime owns their complete operation order; Host ports
 retain authorization, storage, limits, metering policy and projections. Context
 preparation persists artifacts and commits the original checkpoint CAS before
 binding the returned checkpoint. Budget owns the original reservation, dispatch,
 proven-unsent CAS and settlement sequence. A failed Host write/projection is not
 converted to a successful callback receipt.
+
+Budget Tool accounting and Tool timeline start/finish writes also run inside
+these concrete lifecycles; a known Tool no-effect receipt does not certify an
+ordinary Host middleware callback.
 
 Only these concrete adapters (and the channel-only `ModelAdmissionBarrier`) can
 record internal, invocation-bound lifecycle evidence. A wrapper with the same

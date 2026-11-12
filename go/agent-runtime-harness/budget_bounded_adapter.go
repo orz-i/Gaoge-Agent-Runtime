@@ -8,6 +8,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // NewBoundedBudgetAdapter explicitly delegates Run/Model orchestration to
@@ -119,4 +120,9 @@ func (p boundedBudgetPorts) ValidateSettlement(before, after budget.Ledger, res 
 		return budget.ErrInvalidUsage
 	}
 	return nil
+}
+
+// Coordinator Tools wait for children and must not occupy the child's slot.
+func (p boundedBudgetPorts) ToolReservationActive(invocation plugin.ToolInvocation) bool {
+	return invocation.Definition.Key != DelegationToolKey && invocation.Definition.Key != CapabilityInvocationToolKey
 }

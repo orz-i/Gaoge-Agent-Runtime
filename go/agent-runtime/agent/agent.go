@@ -337,7 +337,6 @@ type Runner struct {
 	startControlPreflight     func(context.Context, StartRequest) error
 	runMiddlewareConfigured   bool
 	modelMiddlewareConfigured bool
-	toolMiddlewareConfigured  bool
 	rootCallbacks             *rootCallbackState
 	boundedCallbacks          []any
 	approvalPolicies          *plugin.ApprovalPolicySet
@@ -527,7 +526,6 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		startControlPreflight:     dependencies.StartControlPreflight,
 		runMiddlewareConfigured:   len(dependencies.RunMiddleware) > 0,
 		modelMiddlewareConfigured: len(dependencies.ModelMiddleware) > 0,
-		toolMiddlewareConfigured:  len(dependencies.ToolMiddleware) > 0,
 		hostedTools:               dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:   compactCompletionPolicies(dependencies.CompletionPolicies),
 		limits:               dependencies.Limits,
@@ -539,7 +537,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		modelLimiter:         newCallLimiter(execution.Model.MaxConcurrency),
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
-		boundedCallbacks: collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware),
+		boundedCallbacks: collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware),
 		kernelOwnedStartCancellation: len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 			dependencies.PrepareModelRequest == nil && dependencies.NormalizeModelPolicy == nil,
@@ -2087,9 +2085,6 @@ func (runner *Runner) invokePendingTool(
 			}
 			return runner.executor.Execute(nextCtx, executionRequest)
 		})
-		if runner.toolMiddlewareConfigured {
-			runner.noteRootCallbackFailure(chainErr)
-		}
 		return out, chainErr
 	})
 	endedAt := runner.clock.Now().UTC()
