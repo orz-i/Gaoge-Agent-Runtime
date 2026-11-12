@@ -5,12 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"testing"
+	"time"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
-	"testing"
-	"time"
 )
 
 // RunEA1ChildAgentRecoveryUnknownSuite covers AC-Q P2 only. Actual child
@@ -197,19 +198,25 @@ func ea1ChildRecoveryHost(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	makeRunner := func(runtime *kernel.Runtime) *agent.Runner { return ea1AdmissionRunner(t, runtime, physical, host) }
 	runner := makeRunner(rt)
 	request := agent.StartRequest{ID: "original-child", ParentRunID: parent.Run.ID, RequestID: "effect", OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"original":true}`)), Actor: parent.Run.Actor, Thread: parent.Run.Thread, Goal: "original Host callback", Model: "original-model"}
-	// Prepare isolated invalid inputs before the original active scope.
+	// PrepareRun also invokes configured RunMiddleware. Build isolated invalid
+	// inputs with a separate no-middleware native setup runner, so the unknown
+	// Host effect occurs only in the actual original Start under test.
+	setup, setupErr := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: physical, RunExecution: &agent.RunExecution{OwnerID: "setup-owner", LeaseDuration: 3 * time.Minute}})
+	if setupErr != nil {
+		t.Fatal(setupErr)
+	}
 	rootReq := request
 	rootReq.ID = "root"
 	rootReq.ParentRunID = ""
 	rootReq.OriginFingerprint = ""
-	root, e := runner.PrepareRun(t.Context(), rootReq)
+	root, e := setup.PrepareRun(t.Context(), rootReq)
 	if e != nil {
 		t.Fatal(e)
 	}
 	cleanReq := request
 	cleanReq.ID = "clean-child"
 	cleanReq.RequestID = "clean-effect"
-	clean, e := runner.PrepareRun(t.Context(), cleanReq)
+	clean, e := setup.PrepareRun(t.Context(), cleanReq)
 	if e != nil {
 		t.Fatal(e)
 	}
