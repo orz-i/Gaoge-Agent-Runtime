@@ -56,7 +56,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	if err = store.FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unsafe original pre-callback release accepted: %v", err)
 	}
-	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", grant.ID, child.State, child.Checkpoint)
+	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "workflow_child_physical_settled", grant.ID, child.State, child.Checkpoint)
 	if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 				if !errors.Is(cancelErr, kernel.ErrChildExecutionBusy) {
 					t.Fatalf("child won but parent Cancel=%v", cancelErr)
 				}
-				proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", grant.ID, child.State, child.Checkpoint)
+				proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "workflow_child_physical_settled", grant.ID, child.State, child.Checkpoint)
 				if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
 					t.Fatal(err)
 				}
@@ -135,4 +135,8 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 
 func TestIssue107MemoryChildExecutionConformance(t *testing.T) {
 	conformance.RunChildExecutionSuite(t, func(*testing.T) kernel.Store { return memory.NewStore() })
+}
+
+func TestIssue107MemoryParentedWorkflowPhysicalGrantConformance(t *testing.T) {
+	conformance.RunParentedWorkflowSuite(t, func(child *testing.T) kernel.Store { return memory.NewStore() })
 }

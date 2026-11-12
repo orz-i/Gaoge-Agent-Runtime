@@ -338,8 +338,14 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	runner.recordRunTelemetry(ctx, snapshot, state, observability.PhaseStarted)
-	return runner.runSegment(ctx, snapshot)
+	// Parent-bound Workflow Start must admit its original Kernel physical
+	// Grant before ANY callback, including optional Host telemetry. A
+	// best-effort recorder has no independent parent execution authority.
+	// Root Workflow Runs preserve their original unparented semantics.
+	return runner.withChildPhysicalGrant(ctx, snapshot, func() (kernel.Snapshot, error) {
+		runner.recordRunTelemetry(ctx, snapshot, state, observability.PhaseStarted)
+		return runner.runSegment(ctx, snapshot)
+	})
 }
 
 // Resume continues one running Workflow from its durable state.
@@ -357,7 +363,9 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrWorkflowTerminal
 	}
-	return runner.runSegment(ctx, snapshot)
+	return runner.withChildPhysicalGrant(ctx, snapshot, func() (kernel.Snapshot, error) {
+		return runner.runSegment(ctx, snapshot)
+	})
 }
 
 // ResolveWait resolves one pending host Wait and continues the next segment.
@@ -380,26 +388,32 @@ func (runner *Runner) ResolveWait(
 	if !validPendingWait(snapshot, state) {
 		return kernel.Snapshot{}, ErrWaitPending
 	}
-	waitID := state.CurrentWaitID
-	if err = resolveWaitState(&state, response); err != nil {
-		return kernel.Snapshot{}, err
-	}
-	checkpoint := resolveCheckpoint(snapshot.Checkpoint, response, runner.runtime.Now())
-	encoded, err := encodeExecutionState(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-		Events: []kernel.EventDraft{{Type: "workflow.wait.resolved", Message: waitID, Wakeup: true}},
+	// A waiting child is itself a live execution authority: a parent could
+	// already be terminal, and resolving a Wait can synchronously dispatch a
+	// fresh external Effect. Enclose the checkpoint CAS and the optional
+	// next segment in the SAME original Store physical Grant.
+	return runner.withChildPhysicalGrant(ctx, snapshot, func() (kernel.Snapshot, error) {
+		waitID := state.CurrentWaitID
+		if err = resolveWaitState(&state, response); err != nil {
+			return kernel.Snapshot{}, err
+		}
+		checkpoint := resolveCheckpoint(snapshot.Checkpoint, response, runner.runtime.Now())
+		encoded, err := encodeExecutionState(state)
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+		running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
+			Events: []kernel.EventDraft{{Type: "workflow.wait.resolved", Message: waitID, Wakeup: true}},
+		})
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+		if runner.deferResume {
+			return running, nil
+		}
+		return runner.runSegment(ctx, running)
 	})
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	if runner.deferResume {
-		return running, nil
-	}
-	return runner.runSegment(ctx, running)
 }
 
 // ViewState decodes an isolated public view from a Kernel snapshot.

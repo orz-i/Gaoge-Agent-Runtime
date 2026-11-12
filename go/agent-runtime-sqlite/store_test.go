@@ -233,3 +233,7 @@ func privateDir(tb testing.TB) string {
 func TestIssue107SQLiteChildExecutionConformance(t *testing.T) {
 	conformance.RunChildExecutionSuite(t, func(child *testing.T) kernel.Store { return openStore(child) })
 }
+
+func TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance(t *testing.T) {
+	conformance.RunParentedWorkflowSuite(t, func(child *testing.T) kernel.Store { return openStore(child) })
+}

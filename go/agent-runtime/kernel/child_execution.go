@@ -31,10 +31,21 @@ type ChildExecutionGrant struct {
 type ChildExecutionSettlement struct{ proof *featurecontrol.Proof }
 
 func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, snapshot Snapshot) bool {
-	return grant.ID != "" && grant.ChildRunID != "" &&
-		snapshot.Run.ID == grant.ChildRunID && snapshot.Run.ParentRunID != "" &&
-		settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision,
-			"agent_child_physical_settled", grant.ID, snapshot.State, snapshot.Checkpoint)
+	if grant.ID == "" || grant.ChildRunID == "" ||
+		snapshot.Run.ID != grant.ChildRunID || snapshot.Run.ParentRunID == "" {
+		return false
+	}
+	var proofKind string
+	switch snapshot.Run.Kind {
+	case "agent":
+		proofKind = "agent_child_physical_settled"
+	case "workflow":
+		proofKind = "workflow_child_physical_settled"
+	default:
+		return false
+	}
+	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision,
+		proofKind, grant.ID, snapshot.State, snapshot.Checkpoint)
 }
 
 // ChildExecutionStore is an optional atomic store port for immutable parented
@@ -125,8 +136,11 @@ func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExe
 	if err != nil {
 		return err
 	}
-	if snapshot.Run.ParentRunID == "" ||
-		!proof.Matches(grant.ChildRunID, snapshot.Run.Revision, "agent_child_physical_settled", grant.ID, snapshot.State, snapshot.Checkpoint) {
+	// Agent and Workflow use different first-party Feature proof domains.
+	// They share the same opaque Store settlement permit; a Workflow proof
+	// must never be accepted as an Agent proof (or the inverse).
+	permit := ChildExecutionSettlement{proof: proof}
+	if !permit.Matches(grant, snapshot) {
 		return ErrExecutionConflict
 	}
 	return store.FinishChildExecution(ctx, grant)

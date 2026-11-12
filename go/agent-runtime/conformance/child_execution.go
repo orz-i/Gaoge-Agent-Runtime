@@ -69,7 +69,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if loadErr != nil {
 			t.Fatal(loadErr)
 		}
-		proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
+		proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "workflow_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
 		if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
 			t.Fatalf("trusted Agent post-callback settlement marker was rejected: %v", err)
 		}

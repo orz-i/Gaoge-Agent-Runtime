@@ -81,8 +81,26 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 		if err != nil {
 			return err
 		}
-		// Parent locks serialize contenders; never trust a read-before-lock
-		// uniqueness check as the sole guard for a physical Grant.
+		// The initial child read selected the immutable ancestor chain; it
+		// did NOT establish the child's current execution state. A concurrent
+		// child Cancel/Fail may commit while we wait on the parent row. Lock
+		// the child only AFTER the root-to-leaf ancestor locks, then validate
+		// the exact original identity and live status under that lock.
+		// Approval controls take the same ancestor -> child lock order.
+		lockedChild, lockErr := lockKernelRun(tx, grant.ChildRunID)
+		if lockErr != nil {
+			return lockErr
+		}
+		if lockedChild.ParentRunID != child.ParentRunID ||
+			lockedChild.Kind != child.Kind ||
+			lockedChild.TenantID != child.TenantID || lockedChild.ActorID != child.ActorID ||
+			lockedChild.ThreadKind != child.ThreadKind || lockedChild.ThreadID != child.ThreadID ||
+			(lockedChild.Status != string(kernel.RunStatusRunning) &&
+				lockedChild.Status != string(kernel.RunStatusWaitingInput)) {
+			return kernel.ErrExecutionConflict
+		}
+		// Ancestor and child locks serialize contenders; never trust a
+		// pre-lock observation or a uniqueness check as the sole guard.
 		var active int64
 		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("child_run_id = ?", grant.ChildRunID).Count(&active).Error; err != nil {
 			return translateKernelError(err)
