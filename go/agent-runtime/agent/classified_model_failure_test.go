@@ -79,7 +79,7 @@ func TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry(t *testing.
 			clock.Advance(3 * time.Minute)
 			_, resumeErr := runner.Resume(t.Context(), snapshot.Run.ID, snapshot.Run.Revision)
 			after, loadErr := runtime.Load(t.Context(), snapshot.Run.ID)
-			if !errors.Is(resumeErr, ErrRootOutcomeUnknown) || provider.calls != 1 || loadErr != nil || !reflect.DeepEqual(after, snapshot) {
+			if !errors.Is(resumeErr, ErrModelOutcomeUnknown) || provider.calls != 1 || loadErr != nil || !reflect.DeepEqual(after, snapshot) {
 				t.Fatalf("unknown classified result replayed or mutated: %v calls=%d", resumeErr, provider.calls)
 			}
 		})

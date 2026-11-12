@@ -106,7 +106,7 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 		if err != nil {
 			return err
 		}
-		if current.Kind != "agent" || current.ParentRunID != "" || current.Status != string(kernel.RunStatusRunning) || current.Revision != expectedRevision || !permit.Matches(grant, snapshot, mutation) {
+		if current.Kind != "agent" || current.ParentRunID != "" || current.Status != string(kernel.RunStatusRunning) {
 			return kernel.ErrExecutionConflict
 		}
 		// Receipt recovery may outlive TTL, but never the original native identity.
@@ -118,6 +118,12 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 			return translateKernelError(err)
 		}
 		if len(rows) != 1 || pgPhysicalGrant(rows[0]) != grant || rows[0].ParentRunID != grant.ChildRunID || rows[0].SettledRevision != 0 || rows[0].CallbackReturnRevision == 0 || rows[0].CallbackHostCompleted == permit.IsModelEvidence() {
+			return kernel.ErrExecutionConflict
+		}
+		if current.Revision != expectedRevision {
+			return kernel.ErrConflict
+		}
+		if !permit.Matches(grant, snapshot, mutation) {
 			return kernel.ErrExecutionConflict
 		}
 		updated, err := kernelRunRecordFrom(mutation.Record, 0)

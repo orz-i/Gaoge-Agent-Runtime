@@ -61,8 +61,13 @@ func TestUnboundFencedResumeDoesNotExecuteToolBeforeCAS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	competitor, err := plain.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: approved.Run.ID, OwnerID: "actual-competitor", LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = plain.ReleaseExecution(ctx, competitor) }()
 	_, err = unbound.Resume(ctx, approved.Run.ID, approved.Run.Revision)
-	if !errors.Is(err, kernel.ErrExecutionRequired) {
+	if !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unbound Resume not rejected BEFORE effects: %v", err)
 	}
 	after, err := os.ReadFile(marker)

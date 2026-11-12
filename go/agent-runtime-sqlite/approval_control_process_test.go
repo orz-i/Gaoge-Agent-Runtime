@@ -227,6 +227,11 @@ func TestFencedApprovalProcessChild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fenced resume after %s: %v", phase, err)
 	}
+	// This Runtime was explicitly bound by the caller; its owner must release
+	// before a later process acquires the next approval segment.
+	if err = rt.ReleaseExecution(ctx, newLease); err != nil {
+		t.Fatal(err)
+	}
 	if phase == "first" {
 		if next.Run.Status != kernel.RunStatusWaitingInput {
 			t.Fatalf("second approval bypassed: %s", next.Run.Status)

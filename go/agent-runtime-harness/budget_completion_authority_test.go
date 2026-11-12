@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -115,7 +116,7 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, Clock: durabilityTestClock{now: at}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
+				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -131,24 +132,25 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			final, callErr := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
-			if client.calls != 1 || (callErr == nil) != accepted {
-				t.Fatalf("replay changed outcome or regenerated: calls=%d err=%v", client.calls, callErr)
-			}
-			view, err := agent.ViewState(final)
+			grant, err := rt.LookupChildExecution(t.Context(), pending.Run.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if view.Budget.Usage.LLMCalls != 1 || len(view.ModelInvocations) != 1 || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed || view.ModelInvocations[0].ProviderResponseID != "known-completion" {
-				t.Fatalf("named replay receipt lost: %+v", view)
+			ledgerBefore, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil {
+				t.Fatal(err)
+			}
+			final, callErr := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+			assertRootReceiptEvidenceOnly(t, rt, pending, final, grant, callErr)
+			view, _ := agent.ViewState(final)
+			if (view.ModelInvocations[0].ErrorCode == "") != accepted || view.ModelInvocations[0].Provider != "audit" || view.ModelInvocations[0].BindingFingerprint != strings.Repeat("a", 64) || client.calls != 1 {
+				t.Fatalf("named receipt source/outcome lost: %+v calls=%d", view.ModelInvocations, client.calls)
 			}
 			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil {
-				t.Fatal(err)
+			if err != nil || !reflect.DeepEqual(ledgerBefore, ledger) || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").UnknownUsage {
+				t.Fatalf("replay bill changed: %+v %v", ledger, err)
 			}
-			if ledger.View("").Usage.TotalTokens != 30 || ledger.View("").UnknownUsage {
-				t.Fatalf("replay bill changed: %+v", ledger.View(""))
-			}
+
 		})
 	}
 }

@@ -85,8 +85,8 @@ func TestPendingHostedGrantRevocationBlocksProviderRetry(t *testing.T) {
 					Key: auditHostedToolKey, DefinitionVersion: auditHostedToolVersion,
 				}}
 			}
-			pending, err := runner.StartRun(t.Context(), start)
-			pending = mustLoadModelInvocationRun(t, runtime, start.ID)
+			_, err = runner.StartRun(t.Context(), start)
+			pending := mustLoadModelInvocationRun(t, runtime, start.ID)
 			if !errors.Is(err, errInjectedModelInvocationCrash) || pending.Run.Status != kernel.RunStatusRunning ||
 				len(provider.requests) != 0 {
 				t.Fatalf("expected durable pre-dispatch interruption: %+v err=%v calls=%d",
@@ -125,8 +125,8 @@ func TestPendingLocalToolDefinitionDriftBlocksProviderRetry(t *testing.T) {
 	}
 	start := startRequest("audit_discovery_pending_retry", "audit_discovery_request", "Find documents", keys...)
 	start.InitialToolKeys = []string{discoveryChosenToolKey}
-	pending, err := runner.StartRun(t.Context(), start)
-	pending = mustLoadModelInvocationRun(t, runtime, start.ID)
+	_, err = runner.StartRun(t.Context(), start)
+	pending := mustLoadModelInvocationRun(t, runtime, start.ID)
 	if !errors.Is(err, errInjectedModelInvocationCrash) || pending.Run.Status != kernel.RunStatusRunning ||
 		len(provider.requests) != 0 {
 		t.Fatalf("expected pending model intent: run=%+v err=%v physicalCalls=%d",
@@ -171,8 +171,8 @@ func TestPendingUnchangedHostedGrantRetainsInvocationIdentity(t *testing.T) {
 	start.HostedToolGrants = []agent.HostedToolGrant{{
 		Key: auditHostedToolKey, DefinitionVersion: auditHostedToolVersion,
 	}}
-	pending, err := runner.StartRun(t.Context(), start)
-	pending = mustLoadModelInvocationRun(t, runtime, start.ID)
+	_, err = runner.StartRun(t.Context(), start)
+	pending := mustLoadModelInvocationRun(t, runtime, start.ID)
 	if !errors.Is(err, errInjectedModelInvocationCrash) || pending.Run.Status != kernel.RunStatusRunning || len(provider.requests) != 0 {
 		t.Fatalf("expected recoverable model failure: status=%s err=%v", pending.Run.Status, err)
 	}

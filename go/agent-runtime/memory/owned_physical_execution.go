@@ -59,12 +59,18 @@ func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildEx
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
 	original, ok := s.childGrants[g.ID]
-	if !ok || original.grant != g || !g.IsOwned() || original.settledRevision != 0 || original.completion.GrantID != g.ID || original.completion.HostCompleted == p.IsModelEvidence() || current.Run.Revision != revision || !p.Matches(g, current, m) {
+	if !ok || original.grant != g || !g.IsOwned() || current.Run.Kind != "agent" || current.Run.ParentRunID != "" || current.Run.Status != kernel.RunStatusRunning || original.settledRevision != 0 || original.completion.GrantID != g.ID || original.completion.HostCompleted == p.IsModelEvidence() {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
 	// Recovery never clears/replaces an epoch. A foreign/replaced native identity
 	// cannot be adopted merely because a stale physical row survived.
 	if !g.MatchesExecution(s.execution[g.ChildRunID].lease) {
+		return kernel.Snapshot{}, kernel.ErrExecutionConflict
+	}
+	if current.Run.Revision != revision {
+		return kernel.Snapshot{}, kernel.ErrConflict
+	}
+	if !p.Matches(g, current, m) {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
 	m.PhysicalPermit = p.PhysicalPermit(g, current, m)

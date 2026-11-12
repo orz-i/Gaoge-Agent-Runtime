@@ -71,8 +71,8 @@ func validDeferredChildGrantCancellation(item Item, intent Item) bool {
 }
 
 // resumeDeferredChildGrantCancellation only resumes the SAME elected root
-// cancellation (not a Subtask or remote Handoff) after its durable budget
-// cancellation and the original Kernel-minted no-effect ChildGrant fact.
+// cancellation (not a Subtask or remote Handoff) after cancelling its budget
+// when configured, and the original Kernel-minted no-effect ChildGrant fact.
 // A generic unknown Store/Host callback outcome can never claim this path.
 func (runner *Runner) resumeDeferredChildGrantCancellation(
 	ctx context.Context, turn Turn, runID string, current kernel.Snapshot,
@@ -89,7 +89,7 @@ func (runner *Runner) resumeDeferredChildGrantCancellation(
 		return Item{}, ErrConflict
 	}
 	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil || ledger == nil || !ledger.Cancelled {
+	if err != nil || ledger != nil && !ledger.Cancelled {
 		return Item{}, errors.Join(ErrConflict, err)
 	}
 	var candidate Item
@@ -126,43 +126,43 @@ func (runner *Runner) resumeDeferredChildGrantCancellation(
 
 // cleanupReturnedRootChildren uses the already elected cancellation and frozen
 // child routes. Eligibility is an observation, never authority to dispatch:
-// the original cancellation intent and cancelled shared budget supply that
-// authority. Unknown or still-running Host callbacks cannot enter this path.
-func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn, intent Item, invocation Invocation, reason string) error {
+// the original cancellation intent and, when configured, cancelled shared
+// budget supply that authority. Unknown or still-running Host callbacks cannot enter this path.
+func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn, intent Item, invocation Invocation, reason string) (attempted bool, outcome error) {
 	native, ok := runner.agent.(*agent.Runner)
 	if !ok || invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
-		return ErrConflict
+		return false, nil
 	}
 	current, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err = validateRootRuntimeOwnership(invocation, current); err != nil {
-		return err
+		return false, err
 	}
 	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil || ledger == nil || !ledger.Cancelled {
-		return errors.Join(ErrConflict, err)
+	if err != nil || ledger != nil && !ledger.Cancelled {
+		return false, errors.Join(ErrConflict, err)
 	}
 	scope, err := native.RootDeferredCleanupEligibility(ctx, current.Run.ID, current.Run.Revision)
 	if err != nil || !scope.Valid() {
-		return errors.Join(ErrConflict, err)
+		return false, errors.Join(ErrConflict, err)
 	}
 	// Persist the same-election recovery witness BEFORE any remote cleanup.
 	if err = runner.recordDeferredChildGrantCancellation(ctx, turn, intent, current.Run.ID); err != nil {
-		return err
+		return true, err
 	}
 	if _, err = runner.cancelTurnDescendants(ctx, turn.ID, invocation.ID, current.Run.ID, reason); err != nil {
-		return err
+		return true, err
 	}
 	latest, err := runner.runtime.Load(ctx, current.Run.ID)
 	if err != nil {
-		return err
+		return true, err
 	}
 	after, err := native.RootDeferredCleanupEligibility(ctx, latest.Run.ID, latest.Run.Revision)
 	if err != nil || !scope.Matches(after) {
-		return errors.Join(ErrConflict, err)
+		return true, errors.Join(ErrConflict, err)
 	}
 	_, err = native.ReconcileRootDeferredChildren(ctx, latest.Run.ID, latest.Run.Revision)
-	return err
+	return true, err
 }

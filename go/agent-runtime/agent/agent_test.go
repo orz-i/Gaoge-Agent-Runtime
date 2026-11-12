@@ -981,7 +981,7 @@ func TestRunnerDoesNotReplayModelAfterStreamDeltaFailure(t *testing.T) {
 	before := mustLoadModelInvocationRun(t, runtime, snapshot.Run.ID)
 	_, resumeErr := runner.Resume(t.Context(), before.Run.ID, before.Run.Revision)
 	after := mustLoadModelInvocationRun(t, runtime, before.Run.ID)
-	if !errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || model.streamCalls != 1 || model.unaryCalls != 0 || !reflect.DeepEqual(before, after) {
+	if !errors.Is(resumeErr, agent.ErrModelOutcomeUnknown) || model.streamCalls != 1 || model.unaryCalls != 0 || !reflect.DeepEqual(before, after) {
 		t.Fatalf("partial stream replayed or changed: %v", resumeErr)
 	}
 }

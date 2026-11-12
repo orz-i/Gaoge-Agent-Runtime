@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
@@ -105,6 +106,16 @@ func TestDeferredApprovalRejectsMismatchedOrRejectedGrant(t *testing.T) {
 			running, err := seedApprovalRecoveryFixture(t.Context(), runtime, waiting, kernel.Mutation{
 				Status: kernel.RunStatusRunning, State: state, Checkpoint: checkpoint,
 			})
+			if testcase == "payload-changed" {
+				if !errors.Is(err, kernel.ErrInvalidInput) {
+					t.Fatalf("changed original checkpoint payload admitted: %v", err)
+				}
+				unchanged, loadErr := runtime.Load(t.Context(), waiting.Run.ID)
+				if loadErr != nil || !reflect.DeepEqual(unchanged, waiting) || *executions != 0 {
+					t.Fatalf("rejected payload changed original checkpoint/source: %v", loadErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

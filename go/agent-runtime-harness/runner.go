@@ -1099,10 +1099,22 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
 	if err != nil {
 		if errors.Is(err, kernel.ErrChildExecutionBusy) && kernel.IsControlNoEffect(err) {
-			if cleanupErr := runner.cleanupReturnedRootChildren(ctx, turn, intent, invocation, reason); cleanupErr == nil {
+			attempted, cleanupErr := runner.cleanupReturnedRootChildren(ctx, turn, intent, invocation, reason)
+			if attempted {
+				// Once the original cleanup election has written or dispatched,
+				// the earlier root-only no-effect proof cannot retire its fence.
+				if cleanupErr != nil {
+					return Snapshot{}, errors.Join(err, cleanupErr)
+				}
 				runtimeSnapshot, found, err = runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
-			} else {
-				err = errors.Join(err, cleanupErr)
+				if err != nil {
+					return Snapshot{}, err
+				}
+			} else if cleanupErr != nil {
+				// Preserve the direct Kernel proof while the original release
+				// protocol evaluates it. A wrapper is not a new private proof.
+				released := runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
+				return Snapshot{}, errors.Join(released, cleanupErr)
 			}
 		}
 		if err != nil {

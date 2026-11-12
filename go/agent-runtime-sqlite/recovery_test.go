@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -94,9 +95,24 @@ func (s failAfterCommitStore) afterApply(snap kernel.Snapshot, m kernel.StoreMut
 	return snap
 }
 
+func (s failAfterCommitStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	if s.point == "callback_return" {
+		return errors.New("injected pre-Mark failure")
+	}
+	return s.Store.MarkChildExecutionSettled(ctx, g, p)
+}
+func (s failAfterCommitStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+	err := s.Store.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	if err == nil && s.point == "callback_return" {
+		os.Exit(78)
+	}
+	return err
+}
+
 // TestAgentCrashSubprocess runs in an isolated OS process. os.Exit simulates
 // a killed app without any deferred Close, exactly as an embedded host may die.
 func TestAgentCrashSubprocess(t *testing.T) {
+	ctx := context.Background()
 	phase := os.Getenv("GAOGE_SQLITE_SUBPROCESS_PHASE")
 	if phase == "" {
 		return
@@ -106,7 +122,7 @@ func TestAgentCrashSubprocess(t *testing.T) {
 	withTool := os.Getenv("GAOGE_SQLITE_SUBPROCESS_TOOL") == "1"
 	var store *sqlite.Store
 	var err error
-	if phase == "resume" {
+	if phase == "resume" || phase == "resume_unknown" || phase == "recover_return" {
 		store, err = sqlite.Open(context.Background(), path)
 	} else {
 		store, err = sqlite.CreateNew(context.Background(), path)
@@ -116,7 +132,7 @@ func TestAgentCrashSubprocess(t *testing.T) {
 	}
 	// No defer: crash phases must exit without running cleanup.
 	var runtimeStore kernel.Store = store
-	if phase != "resume" {
+	if phase != "resume" && phase != "resume_unknown" && phase != "recover_return" {
 		runtimeStore = failAfterCommitStore{Store: store, point: phase}
 	}
 	runtime, err := kernel.New(kernel.Dependencies{Store: runtimeStore})
@@ -150,12 +166,57 @@ func TestAgentCrashSubprocess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if phase == "resume" {
+	if phase == "resume" || phase == "resume_unknown" || phase == "recover_return" {
 		current, err := runtime.Load(context.Background(), "crash-agent")
 		if err != nil {
 			t.Fatal(err)
 		}
+		if phase == "recover_return" {
+			grant, e := runtime.LookupChildExecution(ctx, current.Run.ID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			completion, e := runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+			if e != nil || !completion.HostCompleted {
+				t.Fatalf("callback return absent: %+v %v", completion, e)
+			}
+			if e = runner.ReconcileRootPhysicalExecution(ctx, current.Run.ID); e != nil {
+				t.Fatal(e)
+			}
+			after, e := runtime.Load(ctx, current.Run.ID)
+			if e != nil || !reflect.DeepEqual(after, current) {
+				t.Fatal("callback recovery changed Run")
+			}
+			return
+		}
+		var originalGrant kernel.ChildExecutionGrant
+		if phase == "resume_unknown" {
+			originalGrant, err = runtime.LookupChildExecution(ctx, current.Run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 		completed, err := runner.Resume(context.Background(), current.Run.ID, current.Run.Revision)
+		if phase == "resume_unknown" {
+			if !errors.Is(err, agent.ErrRootOutcomeUnknown) && !errors.Is(err, agent.ErrModelOutcomeUnknown) {
+				t.Fatalf("unknown callback resumed: %v", err)
+			}
+			after, e := runtime.Load(ctx, current.Run.ID)
+			if e != nil || !reflect.DeepEqual(after, current) {
+				t.Fatal("unknown crash mutated state")
+			}
+			grant, e := runtime.LookupChildExecution(ctx, current.Run.ID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if grant != originalGrant {
+				t.Fatal("crash retry replaced original grant")
+			}
+			if _, e = runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant); !errors.Is(e, kernel.ErrNotFound) {
+				t.Fatalf("missing return invented: %v", e)
+			}
+			return
+		}
 		if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
 			t.Fatalf("resume=%+v err=%v", completed.Run, err)
 		}
@@ -213,14 +274,22 @@ func TestAgentCrashAndResumeInNewProcess(t *testing.T) {
 	}{
 		{name: "after-create", crash: "create", exitCode: 75, models: 1},
 		{name: "after-model-receipt", crash: "model_receipt", exitCode: 76, models: 1},
-		{name: "after-tool-receipt", crash: "tool_receipt", exitCode: 77, withTool: true, models: 2, tools: 1},
+		{name: "after-tool-receipt", crash: "tool_receipt", exitCode: 77, withTool: true, models: 1, tools: 1},
+		{name: "after-callback-return", crash: "callback_return", exitCode: 78, models: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(privateDir(t), "runtime.sqlite")
 			marker := filepath.Join(privateDir(t), "calls.log")
 			subprocess(t, path, marker, tc.crash, tc.withTool, tc.exitCode)
 			// A different OS process (new Store, Kernel and Runner) resumes.
-			subprocess(t, path, marker, "resume", tc.withTool, 0)
+			phase := "resume"
+			if tc.crash == "model_receipt" || tc.crash == "tool_receipt" {
+				phase = "resume_unknown"
+			}
+			if tc.crash == "callback_return" {
+				phase = "recover_return"
+			}
+			subprocess(t, path, marker, phase, tc.withTool, 0)
 			data, err := os.ReadFile(marker)
 			if err != nil {
 				t.Fatal(err)
@@ -245,7 +314,11 @@ func TestAgentCrashAndResumeInNewProcess(t *testing.T) {
 			}
 			defer func() { _ = stored.Close() }()
 			snapshot, err := stored.Load(t.Context(), "crash-agent")
-			if err != nil || snapshot.Run.Status != kernel.RunStatusCompleted {
+			wantStatus := kernel.RunStatusCompleted
+			if phase == "resume_unknown" {
+				wantStatus = kernel.RunStatusRunning
+			}
+			if err != nil || snapshot.Run.Status != wantStatus {
 				t.Fatalf("reopened completion=%+v err=%v", snapshot.Run, err)
 			}
 		})

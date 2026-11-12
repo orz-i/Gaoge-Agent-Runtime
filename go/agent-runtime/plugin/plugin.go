@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -212,15 +213,23 @@ func (chain *RunChain) Invoke(ctx context.Context, invocation RunInvocation, ter
 	for index := len(chain.middleware) - 1; index >= 0; index-- {
 		current := chain.middleware[index]
 		downstream := next
-		next = func(callCtx context.Context) (kernel.Snapshot, error) {
+		next = func(callCtx context.Context) (out kernel.Snapshot, callbackErr error) {
+			layerCtx, ticket := callbackscope.Enter(callCtx, invocation.RunID, current, invocation)
 			lifetime := newNextLifetime()
-			defer lifetime.finish()
-			return current.Run(callCtx, invocation, onceRunNext(func(nextCtx context.Context) (kernel.Snapshot, error) {
+			defer func() {
+				lifetime.finish()
+				if failure := recover(); failure != nil {
+					callbackscope.Aborted(ticket)
+					panic(failure)
+				}
+				callbackscope.Returned(ticket, callbackErr)
+			}()
+			return current.Run(layerCtx, invocation, onceRunNext(func(nextCtx context.Context) (kernel.Snapshot, error) {
 				if !lifetime.enter() {
 					return kernel.Snapshot{}, ErrNextAlreadyCalled
 				}
 				defer lifetime.leave()
-				return downstream(nextCtx)
+				return downstream(callbackscope.Inherit(nextCtx, layerCtx))
 			}))
 		}
 	}
@@ -252,16 +261,24 @@ func (chain *ModelChain) Invoke(
 	for index := len(chain.middleware) - 1; index >= 0; index-- {
 		current := chain.middleware[index]
 		downstream := next
-		next = func(callCtx context.Context, callRequest model.Request, callEmit model.StreamSink) (model.Response, error) {
+		next = func(callCtx context.Context, callRequest model.Request, callEmit model.StreamSink) (out model.Response, callbackErr error) {
+			layerCtx, ticket := callbackscope.Enter(callCtx, callRequest.RunID, current, callRequest)
 			lifetime := newNextLifetime()
-			defer lifetime.finish()
-			return current.Model(callCtx, model.CloneRequest(callRequest), callEmit,
+			defer func() {
+				lifetime.finish()
+				if failure := recover(); failure != nil {
+					callbackscope.Aborted(ticket)
+					panic(failure)
+				}
+				callbackscope.Returned(ticket, callbackErr)
+			}()
+			return current.Model(layerCtx, model.CloneRequest(callRequest), callEmit,
 				onceModelNext(func(nextCtx context.Context, nextRequest model.Request, nextEmit model.StreamSink) (model.Response, error) {
 					if !lifetime.enter() {
 						return model.Response{}, ErrNextAlreadyCalled
 					}
 					defer lifetime.leave()
-					return downstream(nextCtx, nextRequest, nextEmit)
+					return downstream(callbackscope.Inherit(nextCtx, layerCtx), nextRequest, nextEmit)
 				}))
 		}
 	}

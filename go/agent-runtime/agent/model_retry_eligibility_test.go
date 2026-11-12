@@ -14,27 +14,6 @@ type modelEligibilityClock struct{ now time.Time }
 
 func (clock *modelEligibilityClock) Now() time.Time { return clock.now }
 
-// Model retries use a persisted due time. Tests that focus on the pending
-// identity/revocation rebuild the Runner at that due time instead of relying
-// on a deprecated immediate-retry Resume path or waiting on wall-clock sleeps.
-func newModelRunnerAfterRetryDue(t *testing.T, pending kernel.Snapshot, deps agent.Dependencies) *agent.Runner {
-	t.Helper()
-	view, err := agent.ViewState(pending)
-	if err != nil || len(view.ModelInvocations) == 0 {
-		t.Fatalf("pending invocation unavailable: err=%v", err)
-	}
-	due := view.ModelInvocations[len(view.ModelInvocations)-1].RetryAfter
-	if due == nil {
-		t.Fatal("retryable invocation has no durable ReadyAt")
-	}
-	deps.Clock = &modelEligibilityClock{now: due.Add(time.Second)}
-	runner, err := agent.NewRunner(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
-}
-
 func TestModelRetryReadyAtCannotBeBypassedByDirectResume(t *testing.T) {
 	for _, native := range []bool{false, true} {
 		label := "direct"

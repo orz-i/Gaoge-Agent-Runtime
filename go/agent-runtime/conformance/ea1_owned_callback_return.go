@@ -12,6 +12,23 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
+// Captures the original opaque CAS solely to test Store-side stale-vs-foreign
+// classification after a real successful recovery, bypassing no authority.
+type ea1OwnedRecoveryCapture struct {
+	kernel.Store
+	kernel.ExecutionStore
+	kernel.ChildExecutionStore
+	kernel.OwnedPhysicalExecutionStore
+	mutation kernel.StoreMutation
+	permit   kernel.OwnedPhysicalRecovery
+}
+
+func (s *ea1OwnedRecoveryCapture) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
+	s.mutation = m
+	s.permit = p
+	return s.OwnedPhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
+}
+
 // RunEA1OwnedCallbackReturn exercises the actual first-party opaque ports,
 // never seeded SQL grants. This is a Store boundary test, not fabricated
 // evidence that an arbitrary Host callback returned.
@@ -24,7 +41,8 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			if e != nil {
 				t.Fatal(e)
 			}
-			observer, e := kernel.New(kernel.Dependencies{Store: peer})
+			captured := &ea1OwnedRecoveryCapture{Store: peer, ExecutionStore: peer.(kernel.ExecutionStore), ChildExecutionStore: peer.(kernel.ChildExecutionStore), OwnedPhysicalExecutionStore: peer.(kernel.OwnedPhysicalExecutionStore)}
+			observer, e := kernel.New(kernel.Dependencies{Store: captured})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -121,6 +139,20 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			}
 			if e != nil {
 				t.Fatal(e)
+			}
+			// The exact original authority losing only its revision is a normal
+			// CAS conflict; a changed grant is never eligible for that retry class.
+			if _, e = captured.OwnedPhysicalExecutionStore.ApplyOwnedPhysicalRecovery(t.Context(), g, initial.Run.Revision, captured.mutation, captured.permit); !errors.Is(e, kernel.ErrConflict) {
+				t.Fatalf("pure stale receipt CAS: %v", e)
+			}
+			foreign := g
+			foreign.ExecutionEpoch++
+			if _, e = captured.OwnedPhysicalExecutionStore.ApplyOwnedPhysicalRecovery(t.Context(), foreign, initial.Run.Revision, captured.mutation, captured.permit); !errors.Is(e, kernel.ErrExecutionConflict) {
+				t.Fatalf("foreign receipt CAS became retryable: %v", e)
+			}
+			unchanged, e := observer.Load(t.Context(), g.ChildRunID)
+			if e != nil || !reflect.DeepEqual(unchanged, repaired) {
+				t.Fatal("rejected CAS changed snapshot")
 			}
 			// A crash/fault between the receipt CAS and Mark leaves the original
 			// completion intact; a new Runtime must seal the CURRENT receipt state.

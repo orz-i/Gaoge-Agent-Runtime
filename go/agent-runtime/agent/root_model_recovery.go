@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -96,7 +98,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if originalInvocation.Status == ModelInvocationCompleted {
 		// Immutable original evidence: neither another receipt nor another
 		// verifier response may overwrite it, even under the same call ID.
-		if !reflect.DeepEqual(originalInvocation.Response, inv.Response) || !reflect.DeepEqual(originalInvocation.Usage, inv.Usage) || originalInvocation.ProviderResponseID != inv.ProviderResponseID || originalInvocation.ErrorCode != inv.ErrorCode {
+		if !samePersistedModelResponse(originalInvocation.Response, inv.Response) || !reflect.DeepEqual(originalInvocation.Usage, inv.Usage) || originalInvocation.ProviderResponseID != inv.ProviderResponseID || originalInvocation.ErrorCode != inv.ErrorCode {
 			return snapshot, ErrInvalidModelResponse
 		}
 		if !completion.HostCompleted {
@@ -135,4 +137,12 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 		return repaired, err
 	}
 	return repaired, nil
+}
+
+// Compare exactly the representation the receipt store can preserve. JSON's
+// omitempty removes nil-vs-empty slice allocation differences, not receipt data.
+func samePersistedModelResponse(left, right model.Response) bool {
+	a, ae := json.Marshal(left)
+	b, be := json.Marshal(right)
+	return ae == nil && be == nil && bytes.Equal(a, b)
 }

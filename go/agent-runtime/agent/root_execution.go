@@ -7,8 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // ErrModelOutcomeUnknown retains the original dispatched invocation until an
@@ -148,14 +150,16 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 	scoped.activeRootGrant = &grant
 	scoped.rootCallbacks = &rootCallbackState{}
 	scoped.externalRunLease = external
-	result, callErr := execute(ctx, &scoped, current)
+	lifecycle := callbackscope.New(callbackscope.Binding{RunID: grant.ChildRunID, GrantID: grant.ID, OwnerID: grant.ExecutionOwnerID, LeaseID: grant.ExecutionLeaseID, Epoch: grant.ExecutionEpoch, SourceHash: grant.AdmissionSourceHash, Operation: grant.AdmissionOperation}, runner.boundedCallbacks)
+	defer lifecycle.Close()
+	result, callErr := execute(callbackscope.Bind(ctx, lifecycle), &scoped, current)
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
 	latest, loadErr := scopedRT.Load(cleanup, current.Run.ID)
 	if loadErr != nil {
 		return result, errors.Join(callErr, ErrRootOutcomeUnknown, loadErr)
 	}
-	hostComplete := (callErr == nil || !runner.runMiddlewareConfigured) && !scoped.rootCallbacks.unknown.Load()
+	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load()
 	settled := hostComplete && knownRootPhysicalSettlement(latest)
 	if !settled {
 		outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
@@ -245,10 +249,31 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 		return errors.Join(ErrRootOutcomeUnknown, err)
 	}
 	if completionErr == nil && completion.LeaseOwned {
-		lease := kernel.ExecutionLease{RunID: grant.ChildRunID, OwnerID: grant.ExecutionOwnerID, LeaseID: grant.ExecutionLeaseID, Epoch: grant.ExecutionEpoch, ExpiresAt: time.Now().UTC()}
+		lease := kernel.ExecutionLease{RunID: grant.ChildRunID, OwnerID: grant.ExecutionOwnerID, LeaseID: grant.ExecutionLeaseID, Epoch: grant.ExecutionEpoch, ExpiresAt: time.Now().UTC().Truncate(time.Millisecond)}
 		if err = runner.runtime.ReleaseExecution(ctx, lease); err != nil && !errors.Is(err, kernel.ErrExecutionConflict) {
 			return err
 		}
 	}
 	return nil
+}
+
+func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelMiddleware) []any {
+	var result []any
+	for _, m := range runs {
+		switch value := m.(type) {
+		case *BoundedContextAdapter:
+			result = append(result, value)
+		case *BoundedBudgetAdapter:
+			result = append(result, value)
+		}
+	}
+	for _, m := range models {
+		switch value := m.(type) {
+		case *BoundedBudgetAdapter:
+			result = append(result, value)
+		case *ModelAdmissionBarrier:
+			result = append(result, value)
+		}
+	}
+	return result
 }

@@ -10,18 +10,20 @@
       "input": {"operation": "agent_tool_once"},
       "expected": {
         "status": "completed",
-        "revision": 11,
+        "revision": 13,
         "eventTypes": [
           "run.created",
           "agent.started",
           "agent.model_invocation.pending",
           "agent.model_invocation.claimed",
+          "agent.model_invocation.dispatch_intent",
           "agent.model_invocation.completed",
           "tool.batch_requested",
           "tool.dispatch_intent",
           "tool.completed",
           "agent.model_invocation.pending",
           "agent.model_invocation.claimed",
+          "agent.model_invocation.dispatch_intent",
           "agent.model_invocation.completed",
           "agent.completed"
         ],

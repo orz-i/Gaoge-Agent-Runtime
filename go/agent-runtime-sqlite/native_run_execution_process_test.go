@@ -332,7 +332,7 @@ func TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool(t *testing.T) {
 	}
 }
 
-func TestLegacyRunCannotJoinNativeExecutionDuringTool(t *testing.T) {
+func TestDefaultNativeRunRejectsCompetingOwnerDuringTool(t *testing.T) {
 	ctx := t.Context()
 	profile := privateDir(t)
 	store, err := sqlite.CreateNew(ctx, filepath.Join(profile, "mixed.sqlite"))
@@ -403,7 +403,7 @@ func TestLegacyRunCannotJoinNativeExecutionDuringTool(t *testing.T) {
 	// Every Tool dispatch now advances the Agent Revision to commit its
 	// immutable external-effect intent, even without a RunExecution lease.
 	// First prove the stale caller is rejected by CAS, then re-read under
-	// the same in-flight Legacy Tool and prove epoch-0 cannot be upgraded.
+	// the same in-flight default-native Tool and prove its owner cannot be replaced.
 	current, currentErr := rt.Load(ctx, ready.Run.ID)
 	if currentErr != nil {
 		t.Fatal(currentErr)
@@ -414,13 +414,13 @@ func TestLegacyRunCannotJoinNativeExecutionDuringTool(t *testing.T) {
 	})
 	close(unblockFirst)
 	oldErr := <-oldDone
-	t.Logf("AUDIT MIXED legacy epoch0 Tool already in flight; native claim accepted=%t status=%s physical_effects=%d stale_legacy_error=%v",
+	t.Logf("AUDIT default-native Tool already in flight; native claim accepted=%t status=%s physical_effects=%d stale_legacy_error=%v",
 		nativeErr == nil, next.Run.Status, physical.Load(), oldErr)
 	if !errors.Is(nativeErr, kernel.ErrConflict) ||
 		!errors.Is(freshNativeErr, agent.ErrToolOutcomeUnknown) ||
-		!errors.Is(forbiddenClaimErr, kernel.ErrExecutionRequired) ||
+		!errors.Is(forbiddenClaimErr, kernel.ErrChildExecutionBusy) ||
 		physical.Load() != 1 || oldErr != nil {
-		t.Fatalf("legacy Run was upgraded into concurrent native execution: effects=%d stale=%v fresh=%v storeClaim=%v legacy=%v",
+		t.Fatalf("default-native Run admitted competing execution: effects=%d stale=%v fresh=%v storeClaim=%v legacy=%v",
 			physical.Load(), nativeErr, freshNativeErr, forbiddenClaimErr, oldErr)
 	}
 }

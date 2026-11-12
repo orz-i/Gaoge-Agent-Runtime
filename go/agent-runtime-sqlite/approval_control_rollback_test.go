@@ -3,7 +3,6 @@ package sqlite_test
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,7 +55,15 @@ func TestVerifiedApprovalRollbackRetainsEpochAndWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	approver, err := controlTestRunner(plain, marker, false)
+	approvalLease, err := plain.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: pending.Run.ID, OwnerID: "approval-owner", LeaseDuration: 30 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approvalRuntime, err := plain.WithExecution(approvalLease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approver, err := controlTestRunner(approvalRuntime, marker, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +78,7 @@ func TestVerifiedApprovalRollbackRetainsEpochAndWait(t *testing.T) {
 		t.Fatalf("failed approval leaked new state: %+v %+v %v", stored.Run, stored.Checkpoint, err)
 	}
 	if _, err = plain.RenewExecution(ctx, kernel.ExecutionRenewRequest{
-		Lease: testAdapter.lease, LeaseDuration: 5 * time.Second,
+		Lease: approvalLease, LeaseDuration: 5 * time.Second,
 	}); err != nil {
 		t.Fatalf("failed approval revoked original lease: %v", err)
 	}
@@ -84,9 +91,9 @@ func TestVerifiedApprovalRollbackRetainsEpochAndWait(t *testing.T) {
 		t.Fatalf("approved retry unsuccessful: %+v %v", resolved.Run, err)
 	}
 	if _, err = plain.RenewExecution(ctx, kernel.ExecutionRenewRequest{
-		Lease: testAdapter.lease, LeaseDuration: time.Second,
-	}); !errors.Is(err, kernel.ErrExecutionConflict) {
-		t.Fatalf("old lease not revoked by control: %v", err)
+		Lease: approvalLease, LeaseDuration: time.Second,
+	}); err != nil {
+		t.Fatalf("exact caller-owned approval lease was revoked: %v", err)
 	}
 	marks, err := os.ReadFile(marker)
 	if err != nil {

@@ -68,7 +68,7 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 	if status == string(kernel.RunStatusCompleted) || status == string(kernel.RunStatusFailed) || status == string(kernel.RunStatusCancelled) {
 		return kernel.ExecutionLease{}, kernel.ErrTerminal
 	}
-	if status != string(kernel.RunStatusRunning) && !(epoch != 0 && kind == "agent" && status == string(kernel.RunStatusWaitingInput)) {
+	if status != string(kernel.RunStatusRunning) && (epoch == 0 || kind != "agent" || status != string(kernel.RunStatusWaitingInput)) {
 		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
 	}
 	if quarantineRev != 0 {

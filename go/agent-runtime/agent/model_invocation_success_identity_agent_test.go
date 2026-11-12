@@ -150,7 +150,7 @@ func TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity(t *tes
 			before := mustLoadModelInvocationRun(t, runtime, snapshot.Run.ID)
 			_, resumeErr := runner.Resume(t.Context(), before.Run.ID, before.Run.Revision)
 			after := mustLoadModelInvocationRun(t, runtime, before.Run.ID)
-			if !errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || underlying.calls != 1 || effects != 0 || !reflect.DeepEqual(before, after) {
+			if !errors.Is(resumeErr, agent.ErrModelOutcomeUnknown) || underlying.calls != 1 || effects != 0 || !reflect.DeepEqual(before, after) {
 				t.Fatalf("unproved physical identity replayed or changed: %v", resumeErr)
 			}
 		})

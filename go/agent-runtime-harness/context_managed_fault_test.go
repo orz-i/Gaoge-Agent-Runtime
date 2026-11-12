@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -39,6 +40,12 @@ func (store *beforeModelIntentStore) Apply(
 }
 
 func TestManagedContextResumeAfterRolloverBeforeModelIntentCommit(t *testing.T) {
+	testManagedContextResume(t, true)
+}
+func TestManagedContextOpaqueCallbackCannotProveRecovery(t *testing.T) {
+	testManagedContextResume(t, false)
+}
+func testManagedContextResume(t *testing.T, bounded bool) {
 	base := memory.NewStore()
 	faulty := &beforeModelIntentStore{Store: base}
 	harnessStore := harness.NewMemoryStore()
@@ -46,6 +53,12 @@ func TestManagedContextResumeAfterRolloverBeforeModelIntentCommit(t *testing.T) 
 	archive, err := harness.NewManagedContextPreparer(harnessStore, manager, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 		return runtimecontext.ModelWindow{ContextTokens: 2000, ReservedOutputTokens: 128}, nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundedContext, err := harness.NewBoundedContextAdapter(harnessStore, manager, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		return runtimecontext.ModelWindow{ContextTokens: 2000, ReservedOutputTokens: 128}, nil
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,9 +82,14 @@ func TestManagedContextResumeAfterRolloverBeforeModelIntentCommit(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
+		prepare := archive
+		if bounded {
+			hydrate = boundedContext
+			prepare = boundedContext.Prepare
+		}
 		direct, err := agent.NewRunner(agent.Dependencies{
 			Runtime: rt, Model: provider, Catalog: registry, Executor: registry,
-			PrepareModelRequest: archive, RunMiddleware: []plugin.RunMiddleware{hydrate},
+			PrepareModelRequest: prepare, RunMiddleware: []plugin.RunMiddleware{hydrate},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -133,6 +151,17 @@ func TestManagedContextResumeAfterRolloverBeforeModelIntentCommit(t *testing.T) 
 	freshModel := &multiContextCaptureModel{}
 	resumedHost, direct, rt := create(base, freshModel)
 	completed, err := direct.Resume(t.Context(), runID, pending.Run.Revision)
+	if !bounded {
+		if !errors.Is(err, agent.ErrRootOutcomeUnknown) || len(freshModel.requests) != 0 {
+			t.Fatalf("opaque callback obtained bounded recovery: %v calls=%d", err, len(freshModel.requests))
+		}
+		unchanged, loadErr := base.Load(t.Context(), runID)
+		if loadErr != nil || !reflect.DeepEqual(pending, unchanged) {
+			t.Fatalf("opaque callback changed original scope: %v", loadErr)
+		}
+		return
+	}
+
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || len(freshModel.requests) != 1 {
 		t.Fatalf("resume failed: status=%s err=%v calls=%d", completed.Run.Status, err, len(freshModel.requests))
 	}

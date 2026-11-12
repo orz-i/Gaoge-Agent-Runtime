@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,33 +71,37 @@ func TestRealPostgresAgentRecoveryAcrossProcessCrash(t *testing.T) {
 				t.Fatal("pending invocation has no durable identity")
 			}
 
-			// Only the database and the external HTTP server survive the child.
-			// Advance the injected clock past the dead process's execution lease.
-			runner, _ := newRecoveryAgent(t, store, provider, 3*time.Minute)
-			completed, err := runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+			// Process death occurred before callback-return/Mark. TTL and a
+			// repeated InvocationID do not prove Host completion or provider idempotency.
+			runner, runtime := newRecoveryAgent(t, store, provider, 3*time.Minute)
+			grant, err := runtime.LookupChildExecution(t.Context(), pending.Run.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertRecoveredAgent(t, completed, invocationID, test.totalCalls)
-			for _, request := range provider.calls() {
-				if request.InvocationID != invocationID || request.RunID != pending.Run.ID {
-					t.Fatalf("physical retry changed invocation identity: %#v", request)
-				}
+			if _, err = runtime.LookupOwnedPhysicalCallbackReturn(t.Context(), grant); !errors.Is(err, kernel.ErrNotFound) {
+				t.Fatalf("crash invented callback return: %v", err)
 			}
-			if calls := provider.calls(); len(calls) != test.totalCalls {
-				t.Fatalf("physical calls after recovery = %d, want %d", len(calls), test.totalCalls)
+			_, err = runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+			if !errors.Is(err, agent.ErrRootOutcomeUnknown) && !errors.Is(err, agent.ErrModelOutcomeUnknown) {
+				t.Fatalf("unreturned callback resumed: %v", err)
 			}
 			persisted, err := store.Load(t.Context(), pending.Run.ID)
-			if err != nil {
-				t.Fatal(err)
+			if err != nil || !reflect.DeepEqual(persisted, pending) {
+				t.Fatalf("blocked crash recovery mutated Run: %v", err)
 			}
-			assertRecoveredAgent(t, persisted, invocationID, test.totalCalls)
-			if _, err = runner.Resume(t.Context(), persisted.Run.ID, persisted.Run.Revision); !errors.Is(err, agent.ErrRunTerminal) {
-				t.Fatalf("terminal replay error = %v", err)
+			sameGrant, grantErr := runtime.LookupChildExecution(t.Context(), pending.Run.ID)
+			if grantErr != nil || sameGrant != grant {
+				t.Fatal("blocked crash recovery replaced original grant")
 			}
-			if len(provider.calls()) != test.totalCalls {
-				t.Fatal("terminal replay dispatched another physical call")
+			if len(provider.calls()) != test.beforeCalls {
+				t.Fatal("unknown crash replayed provider")
 			}
+			for _, request := range provider.calls() {
+				if request.InvocationID != invocationID || request.RunID != pending.Run.ID {
+					t.Fatal("original physical source changed")
+				}
+			}
+
 		})
 	}
 }
@@ -151,35 +156,39 @@ func TestRealPostgresAgentCancellationFencesLateModelReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cancelled, err := otherRuntime.Cancel(t.Context(), inFlight.Run.ID, inFlight.Run.Revision, "cancel in flight")
+	originalGrant, err := otherRuntime.LookupChildExecution(t.Context(), inFlight.Run.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	_, err = otherRuntime.Cancel(t.Context(), inFlight.Run.ID, inFlight.Run.Revision, "cancel in flight")
+	if !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("inflight owner cancelled: %v", err)
+	}
+	unchanged, err := otherStore.Load(t.Context(), inFlight.Run.ID)
+	if err != nil || !reflect.DeepEqual(unchanged, inFlight) {
+		t.Fatal("denied cancellation mutated Run")
+	}
+	currentGrant, err := otherRuntime.LookupChildExecution(t.Context(), inFlight.Run.ID)
+	if err != nil || currentGrant != originalGrant {
+		t.Fatal("denied cancellation replaced scope")
 	}
 	unblock()
 	select {
 	case err = <-result:
-		if !errors.Is(err, kernel.ErrConflict) && !errors.Is(err, kernel.ErrTerminal) {
-			t.Fatalf("late model response error = %v", err)
+		if err != nil {
+			t.Fatalf("original provider did not settle: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("model caller did not stop after cancellation")
+		t.Fatal("original provider did not return")
 	}
 	final, err := otherStore.Load(t.Context(), inFlight.Run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	view := recoveryAgentView(t, final)
-	if final.Run.Status != kernel.RunStatusCancelled || final.Run.Revision != cancelled.Run.Revision ||
-		final.EventHead != cancelled.EventHead || final.Result != nil || view.Budget.Usage.LLMCalls != 0 ||
-		len(view.ModelInvocations) != 1 || view.ModelInvocations[0].Status != agent.ModelInvocationPending {
-		t.Fatalf("late receipt changed the cancelled run: snapshot=%#v view=%#v", final, view)
+	if err != nil || final.Run.Status != kernel.RunStatusCompleted || len(provider.calls()) != 1 {
+		t.Fatalf("original owner settlement: %+v %v", final.Run, err)
 	}
 	if _, err = otherRunner.Resume(t.Context(), final.Run.ID, final.Run.Revision); !errors.Is(err, agent.ErrRunTerminal) {
-		t.Fatalf("cancelled replay error = %v", err)
+		t.Fatalf("terminal replay: %v", err)
 	}
-	if len(provider.calls()) != 1 {
-		t.Fatal("cancelled run dispatched another model call")
-	}
+
 }
 
 func requireRecoveryPostgres(t *testing.T) string {
@@ -259,6 +268,56 @@ func (store *agentCrashStore) ApplyExecution(ctx context.Context, lease kernel.E
 		os.Exit(agentCrashExitCode)
 	}
 	return snapshot, err
+}
+
+func (store *agentCrashStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	if store.event == "callback_return" {
+		return errors.New("injected pre-Mark failure")
+	}
+	return store.KernelStore.MarkChildExecutionSettled(ctx, g, p)
+}
+func (store *agentCrashStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+	err := store.KernelStore.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	if err == nil && store.event == "callback_return" {
+		os.Exit(agentCrashExitCode)
+	}
+	return err
+}
+func TestRealPostgresRecordedCallbackSurvivesProcessCrash(t *testing.T) {
+	db, dsn := openIsolatedRealPostgres(t, requireRecoveryPostgres(t))
+	if e := Migrate(db); e != nil {
+		t.Fatal(e)
+	}
+	provider := newRecoveryModel(t, nil)
+	runAgentCrashProcess(t, dsn, provider.endpoint, "callback_return", true)
+	runner, rt := newRecoveryAgent(t, NewKernelStore(db), provider, 0)
+	snapshot, e := rt.Load(t.Context(), agentCrashRunID)
+	if e != nil || snapshot.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("callback snapshot: %+v %v", snapshot.Run, e)
+	}
+	grant, e := rt.LookupChildExecution(t.Context(), agentCrashRunID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	if e != nil || !completion.HostCompleted {
+		t.Fatalf("actual callback return absent: %+v %v", completion, e)
+	}
+	if e = runner.ReconcileRootPhysicalExecution(t.Context(), agentCrashRunID); e != nil {
+		t.Fatal(e)
+	}
+	view := recoveryAgentView(t, snapshot)
+	if len(view.ModelInvocations) != 1 {
+		t.Fatal("missing original model receipt")
+	}
+	assertRecoveredAgent(t, snapshot, view.ModelInvocations[0].ID, 1)
+	after, e := rt.Load(t.Context(), agentCrashRunID)
+	if e != nil || !reflect.DeepEqual(after, snapshot) || len(provider.calls()) != 1 {
+		t.Fatal("callback recovery replayed/mutated Run")
+	}
+	if _, e = rt.LookupChildExecution(t.Context(), agentCrashRunID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("marked callback not retired: %v", e)
+	}
 }
 
 type recoveryClock struct{ now time.Time }

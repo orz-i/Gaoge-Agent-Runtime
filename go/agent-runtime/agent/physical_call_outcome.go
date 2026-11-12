@@ -61,7 +61,13 @@ func (runner *Runner) claimPhysicalObservation(ctx context.Context, runID string
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.closed || o.claimed || o.runID != runID || o.operation != operation || o.runner != runner {
+	if o.runID != runID {
+		// Nested foreign Run contexts cannot claim or invalidate the parent's
+		// call observation. They receive neither the observer nor its claim.
+		isolated := context.WithValue(ctx, physicalObservationKey{}, (*physicalObservation)(nil))
+		return context.WithValue(isolated, claimedPhysicalObservationKey{}, (*physicalObservation)(nil))
+	}
+	if o.closed || o.claimed || o.operation != operation || o.runner != runner {
 		o.invalid = true
 		o.kind = PhysicalCallUnknown
 		return context.WithValue(ctx, claimedPhysicalObservationKey{}, (*physicalObservation)(nil))

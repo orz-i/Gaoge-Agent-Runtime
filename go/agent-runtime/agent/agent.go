@@ -339,6 +339,7 @@ type Runner struct {
 	modelMiddlewareConfigured bool
 	toolMiddlewareConfigured  bool
 	rootCallbacks             *rootCallbackState
+	boundedCallbacks          []any
 	approvalPolicies          *plugin.ApprovalPolicySet
 	hostedTools               HostedToolCatalog
 	discovery                 ToolDiscovery
@@ -538,6 +539,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		modelLimiter:         newCallLimiter(execution.Model.MaxConcurrency),
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
+		boundedCallbacks: collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware),
 		kernelOwnedStartCancellation: len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 			dependencies.PrepareModelRequest == nil && dependencies.NormalizeModelPolicy == nil,
@@ -924,7 +926,6 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 		if err != nil {
 			return snapshot, err
 		}
-		expectedRevision = snapshot.Run.Revision
 	}
 	if invocation, active := activeModelInvocation(state); active && invocation.RetryAfter != nil &&
 		runner.clock.Now().UTC().Before(invocation.RetryAfter.UTC()) {
@@ -1630,9 +1631,11 @@ func (runner *Runner) generateModel(
 	// persisting the ModelInvocation. Middleware is strictly observational or
 	// budget-narrowing: no late message/schema compatibility injection.
 	frozen := model.CloneRequest(request)
+	denialScope := &modelDenialScope{}
+	ctx = context.WithValue(ctx, modelDenialKey{}, denialScope)
 	terminal := func(callCtx context.Context, candidate model.Request, sink model.StreamSink) (model.Response, error) {
 		if !validDispatchModelRequest(frozen, candidate) {
-			return model.Response{}, modelPreDispatchDenied{cause: ErrInvalidRequest}
+			return model.Response{}, modelPreDispatchDenied{cause: ErrInvalidRequest, scope: denialScope, request: model.CloneRequest(candidate)}
 		}
 		if beforeProvider != nil {
 			// The final chance to reject an expired or stolen invocation claim
@@ -1640,7 +1643,7 @@ func (runner *Runner) generateModel(
 			if err := beforeProvider(callCtx); err != nil {
 				// This is an execution admission rejection, not a Provider
 				// failure. The caller must not terminalize a recoverable Run.
-				return model.Response{}, modelPreDispatchDenied{cause: err}
+				return model.Response{}, modelPreDispatchDenied{cause: err, scope: denialScope, request: model.CloneRequest(candidate)}
 			}
 		}
 		response, err := runner.generateProviderModel(callCtx, candidate, sink)
@@ -1653,9 +1656,8 @@ func (runner *Runner) generateModel(
 		ctx = context.WithValue(ctx, modelResponseAuthorityKey{}, afterProvider[0])
 	}
 	response, err := runner.modelChain.Invoke(ctx, request, emit, terminal)
-	if runner.modelMiddlewareConfigured {
-		runner.noteRootCallbackFailure(err)
-	}
+	// Model layer completion is tracked by the actual chain lifecycle; only
+	// concrete Runtime-owned adapters can supply internal error-path receipts.
 	return response, err
 }
 

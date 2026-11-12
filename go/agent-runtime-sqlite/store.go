@@ -351,13 +351,23 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 		if e != nil {
 			return kernel.Snapshot{}, e
 		}
-		if original != recovery.grant || marked != 0 || !recovery.permit.Matches(original, current, mutation) {
+		if original != recovery.grant || marked != 0 || current.Run.Kind != "agent" || current.Run.ParentRunID != "" || current.Run.Status != kernel.RunStatusRunning {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
 		completion, completionErr := loadOwnedCallbackReturn(ctx, tx, original)
 		if completionErr != nil || completion.HostCompleted == recovery.permit.IsModelEvidence() {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
+		if e = sqliteOwnedIdentityCurrent(ctx, tx, original); e != nil {
+			return kernel.Snapshot{}, e
+		}
+		if current.Run.Revision != expectedRevision {
+			return kernel.Snapshot{}, kernel.ErrConflict
+		}
+		if !recovery.permit.Matches(original, current, mutation) {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+
 	}
 	// A Root Workflow's own physical Grant fences ALL concurrent writes,
 	// not just Cancel. Its scoped first-party Kernel Runtime provides one
