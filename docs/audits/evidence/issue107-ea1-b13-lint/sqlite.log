@@ -1,0 +1,135 @@
+SOURCE_SHA=089f57ed7ae05676df776b6bbf7d9b8b7355bed1
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1RootAgent' -v
+=== RUN   TestEA1RootAgentAdmissionSQLite
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/opaque-tool
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/bounded-tool-timeline
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model
+--- PASS: TestEA1RootAgentAdmissionSQLite (1.02s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-bounded (0.11s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-opaque (0.06s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-foreign-hydration (0.06s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/opaque-tool (0.13s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/bounded-tool-timeline (0.12s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim (0.11s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission (0.05s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse (0.10s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/same-external-lease-two-callers (0.11s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical (0.09s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model (0.07s)
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/opaque-tool
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/bounded-tool-timeline
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/default-generated-id
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model
+--- PASS: TestEA1RootAgentDefaultAdmissionSQLite (1.09s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-bounded (0.09s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-opaque (0.08s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-foreign-hydration (0.06s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/opaque-tool (0.12s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/bounded-tool-timeline (0.12s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/default-generated-id (0.08s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim (0.09s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission (0.06s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse (0.09s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/same-external-lease-two-callers (0.09s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical (0.10s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model (0.09s)
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P2/model-host-evidence
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P0/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P0/tool
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P1/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P1/tool
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P2/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P2/tool
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P3/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P3/tool
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P4/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P4/tool
+--- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite (5.59s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P2/model-host-evidence (0.11s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P0/model (0.18s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P0/tool (0.16s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P1/model (0.11s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P1/tool (0.10s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P2/model (2.23s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P2/tool (2.23s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P3/model (0.11s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P3/tool (0.12s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P4/model (0.12s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P4/tool (0.12s)
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/missing
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/stale
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/terminal
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/admission-revision
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/admission-cancel
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P1/admitted-before-dispatch
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P2/model
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P2/tool
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P2/host
+--- PASS: TestEA1RootAgentResumePhasesNativeSQLite (7.21s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/missing (0.06s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/stale (0.06s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/terminal (0.06s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/admission-revision (0.08s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/admission-cancel (0.09s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P1/admitted-before-dispatch (0.15s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P2/model (2.24s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P2/tool (2.23s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P2/host (2.25s)
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P3/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P3/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P4/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P4/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RootAgentResumeSettlementNativeSQLite (0.68s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P3/model-yield (0.13s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P3/terminal-tool (0.16s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P4/model-yield (0.11s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P4/terminal-tool (0.15s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P3/committed-model-receipt-unknown-host (0.13s)
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P3/model-yield
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P3/terminal-tool
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P4/model-yield
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P4/terminal-tool
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RootAgentStartSettlementNativeSQLite (0.56s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P3/model-yield (0.12s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P3/terminal-tool (0.11s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P4/model-yield (0.12s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P4/terminal-tool (0.11s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P3/committed-model-receipt-unknown-host (0.09s)
+=== RUN   TestEA1RootAgentUnknownNativeSQLite
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/host_middleware
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/model
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/tool
+--- PASS: TestEA1RootAgentUnknownNativeSQLite (6.68s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/host_middleware (2.27s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/model (2.20s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/tool (2.21s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	24.355s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.537s [no tests to run]
+
+EXIT_CODE=0
