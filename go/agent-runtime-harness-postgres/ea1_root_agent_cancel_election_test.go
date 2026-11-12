@@ -209,9 +209,22 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 	}
 	hash := sha256.Sum256(input)
 	owner := harness.Invocation{ID: iid, TurnID: tid, CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent, Input: input, InputHash: fmt.Sprintf("%x", hash), ExecutionRefID: rid, Status: harness.InvocationRunning, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
-	if _, _, err = f.host.CreateInvocation(t.Context(), owner); err != nil {
-		t.Fatal(err)
+	savedOwner, freshOwner, err := f.host.CreateInvocation(t.Context(), owner)
+	if err != nil || !freshOwner {
+		t.Fatalf("seed original Invocation: fresh=%t err=%v", freshOwner, err)
 	}
+	// Memory clones an empty OutputRefs slice to nil; SQL may preserve [].
+	// Verify every input field before using the actual persisted representation
+	// as the full-field baseline for the cancellation cutpoint.
+	if len(savedOwner.OutputRefs) != 0 {
+		t.Fatal("seed unexpectedly introduced output references")
+	}
+	seedComparison := savedOwner
+	seedComparison.OutputRefs = owner.OutputRefs
+	if !reflect.DeepEqual(seedComparison, owner) {
+		t.Fatalf("seed changed frozen owner or initial state: want=%+v got=%+v", owner, savedOwner)
+	}
+	owner = savedOwner
 	if _, _, err = f.host.AppendItem(t.Context(), harness.Item{ID: "ea1-root-invocation-item", TurnID: tid, Kind: harness.ItemInvocation, Status: harness.ItemStarted, RunID: rid, InvocationID: iid, Payload: json.RawMessage(`{"executionClass":"agent"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
