@@ -1,0 +1,109 @@
+SOURCE_SHA=606a7f559801e8f64d72dfc5c1f0aca4c90f5e80
+COMMAND=go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresChildAgent(ResumePhases|ResumeSettlement)' -v
+=== RUN   TestEA1RealPostgresChildAgentResumePhases
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/missing
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/stale-revision
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/terminal
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/parent-wins
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/stale-admission
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P1/host-before-next
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P2/host
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P2/model
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P2/tool
+--- PASS: TestEA1RealPostgresChildAgentResumePhases (10.64s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/missing (0.25s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/stale-revision (0.19s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/terminal (0.16s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/parent-wins (0.18s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/stale-admission (0.23s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P1/host-before-next (2.47s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P2/host (2.37s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P2/model (2.38s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P2/tool (2.40s)
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P3/model-yield
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P3/terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P4/model-yield
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P4/terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-parent-cancel
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-ancestor-deadline
+--- PASS: TestEA1RealPostgresChildAgentResumeSettlement (4.90s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P3/model-yield (0.35s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P3/terminal-tool (0.26s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P4/model-yield (0.25s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P4/terminal-tool (0.36s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-parent-cancel (0.40s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-ancestor-deadline (3.27s)
+=== RUN   TestEA1RealPostgresChildAgentResumePhases
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/missing
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/stale-revision
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/terminal
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/parent-wins
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/stale-admission
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P1/host-before-next
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P2/host
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P2/model
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P2/tool
+--- PASS: TestEA1RealPostgresChildAgentResumePhases (10.52s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/missing (0.18s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/stale-revision (0.17s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/terminal (0.21s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/parent-wins (0.19s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/stale-admission (0.16s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P1/host-before-next (2.40s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P2/host (2.39s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P2/model (2.40s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P2/tool (2.41s)
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P3/model-yield
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P3/terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P4/model-yield
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P4/terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-parent-cancel
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-ancestor-deadline
+--- PASS: TestEA1RealPostgresChildAgentResumeSettlement (4.70s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P3/model-yield (0.28s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P3/terminal-tool (0.26s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P4/model-yield (0.24s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P4/terminal-tool (0.31s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-parent-cancel (0.32s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-ancestor-deadline (3.28s)
+=== RUN   TestEA1RealPostgresChildAgentResumePhases
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/missing
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/stale-revision
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/terminal
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/parent-wins
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P0/stale-admission
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P1/host-before-next
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P2/host
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P2/model
+=== RUN   TestEA1RealPostgresChildAgentResumePhases/P2/tool
+--- PASS: TestEA1RealPostgresChildAgentResumePhases (10.62s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/missing (0.26s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/stale-revision (0.18s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/terminal (0.19s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/parent-wins (0.24s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P0/stale-admission (0.21s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P1/host-before-next (2.34s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P2/host (2.36s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P2/model (2.35s)
+    --- PASS: TestEA1RealPostgresChildAgentResumePhases/P2/tool (2.49s)
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P3/model-yield
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P3/terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P4/model-yield
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P4/terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-parent-cancel
+=== RUN   TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-ancestor-deadline
+--- PASS: TestEA1RealPostgresChildAgentResumeSettlement (4.73s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P3/model-yield (0.32s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P3/terminal-tool (0.24s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P4/model-yield (0.24s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P4/terminal-tool (0.34s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-parent-cancel (0.34s)
+    --- PASS: TestEA1RealPostgresChildAgentResumeSettlement/P5/two-resumes-ancestor-deadline (3.25s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	47.491s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

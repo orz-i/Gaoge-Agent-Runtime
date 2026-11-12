@@ -1,0 +1,43 @@
+SOURCE_SHA=606a7f559801e8f64d72dfc5c1f0aca4c90f5e80
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1ChildAgent(ResumePhases|ResumeSettlement)' -v
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/missing
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/stale-revision
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/terminal
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/parent-wins
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/stale-admission
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P1/host-before-next
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P2/host
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P2/model
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P2/tool
+--- PASS: TestEA1ChildAgentResumePhasesNativeSQLite (9.34s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/missing (0.09s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/stale-revision (0.06s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/terminal (0.06s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/parent-wins (0.07s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/stale-admission (0.06s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P1/host-before-next (2.23s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P2/host (2.25s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P2/model (2.26s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P2/tool (2.25s)
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P3/model-yield
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P3/terminal-tool
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P4/model-yield
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P4/terminal-tool
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P5/two-resumes-parent-cancel
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P5/two-resumes-ancestor-deadline
+--- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite (3.81s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P3/model-yield (0.15s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P3/terminal-tool (0.13s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P4/model-yield (0.14s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P4/terminal-tool (0.15s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P5/two-resumes-parent-cancel (0.13s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P5/two-resumes-ancestor-deadline (3.11s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	14.646s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.486s [no tests to run]
+
+EXIT_CODE=0

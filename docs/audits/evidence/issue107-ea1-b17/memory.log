@@ -1,0 +1,40 @@
+SOURCE_SHA=606a7f559801e8f64d72dfc5c1f0aca4c90f5e80
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1ChildAgent(ResumePhases|ResumeSettlement)' -v
+=== RUN   TestEA1ChildAgentResumePhasesMemory
+=== RUN   TestEA1ChildAgentResumePhasesMemory/P0/missing
+=== RUN   TestEA1ChildAgentResumePhasesMemory/P0/stale-revision
+=== RUN   TestEA1ChildAgentResumePhasesMemory/P0/terminal
+=== RUN   TestEA1ChildAgentResumePhasesMemory/P0/parent-wins
+=== RUN   TestEA1ChildAgentResumePhasesMemory/P0/stale-admission
+=== RUN   TestEA1ChildAgentResumePhasesMemory/P1/host-before-next
+=== RUN   TestEA1ChildAgentResumePhasesMemory/P2/host
+=== RUN   TestEA1ChildAgentResumePhasesMemory/P2/model
+=== RUN   TestEA1ChildAgentResumePhasesMemory/P2/tool
+--- PASS: TestEA1ChildAgentResumePhasesMemory (8.63s)
+    --- PASS: TestEA1ChildAgentResumePhasesMemory/P0/missing (0.00s)
+    --- PASS: TestEA1ChildAgentResumePhasesMemory/P0/stale-revision (0.00s)
+    --- PASS: TestEA1ChildAgentResumePhasesMemory/P0/terminal (0.00s)
+    --- PASS: TestEA1ChildAgentResumePhasesMemory/P0/parent-wins (0.00s)
+    --- PASS: TestEA1ChildAgentResumePhasesMemory/P0/stale-admission (0.00s)
+    --- PASS: TestEA1ChildAgentResumePhasesMemory/P1/host-before-next (2.15s)
+    --- PASS: TestEA1ChildAgentResumePhasesMemory/P2/host (2.16s)
+    --- PASS: TestEA1ChildAgentResumePhasesMemory/P2/model (2.15s)
+    --- PASS: TestEA1ChildAgentResumePhasesMemory/P2/tool (2.16s)
+=== RUN   TestEA1ChildAgentResumeSettlementMemory
+=== RUN   TestEA1ChildAgentResumeSettlementMemory/P3/model-yield
+=== RUN   TestEA1ChildAgentResumeSettlementMemory/P3/terminal-tool
+=== RUN   TestEA1ChildAgentResumeSettlementMemory/P4/model-yield
+=== RUN   TestEA1ChildAgentResumeSettlementMemory/P4/terminal-tool
+=== RUN   TestEA1ChildAgentResumeSettlementMemory/P5/two-resumes-parent-cancel
+=== RUN   TestEA1ChildAgentResumeSettlementMemory/P5/two-resumes-ancestor-deadline
+--- PASS: TestEA1ChildAgentResumeSettlementMemory (3.07s)
+    --- PASS: TestEA1ChildAgentResumeSettlementMemory/P3/model-yield (0.01s)
+    --- PASS: TestEA1ChildAgentResumeSettlementMemory/P3/terminal-tool (0.01s)
+    --- PASS: TestEA1ChildAgentResumeSettlementMemory/P4/model-yield (0.00s)
+    --- PASS: TestEA1ChildAgentResumeSettlementMemory/P4/terminal-tool (0.01s)
+    --- PASS: TestEA1ChildAgentResumeSettlementMemory/P5/two-resumes-parent-cancel (0.01s)
+    --- PASS: TestEA1ChildAgentResumeSettlementMemory/P5/two-resumes-ancestor-deadline (3.04s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	13.157s
+
+EXIT_CODE=0
