@@ -1,5 +1,7 @@
 # Issue #107 — Workflow AgentTask child ownership proof (2026-11-11)
 
+> Historical remediation and audit evidence only. For the frozen scope and actual acceptance criteria use [EA-1 execution authorization contract](../issue107-execution-authorization-contract.md), [the fixed phase/entrypoint matrix](../issue107-execution-acceptance-matrix.md), and its per-cell CSV ledger. New generic audit rounds are not an implicit release gate.
+
 ## Reproduction and trust boundaries
 
 Runtime base: `b3e496a50895d0f52a1dc37ea5c2a3979b05cebd`.
