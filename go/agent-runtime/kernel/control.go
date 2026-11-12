@@ -201,6 +201,17 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 		return Snapshot{}, false, controlNoEffectBeforeStore(err)
 	}
 	next := runtime.makeStoreMutation(current, mutation)
+	if runtime.physicalGrant != nil {
+		if current.Run.ID != runtime.physicalGrant.ChildRunID {
+			return Snapshot{}, false, controlNoEffectBeforeStore(ErrExecutionConflict)
+		}
+		next.PhysicalPermit = PhysicalApplyPermit{
+			grant: *runtime.physicalGrant,
+			proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision,
+				physicalFeatureProofDomain(current.Run.Kind, "apply"),
+				runtime.physicalGrant.ID, current.State, current.Checkpoint),
+		}
+	}
 	// The Store sees the exact same unforgeable, mutation-bound proof and
 	// checks it again under the authoritative transaction/row lock.
 	guard.verified = permit

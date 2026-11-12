@@ -78,12 +78,10 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 			return kernel.ErrExecutionConflict
 		}
 		var ids []string
-		if child.ParentRunID == "" {
-			if child.Kind != "workflow" {
-				return kernel.ErrExecutionRequired
-			}
-			ids = []string{child.RunID} // Root self-fence.
-		} else {
+		if child.Kind != "workflow" && child.Kind != "agent" {
+			return kernel.ErrExecutionRequired
+		}
+		if child.ParentRunID != "" {
 			var ancestorErr error
 			ids, ancestorErr = store.lockLiveChildAncestors(tx, child.ParentRunID,
 				child.TenantID, child.ActorID, child.ThreadKind, child.ThreadID)
@@ -91,6 +89,10 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 				return ancestorErr
 			}
 		}
+		// The Store always locks the executing child LAST; persist its OWN
+		// fence in addition to every root-to-leaf ancestor so direct Cancel
+		// and unbound Apply cannot change it while the external call runs.
+		ids = append(ids, child.RunID)
 		lockedChild, lockErr := lockKernelRun(tx, grant.ChildRunID)
 		if lockErr != nil {
 			return lockErr

@@ -241,3 +241,7 @@ func TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance(t *testing.T) {
 func TestIssue107SQLiteRootWorkflowPhysicalGrantConformance(t *testing.T) {
 	conformance.RunRootWorkflowSuite(t, func(child *testing.T) kernel.Store { return openStore(child) })
 }
+
+func TestAuditIssue107SQLiteChildSelfPhysicalGrantFence(t *testing.T) {
+	conformance.RunAuditPhysicalChildSelfFence(t, func(child *testing.T) kernel.Store { return openStore(child) })
+}

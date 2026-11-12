@@ -144,3 +144,7 @@ func TestIssue107MemoryParentedWorkflowPhysicalGrantConformance(t *testing.T) {
 func TestIssue107MemoryRootWorkflowPhysicalGrantConformance(t *testing.T) {
 	conformance.RunRootWorkflowSuite(t, func(child *testing.T) kernel.Store { return memory.NewStore() })
 }
+
+func TestAuditIssue107MemoryChildSelfPhysicalGrantFence(t *testing.T) {
+	conformance.RunAuditPhysicalChildSelfFence(t, func(child *testing.T) kernel.Store { return memory.NewStore() })
+}

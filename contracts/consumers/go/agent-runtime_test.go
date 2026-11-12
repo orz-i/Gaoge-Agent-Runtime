@@ -84,6 +84,7 @@ var (
 	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error)         = (*kernel.Runtime).LookupChildExecution
 	_ func(*agent.Runner, context.Context, string) error                                         = (*agent.Runner).ReconcileChildPhysicalGrant
 	_ func(*workflow.Runner, context.Context, string) error                                      = (*workflow.Runner).ReconcileChildPhysicalGrant
+	_ workflow.Effect                                                                            = workflow.Effect{PhysicalNoEffect: true, PhysicalNoEffectAttempt: 1}
 	_ func(*kernel.Runtime) *kernel.Runtime                                                      = (*kernel.Runtime).WithoutPhysicalGrant
 	_ func([]byte) string                                                                        = agent.FrozenOriginFingerprint
 	_ func(kernel.Snapshot, []byte) bool                                                         = agent.MatchesFrozenOrigin

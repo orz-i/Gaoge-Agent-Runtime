@@ -62,17 +62,17 @@ func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecu
 		return kernel.ErrExecutionConflict
 	}
 	var ids []string
-	if child.Run.ParentRunID == "" {
-		if child.Run.Kind != "workflow" {
-			return kernel.ErrExecutionRequired
-		}
-		ids = []string{child.Run.ID}
-	} else {
+	if child.Run.Kind != "workflow" && child.Run.Kind != "agent" {
+		return kernel.ErrExecutionRequired
+	}
+	if child.Run.ParentRunID != "" {
 		ids, err = sqliteLiveChildAncestors(ctx, tx, child.Run)
 		if err != nil {
 			return err
 		}
 	}
+	// Self + ancestor execution fencing is atomic in the SQLite writer.
+	ids = append(ids, child.Run.ID)
 	var count int
 	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE child_run_id=?", grant.ChildRunID).Scan(&count); err != nil {
 		return err

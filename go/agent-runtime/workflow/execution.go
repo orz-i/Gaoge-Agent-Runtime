@@ -120,6 +120,9 @@ type Effect struct {
 	Error        string               `json:"error,omitempty"`
 	// Trusted original Executor's explicit no-physical-request receipt.
 	PhysicalNoEffect bool `json:"physicalNoEffect,omitempty"`
+	// This evidence is scoped to the exact original dispatched Attempt;
+	// the prior attempt's no-effect claim MUST NOT settle a later send.
+	PhysicalNoEffectAttempt int `json:"physicalNoEffectAttempt,omitempty"`
 }
 
 // Wait is one explicit host-resolved suspension point.

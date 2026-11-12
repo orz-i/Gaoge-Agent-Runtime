@@ -9,56 +9,68 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// withChildPhysicalGrant surrounds the entire first-party Agent physical
-// Start/Approval/Resume, including ALL Host middleware, Model and Tool calls.
-// Its Store admission is transactionally serialized against terminal mutation
-// of every Kernel ancestor. An in-flight Grant blocks parent termination;
-// after parent termination no new physical execution may be admitted.
+// withChildPhysicalGrant surrounds the entire first-party PARENTED Agent
+// Start/Approval/Resume, including Host middleware, Model and Tool calls.
+// Store admission atomically fences the executing child ITSELF and all its
+// ancestors against unbound physical/terminal writes. A Root Agent retains
+// its separate ModelInvocation, ToolDispatch and ExecutionLease protocol;
+// do not silently substitute a Workflow Root Grant for its replay semantics.
 //
 // A crashed/unknown Model or Tool outcome retains the Grant. Only an Agent
 // that has committed settlement of every physical intent may close it; no
 // deadline or process-local mutex can silently authorize another executor.
 func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, expectedRevision uint64,
-	physical func() (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+	physical func(*Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	if runner == nil || runner.runtime == nil || physical == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	child, err := runner.runtime.Load(ctx, runID)
+	// A child nested in another first-party physical owner acquires its
+	// OWN Grant. Never carry the parent's write permit into a foreign Run.
+	executionRuntime := runner.runtime.WithoutPhysicalGrant()
+	child, err := executionRuntime.Load(ctx, runID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
 	if child.Run.ParentRunID == "" {
-		return physical()
+		// Root Agent's durable ModelInvocation/ToolDispatch and ExecutionLease
+		// authority has distinct restart/replay semantics. Do not conflate it
+		// with the Workflow Root physical Grant. The Root Start now creates
+		// its Run before any arbitrary Host Run middleware is called.
+		return physical(runner)
 	}
-	grant, err := runner.runtime.BeginChildExecution(ctx, runID, expectedRevision)
+	grant, err := executionRuntime.BeginChildExecution(ctx, runID, expectedRevision)
 	if err != nil {
-		// Store admission rejected BEFORE invoking middleware or any
-		// external Model/Tool. Preserve the original child snapshot as
-		// affirmative evidence that this callback did not dispatch work.
 		return child, err
 	}
-	// A panic or worker termination deliberately leaves an unresolved Grant;
-	// only a successful, verified physical result can discharge it.
-	result, physicalErr := physical()
-	// A Host Run middleware may perform effects before returning an error.
-	// Even a clean Agent State is not proof that those effects never happened;
-	// only a completed callback that reports success may mark its Grant
-	// settled. Error/timeout/panic retain the exact original Grant.
+	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision,
+		"agent_physical_owner", grant.ID, child.State, child.Checkpoint)
+	bound, bindErr := executionRuntime.WithPhysicalGrant(ctx, grant, proof)
+	if bindErr != nil {
+		return child, errors.Join(kernel.ErrChildExecutionBusy, bindErr)
+	}
+	scoped := *runner
+	scoped.runtime = bound
+	// The entire first-party Agent Start/Approval/Resume (including Host
+	// middleware and Model/Tool callbacks) runs with its original scoped
+	// mutation authority. A direct unbound Kernel Cancel/Apply cannot
+	// mutate this Run until trusted physical settlement.
+	result, physicalErr := physical(&scoped)
 	if physicalErr != nil {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy)
 	}
 	settlementCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer stop()
-	latest, loadErr := runner.runtime.Load(settlementCtx, runID)
+	latest, loadErr := executionRuntime.Load(settlementCtx, runID)
 	if loadErr != nil || !knownAgentPhysicalSettlement(latest) {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, loadErr)
 	}
-	proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
-	if markErr := runner.runtime.MarkChildExecutionSettled(settlementCtx, grant, proof); markErr != nil {
+	settledProof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision,
+		"agent_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
+	if markErr := executionRuntime.MarkChildExecutionSettled(settlementCtx, grant, settledProof); markErr != nil {
 		return result, errors.Join(kernel.ErrChildExecutionBusy, markErr)
 	}
-	if finishErr := runner.runtime.FinishChildExecution(settlementCtx, grant, proof); finishErr != nil {
-		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, finishErr)
+	if finishErr := executionRuntime.FinishChildExecution(settlementCtx, grant, settledProof); finishErr != nil {
+		return result, errors.Join(kernel.ErrChildExecutionBusy, finishErr)
 	}
 	return result, physicalErr
 }

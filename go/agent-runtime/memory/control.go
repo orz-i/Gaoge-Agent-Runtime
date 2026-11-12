@@ -43,8 +43,21 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 		// identity while the same Feature wait remains unresolved.
 		return kernel.Snapshot{}, false, kernel.ErrExecutionQuarantined
 	}
-	if memoryTerminalStatus(mutation.Record.Run.Status) && len(store.childGrantOwners[runID]) != 0 {
-		return kernel.Snapshot{}, false, kernel.ErrChildExecutionBusy
+	// A child physical Grant requires an original, per-revision permit
+	// for control writes as well as ordinary Apply. Check BEFORE revoking
+	// a Run Execution epoch so a rejected Cancel is truly no-mutation.
+	for id := range store.childGrantOwners[runID] {
+		original, ok := store.childGrants[id]
+		if !ok {
+			return kernel.Snapshot{}, false, kernel.ErrExecutionConflict
+		}
+		if original.grant.ChildRunID == runID {
+			if !mutation.PhysicalPermit.Matches(original.grant, current) {
+				return kernel.Snapshot{}, false, kernel.ErrChildExecutionBusy
+			}
+		} else if memoryTerminalStatus(mutation.Record.Run.Status) {
+			return kernel.Snapshot{}, false, kernel.ErrChildExecutionBusy
+		}
 	}
 	if authority.epoch == math.MaxUint64 {
 		return kernel.Snapshot{}, false, kernel.ErrExecutionConflict

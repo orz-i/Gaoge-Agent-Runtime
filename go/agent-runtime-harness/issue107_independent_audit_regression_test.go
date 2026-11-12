@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -52,7 +53,7 @@ func TestFinalAuditParentTerminalCannotApproveLiveChild(t *testing.T) {
 	}
 }
 
-func TestFinalAuditCancelledAgentWithInflightToolCannotSettleAsCleanup(t *testing.T) {
+func TestFinalAuditActiveAgentToolCannotBypassSelfGrantForCleanup(t *testing.T) {
 	f := newIssue107HarnessFixture(t, true, true)
 	f.toolStarted = make(chan struct{})
 	f.toolRelease = make(chan struct{})
@@ -92,12 +93,12 @@ func TestFinalAuditCancelledAgentWithInflightToolCannotSettleAsCleanup(t *testin
 		t.Fatal("test did not persist Tool dispatch ID")
 	}
 	_, err = f.runtime.Cancel(t.Context(), task.RunID, physical.Run.Revision, "cancel during unresolved Tool")
-	if err != nil {
+	if !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		close(f.toolRelease)
-		t.Fatalf("Kernel CAS cancel: %v", err)
+		t.Fatalf("original child self-fence did not deny Kernel Cancel during Tool: %v", err)
 	}
 	confirmed, cancelErr := f.harness.CancelSubtask(t.Context(), waiting.Turn.ID, task.ID, "reconcile physical child")
-	t.Logf("Harness CancelSubtask after terminal Kernel cancel while Tool callback unreturned: cancelErr=%v; subtasks=%+v", cancelErr, confirmed.Subtasks)
+	t.Logf("Harness CancelSubtask after rejected direct Kernel cancel while Tool callback unreturned: cancelErr=%v; subtasks=%+v", cancelErr, confirmed.Subtasks)
 	close(f.toolRelease)
 	select {
 	case e := <-done:

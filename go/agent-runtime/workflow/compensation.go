@@ -34,14 +34,20 @@ func (runner *Runner) Cancel(
 	if detail == "" {
 		detail = errCancellationRequested.Error()
 	}
-	cancelled, cancelErr := runner.beginFailure(
-		ctx, snapshot, state, kernel.RunStatusCancelled, "workflow.cancelled", errors.New(detail),
-	)
-	if cancelled.Run.Status == kernel.RunStatusCancelled &&
-		(cancelled.Run.ErrorCode == "workflow.cancelled" || cancelled.Run.ErrorCode == "") {
-		return cancelled, nil
-	}
-	return cancelled, cancelErr
+	// Workflow cancellation may dispatch physically compensating Effects.
+	// Admit the original Run's Store Grant BEFORE writing the failure intent
+	// or invoking any custom compensator, then hold it across all receipts.
+	// Unknown physical compensation outcomes remain durable and block any
+	// competing terminal transition or retry.
+	return runner.withChildPhysicalGrant(ctx, snapshot, func(scoped *Runner) (kernel.Snapshot, error) {
+		cancelled, cancelErr := scoped.beginFailure(ctx, snapshot, state,
+			kernel.RunStatusCancelled, "workflow.cancelled", errors.New(detail))
+		if cancelled.Run.Status == kernel.RunStatusCancelled &&
+			(cancelled.Run.ErrorCode == "workflow.cancelled" || cancelled.Run.ErrorCode == "") {
+			return cancelled, nil
+		}
+		return cancelled, cancelErr
+	})
 }
 
 func (runner *Runner) beginFailure(
@@ -198,6 +204,11 @@ func (runner *Runner) dispatchCompensation(
 		return runner.yield(ctx, snapshot, state, "compensation_pending")
 	}
 	if result.Disposition == DispositionFailed {
+		effect.PhysicalNoEffect = result.PhysicalNoEffect
+		effect.PhysicalNoEffectAttempt = 0
+		if effect.PhysicalNoEffect {
+			effect.PhysicalNoEffectAttempt = effect.Attempt
+		}
 		code := strings.TrimSpace(result.ErrorCode)
 		if code == "" {
 			code = "workflow.compensation_failed"

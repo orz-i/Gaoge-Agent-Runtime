@@ -41,21 +41,17 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, snapshot kerne
 	scoped := *runner
 	scoped.runtime = executionRuntime
 	scoped.physicalCalls = calls
-	physicalRunner := &scoped
-	if snapshot.Run.ParentRunID == "" {
-		// The original root Run is also a physical Feature owner. A root
-		// cannot evade execution admission merely by lacking ancestors.
-		// Bind each per-revision Kernel.Apply to a first-party Root Grant
-		// so legitimate interpreter transitions remain possible while a
-		// concurrent Root Resume/Cancel cannot bypass the active callback.
-		proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision,
-			"workflow_root_physical_owner", grant.ID, snapshot.State, snapshot.Checkpoint)
-		bound, bindErr := executionRuntime.WithPhysicalGrant(ctx, grant, proof)
-		if bindErr != nil {
-			return snapshot, errors.Join(kernel.ErrChildExecutionBusy, bindErr)
-		}
-		scoped.runtime = bound
+	// Root and parented Workflow share the SAME Feature-owned per-revision
+	// mutation permit. A child may not bypass its own Grant by using the
+	// unscoped Kernel Runtime, including when executing compensations.
+	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision,
+		"workflow_physical_owner", grant.ID, snapshot.State, snapshot.Checkpoint)
+	bound, bindErr := executionRuntime.WithPhysicalGrant(ctx, grant, proof)
+	if bindErr != nil {
+		return snapshot, errors.Join(kernel.ErrChildExecutionBusy, bindErr)
 	}
+	scoped.runtime = bound
+	physicalRunner := &scoped
 
 	// A panic, pending unknown remote effect, or callback error without a
 	// trustworthy physical receipt leaves the original Grant durable. Do
@@ -79,7 +75,7 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, snapshot kerne
 			return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, stateErr)
 		}
 	}
-	proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision,
+	proof = featurecontrol.Seal(latest.Run.ID, latest.Run.Revision,
 		"workflow_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
 	if err := executionRuntime.MarkChildExecutionSettled(settlementCtx, grant, proof); err != nil {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, err)
@@ -122,7 +118,8 @@ func (runner *Runner) knownWorkflowPhysicalSettlement(ctx context.Context, snaps
 				// dispatched. ErrEffectPending is an observed external
 				// pending outcome and requires separate trusted evidence.
 				if !errors.Is(physicalErr, ErrSegmentYielded) &&
-					(!errors.Is(physicalErr, ErrEffectPending) || !effect.PhysicalNoEffect || effect.ErrorCode == "") {
+					(!errors.Is(physicalErr, ErrEffectPending) || !effect.PhysicalNoEffect ||
+						effect.PhysicalNoEffectAttempt != effect.Attempt-1 || effect.ErrorCode == "") {
 					return false
 				}
 				continue
@@ -170,7 +167,7 @@ func (runner *Runner) knownWorkflowPhysicalSettlement(ctx context.Context, snaps
 			// A failed original attempt with an explicit Host-attested
 			// pre-dispatch NoEffect is not unknown physical work.
 			// Never apply this to generic failures or timeouts.
-			if !effect.PhysicalNoEffect || effect.ErrorCode == "" {
+			if !effect.PhysicalNoEffect || effect.PhysicalNoEffectAttempt != effect.Attempt || effect.ErrorCode == "" {
 				return false
 			}
 		default:

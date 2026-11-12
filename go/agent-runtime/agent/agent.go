@@ -607,37 +607,41 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 		Operation: plugin.RunStart, Kind: RunKind, RunID: strings.TrimSpace(request.ID),
 		ParentRunID: request.ParentRunID, Actor: request.Actor, Thread: request.Thread, Goal: strings.TrimSpace(request.Goal),
 	}
-	var snapshot kernel.Snapshot
-	var invokeErr error
-	if request.ParentRunID != "" {
-		// Kernel.Create first verifies the immutable parent under the Store's
-		// transaction, then the first physical Grant spans ALL RunStart
-		// middleware and the Agent Model/Tool loop. A Host middleware cannot
-		// emit external effects before admission and then hide behind a later
-		// rejected child Create/Begin. No second Create is performed in next.
-		created, createErr := runner.createPreparedRun(ctx, request, encoded)
-		if createErr != nil {
-			return kernel.Snapshot{}, createErr
-		}
-		snapshot, invokeErr = runner.withChildPhysicalGrant(ctx, created.Run.ID, created.Run.Revision,
-			func() (kernel.Snapshot, error) {
-				return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-					return runner.continuePreparedRun(nextCtx, created, deferred)
-				})
+	// Every Run (Root and child) must be durably Created and admitted to
+	// its original physical Grant BEFORE ANY arbitrary Host Run middleware
+	// can issue external work. A duplicate Root ID never executes middleware.
+	created, createErr := runner.createPreparedRun(ctx, request, encoded)
+	if createErr != nil {
+		return kernel.Snapshot{}, createErr
+	}
+	invocation.RunID = created.Run.ID
+	var continuationReached bool
+	snapshot, invokeErr := runner.withChildPhysicalGrant(ctx, created.Run.ID, created.Run.Revision,
+		func(scoped *Runner) (kernel.Snapshot, error) {
+			return scoped.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+				continuationReached = true
+				return scoped.continuePreparedRun(nextCtx, created, deferred)
 			})
-		if invokeErr != nil && snapshot.Run.ID == "" {
-			return created, invokeErr
-		}
-	} else {
-		snapshot, invokeErr = runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-			return runner.startPreparedRun(nextCtx, request, deferred, encoded)
 		})
+	if invokeErr != nil && snapshot.Run.ID == "" {
+		// Keep the newly created Run visible for explicit recovery, but
+		// never return here: an untrusted middleware may have returned a
+		// native pre-Create proof belonging to ANOTHER nested Start.
+		snapshot = created
 	}
 	// A custom middleware could return a private proof from an unrelated
 	// nested native Start after performing effects of its own. Only the
 	// direct pre-middleware return above carries this call's authority.
 	if IsNativeStartNoEffect(invokeErr) {
-		return snapshot, fmt.Errorf("agent Run Middleware outcome is not preflight proof: %w", invokeErr)
+		invokeErr = fmt.Errorf("agent Run Middleware outcome is not preflight proof: %w", invokeErr)
+	}
+	if invokeErr != nil && !continuationReached {
+		// A middleware may return a custom/public NoEffect marker after
+		// issuing external work without calling Next. The existing Root
+		// Create is NOT a physical effect receipt. Do not let Harness see
+		// the created Run as a successful physical Start and retire its
+		// own dispatch Grant. Persisted Run identity remains recoverable.
+		return kernel.Snapshot{}, invokeErr
 	}
 	return snapshot, invokeErr
 }
@@ -735,17 +739,6 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 	return encoded, nil
 }
 
-func (runner *Runner) startPreparedRun(ctx context.Context, request StartRequest, deferred bool, encoded json.RawMessage) (kernel.Snapshot, error) {
-	snapshot, err := runner.createPreparedRun(ctx, request, encoded)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	// A parent-bound Start is handled by startRunWithMiddleware itself,
-	// which creates the child, admits the physical Grant, and only then
-	// enters arbitrary Host Run middleware. This path is only for roots.
-	return runner.continuePreparedRun(ctx, snapshot, deferred)
-}
-
 func (runner *Runner) createPreparedRun(ctx context.Context, request StartRequest, encoded json.RawMessage) (kernel.Snapshot, error) {
 	return runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
@@ -808,11 +801,12 @@ func (runner *Runner) ResolveApproval(
 	// From this boundary onward a Run middleware, approval handler or
 	// Model/Tool may perform effects; no generic return error proves no-effect.
 	invocation := runInvocation(plugin.RunResolveApproval, snapshot)
-	return runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, snapshot.Run.Revision, func() (kernel.Snapshot, error) {
-		return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-			return runner.resolveApproval(nextCtx, snapshot, state, response)
+	return runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, snapshot.Run.Revision,
+		func(scoped *Runner) (kernel.Snapshot, error) {
+			return scoped.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+				return scoped.resolveApproval(nextCtx, snapshot, state, response)
+			})
 		})
-	})
 }
 
 func (runner *Runner) resolveApproval(
@@ -884,14 +878,16 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	// Claim an execution segment BEFORE Run middleware and any Model/Tool
 	// side effect. A runner without RunExecution still follows the original
 	// pre-dispatch Store guard and will be rejected on fenced Runs.
-	resumed, resumeErr := runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, snapshot.Run.Revision, func() (kernel.Snapshot, error) {
-		return runner.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-			invocation := runInvocation(plugin.RunResume, snapshot)
-			return scoped.runChain.Invoke(driveCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-				return scoped.resumeRunning(nextCtx, snapshot, state)
-			})
+	resumed, resumeErr := runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, snapshot.Run.Revision,
+		func(physical *Runner) (kernel.Snapshot, error) {
+			return physical.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision,
+				func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
+					invocation := runInvocation(plugin.RunResume, snapshot)
+					return scoped.runChain.Invoke(driveCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+						return scoped.resumeRunning(nextCtx, snapshot, state)
+					})
+				})
 		})
-	})
 	if resumeErr != nil && resumed.Run.ID == "" {
 		return snapshot, resumeErr
 	}

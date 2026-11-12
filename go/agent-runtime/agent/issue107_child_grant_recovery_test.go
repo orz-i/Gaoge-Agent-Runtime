@@ -38,6 +38,15 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Synthetic trusted callback owns the original Agent per-revision
+	// mutation capability. Other, unbound writers cannot rewrite a child
+	// while an external operation is physically in flight.
+	ownerProof := featurecontrol.Seal(child.Run.ID, child.Run.Revision,
+		"agent_physical_owner", original.ID, child.State, child.Checkpoint)
+	owned, bindErr := rt.WithPhysicalGrant(t.Context(), original, ownerProof)
+	if bindErr != nil {
+		t.Fatal(bindErr)
+	}
 	if _, err = rt.Cancel(t.Context(), parent.Run.ID, parent.Run.Revision, "unknown external work"); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("lost Grant did not block parent terminal: %v", err)
 	}
@@ -50,7 +59,7 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed, err := rt.Apply(t.Context(), child.Run.ID, child.Run.Revision, kernel.Mutation{
+	changed, err := owned.Apply(t.Context(), child.Run.ID, child.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: pending,
 	})
 	if err != nil {
@@ -69,7 +78,7 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = rt.Apply(t.Context(), child.Run.ID, changed.Run.Revision, kernel.Mutation{
+	_, err = owned.Apply(t.Context(), child.Run.ID, changed.Run.Revision, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: settled,
 	})
 	if err != nil {

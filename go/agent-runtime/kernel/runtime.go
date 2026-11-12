@@ -111,7 +111,8 @@ type Runtime struct {
 	// execution optionally binds this Runtime to one Store-authorized segment.
 	// It is never inherited by a fresh Runtime created from the same Store.
 	execution *ExecutionLease
-	// physicalGrant is a first-party bound Root Workflow execution segment.
+	// physicalGrant binds a first-party Root/child Workflow or parented
+	// Agent execution segment to its original Store Grant.
 	// A Store mutation carries a fresh per-revision proof to prevent another
 	// worker from modifying this Root while physical effects are in flight.
 	physicalGrant *ChildExecutionGrant
@@ -231,7 +232,8 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 		proposed.PhysicalPermit = PhysicalApplyPermit{
 			grant: *runtime.physicalGrant,
 			proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision,
-				"workflow_root_physical_apply", runtime.physicalGrant.ID, current.State, current.Checkpoint),
+				physicalFeatureProofDomain(current.Run.Kind, "apply"),
+				runtime.physicalGrant.ID, current.State, current.Checkpoint),
 		}
 	}
 	if runtime.execution != nil {

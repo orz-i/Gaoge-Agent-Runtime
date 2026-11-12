@@ -23,8 +23,8 @@ type ChildExecutionGrant struct {
 	ExpectedRevision uint64 // Original physical caller's immutable Run revision.
 }
 
-// ChildExecutionSettlement is the opaque first-party Agent-issued physical
-// callback completion permit. Only the Kernel/Agent internal Feature control
+// ChildExecutionSettlement is the opaque first-party Agent/Workflow physical
+// callback completion permit. Only the internal Feature control
 // boundary can populate it. Store adapters MUST validate Matches against the
 // authoritative child Snapshot INSIDE the SAME transaction as setting the
 // durable settlement revision; a direct Store call with a zero/forged permit
@@ -49,9 +49,9 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 		proofKind, grant.ID, snapshot.State, snapshot.Checkpoint)
 }
 
-// PhysicalApplyPermit is an opaque per-Run write proof for a Root Workflow
-// while its own durable physical Grant is active. It is minted exclusively
-// by a first-party Workflow-scoped Kernel Runtime. An external caller holding
+// PhysicalApplyPermit is an opaque per-Run write proof for a Root or child
+// Agent/Workflow while its own durable physical Grant is active. It is minted
+// exclusively by a first-party Feature-scoped Kernel Runtime. An external caller holding
 // a visible Grant ID cannot forge this permit or mutate a root mid-dispatch.
 type PhysicalApplyPermit struct {
 	grant ChildExecutionGrant
@@ -59,11 +59,22 @@ type PhysicalApplyPermit struct {
 }
 
 func (permit PhysicalApplyPermit) Matches(grant ChildExecutionGrant, snapshot Snapshot) bool {
-	return snapshot.Run.Kind == "workflow" &&
-		grant.ID != "" && grant.ChildRunID == snapshot.Run.ID &&
-		permit.grant == grant &&
-		permit.proof.Matches(snapshot.Run.ID, snapshot.Run.Revision,
-			"workflow_root_physical_apply", grant.ID, snapshot.State, snapshot.Checkpoint)
+	if grant.ID == "" || grant.ChildRunID != snapshot.Run.ID || grant.ExpectedRevision == 0 ||
+		permit.grant != grant {
+		return false
+	}
+	domain := physicalFeatureProofDomain(snapshot.Run.Kind, "apply")
+	return domain != "" && permit.proof.Matches(snapshot.Run.ID, snapshot.Run.Revision,
+		domain, grant.ID, snapshot.State, snapshot.Checkpoint)
+}
+
+func physicalFeatureProofDomain(kind RunKind, phase string) string {
+	switch kind {
+	case "agent", "workflow":
+		return string(kind) + "_physical_" + phase
+	default:
+		return ""
+	}
 }
 
 // IsPresent permits Store adapters to reject a sealed Root execution
@@ -85,9 +96,9 @@ func (runtime *Runtime) WithoutPhysicalGrant() *Runtime {
 	return &unbound
 }
 
-// WithPhysicalGrant binds a Kernel Runtime to the one original Root Workflow
-// physical Grant. Only a first-party Workflow can mint the required source
-// proof, and the Store validates every subsequent per-revision write under
+// WithPhysicalGrant binds a Kernel Runtime to the original Root/child
+// Agent/Workflow physical Grant. Only the first-party Feature can mint a
+// valid internal source proof, and the Store validates every subsequent per-revision write under
 // its own atomic lock/transaction. It never bypasses terminal control CAS.
 func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) (*Runtime, error) {
 	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 ||
@@ -102,10 +113,11 @@ func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecut
 	if err != nil {
 		return nil, err
 	}
-	if stored != grant || current.Run.Kind != "workflow" || current.Run.ParentRunID != "" ||
-		current.Run.Revision != grant.ExpectedRevision ||
+	if stored != grant || current.Run.Revision != grant.ExpectedRevision ||
+		physicalFeatureProofDomain(current.Run.Kind, "owner") == "" ||
 		!proof.Matches(current.Run.ID, current.Run.Revision,
-			"workflow_root_physical_owner", grant.ID, current.State, current.Checkpoint) {
+			physicalFeatureProofDomain(current.Run.Kind, "owner"),
+			grant.ID, current.State, current.Checkpoint) {
 		return nil, ErrExecutionConflict
 	}
 	bound := *runtime
@@ -113,10 +125,11 @@ func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecut
 	return &bound, nil
 }
 
-// ChildExecutionStore is an optional atomic store port for immutable parented
-// Runs. Each implementation MUST serialize BeginChildExecution and every
-// terminal ancestor transition in the SAME persistent Store, covering all
-// ancestor Runs; no in-process lock or read-then-check fallback suffices.
+// ChildExecutionStore is the authoritative, persistent physical Feature
+// execution port. Each implementation MUST serialize Grant admission with
+// writes/terminal Control on the executing Run ITSELF and every immutable
+// ancestor in the SAME Store transaction; a read-then-check fallback is
+// insufficient.
 // Finish may retire a Grant only after the owning Feature has certified the
 // physical execution returned with no unresolved effects. ErrChildExecutionBusy
 // from a parent ApplyControl MUST be an atomic, no-mutation rejection; the

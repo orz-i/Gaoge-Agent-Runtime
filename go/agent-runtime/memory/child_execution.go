@@ -73,18 +73,20 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 		return kernel.ErrExecutionConflict
 	}
 	var ancestors []string
-	if child.Run.ParentRunID == "" {
-		if child.Run.Kind != "workflow" {
-			return kernel.ErrExecutionRequired
-		}
-		ancestors = []string{child.Run.ID} // Root self-fence for Cancel/Apply.
-	} else {
+	if child.Run.Kind != "workflow" && child.Run.Kind != "agent" {
+		return kernel.ErrExecutionRequired
+	}
+	if child.Run.ParentRunID != "" {
 		var err error
 		ancestors, err = store.childAncestorsLocked(child.Run)
 		if err != nil {
 			return err
 		}
 	}
+	// Every physical execution fences its OWN Run and ALL ancestors.
+	// The first-party Feature receives a per-revision scoped mutation permit,
+	// while unbound Kernel.Cancel/Apply/Control must fail until settlement.
+	ancestors = append(ancestors, child.Run.ID)
 	if _, exists := store.childGrants[grant.ID]; exists {
 		return kernel.ErrChildExecutionBusy
 	}

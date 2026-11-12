@@ -135,10 +135,10 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
-	// The root's original physical Grant fences every competing Run write,
-	// not only terminal cancellation. Its own Feature-scoped Kernel Runtime
-	// carries the original per-revision proof. Descendant physical Grants
-	// independently prevent a parent terminal mutation.
+	// The original self-owned physical Grant fences every competing Run
+	// write, not only terminal cancellation. Only a first-party scoped
+	// Kernel Runtime carries its exact per-revision proof. Descendant
+	// Grants independently prevent ancestor terminal mutation.
 	var rootGrantFound bool
 	for id := range store.childGrantOwners[runID] {
 		granted, ok := store.childGrants[id]
