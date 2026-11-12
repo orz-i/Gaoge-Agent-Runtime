@@ -300,6 +300,27 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if queryErr := tx.Where("parent_run_id = ?", runID).Find(&active).Error; queryErr != nil {
 			return translateKernelError(queryErr)
 		}
+		// A native waiting owner cannot bypass approval through ordinary Apply.
+		// Preserve Memory's authority precedence before checking the gate.
+		if lease != nil && guard == nil && current.Run.Status == kernel.RunStatusWaitingInput {
+			for _, row := range active {
+				original := pgPhysicalGrant(row)
+				if original.ChildRunID == runID && original.IsOwned() && !original.MatchesExecution(*lease) {
+					return kernel.ErrExecutionConflict
+				}
+			}
+			if lockedRun.ExecutionQuarantineRevision != 0 {
+				return kernel.ErrExecutionQuarantined
+			}
+			now, clockErr := pgStoreNow(tx)
+			if clockErr != nil {
+				return clockErr
+			}
+			if !pgLeaseMatches(lockedRun, *lease, now) {
+				return kernel.ErrExecutionConflict
+			}
+			return kernel.ErrExecutionRequired
+		}
 		var approvalLease *kernel.ExecutionLease
 		rootGrantFound := false
 		for _, record := range active {

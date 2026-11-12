@@ -9,10 +9,10 @@ import (
 )
 
 func TestEA1RootAgentControlSettlementMemory(t *testing.T) {
-	conformance.RunEA1RootAgentControlSettlementSuite(t, func(*testing.T) (kernel.Store, func() kernel.Store) {
+	conformance.RunEA1RootAgentControlSettlementSuite(t, func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
 		store := memory.NewStore()
 		// Memory cannot model process persistence; a fresh Kernel/Runner shares
 		// the same Store state while persistence is tested by SQLite and PG.
-		return store, func() kernel.Store { return store }
+		return store, store, func() kernel.Store { return store }
 	})
 }

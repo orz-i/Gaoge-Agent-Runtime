@@ -8,8 +8,8 @@ import (
 )
 
 func TestEA1RootAgentControlSettlementGORM(t *testing.T) {
-	conformance.RunEA1RootAgentControlSettlementSuite(t, func(t *testing.T) (kernel.Store, func() kernel.Store) {
+	conformance.RunEA1RootAgentControlSettlementSuite(t, func(t *testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
 		db := openKernelStoreTestDB(t)
-		return NewKernelStore(db), func() kernel.Store { return NewKernelStore(db) }
+		return NewKernelStore(db), NewKernelStore(db), func() kernel.Store { return NewKernelStore(db) }
 	})
 }

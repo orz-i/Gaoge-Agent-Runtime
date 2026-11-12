@@ -2,6 +2,8 @@ package conformance
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -14,6 +16,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -21,7 +24,7 @@ import (
 // RunEA1RootAgentControlSettlementSuite covers AR-A P3/P4/P5. Root has no
 // ancestor. These APIs expose neither Workflow compensation nor shared-budget
 // election; the entire original Budget is nevertheless protected on rejection.
-func RunEA1RootAgentControlSettlementSuite(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store)) {
+func RunEA1RootAgentControlSettlementSuite(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	for _, entry := range []string{"approval", "toolwait"} {
 		for _, phase := range []string{"P3", "P4", "P5", "P5-run-deadline"} {
 			t.Run(entry+"/"+phase, func(t *testing.T) { ea1ControlSettlement(t, factory, entry, phase) })
@@ -54,13 +57,17 @@ func (m *ea1ControlMiddleware) Run(ctx context.Context, inv plugin.RunInvocation
 	return next(ctx)
 }
 
-func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store), entry, phase string) {
+func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), entry, phase string) {
 	t.Helper()
 	ctx := t.Context()
-	backing, reopen := factory(t)
+	backing, peerStore, reopen := factory(t)
 	fault := errors.New("original control settlement transport fault")
 	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), mode: "setup", fault: fault}
 	rt, err := kernel.New(kernel.Dependencies{Store: wrapped})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerRT, err := kernel.New(kernel.Dependencies{Store: peerStore})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,6 +93,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		t.Fatal(err)
 	}
 	middleware := &ea1ControlMiddleware{}
+	var resolvedCheckpoint *kernel.Checkpoint
 	makeRunner := func(runtime *kernel.Runtime, owner string, control bool) *agent.Runner {
 		approvals, e := interaction.New(runtime)
 		if e != nil {
@@ -103,7 +111,15 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 			return tools.CloneExecutionResult(verifiedResult), nil
 		})}
 		if entry == "approval" {
-			deps.Approvals = interactionadapter.New(approvals)
+			deps.Approvals = ea1ControlApprovalCapture{ApprovalHandler: interactionadapter.New(approvals), returned: func(cp *kernel.Checkpoint) {
+				raw, e := json.Marshal(cp)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if e = json.Unmarshal(raw, &resolvedCheckpoint); e != nil {
+					t.Fatal(e)
+				}
+			}}
 			deps.ApprovalPolicies = []plugin.ApprovalPolicy{ea1ControlApprovalPolicy{}}
 		}
 		if control {
@@ -146,7 +162,23 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if intent.Status != agent.ModelInvocationConsumed || intent.ExecutionAttempt != 1 || intent.DispatchAttempt != 1 || intent.RequestHash != physical.intents[0].RequestHash || intent.Provider != physical.ProviderName() || intent.BindingFingerprint != strings.Repeat("b", 64) {
 		t.Fatal("original Model binding/attempt lost")
 	}
-	ea1StartSettlementJSONEqual(t, "original Model request", intent.Request, physical.requests[0])
+	// The consumed invocation legitimately prunes Request. Verify the full
+	// original tuple captured at Generate, then bind durable identity to it.
+	originalIntent := physical.intents[0]
+	ea1StartSettlementJSONEqual(t, "original Model request", originalIntent.Request, physical.requests[0])
+	canonical := model.CloneRequest(physical.requests[0])
+	canonical.InvocationID = ""
+	encoded, e := json.Marshal(struct {
+		Request             model.Request `json:"request"`
+		CatalogFingerprints []string      `json:"catalogFingerprints"`
+		Provider            string        `json:"provider"`
+		BindingFingerprint  string        `json:"bindingFingerprint"`
+	}{canonical, originalIntent.CatalogFingerprints, originalIntent.Provider, originalIntent.BindingFingerprint})
+	digest := sha256.Sum256(encoded)
+	if e != nil || originalIntent.RequestHash != hex.EncodeToString(digest[:]) || intent.ID != originalIntent.ID || intent.RunID != originalIntent.RunID || intent.SourceRevision != originalIntent.SourceRevision || intent.Model != originalIntent.Model || intent.Provider != originalIntent.Provider || intent.BindingFingerprint != originalIntent.BindingFingerprint || intent.ExecutionAttempt != originalIntent.ExecutionAttempt || intent.DispatchAttempt != originalIntent.DispatchAttempt {
+		t.Fatal("durable invocation lost original full source tuple")
+	}
+	// CatalogFingerprints is pruned with Request; the original tuple is sealed by the retained hash above.
 	ea1StartSettlementJSONEqual(t, "original Model response", intent.Response, physical.responses[0])
 	var originalGrant kernel.ChildExecutionGrant
 	var wait *agent.PendingTool
@@ -193,11 +225,16 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 			// Two real ready deliveries race the same original receipt CAS.
 			var deliveries sync.WaitGroup
 			outcomes := make(chan error, 2)
-			for range 2 {
+			deliveryPeer := makeRunner(peerRT, "signal-delivery-peer", false)
+			for index := range 2 {
+				delivery := runner
+				if index == 1 {
+					delivery = deliveryPeer
+				}
 				deliveries.Add(1)
 				go func() {
 					defer deliveries.Done()
-					_, e := runner.NotifyExternalToolResultReady(ctx, signal)
+					_, e := delivery.NotifyExternalToolResultReady(ctx, signal)
 					outcomes <- e
 				}()
 			}
@@ -238,17 +275,17 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		if e != nil {
 			t.Fatal(e)
 		}
-		_, e = rt.Cancel(ctx, req.ID, before.Run.Revision, "competing control")
+		_, e = peerRT.Cancel(ctx, req.ID, before.Run.Revision, "competing control")
 		if !errors.Is(e, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("Cancel passed physical owner: %v", e)
 		}
 		ea1ControlUnchanged(t, rt, before, contested)
-		_, e = rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: req.ID, OwnerID: "competitor", LeaseDuration: time.Minute})
+		_, e = peerRT.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: req.ID, OwnerID: "competitor", LeaseDuration: time.Minute})
 		if !errors.Is(e, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("Acquire passed physical owner: %v", e)
 		}
 		ea1ControlUnchanged(t, rt, before, contested)
-		peer := makeRunner(rt, "competing-control-owner", false)
+		peer := makeRunner(peerRT, "competing-control-owner", false)
 		if entry == "approval" {
 			_, e = peer.ResolveApproval(ctx, req.ID, before.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
 			if !errors.Is(e, kernel.ErrChildExecutionBusy) {
@@ -270,7 +307,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 			ea1ControlWaitUntil(*before.Run.DeadlineAt)
 			limit := time.Now().Add(time.Second)
 			for {
-				_, applied, expireErr := rt.Expire(ctx, req.ID, before.Run.Revision)
+				_, applied, expireErr := peerRT.Expire(ctx, req.ID, before.Run.Revision)
 				ea1ControlUnchanged(t, rt, before, contested)
 				if errors.Is(expireErr, kernel.ErrChildExecutionBusy) && !applied {
 					break
@@ -351,6 +388,13 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	}
 	if entry == "approval" {
 		ea1StartSettlementJSONEqual(t, "approval Budget unchanged", finalView.Budget, initialView.Budget)
+		if resolvedCheckpoint == nil || resolvedCheckpoint.Status != kernel.CheckpointResolved || resolvedCheckpoint.ResolvedAt == nil || resolvedCheckpoint.ID != initial.Checkpoint.ID || resolvedCheckpoint.Kind != initial.Checkpoint.Kind || !resolvedCheckpoint.CreatedAt.Equal(initial.Checkpoint.CreatedAt) {
+			t.Fatal("actual handler did not resolve original checkpoint")
+		}
+		ea1StartSettlementJSONEqual(t, "original approval payload", resolvedCheckpoint.Payload, initial.Checkpoint.Payload)
+		ea1StartSettlementJSONEqual(t, "actual approve response", resolvedCheckpoint.Response, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
+		ea1StartSettlementJSONEqual(t, "full durable actual approval checkpoint", before.Checkpoint, resolvedCheckpoint)
+
 		if before.Checkpoint == nil || initial.Checkpoint == nil || before.Checkpoint.ID != initial.Checkpoint.ID {
 			t.Fatal("approval checkpoint source lost")
 		}
@@ -475,4 +519,18 @@ func ea1ControlTerminalResult(t *testing.T, s kernel.Snapshot, result tools.Exec
 	if err != nil || view.Budget.Usage.ToolCalls != 1 || view.PendingTool != nil {
 		t.Fatalf("receipt not charged exactly once/retired: %v", err)
 	}
+}
+
+// Observe the actual first-party adapter return without inventing a checkpoint.
+type ea1ControlApprovalCapture struct {
+	plugin.ApprovalHandler
+	returned func(*kernel.Checkpoint)
+}
+
+func (h ea1ControlApprovalCapture) ResolveToolApproval(cp *kernel.Checkpoint, response plugin.ApprovalResponse) (*kernel.Checkpoint, error) {
+	result, err := h.ApprovalHandler.ResolveToolApproval(cp, response)
+	if err == nil {
+		h.returned(result)
+	}
+	return result, err
 }

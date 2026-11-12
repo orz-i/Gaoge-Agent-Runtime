@@ -16,12 +16,12 @@ func TestEA1RealPostgresRootAgentControlSettlement(t *testing.T) {
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN not configured")
 	}
-	conformance.RunEA1RootAgentControlSettlementSuite(t, func(t *testing.T) (kernel.Store, func() kernel.Store) {
+	conformance.RunEA1RootAgentControlSettlementSuite(t, func(t *testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
 		db, isolatedDSN := openIsolatedRealPostgres(t, dsn)
 		if err := Migrate(db); err != nil {
 			t.Fatal(err)
 		}
-		return NewKernelStore(db), func() kernel.Store {
+		openPeer := func() kernel.Store {
 			fresh, err := gorm.Open(pgdriver.Open(isolatedDSN), realPostgresTestConfig())
 			if err != nil {
 				t.Fatal(err)
@@ -33,5 +33,6 @@ func TestEA1RealPostgresRootAgentControlSettlement(t *testing.T) {
 			t.Cleanup(func() { _ = sqlDB.Close() })
 			return NewKernelStore(fresh)
 		}
+		return NewKernelStore(db), openPeer(), openPeer
 	})
 }

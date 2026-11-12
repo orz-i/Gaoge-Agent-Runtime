@@ -115,7 +115,7 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lease, err := s.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: "root", OwnerID: "original", LeaseDuration: time.Second})
+	lease, err := s.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: "root", OwnerID: "original", LeaseDuration: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +162,70 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 	forged.OwnerID = "foreign"
 	if err = s.CheckExecution(t.Context(), "root", &forged); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("foreign identity: %v", err)
+	}
+	// Isolated low-level state fault, not first-party approval evidence.
+	waitingRun := before.Run
+	waitingRun.Status = kernel.RunStatusWaitingInput
+	waitingJSON, err := json.Marshal(waitingRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalJSON, err := json.Marshal(before.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var originalExpiry int64
+	if err = s.db.QueryRow(`SELECT execution_expiry_ms FROM runtime_runs WHERE run_id='root'`).Scan(&originalExpiry); err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []string{"valid", "foreign", "expired", "quarantined", "foreign-quarantined"} {
+		expiry, quarantine := originalExpiry, int64(0)
+		candidate := lease
+		expected := kernel.ErrExecutionRequired
+		if scenario == "expired" {
+			expiry = 1
+			expected = kernel.ErrExecutionConflict
+		}
+		if scenario == "quarantined" || scenario == "foreign-quarantined" {
+			quarantine = int64(before.Run.Revision)
+			expected = kernel.ErrExecutionQuarantined
+		}
+		if scenario == "foreign" || scenario == "foreign-quarantined" {
+			candidate.OwnerID += "-foreign"
+			expected = kernel.ErrExecutionConflict
+		}
+		if _, err = s.db.Exec(`UPDATE runtime_runs SET status=?,run_json=?,execution_expiry_ms=?,execution_quarantine_revision=? WHERE run_id='root'`, string(waitingRun.Status), string(waitingJSON), expiry, quarantine); err != nil {
+			t.Fatal(err)
+		}
+		snap, e := s.Load(t.Context(), "root")
+		if e != nil {
+			t.Fatal(e)
+		}
+		next := kernel.Record{Run: snap.Run, State: snap.State, Checkpoint: snap.Checkpoint, Result: snap.Result}
+		next.Run.Revision++
+		if _, err = s.ApplyExecution(t.Context(), candidate, snap.Run.Revision, kernel.StoreMutation{Record: next}); !errors.Is(err, expected) {
+			t.Fatalf("waiting %s authority precedence: %v want %v", scenario, err, expected)
+		}
+		after, e := s.Load(t.Context(), "root")
+		if e != nil || !reflect.DeepEqual(after, snap) {
+			t.Fatal("waiting rejection changed full snapshot")
+		}
+		retained, e := s.LookupChildExecution(t.Context(), "root")
+		if e != nil || retained != g {
+			t.Fatal("waiting rejection changed grant")
+		}
+		var epoch uint64
+		var owner, id string
+		var gotExpiry, gotQuarantine int64
+		if err = s.db.QueryRow(`SELECT execution_epoch,execution_owner,execution_lease_id,execution_expiry_ms,execution_quarantine_revision FROM runtime_runs WHERE run_id='root'`).Scan(&epoch, &owner, &id, &gotExpiry, &gotQuarantine); err != nil {
+			t.Fatal(err)
+		}
+		if epoch != lease.Epoch || owner != lease.OwnerID || id != lease.LeaseID || gotExpiry != expiry || gotQuarantine != quarantine {
+			t.Fatal("waiting rejection changed native authority")
+		}
+	}
+	if _, err = s.db.Exec(`UPDATE runtime_runs SET status=?,run_json=?,execution_expiry_ms=?,execution_quarantine_revision=0 WHERE run_id='root'`, string(before.Run.Status), string(originalJSON), originalExpiry); err != nil {
+		t.Fatal(err)
 	}
 	renewed, err := s.RenewExecution(t.Context(), kernel.ExecutionRenewRequest{Lease: lease, LeaseDuration: time.Minute})
 	if err != nil {

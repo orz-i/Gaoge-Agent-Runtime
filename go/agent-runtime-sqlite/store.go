@@ -349,6 +349,33 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 			return kernel.Snapshot{}, kernel.ErrExecutionRequired
 		}
 	}
+	// Only ordinary leased writes use this gate. Trusted approval and opaque
+	// receipt recovery retain their separate same-transaction authority paths.
+	if lease != nil && guard == nil && recovery == nil && current.Run.Status == kernel.RunStatusWaitingInput {
+		original, _, grantErr := loadPhysicalGrant(ctx, tx, runID)
+		if grantErr != nil && !errors.Is(grantErr, kernel.ErrNotFound) {
+			return kernel.Snapshot{}, grantErr
+		}
+		if grantErr == nil && original.IsOwned() && !original.MatchesExecution(*lease) {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		var epoch, expiry, quarantine int64
+		var owner, id string
+		if e := tx.QueryRowContext(ctx, `SELECT execution_epoch,execution_owner,execution_lease_id,execution_expiry_ms,execution_quarantine_revision FROM runtime_runs WHERE run_id=?`, runID).Scan(&epoch, &owner, &id, &expiry, &quarantine); e != nil {
+			return kernel.Snapshot{}, e
+		}
+		if quarantine != 0 {
+			return kernel.Snapshot{}, kernel.ErrExecutionQuarantined
+		}
+		now, clockErr := sqliteExecutionNow(ctx, tx)
+		if clockErr != nil {
+			return kernel.Snapshot{}, clockErr
+		}
+		if epoch != int64(lease.Epoch) || owner != lease.OwnerID || id != lease.LeaseID || expiry <= now {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		return kernel.Snapshot{}, kernel.ErrExecutionRequired
+	}
 	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}

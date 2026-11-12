@@ -125,6 +125,48 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 		t.Fatalf("premature retirement: %v", e)
 	}
 	assertOwnedKernelRecord(t, db, before)
+	// Isolated low-level state fault: only test authority/error precedence,
+	// not a claim that this seeded row proves first-party approval admission.
+	for _, scenario := range []string{"valid", "foreign", "expired", "quarantined", "foreign-quarantined"} {
+		waiting := before
+		waiting.Status = string(kernel.RunStatusWaitingInput)
+		candidate := lease
+		expected := kernel.ErrExecutionRequired
+		if scenario == "expired" {
+			past := time.Now().UTC().Add(-time.Hour)
+			waiting.ExecutionExpiresAt = &past
+			expected = kernel.ErrExecutionConflict
+		}
+		if scenario == "quarantined" || scenario == "foreign-quarantined" {
+			waiting.ExecutionQuarantineRevision = waiting.Revision
+			expected = kernel.ErrExecutionQuarantined
+		}
+		if scenario == "foreign" || scenario == "foreign-quarantined" {
+			candidate.OwnerID += "-foreign"
+			expected = kernel.ErrExecutionConflict
+		}
+		if e = db.Model(&models.KernelRunRecord{}).Where("run_id = ?", before.RunID).UpdateColumns(map[string]any{"status": waiting.Status, "execution_expires_at": waiting.ExecutionExpiresAt, "execution_quarantine_revision": waiting.ExecutionQuarantineRevision}).Error; e != nil {
+			t.Fatal(e)
+		}
+		authoritative := ownedKernelRecord(t, db, before.RunID)
+		snap, loadErr := store.Load(ctx, before.RunID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		next := kernel.Record{Run: snap.Run, State: snap.State, Checkpoint: snap.Checkpoint, Result: snap.Result}
+		next.Run.Revision++
+		if _, e = store.ApplyExecution(ctx, candidate, snap.Run.Revision, kernel.StoreMutation{Record: next}); !errors.Is(e, expected) {
+			t.Fatalf("waiting %s authority precedence: %v want %v", scenario, e, expected)
+		}
+		assertOwnedKernelRecord(t, db, authoritative)
+		retained, lookupErr := store.LookupChildExecution(ctx, before.RunID)
+		if lookupErr != nil || retained != grant {
+			t.Fatal("waiting rejection changed original grant")
+		}
+	}
+	if e = db.Model(&models.KernelRunRecord{}).Where("run_id = ?", before.RunID).UpdateColumns(map[string]any{"status": before.Status, "execution_expires_at": before.ExecutionExpiresAt, "execution_quarantine_revision": before.ExecutionQuarantineRevision}).Error; e != nil {
+		t.Fatal(e)
+	}
 	// In this isolated database only, expire the original lease. No wall-clock
 	// timeout can retire unknown work or permit a takeover.
 	past := time.Now().UTC().Add(-time.Hour)

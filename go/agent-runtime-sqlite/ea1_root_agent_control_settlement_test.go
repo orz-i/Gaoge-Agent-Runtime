@@ -10,14 +10,19 @@ import (
 )
 
 func TestEA1RootAgentControlSettlementNativeSQLite(t *testing.T) {
-	conformance.RunEA1RootAgentControlSettlementSuite(t, func(t *testing.T) (kernel.Store, func() kernel.Store) {
+	conformance.RunEA1RootAgentControlSettlementSuite(t, func(t *testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
 		path := filepath.Join(privateDir(t), "root-agent-control-settlement.sqlite")
 		first, err := sqlite.CreateNew(t.Context(), path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = first.Close() })
-		return first, func() kernel.Store {
+		peer, err := sqlite.OpenExisting(t.Context(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = peer.Close() })
+		return first, peer, func() kernel.Store {
 			if err := first.Close(); err != nil {
 				t.Fatal(err)
 			}
