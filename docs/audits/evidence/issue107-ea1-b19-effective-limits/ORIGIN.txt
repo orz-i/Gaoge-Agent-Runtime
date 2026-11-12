@@ -1,0 +1,2 @@
+SOURCE_SHA=b0458df10a54c5b73c758d10d7c082ed2a5045dc
+Exact Host setup rejected raw-vs-effective budget comparison: actual defaults MaxChildRuns32/MaxConcurrentRuns8 are applied by existing Harness normalization. No target reached/no production defect; all later checks not run.

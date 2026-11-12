@@ -1,0 +1,12 @@
+SOURCE_SHA=b0458df10a54c5b73c758d10d7c082ed2a5045dc
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^TestEA1HarnessAgentTaskCancelP0$/^actor$' -v
+=== RUN   TestEA1HarnessAgentTaskCancelP0
+=== RUN   TestEA1HarnessAgentTaskCancelP0/actor
+    ea1_child_agent_cancel_harness_test.go:406: initial Host ledger/source before explicit registration: ledger={ID:ht_de1baf674a35ad31b4555791 Revision:1 Limits:{MaxLLMCalls:10 MaxToolCalls:0 MaxHostedToolCalls:0 MaxInputTokens:0 MaxOutputTokens:0 MaxTotalTokens:1000 MaxOutputBytes:0 MaxStateBytes:0 MaxChildRuns:32 MaxCostUnits:0 MaxConcurrentRuns:8 MaxConcurrentDescendants:0} Runs:map[] Reservations:map[] Cancelled:false CancelledRuns:map[] FinishedRuns:map[]} err=<nil>
+--- FAIL: TestEA1HarnessAgentTaskCancelP0 (0.00s)
+    --- FAIL: TestEA1HarnessAgentTaskCancelP0/actor (0.00s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	0.798s
+FAIL
+
+EXIT_CODE=1
