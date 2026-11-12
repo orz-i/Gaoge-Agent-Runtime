@@ -1,0 +1,52 @@
+SOURCE_SHA=5354c161c3c1ac64328b609dfa2ba7cb76b12bcb
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=3 ./... -run '^TestRealPostgres(EA1RootAgentCancelHostElection|CancellationFenceAcrossConnections|CancellationReceiptOwnerAcrossConnections|SharedBudgetRaceAndRestart)$' -v
+=== RUN   TestRealPostgresSharedBudgetRaceAndRestart
+--- PASS: TestRealPostgresSharedBudgetRaceAndRestart (1.05s)
+=== RUN   TestRealPostgresCancellationFenceAcrossConnections
+--- PASS: TestRealPostgresCancellationFenceAcrossConnections (0.32s)
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+    ea1_root_agent_cancel_election_test.go:153: original Invocation changed before physical cancel: <nil>
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss
+--- FAIL: TestRealPostgresEA1RootAgentCancelHostElection (0.95s)
+    --- FAIL: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.26s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-before (0.34s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss (0.35s)
+=== RUN   TestRealPostgresCancellationReceiptOwnerAcrossConnections
+--- PASS: TestRealPostgresCancellationReceiptOwnerAcrossConnections (0.19s)
+=== RUN   TestRealPostgresSharedBudgetRaceAndRestart
+--- PASS: TestRealPostgresSharedBudgetRaceAndRestart (0.90s)
+=== RUN   TestRealPostgresCancellationFenceAcrossConnections
+--- PASS: TestRealPostgresCancellationFenceAcrossConnections (0.35s)
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+    ea1_root_agent_cancel_election_test.go:153: original Invocation changed before physical cancel: <nil>
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss
+--- FAIL: TestRealPostgresEA1RootAgentCancelHostElection (0.88s)
+    --- FAIL: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.21s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-before (0.27s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss (0.40s)
+=== RUN   TestRealPostgresCancellationReceiptOwnerAcrossConnections
+--- PASS: TestRealPostgresCancellationReceiptOwnerAcrossConnections (0.20s)
+=== RUN   TestRealPostgresSharedBudgetRaceAndRestart
+--- PASS: TestRealPostgresSharedBudgetRaceAndRestart (0.96s)
+=== RUN   TestRealPostgresCancellationFenceAcrossConnections
+--- PASS: TestRealPostgresCancellationFenceAcrossConnections (0.30s)
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+    ea1_root_agent_cancel_election_test.go:153: original Invocation changed before physical cancel: <nil>
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss
+--- FAIL: TestRealPostgresEA1RootAgentCancelHostElection (0.81s)
+    --- FAIL: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.20s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-before (0.28s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss (0.32s)
+=== RUN   TestRealPostgresCancellationReceiptOwnerAcrossConnections
+--- PASS: TestRealPostgresCancellationReceiptOwnerAcrossConnections (0.23s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	8.003s
+FAIL
+
+EXIT_CODE=1

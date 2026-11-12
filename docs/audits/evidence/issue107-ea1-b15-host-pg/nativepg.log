@@ -1,0 +1,769 @@
+SOURCE_SHA=5354c161c3c1ac64328b609dfa2ba7cb76b12bcb
+COMMAND=go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresRootAgent' -v
+=== RUN   TestEA1RealPostgresRootAgentAdmission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-bounded
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-opaque
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/opaque-tool
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/bounded-tool-timeline
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/control-before-owned-admission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/original-external-owner-reuse
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/same-external-lease-two-callers
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/middleware-before-physical
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/owned-admission-before-model
+--- PASS: TestEA1RealPostgresRootAgentAdmission (2.73s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-bounded (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-opaque (0.16s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-foreign-hydration (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/opaque-tool (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/bounded-tool-timeline (0.36s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/control-before-owned-admission (0.13s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/original-external-owner-reuse (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/same-external-lease-two-callers (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/middleware-before-physical (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/owned-admission-before-model (0.16s)
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-bounded
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-opaque
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/opaque-tool
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/bounded-tool-timeline
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/default-generated-id
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/origin-and-claim
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/control-before-owned-admission
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/original-external-owner-reuse
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/same-external-lease-two-callers
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/middleware-before-physical
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/owned-admission-before-model
+--- PASS: TestEA1RealPostgresRootAgentDefaultAdmission (3.13s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-bounded (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-opaque (0.15s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-foreign-hydration (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/opaque-tool (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/bounded-tool-timeline (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/default-generated-id (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/origin-and-claim (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/control-before-owned-admission (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/original-external-owner-reuse (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/same-external-lease-two-callers (0.25s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/middleware-before-physical (0.18s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/owned-admission-before-model (0.22s)
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/missing
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/stale
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/prepared
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/native-before-owned
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P1/active-original-callback
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P2/host
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P3/yield
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P3/terminal
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P4/yield
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P4/terminal
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P4/actual-cancel-CAS-lost-ACK
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-wins-resume-admission
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/resume-scope-rejects-cancel
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/two-cancel-owners
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-deadline
+--- PASS: TestEA1RealPostgresRootAgentCancelPhases (13.72s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/missing (0.18s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/stale (0.18s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/prepared (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/native-before-owned (0.18s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P1/active-original-callback (0.25s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P2/host (2.38s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P2/model (2.46s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P2/tool (2.41s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P3/yield (0.37s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P3/terminal (0.36s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P4/yield (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P4/terminal (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P4/actual-cancel-CAS-lost-ACK (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-wins-resume-admission (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/resume-scope-rejects-cancel (0.25s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/two-cancel-owners (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-deadline (3.20s)
+=== RUN   TestEA1RealPostgresRootAgentControlPhases
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/missing
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/stale
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/not-waiting
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/invalid-decision
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/foreign-checkpoint
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/native-success
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/default-success
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait-no-wait
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P1/approval
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P2/approval/handler
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P2/approval/tool
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P1/tool-wait
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P2/tool-wait
+--- PASS: TestEA1RealPostgresRootAgentControlPhases (10.27s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/missing (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/stale (0.20s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/not-waiting (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/invalid-decision (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/foreign-checkpoint (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/native-success (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/default-success (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait-no-wait (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P1/approval (0.39s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P2/approval/handler (2.42s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P2/approval/tool (2.44s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P1/tool-wait (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P2/tool-wait (2.38s)
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P3
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P4
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P5
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P5-run-deadline
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P3
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P4
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-run-deadline
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-pending-deadline
+--- PASS: TestEA1RealPostgresRootAgentControlSettlement (5.48s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P3 (0.45s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P4 (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P5 (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P5-run-deadline (1.16s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P3 (0.45s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P4 (0.37s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5 (0.45s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-run-deadline (1.27s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-pending-deadline (0.68s)
+=== RUN   TestEA1RealPostgresRootAgentElection
+=== RUN   TestEA1RealPostgresRootAgentElection/start/host
+=== RUN   TestEA1RealPostgresRootAgentElection/start/model
+=== RUN   TestEA1RealPostgresRootAgentElection/start/tool
+=== RUN   TestEA1RealPostgresRootAgentElection/start/deadline
+=== RUN   TestEA1RealPostgresRootAgentElection/start/unknown-model
+=== RUN   TestEA1RealPostgresRootAgentElection/start/unknown-tool
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/host
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/model
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/tool
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/deadline
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/unknown-model
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/unknown-tool
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/known
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/unknown-ttl
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/competing-receipt
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/deadline-known
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/known
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/unknown-ttl
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/competing-receipt
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/deadline-known
+--- PASS: TestEA1RealPostgresRootAgentElection (22.37s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/host (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/model (0.25s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/tool (0.41s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/deadline (1.18s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/unknown-model (2.36s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/unknown-tool (2.34s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/host (0.36s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/model (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/tool (0.27s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/deadline (1.16s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/unknown-model (2.33s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/unknown-tool (2.39s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/known (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/unknown-ttl (2.34s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/competing-receipt (0.41s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/deadline-known (1.34s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/known (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/unknown-ttl (2.37s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/competing-receipt (0.39s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/deadline-known (1.26s)
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/model-host-evidence
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P0/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P0/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P1/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P1/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P3/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P3/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/tool
+--- PASS: TestEA1RealPostgresRootAgentReconcilePhases (7.55s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/model-host-evidence (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P0/model (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P0/tool (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P1/model (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P1/tool (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/model (2.45s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/tool (2.40s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P3/model (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P3/tool (0.36s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/model (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/tool (0.27s)
+=== RUN   TestEA1RealPostgresRootAgentResumePhases
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/missing
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/stale
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/terminal
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/admission-revision
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/admission-cancel
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P1/admitted-before-dispatch
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P2/host
+--- PASS: TestEA1RealPostgresRootAgentResumePhases (8.48s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/missing (0.14s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/stale (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/terminal (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/admission-revision (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/admission-cancel (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P1/admitted-before-dispatch (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P2/model (2.37s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P2/tool (2.36s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P2/host (2.44s)
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P3/model-yield
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P3/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P4/model-yield
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P4/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RealPostgresRootAgentResumeSettlement (1.70s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P3/model-yield (0.37s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P3/terminal-tool (0.36s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P4/model-yield (0.44s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P4/terminal-tool (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P3/committed-model-receipt-unknown-host (0.22s)
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P3/model-yield
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P3/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P4/model-yield
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P4/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RealPostgresRootAgentStartSettlement (1.54s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P3/model-yield (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P3/terminal-tool (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P4/model-yield (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P4/terminal-tool (0.39s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P3/committed-model-receipt-unknown-host (0.30s)
+=== RUN   TestEA1RealPostgresRootAgentUnknown
+=== RUN   TestEA1RealPostgresRootAgentUnknown/host_middleware
+=== RUN   TestEA1RealPostgresRootAgentUnknown/model
+=== RUN   TestEA1RealPostgresRootAgentUnknown/tool
+--- PASS: TestEA1RealPostgresRootAgentUnknown (7.12s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/host_middleware (2.44s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/model (2.34s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/tool (2.34s)
+=== RUN   TestEA1RealPostgresRootAgentAdmission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-bounded
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-opaque
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/opaque-tool
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/bounded-tool-timeline
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/control-before-owned-admission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/original-external-owner-reuse
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/same-external-lease-two-callers
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/middleware-before-physical
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/owned-admission-before-model
+--- PASS: TestEA1RealPostgresRootAgentAdmission (2.59s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-bounded (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-opaque (0.25s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-foreign-hydration (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/opaque-tool (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/bounded-tool-timeline (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/control-before-owned-admission (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/original-external-owner-reuse (0.25s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/same-external-lease-two-callers (0.20s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/middleware-before-physical (0.16s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/owned-admission-before-model (0.17s)
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-bounded
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-opaque
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/opaque-tool
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/bounded-tool-timeline
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/default-generated-id
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/origin-and-claim
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/control-before-owned-admission
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/original-external-owner-reuse
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/same-external-lease-two-callers
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/middleware-before-physical
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/owned-admission-before-model
+--- PASS: TestEA1RealPostgresRootAgentDefaultAdmission (2.91s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-bounded (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-opaque (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-foreign-hydration (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/opaque-tool (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/bounded-tool-timeline (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/default-generated-id (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/origin-and-claim (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/control-before-owned-admission (0.16s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/original-external-owner-reuse (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/same-external-lease-two-callers (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/middleware-before-physical (0.18s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/owned-admission-before-model (0.20s)
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/missing
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/stale
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/prepared
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/native-before-owned
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P1/active-original-callback
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P2/host
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P3/yield
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P3/terminal
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P4/yield
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P4/terminal
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P4/actual-cancel-CAS-lost-ACK
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-wins-resume-admission
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/resume-scope-rejects-cancel
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/two-cancel-owners
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-deadline
+--- PASS: TestEA1RealPostgresRootAgentCancelPhases (13.62s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/missing (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/stale (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/prepared (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/native-before-owned (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P1/active-original-callback (0.27s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P2/host (2.44s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P2/model (2.38s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P2/tool (2.45s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P3/yield (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P3/terminal (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P4/yield (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P4/terminal (0.27s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P4/actual-cancel-CAS-lost-ACK (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-wins-resume-admission (0.18s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/resume-scope-rejects-cancel (0.27s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/two-cancel-owners (0.20s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-deadline (3.19s)
+=== RUN   TestEA1RealPostgresRootAgentControlPhases
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/missing
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/stale
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/not-waiting
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/invalid-decision
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/foreign-checkpoint
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/native-success
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/default-success
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait-no-wait
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P1/approval
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P2/approval/handler
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P2/approval/tool
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P1/tool-wait
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P2/tool-wait
+--- PASS: TestEA1RealPostgresRootAgentControlPhases (10.31s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/missing (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/stale (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/not-waiting (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/invalid-decision (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/foreign-checkpoint (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/native-success (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/default-success (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait-no-wait (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P1/approval (0.40s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P2/approval/handler (2.41s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P2/approval/tool (2.44s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P1/tool-wait (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P2/tool-wait (2.36s)
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P3
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P4
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P5
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P5-run-deadline
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P3
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P4
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-run-deadline
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-pending-deadline
+--- PASS: TestEA1RealPostgresRootAgentControlSettlement (5.37s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P3 (0.38s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P4 (0.43s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P5 (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P5-run-deadline (1.20s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P3 (0.46s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P4 (0.39s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5 (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-run-deadline (1.26s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-pending-deadline (0.63s)
+=== RUN   TestEA1RealPostgresRootAgentElection
+=== RUN   TestEA1RealPostgresRootAgentElection/start/host
+=== RUN   TestEA1RealPostgresRootAgentElection/start/model
+=== RUN   TestEA1RealPostgresRootAgentElection/start/tool
+=== RUN   TestEA1RealPostgresRootAgentElection/start/deadline
+=== RUN   TestEA1RealPostgresRootAgentElection/start/unknown-model
+=== RUN   TestEA1RealPostgresRootAgentElection/start/unknown-tool
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/host
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/model
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/tool
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/deadline
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/unknown-model
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/unknown-tool
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/known
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/unknown-ttl
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/competing-receipt
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/deadline-known
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/known
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/unknown-ttl
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/competing-receipt
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/deadline-known
+--- PASS: TestEA1RealPostgresRootAgentElection (22.23s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/host (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/model (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/tool (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/deadline (1.22s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/unknown-model (2.38s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/unknown-tool (2.39s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/host (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/model (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/tool (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/deadline (1.17s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/unknown-model (2.34s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/unknown-tool (2.39s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/known (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/unknown-ttl (2.35s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/competing-receipt (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/deadline-known (1.26s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/known (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/unknown-ttl (2.35s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/competing-receipt (0.46s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/deadline-known (1.25s)
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/model-host-evidence
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P0/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P0/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P1/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P1/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P3/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P3/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/tool
+--- PASS: TestEA1RealPostgresRootAgentReconcilePhases (7.07s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/model-host-evidence (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P0/model (0.25s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P0/tool (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P1/model (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P1/tool (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/model (2.38s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/tool (2.35s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P3/model (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P3/tool (0.27s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/model (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/tool (0.25s)
+=== RUN   TestEA1RealPostgresRootAgentResumePhases
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/missing
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/stale
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/terminal
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/admission-revision
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/admission-cancel
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P1/admitted-before-dispatch
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P2/host
+--- PASS: TestEA1RealPostgresRootAgentResumePhases (8.44s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/missing (0.14s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/stale (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/terminal (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/admission-revision (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/admission-cancel (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P1/admitted-before-dispatch (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P2/model (2.41s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P2/tool (2.36s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P2/host (2.41s)
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P3/model-yield
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P3/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P4/model-yield
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P4/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RealPostgresRootAgentResumeSettlement (1.40s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P3/model-yield (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P3/terminal-tool (0.37s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P4/model-yield (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P4/terminal-tool (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P3/committed-model-receipt-unknown-host (0.25s)
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P3/model-yield
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P3/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P4/model-yield
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P4/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RealPostgresRootAgentStartSettlement (1.53s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P3/model-yield (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P3/terminal-tool (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P4/model-yield (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P4/terminal-tool (0.36s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P3/committed-model-receipt-unknown-host (0.32s)
+=== RUN   TestEA1RealPostgresRootAgentUnknown
+=== RUN   TestEA1RealPostgresRootAgentUnknown/host_middleware
+=== RUN   TestEA1RealPostgresRootAgentUnknown/model
+=== RUN   TestEA1RealPostgresRootAgentUnknown/tool
+--- PASS: TestEA1RealPostgresRootAgentUnknown (7.04s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/host_middleware (2.37s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/model (2.35s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/tool (2.33s)
+=== RUN   TestEA1RealPostgresRootAgentAdmission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-bounded
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-opaque
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/opaque-tool
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/bounded-tool-timeline
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/control-before-owned-admission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/original-external-owner-reuse
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/same-external-lease-two-callers
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/middleware-before-physical
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P1/owned-admission-before-model
+--- PASS: TestEA1RealPostgresRootAgentAdmission (2.69s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-bounded (0.27s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-opaque (0.20s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/callback-completion-foreign-hydration (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/opaque-tool (0.36s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/bounded-tool-timeline (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/control-before-owned-admission (0.13s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/original-external-owner-reuse (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P0/same-external-lease-two-callers (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/middleware-before-physical (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentAdmission/P1/owned-admission-before-model (0.20s)
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-bounded
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-opaque
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/opaque-tool
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/bounded-tool-timeline
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/default-generated-id
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/origin-and-claim
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/control-before-owned-admission
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/original-external-owner-reuse
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P0/same-external-lease-two-callers
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/middleware-before-physical
+=== RUN   TestEA1RealPostgresRootAgentDefaultAdmission/P1/owned-admission-before-model
+--- PASS: TestEA1RealPostgresRootAgentDefaultAdmission (2.99s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-bounded (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-opaque (0.30s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/callback-completion-foreign-hydration (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/opaque-tool (0.27s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/bounded-tool-timeline (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/default-generated-id (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/origin-and-claim (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/control-before-owned-admission (0.13s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/original-external-owner-reuse (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P0/same-external-lease-two-callers (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/middleware-before-physical (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentDefaultAdmission/P1/owned-admission-before-model (0.19s)
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/missing
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/stale
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/prepared
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P0/native-before-owned
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P1/active-original-callback
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P2/host
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P3/yield
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P3/terminal
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P4/yield
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P4/terminal
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P4/actual-cancel-CAS-lost-ACK
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-wins-resume-admission
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/resume-scope-rejects-cancel
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/two-cancel-owners
+=== RUN   TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-deadline
+--- PASS: TestEA1RealPostgresRootAgentCancelPhases (14.00s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/missing (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/stale (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/prepared (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P0/native-before-owned (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P1/active-original-callback (0.37s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P2/host (2.37s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P2/model (2.37s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P2/tool (2.41s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P3/yield (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P3/terminal (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P4/yield (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P4/terminal (0.38s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P4/actual-cancel-CAS-lost-ACK (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-wins-resume-admission (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/resume-scope-rejects-cancel (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/two-cancel-owners (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentCancelPhases/P5/cancel-deadline (3.22s)
+=== RUN   TestEA1RealPostgresRootAgentControlPhases
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/missing
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/stale
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/not-waiting
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/invalid-decision
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/foreign-checkpoint
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/native-success
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/approval/default-success
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait-no-wait
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P1/approval
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P2/approval/handler
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P2/approval/tool
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P1/tool-wait
+=== RUN   TestEA1RealPostgresRootAgentControlPhases/P2/tool-wait
+--- PASS: TestEA1RealPostgresRootAgentControlPhases (10.15s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/missing (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/stale (0.38s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/not-waiting (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/invalid-decision (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/foreign-checkpoint (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/native-success (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/approval/default-success (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait-no-wait (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P1/approval (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P2/approval/handler (2.38s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P2/approval/tool (2.39s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P0/tool-wait (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P1/tool-wait (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentControlPhases/P2/tool-wait (2.33s)
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P3
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P4
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P5
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/approval/P5-run-deadline
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P3
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P4
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-run-deadline
+=== RUN   TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-pending-deadline
+--- PASS: TestEA1RealPostgresRootAgentControlSettlement (5.78s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P3 (0.37s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P4 (0.27s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P5 (0.37s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/approval/P5-run-deadline (1.24s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P3 (0.52s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P4 (0.49s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5 (0.50s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-run-deadline (1.34s)
+    --- PASS: TestEA1RealPostgresRootAgentControlSettlement/toolwait/P5-pending-deadline (0.68s)
+=== RUN   TestEA1RealPostgresRootAgentElection
+=== RUN   TestEA1RealPostgresRootAgentElection/start/host
+=== RUN   TestEA1RealPostgresRootAgentElection/start/model
+=== RUN   TestEA1RealPostgresRootAgentElection/start/tool
+=== RUN   TestEA1RealPostgresRootAgentElection/start/deadline
+=== RUN   TestEA1RealPostgresRootAgentElection/start/unknown-model
+=== RUN   TestEA1RealPostgresRootAgentElection/start/unknown-tool
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/host
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/model
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/tool
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/deadline
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/unknown-model
+=== RUN   TestEA1RealPostgresRootAgentElection/resume/unknown-tool
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/known
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/unknown-ttl
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/competing-receipt
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/model/deadline-known
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/known
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/unknown-ttl
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/competing-receipt
+=== RUN   TestEA1RealPostgresRootAgentElection/recovery/tool/deadline-known
+--- PASS: TestEA1RealPostgresRootAgentElection (22.83s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/host (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/model (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/tool (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/deadline (1.19s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/unknown-model (2.35s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/start/unknown-tool (2.42s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/host (0.42s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/model (0.25s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/tool (0.27s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/deadline (1.19s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/unknown-model (2.40s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/resume/unknown-tool (2.42s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/known (0.36s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/unknown-ttl (2.47s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/competing-receipt (0.38s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/model/deadline-known (1.31s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/known (0.38s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/unknown-ttl (2.37s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/competing-receipt (0.49s)
+    --- PASS: TestEA1RealPostgresRootAgentElection/recovery/tool/deadline-known (1.28s)
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/model-host-evidence
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P0/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P0/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P1/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P1/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P3/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P3/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/tool
+--- PASS: TestEA1RealPostgresRootAgentReconcilePhases (7.30s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/model-host-evidence (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P0/model (0.31s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P0/tool (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P1/model (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P1/tool (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/model (2.34s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/tool (2.37s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P3/model (0.24s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P3/tool (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/model (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/tool (0.29s)
+=== RUN   TestEA1RealPostgresRootAgentResumePhases
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/missing
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/stale
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/terminal
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/admission-revision
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P0/admission-cancel
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P1/admitted-before-dispatch
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentResumePhases/P2/host
+--- PASS: TestEA1RealPostgresRootAgentResumePhases (8.45s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/missing (0.17s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/stale (0.20s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/terminal (0.19s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/admission-revision (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P0/admission-cancel (0.21s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P1/admitted-before-dispatch (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P2/model (2.41s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P2/tool (2.39s)
+    --- PASS: TestEA1RealPostgresRootAgentResumePhases/P2/host (2.39s)
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P3/model-yield
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P3/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P4/model-yield
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P4/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentResumeSettlement/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RealPostgresRootAgentResumeSettlement (1.36s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P3/model-yield (0.25s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P3/terminal-tool (0.34s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P4/model-yield (0.22s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P4/terminal-tool (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentResumeSettlement/P3/committed-model-receipt-unknown-host (0.32s)
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P3/model-yield
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P3/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P4/model-yield
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P4/terminal-tool
+=== RUN   TestEA1RealPostgresRootAgentStartSettlement/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RealPostgresRootAgentStartSettlement (1.47s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P3/model-yield (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P3/terminal-tool (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P4/model-yield (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P4/terminal-tool (0.28s)
+    --- PASS: TestEA1RealPostgresRootAgentStartSettlement/P3/committed-model-receipt-unknown-host (0.32s)
+=== RUN   TestEA1RealPostgresRootAgentUnknown
+=== RUN   TestEA1RealPostgresRootAgentUnknown/host_middleware
+=== RUN   TestEA1RealPostgresRootAgentUnknown/model
+=== RUN   TestEA1RealPostgresRootAgentUnknown/tool
+--- PASS: TestEA1RealPostgresRootAgentUnknown (7.17s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/host_middleware (2.44s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/model (2.37s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/tool (2.36s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	252.536s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0
