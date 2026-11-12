@@ -250,3 +250,55 @@ operational migration and release proof remain NO-GO. Unknown external
 effects cannot be administratively erased by an API call; a dedicated
 authoritative external reconciliation process is required for any such
 historical Grant.
+
+## Fifth independent audit and sixth governance: complete physical admission (2026-11-12)
+
+The fifth independent audit of Runtime `3e2a2739` and Gaoge
+`7a01b9db` found three deterministic P1 variants. A nested Workflow
+Effect executed during parent Cancel; a nested Workflow Wait resumed
+and dispatched a fresh Effect AFTER its parent had already cancelled;
+a parented Agent Start middleware executed a synthetic external Host
+effect before child Create/Grant; and native PostgreSQL read child
+Running before parent locking, permitting stale Grant admission after
+an independent child Cancel. The original minimum failure tests are
+retained as mandatory regressions in this Runtime source tree.
+
+**Contract changes:**
+
+- `Workflow.StartRun/Resume/ResolveWait` require Store physical
+  admission around the whole interpreter segment for parent-bound Runs,
+  with a distinct Workflow Feature settlement proof. Completed external
+  effects require original receipts; unverified remote Pending retains
+  its durable Grant until trusted physical reconciliation. A verified
+  local pending Subworkflow child can safely release the intermediate
+  synchronous callback when its own physical Grant remains authoritative.
+- Agent Start now creates its immutable child, acquires the original
+  physical Grant and THEN enters all Host Run middleware. For Host
+  middleware on parented Runs, a pure `StartControlPreflight` must
+  verify the frozen parent/Effect/relation before Create. The Gaoge
+  Host verifies the same persisted source again on actual RunStart.
+- All Run/Model/Tool `Next` callbacks are bounded by their original
+  middleware call. Saved `Next` is rejected after return; a previously
+  admitted asynchronous Next must finish before the outer call returns.
+  Host callbacks that spawn detached effects without Next remain
+  outside the SDK's physical settlement authority.
+- PostgreSQL `BeginChildExecution` locks root-to-leaf ancestors and
+  finally locks/revalidates the child state/identity. A child cancelled
+  during parent lock wait cannot receive a new physical Grant.
+
+**Test matrix:** 3 original fifth-audit P1 tests (Workflow effect,
+Workflow Wait and Agent Start) plus real PostgreSQL stale-child test;
+unknown remote external Pending, quiescent Wait, nested local child
+Pending, stale/cross-tenant child identity, deferred and stored
+Middleware Next, and full original Host approval/cancellation lineage.
+The same actual Workflow Runner conformance executes on Memory,
+GORM PostgreSQL, native SQLite and real isolated PostgreSQL 16.
+The real PG stale-child interleaving has been repeated with two
+independent physical connections; no production database was used.
+
+**Remaining NO-GO:** this is local remediation, NOT a final independent
+merge acceptance. No GitHub PR Head checks, production migration or
+cutover have run. Gaoge's `sdk` gitlink is still pinned to the
+pre-#107 cohort, and the original Hosted MCP test still reports
+`target provider replay state conflict`. Those gates must remain
+explicitly blocked rather than inferred from passing Issue #107 tests.

@@ -5,6 +5,21 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Issue #107 fifth independent P1 audit remediation (2026-11-12):
+  nested Workflow Start/Resume/ResolveWait, arbitrary EffectExecutor and
+  compensation run under the original Kernel parent/child physical Grant.
+  Unknown external Pending retains its Grant; quiescent Waits and statically
+  verified same-Kernel pending children can retire it safely. Parented Agent
+  Start creates the original child and acquires Grant BEFORE all Host
+  RunMiddleware; a pure StartControlPreflight verifies frozen ownership
+  before Create. Run/Model/Tool Next callbacks cannot escape their original
+  physical callback lifetime. PostgreSQL locks and revalidates the actual
+  child after acquiring ancestor row locks, preventing stale cancelled-child
+  admission. Added independent P1 repros, cross-Store actual Workflow suites,
+  real PostgreSQL interleavings and SDK external consumer tests. No new
+  persistence schema beyond the previous pre-stable hard cut; no shim.
+  See `docs/breaking-changes.md` and the Issue #107 audit note.
+
 - Issue #107 fourth-audit atomic parent/child authority remediation
   (2026-11-12): replace untrusted read/check parent liveness with a
   Store-serialized physical Grant covering child Agent Start, Approval and

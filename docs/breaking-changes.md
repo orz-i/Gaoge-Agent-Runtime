@@ -2,6 +2,76 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-12 — Issue #107 fifth audit: close remaining physical Feature admission paths
+
+The fifth independent review of Runtime `3e2a2739` and Gaoge
+`7a01b9db` reproduced three P1 authorization failures: a nested
+Workflow custom Effect or Wait resume could execute after its parent
+Kernel Workflow was cancelled; parented Agent RunStart middleware ran
+BEFORE child Create/Grant and could issue external effects before a later
+rejected Create; and real PostgreSQL `BeginChildExecution` admitted an
+already Cancelled child after reading stale status before waiting on a
+locked parent row.
+
+**Uniform parented Workflow execution:** `workflow.Runner.StartRun`,
+`Resume`, and `ResolveWait` now hold the original Kernel
+`ChildExecutionGrant` throughout interpreter segment execution, custom
+EffectExecutor callbacks, nested Subworkflow dispatch and Host telemetry.
+The same Store admission competes atomically with terminal mutations of
+every immutable Kernel ancestor. A Workflow settlement proof uses its own
+first-party domain; an Agent receipt cannot settle a Workflow Grant.
+Completed Effects require original receipts. An external
+`DispositionPending` with no trustworthy local child/receipt retains its
+Grant as UNKNOWN and cannot be resumed or cancelled as though no effect
+began. Quiescent Waits, pre-dispatch segment yields and pending children
+whose original same-Kernel Feature/RunRelation identity has been verified
+can settle their synchronous callback without pretending unknown remote
+effects are complete.
+
+**Uniform parented Agent Start:** After pre-Create read-only input checks,
+an original Host-defined `agent.Dependencies.StartControlPreflight`
+must validate the frozen Workflow Effect, parent and original relation
+before Kernel.Create when RunMiddleware is configured. Missing/denying
+preflight rejects the parented Start BEFORE creating a child or pinning
+a physical Grant. The Kernel then creates the child under its live
+ancestor and acquires the physical Grant BEFORE ANY RunMiddleware,
+Agent Model/Tool dispatch or Host observer callback. The Host repeats
+the frozen persisted `OriginFingerprint` check inside its actual RunStart
+middleware after admission. Pure Start preflight is not a substitute
+for the physical Kernel Store Grant; arbitrary Host callbacks may not
+perform external work in this read-only admission phase.
+
+**Middleware Next lifecycle:** The Run, Model and Tool middleware chains
+enforce one physical callback lifetime in addition to once-only Next.
+A retained Next invoked after its parent middleware returns is rejected
+before reaching the provider or Tool. A Next already admitted on another
+goroutine must complete before the parent middleware can return and
+release the enclosing physical Grant. Detached Host side effects that
+ignore Next entirely remain Host-owned and require their own receipt
+contract; Runtime cannot certify they were not executed.
+
+**PostgreSQL child-lock linearization:** `BeginChildExecution` now
+locks ancestor rows root-to-leaf and then explicitly locks/revalidates
+the child Run's immutable parent, kind, tenant, Actor, Thread and
+Running/WaitingInput status. The first unlocked child read is only
+a tentative ancestry lookup. Any Cancel/Fail of the child while waiting
+for its parent lock is observed before Grant commit. Existing Memory
+and native SQLite stores already read live child state inside their
+single authoritative writer locks. No additional database schema version
+is added beyond the fourth-round hard cut.
+
+**Verification and migration:** Original fifth-audit reproductions are
+mandatory tests. Additional cases exercise unknown external Pending,
+quiescent local nested Wait, original local Subworkflow child pending,
+retained and in-flight Run/Model/Tool Next callbacks, Memory/GORM
+PostgreSQL/native SQLite complete Workflow physical suites, and real
+PostgreSQL stale-child interleavings. Historical unknown external effects
+remain quarantined; the original SQLite v2 / PostgreSQL grant schema
+requires explicit nonproduction rehearsal and production drain before
+cutover. Gaoge #69 Hosted ProviderReplay, outdated SDK gitlink,
+independent final audit, required PR Head CI and real external provider
+billing/replay remain NO-GO gates.
+
 ## 2026-11-12 — Issue #107 parent/child physical Grant and frozen source hard-cut (beta.24 candidate)
 
 Fourth independent review confirmed that repeated Host/Harness `Load` checks
