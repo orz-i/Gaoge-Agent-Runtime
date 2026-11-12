@@ -59,6 +59,9 @@ func RunEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if !errors.Is(e, kernel.ErrExecutionConflict) || created.Run.ID != req.ID || m.calls.Load() != 0 {
 			t.Fatalf("claim conflict concealed created Root or dispatched: %v %+v", e, created.Run)
 		}
+		if middleware.calls.Load() != 0 {
+			t.Errorf("EA01/P0: failed original owner admission entered effect-capable Host middleware %d times", middleware.calls.Load())
+		}
 		persisted, e := observer.Load(t.Context(), req.ID)
 		if e != nil || !runner.VerifyFrozenStartRequest(persisted, req) {
 			t.Fatalf("original immutable source missing: %v", e)
