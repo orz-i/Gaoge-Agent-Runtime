@@ -1,0 +1,132 @@
+SOURCE_SHA=b98ba6c5aabfdfcad269b8205d0e66c4fc20cd5f
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1RootAgent' -v
+=== RUN   TestEA1RootAgentAdmissionMemory
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/opaque-tool
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/bounded-tool-timeline
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/origin-and-claim
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentAdmissionMemory/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentAdmissionMemory/P1/owned-admission-before-model
+--- PASS: TestEA1RootAgentAdmissionMemory (0.05s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/callback-completion-bounded (0.01s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/callback-completion-opaque (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/callback-completion-foreign-hydration (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/opaque-tool (0.01s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/bounded-tool-timeline (0.01s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P0/origin-and-claim (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P0/control-before-owned-admission (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P0/original-external-owner-reuse (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P0/same-external-lease-two-callers (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/middleware-before-physical (0.00s)
+    --- PASS: TestEA1RootAgentAdmissionMemory/P1/owned-admission-before-model (0.00s)
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/opaque-tool
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/bounded-tool-timeline
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/default-generated-id
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/origin-and-claim
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentDefaultAdmissionMemory/P1/owned-admission-before-model
+--- PASS: TestEA1RootAgentDefaultAdmissionMemory (0.04s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-bounded (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-opaque (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/callback-completion-foreign-hydration (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/opaque-tool (0.01s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/bounded-tool-timeline (0.01s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/default-generated-id (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/origin-and-claim (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/control-before-owned-admission (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/original-external-owner-reuse (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P0/same-external-lease-two-callers (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/middleware-before-physical (0.00s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionMemory/P1/owned-admission-before-model (0.00s)
+=== RUN   TestEA1RootAgentReconcilePhasesMemory
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P2/model-host-evidence
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P0/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P0/tool
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P1/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P1/tool
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P2/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P2/tool
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P3/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P3/tool
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P4/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P4/tool
+--- PASS: TestEA1RootAgentReconcilePhasesMemory (4.36s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P2/model-host-evidence (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P0/model (0.00s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P0/tool (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P1/model (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P1/tool (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P2/model (2.15s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P2/tool (2.15s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P3/model (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P3/tool (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P4/model (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P4/tool (0.01s)
+=== RUN   TestEA1RootAgentResumePhasesMemory
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/missing
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/stale
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/terminal
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/admission-revision
+=== RUN   TestEA1RootAgentResumePhasesMemory/P0/admission-cancel
+=== RUN   TestEA1RootAgentResumePhasesMemory/P1/admitted-before-dispatch
+=== RUN   TestEA1RootAgentResumePhasesMemory/P2/model
+=== RUN   TestEA1RootAgentResumePhasesMemory/P2/tool
+=== RUN   TestEA1RootAgentResumePhasesMemory/P2/host
+--- PASS: TestEA1RootAgentResumePhasesMemory (6.47s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/missing (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/stale (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/terminal (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/admission-revision (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P0/admission-cancel (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P1/admitted-before-dispatch (0.00s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P2/model (2.15s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P2/tool (2.16s)
+    --- PASS: TestEA1RootAgentResumePhasesMemory/P2/host (2.15s)
+=== RUN   TestEA1RootAgentResumeSettlementMemory
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P3/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P3/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P4/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P4/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RootAgentResumeSettlementMemory (0.06s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P3/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P3/terminal-tool (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P4/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P4/terminal-tool (0.02s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P3/committed-model-receipt-unknown-host (0.01s)
+=== RUN   TestEA1RootAgentStartSettlementMemory
+=== RUN   TestEA1RootAgentStartSettlementMemory/P3/model-yield
+=== RUN   TestEA1RootAgentStartSettlementMemory/P3/terminal-tool
+=== RUN   TestEA1RootAgentStartSettlementMemory/P4/model-yield
+=== RUN   TestEA1RootAgentStartSettlementMemory/P4/terminal-tool
+=== RUN   TestEA1RootAgentStartSettlementMemory/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RootAgentStartSettlementMemory (0.04s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P3/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P3/terminal-tool (0.01s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P4/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P4/terminal-tool (0.01s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P3/committed-model-receipt-unknown-host (0.01s)
+=== RUN   TestEA1RootAgentUnknownMemory
+=== RUN   TestEA1RootAgentUnknownMemory/host_middleware
+=== RUN   TestEA1RootAgentUnknownMemory/model
+=== RUN   TestEA1RootAgentUnknownMemory/tool
+--- PASS: TestEA1RootAgentUnknownMemory (6.51s)
+    --- PASS: TestEA1RootAgentUnknownMemory/host_middleware (2.20s)
+    --- PASS: TestEA1RootAgentUnknownMemory/model (2.15s)
+    --- PASS: TestEA1RootAgentUnknownMemory/tool (2.15s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	18.780s
+
+EXIT_CODE=0
