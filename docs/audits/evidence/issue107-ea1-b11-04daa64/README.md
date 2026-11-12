@@ -1,0 +1,1 @@
+Fixture setup failure: the new Root test incorrectly supplied child-only OriginFingerprint, rejected by prepareStartState before any callback. Compile and lint pass; directed checks fail. Full race was not started. No production code change is justified; preserve Root empty fingerprint and original full Create verification.

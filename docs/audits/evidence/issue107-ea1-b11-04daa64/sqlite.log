@@ -1,0 +1,82 @@
+SOURCE_SHA=04daa6497cd60b61503a192e0d9c7f5017136e06
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^(TestEA1RootAgent|TestEA1OwnedCallbackReturn|TestOwned)' -v
+=== RUN   TestOwnedSchemaMigrationPreservesOriginalGrants
+--- PASS: TestOwnedSchemaMigrationPreservesOriginalGrants (0.09s)
+=== RUN   TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover
+--- PASS: TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover (0.06s)
+=== RUN   TestEA1OwnedCallbackReturnSQLite
+=== RUN   TestEA1OwnedCallbackReturnSQLite/unknown-host
+=== RUN   TestEA1OwnedCallbackReturnSQLite/known-host
+--- PASS: TestEA1OwnedCallbackReturnSQLite (2.16s)
+    --- PASS: TestEA1OwnedCallbackReturnSQLite/unknown-host (1.08s)
+    --- PASS: TestEA1OwnedCallbackReturnSQLite/known-host (1.08s)
+=== RUN   TestEA1RootAgentAdmissionSQLite
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/opaque-tool
+    ea1_root_bounded_tool.go:81: original known Tool business result changed: models=0 tools=0 status= err=invalid agent run request
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/bounded-tool-timeline
+    ea1_root_bounded_tool.go:81: original known Tool business result changed: models=0 tools=0 status= err=invalid agent run request
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model
+--- FAIL: TestEA1RootAgentAdmissionSQLite (0.80s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-bounded (0.10s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-opaque (0.06s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-foreign-hydration (0.06s)
+    --- FAIL: TestEA1RootAgentAdmissionSQLite/P1/opaque-tool (0.04s)
+    --- FAIL: TestEA1RootAgentAdmissionSQLite/P1/bounded-tool-timeline (0.04s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim (0.11s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission (0.06s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse (0.11s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/same-external-lease-two-callers (0.10s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical (0.06s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model (0.06s)
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/opaque-tool
+    ea1_root_bounded_tool.go:81: original known Tool business result changed: models=0 tools=0 status= err=invalid agent run request
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/bounded-tool-timeline
+    ea1_root_bounded_tool.go:81: original known Tool business result changed: models=0 tools=0 status= err=invalid agent run request
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/default-generated-id
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model
+--- FAIL: TestEA1RootAgentDefaultAdmissionSQLite (0.98s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-bounded (0.10s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-opaque (0.06s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-foreign-hydration (0.06s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionSQLite/P1/opaque-tool (0.04s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionSQLite/P1/bounded-tool-timeline (0.04s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/default-generated-id (0.11s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim (0.18s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission (0.05s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse (0.10s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/same-external-lease-two-callers (0.12s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical (0.06s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model (0.06s)
+=== RUN   TestEA1RootAgentUnknownNativeSQLite
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/host_middleware
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/model
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/tool
+--- PASS: TestEA1RootAgentUnknownNativeSQLite (6.68s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/host_middleware (2.27s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/model (2.21s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/tool (2.20s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	11.293s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.495s [no tests to run]
+FAIL
+
+EXIT_CODE=1
