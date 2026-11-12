@@ -1,0 +1,59 @@
+SOURCE_SHA=f146f20cfc59d8516f35c0b1f415a5381dbd275a
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 ./... -run '^(TestPR82RootCancelRejectsForeignNativeKernelCanceller|TestNativeCancellationEarlyReadStagesAllowRetry|TestIndependentCancellationIntentPreventsLateChildAdmission|TestCancellationClaimCommittedHostCASLostReplyKeepsIntent|TestNativeCancellationDoesNotReleaseUncertainStoreConflict|TestCancelWhileAgentIsRunningCannotRevokePhysicalOwner|TestCancellationSuccessReceiptTimeoutKeepsIntentForReconciliation|TestAuditPR82CustomRootCancelForeignTerminalCannotSettle|TestCancellationCompletionLostACKRequiresDurableReceiptEvidence|TestNativeConcurrentKernelRevisionDuringCancelRetries|TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed|TestAsyncDelegationCancellationRetriesExternalCleanup)$' -v
+=== RUN   TestPR82RootCancelRejectsForeignNativeKernelCanceller
+--- PASS: TestPR82RootCancelRejectsForeignNativeKernelCanceller (0.00s)
+=== RUN   TestAuditPR82CustomRootCancelForeignTerminalCannotSettle
+--- PASS: TestAuditPR82CustomRootCancelForeignTerminalCannotSettle (0.00s)
+=== RUN   TestCancellationClaimCommittedHostCASLostReplyKeepsIntent
+--- PASS: TestCancellationClaimCommittedHostCASLostReplyKeepsIntent (0.00s)
+=== RUN   TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed
+=== RUN   TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/successful-recovery
+=== RUN   TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/verification-failed
+=== RUN   TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/receipt-failed
+=== RUN   TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/verification-timeout
+=== RUN   TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/late-kernel-read-after-deadline
+--- PASS: TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed (10.01s)
+    --- PASS: TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/successful-recovery (0.00s)
+    --- PASS: TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/verification-failed (0.00s)
+    --- PASS: TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/receipt-failed (0.00s)
+    --- PASS: TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/verification-timeout (5.00s)
+    --- PASS: TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed/late-kernel-read-after-deadline (5.00s)
+=== RUN   TestCancellationSuccessReceiptTimeoutKeepsIntentForReconciliation
+--- PASS: TestCancellationSuccessReceiptTimeoutKeepsIntentForReconciliation (5.00s)
+=== RUN   TestCancellationCompletionLostACKRequiresDurableReceiptEvidence
+--- PASS: TestCancellationCompletionLostACKRequiresDurableReceiptEvidence (0.00s)
+=== RUN   TestAsyncDelegationCancellationRetriesExternalCleanup
+=== PAUSE TestAsyncDelegationCancellationRetriesExternalCleanup
+=== RUN   TestCancelWhileAgentIsRunningCannotRevokePhysicalOwner
+=== PAUSE TestCancelWhileAgentIsRunningCannotRevokePhysicalOwner
+=== RUN   TestIndependentCancellationIntentPreventsLateChildAdmission
+=== RUN   TestIndependentCancellationIntentPreventsLateChildAdmission/CancelSubtask
+=== RUN   TestIndependentCancellationIntentPreventsLateChildAdmission/CancelInvocation
+=== RUN   TestIndependentCancellationIntentPreventsLateChildAdmission/CancelTurn
+--- PASS: TestIndependentCancellationIntentPreventsLateChildAdmission (0.03s)
+    --- PASS: TestIndependentCancellationIntentPreventsLateChildAdmission/CancelSubtask (0.01s)
+    --- PASS: TestIndependentCancellationIntentPreventsLateChildAdmission/CancelInvocation (0.01s)
+    --- PASS: TestIndependentCancellationIntentPreventsLateChildAdmission/CancelTurn (0.01s)
+=== RUN   TestNativeCancellationEarlyReadStagesAllowRetry
+=== RUN   TestNativeCancellationEarlyReadStagesAllowRetry/Harness-first-Load
+=== RUN   TestNativeCancellationEarlyReadStagesAllowRetry/Kernel-Cancel-second-Load
+=== RUN   TestNativeCancellationEarlyReadStagesAllowRetry/Kernel-ApplyControl-third-Load
+--- PASS: TestNativeCancellationEarlyReadStagesAllowRetry (0.00s)
+    --- PASS: TestNativeCancellationEarlyReadStagesAllowRetry/Harness-first-Load (0.00s)
+    --- PASS: TestNativeCancellationEarlyReadStagesAllowRetry/Kernel-Cancel-second-Load (0.00s)
+    --- PASS: TestNativeCancellationEarlyReadStagesAllowRetry/Kernel-ApplyControl-third-Load (0.00s)
+=== RUN   TestNativeConcurrentKernelRevisionDuringCancelRetries
+--- PASS: TestNativeConcurrentKernelRevisionDuringCancelRetries (0.00s)
+=== RUN   TestNativeCancellationDoesNotReleaseUncertainStoreConflict
+--- PASS: TestNativeCancellationDoesNotReleaseUncertainStoreConflict (0.00s)
+=== CONT  TestAsyncDelegationCancellationRetriesExternalCleanup
+=== CONT  TestCancelWhileAgentIsRunningCannotRevokePhysicalOwner
+--- PASS: TestCancelWhileAgentIsRunningCannotRevokePhysicalOwner (0.01s)
+--- PASS: TestAsyncDelegationCancellationRetriesExternalCleanup (0.03s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	16.972s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.758s [no tests to run]
+
+EXIT_CODE=0

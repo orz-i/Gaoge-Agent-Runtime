@@ -1,0 +1,14 @@
+SOURCE_SHA=f146f20cfc59d8516f35c0b1f415a5381dbd275a
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=1 ./... -run '^TestEA1RootAgentCancelHostElection$' -v
+=== RUN   TestEA1RootAgentCancelHostElection
+=== RUN   TestEA1RootAgentCancelHostElection/election-after
+=== RUN   TestEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestEA1RootAgentCancelHostElection/receipt-ack-loss
+--- PASS: TestEA1RootAgentCancelHostElection (0.01s)
+    --- PASS: TestEA1RootAgentCancelHostElection/election-after (0.01s)
+    --- PASS: TestEA1RootAgentCancelHostElection/receipt-before (0.00s)
+    --- PASS: TestEA1RootAgentCancelHostElection/receipt-ack-loss (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	1.874s
+
+EXIT_CODE=0

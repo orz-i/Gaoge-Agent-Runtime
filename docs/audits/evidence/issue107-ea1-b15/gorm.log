@@ -1,0 +1,112 @@
+SOURCE_SHA=f146f20cfc59d8516f35c0b1f415a5381dbd275a
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1RootAgent(CancelPhases|Election)' -v
+=== RUN   TestEA1RootAgentCancelPhasesGORM
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P0/missing
+
+2026/11/13 07:02:34 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.127ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "absent-root" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P0/stale
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P0/prepared
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P0/native-before-owned
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P1/active-original-callback
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P2/host
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P2/model
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P2/tool
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P3/yield
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P3/terminal
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P4/yield
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P4/terminal
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P4/actual-cancel-CAS-lost-ACK
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P5/cancel-wins-resume-admission
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P5/resume-scope-rejects-cancel
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P5/two-cancel-owners
+
+2026/11/13 07:02:41 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.137ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-11-12 23:02:41.566",`deadline_at`=NULL,`ended_at`="2026-11-12 23:02:41.572",`error_code`="run.cancelled",`error_detail`="original cancel",`execution_epoch`=CASE WHEN execution_epoch > 0 THEN execution_epoch + 1 ELSE 0 END,`execution_expires_at`=NULL,`execution_lease_id`="",`execution_owner`="",`goal`="original Resume effect",`kind`="agent",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="original-request",`result_json`="",`revision`=2,`state_json`="{""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve original source.""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original Resume effect""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":8,""maxToolCalls"":16},""usage"":{}}}",`status`="cancelled",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-11-12 23:02:41.572" WHERE run_id = "actual-root-resume" AND revision = 1 AND parent_run_id = ""
+=== RUN   TestEA1RootAgentCancelPhasesGORM/P5/cancel-deadline
+
+2026/11/13 07:02:44 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.325ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-11-12 23:02:41.584",`deadline_at`="2026-11-12 23:02:44.584",`ended_at`="2026-11-12 23:02:44.618",`error_code`="run.cancelled",`error_detail`="original cancel",`execution_epoch`=CASE WHEN execution_epoch > 0 THEN execution_epoch + 1 ELSE 0 END,`execution_expires_at`=NULL,`execution_lease_id`="",`execution_owner`="",`goal`="original Resume effect",`kind`="agent",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="original-request",`result_json`="",`revision`=2,`state_json`="{""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve original source.""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original Resume effect""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":8,""maxToolCalls"":16},""usage"":{}}}",`status`="cancelled",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-11-12 23:02:44.618" WHERE run_id = "actual-root-resume" AND revision = 1 AND parent_run_id = ""
+--- PASS: TestEA1RootAgentCancelPhasesGORM (9.97s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P0/missing (0.04s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P0/stale (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P0/prepared (0.02s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P0/native-before-owned (0.03s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P1/active-original-callback (0.04s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P2/host (2.18s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P2/model (2.17s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P2/tool (2.18s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P3/yield (0.05s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P3/terminal (0.05s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P4/yield (0.04s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P4/terminal (0.04s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P4/actual-cancel-CAS-lost-ACK (0.02s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P5/cancel-wins-resume-admission (0.02s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P5/resume-scope-rejects-cancel (0.03s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P5/two-cancel-owners (0.02s)
+    --- PASS: TestEA1RootAgentCancelPhasesGORM/P5/cancel-deadline (3.05s)
+=== RUN   TestEA1RootAgentElectionGORM
+=== RUN   TestEA1RootAgentElectionGORM/start/host
+
+2026/11/13 07:02:44 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.248ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("root-election","original-request","","agent","tenant","owner","conversation","original-thread","original election","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original election""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:02:44.638","2026-11-12 23:02:44.638")
+=== RUN   TestEA1RootAgentElectionGORM/start/model
+
+2026/11/13 07:02:44 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.126ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("root-election","original-request","","agent","tenant","owner","conversation","original-thread","original election","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original election""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:02:44.673","2026-11-12 23:02:44.673")
+=== RUN   TestEA1RootAgentElectionGORM/start/tool
+
+2026/11/13 07:02:44 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.127ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("root-election","original-request","","agent","tenant","owner","conversation","original-thread","original election","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original election""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[""effect""],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:02:44.714","2026-11-12 23:02:44.714")
+=== RUN   TestEA1RootAgentElectionGORM/start/deadline
+
+2026/11/13 07:02:44 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.129ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("root-election","original-request","","agent","tenant","owner","conversation","original-thread","original election","running",1,1,"","",NULL,0,0,"","","","2026-11-12 23:02:45.732",NULL,"{""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original election""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:02:44.737","2026-11-12 23:02:44.737")
+=== RUN   TestEA1RootAgentElectionGORM/start/unknown-model
+
+2026/11/13 07:02:47 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.263ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("root-election","original-request","","agent","tenant","owner","conversation","original-thread","original election","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original election""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:02:47.921","2026-11-12 23:02:47.921")
+=== RUN   TestEA1RootAgentElectionGORM/start/unknown-tool
+
+2026/11/13 07:02:50 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.160ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("root-election","original-request","","agent","tenant","owner","conversation","original-thread","original election","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original election""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[""effect""],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-12 23:02:50.092","2026-11-12 23:02:50.092")
+=== RUN   TestEA1RootAgentElectionGORM/resume/host
+=== RUN   TestEA1RootAgentElectionGORM/resume/model
+=== RUN   TestEA1RootAgentElectionGORM/resume/tool
+=== RUN   TestEA1RootAgentElectionGORM/resume/deadline
+=== RUN   TestEA1RootAgentElectionGORM/resume/unknown-model
+=== RUN   TestEA1RootAgentElectionGORM/resume/unknown-tool
+=== RUN   TestEA1RootAgentElectionGORM/recovery/model/known
+=== RUN   TestEA1RootAgentElectionGORM/recovery/model/unknown-ttl
+=== RUN   TestEA1RootAgentElectionGORM/recovery/model/competing-receipt
+=== RUN   TestEA1RootAgentElectionGORM/recovery/model/deadline-known
+=== RUN   TestEA1RootAgentElectionGORM/recovery/tool/known
+=== RUN   TestEA1RootAgentElectionGORM/recovery/tool/unknown-ttl
+=== RUN   TestEA1RootAgentElectionGORM/recovery/tool/competing-receipt
+=== RUN   TestEA1RootAgentElectionGORM/recovery/tool/deadline-known
+--- PASS: TestEA1RootAgentElectionGORM (17.71s)
+    --- PASS: TestEA1RootAgentElectionGORM/start/host (0.03s)
+    --- PASS: TestEA1RootAgentElectionGORM/start/model (0.03s)
+    --- PASS: TestEA1RootAgentElectionGORM/start/tool (0.04s)
+    --- PASS: TestEA1RootAgentElectionGORM/start/deadline (1.03s)
+    --- PASS: TestEA1RootAgentElectionGORM/start/unknown-model (2.17s)
+    --- PASS: TestEA1RootAgentElectionGORM/start/unknown-tool (2.17s)
+    --- PASS: TestEA1RootAgentElectionGORM/resume/host (0.05s)
+    --- PASS: TestEA1RootAgentElectionGORM/resume/model (0.06s)
+    --- PASS: TestEA1RootAgentElectionGORM/resume/tool (0.06s)
+    --- PASS: TestEA1RootAgentElectionGORM/resume/deadline (1.03s)
+    --- PASS: TestEA1RootAgentElectionGORM/resume/unknown-model (2.17s)
+    --- PASS: TestEA1RootAgentElectionGORM/resume/unknown-tool (2.18s)
+    --- PASS: TestEA1RootAgentElectionGORM/recovery/model/known (0.06s)
+    --- PASS: TestEA1RootAgentElectionGORM/recovery/model/unknown-ttl (2.17s)
+    --- PASS: TestEA1RootAgentElectionGORM/recovery/model/competing-receipt (0.05s)
+    --- PASS: TestEA1RootAgentElectionGORM/recovery/model/deadline-known (1.06s)
+    --- PASS: TestEA1RootAgentElectionGORM/recovery/tool/known (0.06s)
+    --- PASS: TestEA1RootAgentElectionGORM/recovery/tool/unknown-ttl (2.18s)
+    --- PASS: TestEA1RootAgentElectionGORM/recovery/tool/competing-receipt (0.06s)
+    --- PASS: TestEA1RootAgentElectionGORM/recovery/tool/deadline-known (1.06s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	29.267s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

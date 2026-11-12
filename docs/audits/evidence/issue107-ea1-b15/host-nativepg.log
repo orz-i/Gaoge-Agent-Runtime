@@ -1,0 +1,30 @@
+SOURCE_SHA=f146f20cfc59d8516f35c0b1f415a5381dbd275a
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=3 ./... -run '^TestRealPostgresEA1RootAgentCancelHostElection$' -v
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss
+--- PASS: TestRealPostgresEA1RootAgentCancelHostElection (1.09s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.36s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-before (0.27s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss (0.46s)
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss
+--- PASS: TestRealPostgresEA1RootAgentCancelHostElection (1.27s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.34s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-before (0.37s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss (0.56s)
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss
+--- PASS: TestRealPostgresEA1RootAgentCancelHostElection (1.17s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.41s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-before (0.41s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss (0.35s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	4.892s
+
+EXIT_CODE=0
