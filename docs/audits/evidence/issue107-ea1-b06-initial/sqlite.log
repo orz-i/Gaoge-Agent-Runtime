@@ -1,0 +1,46 @@
+SOURCE_SHA=3a4e0316bf54473f90a69cb91371122df0fc61fd
+EXIT_CODE=1
+=== RUN   TestEA1CompensationAdmissionSQLite
+=== RUN   TestEA1CompensationAdmissionSQLite/root/revision
+=== RUN   TestEA1CompensationAdmissionSQLite/root/terminal
+=== RUN   TestEA1CompensationAdmissionSQLite/child/revision
+=== RUN   TestEA1CompensationAdmissionSQLite/child/terminal
+--- PASS: TestEA1CompensationAdmissionSQLite (0.38s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/root/revision (0.12s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/root/terminal (0.07s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/child/revision (0.11s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/child/terminal (0.08s)
+=== RUN   TestEA1CompensationBarriersSQLite
+=== RUN   TestEA1CompensationBarriersSQLite/root/P1
+=== RUN   TestEA1CompensationBarriersSQLite/root/P5
+=== RUN   TestEA1CompensationBarriersSQLite/root/P5-retry
+    ea1_compensation_barriers.go:198: legal retry must finish original cancellation without stranded grant: workflow cancellation requested
+        kernel descendant has an unsettled physical execution Grant status=cancelled code=workflow.cancelled
+=== RUN   TestEA1CompensationBarriersSQLite/child/P1
+=== RUN   TestEA1CompensationBarriersSQLite/child/P5
+=== RUN   TestEA1CompensationBarriersSQLite/child/P5-retry
+    ea1_compensation_barriers.go:198: legal retry must finish original cancellation without stranded grant: workflow cancellation requested
+        kernel descendant has an unsettled physical execution Grant status=cancelled code=workflow.cancelled
+--- FAIL: TestEA1CompensationBarriersSQLite (0.71s)
+    --- PASS: TestEA1CompensationBarriersSQLite/root/P1 (0.12s)
+    --- PASS: TestEA1CompensationBarriersSQLite/root/P5 (0.10s)
+    --- FAIL: TestEA1CompensationBarriersSQLite/root/P5-retry (0.12s)
+    --- PASS: TestEA1CompensationBarriersSQLite/child/P1 (0.12s)
+    --- PASS: TestEA1CompensationBarriersSQLite/child/P5 (0.12s)
+    --- FAIL: TestEA1CompensationBarriersSQLite/child/P5-retry (0.13s)
+=== RUN   TestEA1CompensationUnknownNativeSQLite
+=== RUN   TestEA1CompensationUnknownNativeSQLite/root
+    ea1_compensation_unknown.go:57: actual Cancel unknown not fenced: original cancellation
+        workflow segment yielded requests=2
+=== RUN   TestEA1CompensationUnknownNativeSQLite/child
+    ea1_compensation_unknown.go:57: actual Cancel unknown not fenced: original cancellation
+        workflow segment yielded requests=2
+--- FAIL: TestEA1CompensationUnknownNativeSQLite (0.17s)
+    --- FAIL: TestEA1CompensationUnknownNativeSQLite/root (0.08s)
+    --- FAIL: TestEA1CompensationUnknownNativeSQLite/child (0.08s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	1.801s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.541s [no tests to run]
+FAIL

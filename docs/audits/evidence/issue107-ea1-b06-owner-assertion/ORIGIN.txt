@@ -1,0 +1,2 @@
+SOURCE_SHA=b418f5f225b6a18865749624d272da9392568669
+STATUS=diagnostic-not-cell-acceptance

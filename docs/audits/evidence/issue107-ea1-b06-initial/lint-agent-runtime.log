@@ -1,0 +1,7 @@
+SOURCE_SHA=3a4e0316bf54473f90a69cb91371122df0fc61fd
+EXIT_CODE=1
+go/agent-runtime/conformance/ea1_compensation_barriers.go:72:15: ST1023: should omit type kernel.Store from declaration; it will be inferred from the right-hand side (staticcheck)
+				var owned kernel.Store = backing
+				          ^
+1 issues:
+* staticcheck: 1

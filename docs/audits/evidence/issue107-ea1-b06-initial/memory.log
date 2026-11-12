@@ -1,0 +1,44 @@
+SOURCE_SHA=3a4e0316bf54473f90a69cb91371122df0fc61fd
+EXIT_CODE=1
+=== RUN   TestEA1CompensationAdmissionMemory
+=== RUN   TestEA1CompensationAdmissionMemory/root/revision
+=== RUN   TestEA1CompensationAdmissionMemory/root/terminal
+=== RUN   TestEA1CompensationAdmissionMemory/child/revision
+=== RUN   TestEA1CompensationAdmissionMemory/child/terminal
+--- PASS: TestEA1CompensationAdmissionMemory (0.06s)
+    --- PASS: TestEA1CompensationAdmissionMemory/root/revision (0.02s)
+    --- PASS: TestEA1CompensationAdmissionMemory/root/terminal (0.02s)
+    --- PASS: TestEA1CompensationAdmissionMemory/child/revision (0.02s)
+    --- PASS: TestEA1CompensationAdmissionMemory/child/terminal (0.01s)
+=== RUN   TestEA1CompensationBarriersMemory
+=== RUN   TestEA1CompensationBarriersMemory/root/P1
+=== RUN   TestEA1CompensationBarriersMemory/root/P5
+=== RUN   TestEA1CompensationBarriersMemory/root/P5-retry
+    ea1_compensation_barriers.go:198: legal retry must finish original cancellation without stranded grant: workflow cancellation requested
+        kernel descendant has an unsettled physical execution Grant status=cancelled code=workflow.cancelled
+=== RUN   TestEA1CompensationBarriersMemory/child/P1
+    ea1_compensation_barriers.go:160: due ancestor deadline: false kernel run deadline exceeded
+=== RUN   TestEA1CompensationBarriersMemory/child/P5
+    ea1_compensation_barriers.go:160: due ancestor deadline: false kernel run deadline exceeded
+=== RUN   TestEA1CompensationBarriersMemory/child/P5-retry
+    ea1_compensation_barriers.go:160: due ancestor deadline: false kernel run deadline exceeded
+--- FAIL: TestEA1CompensationBarriersMemory (0.09s)
+    --- PASS: TestEA1CompensationBarriersMemory/root/P1 (0.02s)
+    --- PASS: TestEA1CompensationBarriersMemory/root/P5 (0.01s)
+    --- FAIL: TestEA1CompensationBarriersMemory/root/P5-retry (0.02s)
+    --- FAIL: TestEA1CompensationBarriersMemory/child/P1 (0.01s)
+    --- FAIL: TestEA1CompensationBarriersMemory/child/P5 (0.01s)
+    --- FAIL: TestEA1CompensationBarriersMemory/child/P5-retry (0.02s)
+=== RUN   TestEA1CompensationUnknownMemory
+=== RUN   TestEA1CompensationUnknownMemory/root
+    ea1_compensation_unknown.go:57: actual Cancel unknown not fenced: original cancellation
+        workflow segment yielded requests=2
+=== RUN   TestEA1CompensationUnknownMemory/child
+    ea1_compensation_unknown.go:57: actual Cancel unknown not fenced: original cancellation
+        workflow segment yielded requests=2
+--- FAIL: TestEA1CompensationUnknownMemory (0.02s)
+    --- FAIL: TestEA1CompensationUnknownMemory/root (0.01s)
+    --- FAIL: TestEA1CompensationUnknownMemory/child (0.01s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	1.026s
+FAIL

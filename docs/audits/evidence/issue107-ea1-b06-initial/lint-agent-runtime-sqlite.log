@@ -1,0 +1,7 @@
+SOURCE_SHA=3a4e0316bf54473f90a69cb91371122df0fc61fd
+EXIT_CODE=1
+go/agent-runtime-sqlite/ea1_compensation_barriers_test.go:3:1: File is not properly formatted (goimports)
+import (
+^
+1 issues:
+* goimports: 1
