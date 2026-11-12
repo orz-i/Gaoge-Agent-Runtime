@@ -123,6 +123,14 @@ func TestOwnedPhysicalMemoryReceiptOnlyRecovery(t *testing.T) {
 	if _, e := rt.ApplyOwnedPhysicalRecovery(t.Context(), forged, v.Run.Revision, m, source, target); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("foreign epoch recovery: %v", e)
 	}
+	if _, e := rt.ApplyOwnedPhysicalRecovery(t.Context(), g, v.Run.Revision, m, source, target); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("receipt recovery before callback return: %v", e)
+	}
+	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
+	callbackProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_callback_return", g.ID, kernel.OwnedPhysicalCallbackReturnPayload(v, outcome), nil)
+	if e := rt.RecordOwnedPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, outcome, callbackProof); e != nil {
+		t.Fatal(e)
+	}
 	recovered, e := rt.ApplyOwnedPhysicalRecovery(t.Context(), g, v.Run.Revision, m, source, target)
 	if e != nil {
 		t.Fatal(e)
@@ -169,8 +177,8 @@ func TestOwnedPhysicalMemoryMarkedRecoveryAfterExpiry(t *testing.T) {
 	}
 }
 func TestOwnedPhysicalMemoryApprovalPreservesLease(t *testing.T) {
-	s, rt, bound, v, l, _ := ownedPhysicalFixture(t)
-	cp := &kernel.Checkpoint{ID: "approval", Kind: "agent.tool_approval", Status: kernel.CheckpointPending, Payload: json.RawMessage(`{"call":"original"}`)}
+	s, rt, bound, v, l, clock := ownedPhysicalFixture(t)
+	cp := &kernel.Checkpoint{CreatedAt: clock.now, ID: "approval", Kind: "agent.tool_approval", Status: kernel.CheckpointPending, Payload: json.RawMessage(`{"call":"original"}`)}
 	waiting, e := bound.Apply(t.Context(), v.Run.ID, v.Run.Revision, kernel.Mutation{Status: kernel.RunStatusWaitingInput, State: v.State, Checkpoint: cp})
 	if e != nil {
 		t.Fatal(e)
@@ -192,6 +200,8 @@ func TestOwnedPhysicalMemoryApprovalPreservesLease(t *testing.T) {
 	}
 	resolved := *cp
 	resolved.Status = kernel.CheckpointResolved
+	resolvedAt := clock.now
+	resolved.ResolvedAt = &resolvedAt
 	resolved.Response = json.RawMessage(`{"decision":"approve"}`)
 	m := kernel.Mutation{Status: kernel.RunStatusRunning, State: v.State, Checkpoint: &resolved}
 	proof := featurecontrol.Seal(v.Run.ID, waiting.Run.Revision, string(kernel.ControlApproval), cp.ID, m.State, m.Checkpoint)
@@ -205,5 +215,71 @@ func TestOwnedPhysicalMemoryApprovalPreservesLease(t *testing.T) {
 	current, e := rt.LookupChildExecution(t.Context(), v.Run.ID)
 	if e != nil || current != g {
 		t.Fatal("approval replaced immutable scope")
+	}
+}
+
+func TestOwnedPhysicalCallbackReturnMemory(t *testing.T) {
+	for _, hostComplete := range []bool{false, true} {
+		t.Run(map[bool]string{false: "host-unknown", true: "host-complete"}[hostComplete], func(t *testing.T) {
+			_, rt, bound, v, l, clock := ownedPhysicalFixture(t)
+			g, _ := ownedPhysicalAdmit(t, bound, v, l)
+			clock.now = clock.now.Add(2 * time.Minute)
+			outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: true}
+			proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_callback_return", g.ID, kernel.OwnedPhysicalCallbackReturnPayload(v, outcome), nil)
+			if e := rt.RecordOwnedPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, outcome, proof); e != nil {
+				t.Fatal(e)
+			}
+			completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+			if e != nil || completion.GrantID != g.ID || completion.ReturnRevision != v.Run.Revision || completion.HostCompleted != hostComplete || !completion.LeaseOwned || len(completion.ReturnSourceHash) != 64 {
+				t.Fatalf("completion: %+v %v", completion, e)
+			}
+			if e = rt.RecordOwnedPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, outcome, proof); e != nil {
+				t.Fatal(e)
+			}
+			flipped := outcome
+			flipped.HostCompleted = !hostComplete
+			flippedProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_callback_return", g.ID, kernel.OwnedPhysicalCallbackReturnPayload(v, flipped), nil)
+			if e = rt.RecordOwnedPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, flipped, flippedProof); !errors.Is(e, kernel.ErrExecutionConflict) {
+				t.Fatalf("contradictory completion: %v", e)
+			}
+			flipped = outcome
+			flipped.LeaseOwned = false
+			if e = rt.RecordOwnedPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, flipped, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
+				t.Fatalf("unsealed ownership: %v", e)
+			}
+			current, e := rt.Load(t.Context(), v.Run.ID)
+			if e != nil || !reflect.DeepEqual(current, v) {
+				t.Fatal("callback fact changed Run")
+			}
+			recoveredProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_recovered", g.ID, v.State, v.Checkpoint)
+			e = rt.MarkOwnedPhysicalRecovered(t.Context(), g, recoveredProof)
+			if !hostComplete {
+				if !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("unknown Host released: %v", e)
+				}
+				return
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+			// Record and Finish serialize on the same authority. Either order must
+			// leave no resurrected scope, even when the original ACK was lost.
+			results := make(chan error, 2)
+			go func() {
+				results <- rt.RecordOwnedPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, outcome, proof)
+			}()
+			go func() { results <- rt.FinishChildExecution(t.Context(), g, recoveredProof) }()
+			for range 2 {
+				if e = <-results; e != nil && !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatal(e)
+				}
+			}
+			if _, e = rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
+				t.Fatalf("retired completion remains: %v", e)
+			}
+			if e = rt.RecordOwnedPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, outcome, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
+				t.Fatalf("retired scope rebuilt: %v", e)
+			}
+		})
 	}
 }

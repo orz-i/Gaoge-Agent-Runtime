@@ -75,7 +75,7 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 		return kernel.ExecutionLease{}, kernel.ErrTerminal
 	case kernel.RunStatusRunning:
 	case kernel.RunStatusWaitingInput:
-		if snap.Run.Kind != "agent" {
+		if snap.Run.Kind != "agent" || store.execution[request.RunID].epoch == 0 {
 			return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
 		}
 	case kernel.RunStatusPausedBudget:

@@ -59,7 +59,7 @@ func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildEx
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
 	original, ok := s.childGrants[g.ID]
-	if !ok || original.grant != g || !g.IsOwned() || original.settledRevision != 0 || current.Run.Revision != revision || !p.Matches(g, current, m) {
+	if !ok || original.grant != g || !g.IsOwned() || original.settledRevision != 0 || original.completion.GrantID != g.ID || original.completion.HostCompleted == p.IsModelEvidence() || current.Run.Revision != revision || !p.Matches(g, current, m) {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
 	// Recovery never clears/replaces an epoch. A foreign/replaced native identity
@@ -69,4 +69,56 @@ func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildEx
 	}
 	m.PhysicalPermit = p.PhysicalPermit(g, current, m)
 	return s.applyLocked(g.ChildRunID, revision, m)
+}
+
+// RecordOwnedPhysicalCallbackReturn changes only the original physical scope,
+// never the Run projection, wakeup revision, checkpoint or lease epoch.
+func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+	if s == nil || ctx == nil {
+		return kernel.ErrInvalidInput
+	}
+	if e := ctx.Err(); e != nil {
+		return e
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	original, ok := s.childGrants[g.ID]
+	current, exists := s.records[g.ChildRunID]
+	if !ok || !exists || original.grant != g || !g.IsOwned() || current.Run.Revision != rev || !g.MatchesExecution(s.execution[g.ChildRunID].lease) || !p.Matches(g, current, o) {
+		return kernel.ErrExecutionConflict
+	}
+	completion := p.Completion(g, current, o)
+	if original.completion.GrantID != "" {
+		if original.completion != completion {
+			return kernel.ErrExecutionConflict
+		}
+		return nil
+	}
+	if original.settledRevision != 0 {
+		return kernel.ErrExecutionConflict
+	}
+	original.completion = completion
+	s.childGrants[g.ID] = original
+	return nil
+}
+func (s *Store) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
+	if s == nil || ctx == nil || !g.IsOwned() {
+		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrInvalidInput
+	}
+	if e := ctx.Err(); e != nil {
+		return kernel.OwnedPhysicalCallbackCompletion{}, e
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	original, ok := s.childGrants[g.ID]
+	if !ok {
+		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrNotFound
+	}
+	if original.grant != g {
+		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
+	}
+	if original.completion.GrantID == "" {
+		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrNotFound
+	}
+	return original.completion, nil
 }

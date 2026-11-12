@@ -57,6 +57,8 @@ type ModelInvocation struct {
 	Response            model.Response        `json:"response,omitempty"`
 	Usage               *model.Usage          `json:"usage,omitempty"`
 	ErrorCode           string                `json:"errorCode,omitempty"`
+	OutcomeErrorCode    string                `json:"outcomeErrorCode,omitempty"`
+	OutcomeErrorDetail  string                `json:"outcomeErrorDetail,omitempty"`
 	DispatchAttempt     uint32                `json:"dispatchAttempt,omitempty"`
 	ExecutionAttempt    uint32                `json:"executionAttempt,omitempty"`
 	ExecutionLeaseUntil *time.Time            `json:"executionLeaseUntil,omitempty"`
@@ -478,6 +480,7 @@ func (runner *Runner) buildModelRequest(
 	originalTools := append([]tools.Definition(nil), request.Tools...)
 	if runner.prepareModelRequest != nil {
 		prepared, prepareErr := runner.prepareModelRequest(ctx, model.CloneRequest(request))
+		runner.noteRootCallbackFailure(prepareErr)
 		if prepareErr != nil {
 			return model.Request{}, nil, prepareErr
 		}

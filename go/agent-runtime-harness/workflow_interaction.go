@@ -210,8 +210,8 @@ func (runner *Runner) resolveMatchingWorkflowWait(ctx context.Context, session S
 			}
 			return true, run, nil
 		}
-		resolved, err := runner.withPhysicalInvocationDispatchFor(ctx, invocation, "resolve-wait", run.Run.ID, func() (kernel.Snapshot, error) {
-			return runner.workflows.ResolveWait(ctx, run.Run.ID, run.Run.Revision, interaction.Response)
+		resolved, err := runner.withPhysicalInvocationDispatchFor(ctx, invocation, "resolve-wait", run.Run.ID, func(physicalCtx context.Context) (kernel.Snapshot, error) {
+			return runner.workflows.ResolveWait(physicalCtx, run.Run.ID, run.Run.Revision, interaction.Response)
 		})
 		if resolved.Run.ID != "" {
 			err = normalizedFeatureStartError(ExecutionWorkflow, resolved, err, nil)

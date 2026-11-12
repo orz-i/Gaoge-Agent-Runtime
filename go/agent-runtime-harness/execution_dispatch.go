@@ -9,6 +9,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // ErrExecutionNoEffect may be returned by a host Feature StartRun ONLY when
@@ -287,7 +288,7 @@ func (runner *Runner) nativeAgentStartOwnedByKernel(ctx context.Context, grant I
 // ambiguous no-snapshot outcome stays fenced for explicit reconciliation.
 func (runner *Runner) withPhysicalInvocationDispatch(
 	ctx context.Context, invocation Invocation, phase string,
-	physical func() (kernel.Snapshot, error),
+	physical func(context.Context) (kernel.Snapshot, error),
 ) (kernel.Snapshot, error) {
 	return runner.withPhysicalInvocationDispatchFor(ctx, invocation, phase, invocation.ExecutionRefID, physical)
 }
@@ -297,13 +298,13 @@ func (runner *Runner) withPhysicalInvocationDispatch(
 // belongs to the owning Invocation for cancellation arbitration.
 func (runner *Runner) withPhysicalInvocationDispatchFor(
 	ctx context.Context, invocation Invocation, phase, resultRunID string,
-	physical func() (kernel.Snapshot, error),
+	physical func(context.Context) (kernel.Snapshot, error),
 ) (kernel.Snapshot, error) {
 	if physical == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	return runner.withPhysicalInvocationDispatchForContext(ctx, invocation, phase, resultRunID,
-		nil, func(context.Context) (kernel.Snapshot, error) { return physical() })
+		nil, physical)
 }
 
 // An AgentTask approval carries a private per-call proof only AFTER the
@@ -375,7 +376,27 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		defer bound.active.Store(false)
 		physicalCtx = context.WithValue(ctx, subtaskApprovalDispatchContextKey{}, bound)
 	}
-	snapshot, physicalErr := physical(physicalCtx)
+	native, nativeAgent := runner.agent.(*agent.Runner)
+	var operation plugin.RunOperation
+	observe := nativeAgent && invocation.ExecutionClass == ExecutionAgent
+	switch phase {
+	case "start", "start-retry":
+		operation = plugin.RunStart
+	case "resume":
+		operation = plugin.RunResume
+	case "resolve-approval", "resolve-subtask-approval":
+		operation = plugin.RunResolveApproval
+	default:
+		observe = false // Pure native allowance CAS and non-Agent features keep their own exact contracts.
+	}
+	var snapshot kernel.Snapshot
+	var physicalErr error
+	var outcome agent.PhysicalCallOutcome
+	if observe {
+		snapshot, outcome, physicalErr = native.ObservePhysicalCall(physicalCtx, resultRunID, operation, physical)
+	} else {
+		snapshot, physicalErr = physical(physicalCtx)
+	}
 	if snapshot.Run.ID == "" {
 		// An arbitrary Feature may have dispatched remote side effects
 		// before returning a generic error, including a Kernel CAS conflict.
@@ -420,6 +441,12 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 	}
 	if snapshot.Run.ID != resultRunID {
 		return snapshot, errors.Join(physicalErr, ErrConflict)
+	}
+	if observe && !outcome.Matches(resultRunID, operation) {
+		// A nonempty Run is recoverable identity, not this callback's receipt.
+		// Only the current first-party invocation can certify settled or a
+		// durable known yield still protected by its original Kernel scope.
+		return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr)
 	}
 	return snapshot, errors.Join(physicalErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_returned"))
 }

@@ -39,7 +39,7 @@ func TestOwnedPhysicalBindingMigrationPreservesLegacyGrant(t *testing.T) {
 	if e = db.Find(&rows).Error; e != nil {
 		t.Fatal(e)
 	}
-	if len(rows) != 1 || rows[0].GrantID != "old-grant" || rows[0].ParentRunID != "old-parent" || rows[0].ChildRunID != "old-child" || rows[0].StartRevision != 7 || rows[0].SettledRevision != 0 || pgPhysicalGrant(rows[0]).IsOwned() {
+	if len(rows) != 1 || rows[0].GrantID != "old-grant" || rows[0].ParentRunID != "old-parent" || rows[0].ChildRunID != "old-child" || rows[0].StartRevision != 7 || rows[0].SettledRevision != 0 || pgPhysicalGrant(rows[0]).IsOwned() || rows[0].CallbackReturnRevision != 0 || rows[0].CallbackReturnSourceHash != "" || rows[0].CallbackHostCompleted || rows[0].CallbackLeaseOwned {
 		t.Fatalf("legacy unknown grant was removed/backfilled: %+v", rows)
 	}
 }
@@ -175,4 +175,41 @@ func assertOwnedKernelRecord(t *testing.T, db *gorm.DB, want models.KernelRunRec
 	if got := ownedKernelRecord(t, db, want.RunID); !reflect.DeepEqual(got, want) {
 		t.Fatal("rejected guard mutated Run or native execution authority")
 	}
+}
+
+func TestNativeLeaseOnlyPreservesRunProjectionGORM(t *testing.T) {
+	runNativeLeaseOnlyPreservesRunProjection(t, openKernelStoreTestDB(t))
+}
+func runNativeLeaseOnlyPreservesRunProjection(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	store := NewKernelStore(db)
+	rt, e := kernel.New(kernel.Dependencies{Store: store})
+	if e != nil {
+		t.Fatal(e)
+	}
+	original, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "lease-projection", Kind: "agent", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "thread", ID: "one"}, Goal: "lease-only", State: json.RawMessage(`{}`), ExecutionRequired: true})
+	if e != nil {
+		t.Fatal(e)
+	}
+	same := func() {
+		t.Helper()
+		current, err := rt.Load(t.Context(), original.Run.ID)
+		if err != nil || !reflect.DeepEqual(current, original) {
+			t.Fatalf("lease changed Run projection: before=%#v after=%#v err=%v", original, current, err)
+		}
+	}
+	l, e := rt.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: original.Run.ID, OwnerID: "owner", LeaseDuration: time.Minute})
+	if e != nil {
+		t.Fatal(e)
+	}
+	same()
+	l, e = rt.RenewExecution(t.Context(), kernel.ExecutionRenewRequest{Lease: l, LeaseDuration: time.Minute})
+	if e != nil {
+		t.Fatal(e)
+	}
+	same()
+	if e = rt.ReleaseExecution(t.Context(), l); e != nil {
+		t.Fatal(e)
+	}
+	same()
 }

@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -177,5 +178,36 @@ func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T
 	request.Model = "different-model"
 	if _, err = shared.Model(t.Context(), request, nil, nil); !errors.Is(err, budget.ErrLedgerConflict) {
 		t.Fatalf("changed request=%v", err)
+	}
+}
+
+func TestBudgetModelOutcomeVerifierOnlyReadsOriginalSettledReceipt(t *testing.T) {
+	client := &ledgerTestModel{}
+	store, shared, snapshot := newLedgerHarness(t, client)
+	request := model.CloneRequest(client.request)
+	request.MaxOutputTokens = 0 // Original pre-reservation middleware input.
+	before, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := shared.VerifyModelOutcome(t.Context(), request)
+	if err != nil || response.Content != "receipt" {
+		t.Fatalf("original receipt: %+v %v", response, err)
+	}
+	for _, mutate := range []func(*model.Request){
+		func(r *model.Request) { r.RunID = "foreign-run" },
+		func(r *model.Request) { r.InvocationID = "foreign-invocation" },
+		func(r *model.Request) { r.Model = "foreign-model" },
+		func(r *model.Request) { r.MaxOutputTokens++ },
+	} {
+		wrong := model.CloneRequest(request)
+		mutate(&wrong)
+		if _, err := shared.VerifyModelOutcome(t.Context(), wrong); err == nil {
+			t.Fatal("accepted foreign or changed original request")
+		}
+	}
+	after, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("receipt-only lookup changed ledger: %v", err)
 	}
 }

@@ -3,7 +3,9 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -294,6 +296,7 @@ type retryAfterSearchModel struct {
 	t         *testing.T
 	calls     int
 	retriedID string
+	original  model.Request
 }
 
 func (stub *retryAfterSearchModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
@@ -308,10 +311,7 @@ func (stub *retryAfterSearchModel) Generate(_ context.Context, request model.Req
 			Arguments: json.RawMessage(`{"query":"look up documents"}`),
 		}}}, nil
 	case 2:
-		stub.retriedID = request.InvocationID
-		return model.Response{}, model.NewRetryableError(errRetryableProvider)
-	case 3:
-		if stub.retriedID == "" || request.InvocationID != stub.retriedID ||
+		if stub.retriedID == "" || request.InvocationID != stub.retriedID || !reflect.DeepEqual(request, stub.original) ||
 			len(request.Tools) != 2 ||
 			!slices.ContainsFunc(request.Tools, func(t tools.Definition) bool { return t.Key == discoveryChosenToolKey }) {
 			stub.t.Fatalf("resume changed invocation or lost loaded Tool: %s %+v", request.InvocationID, request.Tools)
@@ -325,7 +325,7 @@ func (stub *retryAfterSearchModel) Generate(_ context.Context, request model.Req
 
 func TestRuntimeToolSearchPersistsReceiptAcrossRetryResume(t *testing.T) {
 	t.Parallel()
-	runtime, _ := newTestRuntimeAndApprovals(t)
+	runtime := newModelPreparedCutRuntime(t, 2)
 	executions := 0
 	registry, keys := discoveryTestRegistry(t, 16, &executions)
 	search := &testToolDiscovery{returned: []string{discoveryChosenToolKey}}
@@ -338,7 +338,8 @@ func TestRuntimeToolSearchPersistsReceiptAcrossRetryResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending, err := runner.StartRun(t.Context(), startRequest("run_search_retry", "req_search_retry", "Find documents", keys...))
-	if err == nil || pending.Run.Status != kernel.RunStatusRunning || search.calls != 1 {
+	pending = mustLoadModelInvocationRun(t, runtime, "run_search_retry")
+	if !errors.Is(err, errInjectedModelInvocationCrash) || provider.calls != 1 || pending.Run.Status != kernel.RunStatusRunning || search.calls != 1 {
 		t.Fatalf("retryable failure not durable: status=%s err=%v search=%d", pending.Run.Status, err, search.calls)
 	}
 	var payload struct {
@@ -358,11 +359,27 @@ func TestRuntimeToolSearchPersistsReceiptAcrossRetryResume(t *testing.T) {
 	}
 	// Reconstruction of the SDK Runner (same Kernel Store) must not rerun
 	// search, must retain the frozen grant and exact pending Invocation ID.
-	restarted := newModelRunnerAfterRetryDue(t, pending, deps)
+	original := assertPreparedUnsentInvocation(t, pending)
+	provider.retriedID = original.ID
+	provider.original = model.CloneRequest(original.Request)
+	restarted, restartErr := agent.NewRunner(deps)
+	if restartErr != nil {
+		t.Fatal(restartErr)
+	}
 	completed, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || search.calls != 1 ||
-		provider.calls != 3 || executions != 0 {
+		provider.calls != 2 || executions != 0 {
 		t.Fatalf("resume reauthorized/replayed search: run=%+v err=%v calls=%d", completed.Run, err, search.calls)
+	}
+	view := mustModelInvocationView(t, completed)
+	if view.Budget.Usage.LLMCalls != 2 {
+		t.Fatalf("search recovery model billing changed: %+v", view.Budget.Usage)
+	}
+	var finalPayload = payload
+	finalPayload.Discovery.LoadedKeys = nil
+	finalPayload.Discovery.Receipts = nil
+	if err := json.Unmarshal(completed.State, &finalPayload); err != nil || !reflect.DeepEqual(payload.Discovery, finalPayload.Discovery) {
+		t.Fatalf("original search receipt/source changed on recovery: %v %+v", err, finalPayload.Discovery)
 	}
 }
 

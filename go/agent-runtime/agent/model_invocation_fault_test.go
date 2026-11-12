@@ -143,7 +143,7 @@ func TestNamedRejectedResponseWithoutPhysicalIDIsNotBillable(t *testing.T) {
 	result, err := runner.StartRun(t.Context(), startRequest(
 		"idless-rejection", "idless-rejection-req", "finish from evidence",
 	))
-	if !errors.Is(err, agent.ErrInvalidModelResponse) || result.Run.Status != kernel.RunStatusFailed ||
+	if !errors.Is(err, agent.ErrInvalidModelResponse) || !errors.Is(err, agent.ErrModelOutcomeUnknown) || result.Run.Status != kernel.RunStatusRunning ||
 		len(provider.callsCopy()) != 1 {
 		t.Fatalf("unproved completed rejection proceeded: run=%+v err=%v calls=%d",
 			result.Run, err, len(provider.callsCopy()))

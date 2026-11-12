@@ -17,6 +17,7 @@ func (runner *Runner) normalizeModelPolicy(ctx context.Context, request model.Re
 		return request, nil
 	}
 	policy, err := runner.modelPolicyNormalizer(ctx, model.CloneRequest(request))
+	runner.noteRootCallbackFailure(err)
 	if err != nil {
 		return model.Request{}, err
 	}

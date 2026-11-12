@@ -20,7 +20,7 @@ func schemaV3DDL() []string {
 	result := append([]string(nil), schemaDDL...)
 	for i, ddl := range result {
 		if strings.HasPrefix(ddl, "CREATE TABLE runtime_child_effect_grants ") {
-			for _, line := range []string{"\n\t\texecution_owner_id TEXT NOT NULL DEFAULT '',", "\n\t\texecution_lease_id TEXT NOT NULL DEFAULT '',", "\n\t\texecution_epoch INTEGER NOT NULL DEFAULT 0,", "\n\t\tadmission_source_hash TEXT NOT NULL DEFAULT '',", "\n\t\tadmission_operation TEXT NOT NULL DEFAULT '',"} {
+			for _, line := range []string{"\n\t\texecution_owner_id TEXT NOT NULL DEFAULT '',", "\n\t\texecution_lease_id TEXT NOT NULL DEFAULT '',", "\n\t\texecution_epoch INTEGER NOT NULL DEFAULT 0,", "\n\t\tadmission_source_hash TEXT NOT NULL DEFAULT '',", "\n\t\tadmission_operation TEXT NOT NULL DEFAULT '',", "\n\t\tcallback_return_revision INTEGER NOT NULL DEFAULT 0,", "\n\t\tcallback_return_source_hash TEXT NOT NULL DEFAULT '',", "\n\t\tcallback_host_completed INTEGER NOT NULL DEFAULT 0,", "\n\t\tcallback_lease_owned INTEGER NOT NULL DEFAULT 0,"} {
 				ddl = strings.ReplaceAll(ddl, line, "")
 			}
 			result[i] = ddl

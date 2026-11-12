@@ -78,7 +78,7 @@ func TestAutoAllowanceHostedYieldSurvivesRestartWithoutToolReplay(t *testing.T) 
 		switch {
 		case result.err == nil && result.snapshot.Run.Status == kernel.RunStatusCompleted:
 			success++
-		case errors.Is(result.err, kernel.ErrConflict), errors.Is(result.err, kernel.ErrTerminal):
+		case errors.Is(result.err, kernel.ErrConflict), errors.Is(result.err, kernel.ErrTerminal), errors.Is(result.err, kernel.ErrExecutionConflict), errors.Is(result.err, kernel.ErrChildExecutionBusy), errors.Is(result.err, agent.ErrRootOutcomeUnknown):
 			// The losing worker may race an in-flight CAS or the winner's
 			// terminal commit. Both forbid replay; the final Store check below
 			// proves that the winner did commit successfully.

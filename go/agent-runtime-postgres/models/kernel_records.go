@@ -95,6 +95,11 @@ func (RunRelationRecord) TableName() string { return "agent_run_relations" }
 // KernelChildEffectGrantRecord holds one durable per-ancestor physical Grant.
 // Unknown work cannot be deleted by a parent terminal-CAS or TTL timeout.
 type KernelChildEffectGrantRecord struct {
+	CallbackReturnRevision   uint64 `gorm:"not null;default:0"`
+	CallbackReturnSourceHash string `gorm:"not null;default:''"`
+	CallbackHostCompleted    bool   `gorm:"not null;default:false"`
+	CallbackLeaseOwned       bool   `gorm:"not null;default:false"`
+
 	GrantID         string `gorm:"size:128;primaryKey"`
 	ParentRunID     string `gorm:"size:64;primaryKey;index:idx_agent_kernel_child_grants_parent"`
 	ChildRunID      string `gorm:"size:64;not null;index:idx_agent_kernel_child_grants_child"`

@@ -255,8 +255,12 @@ func TestRunDeadlineBoundsModelInvocation(t *testing.T) {
 	if !errors.Is(err, kernel.ErrDeadline) {
 		t.Fatalf("deadline error = %v", err)
 	}
-	if snapshot.Run.Status != kernel.RunStatusFailed || snapshot.Run.ErrorCode != "agent.deadline_exceeded" {
-		t.Fatalf("deadline snapshot = %#v", snapshot.Run)
+	if !errors.Is(err, ErrModelOutcomeUnknown) || snapshot.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("deadline cannot prove dispatched Model had no effect: %#v %v", snapshot.Run, err)
+	}
+	view, viewErr := ViewState(snapshot)
+	if viewErr != nil || len(view.ModelInvocations) != 1 || view.ModelInvocations[0].DispatchAttempt != 1 || view.ModelInvocations[0].CompletedAt != nil || view.Budget.Usage.LLMCalls != 0 {
+		t.Fatalf("deadline fabricated a receipt: %+v %v", view, viewErr)
 	}
 	if provider.calls.Load() != 1 {
 		t.Fatalf("provider calls = %d, want 1", provider.calls.Load())

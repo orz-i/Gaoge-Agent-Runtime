@@ -170,6 +170,9 @@ func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant k
 		if grant.IsOwned() && (child.ExecutionOwner != grant.ExecutionOwnerID || child.ExecutionLeaseID != grant.ExecutionLeaseID || child.ExecutionEpoch != grant.ExecutionEpoch) {
 			return kernel.ErrExecutionConflict
 		}
+		if grant.IsOwned() && permit.IsRecovery() && (records[0].CallbackReturnRevision == 0 || !records[0].CallbackHostCompleted) {
+			return kernel.ErrExecutionConflict
+		}
 		if grant.IsOwned() && records[0].SettledRevision == 0 && !permit.IsRecovery() {
 			lease, ok := permit.ExecutionLease()
 			now, timeErr := pgStoreNow(tx)

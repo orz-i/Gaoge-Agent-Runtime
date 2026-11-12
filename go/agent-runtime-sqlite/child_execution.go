@@ -138,6 +138,12 @@ func (s *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.Chil
 			return err
 		}
 	}
+	if grant.IsOwned() && permit.IsRecovery() {
+		completion, err := loadOwnedCallbackReturn(ctx, tx, grant)
+		if err != nil || !completion.HostCompleted {
+			return kernel.ErrExecutionConflict
+		}
+	}
 	if !permit.Matches(grant, child) {
 		return kernel.ErrExecutionConflict
 	}

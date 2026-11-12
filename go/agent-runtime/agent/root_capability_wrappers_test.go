@@ -11,7 +11,23 @@ func (s *modelInvocationFaultStore) BeginOwnedPhysicalExecution(ctx context.Cont
 	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, g, l, p)
 }
 func (s *modelInvocationFaultStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
+	s.mu.Lock()
+	fail := !s.failed && mutationHasEvent(m.Events, s.eventType)
+	if fail {
+		s.failed = true
+	}
+	s.mu.Unlock()
+	if fail && !s.afterCommit {
+		return kernel.Snapshot{}, errInjectedModelInvocationCrash
+	}
+	out, err := s.Store.(kernel.OwnedPhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
+	if err != nil {
+		return out, err
+	}
+	if fail {
+		return kernel.Snapshot{}, errInjectedModelInvocationCrash
+	}
+	return out, nil
 }
 func (s *modelInvocationFaultStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
 	return s.Store.(kernel.ChildExecutionStore).BeginChildExecution(ctx, g)
@@ -118,4 +134,25 @@ func (s *modelInvocationFaultStore) ApplyExecution(ctx context.Context, l kernel
 		return kernel.Snapshot{}, errInjectedModelInvocationCrash
 	}
 	return out, nil
+}
+
+func (s *modelInvocationFaultStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).RecordOwnedPhysicalCallbackReturn(ctx, g, r, o, p)
+}
+func (s *modelInvocationFaultStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).LookupOwnedPhysicalCallbackReturn(ctx, g)
+}
+
+func (s *lostCreateResponseStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).RecordOwnedPhysicalCallbackReturn(ctx, g, r, o, p)
+}
+func (s *lostCreateResponseStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).LookupOwnedPhysicalCallbackReturn(ctx, g)
+}
+
+func (s *stealerOnCreateStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).RecordOwnedPhysicalCallbackReturn(ctx, g, r, o, p)
+}
+func (s *stealerOnCreateStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).LookupOwnedPhysicalCallbackReturn(ctx, g)
 }

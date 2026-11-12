@@ -14,30 +14,19 @@ import (
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 )
 
-// interleavingWaitLoader simulates an unrelated persisted revision between
-// Dispatch's load and the Agent's generation-guarded resume. The returned
-// snapshot is deliberately the old one; all writes use the real Kernel CAS.
+// interleavingWaitLoader injects read-admission conflicts. Unknown deadline
+// recovery is read-only: these are NOT fabricated writes or receipt CAS proof.
 type interleavingWaitLoader struct {
 	runtime *kernel.Runtime
 	bumps   int
 }
 
 func (loader *interleavingWaitLoader) Load(ctx context.Context, runID string) (kernel.Snapshot, error) {
-	snapshot, err := loader.runtime.Load(ctx, runID)
-	if err != nil {
-		return snapshot, err
-	}
-	if loader.bumps > 0 && snapshot.Run.Status == kernel.RunStatusRunning {
+	if loader.bumps > 0 {
 		loader.bumps--
-		_, err = loader.runtime.Apply(ctx, runID, snapshot.Run.Revision, kernel.Mutation{
-			Status: kernel.RunStatusRunning, State: snapshot.State, Checkpoint: snapshot.Checkpoint,
-			Events: []kernel.EventDraft{{Type: "test.unrelated_revision_without_wakeup"}},
-		})
-		if err != nil {
-			return kernel.Snapshot{}, err
-		}
+		return kernel.Snapshot{}, kernel.ErrConflict
 	}
-	return snapshot, nil
+	return loader.runtime.Load(ctx, runID)
 }
 
 func startInterleavedWait(t *testing.T, fixture *durableWaitFixture) (kernel.Snapshot, uint64) {
@@ -74,13 +63,16 @@ func newInterleavedDispatcher(t *testing.T, fixture *durableWaitFixture, loader 
 	return dispatcher
 }
 
-func TestExternalWaitDeadlineSurvivesCASConflictDuringDispatch(t *testing.T) {
+func TestExternalWaitDeadlineSurvivesReadConflictRedelivery(t *testing.T) {
 	fixture := newDurableWaitFixture(t)
 	waiting, generation := startInterleavedWait(t, fixture)
 	fixture.clock.now = fixture.clock.now.Add(2 * time.Minute)
 	loader := &interleavingWaitLoader{runtime: fixture.runtime, bumps: 1}
 	dispatcher := newInterleavedDispatcher(t, fixture, loader)
 	payload := interleavedWaitPayload(waiting, generation, continuation.TriggerToolWaitDeadline)
+	if err := dispatcher.Dispatch(t.Context(), payload); !errors.Is(err, kernel.ErrConflict) {
+		t.Fatalf("read conflict must NACK: %v", err)
+	}
 	if err := dispatcher.Dispatch(t.Context(), payload); !errors.Is(err, agent.ErrToolOutcomeUnknown) {
 		t.Fatalf("unverified deadline must NACK rather than grant another Tool attempt: %v", err)
 	}
@@ -112,11 +104,15 @@ func TestExternalResultReadySurvivesCASConflictDuringDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	loader := &interleavingWaitLoader{runtime: fixture.runtime, bumps: 1}
+	fixture.store.recoveryConflicts = 1
+	loader := &interleavingWaitLoader{runtime: fixture.runtime}
 	dispatcher := newInterleavedDispatcher(t, fixture, loader)
 	payload := interleavedWaitPayload(waiting, generation, continuation.TriggerToolResultReady)
 	if err := dispatcher.Dispatch(t.Context(), payload); err != nil {
 		t.Fatal(err)
+	}
+	if fixture.store.recoveryFaults != 1 {
+		t.Fatalf("actual receipt CAS fault not reached: %d", fixture.store.recoveryFaults)
 	}
 	actual, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
 	if err != nil || actual.Run.Status != kernel.RunStatusCompleted {
@@ -138,7 +134,7 @@ func TestExternalResultReadySurvivesCASConflictDuringDispatch(t *testing.T) {
 	}
 }
 
-func TestExternalWaitCASConflictExhaustionMustNackAndRetry(t *testing.T) {
+func TestExternalWaitReadConflictMustNackAndRetry(t *testing.T) {
 	fixture := newDurableWaitFixture(t)
 	waiting, generation := startInterleavedWait(t, fixture)
 	fixture.clock.now = fixture.clock.now.Add(2 * time.Minute)
@@ -167,7 +163,7 @@ func TestExternalWaitCASConflictExhaustionMustNackAndRetry(t *testing.T) {
 
 // Exercise the real queue consumer: unresolved CAS contention must NACK its
 // leased Job, after which the identical generation can be reclaimed and ACKed.
-func TestExternalWaitCASConflictNacksRealQueueBeforeRecovery(t *testing.T) {
+func TestExternalWaitReadConflictNacksRealQueueBeforeRecovery(t *testing.T) {
 	fixture := newDurableWaitFixture(t)
 	waiting, generation := startInterleavedWait(t, fixture)
 	fixture.clock.now = fixture.clock.now.Add(2 * time.Minute)

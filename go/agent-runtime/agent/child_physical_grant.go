@@ -72,6 +72,7 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, 
 	if finishErr := executionRuntime.FinishChildExecution(settlementCtx, grant, settledProof); finishErr != nil {
 		return result, errors.Join(kernel.ErrChildExecutionBusy, finishErr)
 	}
+	recordPhysicalObservation(ctx, runID, PhysicalCallSettled)
 	return result, physicalErr
 }
 

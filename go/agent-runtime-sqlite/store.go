@@ -354,6 +354,10 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 		if original != recovery.grant || marked != 0 || !recovery.permit.Matches(original, current, mutation) {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
+		completion, completionErr := loadOwnedCallbackReturn(ctx, tx, original)
+		if completionErr != nil || completion.HostCompleted == recovery.permit.IsModelEvidence() {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
 	}
 	// A Root Workflow's own physical Grant fences ALL concurrent writes,
 	// not just Cancel. Its scoped first-party Kernel Runtime provides one

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -47,8 +48,9 @@ func (middleware *holdModelMiddleware) Model(ctx context.Context, req model.Requ
 }
 
 // A queued/blocked ModelMiddleware can outlast the persisted claim lease.
-// Once a new worker has claimed and completed that invocation, the old worker
-// must not send a second physical Provider request with the same identity.
+// A clock-only contender must not replace the still-active physical owner.
+// Even when next rejects before Generate, an arbitrary middleware callback
+// cannot prove its own external outcome; the scope must remain unknown.
 func TestExpiredModelInvocationClaimCannotDispatchAfterTakeover(t *testing.T) {
 	clock := newModelClaimClock()
 	store := memory.NewStore()
@@ -92,9 +94,13 @@ func TestExpiredModelInvocationClaimCannotDispatchAfterTakeover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := takeover.Resume(t.Context(), claimed.Run.ID, claimed.Run.Revision)
-	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
-		t.Fatalf("new owner failed to complete: status=%s err=%v", completed.Run.Status, err)
+	denied, err := takeover.Resume(t.Context(), claimed.Run.ID, claimed.Run.Revision)
+	if !errors.Is(err, agent.ErrRootOutcomeUnknown) && !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("active original callback lost physical scope: %v %+v", err, denied.Run)
+	}
+	unchanged, loadErr := runtime.Load(t.Context(), claimed.Run.ID)
+	if loadErr != nil || !reflect.DeepEqual(unchanged, claimed) || len(provider.callsCopy()) != 0 {
+		t.Fatal("clock-only contender changed source or sent provider request")
 	}
 	unblock()
 	select {
@@ -105,9 +111,22 @@ func TestExpiredModelInvocationClaimCannotDispatchAfterTakeover(t *testing.T) {
 	case <-time.After(4 * time.Second):
 		t.Fatal("old owner remained blocked after release")
 	}
+	if len(provider.callsCopy()) != 0 {
+		t.Fatal("expired original claim reached provider before no-effect exit")
+	}
+	restored, err := runtime.Load(t.Context(), claimed.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = takeover.Resume(t.Context(), restored.Run.ID, restored.Run.Revision)
+	after, loadErr := runtime.Load(t.Context(), restored.Run.ID)
 	calls := provider.callsCopy()
-	if len(calls) != 1 {
-		t.Fatalf("expired claim caused %d physical Provider deliveries: %+v", len(calls), calls)
+	if !errors.Is(err, agent.ErrRootOutcomeUnknown) || len(calls) != 0 || loadErr != nil || !reflect.DeepEqual(restored, after) {
+		t.Fatalf("middleware outcome was incorrectly treated as no-effect: %v %+v", err, calls)
+	}
+	restoredView := mustModelInvocationView(t, restored)
+	if len(restoredView.ModelInvocations) != 1 || restoredView.ModelInvocations[0].ID != view.ModelInvocations[0].ID {
+		t.Fatal("retained unknown changed original invocation identity")
 	}
 }
 
@@ -265,8 +284,8 @@ func (catalog *pausedHostedCatalog) Resolve(ctx context.Context, key, _ string) 
 
 // Hosted Tool re-resolution can block *after* the original claim check.
 // That asynchronous pause is still before the physical Model call. A new
-// owner can take over during it, so claim/epoch must be checked after the
-// Catalog guard, not before it.
+// owner must remain blocked during it. After that callback really exits,
+// claim/epoch must still be checked after the Catalog guard before sending.
 func TestSlowHostedCatalogRecheckCannotDispatchStaleClaim(t *testing.T) {
 	clock := newModelClaimClock()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: clock})
@@ -312,8 +331,12 @@ func TestSlowHostedCatalogRecheckCannotDispatchStaleClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, err := newRunner.Resume(t.Context(), claimed.Run.ID, claimed.Run.Revision)
-	if err != nil || current.Run.Status != kernel.RunStatusCompleted {
-		t.Fatalf("new owner: %+v err=%v", current.Run, err)
+	if !errors.Is(err, agent.ErrRootOutcomeUnknown) && !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("active catalog callback allowed takeover: %+v err=%v", current.Run, err)
+	}
+	unchanged, loadErr := runtime.Load(t.Context(), claimed.Run.ID)
+	if loadErr != nil || !reflect.DeepEqual(unchanged, claimed) || len(provider.callsCopy()) != 0 {
+		t.Fatal("active catalog contender changed source or sent")
 	}
 	unblock()
 	select {
@@ -324,8 +347,17 @@ func TestSlowHostedCatalogRecheckCannotDispatchStaleClaim(t *testing.T) {
 	case <-time.After(4 * time.Second):
 		t.Fatal("former worker blocked after Catalog release")
 	}
-	if calls := provider.callsCopy(); len(calls) != 1 {
-		t.Fatalf("stale Catalog path physically dispatched again: %+v", calls)
+	if len(provider.callsCopy()) != 0 {
+		t.Fatal("stale catalog claim was physically sent")
+	}
+	restored, err := runtime.Load(t.Context(), claimed.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := newRunner.Resume(t.Context(), restored.Run.ID, restored.Run.Revision)
+	calls := provider.callsCopy()
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || len(calls) != 1 || calls[0].InvocationID != view.ModelInvocations[0].ID {
+		t.Fatalf("catalog no-send exit did not preserve recoverable identity: %v %+v", err, calls)
 	}
 }
 

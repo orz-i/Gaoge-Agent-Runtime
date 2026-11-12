@@ -64,9 +64,18 @@ an uncertain physical outcome. No background recovery worker is started.
 A completed receipt may be consumed without reissuing the original invocation.
 Root Host errors retain the original scope; TTL cannot manufacture completion.
 `ReconcileRootPhysicalExecution` can retire a durable completion marker or an
-original persisted callback-returned fact with all physical intents settled.
-A clean snapshot alone is insufficient. Terminal completion without its durable
-marker remains unknown. This is not production multi-worker certification.
+original grant-bound callback-returned completion record with all physical intents settled.
+A clean snapshot alone is insufficient. A Run status alone never proves callback completion; the original opaque
+completion record or durable settlement marker is required. This is not production multi-worker certification.
+
+An explicitly configured `ModelOutcomeVerifier` may read the original settled
+Model receipt without invoking middleware or generating another response. If
+the original Host callback completed, receipt recovery can retire its scope.
+If that Host callback remains unknown, complete authoritative response evidence
+may be saved without consuming it: the original scope, errors, messages, Tool
+state and SDK budget usage stay unchanged. Billing-only evidence cannot promote
+a pending invocation to completed. No wakeup or further execution is authorized
+by this evidence-only write.
 
 A native Tool writes a durable dispatch intent containing the stable
 Call ID **before** executing. The returned native receipt must match

@@ -354,6 +354,10 @@ var schemaDDL = []string{
 		execution_epoch INTEGER NOT NULL DEFAULT 0,
 		admission_source_hash TEXT NOT NULL DEFAULT '',
 		admission_operation TEXT NOT NULL DEFAULT '',
+		callback_return_revision INTEGER NOT NULL DEFAULT 0,
+		callback_return_source_hash TEXT NOT NULL DEFAULT '',
+		callback_host_completed INTEGER NOT NULL DEFAULT 0,
+		callback_lease_owned INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY(grant_id,parent_run_id)
 	)`,
 	`CREATE INDEX runtime_child_grants_parent ON runtime_child_effect_grants(parent_run_id,grant_id)`,

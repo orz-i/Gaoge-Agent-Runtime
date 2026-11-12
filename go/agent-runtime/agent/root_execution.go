@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sync/atomic"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
@@ -15,12 +16,12 @@ import (
 var ErrModelOutcomeUnknown = errors.New("agent external model result is uncertain")
 var ErrRootOutcomeUnknown = errors.New("agent original root callback result is uncertain")
 
-type rootSegmentState struct {
-	GrantID          string `json:"grantID"`
-	LeaseOwned       bool   `json:"leaseOwned,omitempty"`
-	Operation        string `json:"operation"`
-	CallbackReturned bool   `json:"callbackReturned,omitempty"`
-	HostCompleted    bool   `json:"hostCompleted,omitempty"`
+type rootCallbackState struct{ unknown atomic.Bool }
+
+func (runner *Runner) noteRootCallbackFailure(err error) {
+	if err != nil && runner.rootCallbacks != nil {
+		runner.rootCallbacks.unknown.Store(true)
+	}
 }
 
 // defaultRunExecution preserves optional configuration, not unowned dispatch.
@@ -133,14 +134,9 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 	proof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "agent_owned_physical_admission", lease.LeaseID, current.State, current.Checkpoint)
 	grant, err := bound.BeginOwnedPhysicalExecution(ctx, current.Run.ID, current.Run.Revision, proof, operation)
 	if err != nil {
-		// ACK loss cannot authorize a second admission or release an existing scope.
-		existing, lookupErr := bound.LookupChildExecution(context.WithoutCancel(ctx), current.Run.ID)
-		if lookupErr == nil && existing.ExecutionOwnerID == lease.OwnerID && existing.ExecutionLeaseID == lease.LeaseID && existing.ExecutionEpoch == lease.Epoch && existing.ExpectedRevision == current.Run.Revision && existing.AdmissionOperation == operation {
-			grant = existing
-		} else {
-			return abort(err)
-		}
+		return abort(err)
 	}
+
 	ownerProof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "agent_physical_owner", grant.ID, current.State, current.Checkpoint)
 	scopedRT, err := bound.WithPhysicalGrant(ctx, grant, ownerProof)
 	if err != nil {
@@ -150,6 +146,7 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 	scoped.runtime = scopedRT
 	scoped.activeRunLease = &lease
 	scoped.activeRootGrant = &grant
+	scoped.rootCallbacks = &rootCallbackState{}
 	scoped.externalRunLease = external
 	result, callErr := execute(ctx, &scoped, current)
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
@@ -158,38 +155,49 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 	if loadErr != nil {
 		return result, errors.Join(callErr, ErrRootOutcomeUnknown, loadErr)
 	}
-	hostComplete := callErr == nil || !runner.runMiddlewareConfigured
-	// Persist callback-returned only while the Run remains writable. Terminal
-	// clean completion is recorded by Mark; absence of that marker remains unknown.
-	if latest.Run.Status == kernel.RunStatusRunning {
-		lastState, decodeErr := decodeState(latest.State)
-		if decodeErr == nil {
-			lastState.RootSegment = &rootSegmentState{GrantID: grant.ID, Operation: operation, LeaseOwned: !external}
-			lastState.RootSegment.CallbackReturned = true
-			lastState.RootSegment.HostCompleted = hostComplete
-			value, encodeErr := encodeState(lastState)
-			if encodeErr == nil {
-				updated, applyErr := scopedRT.Apply(cleanup, latest.Run.ID, latest.Run.Revision, kernel.Mutation{Status: latest.Run.Status, State: value, Checkpoint: latest.Checkpoint})
-				if applyErr != nil {
-					return latest, errors.Join(callErr, ErrRootOutcomeUnknown, applyErr)
-				}
-				latest = updated
-			}
+	hostComplete := (callErr == nil || !runner.runMiddlewareConfigured) && !scoped.rootCallbacks.unknown.Load()
+	settled := hostComplete && knownRootPhysicalSettlement(latest)
+	if !settled {
+		outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
+		payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
+		returned := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_callback_return", grant.ID, payload, nil)
+		if recordErr := bound.RecordOwnedPhysicalCallbackReturn(cleanup, grant, latest.Run.Revision, outcome, returned); recordErr != nil {
+			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, recordErr)
 		}
-	}
-	if !hostComplete || !knownRootPhysicalSettlement(latest) {
-		// A durable pending descriptor is a legitimate synchronous result, not
-		// a settled physical scope. Keep the barrier without changing nil into
-		// a fatal error; subsequent Resume still cannot redispatch it.
 		state, stateErr := decodeState(latest.State)
-		if callErr == nil && hostComplete && stateErr == nil && (state.ToolWait != nil || len(state.DeferredChildren) != 0) {
+		if callErr == nil && hostComplete && stateErr == nil && (state.ToolDispatchID != "" || len(state.DeferredChildren) != 0) {
+			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)
 			return latest, nil
 		}
 		return latest, errors.Join(callErr, ErrRootOutcomeUnknown)
 	}
 	proof = featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_physical_settled", grant.ID, latest.State, latest.Checkpoint)
 	if err = bound.MarkChildExecutionSettled(cleanup, grant, proof); err != nil {
-		return latest, errors.Join(callErr, ErrRootOutcomeUnknown, err)
+		// Mark may have committed before its ACK was lost. Finish accepts only
+		// that exact marker; it does not infer settlement from clean state.
+		if finishErr := bound.FinishChildExecution(cleanup, grant, proof); finishErr == nil {
+			if !external {
+				if releaseErr := bound.ReleaseExecution(cleanup, lease); releaseErr != nil {
+					return latest, errors.Join(callErr, releaseErr)
+				}
+			}
+			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallSettled)
+			return latest, callErr
+		}
+		// The original callback really returned, even if its native lease
+		// expired meanwhile. Record that fact without mutating the Run or
+		// minting another physical owner, then use the separate recovery seam.
+		outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
+		payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
+		returned := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_callback_return", grant.ID, payload, nil)
+		if recordErr := bound.RecordOwnedPhysicalCallbackReturn(cleanup, grant, latest.Run.Revision, outcome, returned); recordErr != nil {
+			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, err, recordErr)
+		}
+		if recoverErr := runner.ReconcileRootPhysicalExecution(cleanup, latest.Run.ID); recoverErr != nil {
+			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, err, recoverErr)
+		}
+		recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallSettled)
+		return latest, callErr
 	}
 	if err = bound.FinishChildExecution(cleanup, grant, proof); err != nil {
 		return latest, errors.Join(callErr, ErrRootOutcomeUnknown, err)
@@ -199,6 +207,7 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 			return latest, errors.Join(callErr, err)
 		}
 	}
+	recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallSettled)
 	return latest, callErr
 }
 
@@ -222,23 +231,20 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 	if grant.ExecutionLeaseID == "" || !knownRootPhysicalSettlement(snapshot) {
 		return ErrRootOutcomeUnknown
 	}
-	state, decodeErr := decodeState(snapshot.State)
-	if decodeErr != nil {
-		return decodeErr
-	}
-	// An original, persisted callback-returned fact permits receipt recovery;
-	// a clean snapshot or a previous segment's fact never does.
-	if state.RootSegment != nil && state.RootSegment.GrantID == grant.ID && state.RootSegment.CallbackReturned && state.RootSegment.HostCompleted {
+	completion, completionErr := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	if completionErr == nil && completion.HostCompleted {
 		recovered := featurecontrol.Seal(runID, snapshot.Run.Revision, "agent_owned_physical_recovered", grant.ID, snapshot.State, snapshot.Checkpoint)
 		if err = runner.runtime.MarkOwnedPhysicalRecovered(ctx, grant, recovered); err != nil {
 			return errors.Join(ErrRootOutcomeUnknown, err)
 		}
+	} else if completionErr != nil && !errors.Is(completionErr, kernel.ErrNotFound) {
+		return completionErr
 	}
 	proof := featurecontrol.Seal(runID, snapshot.Run.Revision, "agent_owned_physical_settled", grant.ID, snapshot.State, snapshot.Checkpoint)
 	if err = runner.runtime.FinishChildExecution(ctx, grant, proof); err != nil {
 		return errors.Join(ErrRootOutcomeUnknown, err)
 	}
-	if state.RootSegment != nil && state.RootSegment.GrantID == grant.ID && state.RootSegment.LeaseOwned {
+	if completionErr == nil && completion.LeaseOwned {
 		lease := kernel.ExecutionLease{RunID: grant.ChildRunID, OwnerID: grant.ExecutionOwnerID, LeaseID: grant.ExecutionLeaseID, Epoch: grant.ExecutionEpoch, ExpiresAt: time.Now().UTC()}
 		if err = runner.runtime.ReleaseExecution(ctx, lease); err != nil && !errors.Is(err, kernel.ErrExecutionConflict) {
 			return err

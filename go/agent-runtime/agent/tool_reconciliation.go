@@ -47,6 +47,16 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 	if snapshot.Run.Revision != expectedRevision {
 		return snapshot, kernel.ErrConflict
 	}
+	if snapshot.Run.ParentRunID == "" && state.ToolDispatchID == "" && len(state.DeferredChildren) > 0 && state.DeferredChildren[0].Call.ID == callID {
+		grant, grantErr := runner.runtime.LookupChildExecution(ctx, runID)
+		if grantErr != nil {
+			return snapshot, grantErr
+		}
+		snapshot, state, err = runner.stageRootDeferredReceipt(ctx, snapshot, state, grant)
+		if err != nil {
+			return snapshot, err
+		}
+	}
 	call, exists := nextPendingCall(state)
 	if !exists || snapshot.Run.Status != kernel.RunStatusRunning ||
 		state.ToolDispatchID != callID || call.ID != callID {

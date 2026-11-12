@@ -225,13 +225,12 @@ func TestNativeRunExecutionAcrossProcesses(t *testing.T) {
 // loaded its candidate Snapshot, then persists an unrelated legal CAS under
 // the just-issued lease. The caller now holds a VALID epoch but STALE revision.
 type auditClaimAdvancesRevision struct {
-	kernel.Store
-	kernel.ExecutionStore
+	*sqlite.Store
 	did bool
 }
 
 func (w *auditClaimAdvancesRevision) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
-	lease, err := w.ExecutionStore.AcquireExecution(ctx, req)
+	lease, err := w.Store.AcquireExecution(ctx, req)
 	if err != nil {
 		return lease, err
 	}
@@ -296,7 +295,7 @@ func TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrapper := &auditClaimAdvancesRevision{Store: store, ExecutionStore: store}
+	wrapper := &auditClaimAdvancesRevision{Store: store}
 	wrappedRT, err := kernel.New(kernel.Dependencies{Store: wrapper})
 	if err != nil {
 		t.Fatal(err)

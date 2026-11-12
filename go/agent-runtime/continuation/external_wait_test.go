@@ -33,7 +33,7 @@ func (client *durableWaitModel) Generate(context.Context, model.Request) (model.
 }
 
 type durableWaitFixture struct {
-	store      *memory.Store
+	store      *durableWaitStore
 	runtime    *kernel.Runtime
 	clock      *durableWaitClock
 	agent      *agent.Runner
@@ -49,7 +49,7 @@ type durableWaitFixture struct {
 
 func newDurableWaitFixture(t *testing.T) *durableWaitFixture {
 	t.Helper()
-	fixture := &durableWaitFixture{store: memory.NewStore(), clock: &durableWaitClock{now: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)}, model: &durableWaitModel{}}
+	fixture := &durableWaitFixture{store: &durableWaitStore{Store: memory.NewStore()}, clock: &durableWaitClock{now: time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)}, model: &durableWaitModel{}}
 	var err error
 	fixture.runtime, err = kernel.New(kernel.Dependencies{Store: fixture.store, Clock: fixture.clock})
 	if err != nil {
@@ -162,7 +162,12 @@ func TestExternalWaitDeadlineSurvivesRevisionAndRejectsObsoleteGeneration(t *tes
 	if staleErr != nil || unchanged.Run.Revision != waiting.Run.Revision || fixture.executions != 1 {
 		t.Fatalf("obsolete generation dispatched work: %#v, %v", unchanged.Run, staleErr)
 	}
-	newer, err := fixture.runtime.Apply(t.Context(), waiting.Run.ID, waiting.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: waiting.State, Events: []kernel.EventDraft{{Type: "test.unrelated_fact"}}})
+	// A source-bound ready notification, unlike ordinary Apply, is allowed
+	// to advance this owned wait without granting a second physical attempt.
+	newer, err := fixture.agent.NotifyExternalToolResultReady(t.Context(), agent.ExternalToolResultSignal{
+		RunID: waiting.Run.ID, CallID: "wait-call", OperationID: "wait-operation",
+		InputDigest: strings.Repeat("c", 64), SignalID: "unverified-ready-fact",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,4 +444,20 @@ func TestNativeUnknownExternalOutcomeAfterDeadlineIsDiagnosable(t *testing.T) {
 		!errors.Is(directErr, agent.ErrToolOutcomeOverdue) || effects != 1 {
 		t.Fatalf("direct native Resume lost overdue diagnosis or replayed Tool: %v effects=%d", directErr, effects)
 	}
+}
+
+// Faithfully exposes all Memory ports; injects only the real receipt recovery CAS.
+type durableWaitStore struct {
+	*memory.Store
+	recoveryConflicts int
+	recoveryFaults    int
+}
+
+func (s *durableWaitStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, proof kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
+	if s.recoveryConflicts > 0 {
+		s.recoveryConflicts--
+		s.recoveryFaults++
+		return kernel.Snapshot{}, kernel.ErrConflict
+	}
+	return s.Store.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, proof)
 }

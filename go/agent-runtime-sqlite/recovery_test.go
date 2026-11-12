@@ -54,7 +54,7 @@ func appendMarker(path, value string) error {
 }
 
 type failAfterCommitStore struct {
-	kernel.Store
+	*sqlite.Store
 	point string
 }
 
@@ -71,6 +71,18 @@ func (s failAfterCommitStore) Apply(ctx context.Context, id string, rev uint64, 
 	if err != nil {
 		return snap, err
 	}
+	return s.afterApply(snap, m), nil
+}
+
+func (s failAfterCommitStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+	snap, err := s.Store.ApplyExecution(ctx, lease, rev, m)
+	if err != nil {
+		return snap, err
+	}
+	return s.afterApply(snap, m), nil
+}
+
+func (s failAfterCommitStore) afterApply(snap kernel.Snapshot, m kernel.StoreMutation) kernel.Snapshot {
 	for _, event := range m.Events {
 		if s.point == "model_receipt" && event.Type == "agent.model_invocation.completed" {
 			os.Exit(76) // Crash after durable model receipt, before consumption.
@@ -79,7 +91,7 @@ func (s failAfterCommitStore) Apply(ctx context.Context, id string, rev uint64, 
 			os.Exit(77) // Crash after Tool receipt commit, before next step.
 		}
 	}
-	return snap, err
+	return snap
 }
 
 // TestAgentCrashSubprocess runs in an isolated OS process. os.Exit simulates

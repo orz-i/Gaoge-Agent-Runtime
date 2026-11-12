@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +28,39 @@ func RunEA1RootAgentDefaultAdmission(t *testing.T, factory func(*testing.T) (ker
 	runEA1RootAgentAdmission(t, factory, true)
 }
 func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store), automatic bool) {
+
+	if automatic {
+		t.Run("P0/default-generated-id", func(t *testing.T) {
+			backing, peer := factory(t)
+			wrapped := ea1AgentAdmissionWrap(t, backing)
+			rt := ea1StartRuntime(t, wrapped)
+			observer := ea1StartRuntime(t, peer)
+			m := &ea1AdmissionModel{}
+			mw := &ea1AdmissionMiddleware{}
+			runner := ea1AdmissionConfiguredRunner(t, rt, m, mw, true)
+			req := ea1AdmissionRequest()
+			req.ID = ""
+			var createdID string
+			wrapped.afterCreate = func(_ context.Context, s kernel.Snapshot) error { createdID = s.Run.ID; return nil }
+			mw.before = func(ctx context.Context) error {
+				g, e := observer.LookupChildExecution(ctx, createdID)
+				if e != nil || g.ChildRunID != createdID || g.ExecutionLeaseID != wrapped.acquired.LeaseID {
+					t.Fatalf("automatic ID was not durably admitted: %v", e)
+				}
+				return nil
+			}
+			result, e := runner.StartRun(t.Context(), req)
+			if e != nil || result.Run.ID == "" || result.Run.ID != createdID || result.Run.Status != kernel.RunStatusCompleted || m.calls.Load() != 1 || mw.calls.Load() != 1 {
+				t.Fatalf("default automatic ID path: %v", e)
+			}
+			req.ID = createdID
+			if !runner.VerifyFrozenStartRequest(result, req) {
+				t.Fatal("automatic ID changed original source")
+			}
+			ea1CompBarrierUnchanged(t, observer, result)
+		})
+	}
+
 	t.Run("P0/origin-and-claim", func(t *testing.T) {
 		backing, peer := factory(t)
 		wrapped := ea1AgentAdmissionWrap(t, backing)
@@ -37,6 +71,9 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		runner := ea1AdmissionConfiguredRunner(t, rt, m, middleware, automatic)
 		req := ea1AdmissionRequest()
 		for _, vector := range []string{"missing-id", "empty-goal", "child-origin-on-root"} {
+			if automatic && vector == "missing-id" {
+				continue
+			}
 			bad := req
 			bad.ID = "invalid-" + vector
 			switch vector {
@@ -207,6 +244,113 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		ea1CompBarrierUnchanged(t, observer, final)
 	})
 
+	t.Run("P0/same-external-lease-two-callers", func(t *testing.T) {
+		backing, peer := factory(t)
+		rt := ea1StartRuntime(t, backing)
+		observer := ea1StartRuntime(t, peer)
+		m := &ea1AdmissionModel{}
+		setup, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m})
+		if e != nil {
+			t.Fatal(e)
+		}
+		req := ea1AdmissionRequest()
+		prepared, e := setup.PrepareRun(t.Context(), req)
+		if e != nil {
+			t.Fatal(e)
+		}
+		lease, e := observer.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: req.ID, OwnerID: "shared-external-original", LeaseDuration: 3 * time.Minute})
+		if e != nil {
+			t.Fatal(e)
+		}
+		a, b := ea1AgentAdmissionWrap(t, backing), ea1AgentAdmissionWrap(t, peer)
+		gate := make(chan struct{})
+		release := make(chan struct{})
+		hostEntered := make(chan struct{})
+		var enterOnce sync.Once
+		var ready atomic.Int32
+		before := func(ctx context.Context, _ kernel.ChildExecutionGrant) error {
+			if ready.Add(1) == 2 {
+				close(gate)
+			}
+			select {
+			case <-gate:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		a.beforeOwned = before
+		b.beforeOwned = before
+		mw := &ea1AdmissionMiddleware{before: func(ctx context.Context) error {
+			enterOnce.Do(func() { close(hostEntered) })
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}}
+		type outcome struct {
+			s kernel.Snapshot
+			e error
+		}
+		done := make(chan outcome, 2)
+		for _, store := range []*ea1AgentAdmissionStore{a, b} {
+			bound, err := ea1StartRuntime(t, store).WithExecution(lease)
+			if err != nil {
+				t.Fatal(err)
+			}
+			owner := ea1AdmissionConfiguredRunner(t, bound, m, mw, automatic)
+			go func() { s, err := owner.Resume(t.Context(), req.ID, prepared.Run.Revision); done <- outcome{s, err} }()
+		}
+		results := []outcome{}
+		select {
+		case loser := <-done:
+			results = append(results, loser)
+			if !errors.Is(loser.e, kernel.ErrChildExecutionBusy) && !errors.Is(loser.e, kernel.ErrExecutionConflict) {
+				t.Errorf("competing same-lease caller not rejected: %v", loser.e)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("same-lease callers failed to elect one scope; possibly both entered Host")
+		}
+		select {
+		case <-hostEntered:
+		case <-time.After(5 * time.Second):
+			t.Error("elected owner did not enter Host")
+		}
+		if mw.calls.Load() != 1 || m.calls.Load() != 0 {
+			t.Errorf("before winner release Host=%d Model=%d", mw.calls.Load(), m.calls.Load())
+		}
+		close(release)
+		for len(results) < 2 {
+			select {
+			case r := <-done:
+				results = append(results, r)
+			case <-time.After(5 * time.Second):
+				t.Fatal("same-lease caller did not return")
+			}
+		}
+		wins := 0
+		for _, r := range results {
+			if r.e == nil {
+				wins++
+				if r.s.Run.Status != kernel.RunStatusCompleted {
+					t.Fatal("winner incomplete")
+				}
+				ea1CompBarrierUnchanged(t, observer, r.s)
+			}
+		}
+		if wins != 1 || mw.calls.Load() != 1 || m.calls.Load() != 1 {
+			t.Fatalf("same-lease duplicated original callback: wins=%d Host=%d Model=%d", wins, mw.calls.Load(), m.calls.Load())
+		}
+		if a.acquireCalls+b.acquireCalls+a.releaseCalls+b.releaseCalls+a.renewCalls+b.renewCalls != 0 {
+			t.Fatal("same-lease callers changed external ownership")
+		}
+		if e = observer.ReleaseExecution(t.Context(), lease); e != nil {
+			t.Fatal(e)
+		}
+	})
+
 	for _, phase := range []string{"middleware-before-physical", "owned-admission-before-model"} {
 		t.Run("P1/"+phase, func(t *testing.T) {
 			backing, peer := factory(t)
@@ -310,10 +454,6 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 func ea1AdmissionRequest() agent.StartRequest {
 	return agent.StartRequest{ID: "native-original", RequestID: "original-effect", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "original-thread"}, Goal: "original bounded task", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 }
-func ea1AdmissionRunner(t *testing.T, rt *kernel.Runtime, m model.Client, mw plugin.RunMiddleware) *agent.Runner {
-	t.Helper()
-	return ea1AdmissionConfiguredRunner(t, rt, m, mw, false)
-}
 func ea1AdmissionConfiguredRunner(t *testing.T, rt *kernel.Runtime, m model.Client, mw plugin.RunMiddleware, automatic bool) *agent.Runner {
 	t.Helper()
 	var execution *agent.RunExecution
@@ -364,6 +504,7 @@ type ea1AgentAdmissionStore struct {
 	afterCreate  func(context.Context, kernel.Snapshot) error
 	afterAcquire func(context.Context, kernel.ExecutionLease) error
 	afterOwned   func(context.Context, kernel.ChildExecutionGrant) error
+	beforeOwned  func(context.Context, kernel.ChildExecutionGrant) error
 }
 
 func ea1AgentAdmissionWrap(t *testing.T, s kernel.Store) *ea1AgentAdmissionStore {
@@ -411,6 +552,11 @@ func (s *ea1AgentAdmissionStore) AcquireExecution(ctx context.Context, r kernel.
 }
 
 func (s *ea1AgentAdmissionStore) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, a kernel.OwnedPhysicalAdmission) error {
+	if s.beforeOwned != nil {
+		if e := s.beforeOwned(ctx, g); e != nil {
+			return e
+		}
+	}
 	e := s.OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution(ctx, g, l, a)
 	if e == nil && s.afterOwned != nil {
 		return s.afterOwned(ctx, g)

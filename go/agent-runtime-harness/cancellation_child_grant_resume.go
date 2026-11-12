@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -121,4 +122,47 @@ func (runner *Runner) resumeDeferredChildGrantCancellation(
 		return Item{}, ErrConflict
 	}
 	return candidate, nil
+}
+
+// cleanupReturnedRootChildren uses the already elected cancellation and frozen
+// child routes. Eligibility is an observation, never authority to dispatch:
+// the original cancellation intent and cancelled shared budget supply that
+// authority. Unknown or still-running Host callbacks cannot enter this path.
+func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn, intent Item, invocation Invocation, reason string) error {
+	native, ok := runner.agent.(*agent.Runner)
+	if !ok || invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+		return ErrConflict
+	}
+	current, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+	if err != nil {
+		return err
+	}
+	if err = validateRootRuntimeOwnership(invocation, current); err != nil {
+		return err
+	}
+	ledger, err := runner.loadTurnBudget(ctx, turn)
+	if err != nil || ledger == nil || !ledger.Cancelled {
+		return errors.Join(ErrConflict, err)
+	}
+	scope, err := native.RootDeferredCleanupEligibility(ctx, current.Run.ID, current.Run.Revision)
+	if err != nil || !scope.Valid() {
+		return errors.Join(ErrConflict, err)
+	}
+	// Persist the same-election recovery witness BEFORE any remote cleanup.
+	if err = runner.recordDeferredChildGrantCancellation(ctx, turn, intent, current.Run.ID); err != nil {
+		return err
+	}
+	if _, err = runner.cancelTurnDescendants(ctx, turn.ID, invocation.ID, current.Run.ID, reason); err != nil {
+		return err
+	}
+	latest, err := runner.runtime.Load(ctx, current.Run.ID)
+	if err != nil {
+		return err
+	}
+	after, err := native.RootDeferredCleanupEligibility(ctx, latest.Run.ID, latest.Run.Revision)
+	if err != nil || !scope.Matches(after) {
+		return errors.Join(ErrConflict, err)
+	}
+	_, err = native.ReconcileRootDeferredChildren(ctx, latest.Run.ID, latest.Run.Revision)
+	return err
 }

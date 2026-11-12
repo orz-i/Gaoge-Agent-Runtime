@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -161,10 +162,11 @@ func assertTerminalTurnFeedOrder(t *testing.T, events []harness.TurnEvent, start
 	}
 }
 
-func TestCancelWhileAgentIsRunningConvergesBothCallersToCancelled(t *testing.T) {
+func TestCancelWhileAgentIsRunningCannotRevokePhysicalOwner(t *testing.T) {
 	t.Parallel()
 	model := &blockingModel{started: make(chan struct{}), release: make(chan struct{})}
-	runner := newHarnessRunnerWithModel(t, model)
+	base := memory.NewStore()
+	runner, runtime := newResumeTurnHarness(t, base, harness.NewMemoryStore(), model, newResumeTurnClock(), nil)
 	type startResult struct {
 		snapshot harness.Snapshot
 		err      error
@@ -180,15 +182,47 @@ func TestCancelWhileAgentIsRunningConvergesBothCallersToCancelled(t *testing.T) 
 	case <-time.After(5 * time.Second):
 		t.Fatal("agent model did not start")
 	}
-	cancelled, err := runner.Cancel(t.Context(), harnessTurnID(t), "operator request")
-	if err != nil || cancelled.Turn.Status != harness.TurnCancelled {
-		t.Fatalf("cancel snapshot=%#v err=%v", cancelled, err)
+	current, err := runner.Load(t.Context(), harnessTurnID(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, _ := harness.TopLevelInvocation(current)
+	before, err := runtime.Load(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := runtime.LookupChildExecution(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Cancel(t.Context(), harnessTurnID(t), "operator request")
+	if !errors.Is(err, kernel.ErrChildExecutionBusy) && !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("active physical cancellation must reject: %v", err)
+	}
+	after, loadErr := runtime.Load(t.Context(), root.ExecutionRefID)
+	actualGrant, grantErr := runtime.LookupChildExecution(t.Context(), root.ExecutionRefID)
+	if loadErr != nil || grantErr != nil || !reflect.DeepEqual(before, after) || actualGrant != grant {
+		t.Fatalf("rejected Cancel changed owner: load=%v grant=%v", loadErr, grantErr)
 	}
 	close(model.release)
 	select {
-	case result := <-started:
-		if result.err != nil || result.snapshot.Turn.Status != harness.TurnCancelled {
-			t.Fatalf("start snapshot=%#v err=%v", result.snapshot, result.err)
+	case <-started:
+		// The actual provider receipt, not cancellation, now permits settlement.
+		settled, loadErr := runtime.Load(t.Context(), root.ExecutionRefID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if _, err := runner.Cancel(t.Context(), harnessTurnID(t), "operator request"); err != nil {
+			t.Fatalf("settled physical call could not reconcile cancellation: %v", err)
+		}
+		final, loadErr := runtime.Load(t.Context(), root.ExecutionRefID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		if settled.Run.Status == kernel.RunStatusCompleted || settled.Run.Status == kernel.RunStatusFailed {
+			if final.Run.Status != settled.Run.Status || final.Run.ErrorCode != settled.Run.ErrorCode || !reflect.DeepEqual(final.Result, settled.Result) {
+				t.Fatal("cancellation overwrote actual terminal receipt")
+			}
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("agent start did not converge after cancellation")

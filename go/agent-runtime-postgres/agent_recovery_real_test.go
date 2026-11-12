@@ -110,7 +110,7 @@ func TestAgentRecoveryCrashProcess(t *testing.T) {
 	}
 	db := reopenRecoveryPostgres(t, requireRecoveryPostgres(t))
 	store := &agentCrashStore{
-		Store: NewKernelStore(db), event: event,
+		KernelStore: NewKernelStore(db), event: event,
 		afterCommit: os.Getenv("GAOGE_TEST_AGENT_CRASH_AFTER_COMMIT") == "true",
 	}
 	provider := &recoveryHTTPModel{
@@ -224,7 +224,7 @@ func runAgentCrashProcess(t *testing.T, dsn, endpoint, event string, afterCommit
 }
 
 type agentCrashStore struct {
-	kernel.Store
+	*KernelStore
 	event       string
 	afterCommit bool
 }
@@ -237,7 +237,24 @@ func (store *agentCrashStore) Apply(ctx context.Context, runID string, revision 
 	if crash && !store.afterCommit {
 		os.Exit(agentCrashExitCode)
 	}
-	snapshot, err := store.Store.Apply(ctx, runID, revision, mutation)
+	snapshot, err := store.KernelStore.Apply(ctx, runID, revision, mutation)
+	if crash && store.afterCommit && err == nil {
+		os.Exit(agentCrashExitCode)
+	}
+	return snapshot, err
+}
+
+// Inject the identical original event cutpoint on the actual native CAS port;
+// interface forwarding alone would silently stop exercising crash recovery.
+func (store *agentCrashStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+	crash := false
+	for _, event := range mutation.Events {
+		crash = crash || event.Type == store.event
+	}
+	if crash && !store.afterCommit {
+		os.Exit(agentCrashExitCode)
+	}
+	snapshot, err := store.KernelStore.ApplyExecution(ctx, lease, revision, mutation)
 	if crash && store.afterCommit && err == nil {
 		os.Exit(agentCrashExitCode)
 	}

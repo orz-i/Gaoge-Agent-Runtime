@@ -98,7 +98,7 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 			return kernel.ErrTerminal
 		case kernel.RunStatusRunning:
 		case kernel.RunStatusWaitingInput:
-			if current.Kind != "agent" {
+			if current.Kind != "agent" || current.ExecutionEpoch == 0 {
 				return kernel.ErrExecutionConflict
 			}
 		case kernel.RunStatusPausedBudget:
@@ -125,7 +125,7 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		}
 		expiration := now.Add(request.LeaseDuration).UTC()
 		res := tx.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND execution_epoch = ?",
-			request.RunID, current.Revision, current.ExecutionEpoch).Updates(map[string]any{
+			request.RunID, current.Revision, current.ExecutionEpoch).UpdateColumns(map[string]any{
 			"execution_epoch": current.ExecutionEpoch + 1,
 			"execution_owner": strings.TrimSpace(request.OwnerID), "execution_lease_id": id,
 			"execution_expires_at": expiration,
@@ -180,7 +180,7 @@ func (store *KernelStore) RenewExecution(ctx context.Context, req kernel.Executi
 		} else {
 			query = query.Where("execution_expires_at > ?", time.Now().UTC())
 		}
-		res := query.Update("execution_expires_at", now.Add(req.LeaseDuration).UTC())
+		res := query.UpdateColumn("execution_expires_at", now.Add(req.LeaseDuration).UTC())
 		if res.Error != nil {
 			return executionQueryError(tx, res.Error)
 		}
@@ -229,7 +229,7 @@ func (store *KernelStore) ReleaseExecution(ctx context.Context, lease kernel.Exe
 		} else {
 			query = query.Where("execution_expires_at > ?", time.Now().UTC())
 		}
-		res := query.Updates(map[string]any{"execution_owner": "", "execution_lease_id": "", "execution_expires_at": nil})
+		res := query.UpdateColumns(map[string]any{"execution_owner": "", "execution_lease_id": "", "execution_expires_at": nil})
 		if res.Error != nil {
 			return executionQueryError(tx, res.Error)
 		}

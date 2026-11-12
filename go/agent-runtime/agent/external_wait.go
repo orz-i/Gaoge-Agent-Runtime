@@ -141,7 +141,8 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 		var applyErr error
 		grant, grantErr := runner.runtime.LookupChildExecution(ctx, signal.RunID)
 		if grantErr == nil && grant.IsOwned() {
-			if snapshot.Run.ParentRunID != "" || state.RootSegment == nil || state.RootSegment.GrantID != grant.ID || !state.RootSegment.CallbackReturned || !state.RootSegment.HostCompleted {
+			completion, completionErr := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+			if snapshot.Run.ParentRunID != "" || completionErr != nil || !completion.HostCompleted {
 				return snapshot, ErrRootOutcomeUnknown
 			}
 			source := featurecontrol.Seal(signal.RunID, snapshot.Run.Revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)

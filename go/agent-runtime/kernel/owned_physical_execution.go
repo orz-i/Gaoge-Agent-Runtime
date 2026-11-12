@@ -23,6 +23,8 @@ func (g ChildExecutionGrant) MatchesExecution(l ExecutionLease) bool {
 // OwnedPhysicalExecutionStore adds an atomic Root Agent barrier to its native
 // lease/receipt protocol. Neither method grants fresh dispatch authority.
 type OwnedPhysicalExecutionStore interface {
+	RecordOwnedPhysicalCallbackReturn(context.Context, ChildExecutionGrant, uint64, OwnedPhysicalCallbackOutcome, OwnedPhysicalCallbackReturn) error
+	LookupOwnedPhysicalCallbackReturn(context.Context, ChildExecutionGrant) (OwnedPhysicalCallbackCompletion, error)
 	BeginOwnedPhysicalExecution(context.Context, ChildExecutionGrant, ExecutionLease, OwnedPhysicalAdmission) error
 	ApplyOwnedPhysicalRecovery(context.Context, ChildExecutionGrant, uint64, StoreMutation, OwnedPhysicalRecovery) (Snapshot, error)
 }
@@ -110,7 +112,14 @@ func (r *Runtime) BeginOwnedPhysicalExecution(ctx context.Context, id string, re
 
 // OwnedPhysicalRecovery is first-party-only, exact source AND target CAS
 // authority. It cannot be used as a generic Store write or provider permission.
-type OwnedPhysicalRecovery struct{ source, target *featurecontrol.Proof }
+type OwnedPhysicalRecovery struct {
+	source, target *featurecontrol.Proof
+	modelEvidence  bool
+}
+
+// IsModelEvidence distinguishes evidence preservation from actual recovery.
+// Only the purpose-specific Runtime entry can mint this opaque capability.
+func (p OwnedPhysicalRecovery) IsModelEvidence() bool { return p.modelEvidence }
 
 func (p OwnedPhysicalRecovery) Matches(g ChildExecutionGrant, current Snapshot, m StoreMutation) bool {
 	if !g.IsOwned() || g.ID == "" || g.ChildRunID != current.Run.ID || current.Run.Kind != "agent" || current.Run.ParentRunID != "" || current.Run.Status != RunStatusRunning || current.Run.Revision < g.ExpectedRevision || m.Record.Run.Status != RunStatusRunning || m.Record.Run.Revision != current.Run.Revision+1 {
@@ -124,6 +133,12 @@ func (p OwnedPhysicalRecovery) Matches(g ChildExecutionGrant, current Snapshot, 
 	if !reflect.DeepEqual(run, current.Run) || m.Record.ExecutionRequired || !reflect.DeepEqual(m.Record.Result, current.Result) {
 		return false
 	}
+	if p.modelEvidence {
+		if len(m.Events) != 0 || m.Record.Run.ErrorCode != current.Run.ErrorCode || m.Record.Run.ErrorDetail != current.Run.ErrorDetail || !reflect.DeepEqual(m.Record.Checkpoint, current.Checkpoint) {
+			return false
+		}
+		return p.source.Matches(current.Run.ID, current.Run.Revision, "agent_owned_model_receipt_evidence_source", g.ID, current.State, current.Checkpoint) && p.target.Matches(current.Run.ID, current.Run.Revision, "agent_owned_model_receipt_evidence_target", g.ID, m.Record.State, m.Record.Checkpoint)
+	}
 	return p.source.Matches(current.Run.ID, current.Run.Revision, "agent_owned_receipt_recovery_source", g.ID, current.State, current.Checkpoint) && p.target.Matches(current.Run.ID, current.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, m.Record.State, m.Record.Checkpoint)
 }
 
@@ -135,6 +150,16 @@ func (p OwnedPhysicalRecovery) PhysicalPermit(g ChildExecutionGrant, s Snapshot,
 	return PhysicalApplyPermit{grant: g, proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_physical_apply", g.ID, s.State, s.Checkpoint)}
 }
 func (r *Runtime) ApplyOwnedPhysicalRecovery(ctx context.Context, g ChildExecutionGrant, revision uint64, m Mutation, source, target *featurecontrol.Proof) (Snapshot, error) {
+	return r.applyOwnedPhysicalPurpose(ctx, g, revision, m, source, target, false)
+}
+
+// ApplyOwnedModelReceiptEvidence preserves first-party verified original model
+// response evidence without resolving unknown Host work or authorizing send.
+func (r *Runtime) ApplyOwnedModelReceiptEvidence(ctx context.Context, g ChildExecutionGrant, revision uint64, m Mutation, source, target *featurecontrol.Proof) (Snapshot, error) {
+	return r.applyOwnedPhysicalPurpose(ctx, g, revision, m, source, target, true)
+}
+func (r *Runtime) applyOwnedPhysicalPurpose(ctx context.Context, g ChildExecutionGrant, revision uint64, m Mutation, source, target *featurecontrol.Proof, evidence bool) (Snapshot, error) {
+
 	if r == nil || ctx == nil || revision == 0 || hasReservedApplyEvidence(m.Events) {
 		return Snapshot{}, ErrInvalidInput
 	}
@@ -153,7 +178,7 @@ func (r *Runtime) ApplyOwnedPhysicalRecovery(ctx context.Context, g ChildExecuti
 		return Snapshot{}, e
 	}
 	proposed := r.makeStoreMutation(s, m)
-	p := OwnedPhysicalRecovery{source: source, target: target}
+	p := OwnedPhysicalRecovery{source: source, target: target, modelEvidence: evidence}
 	if !p.Matches(g, s, proposed) {
 		return Snapshot{}, ErrExecutionConflict
 	}

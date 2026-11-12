@@ -12,6 +12,7 @@ type memoryChildGrant struct {
 	grant           kernel.ChildExecutionGrant
 	ancestors       []string
 	settledRevision uint64
+	completion      kernel.OwnedPhysicalCallbackCompletion
 }
 
 func memoryTerminalStatus(status kernel.RunStatus) bool {
@@ -133,6 +134,9 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 		}
 	}
 	if grant.IsOwned() && !grant.MatchesExecution(store.execution[grant.ChildRunID].lease) {
+		return kernel.ErrExecutionConflict
+	}
+	if grant.IsOwned() && permit.IsRecovery() && (original.completion.GrantID != grant.ID || !original.completion.HostCompleted) {
 		return kernel.ErrExecutionConflict
 	}
 	original.settledRevision = child.Run.Revision

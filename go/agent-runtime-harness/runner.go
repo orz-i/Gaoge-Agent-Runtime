@@ -116,8 +116,8 @@ func (runner *Runner) recordInvocationItem(ctx context.Context, invocation Invoc
 func (runner *Runner) startAgentPhysical(
 	ctx context.Context, invocation Invocation, request StartRequest, config ConfigSnapshot,
 ) (kernel.Snapshot, error) {
-	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.agent.StartRun(ctx, agent.StartRequest{
+	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func(physicalCtx context.Context) (kernel.Snapshot, error) {
+		return runner.agent.StartRun(physicalCtx, agent.StartRequest{
 			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
 			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), Goal: request.Goal,
 			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
@@ -263,9 +263,9 @@ func (runner *Runner) ResolveApproval(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	resolved, resolveErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", func() (kernel.Snapshot, error) {
+	resolved, resolveErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", func(physicalCtx context.Context) (kernel.Snapshot, error) {
 		return runner.agent.ResolveApproval(
-			runCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
+			physicalCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
 			plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)},
 		)
 	})
@@ -1098,7 +1098,16 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
 	if err != nil {
-		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
+		if errors.Is(err, kernel.ErrChildExecutionBusy) && kernel.IsControlNoEffect(err) {
+			if cleanupErr := runner.cleanupReturnedRootChildren(ctx, turn, intent, invocation, reason); cleanupErr == nil {
+				runtimeSnapshot, found, err = runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
+			} else {
+				err = errors.Join(err, cleanupErr)
+			}
+		}
+		if err != nil {
+			return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
+		}
 	}
 	if !found {
 		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
