@@ -87,6 +87,7 @@ var (
 	_ func(kernel.Snapshot, []byte) bool                                                 = agent.MatchesFrozenOrigin
 	_                                                                                    = agent.Dependencies{
 		ApprovalControlPreflight: func(context.Context, kernel.Snapshot) error { return nil },
+		StartControlPreflight:    func(context.Context, agent.StartRequest) error { return nil },
 	}
 )
 

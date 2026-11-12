@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -212,7 +213,15 @@ func (chain *RunChain) Invoke(ctx context.Context, invocation RunInvocation, ter
 		current := chain.middleware[index]
 		downstream := next
 		next = func(callCtx context.Context) (kernel.Snapshot, error) {
-			return current.Run(callCtx, invocation, onceRunNext(downstream))
+			lifetime := newNextLifetime()
+			defer lifetime.finish()
+			return current.Run(callCtx, invocation, onceRunNext(func(nextCtx context.Context) (kernel.Snapshot, error) {
+				if !lifetime.enter() {
+					return kernel.Snapshot{}, ErrNextAlreadyCalled
+				}
+				defer lifetime.leave()
+				return downstream(nextCtx)
+			}))
 		}
 	}
 	return next(ctx)
@@ -244,7 +253,16 @@ func (chain *ModelChain) Invoke(
 		current := chain.middleware[index]
 		downstream := next
 		next = func(callCtx context.Context, callRequest model.Request, callEmit model.StreamSink) (model.Response, error) {
-			return current.Model(callCtx, model.CloneRequest(callRequest), callEmit, onceModelNext(downstream))
+			lifetime := newNextLifetime()
+			defer lifetime.finish()
+			return current.Model(callCtx, model.CloneRequest(callRequest), callEmit,
+				onceModelNext(func(nextCtx context.Context, nextRequest model.Request, nextEmit model.StreamSink) (model.Response, error) {
+					if !lifetime.enter() {
+						return model.Response{}, ErrNextAlreadyCalled
+					}
+					defer lifetime.leave()
+					return downstream(nextCtx, nextRequest, nextEmit)
+				}))
 		}
 	}
 	return next(ctx, model.CloneRequest(request), emit)
@@ -275,10 +293,58 @@ func (chain *ToolChain) Invoke(
 		current := chain.middleware[index]
 		downstream := next
 		next = func(callCtx context.Context) (tools.ExecutionResult, error) {
-			return current.Tool(callCtx, cloneToolInvocation(invocation), onceToolNext(downstream))
+			lifetime := newNextLifetime()
+			defer lifetime.finish()
+			return current.Tool(callCtx, cloneToolInvocation(invocation), onceToolNext(func(nextCtx context.Context) (tools.ExecutionResult, error) {
+				if !lifetime.enter() {
+					return tools.ExecutionResult{}, ErrNextAlreadyCalled
+				}
+				defer lifetime.leave()
+				return downstream(nextCtx)
+			}))
 		}
 	}
 	return next(ctx)
+}
+
+// nextLifetime is the single physical-callback lifetime contract for Run,
+// Model and Tool middleware. Single-use alone is insufficient: a middleware
+// may retain Next and invoke it after its own Run/Model/Tool method returns,
+// or start a goroutine that continues dispatching effects after that return.
+//
+// Admit Next while its parent callback is active, count admitted calls before
+// releasing the mutex, and wait for all admitted descendants before returning
+// to an enclosing Kernel physical Grant. After finish closes admission,
+// a retained callback fails before reaching any downstream external effect.
+//
+// Do not add a deadline or detach an in-flight Next: an unknown callback must
+// retain its original physical Grant rather than manufacture a no-effect
+// acknowledgement on caller timeout.
+type nextLifetime struct {
+	mu       sync.Mutex
+	open     bool
+	inflight sync.WaitGroup
+}
+
+func newNextLifetime() *nextLifetime { return &nextLifetime{open: true} }
+
+func (scope *nextLifetime) enter() bool {
+	scope.mu.Lock()
+	defer scope.mu.Unlock()
+	if !scope.open {
+		return false
+	}
+	scope.inflight.Add(1)
+	return true
+}
+
+func (scope *nextLifetime) leave() { scope.inflight.Done() }
+
+func (scope *nextLifetime) finish() {
+	scope.mu.Lock()
+	scope.open = false
+	scope.mu.Unlock()
+	scope.inflight.Wait()
 }
 
 func onceRunNext(next RunNext) RunNext {

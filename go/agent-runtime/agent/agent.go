@@ -263,12 +263,19 @@ type Dependencies struct {
 	// Parented Runs fail closed when it is missing. It must authenticate the
 	// original Harness physical approval identity without dispatching effects.
 	ApprovalControlPreflight func(context.Context, kernel.Snapshot) error
-	HostedTools              HostedToolCatalog
-	ToolDiscovery            ToolDiscovery
-	Observers                []plugin.Observer
-	Telemetry                []observability.Recorder
-	RunMiddleware            []plugin.RunMiddleware
-	ModelMiddleware          []plugin.ModelMiddleware
+	// StartControlPreflight is a pure, read-only Host proof of the original
+	// parent Effect/RunRelation and frozen child StartRequest. When Host Run
+	// middleware is configured, a parent-bound Start MUST pass it before
+	// Kernel.Create; otherwise an invalid Host relation can create an
+	// orphan child and leave an unresolved physical Grant on rejection.
+	// Physical permission still comes only from Store BeginChildExecution.
+	StartControlPreflight func(context.Context, StartRequest) error
+	HostedTools           HostedToolCatalog
+	ToolDiscovery         ToolDiscovery
+	Observers             []plugin.Observer
+	Telemetry             []observability.Recorder
+	RunMiddleware         []plugin.RunMiddleware
+	ModelMiddleware       []plugin.ModelMiddleware
 	// PrepareModelRequest is the only pre-commit message/Tool schema projection.
 	// It does not choose an Agent mode. ModelMiddleware cannot rewrite frozen input.
 	PrepareModelRequest ModelRequestPreparer
@@ -326,6 +333,8 @@ type Runner struct {
 	executor                 tools.Executor
 	approvals                plugin.ApprovalHandler
 	approvalControlPreflight func(context.Context, kernel.Snapshot) error
+	startControlPreflight    func(context.Context, StartRequest) error
+	runMiddlewareConfigured  bool
 	approvalPolicies         *plugin.ApprovalPolicySet
 	hostedTools              HostedToolCatalog
 	discovery                ToolDiscovery
@@ -496,6 +505,8 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		approvalControlPreflight: dependencies.ApprovalControlPreflight,
+		startControlPreflight:    dependencies.StartControlPreflight,
+		runMiddlewareConfigured:  len(dependencies.RunMiddleware) > 0,
 		hostedTools:              dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:  compactCompletionPolicies(dependencies.CompletionPolicies),
 		limits:              dependencies.Limits,
@@ -566,7 +577,7 @@ func (runner *Runner) PrepareRun(ctx context.Context, request StartRequest) (ker
 
 func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartRequest, deferred bool) (kernel.Snapshot, error) {
 	if runner == nil || strings.TrimSpace(request.Goal) == "" ||
-		(runner.runExecution != nil && strings.TrimSpace(request.ID) == "") {
+		((runner.runExecution != nil || request.ParentRunID != "") && strings.TrimSpace(request.ID) == "") {
 		// Native durability cannot recover an uncertain Create when the
 		// caller never knew the generated Run ID. RequestID alone is not a
 		// Store-enforced unique idempotency key.
@@ -580,13 +591,48 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 	if err != nil {
 		return kernel.Snapshot{}, nativeStartNoEffect(err)
 	}
+	if request.ParentRunID != "" {
+		if runner.startControlPreflight == nil && runner.runMiddlewareConfigured {
+			return kernel.Snapshot{}, nativeStartNoEffect(ErrInvalidRequest)
+		}
+		if runner.startControlPreflight != nil {
+			if err := runner.startControlPreflight(ctx, request); err != nil {
+				// Read-only original Host admission is certified as no-effect
+				// only before entering any Run middleware or Kernel.Create.
+				return kernel.Snapshot{}, nativeStartNoEffect(err)
+			}
+		}
+	}
 	invocation := plugin.RunInvocation{
 		Operation: plugin.RunStart, Kind: RunKind, RunID: strings.TrimSpace(request.ID),
 		ParentRunID: request.ParentRunID, Actor: request.Actor, Thread: request.Thread, Goal: strings.TrimSpace(request.Goal),
 	}
-	snapshot, invokeErr := runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-		return runner.startPreparedRun(nextCtx, request, deferred, encoded)
-	})
+	var snapshot kernel.Snapshot
+	var invokeErr error
+	if request.ParentRunID != "" {
+		// Kernel.Create first verifies the immutable parent under the Store's
+		// transaction, then the first physical Grant spans ALL RunStart
+		// middleware and the Agent Model/Tool loop. A Host middleware cannot
+		// emit external effects before admission and then hide behind a later
+		// rejected child Create/Begin. No second Create is performed in next.
+		created, createErr := runner.createPreparedRun(ctx, request, encoded)
+		if createErr != nil {
+			return kernel.Snapshot{}, createErr
+		}
+		snapshot, invokeErr = runner.withChildPhysicalGrant(ctx, created.Run.ID,
+			func() (kernel.Snapshot, error) {
+				return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+					return runner.continuePreparedRun(nextCtx, created, deferred)
+				})
+			})
+		if invokeErr != nil && snapshot.Run.ID == "" {
+			return created, invokeErr
+		}
+	} else {
+		snapshot, invokeErr = runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+			return runner.startPreparedRun(nextCtx, request, deferred, encoded)
+		})
+	}
 	// A custom middleware could return a private proof from an unrelated
 	// nested native Start after performing effects of its own. Only the
 	// direct pre-middleware return above carries this call's authority.
@@ -690,7 +736,18 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 }
 
 func (runner *Runner) startPreparedRun(ctx context.Context, request StartRequest, deferred bool, encoded json.RawMessage) (kernel.Snapshot, error) {
-	snapshot, err := runner.runtime.Create(ctx, kernel.CreateRequest{
+	snapshot, err := runner.createPreparedRun(ctx, request, encoded)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	// A parent-bound Start is handled by startRunWithMiddleware itself,
+	// which creates the child, admits the physical Grant, and only then
+	// enters arbitrary Host Run middleware. This path is only for roots.
+	return runner.continuePreparedRun(ctx, snapshot, deferred)
+}
+
+func (runner *Runner) createPreparedRun(ctx context.Context, request StartRequest, encoded json.RawMessage) (kernel.Snapshot, error) {
+	return runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		ExecutionRequired: runner.runExecution != nil,
 		RequestID:         request.RequestID, ParentRunID: request.ParentRunID,
@@ -700,20 +757,18 @@ func (runner *Runner) startPreparedRun(ctx context.Context, request StartRequest
 			WakeupAt: agentWakeupAt(runner.clock.Now()),
 		}},
 	})
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
+}
+
+func (runner *Runner) continuePreparedRun(ctx context.Context, snapshot kernel.Snapshot, deferred bool) (kernel.Snapshot, error) {
 	if deferred {
 		return snapshot, nil
 	}
-	// Claim the Run before publishing the started event or dispatching any
-	// Model/Tool. If acquisition fails, preserve the created Run for safe
-	// recovery rather than running unfenced.
-	driven, driveErr := runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, func() (kernel.Snapshot, error) {
-		return runner.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-			scoped.publishRunEvent(driveCtx, snapshot, EventRunStarted, false)
-			return scoped.drive(driveCtx, snapshot)
-		})
+	// The original parent's Store Grant (if any) already encloses every
+	// caller-supplied Host Run middleware before this code is reachable.
+	// Standalone Root Agent execution retains its original Run Owner lease.
+	driven, driveErr := runner.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
+		scoped.publishRunEvent(driveCtx, snapshot, EventRunStarted, false)
+		return scoped.drive(driveCtx, snapshot)
 	})
 	if driveErr != nil && driven.Run.ID == "" {
 		return snapshot, driveErr

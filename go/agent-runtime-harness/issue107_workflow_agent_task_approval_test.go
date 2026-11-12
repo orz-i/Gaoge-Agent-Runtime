@@ -205,6 +205,17 @@ func newIssue107HarnessFixture(t *testing.T, options ...bool) *issue107HarnessFi
 	}
 	if capture {
 		dependencies.RunMiddleware = []plugin.RunMiddleware{issue107ApprovalContextCapture{fixture: f}}
+		// The capture middleware is physically trusted only after the
+		// original frozen Workflow relation has been observed without side
+		// effects. No parented Start may create a child on a missing edge.
+		dependencies.StartControlPreflight = func(ctx context.Context, request agent.StartRequest) error {
+			relation, err := relations.GetByChild(ctx, request.ID)
+			if err != nil || relation.Kind != runrelation.KindWorkflowEffect ||
+				relation.ParentRunID != request.ParentRunID || relation.ChildRunID != request.ID {
+				return harness.ErrConflict
+			}
+			return nil
+		}
 	}
 	f.agent, err = agent.NewRunner(dependencies)
 	if err != nil {
