@@ -265,7 +265,11 @@ func assertEA1CompBarrierBinding(t *testing.T, s kernel.Snapshot, def workflow.D
 	}
 	if attempt == 2 {
 		first := requests[1]
+		if first.OwnerNodeID != first.NodeID || req.OwnerNodeID != req.EffectID+"_attempt_2" {
+			t.Fatal("retry lost exact attempt-specific relation owner")
+		}
 		first.Attempt = 2
+		first.OwnerNodeID = req.EffectID + "_attempt_2"
 		if !reflect.DeepEqual(first, req) {
 			t.Fatal("retry changed original request beyond attempt")
 		}
