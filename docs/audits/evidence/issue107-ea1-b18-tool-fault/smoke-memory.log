@@ -1,0 +1,52 @@
+SOURCE_SHA=d85d52574c7df0dd13fc7a5102c9cfc43032e177
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1ChildAgent(ControlPhases|ApprovalSettlement)' -v
+=== RUN   TestEA1ChildAgentApprovalSettlementMemory
+=== RUN   TestEA1ChildAgentApprovalSettlementMemory/P3/native-checkpoint
+=== RUN   TestEA1ChildAgentApprovalSettlementMemory/P4/native-checkpoint
+=== RUN   TestEA1ChildAgentApprovalSettlementMemory/P5/native-checkpoint/two-approvals
+=== RUN   TestEA1ChildAgentApprovalSettlementMemory/P3/default-terminal-tool
+=== RUN   TestEA1ChildAgentApprovalSettlementMemory/P4/default-terminal-tool
+=== RUN   TestEA1ChildAgentApprovalSettlementMemory/P5/default-terminal-tool/two-approvals
+=== RUN   TestEA1ChildAgentApprovalSettlementMemory/P5/ancestor-deadline
+--- PASS: TestEA1ChildAgentApprovalSettlementMemory (3.04s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementMemory/P3/native-checkpoint (0.00s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementMemory/P4/native-checkpoint (0.00s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementMemory/P5/native-checkpoint/two-approvals (0.00s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementMemory/P3/default-terminal-tool (0.00s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementMemory/P4/default-terminal-tool (0.00s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementMemory/P5/default-terminal-tool/two-approvals (0.00s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementMemory/P5/ancestor-deadline (3.03s)
+=== RUN   TestEA1ChildAgentControlPhasesMemory
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P0/missing
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P0/stale
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P0/not-waiting
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P0/missing-preflight
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P0/preflight-rejected
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P0/parent-wins
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P0/invalid-decision
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P0/foreign-checkpoint
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P1/default
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P1/native
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P2/host
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P2/handler
+=== RUN   TestEA1ChildAgentControlPhasesMemory/P2/tool
+    ea1_child_agent_control_phases.go:335: actual child approval unknown cut: <nil>
+--- FAIL: TestEA1ChildAgentControlPhasesMemory (0.01s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P0/missing (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P0/stale (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P0/not-waiting (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P0/missing-preflight (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P0/preflight-rejected (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P0/parent-wins (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P0/invalid-decision (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P0/foreign-checkpoint (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P1/default (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P1/native (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P2/host (0.00s)
+    --- PASS: TestEA1ChildAgentControlPhasesMemory/P2/handler (0.00s)
+    --- FAIL: TestEA1ChildAgentControlPhasesMemory/P2/tool (0.00s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	3.780s
+FAIL
+
+EXIT_CODE=1

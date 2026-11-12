@@ -1,0 +1,2 @@
+SOURCE_SHA=d85d52574c7df0dd13fc7a5102c9cfc43032e177
+Memory smoke 19 subcases PASS, P2/tool expected fault but actual ResolveApproval returned nil. Fixture fault reachability diagnosis pending; no production defect claimed. Later checks not run.
