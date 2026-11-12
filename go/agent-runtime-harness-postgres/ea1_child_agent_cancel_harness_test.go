@@ -307,9 +307,20 @@ func ea1ChildCancelStart(t *testing.T, f *ea1ChildCancelHarnessFixture) (harness
 	}
 	task := waiting.Subtasks[0]
 	c := budget.Coordinator{Store: f.backend.ledgers}
+	// ExecutionPolicy tightens the submitted limits before sealing Config.
+	// Compare the ledger against the actual immutable Turn-linked source,
+	// not the pre-normalization request (which omits default child/concurrency caps).
+	persistedTurn, err := f.store.GetTurn(t.Context(), waiting.Turn.ID)
+	if err != nil || persistedTurn.ID != waiting.Turn.ID || persistedTurn.ConfigSnapshotID != waiting.Turn.ConfigSnapshotID {
+		t.Fatalf("load original Turn budget source: %v", err)
+	}
+	frozenConfig, err := f.store.GetConfigSnapshot(t.Context(), persistedTurn.ConfigSnapshotID)
+	if err != nil || frozenConfig.ID != persistedTurn.ConfigSnapshotID || frozenConfig.TurnID != persistedTurn.ID || frozenConfig.SharedBudget == nil {
+		t.Fatalf("load frozen effective Config budget source: %v", err)
+	}
 	initial, err := f.backend.ledgers.LoadBudget(t.Context(), waiting.Turn.ID)
-	if err != nil || f.request.Config.SharedBudget == nil || initial.Limits != *f.request.Config.SharedBudget || len(initial.Runs) != 0 {
-		t.Fatalf("initial Host ledger/source before explicit registration: ledger=%+v err=%v", initial, err)
+	if err != nil || initial.ID != persistedTurn.ID || initial.Limits != *frozenConfig.SharedBudget || len(initial.Runs) != 0 {
+		t.Fatalf("initial Host ledger/source before explicit registration: ledger=%+v effective=%+v err=%v", initial, frozenConfig.SharedBudget, err)
 	}
 	registered, err := c.RegisterRun(t.Context(), waiting.Turn.ID, root.ExecutionRefID, budget.RunBudget{})
 	if err != nil {
@@ -319,8 +330,15 @@ func ea1ChildCancelStart(t *testing.T, f *ea1ChildCancelHarnessFixture) (harness
 	if !exists || binding != (budget.RunBudget{}) || registered.Limits != initial.Limits {
 		t.Fatal("root registration changed frozen limits/binding")
 	}
-	if _, err = c.RegisterRun(t.Context(), waiting.Turn.ID, task.RunID, budget.RunBudget{ParentRunID: root.ExecutionRefID}); err != nil {
+	// Like BudgetMiddleware.registerAncestry, bindings add only the parent;
+	// effective global caps stay in Ledger.Limits, not duplicate local overrides.
+	childBinding := budget.RunBudget{ParentRunID: root.ExecutionRefID}
+	registered, err = c.RegisterRun(t.Context(), waiting.Turn.ID, task.RunID, childBinding)
+	if err != nil {
 		t.Fatalf("register original AgentTask child %s under %s: %v", task.RunID, root.ExecutionRefID, err)
+	}
+	if registered.Runs[task.RunID] != childBinding || registered.Runs[root.ExecutionRefID] != binding || registered.Limits != *frozenConfig.SharedBudget {
+		t.Fatal("child registration changed original ancestry/effective budget source")
 	}
 	for _, id := range []string{"child-unsent", "child-dispatched"} {
 		if _, err = c.Reserve(t.Context(), waiting.Turn.ID, budget.Reservation{ID: id, RunID: task.RunID, RequestHash: "original-" + id, Requested: budget.Usage{LLMCalls: 1, InputTokens: 3, OutputTokens: 2, TotalTokens: 5}}, true); err != nil {
